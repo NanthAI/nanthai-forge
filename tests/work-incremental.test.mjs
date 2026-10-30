@@ -13,6 +13,7 @@ import { WorkService } from '../dist/work.js';
 import { AgentWorkflow } from '../dist/agent-workflow.js';
 import { recordManifest, readRecords } from '../dist/work-records.js';
 import { unpackRecord } from '../dist/work-record-codec.js';
+import { unifyIntent } from '../dist/work-intent-local.js';
 function fixture(t) {
   const root = fs.mkdtempSync(join(tmpdir(), 'forge-incremental-'));
   fs.writeFileSync(join(root, 'a.txt'), 'source\n');
@@ -20,15 +21,16 @@ function fixture(t) {
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   return { root, store: new WorkStore(root), work: new WorkService(root), agent: new AgentWorkflow(root) };
 }
-const intent = (base, i) => ({
-  id: randomUUID(),
-  outcome: `Retained ${i}`,
-  constraints: '',
-  base,
-  status: 'active',
-  createdAt: '2026-01-01T00:00:00Z',
-  notes: [],
-});
+const intent = (base, i) =>
+  unifyIntent({
+    id: randomUUID(),
+    outcome: `Retained ${i}`,
+    constraints: '',
+    base,
+    status: 'active',
+    createdAt: '2026-01-01T00:00:00Z',
+    notes: [],
+  });
 async function measured(directory, fn) {
   const originals = {
       openSync: fs.openSync,
@@ -119,7 +121,7 @@ test('ordinary compact mutations and agent frontdoors do not reconstruct unrelat
     const saved = (await agent.dispatch(checkpoint)).result;
     assert.equal((await agent.dispatch(checkpoint)).result.head, saved.head);
     const status = await agent.dispatch({ action: 'status', limit: 2 });
-    assert.equal(status.result.intents.total, 151);
+    assert.equal(status.result.intents.total, 152); // Execution start and the planned Issue each add an Intent.
     assert.equal(status.result.intents.items.length, 2);
     const check = await agent.dispatch({
       action: 'define-check',
@@ -146,7 +148,7 @@ test('scoped CAS, unpublished fragments, corruption and extension fields preserv
     stale = store.records();
   first.appendField('intents', data.intents[0].id, 'notes', { kind: 'comment', text: 'new', at: 'now' });
   store.locked(() => store.commitRecords(first));
-  stale.patchFields('intents', data.intents[1].id, { status: 'ready' });
+  stale.patchFields('intents', data.intents[1].id, { status: 'completed' });
   assert.throws(
     () => store.locked(() => store.commitRecords(stale)),
     error => error.code === 'WORK_STALE',
@@ -155,7 +157,7 @@ test('scoped CAS, unpublished fragments, corruption and extension fields preserv
   execFileSync(process.execPath, [
     '--input-type=module',
     '-e',
-    `import {WorkStore} from ${JSON.stringify(new URL('../dist/work-store.js', import.meta.url).href)};const store=new WorkStore(${JSON.stringify(store.root)});store.locked(()=>{const tx=store.records();tx.patchFields('intents',${JSON.stringify(data.intents[1].id)},{status:'ready'});store.commitRecords(tx);});`,
+    `import {WorkStore} from ${JSON.stringify(new URL('../dist/work-store.js', import.meta.url).href)};const store=new WorkStore(${JSON.stringify(store.root)});store.locked(()=>{const tx=store.records();tx.patchFields('intents',${JSON.stringify(data.intents[1].id)},{status:'completed'});store.commitRecords(tx);});`,
   ]);
   assert.throws(
     () => store.locked(() => store.commitRecords(crossProcess)),
@@ -207,6 +209,7 @@ test('version-one and monolithic migration are lossless; malformed legacy data n
   data.intents = [intent(data.nativeHead, 0)];
   data.unknown = { nested: ['original'] };
   data.intents[0].notes = [{ kind: 'comment', text: 'preserve', at: 'now', future: 'unknown' }];
+  data.intents[0] = unifyIntent(data.intents[0]);
   const legacy = Buffer.from(JSON.stringify(data, null, 2));
   fs.writeFileSync(join(store.directory, 'work.json'), legacy);
   store.locked(() => store.records());
@@ -259,7 +262,7 @@ test('optional undefined fields retain portable JSON semantics across save, scop
   tx.replace('intents', found.position, { ...found.record, dependencies: undefined, status: 'ready' });
   store.locked(() => store.commitRecords(tx));
   const restored = store.load();
-  assert.equal(restored.intents[0].status, 'ready');
+  assert.equal(restored.intents[0].status, 'active');
   assert.deepEqual(restored.intents[0].notes, [{ kind: 'comment', text: 'Optional entry', at: 'now' }]);
   assert.equal(Object.hasOwn(restored.intents[0], 'dependencies'), false);
   assert.deepEqual(restored.intents[0].future, { kept: true });

@@ -89,7 +89,7 @@ export function prepareRunRegistration(store: WorkStore, command: RunCommand, se
         ...(sequenceId ? { playbookRunId: sequenceId } : {}),
       };
       // Older readers without selection evidence must reject this optional feature.
-      if (command.tests !== undefined) tx.setSchema(15);
+
       run.reuseKey = checkReuseKey(store, {
         ...run,
         backend: {
@@ -106,7 +106,6 @@ export function prepareRunRegistration(store: WorkStore, command: RunCommand, se
       });
       if (command.interaction !== undefined) {
         run.interaction = command.interaction ? interactionEvidence(store, run, command.interaction) : null;
-        tx.setSchema(15);
       }
       tx.append('runs', run);
       return { tx, run };

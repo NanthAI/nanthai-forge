@@ -60,7 +60,7 @@ export function setPolicy(store: WorkStore, input: unknown, actor: AcceptanceAct
       };
     data.autonomyPolicy = policy;
     (data.policyChanges ??= []).push(change);
-    data.schema = Math.max(data.schema, policy.acceptance.disjointFastPath ? 14 : 11) as WorkData['schema'];
+
     data.revision++;
     store.save(data);
     return { revision: data.revision, result: change };

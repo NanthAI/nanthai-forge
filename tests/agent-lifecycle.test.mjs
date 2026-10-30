@@ -205,7 +205,7 @@ for (const native of [true, false])
     assert.equal(saved.lifecycle[0].reason, 'Superseded');
     assert.equal(saved.lifecycle[0].actor.kind, 'agent');
     assert.ok(Date.parse(saved.lifecycle[0].at));
-    assert.equal(agent.work.store.load().schema, 13);
+    assert.equal(agent.work.store.load().schema, 24);
     const { laneSummary } = await import('../dist/work-hosted-summary.js');
     assert.equal(laneSummary(saved).state, 'abandoned');
     assert.equal((await lanes(agent, { state: 'abandoned' })).total, 1);
@@ -246,8 +246,8 @@ test('Intent abandon preflights cascade, preserves all children and can reopen a
   assert.equal(agent.work.store.select('lanes', a.laneId).state, 'abandoned');
   assert.equal(agent.work.store.select('lanes', b.laneId).state, 'abandoned');
   assert.deepEqual((await dispatch(agent, 'abandon', command)).result, result.result);
-  const { workSchema } = await import('../dist/work-types.js');
-  const data = workSchema.parse(JSON.parse(JSON.stringify(agent.work.store.load())));
+  const { parseWork } = await import('../dist/work-unified-types.js');
+  const data = parseWork(JSON.parse(JSON.stringify(agent.work.store.load())));
   assert.equal(data.intents[0].lifecycle[0].reason, 'Superseded');
   assert.equal(data.lanes.find(l => l.id === b.laneId).checkpoints.length, 1);
   await dispatch(agent, 'clean', { apply: true });

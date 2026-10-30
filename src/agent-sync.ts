@@ -389,7 +389,7 @@ export function agentSync(
                 undo: `Run undo-sync with laneId ${lane.id} and syncOperationId ${command.operationId}.`,
               }
             : undefined;
-        tx.setSchema(automatic ? 11 : 7);
+
         tx.appendField('lanes', lane.id, 'checkpoints', {
           head: merged.head,
           parent: lane.head,
@@ -442,7 +442,7 @@ export function agentSync(
               undo: `Run undo-sync with laneId ${lane.id} and syncOperationId ${command.operationId} to remove the pending sync.`,
             }
           : undefined;
-      tx.setSchema(automatic ? 11 : 10);
+
       tx.patchFields('lanes', lane.id, {
         pendingMerge: {
           parent: target,

@@ -187,7 +187,7 @@ test('assigned contributors can append notes and status atomically; revocation a
   const after = await s.read();
   const updated = after.data.intents.find(i => i.id === creation.operationId);
   assert.equal(updated.notes.at(-1).text, 'Assigned account note');
-  assert.equal(updated.status, 'ready');
+  assert.equal(updated.status, 'active');
 });
 
 test('per-account authority remains usable when an oversized summary omits assignment fields', async () => {

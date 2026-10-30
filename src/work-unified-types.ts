@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
-// Formats 18/20 compose unified format 16 with four/eight-entry landing batches.
+// Unified Work includes historical formats for backup and exact journal recovery.
 import { z } from 'zod';
 import { invariant } from './errors.js';
 import { intentSchema, workSchema, type WorkData } from './work-types.js';
 import { planningItemSchema } from './work-planning-types.js';
 
-export const unifiedWorkFormat = 20;
+import { latestWorkFormat } from './work-format.js';
+
+export const unifiedWorkFormat = latestWorkFormat;
 const id = z.string().uuid();
 const hash = z.string().regex(/^[0-9a-f]{64}$/);
 export const intentMembershipSchema = z
@@ -65,13 +67,15 @@ export const unifiedWorkSchema = z
     initiatives: z.array(initiativeSchema),
     intentAliases: z.array(intentAliasSchema),
     // Exact legacy objects, including extensions, preserve conflicting facts and request bytes.
-    legacyIntentMerge: z.object({
-      intents: z.array(z.unknown()),
-      planningItems: z.array(z.unknown()),
-      planningComments: z.array(z.unknown()),
-      fields: z.record(z.string(), z.unknown()),
-    }),
-    intentMergeReceipt: intentMergeReceiptSchema,
+    legacyIntentMerge: z
+      .object({
+        intents: z.array(z.unknown()),
+        planningItems: z.array(z.unknown()),
+        planningComments: z.array(z.unknown()),
+        fields: z.record(z.string(), z.unknown()),
+      })
+      .optional(),
+    intentMergeReceipt: intentMergeReceiptSchema.optional(),
   })
   .passthrough();
 export type UnifiedWorkData = z.infer<typeof unifiedWorkSchema>;

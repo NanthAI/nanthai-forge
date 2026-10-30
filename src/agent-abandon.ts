@@ -244,7 +244,7 @@ export function agentAbandon(store: WorkStore, command: Command, attribution?: W
     const at = new Date().toISOString(),
       operation = { id: command.operationId, request: hash };
     const event = (from: string) => ({ from, to: 'abandoned', at, actor, reason: command.reason, operation });
-    tx.setSchema(13);
+
     for (const lane of lanes) {
       tx.appendField('lanes', lane.id, 'lifecycle', event(lane.state));
       tx.patchFields('lanes', lane.id, { state: 'abandoned' });

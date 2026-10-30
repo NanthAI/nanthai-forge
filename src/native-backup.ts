@@ -36,7 +36,7 @@ import { NativeSource, nativeMarker } from './native-source.js';
 import { NativeMaterialization } from './native-materialization.js';
 import { WorkStore } from './work-store.js';
 import { parseWorkBytes } from './work-metadata.js';
-import { workSchema, type WorkData } from './work-types.js';
+import type { WorkData } from './work-types.js';
 import { digest } from './hash.js';
 import { readSource, fingerprintPrivateFile } from './files.js';
 import { invariant } from './errors.js';
@@ -49,6 +49,10 @@ import {
   deduplicateArtifactFiles,
   materializeArtifactAliases,
 } from './native-artifact-alias.js';
+
+import { createWork } from './work-create.js';
+import { restoreWorkFormat } from './work-restore-format.js';
+import { stageRecords, publishRecords } from './work-records.js';
 
 export function exportNativeWork(
   store: WorkStore,
@@ -77,9 +81,9 @@ async function exportSnapshot(
     const current = store.load();
     invariant(current.revision === revision, 'WORK_STALE', 'Work changed before native export.');
     // A source release carries only a fresh empty native owner, never the original private Work or run logs.
-    const data: WorkData = head
-      ? workSchema.parse({ schema: 1, revision: 0, nativeHead: head, intents: [], lanes: [], views: [] })
-      : current;
+    const data: WorkData = head ? createWork(head) : current;
+    // Source-only releases retain their existing unspecified policy defaults.
+    if (head) delete data.autonomyPolicy;
     return {
       data,
       capturedAt: new Date().toISOString(),
@@ -359,8 +363,10 @@ async function restoreDirectory(
         );
       }
     }
-    const data = new WorkStore(owner).load();
-    validateNativeArchiveRecords(new WorkStore(owner), manifest, data);
+    // Validate original logical records and archive pins before changing representation.
+    validateNativeArchiveRecords(new WorkStore(owner), manifest, snapshot);
+    const data = restoreWorkFormat(snapshot);
+    if (snapshot.schema !== data.schema) publishRecords(work, stageRecords(work, data));
     const materialized = join(scratch, 'materialized'),
       source = new NativeMaterialization(owner),
       warnings: string[] = [];

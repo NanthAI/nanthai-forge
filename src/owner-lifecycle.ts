@@ -91,7 +91,7 @@ function applyRequestedOwnerLifecycle(
           ...(command.reason.trim() ? { reason: command.reason.trim() } : {}),
           operation: { id: operationId, request },
         };
-        tx.setSchema(13);
+
         tx.appendField(command.collection, command.id, 'lifecycle', event);
         tx.patchFields(
           command.collection,

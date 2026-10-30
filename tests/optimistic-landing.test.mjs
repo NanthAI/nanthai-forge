@@ -47,7 +47,7 @@ function fixture(t, { bad = [1], enabled = true, supervised = false, flaky = fal
     at: now(),
   };
   const data = store.load();
-  data.schema = 14;
+
   data.autonomyPolicy = policyPreset(supervised ? 'supervised' : 'trusted');
   if (enabled) data.autonomyPolicy.acceptance.landing = 'optimistic';
   data.checks.push(check);

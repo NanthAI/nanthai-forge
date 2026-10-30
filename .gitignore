@@ -33,3 +33,6 @@ hosted-web-dist/
 
 # Derived from current Convex module filenames before builds and typechecks.
 convex/_generated/api.d.ts
+
+# Advisory hosted queue preview cache
+queue-ahead-objects/

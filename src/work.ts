@@ -11,7 +11,6 @@ import { pendingStatus } from './pending-status.js';
 import { decorateRepair } from './agent-repair-lineage.js';
 import { landingRepairNotices } from './landing-repair-notice.js';
 import { executionBase } from './work-intent-local.js';
-import { migrateIntentWork } from './work-intent-migration.js';
 import { withWorkLockOptions } from './work-lock.js';
 import { withLandingSlot } from './landing-queue.js';
 import { localActor, type WorkActor } from './work-actor.js';
@@ -540,11 +539,7 @@ export class WorkService {
         if (page.complete) return { revision: this.store.revision(), result: { complete: true, migrated } };
       }
     }
-    if (input && typeof input === 'object' && 'action' in input && input.action === 'migrate-intents') {
-      // Explicit owner action only; take a verified backup first. Retry returns the original receipt.
-      const migration = migrateIntentWork(this.store);
-      return { revision: migration.revision, result: migration };
-    }
+
     if (input && typeof input === 'object' && 'action' in input && input.action === 'read-work-detail')
       return readWorkDetail(this.store, input);
     if (input && typeof input === 'object' && 'action' in input && input.action === 'export-work') {

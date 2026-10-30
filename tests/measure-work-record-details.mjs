@@ -21,7 +21,7 @@ try {
   const store = new WorkStore(root),
     head = store.load().nativeHead;
   let data = store.load();
-  data.schema = 21;
+
   const path = index =>
     `tests/synthetic-component-${String(index).padStart(4, '0')}-${'x'.repeat(36)}.test.mjs`;
   const tests = Array.from({ length: 100 }, (_, i) => path(i));

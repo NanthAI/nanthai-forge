@@ -13,7 +13,7 @@ import { NativeSource } from '../dist/native-source.js';
 import { initNative } from '../dist/native-work.js';
 import { WorkStore } from '../dist/work-store.js';
 import { WorkService } from '../dist/work.js';
-import { workSchema } from '../dist/work-types.js';
+import { parseWork } from '../dist/work-unified-types.js';
 const git = (root, args) =>
   execFileSync('git', ['-C', root, ...args], {
     encoding: 'utf8',
@@ -39,7 +39,7 @@ function fixture(native, legacy = false) {
     const store = new WorkStore(root),
       data = store.load();
     delete data.autonomyPolicy;
-    data.schema = 1;
+
     writeFileSync(join(store.directory, 'work.json'), JSON.stringify(data));
   }
   return root;
@@ -79,7 +79,7 @@ for (const native of [true, false])
         (await agent.dispatch({ action: 'status' })).result.lanes.items[0].startedBy,
         lane.startedBy,
       );
-      assert.equal(new WorkStore(root).load().schema, 11);
+      assert.equal(new WorkStore(root).load().schema, 24);
       assert.equal((await new AgentWorkflow(root).dispatch(startCommand)).result.laneId, lane.laneId);
       await assert.rejects(
         agent.dispatch({ ...startCommand, outcome: 'Different' }),
@@ -226,7 +226,7 @@ for (const native of [true, false])
       assert.equal(status.runs.more, true);
       assert.ok(!('args' in status.checks.items[0]));
       const bytes = readWorkBytes(join(agent.work.store.directory, 'work.json'));
-      workSchema.parse(JSON.parse(bytes));
+      parseWork(JSON.parse(bytes));
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -447,13 +447,13 @@ test('agent restart reconciles original pending Git checkpoint without new commi
     rmSync(root, { recursive: true, force: true });
   }
 });
-test('agent schema promotion is explicit and optional declared inputs never downgrade', async () => {
+test('agent stores stay current when optional declared inputs are added', async () => {
   const root = fixture(true, true),
     agent = new AgentWorkflow(root);
   try {
-    assert.equal(agent.work.store.load().schema, 1);
+    assert.equal(agent.work.store.load().schema, 24);
     await agent.dispatch({ action: 'status' });
-    assert.equal(agent.work.store.load().schema, 1);
+    assert.equal(agent.work.store.load().schema, 24);
     await start(agent);
     await agent.dispatch({
       action: 'define-check',
@@ -462,7 +462,7 @@ test('agent schema promotion is explicit and optional declared inputs never down
       args: [],
       declaredInputs: [{ kind: 'environment', name: 'TZ' }],
     });
-    assert.equal(agent.work.store.load().schema, 7);
+    assert.equal(agent.work.store.load().schema, 24);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

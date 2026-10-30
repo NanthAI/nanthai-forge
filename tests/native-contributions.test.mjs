@@ -29,7 +29,7 @@ import { digest } from '../dist/hash.js';
 import { applyHostedEvent, parseWorkBytes, workBytes, metadataRequest } from '../dist/work-metadata.js';
 import { code } from './helpers.mjs';
 
-async function setup(t, schema = 1, binaryBytes = 0) {
+async function setup(t, binaryBytes = 0) {
   const dir = mkdtempSync(join(tmpdir(), 'forge-native-contribution-')),
     owner = join(dir, 'owner');
   mkdirSync(owner);
@@ -39,11 +39,6 @@ async function setup(t, schema = 1, binaryBytes = 0) {
   const w = new WorkService(owner),
     data = () => w.store.load(),
     act = c => w.execute(c, data().revision).result;
-  if (schema > 1) {
-    const records = data();
-    records.schema = schema;
-    w.store.save(records);
-  }
   const intent = act({ action: 'intent', outcome: 'Native contributor source' }),
     lane = act({ action: 'lane', intentId: intent.id, name: 'Keep owner edits' });
   const baseArchive = (await w.dispatch({ action: 'export-work', archive: true }, data().revision)).result;
@@ -127,9 +122,9 @@ async function setup(t, schema = 1, binaryBytes = 0) {
   };
 }
 
-test('source-only import preserves owner Work/dirty files, ancestry/modes and archive digest facts through earlier-format recovery and format5 no-downgrade', async t => {
-  for (const schema of [1, 2, 3, 5]) {
-    const f = await setup(t, schema),
+test('source-only import preserves owner Work/dirty files, ancestry/modes and archive digest facts through current-format recovery', async t => {
+  {
+    const f = await setup(t),
       path = f.w.store.path(f.lane.id);
     writeFileSync(join(path, 'a.ts'), 'owner dirty edits stay\n');
     const before = f.data(),
@@ -138,7 +133,7 @@ test('source-only import preserves owner Work/dirty files, ancestry/modes and ar
     const result = await f.call(),
       data = f.data(),
       lane = result.result;
-    assert.equal(data.schema, Math.max(schema, 4));
+    assert.equal(data.schema, 24);
     assert.equal(lane.nativeContributionId, f.command.operationId);
     assert.deepEqual(data.lanes.slice(0, -1), before.lanes);
     assert.deepEqual(data.intents, before.intents);
@@ -199,9 +194,9 @@ test('source-only import preserves owner Work/dirty files, ancestry/modes and ar
       assert.deepEqual(readWorkBytes(join(f.w.store.directory, 'work.json')), retainedWork);
     }
     const inspected = await f.call({ action: 'inspect-native-objects' });
-    assert.equal(inspected.result.format, Math.max(schema, 4));
+    assert.equal(inspected.result.format, 24);
     await f.call({ action: 'collect-native-objects' });
-    assert.equal(f.data().schema, Math.max(schema, 4));
+    assert.equal(f.data().schema, 24);
     assert.equal(existsSync(join(native.directory, receipt.archiveSha256)), false);
     assert.equal(digest(readFileSync(f.command.archivePath)), receipt.archiveSha256);
   }
@@ -209,7 +204,7 @@ test('source-only import preserves owner Work/dirty files, ancestry/modes and ar
 
 test('three full native proposal round trips retain source/provenance without nesting archive bodies in owner backups', async t => {
   const payload = 256 * 1024,
-    f = await setup(t, 1, payload),
+    f = await setup(t, payload),
     bytes = () =>
       readdirSync(new NativeSource(f.w.store.root).directory)
         .filter(name => /^[0-9a-f]{64}$/.test(name))
@@ -402,10 +397,10 @@ test('concurrent raw Work changes during validation cannot be overwritten and or
   const before = readWorkBytes(join(f.w.store.directory, 'work.json'));
   await assert.rejects(pending, code('WORK_STALE'));
   assert.deepEqual(readWorkBytes(join(f.w.store.directory, 'work.json')), before);
-  assert.equal(f.data().schema, 1);
+  assert.equal(f.data().schema, 24);
 });
 
-test('format4 owner receives hosted companion metadata without downgrading or losing contribution receipt/archive digest facts', async t => {
+test('current-format owner receives hosted companion metadata without downgrading or losing contribution receipt/archive digest facts', async t => {
   const f = await setup(t);
   await f.call();
   const receipt = f.data().nativeContributionReceipts[0];
@@ -461,7 +456,7 @@ test('format4 owner receives hosted companion metadata without downgrading or lo
     journalSha256: digest(bytes),
   });
   assert.equal(received.result.status, 'reconciled');
-  assert.equal(f.data().schema, 4);
+  assert.equal(f.data().schema, 24);
   assert.deepEqual(f.data().nativeContributionReceipts, [receipt]);
   assert.equal(f.data().nativeCompanionReceipts.length, 1);
   assert.equal(f.data().intents[0].notes[0].text, 'Original hosted contributor round trip');

@@ -33,7 +33,6 @@ function fixture(t, enabled = true) {
     ...policyPreset('trusted'),
     acceptance: { ...policyPreset('trusted').acceptance, disjointFastPath: enabled },
   };
-  data.schema = enabled ? 14 : 13;
   const intent = {
     id: randomUUID(),
     outcome: 'Synthetic work',
@@ -515,7 +514,7 @@ test('scoped acceptance queues full main while disjoint policy stays off and ret
   const { move } = f.accept(candidate);
   assert.deepEqual(move.postAccept, { checkId: f.check.id, mode: 'full', reason: 'scoped-check' });
   assert.equal(move.fastPath, undefined);
-  assert.equal(f.store.load().schema, 23);
+  assert.equal(f.store.load().schema, 24);
   assert.equal(f.store.load().autonomyPolicy.acceptance.disjointFastPath, false);
 });
 
@@ -532,7 +531,7 @@ test(
     old.locked(() => old.commitRecords(old.records()));
     const after = readFileSync(join(f.store.directory, 'work.json'));
     assert.notDeepEqual(after, before);
-    assert.equal(f.store.load().schema, 14);
+    assert.equal(f.store.load().schema, 24);
     t.diagnostic(
       'Old bare records().commit() changes the revision without validating format14. Do not use legacy embedding APIs after enabling.',
     );

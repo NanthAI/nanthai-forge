@@ -106,7 +106,6 @@ test('native migration resumes finite pages, preserving revision, identities, ol
       result: '{"completed":true}',
     },
   ];
-  data.schema = 21;
   // Retain a pre-upgrade records-v3 fixture without going through new writer compaction.
   writeRecords(store.directory, { ...data, runs: [], automaticActions: [] });
   const tx = store.readRecords();
@@ -114,7 +113,8 @@ test('native migration resumes finite pages, preserving revision, identities, ol
   const pointer = JSON.parse(readWorkFile(store.directory));
   const { recordIO, putCollection, publishRecords } = awaitImport;
   const io = recordIO(store.directory);
-  pointer.fields.schema = 21;
+  delete pointer.fields.workDetailsMigrated;
+  pointer.keys = pointer.keys.filter(key => key !== 'workDetailsMigrated');
   pointer.collections.runs = putCollection(io, data.runs);
   pointer.collections.automaticActions = putCollection(io, data.automaticActions);
   publishRecords(store.directory, pointer);
@@ -136,7 +136,7 @@ test('native migration resumes finite pages, preserving revision, identities, ol
     actionResult(store.load().automaticActions[0], detailReader(store.directory)),
     data.automaticActions[0].result,
   );
-  assert.equal(store.load().schema, 23);
+  assert.equal(store.load().schema, 24);
   assert.equal(store.revision(), data.revision);
   assert.deepEqual(store.pinnedData(before).runs, data.runs);
   const current = store.pointer();
@@ -325,6 +325,7 @@ test('an ordinary full save can complete an interrupted migration without losing
   const { store } = fixture(t),
     data = store.load();
   data.runs = [runFixture(data.nativeHead), runFixture(data.nativeHead)];
+  delete data.workDetailsMigrated;
   writeFileSync(join(store.directory, 'work.json'), JSON.stringify(data));
   // Install an old record pointer through the legacy primitives.
   const io = awaitImport.recordIO(store.directory),

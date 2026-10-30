@@ -78,6 +78,5 @@ export function selectMainAudit(data: WorkData, push?: { channel: string; checkI
   main.postAcceptAuditRunId = runId;
   // Preserve the direct pointer for the newest request (including explicit push).
   if (requested.some(item => item.move.id === main.id)) main.postAcceptRunId = runId;
-  data.schema = Math.max(data.schema, 13) as WorkData['schema'];
   return { view, runId, checkId: newest.checkId };
 }

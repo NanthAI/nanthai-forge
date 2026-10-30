@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { compactDetailPage, slimWorkFormat } from './work-record-details.js';
 import { detailReader, detailWriter } from './work-detail-store.js';
-import { assertWorkFormat } from './work-format.js';
+import { assertCurrentWorkFormat } from './work-format.js';
 import { isDeepStrictEqual } from 'node:util';
 import { digest } from './hash.js';
 import { invariant } from './errors.js';
@@ -57,7 +57,7 @@ export class WorkRecordTransaction {
     bytes: Buffer,
     memo?: WorkRecordReadMemo,
   ) {
-    assertWorkFormat(manifest.fields);
+    assertCurrentWorkFormat(manifest.fields);
     this.putDetail = detailWriter(directory, true);
     this.pages = memo?.pages ?? new Map();
     this.recordsByHash = memo?.records ?? new Map();
@@ -520,7 +520,7 @@ export class WorkRecordTransaction {
       'BAD_ARGUMENT',
       'Work revision is invalid.',
     );
-    assertWorkFormat(this.manifest.fields);
+    assertCurrentWorkFormat(this.manifest.fields);
     this.manifest.fields.revision = next;
     this.prepared = { revision: next, publish: prepareRecordPublication(this.directory, this.manifest) };
   }
@@ -533,7 +533,7 @@ export class WorkRecordTransaction {
   }
   private publish(revision?: number) {
     const nextRevision = revision ?? this.prepared?.revision ?? this.revision + 1;
-    assertWorkFormat(this.manifest.fields);
+    assertCurrentWorkFormat(this.manifest.fields);
     invariant(
       Number.isSafeInteger(nextRevision) && nextRevision >= this.revision,
       'BAD_ARGUMENT',

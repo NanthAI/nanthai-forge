@@ -161,7 +161,7 @@ function recordNativeLaneLocked(
         command.message,
         at,
       );
-      tx.setSchema(12);
+
       tx.appendField('lanes', id, 'checkpoints', {
         ...resolvedSyncCheckpoint(source, lane, files),
         actor,

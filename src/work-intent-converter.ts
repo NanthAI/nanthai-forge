@@ -6,11 +6,10 @@ import { workSchema, type WorkData } from './work-types.js';
 import { unifiedWorkSchema, type UnifiedIntent, type UnifiedWorkData } from './work-unified-types.js';
 
 /** Hash exact JSON bytes, including property order; never normalize retained requests/events. */
+import { noteId } from './work-note-id.js';
+
 export const intentMergeHash = (value: unknown) => digest(JSON.stringify(value));
-export const noteId = (intentId: string, index: number) => {
-  const h = digest(`intent-merge-v1:note:${intentId}:${index}`);
-  return `${h.slice(0, 8)}-${h.slice(8, 12)}-5${h.slice(13, 16)}-a${h.slice(17, 20)}-${h.slice(20, 32)}`;
-};
+export { noteId } from './work-note-id.js';
 const count = (data: {
   intents: { notes: unknown[] }[];
   planningItems: WorkData['planningItems'];

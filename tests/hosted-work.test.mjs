@@ -258,7 +258,7 @@ test('hosted Intent authority reconciles original operations, retains concurrent
     assert.equal(snapshot.events.length, 104);
     assert.equal(snapshot.data.revision, initialRevision + 104);
     assert.equal(snapshot.data.intents.find(item => item.id === create.operationId).notes.length, 102);
-    assert.equal(snapshot.data.intents.find(item => item.id === create.operationId).status, 'ready');
+    assert.equal(snapshot.data.intents.find(item => item.id === create.operationId).status, 'active');
     assert.equal(snapshot.events[0].actor, 'owner');
     const journal = JSON.parse(await actions.exportJournal._handler(s.ctx, { projectId: s.projectId })),
       journalPath = join(root, 'hosted-work.json');

@@ -19,7 +19,7 @@ import { exportNativeSource, restoreNativeWork } from '../dist/native-backup.js'
 import { serveRepository } from '../dist/http.js';
 
 const input = { action: 'import-pr', url: 'https://github.com/tests/example/pull/7' };
-async function native(t, { format = 'sha1', schema = 1, pure = false } = {}) {
+async function native(t, { format = 'sha1', pure = false } = {}) {
   const priorHash = process.env.GIT_DEFAULT_HASH;
   process.env.GIT_DEFAULT_HASH = format;
   const f = setup(t);
@@ -37,11 +37,6 @@ async function native(t, { format = 'sha1', schema = 1, pure = false } = {}) {
   const work = new WorkService(root),
     data = () => work.store.load(),
     act = c => work.execute(c, data().revision).result;
-  if (schema > 1) {
-    const saved = data();
-    saved.schema = schema;
-    work.store.save(saved);
-  }
   let base = original;
   if (pure) {
     const projected = await exportNativeGit(root, imported.head, join(f.root, '.git/projected'));
@@ -117,24 +112,13 @@ for (const format of ['sha1', 'sha256'])
     `native ${format} incoming PR retains original fork bytes/history and composes/checks/accepts through the existing owner`,
     { timeout: 120000 },
     async t => {
-      const f = await native(t, { format, schema: 4 }),
+      const f = await native(t, { format }),
         path = f.work.store.path(f.lane.id);
       writeFileSync(join(path, 'dirty.ts'), 'Keep dirty unrelated source\n');
       const before = f.data(),
         oldRecords = readWorkBytes(join(f.work.store.directory, 'work.json'));
-      if (process.env.FORGE_NATIVE_PR_LEGACY_CLI) {
-        // Exercise the old reader's supported portable format, not the new indexed commit pointer.
-        writeFileSync(join(f.work.store.directory, 'work.json'), oldRecords);
-        const prior = JSON.parse(
-          execFileSync(process.execPath, [process.env.FORGE_NATIVE_PR_LEGACY_CLI, 'work', f.root], {
-            encoding: 'utf8',
-          }),
-        );
-        assert.equal(prior.schema, 4);
-        assert.deepEqual(readFileSync(join(f.work.store.directory, 'work.json')), oldRecords);
-      }
       assert.equal(f.work.status().capabilities.nativeGithubPrImport, true);
-      assert.equal(f.data().schema, 4);
+      assert.equal(f.data().schema, 24);
       assert.deepEqual(readWorkBytes(join(f.work.store.directory, 'work.json')), oldRecords);
       const raw = JSON.parse(oldRecords);
       raw.unknownOwnerRecord = { retained: true };
@@ -143,7 +127,7 @@ for (const format of ['sha1', 'sha256'])
       const incoming = (await f.call()).result,
         observation = incoming.external.observations[0],
         source = new NativeSource(f.root);
-      assert.equal(f.data().schema, 5);
+      assert.equal(f.data().schema, 24);
       assert.equal(incoming.external.author.login, 'upstream-author');
       assert.equal(observation.head, f.head);
       assert.equal(observation.base, f.base);
@@ -222,14 +206,14 @@ for (const format of ['sha1', 'sha256'])
       await f.call({ action: 'collect-native-objects' });
       assert.ok(objects.includes(observation.bundle));
       assert.ok(existsSync(join(source.directory, observation.bundle)));
-      assert.equal(f.data().schema, 5);
+      assert.equal(f.data().schema, 24);
       assert.equal(f.state().creates, 1); // Only fixture setup published. Import/check makes no provider writes.
       if (process.env.FORGE_NATIVE_PR_LEGACY_CLI) {
         const workFile = join(f.work.store.directory, 'work.json'),
           indexed = readFileSync(workFile),
           portable = f.work.store.snapshotBytes();
         assert.equal(JSON.parse(indexed).schema, 'forge-work-records-v3');
-        assert.equal(JSON.parse(portable).schema, 5);
+        assert.equal(JSON.parse(portable).schema, 24);
         // Both the new indexed representation and unsupported portable format5 fail without a write.
         for (const retained of [indexed, portable]) {
           writeFileSync(workFile, retained);
@@ -252,7 +236,7 @@ test(
   'pure native publication boundary maps incoming source without inventing Git-backed ownership; no format change from failed reads',
   { timeout: 120000 },
   async t => {
-    const f = await native(t, { pure: true, schema: 2 }),
+    const f = await native(t, { pure: true }),
       bytes = readWorkBytes(join(f.work.store.directory, 'work.json')),
       objects = readdirSync(new NativeSource(f.root).directory);
     await assert.rejects(f.call(input, 0), code('WORK_STALE'));
@@ -285,7 +269,7 @@ test(
   'native check/repeat import preserves earlier exact candidates and concurrent notes; delayed reads cannot replace a later observation',
   { timeout: 120000 },
   async t => {
-    const f = await native(t, { schema: 3 }),
+    const f = await native(t),
       incoming = (await f.call()).result,
       first = compose(f, incoming);
     const next = f.fork(f.command.expectedHead, f.head, 'Later fork history\n');
@@ -450,11 +434,11 @@ test(
       const release = (await exportNativeSource(f.work.store, saved.revision, view.head)).result;
       sourceOnly = join(f.root, '.forge/source-only');
       await restoreNativeWork(release.archive.path, sourceOnly);
-      assert.equal(new WorkService(sourceOnly).store.load().schema, 1);
+      assert.equal(new WorkService(sourceOnly).store.load().schema, 24);
       assert.deepEqual(new WorkService(sourceOnly).store.load().intents, []);
       assert.equal(existsSync(used), false);
       await f.call({ action: 'collect-native-objects' });
-      assert.equal(f.data().schema, 5);
+      assert.equal(f.data().schema, 24);
       assert.equal(existsSync(used), false);
     } finally {
       process.env.PATH = previous;
@@ -604,10 +588,10 @@ new WorkStore(process.argv[1]).locked(() => {
 );
 
 test(
-  'lost native PR save/reply reconciles one Intent; unregistered staged objects remain collectible and old Work stays intact',
+  'lost native PR save/reply reconciles one Intent; unregistered staged objects remain collectible and current Work stays intact',
   { timeout: 120000 },
   async t => {
-    const f = await native(t, { schema: 4 }),
+    const f = await native(t),
       source = new NativeSource(f.root),
       file = join(f.work.store.directory, 'work.json'),
       original = readFileSync(file),
@@ -618,7 +602,7 @@ test(
     await assert.rejects(f.call(), /lost registration before save/);
     f.work.store.save = save;
     assert.deepEqual(readFileSync(file), original);
-    assert.equal(f.data().schema, 4);
+    assert.equal(f.data().schema, 24);
     assert.equal(f.data().intents.length, 1);
     const orphaned = (await f.call({ action: 'collect-native-objects' })).result.removed;
     assert.ok(orphaned.length > 0);
@@ -636,7 +620,7 @@ test(
     assert.equal(f.data().intents.filter(item => item.external).length, 1);
     assert.equal(retry.external.observations.at(-1).native.head, pins.head);
     assert.equal(retry.external.observations.at(-1).native.base, pins.base);
-    assert.equal(f.data().schema, 5);
+    assert.equal(f.data().schema, 24);
   },
 );
 

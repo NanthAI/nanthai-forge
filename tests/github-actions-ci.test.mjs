@@ -9,7 +9,7 @@ import { randomUUID } from 'node:crypto';
 import { WorkService } from '../dist/work.js';
 import { AgentWorkflow } from '../dist/agent-workflow.js';
 import { initNative } from '../dist/native-work.js';
-import { workSchema } from '../dist/work-types.js';
+import { assertCurrentWorkFormat } from '../dist/work-format.js';
 import { parseAgentAction } from '../dist/agent-action-parse.js';
 import { successfulCheck, retainedPassedCheck, validateReusedCheck } from '../dist/check-reuse-evidence.js';
 import { adoptFinishRun } from '../dist/agent-finish-reuse.js';
@@ -93,7 +93,9 @@ for (const tests of [[], ['tests/a.test.mjs']])
     assert.match(receipt.coverage, /Partial evidence/);
     const run = runDetails(work.store, work.store.select('runs', receipt.runId));
     assert.ok(work.store.load().schema >= 15);
-    assert.equal(workSchema.safeParse({ ...work.store.load(), schema: 14 }).success, false);
+    assert.throws(() => assertCurrentWorkFormat({ ...work.store.load(), schema: 14 }), {
+      code: 'WORK_UPGRADE_REQUIRED',
+    });
     const output = readFileSync(join(work.store.directory, `check-${run.id}/stdout.log`), 'utf8');
     assert.deepEqual(JSON.parse(output.trim()).tests, tests);
     assert.equal(JSON.parse(output.trim()).scope, 'partial');

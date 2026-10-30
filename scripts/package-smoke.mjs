@@ -495,7 +495,7 @@ try {
   assert.equal(finished.acceptance.acceptanceId, finished.acceptance.operationId);
   assert.deepEqual(agent('finish', finishRequest), finished);
   const agentWork = command('work', agentOwner, '--compact');
-  assert.equal(agentWork.schema, 23);
+  assert.equal(agentWork.schema, 24);
   assert.equal(agentWork.runs.length, 2);
   const agentBackup = command(
     'work',

@@ -305,7 +305,6 @@ test('transitive ordering dependencies and stack parents are checked at their fr
   await f.save(c, 'c.txt', '1');
   const savedParent = a.head;
   f.edit(data => {
-    data.schema = [16, 18, 20, 22].includes(data.schema) ? 22 : 21;
     data.lanes.find(row => row.id === b.laneId).stack = {
       laneId: a.laneId,
       head: savedParent,

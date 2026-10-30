@@ -28,7 +28,7 @@ test('revision observation reads only the record manifest and remains available 
   writeFileSync(join(work.store.directory, 'work.json'), JSON.stringify(manifest));
   assert.throws(() => work.store.revision(), { code: 'INVALID_WORK_STORE' });
 });
-test('legacy revision uses existing validation without migrating or changing bytes', t => {
+test('old-format revision is rejected without changing bytes', t => {
   const { work } = setup(t),
     data = work.store.load();
   delete data.autonomyPolicy;
@@ -37,6 +37,6 @@ test('legacy revision uses existing validation without migrating or changing byt
   const bytes = JSON.stringify(data),
     path = join(work.store.directory, 'work.json');
   writeFileSync(path, bytes);
-  assert.equal(work.store.revision(), 9);
+  assert.throws(() => work.store.revision(), { code: 'WORK_UPGRADE_REQUIRED' });
   assert.equal(readFileSync(path, 'utf8'), bytes);
 });

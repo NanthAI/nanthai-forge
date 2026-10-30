@@ -33,7 +33,8 @@ async function fixture(t, mode = 'native-owner', records = false) {
     // The archive fixture emulates an old writer; no new save path can compact it.
     const { store } = local;
     data.runs = [original];
-    data.schema = 21;
+    delete data.workDetailsMigrated;
+
     // Write a legacy monolithic pointer so the export retains the original bytes.
     writeFileSync(join(store.directory, 'work.json'), JSON.stringify(data, null, 2));
   });
@@ -91,9 +92,9 @@ for (const mode of ['native-owner', 'server'])
     } while (!result.complete);
     assert.equal(JSON.parse(await s.step()).root.sha256, result.root.sha256);
     const snapshot = await workLoad.load(s.ctx, s.projectId, 'owner');
-    assert.equal(snapshot.data.schema, 23);
+    assert.equal(snapshot.data.schema, 24);
     const originalSnapshot = await workLoad.source(s.ctx, s.backupId, 'owner');
-    assert.equal(originalSnapshot.data.schema, 21);
+    assert.equal(originalSnapshot.data.schema, 24);
     assert.deepEqual(originalSnapshot.data.runs[0], s.original);
     assert.equal(snapshot.data.runs[0].backend.testVerdicts, undefined);
     const detail = snapshot.data.runs[0].detailRef;

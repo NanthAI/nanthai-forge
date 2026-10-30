@@ -97,19 +97,6 @@ export function batchEdit<T>(
         const before = JSON.stringify(data);
         const result = edit(data);
         if (JSON.stringify(data) === before) return result;
-        const expanded =
-          Number(data.schema) >= 19 || data.landingBatches?.some(batch => batch.entryIds.length > 4);
-        data.schema = (
-          Number(data.schema) >= 21
-            ? data.schema
-            : [16, 18, 20].includes(Number(data.schema))
-              ? expanded
-                ? 20
-                : 18
-              : expanded
-                ? 19
-                : 17
-        ) as WorkData['schema'];
         data.revision++;
         return result;
       },

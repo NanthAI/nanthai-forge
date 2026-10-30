@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { initNative } from '../dist/native-work.js';
-import { workSchema } from '../dist/work-types.js';
+import { assertCurrentWorkFormat } from '../dist/work-format.js';
 import { WorkService } from '../dist/work.js';
 import { AgentWorkflow } from '../dist/agent-workflow.js';
 import { readFileProvenance } from '../dist/view-provenance.js';
@@ -42,8 +42,10 @@ test('multi-Lane provenance follows pinned saves, later overrides, independent h
   );
   assert.ok(file.contributors[0].saves.every(s => s.actor.kind === 'person'));
   const attributed = f.work.store.load();
-  assert.equal(attributed.schema, 12);
-  assert.equal(workSchema.safeParse({ ...attributed, schema: 11 }).success, false);
+  assert.equal(attributed.schema, 24);
+  assert.throws(() => assertCurrentWorkFormat({ ...attributed, schema: 11 }), {
+    code: 'WORK_UPGRADE_REQUIRED',
+  });
   delete attributed.lanes.find(lane => lane.id === p.first.id).checkpoints[0].actor;
   attributed.revision++;
   f.work.store.save(attributed);

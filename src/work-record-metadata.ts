@@ -75,7 +75,6 @@ export function recordMetadata(
               );
             const file = state.files.find(file => file.path === command.anchor!.file);
             validateAnchorFile(command.anchor, file, file ? source.object(file.blob) : undefined);
-            tx.setSchema(9);
           }
           const note = {
             text: command.text,
@@ -100,7 +99,6 @@ export function recordMetadata(
               at,
             });
           else if (command.status === 'completed' || Object.hasOwn(found.counts, 'lifecycle')) {
-            tx.setSchema(8);
             if (found.record.status !== command.status)
               tx.appendField('intents', command.intentId, 'lifecycle', {
                 from: found.record.status,
@@ -128,7 +126,6 @@ export function recordMetadata(
           );
           options.workspace?.(found.record);
           if (command.state === 'completed' || Object.hasOwn(found.counts, 'lifecycle')) {
-            tx.setSchema(8);
             if (found.record.state !== command.state)
               tx.appendField('lanes', command.laneId, 'lifecycle', {
                 from: found.record.state,

@@ -1135,72 +1135,14 @@ export const workSchema = z
   })
   .refine(
     data =>
-      ((!data.landingEntries?.length &&
-        !data.landingBatches?.length &&
-        !data.channelMoves.some(move => move.postAccept?.reason === 'batch')) ||
-        data.schema >= 17) &&
-      (!data.runs.some(
-        run =>
-          run.interaction !== undefined ||
-          ['interaction', 'partial'].includes(run.checkSelection?.scope ?? ''),
-      ) ||
-        data.schema >= 15) &&
-      ((!data.autonomyPolicy?.acceptance.disjointFastPath &&
-        !data.channelMoves.some(move => move.fastPath)) ||
-        data.schema >= 14) &&
-      ((!data.lanes.some(
-        lane => lane.state === 'abandoned' || lane.lifecycle?.some(entry => entry.operation),
-      ) &&
-        !data.intents.some(intent => intent.lifecycle?.some(entry => entry.operation))) ||
-        data.schema >= 13) &&
-      ((!data.runs.some(run => run.detailRef) && !data.automaticActions?.some(action => action.resultRef)) ||
-        data.schema >= 23) &&
-      (!data.lanes.some(lane => lane.stack) || data.schema >= 21) &&
-      (!data.lanes.some(
-        lane =>
-          lane.after ||
-          lane.agentStart ||
-          lane.pending?.actor ||
-          lane.pendingSync?.actor ||
-          lane.checkpoints.some(save => save.actor),
-      ) ||
-        data.schema >= 12) &&
-      ((!data.autonomyPolicy &&
-        !data.policyChanges?.length &&
-        !data.automaticActions?.length &&
-        !data.channelMoves.some(move => move.automatic) &&
-        !data.lanes.some(lane => lane.checkpoints.some(cp => cp.automatic || cp.undoSync))) ||
-        data.schema >= 11) &&
-      (!data.lanes.some(lane => lane.pendingMerge) || data.schema >= 10) &&
-      (!data.intents.some(intent => intent.notes.some(note => note.anchor)) || data.schema >= 9) &&
-      ((!data.intents.some(intent => intent.status === 'completed' || intent.lifecycle?.length) &&
-        !data.lanes.some(lane => lane.state === 'completed' || lane.lifecycle?.length)) ||
-        data.schema >= 8) &&
-      ((!data.intents.some(intent => intent.agentStart) &&
-        !data.lanes.some(
-          lane => lane.pending?.operation || lane.checkpoints.some(checkpoint => checkpoint.operation),
-        )) ||
-        data.schema >= 7) &&
-      (!data.nativeContributionReceipts?.some(item => item.provenance === 'unverified-git-bundle') ||
-        data.schema >= 6) &&
-      (!data.historicalWork?.length || data.schema >= 2) &&
-      (!data.nativeCompanionReceipts?.length || data.schema >= 3) &&
-      ((!data.nativeContributionReceipts?.length && !data.lanes.some(lane => lane.nativeContributionId)) ||
-        data.schema >= 4) &&
-      ((!data.checks.some(check => check.declaredInputs?.length) &&
-        !data.runs.some(run => run.check.declaredInputs?.length || run.inputObservations?.length) &&
-        !data.automations.some(rule => rule.checks.some(check => check.declaredInputs?.length)) &&
-        !data.playbookRuns.some(run => run.steps.some(step => step.check.declaredInputs?.length))) ||
-        data.schema >= 5) &&
       (!data.intents.some(intent => intent.external?.observations.some(observation => observation.native)) ||
-        (data.schema >= 5 && !!data.nativeHead)) &&
-      (data.schema === 1 || data.schema >= 5 || !!data.nativeHead) &&
+        !!data.nativeHead) &&
       ((!data.historicalWork?.length &&
         !data.nativeCompanionReceipts?.length &&
         !data.nativeContributionReceipts?.length &&
         !data.lanes.some(lane => lane.nativeContributionId)) ||
         !!data.nativeHead),
-    'Extended Work requires its versioned format; native history retains its native owner.',
+    'Native history retains its native owner.',
   );
 export type WorkData = z.infer<typeof workSchema>;
 export type Lane = z.infer<typeof laneSchema>;

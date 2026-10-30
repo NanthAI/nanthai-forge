@@ -685,17 +685,15 @@ issue/execution UUID reports `INTENT_MERGE_ID_COLLISION` without mutating input.
 The anonymous count/topology fixture contains only ordinal IDs, lifecycle facts
 and counts; every title, note and comment in its generated Work is synthetic.
 
-Local Work unifies legacy Intents only through the explicit owner command
-`{"action":"migrate-intents"}` (`src/work-intent-migration.ts`); no reader or
-writer migrates implicitly. Take a verified backup first. Under the owner lock it
-converts the current Work, writes the converted pages as content-addressed
-records, reads them back and validates them, writes `intent-merge-receipt.json`,
-then switches `work.json` with one atomic rename. A failure before the rename
-leaves the original format-15/16/17/19 pointer and records untouched. The migration ID derives from
-the original Work hash, so a retry reproduces identical pages and receipt; once switched,
-a retry returns the stored `intentMigration` receipt without writing. The large
-`legacyIntentMerge` copy is stored as a one-record paged collection, so ordinary
-commits never rewrite it inside the commit pointer.
+New Work stores start at current unified format 24, including packed evidence.
+Ordinary owner reads and writes require that format before reading collection
+pages. Native backup restoration validates the original archive and source pins,
+replays any hosted journal with its original request hashes, then converts older
+Work in the private recovery directory. Already unified Work is relabelled without
+folding again or replacing `legacyIntentMerge`, `intentMergeReceipt` or aliases.
+Fresh stores omit those historical conversion facts. The completed live migration
+commands and feature-promotion ladder are removed. Historical journal replay
+retains its format-specific representation until compaction.
 
 In unified Work, record writers complete unified fields on any Intent they write
 (`unifyIntent`): title, description, empty relation lists and a stable

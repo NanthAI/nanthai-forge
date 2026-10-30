@@ -158,7 +158,6 @@ export async function boundAgentCache(
           'The local saved Lane changed during hosted save.',
         );
         if (!tx.fieldFind('lanes', lane.id, 'checkpoints', operationId, 'operation')) {
-          tx.setSchema(12);
           tx.appendField('lanes', lane.id, 'checkpoints', {
             head: receipt.head,
             parent: retained.inputs[0]!.baseline,

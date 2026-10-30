@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { AgentWorkflow } from '../dist/agent-workflow.js';
-import { workSchema } from '../dist/work-types.js';
+import { parseWork } from '../dist/work-unified-types.js';
 import { WorkService } from '../dist/work.js';
 import { initNative } from '../dist/native-work.js';
 import { NativeSource } from '../dist/native-source.js';
@@ -100,11 +100,11 @@ for (const native of [true, false]) {
     assert.equal(data.views.length, 1);
     assert.equal(data.runs.length, 1);
     assert.equal(data.channelMoves.length, 1);
-    assert.equal(data.schema, native ? 23 : 12);
+    assert.equal(data.schema, 24);
     const attributed = structuredClone(data);
     attributed.lanes[0].checkpoints[0].actor = { kind: 'agent', name: 'Synthetic H17 actor' };
     assert.deepEqual(
-      workSchema.parse(attributed).lanes[0].checkpoints[0].actor,
+      parseWork(attributed).lanes[0].checkpoints[0].actor,
       attributed.lanes[0].checkpoints[0].actor,
     );
     assert.deepEqual(

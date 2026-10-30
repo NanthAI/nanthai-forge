@@ -178,7 +178,7 @@ function accept(
             'The Candidate does not contain the current Channel head, so accepting it would drop accepted work. Merge the Channel into the Lane (git merge), checkpoint and finish again.',
           );
           const automatic = enforceAcceptance(store, data, view, command.expectedPrevious, actor);
-          if (automatic) data.schema = 11;
+
           const assessment = command.invariant
             ? assessInvariant(
                 store,
@@ -211,7 +211,7 @@ function accept(
             ...(automatic ? { automatic } : {}),
             ...(assessment ? { invariant: assessment } : {}),
           };
-          if (move.postAccept) data.schema = Math.max(data.schema, 13) as WorkData['schema'];
+
           data.channelMoves.push(move);
           data.revision++;
           store.save(data);

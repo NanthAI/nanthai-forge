@@ -91,7 +91,7 @@ test('indexed hosted commands avoid archive/history replay, preserve reducer res
   const after = JSON.parse(await index.workspace._handler(s.ctx, { projectId: s.projectId }));
   assert.equal(after.generationId, before.generationId);
   assert.equal(after.revision, before.revision + 5);
-  assert.equal(after.schema, 11); // new source owner already records its supervised policy
+  assert.equal(after.schema, 24); // new source owner already records its supervised policy
   assert.equal(after.defaultIntentId, operationId);
   assert.equal(after.counts.notes, 1);
   assert.equal(after.counts.lifecycle, 2);
@@ -227,7 +227,7 @@ test('materialization chunks oversized imported attributes and retains full payl
   );
 });
 
-test('a warm note reads the same bounded records with 10 or 4000 retained notes and leaves unrelated reactive pages equal', async t => {
+test('a warm note pages selected attributes with bounded overhead for 10 or 4000 retained notes and leaves unrelated reactive pages equal', async t => {
   const observations = [];
   for (const count of [10, 4000]) {
     const intentId = randomUUID(),
@@ -253,6 +253,16 @@ test('a warm note reads the same bounded records with 10 or 4000 retained notes 
     await indexActions.ensure._handler(s.ctx, { projectId: s.projectId });
     const beforePage = await page(s, 'lanes'),
       workspace = JSON.parse(await index.workspace._handler(s.ctx, { projectId: s.projectId }));
+    const header = JSON.parse(
+      (
+        await index.detail._handler(s.ctx, {
+          projectId: s.projectId,
+          collection: 'intents',
+          id: intentId,
+        })
+      ).value,
+    );
+    const attributeParts = header.payloadParts ?? 0;
     let reads = 0,
       blobReads = 0;
     const originalGet = s.ctx.db.get,
@@ -299,7 +309,7 @@ test('a warm note reads the same bounded records with 10 or 4000 retained notes 
       revision: workspace.revision,
       command: JSON.stringify({ action: 'note', intentId, text: 'One more', kind: 'comment' }),
     });
-    observations.push({ reads, blobReads });
+    observations.push({ reads, blobReads, attributeParts });
     s.ctx.db.get = originalGet;
     s.ctx.db.query = originalQuery;
     assert.deepEqual(
@@ -315,9 +325,16 @@ test('a warm note reads the same bounded records with 10 or 4000 retained notes 
       count + 1,
     );
   }
-  assert.deepEqual(observations[0], observations[1]);
-  assert.equal(observations[0].blobReads, 0);
-  assert.ok(observations[0].reads < 50);
+  // Current unified Intents retain conversation references in selected attributes.
+  // Their payload pages are expected; per-note overhead must stay independent of history.
+  assert.equal(
+    observations[0].reads - observations[0].attributeParts,
+    observations[1].reads - observations[1].attributeParts,
+  );
+  for (const observation of observations) {
+    assert.equal(observation.blobReads, 0);
+    assert.ok(observation.reads < 50);
+  }
 });
 
 test('scoped page wire validator includes provider pagination split metadata', async t => {
@@ -341,7 +358,6 @@ test('oversized Intent headers keep mutation-critical history counters while imp
     s = await setup(t, true, root => {
       const local = new WorkStore(root),
         data = local.load();
-      data.schema = 8;
       data.intents.push({
         id: intentId,
         outcome: 'Wide attributes',

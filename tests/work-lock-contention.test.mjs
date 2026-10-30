@@ -129,7 +129,7 @@ test('metadata publication retains revision guard and same-revision extensions',
     store.locked = locked;
     peer.locked(() => {
       const tx = peer.records();
-      tx.patchFields('intents', lane.intentId, { status: 'ready' });
+      tx.patchFields('intents', lane.intentId, { status: 'completed' });
       peer.commitRecords(tx);
     });
     return locked(run);

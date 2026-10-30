@@ -75,13 +75,6 @@ export function nativeObjects(store: WorkStore, input: unknown) {
           }
           const removed: { id: string; bytes: number }[] = [];
           if (command.action === 'collect-native-objects') {
-            // Older schema1/2 writers must reject before registering references using
-            // their former insert-before-lock protocol. Inspection never upgrades.
-            if (data.schema < 3) {
-              data.schema = 3;
-              data.revision++;
-              store.save(data);
-            }
             for (const item of candidates) {
               const path = join(source.directory, item.id),
                 stat = lstatSync(path);

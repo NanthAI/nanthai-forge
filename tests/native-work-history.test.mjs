@@ -13,7 +13,7 @@ import { NativeSource } from '../dist/native-source.js';
 import { restoreNativeWork } from '../dist/native-backup.js';
 import { restoreWork } from '../dist/work-backup.js';
 import { withWorkArchive } from '../dist/work-backup-archive.js';
-import { workSchema } from '../dist/work-types.js';
+import { parseWork } from '../dist/work-unified-types.js';
 import { parseWorkBytes, workBytes } from '../dist/work-metadata.js';
 import { digest } from '../dist/hash.js';
 import { serveRepository } from '../dist/http.js';
@@ -215,7 +215,7 @@ test('historical import retains exact original Git owner and reconciles lost rep
   await assert.rejects(f.call(f.command), /Lost attachment reply/);
   f.w.store.save = save;
   const record = (await f.call(f.command, 0)).result;
-  assert.equal(f.data().schema, 2);
+  assert.equal(f.data().schema, 24);
   assert.equal(f.data().historicalWork.length, 1);
   assert.equal(record.archive.sha256, digest(f.archive));
   assert.equal(f.data().runs.length, 0);
@@ -232,7 +232,7 @@ test('historical import retains exact original Git owner and reconciles lost rep
     kind: 'decision',
     text: 'Continue native Work',
   });
-  assert.equal(f.data().schema, 2);
+  assert.equal(f.data().schema, 24);
   assert.equal((await f.call(f.command, 0)).result.id, record.id);
   const bytes = readWorkBytes(join(f.w.store.directory, 'work.json'));
   const legacy = z.object({ schema: z.literal(1) });
@@ -360,11 +360,11 @@ test('fresh Git-free native restore reads original records/evidence and exports 
   assert.deepEqual(readWorkBytes(join(original.store.directory, 'work.json')), f.originalWork);
 });
 
-test('historical Work format remains absent from schema1 serialization and protected HTTP reads use the same owner', async t => {
+test('historical Work remains absent from ordinary current-format serialization and protected HTTP reads use the same owner', async t => {
   const f = await setup(t, false),
     legacy = workBytes(parseWorkBytes(f.originalWork));
   assert.equal('historicalWork' in JSON.parse(legacy), false);
-  assert.equal(workSchema.parse(JSON.parse(legacy)).schema, 1);
+  assert.equal(parseWork(JSON.parse(legacy)).schema, 24);
   const record = (await f.call(f.command)).result,
     server = await serveRepository(f.root, 0);
   t.after(() => server.close());

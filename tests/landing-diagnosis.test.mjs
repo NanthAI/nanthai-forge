@@ -283,7 +283,7 @@ await drainLandingBatches(work, 'main');`;
   );
   const legacy = landingBatchSchema.omit({ diagnosis: true, settlement: true });
   assert.deepEqual(preserveFields(legacy.parse(recovered), recovered), recovered);
-  assert.equal(f.store.load().schema, 23);
+  assert.equal(f.store.load().schema, 24);
   assert.deepEqual(
     f.store.load().landingEntries.map(entry => entry.status),
     ['accepted', 'failed', 'accepted', 'accepted'],

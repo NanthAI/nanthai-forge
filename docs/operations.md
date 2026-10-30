@@ -371,41 +371,20 @@ This complements project archives; the live restore drill remains unverified.
 
 Hosted projects store the same archives. Use "Store private backup" in the browser, or `nforge exchange` for incremental pushes. To work on hosted Intents locally, download the pinned archive and the current journal together, then run `nforge restore-native ARCHIVE NEW_DIR --journal HOSTED_WORK.json`. Return a new checkpoint with "Return checkpoint to hosted Forge". If another edit landed first, nothing is overwritten. Both versions stay, so download the current Work and reconcile first. A lost reply is resolved with "Reconcile original source return".
 
-### Hosted Intent migration
+### Work format and recovery
 
-Owners can preview and run the existing operation-pinned hosted migration through
-`hosted-work`. Use a CLI built with these commands and a backend providing
-`projectIntentMigrationActions:preview` and `projectIntentMigration:progress`.
-Authenticate with `nforge login DEPLOYMENT_URL` or the existing `FORGE_AUTH_TOKEN`
-environment override. For a locally bound owner:
+New native, Git and hosted Work stores use the current unified format (24, including
+packed evidence). Ordinary reads and writes of older stores return
+`WORK_UPGRADE_REQUIRED` before loading collection pages or changing bytes.
+Restore an old verified native backup with `nforge restore-native BACKUP NEW_DIR`;
+recovery replays any supplied hosted journal in its original representation, then
+converts Work before publishing the new directory. Original journal commands,
+request hashes, source pins, aliases, conversion receipts and legacy facts remain
+retained. Current-format stores have no invented conversion receipt.
 
-```sh
-nforge hosted-work ROOT '{"action":"migrate-intents","operationId":"ORIGINAL_UUID","dryRun":true}'
-nforge hosted-work ROOT '{"action":"migrate-intents","operationId":"ORIGINAL_UUID"}'
-```
-
-Replace `ORIGINAL_UUID` with one UUID and retain it for every retry. The same JSON
-also works with `nforge hosted-work DEPLOYMENT_URL PROJECT_ID JSON` or
-`--command-file FILE`. This migrates hosted Work only; local `migrate-intents`
-is a separate operation.
-
-Dry run replays the current checkpoint and journal, applies the same converter
-and validates the result without staging batches, publishing a generation or
-changing source. It reports the observed revision, `alreadyUnified`, and
-before/after counts with `foldedPairs`. On an already unified snapshot, counts
-show current Intents, Initiatives and aliases and zero new folds.
-
-During migration, stderr identifies the operation UUID, revision, generation
-and staged-batch count as they change; stdout holds the final JSON result.
-After interruption, timeout or an unknown reply, rerun the original request with
-the same UUID. The server resumes retained batches, reconstructs at a newer
-revision when a concurrent journal append wins, and publishes only after its
-existing source/revision checks. A completed migration returns its retained
-generation even after later source selections; a new operation does not migrate
-it again. A progress-read failure reports unavailable progress while the
-original action result remains authoritative. No automatic retry chooses a new
-operation or claims success. Previous generations, source backups and journal
-bytes remain retained by the existing migration.
+The completed local and hosted Intent migration commands are removed. The
+historical journal reader remains until journal compaction; it converts exactly
+at the recorded migration revision, never by rewriting old events.
 
 ### Hosting progress and recovery
 
@@ -1462,18 +1441,11 @@ Live source-return computation, callers, progress probes and return-only tests a
 
 #### B1.7 — format conversion
 
-| Module                                    |     LOC | Last surviving callers |
-| ----------------------------------------- | ------: | ---------------------- |
-| `src/work-intent-converter.ts`            |     232 | H1                     |
-| `src/work-intent-migration.ts`            |     107 | H2                     |
-| `src/hosted-intent-migration-client.ts`   |      74 | H3                     |
-| `convex/projectIntentMigration.ts`        |     156 | H3                     |
-| `convex/projectIntentMigrationActions.ts` |     117 | H3                     |
-| **Whole-file scope**                      | **686** |                        |
-
-- **H1:** `src/work-hosted-intents.ts`, `src/work-intent-local.ts`, `src/work.ts`.
-- **H2:** `src/work.ts`.
-- **H3:** `src/hosted-work-client.ts`.
+Live migration clients and endpoints are removed. `src/work-create.ts` creates
+current-format stores; `src/work-restore-format.ts` converts verified native
+backups. `src/work-intent-converter.ts` and `src/work-hosted-intents.ts` remain for
+old backup conversion and exact pre-compaction journal replay. Ordinary note IDs
+come from `src/work-note-id.ts`, independently of the converter.
 
 #### B1.8 — legacy hosted accept/review
 
@@ -1511,7 +1483,7 @@ retained functions still have normal callers. Re-run impact selection at deletio
 | `src/mcp.ts`                          |   302 | Owner activity/reconcile command exposure; entry: MCP.                                                                                                                                                                                                           |
 | `src/mcp-agent-workflow.ts`           |   269 | forge_exchange and forge_migrate_archive exposure; entry: MCP agent mode.                                                                                                                                                                                        |
 | `src/native-work.ts`                  |   609 | Owner-request compose/accept branch and creation/promotion ladder; callers: WorkService and init-native CLI; unbound acceptance stays.                                                                                                                           |
-| `src/work.ts`                         |   963 | reconcile-hosted-work and migrate-intents dispatch; callers: CLI/MCP/HTTP Work service.                                                                                                                                                                          |
+| `src/work.ts`                         |   963 | reconcile-hosted-work dispatch; callers: CLI/MCP/HTTP Work service.                                                                                                                                                                          |
 | `src/work-records.ts`                 |   389 | recordPendingExchange on writes; WorkStore and record transactions still need record storage.                                                                                                                                                                    |
 | `src/work-store.ts`                   |   283 | Auto-exchange wakes and creation/format promotion; WorkService/record transactions retain storage.                                                                                                                                                               |
 | `src/landing-worker.ts`               |   238 | notifyAutoExchange after landing; native unbound landing controller survives.                                                                                                                                                                                    |
@@ -1527,7 +1499,7 @@ retained functions still have normal callers. Re-run impact selection at deletio
 | `convex/projectWorkLoad.ts`           |   195 | publicationSnapshot and migration replay; projectWork query/action callers need a replacement before deletion.                                                                                                                                                   |
 | `convex/projectWorkIndex.ts`          |   227 | projectFreshness projection; hosted Work reads remain.                                                                                                                                                                                                           |
 | `convex/projectWorkActions.ts`        |   249 | acceptChannel native owner relay and legacy selection branch; hosted-work-client/legacy browser accept must route to hosted landing.                                                                                                                             |
-| `convex/projectSourceProjection.ts`   |   165 | Owner projection dependency; callers: projectWorkIndexActions and projectIntentMigrationActions. Verify projectHostedProjection parity before deleting G.                                                                                                                                         |
+| `convex/projectSourceProjection.ts`   |   165 | Owner projection dependency; caller: projectWorkIndexActions. Verify projectHostedProjection parity before deleting G.                                                                                                                                         |
 | `convex/projectWorkCommand.ts`        |   177 | hostedChannelMoves hydration; projectWorkActions uses legacy Work command replay until folded.                                                                                                                                                                   |
 | `convex/projectWorkIndexedCommand.ts` |   182 | hostedChannelMoves hydration; projectWorkActions indexed command path.                                                                                                                                                                                           |
 | `convex/projectWorkProjection.ts`     |   250 | hostedChannelMoves read/write; projectWork command/index paths.                                                                                                                                                                                                  |
@@ -1537,7 +1509,7 @@ retained functions still have normal callers. Re-run impact selection at deletio
 | `web/src/hosted-handoff.ts`           |   144 | Printed reconcile-hosted-work command; copy-prompt/handoff callers.                                                                                                                                                                                              |
 | `src/work-types.ts`                   | 1,329 | Legacy workSchema union and refine gates; shared WorkData imports remain across src/convex/web.                                                                                                                                                                  |
 | `src/work-unified-types.ts`           |   104 | Dual isUnifiedWork/safeParseWork paths; WorkStore and hosted readers retain current-format parsing.                                                                                                                                                              |
-| `src/work-hosted-intents.ts`          |    70 | Hosted journal converter; projectWorkLoad, projectIntentMigrationActions, work-backup, work-metadata and source-return journal need original replay until compaction. Keep restore-only conversion.                                      |
+| `src/work-hosted-intents.ts`          |    70 | Hosted journal converter; projectWorkLoad, work-backup, work-metadata and source-return journal need original replay until compaction. Keep restore-only conversion.                                      |
 | `src/work-intent-local.ts`            |    58 | noteId imported from work-intent-converter; ordinary unified Intent/note writes survive: extract noteId before making converter restore-only.                                                                                                                    |
 | `src/work-format.ts`                  |    13 | B1.7 creation/current-format gate or lazy-promotion site; retain its ordinary native/Work callers, remove the legacy branch after migration. Historic replay keeps its original representation.                                                                  |
 | `src/native-git.ts`                   |   422 | B1.7 creation/current-format gate or lazy-promotion site; retain its ordinary native/Work callers, remove the legacy branch after migration. Historic replay keeps its original representation.                                                                  |
@@ -1657,8 +1629,6 @@ assertions first. Mixed tests (for example `host-cli`, `hosted-work`,
 | H           | `tests/intent-merge-local.test.mjs` (553)               | Selected test runner                     |
 | H           | `tests/hosted-intent-migration.test.mjs` (425)          | Selected test runner                     |
 | H           | `tests/intent-merge.test.mjs` (291)                     | Selected test runner                     |
-| H           | `tests/hosted-intent-migration-cli.test.mjs` (269)      | Selected test runner                     |
-| H           | `tests/work-format-compatibility.test.mjs` (214)        | Selected test runner                     |
 | I           | `tests/ui-review.test.mjs` (91)                         | Selected test runner                     |
 
 Benchmarks are explicit operator entry points; their CLI runner is the last caller:

@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { readWorkPointer } from './work-pointer.js';
 import { readSource } from './files.js';
 import { unpackRecord } from './work-record-codec.js';
-import { assertWorkFormat } from './work-format.js';
+import { assertCurrentWorkFormat } from './work-format.js';
 import { digest } from './hash.js';
 import { invariant } from './errors.js';
 import type { RecordManifest } from './work-records.js';
@@ -32,7 +32,7 @@ export function editRecordReader(directory: string) {
   const bytes = readWorkPointer(directory);
   invariant(bytes, 'EDIT_INDEX_UNAVAILABLE', 'Local Work is unavailable.');
   const manifest = pointer.parse(JSON.parse(bytes.toString('utf8'))) as RecordManifest;
-  assertWorkFormat(manifest.fields);
+  assertCurrentWorkFormat(manifest.fields);
   const read = (id: string): unknown => {
     hash.parse(id);
     const packed = readSource(directory, join('records', id), Number.MAX_SAFE_INTEGER);

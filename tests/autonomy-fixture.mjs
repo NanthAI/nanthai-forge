@@ -7,7 +7,6 @@ export function trustAgents(root) {
   store.locked(() => {
     const data = store.load();
     data.autonomyPolicy = policyPreset('trusted');
-    data.schema = 11;
     store.save(data);
   });
 }
@@ -16,11 +15,10 @@ import { existsSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { WorkService } from '../dist/work.js';
 import { initNative } from '../dist/native-work.js';
-/** Schema-promotion tests deliberately begin with an existing pre-autonomy owner. */
+/** Preserve the historical custom autonomy defaults in otherwise current-format fixtures. */
 function makeLegacy(store) {
   const data = store.load();
   delete data.autonomyPolicy;
-  data.schema = 1;
   writeFileSync(join(store.directory, 'work.json'), JSON.stringify(data));
 }
 export function initLegacyNative(root) {

@@ -54,7 +54,6 @@ export function recordEvidence(
     data.reviews.push(review);
     return review;
   }
-  if (command.declaredInputs?.length && data.schema < 5) data.schema = 5; // Only selecting the optional feature promotes the reader contract.
   const current = command.checkId ? data.checks.find(c => c.id === command.checkId) : undefined;
   invariant(!command.checkId || current, 'NOT_FOUND', 'Check definition not found.');
   const definition = {

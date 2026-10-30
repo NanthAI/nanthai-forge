@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { initNative } from '../dist/native-work.js';
 import { WorkService } from '../dist/work.js';
-import { workSchema } from '../dist/work-types.js';
+import { parseWork } from '../dist/work-unified-types.js';
 import { hostedPaths, hostedText } from '../dist/hosted-paths.js';
 import { metadataRequest, applyHostedEvent } from '../dist/work-metadata.js';
 import { mergeCompanion } from '../dist/native-companion.js';
@@ -53,7 +53,7 @@ test('hosted metadata removes nested receipt paths, local links and Windows/home
   assert.equal(hostedText(hostedText(JSON.stringify(original))), hostedText(JSON.stringify(original)));
 });
 
-test('blocker: generic Work redaction changes recorded command digests and conflicts with original local metadata', t => {
+test('generic Work redaction changes recorded command digests and never replaces original local metadata', t => {
   const root = mkdtempSync(join(tmpdir(), 'forge-host-paths-'));
   t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   writeFileSync(join(root, 'source.ts'), 'export const value = 1;\n');
@@ -64,9 +64,11 @@ test('blocker: generic Work redaction changes recorded command digests and confl
     service.status().revision,
   ).result;
   const original = service.store.load();
-  const portable = workSchema.parse(hostedPaths(original));
+  const portable = parseWork(hostedPaths(original));
   assert.equal(portable.schema, original.schema);
-  assert(mergeCompanion(portable, original, portable, true).conflicts.some(item => item.field === 'outcome'));
+  const merged = mergeCompanion(portable, original, portable, true);
+  assert.equal(merged.merged.intents[0].outcome, original.intents[0].outcome);
+  assert.equal(merged.merged.intents[0].title, original.intents[0].title);
   const command = { action: 'note', intentId: intent.id, text: `Observed ${local}`, kind: 'comment' };
   const event = {
     id: randomUUID(),

@@ -8,7 +8,7 @@ import { setup, actions, work } from './hosted-planning-fixture.mjs';
 import { readHosted } from './hosted-read.mjs';
 const denied = error => error.data?.code === 'PROJECT_UNAVAILABLE';
 
-test('whole-project hosted planning works without Intents, preserves versions/labels and reconciles a lost original reply', async t => {
+test('whole-project hosted planning creates a planned Intent, preserves versions/labels and reconciles a lost original reply', async t => {
   for (const native of [true, false]) {
     const s = await setup(t, native),
       before = await s.read();
@@ -83,7 +83,7 @@ test('whole-project hosted planning works without Intents, preserves versions/la
     assert.equal(after.data.planningComments[0].authorLabel, 'Supplied alias');
     assert.equal(after.data.planningComments[0].provenance, 'user-declared-local');
     assert.equal(after.events.find(event => event.id === after.data.planningComments[0].id).actor, 'owner');
-    assert.equal(after.data.intents.length, 0);
+    assert.equal(after.data.intents.length, 1);
     assert.equal(after.sourceHead, before.sourceHead);
     for (const key of ['lanes', 'views', 'runs', 'channelMoves', 'hostedChannelMoves'])
       assert.deepEqual(after.data[key], before.data[key]);

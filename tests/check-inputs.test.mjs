@@ -134,7 +134,7 @@ test('optional declarations bind actual source/tool/runtime observations and ext
   assert.equal(original.inputObservations[4].status, 'claimed');
   assert.equal((await assess(f.w, original, f.view)).applicability, 'unknown');
   assert.equal(f.w.status().runs[0].applicability, 'current');
-  assert.equal(f.w.store.load().schema, 5);
+  assert.equal(f.w.store.load().schema, 24);
   assert.equal(existsSync(f.marker), false);
   const bytes = readWorkBytes(join(f.w.store.directory, 'work.json'), 'utf8');
   assert.ok(!bytes.includes(process.env.FORGE_DECLARED_SECRET));
@@ -517,27 +517,8 @@ test('complete fresh native format5 recovery retains observations and incompatib
   assert.equal(existsSync(f.marker), false);
 });
 
-test('native no-input formats1–4 and Git format1 remain compatible; Git selected inputs alone promote and recover format5', async t => {
+test('Git declared inputs retain current Work through recovery', async t => {
   const legacyCli = process.env.FORGE_LEGACY_INPUT_CLI;
-  for (const schema of [1, 2, 3, 4])
-    await t.test('legacy native format ' + schema, async sub => {
-      const f = setup(sub),
-        data = f.w.store.load();
-      data.schema = schema;
-      f.w.store.save(data);
-      const plain = f.define();
-      assert.equal(plain.declaredInputs, undefined);
-      assert.equal(f.w.store.load().schema, schema);
-      const backup = (await f.w.dispatch({ action: 'export-work', archive: true }, f.w.store.load().revision))
-        .result;
-      const fresh = join(f.directory, 'legacy-compatible');
-      if (legacyCli)
-        execFileSync(process.execPath, [legacyCli, 'restore-native', backup.archive.path, fresh], {
-          encoding: 'utf8',
-        });
-      else await restoreNativeWork(backup.archive.path, fresh);
-      assert.deepEqual(new WorkService(fresh).store.load(), f.w.store.load());
-    });
   const root = gitFixture(t, { 'a.ts': 'export const a=1;' });
   git(root, ['add', '.']);
   git(root, ['commit', '-qm', 'Git baseline']);
@@ -546,7 +527,7 @@ test('native no-input formats1–4 and Git format1 remain compatible; Git select
     { action: 'define-check', name: 'Old Git definition', executable: process.execPath, args: [] },
     0,
   );
-  assert.equal(w.store.load().schema, 1);
+  assert.equal(w.store.load().schema, 24);
   w.execute(
     {
       action: 'define-check',
@@ -557,7 +538,7 @@ test('native no-input formats1–4 and Git format1 remain compatible; Git select
     },
     w.store.load().revision,
   );
-  assert.equal(w.store.load().schema, 5);
+  assert.equal(w.store.load().schema, 24);
   assert.equal(w.store.load().nativeHead, undefined);
   const backup = (await w.dispatch({ action: 'export-work', archive: true }, w.store.load().revision)).result;
   const { restoreWork } = await import('../dist/work-backup.js'),
@@ -621,7 +602,7 @@ test('later native source contribution and collection preserve selected format5 
     name: 'Received after declared inputs',
   };
   const receipt = await f.w.dispatch(command, before.revision);
-  assert.equal(f.w.store.load().schema, 5);
+  assert.equal(f.w.store.load().schema, 24);
   assert.deepEqual(f.w.store.load().checks, before.checks);
   assert.deepEqual(f.w.store.load().runs, before.runs);
   assert.deepEqual(f.w.store.load().runs[0].inputObservations, original.inputObservations);
@@ -630,9 +611,9 @@ test('later native source contribution and collection preserve selected format5 
     receipt.result.id,
   );
   assert.equal(readFileSync(join(f.w.store.path(f.lane.id), 'a.ts'), 'utf8'), 'unfinished owner source');
-  assert.equal((await f.w.dispatch({ action: 'inspect-native-objects' }, 0)).result.format, 5);
+  assert.equal((await f.w.dispatch({ action: 'inspect-native-objects' }, 0)).result.format, 24);
   await f.w.dispatch({ action: 'collect-native-objects' }, 0);
-  assert.equal(f.w.store.load().schema, 5);
+  assert.equal(f.w.store.load().schema, 24);
   const backup = (await f.w.dispatch({ action: 'export-work', archive: true }, f.w.store.load().revision))
       .result,
     fresh = join(f.directory, 'fresh-contribution-inputs');

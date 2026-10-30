@@ -103,7 +103,7 @@ export function agentGitUndoSync(store: WorkStore, command: UndoSync) {
               syncOperationId: command.syncOperationId,
               forced: command.force,
             };
-            tx.setSchema(11);
+
             tx.patchFields('lanes', lane.id, { pendingUndo: pending });
             store.commitRecords(tx);
             tx = store.records();

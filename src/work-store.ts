@@ -5,11 +5,10 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { wakeAutoExchange } from './auto-exchange-wake.js';
 import { indexPeerRecords } from './agent-peers-index.js';
 // SPDX-License-Identifier: Apache-2.0
-import { assertWorkFormat } from './work-format.js';
+import { assertCurrentWorkFormat } from './work-format.js';
 import { workLocked, workLockedAsync, type WorkLockOptions } from './work-lock.js';
 import { mkdirBelow } from './mkdir-below.js';
 import { existsSync, lstatSync, mkdirSync, realpathSync } from 'node:fs';
-import { policyPreset } from './autonomy-policy.js';
 import { join, resolve } from 'node:path';
 import { ForgeError, invariant } from './errors.js';
 import { verifyRoot } from './git.js';
@@ -31,12 +30,14 @@ import {
   type WorkRecord,
   type WorkRecordReadMemo,
 } from './work-record-transaction.js';
-import { workSchema, type WorkData } from './work-types.js';
+import type { WorkData } from './work-types.js';
 import { isUnifiedWork, parseWork } from './work-unified-types.js';
 import { unifyIntent } from './work-intent-local.js';
 
 import { preserveFields } from './work-normalization.js';
 export { preserveFields } from './work-normalization.js';
+
+import { createWork } from './work-create.js';
 
 export class WorkStore {
   private writerDepth = 0;
@@ -84,6 +85,7 @@ export class WorkStore {
     );
     if (!options.readOnly) {
       wakeAutoExchange(this);
+
       wakeLandingWorker(this);
     }
   }
@@ -127,21 +129,16 @@ export class WorkStore {
         'INVALID_WORK_STORE',
         'Work metadata is unavailable. Existing work is preserved.',
       );
-      return workSchema.parse({
-        schema: 11,
-        revision: 0,
-        autonomyPolicy: policyPreset('supervised'),
-        intents: [],
-        lanes: [],
-        views: [],
-      });
+      return createWork();
     }
     try {
       const original: unknown = JSON.parse(bytes.toString('utf8')),
         manifest = recordManifest(original);
+      assertCurrentWorkFormat(manifest?.fields ?? original);
       const raw = (manifest ? readRecords(this.directory, manifest) : original) as Record<string, unknown>;
       return preserveFields(parseWork(raw), raw) as WorkData;
-    } catch {
+    } catch (error) {
+      if (error instanceof ForgeError && error.code === 'WORK_UPGRADE_REQUIRED') throw error;
       throw new ForgeError(
         'INVALID_WORK_STORE',
         'Work metadata is invalid. Existing branches and workspaces are preserved.',
@@ -161,6 +158,7 @@ export class WorkStore {
       this.pinnedData(bytes);
       return bytes;
     }
+    assertCurrentWorkFormat(manifest.fields);
     const data = readRecords(this.directory, manifest);
     parseWork(data);
     return Buffer.from(JSON.stringify(data, null, 2));
@@ -273,6 +271,7 @@ export class WorkStore {
     this.afterPublication(() => {
       if (options.advisory !== false) wakeIntegrationPreview(this, previous, transaction);
       wakeAutoExchange(this);
+
       wakeLandingWorker(this);
       try {
         if (options.advisory !== false)
@@ -291,37 +290,8 @@ export class WorkStore {
   }
   /** Validate and stage immutable pages before writer admission. Caller pins collection until publication. */
   prepareSave(data: WorkData, stage = stageRecords): RecordManifest {
-    assertWorkFormat(data);
-    const bytes = this.readPointer();
-    let previousSchema: unknown;
-    if (bytes) {
-      try {
-        const raw: unknown = JSON.parse(bytes.toString('utf8'));
-        previousSchema = recordManifest(raw)?.fields.schema ?? (raw as { schema?: unknown })?.schema;
-      } catch {
-        throw new ForgeError(
-          'INVALID_WORK_STORE',
-          'Existing Work metadata is invalid and remains preserved.',
-        );
-      }
-    }
-    const lifecycle =
-      data.intents.some(intent => intent.status === 'completed' || intent.lifecycle?.length) ||
-      data.lanes.some(lane => lane.state === 'completed' || lane.lifecycle?.length);
-    // Preserve versioned lifecycle and source anchors across older feature writers.
-    const anchored = data.intents.some(intent => intent.notes.some(note => note.anchor));
-    if (lifecycle || anchored || (typeof previousSchema === 'number' && previousSchema >= 8))
-      data.schema = Math.max(
-        data.schema,
-        anchored ? 9 : lifecycle ? 8 : 1,
-        typeof previousSchema === 'number' ? previousSchema : 1,
-      ) as WorkData['schema'];
-    if (
-      data.lanes.some(
-        lane => lane.pending?.actor || lane.pendingSync?.actor || lane.checkpoints.some(save => save.actor),
-      )
-    )
-      data.schema = Math.max(data.schema, 12) as WorkData['schema'];
+    assertCurrentWorkFormat(data);
+    this.readPointer(); // Reject an old selected owner before staging any records.
     if (isUnifiedWork(data)) data.intents = data.intents.map(unifyIntent);
     parseWork(data);
     return stage(this.directory, data);
@@ -333,6 +303,7 @@ export class WorkStore {
     this.afterPublication(() => {
       wakeIntegrationPreview(this, previous, next);
       wakeAutoExchange(this);
+
       wakeLandingWorker(this);
     });
   }

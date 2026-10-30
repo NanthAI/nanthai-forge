@@ -332,30 +332,23 @@ test('stack metadata survives unified records and portable reads without changin
     a = await f.start('Parent');
   f.edit(a, 'parent.txt', 'parent\n');
   await f.save(a);
-  const { convertWorkTo18 } = await import('../dist/work-intent-converter.js');
   const { parseWork } = await import('../dist/work-unified-types.js');
-  f.store.locked(() => {
-    const data = f.store.load();
-    data.schema = 15;
-    f.store.save(convertWorkTo18(data));
-  });
   const b = await f.start('Unified child', a);
-  assert.equal(f.store.load().schema, 22);
+  assert.equal(f.store.load().schema, 24);
   f.edit(b, 'child.txt', 'child\n');
   await f.save(b);
   f.edit(a, 'next.txt', 'parent moved\n');
   await f.save(a);
   await f.call('sync', { laneId: b.laneId });
   const data = parseWork(JSON.parse(f.store.snapshotBytes()));
-  assert.equal(data.schema, 22);
+  assert.equal(data.schema, 24);
   assert.deepEqual(
     data.lanes.find(lane => lane.id === b.laneId).stack,
     f.store.select('lanes', b.laneId).stack,
   );
-  assert.equal(convertWorkTo18(data).schema, 22);
   const { batchEdit } = await import('../dist/landing-batch-store.js');
   await batchEdit(f.agent.work, randomUUID(), () => {});
-  assert.equal(f.store.load().schema, 22);
+  assert.equal(f.store.load().schema, 24);
 });
 
 test('same-Intent stack waits for its exact parent, not unrelated siblings, and pending shows the chain', async t => {

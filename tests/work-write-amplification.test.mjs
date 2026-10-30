@@ -30,7 +30,7 @@ function fixture(t, count = 2) {
   initNative(root);
   const store = new WorkStore(root),
     data = store.load();
-  data.schema = 13;
+
   data.autonomyPolicy = policyPreset('autonomous');
   data.intents.push({
     id: randomUUID(),

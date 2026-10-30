@@ -67,7 +67,7 @@ test('inspection preserves format and collection retains all old source, dirty w
   fs.linkSync(join(f.source.directory, linked), join(f.dir, 'linked-copy'));
   const scan = f.inspect();
   assert.deepEqual(fs.readFileSync(workFile), before);
-  assert.equal(scan.result.format, 1);
+  assert.equal(scan.result.format, 24);
   assert.deepEqual(
     scan.result.candidates.map(x => x.id),
     [orphan],
@@ -119,7 +119,7 @@ test('inspection preserves format and collection retains all old source, dirty w
     logBytes = fs.readFileSync(log);
   fs.writeFileSync(join(f.w.store.path(f.lane.id), 'a.ts'), 'still dirty\n');
   const collected = f.collect();
-  assert.equal(collected.result.format, 12); // the new checkpoint records its actor
+  assert.equal(collected.result.format, 24); // the checkpoint retains its actor in the current format
   assert.deepEqual(
     collected.result.removed.map(x => x.id),
     [orphan],
@@ -141,7 +141,7 @@ test('inspection preserves format and collection retains all old source, dirty w
     const restored = join(f.dir, 'restored');
     await restoreNativeWork(backup.archive.path, restored);
     const restoredWork = new WorkService(restored).store.load();
-    assert.equal(restoredWork.schema, 12);
+    assert.equal(restoredWork.schema, 24);
     assert.equal(restoredWork.lanes[0].checkpoints.at(-1).actor.kind, 'person');
     assert.equal(fs.existsSync(join(restored, '.forge/work', 'check-' + run.id, 'stdout.log')), false);
     assert.equal(JSON.parse(backup.json).checkLogs.find(item => item.runId === run.id).status, 'local-only');
@@ -155,7 +155,7 @@ test('inspection preserves format and collection retains all old source, dirty w
   }
 });
 
-test('invalid retained closure blocks every deletion; interrupted collection and lost format-upgrade replies reconcile', t => {
+test('invalid retained closure blocks every deletion and interrupted collection reconciles', t => {
   const f = setup(t),
     a = f.source.put(Buffer.from('orphan a')),
     b = f.source.put(Buffer.from('orphan b')),
@@ -164,18 +164,9 @@ test('invalid retained closure blocks every deletion; interrupted collection and
     original = fs.readFileSync(headPath);
   fs.writeFileSync(headPath, 'corrupt');
   assert.throws(f.collect, code('INVALID_NATIVE_SOURCE'));
-  assert.equal(f.w.store.load().schema, 1);
+  assert.equal(f.w.store.load().schema, 24);
   assert.equal(fs.existsSync(join(f.source.directory, a)), true);
   fs.writeFileSync(headPath, original);
-  const save = f.w.store.save.bind(f.w.store);
-  f.w.store.save = data => {
-    save(data);
-    throw Error('Lost upgrade reply');
-  };
-  assert.throws(f.collect, /Lost upgrade reply/);
-  f.w.store.save = save;
-  assert.equal(f.w.store.load().schema, 3);
-  assert.equal(fs.existsSync(join(f.source.directory, a)), true);
   const unlink = fs.unlinkSync;
   let deleted = 0;
   fs.unlinkSync = function (path) {
@@ -240,7 +231,7 @@ test('history insertion is locked and collected owners preserve format3, archive
     NativeSource.prototype.put = put;
   }
   assert.equal(writes, 1);
-  assert.equal(f.w.store.load().schema, 3);
+  assert.equal(f.w.store.load().schema, 24);
   assert.deepEqual(f.collect().result.removed, []);
   assert.deepEqual(
     fs.readFileSync((await f.call({ action: 'export-work-history', id: record.id })).result.path),
@@ -338,7 +329,7 @@ test('HTTP and CLI expose explicit collection while schema1/2 owners remain unch
     ).status,
     401,
   );
-  assert.equal(f.w.store.load().schema, 1);
+  assert.equal(f.w.store.load().schema, 24);
   const cli = JSON.parse(
     execFileSync(
       process.execPath,
@@ -346,14 +337,14 @@ test('HTTP and CLI expose explicit collection while schema1/2 owners remain unch
       { encoding: 'utf8' },
     ),
   );
-  assert.equal(cli.result.format, 1);
+  assert.equal(cli.result.format, 24);
   const response = await fetch(url.origin + '/api/work', {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
     body,
   });
   assert.equal(response.status, 200);
-  assert.equal((await response.json()).result.format, 3);
+  assert.equal((await response.json()).result.format, 24);
   const client = new Client({ name: 'native-object-acceptance', version: '1' }),
     transport = new StdioClientTransport({
       command: process.execPath,
@@ -367,7 +358,7 @@ test('HTTP and CLI expose explicit collection while schema1/2 owners remain unch
     name: 'forge_work_command',
     arguments: { revision: 0, command: { action: 'inspect-native-objects' } },
   });
-  assert.equal(JSON.parse(inspected.content[0].text).result.format, 3);
+  assert.equal(JSON.parse(inspected.content[0].text).result.format, 24);
   const collected = await client.callTool({
     name: 'forge_work_command',
     arguments: { revision: 0, command: { action: 'collect-native-objects' } },
@@ -376,49 +367,6 @@ test('HTTP and CLI expose explicit collection while schema1/2 owners remain unch
 });
 
 // Supply an actual prior build for release acceptance; do not imitate its parser here.
-test(
-  'previous compiled CLI rejects format3 before mutating Work',
-  { skip: !process.env.FORGE_LEGACY_CLI },
-  async t => {
-    const f = setup(t),
-      legacy = process.env.FORGE_LEGACY_CLI,
-      path = join(f.w.store.directory, 'work.json');
-    const command = {
-      action: 'note',
-      intentId: f.intent.id,
-      kind: 'comment',
-      text: 'Must not reach old writer',
-    };
-    const rejected = () => {
-      const bytes = fs.readFileSync(path),
-        revision = f.w.store.load().revision;
-      const result = spawnSync(
-        process.execPath,
-        [legacy, 'work', f.root, JSON.stringify(command), String(revision)],
-        { encoding: 'utf8' },
-      );
-      assert.notEqual(result.status, 0);
-      assert.match(result.stderr, /INVALID_WORK_STORE/);
-      assert.deepEqual(fs.readFileSync(path), bytes);
-    };
-    // The old executable rejects the new physical layout even when its portable data is supported.
-    assert.equal(JSON.parse(fs.readFileSync(path)).schema, 'forge-work-records-v3');
-    rejected();
-    const supported = f.w.store.snapshotBytes();
-    fs.writeFileSync(path, supported);
-    const initial = spawnSync(process.execPath, [legacy, 'work', f.root, '--compact'], { encoding: 'utf8' });
-    assert.equal(initial.status, 0, initial.stderr);
-    assert.deepEqual(fs.readFileSync(path), supported);
-    f.collect();
-    assert.equal(f.w.store.load().schema, 3);
-    assert.equal(JSON.parse(fs.readFileSync(path)).schema, 'forge-work-records-v3');
-    rejected();
-    // Portable format3 must also be rejected: do not accidentally test only the storage marker.
-    const unsupported = f.w.store.snapshotBytes();
-    fs.writeFileSync(path, unsupported);
-    rejected();
-  },
-);
 
 test('separate collector respects live Work lock and recovers after process death between deletions', t => {
   const f = setup(t),

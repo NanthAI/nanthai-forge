@@ -2,7 +2,6 @@ import { ensureWorkIndex } from './work-index-client.js';
 // SPDX-License-Identifier: Apache-2.0
 import { hostedActionError } from './hosted-action-error.js';
 import { SourceAuthorityStaleError } from './hosted-source-authority.js';
-import { runHostedIntentMigration } from './hosted-intent-migration-client.js';
 import { assembleIndexValue } from './work-index-value.js';
 import { policyWriteSchema } from './autonomy-policy.js';
 import { ConvexError } from 'convex/values';
@@ -27,13 +26,6 @@ export const hostedWorkRequestSchema = z.discriminatedUnion('action', [
     .strict(),
   z.object({ action: z.literal('workspace') }).strict(),
   z.object({ action: z.literal('migrate-record-details'), operationId: z.uuid() }).strict(),
-  z
-    .object({
-      action: z.literal('migrate-intents'),
-      operationId: z.uuid(),
-      dryRun: z.boolean().default(false),
-    })
-    .strict(),
   z
     .object({
       action: z.literal('records'),
@@ -157,7 +149,7 @@ export async function dispatchHostedWork(
   invariant(
     parsed.success,
     'BAD_ARGUMENT',
-    'Use workspace, records, detail, policy, set-policy, migrate-intents or pinned accept.',
+    'Use workspace, records, detail, policy, set-policy or pinned accept.',
   );
   try {
     const request = parsed.data;
@@ -176,8 +168,6 @@ export async function dispatchHostedWork(
       } while (!result.complete);
       return result;
     }
-    if (request.action === 'migrate-intents')
-      return await runHostedIntentMigration(client, projectId, request, progress);
     if (request.action === 'accept') {
       const { action: _action, operationId, revision, authorityEpoch, ...pins } = request;
       void _action;

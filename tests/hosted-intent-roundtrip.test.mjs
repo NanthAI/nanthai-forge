@@ -5,41 +5,25 @@ import { randomUUID } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { getFunctionName } from 'convex/server';
+import { restoreWorkFormat } from '../dist/work-restore-format.js';
 import { setup, actions } from './hosted-planning-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { digest } from '../dist/hash.js';
 import { WorkStore } from '../dist/work-store.js';
 import { restoreNativeWork } from '../dist/native-backup.js';
 import { mergeCompanion } from '../dist/native-companion.js';
-const migration = await import(moduleUrl('../convex/projectIntentMigration.ts'));
-const migrationActions = await import(moduleUrl('../convex/projectIntentMigrationActions.ts'));
 const commands = await import(moduleUrl('../convex/projectWorkCommand.ts'));
 async function fixture(t) {
-  const s = await setup(t, true, (_root, local) => {
-    const data = local.store.load();
-    data.schema = 15;
-    local.store.save(data);
-  });
-  const original = s.ctx.runMutation;
-  s.ctx.runMutation = async (ref, args) => {
-    const [module, name] = getFunctionName(ref).split(':');
-    return module === 'projectIntentMigration' ? migration[name]._handler(s.ctx, args) : original(ref, args);
-  };
-  const migrate = operationId =>
-    migrationActions.migrate._handler(s.ctx, { projectId: s.projectId, operationId });
-  return { ...s, migrate };
+  return setup(t, true);
 }
-test('hosted cutover, subsequent journal writes and recovery into a fresh schema-16 owner preserve original commands', async t => {
+test('current hosted Work, subsequent journal writes and recovery preserve original commands', async t => {
   const s = await fixture(t),
     issue = s.item({ title: 'One unified outcome' });
   await s.send(issue);
   const original = JSON.stringify([...s.tables.projectWorkEvents.values()]);
-  const operationId = randomUUID(),
-    generationId = await s.migrate(operationId);
-  assert.equal(await s.migrate(operationId), generationId);
   assert.equal(JSON.stringify([...s.tables.projectWorkEvents.values()]), original);
   const migrated = await s.read();
-  assert.equal(migrated.data.schema, 18);
+  assert.equal(migrated.data.schema, 24);
   assert.equal(migrated.data.intents.find(i => i.id === issue.itemId).title, issue.title);
   const note = { action: 'note', intentId: issue.itemId, text: 'After cutover', kind: 'comment' };
   const input = { projectId: s.projectId, operationId: randomUUID(), command: JSON.stringify(note) };
@@ -53,13 +37,13 @@ test('hosted cutover, subsequent journal writes and recovery into a fresh schema
   const target = join(s.directory, 'recovered');
   await restoreNativeWork(s.exported.archive.path, target, journalPath);
   const recovered = new WorkStore(target).load();
-  assert.equal(recovered.schema, 18);
+  assert.equal(recovered.schema, 24);
   assert.deepEqual(recovered.intents, after.data.intents);
   assert.deepEqual(recovered.hostedEvents, after.data.hostedEvents);
   assert.equal(JSON.parse(journal).workSha256, digest(JSON.stringify(after.data, null, 2)));
   assert.ok(readFileSync(s.exported.archive.path).length > 0);
 });
-test('schema-16 local companion accepts a schema-15 hosted note without downgrading the owner', async t => {
+test('current local companion accepts a hosted note without downgrading the owner', async t => {
   const s = await fixture(t);
   const created = await s.send({
     action: 'intent',
@@ -68,8 +52,7 @@ test('schema-16 local companion accepts a schema-15 hosted note without downgrad
     base: s.preview.head,
   });
   const base = (await s.read()).data;
-  const { convertWork15To16 } = await import('../dist/work-intent-converter.js');
-  const local = convertWork15To16(base);
+  const local = base;
   await s.send({
     action: 'note',
     intentId: created.operationId,
@@ -79,11 +62,11 @@ test('schema-16 local companion accepts a schema-15 hosted note without downgrad
   const hosted = (await s.read()).data,
     result = mergeCompanion(base, local, hosted);
   assert.deepEqual(result.conflicts, []);
-  assert.equal(result.merged.schema, 18);
+  assert.equal(result.merged.schema, 24);
   assert.equal(result.merged.intents[0].notes.at(-1).text, 'Hosted observation');
 });
 
-test('reconciling and retrying a hosted schema-15 journal saves into an existing schema-16 owner', async t => {
+test('reconciling and retrying a hosted journal preserves the current owner', async t => {
   let intentId;
   const s = await setup(t, true, async (_root, local) => {
     const created = await local.dispatch(
@@ -96,13 +79,11 @@ test('reconciling and retrying a hosted schema-15 journal saves into an existing
       local.store.revision(),
     );
     const data = local.store.load();
-    data.schema = 15;
     local.store.save(data);
   });
-  const { convertWork15To16 } = await import('../dist/work-intent-converter.js');
-  const unified = convertWork15To16(s.local.store.load());
+  const unified = s.local.store.load();
   unified.futureOwnerFact = { keep: true };
-  s.local.store.save(unified);
+  s.local.store.save(restoreWorkFormat(unified));
   await s.local.dispatch(
     { action: 'note', intentId, text: 'Local concurrent observation', kind: 'comment' },
     s.local.store.revision(),
@@ -123,7 +104,7 @@ test('reconciling and retrying a hosted schema-15 journal saves into an existing
   const result = await s.local.dispatch(command, s.local.store.revision());
   assert.equal(result.result.status, 'reconciled', JSON.stringify(result.result.conflicts));
   const saved = s.local.store.load();
-  assert.equal(saved.schema, 18);
+  assert.equal(saved.schema, 24);
   assert.deepEqual(saved.futureOwnerFact, unified.futureOwnerFact);
   assert.deepEqual(saved.intentMergeReceipt, unified.intentMergeReceipt);
   const intent = saved.intents.find(i => i.id === intentId);
@@ -142,15 +123,14 @@ test('reconciling and retrying a hosted schema-15 journal saves into an existing
   assert.equal(retried.nativeCompanionReceipts.filter(r => r.id === command.operationId).length, 1);
 });
 
-test('Git export-work and restore retain schema-16 planned Intents and unknown fields', async t => {
+test('Git export-work and restore retain current planned Intents and unknown fields', async t => {
   const s = await setup(t, false);
   const issue = s.item({ title: 'Unpinned Git planning outcome' });
   await s.local.dispatch(issue, s.local.store.revision());
-  const { convertWork15To16 } = await import('../dist/work-intent-converter.js');
   const legacy = s.local.store.load();
-  const unified = convertWork15To16({ ...legacy, schema: 15 });
+  const unified = legacy;
   unified.futureTransportFact = { retain: 'synthetic extension' };
-  s.local.store.save(unified);
+  s.local.store.save(restoreWorkFormat(unified));
   const exported = (
     await s.local.dispatch({ action: 'export-work', archive: true }, s.local.store.revision())
   ).result;
@@ -158,7 +138,7 @@ test('Git export-work and restore retain schema-16 planned Intents and unknown f
   const target = join(s.directory, 'git-unified-recovered');
   await restoreWork(exported.archive.path, target);
   const recovered = new WorkStore(target).load();
-  assert.equal(recovered.schema, 16);
+  assert.equal(recovered.schema, 24);
   assert.equal(recovered.intents.find(intent => intent.id === issue.itemId).base, undefined);
   assert.deepEqual(recovered.futureTransportFact, unified.futureTransportFact);
 });
@@ -189,7 +169,6 @@ test('a journal export racing same-revision format cutover retries instead of ex
 });
 
 test('oversized unified summaries retain note positions and every existing note during an append', async t => {
-  const { convertWork15To16 } = await import('../dist/work-intent-converter.js');
   let intentId;
   const s = await setup(t, true, async (_root, local) => {
     const created = await local.dispatch(
@@ -203,9 +182,9 @@ test('oversized unified summaries retain note positions and every existing note 
       kind: 'comment',
       at: '2026-01-01T00:00:00Z',
     }));
-    const unified = convertWork15To16({ ...data, schema: 15 });
+    const unified = data;
     unified.intents[0].assigneeAccountIds = ['assigned', 'x'.repeat(40000)];
-    local.store.save(unified);
+    local.store.save(restoreWorkFormat(unified));
   });
   await s.send({ action: 'note', intentId, text: 'New fourth note', kind: 'comment' });
   const index = await import(moduleUrl('../convex/projectWorkIndex.ts'));
@@ -249,7 +228,6 @@ test('hosted planning link removal updates both indexed Intents and preserves or
   });
   const item = s.item({ intentIds: [first.operationId, second.operationId] });
   await s.send(item);
-  await s.migrate(randomUUID());
   const before = (await s.read()).data;
   const originals = JSON.stringify(before.legacyIntentMerge);
   await s.send({ ...item, operationId: randomUUID(), expectedVersion: 1, intentIds: [] });

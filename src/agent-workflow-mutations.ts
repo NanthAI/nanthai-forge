@@ -1,7 +1,6 @@
 import { readEditContext } from './agent-edit-context.js';
 import { prepareReceiptSource } from './agent-receipt-peers.js';
 import { readStartReceipt, stageStartReceipt } from './agent-start-receipt.js';
-import { isUnifiedWork } from './work-unified-types.js';
 import { citeFriction } from './friction.js';
 import { workLockWaitMs } from './work-lock.js';
 import { preparedRecordCommit } from './work-prepared-commit.js';
@@ -34,7 +33,7 @@ import { digest } from './hash.js';
 import { ForgeError, invariant } from './errors.js';
 import type { CheckpointAction, StartAction } from './agent-workflow-schema.js';
 import type { WorkRecordTransaction } from './work-record-transaction.js';
-import type { Lane, WorkData } from './work-types.js';
+import type { Lane } from './work-types.js';
 import { laneReceipt } from './agent-receipts.js';
 import { assertMergeResolved, resolvedSyncCheckpoint } from './agent-sync.js';
 const request = (command: unknown) => digest(JSON.stringify(command));
@@ -263,9 +262,6 @@ export function agentStart(store: WorkStore, command: StartAction, liveMcp = fal
             state: 'creating',
             checkpoints: [],
           };
-          tx.setSchema(
-            (parent ? (isUnifiedWork(data) ? 22 : 21) : existing || after ? 12 : 7) as WorkData['schema'],
-          );
           if (!existing) tx.append('intents', intent);
           // A planned schema-16 Intent's first Lane captures its exact source pin.
           else if (!existing.base) tx.patchFields('intents', existing.id, { base });
@@ -595,7 +591,6 @@ export function agentCheckpoint(
               operation: { id: command.operationId, request: hash },
             };
             const updateMetadata = () => {
-              tx.setSchema(12);
               if (after) {
                 lane.after = after;
                 tx.patchFields('lanes', lane.id, { after });

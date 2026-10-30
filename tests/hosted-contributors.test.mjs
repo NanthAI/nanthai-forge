@@ -721,7 +721,7 @@ test('hosted contributor proposal reaches a new native owner Lane after journal 
   };
   const result = (await s.w.dispatch(importing, s.w.store.load().revision)).result,
     after = s.w.store.load();
-  assert.equal(after.schema, 4);
+  assert.equal(after.schema, 24);
   assert.equal(after.lanes.length, received.lanes.length + 1);
   assert.equal(result.head, stored.head);
   assert.equal(result.id === s.lane.id, false);
@@ -772,7 +772,7 @@ test('hosted contributor proposal reaches a new native owner Lane after journal 
   assert.equal(restored.restored, true);
   assert.equal(existsSync(sentinel), false);
   const recovered = new WorkService(target);
-  assert.equal(recovered.store.load().schema, 4);
+  assert.equal(recovered.store.load().schema, 24);
   assert.deepEqual(recovered.store.load().nativeContributionReceipts, after.nativeContributionReceipts);
   assert.equal(readFileSync(join(recovered.store.path(result.id), 'a.ts'), 'utf8'), 'export const a=2;\n');
   assert.deepEqual(recovered.store.load().channelMoves, after.channelMoves);

@@ -1,3 +1,4 @@
+import { exportNativeWork } from '../dist/native-backup.js';
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -10,9 +11,8 @@ import { AgentWorkflow } from '../dist/agent-workflow.js';
 import { WorkService } from '../dist/work.js';
 import { WorkStore } from '../dist/work-store.js';
 import { planningWork } from '../dist/work-planning.js';
-import { migrateIntentWork, intentMigrationReceiptFile } from '../dist/work-intent-migration.js';
-import { convertWork15To16, convertWorkTo18 } from '../dist/work-intent-converter.js';
-import { prepareNativeExchange } from '../dist/native-exchange.js';
+import { restoreWorkFormat } from '../dist/work-restore-format.js';
+
 import { hostedPushWork, intentState } from '../dist/work-intent-local.js';
 import { planningCommandSchema } from '../dist/work-planning-types.js';
 import { unifiedWorkSchema } from '../dist/work-unified-types.js';
@@ -79,83 +79,13 @@ async function legacyOwner(t) {
       provenance: 'user-declared-local',
     });
     data.revision++;
-    f.store.save(data);
+    f.store.save(restoreWorkFormat(data));
   });
   return { ...f, initiative, folded, unlinked };
 }
 
-test('migration switches atomically and a crash before the switch leaves schema 15 intact', async t => {
-  const f = await legacyOwner(t),
-    before = f.pointer(),
-    revision = f.store.revision();
-  assert.throws(
-    () =>
-      migrateIntentWork(f.store, {
-        beforeSwitch() {
-          throw new Error('Crash before switch');
-        },
-      }),
-    /Crash before switch/,
-  );
-  assert.deepEqual(f.pointer(), before);
-  assert.equal(f.store.load().schema, 15);
-  assert.equal(f.store.revision(), revision);
-  const crashed = JSON.parse(readFileSync(join(f.store.directory, intentMigrationReceiptFile), 'utf8'));
-  const result = migrateIntentWork(f.store);
-  assert.equal(result.migrated, true);
-  assert.equal(result.migrationId, crashed.migrationId);
-  assert.equal(result.fromRevision, revision);
-  const data = f.store.load();
-  assert.equal(data.schema, 18);
-  assert.equal(data.revision, revision + 1);
-  assert.equal(unifiedWorkSchema.safeParse(data).success, true);
-});
-
-test('retry after the switch is idempotent and writes nothing', async t => {
-  const f = await legacyOwner(t);
-  const first = migrateIntentWork(f.store),
-    pointer = f.pointer(),
-    receipt = readFileSync(join(f.store.directory, intentMigrationReceiptFile));
-  const again = migrateIntentWork(f.store);
-  assert.equal(again.migrated, false);
-  assert.equal(again.migrationId, first.migrationId);
-  assert.deepEqual(again.receipt, first.receipt);
-  assert.deepEqual(f.pointer(), pointer);
-  assert.deepEqual(readFileSync(join(f.store.directory, intentMigrationReceiptFile)), receipt);
-  // The explicit work command reaches the same receipt.
-  const viaCommand = await f.work.dispatch({ action: 'migrate-intents' }, f.store.revision());
-  assert.equal(viaCommand.result.migrationId, first.migrationId);
-});
-
-test('receipt counts match the stored Work and the pure converter', async t => {
-  const f = await legacyOwner(t),
-    original = f.store.load();
-  const expected = convertWorkTo18(original).intentMergeReceipt;
-  const { receipt } = migrateIntentWork(f.store),
-    data = f.store.load();
-  assert.deepEqual(receipt, expected);
-  assert.deepEqual(receipt.counts.before, {
-    intents: 1,
-    issues: 2,
-    initiatives: 1,
-    versions: 3,
-    comments: 1,
-    notes: 1,
-  });
-  assert.equal(receipt.counts.foldedPairs, 1);
-  assert.equal(data.intents.length, receipt.counts.before.intents + receipt.counts.before.issues - 1);
-  assert.equal(data.intentAliases.length, 1);
-  assert.equal(data.planningItems.length, 3);
-  // Legacy copies are paged records, never inline in the commit pointer.
-  assert.equal(JSON.parse(f.pointer()).fields.legacyIntentMerge, undefined);
-  assert.equal(JSON.parse(f.store.snapshotBytes()).legacyIntentMerge.planningItems.length, 3);
-  assert.equal(data.lanes[0].intentId, f.lane.intentId);
-  assert.ok(data.intents.some(intent => intent.id === data.lanes[0].intentId));
-});
-
 test('lifecycle: ready becomes active, ready requests stay history, and status derives from Lanes', async t => {
   const f = await legacyOwner(t);
-  migrateIntentWork(f.store);
   let intent = f.store.load().intents.find(item => item.id === f.lane.intentId);
   assert.equal(intent.status, 'active');
   assert.equal(intentState(intent.status, 1), 'In motion');
@@ -177,9 +107,8 @@ test('lifecycle: ready becomes active, ready requests stay history, and status d
   assert.equal(intentState('proposed', 0), 'Proposed');
 });
 
-test('notes added after migration receive stable conversation identities', async t => {
+test('notes added in current Work receive stable conversation identities', async t => {
   const f = await legacyOwner(t);
-  migrateIntentWork(f.store);
   await f.work.dispatch(
     { action: 'note', intentId: f.lane.intentId, kind: 'decision', text: 'Second note' },
     f.store.revision(),
@@ -196,7 +125,6 @@ test('notes added after migration receive stable conversation identities', async
 
 test('alias resolution: legacy Issue IDs update and discuss the folded Intent in one version chain', async t => {
   const f = await legacyOwner(t);
-  migrateIntentWork(f.store);
   const put = {
     action: 'put-planning-item',
     operationId: randomUUID(),
@@ -246,7 +174,6 @@ test('alias resolution: legacy Issue IDs update and discuss the folded Intent in
 
 test('new Issues become planned Intents with memberships and capture a pin at their first Lane', async t => {
   const f = await legacyOwner(t);
-  migrateIntentWork(f.store);
   const itemId = randomUUID();
   f.plan({
     action: 'put-planning-item',
@@ -294,7 +221,6 @@ test('new Issues become planned Intents with memberships and capture a pin at th
 
 test('closing an unstarted Issue completes its planned Intent', async t => {
   const f = await legacyOwner(t);
-  migrateIntentWork(f.store);
   f.plan({
     action: 'put-planning-item',
     operationId: randomUUID(),
@@ -313,7 +239,6 @@ test('closing an unstarted Issue completes its planned Intent', async t => {
 
 test('Initiative direct links become memberships and Initiatives stay grouping records', async t => {
   const f = await legacyOwner(t);
-  migrateIntentWork(f.store);
   f.plan({
     action: 'put-planning-item',
     operationId: randomUUID(),
@@ -350,30 +275,18 @@ test('Initiative direct links become memberships and Initiatives stay grouping r
 
 test('hosted push preserves unified fields and unpinned Intents', async t => {
   const f = await legacyOwner(t);
-  migrateIntentWork(f.store);
   const data = f.store.load();
   const pushed = hostedPushWork(data);
-  assert.equal(pushed.schema, 18);
+  assert.equal(pushed.schema, 24);
   assert.equal(unifiedWorkSchema.safeParse(pushed).success, true);
   assert.deepEqual(pushed, data);
-  const prepared = await prepareNativeExchange(
-    f.store,
-    data.revision,
-    randomUUID(),
-    true,
-    undefined,
-    undefined,
-    {
-      recordMetadata: true,
-    },
-  );
-  assert.deepEqual(JSON.parse(readFileSync(join(prepared.directory, 'work.json'), 'utf8')), data);
+  const prepared = (await exportNativeWork(f.store, data.revision, false)).result;
+  assert.deepEqual(JSON.parse(readFileSync(join(prepared.path, 'work.json'), 'utf8')), data);
   assert.ok(pushed.intents.some(intent => intent.id === f.unlinked && intent.base === undefined));
 });
 
-test('planned Intents round-trip record-enabled push preparation after migration and real planning writes', async t => {
+test('planned Intents round-trip record archives in current Work and real planning writes', async t => {
   const f = await legacyOwner(t);
-  migrateIntentWork(f.store);
   const itemId = randomUUID();
   f.plan({
     action: 'put-planning-item',
@@ -447,107 +360,4 @@ test('planned Intents round-trip record-enabled push preparation after migration
     data.intents,
     'the shared hosted validator preserves extensions and unpinned Intents',
   );
-});
-
-test('real-shape fixture migrates through the store with Lane and View references intact', async t => {
-  const f = await owner(t),
-    counts = JSON.parse(
-      readFileSync(new URL('./fixtures/intent-merge-owner-counts.json', import.meta.url), 'utf8'),
-    );
-  f.store.locked(() => {
-    const data = f.store.load();
-    data.schema = 15;
-    data.intents = counts.intentShape.map(item => ({
-      id: id(item.id),
-      outcome: `Outcome ${item.id}`,
-      constraints: '',
-      base: hash,
-      status: item.status,
-      notes: Array.from({ length: item.notes }, () => ({ text: 'Synthetic note', kind: 'comment', at })),
-      createdAt: at,
-    }));
-    data.lanes = counts.laneIntentOrdinals.map((target, index) => ({
-      ...data.lanes[0],
-      id: id(20000 + index),
-      intentId: id(target),
-    }));
-    data.views = counts.viewIntentOrdinals.map((target, index) => ({
-      id: id(30000 + index),
-      intentId: id(target),
-      base: hash,
-      inputs: [],
-      status: 'clean',
-      head: hash,
-      details: '',
-      at,
-    }));
-    data.planningItems = counts.planningShape.map(item =>
-      planned(item.id, {
-        ...item,
-        id: id(item.id),
-        intentIds: item.intentIds.map(id),
-        ...(item.initiativeId ? { initiativeId: id(item.initiativeId) } : {}),
-      }),
-    );
-    data.planningComments = counts.commentTargets.map((target, index) => ({
-      id: id(9000 + index),
-      itemId: id(target),
-      request: hash,
-      authorLabel: '',
-      text: 'Synthetic comment',
-      at,
-      provenance: 'user-declared-local',
-    }));
-    data.revision++;
-    f.store.save(data);
-  });
-  const { receipt } = migrateIntentWork(f.store),
-    data = f.store.load(),
-    ids = new Set(data.intents.map(item => item.id));
-  assert.equal(data.lanes.length, counts.lanes);
-  assert.equal(data.views.length, counts.views);
-  assert.ok(data.lanes.every(lane => ids.has(lane.intentId)));
-  assert.ok(data.views.every(view => ids.has(view.intentId)));
-  assert.equal(receipt.counts.before.intents, counts.intents);
-  assert.equal(receipt.counts.before.versions, counts.planningVersions);
-  assert.equal(receipt.counts.before.notes, counts.notes);
-  assert.equal(
-    data.intents.length,
-    counts.intents + receipt.counts.before.issues - receipt.counts.foldedPairs,
-  );
-  assert.equal(data.planningComments.length, counts.planningComments);
-  assert.equal(unifiedWorkSchema.safeParse(hostedPushWork(data)).success, true);
-});
-
-test('historical format16 migrates to18 without folding again or rewriting its receipt', async t => {
-  const f = await legacyOwner(t);
-  f.store.locked(() => {
-    const data = convertWork15To16(f.store.load());
-    data.initiatives[0].nextMembershipOrder = 100;
-    f.store.save(data);
-  });
-  const before = f.store.load();
-  assert.equal(before.schema, 16);
-  migrateIntentWork(f.store);
-  const after = f.store.load();
-  assert.equal(after.schema, 18);
-  assert.deepEqual(after.intents, before.intents);
-  assert.equal(after.initiatives[0].nextMembershipOrder, 100);
-  assert.deepEqual(after.intentMergeReceipt, before.intentMergeReceipt);
-  assert.deepEqual(after.legacyIntentMerge, before.legacyIntentMerge);
-  const pointer = f.pointer();
-  assert.equal(migrateIntentWork(f.store).migrated, false);
-  assert.deepEqual(f.pointer(), pointer);
-});
-
-test('recovered format18 retains its conversion receipt without inventing local migration facts', async t => {
-  const f = await legacyOwner(t);
-  const unified = convertWorkTo18(f.store.load());
-  f.store.save(unified);
-  const before = f.pointer();
-  const result = migrateIntentWork(f.store);
-  assert.equal(result.migrated, false);
-  assert.deepEqual(result.receipt, unified.intentMergeReceipt);
-  assert.equal(result.fromRevision, undefined);
-  assert.deepEqual(f.pointer(), before);
 });

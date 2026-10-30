@@ -12,7 +12,7 @@ import {
   sourceManifestSchema,
   workArchiveMetadata,
 } from '../dist/work-archive-metadata.js';
-import { exportWorkCommandSchema } from '../dist/work-types.js';
+import { exportWorkCommandSchema, workSchema } from '../dist/work-types.js';
 import { WorkService } from '../dist/work.js';
 import { initNative } from '../dist/native-work.js';
 import { digest } from '../dist/hash.js';
@@ -242,18 +242,27 @@ test('browser archive preview supports legacy and current Work formats for ordin
   const f = await nativeFixture(t),
     data = f.w.store.load();
   delete data.autonomyPolicy;
-  for (const schema of [6, 7, 8, 9, 10, 11, 12])
+  for (const schema of [6, 7, 8, 9, 10, 11, 12, latestWorkFormat])
     for (const deduplicateArtifacts of [false, true]) {
-      data.schema = schema;
-      writeFileSync(join(f.w.store.directory, 'work.json'), JSON.stringify(data));
-      const exported = (
-        await f.w.dispatch(
-          { action: 'export-work', archive: true, deduplicateArtifacts },
-          f.w.store.load().revision,
-        )
-      ).result;
-      const bytes = readFileSync(exported.archive.path),
-        metadata = await workArchiveMetadata(new Blob([bytes]));
+      // Construct historical archive bytes directly: ordinary owners never downgrade.
+      const work = Buffer.from(
+        JSON.stringify(schema === latestWorkFormat ? data : workSchema.parse({ ...data, schema })),
+      );
+      const manifest = structuredClone(f.manifest);
+      manifest.schema = deduplicateArtifacts ? 2 : 1;
+      if (deduplicateArtifacts) manifest.artifactAliases ??= [];
+      else delete manifest.artifactAliases;
+      const file = manifest.files.find(item => item.path === 'work.json');
+      file.size = work.length;
+      file.sha256 = digest(work);
+      const bytes = gzipSync(
+        Buffer.concat([
+          entry('manifest.json', Buffer.from(JSON.stringify(manifest))),
+          entry('work.json', work),
+          Buffer.alloc(1024),
+        ]),
+      );
+      const metadata = await workArchiveMetadata(new Blob([bytes]));
       assert.equal(JSON.parse(Buffer.from(metadata.work)).schema, schema);
       assert.equal(JSON.parse(Buffer.from(metadata.manifest)).schema, deduplicateArtifacts ? 2 : 1);
       const preview = await previewWorkArchive(new File([bytes], 'current-work.tar.gz'));

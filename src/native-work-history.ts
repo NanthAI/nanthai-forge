@@ -137,7 +137,6 @@ export async function historicalWork(store: WorkStore, input: unknown, revision:
       );
       // Older schema-1 readers reject before rewriting, instead of silently dropping this attachment.
       source.put(bytes);
-      data.schema = Math.max(data.schema, 2) as 2 | 3 | 4 | 5;
       data.historicalWork = [...(data.historicalWork ?? []), record];
       data.revision++;
       store.save(data);

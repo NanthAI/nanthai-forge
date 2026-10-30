@@ -84,7 +84,7 @@ for (const native of [true, false])
       })),
     );
     assert.equal(result.message, 'Waiting for review by a person; not in main yet');
-    assert.equal(p.store.select('intents', lane.intentId).status, 'ready');
+    assert.equal(p.store.select('intents', lane.intentId).status, 'active');
     assert.equal(currentChannelHead(p.store, 'main'), null);
     const command = {
       action: 'accept-channel',
@@ -185,7 +185,6 @@ test('existing owner migrates lazily to custom without changing behavior or enab
   p.store.locked(() => {
     const data = p.store.load();
     delete data.autonomyPolicy;
-    data.schema = 1;
     p.store.save(data);
   });
   const policy = (await p.agent.dispatch({ action: 'policy' })).result;

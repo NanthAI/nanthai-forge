@@ -447,7 +447,7 @@ test('GitHub status uses audit-compatible Work format and retries hosted metadat
   const { publishGithubStatus } = await import('../dist/github-sync-status.js');
   const { updateHostState } = await import('../dist/host-binding.js');
   const { ownerSyncSchema } = await import('../dist/owner-sync-types.js');
-  const { workSchema } = await import('../dist/work-types.js');
+  const { unifiedWorkSchema } = await import('../dist/work-unified-types.js');
   const f = fixture(t),
     schema = f.work.store.load().schema;
   await f.sync({ push: true });
@@ -455,7 +455,7 @@ test('GitHub status uses audit-compatible Work format and retries hosted metadat
   assert.equal(data.schema, Math.max(schema, 13)); // Main audit evidence uses the existing format 13.
   assert.ok(data.runs.some(run => run.mainCheck && run.status === 'passed'));
   const { z } = await import('zod');
-  const previousShape = { ...workSchema.shape };
+  const previousShape = { ...unifiedWorkSchema.shape };
   delete previousShape.githubSync;
   assert.equal(z.object(previousShape).parse(data).githubSync, undefined); // older shapes ignore unknown optional fields
   updateHostState(f.work.store, state => {

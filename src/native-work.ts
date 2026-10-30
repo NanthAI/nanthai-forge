@@ -19,7 +19,7 @@ import { assertContractsSynced } from './contract-gate.js';
 import { nativeFastPath } from './native-fast-path.js';
 import { prepareNativeComposition, composedNativeMain } from './native-composition-candidate.js';
 import { localActor, type WorkActor } from './work-actor.js';
-import { policyPreset, type AcceptanceActor } from './autonomy-policy.js';
+import type { AcceptanceActor } from './autonomy-policy.js';
 import { enforceAcceptance, localPerson, readPolicy } from './work-autonomy.js';
 import { recordNativeLane, scopedNativeLane } from './native-record-mutations.js';
 import { recordMetadata, scopedMetadata } from './work-record-metadata.js';
@@ -31,13 +31,7 @@ import { NativeSource, nativeMarker, nativeOwner, type NativeCaptureCoverage } f
 import { nativeDependencyHead, validateNativePr } from './native-pr-pins.js';
 import { nativeChanges, nativeDiff } from './native-diff.js';
 import { WorkStore } from './work-store.js';
-import {
-  workSchema,
-  commandSchema,
-  channelCommandSchema,
-  type WorkData,
-  type WorkView,
-} from './work-types.js';
+import { commandSchema, channelCommandSchema, type WorkData, type WorkView } from './work-types.js';
 import { applyIntentMetadata } from './work-metadata.js';
 import { recordEvidence, evidenceApplicability, runApplicability } from './work-evidence.js';
 import {
@@ -53,6 +47,8 @@ import { previewEnvironments } from './work-deployment.js';
 import { invariant } from './errors.js';
 import { digest } from './hash.js';
 import { laneReview, viewReview } from './work-detail.js';
+
+import { createWork } from './work-create.js';
 
 export const CHANNEL_DIVERGED =
   'The Candidate does not contain the current Channel head, so accepting it would drop accepted work. Sync the Lane with the Channel (or compose with it) and finish again.';
@@ -111,17 +107,7 @@ export function initNative(input: string) {
       'NATIVE_TARGET_EXISTS',
       'Existing Work metadata is preserved.',
     );
-    store.save(
-      workSchema.parse({
-        schema: 11,
-        revision: 0,
-        autonomyPolicy: policyPreset('supervised'),
-        nativeHead: head,
-        intents: [],
-        lanes: [],
-        views: [],
-      }),
-    );
+    store.save(createWork(head));
   });
   return { root, head, files: files.length, engine: 'forge-native', captureCoverage };
 }
@@ -545,8 +531,7 @@ export function nativeExecute(
                 'Optimistic recovery is no longer enabled; preserve main for fix forward.',
               );
             const automatic = enforceAcceptance(store, data, view, previous, options.actor ?? localPerson());
-            if (automatic) data.schema = Math.max(data.schema, 11) as WorkData['schema'];
-            if (fast) data.schema = Math.max(data.schema, 14) as WorkData['schema'];
+
             if (fast && automatic) automatic.runId = fast.evidence.runId;
             const acceptedView = fast
               ? {
@@ -565,7 +550,7 @@ export function nativeExecute(
                   reason: 'disjoint-fast-path' as const,
                 }
               : scopedPostAccept(data, view);
-            if (postAccept) data.schema = Math.max(data.schema, 13) as WorkData['schema'];
+
             const assessment = command.invariant
               ? assessInvariant(store, data, {
                   action: 'assess-invariant',

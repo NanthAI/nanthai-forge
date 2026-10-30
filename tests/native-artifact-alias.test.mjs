@@ -289,7 +289,9 @@ test('ordinary copied backup directories retain readable-file support and reject
     for (const file of manifest.files) {
       assert.equal(statSync(join(backup.path, file.path)).mode & 0o777, 0o644);
       assert.deepEqual(
-        readFileSync(join(accepted, '.forge/work', file.path)),
+        file.path === 'work.json'
+          ? readWorkBytes(join(accepted, '.forge/work', file.path))
+          : readFileSync(join(accepted, '.forge/work', file.path)),
         readFileSync(join(backup.path, file.path)),
       );
       assert.equal(statSync(join(accepted, '.forge/work', file.path)).mode & 0o777, 0o600);

@@ -131,8 +131,7 @@ export async function startCache(
   );
   store.locked(() => {
     const tx = store.records();
-    if (retained.startSource?.stack) tx.setSchema(21);
-    else if (command.after) tx.setSchema(12);
+
     if (!tx.find('intents', started.intentId))
       tx.append('intents', {
         id: started.intentId,

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { invariant } from './errors.js';
-import { noteId } from './work-intent-converter.js';
+import { noteId } from './work-note-id.js';
 import { workSchema, type WorkData } from './work-types.js';
 import { isUnifiedWork, unifiedWorkSchema } from './work-unified-types.js';
 
@@ -20,9 +20,10 @@ export function unifyIntent<T>(value: T): T {
   if (intent.status === 'ready') intent.status = 'active';
   for (const key of ['memberships', 'relatedIntentIds', 'historyRefs', 'conversation'])
     intent[key] = Array.isArray(intent[key]) ? [...(intent[key] as unknown[])] : [];
-  const conversation = intent.conversation as Conversation[];
+  const conversation = intent.conversation as Conversation[],
+    retainedNotes = new Set(conversation.filter(entry => entry.kind === 'note').map(entry => entry.index));
   for (let index = 0; index < notes.length; index++)
-    if (!conversation.some(entry => entry.kind === 'note' && entry.index === index))
+    if (!retainedNotes.has(index))
       conversation.push({ id: noteId(String(intent.id), index), kind: 'note', index });
   return intent as T;
 }

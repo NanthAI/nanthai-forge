@@ -4,13 +4,14 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { randomUUID, createHash } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { initNative } from '../dist/native-work.js';
 import { WorkService } from '../dist/work.js';
 import { WorkStore } from '../dist/work-store.js';
 import { AgentWorkflow } from '../dist/agent-workflow.js';
 import { workSchema } from '../dist/work-types.js';
-import { recordObject } from '../dist/work-records.js';
+import { recordObject, recordIO, putRecord } from '../dist/work-records.js';
+import { unifyIntent } from '../dist/work-intent-local.js';
 import { exportNativeWork, restoreNativeWork } from '../dist/native-backup.js';
 
 function fixture(t) {
@@ -23,17 +24,18 @@ function fixture(t) {
   const work = new WorkService(root);
   return { parent, root, work, store: work.store };
 }
-const intent = (base, i) => ({
-  id: randomUUID(),
-  outcome: `Retained intent ${i}`,
-  constraints: '',
-  base,
-  status: 'active',
-  notes: [],
-  createdAt: '2026-01-01T00:00:00Z',
-});
+const intent = (base, i) =>
+  unifyIntent({
+    id: randomUUID(),
+    outcome: `Retained intent ${i}`,
+    constraints: '',
+    base,
+    status: 'active',
+    notes: [],
+    createdAt: '2026-01-01T00:00:00Z',
+  });
 
-test('legacy journal migration retains unknown fields, history, ordering and all record IDs', t => {
+test('current monolithic journal migration retains unknown fields, history, ordering and all record IDs', t => {
   const { store } = fixture(t),
     data = store.load();
   data.intents = Array.from({ length: 270 }, (_, i) => intent(data.nativeHead, i));
@@ -67,7 +69,9 @@ test('one changed record writes only selected fragments and leaves retained byte
   store.save(data);
   const after = readdirSync(dir),
     added = after.filter(name => !before.has(name));
-  assert.ok(added.length <= 5);
+  // A unified note also adds its stable conversation record and index.
+  t.diagnostic(`Changed-note record objects: ${added.length}`);
+  assert.ok(added.length <= 7);
   for (const [name, mtime] of before) assert.equal(statSync(join(dir, name)).mtimeMs, mtime);
   const pointer = JSON.parse(readFileSync(join(store.directory, 'work.json'))),
     changed = pointer.collections.intents.pages[1];
@@ -99,25 +103,9 @@ test('a failed staged record write cannot replace the last committed snapshot', 
     next = store.load();
   next.intents = [intent(next.nativeHead, 1), intent(next.nativeHead, 2)];
   next.revision++;
-  const value = next.intents[1],
-    bytes = Buffer.from(
-      JSON.stringify({
-        kind: 'forge-work-record-v2',
-        fields: Object.fromEntries(Object.entries(value).filter(([, item]) => !Array.isArray(item))),
-        keys: Object.keys(value),
-        arrays: {
-          notes: {
-            count: 0,
-            pages: [],
-            lookup: createHash('sha256')
-              .update(JSON.stringify({ entries: [] }))
-              .digest('hex'),
-          },
-        },
-      }),
-    ),
-    id = createHash('sha256').update(bytes).digest('hex');
-  const corrupted = join(store.directory, 'records', id);
+  const id = putRecord(recordIO(store.directory), next.intents[1]),
+    corrupted = join(store.directory, 'records', id),
+    bytes = readFileSync(corrupted);
   writeFileSync(corrupted, 'corrupted pre-existing content');
   assert.throws(
     () => store.save(next),

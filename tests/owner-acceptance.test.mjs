@@ -720,12 +720,12 @@ test('lifecycle stale pins, foreign authority, changed retries and unsupported c
   await assert.rejects(lifecycleRequest(f, intent, 'cancel'));
   nativeExecute(
     f.store,
-    { action: 'intent-status', intentId: intent.id, status: 'ready' },
+    { action: 'intent-status', intentId: intent.id, status: 'abandoned' },
     f.store.revision(),
   );
   await consumeOwnerRequests(f.store, f.client);
   assert.equal([...f.s.tables.ownerAcceptanceRequests.values()][0].state, 'rejected');
-  assert.equal(f.store.select('intents', intent.id).status, 'ready');
+  assert.equal(f.store.select('intents', intent.id).status, 'abandoned');
 });
 
 test('compensating revert accepts a new checked descendant while preserving a later disjoint change', async t => {

@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { digest } from './portable-hash.js';
-import { policyPreset } from './autonomy-policy.js';
-import { workSchema } from './work-types.js';
+import { createWork } from './work-create.js';
 import { nativeManifestSchema } from './work-archive-metadata.js';
 import { materializeWork } from './work-hosted-index.js';
 import { invariant } from './errors.js';
@@ -55,27 +54,19 @@ export function githubHostedProject(
     at,
   });
   const head = digest(state);
-  const data = workSchema.parse({
-    schema: 11,
-    revision: 0,
-    autonomyPolicy: policyPreset('supervised'),
-    nativeHead: head,
-    intents: [],
-    lanes: [],
-    views: [],
-    channelMoves: [
-      {
-        id: operationId,
-        channel: 'main',
-        viewId: operationId,
-        head,
-        previous: null,
-        at,
-        status: 'accepted',
-        provenance: 'user-declared-local',
-      },
-    ],
-  });
+  const data = createWork(head);
+  data.channelMoves = [
+    {
+      id: operationId,
+      channel: 'main',
+      viewId: operationId,
+      head,
+      previous: null,
+      at,
+      status: 'accepted',
+      provenance: 'user-declared-local',
+    },
+  ];
   const work = JSON.stringify(data, null, 2);
   const pin = (text: string) => ({ sha256: digest(text), size: new TextEncoder().encode(text).length });
   const source = new Map(files.map(file => [file.blob, file.size]));

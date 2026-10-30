@@ -79,7 +79,7 @@ function journalFixture(base, archiveSha256, manifestBytes, original) {
   };
 }
 
-test('push reconciliation, object pull and archive restore replay legacy source returns before the cutover', async t => {
+test('push reconciliation, object pull and archive restore replay current-format source returns', async t => {
   const dir = mkdtempSync(join(tmpdir(), 'forge-exchange-cutover-'));
   t.after(() => rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const root = join(dir, 'owner');
@@ -90,8 +90,6 @@ test('push reconciliation, object pull and archive restore replay legacy source 
     store = service.store;
   service.execute({ action: 'intent', outcome: 'Synthetic legacy execution' }, store.load().revision);
   const initial = store.load();
-  initial.schema = 15;
-  store.save(initial);
   const objects = new Map();
   const transport = {
     missing: async pins => pins.filter(pin => !objects.has(pin.sha256)).map(pin => pin.sha256),
@@ -138,7 +136,7 @@ test('push reconciliation, object pull and archive restore replay legacy source 
   });
   assert.equal(result.result.status, 'reconciled');
   for (const data of [store.load(), candidate]) {
-    assert.equal(data.schema, 18);
+    assert.equal(data.schema, 24);
     assert.deepEqual(data.hostedEvents, f.hosted.hostedEvents);
     assert.deepEqual(data.intents[0].notes, f.hosted.intents[0].notes);
     assert.deepEqual(data.intents[0].conversation, f.hosted.intents[0].conversation);
@@ -152,7 +150,7 @@ test('push reconciliation, object pull and archive restore replay legacy source 
     undefined,
     { captured: { directory, data: candidate } },
   );
-  assert.equal(parseWorkBytes(readFileSync(join(prepared.directory, 'work.json'))).schema, 18);
+  assert.equal(parseWorkBytes(readFileSync(join(prepared.directory, 'work.json'))).schema, 24);
   const pulled = join(dir, 'pulled');
   await pullNativeExchange(checkpoint.backupId, pulled, transport, { journalPath });
   assert.deepEqual(new WorkStore(pulled).load().intents, f.hosted.intents);
@@ -176,7 +174,7 @@ test('push reconciliation, object pull and archive restore replay legacy source 
   const restored = join(dir, 'restored');
   await restoreNativeWork(exported.result.archive.path, restored, archiveJournal);
   const restoredData = new WorkStore(restored).load();
-  assert.equal(restoredData.schema, 18);
+  assert.equal(restoredData.schema, 24);
   assert.deepEqual(restoredData.hostedEvents, archive.hosted.hostedEvents);
   assert.deepEqual(restoredData.intents, archive.hosted.intents);
 });

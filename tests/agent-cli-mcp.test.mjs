@@ -81,7 +81,7 @@ test('agent CLI completes and replays native delivery without indexing or SDK gl
   assert.equal(accepted.status, 'accepted');
   assert.match(agent('log', { operationId: run.operationId }).result.text, /verified/);
   const raw = JSON.parse(readWorkBytes(join(root, '.forge/work/work.json')));
-  assert.equal(raw.schema, 23); // recorded completion result is a retained detail object
+  assert.equal(raw.schema, 24); // recorded completion result is a retained detail object
   assert.equal(raw.lanes[0].checkpoints[0].actor.kind, 'agent');
   assert.equal(raw.runs.length, 1);
   const before = readWorkBytes(join(root, '.forge/work/work.json'));

@@ -76,7 +76,7 @@ test('browser edit serialization retains all four declarations through the real 
   });
   assert.deepEqual(edited.declaredInputs, original);
   assert.deepEqual(f.inputs, original);
-  assert.equal(f.w.store.load().schema, 5);
+  assert.equal(f.w.store.load().schema, 24);
   f.check = edited;
   const { run: observed } = await run(f);
   assert.equal(observed.status, 'passed');

@@ -13,7 +13,8 @@ import { initNative } from '../dist/native-work.js';
 import { AgentWorkflow } from '../dist/agent-workflow.js';
 import { WorkStore } from '../dist/work-store.js';
 import { restoreNativeWork } from '../dist/native-backup.js';
-import { workSchema } from '../dist/work-types.js';
+import { assertCurrentWorkFormat } from '../dist/work-format.js';
+import { parseWork } from '../dist/work-unified-types.js';
 import { drainPostAccept } from '../dist/post-accept-main.js';
 import { lightweightDocsRun } from '../dist/work-docs-admission.js';
 import { CheckQueue } from '../dist/check-queue.js';
@@ -202,7 +203,7 @@ for (const code of [false, true])
     const audit = data.runs.find(run => run.mainCheck && run.head === receipt.acceptance.head);
     assert.equal(audit?.status, 'passed');
     assert.equal(audit.checkSelection.scope, 'full');
-    assert.equal(data.schema, 23);
+    assert.equal(data.schema, 24);
     const view = data.views.find(view => view.id === receipt.view.viewId);
     assert.equal(scopedPostAccept(data, view).mode, 'full');
     const exact = data.runs.find(run => run.id === receipt.run.runId);
@@ -221,11 +222,8 @@ for (const code of [false, true])
     ])
       assert.equal(await lightweightDocsRun(f.store, { ...exact, ...override }), false);
 
-    assert.deepEqual(
-      workSchema.parse(data).runs.find(run => run.id === exact.id).interaction,
-      exact.interaction,
-    );
-    assert.equal(workSchema.safeParse({ ...data, schema: 14 }).success, false);
+    assert.deepEqual(parseWork(data).runs.find(run => run.id === exact.id).interaction, exact.interaction);
+    assert.throws(() => assertCurrentWorkFormat({ ...data, schema: 14 }), { code: 'WORK_UPGRADE_REQUIRED' });
     const replay = (await new AgentWorkflow(f.root).dispatch({ ...request, ...receipt.resolved })).result;
     const { resolved: _resolved, ...withoutResolved } = receipt;
     assert.deepEqual(replay, withoutResolved);
@@ -283,7 +281,7 @@ for (const code of [false, true])
     t.after(() => rmSync(target, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }));
     await restoreNativeWork(exported.path, target);
     const restored = new WorkStore(target).load();
-    assert.equal(restored.schema, 23);
+    assert.equal(restored.schema, 24);
     assert.deepEqual(restored.runs.find(run => run.id === exact.id).interaction, exact.interaction);
     assert.deepEqual(restored.runs.find(run => run.id === exact.id).checkSelection, exact.checkSelection);
   });

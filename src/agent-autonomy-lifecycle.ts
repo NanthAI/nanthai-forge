@@ -34,7 +34,6 @@ export async function acceptedLifecycle(work: WorkService, move: ChannelMove, ke
   work.store.locked(() => {
     const tx = work.store.records();
     if (!tx.find('automaticActions', id)) {
-      tx.setSchema(11);
       tx.append('automaticActions', {
         id,
         at: new Date().toISOString(),

@@ -387,7 +387,6 @@ test('an oversized native receipt remains an object pin in the small seed reques
   const f = setup(t, 5),
     data = f.store.load(),
     head = data.nativeHead;
-  data.schema = 14;
   data.channelMoves.push({
     id: randomUUID(),
     channel: 'main',

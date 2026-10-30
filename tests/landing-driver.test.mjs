@@ -280,10 +280,10 @@ test('legacy writers preserve optional evaluation state before completion result
   data.landingBatches[0] = preserveFields(legacy.parse(saved), saved);
   data.revision++;
   f.store.locked(() => f.store.save(data));
-  assert.equal(f.store.load().schema, 17);
+  assert.equal(f.store.load().schema, 24);
   await drainLandingBatches(f.work, 'main');
   assert.equal(f.main().id, batchAcceptanceId(batch, saved.prefixes[0].viewId));
-  assert.equal(f.store.load().schema, 23);
+  assert.equal(f.store.load().schema, 24);
 });
 
 test('at runner capacity repeated drain observations publish no unchanged Work', async t => {

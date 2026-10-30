@@ -8,6 +8,7 @@ import { filesFromGit, prepareNativeProjection, treeForGit, validateNativeProjec
 import { observe, prLocation, readPull } from './work-import.js';
 import { workSourcePins } from './work-archive-metadata.js';
 import { workGit } from './work-git.js';
+import { unifyIntent } from './work-intent-local.js';
 import { parseWorkBytes, validateWorkSize } from './work-metadata.js';
 import type { GitProjection, GithubObservation, WorkData } from './work-types.js';
 import type { WorkStore } from './work-store.js';
@@ -236,9 +237,9 @@ export async function nativeGithubWork(
             observations: [incoming],
           },
         };
+        intent = unifyIntent(intent);
         data.intents.push(intent);
       } else intent.external!.observations.push(incoming);
-      if (data.schema < 5) data.schema = 5;
       data.revision++;
       validateWorkSize(data);
       const source = new NativeSource(store.root);

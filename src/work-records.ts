@@ -22,7 +22,7 @@ import { recordOwnerMutation } from './self-metrics-journal.js';
 import { z } from 'zod';
 import { digest } from './hash.js';
 import { readSource } from './files.js';
-import { assertWorkFormat } from './work-format.js';
+import { assertCurrentWorkFormat } from './work-format.js';
 import { invariant } from './errors.js';
 import { indexBuild, recordKeys, validateIndex, type IndexIO } from './work-record-index.js';
 const hash = z.string().regex(/^[a-f0-9]{64}$/);
@@ -65,7 +65,7 @@ export function readWorkFile(directory: string) {
       return bytes;
     }
     const fields = raw && typeof raw === 'object' && 'fields' in raw ? raw.fields : raw;
-    assertWorkFormat(fields);
+    assertCurrentWorkFormat(fields);
   }
   return bytes;
 }

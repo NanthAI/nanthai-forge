@@ -81,7 +81,7 @@ test('production native v2 push pins concurrent Work for the next push and reuse
   assert.equal(new WorkStore(restored).load().intents[0].outcome, 'Arrived during upload');
 });
 
-test('publication receipt replay repairs a missing hint and the next format promotion sends a delta', async t => {
+test('publication receipt replay repairs a missing hint and the next current-format checkpoint sends a delta', async t => {
   const root = mkdtempSync(join(tmpdir(), 'forge-record-replay-'));
   t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   writeFileSync(join(root, 'a.ts'), 'export const a = 1;\n');
@@ -108,7 +108,6 @@ test('publication receipt replay repairs a missing hint and the next format prom
   assert.equal(replay.uploadedBytes, 0);
   assert.equal(JSON.parse(JSON.parse(readFileSync(hint)).payload).manifest.id, operationId);
   const data = store.load();
-  data.schema = 19;
   data.revision++;
   store.save(data);
   delete transport.published;

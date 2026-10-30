@@ -73,7 +73,7 @@ test('native reader replays a leaderless batch from owner shapes, reads a pinned
       at: at('12:00'),
       dependencies: [],
     });
-    data.schema = 17;
+
     data.landingEntries = [
       {
         id: entryId,
@@ -278,7 +278,7 @@ test('lifecycle receipt records final returned errors once, reads stay silent, c
     ).result;
     const cancel = randomUUID(),
       data = store.load();
-    data.schema = 17;
+
     data.landingEntries = [
       {
         id: cancel,

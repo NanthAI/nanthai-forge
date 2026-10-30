@@ -14,19 +14,18 @@ import { land } from './source-landings-fixture.mjs';
 import { NativeSource } from '../dist/native-source.js';
 import { digest } from '../dist/hash.js';
 import { parseWork } from '../dist/work-unified-types.js';
-import { convertWorkTo18 } from '../dist/work-intent-converter.js';
 import { unifyIntent } from '../dist/work-intent-local.js';
 import { compactAction } from '../dist/work-record-details.js';
 
 import { indexObjects, measurePublication } from './hosted-seed-delta-scale-fixture.mjs';
 
-test('dogfood-sized format-22 paged seed then format-24 catch-up publishes bounded delta', async t => {
+test('dogfood-sized current-format paged seed and catch-up publish bounded delta', async t => {
   const s = fixture(),
     first = await checkpoint(t, s),
     store = first.store;
   indexObjects(s);
   // This measures hosted publication, not local fragmented-store fsync cost.
-  // Retain valid legacy JSON fixture snapshots through the normal Work reader.
+  // Keep the synthetic owner in the current format throughout publication.
   store.save = value => {
     if (value.schema === 22 || value.schema === 24)
       value.intents = value.intents.map(intent =>
@@ -36,7 +35,7 @@ test('dogfood-sized format-22 paged seed then format-24 catch-up publishes bound
     writeFileSync(join(store.directory, 'work.json'), JSON.stringify(value, null, 2));
   };
   land(store, 575, 5);
-  const data = convertWorkTo18({ ...store.load(), schema: 21 });
+  const data = store.load();
   // ~100 MiB of retained Work, spread over bounded record bodies and packs.
   for (const intent of data.intents)
     intent.notes.push(
@@ -159,7 +158,7 @@ test('dogfood-sized format-22 paged seed then format-24 catch-up publishes bound
   after.landingBatches.push(...Array.from({ length: 3 }, (_, i) => batch(after, i)));
   after.revision = 29560;
   // The real catch-up includes newly slimmed action records, while old records
-  // remain byte-identical across the additive format promotion.
+  // remain byte-identical across current-format catch-up.
   after.automaticActions ??= [];
   const detail = compactAction(
     {

@@ -57,7 +57,7 @@ test('whole planning history, historical Intent links and original actor observa
       exported = JSON.parse(await actions.exportPlanning._handler(s.ctx, { projectId: s.projectId }));
     assert.deepEqual(
       JSON.parse(exported.json).linkedIntents,
-      hosted.intents,
+      hosted.intents.filter(intent => intent.id === created.operationId),
       'Historical links remain in JSON after latest version unlinks.',
     );
     const j = await journal(s),

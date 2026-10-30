@@ -681,7 +681,6 @@ export class AgentWorkflow {
         ? undefined
         : tx.find('checks', check.definition, 'definition')?.record;
       if (!existing) {
-        tx.setSchema(current.schema);
         if (previous) tx.replace('checks', previous.position, check);
         else tx.append('checks', check);
         store.commitRecords(tx);

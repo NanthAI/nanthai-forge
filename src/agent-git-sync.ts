@@ -206,7 +206,7 @@ export function agentGitSync(
           },
           ...(automatic ? { automatic } : {}),
         };
-        tx.setSchema(11);
+
         tx.patchFields('lanes', lane.id, { pendingSync: pending });
         publish();
       }

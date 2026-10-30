@@ -162,6 +162,9 @@ export function briefingContext(
           intentId: intent.id,
           intent: {
             outcome: intent.outcome,
+            ...('description' in intent && typeof intent.description === 'string'
+              ? { description: intent.description }
+              : {}),
             constraints: intent.constraints,
             notes: intent.notes.map(n => ({ kind: n.kind, text: n.text, at: n.at })),
             status: intent.status,

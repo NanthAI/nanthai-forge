@@ -132,7 +132,7 @@ export function agentUndoSync(store: WorkStore, command: UndoSync) {
                     status: sync!.sync!.status ?? ('merged' as const),
                   },
             };
-            tx.setSchema(11);
+
             tx.patchFields('lanes', lane.id, { head: from, pendingUndo: pending, pendingMerge: undefined });
             store.commitRecords(tx);
             tx = store.records();

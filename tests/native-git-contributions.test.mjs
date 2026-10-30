@@ -182,7 +182,7 @@ for (const kind of ['plain', 'sha1', 'sha256'])
       let data = f.data(),
         receipt = data.nativeContributionReceipts.find(r => r.id === operation),
         lane = data.lanes.find(l => l.id === operation);
-      assert.equal(data.schema, 6);
+      assert.equal(data.schema, 24);
       assert.equal(receipt.provenance, 'unverified-git-bundle');
       assert.equal(receipt.gitHead, head);
       assert.equal(receipt.base, f.intent.base);
@@ -415,7 +415,7 @@ test(
       const sourceTarget = join(f.dir, 'source-only');
       await restoreNativeWork(selected.archive.path, sourceTarget);
       const sourceOwner = new WorkService(sourceTarget);
-      assert.equal(sourceOwner.store.load().schema, 1);
+      assert.equal(sourceOwner.store.load().schema, 24);
       assert.deepEqual(sourceOwner.store.load().nativeContributionReceipts ?? [], []);
       assert.equal(sourceOwner.store.load().intents.length, 0);
       assert.equal(new NativeSource(sourceTarget).state(imported.head).git.commit, command.expectedHead);
@@ -424,7 +424,7 @@ test(
       const target = join(f.dir, 'recovered-six');
       await restoreNativeWork(archive.archive.path, target);
       const recovered = new WorkService(target);
-      assert.equal(recovered.store.load().schema, 6);
+      assert.equal(recovered.store.load().schema, 24);
       assert.deepEqual(recovered.store.load().nativeContributionReceipts, [receipt]);
       const retry = await recovered.dispatch({ ...command, path: '/missing-after-recovery' }, 0);
       assert.equal(retry.result.id, imported.id);

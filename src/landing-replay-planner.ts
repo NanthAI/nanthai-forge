@@ -43,7 +43,6 @@ export class ReplayPlanner {
       at: replayStamp(0),
     };
     this.data.checks = [check];
-    this.data.schema = 17;
     this.data.landingEntries = [];
     this.data.landingBatches = [];
     this.data.autonomyPolicy = editedPolicy(policyPreset('trusted'), {

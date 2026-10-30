@@ -8,27 +8,17 @@ import { join } from 'node:path';
 import { initNative } from '../dist/native-work.js';
 import { WorkService } from '../dist/work.js';
 import { AgentWorkflow } from '../dist/agent-workflow.js';
-import { migrateIntentWork } from '../dist/work-intent-migration.js';
 import { setup } from './hosted-planning-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 const briefs = await import(moduleUrl('../convex/projectBriefings.ts'));
 const denied = error => error.data?.code === 'PROJECT_UNAVAILABLE';
-function upgrade(work) {
-  work.store.locked(() => {
-    const tx = work.store.records();
-    tx.setSchema(15);
-    work.store.commitRecords(tx);
-  });
-  migrateIntentWork(work.store);
-}
-async function native(t, unified = false) {
+async function native(t) {
   const root = mkdtempSync(join(tmpdir(), 'forge-planning-lifecycle-'));
   t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   writeFileSync(join(root, 'file.txt'), 'synthetic\n');
   initNative(root);
   const work = new WorkService(root),
     agent = new AgentWorkflow(root);
-  if (unified) upgrade(work);
   const put = patch => ({
     action: 'put-planning-item',
     operationId: randomUUID(),
@@ -44,8 +34,8 @@ async function native(t, unified = false) {
   const send = command => work.dispatch(command, work.store.revision());
   return { work, agent, put, send };
 }
-test('native legacy and unified planning retain Proposed, plan, abandon and reopen versions with retry/CAS', async t => {
-  for (const unified of [false, true]) {
+test('native current planning retain Proposed, plan, abandon and reopen versions with retry/CAS', async t => {
+  for (const unified of [true]) {
     const f = await native(t, unified);
     const command = f.put();
     await f.send(command);
@@ -79,7 +69,7 @@ test('native legacy and unified planning retain Proposed, plan, abandon and reop
     }
   }
 });
-test('legacy planning start briefing and CLI start create exactly one linked Intent/Lane and retain details', async t => {
+test('current planning start briefing and CLI start create exactly one linked Intent/Lane and retain details', async t => {
   const f = await native(t);
   const command = f.put({ status: 'open' });
   await f.send(command);
@@ -102,11 +92,12 @@ test('legacy planning start briefing and CLI start create exactly one linked Int
   const data = f.work.store.load();
   assert.equal(data.intents.length, 1);
   assert.equal(data.lanes.length, 1);
-  assert.equal(data.intents[0].constraints, command.body);
-  assert.deepEqual(data.planningItems.at(-1).intentIds, [first.intentId]);
+  assert.equal(data.intents[0].description, command.body);
+  assert.equal(data.intents[0].id, first.intentId);
+  assert.deepEqual(data.intents[0].historyRefs, [{ itemId: command.itemId, version: 1 }]);
 });
 test('CLI abandons legacy planning Intents and Initiatives without changing their children, retry-safe', async t => {
-  for (const unified of [false, true]) {
+  for (const unified of [true]) {
     const f = await native(t, unified);
     const child = f.put({ status: 'open' });
     await f.send(child);
@@ -140,9 +131,9 @@ test('CLI abandons legacy planning Intents and Initiatives without changing thei
     );
   }
 });
-test('hosted legacy and unified Proposed/abandon writes preserve history, lifecycle index, authority and child states', async t => {
-  for (const unified of [false, true]) {
-    const s = await setup(t, true, unified ? (_root, work) => upgrade(work) : undefined);
+test('hosted current Proposed/abandon writes preserve history, lifecycle index, authority and child states', async t => {
+  for (const unified of [true]) {
+    const s = await setup(t, true, undefined);
     const command = s.item({ status: 'proposed' });
     await s.send(command);
     const brief = await briefs.brief._handler(s.ctx, {

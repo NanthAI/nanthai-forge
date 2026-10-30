@@ -61,15 +61,14 @@ test('line comments retain exact source through narrow appends, lifecycle, expor
   const act = c => work.execute(c, work.store.revision()).result;
   act(command);
   assert.deepEqual(work.store.load().intents[0].notes[0].anchor, command.anchor);
-  assert.equal(work.store.load().schema, 9);
+  assert.equal(work.store.load().schema, 24);
   act({ action: 'intent-status', intentId: command.intentId, status: 'completed' });
-  assert.equal(work.store.load().schema, 9);
+  assert.equal(work.store.load().schema, 24);
   act({ action: 'note', intentId: command.intentId, kind: 'comment', text: 'Ordinary notes still work' });
   const older = work.store.load();
   older.schema = 7;
-  work.store.save(older);
-  assert.equal(work.store.load().schema, 9);
-  assert.equal(workSchema.safeParse({ ...work.store.load(), schema: 8 }).success, false);
+  assert.throws(() => work.store.save(older), { code: 'WORK_UPGRADE_REQUIRED' });
+  assert.equal(work.store.load().schema, 24);
   const exported = (await work.dispatch({ action: 'export-work', archive: true }, work.store.revision()))
       .result,
     target = root + '-restored';
@@ -87,7 +86,7 @@ test('line comments retain exact source through narrow appends, lifecycle, expor
     command,
   };
   applyHostedEvent(before, event);
-  assert.equal(before.schema, 9);
+  assert.equal(before.schema, 24);
   assert.deepEqual(before.intents[0].notes[0].anchor, command.anchor);
   for (const patch of [
     { line: 99 },
@@ -122,7 +121,7 @@ test('hosted line comments validate current source, preserve one retry and rejec
   const result = await modules.projectWorkActions.command._handler(s.ctx, input);
   assert.equal((await modules.projectWorkActions.command._handler(s.ctx, input))._id, result._id);
   let after = await read();
-  assert.equal(after.data.schema, 11); // policy-bearing owners cannot be downgraded by anchors
+  assert.equal(after.data.schema, 24); // policy-bearing owners cannot be downgraded by anchors
   assert.deepEqual(after.data.intents[0].notes[0].anchor, command.anchor);
   for (const patch of [
     { line: 99 },

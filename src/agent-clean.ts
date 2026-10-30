@@ -462,7 +462,6 @@ export function agentClean(store: WorkStore, command: CleanCommand, automatic?: 
       if (tx && automatic) {
         const prior = tx.find('automaticActions', automatic.id);
         if (!prior) {
-          tx.setSchema(11);
           tx.append('automaticActions', {
             id: automatic.id,
             at: new Date().toISOString(),

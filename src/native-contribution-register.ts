@@ -120,10 +120,6 @@ export function registerNativeContribution(
       checkpoints: [],
       nativeContributionId: receipt.id,
     };
-    data.schema = Math.max(
-      data.schema,
-      receipt.provenance === 'unverified-git-bundle' ? 6 : 4,
-    ) as WorkData['schema'];
     data.nativeContributionReceipts = [...(data.nativeContributionReceipts ?? []), receipt];
     data.lanes.push(lane);
     data.revision++;

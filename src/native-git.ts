@@ -14,10 +14,9 @@ import {
 import { dirname, join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { TextDecoder } from 'node:util';
-import { policyPreset } from './autonomy-policy.js';
 import { NativeSource, nativeMarker, type NativeFile } from './native-source.js';
 import { WorkStore } from './work-store.js';
-import { workSchema, type GitProjection } from './work-types.js';
+import type { GitProjection } from './work-types.js';
 import { workGit } from './work-git.js';
 import { asyncGitTreeWriter } from './native-git-tree.js';
 import { batchObjectWriter } from './native-git-batch.js';
@@ -29,6 +28,8 @@ import { withGithubTransport } from './work-github.js';
 import { safeRelative } from './files.js';
 import { digest } from './hash.js';
 import { ForgeError, invariant } from './errors.js';
+
+import { createWork } from './work-create.js';
 
 const gitId = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/;
 export function filesFromGit(root: string, head: string, source: NativeSource): NativeFile[] {
@@ -172,17 +173,7 @@ export async function importNativeGit(input: string, commit: string, target: str
     );
     renameSync(join(owner, '.forge'), join(workspace, '.forge'));
     nativeMarker(workspace);
-    new WorkStore(workspace).save(
-      workSchema.parse({
-        schema: 11,
-        revision: 0,
-        autonomyPolicy: policyPreset('supervised'),
-        nativeHead: head,
-        intents: [],
-        lanes: [],
-        views: [],
-      }),
-    );
+    new WorkStore(workspace).save(createWork(head));
     publish(workspace, destination);
     return {
       root: destination,
