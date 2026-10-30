@@ -15,6 +15,7 @@ import { sourceTaskData } from './projectSourceStepFields';
 import { sourceDispatch } from '../src/hosted-source-job-controller';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { ForgeError, invariant } from '../src/errors';
+import { sourceMutation } from './projectConvexSourceErrors';
 const identity = { projectId: v.id('hostedProjects'), jobId: v.string(), step: v.number() };
 const taskIdentity = { ...identity, index: v.number(), generation: v.number() };
 export async function validSourceBatch(ctx: MutationCtx, batch: Doc<'projectSourceBatches'>) {
@@ -43,7 +44,7 @@ const taskRow = (ctx: MutationCtx, batchId: Id<'projectSourceBatches'>, index: n
     .query('projectSourceTasks')
     .withIndex('by_batch_and_index', q => q.eq('batchId', batchId).eq('index', index))
     .unique();
-export const fork = internalMutation({
+export const fork = sourceMutation({
   args: {
     ...identity,
     cursor: v.string(),
@@ -97,7 +98,7 @@ export const fork = internalMutation({
     return null;
   },
 });
-export const begin = internalMutation({
+export const begin = sourceMutation({
   args: taskIdentity,
   returns: v.union(v.string(), v.null()),
   handler: async (ctx, args) => {
@@ -126,7 +127,7 @@ export const begin = internalMutation({
     return canonicalPayload({ input: task.input, progress: task.progress });
   },
 });
-export const complete = internalMutation({
+export const complete = sourceMutation({
   args: {
     ...taskIdentity,
     done: v.boolean(),
@@ -173,7 +174,7 @@ export const complete = internalMutation({
     return null;
   },
 });
-export const results = internalMutation({
+export const results = sourceMutation({
   args: identity,
   returns: v.string(),
   handler: async (ctx, args) => {

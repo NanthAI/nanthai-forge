@@ -262,7 +262,7 @@ test('epoch and fence changes after a step begins prevent output publication and
       if (mode === 'epoch')
         await assert.rejects(
           s.call('staleCommit', store.commit, input),
-          e => e.code === 'SOURCE_AUTHORITY_CHANGED',
+          e => e.data?.code === 'SOURCE_AUTHORITY_CHANGED',
         );
       else await s.call('staleCommit', store.commit, input);
       assert.equal(s.scheduled.length, 0);
@@ -356,7 +356,7 @@ test('a step that failed on a platform error is retried after the 60 s lease exp
     assert(job.control.workerUntil <= Date.now(), 'the dead execution expired');
     await assert.rejects(
       s.call('expiredBegin', store.begin, step.args),
-      e => e.code === 'SOURCE_JOB_FENCED',
+      e => e.data?.code === 'SOURCE_JOB_FENCED',
       'nothing from the dead attempt can run before an explicit recovery',
     );
     // A stale step number neither commits nor extends the lease.

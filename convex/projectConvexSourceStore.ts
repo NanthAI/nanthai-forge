@@ -17,6 +17,7 @@ import { sourceDispatch, driveSourceJob } from '../src/hosted-source-job-control
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { convexSourceWorker, convexSourceRuntime, ConvexSourceProvider } from '../src/convex-source-provider';
 import { invariant } from '../src/errors';
+import { sourceMutation } from './projectConvexSourceErrors';
 import { hostedWriteProject } from './projectHostedRecords';
 import { saveObject } from './projectHostedSaveStore';
 import { drainSourcePool, requeueSourceBatch } from './projectConvexSourcePool';
@@ -201,7 +202,7 @@ async function sourceStep(
     );
   return { job, row };
 }
-export const begin = internalMutation({
+export const begin = sourceMutation({
   args: { ...identity, step: v.number() },
   returns: v.union(v.string(), v.null()),
   handler: async (ctx, args) => {
@@ -233,7 +234,7 @@ export const begin = internalMutation({
     });
   },
 });
-export const commit = internalMutation({
+export const commit = sourceMutation({
   args: {
     ...identity,
     step: v.number(),
@@ -333,7 +334,7 @@ export const dispatch = internalMutation({
   },
 });
 
-export const stage = internalMutation({
+export const stage = sourceMutation({
   args: {
     ...identity,
     step: v.number(),

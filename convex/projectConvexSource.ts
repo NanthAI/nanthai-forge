@@ -23,7 +23,8 @@ import {
   saveSourceProgress,
   type SourceProgress,
 } from '../src/hosted-source-step-progress';
-import { ForgeError, invariant } from '../src/errors';
+import { invariant } from '../src/errors';
+import { sourceDomainError } from './projectConvexSourceErrors';
 const identity = { projectId: v.id('hostedProjects'), jobId: v.string() };
 const reference = (name: string) => makeFunctionReference<'mutation'>(name);
 export const dispatch = internalAction({
@@ -174,13 +175,15 @@ export const step = internalAction({
       }
       result = await runSourceStep(cursor, io);
     } catch (error) {
-      if (!(error instanceof ForgeError)) throw error;
+      // Platform failures stay retryable; a fenced step has nothing to settle.
+      const domain = sourceDomainError(error);
+      if (!domain || domain.code === 'SOURCE_JOB_FENCED') throw error;
       await ctx.runMutation(reference('projectConvexSourceStore:commit'), {
         ...input,
         cursor: state.cursor,
         objects: [],
         output: null,
-        failure: error.code,
+        failure: domain.code,
       });
       return null;
     }
@@ -190,6 +193,13 @@ export const step = internalAction({
         : (await saveSourceProgress(result.cursor, progress, storage.store)).id;
     if (fanout) {
       const plan = fanout as SourceFanout;
+      // The saved cursor refers to States this step already uploaded; the step
+      // after the join resolves them, so they must be recorded before the fork.
+      while (outputs.length)
+        await ctx.runMutation(reference('projectConvexSourceStore:stage'), {
+          ...input,
+          objects: outputs.splice(0, 100),
+        });
       await ctx.runMutation(reference('projectConvexSourceFanout:fork'), {
         ...input,
         cursor: saved,

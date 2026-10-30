@@ -2,6 +2,7 @@
 import assert from 'node:assert/strict';
 import { fork } from 'node:child_process';
 import { randomUUID, createHash } from 'node:crypto';
+import { ConvexError } from 'convex/values';
 import { getFunctionName, makeFunctionReference } from 'convex/server';
 import { recordsFixture } from './hosted-records-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
@@ -244,7 +245,15 @@ export async function scaleFixture({ parallelism = 4, delay = 0, guardRss = fals
             }
             child.send({ reply: message.id, value });
           } catch (error) {
-            child.send({ reply: message.id, error: { message: error.message, code: error.code } });
+            // Like Convex: a ConvexError keeps its data across runMutation; any other
+            // error (including ForgeError) arrives as a plain Error without its code.
+            child.send({
+              reply: message.id,
+              error:
+                error instanceof ConvexError
+                  ? { message: error.message, data: error.data }
+                  : { message: error.message },
+            });
           }
         });
         child.send({ run: true, url: actionUrls[n], method: m, args: item.args, guardRss });

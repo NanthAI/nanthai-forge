@@ -524,7 +524,7 @@ test('after a failed step or child and an expired lease, one explicit trigger re
       const row = [...s.tables.projectSourceSteps.values()][0];
       await assert.rejects(
         s.invoke('projectConvexSourceStore:begin', { projectId: s.projectId, jobId: id, step: row.step }),
-        e => e.code === 'SOURCE_JOB_FENCED',
+        e => e.data?.code === 'SOURCE_JOB_FENCED',
         'the dead execution expired',
       );
       if (mode === 'fenced') {

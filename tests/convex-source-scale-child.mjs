@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { createReadStream } from 'node:fs';
+import { ConvexError } from 'convex/values';
 import { getFunctionName } from 'convex/server';
 import { convexStoreBlob } from './convex-storage-fake.mjs';
 let sequence = 0;
@@ -20,7 +21,10 @@ process.on('message', async message => {
   if (message.reply) {
     const w = waiting.get(message.reply);
     waiting.delete(message.reply);
-    if (message.error) w.reject(Object.assign(Error(message.error.message), message.error));
+    if (message.error)
+      w.reject(
+        message.error.data === undefined ? Error(message.error.message) : new ConvexError(message.error.data),
+      );
     else w.resolve(message.value);
     return;
   }

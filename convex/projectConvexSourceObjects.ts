@@ -1,18 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
 import type { Id } from './_generated/dataModel';
-import { internalMutation } from './_generated/server';
 import { activeStep } from './projectConvexSourceStore';
 import { saveObject } from './projectHostedSaveStore';
 import { record, recordPartition, selectedGeneration } from './projectWorkIndexStore';
 import { isStored } from './projectObjectFields';
 import { invariant } from '../src/errors';
+import { sourceMutation } from './projectConvexSourceErrors';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { presignGet, r2Config } from './r2';
 const identity = { projectId: v.id('hostedProjects'), jobId: v.string(), step: v.number() };
 /** Object storage locations stay inside the trusted action. No worker HTTP
  * grant, callback ingress, HMAC, Modal credential or repository URL is involved. */
-export const resolve = internalMutation({
+export const resolve = sourceMutation({
   args: {
     ...identity,
     digests: v.array(v.string()),

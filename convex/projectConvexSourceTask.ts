@@ -6,7 +6,7 @@ import { internalAction } from './_generated/server';
 import { convexSourceTransport } from './projectConvexSource';
 import { runSourceTask, type SourceTaskInput, type SourceTaskProgress } from '../src/hosted-source-fanout';
 import { storeTaskData, loadTaskData } from '../src/hosted-source-task-data';
-import { ForgeError } from '../src/errors';
+import { sourceDomainError } from './projectConvexSourceErrors';
 import { sourceStorage } from './projectConvexSourceStorage';
 const args = {
   projectId: v.id('hostedProjects'),
@@ -37,7 +37,7 @@ export const run = internalAction({
         done: true,
         progress: null,
         output: null,
-        failure: error instanceof ForgeError ? error.code : 'SOURCE_WORKER_FAILED',
+        failure: sourceDomainError(error)?.code ?? 'SOURCE_WORKER_FAILED',
       });
       return null;
     }
