@@ -24,7 +24,7 @@ test('hosted note contention and reactive read-set measurement', async t => {
       base: initial.sourceHead,
     }),
   });
-  await indexActions.ensure._handler(s.ctx, { projectId: s.projectId });
+  await indexActions.ensure._handler(s.ctx, { rebuild: true, projectId: s.projectId });
   const subscriptions = [
     () => work.state._handler(s.ctx, { projectId: s.projectId }),
     () => index.workspace._handler(s.ctx, { projectId: s.projectId }),

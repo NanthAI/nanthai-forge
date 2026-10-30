@@ -19,7 +19,7 @@ test('hosted View reads use indexed file/save and Lane/View records, with fresh 
   const s = await setup(t, true, async (root, work) => {
     p = await prepareViewProvenance(root, work);
   });
-  await indexActions.ensure._handler(s.ctx, { projectId: s.projectId });
+  await indexActions.ensure._handler(s.ctx, { rebuild: true, projectId: s.projectId });
   const query = args =>
     reads.read._handler(s.ctx, {
       projectId: s.projectId,

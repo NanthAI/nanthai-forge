@@ -677,7 +677,7 @@ export function progressFixture(scale = 1, saved, ensure = actions.ensure._handl
       stepStarted = started;
       metrics.actionCalls++;
       metric('calls');
-      const result = await ensure(s.ctx, { projectId: 'project' });
+      const result = await ensure(s.ctx, { projectId: 'project', rebuild: true });
       metrics.maxActionMs = Math.max(metrics.maxActionMs, performance.now() - started);
       return result;
     },

@@ -21,13 +21,13 @@ const transport = s => ({
   action: (ref, input) => actions[getFunctionName(ref).split(':')[1]]._handler(s.ctx, input),
 });
 
-test('scoped read transport prepares missing index, hydrates only selected payload, rejects stale source and keeps access current', async t => {
+test('scoped read transport uses the ready index, hydrates only selected payload, rejects stale source and keeps access current', async t => {
   const s = await setup(t),
     client = transport(s),
     before = s.reads();
   const workspace = await dispatchHostedWork(client, s.projectId, { action: 'workspace' });
   assert.ok(workspace.generationId);
-  assert.ok(s.reads() > before);
+  assert.equal(s.reads(), before, 'ready reads never download source history');
   const item = s.item({ body: 'Large 🐈 body '.repeat(20000) });
   await s.send(item);
   const rows = await dispatchHostedWork(client, s.projectId, {
@@ -311,34 +311,47 @@ test('owner decision reads page immutable Work, hydrate oversized what, retain a
   assert.equal(calls, 0, 'older optional projections render empty without reads');
 });
 
-test('a hosted read drives index continuations to completion and reports counts without progress queries', async () => {
-  const { ensureWorkIndex } = await import('../dist/work-index-client.js');
+test('an explicit operator rebuild drives index continuations to completion and reports counts without progress queries', async () => {
   const { hostProgress } = await import('../dist/host-progress.js');
   const events = [],
     progress = hostProgress(event => events.push(event));
-  progress.phase('building Work index');
-  let calls = 0;
+  let calls = 0,
+    transferredBytes = 0;
   const client = {
+    query: async ref => {
+      assert.equal(getFunctionName(ref), 'projectWorkIndex:workspace');
+      return JSON.stringify({ generationId: 'generation', backupId: 'backup', revision: 1 });
+    },
     action: async (ref, args) => {
+      transferredBytes += Buffer.byteLength(JSON.stringify(args));
       assert.equal(getFunctionName(ref), 'projectWorkIndexActions:ensure');
+      assert.equal(args.rebuild, true);
       assert.equal(args.continuation, calls > 0);
       calls++;
-      return calls < 3
-        ? {
-            pending: true,
-            progress: JSON.stringify({
-              phase: 'index',
-              buildPhase: 'parents',
-              done: calls * 50,
-              total: 2495,
-              step: calls,
-            }),
-          }
-        : 'generation';
+      const result =
+        calls < 3
+          ? {
+              pending: true,
+              progress: JSON.stringify({
+                phase: 'index',
+                buildPhase: 'parents',
+                done: calls * 50,
+                total: 2495,
+                step: calls,
+              }),
+            }
+          : 'generation';
+      transferredBytes += Buffer.byteLength(JSON.stringify(result));
+      if (result.pending) progress.index(result.progress);
+      return result;
     },
   };
-  assert.equal(await ensureWorkIndex(client, 'project', progress.index), 'generation');
+  assert.equal(
+    (await dispatchHostedWork(client, 'project', { action: 'rebuild-index' })).generationId,
+    'generation',
+  );
   assert.equal(calls, 3);
+  assert(transferredBytes < 1024);
   assert.equal(events.at(-1).objectsDone, 100);
   assert.equal(events.at(-1).objectsTotal, 2495);
 });

@@ -144,7 +144,7 @@ test('indexed source reviews read only selected State/file pins, preserving byte
     operationId: crypto.randomUUID(),
   });
   const indexActions = await import(moduleUrl('../convex/projectWorkIndexActions.ts'));
-  const generationId = await indexActions.ensure._handler(s.ctx, { projectId: 'project' });
+  const generationId = await indexActions.ensure._handler(s.ctx, { rebuild: true, projectId: 'project' });
   const query = s.ctx.runQuery,
     seen = [];
   s.ctx.runQuery = (ref, args) => {

@@ -83,6 +83,7 @@ for (const mode of ['native-owner', 'server'])
   test(`hosted ${mode} migration resumes pages and leaves source/receipts exact`, async t => {
     const s = await fixture(t, mode),
       before = structuredClone(s.tables.projectBackups.get(s.backupId));
+    const selectedGeneration = s.tables.hostedProjects.get(s.projectId).work.generationId;
     const first = JSON.parse(await s.step());
     assert.equal(first.complete, false);
     assert.equal(s.tables.hostedProjects.get(s.projectId).work.recordDetails, undefined);
@@ -91,6 +92,11 @@ for (const mode of ['native-owner', 'server'])
       result = JSON.parse(await s.step());
     } while (!result.complete);
     assert.equal(JSON.parse(await s.step()).root.sha256, result.root.sha256);
+    assert.equal(
+      s.tables.hostedProjects.get(s.projectId).work.generationId,
+      selectedGeneration,
+      'detail storage changes keep the logically identical index',
+    );
     const snapshot = await workLoad.load(s.ctx, s.projectId, 'owner');
     assert.equal(snapshot.data.schema, 24);
     const originalSnapshot = await workLoad.source(s.ctx, s.backupId, 'owner');
@@ -119,7 +125,7 @@ for (const mode of ['native-owner', 'server'])
 test('hosted publication catches Work/authority races and rechecks current owner on replay', async t => {
   const s = await fixture(t);
   await s.step();
-  s.tables.hostedProjects.get(s.projectId).work.revision++;
+  [...s.tables.projectWorkHeads.values()][0].revision++;
   await assert.rejects(s.step(), error => error.data?.code === 'WORK_STALE' || error.code === 'WORK_STALE');
   assert.equal(s.tables.hostedProjects.get(s.projectId).work.recordDetails, undefined);
   s.caller('outsider');

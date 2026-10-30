@@ -28,6 +28,11 @@ test('128 MB server-held record index stays below the Node action memory limit',
   const before = await run('before'),
     after = await run('after');
   assert(after.workBytes >= 126445313);
+  // Only explicit operator preparation may pay this full-history budget.
+  assert(after.calls <= 40, JSON.stringify(after));
+  assert(after.queryCalls + after.mutationCalls <= 2200, JSON.stringify(after));
+  assert(after.readBytes <= after.workBytes * 2, JSON.stringify(after));
+  assert(after.dbWriteBytes <= after.workBytes * 2, JSON.stringify(after));
   assert(after.maxRSS < 512 * 1024 * 1024, JSON.stringify(after));
   assert(after.maxStepBytes < 600000, JSON.stringify(after));
   assert(after.maxStepMs > 0 && after.maxStepMs < 30000, JSON.stringify(after));

@@ -56,12 +56,15 @@ test('legacy index budget yields only after a committed batch and resumes the ne
     },
   };
   for (let i = 1; i <= 3; i++) {
-    const result = await ensure._handler(ctx, { projectId: 'project', continuation: true });
+    const result = await ensure._handler(ctx, { rebuild: true, projectId: 'project', continuation: true });
     assert.equal(result.pending, true);
     assert.equal(JSON.parse(result.progress).done, i);
     assert.equal(committed.length, i);
   }
-  assert.equal(await ensure._handler(ctx, { projectId: 'project', continuation: true }), 'generation');
+  assert.equal(
+    await ensure._handler(ctx, { rebuild: true, projectId: 'project', continuation: true }),
+    'generation',
+  );
   assert.deepEqual(
     committed.map(e => e.key),
     ['0', '1', '2'],

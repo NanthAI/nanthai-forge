@@ -19,6 +19,7 @@ import { moduleUrl } from './convex-module.mjs';
 import { state } from './hosted-fixture.mjs';
 import { readHosted } from './hosted-read.mjs';
 const actions = await import(moduleUrl('../convex/projectWorkActions.ts'));
+const indexActions = await import(moduleUrl('../convex/projectWorkIndexActions.ts'));
 const work = await import(moduleUrl('../convex/projectWork.ts'));
 const backups = await import(moduleUrl('../convex/projectBackups.ts'));
 const { previewWorkArchive } = await import(moduleUrl('../web/src/work-archive.ts'));
@@ -130,6 +131,7 @@ test('hosted Intent authority reconciles original operations, retains concurrent
       initialRevision = preview.revision;
     const start = { projectId: s.projectId, backupId: s.backupId, operationId: randomUUID() };
     await actions.initialize._handler(s.ctx, start);
+    await indexActions.ensure._handler(s.ctx, { projectId: s.projectId, rebuild: true });
     await actions.initialize._handler(s.ctx, start);
     await assert.rejects(
       actions.initialize._handler(s.ctx, { ...start, operationId: randomUUID() }),

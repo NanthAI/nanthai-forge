@@ -1,10 +1,8 @@
 import { OwnerDecisionsRoute } from './decisions/OwnerDecisionsRoute';
-import { continueLongAction } from '../../src/long-action';
 import { ErrorToast } from './ui/Toast';
 import { routeUrlState } from './shell/location';
 import { reconcileBefore } from './pending-write';
 // SPDX-License-Identifier: Apache-2.0
-import { ConvexError } from 'convex/values';
 import { HostedReview } from './review/HostedReview';
 import { useWorkRecord } from './hosted-work-index';
 import type { ComponentProps } from 'react';
@@ -323,22 +321,7 @@ export default function HostedWork({
           operationId: original.operationId,
           command: JSON.stringify(original.command),
         };
-        try {
-          await client.mutation(api.projectWorkCommand.command, args);
-        } catch (error) {
-          if (
-            !(error instanceof ConvexError) ||
-            (error.data as { code?: string }).code !== 'PROJECT_WORK_INDEX_MISSING'
-          )
-            throw error;
-          await continueLongAction('Work index', String(projectId), continuation =>
-            client.action(api.projectWorkIndexActions.ensure, {
-              projectId,
-              ...(continuation ? { continuation } : {}),
-            }),
-          );
-          await client.mutation(api.projectWorkCommand.command, args);
-        }
+        await client.mutation(api.projectWorkCommand.command, args);
       }
       setPending(null);
       if (original.command.action === 'intent') {

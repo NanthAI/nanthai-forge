@@ -260,7 +260,7 @@ for (const outcome of ['failed', 'unknown'])
             )
           )
             return s.ctx.runAction(ref, args);
-          assert.ok(['projectWorkActions:initialize', 'projectWorkIndexActions:ensure'].includes(name));
+          assert.equal(name, 'projectWorkActions:initialize');
           assert.equal((await readRecoveryInventory(f.root)).latestCompleteOffMachine.kind, 'seed');
         },
       },

@@ -1,4 +1,4 @@
-import { ensureWorkIndex } from './work-index-client.js';
+import { rebuildWorkIndex } from './work-index-client.js';
 // SPDX-License-Identifier: Apache-2.0
 import { hostedActionError } from './hosted-action-error.js';
 import { SourceAuthorityStaleError } from './hosted-source-authority.js';
@@ -12,6 +12,7 @@ export const hostedWorkRequestSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('policy') }).strict(),
   policyWriteSchema,
   z.object({ action: z.literal('workspace') }).strict(),
+  z.object({ action: z.literal('rebuild-index') }).strict(),
   z.object({ action: z.literal('migrate-record-details'), operationId: z.uuid() }).strict(),
   z
     .object({
@@ -61,15 +62,11 @@ type Detail = {
 const cursorPrefix = 'forge-hosted-work-v1:';
 const reference = (name: string) => makeFunctionReference<'query'>(`projectWorkIndex:${name}`);
 async function workspace(client: HostedWorkTransport, projectId: string): Promise<Workspace> {
-  let value = await client.query(reference('workspace'), { projectId });
-  if (value === null) {
-    await ensureWorkIndex(client, projectId);
-    value = await client.query(reference('workspace'), { projectId });
-  }
+  const value = await client.query(reference('workspace'), { projectId });
   invariant(
     typeof value === 'string',
-    'WORK_STALE',
-    'Hosted source changed while preparing its Work index. Retry this read.',
+    'PROJECT_WORK_INDEX_MISSING',
+    'The Work index is unavailable. Run hosted-work with action rebuild-index explicitly.',
   );
   return JSON.parse(value) as Workspace;
 }
@@ -136,10 +133,14 @@ export async function dispatchHostedWork(
   invariant(
     parsed.success,
     'BAD_ARGUMENT',
-    'Use workspace, records, detail, policy, set-policy or migrate-record-details.',
+    'Use workspace, records, detail, policy, set-policy, rebuild-index or migrate-record-details.',
   );
   try {
     const request = parsed.data;
+    if (request.action === 'rebuild-index') {
+      await rebuildWorkIndex(client, projectId);
+      return await workspace(client, projectId);
+    }
     if (request.action === 'migrate-record-details') {
       let result: { complete: boolean };
       do {

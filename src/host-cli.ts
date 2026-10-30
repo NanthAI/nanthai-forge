@@ -13,7 +13,6 @@ import type { ExchangeTransport } from './native-exchange.js';
 import { prepareHostedSeed, seedHostedProject } from './hosted-seed.js';
 import { readHostState, updateHostState, type HostState } from './host-binding.js';
 import { ForgeError, invariant } from './errors.js';
-import { continueLongAction } from './long-action.js';
 export const HOST_HELP = `nforge host ROOT [--deployment URL] [--name NAME] [--visibility private|public] [--new] [--json] [--wait]
 nforge host ROOT --delete-project PROJECT_ID --confirm SLUG [--deployment URL] [--allow-bound-project] [--json]
 nforge host ROOT --abandon-pending OPERATION_UUID --confirm OPERATION_UUID
@@ -183,17 +182,6 @@ export async function hostProject(
       backupId: pushed.backupId,
       operationId: pending.initializeId,
     });
-    progress.phase('building Work index');
-    await continueLongAction(
-      'Building Work index',
-      pending.initializeId,
-      continuation =>
-        client.action(makeFunctionReference<'action'>('projectWorkIndexActions:ensure'), {
-          projectId: created.projectId,
-          continuation,
-        }),
-      progress.index,
-    );
     const binding = {
       projectId: created.projectId,
       deployment,

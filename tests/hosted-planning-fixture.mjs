@@ -14,7 +14,7 @@ export const actions = await import(moduleUrl('../convex/projectWorkActions.ts')
 export const work = await import(moduleUrl('../convex/projectWork.ts'));
 const backups = await import(moduleUrl('../convex/projectBackups.ts'));
 const { previewWorkArchive } = await import(moduleUrl('../web/src/work-archive.ts'));
-export async function setup(t, native = true, prepare) {
+export async function setup(t, native = true, prepare, prepareIndex = true) {
   const directory = fixture(t),
     root = join(directory, 'source');
   mkdirSync(root);
@@ -70,6 +70,10 @@ export async function setup(t, native = true, prepare) {
   });
   s.files.set('source', { blob: new Blob([bytes], { type: 'application/gzip' }) });
   await actions.initialize._handler(s.ctx, { projectId, backupId, operationId: randomUUID() });
+  if (prepareIndex) {
+    const { ensure } = await import(moduleUrl('../convex/projectWorkIndexActions.ts'));
+    await ensure._handler(s.ctx, { projectId, rebuild: true });
+  }
   const read = async () => JSON.parse(await readHosted(s.ctx, { projectId }));
   const send = async (command, revision) =>
     actions.command._handler(s.ctx, {

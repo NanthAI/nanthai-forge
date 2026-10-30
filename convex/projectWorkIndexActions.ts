@@ -10,31 +10,21 @@ import { caller, load } from './projectWorkActions';
 import { digest } from '../src/hash';
 import { workBytes } from '../src/work-metadata';
 import { report } from './errors';
-import { ForgeError } from '../src/errors';
+import { ForgeError, invariant } from '../src/errors';
 import { longActionExpired } from '../src/long-action';
-import { indexReadContext, indexTransient, retryCode } from './projectWorkIndexRetry';
+import { indexReadContext, indexTransient } from './projectWorkIndexRetry';
 import { buildProgress } from './projectWorkIndexBuildProgress';
 import { resume } from './projectWorkIndexBuildTypes';
 async function ensureIndex(
   ctx: ActionCtx,
   projectId: Id<'hostedProjects'>,
   owner: string,
-  resumable = true,
 ): Promise<Id<'projectWorkGenerations'> | { pending: true; progress: string }> {
   ctx = indexReadContext(ctx);
   const paged = await buildRecordIndex(ctx, { projectId, owner });
-  if (paged) {
-    if (typeof paged === 'string' || resumable) return paged;
-    let result = paged as Id<'projectWorkGenerations'> | { pending: true; progress: string };
-    while (typeof result !== 'string') {
-      if (JSON.parse(result.progress).retryable)
-        throw new ConvexError({ code: retryCode, message: 'Resume the saved index build cursor.' });
-      result = (await buildRecordIndex(ctx, { projectId, owner }))!;
-    }
-    return result;
-  }
+  if (paged) return paged;
   const started = Date.now();
-  const expired = () => resumable && longActionExpired(started);
+  const expired = () => longActionExpired(started);
   while (true) {
     const existing: Doc<'projectWorkGenerations'> | null = await ctx.runQuery(
       internal.projectWorkIndexStore.current,
@@ -119,29 +109,52 @@ export const ensureInternal = internalAction({
   args: { projectId: v.id('hostedProjects'), owner: v.string() },
   returns: v.id('projectWorkGenerations'),
   handler: async (ctx, input): Promise<Id<'projectWorkGenerations'>> => {
-    const result = await ensureIndex(ctx, input.projectId, input.owner, false);
-    if (typeof result === 'string') return result;
-    // Internal commands retain their existing receipt-only contract. Their
-    // caller cannot consume an index continuation as a completed command.
-    throw new ForgeError('INTERNAL_ERROR', 'Internal index preparation returned an unexpected continuation.');
+    const generation: Doc<'projectWorkGenerations'> | null = await ctx.runQuery(
+      internal.projectWorkIndexStore.current,
+      input,
+    );
+    invariant(
+      generation,
+      'PROJECT_WORK_INDEX_MISSING',
+      'The Work index is unavailable. Run hosted-work with action rebuild-index explicitly.',
+    );
+    return generation._id;
   },
 });
 export const ensure = action({
-  args: { projectId: v.id('hostedProjects'), continuation: v.optional(v.boolean()) },
+  args: {
+    projectId: v.id('hostedProjects'),
+    continuation: v.optional(v.boolean()),
+    rebuild: v.optional(v.literal(true)),
+  },
   returns: v.union(
     v.id('projectWorkGenerations'),
     v.object({ pending: v.literal(true), progress: v.string() }),
   ),
   handler: async (
     ctx,
-    { projectId },
+    { projectId, rebuild },
   ): Promise<Id<'projectWorkGenerations'> | { pending: true; progress: string }> => {
     let owner: string | undefined;
     try {
       owner = await caller(ctx);
+      // Old clients called this action from reads and command retries. They may
+      // observe a ready index, but only an explicit operator request can build it.
+      if (!rebuild) {
+        const generation: Doc<'projectWorkGenerations'> | null = await ctx.runQuery(
+          internal.projectWorkIndexStore.current,
+          { projectId, owner },
+        );
+        invariant(
+          generation,
+          'PROJECT_WORK_INDEX_MISSING',
+          'The Work index is unavailable. Run hosted-work with action rebuild-index explicitly.',
+        );
+        return generation._id;
+      }
       return await ensureIndex(ctx, projectId, owner);
     } catch (error) {
-      if (owner && indexTransient(error)) {
+      if (rebuild && owner && indexTransient(error)) {
         // Read the durable position afresh, including after an unknown CAS reply.
         let generation: Doc<'projectWorkGenerations'> | null = null;
         try {

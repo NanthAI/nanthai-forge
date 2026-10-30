@@ -14,6 +14,8 @@ import { workSchema } from '../dist/work-types.js';
 import { applyHostedEvent, metadataRequest } from '../dist/work-metadata.js';
 import { fixture, checkpoint, preparedCheckpoint, modules } from './project-exchange-fixture.mjs';
 import { readHosted } from './hosted-read.mjs';
+import { moduleUrl } from './convex-module.mjs';
+const indexActions = await import(moduleUrl('../convex/projectWorkIndexActions.ts'));
 
 function prepare(store) {
   const data = store.load(),
@@ -110,6 +112,7 @@ test('hosted line comments validate current source, preserve one retry and rejec
     backupId,
     operationId: randomUUID(),
   });
+  await indexActions.ensure._handler(s.ctx, { projectId: 'project', rebuild: true });
   const read = async () => JSON.parse(await readHosted(s.ctx, { projectId: 'project' })),
     before = await read(),
     operationId = randomUUID(),

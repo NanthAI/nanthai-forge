@@ -72,7 +72,7 @@ test('hosted log pages read only retained run bytes and recheck current read aut
     backupId,
     operationId: randomUUID(),
   });
-  const generationId = await index.ensure._handler(s.ctx, { projectId: 'project' });
+  const generationId = await index.ensure._handler(s.ctx, { rebuild: true, projectId: 'project' });
   const args = {
     projectId: 'project',
     generationId,

@@ -52,7 +52,7 @@ async function fixture(t, slow = false) {
       })
     ).result;
   });
-  const generation = await index.ensure._handler(s.ctx, { projectId: s.projectId });
+  const generation = await index.ensure._handler(s.ctx, { rebuild: true, projectId: s.projectId });
   const runnerId = 'local-runner',
     scope = { projectId: s.projectId, runnerId };
   await requests.connect._handler(s.ctx, { ...scope, name: 'Fixture computer', listening: true });
@@ -217,7 +217,7 @@ test('format2 indexes rebuild with check choices without changing source or Work
   const s = await fixture(t),
     before = await s.read();
   s.tables.projectWorkGenerations.get(s.generation).format = 2;
-  const next = await index.ensure._handler(s.ctx, { projectId: s.projectId });
+  const next = await index.ensure._handler(s.ctx, { rebuild: true, projectId: s.projectId });
   assert.notEqual(next, s.generation);
   assert.equal(s.tables.projectWorkGenerations.get(next).format, HOSTED_WORK_INDEX_FORMAT);
   const row = [...s.tables.projectWorkRecords.values()].find(

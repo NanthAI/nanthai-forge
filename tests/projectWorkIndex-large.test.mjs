@@ -137,7 +137,7 @@ test('large record index resumes after a committed step loses its reply without 
       assert.equal(args.paginationOpts.numItems, 50, 'journal replay reads one bounded ordered page');
     return query(ref, args);
   };
-  await assert.rejects(actions.ensure._handler(f.s.ctx, { projectId: 'project' }));
+  await assert.rejects(actions.ensure._handler(f.s.ctx, { rebuild: true, projectId: 'project' }));
   const stage = [...f.s.tables.projectWorkGenerations.values()][0];
   const savedStep = stage.nextBatch;
   assert(savedStep >= 3);
@@ -154,7 +154,7 @@ test('large record index resumes after a committed step loses its reply without 
   const start = performance.now();
   const id = await continueLongAction('Synthetic index', randomUUID(), async continuation => {
     calls++;
-    return actions.ensure._handler(f.s.ctx, { projectId: 'project', continuation });
+    return actions.ensure._handler(f.s.ctx, { rebuild: true, projectId: 'project', continuation });
   });
   const workspace = JSON.parse(await index.workspace._handler(f.s.ctx, { projectId: 'project' }));
   assert.equal(id, stage._id);
@@ -186,11 +186,11 @@ test('large record index resumes after a committed step loses its reply without 
   );
   assert(maxBytes < 600000, `RPC page was ${maxBytes} bytes`);
   const before = steps;
-  assert.equal(await actions.ensure._handler(f.s.ctx, { projectId: 'project' }), id);
+  assert.equal(await actions.ensure._handler(f.s.ctx, { rebuild: true, projectId: 'project' }), id);
   assert.equal(steps, before, 'ready retry performs no rebuild writes');
   f.s.caller('stranger');
   await assert.rejects(
-    actions.ensure._handler(f.s.ctx, { projectId: 'project' }),
+    actions.ensure._handler(f.s.ctx, { rebuild: true, projectId: 'project' }),
     e => e.data?.code === 'PROJECT_UNAVAILABLE',
   );
   f.s.caller('owner');
@@ -236,7 +236,7 @@ test('record rebuild replays journal events with original identities and timesta
   const f = await setup(t);
   const ensure = () =>
     continueLongAction('Synthetic index', randomUUID(), continuation =>
-      actions.ensure._handler(f.s.ctx, { projectId: 'project', continuation }),
+      actions.ensure._handler(f.s.ctx, { rebuild: true, projectId: 'project', continuation }),
     );
   const first = await ensure();
   const operationId = randomUUID();
@@ -285,7 +285,7 @@ test('a moving snapshot cannot publish an incomplete record generation', async t
     return result;
   };
   await assert.rejects(
-    actions.ensure._handler(f.s.ctx, { projectId: 'project' }),
+    actions.ensure._handler(f.s.ctx, { rebuild: true, projectId: 'project' }),
     e => e.data?.code === 'WORK_STALE',
   );
   assert.equal(f.s.tables.hostedProjects.get('project').work.generationId, undefined);
@@ -295,7 +295,7 @@ test('a moving snapshot cannot publish an incomplete record generation', async t
 test('paged View provenance derives changed source and saved Lane history on the server', async t => {
   const f = await setup(t, 3 * 1024 * 1024, true);
   await continueLongAction('Synthetic index', randomUUID(), continuation =>
-    actions.ensure._handler(f.s.ctx, { projectId: 'project', continuation }),
+    actions.ensure._handler(f.s.ctx, { rebuild: true, projectId: 'project', continuation }),
   );
   const detail = JSON.parse(
     (await index.detail._handler(f.s.ctx, { projectId: 'project', collection: 'viewDetails', id: f.view.id }))

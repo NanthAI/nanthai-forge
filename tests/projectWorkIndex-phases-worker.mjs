@@ -45,7 +45,7 @@ if (['action', 'state-action'].includes(process.argv[2])) {
   const result =
     process.argv[2] === 'state-action'
       ? await states.batch._handler(ctx, JSON.parse(process.argv[3]))
-      : await ensure._handler(ctx, { projectId: 'project' });
+      : await ensure._handler(ctx, { rebuild: true, projectId: 'project' });
   console.log(
     `ACTION_RESULT ${JSON.stringify({ pending: result.pending, selectedStates: process.argv[2] === 'state-action' ? new Set(JSON.parse(process.argv[3]).requests.flatMap(r => [r.before, r.after, ...r.pins].map(p => p.sha256))).size : undefined, baseline, memory: process.memoryUsage(), maxRssBytes: process.resourceUsage().maxRSS * 1024, elapsedMs: performance.now() - started, maxSourceWindowBytes: await rpc('window') })}`,
   );

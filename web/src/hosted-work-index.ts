@@ -1,4 +1,3 @@
-import { continueLongAction } from '../../src/long-action';
 import { useReadRetry } from './ui/read-retry';
 // SPDX-License-Identifier: Apache-2.0
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
@@ -36,11 +35,6 @@ export const workIndex = {
     Project & { generationId?: string; collection: string; id: string },
     Detail
   >('projectWorkIndex:detail'),
-  ensure: makeFunctionReference<
-    'action',
-    Project & { continuation?: boolean },
-    string | { pending: true; progress?: string }
-  >('projectWorkIndexActions:ensure'),
   checksum: makeFunctionReference<'action', Project, string>('projectWorkIndexActions:checksum'),
 };
 export type WorkIndexWorkspace = {
@@ -77,30 +71,15 @@ export function useWorkIndex(
   projectId: Id<'hostedProjects'>,
   source?: { backupId: Id<'projectBackups'>; revision: number },
 ) {
-  const readAttempt = useReadRetry();
-  const client = useConvex(),
-    value = useQuery(workIndex.workspace, { projectId });
+  const value = useQuery(workIndex.workspace, { projectId });
   const workspace = useMemo(() => (value ? (JSON.parse(value) as WorkIndexWorkspace) : null), [value]);
   const current = workspace && (!source || workspace.backupId === source.backupId) ? workspace : null;
-  const [error, setError] = useState('');
   const retained = useRef<{ projectId: string; workspace: WorkIndexWorkspace } | null>(null);
   if (current) retained.current = { projectId, workspace: current };
-  useEffect(() => {
-    if (!source || current) return;
-    let active = true;
-    void continueLongAction('Work index', String(projectId), continuation =>
-      client.action(workIndex.ensure, { projectId, ...(continuation ? { continuation } : {}) }),
-    )
-      .then(() => {
-        if (active) setError('');
-      })
-      .catch(error => {
-        if (active) setError(hostedError(error));
-      });
-    return () => {
-      active = false;
-    };
-  }, [client, projectId, source?.backupId, source?.revision, current?.generationId, readAttempt]);
+  const error =
+    source && value === null
+      ? 'The Work index is unavailable. Run hosted-work with action rebuild-index explicitly.'
+      : '';
   // Keep mounted editor state while a new source generation is being prepared.
   // Any command still carries its observed revision and existing server CAS.
   return {

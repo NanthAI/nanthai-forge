@@ -110,16 +110,16 @@ test('permanent summary fault retains progress, fails after five resumes, and na
   assert.equal(f.s.scheduled.length, 0);
 });
 
-test('receipt-only internal builds stop on exhausted reads rather than hot-looping resumes', async () => {
+test('internal compatibility reads never start a full build when the index is absent', async () => {
   const { ensureInternal } = await import(moduleUrl('../convex/projectWorkIndexActions.ts'));
   const f = progressFixture(0.02, undefined, (ctx, { projectId }) =>
     ensureInternal._handler(ctx, { projectId, owner: 'owner' }),
   );
   const fault = injectSummary(f, new Error('ECONNRESET'));
-  await assert.rejects(f.drive(), error => error.data?.code === 'WORK_INDEX_RETRY');
-  assert.equal(fault.calls, 3);
-  assert.equal(generation(f).status, 'building');
-  assert.equal(JSON.parse(generation(f).ensureRetry).resumes, 0);
+  await assert.rejects(f.drive(), error => error.code === 'PROJECT_WORK_INDEX_MISSING');
+  assert.equal(fault.calls, 0);
+  assert.equal(f.s.tables.projectWorkGenerations.size, 0);
+  assert.equal(f.s.scheduled.length, 0);
 });
 
 test('failure operations reconcile and a moved cursor cannot be failed by an old reader', async () => {

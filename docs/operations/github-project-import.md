@@ -91,14 +91,28 @@ bounded-range reads, existing shared-reference deletion semantics, and atomic
 publication through the same hosted-main receipt. It must preserve operation IDs,
 source modes, private-repository authorization and lost-reply reconciliation.
 
-Hosted Work index reads retry transient transport/storage faults up to three total
+Full Work index preparation is an explicit, rare operator action:
+
+```sh
+nforge hosted-work DEPLOYMENT PROJECT_ID '{"action":"rebuild-index"}'
+```
+
+Normal web/agent reads, commands, briefings and hosting never start or resume a
+full rebuild. Missing or incompatible indexes return `PROJECT_WORK_INDEX_MISSING`
+(or a null workspace query) with the explicit repair command. Older clients calling
+`projectWorkIndexActions:ensure` without `rebuild:true` can read a ready generation
+but cannot rebuild history. Ordinary commands update selected records and the
+Work head incrementally; accepted main moves and detail-storage migration retain
+the ready index. Full preparation consumes saved continuations and reports progress.
+
+Explicit Work index preparation retries transient transport/storage faults up to three total
 attempts, with short backoff inside the same action; application, validation and
 access errors are not retried. Exhausted reads return `pending` at the committed
 cursor. Resume continues that generation, retaining its View and changed-file
 counters; five consecutive unsuccessful resumes without cursor movement mark it
 `failed` with `WORK_INDEX_READ_FAILED` and the failing storage object pin when
 available. A failed generation returns that error on subsequent resumes. Advancing
-the cursor resets the failure streak. The host CLI shows committed Views and
+the cursor resets the failure streak. The explicit rebuild command shows committed Views and
 changed files, files/minute and a resume-relative ETA for discovered file output;
 file totals are labelled discovered until all Views have been projected. Legacy
 in-flight cursors remain resumable: missing counters start from committed index

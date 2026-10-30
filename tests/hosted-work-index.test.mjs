@@ -120,7 +120,7 @@ test('indexed hosted commands avoid archive/history replay, preserve reducer res
 });
 
 test('generation publication is atomic, resumable and source-pinned; access loss and cross-project lookups fail', async t => {
-  const s = await setup(t),
+  const s = await setup(t, true, undefined, false),
     snapshot = await s.read(),
     metadata = JSON.stringify({ schema: 1, counts: {} });
   const request = {
@@ -167,7 +167,7 @@ test('generation publication is atomic, resumable and source-pinned; access loss
   await store.retire._handler(s.ctx, { generationId: first._id });
   assert.equal(s.tables.projectWorkRecords.size, 0);
   project.work.revision--;
-  const generationId = await indexActions.ensure._handler(s.ctx, { projectId: s.projectId });
+  const generationId = await indexActions.ensure._handler(s.ctx, { rebuild: true, projectId: s.projectId });
   s.caller('stranger');
   await assert.rejects(index.workspace._handler(s.ctx, { projectId: s.projectId }));
   await assert.rejects(
@@ -250,7 +250,7 @@ test('a warm note pages selected attributes with bounded overhead for 10 or 4000
         data.revision++;
         local.save(data);
       });
-    await indexActions.ensure._handler(s.ctx, { projectId: s.projectId });
+    await indexActions.ensure._handler(s.ctx, { rebuild: true, projectId: s.projectId });
     const beforePage = await page(s, 'lanes'),
       workspace = JSON.parse(await index.workspace._handler(s.ctx, { projectId: s.projectId }));
     const header = JSON.parse(
@@ -339,7 +339,7 @@ test('a warm note pages selected attributes with bounded overhead for 10 or 4000
 
 test('scoped page wire validator includes provider pagination split metadata', async t => {
   const s = await setup(t);
-  await indexActions.ensure._handler(s.ctx, { projectId: s.projectId });
+  await indexActions.ensure._handler(s.ctx, { rebuild: true, projectId: s.projectId });
   const result = await page(s, 'intents');
   assert.equal(result.pageStatus, null);
   assert.equal(result.splitCursor, null);
@@ -374,7 +374,7 @@ test('oversized Intent headers keep mutation-critical history counters while imp
       data.revision++;
       local.save(data);
     });
-  const generationId = await indexActions.ensure._handler(s.ctx, { projectId: s.projectId });
+  const generationId = await indexActions.ensure._handler(s.ctx, { rebuild: true, projectId: s.projectId });
   const initial = JSON.parse(
     (await index.detail._handler(s.ctx, { projectId: s.projectId, collection: 'intents', id: intentId }))
       .value,
@@ -401,14 +401,21 @@ test('oversized Intent headers keep mutation-critical history counters while imp
   assert.ok(s.tables.projectWorkGenerations.has(generationId));
 });
 
-test('a prior projection format rebuilds transparently without changing source, Work revision or journal', async t => {
+test('an explicit operator request rebuilds a prior projection format without changing source, Work revision or journal', async t => {
   const s = await setup(t),
-    first = await indexActions.ensure._handler(s.ctx, { projectId: s.projectId });
+    first = await indexActions.ensure._handler(s.ctx, { rebuild: true, projectId: s.projectId });
   s.tables.projectWorkGenerations.get(first).format = 3;
   const before = structuredClone(s.tables.hostedProjects.get(s.projectId)),
     events = [...s.tables.projectWorkEvents];
   assert.equal(await index.workspace._handler(s.ctx, { projectId: s.projectId }), null);
-  const second = await indexActions.ensure._handler(s.ctx, { projectId: s.projectId });
+  const reads = s.reads();
+  await assert.rejects(
+    indexActions.ensure._handler(s.ctx, { projectId: s.projectId }),
+    error => error.data?.code === 'PROJECT_WORK_INDEX_MISSING',
+  );
+  assert.equal(s.reads(), reads, 'legacy format mismatch never auto-downloads history');
+  assert.equal(s.tables.projectWorkGenerations.size, 1);
+  const second = await indexActions.ensure._handler(s.ctx, { rebuild: true, projectId: s.projectId });
   assert.notEqual(second, first);
   assert.equal(s.tables.projectWorkGenerations.get(second).format, HOSTED_WORK_INDEX_FORMAT);
   const after = s.tables.hostedProjects.get(s.projectId);
@@ -528,7 +535,7 @@ test('large GitHub history retains a compact publication summary and full mappin
 
 test('summary paging can start newest-first while preserving the default positional API', async t => {
   const s = await setup(t);
-  await indexActions.ensure._handler(s.ctx, { projectId: s.projectId });
+  await indexActions.ensure._handler(s.ctx, { rebuild: true, projectId: s.projectId });
   const workspace = JSON.parse(await index.workspace._handler(s.ctx, { projectId: s.projectId }));
   const generation = s.tables.projectWorkGenerations.get(workspace.generationId);
   const partition = generation.recordsGenerationId ?? generation._id;
@@ -572,7 +579,7 @@ test('summary paging can start newest-first while preserving the default positio
 
 test('summary pages resolve a repeated actor once per request and keep fresh names and authority', async t => {
   const s = await setup(t);
-  await indexActions.ensure._handler(s.ctx, { projectId: s.projectId });
+  await indexActions.ensure._handler(s.ctx, { rebuild: true, projectId: s.projectId });
   const workspace = JSON.parse(await index.workspace._handler(s.ctx, { projectId: s.projectId }));
   const generation = s.tables.projectWorkGenerations.get(workspace.generationId);
   const partition = generation.recordsGenerationId ?? generation._id;

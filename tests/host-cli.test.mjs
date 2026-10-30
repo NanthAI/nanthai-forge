@@ -22,6 +22,7 @@ import { hostProject, hostCli } from '../dist/host-cli.js';
 import { readHostState, updateHostState, requireHostedBinding } from '../dist/host-binding.js';
 import { ConvexExchange } from '../dist/exchange-client.js';
 import { HOSTED_WORK_INDEX_FORMAT } from '../dist/work-hosted-summary.js';
+const indexActions = await import(moduleUrl('../convex/projectWorkIndexActions.ts'));
 import { immutableDirectorySync } from './helpers/immutable-directory.mjs';
 const { default: schema } = await import(moduleUrl('../convex/schema.ts'));
 const hosting = await import(moduleUrl('../convex/projectHosting.ts'));
@@ -178,7 +179,7 @@ test('host creates a brand-new empty native owner through schema-validated Conve
   assert.equal(f.s.tables.hostedProjects.size, 1);
 });
 
-test('host seeds native source/Work via missing objects, initializes current index, saves owner binding and prevents duplicates', async t => {
+test('host seeds native source/Work and saves owner binding without automatically rebuilding the index', async t => {
   const f = setup(t);
   const result = await hostProject(
     f.root,
@@ -192,6 +193,9 @@ test('host seeds native source/Work via missing objects, initializes current ind
   assert.equal(project.visibility, 'private');
   assert.equal(project.autonomyPolicy.preset, 'supervised');
   assert.equal(project.work.backupId, result.backupId);
+  assert.equal(project.work.generationId, undefined);
+  assert.equal(f.s.tables.projectWorkGenerations.size, 0);
+  await indexActions.ensure._handler(f.s.ctx, { projectId: result.projectId, rebuild: true });
   const generation = f.s.tables.projectWorkGenerations.get(project.work.generationId);
   assert.equal(generation.format, HOSTED_WORK_INDEX_FORMAT);
   assert.equal(
@@ -300,26 +304,27 @@ test('interrupted upload resumes missing objects against original snapshot even 
   assert.equal(f.s.tables.projectBackups.get(result.backupId).preview.revision, pending.revision);
 });
 
-test('initialization/index interruption resumes, public reads do not grant writes, and changed requests fail', async t => {
+test('initialization interruption resumes, public reads do not grant writes, and changed requests fail', async t => {
   const f = setup(t),
     action = f.dependencies.client.action;
   let interrupted = true;
   f.dependencies.client.action = async (ref, args) => {
     const result = await action(ref, args);
-    if (getFunctionName(ref) === 'projectWorkIndexActions:ensure' && interrupted) {
+    if (getFunctionName(ref) === 'projectWorkActions:initialize' && interrupted) {
       interrupted = false;
-      throw new Error('lost index reply');
+      throw new Error('lost initialization reply');
     }
     return result;
   };
   await assert.rejects(
     hostProject(f.root, { deployment: 'https://fixture.convex.cloud', visibility: 'public' }, f.dependencies),
-    /lost index/,
+    /lost initialization/,
   );
   await assert.rejects(hostProject(f.root, { visibility: 'private' }, f.dependencies), {
     code: 'WORK_OPERATION_CHANGED',
   });
   const result = await hostProject(f.root, {}, f.dependencies);
+  await indexActions.ensure._handler(f.s.ctx, { projectId: result.projectId, rebuild: true });
   f.identity({ subject: 'reader' });
   const workspace = JSON.parse(await workIndex.workspace._handler(f.s.ctx, { projectId: result.projectId }));
   assert.equal(workspace.capabilities.intent, false);
@@ -443,71 +448,26 @@ test('interrupted history stays unselected until the complete seed validates', a
   assert.equal(readHostState(f.store).hosting, undefined);
   assert.equal(result.operationId, pending.operationId);
   assert.equal(new Set(f.uploaded).size, f.uploaded.length);
-  for (const phase of [
-    'seeding source and records',
-    'validating seeded main',
-    'building Work index',
-    'complete',
-  ])
+  for (const phase of ['seeding source and records', 'validating seeded main', 'complete'])
     assert(
       events.some(event => event.phase === phase),
       phase,
     );
 });
 
-test('host follows durable index continuations before binding and preserves server error diagnostics', async t => {
+test('hosting never invokes full index preparation, including a lost initialization reply', async t => {
   const f = setup(t),
     action = f.dependencies.client.action;
-  let calls = 0,
-    fail = true;
+  let calls = 0;
   f.dependencies.client.action = async (ref, args) => {
-    if (getFunctionName(ref) === 'projectWorkIndexActions:ensure') {
-      assert.equal(readHostState(f.store).binding, undefined);
-      calls++;
-      if (calls <= 2)
-        return {
-          pending: true,
-          progress: JSON.stringify({
-            phase: 'index',
-            buildPhase: 'summaries',
-            field: 'views',
-            done: calls * 10,
-            total: 2167,
-            step: calls,
-          }),
-        };
-      if (fail) {
-        fail = false;
-        throw new ConvexError({
-          code: 'SYNTHETIC_INDEX_FAILURE',
-          message: 'The retained index page could not be read.',
-        });
-      }
-    }
+    assert.notEqual(getFunctionName(ref), 'projectWorkIndexActions:ensure');
+    calls++;
     return action(ref, args);
   };
-  const events = [];
-  await assert.rejects(
-    hostProject(
-      f.root,
-      { deployment: 'https://fixture.convex.cloud', onProgress: event => events.push(event) },
-      f.dependencies,
-    ),
-    {
-      code: 'SYNTHETIC_INDEX_FAILURE',
-      message: 'The retained index page could not be read.',
-    },
-  );
-  const pending = readHostState(f.store).hosting;
-  assert.equal(pending.errorCode, 'SYNTHETIC_INDEX_FAILURE');
-  assert.equal(pending.progress.indexBuild.done, 20);
-  assert.equal(pending.progress.indexBuild.total, 2167);
-  assert(events.some(e => e.indexBuild?.field === 'views' && e.objectsDone === 20));
-  assert.equal(readHostState(f.store).binding, undefined);
-  const result = await hostProject(f.root, {}, f.dependencies);
-  assert.equal(result.operationId, pending.operationId);
-  assert.equal(calls, 4);
+  const result = await hostProject(f.root, { deployment: 'https://fixture.convex.cloud' }, f.dependencies);
+  assert(calls > 0);
   assert.equal(readHostState(f.store).binding.projectId, result.projectId);
+  assert.equal(f.s.tables.projectWorkGenerations.size, 0);
 });
 
 test('host --json and --status read pending hosting without writes or resuming; --resume is explicit', async t => {

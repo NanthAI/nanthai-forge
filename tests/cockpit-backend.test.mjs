@@ -119,7 +119,7 @@ test('native hosted summaries track actual ancestry when main moves without read
     local.store.save(data);
     pins = { a, b, c, d, views, moves: data.channelMoves };
   });
-  await indexActions.ensure._handler(s.ctx, { projectId: s.projectId });
+  await indexActions.ensure._handler(s.ctx, { rebuild: true, projectId: s.projectId });
   let summaries = (await readPage(s, 'views')).page.map(row => JSON.parse(row.value));
   assert.deepEqual(
     summaries.map(v => v.main),
@@ -442,7 +442,7 @@ for (const format of ['sha1', 'sha256'])
       local.store.save(data);
       heads = { current, views };
     });
-    await indexActions.ensure._handler(s.ctx, { projectId: s.projectId });
+    await indexActions.ensure._handler(s.ctx, { rebuild: true, projectId: s.projectId });
     const page = (await readPage(s, 'views')).page.map(row => JSON.parse(row.value));
     assert.deepEqual(
       page.map(view => view.main),

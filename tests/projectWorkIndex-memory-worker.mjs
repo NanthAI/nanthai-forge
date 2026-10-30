@@ -277,7 +277,11 @@ do {
   const started = performance.now();
   stepStarted = started;
   calls++;
-  result = await actions.ensure._handler(s.ctx, { projectId: 'project', continuation: calls > 1 });
+  result = await actions.ensure._handler(s.ctx, {
+    rebuild: true,
+    projectId: 'project',
+    continuation: calls > 1,
+  });
   longestActionMs = Math.max(longestActionMs, performance.now() - started);
 } while (typeof result !== 'string');
 console.log(

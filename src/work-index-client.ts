@@ -21,8 +21,8 @@ export function indexProgressReporter(sink?: ProgressSink) {
     progress.index(value);
   };
 }
-/** Every caller consumes continuations; a pending index is never a finished read. */
-export function ensureWorkIndex(
+/** Explicit operator repair only. Reads and ordinary commands never call this. */
+export function rebuildWorkIndex(
   client: {
     action(ref: FunctionReference<'action'>, args: Record<string, unknown>): Promise<unknown>;
   },
@@ -35,6 +35,7 @@ export function ensureWorkIndex(
     continuation =>
       client.action(makeFunctionReference<'action'>('projectWorkIndexActions:ensure'), {
         projectId,
+        rebuild: true,
         continuation,
       }),
     onProgress,

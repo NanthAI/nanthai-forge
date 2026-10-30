@@ -33,6 +33,7 @@ for (const name of [
 ])
   modules[name] = await import(moduleUrl(`../convex/${name}.ts`));
 const actions = await import(moduleUrl('../convex/projectWorkActions.ts'));
+const indexActions = await import(moduleUrl('../convex/projectWorkIndexActions.ts'));
 const grants = await import(moduleUrl('../convex/projectContributorActions.ts'));
 const proposals = historicalArchiveActions(await import(moduleUrl('../convex/projectProposalActions.ts')));
 const backups = historicalArchiveActions(await import(moduleUrl('../convex/projectBackupActions.ts')));
@@ -140,6 +141,7 @@ async function setup(t, { retained = false, r2Ready = false } = {}) {
     backupId: 'backup',
     operationId: randomUUID(),
   });
+  await indexActions.ensure._handler(s.ctx, { projectId: 'project', rebuild: true });
   const cleanup = providers();
   t.after(cleanup);
   await grants.add._handler(s.ctx, { projectId: 'project', contributor: 'contributor' });

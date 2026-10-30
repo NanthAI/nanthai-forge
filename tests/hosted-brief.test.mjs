@@ -267,7 +267,7 @@ test('path preparation reads immutable State manifests, is idempotent, and reche
   const all = [...s.tables.projectBriefingSources.values()].map(row => row.value).join('');
   assert.ok(all.includes('a.ts'));
   assert.ok(!all.includes('export const a'), 'file contents never enter path projection');
-  await indexActions.ensure._handler(s.ctx, { projectId: 'project' });
+  await indexActions.ensure._handler(s.ctx, { rebuild: true, projectId: 'project' });
   s.caller('stranger');
   await assert.rejects(
     actions.prepare._handler(s.ctx, { projectId: 'project' }),

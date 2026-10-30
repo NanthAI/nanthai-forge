@@ -1,6 +1,5 @@
 import { sourceAuthority } from './hosted-source-authority.js';
 import { readHostState } from './host-binding.js';
-import { ensureWorkIndex } from './work-index-client.js';
 // SPDX-License-Identifier: Apache-2.0
 import { makeFunctionReference } from 'convex/server';
 import { ConvexError } from 'convex/values';
@@ -34,23 +33,7 @@ async function readBrief(store: WorkStore, input: unknown, liveMcp: boolean): Pr
     const args = { ...parsed.data, projectId };
     const read = () =>
       client.query(makeFunctionReference<'query', typeof args, Briefing>('projectBriefings:brief'), args);
-    let hosted: Briefing;
-    try {
-      hosted = await read();
-    } catch (error) {
-      if (
-        !(
-          error instanceof ConvexError &&
-          typeof error.data === 'object' &&
-          error.data !== null &&
-          'code' in error.data &&
-          error.data.code === 'WORK_STALE'
-        )
-      )
-        throw error;
-      await ensureWorkIndex(client, projectId);
-      hosted = await read();
-    }
+    let hosted = await read();
     if (hosted.context.coverage.some(line => line.startsWith('Source paths unavailable'))) {
       await client.action(makeFunctionReference<'action'>('projectBriefingActions:prepare'), { projectId });
       hosted = await read();

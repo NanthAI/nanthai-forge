@@ -21,16 +21,18 @@ export async function indexedCommand(
   command: Exclude<HostedEvent['command'], { action: 'source-return' }>,
   request: string,
 ) {
-  const generationId: Id<'projectWorkGenerations'> = await ctx.runAction(
-    internal.projectWorkIndexActions.ensureInternal,
-    { projectId: input.projectId, owner },
-  );
   const generation: Doc<'projectWorkGenerations'> | null = await ctx.runQuery(
     internal.projectWorkIndexStore.current,
     { projectId: input.projectId, owner },
   );
   invariant(
-    generation?._id === generationId && generation.revision === input.revision,
+    generation,
+    'PROJECT_WORK_INDEX_MISSING',
+    'The Work index is unavailable. Run hosted-work with action rebuild-index explicitly.',
+  );
+  const generationId = generation._id;
+  invariant(
+    generation.revision === input.revision,
     'WORK_STALE',
     'Hosted Work changed. Your request remains available.',
   );

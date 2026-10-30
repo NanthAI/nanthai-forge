@@ -113,7 +113,6 @@ export const publish = internalMutation({
     await ctx.db.patch(project._id, {
       work: {
         ...project.work!,
-        generationId: undefined,
         recordDetails: {
           operationId: input.operationId,
           backupId: saved.backupId,
