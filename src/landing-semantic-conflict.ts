@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 import { candidateContractReports } from './agent-contract-timings.js';
-import { semanticVerdict, semanticConflictMessage } from './intent-semantic-conflict.js';
+import {
+  semanticVerdict,
+  semanticConflictMessage,
+  semanticBudgetMessage,
+} from './intent-semantic-conflict.js';
 import { batchEdit } from './landing-batch-store.js';
 import type { WorkService } from './work.js';
 import type { CheckRun } from './work-types.js';
@@ -39,7 +43,7 @@ export async function retainSemanticConflict(
         entry.status = 'failed';
         entry.error = {
           code: 'CONTRACT_OVER_BUDGET',
-          message: `Composed contract union measured ${verdict.overBudget.measuredMs} ms; budget is under 90000 ms for Intents ${verdict.overBudget.intents.join(' + ')}.`,
+          message: semanticBudgetMessage(verdict.overBudgetPairs),
         };
         entry.reason = entry.error.message;
       } else {

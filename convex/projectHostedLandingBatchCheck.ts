@@ -1,4 +1,8 @@
-import { ForgeError } from '../src/errors';
+import { diagnoseBatchFailure } from '../src/hosted-batch-diagnosis';
+import { advanceBatchFallback } from './projectHostedLandingBatchFallback';
+import { ForgeError, invariant } from '../src/errors';
+import { readHostedRecord } from './projectHostedRecords';
+import { hostedRecordSchema } from '../src/hosted-records';
 import { semanticVerdict } from '../src/intent-semantic-conflict';
 // SPDX-License-Identifier: Apache-2.0
 import type { MutationCtx } from './_generated/server';
@@ -26,18 +30,41 @@ async function prepareLandingCheckOnce(
   now: number,
 ) {
   const { state, attempt, queue } = selected;
+  if (state.batchOriginId && state.batchNeedsSoloCompose) {
+    const key = { projectId: claim.projectId, batchId: state.batchOriginId };
+    const { batch } = await loadBatch(ctx, key);
+    await advanceBatchFallback(ctx, key, batch, state.id);
+    await releaseLandingQueue(ctx, queue, now);
+    return true;
+  }
   if (state.batchId && !state.batchSolo) {
     const key = { projectId: claim.projectId, batchId: state.batchId };
     const { batch } = await loadBatch(ctx, key);
     if (batch.phase === 'checking' && batch.runId) {
       const { run } = await loadHostedCheck(ctx, { projectId: claim.projectId, runId: batch.runId });
       if (hostedCheckTerminal(run)) {
-        const semantic = semanticVerdict(run.semanticPlan, run.contractReports ?? {}, {
-          candidateId: attempt.candidate.id,
-          head: attempt.candidate.head!,
-          runId: run.id,
-        });
-        if (run.status === 'passed' && !semantic.overBudget && !semantic.conflicts.length) {
+        const semantic = semanticVerdict(
+          run.semanticPlan,
+          run.contractReports ?? {},
+          {
+            candidateId: attempt.candidate.id,
+            head: attempt.candidate.head!,
+            runId: run.id,
+          },
+          batch.memberDetails
+            ?.filter(member => !batch.included || batch.included.includes(member.submissionId))
+            .map(member => member.intentId),
+        );
+        const details = (batch.memberDetails ?? []).filter(
+          member => !batch.included || batch.included.includes(member.submissionId),
+        );
+        const failure = diagnoseBatchFailure(details, run, semantic);
+        if (
+          run.status === 'passed' &&
+          !failure.failedTests.length &&
+          !semantic.overBudget &&
+          !semantic.conflicts.length
+        ) {
           await requireHostedCheckEvidence(ctx, {
             projectId: claim.projectId,
             actor: attempt.actor.id,
@@ -67,7 +94,32 @@ async function prepareLandingCheckOnce(
             );
           }
         } else {
-          await writeBatch(ctx, key, { ...batch, phase: 'fallback' });
+          // At most eight exact metadata reads in this mutation, only after a
+          // failed shared check. Large source path lists never enter batch state.
+          const originals = await Promise.all(
+            details.map(async member => {
+              const original = batch.members.find(entry => entry.submissionId === member.submissionId);
+              invariant(original, 'EVIDENCE_CHANGED', 'The original batch member is unavailable.');
+              const row = await readHostedRecord(ctx, {
+                projectId: claim.projectId,
+                actor: original.actor.id,
+                kind: 'candidate',
+                key: original.candidate.id,
+              });
+              invariant(
+                row?.digest === original.candidate.digest,
+                'EVIDENCE_CHANGED',
+                'The original batch member Candidate changed.',
+              );
+              const candidate = hostedRecordSchema.options[3].parse(JSON.parse(row.value));
+              return { ...member, paths: candidate.governance?.paths ?? member.paths };
+            }),
+          );
+          await writeBatch(ctx, key, {
+            ...batch,
+            phase: 'fallback',
+            failure: diagnoseBatchFailure(originals, run, semantic),
+          });
           await wakeBatch(ctx, key);
         }
       }

@@ -1,3 +1,7 @@
+import { loadBatch, writeBatch } from './projectHostedLandingBatchStore';
+import { advanceBatchFallback } from './projectHostedLandingBatchFallback';
+import { wakeLandingQueue } from './projectHostedLandingWake';
+import { finishRow, scheduleFinish } from './projectHostedFinishWake';
 // SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
 import { internalMutation } from './_generated/server';
@@ -30,7 +34,32 @@ export async function raiseLandingAlarm(
   const stall = hostedLandingStall(state, now);
   if (!stall || state.observation.stall?.lastProgressAt === stall.lastProgressAt) return null;
   const next = { ...state, version: state.version + 1, observation: { ...state.observation, stall } };
-  if (canonical) await writeLanding(ctx, canonical, next, canonical.runnable);
-  else await ctx.db.patch(row._id, { value: canonicalPayload(next) });
+  if (canonical) {
+    await writeLanding(ctx, canonical, next, canonical.runnable);
+    if (state.phase === 'queued') {
+      const batchId = state.batchId ?? state.batchOriginId;
+      if (batchId) {
+        const key = { projectId: input.projectId, batchId };
+        const { batch: original } = await loadBatch(ctx, key);
+        // A queued member has already exceeded the existing progress deadline.
+        // An active batch must not retain it indefinitely while later work lands.
+        const batch =
+          original.phase === 'checking' || original.phase === 'composing'
+            ? { ...original, phase: 'fallback' as const }
+            : original;
+        if (batch.phase === 'fallback' || batch.phase === 'landed') {
+          // Repair and re-select in this alarm transaction, including legacy
+          // members whose original batch leader has already stopped driving.
+          await writeBatch(ctx, key, batch);
+          await advanceBatchFallback(ctx, key, batch, state.id);
+          const finish = await finishRow(ctx, input);
+          if (finish) await scheduleFinish(ctx, finish);
+        }
+      } else if (state.observation.pendingReason !== 'waiting-for-dependency') {
+        await ctx.db.patch(canonical._id, { runnable: true });
+      }
+      await wakeLandingQueue(ctx, { projectId: input.projectId, channel: 'main' });
+    }
+  } else await ctx.db.patch(row._id, { value: canonicalPayload(next) });
   return null;
 }

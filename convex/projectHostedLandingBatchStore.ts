@@ -1,3 +1,5 @@
+import { batchFailureSchema, batchMemberDetailSchema } from '../src/hosted-batch-diagnosis';
+import { releaseBatchMembers } from './projectHostedLandingBatchRelease';
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
 import type { MutationCtx, QueryCtx } from './_generated/server';
@@ -24,6 +26,8 @@ export const batchSchema = z
     checkOperationId: z.uuid(),
     phase: z.enum(['composing', 'checking', 'fallback', 'landed']),
     members: z.array(hostedLandingAttemptSchema).min(2).max(HOSTED_BATCH_MEMBERS),
+    memberDetails: z.array(batchMemberDetailSchema).max(HOSTED_BATCH_MEMBERS).optional(),
+    failure: batchFailureSchema.optional(),
     uploadIndex: z.number().int().nonnegative(),
     uploads: z
       .array(z.object({ pin: z.object({ sha256: z.string(), size: z.number() }), value: z.string() }))
@@ -49,6 +53,7 @@ export async function writeBatch(ctx: MutationCtx, input: BatchIdentity, batch: 
   await ctx.db.patch(row._id, {
     value: canonicalPayload(batchSchema.parse({ ...JSON.parse(row.value), ...batch })),
   });
+  if (batch.phase === 'fallback' || batch.phase === 'landed') await releaseBatchMembers(ctx, input, batch);
 }
 export async function wakeBatch(ctx: MutationCtx, input: BatchIdentity) {
   const { batch } = await loadBatch(ctx, input);
@@ -97,7 +102,7 @@ export async function formLandingBatch(
   if (members.length < 2 || !members.some(m => m.state.id === input.submissionId)) return false;
   const batch: LandingBatch = {
     id: members[0]!.state.id,
-    at: new Date().toISOString(),
+    at: new Date(Date.now()).toISOString(),
     composeOperationId: crypto.randomUUID(),
     checkOperationId: crypto.randomUUID(),
     phase: 'composing',
@@ -117,6 +122,7 @@ export async function formLandingBatch(
       {
         ...member.state,
         batchId: batch.id,
+        timing: { submittedAt: member.state.at, ...member.state.timing, selectedAt: batch.at },
         version: member.state.version + 1,
         phase: 'queued',
         observation: landingObservation('queued'),

@@ -1,3 +1,4 @@
+import { scheduleAbandonedBatchReselection } from './projectHostedBatchAbandon';
 // SPDX-License-Identifier: Apache-2.0
 import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
@@ -176,6 +177,15 @@ export async function applyLifecycleRecord(
         : { status }),
     },
   });
+  if (request.action === 'abandon')
+    await scheduleAbandonedBatchReselection(ctx, {
+      projectId: plan.projectId,
+      actor: plan.actor,
+      operationId: plan.operationId,
+      kind: before.kind,
+      key: before.id,
+      version: before.version + 1,
+    });
   await writeLifecycleEvent(ctx, plan, before, -1);
 }
 export async function lifecycleCaller(ctx: QueryCtx | MutationCtx, projectId: Id<'hostedProjects'>) {

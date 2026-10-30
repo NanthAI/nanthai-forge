@@ -1,3 +1,4 @@
+import type { BatchMemberDetail } from '../src/hosted-batch-diagnosis';
 // SPDX-License-Identifier: Apache-2.0
 import type { MutationCtx } from './_generated/server';
 import { beginHostedOperation } from './projectHostedOperations';
@@ -31,6 +32,7 @@ export async function prepareBatchCompose(ctx: MutationCtx, input: BatchIdentity
         })),
       ),
     );
+  const memberDetails: BatchMemberDetail[] = [];
   if (!existing) {
     const main = await hostedStartMain(ctx, input.projectId);
     const request = {
@@ -55,6 +57,16 @@ export async function prepareBatchCompose(ctx: MutationCtx, input: BatchIdentity
       contracts.push(...(candidate.semanticPlan?.members ?? []));
       const own = await semanticMember(ctx, auth, candidate.intentId);
       if (own) contracts.push(own);
+      const declaration = own ?? candidate.semanticPlan?.members.find(m => m.intentId === candidate.intentId);
+      memberDetails.push({
+        submissionId: member.submissionId,
+        intentId: candidate.intentId,
+        outcome: declaration?.outcome ?? `Intent ${candidate.intentId}`,
+        // Keep large path lists on their immutable Candidate, not multiplied
+        // into the shared batch document. Failure diagnosis reads those pins.
+        paths: [],
+        tests: declaration?.tests.map(test => test.path) ?? [],
+      });
     }
     const expected = { authorityEpoch: first.authorityEpoch, ...request.expectedMain };
     const operation = await beginHostedOperation(ctx, {
@@ -75,7 +87,14 @@ export async function prepareBatchCompose(ctx: MutationCtx, input: BatchIdentity
       request,
       ownerInputs: true,
       batch: { members: batch.members.map(m => m.candidate.id) },
-      ...(contracts.length ? { semanticPlan: mergeSemanticMembers(request.intentId, contracts) } : {}),
+      ...(contracts.length
+        ? {
+            semanticPlan: {
+              ...mergeSemanticMembers(request.intentId, contracts),
+              batchIntentIds: [...new Set(memberDetails.map(member => member.intentId))],
+            },
+          }
+        : {}),
       main: await saveObject(ctx, input.projectId, { sha256: main.head }),
       inputs: { next: null, pages: inputs.manifest.pages, count: 0 },
       dependencies: { next: null, pages: dependencies.manifest.pages, count: batch.members.length },
@@ -95,6 +114,6 @@ export async function prepareBatchCompose(ctx: MutationCtx, input: BatchIdentity
     pin: page.pin,
     value: canonicalPayload(page.value),
   }));
-  await writeBatch(ctx, input, { ...batch, uploads });
+  await writeBatch(ctx, input, { ...batch, uploads, ...(memberDetails.length ? { memberDetails } : {}) });
   return { ...source, auth, uploads };
 }

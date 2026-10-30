@@ -1,3 +1,4 @@
+import { loadBatch, writeBatch } from './projectHostedLandingBatchStore';
 // SPDX-License-Identifier: Apache-2.0
 import type { MutationCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
@@ -29,12 +30,17 @@ export async function cancelHostedLanding(
   input: {
     projectId: Id<'hostedProjects'>;
     actor: string;
+    reason?: string;
     request: z.infer<typeof hostedLandingCancelSchema>;
   },
 ) {
   const { projectId, actor, request } = input;
   const expected = { authorityEpoch: request.authorityEpoch, resourceId: request.submissionId };
-  const payload = { kind: 'hosted-landing-cancel', request };
+  const payload = {
+    kind: 'hosted-landing-cancel',
+    request,
+    ...(input.reason ? { reason: input.reason } : {}),
+  };
   const { operation } = await beginHostedOperation(ctx, {
     projectId,
     actor,
@@ -89,21 +95,30 @@ export async function cancelHostedLanding(
         version: state.version + 1,
         phase: 'terminal-failed',
         observation: landingObservation('cancelled'),
-        error: { code: 'LANDING_CANCELLED', message: 'The hosted landing request was cancelled.' },
+        error: {
+          code: 'LANDING_CANCELLED',
+          message: input.reason ?? 'The hosted landing request was cancelled.',
+        },
       };
       result = await writeLanding(ctx, row, result, false);
       await settleLandingOperation(ctx, result);
-      // Invalidate in-flight metadata IO without cancelling shared source/check
-      // executions. Late callbacks can retain their evidence but cannot land.
-      const finish = await finishRow(ctx, identity);
-      if (finish) {
-        if (finish.wake) await ctx.scheduler.cancel(finish.wake.taskId);
-        await ctx.db.patch(finish._id, { wake: null, waiting: false });
-      }
-      const queue = await landingQueue(ctx, { projectId, channel: state.request.channel });
-      if (queue && (!queue.lease || queue.lease.submissionId === state.id))
-        await releaseLandingQueue(ctx, queue);
     }
+    const batchId = state.batchId ?? state.batchOriginId;
+    if (batchId) {
+      const key = { projectId, batchId };
+      const { batch } = await loadBatch(ctx, key);
+      await writeBatch(ctx, key, { ...batch, phase: batch.phase === 'landed' ? 'landed' : 'fallback' });
+      result = (await loadLanding(ctx, identity)).state;
+    }
+    // Invalidate cancelled member IO after release has scheduled its peers.
+    const finish = await finishRow(ctx, identity);
+    if (finish) {
+      if (finish.wake) await ctx.scheduler.cancel(finish.wake.taskId);
+      await ctx.db.patch(finish._id, { wake: null, waiting: false });
+    }
+    const queue = await landingQueue(ctx, { projectId, channel: state.request.channel });
+    if (queue && (!queue.lease || queue.lease.submissionId === state.id))
+      await releaseLandingQueue(ctx, queue);
   }
   await finishHostedOperation(ctx, {
     projectId,

@@ -1,29 +1,89 @@
 // SPDX-License-Identifier: Apache-2.0
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
 import { getFunctionName } from 'convex/server';
-import { finishFixture, compose, driver } from './hosted-finish-fixture.mjs';
+import { finishFixture, compose, driver, records } from './hosted-finish-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
+export const batchAbandon = await import(moduleUrl('../convex/projectHostedBatchAbandon.ts'));
 export const batchPublish = await import(moduleUrl('../convex/projectHostedLandingBatchPublish.ts'));
 export const batchStore = await import(moduleUrl('../convex/projectHostedLandingBatchStore.ts'));
 export const checkStore = await import(moduleUrl('../convex/projectHostedCheckStore.ts'));
 export const states = f => [...f.tables.projectHostedLandingRequests.values()].map(r => JSON.parse(r.value));
 export async function batchesFixture(
   t,
-  { count = 4, fileCount = 3, conflict = false, governanceVersion = 1 } = {},
+  {
+    count = 4,
+    fileCount = 3,
+    conflict = false,
+    governanceVersion = 1,
+    memberContracts,
+    memberPaths,
+    memberFileCount = 1,
+  } = {},
 ) {
   const f = await finishFixture(t, { fileCount });
   const entries = [];
   for (let i = 0; i < count; i++) {
+    const memberPath = memberPaths?.[i] ?? (conflict && i < 2 ? 'collision' : `member-${i}`);
     const pin = f.c.state(
       [
         ...JSON.parse(f.c.objects.get(f.c.baseline.sha256)).files,
         ...Array.from({ length: Math.max(0, fileCount - 2) }, (_, k) => f.c.file(`fixture/${k}`, 'shared')),
-        f.c.file(conflict && i < 2 ? 'collision' : `member-${i}`, `member ${i}`),
+        ...Array.from({ length: memberFileCount }, (_, index) =>
+          f.c.file(
+            index ? `${memberPath}-additional-${index}` : memberPath,
+            index ? `member ${i} additional ${index}` : `member ${i}`,
+          ),
+        ),
       ],
       [f.c.baseline.sha256],
     );
-    const lane = await f.c.lane(pin),
+    let intentId = f.c.intentId;
+    if (memberContracts) {
+      intentId = randomUUID();
+      const template = JSON.parse(
+        (
+          await f.c.run('readBatchTemplate', records.readHostedRecord, {
+            ...f.c.auth,
+            kind: 'intent',
+            key: f.c.intentId,
+          })
+        ).value,
+      );
+      const tests = (memberContracts[i] ?? []).map(path => ({ path, durationMs: 1 }));
+      await f.c.run('seedBatchIntent', records.writeHostedRecord, {
+        ...f.c.auth,
+        expectedVersion: null,
+        record: {
+          ...template,
+          id: intentId,
+          version: 0,
+          outcome: String.fromCharCode(65 + i),
+          ...(tests.length
+            ? {
+                testContracts: [
+                  {
+                    timingBasis: 'history',
+                    version: 1,
+                    operationId: randomUUID(),
+                    request: 'a'.repeat(64),
+                    candidateId: randomUUID(),
+                    measuredOn: pin.sha256,
+                    runId: randomUUID(),
+                    at: template.at,
+                    proposedTests: tests.map(t => t.path),
+                    tests,
+                    totalMs: tests.length,
+                  },
+                ],
+              }
+            : {}),
+        },
+      });
+    }
+    const lane = await f.c.lane(pin, { intentId }),
       selection = f.c.selection([lane]);
+    selection.request.intentId = intentId;
     // Seed the trusted owner provenance normally produced by start/save. The
     // generic compose fixture deliberately creates unverified arbitrary Lanes.
     for (const table of ['projectHostedRecords', 'projectHostedRecordHeads'])
@@ -41,6 +101,13 @@ export async function batchesFixture(
   }
   const publications = [];
   const execute = async (task, stop = null) => {
+    if (task.name === 'projectHostedBatchAbandon:reselect') {
+      f.advanceClock(Math.max(0, task.scheduledTime - Date.now()));
+      f.patch('_scheduled_functions', task._id, { state: { kind: 'inProgress' } });
+      await f.transaction('batch-abandon-reselection', batchAbandon.reselect, task.args[0]);
+      f.patch('_scheduled_functions', task._id, { state: { kind: 'success' } });
+      return;
+    }
     if (task.name !== 'projectHostedFinishDriver:drive') return f.execute(task);
     f.advanceClock(Math.max(0, task.scheduledTime - Date.now()));
     f.patch('_scheduled_functions', task._id, { state: { kind: 'inProgress' } });

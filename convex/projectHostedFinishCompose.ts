@@ -179,11 +179,13 @@ export async function installFinishCompose(
   });
   await insertLandingAttempt(ctx, attempt);
   await writeFinish(ctx, row, { ...value, pending: null });
+  const { batchNeedsSoloCompose: _needsSolo, ...installedState } = state;
+  void _needsSolo;
   await writeLanding(
     ctx,
     landing,
     {
-      ...state,
+      ...installedState,
       version: state.version + 1,
       attemptId: attempt.id,
       phase: 'queued',

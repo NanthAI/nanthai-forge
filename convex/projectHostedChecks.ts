@@ -191,9 +191,12 @@ export async function enqueueHostedCheck(
   );
   const id = prepared.operation.firstAttempt.ids.run!;
   const member = await semanticMember(ctx, { projectId: input.projectId, actor }, candidate.intentId);
-  const semantic = member
-    ? mergeSemanticMembers(candidate.intentId, candidate.semanticPlan?.members, [member])
-    : undefined;
+  const semantic =
+    member || candidate.semanticPlan?.batchIntentIds
+      ? mergeSemanticMembers(candidate.intentId, candidate.semanticPlan?.members, member ? [member] : [])
+      : undefined;
+  if (semantic && candidate.semanticPlan?.batchIntentIds)
+    semantic.batchIntentIds = candidate.semanticPlan.batchIntentIds;
   if (semantic && candidate.semanticPlan?.afterSequence !== undefined)
     semantic.afterSequence = candidate.semanticPlan.afterSequence;
   const project = (await ctx.db.get(input.projectId))!;

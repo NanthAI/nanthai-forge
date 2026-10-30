@@ -245,6 +245,7 @@ export async function settleLandingOperation(ctx: MutationCtx, state: HostedLand
               attemptId: state.attemptId,
               phase: state.phase,
               ...(state.semanticConflicts ? { semanticConflicts: state.semanticConflicts } : {}),
+              ...(state.batchDiagnostic ? { batchDiagnostic: state.batchDiagnostic } : {}),
               observation: state.observation,
               ...(state.acceptance ? { acceptance: state.acceptance } : {}),
             },
@@ -263,10 +264,25 @@ export async function retainLandingProgress(ctx: MutationCtx, state: HostedLandi
     attemptId: state.attemptId,
   });
   invariant(row, 'SOURCE_UNAVAILABLE', 'The original attempt is unavailable.');
-  if (row.progress && hostedLandingProgressSchema.parse(JSON.parse(row.progress)).settled) return;
+  if (row.progress) {
+    const retained = hostedLandingProgressSchema.parse(JSON.parse(row.progress));
+    if (retained.settled) {
+      // Keep settled source/outcome evidence frozen; pair diagnosis can arrive
+      // when another member finishes its existing fallback later.
+      if (
+        state.batchDiagnostic &&
+        canonicalPayload(retained.batchDiagnostic ?? null) !== canonicalPayload(state.batchDiagnostic)
+      )
+        await ctx.db.patch(row._id, {
+          progress: semanticPayload({ ...retained, batchDiagnostic: state.batchDiagnostic }),
+        });
+      return;
+    }
+  }
   await ctx.db.patch(row._id, {
     progress: semanticPayload({
       ...(state.semanticConflicts ? { semanticConflicts: state.semanticConflicts } : {}),
+      ...(state.batchDiagnostic ? { batchDiagnostic: state.batchDiagnostic } : {}),
       observation: replaced ? landingObservation('failed', 'CHANNEL_CHANGED') : state.observation,
       phase: replaced ? 'terminal-failed' : state.phase,
       error: replaced
@@ -296,6 +312,7 @@ export function landingAttemptProgress(row: Doc<'projectHostedLandingAttempts'>,
   return row.attemptId === state.attemptId
     ? {
         ...(state.semanticConflicts ? { semanticConflicts: state.semanticConflicts } : {}),
+        ...(state.batchDiagnostic ? { batchDiagnostic: state.batchDiagnostic } : {}),
         observation: state.observation,
         phase: state.phase,
         error: state.error,

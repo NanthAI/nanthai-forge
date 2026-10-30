@@ -1,3 +1,4 @@
+import { batchDiagnosticSchema } from './hosted-batch-diagnosis.js';
 import { checkFileSummarySchema } from './check-file-summary.js';
 import { semanticConflictsSchema, semanticPlanSchema } from './intent-semantic-conflict.js';
 // SPDX-License-Identifier: Apache-2.0
@@ -126,7 +127,10 @@ export const hostedLandingStateSchema = z
     phase: z.enum(['composing', 'queued', 'checking', 'ready', 'terminal-failed', 'landed']),
     preparing: z.literal(true).optional(),
     batchId: z.uuid().optional(),
+    batchOriginId: z.uuid().optional(),
+    batchNeedsSoloCompose: z.literal(true).optional(),
     batchSolo: z.literal(true).optional(),
+    batchDiagnostic: batchDiagnosticSchema.optional(),
     semanticConflicts: semanticConflictsSchema.optional(),
     checkProgress: hash.optional(),
     testFiles: checkFileSummarySchema.optional(),
@@ -158,6 +162,7 @@ export const hostedLandingStateSchema = z
 export const hostedLandingProgressSchema = hostedLandingStateSchema
   .pick({
     semanticConflicts: true,
+    batchDiagnostic: true,
     observation: true,
     phase: true,
     error: true,

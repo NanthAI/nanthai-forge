@@ -16,6 +16,7 @@ export const control = await import(moduleUrl('../convex/projectHostedFinishCont
 export const records = await import(moduleUrl('../convex/projectHostedRecords.ts'));
 export const landingApi = await import(moduleUrl('../convex/projectHostedLanding.ts'));
 const stallApi = await import(moduleUrl('../convex/projectHostedLandingStall.ts'));
+const batchAbandon = await import(moduleUrl('../convex/projectHostedBatchAbandon.ts'));
 const convexSourceModules = Object.fromEntries(
   await Promise.all(
     [
@@ -228,6 +229,8 @@ export async function finishFixture(
         );
       } else if (task.name === 'projectHostedLandingStall:alarm') {
         await tx('landingAlarm', stallApi.alarm, input);
+      } else if (task.name === 'projectHostedBatchAbandon:reselect') {
+        await tx('batchAbandon', batchAbandon.reselect, input);
       } else if (task.name === 'projectHostedLandingDesired:drive') {
         await desired.drive._handler(
           {

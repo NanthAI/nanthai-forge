@@ -1,10 +1,11 @@
+import { advanceBatchFallback } from './projectHostedLandingBatchFallback';
 // SPDX-License-Identifier: Apache-2.0
 import type { Doc } from './_generated/dataModel';
 import type { MutationCtx } from './_generated/server';
 import type { FinishIdentity } from './projectHostedFinishControl';
 import { retainBatchConflict } from './projectHostedLandingBatchConflict';
 import { loadFinish } from './projectHostedFinishStore';
-import { loadLanding, writeLanding } from './projectHostedLandingStore';
+import { loadLanding } from './projectHostedLandingStore';
 import {
   loadBatch,
   writeBatch,
@@ -14,7 +15,6 @@ import {
 } from './projectHostedLandingBatchStore';
 import { prepareBatchCompose } from './projectHostedLandingBatchCompose';
 import { submitHostedCompose } from './projectHostedComposeJobs';
-import { reserveFinishRetry } from './projectHostedFinishCompose';
 import { hostedWriteProject, readHostedRecord } from './projectHostedRecords';
 import { hostedRecordSchema } from '../src/hosted-records';
 import { canonicalPayload } from '../src/hosted-source-operation';
@@ -32,37 +32,29 @@ export async function batchFinishStep(
   command: FinishCommand | null;
 }> {
   const { state } = await loadLanding(ctx, input);
-  if (!state.batchId) return { handled: false, command: null };
-  const key = { projectId: input.projectId, batchId: state.batchId };
+  const batchId = state.batchId ?? state.batchOriginId;
+  if (!batchId) return { handled: false, command: null };
+  const key = { projectId: input.projectId, batchId };
   const { batch } = await loadBatch(ctx, key);
-  if (batch.phase === 'fallback') {
-    if (state.id !== batch.id) return { handled: !state.batchSolo, command: null };
-    for (const member of batch.members) {
-      const current = await loadLanding(ctx, {
-        projectId: input.projectId,
-        submissionId: member.submissionId,
-      });
-      if (['landed', 'terminal-failed'].includes(current.state.phase)) continue;
-      if (current.state.batchSolo) return { handled: current.state.id !== state.id, command: null };
-      await writeLanding(
-        ctx,
-        current.row,
-        {
-          ...current.state,
-          batchSolo: true,
-          phase: 'queued',
-          version: current.state.version + 1,
-          error: null,
-        },
-        false,
-      );
-      const finish = await loadFinish(ctx, { projectId: input.projectId, submissionId: member.submissionId });
-      await reserveFinishRetry(ctx, finish.row, finish.value);
-      return { handled: true, command: null };
-    }
-    await writeBatch(ctx, key, { ...batch, phase: 'landed' });
-    return { handled: true, command: null };
+  if (
+    state.phase === 'queued' &&
+    state.observation.stall &&
+    (batch.phase === 'composing' || batch.phase === 'checking')
+  ) {
+    // A pre-upgrade alarm may already be consumed. Resume/event repair must
+    // reselect the member too, without needing another timer or a backfill.
+    const fallback = { ...batch, phase: 'fallback' as const };
+    await writeBatch(ctx, key, fallback);
+    return advanceBatchFallback(ctx, key, fallback, state.id);
   }
+  if (
+    batch.phase === 'fallback' ||
+    (batch.phase === 'landed' && (state.phase !== 'landed' || state.batchOriginId))
+  ) {
+    if (state.batchId) await writeBatch(ctx, key, batch);
+    return advanceBatchFallback(ctx, key, batch, state.id);
+  }
+  if (state.batchOriginId) return { handled: false, command: null };
   if (state.batchSolo || state.phase === 'ready' || state.phase === 'landed')
     return { handled: false, command: null };
   if (state.id !== batch.id || batch.phase !== 'composing') return { handled: true, command: null };

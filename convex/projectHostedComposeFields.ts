@@ -23,8 +23,13 @@ export const hostedComposeTables = {
     'kind',
     'index',
   ]),
-  projectHostedComposeSelections: defineTable({ ...identity, kind: v.string(), key: v.string() }).index(
-    'by_project_and_actor_and_operation_and_kind_and_key',
-    ['projectId', 'actor', 'operationId', 'kind', 'key'],
-  ),
+  projectHostedComposeSelections: defineTable({ ...identity, kind: v.string(), key: v.string() })
+    .index('by_project_and_actor_and_operation_and_kind_and_key', [
+      'projectId',
+      'actor',
+      'operationId',
+      'kind',
+      'key',
+    ])
+    .index('by_project_and_kind_and_key', ['projectId', 'kind', 'key']),
 };

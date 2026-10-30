@@ -11,6 +11,7 @@ const member = z.object({
 });
 const expandedSemanticPlanSchema = z.object({
   primaryIntentId: z.uuid(),
+  batchIntentIds: z.array(z.uuid()).max(8).optional(),
   afterSequence: z.number().safe().nonnegative().optional(),
   members: z.array(member),
 });
@@ -30,6 +31,7 @@ const indexedSemanticPlanSchema = expandedSemanticPlanSchema
   })
   .transform(plan => ({
     primaryIntentId: plan.primaryIntentId,
+    ...(plan.batchIntentIds ? { batchIntentIds: plan.batchIntentIds } : {}),
     ...(plan.afterSequence !== undefined ? { afterSequence: plan.afterSequence } : {}),
     members: plan.members.map(member => ({
       ...member,
@@ -182,7 +184,8 @@ export const activeSemanticMembers = (plan?: SemanticPlan) =>
   ) ?? [];
 export const semanticTests = (plan?: SemanticPlan) => {
   const members = activeSemanticMembers(plan);
-  return members.length > 1 && members.some(member => member.intentId === plan?.primaryIntentId)
+  return members.length > 1 &&
+    (plan?.batchIntentIds || members.some(member => member.intentId === plan?.primaryIntentId))
     ? [...new Set(members.flatMap(member => member.tests.map(test => test.path)))].sort()
     : [];
 };
@@ -190,17 +193,32 @@ export function semanticVerdict(
   plan: SemanticPlan | undefined,
   reports: Record<string, { durationMs?: number | undefined; failed: boolean }>,
   pins: { candidateId: string; head: string; runId: string },
+  batchIntentIds: readonly string[] | undefined = plan?.batchIntentIds,
 ) {
   const conflicts: SemanticConflict[] = [];
-  let overBudget: { measuredMs: number; intents: string[] } | undefined;
-  const left = plan?.members.find(member => member.intentId === plan.primaryIntentId);
-  for (const right of activeSemanticMembers(plan)) {
-    if (!left || left.intentId === right.intentId) continue;
+  const overBudgetPairs: { measuredMs: number; intents: string[] }[] = [];
+  const active = activeSemanticMembers(plan);
+  const selected = batchIntentIds ? new Set(batchIntentIds) : null;
+  const members = selected ? active.filter(member => selected.has(member.intentId)) : active;
+  // Only the current batch expands to all pairs (8 members = 28). Accepted
+  // history retains the primary-vs-peer path, independent of history size.
+  const pairs: [SemanticPlan['members'][number], SemanticPlan['members'][number]][] = [];
+  for (let i = 0; i < members.length; i++) {
+    const left = members[i]!;
+    if (!selected && left.intentId !== plan?.primaryIntentId) continue;
+    const paths = new Set(left.tests.map(test => test.path));
+    for (const right of selected ? members.slice(i + 1) : members) {
+      if (left.intentId === right.intentId) continue;
+      if (selected && !right.tests.some(test => paths.has(test.path))) continue;
+      pairs.push([left, right]);
+    }
+  }
+  for (const [left, right] of pairs) {
     const tests = [...new Set([...left.tests, ...right.tests].map(test => test.path))].sort();
     if (!tests.length || tests.some(test => !reports[test]?.durationMs)) continue;
     const measuredMs = tests.reduce((total, test) => total + reports[test]!.durationMs!, 0);
     if (measuredMs >= 90_000) {
-      overBudget = { measuredMs, intents: [left.intentId, right.intentId] };
+      overBudgetPairs.push({ measuredMs, intents: [left.intentId, right.intentId] });
       continue;
     }
     const failedTests = tests.filter(test => reports[test]!.failed);
@@ -212,10 +230,14 @@ export function semanticVerdict(
       conflicts.push({ kind: 'intent-semantic', ...pins, intents: [a, b], tests, failedTests, measuredMs });
     }
   }
-  return { conflicts, overBudget };
+  return { conflicts, overBudget: overBudgetPairs[0], overBudgetPairs };
 }
 export function semanticConflictMessage(conflicts: SemanticConflict[]) {
   const first = conflicts[0];
   if (!first) return '';
-  return `Intent semantic conflict: ${first.intents.map(intent => `${intent.outcome} (${intent.intentId})`).join(' + ')}; contract tests failed together on ${first.head}: ${first.failedTests.join(', ')}; run ${first.runId}.${conflicts.length > 1 ? ` ${conflicts.length - 1} additional named conflicts are retained in semanticConflicts.` : ''}`;
+  return `Intent semantic conflict: ${first.intents.map(intent => `${intent.outcome} (${intent.intentId})`).join(' fails together with ')}; contract tests failed together on ${first.head}: ${first.failedTests.join(', ')}; run ${first.runId}.${conflicts.length > 1 ? ` ${conflicts.length - 1} additional named conflicts are retained in semanticConflicts.` : ''}`;
+}
+
+export function semanticBudgetMessage(pairs: { measuredMs: number; intents: string[] }[]) {
+  return `Composed contract unions exceed the under-90000 ms pair budget: ${pairs.map(pair => `${pair.intents.join(' + ')}: ${pair.measuredMs} ms`).join('; ')}.`;
 }

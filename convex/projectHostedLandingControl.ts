@@ -1,5 +1,9 @@
 import { prepareLandingCheck } from './projectHostedLandingBatchCheck';
-import { semanticVerdict, semanticConflictMessage } from '../src/intent-semantic-conflict';
+import {
+  semanticVerdict,
+  semanticConflictMessage,
+  semanticBudgetMessage,
+} from '../src/intent-semantic-conflict';
 import { digest } from '../src/portable-hash';
 import { canonicalPayload } from '../src/hosted-source-operation';
 // SPDX-License-Identifier: Apache-2.0
@@ -209,7 +213,7 @@ export async function advanceLandingQueue(ctx: MutationCtx, claim: LandingClaim,
         observation = landingObservation('failed', 'CONTRACT_OVER_BUDGET');
         error = {
           code: 'CONTRACT_OVER_BUDGET',
-          message: `Composed contract union measured ${semantic.overBudget.measuredMs} ms; budget is under 90000 ms for Intents ${semantic.overBudget.intents.join(' + ')}.`,
+          message: semanticBudgetMessage(semantic.overBudgetPairs),
         };
       } else if (['passed', 'failed'].includes(run.status) && semantic.conflicts.length) {
         phase = 'terminal-failed';
