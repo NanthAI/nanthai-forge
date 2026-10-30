@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { z } from 'zod';
 import type { semanticReportsSchema } from './intent-semantic-conflict.js';
+import type { HostedCheckCallback } from './hosted-check-evidence.js';
+import { canonicalPayload } from './hosted-source-operation.js';
 type Reports = z.infer<typeof semanticReportsSchema>;
 export const checkReportExcerptBytes = 64 * 1024;
 const excerptFiles = 32;
@@ -63,4 +65,25 @@ export function applyCheckRetryBudget(input: Reports) {
       };
   }
   return reports;
+}
+
+/** The stored callback receipt is only a replay record (its digest, taken over the full callback, decides
+ * retries), so it must stay far below the 1 MiB document limit however many test files a callback reports.
+ * Small callbacks are kept verbatim; larger ones keep capped excerpts, then only the file count. */
+export const checkCallbackReceiptBytes = 256 * 1024;
+export function callbackReceipt(callback: HostedCheckCallback) {
+  const fits = (text: string) => encoder.encode(text).length <= checkCallbackReceiptBytes;
+  const full = canonicalPayload(callback);
+  const result = callback.result;
+  if (fits(full) || result.kind !== 'complete' || !result.contractReports) return full;
+  const capped = canonicalPayload({
+    ...callback,
+    result: { ...result, contractReports: capCheckReports(result.contractReports).reports },
+  });
+  if (fits(capped)) return capped;
+  const { contractReports, ...rest } = result;
+  return canonicalPayload({
+    ...callback,
+    result: { ...rest, contractReportsOmitted: Object.keys(contractReports).length },
+  });
 }

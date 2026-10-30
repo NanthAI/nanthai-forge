@@ -1,7 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { capCheckReports, checkReportExcerptBytes } from '../dist/check-report-cap.js';
+import {
+  callbackReceipt,
+  capCheckReports,
+  checkCallbackReceiptBytes,
+  checkReportExcerptBytes,
+} from '../dist/check-report-cap.js';
+import { canonicalPayload } from '../dist/hosted-source-operation.js';
 import { checkFileSummary } from '../dist/check-file-summary.js';
 import { semanticReportsSchema } from '../dist/intent-semantic-conflict.js';
 import { hostedCheckRunSchema } from '../dist/hosted-check.js';
@@ -148,6 +154,54 @@ test('signed callback completion caps excerpts and retains every failure name', 
   assert.equal(result.testFiles.failed.length, 100);
   assert.equal(result.testFiles.truncated, 68);
   assert.equal(Object.values(result.contractReports).filter(r => r.firstError).length, 32);
+});
+
+test('the retained callback receipt of a callback over 1 MiB stays under the receipt budget and replays', async () => {
+  const s = await checksFixture();
+  const run = await s.activate((await s.enqueue(s.selection())).id, 1);
+  await s.callback(s.shard(run, 0, 'failed'));
+  const callback = s.complete(run, 'failed', { contractReports: failures(1000) });
+  assert(Buffer.byteLength(JSON.stringify(callback)) > 1024 * 1024);
+  const { receiveHostedCheckCallback } = await import(
+    (await import('./convex-module.mjs')).moduleUrl('../convex/projectHostedCheckCallbacks.ts')
+  );
+  const receive = name =>
+    s.transaction(
+      name,
+      {
+        _handler: ctx =>
+          receiveHostedCheckCallback(
+            ctx,
+            { projectId: s.projectId, callback, signature: s.sign(callback) },
+            () => 'synthetic-check-collector-only',
+          ),
+      },
+      {},
+    );
+  const before = s.tables.projectHostedCheckCallbacks.size;
+  assert.equal((await receive('large-callback')).status, 'failed');
+  const receipts = [...s.tables.projectHostedCheckCallbacks.values()];
+  assert.equal(receipts.length, before + 1);
+  const saved = receipts.find(row => row.eventId === callback.eventId);
+  assert(Buffer.byteLength(saved.value) <= checkCallbackReceiptBytes);
+  assert.equal(JSON.parse(saved.value).eventId, callback.eventId);
+  // The digest still covers the original callback, so the provider retry is accepted without a second receipt.
+  assert.equal((await receive('large-callback-retry')).status, 'failed');
+  assert.equal(s.tables.projectHostedCheckCallbacks.size, before + 1);
+});
+
+test('callback receipts keep small callbacks verbatim and fall back to a file count when names alone are too large', () => {
+  const base = { schema: 1, eventId: 'e', result: { kind: 'complete', status: 'failed', exitCode: 1 } };
+  const small = { ...base, result: { ...base.result, contractReports: failures(3, 'boom') } };
+  assert.equal(callbackReceipt(small), canonicalPayload(small));
+  const names = Object.fromEntries(
+    Array.from({ length: 4000 }, (_, i) => [`tests/${'n'.repeat(120)}-${i}.test.mjs`, { failed: true }]),
+  );
+  const huge = { ...base, result: { ...base.result, contractReports: names } };
+  const receipt = JSON.parse(callbackReceipt(huge));
+  assert(Buffer.byteLength(callbackReceipt(huge)) <= checkCallbackReceiptBytes);
+  assert.equal(receipt.result.contractReports, undefined);
+  assert.equal(receipt.result.contractReportsOmitted, 4000);
 });
 
 test('the first 32 failed files keep excerpts ahead of recovered flakes', () => {

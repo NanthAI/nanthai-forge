@@ -1,6 +1,6 @@
 import { isMachineRunner } from '../src/hosted-machine-runner';
 import { checkFileSummary } from '../src/check-file-summary';
-import { capCheckReports } from '../src/check-report-cap';
+import { callbackReceipt, capCheckReports } from '../src/check-report-cap';
 // SPDX-License-Identifier: Apache-2.0
 import { notifyActionsProgress } from './projectHostedActionsWake';
 import { requireMacMachine } from './projectHostedCheckMachines';
@@ -192,7 +192,7 @@ export async function receiveHostedCheckCallback(
     runId: run.id,
     eventId: callback.eventId,
     digest,
-    value: canonicalPayload(callback),
+    value: callbackReceipt(callback),
   });
   await writeHostedCheck(ctx, row._id, run);
   await notifyActionsProgress(ctx, run, now);

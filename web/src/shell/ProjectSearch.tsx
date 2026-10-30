@@ -1,4 +1,3 @@
-import { readBrowserSource } from '../browser-source';
 import { useReadRetry } from '../ui/read-retry';
 // SPDX-License-Identifier: Apache-2.0
 import { useEffect, useMemo, useState } from 'react';
@@ -88,12 +87,16 @@ function HostedSearch({
     setFiles([]);
     setError('');
     setLoading(true);
-    void readBrowserSource(client, {
-      projectId,
-      backupId: workspace.backupId,
-      base: sourceHead,
-      head: sourceHead,
-    })
+    // Loaded on demand: the source reader pulls in the language parsers, which first paint never needs.
+    void import('../browser-source')
+      .then(({ readBrowserSource }) =>
+        readBrowserSource(client, {
+          projectId,
+          backupId: workspace.backupId,
+          base: sourceHead,
+          head: sourceHead,
+        }),
+      )
       .then(raw => {
         if (!active) return;
         const result = JSON.parse(raw) as { available: boolean; paths?: { path: string }[] };
