@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { createInterface } from 'node:readline';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { preparedMetadata } from '../dist/native-exchange-prepared.js';
+import { preparedMetadata } from '../dist/retained-exchange-metadata.js';
 import { readByteTree } from '../dist/native-exchange-tree.js';
 import { parseJsonStream } from '../dist/json-stream.js';
 import { digest } from '../dist/hash.js';

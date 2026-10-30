@@ -1,11 +1,6 @@
 import { CUTOVER_CLI_VERSION } from './cutover-version.js';
 // SPDX-License-Identifier: Apache-2.0
-import {
-  METADATA_PUBLICATION,
-  publicationPages,
-  publicationHash,
-  type PublicationMetadata,
-} from './publication-metadata.js';
+
 import { cachedExchangeMetadata, retainExchangeMetadata } from './exchange-receive-cache.js';
 import { ExchangeDownloadCache } from './exchange-download-cache.js';
 import { SignedDownloadCache, type SignedObject } from './exchange-r2-read.js';
@@ -16,7 +11,7 @@ import { retryExchange } from './exchange-retry.js';
 import { hostedActionError } from './hosted-action-error.js';
 import { resolveAuthToken } from './auth-store.js';
 import { ConvexHttpClient } from 'convex/browser';
-import { ConvexError } from 'convex/values';
+
 import { makeFunctionReference } from 'convex/server';
 import type { ContentPin, ExchangeTransport } from './native-exchange.js';
 import { mapExchange } from './exchange-parallel.js';
@@ -41,12 +36,9 @@ const chunked = (pin: ContentPin) => {
   );
 };
 export class ConvexExchange implements ExchangeTransport {
-  readonly metadataTrees = true;
-  authorityEpoch: number | undefined;
   metadataCacheDirectory?: string;
   private readonly downloadCache = new ExchangeDownloadCache();
   private readonly signedDownloads = new WeakMap<ConvexHttpClient, SignedDownloadCache>();
-  readonly workRecords = true;
   onCall?: (name: string, pending: boolean) => void;
   onWorkProgress?: (done: number, total: number) => void;
   onDownloadProgress?: (pin: ContentPin, done: number) => void;
@@ -260,134 +252,6 @@ export class ConvexExchange implements ExchangeTransport {
     return this.uploadPhysical(objects.map(({ pin, bytes }) => ({ pin, read: () => bytes })));
   }
 
-  async published(pin: ContentPin): Promise<string | null> {
-    return retryExchange('publication receipt', this.operationId, () =>
-      this.client.action(action('projectExchangeActions:published'), {
-        ...(this.authorityEpoch === undefined ? {} : { authorityEpoch: this.authorityEpoch }),
-        projectId: this.projectId,
-        operationId: this.operationId,
-        previous: this.previous,
-        ...(this.deferHistory ? { deferHistory: true } : {}),
-        digest: pin.sha256,
-        size: pin.size,
-      }),
-    );
-  }
-  async publishMetadata(
-    pin: ContentPin,
-    build: () => PublicationMetadata,
-    ownerDerived?: ContentPin,
-  ): Promise<string | null> {
-    if (this.proposalId || this.deferHistory) return null;
-    const capability = await retryExchange('publication capabilities', this.operationId, async () => {
-      try {
-        return await this.client.query(query('projectPublicationStore:capabilities'), {
-          projectId: this.projectId,
-        });
-      } catch (error) {
-        // An older deployment has no capability endpoint. Other failures stay
-        // explicit and must never silently select another publication route.
-        if (
-          error instanceof Error &&
-          error.message.includes('projectPublicationStore:capabilities') &&
-          /Could not find public function|Function .* is unavailable/.test(error.message)
-        )
-          return null;
-        throw error;
-      }
-    });
-    if (capability !== METADATA_PUBLICATION) return null;
-    const payload = build(),
-      { pages, digest: metadataDigest } = publicationPages(payload),
-      request = publicationHash(
-        JSON.stringify([
-          this.projectId,
-          this.operationId,
-          this.previous,
-          pin.sha256,
-          pin.size,
-          ...(this.authorityEpoch ? ['authority-epoch', this.authorityEpoch] : []),
-        ]),
-      );
-    let cursor: { id: string; cursor: number; chain: string } = await retryExchange(
-      'publication begin',
-      this.operationId,
-      () =>
-        this.client.mutation(mutation('projectPublicationStore:begin'), {
-          projectId: this.projectId,
-          operationId: this.operationId,
-          request,
-          digest: pin.sha256,
-          size: pin.size,
-          metadataDigest,
-          pages: pages.length,
-        }),
-    );
-    while (cursor.cursor < pages.length) {
-      const args = {
-        id: cursor.id,
-        position: cursor.cursor,
-        previous: cursor.chain,
-        body: pages[cursor.cursor]!,
-      };
-      cursor = await retryExchange('publication page', this.operationId, () =>
-        this.client.mutation(mutation('projectPublicationStore:append'), args),
-      );
-    }
-    return this.publish(pin, true, ownerDerived);
-  }
-  async publishedOwnerDerived(backupId: string): Promise<ContentPin | null> {
-    return retryExchange('published owner display pin', this.operationId, () =>
-      this.client.query(query('projectPublicationStore:publishedDisplay'), {
-        projectId: this.projectId,
-        backupId,
-      }),
-    );
-  }
-  async ownerDisplayBaseline(): Promise<boolean> {
-    return retryExchange('owner display baseline', this.operationId, () =>
-      this.client.query(query('projectPublicationStore:displayBaseline'), { projectId: this.projectId }),
-    );
-  }
-  async publish(pin: ContentPin, metadataOnly = false, ownerDerived?: ContentPin): Promise<string> {
-    try {
-      return await retryExchange(
-        'checkpoint publication',
-        this.operationId,
-        () =>
-          this.client.action(action('projectExchangeActions:publish'), {
-            ...(this.authorityEpoch === undefined ? {} : { authorityEpoch: this.authorityEpoch }),
-            displayProtocol: 3,
-            ...(ownerDerived ? { ownerDerived } : {}),
-            projectId: this.projectId,
-            operationId: this.operationId,
-            previous: this.previous,
-            ...(this.deferHistory ? { deferHistory: true } : {}),
-            ...(metadataOnly ? { metadataOnly: 1 } : {}),
-            digest: pin.sha256,
-            size: pin.size,
-          }),
-        { retries: 1, retryCodes: ['EXCHANGE_REQUEST_FAILED', 'EXCHANGE_REQUEST_TIMEOUT'] },
-      );
-    } catch (error) {
-      const data =
-        error instanceof ConvexError && error.data && typeof error.data === 'object' ? error.data : null;
-      if (
-        (data as { code?: unknown } | null)?.code === 'PROJECT_CHANGED' ||
-        (error instanceof ForgeError && error.code === 'PROJECT_CHANGED')
-      )
-        throw new ForgeError(
-          'PROJECT_CHANGED',
-          'Another push changed this project since your previous checkpoint, so nothing was published. Pull the latest checkpoint, reconcile your changes, then push again.',
-        );
-      if (
-        error instanceof ForgeError &&
-        ['HOSTED_ACTION_FAILED', 'EXCHANGE_REQUEST_FAILED', 'EXCHANGE_REQUEST_TIMEOUT'].includes(error.code)
-      )
-        throw new ForgeError('WORK_PUBLICATION_FAILED', error.message);
-      throw error;
-    }
-  }
   async manifest(
     backupId: string,
   ): Promise<{ json: string; digest: string; size: number; sourceDigest?: string }> {

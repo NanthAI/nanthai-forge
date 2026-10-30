@@ -39,7 +39,3 @@ export const autoExchangeStateSchema = z.object({
   spendCheck: z.object({ command: z.string(), at: z.number() }).optional(),
 });
 export type AutoExchangeState = z.infer<typeof autoExchangeStateSchema>;
-export const AUTO_EXCHANGE_UNDO =
-  'Disable future automatic pushes with set-policy autoExchange.enabled:false. Published history is retained; undo source through a compensating Lane.';
-export const AUTO_EXCHANGE_RESUME =
-  'Resumes automatically when the rolling 24-hour window clears. Manual exchange push remains available. Restart owner activity after refreshing login or adapter configuration.';

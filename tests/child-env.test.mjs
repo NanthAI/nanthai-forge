@@ -17,7 +17,6 @@ import { gitCommand } from '../dist/work-git-command.js';
 import { wakeGithubPush } from '../dist/github-auto-push.js';
 import { wakePostAccept } from '../dist/post-accept-main.js';
 import { waitPushAudit } from '../dist/push-audit-wait.js';
-import { wakeAutoExchange } from '../dist/auto-exchange-wake.js';
 import { startPresenceWorker } from '../dist/presence-worker-start.js';
 import { launchDetachedCheck } from '../dist/check-controller.js';
 import { watcherRuntime } from '../dist/local-watcher-runtime.js';
@@ -249,38 +248,6 @@ test('browser opener drops Forge and provider credentials', t => {
   clean(calls[0].options.env);
   assert.equal(calls[0].options.env.FORGE_AUTH_TOKEN, undefined);
   assert.equal(calls[0].options.env.GH_TOKEN, undefined);
-});
-test('detached auto-exchange receives only hosted authentication and its worker marker', async t => {
-  const calls = capture(t);
-  plant(t, ['FORGE_AUTH_TOKEN']);
-  const { workflow } = await fixture(t);
-  const store = workflow.work.store;
-  bind(store);
-  updateHostState(store, state => {
-    state.push = {
-      operationId: randomUUID(),
-      projectId: 'fake-project',
-      deployment: 'http://127.0.0.1:1',
-      previous: null,
-      revision: 0,
-    };
-  });
-  store.locked(() => {
-    const data = store.load();
-    data.autonomyPolicy = {
-      ...policyPreset('trusted'),
-      autoExchange: { enabled: true, debounceMs: 0, maxPendingAgeMs: 0 },
-    };
-    data.revision++;
-    store.save(data);
-  });
-  wakeAutoExchange(store, true);
-  await tick();
-  const call = calls.find(call => call.args[1]?.[0]?.endsWith('/auto-exchange.js'));
-  assert.ok(call);
-  clean(call.options.env);
-  assert.equal(call.options.env.FORGE_AUTH_TOKEN, 'fake-test-secret');
-  assert.equal(call.options.env.FORGE_AUTO_EXCHANGE_WORKER, '1');
 });
 test('detached integration preview retains declared static inputs and drops unrelated secrets', async t => {
   const calls = capture(t);

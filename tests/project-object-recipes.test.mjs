@@ -1,3 +1,4 @@
+import { commitValidatedCheckpoint } from './project-exchange-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
@@ -253,7 +254,7 @@ test('recipe ranges recheck current chunk bytes and access after transfer, inclu
   await assert.rejects(objectRange(s.ctx, row(s, pin.sha256), 'reader', 0), code('PROJECT_UNAVAILABLE'));
 });
 
-test('a recipe-bound logical manifest publishes and opens Work without mislabeling recipe storage as original bytes', async t => {
+test('a retained recipe-bound logical manifest opens Work without mislabeling recipe storage as original bytes', async t => {
   const { checkpoint } = await import('./project-exchange-fixture.mjs');
   const { randomUUID } = await import('node:crypto');
   const s = setup(),
@@ -264,14 +265,10 @@ test('a recipe-bound logical manifest publishes and opens Work without mislabeli
   await recipes.complete._handler(s.ctx, built.input);
   assert(row(s, digest(bytes)).recipe);
   assert.equal(row(s, digest(bytes)).storageId, undefined);
-  const backupId = await modules.projectExchangeActions.publish._handler(s.ctx, {
-    displayProtocol: 3,
-    ownerDerived: base.input.ownerDerived,
-    projectId: 'project',
-    operationId: randomUUID(),
-    previous: null,
-    digest: digest(bytes),
-    size: bytes.length,
+  const backupId = await commitValidatedCheckpoint(s, {
+    ...base,
+    manifest,
+    input: { ...base.input, digest: digest(bytes), size: bytes.length },
   });
   assert.equal(s.tables.projectBackups.get(backupId).storageId, undefined);
   await modules.projectWorkActions.initialize._handler(s.ctx, {

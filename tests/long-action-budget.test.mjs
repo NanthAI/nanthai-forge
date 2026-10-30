@@ -7,7 +7,6 @@ import { moduleUrl, moduleSource } from './convex-module.mjs';
 import { workSchema } from '../dist/work-types.js';
 import { metadataRequest } from '../dist/work-metadata.js';
 import { LONG_ACTION_BUDGET_MS, LONG_ACTION_DEADLINE_MS, longActionExpired } from '../dist/long-action.js';
-const { runPublication } = await import(moduleUrl('../convex/projectPublicationRun.ts'));
 
 test('server scheduling window leaves three minutes below the client deadline', t => {
   let now = 100;
@@ -18,51 +17,6 @@ test('server scheduling window leaves three minutes below the client deadline', 
   assert.equal(longActionExpired(100), false);
   now++;
   assert.equal(longActionExpired(100), true);
-});
-
-test('publication wait yields pending at its budget and never releases another worker claim', async t => {
-  let now = 0,
-    validations = 0,
-    releases = 0;
-  t.mock.method(Date, 'now', () => now);
-  const ctx = {
-    runMutation: async ref => {
-      assert.equal(getFunctionName(ref), 'projectPublicationAttempt:claim');
-      now += LONG_ACTION_BUDGET_MS;
-      return { claimed: false, receipt: null };
-    },
-  };
-  const result = await runPublication(
-    ctx,
-    { projectId: 'project', owner: 'owner', operationId: 'op', request: 'pin' },
-    async () => {
-      validations++;
-      return 'receipt';
-    },
-  );
-  assert.equal(result.pending, true);
-  assert.equal(JSON.parse(result.progress).phase, 'publication-wait');
-  assert.equal(validations, 0);
-  ctx.runMutation = async ref => {
-    if (getFunctionName(ref).endsWith(':release')) {
-      releases++;
-      return null;
-    }
-    return { claimed: false, receipt: 'receipt' };
-  };
-  assert.equal(
-    await runPublication(
-      ctx,
-      { projectId: 'project', owner: 'owner', operationId: 'op', request: 'pin' },
-      async () => {
-        validations++;
-        return 'wrong';
-      },
-    ),
-    'receipt',
-  );
-  assert.equal(releases, 0);
-  assert.equal(validations, 0);
 });
 
 test('legacy index budget yields only after a committed batch and resumes the next batch', async t => {

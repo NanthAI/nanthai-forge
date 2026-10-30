@@ -21,7 +21,7 @@ import { startOwnerPresence } from '../dist/presence-worker-start.js';
 import { driveLand as land } from '../dist/land.js';
 import { WorkStore } from '../dist/work-store.js';
 import { ForgeError } from '../dist/errors.js';
-import { notifyAutoExchange } from '../dist/auto-exchange-notify.js';
+import { notifyWorker } from '../dist/local-worker-notifications.js';
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 function worker(f) {
   const controller = new AbortController();
@@ -435,7 +435,7 @@ test('queue admission contention retries the same snapshot after a peer release 
   try {
     await contended;
     const state = landingWorkerStates(f.store)[0];
-    notifyAutoExchange(state.endpoint);
+    notifyWorker(state.endpoint);
     await until(f, () => entries(f)[0]?.status === 'accepted', 'queue release retries admission');
     assert.equal(blocked, true);
     assert.equal(runs(f).length, 1);

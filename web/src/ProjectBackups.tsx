@@ -1,4 +1,3 @@
-import { continueLongAction } from '../../src/long-action';
 import { downloadObjectArchive } from './object-archive';
 import { countLabel } from './ui/count';
 import { ErrorToast } from './ui/Toast';
@@ -205,20 +204,11 @@ export default function ProjectBackups({ explore }: { explore?: () => void }) {
           name: original.input.name,
         });
         const { uploadArchiveObjects } = await import('./archive-object-upload');
-        const pin = await uploadArchiveObjects(client, projectId, original.file);
-        original.id = await continueLongAction<Id<'projectBackups'>>(
-          'checkpoint publication',
-          original.input.operationId,
-          continuation =>
-            client.action(api.projectExchangeActions.publish, {
-              ...(continuation ? { continuation } : {}),
-              projectId,
-              operationId: original.input.operationId,
-              previous: original.input.previous,
-              retainCandidate: true,
-              ...pin,
-            }),
-        );
+        const seeded = await uploadArchiveObjects(client, projectId, original.file, {
+          operationId: original.input.operationId,
+          preview: original.input.preview,
+        });
+        original.id = seeded.backupId;
         chooseProject(projectId);
         setMessage('Source and Work stored as reusable private objects.');
         setAttempt(null);

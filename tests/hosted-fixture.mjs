@@ -38,8 +38,6 @@ const accountResources = await import(moduleUrl('../convex/accountResources.ts')
 const accountPlan = await import(moduleUrl('../convex/accountPlan.ts'));
 const accountExecute = await import(moduleUrl('../convex/accountExecute.ts'));
 const teamLifecycle = await import(moduleUrl('../convex/teamLifecycle.ts'));
-const projectPublicationAttempt = await import(moduleUrl('../convex/projectPublicationAttempt.ts'));
-const projectPublicationProgress = await import(moduleUrl('../convex/projectPublicationProgress.ts'));
 const projectPublicationStore = await import(moduleUrl('../convex/projectPublicationStore.ts'));
 const projectLifecycle = await import(moduleUrl('../convex/projectLifecycle.ts'));
 const r2ArchiveSource = await import(moduleUrl('../convex/r2ArchiveSource.ts'));
@@ -450,8 +448,6 @@ export function state(jobs = [job()], { keysetPaging = false } = {}) {
     projectR2Backfill,
     r2ArchiveSource,
     projectPublicationStore,
-    projectPublicationProgress,
-    projectPublicationAttempt,
     inventoryAccess,
     projectWorkIndexStore,
     projectWorkIndexBuildStore,

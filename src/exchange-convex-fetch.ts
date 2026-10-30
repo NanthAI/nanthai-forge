@@ -25,19 +25,13 @@ const replaySafe = new Set([
   'projectObjects:missing',
   'projectObjects:available',
   'projectWork:state',
-  'projectPublicationStore:capabilities',
-  'projectPublicationStore:publishedDisplay',
-  'projectPublicationStore:displayBaseline',
   'projectObjectDownloads:describe',
-  'projectPublicationStore:begin',
-  'projectPublicationStore:append',
   'projectObjects:prepareBatch',
   'projectObjects:completeBatch',
   'projectObjects:reconcile',
   'projectObjectDownloads:signDownloads',
   'projectObjectCommit:commitBatch',
   'projectObjectRecipes:complete',
-  'projectExchangeActions:published',
   'projectExchangeActions:checkpoint',
   'projectExchangeActions:downloadBatch',
   'projectExchangeActions:downloadPart',
@@ -47,16 +41,14 @@ const replaySafe = new Set([
   'projectWorkIndexActions:ensure',
 ]);
 const longActions = new Set([
-  'projectExchangeActions:publish',
   'projectExchangeActions:manifest',
-  'projectExchangeActions:completeHistory',
   'projectObjectRecipes:complete',
   'projectWorkActions:initialize',
   'projectExchangeMigration:migrate',
   'projectWorkActions:exportJournal',
   'projectWorkIndexActions:ensure',
 ]);
-const receiptCalls = new Set(['projectExchangeActions:publish', 'projectExchangeMigration:migrate']);
+const receiptCalls = new Set(['projectExchangeMigration:migrate']);
 
 /** The HTTP client uses this for every exchange query, mutation and action,
  * including direct calls from bound exchange and the upload/transport helpers. */
@@ -71,8 +63,7 @@ export function exchangeConvexFetch(
         replaySafe.has(name) ||
         (receiptCalls.has(name) && typeof payload.args?.[0]?.operationId === 'string'),
       longAction = String(url).endsWith('/api/action') && longActions.has(name);
-    const continuable =
-      longAction && ['projectExchangeActions:publish', 'projectWorkIndexActions:ensure'].includes(name);
+    const continuable = longAction && name === 'projectWorkIndexActions:ensure';
     const guard = pendingProgressGuard(name, payload.args?.[0]?.operationId ?? name);
     let progressName: string | undefined;
     const indexProgress = name === 'projectWorkIndexActions:ensure' ? indexProgressReporter() : undefined;
@@ -90,8 +81,7 @@ export function exchangeConvexFetch(
             ? { headerTimeoutMs: LONG_ACTION_DEADLINE_MS, totalTimeoutMs: LONG_ACTION_DEADLINE_MS }
             : {}),
           ...options,
-          // Publication owns its small retry budget in ConvexExchange.publish.
-          retries: name === 'projectExchangeActions:publish' ? 0 : safe ? (options.retries ?? 3) : 0,
+          retries: safe ? (options.retries ?? 3) : 0,
         });
         if (response.status === 429 || (response.status >= 500 && response.status !== 560))
           throw new ForgeError(

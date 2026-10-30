@@ -151,21 +151,22 @@ async function run(t, extra = []) {
   return { code, record: JSON.parse(json) };
 }
 
-test('one command records a real synthetic delta, machine/build identity and explicit unrun browser results', async t => {
+test('one command records machine/build identity and explicitly unrun retired push and browser results', async t => {
   const { code, record } = await run(t);
   const push = record.measurements.oneFilePush;
-  assert.equal(push.samples.length, 1);
-  assert.ok(push.samples[0].durationMs > 0);
-  assert.ok(push.samples[0].rpcCalls > 0);
-  assert.ok(push.samples[0].uploadBytes > 0);
-  assert.equal(code, push.status === 'pass' ? 0 : 1);
+  assert.deepEqual(push.samples, []);
+  assert.equal(push.status, 'unrun');
+  assert.equal(push.medianMs, null);
+  assert.match(push.reason, /Exchange push was retired/);
+  assert.equal(code, 0);
+  assert.equal(record.status, 'partial');
   for (const name of ['now', 'work', 'laneFirstDiff'])
     assert.equal(record.measurements[name].status, 'unrun');
   assert.equal(record.landing.status, 'unrun');
   assert.match(record.buildHash, /^[a-f0-9]{64}$/);
   assert.ok(record.machine.cpuCount > 0);
   assert.ok(Date.parse(record.endedAt) >= Date.parse(record.startedAt));
-  assert.equal(record.syntheticFixture.seedPushExcluded, true);
+  assert.equal(record.syntheticFixture, undefined);
 });
 
 test('requested live setup failure still writes JSON and returns a failure, never a successful live sample', async t => {

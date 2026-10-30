@@ -1,3 +1,4 @@
+import { captureNativeArchive } from './native-archive-fixture.mjs';
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import { spawnSync } from 'node:child_process';
@@ -10,7 +11,7 @@ import { performance } from 'node:perf_hooks';
 import { initNative } from '../dist/native-work.js';
 import { WorkStore } from '../dist/work-store.js';
 import { exchangeBaseline } from '../dist/native-exchange-baseline.js';
-import { prepareNativeExchange } from '../dist/native-exchange.js';
+
 import { ConvexExchange } from '../dist/exchange-client.js';
 import { reconcileExchange } from '../dist/exchange-reconcile.js';
 import { exchangeJournalDelta } from '../dist/exchange-journal-delta.js';
@@ -48,7 +49,7 @@ async function fixture(t, { workSize = 0, events = 3, received = 1 } = {}) {
       : [],
   });
   store.save(data);
-  const prepared = await prepareNativeExchange(store, store.revision(), randomUUID(), false),
+  const prepared = await captureNativeArchive(store, store.revision(), randomUUID(), false),
     manifest = Buffer.from(prepared.json),
     work = readFileSync(join(prepared.directory, 'work.json')),
     s = state([]),

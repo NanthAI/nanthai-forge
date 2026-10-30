@@ -2,7 +2,6 @@ import { wakeIntegrationPreview } from './integration-preview-wake.js';
 import { wakeLandingWorker } from './landing-worker-wake.js';
 import { captureTransactionFriction } from './friction-auto.js';
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { wakeAutoExchange } from './auto-exchange-wake.js';
 import { indexPeerRecords } from './agent-peers-index.js';
 // SPDX-License-Identifier: Apache-2.0
 import { assertCurrentWorkFormat } from './work-format.js';
@@ -84,8 +83,6 @@ export class WorkStore {
       'Work metadata must be a real directory.',
     );
     if (!options.readOnly) {
-      wakeAutoExchange(this);
-
       wakeLandingWorker(this);
     }
   }
@@ -270,7 +267,6 @@ export class WorkStore {
     const result = transaction.commit(revision);
     this.afterPublication(() => {
       if (options.advisory !== false) wakeIntegrationPreview(this, previous, transaction);
-      wakeAutoExchange(this);
 
       wakeLandingWorker(this);
       try {
@@ -302,7 +298,6 @@ export class WorkStore {
     const next = this.readRecords();
     this.afterPublication(() => {
       wakeIntegrationPreview(this, previous, next);
-      wakeAutoExchange(this);
 
       wakeLandingWorker(this);
     });

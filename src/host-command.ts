@@ -7,12 +7,12 @@ import { deleteHostedProject, parseDeleteProjectOptions } from './host-delete.js
 import { checkServiceEnv } from './worker-environment.js';
 import { effectivePolicy as childPolicy } from './autonomy-policy.js';
 import { readRecoveryInventory } from './recovery-inventory.js';
-import { readAutoExchangeStatus } from './auto-exchange-status.js';
+
 import { consumeOwnerRequests, startOwnerAcceptanceListener } from './owner-acceptance-consumer.js';
 import { runAgentSyncRetries } from './agent-sync-retry.js';
 import { markAgentSyncPrepared, startAgentSyncWorker } from './agent-sync-worker.js';
 import { spawn } from 'node:child_process';
-import { isAbsolute } from 'node:path';
+
 import { WorkStore } from './work-store.js';
 import { readHostState, updateHostState, abandonPendingHost } from './host-binding.js';
 import { hostProject, HOST_HELP, type HostOptions } from './host-cli.js';
@@ -93,35 +93,11 @@ export async function hostCli(args: string[], host: typeof hostProject = hostPro
     if (result.autoSync) startAgentSyncWorker(store);
     return result;
   }
-  if (flags[0] === '--spend-command' || flags[0] === '--no-spend-command') {
-    const command = flags[0] === '--spend-command' ? flags[1] : undefined;
-    invariant(
-      command
-        ? flags.length === 2 && isAbsolute(command)
-        : flags.length === 1 && flags[0] === '--no-spend-command',
-      'BAD_ARGUMENT',
-      'Use --spend-command /absolute/owner-owned/executable or --no-spend-command.',
-    );
-    return updateHostState(new WorkStore(root), state => {
-      invariant(state.binding, 'HOST_NOT_BOUND', 'Host this owner first.');
-      state.binding.spendCommand = command;
-      if (state.autoExchange) {
-        delete state.autoExchange.spendCheck;
-        delete state.autoExchange.spend;
-        delete state.autoExchange.nextAttemptAt;
-      }
-      return {
-        spendCommand: command ?? null,
-        next: 'Pending automatic pushes recheck spend before admission.',
-      };
-    });
-  }
   if (flags.includes('--status') || (json && flags.length === 0)) {
     invariant(flags.length === 0 || flags.length === 1, 'BAD_ARGUMENT', HOST_HELP);
     const store = new WorkStore(root, { readOnly: true });
     const state = readHostState(store);
     return {
-      autoExchange: readAutoExchangeStatus(store),
       recovery: await readRecoveryInventory(root),
       bound: Boolean(state.binding),
       canonicalOwner: state.binding?.acceptanceOwner === true,

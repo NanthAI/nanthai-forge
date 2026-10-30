@@ -1,3 +1,4 @@
+import { captureNativeArchive } from './native-archive-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -13,7 +14,7 @@ import { initNative } from '../dist/native-work.js';
 import { WorkStore } from '../dist/work-store.js';
 import { reconcileHostedWork } from '../dist/native-companion.js';
 import { WorkService } from '../dist/work.js';
-import { prepareNativeExchange, pushNativeExchange, pullNativeExchange } from '../dist/native-exchange.js';
+import { pullNativeExchange } from '../dist/native-exchange.js';
 import { metadataRequest, workBytes } from '../dist/work-metadata.js';
 import { NativeSource } from '../dist/native-source.js';
 import { readHosted } from './hosted-read.mjs';

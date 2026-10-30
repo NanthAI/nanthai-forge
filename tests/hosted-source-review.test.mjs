@@ -1,3 +1,4 @@
+import { commitValidatedCheckpoint } from './project-exchange-fixture.mjs';
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -15,7 +16,7 @@ const code = expected => error => (error.data?.code ?? error.code) === expected;
 async function setup(t) {
   const s = fixture(),
     source = await checkpoint(t, s),
-    backupId = await modules.projectExchangeActions.publish._handler(s.ctx, source.input);
+    backupId = await commitValidatedCheckpoint(s, source);
   return {
     ...s,
     source,

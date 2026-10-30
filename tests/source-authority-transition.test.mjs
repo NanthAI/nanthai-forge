@@ -6,7 +6,6 @@ import { lanesFixture } from './hosted-lanes-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 const authority = await import(moduleUrl('../convex/projectSourceAuthority.ts'));
 const owner = await import(moduleUrl('../convex/ownerAcceptance.ts'));
-const exchange = await import(moduleUrl('../convex/projectExchange.ts'));
 const work = await import(moduleUrl('../convex/projectWork.ts'));
 const actions = await import(moduleUrl('../convex/projectWorkActions.ts'));
 const channels = await import(moduleUrl('../convex/projectHostedChannels.ts'));
@@ -124,60 +123,6 @@ test('old owner completion is refused after switch and remains stale after rollb
   s.patch('ownerAcceptanceRequests', requestId, { authorityEpoch: 2 });
   await s.call('rollback-complete', owner.complete, input);
   assert.equal(s.tables.ownerAcceptanceRequests.get(requestId).state, 'rejected');
-});
-
-test('stale upload/publication is fenced before receipt or object reads, including rollback ABA', async () => {
-  const s = setup();
-  const input = {
-    projectId: s.projectId,
-    owner: 'owner',
-    operationId: randomUUID(),
-    request: 'original',
-    previous: null,
-    digest: 'a'.repeat(64),
-    size: 1,
-    preview: {
-      manifestDigest: 'a'.repeat(64),
-      head: 'a'.repeat(64),
-      format: 'native',
-      revision: 0,
-      intents: 0,
-      lanes: 0,
-      views: 0,
-      runs: 0,
-      files: 0,
-      unavailable: 0,
-      channels: [],
-    },
-  };
-  s.insert('projectObjects', {
-    projectId: s.projectId,
-    digest: input.digest,
-    size: 1,
-    nonce: 'nonce',
-    storageId: 'synthetic',
-    removed: false,
-  });
-  const first = await s.call('publish-before', exchange.publish, input);
-  assert.equal(s.counts.at(-1).touched.filter(x => x === 'hostedProjects').length, 1);
-  await s.transition();
-  for (const operationId of [input.operationId, randomUUID()]) {
-    await assert.rejects(s.call('stale-publish', exchange.publish, { ...input, operationId }), stale(server));
-    assert.deepEqual(s.counts.at(-1).touched, ['hostedProjects']);
-  }
-  assert.equal(s.tables.projectBackups.size, 1);
-  await s.transition(server, 'native-owner');
-  await assert.rejects(
-    s.call('old-epoch', exchange.publish, { ...input, previous: first }),
-    stale({ mode: 'native-owner', epoch: 2 }),
-  );
-  await s.call('publish-rollback', exchange.publish, {
-    ...input,
-    operationId: randomUUID(),
-    previous: first,
-    authorityEpoch: 2,
-  });
-  assert.equal(s.tables.projectBackups.size, 2);
 });
 
 test('legacy accept action and its final append transaction both fence a switch between them', async () => {

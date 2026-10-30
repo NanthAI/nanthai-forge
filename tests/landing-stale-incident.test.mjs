@@ -20,7 +20,7 @@ import { WorkStore } from '../dist/work-store.js';
 import { ForgeError } from '../dist/errors.js';
 import { landingWorkerStates } from '../dist/landing-worker-status.js';
 import { formatPendingStatus } from '../dist/pending-status-format.js';
-import { notifyAutoExchange } from '../dist/auto-exchange-notify.js';
+import { notifyWorker } from '../dist/local-worker-notifications.js';
 import childProcess from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import { syncBuiltinESMExports } from 'node:module';

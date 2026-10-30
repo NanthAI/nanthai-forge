@@ -1,3 +1,4 @@
+import { commitValidatedCheckpoint } from './project-exchange-fixture.mjs';
 import test from 'node:test';
 import { validate } from 'convex-helpers/validators';
 import assert from 'node:assert/strict';
@@ -240,7 +241,8 @@ test('hosted guidance preserves original retries, checks current write authority
 });
 test('path preparation reads immutable State manifests, is idempotent, and rechecks authority', async t => {
   const s = fixture(),
-    { input, store } = await checkpoint(t, s);
+    source = await checkpoint(t, s),
+    { input, store } = source;
   const original = s.ctx.runQuery;
   s.ctx.runAction =
     s.ctx.runQuery =
@@ -250,7 +252,7 @@ test('path preparation reads immutable State manifests, is idempotent, and reche
         if (name === 'projectBriefingSources') return paths[method]._handler(s.ctx, args);
         return original(ref, args);
       };
-  const backupId = await exchangeModules.projectExchangeActions.publish._handler(s.ctx, input);
+  const backupId = await commitValidatedCheckpoint(s, source);
   await exchangeModules.projectWorkActions.initialize._handler(s.ctx, {
     projectId: 'project',
     backupId,

@@ -166,7 +166,6 @@ export function plan(options, setup) {
       if (forge)
         steps.push(
           `forge ${scenario} #${run}: agent start -> edit ${paths} -> finish {accept:true} (FORGE_CHECK_SCOPED=1) until main moves` +
-            (forge.hosted ? ' -> exchange push' : '') +
             (forge.mirror ? ` -> github-sync --repo ${forge.mirror} --push until branch moves` : ''),
         );
       if (gh)
@@ -302,11 +301,6 @@ async function forgeSample(forge, scenario, token, member, prepareOnly = false) 
       ...runRecordTimes(finished.run),
       total: tEnd - t0,
     };
-    if (forge.hosted) {
-      const t = Date.now();
-      await exec(NFORGE, ['exchange', forge.root, 'push']);
-      phases.hostedPush = Date.now() - t; // the push receipt returns after hosted publication
-    }
     if (forge.mirror) phases.githubMirror = await mirror(forge);
     return {
       phases,

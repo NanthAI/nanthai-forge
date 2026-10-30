@@ -25,7 +25,6 @@ nforge host ROOT --cutover-file REQUEST.json --dry-run|--apply
 nforge host ROOT --cutover-pins
 nforge host ROOT --source-authority '{"operationId":"UUID","expected":{"mode":"native-owner","epoch":0},"mode":"server"}'
 nforge host ROOT --no-auto-sync | --auto-sync
-nforge host ROOT --spend-command /absolute/executable | --no-spend-command
 --listen consumes hosted acceptance requests every five seconds while running.
 Run nforge login first (cli scope). Only missing source/Work objects are uploaded.
 Source and records are seeded in bounded pages, then main is validated and selected.
@@ -229,7 +228,7 @@ export async function hostProject(
       message: `Hosted ${binding.name}: ${binding.projectUrl}`,
       nextSteps: [
         'nforge host ROOT --status',
-        'nforge exchange ROOT push',
+        'nforge agent ROOT start',
         'nforge coordination ROOT \'{"action":"sessions"}\'',
       ],
     };

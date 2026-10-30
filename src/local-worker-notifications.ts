@@ -7,10 +7,10 @@ import { randomUUID } from 'node:crypto';
 
 /** A private local wake channel exists only while pending. Unlike filesystem
  * notifications, lifecycle clients can explicitly wake a paused owner driver. */
-export async function openAutoExchangeNotifications() {
+export async function openWorkerNotifications() {
   const directory = process.platform === 'win32' ? undefined : mkdtempSync(join(tmpdir(), 'nforge-wake-'));
   if (directory) chmodSync(directory, 0o700);
-  const endpoint = directory ? join(directory, 'wake') : `\\\\.\\pipe\\nforge-auto-${randomUUID()}`;
+  const endpoint = directory ? join(directory, 'wake') : `\\\\.\\pipe\\nforge-worker-${randomUUID()}`;
   const listeners = new Set<() => void>();
   const server = createServer(socket => {
     socket.on('error', () => {});
@@ -45,7 +45,7 @@ export async function openAutoExchangeNotifications() {
     },
   };
 }
-export function notifyAutoExchange(endpoint: string) {
+export function notifyWorker(endpoint: string) {
   const socket = createConnection(endpoint);
   socket.on('error', () => socket.destroy());
   socket.setTimeout(1000, () => socket.destroy());

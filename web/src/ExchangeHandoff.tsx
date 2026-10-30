@@ -14,14 +14,12 @@ function download(value: unknown, filename: string) {
 export default function ExchangeHandoff({
   projectId,
   backupId,
-  previous,
   revision,
   transport,
   inline = false,
 }: {
   projectId: Id<'hostedProjects'>;
   backupId: string;
-  previous?: string | null;
   revision?: number;
   transport?: 'objects';
   inline?: boolean;
@@ -70,27 +68,6 @@ export default function ExchangeHandoff({
               </p>
             </>
           )}
-          <button
-            onClick={() =>
-              download(
-                {
-                  url: client.url,
-                  projectId,
-                  operationId: crypto.randomUUID(),
-                  previous: previous ?? backupId,
-                  revision,
-                },
-                'forge-push.json',
-              )
-            }
-          >
-            Download incremental push request
-          </button>
-          <p>
-            Set the top-level <code>revision</code> to the current local Work revision, then run{' '}
-            <code>nforge exchange ROOT push --command-file forge-push.json</code>. Keep the original request
-            for retries.
-          </p>
         </>
       )}
       <p>

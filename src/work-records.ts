@@ -17,7 +17,6 @@ import {
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { packRecord, unpackRecord } from './work-record-codec.js';
-import { preparePendingExchange } from './pending-exchange.js';
 import { recordOwnerMutation } from './self-metrics-journal.js';
 import { z } from 'zod';
 import { digest } from './hash.js';
@@ -364,7 +363,6 @@ export function prepareRecordPublication(directory: string, manifest: RecordMani
     closeSync(fd);
   }
   const expected = digest(JSON.stringify(manifest));
-  const pending = preparePendingExchange(directory, manifest.fields.revision as number);
   return () => {
     invariant(
       digest(JSON.stringify(manifest)) === expected,
@@ -377,7 +375,6 @@ export function prepareRecordPublication(directory: string, manifest: RecordMani
       'INVALID_WORK_STORE',
       'Prepared Work pointer bytes changed; the committed snapshot is preserved.',
     );
-    pending();
     renameSync(temp, join(directory, 'work.json'));
     syncDirectory(directory);
     recordOwnerMutation(directory, manifest.fields.revision as number);

@@ -15,7 +15,6 @@ import { handoffSummary, latestHandoff } from './agent-handoff-types.js';
 import type { OverlapPlan } from './agent-overlap-plan.js';
 import type { WorkData } from './work-types.js';
 import type { AgentSyncState } from './agent-sync-state.js';
-import type { AutoExchangeStatus } from './auto-exchange-status.js';
 
 /** R1 integration contract: only successfully published captures belong here.
  * Missing observations stay null; metadata publication is never a source receipt. */
@@ -46,11 +45,9 @@ export type PendingObservations = {
   disk?: DiskSample | null;
   integrationPreview?: string | undefined;
   landingWorker?: LandingWorkerStatus;
-  autoExchange?: AutoExchangeStatus;
   submissions?: Submission[];
   overlap?: OverlapPlan;
   recovery?: RecoveryCaptureObservation | null;
-  pendingPushes?: { operationId: string; revision: number }[];
   metadataPending?: number;
   metadataError?: AgentSyncState['headError'] | null;
   metadataNextAttemptAt?: number | null;
@@ -337,14 +334,12 @@ export function pendingStatus(
       checking: lanes.filter(lane => lane.status === 'checking').length,
     },
     hosted: {
-      autoExchange: observed.autoExchange ?? null,
       mainHead: recovery?.mainHead ?? null,
       source,
       work,
       evidence,
       captureAgeMs: age(recovery?.capturedAt, now),
       recovery,
-      pendingPushes: observed.pendingPushes ?? [],
       metadataPending: observed.metadataPending ?? 0,
       metadataError: observed.metadataError ?? null,
       metadataNextAttemptAt: observed.metadataNextAttemptAt ?? null,

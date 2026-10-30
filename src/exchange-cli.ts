@@ -1,26 +1,26 @@
 import { checkoutHostedLane } from './hosted-lane-checkout.js';
 import { hostedLaneCheckoutSchema } from './hosted-lane-checkout-marker.js';
 import { ConvexLaneTransport } from './hosted-lane-transport.js';
-import { acknowledgePendingExchange } from './pending-exchange.js';
-import { withExchangeObservation } from './exchange-observation.js';
+
 import { checkoutHostedMain } from './hosted-main-checkout.js';
 import { mainExpectationSchema } from './hosted-main.js';
 // SPDX-License-Identifier: Apache-2.0
 import { rememberSourceAuthorityError } from './source-authority-client.js';
 import { nativeOwner } from './native-source.js';
 import { hostedActionError } from './hosted-action-error.js';
-import { retryExchange } from './exchange-retry.js';
+
 import { receiveProposal } from './exchange-proposal.js';
-import { boundExchange } from './bound-exchange.js';
+
 import { readFileSync } from 'node:fs';
 import { reconcileExchange } from './exchange-reconcile.js';
 import { migrateNativeArchive } from './native-exchange-migrate.js';
 import { z } from 'zod';
 import { ConvexExchange } from './exchange-client.js';
-import { pushNativeExchange, pullNativeExchange } from './native-exchange.js';
+import { pullNativeExchange } from './native-exchange.js';
 import { WorkStore } from './work-store.js';
-import { invariant } from './errors.js';
+import { ForgeError, invariant } from './errors.js';
 import { CUTOVER_UPGRADE } from './cutover-version.js';
+import { boundMainCheckout } from './bound-main-checkout.js';
 export const mainPullSchema = z
   .object({
     url: z.url(),
@@ -30,14 +30,6 @@ export const mainPullSchema = z
   })
   .strict();
 const shared = { url: z.url(), projectId: z.string().min(1) };
-export const exchangePushSchema = z
-  .object({
-    ...shared,
-    operationId: z.uuid(),
-    previous: z.string().nullable(),
-    revision: z.number().safe().nonnegative(),
-  })
-  .strict();
 export const exchangeMigrateSchema = z
   .object({
     ...shared,
@@ -63,22 +55,18 @@ export const exchangePullSchema = z
     journalPath: z.string().optional(),
   })
   .strict();
-export const EXCHANGE_HELP = `nforge exchange ROOT push
-nforge exchange ROOT pull [--target NEW_DIRECTORY]
-Bound owners use stored deployment/project IDs; push pins current hosted head and local revision.
-Native bound pushes reconcile metadata and update hosted Work and its index.
+export const EXCHANGE_HELP = `nforge exchange ROOT pull [--target NEW_DIRECTORY]
+Bound owners use stored deployment/project IDs.
 Bound pull checks out selected hosted main into a client directory (or --target).
 nforge exchange NEW_DIRECTORY open --command-file REQUEST.json
 nforge exchange NEW_DIRECTORY open-lane --command-file REQUEST.json
 nforge exchange NEW_DIRECTORY restore --command-file REQUEST.json
-nforge exchange ROOT push --command-file REQUEST.json
 nforge exchange NEW_DIRECTORY pull --command-file REQUEST.json
 nforge exchange ROOT receive-proposal --command-file REQUEST.json
 nforge exchange NEW_DIRECTORY pull-proposal --command-file REQUEST.json
 nforge exchange ROOT reconcile --command-file REQUEST.json
 nforge exchange ROOT migrate-archive --command-file REQUEST.json
 Run nforge login or set FORGE_AUTH_TOKEN to your current Forge sign-in JWT. Never put it in the request file.
-Push: {url,projectId,operationId,previous,revision}
 Open/pull main: {url,projectId,operationId,expected?:{head,receiptId}}
 Open-lane: {url,projectId,laneId,operationId,expected?:{head,sourceVersion,version},paths?:["path/or/directory"]}
 Lane checkout is full by default; paths expands a sparse editing directory. Its marker retains the complete baseline. Dirty files are preserved.
@@ -88,9 +76,6 @@ Pull-proposal: {url,projectId,proposalId,cacheRoot?}
 Reconcile: {url,projectId,backupId,operationId,revision}
 Migrate-archive: {url,projectId,backupId,operationId,archivePath,originalDigest}
 Migration preserves exact logical source/Work/artifact bytes and historical archive receipts, then retires exclusively owned compressed archive bytes after exact logical-byte and source-closure verification.
-Push reuses verified project content and large-file chunks by digest, preserving original request IDs for retries.
-First seeds send complete new bytes; changed regions reuse prior chunks without changing logical source hashes.
-Upload counts and bytes describe physical POST bodies; logical reused objects remain separate.
 Restore creates an independent owner; cacheRoot reuses verified local source and journalPath overlays its journal.
 History/source are preserved. No automatic deletion, archive generation, execution or Channel acceptance occurs.
 `;
@@ -100,17 +85,16 @@ export async function exchangeCli(args: string[]) {
     return;
   }
   const [root, action, option, file] = args;
-  if (root && action === 'push' && args.length === 2) return boundExchange(root, 'push');
+  if (root && action === 'push') throw new ForgeError('CLI_UPGRADE_REQUIRED', CUTOVER_UPGRADE);
   if (
     root &&
     action === 'pull' &&
     (args.length === 2 || (args.length === 4 && option === '--target' && file))
   )
-    return boundExchange(root, 'pull', file);
+    return boundMainCheckout(root, file);
   invariant(
     root &&
       [
-        'push',
         'pull',
         'open',
         'open-lane',
@@ -129,13 +113,8 @@ export async function exchangeCli(args: string[]) {
   return exchangeCommand(root, action!, JSON.parse(readFileSync(file, 'utf8')));
 }
 export async function exchangeCommand(root: string, action: string, input: unknown) {
+  if (action === 'push') throw new ForgeError('CLI_UPGRADE_REQUIRED', CUTOVER_UPGRADE);
   try {
-    if (action === 'push') {
-      const { value, observation } = await withExchangeObservation(() =>
-        executeExchangeCommand(root, action, input),
-      );
-      return { ...value, observation };
-    }
     return await executeExchangeCommand(root, action, input);
   } catch (error) {
     const owner = nativeOwner(root);
@@ -212,29 +191,6 @@ async function executeExchangeCommand(root: string, action: string, input: unkno
   }
   if (action === 'reconcile') {
     return reconcileExchange(root, exchangeReconcileSchema.parse(input));
-  }
-  if (action === 'push') {
-    invariant(
-      !(input && typeof input === 'object' && 'returnSource' in input),
-      'CLI_UPGRADE_REQUIRED',
-      CUTOVER_UPGRADE,
-    );
-    const request = exchangePushSchema.parse(input),
-      transport = new ConvexExchange(
-        request.url,
-        process.env.FORGE_AUTH_TOKEN,
-        request.projectId,
-        request.operationId,
-        request.previous,
-      );
-    const result = await retryExchange(
-      'local checkpoint push',
-      request.operationId,
-      () => pushNativeExchange(new WorkStore(root), request.revision, request.operationId, transport, {}),
-      { localSnapshot: true },
-    );
-    if (result.pendingCoverage) acknowledgePendingExchange(new WorkStore(root), result.pendingCoverage);
-    return result;
   }
   const request = exchangePullSchema.parse(input),
     transport = new ConvexExchange(request.url, process.env.FORGE_AUTH_TOKEN, request.projectId, '', null);

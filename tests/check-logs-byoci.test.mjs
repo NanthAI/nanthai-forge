@@ -1,3 +1,5 @@
+import { transferArchiveFixture } from './native-archive-fixture.mjs';
+import { captureNativeArchive } from './native-archive-fixture.mjs';
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -20,7 +22,7 @@ import { WorkService } from '../dist/work.js';
 import { policyPreset, policyWriteSchema, editedPolicy } from '../dist/autonomy-policy.js';
 import { runLogRecord, portableCheckPath, DAY_MS } from '../dist/check-log-policy.js';
 import { exportNativeWork, restoreNativeWork } from '../dist/native-backup.js';
-import { prepareNativeExchange, pushNativeExchange, pullNativeExchange } from '../dist/native-exchange.js';
+import { pullNativeExchange } from '../dist/native-exchange.js';
 import { prepareHostedSeed } from '../dist/hosted-seed-capture.js';
 import { cleanLocalCheckLogs } from '../dist/check-log-cleanup.js';
 import { checkLogsCli } from '../dist/check-logs-cli.js';
@@ -176,13 +178,13 @@ test('all capture routes share explicit local opt-in and suppress an expired old
   let exported = await exportNativeWork(f.store, f.store.revision(), false);
   assert(!JSON.parse(exported.result.json).files.some(file => file.path.endsWith('.log')));
   optIn(f);
-  const exchange = await prepareNativeExchange(f.store, f.store.revision(), randomUUID());
+  const exchange = await captureNativeArchive(f.store, f.store.revision(), randomUUID());
   assert.equal(exchange.manifest.files.filter(file => file.path.endsWith('.log')).length, 2);
   const data = f.store.load();
   data.runs[0].startedAt = data.runs[0].endedAt = new Date(now - 91 * DAY_MS).toISOString();
   data.revision++;
   f.store.save(data);
-  const prepared = await prepareNativeExchange(
+  const prepared = await captureNativeArchive(
     f.store,
     f.store.revision(),
     randomUUID(),
@@ -221,8 +223,8 @@ test('old exchange pull never downloads provider logs and preserves original man
     },
     publish: async pin => pin.sha256,
   };
-  const pushed = await pushNativeExchange(f.store, f.store.revision(), randomUUID(), transport);
-  const manifest = JSON.parse(objects.get(pushed.digest));
+  const pushed = await transferArchiveFixture(f.store, transport);
+  const manifest = JSON.parse(pushed.json);
   const raw = readFileSync(join(f.folder, 'stdout.log'));
   const rawDigest = digest(raw);
   manifest.files.push({ path: `check-${f.run.id}/stdout.log`, sha256: rawDigest, size: raw.length });
@@ -759,7 +761,7 @@ test('CI reports and generated digest caches leave every portable closure and re
   const manifest = JSON.parse(exported.result.json);
   for (const result of [
     manifest,
-    (await prepareNativeExchange(f.store, f.store.revision(), randomUUID())).manifest,
+    (await captureNativeArchive(f.store, f.store.revision(), randomUUID())).manifest,
   ]) {
     assert(!result.files.some(file => /test-reports.json|artifact-0.bin/.test(file.path)));
     assert(!result.unavailable.some(path => /test-reports.json|artifact-0.bin/.test(path)));

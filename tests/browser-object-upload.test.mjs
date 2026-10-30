@@ -184,3 +184,44 @@ test('revoked browser callers cannot get another PUT target for a pending upload
     e => e.data?.code === 'PROJECT_UNAVAILABLE',
   );
 });
+
+test('browser backup import uses paged seed and resumes a committed page after a lost reply', async t => {
+  const { s } = await setup(t);
+  for (const name of ['projectHostedSeed', 'projectHostedSeedActions'])
+    modules[name] = await import(moduleUrl(`../convex/${name}.ts`));
+  for (const table of ['projectHostedSeeds', 'projectHostedSeedPages', 'projectHostedChannels'])
+    s.tables[table] ??= new Map();
+  const { checkpoint } = await import('./project-exchange-fixture.mjs');
+  const source = await checkpoint(t, s);
+  const { exportNativeWork } = await import('../dist/native-backup.js');
+  const { readFileSync } = await import('node:fs');
+  const { result } = await exportNativeWork(source.store, source.store.revision(), true);
+  const file = new File([readFileSync(result.archive.path)], 'synthetic-native.tar.gz');
+  const { previewWorkArchive } = await import(moduleUrl('../web/src/work-archive.ts'));
+  const preview = await previewWorkArchive(file);
+  const browser = client(s).client;
+  const { getFunctionName } = await import('convex/server');
+  const action = browser.action;
+  let lost = false,
+    retiredCalls = 0;
+  browser.action = async (ref, input) => {
+    const name = getFunctionName(ref);
+    if (name === 'projectExchangeActions:publish') retiredCalls++;
+    const value = await action(ref, input);
+    if (name === 'projectHostedSeedActions:stage' && !lost) {
+      lost = true;
+      throw Error('Synthetic lost page reply');
+    }
+    return value;
+  };
+  const seed = { operationId: randomUUID(), preview };
+  await assert.rejects(uploadArchiveObjects(browser, 'project', file, seed), /Synthetic lost page reply/);
+  const completed = await uploadArchiveObjects(browser, 'project', file, seed);
+  assert(completed.backupId);
+  const replay = await uploadArchiveObjects(browser, 'project', file, seed);
+  assert.equal(replay.backupId, completed.backupId);
+  assert.equal(s.tables.projectBackups.size, 1);
+  assert.equal(s.tables.projectHostedSeeds.size, 1);
+  assert.equal(JSON.parse([...s.tables.projectHostedChannels.values()][0].selection).head, preview.head);
+  assert.equal(retiredCalls, 0);
+});

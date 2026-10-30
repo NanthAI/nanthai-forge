@@ -551,7 +551,6 @@ export default function HostedWork({
           inline
           projectId={projectId}
           backupId={snapshot.backupId}
-          previous={project?.currentBackup ?? null}
           {...(owner ? { revision: snapshot.data.revision } : {})}
           {...(snapshotTransport ? { transport: snapshotTransport } : {})}
         />

@@ -1,3 +1,4 @@
+import { captureNativeArchive } from './native-archive-fixture.mjs';
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -11,7 +12,7 @@ import { moduleUrl } from './convex-module.mjs';
 import { initNative } from '../dist/native-work.js';
 import { WorkService } from '../dist/work.js';
 import { WorkStore } from '../dist/work-store.js';
-import { prepareNativeExchange } from '../dist/native-exchange.js';
+
 import { buildExchangeRoot } from '../dist/native-exchange-tree.js';
 import { digest } from '../dist/hash.js';
 const cleanup = await import(moduleUrl('../convex/projectCheckLogCleanup.ts'));
@@ -120,7 +121,7 @@ async function seeded(t, runs = 1, objectCount = 0) {
   });
   const check = act({ action: 'define-check', name: 'Synthetic', executable: process.execPath, args: [] });
   const s = fixture(),
-    prepared = await prepareNativeExchange(store, store.revision(), randomUUID(), false);
+    prepared = await captureNativeArchive(store, store.revision(), randomUUID(), false);
   const data = JSON.parse(readFileSync(join(prepared.directory, 'work.json'))),
     manifest = structuredClone(prepared.manifest);
   const environment = service.status().environment;

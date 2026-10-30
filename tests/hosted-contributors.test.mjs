@@ -983,30 +983,17 @@ test('new contributor proposals transfer objects, preserve old archives, pull di
     key,
     name: 'Object backup import',
   });
-  const backupPin = await uploadArchiveObjects(client, projectId, new File([c.bytes], 'backup.tar.gz'));
-  const backupId = await modules.projectExchangeActions.publish._handler(s.ctx, {
-    displayProtocol: 3,
-    projectId,
+  for (const name of ['projectHostedSeed', 'projectHostedSeedActions'])
+    modules[name] = await import(moduleUrl(`../convex/${name}.ts`));
+  for (const table of ['projectHostedSeeds', 'projectHostedSeedPages', 'projectHostedChannels'])
+    s.tables[table] ??= new Map();
+  client.action = (ref, args) => s.ctx.runAction(ref, args);
+  const importedBackup = await uploadArchiveObjects(client, projectId, new File([c.bytes], 'backup.tar.gz'), {
     operationId: randomUUID(),
-    previous: null,
-    ...backupPin,
+    preview: c.input.preview,
   });
+  const backupId = importedBackup.backupId;
   assert.equal(s.tables.projectBackups.get(backupId).transport, 'objects');
-  const retained = await modules.projectExchangeActions.publish._handler(s.ctx, {
-    displayProtocol: 3,
-    projectId,
-    operationId: randomUUID(),
-    previous: null,
-    retainCandidate: true,
-    ...backupPin,
-  });
-  assert.notEqual(retained, backupId);
-  assert.equal(
-    s.tables.hostedProjects.get(projectId).currentBackup,
-    backupId,
-    'a concurrently newer selection stays current while the backup candidate is retained',
-  );
-
   const legacyBackupActions = await import(moduleUrl('../convex/projectBackupActions.ts'));
   await assert.rejects(
     legacyBackupActions.prepare._handler(s.ctx, {

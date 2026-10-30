@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { landingWorkerStates } from './landing-worker-status.js';
-import { notifyAutoExchange } from './auto-exchange-notify.js';
+import { notifyWorker } from './local-worker-notifications.js';
 import type { WorkStore } from './work-store.js';
 const pending = new Map<string, { excludedId: string | undefined }>();
 /** Invalidation after publication or driver release, deferred past the owner lock.
@@ -19,8 +19,7 @@ export function wakeLandingWorker(store: WorkStore, excludedId?: string) {
     pending.delete(store.directory);
     try {
       for (const state of landingWorkerStates(store))
-        if (state.status !== 'stopped' && state.id !== delivery.excludedId)
-          notifyAutoExchange(state.endpoint);
+        if (state.status !== 'stopped' && state.id !== delivery.excludedId) notifyWorker(state.endpoint);
     } catch {
       // The saved source/Work outcome is independent of this notification.
     }

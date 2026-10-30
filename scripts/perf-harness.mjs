@@ -15,9 +15,9 @@ export const usage = `Usage: node scripts/perf-harness.mjs [--out private-artifa
 Build core first. For bundle bytes, build with npm run build:hosted -- --manifest.
 --live opts into read-only authenticated browser navigation, never a hosted push.
 Enable QA readiness markers with VITE_FORGE_PERF=1 in the measured frontend.
-Without --live, browser numbers are unrun. Push always uses a local synthetic
-HTTP backend and a temporary owner, with seed excluded. Work timings read only
-existing records; this command never starts a check, finish, landing or backfill.
+Without --live, browser numbers are unrun. The retired exchange push measurement
+is always unrun. Work timings read only existing records; this command never
+starts a check, finish, landing or backfill.
 JSON contains machine/build identities, timestamps, each sample and median budget
 pass/fail. A failed or exceeded budget exits 1; unrun is never a pass.`;
 
@@ -118,18 +118,11 @@ export async function main(args) {
       record.browser.status = 'failed';
     }
   }
-  try {
-    const { syntheticPush } = await import('./perf/push.mjs');
-    const observed = await syntheticPush(config.samples);
-    record.syntheticFixture = observed.fixture;
-    record.measurements.oneFilePush = measurement('oneFilePush', observed.samples);
-  } catch {
-    record.measurements.oneFilePush = measurement(
-      'oneFilePush',
-      [{ durationMs: null }],
-      'Synthetic push failed; build core and install dependencies. Details redacted.',
-    );
-  }
+  record.measurements.oneFilePush = measurement(
+    'oneFilePush',
+    [],
+    'Exchange push was retired; hosted save and finish metrics cover the current path.',
+  );
   record.landing = {
     status: 'unrun',
     reason: 'Supply --work-owner to read retained acceptance and check records.',

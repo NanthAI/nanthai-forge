@@ -1,3 +1,4 @@
+import { commitValidatedCheckpoint } from './project-exchange-fixture.mjs';
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -12,7 +13,7 @@ import { moduleUrl } from './convex-module.mjs';
 import { fixture, checkpoint, modules } from './project-exchange-fixture.mjs';
 const { report } = await import(moduleUrl('../convex/errors.ts'));
 
-for (const method of ['publish', 'published', 'journal'])
+for (const method of ['journal'])
   test(`${method} retries an unknown hosted reply with identical operation and payload`, async t => {
     const exchange = new ConvexExchange(
         'https://fixture.invalid',
@@ -41,27 +42,6 @@ for (const method of ['publish', 'published', 'journal'])
     assert.deepEqual(calls[1], calls[0]);
     assert.equal(committed, 1);
   });
-
-test('push retries local Work races with the same operation then fails typed after its bounded budget', async () => {
-  const operationId = randomUUID(),
-    ids = [];
-  await assert.rejects(
-    retryExchange(
-      'snapshot',
-      operationId,
-      async () => {
-        ids.push(operationId);
-        throw new ForgeError('WORK_STALE', 'Work moved before preparation.');
-      },
-      { localSnapshot: true, delayMs: 0 },
-    ),
-    error =>
-      error.code === 'WORK_CHANGED_DURING_PUSH' &&
-      error.message.includes(operationId) &&
-      error.message.includes('4 attempts'),
-  );
-  assert.deepEqual(ids, Array(4).fill(operationId));
-});
 
 test('stable authorization and input failures are typed and never retried', async () => {
   for (const code of [
@@ -112,43 +92,6 @@ test('Convex contention becomes a typed conflict without copying document detail
   );
 });
 
-test('publication lost reply reconciles one real backend receipt while local Work advances', async t => {
-  const s = fixture(),
-    prepared = await checkpoint(t, s),
-    input = prepared.input;
-  let calls = 0;
-  const receipt = await retryExchange(
-    'publication',
-    input.operationId,
-    async () => {
-      calls++;
-      const id = await modules.projectExchangeActions.publish._handler(s.ctx, input);
-      if (calls === 1) {
-        prepared.store.locked(() => {
-          const tx = prepared.store.records();
-          tx.append('intents', {
-            id: randomUUID(),
-            outcome: 'Concurrent synthetic writer',
-            constraints: '',
-            base: tx.data().nativeHead,
-            status: 'active',
-            createdAt: 'now',
-            notes: [],
-          });
-          prepared.store.commitRecords(tx);
-        });
-        throw Error('INTERNAL_ERROR after commit');
-      }
-      return id;
-    },
-    { delayMs: 0 },
-  );
-  assert.equal(calls, 2);
-  assert.equal(s.tables.projectBackups.size, 1);
-  assert.equal(s.tables.hostedProjects.get('project').currentBackup, receipt);
-  assert.equal(await modules.projectExchangeActions.publish._handler(s.ctx, input), receipt);
-});
-
 test('Convex opaque internal errors are mapped without copying private messages', () => {
   assert.throws(
     () => report(new ConvexError({ code: 'INTERNAL_ERROR', message: 'private-source' })),
@@ -159,7 +102,7 @@ test('Convex opaque internal errors are mapped without copying private messages'
 test('hosted journal reads detect a moving head and retry to a consistent snapshot', async t => {
   const s = fixture(),
     prepared = await checkpoint(t, s);
-  const backupId = await modules.projectExchangeActions.publish._handler(s.ctx, prepared.input);
+  const backupId = await commitValidatedCheckpoint(s, prepared);
   await modules.projectWorkActions.initialize._handler(s.ctx, {
     projectId: 'project',
     backupId,

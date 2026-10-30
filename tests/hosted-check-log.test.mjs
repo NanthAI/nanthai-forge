@@ -1,3 +1,4 @@
+import { commitValidatedCheckpoint } from './project-exchange-fixture.mjs';
 import { effectivePolicy } from '../dist/autonomy-policy.js';
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
@@ -65,7 +66,7 @@ test('hosted log pages read only retained run bytes and recheck current read aut
   assert.equal(work.status().runs.find(r => r.id === runId).status, 'failed');
   const s = fixture(),
     source = await preparedCheckpoint(s, work.store);
-  const backupId = await modules.projectExchangeActions.publish._handler(s.ctx, source.input);
+  const backupId = await commitValidatedCheckpoint(s, source);
   await modules.projectWorkActions.initialize._handler(s.ctx, {
     projectId: 'project',
     backupId,

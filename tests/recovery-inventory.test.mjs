@@ -1,3 +1,6 @@
+import { retainRecoveryCapture } from '../dist/recovery-capture.js';
+import { prepareHostedSeed } from '../dist/hosted-seed-capture.js';
+import { captureNativeArchive } from './native-archive-fixture.mjs';
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -21,7 +24,7 @@ import { policyPreset } from '../dist/autonomy-policy.js';
 import { initNative } from '../dist/native-work.js';
 import { WorkService } from '../dist/work.js';
 import { readRecoveryInventory } from '../dist/recovery-inventory.js';
-import { prepareNativeExchange, pushNativeExchange } from '../dist/native-exchange.js';
+
 import { exportNativeWork } from '../dist/native-backup.js';
 import { hostProject } from '../dist/host-cli.js';
 import { readHostState } from '../dist/host-binding.js';
@@ -53,9 +56,19 @@ function fixture(t) {
     },
     publish: async pin => pin.sha256,
   };
-  const push = (operationId = randomUUID(), options = {}) =>
-    pushNativeExchange(work.store, work.store.revision(), operationId, transport, options);
-  return { root, directory, work, act, intent, lane, transport, push };
+  const capture = async (operationId = randomUUID()) => {
+    const prepared = await prepareHostedSeed(work.store, work.store.revision(), operationId);
+    return {
+      revision: prepared.request.revision,
+      recovery: retainRecoveryCapture(work.store, prepared.directory, prepared.request.root, {
+        kind: 'seed',
+        backupId: 'synthetic',
+        completeHistory: 'complete',
+        files: { manifest: prepared.request.manifest.sha256, work: prepared.request.work.sha256 },
+      }),
+    };
+  };
+  return { root, directory, work, act, intent, lane, transport, capture };
 }
 function save(f) {
   writeFileSync(join(f.work.store.path(f.lane.id), 'source.ts'), 'export const value = 2;\n');
@@ -103,16 +116,16 @@ function runRecord(f, finished = false) {
   return { run, directory };
 }
 
-test('complete exchange covers saved unlanded heads and later checkpoints and metadata remain pending', async t => {
+test('complete seed capture covers saved unlanded heads and later checkpoints and metadata remain pending', async t => {
   const f = fixture(t);
-  const initial = await f.push();
+  const initial = await f.capture();
   assert.equal(initial.recovery.status, 'recorded');
   const checkpoint = save(f);
   let inventory = await readRecoveryInventory(f.root, Date.now() + 60_000);
   assert.equal(inventory.latestCompleteOffMachine.workRevision, initial.revision);
   assert.ok(inventory.pending.saves.some(item => item.kind === 'checkpoint' && item.sha256));
   assert.ok(inventory.pending.oldestKnownPendingAgeMs >= 60_000);
-  const captured = await f.push();
+  const captured = await f.capture();
   inventory = await readRecoveryInventory(f.root);
   assert.equal(inventory.pending.saves.length, 0);
   assert.equal(inventory.pending.oldestPendingAgeMs, 0);
@@ -162,7 +175,7 @@ test('missing logs and retained artifacts are per-item unavailable without denyi
   ];
   data.revision++;
   f.work.store.save(data);
-  const result = await f.push();
+  const result = await f.capture();
   assert.equal(result.recovery.status, 'recorded');
   assert.equal(result.recovery.capture.completeHistory, 'complete');
   const inventory = await readRecoveryInventory(f.root);
@@ -179,7 +192,7 @@ test('missing logs and retained artifacts are per-item unavailable without denyi
 test('running-log tail and a later completion are uncovered even when main is unchanged', async t => {
   const f = fixture(t);
   const { run, directory } = runRecord(f);
-  await f.push();
+  await f.capture();
   const revision = f.work.store.revision();
   appendFileSync(join(directory, 'stdout.log'), 'later bytes\n');
   let inventory = await readRecoveryInventory(f.root);
@@ -196,7 +209,7 @@ test('running-log tail and a later completion are uncovered even when main is un
   writeFileSync(join(directory, 'result.json'), '{}', { mode: 0o600 });
   inventory = await readRecoveryInventory(f.root);
   assert.ok(inventory.pending.saves.some(item => item.kind === 'check-completion' && item.id === run.id));
-  await f.push();
+  await f.capture();
   inventory = await readRecoveryInventory(f.root);
   assert.equal(inventory.pending.saves.length, 0);
   assert.ok(inventory.pending.evidence.every(item => item.status === 'covered'));
@@ -292,37 +305,9 @@ for (const outcome of ['failed', 'unknown'])
     assert.deepEqual(inventory.latestCompleteOffMachine, capture);
   });
 
-test('unknown old capture time stays unknown, retry keeps pins and does not invent a new capture time', async t => {
-  const f = fixture(t),
-    operationId = randomUUID();
-  const prepared = await prepareNativeExchange(f.work.store, f.work.store.revision(), operationId);
-  rmSync(join(prepared.directory, 'recovery-timing.json'));
-  const pushed = await f.push(operationId);
-  assert.equal(pushed.recovery.capture.capturedAt, null);
-  const again = await f.push(operationId);
-  assert.deepEqual(again.recovery.capture, pushed.recovery.capture);
-  const inventory = await readRecoveryInventory(f.root);
-  assert.equal(inventory.latestCompleteOffMachine.capturedAt, null);
-  assert.equal(inventory.pending.oldestPendingAgeMs, null);
-});
-
-test('failed or unknown publication creates no successful receipt; same-id replay reconciles it', async t => {
-  const f = fixture(t),
-    operationId = randomUUID(),
-    publish = f.transport.publish;
-  f.transport.publish = async () => {
-    throw Error('synthetic lost reply');
-  };
-  await assert.rejects(f.push(operationId), /synthetic lost reply/);
-  assert.equal((await readRecoveryInventory(f.root)).captures.length, 0);
-  f.transport.publish = publish;
-  await f.push(operationId);
-  assert.equal((await readRecoveryInventory(f.root)).captures.length, 1);
-});
-
-test('corrupt or unwritable inventory is unknown and never changes successful exchange behavior', async t => {
+test('corrupt or unwritable inventory is unknown and never changes successful seed capture behavior', async t => {
   const f = fixture(t);
-  await f.push();
+  await f.capture();
   const directory = join(f.work.store.directory, 'recovery-inventory');
   const receipt = join(directory, readdirSync(directory)[0], 'receipt.json');
   writeFileSync(receipt, 'invalid synthetic receipt');
@@ -331,7 +316,7 @@ test('corrupt or unwritable inventory is unknown and never changes successful ex
   assert.equal(inventory.latestCompleteOffMachine, null);
   rmSync(directory, { recursive: true });
   writeFileSync(directory, 'synthetic obstruction');
-  const result = await f.push();
+  const result = await f.capture();
   assert.equal(result.recovery.status, 'unavailable');
   inventory = await readRecoveryInventory(f.root);
   assert.equal(inventory.availability, 'unknown');
@@ -341,7 +326,7 @@ test('corrupt or unwritable inventory is unknown and never changes successful ex
 test('inventory never follows evidence-directory symlinks and reports unknown current bytes', async t => {
   const f = fixture(t);
   const { run, directory } = runRecord(f);
-  await f.push();
+  await f.capture();
   const outside = join(f.directory, 'synthetic-outside-evidence');
   mkdirSync(outside);
   writeFileSync(join(outside, 'stdout.log'), 'unrelated synthetic private data', { mode: 0o600 });
@@ -386,12 +371,12 @@ test('corrupt retained artifact bytes stay unavailable; a protected declared art
   ];
   data.revision++;
   f.work.store.save(data);
-  await f.push();
+  await f.capture();
   let inventory = await readRecoveryInventory(f.root);
   const evidencePath = `check-${run.id}/artifacts/artifact-0.bin`;
   assert.equal(inventory.pending.evidence.find(item => item.path === evidencePath).status, 'unavailable');
   writeFileSync(path, 'original');
-  await f.push();
+  await f.capture();
   writeFileSync(path, 'damaged');
   inventory = await readRecoveryInventory(f.root);
   assert.equal(inventory.pending.evidence.find(item => item.path === evidencePath).status, 'covered');

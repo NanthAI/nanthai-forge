@@ -1,3 +1,4 @@
+import { transferArchiveFixture } from './native-archive-fixture.mjs';
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -11,7 +12,7 @@ import { setup, client, pinOf } from './r2-harness.mjs';
 import { digest } from '../dist/hash.js';
 import { initNative } from '../dist/native-work.js';
 import { WorkStore } from '../dist/work-store.js';
-import { pushNativeExchange, pullNativeExchange } from '../dist/native-exchange.js';
+import { pullNativeExchange } from '../dist/native-exchange.js';
 import { getSigned } from '../dist/exchange-r2-read.js';
 
 const objects = modules.projectObjects,
@@ -318,7 +319,7 @@ test('flag off: signDownloads reads nothing for convex rows and needs no R2 sett
   assert.equal((await client(s).downloadBatch(pins(['plain'])))[0].toString(), 'plain');
 });
 
-test('full round trip on an opted-in project: push, publish, pull back with verification', async t => {
+test('exported archive objects round trip through opted-in storage with verification', async t => {
   const { s, fake } = await setup(t),
     dir = mkdtempSync(join(tmpdir(), 'forge-r2-roundtrip-')),
     root = join(dir, 'owner');
@@ -329,17 +330,19 @@ test('full round trip on an opted-in project: push, publish, pull back with veri
   initNative(root);
   const store = new WorkStore(root),
     sender = client(s),
-    published = await pushNativeExchange(store, store.revision(), randomUUID(), sender);
+    published = await transferArchiveFixture(store, sender);
   assert.ok(published.backupId);
   const stored = rows(s).filter(r => !r.removed);
   assert.ok(stored.length >= 3);
   assert.ok(stored.filter(r => r.location === 'r2').length >= 3, 'source objects live in R2');
   assert.ok(fake.objects.size >= 3);
-  const backup = s.tables.projectBackups.get(published.backupId);
-  assert.equal(backup.transport, 'objects');
-  assert.equal(backup.storageId, undefined);
   const before = fake.requests.filter(r => r.method === 'GET').length,
     receiver = client(s);
+  receiver.manifest = async () => ({
+    json: published.json,
+    digest: published.digest,
+    size: Buffer.byteLength(published.json),
+  });
   await pullNativeExchange(published.backupId, join(dir, 'pulled'), receiver);
   assert.equal(readFileSync(join(dir, 'pulled', 'a.ts'), 'utf8'), 'export const a = 1;\n');
   assert.equal(readFileSync(join(dir, 'pulled', 'b.txt'), 'utf8'), 'second file\n');
@@ -348,9 +351,13 @@ test('full round trip on an opted-in project: push, publish, pull back with veri
   const [victim] = [...fake.objects.keys()].filter(
     key => fake.objects.get(key).toString() === 'second file\n',
   );
+  assert.ok(victim, 'the corruption hook targets the source blob');
   fake.corrupt.add(victim);
+  // Start a new transfer: the previous client correctly retains verified bytes.
+  const corruptReceiver = client(s);
+  corruptReceiver.manifest = receiver.manifest;
   await assert.rejects(
-    pullNativeExchange(published.backupId, join(dir, 'corrupt'), client(s)),
+    pullNativeExchange(published.backupId, join(dir, 'corrupt'), corruptReceiver),
     code('BLOB_DIGEST_MISMATCH'),
   );
 });
@@ -367,14 +374,20 @@ test('a large chunked file in an opted-in project round trips through R2 leaves'
   writeFileSync(join(root, 'small.txt'), 'small\n');
   initNative(root);
   const store = new WorkStore(root),
-    published = await pushNativeExchange(store, store.revision(), randomUUID(), client(s));
+    published = await transferArchiveFixture(store, client(s));
   assert.ok(
     rows(s).some(r => r.recipe),
     'the large file is stored as a recipe',
   );
   assert.ok(rows(s).filter(r => r.location === 'r2').length > 3);
   assert.ok(fake.objects.size > 3);
-  await pullNativeExchange(published.backupId, join(dir, 'pulled'), client(s));
+  const receiver = client(s);
+  receiver.manifest = async () => ({
+    json: published.json,
+    digest: published.digest,
+    size: Buffer.byteLength(published.json),
+  });
+  await pullNativeExchange(published.backupId, join(dir, 'pulled'), receiver);
   assert.ok(readFileSync(join(dir, 'pulled', 'big.bin')).equals(big));
   assert.equal(readFileSync(join(dir, 'pulled', 'small.txt'), 'utf8'), 'small\n');
 });

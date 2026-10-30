@@ -1,3 +1,4 @@
+import { captureNativeArchive } from './native-archive-fixture.mjs';
 import { randomUUID } from 'node:crypto';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -8,7 +9,7 @@ import { state } from './hosted-fixture.mjs';
 import { digest } from '../dist/hash.js';
 import { initNative } from '../dist/native-work.js';
 import { WorkStore } from '../dist/work-store.js';
-import { prepareNativeExchange } from '../dist/native-exchange.js';
+
 import { ownerDerivedBytes } from '../dist/owner-derived-local.js';
 import { ownerDerivedPages } from '../dist/owner-derived-pages.js';
 import { buildExchangeRoot } from '../dist/native-exchange-tree.js';
@@ -30,9 +31,6 @@ const names = [
   'projectMain',
   'projectObjectValidation',
   'projectExchange',
-  'projectPublicationAttempt',
-  'projectPublicationStore',
-  'projectPublicationProgress',
   'projectExchangeActions',
   'projectBackups',
   'projectWork',
@@ -99,7 +97,7 @@ export async function checkpoint(t, s, additionalObjects = 0) {
 }
 export async function preparedCheckpoint(s, store, additionalObjects = 0, baselineKey, recordOptions = {}) {
   const operationId = randomUUID(),
-    prepared = await prepareNativeExchange(store, store.revision(), operationId, false, baselineKey);
+    prepared = await captureNativeArchive(store, store.revision(), operationId, false, baselineKey);
   for (const file of prepared.manifest.files.filter(
     file => (!recordOptions.records && recordOptions.logicalWork !== false) || file.path !== 'work.json',
   ))
@@ -116,7 +114,7 @@ export async function preparedCheckpoint(s, store, additionalObjects = 0, baseli
     tree = buildExchangeRoot(manifest, work, recordOptions);
   for (const bytes of tree.objects.values()) await upload(s, bytes);
   const pin = await upload(s, tree.bytes);
-  const derived = ownerDerivedPages(readFileSync(join(prepared.directory, 'owner-derived.json')));
+  const derived = ownerDerivedPages(ownerDerivedBytes(store, store.load()));
   for (const page of derived.objects.values()) await upload(s, page);
   const ownerDerived = await upload(s, derived.root);
   return {
@@ -130,6 +128,7 @@ export async function preparedCheckpoint(s, store, additionalObjects = 0, baseli
       ownerDerived,
     },
     tree,
+    directory: prepared.directory,
     manifest: prepared.manifest,
     store,
   };
@@ -164,9 +163,7 @@ export async function seedRecordCheckpoint(s, prepared) {
     modules[name] ??= await import(moduleUrl(`../convex/${name}.ts`));
   for (const table of ['projectHostedSeeds', 'projectHostedSeedPages', 'projectHostedChannels'])
     s.tables[table] ??= new Map();
-  const work = readFileSync(
-    join(prepared.store.directory, `exchange-${prepared.input.operationId}`, 'work.json'),
-  );
+  const work = readFileSync(join(prepared.directory, 'work.json'));
   const data = JSON.parse(work),
     catalog = buildWorkRecords(data);
   const records = new Map();
@@ -257,24 +254,34 @@ export async function seedRecordCheckpoint(s, prepared) {
 /** Source-return fixtures supply a fully validated checkpoint, independently of
  * publication's delta budget. No production whole-Work fallback is exercised. */
 export async function commitValidatedCheckpoint(s, prepared) {
-  const work = readFileSync(
-    join(prepared.store.directory, `exchange-${prepared.input.operationId}`, 'work.json'),
-  );
+  const work = readFileSync(join(prepared.directory, 'work.json'));
   const data = JSON.parse(work);
   validateParsedWork(data);
   const catalog = buildWorkRecords(data, { retainObjects: false });
-  if (catalog?.pin.sha256 !== prepared.tree.root.records?.sha256)
+  if (prepared.tree.root.records && catalog?.pin.sha256 !== prepared.tree.root.records.sha256)
     throw new Error('Fixture record catalog differs from validated Work.');
   const manifest = sourceManifestSchema.parse(prepared.manifest);
   const { input } = prepared;
-  return modules.projectExchange.publish._handler(s.ctx, {
-    ...input,
-    owner: 'owner',
+  // Seed historic immutable backup data directly; no retired publication route is exercised.
+  const object = [...s.tables.projectObjects.values()].find(
+    row => row.projectId === input.projectId && row.digest === input.digest,
+  );
+  const id = await s.ctx.db.insert('projectBackups', {
+    projectId: input.projectId,
+    operationId: input.operationId,
     request: digest(
       JSON.stringify([input.projectId, input.operationId, input.previous, input.digest, input.size]),
     ),
+    previous: input.previous,
+    digest: input.digest,
+    size: input.size,
+    nonce: object.nonce,
+    ...(object.storageId ? { storageId: object.storageId } : {}),
+    transport: 'objects',
+    status: 'stored',
+    ...(input.ownerDerived ? { ownerDerived: input.ownerDerived, displayProtocol: 3 } : {}),
     validatedClosure: 1,
-    validatedWorkRecords: 1,
+    ...(prepared.tree.root.records ? { validatedWorkRecords: 1 } : {}),
     preview: {
       manifestDigest: digest(Buffer.from(JSON.stringify(manifest))),
       head: manifest.head,
@@ -289,4 +296,6 @@ export async function commitValidatedCheckpoint(s, prepared) {
       channels: archiveChannels(manifest, data),
     },
   });
+  s.tables.hostedProjects.get(input.projectId).currentBackup = id;
+  return id;
 }

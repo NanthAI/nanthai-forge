@@ -414,11 +414,9 @@ test('long actions keep the seven-minute header and total deadline; quick calls 
   t.mock.method(globalThis, 'fetch', async () => new Response('{}'));
   const fetch = exchangeConvexFetch();
   for (const path of [
-    'projectExchangeActions:publish',
     'projectWorkActions:exportJournal',
     'projectWorkIndexActions:ensure',
     'projectExchangeActions:manifest',
-    'projectExchangeActions:completeHistory',
     'projectObjectRecipes:complete',
     'projectWorkActions:initialize',
     'projectExchangeMigration:migrate',
@@ -439,25 +437,6 @@ test('long actions keep the seven-minute header and total deadline; quick calls 
   }
 });
 
-test('a publish response arriving after the former header deadline is consumed once', async t => {
-  t.mock.timers.enable({ apis: ['setTimeout'] });
-  let release,
-    calls = 0;
-  t.mock.method(globalThis, 'fetch', async () => {
-    calls++;
-    return new Promise(resolve => {
-      release = resolve;
-    });
-  });
-  const pending = exchangeConvexFetch()('https://fixture.invalid/api/action', {
-    body: JSON.stringify({ path: 'projectExchangeActions:publish', args: [{ operationId: 'original' }] }),
-  });
-  t.mock.timers.tick(180001);
-  release(new Response('receipt'));
-  assert.equal(await (await pending).text(), 'receipt');
-  assert.equal(calls, 1);
-});
-
 test('long actions override the native HTTP header deadline at dispatch; quick calls use the default transport', async t => {
   const dispatched = [];
   t.mock.method(Agent.prototype, 'dispatch', options => {
@@ -470,7 +449,7 @@ test('long actions override the native HTTP header deadline at dispatch; quick c
   });
   const fetch = exchangeConvexFetch();
   await fetch('https://fixture.invalid/api/action', {
-    body: JSON.stringify({ path: 'projectExchangeActions:publish', args: [{}] }),
+    body: JSON.stringify({ path: 'projectExchangeActions:manifest', args: [{}] }),
   });
   assert.equal(dispatched.length, 1);
   assert.equal(dispatched[0].headersTimeout, 420000);
@@ -537,7 +516,7 @@ test('pending long actions continue the exact payload immediately and expose sav
     fetch: exchangeConvexFetch(deadlines, (name, pending) => events.push({ name, pending })),
   });
   assert.equal(
-    await client.action(makeFunctionReference('projectExchangeActions:publish'), {
+    await client.action(makeFunctionReference('projectWorkIndexActions:ensure'), {
       operationId: 'original',
       digest: 'pinned',
       size: 1,
@@ -629,28 +608,3 @@ test('cooperative cancellation stops retries and aborts a header/body stall befo
     assert.equal(f.requests.length, 1);
   }
 });
-
-for (const kind of ['http failure', 'timeout', 'out of memory'])
-  test(`publication ${kind} has one retry budget across HTTP and automatic push`, async t => {
-    const f = await fixture(t, (_req, res) => {
-      if (kind === 'timeout') return;
-      if (kind === 'http failure') {
-        res.writeHead(503);
-        res.end('unavailable');
-        return;
-      }
-      res.writeHead(560);
-      res.end(JSON.stringify({ status: 'error', errorMessage: 'Action ran out of memory' }));
-    });
-    const transport = new ConvexExchange(f.url, 'synthetic', 'project', 'original', null);
-    transport.client = new ConvexHttpClient(f.url, {
-      skipConvexDeploymentUrlCheck: true,
-      logger: false,
-      fetch: exchangeConvexFetch(deadlines),
-    });
-    await assert.rejects(
-      transport.publish({ sha256: 'a'.repeat(64), size: 1 }),
-      error => error.code === 'WORK_PUBLICATION_FAILED',
-    );
-    assert.equal(f.requests.length, 2);
-  });

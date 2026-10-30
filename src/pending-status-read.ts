@@ -11,7 +11,7 @@ import { statSync } from 'node:fs';
 import { join } from 'node:path';
 import { waitingFinishes } from './agent-finish-journal.js';
 import { readHostState } from './host-binding.js';
-import { readAutoExchangeStatus } from './auto-exchange-status.js';
+
 import { pendingStatus, type RecoveryCaptureObservation } from './pending-status.js';
 import type { Lane } from './work-types.js';
 import type { WorkStore } from './work-store.js';
@@ -151,10 +151,6 @@ export function readPendingStatus(
         }
       }
     const host = readHostState(store);
-    const pushes = [host.push, ...(host.pendingPushes ?? [])].filter(
-      item =>
-        !!item && item.projectId === host.binding?.projectId && item.deployment === host.binding?.deployment,
-    );
     const deployment = tx
       ? tx.manifest.collections.deployments?.count
         ? tx.fieldsAt('deployments', tx.manifest.collections.deployments.count - 1).record
@@ -179,9 +175,7 @@ export function readPendingStatus(
         integrationPreview: detail ? integrationPreviewStatus(store) : undefined,
         landingWorker: readLandingWorkerStatus(store),
         submissions: detail ? readLaneSubmissions(store) : [],
-        autoExchange: readAutoExchangeStatus(store, Date.parse(now)),
         recovery: recovery?.(store) ?? null,
-        pendingPushes: pushes.map(push => ({ operationId: push!.operationId, revision: push!.revision })),
         metadataError: host.agentSync?.headError ?? null,
         metadataNextAttemptAt: host.agentSync?.nextAttemptAt ?? null,
         metadataRejected: host.agentSync?.rejected?.length ?? 0,

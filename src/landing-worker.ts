@@ -1,28 +1,28 @@
-import { settleFinish, settleLand, requireRecoveryProgress } from './landing-journal-settle.js';
 import type { FinishAction } from './agent-workflow-schema.js';
-import { shareLandingRecords, landingPositions, prepareLandingRecords } from './landing-records-index.js';
-import { observeLandingQueue } from './landing-records.js';
-import { watchLandingStalls } from './landing-stall-watch.js';
-import { wakeLandingWorker } from './landing-worker-wake.js';
-import { resumeLegacyLand } from './landing-worker-journals.js';
 import type { AgentWorkflow } from './agent-workflow.js';
 import { land } from './land.js';
 import { drainLandingBatches } from './landing-batch.js';
+import { requireRecoveryProgress, settleFinish, settleLand } from './landing-journal-settle.js';
+import { landingPositions, prepareLandingRecords, shareLandingRecords } from './landing-records-index.js';
+import { observeLandingQueue } from './landing-records.js';
+import { watchLandingStalls } from './landing-stall-watch.js';
+import { resumeLegacyLand } from './landing-worker-journals.js';
+import { wakeLandingWorker } from './landing-worker-wake.js';
 // SPDX-License-Identifier: Apache-2.0
-import { statSync } from 'node:fs';
-import { setTimeout as delay } from 'node:timers/promises';
-import { watchLocal } from './local-watcher.js';
-import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { observeUnfinishedFinishes } from './agent-finish-journal.js';
-import { observePendingLands } from './land-journal.js';
-import { openAutoExchangeNotifications } from './auto-exchange-notify.js';
+import { statSync } from 'node:fs';
+import { join } from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
 import { waitingDependencies } from './agent-dependencies.js';
-import { processIdentity, processAlive } from './local-process.js';
-import { recoverRecordRuns } from './work-record-runs.js';
+import { observeUnfinishedFinishes } from './agent-finish-journal.js';
 import { ForgeError } from './errors.js';
-import { withLandingWorker, assertLandingWorkerActive } from './landing-worker-context.js';
+import { observePendingLands } from './land-journal.js';
+import { assertLandingWorkerActive, withLandingWorker } from './landing-worker-context.js';
 import { saveLandingWorkerState, type LandingWorkerState } from './landing-worker-status.js';
+import { processAlive, processIdentity } from './local-process.js';
+import { watchLocal } from './local-watcher.js';
+import { openWorkerNotifications } from './local-worker-notifications.js';
+import { recoverRecordRuns } from './work-record-runs.js';
 import type { WorkStore } from './work-store.js';
 
 /** Owner service/detached-worker lifecycle owns this driver, never a reader.
@@ -32,7 +32,7 @@ export async function watchLandingWorker(store: WorkStore, signal: AbortSignal) 
   if (!store.native || signal.aborted) return;
   // Unsupported Work must fail before any service control state is created.
   if (!store.readRecords()) store.load();
-  const notifications = await openAutoExchangeNotifications();
+  const notifications = await openWorkerNotifications();
   const id = randomUUID(),
     worker = processIdentity();
   let sequence = 0,

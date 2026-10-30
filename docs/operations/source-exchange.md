@@ -1,11 +1,10 @@
 # Source exchange
 
-`nforge exchange` sends a native or Git-backed checkpoint to a hosted Convex project. It uploads only the content the project does not already have, identified by SHA-256. Source ancestry, paths, modes and artifacts stay intact. It does not create an archive and does not sync in the background.
+`nforge exchange` checks out hosted source, restores retained checkpoints, reconciles compatible historical metadata and migrates older archives. Saves and landings use the hosted Lane APIs. Exchange push and automatic exchange are retired.
 
-Run `nforge login DEPLOYMENT_URL` and approve the device in Forge. Saved credentials are used automatically; `FORGE_AUTH_TOKEN` remains an environment override for CI. Never put credentials in request files. Owners can push and migrate. Contributors can read accessible checkpoints and upload immutable proposal objects; checkpoint publication remains owner-only. A scoped source grant cannot upload.
+Run `nforge login DEPLOYMENT_URL` and approve the device in Forge. Saved credentials are used automatically; `FORGE_AUTH_TOKEN` remains an environment override for CI. Never put credentials in request files. Owners can migrate retained archives. Contributors can read accessible checkpoints and upload immutable proposal objects. A scoped source grant cannot upload.
 
-`nforge host ROOT` creates a project through a one-time hosted seed, independently of
-exchange push/publication. It pins native main and its actual acceptance receipt
+`nforge host ROOT` creates a project through a one-time paged hosted seed. It pins native main and its actual acceptance receipt
 (or explicitly records the bootstrap State when no acceptance exists), portable
 Work bytes/revision, and journal-only commands, attempts, waits and unknown
 outcomes in recovery format 1. Immutable objects and Work records reuse the
@@ -14,8 +13,7 @@ contain at most 100 references and 128 KiB of metadata; source/record bodies use
 a 2 MiB action window, with an oversized individual body handled alone. Each
 committed page saves its cursor. Retrying resumes that cursor and the original
 local capture, even when local Work has since advanced. A completed seed returns
-its original checkpoint without uploading again. Native schema-2 seeds mark their
-paged-validated records catalog as a valid base for subsequent delta publication.
+its original checkpoint without uploading again. Native schema-2 seeds retain their paged-validated records catalog for compatible reads and recovery.
 
 Partial seeds select neither a checkpoint nor hosted main. The final action
 reads and hashes hosted native main, compares it with the pinned native digest,
@@ -26,99 +24,35 @@ cutover. No seed polling or scheduled continuation runs. The command drives the
 finite pages itself; rerun the same hosting command after an interruption.
 `--wait` remains accepted, with no first-host background history backfill.
 
-Use `nforge host ROOT` to create and bind a hosted project first. Bound owners need no request file:
+Use `nforge host ROOT` to create and bind a hosted project. Bound pull checks out selected hosted main:
 
 ```sh
-nforge exchange ROOT push
 nforge exchange ROOT pull --target NEW_DIR
 ```
 
-Push records its operation UUID, local revision and observed current hosted backup before upload. Re-running after an unknown outcome resumes those exact pins. Known checkpoint or Work CAS mismatches retain deterministic child attempts under the original capture. Bound pushes serialize transport work across processes while local Work writes use short owner locks. Push uploads a checkpoint; it does not replace hosted Work or accepted main. Server-authority saves and landings use the hosted Lane and CAS APIs.
+Omitting `--target` uses a sibling named `ROOT-hosted-main`. Full Work recovery is the separate `restore` command below. Native owners continue to support local saves and export without a hosted project.
 
-Pull materializes selected hosted main into a source client directory; omitting `--target` uses a sibling named `ROOT-hosted-main`. Full Work recovery is the separate `restore` command below. Git-backed exchange retains its source bundle and complete Work, uploading only missing objects/chunks.
+Source return and exchange push are removed, including push preparation, whole-closure missing-object negotiation, whole-Work publication fallback, bound push queues, automatic exchange and its spend pause. Old CLI push commands and the former publication RPC addresses return structured `CLI_UPGRADE_REQUIRED` errors before source or transport work. Stored local requests and historical receipts remain recovery inputs; these tombstones do not replay publication.
 
-Source return and its progress probes, private staging/commit, and `--supersede-retained` branch have been removed. The old public return and supersede RPC addresses return structured `CLI_UPGRADE_REQUIRED` errors using the existing cutover upgrade instructions. Retained local return requests receive the same error before upload and remain available for recovery. Rollback folds hosted work through `recover` before reverse CAS at a higher epoch; it never invokes source return. Historic journal events and persisted table/document validators remain readable.
+Rollback folds hosted work through `recover` before reverse CAS at a higher epoch. It never pushes or invokes source return. Historic journal events, table definitions and stored-document validators remain readable.
 
 Explicit project IDs and original request files remain supported:
 
 ```sh
-nforge exchange ROOT push --command-file forge-push.json
 nforge exchange ROOT reconcile --command-file forge-reconcile.json
 nforge exchange NEW_DIR pull --command-file forge-pull.json
 nforge exchange ROOT migrate-archive --command-file forge-migrate.json
 ```
 
-With the token set, `nforge mcp ROOT --agent` also offers `forge_exchange` and `forge_migrate_archive` over the same code.
+With account authentication configured, `nforge mcp ROOT --agent` also offers `forge_exchange` and `forge_migrate_archive` over the same retained paths.
 
-## Large pushes and long actions
+## Long actions
 
-Large pushes keep their original operation IDs and checkpoint pins through every continuation. A shared four-minute outer window is checked after complete work units; it never cancels or splits a transaction. Index rebuilds yield after committed batches, and
-publication waiters yield without taking another worker's claim or reading metadata
-pages. Metadata-only publication retains its complete semantic-validation summary
-and verifies committed pins one bounded immutable metadata page per transaction.
-The initial semantic scan queries at most 16 pages (2 MiB of bodies) per call.
-The saved page cursor and incomplete-pin tail advance atomically with those checks.
-Continuations and lost replies skip verified pin pages; a retry after validation
-uses the saved preview without rereading all metadata. Initial complete JSON/digest
-validation remains indivisible; interruption before its summary commits can repeat
-that initial scan. The first action reuses its scanned bytes for pin checks. Resumed actions read
-only the next unverified pin page. Total metadata reads are at most two passes,
-independent of continuation count; a single invocation reads each page once.
-
-Pending is successful scheduling progress, not a transport retry. The client
-continues immediately with `continuation:true`, the same operation ID and inputs,
-and a small event-loop yield.
-Advancing pending responses do not consume a retry budget. Six consecutive pending
-responses at the same saved position stop with `EXCHANGE_ACTION_STALLED` and an
-instruction to retry the original operation. Elapsed time, ETA, invocation counts
-and repeated storage reads do not establish progress.
-
-All long exchange HTTP calls have a seven-minute header and total deadline,
-including the native HTTP dispatch deadline. Unknown replies reconcile the same
-operation; they do not start another publication. A work unit
-must complete before yielding: single-object reads, full compatibility validation,
-archive conversion and initial projection construction remain indivisible. The
-four-minute window is therefore a scheduling target, not a guarantee that any
-individual unit or endpoint finishes within four minutes. Compatibility manifest,
-history validation, recipe validation, initialization, migration and full journal
-export have no durable validation cursor. Modern clients resolve manifests and
-page journals locally where supported.
+Index rebuilds yield after committed batches. Pending responses continue the original request with `continuation:true`; unchanged saved progress stops with `EXCHANGE_ACTION_STALLED`. Long transfer actions retain seven-minute header and total deadlines, including Node's HTTP dispatch deadline. Reads, archive migration, initialization and object-recipe completion retain their existing retry and validation behavior.
 
 ## CLI upgrade
 
-New pushes require owner display protocol 3. Older CLIs and publications without
-complete owner display data receive the typed `CLI_UPGRADE_REQUIRED` error.
-Install the current Forge CLI package (for the offline distribution, run
-`npm install -g /path/to/current/nanthai-forge.tgz`) and prepare a new push.
-Existing hosted reads and successful original-operation receipt replay keep
-working. A retained operation that predates the new display protocol must be
-reprepared from its local source with a new operation UUID; its existing
-checkpoint and hosted history are preserved. There is no server derivation
-fallback and no hosted backfill command.
-
-Current CLIs compute missing display items locally before upload. Large owner
-display payloads are split into hash-checked 128 KiB pages, so a backlog does
-not omit comparisons, ancestry, Views or Code trees to fit a 4 MiB sidecar.
-The server validates owner facts and stores them; owner-supplied display data
-never changes who may land or bypasses revision, main-history or final CAS
-checks. Coordination changed-path lists also come from the CLI, avoiding State
-reads solely for advisory display. Legacy hosted reads retain their existing read-index compatibility behavior; live return staging and publication have been removed.
-
-## Push
-
-```json
-{ "url": "https://DEPLOYMENT.convex.cloud", "projectId": "PROJECT_ID",
-  "operationId": "ORIGINAL_UUID", "previous": "CURRENT_BACKUP_ID", "revision": 123 }
-```
-
-`revision` is the local Work revision. The first push sends everything. Later pushes send only new content, and large files send only changed chunks. Checkpoint upload does not select hosted Work. The retired `returnSource` request field returns the structured cutover upgrade error.
-
-A completed source return remains one original journal event. Reconstructing
-hosted Work validates it against its retained checkpoint, never against later
-local landings. Newly introduced optional collections stay absent when reading
-older checkpoints, preserving their original Work digests; writers initialize
-those collections when used. Neither old receipts nor checkpoint bytes need a
-repair or rewrite.
+Installed clients calling retired push, publication or source-return functions receive `CLI_UPGRADE_REQUIRED` with the cutover upgrade command. Install the matching Forge CLI release, preserve local edits and operation IDs, and resume saves and landings through hosted CAS. Existing object downloads, checkout, restore, export and archive migration remain available. Source recovery never treats an old publication receipt as new write authority.
 
 ## Repair a completed hosted seed records marker
 
@@ -133,144 +67,14 @@ scanning the deployment's backups. Git, schema-1 and incomplete seeds are exclud
 ```sh
 npx convex run projectHostedSeedRecords:backfill '{"projectId":"PROJECT_ID","dryRun":true}'
 npx convex run projectHostedSeedRecords:backfill '{"projectId":"PROJECT_ID","dryRun":false}'
-nforge exchange OWNER push
 ```
 
 ## Work record exchange
 
-Native clients prepare exchange schema 2: missing stable-key Work records and
-chunked ordered catalogs, plus an add/change/remove delta pinned to the previous
-checkpoint catalog, whole Work digest and hosted journal revision. The existing
-Work JSON format stays intact. Changed records and touched references are
-validated on the hosted path; canonical whole-JSON hashing streams retained
-record segments without reconstructing both Work snapshots. Source-return
-history keeps its original whole-JSON digest semantics through an exchange-only
-journal adapter. New captures order only root fields like the journal parser;
-late optional collections keep their original record bodies and values. Existing
-prepared operations retain their exact bytes.
+Schema-1 byte trees and schema-2 stable-key record catalogs remain readable for retained checkpoints, Work projections, journal reconstruction and recovery. Hosted seeds use bounded metadata pages and validate their selected source before committing. Shared record readers verify exact Work and manifest pins, preserve canonical digest semantics and recheck current access at the underlying storage boundary.
 
-Schema-2 records publication requires a validated delta base. An unavailable
-delta returns `WORK_DELTA_UNAVAILABLE` with its skip reason before reading full
-Work; publication never falls back to a whole-Work records seed in one action.
-Copy/apply transactions retain the original revision, operation and offset guards. Metadata RPCs carry
-bounded groups of pages; after publication, detached pages are reclaimed by
-partition. Views with unchanged base/head trees and conflict state reuse their
-file keys while still validating and replacing owner-supplied provenance rows.
-Progress omits unknown zero totals and reports saved work when available.
+The exchange publication delta planner and its continuation/attempt stores no longer execute. Their table definitions and document validators remain until the separate table purge. Shared byte-tree, upload, download and record-reader modules remain because hosted checkout/save/seed, proposal import, archive migration, cleanup and read projections call them.
 
-Use the paged hosted seed for a fresh project. Schema-1 checkpoints, recovery and the logical-manifest
-compatibility endpoint remain available. When either byte-reading native object checkpoint's
-Work exceeds 16 MiB and a current index is available, compatibility preparation
-saves a cursor between reading current Work, reading candidate Work, and checking
-retained-history chunks. It does not load both complete Work copies in one
-action. Complete object metadata is decoded as a stream, and Work schema validation
-checks a scalar skeleton and bounded array segments. Snapshot compression and cold
-snapshot decoding also stream; they retain one parsed candidate without complete
-uncompressed byte and text copies. Large compatibility preparation bypasses the
-raw byte memos while consuming history, keeping their duplicate byte windows out
-of the candidate action. Record reads keep four bounded batches ahead
-to overlap storage latency while preserving canonical order and digest checks. Each validation invocation checks up to eight chunks (a 256 KiB target,
-with indivisible records preserved) against the pinned candidate, then saves its
-position. Large compatibility returns build a complete private index partition
-from validated owner rows through durable commits. Full-index rows are generated
-and saved in bounded immutable batches rather than retained as a second complete
-Work. Post-prepare continuations drain those batches; their snapshot keeps only
-scalar Work metadata after row planning. Metadata page encoding and decoding
-stream without joining or stringifying the complete snapshot. Small returns keep their incremental index comparison. Display rows always come from the owner; full metadata validation does not derive them. These thresholds schedule work; they do not limit accepted Work or
-limit retained Work. Current pushes require the CLI upgrade above. Current-protocol retained operations use the same checkpoint, hosted
-revision, operation UUID and timestamp when preparation resumes.
-
-Publication validation is coordinated by project and original operation UUID in
-a transactional attempt record. An overlapping retry waits for the same receipt
-instead of starting another seed. Changed request pins still fail; failures
-release their attempt, and a crashed worker's attempt expires at the ten-minute
-action budget. Waiting callers return resumable pending progress after four minutes,
-retaining the original request; the client immediately continues that request. Final publication still checks
-current authority and the previous-checkpoint compare-and-set.
-
-Formats 16/18/20/22/24 use schema-owned unified collections, including alias keys and
-unpinned planned Intents, in record catalogs and deltas. Catalog size is independent
-of the delta/context optimization budget; complete seed validation can establish
-validated records for catalogs above 4 MiB. Unknown extension arrays, duplicate
-keys and unsupported layouts cannot establish a records delta; schema-1
-compatibility validation remains available for schema-1 checkpoints.
-Changes to schema-owned scalar metadata, including Git mirror and auto-push
-receipts, use record delta after normal versioned schema validation. Unknown
-changed scalar extensions and reordered collection histories make the delta unavailable.
-Capacity-only Work promotions 17→19 and 18→20 and retained-detail promotions
-21→23 and 22→24 retain the validated record base;
-unchanged records keep their reference meaning, while changed records use their
-new format's validation. Other format transitions make the publication delta unavailable.
-Publication admits up to 32 MiB of reference-context record bytes across the two
-catalogs, read in pages of at most 100 pins with a 2 MiB target (an indivisible
-record is read alone). Its action-local byte memo uses the same 32 MiB bound, so
-validation reuses those authenticated bodies without duplicating them in the
-reader and review caches. Publication prefetches changed bodies, their outgoing references and the landing
-batches naming changed Candidates without retaining both parsed contexts. A
-cumulative batch Candidate can carry inputs from multiple Intents only when a
-retained batch prefix names that exact Candidate and head. Planned prefix run IDs
-remain in the authenticated catalog, but need not have run records: composition
-assigns all prefix IDs before checking, and a passing full batch leaves its proper
-prefixes unexecuted. Diagnostic and confirmation run references remain required.
-Publication validates those records and releases the memo before
-streaming the whole-Work digest without loading complete Work to publish a records checkpoint.
-To check a retained push capture offline, after building core, run:
-
-```sh
-node --max-old-space-size=96 --max-semi-space-size=2 scripts/check-work-exchange-capture.mjs BASE_DIRECTORY CAPTURE_DIRECTORY
-```
-
-The base directory contains its retained `manifest.json` and `work.json`; the
-capture also contains `exchange.json` and `exchange-index.json`. The harness
-streams Work into catalogs, authenticates the original base and candidate pins,
-runs full schema validation in bounded record pages, and uses publication's delta,
-prefetch and changed-record validators before streaming the candidate digest. It
-makes no network or Convex calls, writes only private temporary prior-record
-bodies, removes that scratch on exit, and reports `PASS` with revisions, record
-counts, context pages, memory and elapsed time. Failure reports its structured
-error, including the parent and target of a dangling changed-record reference.
-This predicts the captured metadata validation; it does not verify live authority,
-storage availability or publication CAS.
-
-Publication receipt replay restores its optional local preparation hint. When
-reconciliation finds an exact retained base without that hint, it recovers the
-original Work bytes and property order before preparing a new record delta.
-It never uses mutable owner Work or journal-reduced Work as the publication base.
-Missing/corrupt unprovable bases fail records publication explicitly.
-A change only to a local Channel receipt's `postAcceptRunId` is authenticated
-against both original record bodies before treating its source and acceptance
-fields as unchanged. Such check-link enrichment updates the receipt row without
-pulling the original receipt's entire historical check-log graph into the touched
-context. Other receipt changes require a delta that fits the existing context budget. Source-return
-history, protected acceptance pins and final hosted Channel authority still use
-the existing validation; no context budget is increased.
-
-Current CLI checkpoints add optional `recordPacks` to exchange schema 2. These
-immutable, content-addressed spans contain consecutive canonical record bytes;
-they target 128 KiB, anchor on stable record identities and retain local byte
-locations for upload. Seed decoding and complete digest verification read packs
-instead of opening each small record object. Every individual record hash and the
-whole Work digest are still checked. A routine upload reuses unchanged packs;
-publication still reads the complete logical Work for hashing. Checkpoints with
-packs require the current reader; existing checkpoints without packs keep their
-original read path.
-
-Publication logs identify every delta skip gate and metadata-only publication;
-successful record publication identifies delta mode. A typed delta error is
-terminal for automatic push. Unknown publication failures retry the original
-request at most once, then return `WORK_PUBLICATION_FAILED`, which also stops
-automatic push; an explicit retry reconciles the retained operation.
-Prepare logs include each record-delta skip reason and separate current-load,
-candidate-load and retained-validation completion messages. Record checkpoint
-reconstruction batches up to 100 records with a 2 MiB target on hosted readers
-(a larger indivisible record is read alone), preserving exact portable bytes and
-fresh authority checks. Record preparation and full digest
-hashing still read retained metadata; transferred bytes alone do not measure
-their CPU or storage-read cost.
-
-Complete validation compares the record catalog against the original validated
-Work bytes, preserving their field order and absent optional/default fields.
-Schema parsing must not change the snapshot used for that exact digest comparison.
 ## Receive
 
 Native object reconciliation first reads `projectWorkJournal:page` metadata and
@@ -302,51 +106,22 @@ with retained Work. Live latency and billing require separate measurement.
 
 ## Retries
 
-Source-return metadata trees release decoded chunks after copying or hashing them;
-record reconstruction writes into one logical Work buffer. Work hashing streams
-canonical pretty JSON rather than constructing another complete Work string.
-Durable return steps store their immutable Work/manifest snapshot once and keep a
-reference in subsequent position cursors. Existing embedded-snapshot cursors
-resume with the same operation and timestamp, and switch on their next committed
-step. These changes reduce duplicate allocations; compatibility validation still
-loads complete Work metadata, and per-Candidate provenance can grow with its changed
-paths and retained saves. They do not establish a fixed memory bound for every
-possible project history.
-Selected Candidate steps derive only the requested Candidate's read model, retaining its
-supersession and acceptance context; save-index lookup scans backward without
-copying the Lane's save history. The memory fixture uses a producer process to
-write synthetic backups and emitted test handlers to disk, then a separate action
-process under `--max-old-space-size=384`. It reports producer and action lifetime
-peak RSS separately, including Node and imports, plus sampled action heap. Its
-compatibility action has 12,000 saves and 1,425 source files but no Candidates; it does
-not measure historical provenance or establish an O(batch) bound for Work parsing.
-
-Keep the whole request and its operation UUID. A retry of a finished push returns the original result without re-uploading and without moving a later selection. Otherwise it finds what is already stored and sends only what is missing. A changed request under the same UUID is rejected. `previous` must be the project's current checkpoint. If another push landed first, the push fails with `PROJECT_CHANGED`, publishes nothing and forks nothing. Pull the latest checkpoint, reconcile, and push again with a new `previous` and operation UUID. Interrupted preparation publishes nothing. Retry data lives in `.forge/work/exchange-OPERATION_ID`.
-
-Transient publication, receipt lookup and journal failures retry internally with exponential backoff (three retries per phase). Each retry retains its operation ID and exact payload; an unknown publication reply reconciles the existing receipt rather than publishing again. Native bound pushes pin the current Work revision and immutable record pointer under
-a short owner lock, then durably retain the local capture before the first hosted read. Rebase attempts
-share that capture; each retains its own reconciled candidate before upload. Local
-writes after capture travel on the next push. Reconciliation merges validated hosted
-metadata into newer local Work under its final owner lock. Unknown outcomes retain
-the original snapshot and request; retries never recapture them. Explicit revision-pinned
-requests keep their revision checks. Inconsistent hosted snapshot reads report
-`WORK_CHANGED_DURING_PUSH`; exhausted hosted transaction conflicts report `HOSTED_CONFLICT`. Opaque platform failures become `HOSTED_ACTION_FAILED` with a safe request ID when available, rather than a bare `INTERNAL_ERROR`. Authentication, changed-operation payloads and stable validation failures remain typed and do not retry. A known stale bound push allows the next invocation to select fresh pins; an unknown outcome preserves the pending request. No retry silently changes a source revision or overwrites hosted edits.
+Keep each original request and operation UUID after an unknown outcome. Hosted seed and archive migration reconcile their original retained operations; metadata reads and replay-safe transfers retain bounded retries. Stable authorization and changed-operation errors remain structured and do not silently change source pins.
 
 Exchange HTTP requests bound response headers, body inactivity and total request time.
 Object transfers and Convex queries/mutations allow 30 seconds without headers or
-body bytes, with a two-minute total per attempt. Long Convex actions (publication,
-journal export, logical-manifest reconstruction, index preparation,
-history completion, initialization, object-recipe completion and archive migration) allow the full ten minutes both before
+body bytes, with a two-minute total per attempt. Long Convex actions (journal export, logical-manifest reconstruction, index preparation,
+initialization, object-recipe completion and archive migration) allow seven minutes both before
 headers and in total, with 30 seconds of body inactivity after headers. Quick
 checkpoint and download actions keep the short transfer deadlines. Long actions
-also override Node's underlying HTTP header deadline to ten minutes; extending
+also override Node's underlying HTTP header deadline to seven minutes; extending
 only the application timer would still stop them at the transport's five-minute
 default. Reads and replay-safe actions retry
 three times after 100, 200 and 400 ms; each retry keeps the exact payload and operation
 ID. Exhausted network failures report `EXCHANGE_REQUEST_TIMEOUT` or
 `EXCHANGE_REQUEST_FAILED` with the call name, never a signed URL. Structured Convex
 function errors keep their original code. Upload POSTs to Convex storage are bounded
-but not blindly replayed: retrying the exchange reconciles their existing nonce-bound
+but not blindly replayed: retrying the original transfer reconciles its existing nonce-bound
 objects. Redirected Convex storage downloads and recipe leaf reads also buffer the complete
 response inside these deadlines; a partial body never outlives its timer. Legacy archive metadata and ancestry keep their streaming/early-cancellation behavior inside the
 same deadlines. Server-side R2 and archive range reads use the same 30-second/two-minute
@@ -371,7 +146,7 @@ Zero bytes uploaded does not mean zero work. Validation and hashing still happen
 
 ## Object proposals and browser imports
 
-The Backups and Proposals pages accept local export files, unpack them locally, and upload logical objects rather than compressed archives. Identical content is reused. A browser backup that races a newer selection is retained without rewinding the current checkpoint. New archive registrations are retired; old stored archives and original pending uploads remain readable and resumable. No migration or deletion is needed to use object transport. Local recovery/release archive export remains available.
+The Backups and Proposals pages accept local export files and upload logical objects rather than compressed archives. Identical content is reused. New backup imports use the finite paged hosted seed; original operation IDs resume the same project and seed after an interrupted response. Existing archive uploads remain resumable. Local recovery/release archive export remains available.
 
 For an object proposal, download its receive request (`{url,projectId,proposalId,operationId}`), then run:
 
@@ -380,27 +155,6 @@ nforge exchange ROOT receive-proposal --command-file forge-proposal-receive.json
 ```
 
 This downloads and validates the proposal, then imports it into a separate Lane in the existing owner using the original operation ID. Receive the hosted Intent first through the existing Work reconciliation flow. `pull-proposal` with `{url,projectId,proposalId,cacheRoot?}` is also available to retain an unpacked export in a fresh directory. Use that directory as `archivePath` in the existing `import-native-contribution` request and its manifest SHA-256 as `archiveSha256`. These compatibility field names also accept local archives with their original compressed digest. The importer validates complete source closure and creates a separate Lane; contributor Work and check claims never become owner evidence.
-
-Warm native pushes keep a checksummed preparation hint per project/checkpoint. It reuses retained source and finished-run content and omits known uploaded pins from negotiation. Corrupt or missing hints fall back to full preparation. The server validates changed digest/size bindings against a fully validated prior immutable closure; old or incomplete checkpoints take the full path. Access and current project state are checked again at publication. CLI cursors pin the selected source revision.
-
-Native pushes prepare protocol-3 owner display facts alongside pinned Work. Hosted readers validate the Work pin, comparison keys, counts, object membership and chunk hashes before using those facts. Older documents remain readable through existing compatibility reads. The return-only installer and its `INVALID_OWNER_DATA` path have been removed; shared display-document validation remains in use by ordinary reads and projections.
-
-## Work record delta exchange
-
-Current clients send native exchange schema 2: missing stable-key record bytes and
-chunked catalogs pinned to the exact baseline checkpoint and hosted journal
-revision (see [Work record delta exchange](../architecture.md#work-record-delta-exchange)).
-Hosted publication validates changed records and their references and streams the
-complete Work digest; portable JSON, source-return events and owner-only writes are
-unchanged. First exchanges, old checkpoints, schema-1 clients and oversized
-preparation contexts use full-snapshot validation. No existing hosted rows are
-rewritten.
-
-Native bound pushes retain one local capture before the first hosted read and
-release the owner lock before source traversal and networking; later local edits travel on the next push. Known hosted
-CAS mismatches use at most three rebases after the initial attempt, with separate
-immutable attempt identities. A lost reply reconciles the original attempt before
-changing its baseline.
 
 ## Hosted main client checkout
 
@@ -460,169 +214,7 @@ source, not an additional main authority.
 
 ## Pending saved work
 
-Each owner durably records saved mutations in `pending-exchange.json` beside its
-Work store, independently of hosting enablement. Lane checkpoints (including
-unlanded saves), Work edits, check completion and acceptance all pass through the
-same commit boundary. A burst coalesces while retaining its first and last pending
-times and revision range. The pending write is fsynced before publishing the Work
-pointer; an interrupted commit can conservatively leave extra pending work.
-
-An exchange capture seals that burst under the owner lock. Later writes form a
-new batch and retain their own first-pending time. The retained exchange directory's
-`pending-work.json` pins the owner queue identity, covered sequence, capture time,
-Work revision and Work digest. These are local transport records, excluded from
-portable Work. Older captures without these pins cannot clear the queue. A
-successful complete-history push with no unavailable evidence acknowledges only
-its captured batches. Bound pushes acknowledge after checkpoint upload; failed or unknown outcomes stay pending for original-operation retry.
-Current-first hosting leaves history and evidence pending until its full transfer
-completes. Capturing, updating transport receipts and importing already-hosted
-metadata do not enqueue new work themselves.
-
-The project policy has a separate `autoExchange` preference: `enabled:false`,
-`debounceMs:30000`, `maxPendingAgeMs:300000` by default. Partial `set-policy` edits
-preserve unspecified fields; changing an acceptance preset preserves this project
-preference. Enabling it wakes a detached per-owner driver on startup and saved
-Work publications. It uses a trailing quiet debounce and the oldest pending save's
-maximum age, with no check-green gate. Startup recovers a dead worker using kernel
-process identity; the existing bound-push queue serializes automatic and manual
-pushes. Unknown replies reconcile the retained original operation before another
-snapshot. Saves during transfer get a follow-up capture. Bookkeeping does not
-publish Work. Binding `autoSync` and GitHub `autoPush` remain separate.
-
-The worker listens on a private local wake socket and watches publication events only while pending. Lifecycle clients notify the retained live worker directly, including after disable/rebind; filesystem events are advisory. When idle it
-exits: no polling, usage read or network request. Pending retries use backoff;
-pauses use one expiry timer that local changes can wake. Authentication failures
-and journal conflicts retain pending work and a safe error code; owner activity
-retries after the operator fixes the cause. An incomplete capture remains visible
-and does not upload identical saves repeatedly; new saves or a manual push retry
-it. No first-host history backfill is started by this worker.
-
-`nforge host ROOT --status` and `nforge pending ROOT` include `autoExchange` with
-pending age, status, retained operation, next attempt, spend observation, transport
-observation, resume guidance and Undo. Both automatic and manual bound pushes report
-`phase`, `lastProgressAt` (Unix milliseconds), and `stalledAfterMs`. Actual phase
-changes, received headers and received bytes update progress; repeated attempts
-of the same call and console heartbeats do not. After eleven minutes without progress, status reads `stalled` with the
-instruction to retry on owner save/startup or run `nforge exchange ROOT push`.
-The bound push remains retained with its original operation and capture pins.
-
-On the next wake, a stalled automatic driver receives a cooperative cancellation
-through its existing private wake socket. Its active exchange requests abort and
-unwind before releasing the bound-push and automatic-driver queue slots. A
-successor waits up to five seconds for those slots, then resumes the same retained
-operation. Queue tickets still use kernel process-start identities: no live
-holder is evicted on elapsed time alone, and no OS process signal is sent. An
-older, unresponsive driver that cannot cooperate keeps its slot; status remains
-stalled until it exits, and later startup/save retries recovery. Manual pushes
-share the same serialization and cannot overlap it.
-
-Disable future automatic pushes with
-`set-policy {"autoExchange":{"enabled":false}}`; published history is retained.
-Manual pushes remain available, including during a spend pause.
-
-### Optional daily spend observation
-
-For the dogfood project, enable `autoExchange.pauseOnDailySpend:true` alongside
-`enabled:true`, `debounceMs:30000` and `maxPendingAgeMs:300000`. It is absent/off for
-other projects. This defers new automatic attempts when measured team spend rises
-**strictly more than USD 1** against the earliest retained observation within the
-rolling 24-hour window. It never kills an in-flight push or blocks a manual one.
-A pause resumes automatically when that baseline leaves the window, with a fresh
-observation before admission. Until a full day has been observed, the baseline is
-the first available sample. Team totals include unrelated usage and billing can
-lag: this is an observed-delta pause, not an exact per-push cost ceiling.
-
-Configure an **owner-local executable**, not a portable policy or hosted command:
-
-```sh
-nforge host ROOT --spend-command /absolute/owner-owned/forge-daily-spend
-```
-
-The path is saved only in the local hosted binding. The executable receives
-`projectId` and `deployment` as its two arguments and writes exactly one JSON
-observation to stdout:
-
-```json
-{
-  "kind": "measured",
-  "scope": "team",
-  "subject": "stable-team-and-billing-counter-identity",
-  "projectId": "your-project-id",
-  "deployment": "https://your-deployment.convex.cloud",
-  "observedAt": 1792656000000,
-  "totalUsd": 12.34
-}
-```
-
-`totalUsd` is the cumulative team spend counter in USD. `observedAt` is the
-provider's observation time in epoch milliseconds, not the time an old cached
-response was read. Counter resets or team changes start a new baseline.
-`kind:"estimated"` is accepted as an estimate, but cannot admit a protected
-automatic attempt.
-
-Forge runs the executable without a shell, with a five-second timeout and a
-16 KiB combined stdout/stderr bound. HOME, XDG and temp directories are private
-and removed afterwards; the working directory is private too. PATH contains the
-running Node directory and system executable directories. No environment or
-Forge secrets are inherited. This is not an OS sandbox: the owner-controlled
-executable can access files with the owner's OS rights. It alone reads the
-provider token the owner already has; Forge never discovers, reads, stores or
-passes a Convex team token. Keep credentials out of command arguments, returned
-observations and logs. Provider error text is discarded.
-
-For example, this executable shape uses an **owner-provided billing reader** that
-knows the owner's existing provider API and credential file. That reader is not
-part of Forge; substitute its path and the existing credential path. Use an
-absolute Node shebang (from `command -v node`) and `chmod 700` the executable:
-
-```js
-#!/absolute/path/to/node
-const { readFileSync } = require('node:fs');
-const { readTeamSpend } = require('/absolute/owner-owned/convex-billing-reader.cjs');
-const [projectId, deployment] = process.argv.slice(2);
-(async () => {
-  // Only this owner-controlled process reads the already-existing token.
-  const { token } = JSON.parse(readFileSync('/absolute/private/provider-credentials.json', 'utf8'));
-  const usage = await readTeamSpend({ token });
-  console.log(JSON.stringify({
-    kind: 'measured',
-    scope: 'team',
-    subject: usage.counterIdentity,
-    projectId,
-    deployment,
-    observedAt: usage.observedAt,
-    totalUsd: usage.cumulativeTotalUsd,
-  }));
-})().catch(() => { process.exitCode = 1; });
-```
-
-Spend is read only before admitting a pending automatic attempt, never on idle,
-status or a manual push. Successful measured observations are reused for up to
-one minute, including across worker restarts; expiry causes a read on the next
-attempt, with no polling timer. Changing the command invalidates that cache.
-The rolling spend calculation still uses the retained 24-hour history.
-
-With `pauseOnDailySpend:true`, missing configuration, command failures/timeouts,
-invalid JSON, cross-project, future, out-of-order or at-least-24-hour-old samples
-**defer automatic pushes**. `autoExchange.status` is `paused`, with code
-`AUTO_EXCHANGE_SPEND_UNAVAILABLE`; `spend.reason` distinguishes `unconfigured`,
-`unavailable` and `stale`. `spend.paused` describes only a measured threshold
-pause; unavailable dollars remain null. Status and pending output include the
-reason and recovery guidance. Fix the executable, then set `--spend-command`
-again or resume owner activity (save/startup) to retry. There is no background
-usage polling while deferred. Manual `nforge exchange ROOT push` stays available.
-Remove the local executable setting with `nforge host ROOT --no-spend-command`;
-protected automatic attempts then remain deferred until it is configured again.
-The previous `FORGE_CONVEX_USAGE_ADAPTER` in-process module hook is replaced by
-this local executable setting.
-
-Successful bound and explicit push receipts include `observation`: measured HTTP
-attempts/RPC requests, request/response body bytes and process elapsed milliseconds.
-Retries count as requests. Counts exclude headers/TLS and server-internal work;
-retired source-return accounting is no longer produced. Scope is the current local
-attempt (including receipt replay), not cumulative billing for the original
-operation. `estimatedUsd` and `billedUsd` are null: bytes and RPCs are not prices.
-The latest successful bound observation is retained for local status.
+Hosted Lane saves and finish submissions retain their current durable journals and exact source pins. Native owner saves no longer write `pending-exchange.json`, start an exchange worker or run a spend observation. Old local auto-exchange/spend/progress sidecars and policy fields remain readable historical data and do not launch work. Status no longer advertises automatic push or spend-pause actions. Idle exchange costs zero Convex calls and starts zero local processes. Explicit recovery exports and the recovery inventory remain separate.
 
 ## Recovery inventory
 
@@ -1657,7 +1249,7 @@ data. Existing epoch-zero callers need no new argument. Publication and legacy
 acceptance calls can supply `authorityEpoch` after rollback; owner requests retain
 the epoch at creation so an old completion cannot cross a rollback.
 
-The existing hosted main seed, owner completion, exchange publication and legacy
+The existing hosted main seed, owner completion and legacy
 acceptance commit check their authority in their write transaction. Their guards
 reuse project rows already read for authorization. Native `accept-channel` checks
 the binding pin under the owner lock, including before replay. It adds no hosted

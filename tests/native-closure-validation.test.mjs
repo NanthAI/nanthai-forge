@@ -1,3 +1,4 @@
+import { captureNativeArchive } from './native-archive-fixture.mjs';
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -12,7 +13,7 @@ import { initNative } from '../dist/native-work.js';
 import { WorkStore } from '../dist/work-store.js';
 import { workSchema } from '../dist/work-types.js';
 import { mergeCompanion, reconcileHostedWork } from '../dist/native-companion.js';
-import { prepareNativeExchange } from '../dist/native-exchange.js';
+
 import { digest } from '../dist/hash.js';
 
 function fixture(t) {
@@ -170,7 +171,7 @@ async function exchangeCommand(f) {
   });
   f.store.save(data);
   const operation = randomUUID(),
-    prepared = await prepareNativeExchange(f.store, data.revision, operation),
+    prepared = await captureNativeArchive(f.store, data.revision, operation),
     manifestSha256 = digest(prepared.json);
   const original = readFileSync(join(prepared.directory, 'work.json')),
     projectKey = randomUUID();

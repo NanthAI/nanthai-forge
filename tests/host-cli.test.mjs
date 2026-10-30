@@ -21,7 +21,6 @@ import { workGit } from '../dist/work-git.js';
 import { hostProject, hostCli } from '../dist/host-cli.js';
 import { readHostState, updateHostState, requireHostedBinding } from '../dist/host-binding.js';
 import { ConvexExchange } from '../dist/exchange-client.js';
-import { pushAttemptId } from '../dist/bound-exchange.js';
 import { HOSTED_WORK_INDEX_FORMAT } from '../dist/work-hosted-summary.js';
 import { immutableDirectorySync } from './helpers/immutable-directory.mjs';
 const { default: schema } = await import(moduleUrl('../convex/schema.ts'));

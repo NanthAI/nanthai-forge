@@ -19,7 +19,7 @@ import { z } from 'zod';
 import { pushProgressSchema } from './push-progress-state.js';
 import { autoExchangeStateSchema } from './auto-exchange-state.js';
 import { exchangeObservationSchema } from './exchange-observation.js';
-import { wakeAutoExchange } from './auto-exchange-wake.js';
+
 import { workLocked } from './work-lock.js';
 import { WorkStore } from './work-store.js';
 import { invariant } from './errors.js';
@@ -205,7 +205,7 @@ export function updateHostState<T>(
       { operation: 'host transport metadata' },
     );
   const result = options.ownerLock === false ? apply() : store.locked(apply);
-  wakeAutoExchange(store);
+
   return result;
 }
 function writeChanged(store: WorkStore, name: string, value: unknown) {

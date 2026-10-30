@@ -161,23 +161,10 @@ export async function traceExchange(client, run, options = {}) {
 }
 
 export async function measureRequest({ request, transport, runtime, onProgress }) {
-  const { prepareNativeExchange, pushNativeExchange, pullNativeExchange } = await import(
-    pathToFileURL(join(runtime, 'dist/native-exchange.js'))
-  );
-  const { WorkStore } = await import(pathToFileURL(join(runtime, 'dist/work-store.js')));
+  const { pullNativeExchange } = await import(pathToFileURL(join(runtime, 'dist/native-exchange.js')));
   return traceExchange(
     transport.client,
     async phase => {
-      if (request.action === 'push') {
-        const store = new WorkStore(request.root);
-        const prepared = await phase('prepare', () =>
-          prepareNativeExchange(store, request.revision, request.operationId, true),
-        );
-        const result = await phase('push', () =>
-          pushNativeExchange(store, request.revision, request.operationId, transport),
-        );
-        return { ...result, preparedDirectory: prepared.directory };
-      }
       if (request.action === 'metadata') {
         const manifest = await phase('remote-metadata', () => transport.manifest(request.backupId));
         return {
@@ -193,7 +180,7 @@ export async function measureRequest({ request, transport, runtime, onProgress }
             ...(request.journalPath ? { journalPath: request.journalPath } : {}),
           }),
         );
-      throw new Error('Select push, metadata or recover in the explicit measurement request.');
+      throw new Error('Select metadata or recover in the explicit measurement request.');
     },
     { onProgress },
   );
@@ -203,7 +190,7 @@ async function main() {
   const [requestPath, outputPath] = process.argv.slice(2);
   if (!requestPath || !outputPath || process.argv.includes('--help')) {
     console.log(
-      'Usage: node scripts/measure-exchange-latency.mjs REQUEST_JSON RESULT_JSON\nSet FORGE_AUTH_TOKEN to an existing account JWT; do not put credentials in requests.\nRequest: {action:"push",url,projectId,root,revision,operationId,previous:null}, {action:"metadata",url,projectId,backupId}, or {action:"recover",url,projectId,backupId,target,cacheRoot?,journalPath?}.\nOptional FORGE_MEASURE_RUNTIME selects an installed package root. This harness executes the explicit request once and retains unknown outcomes; it does not retry, create projects, return source or clean restored owners.',
+      'Usage: node scripts/measure-exchange-latency.mjs REQUEST_JSON RESULT_JSON\nSet FORGE_AUTH_TOKEN to an existing account JWT; do not put credentials in requests.\nRequest: {action:"metadata",url,projectId,backupId}, or {action:"recover",url,projectId,backupId,target,cacheRoot?,journalPath?}.\nOptional FORGE_MEASURE_RUNTIME selects an installed package root. This harness executes the explicit request once and retains unknown outcomes; it does not retry, create projects, return source or clean restored owners.',
     );
     return;
   }

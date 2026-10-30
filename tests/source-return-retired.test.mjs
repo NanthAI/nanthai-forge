@@ -14,7 +14,6 @@ import {
 } from '../dist/work-metadata.js';
 import { ConvexExchange } from '../dist/exchange-client.js';
 import { CUTOVER_UPGRADE } from '../dist/cutover-version.js';
-import { exchangePushSchema } from '../dist/exchange-cli.js';
 
 const retired = await import(moduleUrl('../convex/projectSourceReturn.ts'));
 const supersede = await import(moduleUrl('../convex/projectReturnSupersede.ts'));
@@ -66,7 +65,6 @@ test('installed source-return and supersede clients receive the cutover upgrade 
   }
   assert.equal(accesses, 0);
   assert.equal(ConvexExchange.prototype.returnSource, undefined);
-  assert.equal(exchangePushSchema.shape.returnSource, undefined);
 });
 
 test('historic source-return journal events retain original digest and replay validation', () => {

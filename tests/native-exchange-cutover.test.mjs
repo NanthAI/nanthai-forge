@@ -9,7 +9,8 @@ import { initNative } from '../dist/native-work.js';
 import { WorkService } from '../dist/work.js';
 import { WorkStore } from '../dist/work-store.js';
 import { exportNativeWork, restoreNativeWork } from '../dist/native-backup.js';
-import { prepareNativeExchange, pushNativeExchange, pullNativeExchange } from '../dist/native-exchange.js';
+import { pullNativeExchange } from '../dist/native-exchange.js';
+import { transferArchiveFixture } from './native-archive-fixture.mjs';
 import { reconcileHostedWork } from '../dist/native-companion.js';
 import { applyHostedEvent, metadataRequest, parseWorkBytes, workBytes } from '../dist/work-metadata.js';
 import { migrateHostedIntents } from '../dist/work-hosted-intents.js';
@@ -79,7 +80,7 @@ function journalFixture(base, archiveSha256, manifestBytes, original) {
   };
 }
 
-test('push reconciliation, object pull and archive restore replay current-format source returns', async t => {
+test('object reconciliation, pull and archive restore replay current-format source returns', async t => {
   const dir = mkdtempSync(join(tmpdir(), 'forge-exchange-cutover-'));
   t.after(() => rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const root = join(dir, 'owner');
@@ -100,10 +101,16 @@ test('push reconciliation, object pull and archive restore replay current-format
     manifest: async id => ({ json: objects.get(id).toString(), digest: id, size: objects.get(id).length }),
     download: async pin => Buffer.from(objects.get(pin.sha256)),
   };
-  const checkpoint = await pushNativeExchange(store, initial.revision, randomUUID(), transport);
-  const manifestBytes = objects.get(checkpoint.backupId),
+  const checkpoint = await transferArchiveFixture(store, transport);
+  const manifestBytes = Buffer.from(checkpoint.json),
     manifest = JSON.parse(manifestBytes);
   const original = objects.get(manifest.files.find(pin => pin.path === 'work.json').sha256);
+  transport.manifest = async () => ({
+    json: checkpoint.json,
+    digest: checkpoint.digest,
+    size: Buffer.byteLength(checkpoint.json),
+  });
+  checkpoint.backupId = checkpoint.digest;
   const base = parseWorkBytes(original);
   const f = journalFixture(base, checkpoint.backupId, manifestBytes, original);
   const directory = join(dir, 'received');
@@ -141,16 +148,6 @@ test('push reconciliation, object pull and archive restore replay current-format
     assert.deepEqual(data.intents[0].notes, f.hosted.intents[0].notes);
     assert.deepEqual(data.intents[0].conversation, f.hosted.intents[0].conversation);
   }
-  const prepared = await prepareNativeExchange(
-    store,
-    candidate.revision,
-    randomUUID(),
-    false,
-    undefined,
-    undefined,
-    { captured: { directory, data: candidate } },
-  );
-  assert.equal(parseWorkBytes(readFileSync(join(prepared.directory, 'work.json'))).schema, 24);
   const pulled = join(dir, 'pulled');
   await pullNativeExchange(checkpoint.backupId, pulled, transport, { journalPath });
   assert.deepEqual(new WorkStore(pulled).load().intents, f.hosted.intents);

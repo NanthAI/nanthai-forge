@@ -361,31 +361,3 @@ test('tool publication fence detects replacement and earlier PATH shadowing with
   writeFileSync(shadow, '#!/bin/sh\nexit 1\n');
   assert.equal(current(), false);
 });
-
-test('pending exchange capture racing preparation retries without losing its coverage', async t => {
-  const store = fixture(t);
-  const { capturePendingExchange, readPendingExchange } = await import('../dist/pending-exchange.js');
-  const sequence = readPendingExchange(store.directory).sequence;
-  let captured = false,
-    attempts = 0;
-  await retryWorkPhase(randomUUID(), () =>
-    editWork(
-      store,
-      data => {
-        attempts++;
-        data.extension = 'retained';
-      },
-      () => {
-        if (!captured) {
-          captured = true;
-          capturePendingExchange(store.directory, store.pointer());
-        }
-      },
-    ),
-  );
-  const pending = readPendingExchange(store.directory);
-  assert.equal(attempts, 2);
-  assert.equal(pending.capturedThrough, sequence);
-  assert.equal(pending.sequence, sequence + 1);
-  assert.equal(store.load().extension, 'retained');
-});

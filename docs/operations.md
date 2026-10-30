@@ -1256,51 +1256,38 @@ inventory below records that boundary. Tests/scripts are inventoried separately.
 G is conditional on server-projection coverage; I is gross replace/re-parent
 scope, not a promise to delete useful review components.
 
-#### B1.6a — exchange push/publication
+#### B1.6a — exchange push/publication (retired)
 
-| Module                                   |       LOC | Last surviving callers |
-| ---------------------------------------- | --------: | ---------------------- |
-| `src/bound-exchange.ts`                  |       478 | A1                     |
-| `src/bound-exchange-supersede.ts`        |        91 | A1                     |
-| `src/bound-push-progress.ts`             |        50 | A1                     |
-| `src/bound-push-id.ts`                   |        12 | A1                     |
-| `src/exchange-cli.ts`                    |       267 | A2                     |
-| `src/mcp-exchange.ts`                    |        82 | A3                     |
-| `src/exchange-progress.ts`               |         8 | A1                     |
-| `src/native-exchange-prepared.ts`        |        73 | A4                     |
-| `src/native-exchange-migrate.ts`         |       105 | A2                     |
-| `src/git-exchange-prepared.ts`           |        62 | A4                     |
-| `src/pending-exchange.ts`                |       163 | A5                     |
-| `src/push-progress-state.ts`             |        36 | A6                     |
-| `src/native-publication.ts`              |        75 | A4                     |
-| `src/publication-metadata.ts`            |        46 | A7                     |
-| `src/publication-pin-window.ts`          |        67 | A8                     |
-| `src/work-exchange-context.ts`           |        87 | A9                     |
-| `src/exchange-proposal.ts`               |        78 | A2                     |
-| `convex/projectExchange.ts`              |       271 | A10                    |
-| `convex/projectExchangeMigration.ts`     |       124 | A11                    |
-| `convex/projectWorkRecordExchange.ts`    |       255 | A9                     |
-| `convex/projectPublicationValidation.ts` |       287 | A8                     |
-| `convex/projectPublicationProgress.ts`   |       115 | A8                     |
-| `convex/projectPublicationStore.ts`      |       313 | A8                     |
-| `convex/projectPublicationAttempt.ts`    |        78 | A12                    |
-| `convex/projectPublicationRun.ts`        |        43 | A12                    |
-| `web/src/ExchangeHandoff.tsx`            |       110 | A13                    |
-| **Whole-file scope**                     | **3,376** |                        |
+Push publication, automatic exchange and spend admission are removed. Old public RPC addresses remain only as structured upgrade-error tombstones. Counts below are the full-file pre-deletion inventory; shared retained portions are named explicitly. Stored table definitions and document validators remain for the separate table purge.
 
-- **A1:** `src/cli.ts`, `src/host-binding.ts`, `src/mcp-agent-workflow.ts`, `src/work-store.ts`.
-- **A2:** `src/cli.ts`, `src/mcp-agent-workflow.ts`.
-- **A3:** `src/mcp-agent-workflow.ts`.
-- **A4:** `src/native-exchange.ts`.
-- **A5:** `src/cli.ts`, `src/host-binding.ts`, `src/host-command.ts`, `src/mcp-agent-workflow.ts`, `src/native-exchange.ts`, `src/pending-status-read.ts`, `src/pending-status.ts`, `src/work-records.ts`, `src/work-store.ts`, `src/work.ts`.
-- **A6:** `src/host-binding.ts`, `src/host-command.ts`, `src/pending-status-read.ts`, `src/pending-status.ts`, `src/work-store.ts`.
-- **A7:** `convex/projectExchangeActions.ts`, `convex/projectSourceProjection.ts`, `convex/projectWorkLoad.ts`, `src/exchange-client.ts`, `src/exchange-convex-fetch.ts`, `src/native-exchange.ts`, `web/src/HostedWork.tsx`.
-- **A8:** `convex/projectExchangeActions.ts`, `convex/projectSourceProjection.ts`, `convex/projectWorkLoad.ts`, `src/exchange-client.ts`, `src/exchange-convex-fetch.ts`, `web/src/HostedWork.tsx`.
-- **A9:** `convex/projectExchangeActions.ts`, `src/exchange-client.ts`, `src/exchange-convex-fetch.ts`, `web/src/HostedWork.tsx`.
-- **A10:** `convex/projectExchangeActions.ts`, `src/exchange-client.ts`, `src/exchange-convex-fetch.ts`.
-- **A11:** `src/exchange-client.ts`, `src/exchange-convex-fetch.ts`.
-- **A12:** `convex/projectExchangeActions.ts`.
-- **A13:** `web/src/HostedWork.tsx`, `web/src/ProjectBackups.tsx`.
+| Module | LOC before | Present boundary |
+| --- | ---: | --- |
+| `src/bound-exchange.ts` | 372 | Deleted |
+| `src/bound-exchange-supersede.ts` | 0 | Already absent on inspected main |
+| `src/bound-push-progress.ts` | 50 | Deleted |
+| `src/bound-push-id.ts` | 12 | Deleted |
+| `src/exchange-cli.ts` | 242 | Checkout, restore, reconcile, migration and proposal receive; push removed |
+| `src/mcp-exchange.ts` | 82 | Registers retained exchange/read tools without push |
+| `src/exchange-progress.ts` | 8 | Progress for retained object transfer and reconcile |
+| `src/native-exchange-prepared.ts` | 73 | Deleted |
+| `src/native-exchange-migrate.ts` | 115 | Explicit archive migration |
+| `src/git-exchange-prepared.ts` | 62 | Deleted |
+| `src/pending-exchange.ts` | 203 | Deleted |
+| `src/push-progress-state.ts` | 36 | Deleted |
+| `src/native-publication.ts` | 75 | Deleted |
+| `src/publication-metadata.ts` | 46 | Deleted |
+| `src/publication-pin-window.ts` | 67 | Deleted |
+| `src/work-exchange-context.ts` | 146 | Offline retained-delta inspection |
+| `src/exchange-proposal.ts` | 78 | Proposal import and export |
+| `convex/projectExchange.ts` | 315 | Archive migration/retirement only |
+| `convex/projectExchangeMigration.ts` | 147 | Explicit archive migration |
+| `convex/projectWorkRecordExchange.ts` | 338 | Shared bounded record reader only |
+| `convex/projectPublicationValidation.ts` | 287 | Deleted |
+| `convex/projectPublicationProgress.ts` | 115 | Deleted |
+| `convex/projectPublicationStore.ts` | 313 | Upgrade tombstones only |
+| `convex/projectPublicationAttempt.ts` | 78 | Deleted |
+| `convex/projectPublicationRun.ts` | 43 | Deleted |
+| `web/src/ExchangeHandoff.tsx` | 109 | Restore and reconcile requests; push request removed |
 
 #### B1.6b — source return (deleted)
 
@@ -1388,23 +1375,19 @@ Live source-return computation, callers, progress probes and return-only tests a
 - **D2:** `src/cli.ts`, `src/host-binding.ts`, `src/mcp-agent-workflow.ts`, `src/work-store.ts`.
 - **D3:** `src/cli.ts`, `src/host-binding.ts`, `src/mcp-agent-workflow.ts`, `src/native-exchange.ts`, `src/work-store.ts`.
 
-#### B1.6a — auto exchange/spend pause
+#### B1.6a — auto exchange/spend pause (retired)
 
-| Module                               |     LOC | Last surviving callers |
-| ------------------------------------ | ------: | ---------------------- |
-| `src/auto-exchange.ts`               |     341 | E1                     |
-| `src/auto-exchange-status.ts`        |      97 | E2                     |
-| `src/auto-exchange-spend.ts`         |      83 | E3                     |
-| `src/auto-exchange-usage-command.ts` |      81 | E1                     |
-| `src/auto-exchange-wake.ts`          |      69 | E1                     |
-| `src/auto-exchange-notify.ts`        |      53 | E4                     |
-| `src/auto-exchange-state.ts`         |      45 | E3                     |
-| **Whole-file scope**                 | **769** |                        |
+Push publication, automatic exchange and spend admission are removed. Old public RPC addresses remain only as structured upgrade-error tombstones. Counts below are the full-file pre-deletion inventory; shared retained portions are named explicitly. Stored table definitions and document validators remain for the separate table purge.
 
-- **E1:** `src/host-binding.ts`, `src/work-store.ts`.
-- **E2:** `src/host-command.ts`, `src/pending-status-read.ts`, `src/pending-status.ts`.
-- **E3:** `src/host-binding.ts`, `src/host-command.ts`, `src/pending-status-read.ts`, `src/pending-status.ts`, `src/work-store.ts`.
-- **E4:** `src/host-binding.ts`, `src/landing-worker-wake.ts`, `src/landing-worker.ts`, `src/work-store.ts`.
+| Module | LOC before | Present boundary |
+| --- | ---: | --- |
+| `src/auto-exchange.ts` | 341 | Deleted |
+| `src/auto-exchange-status.ts` | 97 | Deleted |
+| `src/auto-exchange-spend.ts` | 83 | Deleted |
+| `src/auto-exchange-usage-command.ts` | 81 | Deleted |
+| `src/auto-exchange-wake.ts` | 69 | Deleted |
+| `src/auto-exchange-notify.ts` | 53 | Deleted |
+| `src/auto-exchange-state.ts` | 45 | Historic local-sidecar validators only |
 
 #### B1.8 — freshness/unsynced UI
 

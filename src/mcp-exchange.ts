@@ -4,17 +4,15 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import {
   exchangeCommand,
-  mainPullSchema,
-  exchangePushSchema,
+  exchangeMigrateSchema,
   exchangePullSchema,
   exchangeReconcileSchema,
-  exchangeMigrateSchema,
+  mainPullSchema,
 } from './exchange-cli.js';
 import { ForgeError } from './errors.js';
 export function registerExchangeTools(server: McpServer, root: string) {
   if (!process.env.FORGE_AUTH_TOKEN && !hasSavedAuth()) return;
   const command = z.discriminatedUnion('action', [
-    exchangePushSchema.extend({ action: z.literal('push') }),
     exchangeReconcileSchema.extend({ action: z.literal('reconcile') }),
     mainPullSchema.extend({ action: z.literal('open'), targetDirectory: z.string().min(1) }),
     exchangePullSchema.extend({ action: z.literal('restore'), targetDirectory: z.string().min(1) }),
@@ -51,7 +49,7 @@ export function registerExchangeTools(server: McpServer, root: string) {
     'forge_exchange',
     {
       description:
-        'Exchange missing native source/artifact content and reusable large-file chunks with the current signed-in Forge project. Logical source hashes stay unchanged; upload counts/bytes describe physical transfers, not retained history or performance guarantees. Push stores a checkpoint and optionally returns it to hosted Work; reconcile merges supported hosted metadata into this owner; open checks out selected hosted main in targetDirectory; restore (legacy pull) restores an independent owner. No source history deletion or automatic acceptance. Retain all original IDs after unknown outcomes. Auth comes from nforge login or FORGE_AUTH_TOKEN.',
+        'Exchange missing native source/artifact content and reusable large-file chunks with the current signed-in Forge project. Logical source hashes stay unchanged; upload counts/bytes describe physical transfers, not retained history or performance guarantees. Reconcile merges supported hosted metadata into this owner; open checks out selected hosted main in targetDirectory; restore (legacy pull) restores an independent owner. No source history deletion or automatic acceptance. Retain all original IDs after unknown outcomes. Auth comes from nforge login or FORGE_AUTH_TOKEN.',
       inputSchema: { command },
       annotations: {
         readOnlyHint: false,

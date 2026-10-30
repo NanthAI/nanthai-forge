@@ -23,7 +23,7 @@ import { NativeSource } from '../dist/native-source.js';
 import { NativeMaterialization } from '../dist/native-materialization.js';
 import { initNative } from '../dist/native-work.js';
 import { exportNativeWork, restoreNativeWork, restoreNativeExchangeStage } from '../dist/native-backup.js';
-import { pullNativeExchange, pushNativeExchange } from '../dist/native-exchange.js';
+import { pullNativeExchange } from '../dist/native-exchange.js';
 import { digest } from '../dist/hash.js';
 async function fixture(t) {
   const owner = realpathSync(mkdtempSync(join(tmpdir(), 'forge-recovery-materialization-'))),
@@ -209,23 +209,4 @@ test('private-stage cross-device fallback preserves content and excludes unliste
   assert.deepEqual(new WorkStore(target).load(), f.before);
   assert.equal(existsSync(join(target, '.forge/work/unlisted.tmp')), false);
   assert.equal(readFileSync(join(f.exported.path, 'manifest.json'), 'utf8'), f.exported.json);
-});
-
-test('physical chunk receipt counts preserve logical reuse for upload-only transports', async t => {
-  const f = await fixture(t),
-    store = new WorkStore(f.owner);
-  const transport = {
-    async missing(pins) {
-      return pins.map(pin => pin.sha256);
-    },
-    async upload(_, bytes) {
-      return { uploadedObjects: 3, uploadedBytes: bytes.length, uploadedLogicalObjects: 1 };
-    },
-    async publish() {
-      return 'physical-chunk-receipt';
-    },
-  };
-  const result = await pushNativeExchange(store, store.revision(), randomUUID(), transport);
-  assert.equal(result.uploadedObjects, result.objects * 3);
-  assert.equal(result.reusedObjects, 0);
 });

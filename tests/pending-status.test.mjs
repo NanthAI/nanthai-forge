@@ -133,19 +133,17 @@ test('no heartbeat, unknown capture time and incomplete first-host history remai
   assert.equal(status.ownerHeartbeat, null);
   assert.match(formatPendingStatus(status), /capture age unknown/);
 });
-test('a failed or unknown-outcome push does not advance successful capture pins', () => {
+test('pending local saves do not advance successful capture pins', () => {
   const status = pendingStatus(
     data(),
     {
       recovery: { ...capture, mainHead: old, workRevision: 3 },
-      pendingPushes: [{ operationId: 'retry-original', revision: 4 }],
     },
     now,
   );
   assert.equal(status.hosted.mainHead, old);
   assert.equal(status.hosted.source, 'different');
   assert.equal(status.hosted.work, 'pending');
-  assert.equal(status.hosted.pendingPushes[0].operationId, 'retry-original');
 });
 test('GitHub success and stale deployment observations stay separate from hosted recovery', () => {
   const status = pendingStatus(
@@ -291,12 +289,12 @@ test('ignore counts and metrics keep submission identities visible within the co
     assert.ok(text.split('\n').length <= 15, text);
     assert.match(text, /lane pending \(checking\).*submission submissi.*attempt attempt-/);
     assert.match(text, /^Ignored: 1 .gitignore · 2 .forgeignore · 3 built-in$/m);
+    assert.doesNotMatch(text, /Automatic hosted push:/);
     for (const label of [
       'Hosted main:',
       'Recovery:',
       'Pending:',
       'Transfers:',
-      'Automatic hosted push:',
       'GitHub main:',
       'Checks:',
       'Audits:',

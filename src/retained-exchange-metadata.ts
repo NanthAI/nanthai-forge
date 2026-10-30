@@ -27,8 +27,7 @@ export function preparedMetadata(directory: string, manifest: Buffer) {
   if (!existsSync(rootPath)) return undefined;
   const bytes = readFileSync(rootPath),
     indexPath = join(directory, 'exchange-index.json');
-  // Transitional prepared operations retain their original encoding. They can
-  // still reconcile; newly prepared operations always pin the compact index.
+  // Offline inspection preserves the exact encoding of historical captures.
   const value = existsSync(indexPath)
     ? JSON.parse(readFileSync(indexPath, 'utf8'))
     : buildExchangeRoot(manifest, readFileSync(join(directory, 'work.json'))).index;

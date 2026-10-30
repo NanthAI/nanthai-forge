@@ -1,3 +1,4 @@
+import { commitValidatedCheckpoint } from './project-exchange-fixture.mjs';
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -103,7 +104,7 @@ test('hosted line comments validate current source, preserve one retry and rejec
     first = await checkpoint(t, s),
     command = prepare(first.store),
     source = await preparedCheckpoint(s, first.store),
-    backupId = await modules.projectExchangeActions.publish._handler(s.ctx, source.input);
+    backupId = await commitValidatedCheckpoint(s, source);
   await modules.projectWorkActions.initialize._handler(s.ctx, {
     projectId: 'project',
     backupId,

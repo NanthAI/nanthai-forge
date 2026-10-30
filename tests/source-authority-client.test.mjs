@@ -17,7 +17,6 @@ import {
   rememberSourceAuthorityError,
 } from '../dist/source-authority-client.js';
 import { consumeOwnerRequests } from '../dist/owner-acceptance-consumer.js';
-import { boundExchange } from '../dist/bound-exchange.js';
 import { hostedActionError } from '../dist/hosted-action-error.js';
 import { lanesFixture } from './hosted-lanes-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
@@ -216,20 +215,6 @@ test('normal offline accepts work at epoch zero; owner writer stale feedback blo
     server,
     'error normalization preserves feedback',
   );
-});
-
-test('bound push persists normalized stale-writer feedback before surfacing the error', async t => {
-  const f = setup(t);
-  await assert.rejects(
-    boundExchange(f.root, 'push', undefined, {
-      beforePush: async () => {
-        throw hostedActionError(stale(server), 'publication');
-      },
-    }),
-    isStale,
-  );
-  assert.deepEqual(readHostState(f.store).binding.sourceAuthority, server);
-  assert.throws(() => nativeExecute(f.store, f.command, f.store.revision()), isHosted);
 });
 
 test('native acceptance checks the authority again under the owner lock', t => {

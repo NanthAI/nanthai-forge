@@ -1,3 +1,4 @@
+import { captureNativeArchive } from './native-archive-fixture.mjs';
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -8,7 +9,7 @@ import { randomUUID } from 'node:crypto';
 import { getFunctionName } from 'convex/server';
 import { mapExchange } from '../dist/exchange-parallel.js';
 import { ConvexExchange } from '../dist/exchange-client.js';
-import { prepareNativeExchange, pushNativeExchange, pullNativeExchange } from '../dist/native-exchange.js';
+import { pullNativeExchange } from '../dist/native-exchange.js';
 import { buildExchangeRoot, resolveExchangeRoot } from '../dist/native-exchange-tree.js';
 import { WorkStore } from '../dist/work-store.js';
 import { initNative } from '../dist/native-work.js';
@@ -95,92 +96,6 @@ test('failed scheduler drains active operations before rejection and starts no r
   gates[1].resolve();
   assert.match((await result).message, /original failure/);
   assert.equal(finished, true);
-});
-
-test('original publication receipt bypasses pin discovery and source reads, retaining auth failures', async t => {
-  const { store } = owner(t),
-    operation = randomUUID(),
-    revision = store.load().revision;
-  let saved;
-  const transport = {
-    metadataTrees: true,
-    published: async () => null,
-    missing: async pins => pins.map(p => p.sha256),
-    upload: async () => {},
-    publish: async p => {
-      saved = p;
-      throw new Error('lost publication reply');
-    },
-  };
-  await assert.rejects(pushNativeExchange(store, revision, operation, transport), /lost publication/);
-  const staged = join(store.directory, `exchange-${operation}`, 'work.json');
-  renameSync(staged, `${staged}.unavailable`);
-  transport.published = async p => {
-    assert.deepEqual(p, saved);
-    return 'original-backup';
-  };
-  transport.missing =
-    transport.upload =
-    transport.publish =
-      async () => assert.fail('a known original must not rediscover, upload or republish');
-  const retry = await pushNativeExchange(store, revision, operation, transport);
-  assert.equal(retry.backupId, 'original-backup');
-  assert.equal(retry.uploadedBytes, 0);
-  assert.equal(retry.reusedObjects, retry.objects);
-  transport.published = async () => {
-    throw new Error('current authority revoked');
-  };
-  await assert.rejects(
-    pushNativeExchange(store, revision, operation, transport),
-    /current authority revoked/,
-  );
-});
-
-test('previously prepared legacy manifests keep their original encoding on modern receipt reconciliation', async t => {
-  const { store } = owner(t),
-    operation = randomUUID(),
-    revision = store.load().revision,
-    prepared = await prepareNativeExchange(store, revision, operation, false);
-  const result = await pushNativeExchange(store, revision, operation, {
-    metadataTrees: true,
-    published: async p => {
-      assert.equal(p.sha256, digest(prepared.json));
-      return 'legacy-original';
-    },
-    missing: async () => assert.fail('no discovery'),
-    upload: async () => assert.fail('no upload'),
-    publish: async () => assert.fail('no publication'),
-  });
-  assert.equal(result.backupId, 'legacy-original');
-  assert.equal(result.digest, digest(prepared.json));
-});
-
-test('missing pages overlap within four existing 100-pin queries and settle before publication', async t => {
-  const { store } = owner(t, 420);
-  let active = 0,
-    peak = 0,
-    pages = 0;
-  const result = await pushNativeExchange(store, store.load().revision, randomUUID(), {
-    metadataTrees: true,
-    published: async () => null,
-    missing: async pins => {
-      assert(pins.length <= 100);
-      pages++;
-      active++;
-      peak = Math.max(peak, active);
-      await tick();
-      active--;
-      return [];
-    },
-    upload: async () => assert.fail('known bytes are not uploaded'),
-    publish: async () => {
-      assert.equal(active, 0);
-      return 'new-checkpoint';
-    },
-  });
-  assert(pages >= 5);
-  assert(peak > 1 && peak <= 4);
-  assert.equal(result.uploadedBytes, 0);
 });
 
 test('manifest and Work tree traversal share one bounded reader and retain exact byte order', async () => {
@@ -410,30 +325,4 @@ test('parallel pull drains active transfers before removing failed staging and n
   assert.match((await result).message, /download interrupted/);
   assert.equal(calls, 2);
   assert.equal(existsSync(target), false);
-});
-
-test('publication capability errors remain explicit and never silently fall back', async () => {
-  const client = new ConvexExchange(
-    'https://fixture.convex.cloud',
-    'fixture',
-    'project',
-    'original-operation',
-    'previous',
-  );
-  client.client.mutation = async () => []; // no R2 objects
-  client.client.action = async (ref, args) => {
-    assert.equal(getFunctionName(ref), 'projectExchangeActions:published');
-    assert.deepEqual(args, {
-      projectId: 'project',
-      operationId: 'original-operation',
-      previous: 'previous',
-      digest: 'a'.repeat(64),
-      size: 493,
-    });
-    throw new Error('Function projectExchangeActions:published is unavailable');
-  };
-  await assert.rejects(
-    client.published({ sha256: 'a'.repeat(64), size: 493 }),
-    error => error.code === 'HOSTED_ACTION_FAILED' && error.message.includes('original-operation'),
-  );
 });
