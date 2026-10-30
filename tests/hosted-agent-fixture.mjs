@@ -121,6 +121,9 @@ export function agentFixture(t) {
         })),
       };
     else if (name === 'projectHostedLanes:head') result = { laneId: lane.laneId, head: lane.head };
+    else if (name === 'projectObjectDownloads:lanePage')
+      // This fixture supplies bytes through its legacy downloadBatch seam.
+      return args.digests.map(digest => ({ digest, size: objects.get(digest).length }));
     else if (name === 'projectObjectDownloads:describe')
       result = args.digests.map(digest => ({
         digest,

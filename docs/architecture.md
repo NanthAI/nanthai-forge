@@ -762,6 +762,14 @@ receipt detects stale selection, including rollback to the same source bytes.
 This endpoint reuses the current accepted receipts and selected generation; there
 is no new main table, Work format, acceptance rule or storage authority.
 
+Lane checkout combines size discovery and signed R2 GET descriptors in 500-object
+metadata pages. The CLI downloads directly from R2 with size/digest verification,
+then rechecks current credential, project access and object bindings once per byte
+window before exposing those bytes. Pages retain the existing 16 MiB transfer
+window; Convex-only objects and recipes keep their legacy download actions. No
+Convex file bodies or storage metadata are read for R2 descriptors. Signatures are
+disposable process memory, and URL expiry refresh retains the same authorization.
+
 Client checkout downloads only that State and missing file blobs through existing
 project-scoped object storage, validates exact bytes, and materializes a source
 client directory. It never restores native Work or derives current main from an

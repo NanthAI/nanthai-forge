@@ -13,6 +13,7 @@ import { isR2Object } from './projectObjectFields';
 import { r2Config, r2Key, presignGet } from './r2';
 import { invariant } from '../src/errors';
 import { report } from './errors';
+import { hostedDownloadPageSize, type HostedDownloadDescriptor } from '../src/hosted-download-page';
 
 async function readableProject(ctx: MutationCtx, projectId: Id<'hostedProjects'>) {
   const user = await ctx.auth.getUserIdentity();
@@ -26,7 +27,7 @@ async function readableProject(ctx: MutationCtx, projectId: Id<'hostedProjects'>
   return project;
 }
 
-/** The single choke point for reading R2 bytes: a signed GET (5 minutes) for each requested digest
+/** General exchange signing: a signed GET (5 minutes) for each requested digest
  * that is a committed R2 object of this project, after a fresh access check on every call. Anything
  * else (unknown, pending, another project's, or stored in Convex) is simply absent from the result,
  * so the caller learns nothing beyond what it can already list. A mutation so that results are never
@@ -187,6 +188,53 @@ export const source = mutation({
         },
         pins: pins?.every(Boolean) ? pins : null,
       });
+    } catch (error) {
+      return report(error);
+    }
+  },
+});
+
+/** Lane size discovery and R2 signatures share one transaction. Legacy objects
+ * retain their existing byte path; never inspect their Convex storage metadata here.
+ * The unsigned call rechecks the same bindings after client IO without re-signing. */
+export const lanePage = mutation({
+  args: { projectId: v.id('hostedProjects'), digests: v.array(v.string()), signed: v.boolean() },
+  returns: v.array(v.object({ digest: v.string(), size: v.number(), url: v.optional(v.string()) })),
+  handler: async (ctx, { projectId, digests, signed }) => {
+    try {
+      const user = await ctx.auth.getUserIdentity();
+      invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to read hosted source.');
+      await accessibleProject(ctx, projectId, user.subject);
+      invariant(
+        digests.length <= hostedDownloadPageSize && digests.every(id => /^[a-f0-9]{64}$/.test(id)),
+        'BAD_ARGUMENT',
+        'Read exact content identities in bounded pages.',
+      );
+      const result: HostedDownloadDescriptor[] = [];
+      for (const digest of digests) {
+        const row = await ctx.db
+          .query('projectObjects')
+          .withIndex('by_project_and_digest', q => q.eq('projectId', projectId).eq('digest', digest))
+          .unique();
+        invariant(
+          row && !row.removed && isStored(row),
+          'SOURCE_UNAVAILABLE',
+          'Requested project source object is unavailable.',
+        );
+        if (isR2Object(row)) {
+          invariant(
+            row.r2Key === r2Key(projectId, digest),
+            'INVALID_WORK_BACKUP',
+            'Stored content has a different project binding.',
+          );
+        }
+        result.push({
+          digest,
+          size: row.size,
+          ...(signed && isR2Object(row) ? { url: await presignGet(r2Config(), row.r2Key!) } : {}),
+        });
+      }
+      return result;
     } catch (error) {
       return report(error);
     }

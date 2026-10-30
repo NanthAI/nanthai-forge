@@ -73,7 +73,21 @@ test('saved source reads return exact Lane/State/blob pins without Work, graph o
   assert(!existsSync(s.root));
   for (const [path, [bytes]] of s.content)
     assert.equal(existsSync(join(`${s.root}.forge-client`, 'objects', digest(bytes))), path === 'a.ts');
-  assert(s.calls.every(call => call.name === 'projectHostedLanes:select'));
+  assert(
+    s.calls.every(call =>
+      ['projectHostedLanes:select', 'projectObjectDownloads:lanePage'].includes(call.name),
+    ),
+  );
+  // Metadata pages discover only the selected State and requested file. Other
+  // source files remain unhydrated; the fixture supplies the legacy byte seam.
+  assert.deepEqual(
+    s.calls.filter(call => call.name === 'projectObjectDownloads:lanePage').map(call => call.args),
+    [s.lane.head, digest(s.content.get('a.ts')[0])].map(id => ({
+      projectId: s.address.projectId,
+      digests: [id],
+      signed: true,
+    })),
+  );
   const lines = await s.call('forge_source', {
     laneId: s.lane.laneId,
     expected,

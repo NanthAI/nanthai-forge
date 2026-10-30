@@ -7,6 +7,7 @@ import { syncDirectory, syncFile } from './native-durability.js';
 import { checkoutPathExists } from './hosted-checkout-files.js';
 import type { ContentPin } from './native-exchange.js';
 export interface CheckoutObjectTransport {
+  readonly objectPageSize?: number;
   objects(digests: string[]): Promise<ContentPin[]>;
   downloadToFile(pin: ContentPin, path: string): Promise<void>;
   downloadFiles?(files: { pin: ContentPin; path: string }[]): Promise<void>;
@@ -43,8 +44,9 @@ export class HostedCheckoutCache {
       }
       missing.push(id);
     }
-    for (let at = 0; at < missing.length; at += 100) {
-      const page = missing.slice(at, at + 100);
+    const pageSize = this.transport.objectPageSize ?? 100;
+    for (let at = 0; at < missing.length; at += pageSize) {
+      const page = missing.slice(at, at + pageSize);
       const pins = await this.transport.objects(page);
       invariant(
         pins.length === page.length &&

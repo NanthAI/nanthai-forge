@@ -121,15 +121,16 @@ test('full/sparse checkout uses bounded indexed membership/signing with no Work 
       'projectMain:objects': main.objects,
       'projectObjectDownloads:signDownloads': downloads.signDownloads,
       'projectObjectDownloads:describe': downloads.describe,
+      'projectObjectDownloads:lanePage': downloads.lanePage,
     };
     assert(functions[name], `Unexpected checkout call: ${name}`);
-    assert((args.digests?.length ?? 0) <= 100);
+    assert((args.digests?.length ?? 0) <= 500);
     calls.push({ name, size: args.digests?.length ?? 0 });
     try {
       return await s.call(name, functions[name], args, actor);
     } finally {
       const meter = s.counts.at(-1);
-      const max = name === 'projectHostedLanes:select' ? 10 : 105;
+      const max = name === 'projectHostedLanes:select' ? 10 : 505;
       assert(meter.documents <= max && meter.ranges <= max, `${name}: per-function read counts`);
       assert(meter.readBytes < 256 * 1024, `${name}: bounded metadata bytes`);
       assert(
@@ -169,12 +170,12 @@ test('full/sparse checkout uses bounded indexed membership/signing with no Work 
   assert.equal(full.downloadedObjects, 251);
   assert.equal(readFileSync(join(root, 'src/249.txt'), 'utf8'), 'synthetic 249');
   assert.deepEqual(
-    calls.filter(call => call.name === 'projectMain:objects').map(call => call.size),
-    [1, 100, 100, 50],
+    calls.filter(call => call.name === 'projectObjectDownloads:lanePage').map(call => call.size),
+    [1, 1, 250, 250],
   );
   assert.deepEqual(
     calls.filter(call => call.name === 'projectObjectDownloads:signDownloads').map(call => call.size),
-    [1, 100, 100, 50],
+    [],
   );
   const before = { calls: calls.length, gets };
   const warm = await checkoutHostedLane(root, request(), transport);
@@ -211,9 +212,9 @@ test('full/sparse checkout uses bounded indexed membership/signing with no Work 
   assert.deepEqual(
     calls
       .slice(beforeLarge)
-      .filter(call => call.name === 'projectObjectDownloads:signDownloads')
+      .filter(call => call.name === 'projectObjectDownloads:lanePage')
       .map(call => call.size),
-    [2],
+    [2, 2],
   );
   for (let index = 0; index < largeFiles.length; index++)
     assert.deepEqual(readFileSync(largeFiles[index].path), large[index]);
@@ -245,8 +246,8 @@ test('full/sparse checkout uses bounded indexed membership/signing with no Work 
   }
   t.diagnostic(
     JSON.stringify({
-      membershipWindows: [1, 100, 100, 50],
-      signingWindows: [1, 100, 100, 50],
+      descriptorWindows: [1, 250],
+      postIoWindows: [1, 250],
       fullObjects: full.downloadedObjects,
       sparseObjects: one.downloadedObjects,
       unchangedObjects: warm.downloadedObjects,

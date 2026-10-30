@@ -8,6 +8,7 @@ import { batchesFixture, states, synthetic } from './hosted-landing-batches-fixt
 import { landingApi } from './hosted-finish-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { hostedConflictAdvice } from '../dist/hosted-agent-resolution.js';
+import { getFunctionName } from 'convex/server';
 const composeApi = await import(moduleUrl('../convex/projectHostedCompose.ts'));
 const prior = Object.fromEntries(Object.keys(synthetic).map(key => [key, process.env[key]]));
 test.before(() => Object.assign(process.env, synthetic));
@@ -30,6 +31,15 @@ test('batch-member conflict advice names the rejected current Candidate and path
   const session = {
     root: join(directory, 'client'),
     exchange: {
+      projectId: f.projectId,
+      client: {
+        mutation: async (ref, args) => {
+          assert.equal(getFunctionName(ref), 'projectObjectDownloads:lanePage');
+          assert.equal(args.projectId, f.projectId);
+          // The fixture supplies conflict bytes through downloadBatch below.
+          return args.digests.map(digest => ({ digest, size: f.c.objects.get(digest).length }));
+        },
+      },
       objects: async ids => ids.map(sha256 => ({ sha256, size: f.c.objects.get(sha256).length })),
       downloadBatch: async pins => pins.map(pin => f.c.objects.get(pin.sha256)),
     },

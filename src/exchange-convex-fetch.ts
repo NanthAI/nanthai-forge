@@ -26,6 +26,7 @@ const replaySafe = new Set([
   'projectObjects:available',
   'projectWork:state',
   'projectObjectDownloads:describe',
+  'projectObjectDownloads:lanePage',
   'projectObjects:prepareBatch',
   'projectObjects:completeBatch',
   'projectObjects:reconcile',

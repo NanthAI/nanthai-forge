@@ -128,6 +128,8 @@ const reads = [
   ['projectObjectDownloads', 'source', { backupId: 'backup', digests: [digest] }],
   ['projectObjectDownloads', 'describe', { digests: [digest] }],
   ['projectObjectDownloads', 'signDownloads', { digests: [digest] }],
+  ['projectObjectDownloads', 'lanePage', { digests: [digest], signed: true }],
+  ['projectObjectDownloads', 'lanePage', { digests: [digest], signed: false }],
   [
     'projectViewActions',
     'log',
@@ -218,10 +220,15 @@ test('the owner of one project cannot read another project through its child ids
       { projectId: 'project', backupId: 'backup', digests: [digest] },
       { backupId: 'other-backup' },
     ],
-    ...['source', 'describe', 'signDownloads'].map(name => [
+    ...['source', 'describe', 'signDownloads', 'lanePage'].map(name => [
       'projectObjectDownloads',
       name,
-      { projectId: 'project', ...(name === 'source' ? { backupId: 'backup' } : {}), digests: [digest] },
+      {
+        projectId: 'project',
+        ...(name === 'source' ? { backupId: 'backup' } : {}),
+        ...(name === 'lanePage' ? { signed: true } : {}),
+        digests: [digest],
+      },
       { projectId: 'other', ...(name === 'source' ? { backupId: 'other-backup' } : {}) },
     ]),
     ['projectExchangeActions', 'checkpoint', { backupId: 'backup' }, { backupId: 'other-backup' }],
