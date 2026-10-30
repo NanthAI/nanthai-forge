@@ -27,7 +27,9 @@ export function lanesFixture() {
     let retries = 0;
     for (;;) {
       const baseline = structuredClone(tables),
-        local = structuredClone(baseline),
+        // Reads return clones and writes replace rows. Share immutable snapshot
+        // rows instead of cloning every unrelated document a second time.
+        local = Object.fromEntries(Object.entries(baseline).map(([table, rows]) => [table, new Map(rows)])),
         reads = [],
         writes = [];
       const meter = {

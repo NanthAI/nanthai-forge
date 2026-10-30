@@ -179,3 +179,82 @@ acceptance authority. Time provisioning, provider import, application/auth
 restoration, hosted selection, checkout, fold, registration, publication and
 check separately. Live dropped landings and recovery-point age require actual
 hosted evidence; local fixture timings do not establish either.
+
+## Hosted machine lifecycle drill
+
+Q4 exercises restart during acceptance, thirty minutes of client sleep and ten
+minutes of client network loss under hosted source authority. Passing evidence
+requires one original passing check, one acceptance receipt and no stranded
+submission. Reconnect must observe the retained operation rather than submit a
+replacement check. Cancellation and abandonment must retain saved source and
+remain terminal after late check completion.
+
+After `npm run build:core`, run the automated drill:
+
+```sh
+node --import ./tests/check-runtime.mjs --test --test-concurrency=2 \
+  tests/hosted-machine-lifecycle.test.mjs \
+  tests/phase5-hosted-lifecycle-script.test.mjs
+```
+
+The tests use production hosted queue, check, source-save, lifecycle, acceptance
+and recovery handlers with synthetic provider/storage IO. Virtual time models
+client disconnection while hosted execution continues. A separate injected
+acceptance-driver crash exercises durable repair. The scale case has 2,538 source
+files, 32,000 unrelated objects and twice the dogfood acceptance history. It
+reports function transactions, document reads/writes, peak process RSS and wall
+time, with executable budgets. Harness RSS includes its snapshot transaction fake;
+it does not measure Convex memory. The clean recovery case uses the actual hosted
+receipt from the existing cutover drill and verifies no native acceptance owner.
+The scale fixture runs in an isolated process with a 384 MiB JavaScript heap;
+its unchanged 1 GiB RSS budget includes native snapshot-copy allocations. The
+transaction fake clones its baseline once and shares immutable rows with its
+local map, while reads and writes retain their independent copies.
+
+For the dev deployment, the live script defaults to one read-only authenticated
+listing and prints its call estimate:
+
+```sh
+node scripts/phase5-hosted-lifecycle-drill.mjs
+```
+
+The live form creates a new private project from a one-file synthetic native
+fixture, seeds accepted main, switches that project to hosted authority, starts
+and saves a Lane, then opens the saved bytes from a fresh root after renaming
+the first root out of reach. It configures one harmless check and an independent
+self-hosted collector, submits a durable finish, observes acceptance, clones main,
+cancels and abandons disposable work, and recovers a runner/cache from hosted.
+Only the scratch fixture permits automatic agent acceptance; the full check gate
+and existing protected paths remain selected. No repository mirror or paid
+provider is configured.
+
+```sh
+node scripts/phase5-hosted-lifecycle-drill.mjs --live .forge/q4-live-UNIQUE
+```
+
+Use the existing CLI sign-in and existing fixed collector credential supported
+by `nforge worker`. The script never reads deployment environment listings or
+generates collector secrets. Missing configuration is a failed live step, not
+synthetic success. The live script accepts no existing project ID and rejects the
+dogfood project before IO. It attempts ordinary `host --delete-project` cleanup
+on success or failure, retaining the project ID and cleanup result in its private
+`report.json`. A failed deletion leaves the scratch project listed for follow-up.
+Keep operation journals and reports after unknown replies; do not replay creation
+in another root to reconcile the original project.
+
+The estimate is 400 client calls plus an allowance of 1,000 internal function
+calls, below the brief's 2,000-call stop threshold. Client calls are counted and
+stopped with the internal allowance still reserved. Server actions, scheduler
+invocations and billing totals are not exposed by the client and remain unknown
+in the report. This is an estimate and an observed client count, not a measured
+Convex bill. The drill operates on selected records and bounded pages; it never
+downloads dogfood Work or scans the account's complete project list in preflight.
+Normal deletion uses the CLI's existing paged project lookup.
+
+The live root transition runs on one physical machine. It does not establish a
+real thirty-minute sleep, ten-minute Wi-Fi outage, off-machine recovery time,
+production reuse rate or operator-intervention rate. Record those separately in
+the private handoff, along with every passed/failed step, remaining scratch
+project, exact receipt and observed call coverage. Q4 moves metrics 5.5 and 5.6;
+metric 5.3 (dropped landings) must remain zero. Automated zero reruns and zero
+stranded entries are qualification evidence, not a production before/after rate.
