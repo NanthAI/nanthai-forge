@@ -212,3 +212,56 @@ test('raw blob hash and length failures never reach the object sink', async () =
     );
   }
 });
+
+test('gitlinks retain mode and pinned commits without requesting blobs or traversing submodules', async () => {
+  let calls = 0;
+  const original = {
+    schema: 1,
+    repository: 'fixture/repo',
+    commit: 'a'.repeat(40),
+    pending: [{ path: '', sha: 'b'.repeat(40) }],
+    files: [],
+    completed: 0,
+    bytes: 0,
+    totalBytes: 0,
+  };
+  let cursor = await discoverGithubSource(original, undefined, async () => {
+    calls++;
+    return Response.json({
+      sha: 'b'.repeat(40),
+      truncated: false,
+      tree: [
+        { path: 'vendor', mode: '160000', type: 'commit', sha: 'c'.repeat(40) },
+        { path: 'other', mode: '160000', type: 'commit', sha: 'd'.repeat(40) },
+      ],
+    });
+  });
+  assert.equal(cursor.pending.length, 0);
+  assert.equal(cursor.submodules, 2);
+  const objects = new Map(),
+    entries = [];
+  while (cursor.completed < cursor.files.length) {
+    const next = await importGithubSourceFile(
+      cursor,
+      async bytes => objects.set(digest(bytes), bytes),
+      undefined,
+      async () => assert.fail('submodules must never be fetched'),
+    );
+    entries.push(next.file);
+    cursor = next.cursor;
+  }
+  assert.equal(calls, 1);
+  assert.equal(cursor.bytes, 0);
+  assert.equal(cursor.totalBytes, 0);
+  assert.deepEqual(
+    entries.map(e => [e.path, e.mode, objects.get(e.blob).toString()]),
+    [
+      ['other', '160000', 'd'.repeat(40)],
+      ['vendor', '160000', 'c'.repeat(40)],
+    ],
+  );
+  await assert.rejects(
+    readGithubSourceBlob('fixture/repo', cursor.files[0], undefined, async () => assert.fail('no fetch')),
+    e => e.code === 'INVALID_GITLINK',
+  );
+});

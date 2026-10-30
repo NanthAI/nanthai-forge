@@ -235,7 +235,7 @@ export class PeersSource extends NativeSource {
           prior?.stamp === stamp &&
           prior.file?.path === file &&
           /^[a-f0-9]{64}$/.test(prior.file.blob) &&
-          ['file', 'symlink', 'executable'].includes(prior.file.mode)
+          ['file', 'symlink', 'executable', 'gitlink'].includes(prior.file.mode)
         ) {
           files.push(prior.file);
           updated[file] = prior;

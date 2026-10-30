@@ -80,6 +80,8 @@ export const status = action({
     totalKnown: v.boolean(),
     bytes: v.number(),
     totalBytes: v.number(),
+    submodules: v.number(),
+    report: v.string(),
     error: v.union(v.object({ code: v.string(), message: v.string() }), v.null()),
   }),
   handler: async (ctx, input) => {
@@ -99,6 +101,8 @@ export const status = action({
         totalKnown: job.totalKnown,
         bytes: job.bytes,
         totalBytes: job.totalBytes,
+        submodules: job.submodules ?? 0,
+        report: `${job.submodules ?? 0} submodules kept as pointers`,
         error: job.error ?? null,
       };
     } catch (error) {

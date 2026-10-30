@@ -9,7 +9,7 @@ export type GithubSourceEntry = {
   path: string;
   sha: string;
   size: number;
-  mode: '100644' | '100755' | '120000';
+  mode: '100644' | '100755' | '120000' | '160000';
 };
 export type GithubSourceCursor = {
   schema: 1;
@@ -20,6 +20,7 @@ export type GithubSourceCursor = {
   completed: number;
   bytes: number;
   totalBytes: number;
+  submodules?: number;
 };
 const gitId = (value: unknown): value is string =>
   typeof value === 'string' && /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/.test(value);
@@ -88,7 +89,10 @@ export async function discoverGithubSource(
     paths.add(path);
     invariant(gitId(entry.sha), 'GITHUB_RESPONSE', 'GitHub returned an invalid object identity.');
     if (entry.type === 'tree' && entry.mode === '040000') next.pending.push({ path, sha: entry.sha });
-    else {
+    else if (entry.type === 'commit' && entry.mode === '160000') {
+      next.files.push({ path, sha: entry.sha, mode: '160000', size: 0 });
+      next.submodules = (next.submodules ?? 0) + 1;
+    } else {
       invariant(
         entry.type === 'blob' && ['100644', '100755', '120000'].includes(entry.mode),
         'GITHUB_SOURCE_UNSUPPORTED',
@@ -128,6 +132,13 @@ export async function streamGithubSourceBlob(
   token?: string,
   request: GithubFetch = fetch,
 ): Promise<{ blob: string; size: number }> {
+  if (entry.mode === '160000') {
+    // Feed only pointer metadata through the existing sink, never a provider request.
+    invariant(gitId(entry.sha), 'GITHUB_RESPONSE', 'GitHub returned an invalid object identity.');
+    const bytes = Buffer.from(entry.sha);
+    await consume(bytes);
+    return { blob: digest(bytes), size: bytes.length };
+  }
   const response = await request(`https://api.github.com/repos/${repository}/git/blobs/${entry.sha}`, {
     redirect: 'error',
     signal: AbortSignal.timeout(120_000),
@@ -176,6 +187,7 @@ export async function readGithubSourceBlob(
   token?: string,
   request: GithubFetch = fetch,
 ): Promise<Buffer> {
+  invariant(entry.mode !== '160000', 'INVALID_GITLINK', 'A gitlink is a commit pointer, not a GitHub blob.');
   const parts: Buffer[] = [];
   await streamGithubSourceBlob(
     repository,
@@ -206,10 +218,17 @@ export async function importGithubSourceFile(
   invariant(!cursor.pending.length, 'IMPORT_DISCOVERING', 'Complete tree discovery before importing bytes.');
   const entry = cursor.files[cursor.completed];
   invariant(entry, 'IMPORT_COMPLETE', 'All source files have been imported.');
-  const bytes = await readGithubSourceBlob(cursor.repository, entry, token, request);
+  const bytes =
+    entry.mode === '160000'
+      ? Buffer.from(entry.sha)
+      : await readGithubSourceBlob(cursor.repository, entry, token, request);
   await put(bytes);
   return {
-    cursor: { ...cursor, completed: cursor.completed + 1, bytes: cursor.bytes + bytes.length },
+    cursor: {
+      ...cursor,
+      completed: cursor.completed + 1,
+      bytes: cursor.bytes + (entry.mode === '160000' ? 0 : bytes.length),
+    },
     file: {
       path: entry.path,
       blob: digest(bytes),
@@ -218,3 +237,6 @@ export async function importGithubSourceFile(
     } satisfies ImportedSourceFile,
   };
 }
+
+export const githubSourceMode = (mode: GithubSourceEntry['mode']) =>
+  ({ '100644': 'file', '100755': 'executable', '120000': 'symlink', '160000': 'gitlink' } as const)[mode];

@@ -174,3 +174,55 @@ test('slow GitHub replies yield a continuation after a bounded time window', asy
   assert.equal(f.calls.filter(c => c.path.endsWith('/blobs')).length, 1);
   await drain(f, next);
 });
+
+test('gitlink bootstrap, unchanged pointer, SHA bump and deletion use commit entries without blob writes', async () => {
+  const pointer = sha => ({ text: sha.repeat(40), mode: 'gitlink' });
+  for (const verified of [true, false]) {
+    const f = mirrorFixture({
+      verified,
+      before: { kept: pointer('a'), bumped: pointer('b'), gone: pointer('c') },
+      after: { kept: pointer('a'), bumped: pointer('d'), added: pointer('e') },
+    });
+    const plan = await drain(f);
+    assert.equal(plan.entry.tree, f.expected());
+    assert.equal(f.calls.filter(c => c.path.endsWith('/blobs')).length, 0);
+    const tree = f.calls.find(c => c.path.endsWith('/trees')).body.tree;
+    assert.deepEqual(
+      tree.map(e => [e.path, e.mode, e.type, e.sha]),
+      [
+        ['gone', '160000', 'commit', null],
+        ['bumped', '160000', 'commit', 'd'.repeat(40)],
+        ['added', '160000', 'commit', 'e'.repeat(40)],
+      ],
+    );
+  }
+});
+
+test('5,000 pointer bumps use 50 descriptor windows and four GitHub metadata calls', async t => {
+  const before = {},
+    after = {};
+  for (let i = 0; i < 5000; i++) {
+    before[`vendor/${i}`] = { mode: 'gitlink', text: i.toString(16).padStart(40, '0') };
+    after[`vendor/${i}`] = { mode: 'gitlink', text: (i + 5000).toString(16).padStart(40, '0') };
+  }
+  const f = mirrorFixture({ before, after }),
+    start = performance.now(),
+    rss = process.memoryUsage().rss;
+  const plan = await drain(f);
+  assert.equal(plan.entry.tree, f.expected());
+  assert.equal(f.ticks.length, 50);
+  assert.equal(f.windows.filter(w => w.blobs).length, 50);
+  assert.equal(f.calls.length, 4);
+  assert(f.ticks.every(tick => tick.reads <= 100));
+  assert(Math.max(...f.ticks.map(tick => tick.rss)) - rss < 128 * 1024 * 1024);
+  t.diagnostic(
+    JSON.stringify({
+      pointers: 5000,
+      descriptorCalls: 51,
+      githubCalls: f.calls.length,
+      steps: f.ticks.length,
+      elapsedMs: performance.now() - start,
+      peakRss: Math.max(...f.ticks.map(tick => tick.rss)),
+    }),
+  );
+});

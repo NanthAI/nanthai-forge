@@ -15,7 +15,7 @@ const entry = z
   .object({
     path: z.string().refine(safeRelative),
     blob: oid,
-    mode: z.enum(['file', 'executable', 'symlink']),
+    mode: z.enum(['file', 'executable', 'symlink', 'gitlink']),
   })
   .strict();
 export const stateSchema = z

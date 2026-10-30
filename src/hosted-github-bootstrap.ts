@@ -10,7 +10,7 @@ export type GithubHostedFile = {
   path: string;
   blob: string;
   size: number;
-  mode: 'file' | 'executable' | 'symlink';
+  mode: 'file' | 'executable' | 'symlink' | 'gitlink';
 };
 export function githubHostedProject(
   operationId: string,
@@ -70,7 +70,7 @@ export function githubHostedProject(
       ...[...source].map(([sha256, size]) => ({ path: `objects/${sha256}`, sha256, size })),
     ],
     unavailable: [],
-    coverage: `Complete committed GitHub tree at ${commit}; original file bytes, executable bits and symlink targets. Git history, LFS target objects and analysis are separate.`,
+    coverage: `Complete committed GitHub tree at ${commit}; original file bytes, executable bits, symlink targets and submodules kept as pointers. Git history, LFS target objects and analysis are separate.`,
   });
   const text = JSON.stringify(manifest);
   const parents = Object.assign(new Map([[head, [] as string[]]]), { files: new Map([[head, entries]]) });

@@ -1,3 +1,4 @@
+import { gitlinkCommit } from './gitlink.js';
 import { readEditContext } from './agent-edit-context.js';
 import { conversationSchema } from './agent-edit-types.js';
 // SPDX-License-Identifier: Apache-2.0
@@ -54,7 +55,9 @@ export type AutoSnapshot = z.infer<typeof pointerSchema>;
 type CacheEntry = { key: string; blob: string; mode: NativeFile['mode'] };
 const cacheSchema = z.object({
   schema: z.literal(1),
-  entries: z.array(z.tuple([z.string(), z.string(), oid, z.enum(['file', 'executable', 'symlink'])])),
+  entries: z.array(
+    z.tuple([z.string(), z.string(), oid, z.enum(['file', 'executable', 'symlink', 'gitlink'])]),
+  ),
 });
 
 export const autoSnapshotDirectory = (store: WorkStore) => join(store.directory, 'auto-snapshots');
@@ -167,6 +170,7 @@ function capture(store: WorkStore, laneId: string): AutoSnapshotResult {
     source = new NativeSource(store.root),
     head = source.state(lane.head),
     headBlobs = new Set(head.files.map(file => file.blob)),
+    headModes = new Map(head.files.map(file => [file.path, file.mode])),
     cache = readCache(store, laneId),
     next = new Map<string, CacheEntry>(),
     written = new Set<string>();
@@ -184,7 +188,10 @@ function capture(store: WorkStore, laneId: string): AutoSnapshotResult {
       return { path, blob: hit.blob, mode: hit.mode };
     }
     reread++;
-    const { bytes, mode } = nativeFile(root, path);
+    const observed = nativeFile(root, path);
+    const { bytes } = observed;
+    const mode = headModes.get(path) === 'gitlink' && observed.mode === 'file' ? 'gitlink' : observed.mode;
+    if (mode === 'gitlink') gitlinkCommit(bytes);
     let blob = digest(bytes);
     if (!headBlobs.has(blob)) {
       const retained = snapshotBlob(source, join(root, path), bytes, mode === 'symlink');

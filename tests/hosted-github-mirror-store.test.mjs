@@ -247,8 +247,13 @@ test('source action verifies raw hashes and reconstructs recipes using project-b
   await assert.rejects(bad.read(), e => e.code === 'SOURCE_HASH_MISMATCH');
 });
 
-for (const files of [0, 2, 5000])
-  test(`real Convex action mirrors ${files} changed files with bounded calls`, async t => {
+for (const { files, gitlinks = false } of [
+  { files: 0 },
+  { files: 2 },
+  { files: 5000 },
+  { files: 5000, gitlinks: true },
+])
+  test(`real Convex action mirrors ${files} changed ${gitlinks ? 'gitlinks' : 'files'} with bounded calls`, async t => {
     const f = await acceptanceFixture();
     bindRepository(t, f.projectId, 'synthetic/mirror');
     const project = f.tables.hostedProjects.get(f.projectId);
@@ -282,8 +287,12 @@ for (const files of [0, 2, 5000])
     const before = {},
       after = {};
     for (let i = 0; i < files; i++) {
-      before[`file-${i}`] = `old ${i}`;
-      after[`file-${i}`] = `new ${i}`;
+      before[`file-${i}`] = gitlinks
+        ? { mode: 'gitlink', text: i.toString(16).padStart(40, '0') }
+        : `old ${i}`;
+      after[`file-${i}`] = gitlinks
+        ? { mode: 'gitlink', text: (i + files).toString(16).padStart(40, '0') }
+        : `new ${i}`;
     }
     const github = mirrorFixture({ before, after });
     const receiptRow = [...f.tables.projectHostedAcceptances.values()][0];
@@ -408,7 +417,7 @@ for (const files of [0, 2, 5000])
     const metrics = f.counts.filter(c => c.name.startsWith('mirrorMutation') || c.name === 'mirrorQuery');
     assert(metrics.every(c => c.documents <= 105 && c.writes <= 3));
     assert(!metrics.some(c => c.touched.includes('projectWorkRecords')));
-    assert.equal(github.calls.length, files ? files + 4 : 1);
+    assert.equal(github.calls.length, files ? (gitlinks ? 4 : files + 4) : 1);
     const completedCalls = calls.length;
     await action.step._handler(ctx, input);
     assert.equal(github.commits.size, files ? 2 : 1, 'replay creates no second commit');
@@ -416,6 +425,7 @@ for (const files of [0, 2, 5000])
     t.diagnostic(
       JSON.stringify({
         files,
+        gitlinks,
         convexCalls: completedCalls,
         documents: metrics.reduce((n, c) => n + c.documents, 0),
         writes: metrics.reduce((n, c) => n + c.writes, 0),

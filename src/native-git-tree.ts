@@ -1,8 +1,11 @@
+import { gitlinkCommit } from './gitlink.js';
+import { gitMode } from './hosted-github-git.js';
 // SPDX-License-Identifier: Apache-2.0
 import { createHash } from 'node:crypto';
 import { NativeSource, type NativeFile } from './native-source.js';
 import { workGit } from './work-git.js';
 
+const objectKey = (file: NativeFile) => (file.mode === 'gitlink' ? `gitlink:${file.blob}` : file.blob);
 type Node = { files: string[]; dirs: Set<string> };
 function treeNodes(files: NativeFile[], blobs: Map<string, string>) {
   const entries = new Map<string, Node>();
@@ -21,7 +24,7 @@ function treeNodes(files: NativeFile[], blobs: Map<string, string>) {
       node(dir);
     }
     node(dir).files.push(
-      `${file.mode === 'symlink' ? '120000' : file.mode === 'executable' ? '100755' : '100644'} blob ${blobs.get(file.blob)!}\t${name}\0`,
+      `${gitMode(file.mode)} ${file.mode === 'gitlink' ? 'commit' : 'blob'} ${blobs.get(objectKey(file))!}\t${name}\0`,
     );
   }
   // Children are inserted after their parent: write bottom-up without recursion.
@@ -40,8 +43,13 @@ export function treeForGit(root: string, files: NativeFile[], source: NativeSour
   const blobs = new Map<string, string>(),
     trees = new Map<string, string>();
   for (const file of files)
-    if (!blobs.has(file.blob))
-      blobs.set(file.blob, workGit(root, ['hash-object', '-w', '--stdin'], source.object(file.blob)).trim());
+    if (!blobs.has(objectKey(file)))
+      blobs.set(
+        objectKey(file),
+        file.mode === 'gitlink'
+          ? gitlinkCommit(source.object(file.blob))
+          : workGit(root, ['hash-object', '-w', '--stdin'], source.object(file.blob)).trim(),
+      );
   for (const [path, node] of treeNodes(files, blobs))
     trees.set(path, workGit(root, ['mktree', '-z'], treeInput(path, node, trees)).trim());
   return trees.get('')!;
@@ -56,7 +64,13 @@ export function asyncGitTreeWriter(
   // Only IDs live across States. Validate bytes before their first write in this repository.
   return async (files: NativeFile[]): Promise<string> => {
     for (const file of files)
-      if (!blobs.has(file.blob)) blobs.set(file.blob, await writeBlob(source.object(file.blob)));
+      if (!blobs.has(objectKey(file)))
+        blobs.set(
+          objectKey(file),
+          file.mode === 'gitlink'
+            ? gitlinkCommit(source.object(file.blob))
+            : await writeBlob(source.object(file.blob)),
+        );
     const trees = new Map<string, string>();
     for (const [path, node] of treeNodes(files, blobs))
       trees.set(path, await writeTree(Buffer.concat([treeInput(path, node, trees), Buffer.from('\0')])));
@@ -75,7 +89,13 @@ export function gitTreeHasher(
     createHash(format).update(`${kind} ${bytes.length}\0`).update(bytes).digest('hex');
   return (files: NativeFile[]) => {
     for (const file of files)
-      if (!blobs.has(file.blob)) blobs.set(file.blob, hash('blob', source.object(file.blob)));
+      if (!blobs.has(objectKey(file)))
+        blobs.set(
+          objectKey(file),
+          file.mode === 'gitlink'
+            ? gitlinkCommit(source.object(file.blob))
+            : hash('blob', source.object(file.blob)),
+        );
     const trees = new Map<string, string>();
     for (const [path, node] of treeNodes(files, blobs)) {
       const records = treeInput(path, node, trees)

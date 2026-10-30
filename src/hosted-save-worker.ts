@@ -1,3 +1,4 @@
+import { gitlinkCommit } from './gitlink.js';
 // SPDX-License-Identifier: Apache-2.0
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -58,6 +59,14 @@ export async function buildHostedSaveState(
         'Delta does not match the registered baseline.',
       );
       if (change.after) {
+        if (change.after.mode === 'gitlink') {
+          invariant(
+            change.after.content.object.size <= 65,
+            'INVALID_GITLINK',
+            'A submodule pointer must contain its full pinned commit SHA.',
+          );
+          gitlinkCommit(await readFile(await reader.file(change.after.content)));
+        }
         files.set(change.path, { path: change.path, blob: change.after.blob, mode: change.after.mode });
       } else files.delete(change.path);
     }

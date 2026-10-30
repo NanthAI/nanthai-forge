@@ -7,6 +7,7 @@ import { authorizeGithub } from '../src/github-access';
 import { githubConfig } from './access';
 import {
   discoverGithubSource,
+  githubSourceMode,
   streamGithubSourceBlob,
   type GithubSourceEntry,
 } from '../src/github-project-source';
@@ -47,6 +48,7 @@ export const run = internalAction({
       if (!job.totalKnown) {
         let total = job.total,
           totalBytes = job.totalBytes,
+          submodules = job.submodules ?? 0,
           size = 0;
         let staged: { part: string; key: string; position: number; value: string }[] = [];
         let stagedBytes = 0;
@@ -112,6 +114,7 @@ export const run = internalAction({
           }
           total += next.files.length;
           totalBytes += next.totalBytes;
+          submodules += next.submodules ?? 0;
           size += Buffer.byteLength(JSON.stringify(next));
           progress.directories++;
           if (
@@ -130,6 +133,7 @@ export const run = internalAction({
           total,
           bytes: job.bytes,
           totalBytes,
+          submodules,
           discovering: progress.directories < progress.discovered,
         });
       } else if (job.completed < job.total) {
@@ -190,10 +194,10 @@ export const run = internalAction({
           const value = JSON.stringify({
             path: file.path,
             ...pin,
-            mode: { '100644': 'file', '100755': 'executable', '120000': 'symlink' }[file.mode],
+            mode: githubSourceMode(file.mode),
           });
           imported.push({ part: 'imported', key: row.key, position: completed++, value });
-          bytes += pin.size;
+          bytes += file.mode === '160000' ? 0 : pin.size;
           progress.after = row.key;
           // A full byte window stops this page; a large single file streams
           // through multiple bounded physical windows before its logical receipt.

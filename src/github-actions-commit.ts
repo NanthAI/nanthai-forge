@@ -1,3 +1,4 @@
+import { gitlinkCommit } from './gitlink.js';
 // SPDX-License-Identifier: Apache-2.0
 import { readFileSync, readlinkSync } from 'node:fs';
 import { join } from 'node:path';
@@ -23,8 +24,18 @@ export function commitActionsSnapshot(plan: ModalPlan, generated: Map<string, st
         ? Buffer.from(readlinkSync(join(plan.source, file.path)))
         : readFileSync(join(plan.source, file.path));
     invariant(digest(bytes) === file.blob, 'EVIDENCE_CHANGED', 'Actions exported source bytes changed.');
-    const hash = git(plan.source, ['hash-object', '--no-filters', '-w', '--stdin'], bytes).trim();
-    const mode = file.mode === 'symlink' ? '120000' : file.mode === 'executable' ? '100755' : '100644';
+    const hash =
+      file.mode === 'gitlink'
+        ? gitlinkCommit(bytes)
+        : git(plan.source, ['hash-object', '--no-filters', '-w', '--stdin'], bytes).trim();
+    const mode =
+      file.mode === 'gitlink'
+        ? '160000'
+        : file.mode === 'symlink'
+          ? '120000'
+          : file.mode === 'executable'
+            ? '100755'
+            : '100644';
     entries.push(`${mode} ${hash}\t${file.path}\0`);
   }
   for (const [path, text] of generated) {

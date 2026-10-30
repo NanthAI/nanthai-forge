@@ -1,3 +1,4 @@
+import { readSubmodulePointers } from './gitlink.js';
 // SPDX-License-Identifier: Apache-2.0
 import { readChangeMap } from './change-map.js';
 import { sourceFilePage } from './source-file-page.js';
@@ -83,6 +84,9 @@ export async function readNativeSourceReviewBytes(
   return {
     ...pins,
     file,
+    ...(file.after?.mode === 'gitlink'
+      ? { submodule: (await readSubmodulePointers(state.files, bytes, file.path))[0] }
+      : {}),
     before: file.before ? reviewTextPage(a, selection.beforeOffset) : null,
     after: file.after ? reviewTextPage(b, selection.afterOffset) : null,
     ...(selection.line !== undefined && file.after

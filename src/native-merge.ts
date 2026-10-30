@@ -67,7 +67,7 @@ export function mergeNativeFiles(
     const mode = x.mode === original.mode ? y.mode : x.mode;
     let blob =
       x.blob === original.blob ? y.blob : y.blob === original.blob || x.blob === y.blob ? x.blob : undefined;
-    if (!blob && ![original, x, y].some(file => file.mode === 'symlink')) {
+    if (!blob && ![original, x, y].some(file => ['symlink', 'gitlink'].includes(file.mode))) {
       if (source.mergeContent) {
         blob = source.mergeContent(original, x, y, options, resolved) ?? undefined;
         return blob ? { path: x.path, mode, blob } : null;

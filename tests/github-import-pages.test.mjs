@@ -8,10 +8,11 @@ import { digest } from '../dist/hash.js';
 const sha = bytes => createHash('sha1').update(`blob ${bytes.length}\0`).update(bytes).digest('hex');
 const hex = n => n.toString(16).padStart(40, '0');
 
-test('28,905 files / 4,089 directories use bounded pages within the complete import call budget', async t => {
+test('28,905 files / 4,089 directories / two gitlinks use bounded pages within the complete import call budget', async t => {
   const s = pagedFixture(),
     files = 28905,
     directories = 4089,
+    submodules = 2,
     bodies = new Map();
   const trees = new Map();
   const root = [];
@@ -39,6 +40,8 @@ test('28,905 files / 4,089 directories use bounded pages within the complete imp
       });
     trees.set(hex(dir + 1), tree);
   }
+  for (let index = 0; index < submodules; index++)
+    root.push({ path: `submodule-${index}`, sha: hex(60000 + index), mode: '160000', type: 'commit' });
   const old = globalThis.fetch;
   t.after(() => {
     globalThis.fetch = old;
@@ -90,7 +93,8 @@ test('28,905 files / 4,089 directories use bounded pages within the complete imp
   const job = s.tables.projectGithubImports.get(id),
     calls = [...s.calls.values()].reduce((a, b) => a + b, 0) + 1; // public start
   assert.equal(job.phase, 'ready');
-  assert.equal(job.completed, files);
+  assert.equal(job.completed, files + submodules);
+  assert.equal(job.submodules, submodules);
   assert.equal(blobRequests, files);
   assert.ok(
     importCalls <= 5 * Math.ceil(files / 1000),
@@ -119,15 +123,16 @@ test('28,905 files / 4,089 directories use bounded pages within the complete imp
     return Buffer.concat(chunks);
   };
   const source = JSON.parse(await logical(backup.preview.head));
-  assert.equal(source.files.length, files);
+  assert.equal(source.files.length, files + submodules);
+  assert.equal(source.files.filter(file => file.mode === 'gitlink').length, submodules);
   assert.equal(digest(await logical(backup.preview.head)), backup.preview.head);
   const manifest = JSON.parse(await logical(backup.digest));
-  assert.equal(manifest.files.length, files + 2);
+  assert.equal(manifest.files.length, files + submodules + 2);
   assert.ok(source.files.some(file => file.mode === 'symlink'));
   assert.ok(source.files.some(file => file.mode === 'executable'));
   assert.equal(
     [...s.tables.projectWorkRecords.values()].filter(row => row.collection === 'sourceBlobs').length,
-    files + 1,
+    files + submodules + 1,
   );
   const count = calls,
     scheduled = s.scheduled.length;
@@ -139,6 +144,7 @@ test('28,905 files / 4,089 directories use bounded pages within the complete imp
     JSON.stringify({
       files,
       directories,
+      submodules,
       executions: count,
       filePageExecutions: importCalls,
       ...s.stats(),

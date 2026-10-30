@@ -224,3 +224,28 @@ test('hosted capture uses nested Forge/Git rules and never re-includes new crede
     assert(!text.includes('SYNTHETIC_CREDENTIAL'));
   }
 });
+
+test('Lane pointer files preserve gitlink mode across unchanged saves and pinned SHA bumps', async t => {
+  const base = directory(t),
+    root = join(base, 'checkout');
+  mkdirSync(root);
+  const s = await saveFixture(),
+    old = s.put('a'.repeat(40));
+  s.state.files.push({ path: 'vendor', mode: 'gitlink', blob: old.sha256 });
+  marker(root, s, ['a.txt', 'vendor']);
+  writeFileSync(join(root, 'a.txt'), 'original');
+  writeFileSync(join(root, 'vendor'), 'a'.repeat(40));
+  const unchanged = await captureHostedSave(root, join(base, 'unchanged'));
+  assert.equal(unchanged.changes.length, 0);
+  writeFileSync(join(root, 'vendor'), 'b'.repeat(40) + '\n');
+  const bumped = await captureHostedSave(root, join(base, 'bumped'));
+  assert.equal(bumped.changes.length, 1);
+  assert.equal(bumped.changes[0].before.mode, 'gitlink');
+  assert.equal(bumped.changes[0].after.mode, 'gitlink');
+  assert.equal(
+    readFileSync(join(base, 'bumped', bumped.changes[0].after.blob), 'utf8'),
+    'b'.repeat(40) + '\n',
+  );
+  writeFileSync(join(root, 'vendor'), 'invalid');
+  await assert.rejects(captureHostedSave(root, join(base, 'invalid')), e => e.code === 'INVALID_GITLINK');
+});

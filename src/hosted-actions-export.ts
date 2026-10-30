@@ -1,3 +1,4 @@
+import { gitlinkCommit } from './gitlink.js';
 import { semanticCheckCommand } from './semantic-check-command.js';
 // SPDX-License-Identifier: Apache-2.0
 import { createReadStream } from 'node:fs';
@@ -133,8 +134,18 @@ export async function exportHostedActions(
       const path = join(cache, file.blob);
       if (file.path === 'package-lock.json') lockfile = file.blob;
       if (generated.has(file.path)) continue;
-      const hash = await hostedActionsGit(root, ['hash-object', '--no-filters', '-w', path]);
-      const mode = file.mode === 'symlink' ? '120000' : file.mode === 'executable' ? '100755' : '100644';
+      const hash =
+        file.mode === 'gitlink'
+          ? gitlinkCommit(await readFile(path))
+          : await hostedActionsGit(root, ['hash-object', '--no-filters', '-w', path]);
+      const mode =
+        file.mode === 'gitlink'
+          ? '160000'
+          : file.mode === 'symlink'
+            ? '120000'
+            : file.mode === 'executable'
+              ? '100755'
+              : '100644';
       entries.push(`${mode} ${hash}\t${file.path}\0`);
       await progress();
     }

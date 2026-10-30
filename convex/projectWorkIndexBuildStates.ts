@@ -21,7 +21,7 @@ const pin = v.object({ sha256: v.string(), size: v.number() });
 const file = v.object({
   path: v.string(),
   blob: v.string(),
-  mode: v.union(v.literal('file'), v.literal('executable'), v.literal('symlink')),
+  mode: v.union(v.literal('file'), v.literal('executable'), v.literal('symlink'), v.literal('gitlink')),
 });
 type Request = { before: Pin; after: Pin; pins: Pin[] };
 const batchRef = makeFunctionReference<

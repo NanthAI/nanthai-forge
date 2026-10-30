@@ -4,7 +4,7 @@ import type { NativeFile } from './native-state-format.js';
 import type { GithubSyncCommit } from './github-sync-types.js';
 import { invariant } from './errors.js';
 export const gitMode = (mode: NativeFile['mode']) =>
-  mode === 'symlink' ? '120000' : mode === 'executable' ? '100755' : '100644';
+  mode === 'gitlink' ? '160000' : mode === 'symlink' ? '120000' : mode === 'executable' ? '100755' : '100644';
 export function gitHash(kind: string, bytes: Uint8Array) {
   return createHash('sha1').update(`${kind} ${bytes.length}\0`).update(bytes).digest('hex');
 }

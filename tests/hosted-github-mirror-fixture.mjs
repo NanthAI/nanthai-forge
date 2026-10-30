@@ -41,7 +41,7 @@ export function mirrorFixture({
     head = state(after);
   const base = states.get(previous).files.map(file => {
     const bytes = objects.get(file.blob),
-      sha = gitHash('blob', bytes);
+      sha = file.mode === 'gitlink' ? bytes.toString().trimEnd() : gitHash('blob', bytes);
     githubBlobs.set(sha, bytes);
     return { path: file.path, mode: file.mode, sha };
   });
@@ -96,10 +96,18 @@ export function mirrorFixture({
       for (const change of body.tree) {
         if (change.sha === null) files.delete(change.path);
         else {
-          assert(githubBlobs.has(change.sha));
+          if (change.type === 'commit') assert.equal(change.mode, '160000');
+          else assert(githubBlobs.has(change.sha));
           files.set(change.path, {
             path: change.path,
-            mode: change.mode === '120000' ? 'symlink' : change.mode === '100755' ? 'executable' : 'file',
+            mode:
+              change.mode === '160000'
+                ? 'gitlink'
+                : change.mode === '120000'
+                  ? 'symlink'
+                  : change.mode === '100755'
+                    ? 'executable'
+                    : 'file',
             sha: change.sha,
           });
         }
@@ -168,7 +176,13 @@ export function mirrorFixture({
     },
     expected: () =>
       gitTree(
-        states.get(head).files.map(file => ({ ...file, sha: gitHash('blob', objects.get(file.blob)) })),
+        states.get(head).files.map(file => ({
+          ...file,
+          sha:
+            file.mode === 'gitlink'
+              ? objects.get(file.blob).toString().trimEnd()
+              : gitHash('blob', objects.get(file.blob)),
+        })),
       ),
     gitMode,
   };

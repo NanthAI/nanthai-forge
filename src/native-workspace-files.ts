@@ -67,7 +67,7 @@ export class NativeWorkspaceFiles {
     this.prepared.set(id, path);
   }
 
-  write(id: string, path: string, kind: 'file' | 'executable' | 'symlink') {
+  write(id: string, path: string, kind: 'file' | 'executable' | 'symlink' | 'gitlink') {
     if (kind === 'symlink') {
       symlinkSync(this.small.get(id) ?? this.read(id), path);
       return;

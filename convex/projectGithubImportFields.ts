@@ -27,6 +27,7 @@ export const githubImportFields = {
   total: v.number(),
   bytes: v.number(),
   totalBytes: v.number(),
+  submodules: v.optional(v.number()),
   error: v.optional(v.object({ code: v.string(), message: v.string() })),
   task: v.optional(v.id('_scheduled_functions')),
 };

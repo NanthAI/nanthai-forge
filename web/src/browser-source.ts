@@ -1,3 +1,4 @@
+import { readSubmodulePointers } from '../../src/gitlink';
 // SPDX-License-Identifier: Apache-2.0
 import { verifiedBytes } from './verified-blob';
 import { ObjectDownloadReader } from '../../src/blob-download';
@@ -23,6 +24,7 @@ export type SourceInput = {
   head: string;
   file?: string;
   map?: boolean;
+  submodules?: boolean;
   beforeOffset?: number;
   afterOffset?: number;
   line?: number;
@@ -125,9 +127,16 @@ export async function readBrowserSource(client: Client, input: SourceInput): Pro
     );
   };
   const [aState, bState] = await bytes([input.base, input.head]),
-    paths = reviewPaths(parseNativeState(aState!).files, parseNativeState(bState!).files);
+    state = parseNativeState(bState!),
+    paths = reviewPaths(parseNativeState(aState!).files, state.files);
   let result: object = { base: input.base, head: input.head, paths };
-  if (input.map)
+  if (input.submodules)
+    result = {
+      base: input.base,
+      head: input.head,
+      pointers: await readSubmodulePointers(state.files, bytes),
+    };
+  else if (input.map)
     result = {
       base: input.base,
       head: input.head,
@@ -143,6 +152,9 @@ export async function readBrowserSource(client: Client, input: SourceInput): Pro
       base: input.base,
       head: input.head,
       file,
+      ...(file.after?.mode === 'gitlink'
+        ? { submodule: (await readSubmodulePointers(state.files, bytes, file.path))[0] }
+        : {}),
       before: file.before ? reviewTextPage(a, input.beforeOffset) : null,
       after: file.after ? reviewTextPage(b, input.afterOffset) : null,
       ...(input.line !== undefined && file.after

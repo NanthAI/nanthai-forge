@@ -132,6 +132,7 @@ export const advance = internalMutation({
     total: v.number(),
     bytes: v.number(),
     totalBytes: v.number(),
+    submodules: v.optional(v.number()),
     discovering: v.boolean(),
     objects: v.optional(v.array(completion)),
     recipes: v.optional(v.array(recipePin)),
@@ -181,6 +182,7 @@ export const advance = internalMutation({
       total: input.total,
       bytes: input.bytes,
       totalBytes: input.totalBytes,
+      submodules: input.submodules ?? row.submodules ?? 0,
       phase: input.discovering ? 'discovering' : 'importing',
       totalKnown: !input.discovering,
       error: undefined,
@@ -225,7 +227,7 @@ const file = v.object({
   path: v.string(),
   blob: v.string(),
   size: v.number(),
-  mode: v.union(v.literal('file'), v.literal('executable'), v.literal('symlink')),
+  mode: v.union(v.literal('file'), v.literal('executable'), v.literal('symlink'), v.literal('gitlink')),
 });
 export const publish = internalMutation({
   args: { ...identity, files: v.array(file) },

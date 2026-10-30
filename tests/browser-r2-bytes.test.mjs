@@ -428,3 +428,45 @@ test('a cached hit stays usable when signing a neighbour crosses its expiry boun
     ['cached neighbour', 'uncached neighbour'],
   );
 });
+
+test('browser Code and Now read gitlink pointers and gitmodules through the authorized object reader', async t => {
+  const f = await sourceFixture(t);
+  const commit = 'a'.repeat(40),
+    modules = '[submodule "lib"]\npath=vendor/lib\nurl=../lib.git\n';
+  const pointer = await upload(f.s, commit),
+    config = await upload(f.s, modules);
+  const state = await upload(
+    f.s,
+    JSON.stringify({
+      schema: 1,
+      kind: 'forge-source-state',
+      parents: [],
+      message: 'gitlinks',
+      at: '2026-01-01T00:00:00.000Z',
+      files: [
+        { path: '.gitmodules', blob: config.sha256, mode: 'file' },
+        { path: 'vendor/lib', blob: pointer.sha256, mode: 'gitlink' },
+      ],
+    }),
+  );
+  const manifest = {
+    ...f.manifest,
+    head: state.sha256,
+    files: [
+      ...f.manifest.files,
+      ...[pointer, config, state].map(pin => ({ path: `objects/${pin.sha256}`, ...pin })),
+    ],
+  };
+  const root = await upload(f.s, JSON.stringify(manifest));
+  Object.assign(f.s.tables.projectBackups.get('backup'), {
+    digest: root.sha256,
+    size: root.size,
+    preview: { format: 'native', head: state.sha256, manifestDigest: root.sha256 },
+  });
+  const input = { ...f.input, base: state.sha256, head: state.sha256 };
+  const code = JSON.parse(await readBrowserSource(f.browser, { ...input, file: 'vendor/lib' }));
+  assert.deepEqual(code.submodule, { path: 'vendor/lib', commit, url: '../lib.git' });
+  assert.equal(code.file.after.mode, 'gitlink');
+  const now = JSON.parse(await readBrowserSource(f.browser, { ...input, submodules: true }));
+  assert.deepEqual(now.pointers, [code.submodule]);
+});

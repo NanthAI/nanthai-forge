@@ -1,3 +1,5 @@
+import { SubmodulePointerView } from './Submodules';
+import type { SubmodulePointer } from '../../src/gitlink';
 import { useSourceReview } from './use-source-review';
 import { usePageCritical } from './ui/page-critical';
 import { SourcePicker } from './shell/SourcePicker';
@@ -48,7 +50,12 @@ export function defaultFile(paths: readonly string[]): string {
     : (paths.find(path => !path.includes('/')) ?? paths[0] ?? '');
 }
 type File =
-  | { available: true; file: ReviewPath; after: ReturnType<typeof reviewTextPage> | null }
+  | {
+      available: true;
+      file: ReviewPath;
+      submodule?: SubmodulePointer;
+      after: ReturnType<typeof reviewTextPage> | null;
+    }
   | { available: false; reason: string };
 
 /** The existing source-review reader authorizes the checkpoint before and after every read. */
@@ -361,7 +368,8 @@ export default function HostedCode({
     moves: [...hostedMoves.records, ...localMoves.records],
     runs: runs.records,
   });
-  const page = content?.available && content.after?.kind === 'text' ? content.after : null;
+  const pointer = content?.available ? content.submodule : undefined;
+  const page = content?.available && !pointer && content.after?.kind === 'text' ? content.after : null;
   const symbols = useMemo(
     () => (page?.offset === 0 ? fileSymbols(selected, page.text, page.line) : []),
     [page, selected],
@@ -504,7 +512,17 @@ export default function HostedCode({
           {fileTree(true)}
         </aside>
         <main className="main">
-          {page && content?.available ? (
+          {pointer ? (
+            <div className="panel">
+              <FileHeader
+                file={selected}
+                meta="Submodule pointer"
+                actions={null}
+                files={() => setSheet(true)}
+              />
+              <SubmodulePointerView pointer={pointer} />
+            </div>
+          ) : page && content?.available ? (
             <SourceView
               head={head}
               source={{

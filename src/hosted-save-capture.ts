@@ -18,6 +18,7 @@ import { dirname, join } from 'node:path';
 import { SourceFileReader } from './source-file-reader.js';
 import { readHostedLaneCheckout } from './hosted-lane-checkout-marker.js';
 import { checkoutPathExists } from './hosted-checkout-files.js';
+import { gitlinkCommit } from './gitlink.js';
 import { digest } from './hash.js';
 import { nativePaths } from './source-paths.js';
 import { durableReplace, syncFile } from './native-durability.js';
@@ -29,15 +30,17 @@ import { canonicalPayload } from './hosted-source-operation.js';
 import { forgeCachePath } from './forge-cache-paths.js';
 
 /** Private disk snapshot: bounded buffers, no link target traversal or repository execution. */
-function captureFile(root: string, path: string, directory: string) {
+function captureFile(root: string, path: string, directory: string, previous?: NativeFile) {
   const absolute = join(root, path),
     stat = lstatSync(absolute),
     temporary = join(directory, randomUUID());
   const mode: NativeFile['mode'] = stat.isSymbolicLink()
     ? 'symlink'
-    : stat.mode & 0o111
-      ? 'executable'
-      : 'file';
+    : previous?.mode === 'gitlink'
+      ? 'gitlink'
+      : stat.mode & 0o111
+        ? 'executable'
+        : 'file';
   let pin: { sha256: string; size: number };
   if (stat.isSymbolicLink()) {
     invariant(
@@ -83,6 +86,14 @@ function captureFile(root: string, path: string, directory: string) {
       closeSync(target);
     }
   }
+  if (mode === 'gitlink') {
+    invariant(
+      pin.size <= 65,
+      'INVALID_GITLINK',
+      'A submodule pointer must contain its full pinned commit SHA.',
+    );
+    gitlinkCommit(readFileSync(temporary));
+  }
   const final = join(directory, pin.sha256);
   if (checkoutPathExists(final)) rmSync(temporary);
   else renameSync(temporary, final);
@@ -99,7 +110,7 @@ export async function captureHostedSave(root: string, directory: string) {
   const changes: SaveChange[] = [],
     files: { pin: { sha256: string; size: number }; path: string }[] = [];
   for (const path of local.sort()) {
-    const observed = captureFile(root, path, directory),
+    const observed = captureFile(root, path, directory, baseline.get(path)),
       old = baseline.get(path);
     if (!old || old.blob !== observed.file.blob || old.mode !== observed.file.mode) {
       changes.push({

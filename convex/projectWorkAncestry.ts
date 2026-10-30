@@ -22,7 +22,7 @@ const statePin = v.object({ sha256: v.string(), size: v.number() });
 const stateFile = v.object({
   path: v.string(),
   blob: v.string(),
-  mode: v.union(v.literal('file'), v.literal('executable'), v.literal('symlink')),
+  mode: v.union(v.literal('file'), v.literal('executable'), v.literal('symlink'), v.literal('gitlink')),
 });
 /** Parsing allocations end with this invocation, rather than accumulating in
  * the coordinator's V8 heap across the entire historical source closure. */
@@ -43,7 +43,7 @@ export const stateBatch = internalAction({
     const result: {
       head: string;
       parents: string[];
-      files?: { path: string; blob: string; mode: 'file' | 'executable' | 'symlink' }[];
+      files?: { path: string; blob: string; mode: 'file' | 'executable' | 'symlink' | 'gitlink' }[];
     }[] = [];
     for (let offset = 0; offset < input.pins.length;) {
       const pins: { sha256: string; size: number }[] = [];

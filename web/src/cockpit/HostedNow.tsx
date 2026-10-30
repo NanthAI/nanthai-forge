@@ -1,3 +1,4 @@
+import { NowSubmodules } from '../Submodules';
 import { OwnerDecisionsPointer } from '../decisions/OwnerDecisionsPanel';
 import { useGenerationFreshness } from '../ui/generation-freshness';
 import { usePageCritical } from '../ui/page-critical';
@@ -381,6 +382,9 @@ function LiveNow({
       initialChannelId,
     ],
   );
+  const main = [...hostedMoves.records, ...localMoves.records]
+    .filter(move => move.channel === 'main' && (!move.status || move.status === 'accepted'))
+    .sort((a, b) => b.at.localeCompare(a.at))[0] as (MoveRecord & { head?: string }) | undefined;
   const client = useConvex();
   const briefs = useMemo(() => hostedBriefs(client, projectId), [client, projectId]);
   return (
@@ -405,6 +409,11 @@ function LiveNow({
           newIntent={newIntent}
           project={projectId}
           {...(user?.id ? { viewer: user.id } : {})}
+        />
+        <NowSubmodules
+          projectId={projectId}
+          workspace={workspace}
+          head={main?.head ?? workspace.sourceHead}
         />
       </InboxContext.Provider>
     </BriefSourceContext.Provider>

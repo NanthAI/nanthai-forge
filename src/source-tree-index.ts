@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { IndexEntry } from './work-hosted-index.js';
 /** Paths only, pinned to an immutable State; source bytes remain on-demand reads. */
-export function sourceTreeEntries(head: string, files: readonly { path: string }[]): IndexEntry[] {
+export function sourceTreeEntries(
+  head: string,
+  files: readonly { path: string; mode?: string }[],
+): IndexEntry[] {
   const paths = files.map(file => file.path).sort();
   const entries: IndexEntry[] = [];
   for (let offset = 0; offset < paths.length; offset += 100)
@@ -17,7 +20,13 @@ export function sourceTreeEntries(head: string, files: readonly { path: string }
     key: head,
     parent: '',
     position: 0,
-    value: JSON.stringify({ head, files: paths.length }),
+    value: JSON.stringify({
+      head,
+      files: paths.length,
+      ...(files.some(file => file.mode === 'gitlink')
+        ? { submodules: files.filter(file => file.mode === 'gitlink').length }
+        : {}),
+    }),
   });
   return entries;
 }

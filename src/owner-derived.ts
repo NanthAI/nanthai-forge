@@ -53,7 +53,11 @@ export const ownerDerivedSchema = z
         hash,
         z.array(
           z
-            .object({ path: z.string(), blob: hash, mode: z.enum(['file', 'executable', 'symlink']) })
+            .object({
+              path: z.string(),
+              blob: hash,
+              mode: z.enum(['file', 'executable', 'symlink', 'gitlink']),
+            })
             .strict(),
         ),
       ]),

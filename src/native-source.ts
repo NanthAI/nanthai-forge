@@ -1,3 +1,4 @@
+import { gitlinkCommit } from './gitlink.js';
 import type { Conversation } from './agent-edit-context.js';
 // SPDX-License-Identifier: Apache-2.0
 import {
@@ -235,13 +236,18 @@ export class NativeSource {
   ): { files: NativeFile[]; coverage: NativeCaptureCoverage } {
     root = realpathSync(root);
     const baseline = base ? this.state(base).files : [];
+    const baselineModes = new Map(baseline.map(file => [file.path, file.mode]));
     const excluded: { path: string; reason: string }[] = [];
     const files: NativeFile[] = nativePaths(
       root,
       baseline.map(file => file.path),
       excluded,
     ).map(path => {
-      const { bytes, mode } = nativeFile(root, path);
+      const observed = nativeFile(root, path);
+      const { bytes } = observed;
+      const mode =
+        baselineModes.get(path) === 'gitlink' && observed.mode === 'file' ? 'gitlink' : observed.mode;
+      if (mode === 'gitlink') gitlinkCommit(bytes);
       return {
         path,
         blob: retain ? this.put(bytes) : digest(bytes),

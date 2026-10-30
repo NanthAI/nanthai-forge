@@ -2,6 +2,7 @@
 import type { NativeFile, NativeState } from './native-state-format.js';
 import type { GithubSyncCommit } from './github-sync-types.js';
 import type { GithubRequest } from './hosted-github-api.js';
+import { gitlinkCommit } from './gitlink.js';
 import { gitHash, gitTree, gitMode, githubCommit } from './hosted-github-git.js';
 import { sourceExclusion } from './files.js';
 import { invariant } from './errors.js';
@@ -29,7 +30,7 @@ export type MirrorPlan = {
   phase: 'bootstrap' | 'blobs' | 'done';
   index: number;
   hashes: GitFile[];
-  changes: { path: string; mode: string; type: 'blob'; sha: string | null }[];
+  changes: { path: string; mode: string; type: 'blob' | 'commit'; sha: string | null }[];
   pending: NativeFile[];
   entry: GithubSyncCommit | null;
 };
@@ -69,13 +70,18 @@ function diffPlan(
   target: NativeState,
   bootstrap: boolean,
 ): MirrorPlan {
-  const files = baseline.files.filter(file => !sourceExclusion(file.path));
-  const next = target.files.filter(file => !sourceExclusion(file.path));
+  const files = baseline.files.filter(file => file.mode === 'gitlink' || !sourceExclusion(file.path));
+  const next = target.files.filter(file => file.mode === 'gitlink' || !sourceExclusion(file.path));
   const old = new Map(files.map(file => [file.path, file]));
   const after = new Map(next.map(file => [file.path, file]));
   const changes: MirrorPlan['changes'] = files
     .filter(file => !after.has(file.path))
-    .map(file => ({ path: file.path, mode: gitMode(file.mode), type: 'blob', sha: null }));
+    .map(file => ({
+      path: file.path,
+      mode: gitMode(file.mode),
+      type: file.mode === 'gitlink' ? 'commit' : 'blob',
+      sha: null,
+    }));
   const pending = next.filter(file => {
     const before = old.get(file.path);
     return !before || before.blob !== file.blob || before.mode !== file.mode;
@@ -112,15 +118,19 @@ export async function stepMirror(plan: MirrorPlan, io: MirrorIO, now = Date.now)
           file = window[i]!;
         if (count && bytes + object.size > mirrorBytes) return plan;
         const content = await object.read();
-        const sha = gitHash('blob', content);
+        const sha = file.mode === 'gitlink' ? gitlinkCommit(content) : gitHash('blob', content);
         if (plan.phase === 'bootstrap') plan.hashes.push({ ...file, sha });
         else {
-          const result = await io.api<{ sha: string }>(`${prefix}/blobs`, 'POST', {
-            content: content.toString('base64'),
-            encoding: 'base64',
-          });
-          invariant(result.sha === sha, 'GITHUB_SYNC_HASH', 'GitHub returned different blob bytes.');
-          plan.changes.push({ path: file.path, mode: gitMode(file.mode), type: 'blob', sha });
+          if (file.mode === 'gitlink') {
+            plan.changes.push({ path: file.path, mode: '160000', type: 'commit', sha });
+          } else {
+            const result = await io.api<{ sha: string }>(`${prefix}/blobs`, 'POST', {
+              content: content.toString('base64'),
+              encoding: 'base64',
+            });
+            invariant(result.sha === sha, 'GITHUB_SYNC_HASH', 'GitHub returned different blob bytes.');
+            plan.changes.push({ path: file.path, mode: gitMode(file.mode), type: 'blob', sha });
+          }
         }
         count++;
         bytes += content.length;

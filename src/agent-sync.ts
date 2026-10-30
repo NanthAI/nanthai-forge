@@ -97,6 +97,11 @@ export function conflictPlan(
   const empty = Buffer.alloc(0),
     read = (file?: NativeFile) => (file ? source.object(file.blob) : empty);
   for (const item of merged.conflicts) {
+    if ([item.base, item.left, item.right].some(file => file?.mode === 'gitlink')) {
+      if (item.left) files.push(item.left);
+      conflicts.push({ path: item.path, kind: 'binary' });
+      continue;
+    }
     if (source.conflictContent) {
       const result = source.conflictContent(item, channel);
       if (result.file) files.push(result.file);

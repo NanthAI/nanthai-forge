@@ -9,7 +9,7 @@ import type { sourceManifestSchema } from '../src/work-archive-metadata';
 import type { IndexEntry } from '../src/work-hosted-index';
 import { internal } from './_generated/api';
 import { reviewPaths } from '../src/native-source-review';
-type ProvenanceFile = { path: string; blob: string; mode: 'file' | 'executable' | 'symlink' };
+type ProvenanceFile = { path: string; blob: string; mode: 'file' | 'executable' | 'symlink' | 'gitlink' };
 import { invariant } from '../src/errors';
 export type ChangedStates = {
   before: ProvenanceFile[];

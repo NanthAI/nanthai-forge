@@ -191,7 +191,7 @@ export function ownerDerivedRows(
             (!version ||
               typeof version.path !== 'string' ||
               !pins.has(version.blob) ||
-              !['file', 'executable', 'symlink'].includes(version.mode))
+              !['file', 'executable', 'symlink', 'gitlink'].includes(version.mode))
           )
             return { reason: 'view-version-invalid' };
       }

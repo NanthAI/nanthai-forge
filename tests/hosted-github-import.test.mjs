@@ -20,7 +20,7 @@ for (const name of [
 ])
   modules[name] = await import(moduleUrl(`../convex/${name}.ts`));
 const gitSha = bytes => createHash('sha1').update(`blob ${bytes.length}\0`).update(bytes).digest('hex');
-function fixture(t, { privateRepository = false, tooLarge = false } = {}) {
+function fixture(t, { privateRepository = false, tooLarge = false, submodules = false } = {}) {
   const s = state([]);
   s.tables.projectGithubImports = new Map();
   const original = s.ctx.runQuery;
@@ -44,6 +44,9 @@ function fixture(t, { privateRepository = false, tooLarge = false } = {}) {
     });
   });
   const bytes = Buffer.from([0, 255, 128, 10]);
+  const modulesBytes = Buffer.from(
+    '[submodule "a"]\npath=vendor-a\nurl=../a.git\n[submodule "b"]\npath=vendor-b\nurl=git@example.invalid:org/b.git\n',
+  );
   let denied = false,
     blobs = 0;
   globalThis.fetch = async (url, options) => {
@@ -67,6 +70,19 @@ function fixture(t, { privateRepository = false, tooLarge = false } = {}) {
         sha: 'b'.repeat(40),
         truncated: false,
         tree: [
+          ...(submodules
+            ? [
+                { path: 'vendor-a', mode: '160000', type: 'commit', sha: 'c'.repeat(40) },
+                { path: 'vendor-b', mode: '160000', type: 'commit', sha: 'd'.repeat(40) },
+                {
+                  path: '.gitmodules',
+                  mode: '100644',
+                  type: 'blob',
+                  sha: gitSha(modulesBytes),
+                  size: modulesBytes.length,
+                },
+              ]
+            : []),
           {
             path: 'data.bin',
             mode: '100755',
@@ -80,6 +96,8 @@ function fixture(t, { privateRepository = false, tooLarge = false } = {}) {
       blobs++;
       assert.equal(options.headers.Accept, 'application/vnd.github.raw+json');
       if (privateRepository) assert.equal(options.headers.Authorization, 'Bearer ghu_synthetic');
+      if (submodules && p.endsWith(gitSha(modulesBytes))) return new Response(modulesBytes);
+      assert(p.endsWith(gitSha(bytes)), 'never fetch a submodule commit as blob');
       return new Response(bytes);
     }
     throw Error(url);
@@ -386,4 +404,29 @@ test('new import selected for R2 fails explicitly on missing configuration witho
   const job = s.tables.projectGithubImports.get(id);
   assert.equal(job.error.code, 'R2_NOT_CONFIGURED');
   assert.equal(s.tables.hostedProjects.get(job.projectId).currentBackup, null);
+});
+
+test('hosted import retains both gitlinks and gitmodules and reports pointer coverage', async t => {
+  const s = fixture(t, { submodules: true }),
+    id = await s.start();
+  for (let tick = 0; tick < 10 && s.tables.projectGithubImports.get(id).phase !== 'ready'; tick++)
+    await s.advance(id);
+  const status = await modules.projectGithubImport.status._handler(s.ctx, { id });
+  assert.equal(status.phase, 'ready');
+  assert.equal(status.submodules, 2);
+  assert.equal(status.report, '2 submodules kept as pointers');
+  assert.equal(status.bytes, status.totalBytes, 'pointer metadata is not counted as repository file bytes');
+  assert.equal(s.blobs(), 2, 'only the regular file and gitmodules are fetched');
+  const job = s.tables.projectGithubImports.get(id),
+    project = s.tables.hostedProjects.get(job.projectId),
+    backup = s.tables.projectBackups.get(project.currentBackup);
+  const row = [...s.tables.projectObjects.values()].find(
+    row => row.projectId === job.projectId && row.digest === backup.preview.head,
+  );
+  const state = JSON.parse(await s.files.get(row.storageId).blob.text());
+  assert.deepEqual(
+    state.files.filter(f => f.mode === 'gitlink').map(f => f.path),
+    ['vendor-a', 'vendor-b'],
+  );
+  assert.equal(state.files.find(f => f.path === '.gitmodules').mode, 'file');
 });

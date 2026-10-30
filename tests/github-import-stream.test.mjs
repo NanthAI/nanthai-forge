@@ -150,3 +150,32 @@ test('multiple chunked files share one byte window before recipes bind atomicall
   await upload.commit();
   assert.equal([...s.tables.projectObjects.values()].filter(row => row.recipe).length, 3);
 });
+
+test('gitlinks use the page stream sink as SHA metadata without a GitHub fetch', async () => {
+  for (const sha of ['a'.repeat(40), 'b'.repeat(64)]) {
+    const parts = [];
+    const pin = await streamGithubSourceBlob(
+      'fixture/repo',
+      { path: 'vendor/lib', sha, size: 0, mode: '160000' },
+      async bytes => {
+        parts.push(bytes);
+      },
+      undefined,
+      async () => assert.fail('never request third-party submodule content'),
+    );
+    assert.equal(Buffer.concat(parts).toString(), sha);
+    assert.deepEqual(pin, { blob: createHash('sha256').update(sha).digest('hex'), size: sha.length });
+    await assert.rejects(
+      streamGithubSourceBlob(
+        'fixture/repo',
+        { path: 'vendor/lib', sha, size: 0, mode: '160000' },
+        async () => {
+          throw Error('sink interrupted');
+        },
+        undefined,
+        async () => assert.fail('no fetch'),
+      ),
+      /sink interrupted/,
+    );
+  }
+});
