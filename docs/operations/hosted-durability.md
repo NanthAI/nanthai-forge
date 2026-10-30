@@ -428,3 +428,39 @@ Work/main pins while accepting the deliberate absence of Convex files. It does
 not establish R2 health; the lead separately verifies the referenced immutable
 objects and exercises an authenticated source download from the restored project.
 No real database-only restore or bucket drill has been run by this implementation.
+
+## Retired Convex tables (B1.9)
+
+The Bet 1 deletions left six tables with no writers: `ownerAcceptanceMachines`,
+`ownerAcceptanceRequests`, `projectPublicationAttempts`, `projectPublications`,
+`projectPublicationPages` and `projectReturnSupersessions`. Their definitions stay in
+the schema until the rows are exported and purged, because schema push and a Route A
+restore of an older weekly backup still contain them. The optional fields
+`exchangeCleanupCursor`, `exchangeCleanupDone`, `work.intentMigration`,
+`projectBackups.metadataPublication` and `projectBackups.ownerDerived` are only
+counted: live code still reads them.
+
+```sh
+node scripts/retired-tables.mjs inventory --deployment NAME
+node scripts/retired-tables.mjs export --deployment NAME --dir NEW_PRIVATE_DIR
+node scripts/retired-tables.mjs restore --deployment SCRATCH_NAME --dir NEW_PRIVATE_DIR
+node scripts/retired-tables.mjs purge --deployment NAME --dir NEW_PRIVATE_DIR --deployed-at ISO
+```
+
+- `export` writes one checksummed JSON Lines file per table plus `manifest.json`
+  (0600, never overwrites). A table that fills the read page is refused as truncated.
+- `restore` imports only into an empty deployment other than the source and then proves
+  every row came back. The weekly backup also holds these tables, so a restore of any
+  retained backup is a second copy.
+- `purge` is a dry run. It reports rows, bytes, rows created since the export, and an
+  estimate of CLI requests and database I/O (rows and bytes are measured, the I/O model is
+  assumed), plus the source files that block removing each definition. `--execute` needs
+  `--approval FILE`: a record with `decision: "approve-retired-table-purge"`, the
+  deployment and manifest digests, every table, and two completed weekly backups
+  after `--deployed-at`. This version has no deletion step, so a valid record ends in
+  `PURGE_NOT_ENABLED`.
+
+Eligibility: the retired writers must be deployed, then two Monday 03:00 UTC runs of the
+weekly backup workflow must complete and the owner must approve. Removing the definitions
+is a separate schema slice, after the remaining readers (see `definitionRemovalBlockers`)
+are deleted.
