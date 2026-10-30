@@ -42,6 +42,32 @@ test('legacy is dark; edited custom policies retain their explicit gate', () => 
   assert.equal(p.preset, 'custom');
   assert.equal(p.acceptance.gate, 'contract');
 });
+test('legacy policy flipped with only gate contract: owner agent contract, every other actor class full', () => {
+  const policy = editedPolicy(legacyPolicy(), {
+    action: 'set-policy',
+    operationId: crypto.randomUUID(),
+    acceptance: { gate: 'contract' },
+  });
+  assert.equal(policy.preset, 'custom');
+  assert.equal(policy.acceptance.mode, 'auto-on-pass');
+  const gate = actor => gateFor({ ...input(), policy, actor }).mode;
+  assert.equal(gate({ kind: 'agent', id: 'owner' }), 'contract');
+  assert.equal(gate({ kind: 'agent', id: 'outsider' }), 'full');
+  assert.equal(gate({ kind: 'person', id: 'owner' }), 'full');
+  assert.equal(gate({ kind: 'system', id: 'owner' }), 'full');
+  const supervised = editedPolicy(policy, {
+    action: 'set-policy',
+    operationId: crypto.randomUUID(),
+    acceptance: { mode: 'review' },
+  });
+  assert.equal(gateFor({ ...input(), policy: supervised }).mode, 'full');
+  const revert = editedPolicy(policy, {
+    action: 'set-policy',
+    operationId: crypto.randomUUID(),
+    acceptance: { gate: 'full' },
+  });
+  assert.equal(gateFor({ ...input(), policy: revert }).mode, 'full');
+});
 test('batch gate unions member declarations and falls back to full for any ineligible Candidate', () => {
   const first = input();
   const second = {

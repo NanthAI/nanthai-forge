@@ -31,7 +31,9 @@ Record a handoff before stopping.
 
 ## Hosted landing gate
 
-Existing policies without `acceptance.gate` keep full checks. Explicit trusted and
+Existing policies without `acceptance.gate` keep full checks. The dogfood project runs
+`gate: contract` (on since 2026-10-30); revert with `set-policy` `acceptance.gate: full`.
+Explicit trusted and
 autonomous presets select the contract gate; supervised projects, contributors,
 system changes and Intents without contracts keep the full gate. A contract run
 checks the declared tests, changed tests and composed Intent union on the exact
