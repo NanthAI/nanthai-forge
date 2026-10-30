@@ -1,4 +1,3 @@
-import { useGenerationFreshness } from './ui/generation-freshness';
 import { useAttention } from './shell/attention-context';
 // SPDX-License-Identifier: Apache-2.0
 import { PagedList, ScaleGroups } from './cockpit/ScaleList';
@@ -180,15 +179,14 @@ export function LaneListView({
   href?: (id: string) => string;
 }) {
   const attention = useAttention();
-  const freshness = useGenerationFreshness();
   const [filter, setFilter] = useState<LaneFilter>('open'),
     [query, setQuery] = useState(''),
     [holder, setHolder] = useState('');
   const rows = useMemo<LaneRow[]>(() => {
     const lanes = withSessions(cockpitLanes(records, attention?.queue), sessions, now);
-    const facts = laneFacts(records, lanes, now, freshness.value !== null);
+    const facts = laneFacts(records, lanes, now, true);
     return lanes.map(lane => ({ lane, fact: facts.get(lane.id)! }));
-  }, [records, sessions, now, freshness.value, attention?.queue]);
+  }, [records, sessions, now, attention?.queue]);
   const holders = [
     ...new Set(rows.flatMap(row => (row.fact.open && row.fact.who ? [row.fact.who.name] : []))),
   ].sort((a, b) => a.localeCompare(b));

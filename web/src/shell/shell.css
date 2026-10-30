@@ -732,22 +732,3 @@
 .fx-save-links { padding: 8px 14px; }
 .fx-save-links > div { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
 
-/* Freshness belongs to the selected hosted generation, never elapsed presence time. */
-.fx-strip:has(.fx-strip-freshness) { overflow: visible; }
-.fx-strip-freshness { margin-left: auto; color: var(--fx-text-3); min-width: 0; }
-.fx-strip-freshness > [tabindex] { display: block; overflow: hidden; text-overflow: ellipsis; }
-.fx-strip-freshness .fx-info-tip { white-space: normal; right: 0; left: auto; }
-.fx-strip:has(.fx-strip-freshness) .fx-strip-live { margin-left: 0; }
-.fx-hosted-behind :is(.fx-row-active, .fx-row-running) { --fx-row-c: var(--fx-stale); }
-.fx-hosted-behind :is(.fx-fact-active, .fx-fact-running, .fx-board-check.fx-tone-running) { color: var(--fx-stale); }
-.fx-hosted-behind :is(.fx-rail-run, .fx-tone-running .fx-glyph, .fx-spin) { animation: none; color: var(--fx-stale); }
-@media (max-width: 720px) {
-  .fx-strip:has(.fx-strip-freshness) { gap: 6px; }
-  .fx-strip:has(.fx-strip-freshness) :is(.fx-strip-moved, .fx-strip-check, .fx-sub-sep) { display: none; }
-  .fx-strip-freshness { font-size: 11px; }
-}
-
-.fx-hosted-behind :is(.fx-fact-running, .fx-fact-active) > .fx-glyph { color: var(--fx-stale); animation: none; }
-
-.fx-hosted-behind .fx-st:has(> .fx-info-tip) { position: relative; }
-.fx-hosted-behind .fx-st:is(:hover, :focus-within) > .fx-info-tip { opacity: 1; visibility: visible; }

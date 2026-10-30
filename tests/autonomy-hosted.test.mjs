@@ -115,7 +115,7 @@ async function hosted(t) {
   return { ...s, projectId, selection, device };
 }
 const errorCode = code => error => error.data?.code === code;
-test('new hosted project gets supervised; contributors cannot set policy or accept', async t => {
+test('new hosted project gets supervised; contributors cannot set policy', async t => {
   const s = await hosted(t);
   assert.equal((await policies.read._handler(s.ctx, { projectId: s.projectId })).preset, 'supervised');
   s.tables.projectContributors.set('member', {
@@ -147,10 +147,7 @@ test('new hosted project gets supervised; contributors cannot set policy or acce
     }),
     errorCode('PROJECT_UNAVAILABLE'),
   );
-  await assert.rejects(
-    actions.acceptChannel._handler(s.ctx, s.selection()),
-    errorCode('CLI_UPGRADE_REQUIRED'),
-  );
+
   s.caller(undefined);
   await assert.rejects(
     policies.read._handler(s.ctx, { projectId: s.projectId }),
@@ -158,10 +155,10 @@ test('new hosted project gets supervised; contributors cannot set policy or acce
   );
 });
 
-test('coordination-only credentials cannot accept or set policy, even with owner subject', async t => {
+test('coordination-only credentials cannot set policy, even with owner subject', async t => {
   const s = await hosted(t);
   s.device('coordination');
-  await assert.rejects(actions.acceptChannel._handler(s.ctx, s.selection()), errorCode('AUTH_SCOPE_DENIED'));
+
   await assert.rejects(
     policies.set._handler(s.ctx, {
       projectId: s.projectId,

@@ -6,7 +6,7 @@ import { createElement as h } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { moduleUrl } from './convex-module.mjs';
 const { TestContract } = await import(moduleUrl('../web/src/lane/TestContract.tsx'));
-const { ReviewStory } = await import(moduleUrl('../web/src/lane/ReviewStory.tsx'));
+const { ReviewStory } = await import(moduleUrl('../web/src/review/ReviewStory.tsx'));
 const { intentRows } = await import(moduleUrl('../web/src/intents/model.ts'));
 const contract = {
   version: 2,

@@ -232,41 +232,6 @@ test('small imported planning/comment/note transport-like fields roundtrip throu
   }
 });
 
-test('pinned hosted accept forwards the original operation and pins without changing actor policy or retry identity', async () => {
-  const command = {
-    action: 'accept',
-    operationId: randomUUID(),
-    revision: 7,
-    viewId: randomUUID(),
-    head: 'a'.repeat(64),
-    archiveSha256: 'b'.repeat(64),
-    previousId: null,
-  };
-  const calls = [];
-  const client = {
-    query: async () => {
-      throw Error('accept must not refresh its original revision');
-    },
-    action: async (ref, args) => {
-      calls.push([getFunctionName(ref), args]);
-      return { state: 'requested' };
-    },
-  };
-  assert.deepEqual(await dispatchHostedWork(client, 'project', command), { state: 'requested' });
-  await dispatchHostedWork(client, 'project', command);
-  assert.deepEqual(calls[0], calls[1]);
-  assert.equal(calls[0][0], 'projectWorkActions:acceptChannel');
-  assert.equal(calls[0][1].operationId, command.operationId);
-  assert.equal(JSON.parse(calls[0][1].command).viewId, command.viewId);
-  assert.equal(JSON.parse(calls[0][1].command).channel, 'main');
-  assert.equal('actorKind' in JSON.parse(calls[0][1].command), false);
-  assert.equal(JSON.parse(calls[0][1].command).agent, true);
-  await assert.rejects(
-    dispatchHostedWork(client, 'project', { ...command, actorKind: 'person' }),
-    /Use workspace/,
-  );
-});
-
 test('owner decision reads page immutable Work, hydrate oversized what, retain access checks and reject changed selection', async () => {
   const { readFileSync } = await import('node:fs');
   const { indexedRecord } = await import('../dist/work-hosted-index.js');

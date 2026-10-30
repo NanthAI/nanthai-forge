@@ -10,7 +10,6 @@ import { WorkService } from '../dist/work.js';
 import { parseWork } from '../dist/work-unified-types.js';
 import { hostedPaths, hostedText } from '../dist/hosted-paths.js';
 import { metadataRequest, applyHostedEvent } from '../dist/work-metadata.js';
-import { mergeCompanion } from '../dist/native-companion.js';
 import { moduleUrl } from './convex-module.mjs';
 import { state, providers } from './hosted-fixture.mjs';
 const zones = await import(moduleUrl('../convex/sourceZones.ts'));
@@ -66,9 +65,7 @@ test('generic Work redaction changes recorded command digests and never replaces
   const original = service.store.load();
   const portable = parseWork(hostedPaths(original));
   assert.equal(portable.schema, original.schema);
-  const merged = mergeCompanion(portable, original, portable, true);
-  assert.equal(merged.merged.intents[0].outcome, original.intents[0].outcome);
-  assert.equal(merged.merged.intents[0].title, original.intents[0].title);
+  assert.deepEqual(service.store.load(), original);
   const command = { action: 'note', intentId: intent.id, text: `Observed ${local}`, kind: 'comment' };
   const event = {
     id: randomUUID(),

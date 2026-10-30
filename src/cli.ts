@@ -71,7 +71,7 @@ Usage:
   nforge coordination <deployment-url> <project-id> JSON
   nforge mcp-coordination <deployment-url> <project-id>
   nforge exchange ROOT pull [--target NEW_DIRECTORY]
-  nforge exchange <root> pull|open|restore|receive-proposal|pull-proposal|reconcile|migrate-archive --command-file FILE
+  nforge exchange <root> pull|open|restore|receive-proposal|pull-proposal|migrate-archive --command-file FILE
   nforge agent <root> <action> [json | --command-file FILE]
   nforge owner refresh <root>
   nforge recover NEW_OWNER [reconnect|client] --command-file REQUEST.json

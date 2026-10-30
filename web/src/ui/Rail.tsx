@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: Apache-2.0
-import { useGenerationFreshness } from './generation-freshness';
 import { useId } from 'react';
 import { InfoTip } from './signals';
 import { railStops, type RailInput } from './rail-stops';
@@ -18,9 +17,8 @@ export function Rail({
   dim?: boolean;
 }) {
   const id = useId();
-  const freshness = useGenerationFreshness();
   const { segments, title } = railStops(lane);
-  const className = ['fx-rail', size === 'lg' && 'fx-rail-lg', (dim || freshness.behind) && 'fx-rail-dim']
+  const className = ['fx-rail', size === 'lg' && 'fx-rail-lg', dim && 'fx-rail-dim']
     .filter(Boolean)
     .join(' ');
   return (
@@ -32,13 +30,10 @@ export function Rail({
       aria-describedby={id}
     >
       {segments.map((segment, index) => (
-        <i key={index} className={`fx-rail-${freshness.behind && segment === 'run' ? 'off' : segment}`} />
+        <i key={index} className={`fx-rail-${segment}`} />
       ))}
       <span role="tooltip" id={id} className="fx-info-tip">
-        <strong>
-          {railState(lane)}
-          {freshness.behind ? ` · ${freshness.asOf}` : ''}
-        </strong>
+        <strong>{railState(lane)}</strong>
         <br />
         Edited · saved · checked · accepted
       </span>

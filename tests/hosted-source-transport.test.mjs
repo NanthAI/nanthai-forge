@@ -5,7 +5,7 @@ import { randomUUID, createHash } from 'node:crypto';
 import { moduleUrl } from './convex-module.mjs';
 import { state } from './hosted-fixture.mjs';
 const work = await import(moduleUrl('../convex/projectWork.ts'));
-const { captureHostedPair, refreshHostedPairTransport, companionHandoff } = await import(
+const { captureHostedPair, refreshHostedPairTransport } = await import(
   moduleUrl('../web/src/hosted-handoff.ts')
 );
 
@@ -132,17 +132,15 @@ test('retained journal and source pins survive in-place conversion while handoff
     transport: 'objects',
     manifestDigest: 'c'.repeat(64),
   };
-  const migrated = refreshHostedPairTransport(original, observation),
-    command = companionHandoff(migrated, randomUUID());
+  const migrated = refreshHostedPairTransport(original, observation);
   assert.deepEqual(original, retained);
   assert.equal(migrated.journal, journal);
   assert.equal(migrated.journalSha256, createHash('sha256').update(journal).digest('hex'));
   assert.equal(migrated.revision, 41);
   assert.equal(journalReads, 1);
-  assert.equal(command.transport, 'objects');
-  assert.equal(command.manifestSha256, observation.manifestDigest);
-  assert.equal(command.archiveSha256, snapshot.backupDigest);
-  assert.equal(command.journalSha256, original.journalSha256);
+  assert.equal(migrated.archive.transport, 'objects');
+  assert.equal(migrated.archive.manifestDigest, observation.manifestDigest);
+  assert.equal(migrated.archive.digest, snapshot.backupDigest);
   assert.equal(refreshHostedPairTransport(migrated, observation), migrated);
   // Another selected backup cannot replace this original pair, even with the same bytes.
   assert.equal(refreshHostedPairTransport(original, { ...observation, backupId: 'new-current' }), original);

@@ -87,7 +87,6 @@ import { importNativeContribution } from './native-contribution.js';
 import { importNativeGitContribution } from './native-git-contribution.js';
 import { importBundle } from './work-contribution.js';
 import { deploymentWork, previewEnvironments, selectPreviewEnvironment } from './work-deployment.js';
-import { reconcileHostedWork } from './native-companion.js';
 import { historicalWork } from './native-work-history.js';
 import { laneReview, viewReview, readWorkDetail } from './work-detail.js';
 export class WorkService {
@@ -508,8 +507,6 @@ export class WorkService {
       ['inspect-native-objects', 'collect-native-objects'].includes(String(input.action))
     )
       return nativeObjects(this.store, input);
-    if (input && typeof input === 'object' && 'action' in input && input.action === 'reconcile-hosted-work')
-      return reconcileHostedWork(this.store, input, expectedRevision);
     if (
       input &&
       typeof input === 'object' &&

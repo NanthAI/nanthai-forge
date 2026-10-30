@@ -1,6 +1,5 @@
 import { AutoTag } from '../ui/signals';
 import { queueHref } from './queue-model';
-import { useGenerationFreshness } from '../ui/generation-freshness';
 // SPDX-License-Identifier: Apache-2.0
 import { Glyph, type GlyphName } from '../ui/Glyph';
 import { Avatar, DiffStat, Dot, StatusPill } from '../ui/primitives';
@@ -72,7 +71,6 @@ export function LaneRow({
   href: string;
   viewHref?: (id: string) => string;
 }) {
-  const freshness = useGenerationFreshness();
   const tone = fact?.tone ?? lane.tone;
   const text = fact?.text ?? lane.fact;
   const intent = fact ? fact.intent : lane.intent !== lane.name ? lane.intent : undefined;
@@ -101,16 +99,11 @@ export function LaneRow({
           <div className={`fx-row-fact fx-fact-${tone}`}>
             <Glyph
               name={
-                freshness.behind && tone === 'running'
-                  ? 'stale'
-                  : (fact?.glyph ??
-                    lane.queue?.glyph ??
-                    factGlyph[tone] ??
-                    (lane.checkpoints ? 'file' : 'waiting'))
+                fact?.glyph ?? lane.queue?.glyph ?? factGlyph[tone] ?? (lane.checkpoints ? 'file' : 'waiting')
               }
               size={12}
             />
-            <span title={fact?.detail ?? (freshness.behind ? `${text} · ${freshness.asOf}` : text)}>
+            <span title={fact?.detail ?? text}>
               {text}
               {lane.queue?.automatic && (
                 <>

@@ -290,82 +290,6 @@ test('metadata-tree manifest resolution reports logical work.json bytes through 
   );
 });
 
-test('reconcile progress identifies manifest, work.json bytes, journal export and local merge', async t => {
-  const { mkdtempSync, rmSync } = await import('node:fs');
-  const { tmpdir } = await import('node:os');
-  const { join } = await import('node:path');
-  const { randomUUID } = await import('node:crypto');
-  const { initNative } = await import('../dist/native-work.js');
-  const { WorkStore } = await import('../dist/work-store.js');
-  const { reconcileExchange } = await import('../dist/exchange-reconcile.js');
-  const root = mkdtempSync(join(tmpdir(), 'forge-reconcile-progress-'));
-  initNative(root);
-  const methods = ['manifest', 'download', 'journal', 'journalPage'];
-  const saved = methods.map(name => ConvexExchange.prototype[name]);
-  const token = process.env.FORGE_AUTH_TOKEN;
-  process.env.FORGE_AUTH_TOKEN = 'synthetic';
-  t.after(() => {
-    methods.forEach((name, i) => {
-      ConvexExchange.prototype[name] = saved[i];
-    });
-    if (token === undefined) delete process.env.FORGE_AUTH_TOKEN;
-    else process.env.FORGE_AUTH_TOKEN = token;
-    rmSync(root, { recursive: true, force: true });
-  });
-  const work = Buffer.from('{}'),
-    file = { path: 'work.json', sha256: digest(work), size: work.length };
-  const manifest = JSON.stringify({
-    schema: 1,
-    kind: 'forge-native-work-backup',
-    id: randomUUID(),
-    head: 'a'.repeat(64),
-    revision: 0,
-    files: [file],
-    unavailable: [],
-    coverage: 'Synthetic',
-  });
-  ConvexExchange.prototype.journalPage = async () => {
-    throw new ForgeError('JOURNAL_PAGING_UNAVAILABLE', 'Synthetic old server');
-  };
-  ConvexExchange.prototype.manifest = async function () {
-    this.onCall?.('projectExchangeActions:checkpoint', true);
-    this.onCall?.('projectExchangeActions:checkpoint', false);
-    return { json: manifest, digest: digest(manifest), size: Buffer.byteLength(manifest) };
-  };
-  ConvexExchange.prototype.download = async function () {
-    this.onDownloadProgress?.(file, 1);
-    return work;
-  };
-  ConvexExchange.prototype.journal = async function () {
-    this.onCall?.('projectWorkActions:exportJournal', true);
-    this.onCall?.('projectWorkActions:exportJournal', false);
-    return JSON.stringify({
-      source: { backupId: 'synthetic' },
-      base: { archiveSha256: digest(manifest) },
-      projectKey: 'synthetic',
-    });
-  };
-  const progress = [];
-  // Deliberately stop on invalid synthetic journal validation after entering local merge.
-  await assert.rejects(
-    reconcileExchange(
-      root,
-      {
-        url: 'https://example.convex.cloud',
-        projectId: 'synthetic',
-        backupId: 'synthetic',
-        operationId: randomUUID(),
-        revision: new WorkStore(root).revision(),
-      },
-      { onProgress: text => progress.push(text) },
-    ),
-  );
-  assert(progress.includes('manifest; waiting on projectExchangeActions:checkpoint'));
-  assert(progress.includes('work.json download 1/2 bytes'));
-  assert(progress.includes('journal export; waiting on projectWorkActions:exportJournal'));
-  assert(progress.includes('local merge'));
-});
-
 test('active call tracking clears completed and timed-out Convex calls', async t => {
   for (const stall of [false, true]) {
     const f = await fixture(t, (_req, res) => {
@@ -426,7 +350,7 @@ test('long actions keep the seven-minute header and total deadline; quick calls 
     assert.deepEqual(timers.slice(0, 2), [420000, 420000], path);
   }
   for (const [api, path] of [
-    ['query', 'projectWorkJournal:page'],
+    ['query', 'projectHostedChannels:current'],
     ['mutation', 'projectObjects:prepareBatch'],
     ['action', 'projectExchangeActions:checkpoint'],
     ['action', 'projectExchangeActions:downloadPart'],
@@ -454,7 +378,7 @@ test('long actions override the native HTTP header deadline at dispatch; quick c
   assert.equal(dispatched.length, 1);
   assert.equal(dispatched[0].headersTimeout, 420000);
   await fetch('https://fixture.invalid/api/query', {
-    body: JSON.stringify({ path: 'projectWorkJournal:page', args: [{}] }),
+    body: JSON.stringify({ path: 'projectHostedChannels:current', args: [{}] }),
   });
   assert.equal(dispatched.length, 1);
 });

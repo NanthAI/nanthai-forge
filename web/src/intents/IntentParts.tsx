@@ -1,4 +1,3 @@
-import { useGenerationFreshness } from '../ui/generation-freshness';
 import { ErrorToast } from '../ui/Toast';
 // SPDX-License-Identifier: Apache-2.0
 import { useUnsavedInput } from '../ui/NavigationGuard';
@@ -10,7 +9,7 @@ import { age, type Tone } from '../ui/status';
 import { Glyph } from '../ui/Glyph';
 import type { CockpitWork } from '../cockpit/model';
 import type { IntentRow } from './model';
-import { candidateCheckUnsynced, canReviewView } from '../views/intent-views';
+import { canReviewView } from '../views/intent-views';
 import type { NoteRow, ViewRow } from './IntentDetail';
 
 export function AddLane({ add }: { add: (name: string) => Promise<string | null> }) {
@@ -240,7 +239,6 @@ export function Candidates({
   records?: CockpitWork;
   base?: string;
 }) {
-  const freshness = useGenerationFreshness();
   const [allViews, setAllViews] = useState(false);
   return (
     <>
@@ -255,11 +253,7 @@ export function Candidates({
                 .map(view => {
                   const queue = row.lanes.find(lane => lane.queue?.viewId === view.id)?.queue;
                   const [tone, label] =
-                    queue?.state === 'not-run'
-                      ? ['plain' as const, 'Not run']
-                      : candidateCheckUnsynced(view, row.lanes, freshness.value)
-                        ? ['plain' as const, 'Check result not synced']
-                        : viewTone(view);
+                    queue?.state === 'not-run' ? ['plain' as const, 'Not run'] : viewTone(view);
                   const href = (viewHref ?? reviewHref)?.(view.id);
                   const landing = records?.channelMoves?.find(
                     move => move.viewId === view.id && move.status === 'accepted',

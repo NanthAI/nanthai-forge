@@ -125,20 +125,3 @@ export async function downloadHostedPair(
     return { ...part, contentType: 'application/gzip', repository: pair.name, head };
   });
 }
-export function companionHandoff(pair: HostedHandoffPair, operationId: string) {
-  return {
-    ...(pair.archive.transport === 'objects'
-      ? { transport: 'objects' as const, manifestSha256: pair.archive.manifestDigest }
-      : {}),
-    action: 'reconcile-hosted-work' as const,
-    operationId,
-    projectKey: pair.projectKey,
-    archivePath:
-      pair.archive.transport === 'objects'
-        ? '/absolute/path/to/original-exchange-directory'
-        : '/absolute/path/to/common-source.tar.gz',
-    archiveSha256: pair.archive.digest,
-    journalPath: '/absolute/path/to/hosted-work.json',
-    journalSha256: pair.journalSha256,
-  };
-}

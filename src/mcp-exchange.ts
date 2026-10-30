@@ -6,14 +6,12 @@ import {
   exchangeCommand,
   exchangeMigrateSchema,
   exchangePullSchema,
-  exchangeReconcileSchema,
   mainPullSchema,
 } from './exchange-cli.js';
 import { ForgeError } from './errors.js';
 export function registerExchangeTools(server: McpServer, root: string) {
   if (!process.env.FORGE_AUTH_TOKEN && !hasSavedAuth()) return;
   const command = z.discriminatedUnion('action', [
-    exchangeReconcileSchema.extend({ action: z.literal('reconcile') }),
     mainPullSchema.extend({ action: z.literal('open'), targetDirectory: z.string().min(1) }),
     exchangePullSchema.extend({ action: z.literal('restore'), targetDirectory: z.string().min(1) }),
     exchangePullSchema.extend({ action: z.literal('pull'), targetDirectory: z.string().min(1) }),
@@ -49,7 +47,7 @@ export function registerExchangeTools(server: McpServer, root: string) {
     'forge_exchange',
     {
       description:
-        'Exchange missing native source/artifact content and reusable large-file chunks with the current signed-in Forge project. Logical source hashes stay unchanged; upload counts/bytes describe physical transfers, not retained history or performance guarantees. Reconcile merges supported hosted metadata into this owner; open checks out selected hosted main in targetDirectory; restore (legacy pull) restores an independent owner. No source history deletion or automatic acceptance. Retain all original IDs after unknown outcomes. Auth comes from nforge login or FORGE_AUTH_TOKEN.',
+        'Exchange missing native source/artifact content and reusable large-file chunks with the current signed-in Forge project. Logical source hashes stay unchanged; upload counts/bytes describe physical transfers, not retained history or performance guarantees. Open checks out selected hosted main in targetDirectory; restore (legacy pull) restores an independent owner. No source history deletion or automatic acceptance. Retain all original IDs after unknown outcomes. Auth comes from nforge login or FORGE_AUTH_TOKEN.',
       inputSchema: { command },
       annotations: {
         readOnlyHint: false,
@@ -59,12 +57,8 @@ export function registerExchangeTools(server: McpServer, root: string) {
       },
     },
     async ({ command }) => {
-      if (command.action === 'pull' || command.action === 'open' || command.action === 'restore') {
-        const { action, targetDirectory, ...request } = command;
-        return run(action, request, targetDirectory);
-      }
-      const { action, ...request } = command;
-      return run(action, request);
+      const { action, targetDirectory, ...request } = command;
+      return run(action, request, targetDirectory);
     },
   );
   server.registerTool(

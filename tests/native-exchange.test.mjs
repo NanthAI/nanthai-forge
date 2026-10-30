@@ -51,43 +51,7 @@ function fixture(t) {
   };
   return { dir, root, w, act, intent, lane, objects, transport, uploads: () => uploads };
 }
-test('companion metadata preserves new lifecycle fields and promotes the received reader version without erasing local history', async () => {
-  const { mergeCompanion } = await import('../dist/native-companion.js'),
-    { workSchema } = await import('../dist/work-types.js');
-  const intent = {
-    id: randomUUID(),
-    outcome: 'Task',
-    constraints: '',
-    base: 'a'.repeat(64),
-    status: 'active',
-    notes: [],
-    createdAt: 'start',
-  };
-  const base = workSchema.parse({
-      schema: 7,
-      revision: 0,
-      nativeHead: 'a'.repeat(64),
-      intents: [intent],
-      lanes: [],
-      views: [],
-    }),
-    local = structuredClone(base),
-    hosted = structuredClone(base);
-  hosted.schema = 8;
-  hosted.intents[0].status = 'completed';
-  hosted.intents[0].lifecycle = [{ from: 'active', to: 'completed', at: 'done' }];
-  const result = mergeCompanion(base, local, hosted);
-  assert.deepEqual(result.conflicts, []);
-  assert.equal(result.merged.schema, 8);
-  assert.deepEqual(result.merged.intents[0].lifecycle, hosted.intents[0].lifecycle);
-  local.intents[0].status = 'ready';
-  local.intents[0].lifecycle = [{ from: 'active', to: 'ready', at: 'local' }];
-  assert.ok(mergeCompanion(base, local, hosted).conflicts.some(item => item.field === 'status'));
-  const common = structuredClone(hosted),
-    changed = structuredClone(hosted);
-  changed.intents[0].lifecycle = [];
-  assert.ok(mergeCompanion(common, hosted, changed).conflicts.some(item => item.field === 'lifecycle'));
-});
+
 test('optional agent exchange tools disclose migration semantics and require account-token configuration', async t => {
   const { registerExchangeTools } = await import('../dist/mcp-exchange.js'),
     saved = process.env.FORGE_AUTH_TOKEN,

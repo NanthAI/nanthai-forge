@@ -118,10 +118,7 @@ test('owner grants retry-safe reader access; reader sees real Work with no write
     [],
   );
   const before = structuredClone(s.tables);
-  await assert.rejects(
-    modules.projectWorkActions.acceptChannel._handler(s.ctx, { projectId: 'project', command: '{}' }),
-    error => error.data?.code === 'CLI_UPGRADE_REQUIRED',
-  );
+
   const attempts = [
     () => modules.projectWork.append._handler(s.ctx, { projectId: 'project', owner: 'reader' }),
     () => modules.projectAutonomy.set._handler(s.ctx, { projectId: 'project', command: '{}' }),

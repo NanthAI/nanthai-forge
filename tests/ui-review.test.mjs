@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { moduleUrl } from './convex-module.mjs';
-const { reviewGroups, reviewViewLabel } = await import(moduleUrl('../web/src/lane/review-model.ts'));
+const { reviewGroups, reviewViewLabel } = await import(moduleUrl('../web/src/review/review-model.ts'));
 const save = (head, saveIndex, at, actor = null) => ({ head, saveIndex, at, message: `Save ${head}`, actor });
 const file = (path, laneId, saves) => ({ path, contributors: [{ laneId, saves }] });
 test('review cohorts combine files from the same save without combining different Lanes or losing older saves', () => {
@@ -45,7 +45,7 @@ test('review labels number Candidates within their Intent in build order', () =>
 test('historical Review replaces decision controls with its recorded disposition', async () => {
   const { createElement: h } = await import('react');
   const { renderToStaticMarkup } = await import('react-dom/server');
-  const { ReviewDisposition } = await import(moduleUrl('../web/src/lane/ReviewDisposition.tsx'));
+  const { ReviewDisposition } = await import(moduleUrl('../web/src/review/ReviewDisposition.tsx'));
   const accepted = renderToStaticMarkup(
     h(ReviewDisposition, { acceptance: { at: '2026-10-15T10:00:00Z', actor: { name: 'Maya' } } }),
   );

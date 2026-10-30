@@ -3,7 +3,6 @@ import { OwnerDecisionsPanel } from '../decisions/OwnerDecisionsPanel';
 import { useOwnerDecisions } from '../decisions/context';
 import { decisionTimeline } from '../decisions/model';
 import { queueHref } from '../cockpit/queue-model';
-import { useGenerationFreshness } from '../ui/generation-freshness';
 // SPDX-License-Identifier: Apache-2.0
 import { useState, type ReactNode } from 'react';
 import { Menu } from '../ui/Menu';
@@ -118,7 +117,6 @@ export function IntentDetailView({
   timeline = [...timeline, ...decisionTimeline(ownerDecisions.records, row.id)].sort(
     (a, b) => new Date(b.at).getTime() - new Date(a.at).getTime(),
   );
-  const freshness = useGenerationFreshness();
   views = views.map(view => ({
     ...view,
     queue: row.lanes.find(lane => lane.queue?.viewId === view.id)?.queue,
@@ -156,9 +154,7 @@ export function IntentDetailView({
     records?.runs
       .filter(run => run.viewId === ready.id && run.head === ready.head && run.status === 'passed')
       .sort((a, b) => (b.endedAt ?? '').localeCompare(a.endedAt ?? ''))[0]?.endedAt;
-  const facts = records ? laneFacts(records, row.lanes, now, freshness.value !== null) : new Map();
-  // Hosted copies can lag the owner machine; don't count unsynced completions as not landed.
-  const unsynced = [...facts.values()].filter(fact => fact.text === 'Completed on owner machine').length;
+  const facts = records ? laneFacts(records, row.lanes, now, true) : new Map();
   const details = (
     <Panel
       title="Details"
@@ -220,15 +216,12 @@ export function IntentDetailView({
                   <span>
                     {row.lanes.length} {row.lanes.length === 1 ? 'Lane' : 'Lanes'} ·{' '}
                     {row.lanes.filter(lane => lane.accepted).length} landed
-                    {unsynced > 0 && <> · {unsynced} not yet synced</>}
                     {queued > 0 && <> · {queued} queued</>}
                     {waitingForYou > 0 && <> · {waitingForYou} waiting for you</>}
                   </span>
                   <span>
                     {views.length} {views.length === 1 ? 'Candidate' : 'Candidates'}
-                    {(unsynced === 0 || views.some(view => view.accepted)) && (
-                      <> · {views.filter(view => view.accepted).length} accepted</>
-                    )}
+                    <> · {views.filter(view => view.accepted).length} accepted</>
                   </span>
                   {row.createdAt && (
                     <span>

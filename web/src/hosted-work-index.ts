@@ -50,7 +50,6 @@ export type WorkIndexWorkspace = {
   landingWorker?: import('../../src/pending-status').PendingStatus['landingWorker'];
   repairNotices?: import('../../src/agent-conflict-notice').ConflictNotice[];
   generationId: string;
-  freshness?: import('../../src/hosted-freshness').HostedFreshness;
   revision: number;
   backupId: Id<'projectBackups'>;
   backupDigest: string;

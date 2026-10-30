@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Explicit synthetic local evidence for the real HostedReview component, without a backend.
 import { createRoot } from 'react-dom/client';
-import { HostedReview } from '../../web/src/lane/HostedReview';
+import { HostedReview } from '../../web/src/review/HostedReview';
 import '../../web/src/legacy.css';
 import '../../web/src/ui/tokens.css';
 import '../../web/src/ui/components.css';

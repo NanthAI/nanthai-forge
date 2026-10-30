@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 import { useAttention } from './attention-context';
-import { useGenerationFreshness } from '../ui/generation-freshness';
-import { HostedFreshnessLine } from './HostedFreshnessLine';
 import { useMemo } from 'react';
 import { useUser } from '@clerk/react';
 import { useConvexConnectionState, useQuery } from 'convex/react';
@@ -18,7 +16,6 @@ import { latestRun } from '../cockpit/model';
  * the project pages already prepared; until then it shows only the connection state.
  */
 export function HostedStrip({ projectId }: { projectId: Id<'hostedProjects'> }) {
-  const freshness = useGenerationFreshness();
   const attention = useAttention();
   const viewer = useUser().user?.id;
   const value = useQuery(workIndex.workspace, { projectId });
@@ -42,7 +39,7 @@ export function HostedStrip({ projectId }: { projectId: Id<'hostedProjects'> }) 
     main?.actor && main.actor === viewer
       ? 'you'
       : (main?.actorDisplayName ?? main?.acceptedBy?.name ?? undefined);
-  const live = freshness.behind ? null : (
+  const live = (
     <LiveStatus
       {...(connection.isWebSocketConnected || !connection.hasEverConnected ? {} : { error: 'offline' })}
     />
@@ -56,8 +53,6 @@ export function HostedStrip({ projectId }: { projectId: Id<'hostedProjects'> }) 
       {...(by ? { by: { name: by } } : {})}
       {...(main?.automatic ? { automatic: true } : {})}
       pending={!workspace || moves.initialLoading || localMoves.initialLoading || channels.initialLoading}
-      stale={freshness.behind ? freshness.asOf : undefined}
-      freshness={<HostedFreshnessLine />}
       live={live}
     />
   );

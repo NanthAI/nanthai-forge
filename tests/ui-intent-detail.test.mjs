@@ -246,71 +246,23 @@ test('Candidate rows reuse recorded diffstats and omit unknown totals', () => {
   assert.doesNotMatch(candidates, /fx-diffstat|\d files?\b|Unknown|Loading/);
 });
 
-test('hosted missing checks distinguish completed inputs and owner lag from an unchecked Candidate', async () => {
-  const { GenerationFreshness } = await import(moduleUrl('../web/src/ui/generation-freshness.ts'));
-  const { candidateCheckUnsynced } = await import(moduleUrl('../web/src/views/intent-views.ts'));
+test('hosted Candidate and closure labels use recorded hosted facts', async () => {
   const { candidateState } = await import(moduleUrl('../web/src/views/WorkMap.tsx'));
   const { viewStatus } = await import(moduleUrl('../web/src/views/model.ts'));
-  const freshness = {
-    syncedAt: now,
-    sourceRevision: 1,
-    mainHead: 'main',
-    machine: null,
-    ownerReport: { revision: 1, reportedAt: now },
-    push: null,
-  };
-  const unchecked = { ...records, runs: [] };
-  const render = (work, value) =>
-    html(
-      h(
-        GenerationFreshness.Provider,
-        { value },
-        h(IntentDetailView, {
-          ...props,
-          records: work,
-          row: intentRows(work.intents, cockpitLanes(work))[0],
-          views: intentViews(work, 'i'),
-        }),
-      ),
-    );
-  assert.match(render(unchecked, null), /Not checked/);
-  assert.match(render(unchecked, freshness), /Not checked/);
-  const ahead = { ...freshness, ownerReport: { revision: 2, reportedAt: now } };
-  const mainAhead = { ...freshness, machine: { name: 'Owner', mainHead: 'new', reportedAt: now + 1 } };
-  for (const value of [ahead, mainAhead]) {
-    assert.match(render(unchecked, value), /Check result not synced/);
-    assert.doesNotMatch(render(unchecked, value), /Not checked/);
-  }
-  const completed = structuredClone(unchecked);
-  completed.lanes[0].state = 'completed';
-  const markup = render(completed, freshness);
-  assert.match(markup, /Completed on owner machine/);
-  assert.match(markup, /0 landed · 1 not yet synced/);
-  assert.doesNotMatch(markup, /0 accepted/);
-  assert.match(markup, /title="Landing details arrive with the next push"/);
-  assert.match(markup, /Check result not synced/);
-  assert.doesNotMatch(markup, /Closed without landing|Not checked|Check passed/);
-  assert.match(markup, /<title>Candidate · Check result not synced/);
-  assert.match(render(completed, null), /Closed without landing/);
-  const view = intentViews(completed, 'i')[0];
-  const lanes = cockpitLanes(completed);
-  assert.equal(candidateCheckUnsynced(view, lanes, freshness), true);
-  for (const extra of [
-    { accepted: true },
-    { supersededBy: 'new' },
-    { status: 'conflict' },
-    { check: 'passed' },
-    { check: 'failed' },
-  ])
-    assert.equal(candidateCheckUnsynced({ ...view, ...extra }, lanes, ahead), false);
-  assert.equal(
-    candidateCheckUnsynced({ ...view, inputs: [{ laneId: 'a', head: 'old' }] }, lanes, freshness),
-    false,
+  const work = structuredClone({ ...records, runs: [] });
+  work.lanes[0].state = 'completed';
+  const markup = html(
+    h(IntentDetailView, {
+      ...props,
+      records: work,
+      row: intentRows(work.intents, cockpitLanes(work))[0],
+      views: intentViews(work, 'i'),
+    }),
   );
-  assert.equal(candidateCheckUnsynced(view, lanes, null), false);
-  assert.equal(candidateState(view, true), 'Check result not synced');
-  assert.deepEqual(viewStatus({ status: 'clean' }, undefined, true), ['plain', 'Check result not synced']);
-  assert.deepEqual(viewStatus({ status: 'accepted' }, undefined, true), ['passed', 'Accepted']);
-  assert.match(render(records, ahead), /verify passed/);
-  assert.doesNotMatch(render(records, ahead), /Check result not synced/);
+  assert.match(markup, /Closed without landing/);
+  assert.match(markup, /Not checked/);
+  assert.doesNotMatch(markup, /owner machine|not yet synced|not synced|next push/);
+  assert.equal(candidateState(intentViews(work, 'i')[0]), 'Not checked');
+  assert.deepEqual(viewStatus({ status: 'clean' }), ['plain', 'Not checked']);
+  assert.deepEqual(viewStatus({ status: 'accepted' }), ['passed', 'Accepted']);
 });

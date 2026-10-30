@@ -5,8 +5,8 @@ import { Glyph } from '../ui/Glyph';
 import { ErrorToast } from '../ui/Toast';
 import { LandingProgress, LandingRail } from './LandingProgress';
 import { landingState, elapsed, type LandingRead } from './landing-model';
-import { RequestChanges, type ReviewRecipient } from './RequestChanges';
-import { ReviewDisposition, type ReviewAcceptance } from './ReviewDisposition';
+import { RequestChanges, type ReviewRecipient } from '../review/RequestChanges';
+import { ReviewDisposition, type ReviewAcceptance } from '../review/ReviewDisposition';
 import './landing.css';
 export type LandingDecisionProps = {
   read?: LandingRead | null;

@@ -101,45 +101,6 @@ for (const actor of [null, 'stranger'])
     await assert.rejects(f.applyCutover(f.cutoverRequest, actor), code('PROJECT_UNAVAILABLE'));
   });
 
-test('old CLI gets one actionable structured error; current/new CLI and native-owner discovery stay available', async () => {
-  const f = await setup();
-  const discover = clientVersion =>
-    f.cutoverCall('capabilities', discovery.capabilities, { ...(clientVersion ? { clientVersion } : {}) });
-  await discover(); // bound does not imply hosted authority
-  await f.applyCutover();
-  for (const version of [undefined, '0.2.9', '0.3.0'])
-    await assert.rejects(discover(version), e => {
-      assert.equal(e.data.code, 'CLI_UPGRADE_REQUIRED');
-      assert.match(e.data.message, /nforge to 0\.3\.1/);
-      assert.match(e.data.message, /npm install -g/);
-      return true;
-    });
-  for (const version of ['0.3.1', '0.4.0', '1.0.0'])
-    assert.equal(JSON.parse(await discover(version)).authority.mode, 'server');
-  await assert.rejects(
-    legacy.acceptChannel._handler(
-      {
-        auth: { getUserIdentity: async () => ({ subject: 'owner' }) },
-        runQuery: async () => f.tables.hostedProjects.get(f.projectId),
-      },
-      {
-        projectId: f.projectId,
-        operationId: randomUUID(),
-        revision: 0,
-        command: '{}',
-      },
-    ),
-    code('CLI_UPGRADE_REQUIRED'),
-  );
-  assert.equal(f.tables.projectHostedAcceptances.size, 0);
-  await f.applyCutover({ operationId: randomUUID(), mode: 'native-owner', pins: await f.pins() });
-  assert.equal(
-    JSON.parse(await discover('0.3.0')).authority.mode,
-    'native-owner',
-    'rollback/native authority does not acquire a hosted-only version restriction',
-  );
-});
-
 test('version comparison handles numeric components and refuses missing/malformed prereleases', () => {
   for (const value of ['0.3.1', '0.3.10', '0.10.0', '1.0.0']) requireCutoverVersion(value);
   for (const value of [undefined, '0.3.0', '0.2.99', '0.3.1-beta', 'bad'])
@@ -174,5 +135,29 @@ test('a cut-over project cannot bypass pinned rollback through the old mode-only
       mode: 'native-owner',
     }),
     code('SOURCE_AUTHORITY_PIN_REQUIRED'),
+  );
+});
+
+test('old CLI gets one actionable structured error; current/new CLI and native-owner discovery stay available', async () => {
+  const f = await setup();
+  const discover = clientVersion =>
+    f.cutoverCall('capabilities', discovery.capabilities, { ...(clientVersion ? { clientVersion } : {}) });
+  await discover(); // bound does not imply hosted authority
+  await f.applyCutover();
+  for (const version of [undefined, '0.2.9', '0.3.0'])
+    await assert.rejects(discover(version), e => {
+      assert.equal(e.data.code, 'CLI_UPGRADE_REQUIRED');
+      assert.match(e.data.message, /nforge to 0\.3\.1/);
+      assert.match(e.data.message, /npm install -g/);
+      return true;
+    });
+  for (const version of ['0.3.1', '0.4.0', '1.0.0'])
+    assert.equal(JSON.parse(await discover(version)).authority.mode, 'server');
+  assert.equal(f.tables.projectHostedAcceptances.size, 0);
+  await f.applyCutover({ operationId: randomUUID(), mode: 'native-owner', pins: await f.pins() });
+  assert.equal(
+    JSON.parse(await discover('0.3.0')).authority.mode,
+    'native-owner',
+    'rollback/native authority does not acquire a hosted-only version restriction',
   );
 });

@@ -11,7 +11,6 @@ import { WorkStore } from '../dist/work-store.js';
 import { exportNativeWork, restoreNativeWork } from '../dist/native-backup.js';
 import { pullNativeExchange } from '../dist/native-exchange.js';
 import { transferArchiveFixture } from './native-archive-fixture.mjs';
-import { reconcileHostedWork } from '../dist/native-companion.js';
 import { applyHostedEvent, metadataRequest, parseWorkBytes, workBytes } from '../dist/work-metadata.js';
 import { migrateHostedIntents } from '../dist/work-hosted-intents.js';
 import { digest } from '../dist/hash.js';
@@ -80,7 +79,7 @@ function journalFixture(base, archiveSha256, manifestBytes, original) {
   };
 }
 
-test('object reconciliation, pull and archive restore replay current-format source returns', async t => {
+test('object pull and archive restore replay current-format source returns', async t => {
   const dir = mkdtempSync(join(tmpdir(), 'forge-exchange-cutover-'));
   t.after(() => rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const root = join(dir, 'owner');
@@ -121,40 +120,9 @@ test('object reconciliation, pull and archive restore replay current-format sour
     journalBytes = JSON.stringify(f.journal);
   writeFileSync(journalPath, journalBytes);
   const exported = await exportNativeWork(store, initial.revision, true);
-  store.save(f.local);
-  let candidate;
-  const command = {
-    action: 'reconcile-hosted-work',
-    transport: 'objects',
-    preserveLocalSource: true,
-    operationId: randomUUID(),
-    projectKey: f.journal.projectKey,
-    archivePath: directory,
-    archiveSha256: checkpoint.backupId,
-    manifestSha256: digest(manifestBytes),
-    journalPath,
-    journalSha256: digest(journalBytes),
-  };
-  const result = await reconcileHostedWork(store, command, f.local.revision, {
-    candidate: structuredClone(f.local),
-    onCandidate: data => {
-      candidate = data;
-    },
-  });
-  assert.equal(result.result.status, 'reconciled');
-  for (const data of [store.load(), candidate]) {
-    assert.equal(data.schema, 24);
-    assert.deepEqual(data.hostedEvents, f.hosted.hostedEvents);
-    assert.deepEqual(data.intents[0].notes, f.hosted.intents[0].notes);
-    assert.deepEqual(data.intents[0].conversation, f.hosted.intents[0].conversation);
-  }
   const pulled = join(dir, 'pulled');
   await pullNativeExchange(checkpoint.backupId, pulled, transport, { journalPath });
   assert.deepEqual(new WorkStore(pulled).load().intents, f.hosted.intents);
-  assert.equal(
-    (await reconcileHostedWork(store, command, store.load().revision)).result.status,
-    'reconciled',
-  );
 
   // Independent archive transport uses the same event sequence and cutover rules.
 

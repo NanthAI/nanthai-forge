@@ -1,6 +1,6 @@
 # Source exchange
 
-`nforge exchange` checks out hosted source, restores retained checkpoints, reconciles compatible historical metadata and migrates older archives. Saves and landings use the hosted Lane APIs. Exchange push and automatic exchange are retired.
+`nforge exchange` checks out hosted source, restores retained checkpoints and migrates older archives. Saves and landings use the hosted Lane APIs. Exchange push and automatic exchange are retired.
 
 Run `nforge login DEPLOYMENT_URL` and approve the device in Forge. Saved credentials are used automatically; `FORGE_AUTH_TOKEN` remains an environment override for CI. Never put credentials in request files. Owners can migrate retained archives. Contributors can read accessible checkpoints and upload immutable proposal objects. A scoped source grant cannot upload.
 
@@ -39,7 +39,6 @@ Rollback folds hosted work through `recover` before reverse CAS at a higher epoc
 Explicit project IDs and original request files remain supported:
 
 ```sh
-nforge exchange ROOT reconcile --command-file forge-reconcile.json
 nforge exchange NEW_DIR pull --command-file forge-pull.json
 nforge exchange ROOT migrate-archive --command-file forge-migrate.json
 ```
@@ -75,30 +74,16 @@ Schema-1 byte trees and schema-2 stable-key record catalogs remain readable for 
 
 The exchange publication delta planner and its continuation/attempt stores no longer execute. Their table definitions and document validators remain until the separate table purge. Shared byte-tree, upload, download and record-reader modules remain because hosted checkout/save/seed, proposal import, archive migration, cleanup and read projections call them.
 
-## Receive
+## Recovery
 
-Native object reconciliation first reads `projectWorkJournal:page` metadata and
-proves an exact local base using the hosted manifest digest, its `work.json` hash,
-source head and initial revision. Retained outgoing exchanges and earlier receive
-or download caches supply those bytes. It replays the already received local event
-prefix, checks the preceding event's SHA-256 against the server, then downloads only
-new events in revision order. Every page rechecks current project access and the
-same checkpoint, revision and Intent migration pins. The query reads no source
-objects or complete Work; pages read at most 50 rows with a 256 KiB read/response
-budget (one existing larger event remains readable).
+Hosted metadata reconciliation and exchange baseline hints have been removed. Hosted Work is
+the current record; recovery restores a pinned source and Work pair into an independent owner.
+Historic companion receipts and journal replay remain readable.
 
-An unprovable base or event boundary logs `journal delta fallback` with its reason.
-Full checkpoint recovery reuses hash-verified retained downloads, including receive
-directories written by older CLIs. Resolved metadata is retained before journal
-export, so an interrupted export does not redownload the same large Work. Current
-servers still return journal pages after base recovery. Older deployments use the
-existing full `exportJournal` action; older CLIs keep that action unchanged. Access
-failures and stale snapshot pins remain errors. Local companion validation, merge
-conflicts, operation retries and final revision/CAS checks are unchanged. This
-reduces network and hosted storage reads; local replay and merging still scale
-with retained Work. Live latency and billing require separate measurement.
-
-`reconcile` merges hosted Work into an existing owner that already has the common source. It takes `backupId` and `revision`, and leaves Lane files and unrelated records alone. `restore` builds a new owner from `backupId` (also accepted by the legacy `pull` request). Optional `cacheRoot` reuses source bytes from another owner, and `journalPath` supplies the hosted Work journal. Restore checks every hash, never runs repository commands, and never overwrites an existing directory.
+`restore` builds a new owner from `backupId` (also accepted by the legacy `pull` request).
+Optional `cacheRoot` reuses source bytes from another owner, and `journalPath` supplies the
+hosted Work journal. Restore checks every hash, never runs repository commands, and never
+overwrites an existing directory.
 
 ## Migrate an older archive
 
@@ -128,11 +113,8 @@ same deadlines. Server-side R2 and archive range reads use the same 30-second/tw
 bounds with one retry; range-less archive responses still discard their prefix and
 cancel the unused suffix.
 
-The five-second reconcile heartbeat names manifest loading, work.json download
-(with logical bytes reconstructed out of total), journal export or local merge,
-and the active Convex function or R2 GET when waiting for its reply. R2 signed GETs are checked
-for every uncached object, even with new R2 writes disabled. Signing returns no URL
-for Convex-stored objects, which retain their existing download fallback. Previously
+R2 signed GETs are checked for every uncached object, even with new R2 writes disabled. Signing
+returns no URL for Convex-stored objects, which retain their existing download fallback. Previously
 committed R2 rows remain readable with `FORGE_BLOBS` unset; the write flag and project
 opt-in do not change their storage location.
 
@@ -154,7 +136,7 @@ For an object proposal, download its receive request (`{url,projectId,proposalId
 nforge exchange ROOT receive-proposal --command-file forge-proposal-receive.json
 ```
 
-This downloads and validates the proposal, then imports it into a separate Lane in the existing owner using the original operation ID. Receive the hosted Intent first through the existing Work reconciliation flow. `pull-proposal` with `{url,projectId,proposalId,cacheRoot?}` is also available to retain an unpacked export in a fresh directory. Use that directory as `archivePath` in the existing `import-native-contribution` request and its manifest SHA-256 as `archiveSha256`. These compatibility field names also accept local archives with their original compressed digest. The importer validates complete source closure and creates a separate Lane; contributor Work and check claims never become owner evidence.
+This downloads and validates the proposal, then imports it into a separate Lane in the existing owner using the original operation ID. Use an existing local Intent when importing into a retained native owner. `pull-proposal` with `{url,projectId,proposalId,cacheRoot?}` is also available to retain an unpacked export in a fresh directory. Use that directory as `archivePath` in the existing `import-native-contribution` request and its manifest SHA-256 as `archiveSha256`. These compatibility field names also accept local archives with their original compressed digest. The importer validates complete source closure and creates a separate Lane; contributor Work and check claims never become owner evidence.
 
 ## Hosted main client checkout
 

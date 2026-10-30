@@ -172,7 +172,7 @@ test('failed Add Lane keeps both its name and open form', async () => {
 test('other-Channel acceptance names its destination', async () => {
   const { createElement } = await import('react');
   const { renderToStaticMarkup } = await import('react-dom/server');
-  const { ReviewDisposition } = await import(moduleUrl('../web/src/lane/ReviewDisposition.tsx'));
+  const { ReviewDisposition } = await import(moduleUrl('../web/src/review/ReviewDisposition.tsx'));
   const html = renderToStaticMarkup(
     createElement(ReviewDisposition, {
       acceptance: { channel: 'release', at: new Date().toISOString(), actor: { name: 'Maya' } },
@@ -183,7 +183,7 @@ test('other-Channel acceptance names its destination', async () => {
 });
 
 test('rejected request changes keeps the review draft and reports failure', async () => {
-  const h = await formHarness('lane/RequestChanges.tsx');
+  const h = await formHarness('review/RequestChanges.tsx');
   const props = {
     draftKey: 'synthetic',
     send: async () => {

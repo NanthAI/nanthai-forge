@@ -51,7 +51,7 @@ test('failure markers cover project compiler and linter output without treating 
 test('Review accepts a compact hosted run summary without assuming a full check object', async () => {
   const { createElement } = await import('react');
   const { renderToStaticMarkup } = await import('react-dom/server');
-  const { ReviewCheck } = await import(moduleUrl('../web/src/lane/ReviewCheck.tsx'));
+  const { ReviewCheck } = await import(moduleUrl('../web/src/review/ReviewCheck.tsx'));
   const html = renderToStaticMarkup(
     createElement(ReviewCheck, {
       run: {

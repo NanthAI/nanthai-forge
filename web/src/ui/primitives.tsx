@@ -1,7 +1,6 @@
-import { useGenerationFreshness } from './generation-freshness';
 import { ErrorToast } from './Toast';
 // SPDX-License-Identifier: Apache-2.0
-import { useId, useState, type AnchorHTMLAttributes, type ButtonHTMLAttributes, type ReactNode } from 'react';
+import { useState, type AnchorHTMLAttributes, type ButtonHTMLAttributes, type ReactNode } from 'react';
 import { Glyph, type GlyphName } from './Glyph';
 import { concepts, type Concept } from './concepts';
 import { hue, initials, toneLabel, type Tone } from './status';
@@ -104,23 +103,10 @@ export function StatusPill({
   children?: ReactNode;
   glyph?: GlyphName;
 }) {
-  const freshness = useGenerationFreshness();
-  const tooltipId = useId();
-  const muted = freshness.behind && ['active', 'running', 'waiting'].includes(tone);
   return (
-    <span
-      title={title}
-      className={`fx-st fx-tone-${muted ? 'stale' : tone}`}
-      aria-describedby={muted ? tooltipId : undefined}
-      tabIndex={muted ? 0 : undefined}
-    >
-      <Glyph name={muted ? 'stale' : (glyph ?? toneGlyph[tone])} size={11} />
+    <span title={title} className={`fx-st fx-tone-${tone}`}>
+      <Glyph name={glyph ?? toneGlyph[tone]} size={11} />
       {children ?? toneLabel[tone]}
-      {muted && (
-        <span role="tooltip" id={tooltipId} className="fx-info-tip">
-          {freshness.asOf}
-        </span>
-      )}
     </span>
   );
 }

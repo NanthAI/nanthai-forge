@@ -11,19 +11,6 @@ import { ForgeError, invariant } from './errors.js';
 export const hostedWorkRequestSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('policy') }).strict(),
   policyWriteSchema,
-  z
-    .object({
-      action: z.literal('accept'),
-      authorityEpoch: z.number().safe().nonnegative().optional(),
-      operationId: z.uuid(),
-      revision: z.number().int().nonnegative(),
-      viewId: z.uuid(),
-      head: z.string().min(1),
-      archiveSha256: z.string().min(1),
-      channel: z.string().trim().min(1).default('main'),
-      previousId: z.string().nullable(),
-    })
-    .strict(),
   z.object({ action: z.literal('workspace') }).strict(),
   z.object({ action: z.literal('migrate-record-details'), operationId: z.uuid() }).strict(),
   z
@@ -149,7 +136,7 @@ export async function dispatchHostedWork(
   invariant(
     parsed.success,
     'BAD_ARGUMENT',
-    'Use workspace, records, detail, policy, set-policy or pinned accept.',
+    'Use workspace, records, detail, policy, set-policy or migrate-record-details.',
   );
   try {
     const request = parsed.data;
@@ -168,17 +155,7 @@ export async function dispatchHostedWork(
       } while (!result.complete);
       return result;
     }
-    if (request.action === 'accept') {
-      const { action: _action, operationId, revision, authorityEpoch, ...pins } = request;
-      void _action;
-      return await client.action(makeFunctionReference('projectWorkActions:acceptChannel'), {
-        projectId,
-        operationId,
-        revision,
-        command: JSON.stringify({ action: 'accept-hosted-channel', ...pins, agent: true }),
-        ...(authorityEpoch === undefined ? {} : { authorityEpoch }),
-      });
-    }
+
     if (request.action === 'policy')
       return await client.query(makeFunctionReference('projectAutonomy:read'), { projectId });
     if (request.action === 'set-policy') {

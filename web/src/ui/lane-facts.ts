@@ -132,10 +132,7 @@ export function laneFacts(
           open: false,
           tone: 'plain',
           label: 'Done',
-          text: hosted
-            ? 'Completed on owner machine'
-            : `Closed without landing${closed ? ` ${age(closed.at, now, true)}` : ''}`,
-          ...(hosted ? { detail: 'Landing details arrive with the next push' } : {}),
+          text: `Closed without landing${closed ? ` ${age(closed.at, now, true)}` : ''}`,
         });
       continue;
     }

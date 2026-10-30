@@ -1,10 +1,10 @@
 import type { SemanticConflict } from '../../../src/intent-semantic-conflict';
-import { readTestContract } from './test-contract-api';
+import { readTestContract } from '../lane/test-contract-api';
 import { candidateTestContract, type IntentTestContract } from '../../../src/intent-test-contract';
 import { OwnerDecisionsDisclosure } from '../decisions/OwnerDecisionsPanel';
 import { Breadcrumbs, workHref } from '../shell/Breadcrumbs';
 import { useReadRetry } from '../ui/read-retry';
-import { ConversationScope } from './ConversationScope';
+import { ConversationScope } from '../lane/ConversationScope';
 // SPDX-License-Identifier: Apache-2.0
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAction, useConvex, useQuery } from 'convex/react';
@@ -19,21 +19,21 @@ import { hostedError } from '../snapshot';
 import { ExactRecord, Panel, StatusPill } from '../ui/primitives';
 import { BriefSourceContext, hostedBriefs } from '../cockpit/brief';
 import { CopyPrompt } from '../cockpit/CopyPrompt';
-import { HostedLaneChanges } from './HostedLaneChanges';
+import { HostedLaneChanges } from '../lane/HostedLaneChanges';
 import { ReviewStory } from './ReviewStory';
-import NativeSourceReview from '../NativeSourceReview';
-import { HostedConversation } from './HostedConversation';
+import SourceComments from './SourceComments';
+import { HostedConversation } from '../lane/HostedConversation';
 import { PendingWrite } from '../pending-write';
 import { useCoordination } from '../cockpit/coordination';
 import { reviewViewLabel } from './review-model';
 import type { ReviewRead } from './review-model';
 import { protectedMatches } from '../../../src/autonomy-policy';
 import { overlappingPaths } from '../../../src/coordination-paths';
-import { HostedRunDetail } from './HostedRunDetail';
-import { LandingDecision } from './LandingDecision';
-import { useHostedLanding } from './use-hosted-landing';
-import { landingState, mainAncestryGate, landingRunSummary, feedbackWorking } from './landing-model';
-import { landingMain } from './landing-api';
+import { HostedRunDetail } from '../lane/HostedRunDetail';
+import { LandingDecision } from '../lane/LandingDecision';
+import { useHostedLanding } from '../lane/use-hosted-landing';
+import { landingState, mainAncestryGate, landingRunSummary, feedbackWorking } from '../lane/landing-model';
+import { landingMain } from '../lane/landing-api';
 import { ReviewCheck } from './ReviewCheck';
 
 type Props = {
@@ -412,7 +412,7 @@ export function HostedReview({
             </ConversationScope>
             <details className="fx-panel">
               <summary>Line comments</summary>
-              <NativeSourceReview
+              <SourceComments
                 projectId={projectId}
                 workspace={workspace}
                 intentId={view.intentId}

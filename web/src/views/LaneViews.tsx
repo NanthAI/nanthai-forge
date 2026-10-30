@@ -1,4 +1,3 @@
-import { useGenerationFreshness } from '../ui/generation-freshness';
 import { usePageCritical } from '../ui/page-critical';
 import { ErrorToast } from '../ui/Toast';
 // SPDX-License-Identifier: Apache-2.0
@@ -22,7 +21,6 @@ export function LaneViews({
   source: ReadSource;
   viewNumber?: (id: string) => number | undefined;
 }) {
-  const freshness = useGenerationFreshness();
   const { data, error, retry } = useViewRead(source, { action: 'views', laneId });
   usePageCritical('Lane', { viewLinks: data !== undefined || !!error });
   const [pages, setPages] = useState<{
@@ -77,7 +75,7 @@ export function LaneViews({
           <ul className="fx-view-links">
             {visible.map(view => {
               const input = view.inputs.find(input => input.laneId === laneId),
-                [tone, label] = viewStatus(view, undefined, freshness.behind);
+                [tone, label] = viewStatus(view, undefined);
               return (
                 <li key={view.viewId}>
                   <div>

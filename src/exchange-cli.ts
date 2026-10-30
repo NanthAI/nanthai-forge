@@ -12,7 +12,6 @@ import { hostedActionError } from './hosted-action-error.js';
 import { receiveProposal } from './exchange-proposal.js';
 
 import { readFileSync } from 'node:fs';
-import { reconcileExchange } from './exchange-reconcile.js';
 import { migrateNativeArchive } from './native-exchange-migrate.js';
 import { z } from 'zod';
 import { ConvexExchange } from './exchange-client.js';
@@ -39,14 +38,6 @@ export const exchangeMigrateSchema = z
     originalDigest: z.string().regex(/^[0-9a-f]{64}$/),
   })
   .strict();
-export const exchangeReconcileSchema = z
-  .object({
-    ...shared,
-    backupId: z.string().min(1),
-    operationId: z.uuid(),
-    revision: z.number().safe().nonnegative(),
-  })
-  .strict();
 export const exchangePullSchema = z
   .object({
     ...shared,
@@ -64,7 +55,6 @@ nforge exchange NEW_DIRECTORY restore --command-file REQUEST.json
 nforge exchange NEW_DIRECTORY pull --command-file REQUEST.json
 nforge exchange ROOT receive-proposal --command-file REQUEST.json
 nforge exchange NEW_DIRECTORY pull-proposal --command-file REQUEST.json
-nforge exchange ROOT reconcile --command-file REQUEST.json
 nforge exchange ROOT migrate-archive --command-file REQUEST.json
 Run nforge login or set FORGE_AUTH_TOKEN to your current Forge sign-in JWT. Never put it in the request file.
 Open/pull main: {url,projectId,operationId,expected?:{head,receiptId}}
@@ -73,7 +63,6 @@ Lane checkout is full by default; paths expands a sparse editing directory. Its 
 Restore (legacy pull with backupId): {url,projectId,backupId,cacheRoot?,journalPath?}
 Receive-proposal: {url,projectId,proposalId,operationId}
 Pull-proposal: {url,projectId,proposalId,cacheRoot?}
-Reconcile: {url,projectId,backupId,operationId,revision}
 Migrate-archive: {url,projectId,backupId,operationId,archivePath,originalDigest}
 Migration preserves exact logical source/Work/artifact bytes and historical archive receipts, then retires exclusively owned compressed archive bytes after exact logical-byte and source-closure verification.
 Restore creates an independent owner; cacheRoot reuses verified local source and journalPath overlays its journal.
@@ -101,7 +90,6 @@ export async function exchangeCli(args: string[]) {
         'restore',
         'pull-proposal',
         'receive-proposal',
-        'reconcile',
         'migrate-archive',
       ].includes(action ?? '') &&
       option === '--command-file' &&
@@ -189,9 +177,7 @@ async function executeExchangeCommand(root: string, action: string, input: unkno
       request.operationId,
     );
   }
-  if (action === 'reconcile') {
-    return reconcileExchange(root, exchangeReconcileSchema.parse(input));
-  }
+
   const request = exchangePullSchema.parse(input),
     transport = new ConvexExchange(request.url, process.env.FORGE_AUTH_TOKEN, request.projectId, '', null);
   return pullNativeExchange(request.backupId, root, transport, request);

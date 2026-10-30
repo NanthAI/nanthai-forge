@@ -8,7 +8,6 @@ import { sourceAuthoritySchema } from './hosted-source-authority.js';
 import { hostedMainSchema, type MainExpectation } from './hosted-main.js';
 import { exchangeConvexFetch } from './exchange-convex-fetch.js';
 import { retryExchange } from './exchange-retry.js';
-import { hostedActionError } from './hosted-action-error.js';
 import { resolveAuthToken } from './auth-store.js';
 import { ConvexHttpClient } from 'convex/browser';
 
@@ -17,7 +16,7 @@ import type { ContentPin, ExchangeTransport } from './native-exchange.js';
 import { mapExchange } from './exchange-parallel.js';
 import { uploadPhysicalObjects } from './exchange-upload.js';
 import { ConvexExchangeBlobs } from './exchange-blobs.js';
-import { ForgeError, invariant } from './errors.js';
+import { invariant } from './errors.js';
 import { digest } from './hash.js';
 import { buildObjectRecipe, ObjectRecipeBuilder } from './object-chunks.js';
 import { SourceFileReader } from './source-file-reader.js';
@@ -502,23 +501,6 @@ export class ConvexExchange implements ExchangeTransport {
       manifestDigest: manifest.sha256,
       manifestSize: manifest.size,
     });
-  }
-  async journalPage(afterRevision?: number, snapshot?: string): Promise<unknown> {
-    try {
-      const json = await this.client.query(query('projectWorkJournal:page'), {
-        projectId: this.projectId,
-        ...(afterRevision === undefined ? {} : { afterRevision }),
-        ...(snapshot === undefined ? {} : { snapshot }),
-      });
-      return JSON.parse(json);
-    } catch (error) {
-      if (
-        error instanceof Error &&
-        /Could not find public function.*projectWorkJournal:page/.test(error.message)
-      )
-        throw new ForgeError('JOURNAL_PAGING_UNAVAILABLE', 'Hosted journal paging is not deployed.');
-      throw hostedActionError(error, 'journal page');
-    }
   }
   async journal(): Promise<string> {
     return retryExchange('Work journal read', this.operationId, () =>

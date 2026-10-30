@@ -14,7 +14,6 @@ function download(value: unknown, filename: string) {
 export default function ExchangeHandoff({
   projectId,
   backupId,
-  revision,
   transport,
   inline = false,
 }: {
@@ -47,29 +46,7 @@ export default function ExchangeHandoff({
           </p>
         </>
       )}
-      {revision !== undefined && (
-        <>
-          {transport === 'objects' && (
-            <>
-              <button
-                onClick={() =>
-                  download(
-                    { url: client.url, projectId, backupId, operationId: crypto.randomUUID(), revision },
-                    'forge-reconcile.json',
-                  )
-                }
-              >
-                Download Work reconciliation request
-              </button>
-              <p>
-                To reconcile hosted metadata with your existing owner, set its current local revision and run{' '}
-                <code>nforge exchange ROOT reconcile --command-file forge-reconcile.json</code>. The original
-                source and local Lane files remain in place.
-              </p>
-            </>
-          )}
-        </>
-      )}
+
       <p>
         Full recovery archives remain available through the local <code>export-work</code> command.
       </p>

@@ -291,7 +291,7 @@ test('account settings retain the existing Clerk account management entry', asyn
   assert.match(html, /Manage account/);
 });
 
-test('behind hosted shell shows one sync line, never Live, with static generation statuses', async () => {
+test('hosted shell remains live independently of legacy owner sync metadata', async () => {
   const html = await render(`?surface=projects&collection=projects&project=${PROJECT}`, tree => {
     const workspace = JSON.parse(tree.queries['projectWorkIndex:workspace']());
     workspace.freshness = {
@@ -320,11 +320,11 @@ test('behind hosted shell shows one sync line, never Live, with static generatio
       );
   });
   const text = html.replace(/<!--.*?-->/gs, '');
-  assert.equal((text.match(/Synced from Mac Studio/g) ?? []).length, 1);
-  assert.match(text, /3 h ago.*catching up/);
-  assert.match(html, /Last hosted sync/);
-  assert.match(html, /Last owner-machine report/);
-  assert.doesNotMatch(html, /class="fx-pulse"|>Live</);
-  assert.match(html, /fx-tone-stale/);
-  assert.match(html, /as of/);
+  assert.doesNotMatch(
+    text,
+    /Synced from Mac Studio|catching up|Last hosted sync|Last owner-machine report|as of/,
+  );
+  assert.doesNotMatch(html, /fx-tone-stale/);
+  assert.match(html, /class="fx-pulse"/);
+  assert.match(text, />Live</);
 });

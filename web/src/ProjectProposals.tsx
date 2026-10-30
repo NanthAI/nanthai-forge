@@ -2,7 +2,7 @@ import { ErrorToast } from './ui/Toast';
 // SPDX-License-Identifier: Apache-2.0
 import { api } from '../../convex/_generated/api';
 import { DetailPanel } from './DetailPanel';
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { useConvex, usePaginatedQuery, useQuery } from 'convex/react';
 import type { Id } from '../../convex/_generated/dataModel';
 import type { WorkArchivePreview } from './work-archive';
@@ -14,7 +14,7 @@ import {
   type Proposal,
   type ProposalInput,
 } from './proposal-api';
-import { companionHandoff, type HostedHandoffPair } from './hosted-handoff';
+import { type HostedHandoffPair } from './hosted-handoff';
 
 type Selection = {
   file: File;
@@ -26,16 +26,11 @@ type Attempt = { file: File; input: ProposalInput; id?: string };
 export function ProposalProvenance({
   proposal,
   projectKey,
-  pair,
 }: {
   proposal: Proposal;
   projectKey: string;
   pair?: HostedHandoffPair;
 }) {
-  const reconcileOperation = useMemo(
-    () => crypto.randomUUID(),
-    [pair?.projectKey, pair?.archive.digest, pair?.journalSha256],
-  );
   const command = {
     action: 'import-native-contribution',
     operationId: proposal.operationId,
@@ -67,30 +62,9 @@ export function ProposalProvenance({
         separate Lane; compose, check and accept through your existing local Work flow.
       </p>
       <p>
-        <strong>Receive hosted Work, then import the proposal.</strong> Your existing canonical owner needs
-        this hosted Intent before it can create its contribution Lane. In Continue locally, prepare the
-        current matching pair and download its common source archive and Work journal.
+        Continue locally with a restored source and Work pair containing this Intent, then import the
+        downloaded proposal into that owner.
       </p>
-      {pair ? (
-        <>
-          <p>
-            Reconcile that pair into your existing owner:{' '}
-            <code>
-              nforge work ROOT '{JSON.stringify(companionHandoff(pair, reconcileOperation))}' WORK_REVISION
-            </code>
-          </p>
-          <p>
-            This pins Work revision {pair.revision}. Replace the two paths and your current local Work
-            revision; retain the operation UUID for retries. Reconciliation receives the Intent while
-            preserving unrelated local Work, Lane heads and dirty source.
-          </p>
-        </>
-      ) : (
-        <p>
-          The exact reconciliation command appears here after the matching pair is prepared. A fresh restore
-          creates an independent owner; it does not receive this Intent into your existing owner.
-        </p>
-      )}
       <p>
         Import the downloaded proposal (the pulled directory for object proposals):{' '}
         <code>nforge work ROOT '{JSON.stringify(command)}' WORK_REVISION</code>. Use the updated local Work
@@ -105,7 +79,6 @@ export default function ProjectProposals({
   projectKey,
   actor,
   pin,
-  pair,
   scopeIntentId,
   inline = false,
   accessManager = false,
@@ -410,7 +383,7 @@ export default function ProjectProposals({
                 <small>
                   {new Date(proposal._creationTime).toLocaleString()} · candidate {proposal.head.slice(0, 12)}
                 </small>
-                <ProposalProvenance proposal={proposal} projectKey={projectKey} pair={pair} />
+                <ProposalProvenance proposal={proposal} projectKey={projectKey} />
               </div>
               {(proposal.status === 'stored' || proposal.actor === actor) && (
                 <div className="import-actions">

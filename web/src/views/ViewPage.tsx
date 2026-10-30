@@ -1,4 +1,3 @@
-import { useGenerationFreshness } from '../ui/generation-freshness';
 import { Breadcrumbs } from '../shell/Breadcrumbs';
 import { ErrorToast } from '../ui/Toast';
 import { ObjectActions } from '../shell/ObjectActions';
@@ -39,7 +38,6 @@ export function ViewPage({
 }) {
   const now = useNow();
   const [mapSelected, setMapSelected] = useState('');
-  const freshness = useGenerationFreshness();
   const { data, error, retry } = useViewRead(source, { action: 'view', viewId });
   const provenance = useViewRead(source, { action: 'provenance', viewId });
   const [extra, setExtra] = useState<{
@@ -70,7 +68,7 @@ export function ViewPage({
   const run = [...(data.runs ?? [])]
       .sort((a, b) => (a.startedAt ?? '').localeCompare(b.startedAt ?? ''))
       .at(-1),
-    [tone, label] = viewStatus(data, run?.status, freshness.behind);
+    [tone, label] = viewStatus(data, run?.status);
   const name =
     data.inputs
       .map(

@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: Apache-2.0
-import { useGenerationFreshness } from '../ui/generation-freshness';
 import { displayLaneName } from '../../../src/lane-name';
 import type { ReactNode } from 'react';
 import type { CockpitLane } from '../cockpit/model';
@@ -99,8 +98,6 @@ export function nextStep(lane: CockpitLane, since?: string): Step {
 }
 
 export function NextStep({ step, actions }: { step: Step; actions?: ReactNode }) {
-  const freshness = useGenerationFreshness();
-  if (freshness.behind && step.tone === 'running') return null;
   if (step.tone === 'active' || step.tone === 'plain' || (step.tone === 'failed' && !step.queue)) return null;
   return (
     <section className={`fx-next fx-tone-${step.tone}`} aria-label="What happens next" role="status">

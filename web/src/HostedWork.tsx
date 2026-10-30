@@ -5,7 +5,7 @@ import { routeUrlState } from './shell/location';
 import { reconcileBefore } from './pending-write';
 // SPDX-License-Identifier: Apache-2.0
 import { ConvexError } from 'convex/values';
-import IntentDelivery from './IntentDelivery';
+import { HostedReview } from './review/HostedReview';
 import { useWorkRecord } from './hosted-work-index';
 import type { ComponentProps } from 'react';
 import { HostedViewRoute } from './shell/ViewRoute';
@@ -724,13 +724,11 @@ export default function HostedWork({
                     projectId={projectId}
                     workspace={workspace!}
                     viewId={reviewView}
-                    data={snapshot.data}
                     channels={snapshot.hostedChannels ?? []}
                     owner={owner}
                     editable={editable}
                     busy={disabled}
                     act={act}
-                    select={setReviewView}
                   />
                 )}
                 {section === 'views' && viewId && (
@@ -811,11 +809,25 @@ export default function HostedWork({
 function HostedReviewRoute({
   viewId,
   ...props
-}: Omit<ComponentProps<typeof IntentDelivery>, 'intentId' | 'selected'> & { viewId: string }) {
+}: Omit<ComponentProps<typeof HostedReview>, 'view' | 'lanes' | 'views'> & { viewId: string }) {
   const view = useWorkRecord<WorkData['views'][number]>(props.projectId, props.workspace, 'views', viewId);
   return view ? (
-    <IntentDelivery {...props} intentId={view.intentId} selected={viewId} />
+    <HostedReviewRecords {...props} key={view.id} view={view} />
   ) : (
     <p role="status">Loading review…</p>
   );
+}
+
+function HostedReviewRecords({
+  view,
+  ...props
+}: Omit<ComponentProps<typeof HostedReview>, 'lanes' | 'views'>) {
+  const lanes = useWorkRecords<WorkData['lanes'][number]>(props.projectId, props.workspace, 'lanes');
+  const views = useWorkRecords<WorkData['views'][number]>(
+    props.projectId,
+    props.workspace,
+    'views',
+    view.intentId,
+  );
+  return <HostedReview {...props} view={view} lanes={lanes.records} views={views.records} />;
 }

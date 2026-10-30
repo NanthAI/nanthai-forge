@@ -332,11 +332,11 @@ intact and the new owner receives the binding. A push stores a new backup; the e
 flow explicitly selects it for hosted Work (see [source exchange](operations/source-exchange.md)).
 Commands with explicit deployment/project IDs and request files remain supported.
 
-In the browser you can create Intents and notes against the hosted source and pick source for a
-hosted Channel. Edit, check and accept locally, then return the new checkpoint. If hosted edits
-happened meanwhile, both sides are kept and you reconcile before returning again.
-
-An owner that kept working after a return can receive hosted changes without a fresh restore. The `reconcile-hosted-work` action takes the common archive and the original journal, merges hosted Intents and notes, and leaves local Lanes and checks alone. A status conflict is reported and changes nothing.
+In the browser you can create Intents and notes against hosted source. Review a Candidate and
+accept it through the hosted landing queue, including while all owner machines are offline.
+Request changes records feedback in Work and the Lane conversation; revert submits a reverse
+Candidate through the same queue. CLI and MCP `finish` use that queue too. Local clients edit
+and save hosted Lanes; they do not reconcile a separate owner's metadata before acceptance.
 
 ## Contributor proposals
 

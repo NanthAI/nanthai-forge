@@ -15,7 +15,6 @@ import { HOSTED_WORK_INDEX_FORMAT } from '../dist/work-hosted-summary.js';
 const relay = await import(moduleUrl('../convex/ownerAcceptance.ts'));
 const lifecycle = await import(moduleUrl('../convex/ownerLifecycle.ts'));
 const sync = await import(moduleUrl('../convex/projectOwnerSync.ts'));
-const work = await import(moduleUrl('../convex/projectWorkActions.ts'));
 const github = await import(moduleUrl('../convex/projectGithubStatus.ts'));
 const upgrade = error => {
   assert.equal(error.data?.code ?? error.code, 'CLI_UPGRADE_REQUIRED');
@@ -41,7 +40,6 @@ test('all retired relay RPCs return upgrade instructions without accessing sourc
     relay.route,
     lifecycle.request,
     sync.publish,
-    work.acceptChannel,
   ])
     await assert.rejects(fn._handler(ctx, {}), upgrade);
 });

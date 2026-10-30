@@ -1,6 +1,4 @@
 'use node';
-import { CUTOVER_UPGRADE } from '../src/cutover-version';
-import { ConvexError } from 'convex/values';
 // SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
 import { action, type ActionCtx } from './cliServer';
@@ -171,18 +169,5 @@ export const exportPlanning = action({
     } catch (error) {
       return report(error);
     }
-  },
-});
-export const acceptChannel = action({
-  args: {
-    projectId: v.id('hostedProjects'),
-    operationId: v.string(),
-    revision: v.number(),
-    command: v.string(),
-    authorityEpoch: v.optional(v.number()),
-  },
-  returns: v.null(),
-  handler: async () => {
-    throw new ConvexError({ code: 'CLI_UPGRADE_REQUIRED', message: CUTOVER_UPGRADE });
   },
 });

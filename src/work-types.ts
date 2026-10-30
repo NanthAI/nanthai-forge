@@ -38,7 +38,7 @@ import {
 import type { NativeGitContributionCommand } from './native-git-contribution.js';
 import type { NativeObjectCommand } from './native-objects.js';
 import { historicalWorkSchema, type HistoricalCommand } from './native-history-types.js';
-import { companionReceiptSchema, type CompanionCommand } from './native-companion-types.js';
+import { companionReceiptSchema } from './native-companion-types.js';
 export type { DeclaredInput, InputObservation, InputAssessmentCommand } from './work-input-types.js';
 import {
   declaredInputSchema,
@@ -1331,7 +1331,6 @@ export type WorkCommand =
   | NativeGitContributionCommand
   | NativeContributionCommand
   | NativeObjectCommand
-  | CompanionCommand
   | HistoricalCommand
   | z.infer<typeof detailCommandSchema>
   | z.infer<typeof exportWorkCommandSchema>

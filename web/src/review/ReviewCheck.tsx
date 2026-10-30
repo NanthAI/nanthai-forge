@@ -4,7 +4,7 @@ import type { HostedRunSummary } from '../../../src/work-hosted-summary';
 import type { WorkData } from '../../../src/work-types';
 import { Panel, StatusPill } from '../ui/primitives';
 import { age, checkStatus } from '../ui/status';
-import { checkDuration } from './CheckPanel';
+import { checkDuration } from '../lane/CheckPanel';
 import { useNow } from '../shell/StatusBar';
 export function ReviewCheck({
   run,

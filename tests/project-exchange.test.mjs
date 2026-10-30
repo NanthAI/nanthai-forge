@@ -12,7 +12,7 @@ import { digest } from '../dist/hash.js';
 import { ConvexExchange } from '../dist/exchange-client.js';
 import { initNative } from '../dist/native-work.js';
 import { WorkStore } from '../dist/work-store.js';
-import { reconcileHostedWork } from '../dist/native-companion.js';
+
 import { WorkService } from '../dist/work.js';
 import { pullNativeExchange } from '../dist/native-exchange.js';
 import { metadataRequest, workBytes } from '../dist/work-metadata.js';

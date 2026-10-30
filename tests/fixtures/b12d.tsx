@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { ToastProvider, useToast } from '../../web/src/ui/Toast';
 import { LandingDecision, type LandingDecisionProps } from '../../web/src/lane/LandingDecision';
-import { ReviewCheck } from '../../web/src/lane/ReviewCheck';
+import { ReviewCheck } from '../../web/src/review/ReviewCheck';
 import { Panel, StatusPill, ExactRecord } from '../../web/src/ui/primitives';
 import { landingState, landingRunSummary } from '../../web/src/lane/landing-model';
 // @ts-expect-error Local synthetic fixture shared with Node component tests.

@@ -1,8 +1,6 @@
 import { ErrorToast } from '../ui/Toast';
 import { OwnerDecisionsContext, ownerDecisionLinks } from '../decisions/context';
 import { queueStatus, queueFacts } from '../cockpit/queue-model';
-import { hostedFreshness } from '../../../src/hosted-freshness';
-import { GenerationFreshness } from '../ui/generation-freshness';
 // SPDX-License-Identifier: Apache-2.0
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useReadsAsleep } from '../live-reads';
@@ -253,10 +251,10 @@ export function HostedAttention({
   }, [arrivals, settled, asleep]);
   const counts = workspace?.counts;
   return (
-    <GenerationFreshness.Provider value={workspace?.freshness ?? null}>
+    <>
       {ownerDecisions.error && <ErrorToast>{ownerDecisions.error}</ErrorToast>}
       <AcceptedToast accepted={arrival} onClose={clearArrival} />
-      <div className={hostedFreshness(workspace?.freshness).behind ? 'fx-hosted-behind' : undefined}>
+      <div>
         <WorkCountsContext.Provider
           value={{
             ...(counts?.intents !== undefined ? { intents: counts.intents } : {}),
@@ -304,6 +302,6 @@ export function HostedAttention({
           </WorkRecordsContext.Provider>
         </WorkCountsContext.Provider>
       </div>
-    </GenerationFreshness.Provider>
+    </>
   );
 }

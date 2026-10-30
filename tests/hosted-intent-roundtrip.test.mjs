@@ -11,7 +11,7 @@ import { moduleUrl } from './convex-module.mjs';
 import { digest } from '../dist/hash.js';
 import { WorkStore } from '../dist/work-store.js';
 import { restoreNativeWork } from '../dist/native-backup.js';
-import { mergeCompanion } from '../dist/native-companion.js';
+
 const commands = await import(moduleUrl('../convex/projectWorkCommand.ts'));
 async function fixture(t) {
   return setup(t, true);
@@ -42,85 +42,6 @@ test('current hosted Work, subsequent journal writes and recovery preserve origi
   assert.deepEqual(recovered.hostedEvents, after.data.hostedEvents);
   assert.equal(JSON.parse(journal).workSha256, digest(JSON.stringify(after.data, null, 2)));
   assert.ok(readFileSync(s.exported.archive.path).length > 0);
-});
-test('current local companion accepts a hosted note without downgrading the owner', async t => {
-  const s = await fixture(t);
-  const created = await s.send({
-    action: 'intent',
-    outcome: 'Pinned execution',
-    constraints: '',
-    base: s.preview.head,
-  });
-  const base = (await s.read()).data;
-  const local = base;
-  await s.send({
-    action: 'note',
-    intentId: created.operationId,
-    text: 'Hosted observation',
-    kind: 'comment',
-  });
-  const hosted = (await s.read()).data,
-    result = mergeCompanion(base, local, hosted);
-  assert.deepEqual(result.conflicts, []);
-  assert.equal(result.merged.schema, 24);
-  assert.equal(result.merged.intents[0].notes.at(-1).text, 'Hosted observation');
-});
-
-test('reconciling and retrying a hosted journal preserves the current owner', async t => {
-  let intentId;
-  const s = await setup(t, true, async (_root, local) => {
-    const created = await local.dispatch(
-      { action: 'intent', outcome: 'Preserve the migrated owner', constraints: '' },
-      local.store.revision(),
-    );
-    intentId = created.result.id;
-    await local.dispatch(
-      { action: 'note', intentId, text: 'Retained pre-migration note', kind: 'decision' },
-      local.store.revision(),
-    );
-    const data = local.store.load();
-    local.store.save(data);
-  });
-  const unified = s.local.store.load();
-  unified.futureOwnerFact = { keep: true };
-  s.local.store.save(restoreWorkFormat(unified));
-  await s.local.dispatch(
-    { action: 'note', intentId, text: 'Local concurrent observation', kind: 'comment' },
-    s.local.store.revision(),
-  );
-  await s.send({ action: 'note', intentId, text: 'Received after local migration', kind: 'comment' });
-  const journal = await actions.exportJournal._handler(s.ctx, { projectId: s.projectId });
-  const journalPath = join(s.directory, 'receive-unified-journal.json');
-  writeFileSync(journalPath, journal);
-  const command = {
-    action: 'reconcile-hosted-work',
-    operationId: randomUUID(),
-    projectKey: s.tables.hostedProjects.get(s.projectId).key,
-    archivePath: s.exported.archive.path,
-    archiveSha256: digest(s.bytes),
-    journalPath,
-    journalSha256: digest(journal),
-  };
-  const result = await s.local.dispatch(command, s.local.store.revision());
-  assert.equal(result.result.status, 'reconciled', JSON.stringify(result.result.conflicts));
-  const saved = s.local.store.load();
-  assert.equal(saved.schema, 24);
-  assert.deepEqual(saved.futureOwnerFact, unified.futureOwnerFact);
-  assert.deepEqual(saved.intentMergeReceipt, unified.intentMergeReceipt);
-  const intent = saved.intents.find(i => i.id === intentId);
-  assert.deepEqual(
-    intent.notes.map(note => note.text),
-    ['Retained pre-migration note', 'Received after local migration', 'Local concurrent observation'],
-  );
-  assert.deepEqual(
-    intent.conversation.map(entry => entry.index),
-    [0, 1, 2],
-  );
-  assert.equal(new Set(intent.conversation.map(entry => entry.id)).size, 3);
-  await s.local.dispatch(command, s.local.store.revision());
-  const retried = s.local.store.load();
-  assert.equal(retried.intents.find(i => i.id === intentId).notes.length, 3);
-  assert.equal(retried.nativeCompanionReceipts.filter(r => r.id === command.operationId).length, 1);
 });
 
 test('Git export-work and restore retain current planned Intents and unknown fields', async t => {

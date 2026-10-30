@@ -35,7 +35,6 @@ const names = [
   'projectBackups',
   'projectWork',
   'projectWorkActions',
-  'projectWorkJournal',
   'projectDiffstats',
 ];
 export const modules = Object.fromEntries(

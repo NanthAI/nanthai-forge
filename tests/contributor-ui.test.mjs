@@ -65,38 +65,24 @@ test('actual proposal provenance renderer keeps exact pins and literal actor tex
   assert.match(html, /import-native-contribution/);
 });
 
-test('owner handoff receives a newly hosted Intent with exact current common pins before isolated proposal import', () => {
-  const projectKey = randomUUID(),
-    proposal = {
-      operationId: randomUUID(),
-      intentId: randomUUID(),
-      baseState: 'a'.repeat(64),
-      baseArchiveSha256: 'b'.repeat(64),
-      head: 'c'.repeat(64),
-      viewId: randomUUID(),
-      digest: 'd'.repeat(64),
-      actor: 'user_contributor',
-      _id: 'synthetic-proposal',
-    };
-  const pair = {
-    projectKey,
-    revision: 51,
-    journalSha256: 'e'.repeat(64),
-    archive: { id: 'current-common', digest: 'f'.repeat(64), head: '1'.repeat(64), kind: 'native' },
+test('proposal handoff uses restored hosted Work and offers isolated source import', () => {
+  const proposal = {
+    operationId: randomUUID(),
+    intentId: randomUUID(),
+    baseState: 'a'.repeat(64),
+    head: 'b'.repeat(64),
+    viewId: randomUUID(),
+    digest: 'c'.repeat(64),
+    actor: 'user_contributor',
+    _id: 'synthetic-proposal',
   };
-  const html = renderToStaticMarkup(createElement(ProposalProvenance, { proposal, projectKey, pair }));
-  assert.match(html, /existing canonical owner needs this hosted Intent/);
-  assert.match(html, /reconcile-hosted-work/);
-  assert.ok(html.indexOf('reconcile-hosted-work') < html.indexOf('import-native-contribution'));
-  assert.ok(html.includes(pair.archive.digest));
-  assert.ok(html.includes(pair.journalSha256));
-  assert.ok(html.includes(proposal.digest));
-  assert.ok(
-    !html.includes(proposal.baseArchiveSha256),
-    'Companion pins come from the current common pair, not the older proposal base archive.',
+  const html = renderToStaticMarkup(
+    createElement(ProposalProvenance, { proposal, projectKey: randomUUID() }),
   );
-  assert.match(html, /updated local Work revision/);
-  assert.match(html, /preserving unrelated local Work, Lane heads and dirty source/);
+  assert.match(html, /restored source and Work pair containing this Intent/);
+  assert.match(html, /import-native-contribution/);
+  assert.ok(html.includes(proposal.digest));
+  assert.doesNotMatch(html, /reconcile-hosted-work|Work reconciliation request/);
 });
 
 test('source return between either download preserves one exact journal/archive pair and explicit refresh selects a new pair', async () => {

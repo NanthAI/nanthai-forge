@@ -162,6 +162,3 @@
     grid-row: 1;
   }
 }
-.fx-hosted-behind :is(.fx-wr-active, .fx-wr-running) {
-  --fx-wr-rail: var(--fx-stale);
-}

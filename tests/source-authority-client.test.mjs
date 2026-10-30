@@ -3,8 +3,6 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { createServer } from 'node:http';
-import { hostedWorkCli } from '../dist/hosted-work-cli.js';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { ConvexError } from 'convex/values';
@@ -218,54 +216,4 @@ test('native acceptance checks the authority again under the owner lock', t => {
   };
   assert.throws(() => nativeExecute(f.store, f.command, f.store.revision()), isHosted);
   assert.equal(f.store.load().channelMoves.length, 0);
-});
-
-test('bound hosted-work accept retains structured stale feedback and updates the owner pin', async t => {
-  const f = setup(t);
-  let calls = 0;
-  const http = createServer((request, response) => {
-    calls++;
-    request.resume();
-    response.writeHead(200, { 'content-type': 'application/json' });
-    response.end(
-      JSON.stringify({
-        status: 'error',
-        errorMessage: 'Source authority changed.',
-        errorData: {
-          code: 'SOURCE_AUTHORITY_STALE',
-          message: 'Source authority changed.',
-          authority: server,
-        },
-      }),
-    );
-  });
-  await new Promise(resolve => http.listen(0, '127.0.0.1', resolve));
-  t.after(() => http.close());
-  const previousToken = process.env.FORGE_AUTH_TOKEN;
-  process.env.FORGE_AUTH_TOKEN = 'synthetic-owner-credential';
-  t.after(() => {
-    if (previousToken === undefined) delete process.env.FORGE_AUTH_TOKEN;
-    else process.env.FORGE_AUTH_TOKEN = previousToken;
-  });
-  updateHostState(f.store, state => {
-    state.binding.deployment = `http://127.0.0.1:${http.address().port}`;
-  });
-  await assert.rejects(
-    hostedWorkCli([
-      f.root,
-      JSON.stringify({
-        action: 'accept',
-        operationId: randomUUID(),
-        revision: 0,
-        viewId: randomUUID(),
-        head: 'a'.repeat(64),
-        archiveSha256: 'b'.repeat(64),
-        previousId: null,
-      }),
-    ]),
-    isStale,
-  );
-  assert.equal(calls, 1);
-  assert.deepEqual(readHostState(f.store).binding.sourceAuthority, server);
-  assert.throws(() => nativeExecute(f.store, f.command, f.store.revision()), isHosted);
 });

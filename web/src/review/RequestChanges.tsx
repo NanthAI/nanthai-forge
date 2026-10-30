@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { useState } from 'react';
 import { ErrorToast } from '../ui/Toast';
-import { useDraft } from './draft';
+import { useDraft } from '../lane/draft';
 import { Button } from '../ui/primitives';
 export type ReviewRecipient = {
   id: string;

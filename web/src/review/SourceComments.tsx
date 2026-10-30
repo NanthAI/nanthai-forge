@@ -1,20 +1,20 @@
-import { useSourceReview } from './use-source-review';
-import { useReadRetry } from './ui/read-retry';
-import { ErrorToast } from './ui/Toast';
-import { SyntaxLine } from './SourceTokens';
+import { useSourceReview } from '../use-source-review';
+import { useReadRetry } from '../ui/read-retry';
+import { ErrorToast } from '../ui/Toast';
+import { SyntaxLine } from '../SourceTokens';
 // SPDX-License-Identifier: Apache-2.0
 import { memo, Profiler, useCallback, useEffect, useState } from 'react';
-import type { Id } from '../../convex/_generated/dataModel';
-import type { ReviewPath, reviewTextPage } from '../../src/native-source-review';
-import type { contextualHunks } from '../../src/review-hunks';
-import type { MetadataCommand } from '../../src/work-types';
-import type { SourceAnchor } from '../../src/work-intent-types';
-import type { WorkIndexWorkspace } from './hosted-work-index';
-import SourceDiscussion from './SourceDiscussion';
-import { PageTabs, ActionPanel } from './WorkspaceUI';
-import './legacy-source-review.css';
-import { LazyLines } from './lane/LazyLines';
-import { profileDiff } from './lane/diff-profile';
+import type { Id } from '../../../convex/_generated/dataModel';
+import type { ReviewPath, reviewTextPage } from '../../../src/native-source-review';
+import type { contextualHunks } from '../../../src/review-hunks';
+import type { MetadataCommand } from '../../../src/work-types';
+import type { SourceAnchor } from '../../../src/work-intent-types';
+import type { WorkIndexWorkspace } from '../hosted-work-index';
+import SourceDiscussion from '../SourceDiscussion';
+import { PageTabs, ActionPanel } from '../WorkspaceUI';
+import '../legacy-source-review.css';
+import { LazyLines } from '../lane/LazyLines';
+import { profileDiff } from '../lane/diff-profile';
 
 type Page = ReturnType<typeof reviewTextPage>;
 type Unavailable = { available: false; reason: string };
@@ -168,7 +168,7 @@ function Source({
     </>
   );
 }
-export default function NativeSourceReview({
+export default function SourceComments({
   projectId,
   workspace,
   intentId,

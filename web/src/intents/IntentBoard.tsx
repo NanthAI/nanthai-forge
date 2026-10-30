@@ -1,4 +1,3 @@
-import { useGenerationFreshness } from '../ui/generation-freshness';
 // SPDX-License-Identifier: Apache-2.0
 import type { InitiativeLinks } from '../cockpit/scale-model';
 import { Glyph } from '../ui/Glyph';
@@ -173,7 +172,6 @@ function IntentCard({
   href: string;
   initiative?: string | undefined;
 }) {
-  const freshness = useGenerationFreshness();
   const flags = intentFlags(row);
   const accepted = row.lanes.filter(lane => lane.accepted).length;
   const done = row.status === 'completed' || row.status === 'abandoned';
@@ -228,12 +226,12 @@ function IntentCard({
             </span>
             {check && (
               <span
-                className={`fx-board-check fx-tone-${freshness.behind && check[0] === 'running' ? 'stale' : check[0]}`}
+                className={`fx-board-check fx-tone-${check[0]}`}
                 role="img"
                 aria-label={check[1]}
-                title={freshness.behind ? `${check[1]} · ${freshness.asOf}` : check[1]}
+                title={check[1]}
               >
-                <Glyph name={freshness.behind && check[0] === 'running' ? 'stale' : check[0]} size={12} />
+                <Glyph name={check[0]} size={12} />
               </span>
             )}
           </span>

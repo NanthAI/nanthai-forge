@@ -117,15 +117,11 @@ test('authority transition requires retained owner requests to be settled before
   assert.equal(s.tables.ownerAcceptanceRequests.get(requestId).state, 'rejected');
 });
 
-test('legacy accept action and its final append transaction both fence a switch between them', async () => {
+test('legacy final append transaction fences an authority switch', async () => {
   const s = setup();
   await s.transition();
   const input = { projectId: s.projectId, operationId: randomUUID(), revision: 0, command: '{}' };
-  const ctx = {
-    auth: { getUserIdentity: async () => ({ subject: 'owner' }) },
-    runQuery: async () => s.tables.hostedProjects.get(s.projectId),
-  };
-  await assert.rejects(actions.acceptChannel._handler(ctx, input), code('CLI_UPGRADE_REQUIRED'));
+
   const command = JSON.stringify({
     action: 'accept-hosted-channel',
     channel: 'main',

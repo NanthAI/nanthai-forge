@@ -3,7 +3,6 @@ import { githubMirrorStatus } from './projectGithubMirrorStatus';
 import { hostedRecordValue } from './hostedRecordValue';
 import { hostedPaths } from '../src/hosted-paths';
 // SPDX-License-Identifier: Apache-2.0
-import { projectFreshness } from './projectFreshness';
 import { generationHead } from './projectWorkHead';
 import { cockpitSummary, hostedMain } from './projectWorkIndexSummary';
 import { effectivePolicy } from '../src/autonomy-policy';
@@ -48,7 +47,6 @@ export const workspace = query({
         );
       return JSON.stringify({
         ...hostedPaths(JSON.parse(generation.metadata)),
-        freshness: await projectFreshness(ctx, project, generation, backup),
         autonomyPolicy: effectivePolicy(project),
         ...(project.needsFix ? { needsFix: needsFix(project) } : {}),
         githubMirror: await githubMirrorStatus(ctx, project),

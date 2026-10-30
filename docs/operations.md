@@ -1331,20 +1331,9 @@ Live source-return computation, callers, progress probes and return-only tests a
 
 #### B1.8 — reconciliation/baselines
 
-| Module                             |     LOC | Last surviving callers |
-| ---------------------------------- | ------: | ---------------------- |
-| `src/native-companion.ts`          |     470 | D1                     |
-| `src/exchange-reconcile.ts`        |     195 | D2                     |
-| `src/native-exchange-reconcile.ts` |      57 | D1                     |
-| `src/native-exchange-baseline.ts`  |      84 | D3                     |
-| `src/exchange-journal-delta.ts`    |     100 | D2                     |
-| `src/native-closure-validation.ts` |      60 | D1                     |
-| `src/work-journal-page.ts`         |      24 | D2                     |
-| **Whole-file scope**               | **990** |                        |
-
-- **D1:** `src/cli.ts`, `src/host-binding.ts`, `src/mcp-agent-workflow.ts`, `src/work-store.ts`, `src/work.ts`.
-- **D2:** `src/cli.ts`, `src/host-binding.ts`, `src/mcp-agent-workflow.ts`, `src/work-store.ts`.
-- **D3:** `src/cli.ts`, `src/host-binding.ts`, `src/mcp-agent-workflow.ts`, `src/native-exchange.ts`, `src/work-store.ts`.
+Reconciliation implementations, CLI/MCP entry points, journal-delta reception and local exchange
+baseline hints have been removed. `src/native-companion-types.ts` remains for persisted Work
+receipts; recovery and historic journal replay retain their independent readers.
 
 #### B1.6a — auto exchange/spend pause (retired)
 
@@ -1362,18 +1351,9 @@ Push publication, automatic exchange and spend admission are removed. Old public
 
 #### B1.8 — freshness/unsynced UI
 
-| Module                                  |     LOC | Last surviving callers |
-| --------------------------------------- | ------: | ---------------------- |
-| `convex/projectFreshness.ts`            |      74 | F1                     |
-| `src/hosted-freshness.ts`               |      23 | F2                     |
-| `web/src/shell/HostedFreshnessLine.tsx` |      45 | F3                     |
-| `web/src/ui/generation-freshness.ts`    |       9 | F4                     |
-| **Whole-file scope**                    | **151** |                        |
-
-- **F1:** `convex/projectWorkIndex.ts`.
-- **F2:** `convex/projectWorkIndex.ts`, `web/src/HostedLanes.tsx`, `web/src/cockpit/HostedNow.tsx`, `web/src/cockpit/LaneRow.tsx`, `web/src/hosted-work-index.ts`, `web/src/intents/IntentBoard.tsx`, `web/src/intents/IntentDetail.tsx`, `web/src/intents/IntentParts.tsx`, `web/src/lane/HostedLane.tsx`, `web/src/lane/LaneParts.tsx`, `web/src/shell/Attention.tsx`, `web/src/shell/HostedStrip.tsx`, `web/src/ui/Rail.tsx`, `web/src/ui/primitives.tsx`, `web/src/views/LaneViews.tsx`, `web/src/views/ViewPage.tsx`, `web/src/views/WorkMap.tsx`, `web/src/views/intent-views.ts`.
-- **F3:** `web/src/shell/HostedStrip.tsx`.
-- **F4:** `web/src/HostedLanes.tsx`, `web/src/cockpit/HostedNow.tsx`, `web/src/cockpit/LaneRow.tsx`, `web/src/intents/IntentBoard.tsx`, `web/src/intents/IntentDetail.tsx`, `web/src/intents/IntentParts.tsx`, `web/src/lane/HostedLane.tsx`, `web/src/lane/LaneParts.tsx`, `web/src/shell/Attention.tsx`, `web/src/shell/HostedStrip.tsx`, `web/src/ui/Rail.tsx`, `web/src/ui/primitives.tsx`, `web/src/views/LaneViews.tsx`, `web/src/views/ViewPage.tsx`, `web/src/views/WorkMap.tsx`.
+Hosted pages use hosted Work facts directly. Owner freshness discovery, the staleness strip,
+its context and muted/unsynced projections have been removed. Connection status and recorded
+Lane/Candidate/check states remain.
 
 #### B1.6c — conditional owner-derived display
 
@@ -1403,21 +1383,11 @@ come from `src/work-note-id.ts`, independently of the converter.
 
 #### B1.8 — legacy hosted accept/review
 
-| Module                               |       LOC | Last surviving callers |
-| ------------------------------------ | --------: | ---------------------- |
-| `web/src/IntentDelivery.tsx`         |        92 | I1                     |
-| `web/src/HostedChannels.tsx`         |       200 | I1                     |
-| `web/src/NativeSourceReview.tsx`     |       459 | I1                     |
-| `web/src/lane/HostedReview.tsx`      |       511 | I1                     |
-| `web/src/lane/ReviewStory.tsx`       |       151 | I1                     |
-| `web/src/lane/RevertAcceptance.tsx`  |       105 | I1                     |
-| `web/src/lane/RequestChanges.tsx`    |        68 | I1                     |
-| `web/src/lane/review-model.ts`       |        68 | I1                     |
-| `web/src/lane/ReviewDisposition.tsx` |        52 | I1                     |
-| `web/src/lane/ReviewCheck.tsx`       |        45 | I1                     |
-| **Whole-file scope**                 | **1,751** |                        |
-
-- **I1:** `web/src/HostedWork.tsx`.
+The legacy selection wrapper, Channel picker and `projectWorkActions.acceptChannel` endpoint
+have been removed. Candidate review now lives in `web/src/review/`: `HostedReview`,
+`SourceComments`, `ReviewStory`, `RequestChanges`, `ReviewCheck`, `ReviewDisposition` and
+`review-model`. It uses the existing hosted landing client, decision panel and queue for accept,
+request changes and revert. `native-companion-types.ts` and retired table validators stay.
 
 #### Surviving modules with split edits
 
@@ -1437,7 +1407,7 @@ retained functions still have normal callers. Re-run impact selection at deletio
 | `src/mcp.ts`                          |   302 | Owner activity/reconcile command exposure; entry: MCP.                                                                                                                                                                                                           |
 | `src/mcp-agent-workflow.ts`           |   269 | forge_exchange and forge_migrate_archive exposure; entry: MCP agent mode.                                                                                                                                                                                        |
 | `src/native-work.ts`                  |   609 | Owner-request compose/accept branch and creation/promotion ladder; callers: WorkService and init-native CLI; unbound acceptance stays.                                                                                                                           |
-| `src/work.ts`                         |   963 | reconcile-hosted-work dispatch; callers: CLI/MCP/HTTP Work service.                                                                                                                                                                          |
+| `src/work.ts`                         |   963 | Retained Work dispatch; callers: CLI/MCP/HTTP Work service.                                                                                                                                                                          |
 | `src/work-records.ts`                 |   389 | recordPendingExchange on writes; WorkStore and record transactions still need record storage.                                                                                                                                                                    |
 | `src/work-store.ts`                   |   283 | Auto-exchange wakes and creation/format promotion; WorkService/record transactions retain storage.                                                                                                                                                               |
 | `src/landing-worker.ts`               |   238 | notifyAutoExchange after landing; native unbound landing controller survives.                                                                                                                                                                                    |
@@ -1460,7 +1430,7 @@ retained functions still have normal callers. Re-run impact selection at deletio
 | `convex/projectMain.ts`               |   112 | Legacy selected-main read; hosted-main-checkout must use projectHostedChannels current in server mode.                                                                                                                                                           |
 | `web/src/HostedWork.tsx`              |   823 | Exchange/source-return and legacy IntentDelivery wiring; hosted project shell remains.                                                                                                                                                                           |
 | `web/src/ProjectBackups.tsx`          |   556 | Publish UI; project backup settings remain.                                                                                                                                                                                                                      |
-| `web/src/hosted-handoff.ts`           |   144 | Printed reconcile-hosted-work command; copy-prompt/handoff callers.                                                                                                                                                                                              |
+| `web/src/hosted-handoff.ts`           |   144 | Pinned source/Work recovery pair; reconciliation command removed.                                                                                                                                                                                              |
 | `src/work-types.ts`                   | 1,329 | Legacy workSchema union and refine gates; shared WorkData imports remain across src/convex/web.                                                                                                                                                                  |
 | `src/work-unified-types.ts`           |   104 | Dual isUnifiedWork/safeParseWork paths; WorkStore and hosted readers retain current-format parsing.                                                                                                                                                              |
 | `src/work-hosted-intents.ts`          |    70 | Hosted journal converter; projectWorkLoad, work-backup, work-metadata and source-return journal need original replay until compaction. Keep restore-only conversion.                                      |
@@ -1572,13 +1542,9 @@ assertions first. Mixed tests (for example `host-cli`, `hosted-work`,
 | C           | `tests/agent-hosted-sync.test.mjs` (483)                | Selected test runner                     |
 | C           | `tests/r3c-owner-only.test.mjs` (374)                   | Selected test runner                     |
 | C           | `tests/ui-owner-acceptance.test.mjs` (49)               | Selected test runner                     |
-| D           | `tests/native-companion.test.mjs` (554)                 | Selected test runner                     |
-| D           | `tests/exchange-journal-delta.test.mjs` (482)           | Selected test runner                     |
-| D           | `tests/native-closure-validation.test.mjs` (231)        | Selected test runner                     |
 | E           | `tests/auto-exchange.test.mjs` (755)                    | Selected test runner                     |
 | E           | `tests/auto-exchange-usage-command.test.mjs` (100)      | Selected test runner                     |
 | E           | `tests/auto-exchange-spend.test.mjs` (76)               | Selected test runner                     |
-| F           | `tests/hosted-freshness.test.mjs` (191)                 | Selected test runner                     |
 | G           | `tests/owner-derived.test.mjs` (448)                    | Selected test runner                     |
 | H           | `tests/intent-merge-local.test.mjs` (553)               | Selected test runner                     |
 | H           | `tests/hosted-intent-migration.test.mjs` (425)          | Selected test runner                     |

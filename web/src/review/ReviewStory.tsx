@@ -1,4 +1,4 @@
-import { TestContract } from './TestContract';
+import { TestContract } from '../lane/TestContract';
 import { ErrorToast } from '../ui/Toast';
 // SPDX-License-Identifier: Apache-2.0
 import { useMemo, useState, type ReactNode } from 'react';
@@ -7,7 +7,7 @@ import { Button, Panel } from '../ui/primitives';
 import { age } from '../ui/status';
 import { useNow } from '../shell/StatusBar';
 import { reviewGroups, type ReviewRead } from './review-model';
-import './review.css';
+import '../lane/review.css';
 export function ReviewStory({
   data,
   error,

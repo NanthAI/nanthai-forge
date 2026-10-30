@@ -70,7 +70,7 @@ test('all pending observation reasons and terminal causes share the header model
 test('legacy review decision modules and their production callers are deleted', () => {
   for (const file of ['OwnerDecision.tsx', 'owner-decision-model.ts', 'RevertAcceptance.tsx'])
     assert.equal(existsSync(new URL(`../web/src/lane/${file}`, import.meta.url)), false);
-  for (const file of ['../web/src/lane/HostedReview.tsx', '../web/src/HostedChannels.tsx']) {
+  for (const file of ['../web/src/review/HostedReview.tsx', '../web/src/lane/LandingDecision.tsx']) {
     const text = readFileSync(new URL(file, import.meta.url), 'utf8');
     assert.doesNotMatch(text, /ownerAcceptance|acceptChannel|HostedRevertAcceptance|<OwnerDecision\b/);
   }

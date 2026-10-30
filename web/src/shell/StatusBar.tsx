@@ -51,13 +51,9 @@ export function ChannelStrip({
   automatic = false,
   pending = false,
   live,
-  stale,
-  freshness,
   queue,
 }: {
   queue?: PendingStatus;
-  stale?: string | undefined;
-  freshness?: ReactNode;
   channel?: string;
   head?: string;
   at?: string | number;
@@ -94,12 +90,8 @@ export function ChannelStrip({
       {head && state && (
         <>
           <span className="fx-sub-sep" aria-hidden="true" />
-          <span
-            className={`fx-strip-check fx-c-${stale ? 'plain' : state.tone}`}
-            title={stale}
-            tabIndex={stale ? 0 : undefined}
-          >
-            <Glyph name={stale && state.tone === 'running' ? 'stale' : (state.glyph as 'passed')} size={12} />
+          <span className={`fx-strip-check fx-c-${state.tone}`}>
+            <Glyph name={state.glyph as 'passed'} size={12} />
             {state.word}
           </span>
         </>
@@ -113,7 +105,6 @@ export function ChannelStrip({
           </span>
         </>
       )}
-      {freshness}
       <span className="fx-strip-live">{live}</span>
     </div>
   );
