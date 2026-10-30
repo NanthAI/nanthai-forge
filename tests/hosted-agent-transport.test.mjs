@@ -279,3 +279,40 @@ test('tests and confirm-tests use the shared hosted action with retained operati
   assert.deepEqual(requests[1], requests[2]);
   assert.ok(!existsSync(join(s.root, '.forge', 'native.json')));
 });
+
+test('urgent desired finish retains priority while composition is pending', async t => {
+  const s = agentFixture(t);
+  s.pending(true);
+  await s.transport().dispatch('finish', { laneId: s.lane.laneId, priority: 'urgent' });
+  const request = JSON.parse(s.calls.find(c => c.name === 'projectHostedLandingDesired:submit').args.request);
+  assert.equal(request.priority, 'urgent');
+});
+
+test('new priority reads negotiate an old server once; authorization failures never retry', async t => {
+  const s = agentFixture(t),
+    exchange = s.exchange;
+  let rejected = 0;
+  const original = exchange.client.query;
+  exchange.client.query = async (ref, args) => {
+    if (args.priorityInfo !== undefined) {
+      rejected++;
+      throw new Error(
+        'ArgumentValidationError: Object contains extra field `priorityInfo` that is not in the validator.',
+      );
+    }
+    return original(ref, args);
+  };
+  const transport = s.transport();
+  await transport.query('projectHostedLanding:status', { submissionId: randomUUID() });
+  await transport.query('projectHostedLanding:status', { submissionId: randomUUID() });
+  assert.equal(rejected, 1);
+  exchange.client.query = original;
+  s.allow(false);
+  const fresh = s.transport();
+  const before = s.calls.length;
+  await assert.rejects(
+    fresh.query('projectHostedLanding:status', { submissionId: randomUUID() }),
+    errorCode('PROJECT_UNAVAILABLE'),
+  );
+  assert.equal(s.calls.length, before + 1);
+});

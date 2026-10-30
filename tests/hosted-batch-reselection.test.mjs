@@ -90,9 +90,15 @@ test('incident replay: fallback detaches and requeues all three members atomical
     'transition replay allocates no duplicate work',
   );
   // The original leader wake is lost. Another member must drive re-selection.
-  for (const task of f.pending())
-    if (task.name === 'projectHostedFinishDriver:drive' && task.args[0].submissionId === batch.id)
-      f.patch('_scheduled_functions', task._id, { state: { kind: 'canceled' } });
+  const leaderWakes = f
+    .pending()
+    .filter(
+      task =>
+        task.name === 'projectHostedFinishDriver:drive' &&
+        task.args[0].submissionId === (batch.leaderId ?? batch.id),
+    );
+  assert(leaderWakes.length > 0, 'the original leader wake must actually be removed');
+  for (const task of leaderWakes) f.patch('_scheduled_functions', task._id, { state: { kind: 'canceled' } });
   await f.drain();
   for (let i = 0; i < 3; i++) {
     await f.passChecks();
@@ -222,7 +228,7 @@ for (const endedPhase of ['fallback', 'landed'])
       lastProgressAt: state.at,
     });
     const repaired = states(f).filter(
-      s => batch.members.some(m => m.submissionId === s.id) && s.id !== batch.id,
+      s => batch.members.some(m => m.submissionId === s.id) && s.id !== (batch.leaderId ?? batch.id),
     );
     assert(repaired.every(s => !s.batchId && s.batchSolo && s.batchOriginId === batch.id));
     assert(f.pending().length > 0, 'the alarm reselects and schedules source work itself');
@@ -233,7 +239,7 @@ for (const endedPhase of ['fallback', 'landed'])
     }
     assert(
       states(f)
-        .filter(s => s.id !== batch.id)
+        .filter(s => s.id !== (batch.leaderId ?? batch.id))
         .every(s => s.phase === 'landed'),
     );
     assert(states(f).every(s => s.phase === 'landed'));
@@ -351,7 +357,12 @@ test('a queue claim racing individual source preparation cannot settle the obsol
   assert(claim);
   const task = f
     .pending()
-    .find(task => task.name === 'projectHostedFinishDriver:drive' && task.args[0].submissionId === batch.id);
+    .find(
+      task =>
+        task.name === 'projectHostedFinishDriver:drive' &&
+        task.args[0].submissionId === (batch.leaderId ?? batch.id),
+    );
+  assert(task, 'the batch leader owns a pending source-preparation wake');
   await f.execute(task);
   assert(states(f)[0].batchNeedsSoloCompose, 'guard survives until the new attempt is published');
   await f.transaction('racing-old-queue-advance', driver.advance, claim);

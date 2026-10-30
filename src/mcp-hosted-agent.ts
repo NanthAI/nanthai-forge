@@ -60,6 +60,7 @@ export function registerHostedAgentWorkflow(
         'sync',
         'resolve',
         'finish',
+        'prioritize',
         'cancel',
         'revert',
         'abandon',
@@ -70,7 +71,7 @@ export function registerHostedAgentWorkflow(
         'overlap-acks',
       ],
       description:
-        'Hosted Lane actions over the same CLI transport and recovery journal. checkpoint aliases save. Retain original parameters/operationId after unknown replies; a new UUID starts new work. Finish always requests agent acceptance under current project policy, including with account credentials. Pending is not accepted.',
+        'Hosted Lane actions over the same CLI transport and recovery journal. checkpoint aliases save. Retain original parameters/operationId after unknown replies; a new UUID starts new work. Finish always requests agent acceptance under current project policy, including with account credentials. Pending is not accepted. finish priority:urgent is owner-only (other submitters retain normal with a reason). prioritize changes a queued Candidate submission priority:urgent|normal; it never cancels a running check.',
     },
     {
       name: 'forge_check',

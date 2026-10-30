@@ -46,7 +46,10 @@ export async function notifyFinish(ctx: MutationCtx, state: HostedLandingState) 
       .withIndex('by_project_and_batch', q => q.eq('projectId', projectId).eq('batchId', state.batchId!))
       .unique();
     if (batch && JSON.parse(batch.value).phase === 'fallback') {
-      const leader = await finishRow(ctx, { projectId, submissionId: state.batchId });
+      const leader = await finishRow(ctx, {
+        projectId,
+        submissionId: JSON.parse(batch.value).leaderId ?? state.batchId,
+      });
       if (leader) await scheduleFinish(ctx, leader);
     }
   }
@@ -91,8 +94,11 @@ export async function notifyFinishCompose(
       q.eq('projectId', projectId).eq('composeOperationId', operationId),
     )
     .unique();
-  if (batch) {
-    const leader = await finishRow(ctx, { projectId, submissionId: batch.batchId });
+  if (batch && !['superseded', 'landed'].includes(JSON.parse(batch.value).phase)) {
+    const leader = await finishRow(ctx, {
+      projectId,
+      submissionId: JSON.parse(batch.value).leaderId ?? batch.batchId,
+    });
     if (leader) await scheduleFinish(ctx, leader);
   }
 }

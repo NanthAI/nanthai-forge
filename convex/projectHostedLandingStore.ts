@@ -1,3 +1,4 @@
+import { landingPriorityState } from './projectHostedLandingOrder';
 import { makeFunctionReference } from 'convex/server';
 import { semanticPayload } from '../src/semantic-payload';
 import { hostedLandingProgressAt } from '../src/hosted-landing-stall';
@@ -64,7 +65,7 @@ export async function loadLanding(ctx: QueryCtx | MutationCtx, input: LandingIde
     'SOURCE_UNAVAILABLE',
     'Landing request identity differs from its record.',
   );
-  return { row, state };
+  return { row, state: landingPriorityState(row, state) };
 }
 export const landingAttemptRow = (
   ctx: QueryCtx | MutationCtx,
@@ -149,7 +150,7 @@ export async function writeLanding(
     'WORK_OPERATION_CHANGED',
     'Composition goals publish through desired-state admission.',
   );
-  const state = hostedLandingStateSchema.parse(input),
+  const state = landingPriorityState(row, hostedLandingStateSchema.parse(input)),
     previous = hostedLandingStateSchema.parse(JSON.parse(row.value));
   if (state.phase === 'landed' || state.phase === 'terminal-failed') {
     const at = new Date().toISOString();

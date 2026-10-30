@@ -6,6 +6,7 @@ import { loadLanding, writeLanding } from './projectHostedLandingStore';
 import { loadFinish } from './projectHostedFinishStore';
 import { reserveFinishRetry } from './projectHostedFinishCompose';
 import { writeBatch, type BatchIdentity, type LandingBatch } from './projectHostedLandingBatchStore';
+import { orderHostedLandingRows } from './projectHostedLandingOrder';
 
 /** One bounded window, no function calls per member and no diagnostic checks.
  * Diagnoses survive terminal outcomes so either member can read a named pair. */
@@ -13,7 +14,7 @@ export async function advanceBatchFallback(
   ctx: MutationCtx,
   input: BatchIdentity,
   batch: LandingBatch,
-  submissionId = batch.id,
+  submissionId = batch.leaderId ?? batch.id,
 ) {
   const suspects = new Set(batch.failure?.suspects ?? []);
   const ordered = [...batch.members].sort(
@@ -26,8 +27,39 @@ export async function advanceBatchFallback(
   );
   const pending = current.filter(member => !['landed', 'terminal-failed'].includes(member.state.phase));
   // Preserve an already-running original attempt, including replay after a lost wake.
-  const next =
-    pending.find(member => member.state.batchSolo && !member.state.batchNeedsSoloCompose) ?? pending[0];
+  const running = pending.find(member => member.state.batchSolo && !member.state.batchNeedsSoloCompose);
+  let next = running ?? pending[0];
+  if (
+    !running &&
+    pending.some(member => member.row.priority === 'urgent') &&
+    pending.some(member => member.row.priority !== 'urgent')
+  ) {
+    // A previously selected solo source operation continues too. At most eight
+    // exact metadata reads, only when an owner mixes fallback priority classes.
+    const preparations = await Promise.all(
+      pending.map(async member => ({
+        member,
+        finish: await loadFinish(ctx, { projectId: input.projectId, submissionId: member.state.id }),
+      })),
+    );
+    const inFlight = preparations.find(item => item.finish.value.pending)?.member;
+    const queue = orderHostedLandingRows(
+      pending.map(member => ({
+        sequence: member.row.sequence,
+        actor: member.row.actor,
+        priority: member.row.priority,
+        member,
+      })),
+    );
+    // Keep the existing healthy-first preference within the selected class;
+    // a suspect hint cannot override the owner's urgent priority.
+    next =
+      inFlight ??
+      (
+        queue.find(entry => entry.priority === queue[0]?.priority && !suspects.has(entry.member.state.id)) ??
+        queue[0]
+      )?.member;
+  }
   for (const member of current) {
     const diagnostic = batchMemberDiagnostic(
       batch.memberDetails ?? [],

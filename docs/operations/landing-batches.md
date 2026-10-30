@@ -504,3 +504,60 @@ entries cannot retain advice through a cached result. A peer that already confli
 with main is unavailable speculation, rather than a claim about the submitting
 Lane. Hosted reducers run outside Convex on the existing hash-verified object
 transport; generated preview States are never uploaded or accepted as evidence.
+
+## Hosted queue priority
+
+Hosted Candidate submissions use the same `orderLandingEntries` sorter as native
+Forge: urgent before normal, then arrival order, with the same two-entry submitter
+fairness within each priority class. Existing submissions without priority are
+normal. Hosted `finish` accepts `priority:"urgent"|"normal"` (omission means normal),
+including while its Candidate is still composing. The authenticated project owner,
+or an agent using that owner's authority, can request urgent. Other contributors
+still submit normally and receive a `priorityReason` explaining the governance rule.
+Priority changes order; it does not change check, review or acceptance requirements.
+
+An owner can reprioritise a queued Candidate submission through the existing agent
+CLI or the hosted `forge_task` MCP tool:
+
+```sh
+nforge agent ROOT prioritize '{"submissionId":"SUBMISSION_UUID","priority":"urgent","operationId":"CHANGE_UUID"}'
+```
+
+Use `priority:"normal"` with a new operation ID to undo a promotion. Replay the same
+operation ID and parameters after an unknown reply. The command retains the
+original priority version; an older retry cannot overwrite a later owner's change.
+A running check is never cancelled for priority. Finish/status returns effective
+`priority`, `priorityReason` and `priorityVersion` on the submission, alongside a
+one-based `queuePosition` in the response for queued work. Position is a current observation, including active
+checks ahead of queued work, and can change as other Candidates arrive or settle.
+Composing, checking, ready and terminal submissions have no queued position.
+
+Batch formation follows the same order and groups one priority class. A mixed
+batch after a promotion, or a normal batch with urgent work waiting outside it
+(including members of another unstarted batch), is superseded before its check
+is reserved. Its members return to selection with
+their exact Candidate pins. Distinct batch IDs retain late composition replies
+against the old batch. Already reserved batch checks continue normally.
+
+Individual fallback also selects urgent before normal, retaining its existing
+healthy-before-suspect preference within the selected priority class. An already
+selected solo preparation or running check continues; priority applies at the
+next selection. A suspect hint cannot override an owner's urgent choice.
+
+A priority mutation writes one submission and schedules nothing. Queue positions
+and batch selection read active ordering metadata in 50-row indexed sequence windows, retaining compact keys rather
+than Work or submission bodies. Next-entry selection reads indexed priority-class
+heads, including legacy normal rows. Explicit reads add no background work or
+polling; idle queues incur zero additional Convex calls.
+
+Released strict wait/stack readers keep their original submission body. Selected
+landing/finish status and observation reads opt into priority fields with
+`priorityInfo:1`; the current CLI/MCP transport supplies that flag. Against an older
+server it retries only an explicit argument-validation rejection without that
+read extension, then remembers legacy reads. Authorization/source failures are
+never retried through another route. Advertised capability action names remain
+unchanged; a new priority write still needs the new server.
+
+Verified queue-advice objects are cached beside the Lane in
+`ROOT.forge-client/queue-ahead-objects`; observing the queue never adds downloaded
+object files to the Lane source directory.

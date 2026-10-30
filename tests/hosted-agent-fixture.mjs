@@ -247,7 +247,15 @@ export function agentFixture(t) {
           error: null,
         };
       });
-    } else if (name === 'projectHostedLanding:cancel')
+    } else if (name === 'projectHostedLanding:status')
+      result = { request: { id: args.submissionId, priorityVersion: 0 }, queuePosition: 1 };
+    else if (name === 'projectHostedLandingPriority:prioritize')
+      result = once(id, () => ({
+        id: request.submissionId,
+        priority: request.priority,
+        priorityVersion: request.expectedVersion + 1,
+      }));
+    else if (name === 'projectHostedLanding:cancel')
       result = once(id, () => ({
         id: request.submissionId,
         phase: 'terminal-failed',

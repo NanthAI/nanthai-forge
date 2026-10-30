@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { mkdtempSync, rmSync, readFileSync, readdirSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { moduleUrl } from './convex-module.mjs';
@@ -91,6 +91,11 @@ test('hosted preview uses verified bytes and native merge, caches composes, and 
   };
   const before = f.objects.size;
   let preview = await hostedQueueAhead(f.transport(), selection);
+  assert(!existsSync(join(f.root, 'queue-ahead-objects')), 'advice never creates source files in the Lane');
+  assert(
+    existsSync(join(`${f.root}.forge-client`, 'queue-ahead-objects')),
+    'verified advice objects stay in the private client cache',
+  );
   assert.deepEqual(preview.conflicts[0].paths, ['shared.txt']);
   assert.equal(preview.conflicts[0].confidence, 'actionable');
   assert.equal(preview.conflicts[0].next.stackOn, laneId);

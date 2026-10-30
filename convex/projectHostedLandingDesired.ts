@@ -1,3 +1,4 @@
+import { landingPriority } from './projectHostedLandingOrder';
 import { scheduleLandingAlarm } from './projectHostedLandingStallWake';
 import { desiredWatchdogMs } from '../src/hosted-landing-stall';
 import { desiredLanding, scheduleDesired as schedule } from './projectHostedLandingDesiredWake';
@@ -30,7 +31,7 @@ export const submit = mutation({
     try {
       const command = hostedLandingDesiredSchema.parse(JSON.parse(input.request));
       const actor = await acceptanceActor(ctx, true);
-      await hostedWriteProject(ctx, input.projectId, actor.id, command.authorityEpoch);
+      const project = await hostedWriteProject(ctx, input.projectId, actor.id, command.authorityEpoch);
       const request = canonicalPayload(command);
       const old = await ctx.db
         .query('projectHostedLandingDesired')
@@ -77,6 +78,7 @@ export const submit = mutation({
       const selectionKey = digest(
         canonicalPayload({
           channel: 'main',
+          ...(command.priority === 'urgent' ? { priority: 'urgent' } : {}),
           agent: true,
           check: command.check,
           inputs: source.state.request.inputs.root,
@@ -128,6 +130,8 @@ export const submit = mutation({
         actor: actor.id,
         at,
         sequence: 0,
+        ...landingPriority(project.owner, actor.id, command.priority),
+        priorityVersion: 0,
         version: 0,
         firstAttemptId: attemptId,
         attemptId,
@@ -145,6 +149,7 @@ export const submit = mutation({
           candidateId: source.state.candidateId,
           expectedHead: null,
           agent: true,
+          ...(command.priority ? { priority: command.priority } : {}),
           check: command.check,
           ...(command.keepOpen === undefined ? {} : { keepOpen: command.keepOpen }),
           finish: { composeOperationId: command.composeOperationId, after: command.after },

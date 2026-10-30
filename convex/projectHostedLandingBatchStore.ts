@@ -1,6 +1,7 @@
 import { batchFailureSchema, batchMemberDetailSchema } from '../src/hosted-batch-diagnosis';
 import { releaseBatchMembers } from './projectHostedLandingBatchRelease';
 // SPDX-License-Identifier: Apache-2.0
+import { activeLandingOrder } from './projectHostedLandingOrder';
 import { z } from 'zod';
 import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
@@ -21,10 +22,11 @@ export type BatchIdentity = { projectId: Id<'hostedProjects'>; batchId: string }
 export const batchSchema = z
   .object({
     id: z.uuid(),
+    leaderId: z.uuid().optional(),
     at: z.iso.datetime(),
     composeOperationId: z.uuid(),
     checkOperationId: z.uuid(),
-    phase: z.enum(['composing', 'checking', 'fallback', 'landed']),
+    phase: z.enum(['composing', 'checking', 'fallback', 'landed', 'superseded']),
     members: z.array(hostedLandingAttemptSchema).min(2).max(HOSTED_BATCH_MEMBERS),
     memberDetails: z.array(batchMemberDetailSchema).max(HOSTED_BATCH_MEMBERS).optional(),
     failure: batchFailureSchema.optional(),
@@ -57,11 +59,11 @@ export async function writeBatch(ctx: MutationCtx, input: BatchIdentity, batch: 
 }
 export async function wakeBatch(ctx: MutationCtx, input: BatchIdentity) {
   const { batch } = await loadBatch(ctx, input);
-  if (batch.phase === 'landed') return;
-  const row = await finishRow(ctx, { projectId: input.projectId, submissionId: batch.id });
+  if (batch.phase === 'landed' || batch.phase === 'superseded') return;
+  const row = await finishRow(ctx, { projectId: input.projectId, submissionId: batch.leaderId ?? batch.id });
   if (row) await scheduleFinish(ctx, row);
 }
-/** Exactly two bounded index windows, independent of project history. Eligibility
+/** Bounded active metadata pages, independent of retained history. Eligibility
  * is pinned at admission; current authority and governance are rechecked at publish. */
 export async function formLandingBatch(
   ctx: MutationCtx,
@@ -73,19 +75,20 @@ export async function formLandingBatch(
 ) {
   if (!selected.row.batchSelection || selected.state.batchId || selected.state.batchSolo) return false;
   const own = hostedLandingAttemptSchema.parse(JSON.parse(selected.row.batchSelection));
+  const order = await activeLandingOrder(
+    ctx,
+    { projectId: input.projectId, channel: 'main' },
+    ['queued', 'checking'],
+    true,
+  );
   const windows = [];
-  for (const phase of ['queued', 'checking'] as const)
-    windows.push(
-      ...(await ctx.db
-        .query('projectHostedLandingRequests')
-        .withIndex('by_project_and_channel_and_batchable_and_phase_and_sequence', q =>
-          q.eq('projectId', input.projectId).eq('channel', 'main').eq('batchable', true).eq('phase', phase),
-        )
-        .order('asc')
-        .take(HOSTED_BATCH_MEMBERS)),
-    );
+  for (const key of order) {
+    if ((key.priority ?? 'normal') !== (selected.state.priority ?? 'normal')) continue;
+    const row = await landingRow(ctx, { projectId: input.projectId, submissionId: key.submissionId });
+    if (row?.batchable) windows.push(row);
+    if (windows.length >= HOSTED_BATCH_MEMBERS) break;
+  }
   const members = windows
-    .sort((a, b) => a.sequence - b.sequence)
     .flatMap(row => {
       const state = hostedLandingStateSchema.parse(JSON.parse(row.value));
       if (!row.batchSelection || state.batchId || state.batchSolo || state.request.finish?.after) return [];
@@ -101,7 +104,8 @@ export async function formLandingBatch(
     .slice(0, HOSTED_BATCH_MEMBERS);
   if (members.length < 2 || !members.some(m => m.state.id === input.submissionId)) return false;
   const batch: LandingBatch = {
-    id: members[0]!.state.id,
+    id: crypto.randomUUID(),
+    leaderId: members[0]!.state.id,
     at: new Date(Date.now()).toISOString(),
     composeOperationId: crypto.randomUUID(),
     checkOperationId: crypto.randomUUID(),

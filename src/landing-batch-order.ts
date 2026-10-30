@@ -1,8 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { LandingEntry } from './landing-batch-types.js';
+export type LandingOrderEntry = {
+  priority: 'urgent' | 'normal';
+  arrivedAt: string;
+  submitter: string;
+};
 /** Ordering only: after two entries, each later entry yields one position to
  * another submitter in the same priority class. No quota or admission denial. */
-export function orderLandingEntries(entries: LandingEntry[]) {
+export function orderLandingEntries<T extends LandingOrderEntry>(entries: T[]) {
   const rank = { urgent: 0, normal: 1 };
   const result = [...entries].sort(
     (a, b) => rank[a.priority] - rank[b.priority] || a.arrivedAt.localeCompare(b.arrivedAt),

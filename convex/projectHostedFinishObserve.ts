@@ -1,3 +1,4 @@
+import { landingQueuePosition, activeLandingOrder, landingStateForReader } from './projectHostedLandingOrder';
 import { hostedQueueAheadSelection } from './projectHostedQueueAhead';
 import { desiredLanding } from './projectHostedLandingDesiredWake';
 import { hostedLandingStateSchema } from '../src/hosted-landing';
@@ -21,6 +22,7 @@ export const page = query({
     projectId: v.id('hostedProjects'),
     operationId: v.string(),
     nextVersion: v.number(),
+    priorityInfo: v.optional(v.literal(1)),
   },
   returns: v.string(),
   handler: async (ctx, input) => {
@@ -70,10 +72,11 @@ export const page = query({
           operationId: input.operationId,
           canonicalOperationId: state.operationId,
           authority: sourceAuthority(project),
-          submission: state,
+          submission: landingStateForReader(state, input.priorityInfo),
+          queuePosition: await landingQueuePosition(ctx, state),
           queueAheadSelection: await hostedQueueAheadSelection(ctx, state),
           pendingAttempt: null,
-          events: [{ submission: state, pendingAttempt: null }],
+          events: [{ submission: landingStateForReader(state, input.priorityInfo), pendingAttempt: null }],
           nextVersion: state.version + 1,
           isDone: true,
           resnapshot: true,
@@ -84,6 +87,10 @@ export const page = query({
         projectId: input.projectId,
         submissionId: rows[0]?.submissionId ?? alias!.submissionId,
       });
+      const order =
+        state.phase === 'queued'
+          ? await activeLandingOrder(ctx, { projectId: input.projectId, channel: 'main' })
+          : undefined;
       const finish = await finishRow(ctx, { projectId: input.projectId, submissionId: state.id });
       const pendingAttempt = finish ? JSON.parse(finish.value).pending : null;
       const events = [];
@@ -99,12 +106,19 @@ export const page = query({
           )
           .unique();
         if (!row) {
-          events.push({ submission: state, pendingAttempt });
+          events.push({ submission: landingStateForReader(state, input.priorityInfo), pendingAttempt });
           nextVersion = state.version + 1;
           resnapshot = true;
           break;
         }
-        events.push(JSON.parse(row.value));
+        const event = JSON.parse(row.value);
+        events.push({
+          ...event,
+          submission: landingStateForReader(
+            hostedLandingStateSchema.parse(event.submission),
+            input.priorityInfo,
+          ),
+        });
         nextVersion++;
       }
       return canonicalPayload({
@@ -112,8 +126,9 @@ export const page = query({
         operationId: input.operationId,
         canonicalOperationId: state.operationId,
         authority: sourceAuthority(project),
-        submission: state,
-        queueAheadSelection: await hostedQueueAheadSelection(ctx, state),
+        submission: landingStateForReader(state, input.priorityInfo),
+        queuePosition: await landingQueuePosition(ctx, state, order),
+        queueAheadSelection: await hostedQueueAheadSelection(ctx, state, order),
         pendingAttempt,
         events,
         nextVersion,

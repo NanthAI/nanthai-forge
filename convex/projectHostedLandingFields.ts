@@ -84,6 +84,17 @@ export const hostedLandingTables = {
     revertOf: v.optional(v.string()),
     actor: v.string(),
     sequence: v.number(),
+    priority: v.optional(v.union(v.literal('urgent'), v.literal('normal'))),
+    priorityReason: v.optional(v.string()),
+    priorityVersion: v.optional(v.number()),
+    priorityChange: v.optional(
+      v.object({
+        operationId: v.string(),
+        actor: v.string(),
+        priority: v.union(v.literal('urgent'), v.literal('normal')),
+        expectedVersion: v.number(),
+      }),
+    ),
     selectionKey: v.optional(v.string()),
     hold: v.optional(v.literal('main-red')),
     runnable: v.boolean(),
@@ -100,6 +111,20 @@ export const hostedLandingTables = {
     .index('by_project_and_selection', ['projectId', 'selectionKey'])
     .index('by_project_and_operation', ['projectId', 'operationId'])
     .index('by_project_and_actor_and_operation', ['projectId', 'actor', 'operationId'])
+    .index('by_project_and_channel_and_runnable_and_priority_and_sequence', [
+      'projectId',
+      'channel',
+      'runnable',
+      'priority',
+      'sequence',
+    ])
+    .index('by_project_and_channel_and_phase_and_priority_and_sequence', [
+      'projectId',
+      'channel',
+      'phase',
+      'priority',
+      'sequence',
+    ])
     .index('by_project_and_channel_and_runnable_and_sequence', [
       'projectId',
       'channel',

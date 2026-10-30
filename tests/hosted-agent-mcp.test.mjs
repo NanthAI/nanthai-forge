@@ -53,6 +53,7 @@ const parameters = s => ({
   check: { candidateId: s.candidate.id, checkId: randomUUID() },
   run: { candidateId: s.candidate.id, checkId: randomUUID() },
   finish: { laneId: s.lane.laneId },
+  prioritize: { submissionId: randomUUID(), priority: 'urgent' },
   cancel: { submissionId: randomUUID() },
   revert: { target: { kind: 'receipt', receiptId: randomUUID() } },
   abandon: { laneId: s.lane.laneId, reason: 'Superseded' },
@@ -71,6 +72,7 @@ for (const action of [
   'check',
   'run',
   'finish',
+  'prioritize',
   'cancel',
   'revert',
   'abandon',
@@ -114,6 +116,7 @@ for (const [action, api] of [
   ['start', 'projectHostedStart:start'],
   ['check', 'projectHostedChecks:enqueue'],
   ['finish', 'projectHostedLanding:enqueue'],
+  ['prioritize', 'projectHostedLandingPriority:prioritize'],
   ['cancel', 'projectHostedLanding:cancel'],
 ])
   test(`MCP ${action} lost response reconciles through the actual CLI with the original UUID`, async t => {
@@ -144,7 +147,9 @@ for (const [action, api] of [
     const cli = await agentCli([s.root, action, JSON.stringify({ ...s.address, ...input })]);
     assert.equal(
       cli.operationId,
-      action === 'start' ? original.operationId : JSON.parse(original.request).operationId,
+      ['start', 'prioritize'].includes(action)
+        ? original.operationId
+        : JSON.parse(original.request).operationId,
     );
     assert.deepEqual(body(await tool.call({ command: { action, ...input } })), cli);
     assert.deepEqual(s.calls.filter(call => call.name === api).at(-1).args, original);

@@ -1,3 +1,4 @@
+import { nextLandingRow } from './projectHostedLandingOrder';
 import { prepareLandingCheck } from './projectHostedLandingBatchCheck';
 import {
   semanticVerdict,
@@ -61,14 +62,7 @@ export async function claimLandingQueue(
   )
     row = null;
   if (!row) {
-    const selected = await ctx.db
-      .query('projectHostedLandingRequests')
-      .withIndex('by_project_and_channel_and_runnable_and_sequence', q =>
-        q.eq('projectId', input.projectId).eq('channel', input.channel).eq('runnable', true),
-      )
-      .order('asc')
-      .take(1);
-    row = selected[0] ?? null;
+    row = await nextLandingRow(ctx, input);
   }
   if (!row) {
     await ctx.db.patch(queue._id, { lease: null, wake: null });

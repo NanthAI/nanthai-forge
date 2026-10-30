@@ -1,3 +1,11 @@
+import {
+  landingPriority,
+  landingQueuePosition,
+  nextLandingRow,
+  activeLandingOrder,
+  landingPriorityState,
+  landingStateForReader,
+} from './projectHostedLandingOrder';
 import { hostedQueueAheadSelection } from './projectHostedQueueAhead';
 import { scheduleLandingAlarm } from './projectHostedLandingStallWake';
 import { reuseHostedLanding } from './projectHostedLandingIdentity';
@@ -77,7 +85,11 @@ async function reader(
   await accessibleProject(ctx, projectId, user.subject);
 }
 export const status = query({
-  args: { projectId: v.id('hostedProjects'), submissionId: v.string() },
+  args: {
+    projectId: v.id('hostedProjects'),
+    submissionId: v.string(),
+    priorityInfo: v.optional(v.literal(1)),
+  },
   returns: v.string(),
   handler: async (ctx, input) => {
     try {
@@ -87,10 +99,15 @@ export const status = query({
         projectId: input.projectId,
         attemptId: state.attemptId,
       });
+      const order =
+        state.phase === 'queued'
+          ? await activeLandingOrder(ctx, { projectId: input.projectId, channel: 'main' })
+          : undefined;
       return canonicalPayload({
-        request: state,
+        request: landingStateForReader(state, input.priorityInfo),
+        queuePosition: await landingQueuePosition(ctx, state, order),
         attempt,
-        queueAheadSelection: await hostedQueueAheadSelection(ctx, state),
+        queueAheadSelection: await hostedQueueAheadSelection(ctx, state, order),
       });
     } catch (error) {
       return report(error);
@@ -134,7 +151,12 @@ export const list = query({
         maximumRowsRead: 100,
         maximumBytesRead: 128 * 1024,
       });
-      return canonicalPayload({ ...page, page: page.page.map(row => JSON.parse(row.value)) });
+      return canonicalPayload({
+        ...page,
+        page: page.page.map(row =>
+          landingPriorityState(row, hostedLandingStateSchema.parse(JSON.parse(row.value))),
+        ),
+      });
     } catch (error) {
       return report(error);
     }
@@ -191,7 +213,7 @@ export async function enqueueHostedLanding(
     timing?: import('../src/hosted-landing').HostedLandingState['timing'];
   },
 ) {
-  await activeProject(ctx, input.projectId, actor.id);
+  const project = await activeProject(ctx, input.projectId, actor.id);
   const reused = await reuseHostedLanding(ctx, { projectId: input.projectId, actor: actor.id, request });
   if (reused.state) return reused.state;
   const expected = {
@@ -263,6 +285,8 @@ export async function enqueueHostedLanding(
     at: first.at,
     request,
     sequence,
+    ...landingPriority(project.owner, actor.id, request.priority),
+    priorityVersion: 0,
     version: reserved ? 1 : 0,
     firstAttemptId: attempt.id,
     attemptId: attempt.id,
@@ -281,6 +305,8 @@ export async function enqueueHostedLanding(
     ...(attempt.deferredCheck ? { batchSelection: canonicalPayload(attempt), batchable: true } : {}),
     ...(request.revertOf ? { revertOf: request.revertOf } : {}),
     actor: actor.id,
+    ...landingPriority(project.owner, actor.id, request.priority),
+    priorityVersion: 0,
     sequence,
     ...(reused.selectionKey ? { selectionKey: reused.selectionKey } : {}),
     runnable: true,
@@ -346,19 +372,14 @@ export const candidate = query({
         state.phase === 'queued'
           ? await landingQueue(ctx, { projectId: input.projectId, channel: 'main' })
           : null;
-      const [runnable] =
+      const runnable =
         state.phase === 'queued'
-          ? await ctx.db
-              .query('projectHostedLandingRequests')
-              .withIndex('by_project_and_channel_and_runnable_and_sequence', q =>
-                q.eq('projectId', input.projectId).eq('channel', 'main').eq('runnable', true),
-              )
-              .take(1)
-          : [];
+          ? await nextLandingRow(ctx, { projectId: input.projectId, channel: 'main' })
+          : null;
       const ahead =
         queue?.lease && queue.lease.submissionId !== state.id
           ? await landingRow(ctx, { projectId: input.projectId, submissionId: queue.lease.submissionId })
-          : runnable && runnable.sequence < row.sequence
+          : runnable && runnable.submissionId !== row.submissionId
             ? runnable
             : null;
       const [reverse] = state.acceptance

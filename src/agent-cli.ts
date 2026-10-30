@@ -156,6 +156,7 @@ const examples: Record<string, unknown> = {
   run: { laneId: 'LANE_ID' },
   observe: { operationId: 'ORIGINAL_UUID', waitMs: 1000 },
   log: { operationId: 'ORIGINAL_UUID', stream: 'stderr', tail: 4096 },
+  prioritize: { submissionId: 'SUBMISSION_ID', priority: 'urgent' },
   cancel: { operationId: 'ORIGINAL_UUID' },
   accept: { viewId: 'CANDIDATE_ID' },
   complete: { laneId: 'LANE_ID' },
@@ -237,6 +238,9 @@ function actionHelp(action: string): string {
   if (action === 'confirm-tests')
     result +=
       'Confirm the proposed proving tests for a clean Candidate. Send candidateId, runId of a completed run on that exact source, expectedHead, expectedVersion and operationId. Optional tests replaces the proposed list. Complete measurements must total under 90000 ms. Missing timings and over-budget contracts are refused explicitly. The acceptance gate remains unchanged.\n';
+  if (action === 'prioritize')
+    result +=
+      'Hosted owner command: prioritize {submissionId,priority:"urgent"|"normal"}. Reorders a queued Candidate; no running check is cancelled. Replay the same operationId after an unknown reply.\n';
   if (action === 'tests')
     result +=
       'Read the scoped landing test selection for the Lane saved head versus current main. Returns scope, reason, tests, command and source pins; command is null when no test files are selected. Run it in the Lane after building. Checkpoint edits and ask again after sync or main changes. Includes contractProposal with per-file historical estimates (unknown timings are null), current contract and version. candidateId selects exact composed source; runId reads its complete measured timing reports. Read-only; no check is started.\n';
@@ -279,6 +283,7 @@ function actionHelp(action: string): string {
       'capabilities',
       'tests',
       'confirm-tests',
+      'prioritize',
       'configure-check',
       'configure-runner',
       'check-settings',

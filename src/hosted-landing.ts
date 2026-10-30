@@ -30,6 +30,7 @@ export const hostedLandingRequestSchema = z
     expectedHead: hash.nullable(),
     agent: z.boolean().default(false),
     keepOpen: z.boolean().optional(),
+    priority: z.enum(['urgent', 'normal']).optional(),
     revertOf: z.uuid().optional(),
     check: landingCheckSelectionSchema.nullable(),
     finish: z
@@ -121,6 +122,9 @@ export const hostedLandingStateSchema = z
     at: z.iso.datetime(),
     request: hostedLandingRequestSchema,
     sequence: checkNumber,
+    priority: z.enum(['urgent', 'normal']).optional(),
+    priorityReason: z.string().optional(),
+    priorityVersion: checkNumber.optional(),
     version: checkNumber,
     firstAttemptId: z.uuid(),
     attemptId: z.uuid(),

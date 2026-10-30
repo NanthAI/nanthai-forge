@@ -178,7 +178,9 @@ export async function finishFixture(
       JSON.parse,
     );
   const current = id =>
-    tx('finishStatus', api.status, { projectId: f.projectId, submissionId: id }).then(JSON.parse);
+    tx('finishStatus', api.status, { projectId: f.projectId, submissionId: id, priorityInfo: 1 }).then(
+      JSON.parse,
+    );
   const row = id => [...f.tables.projectHostedFinishes.values()].find(x => x.submissionId === id);
   const pending = () =>
     [...f.tables._scheduled_functions.values()]

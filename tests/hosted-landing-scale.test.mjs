@@ -157,7 +157,11 @@ test('immutable attempt history pages completely and status never hydrates that 
   assert.equal(total, 205);
   assert.equal((await f.status(saved.id)).attempt.id, a.id);
   const reads = f.counts.filter(c => c.name === 'landingStatus').at(-1);
-  assert.equal(reads.documents, 3);
+  assert.equal(
+    reads.documents,
+    6,
+    'selected request/attempt plus the three active queue ranges for position; no attempt history',
+  );
 });
 
 test('H14 can append a named child under the fence while original request/attempt/check pins remain immutable', async () => {

@@ -1,5 +1,6 @@
 import { advanceBatchFallback } from './projectHostedLandingBatchFallback';
 // SPDX-License-Identifier: Apache-2.0
+import { releaseUnstartedBatchForPriority } from './projectHostedLandingBatchPriority';
 import type { Doc } from './_generated/dataModel';
 import type { MutationCtx } from './_generated/server';
 import type { FinishIdentity } from './projectHostedFinishControl';
@@ -36,6 +37,8 @@ export async function batchFinishStep(
   if (!batchId) return { handled: false, command: null };
   const key = { projectId: input.projectId, batchId };
   const { batch } = await loadBatch(ctx, key);
+  if (batch.phase === 'superseded') return { handled: true, command: null };
+  if (await releaseUnstartedBatchForPriority(ctx, key, batch)) return { handled: true, command: null };
   if (
     state.phase === 'queued' &&
     state.observation.stall &&
@@ -57,7 +60,8 @@ export async function batchFinishStep(
   if (state.batchOriginId) return { handled: false, command: null };
   if (state.batchSolo || state.phase === 'ready' || state.phase === 'landed')
     return { handled: false, command: null };
-  if (state.id !== batch.id || batch.phase !== 'composing') return { handled: true, command: null };
+  if (state.id !== (batch.leaderId ?? batch.id) || batch.phase !== 'composing')
+    return { handled: true, command: null };
   for (const member of batch.members) {
     const current = await loadLanding(ctx, { projectId: input.projectId, submissionId: member.submissionId });
     if (current.state.phase === 'terminal-failed') {

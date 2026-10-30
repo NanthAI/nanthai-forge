@@ -71,3 +71,31 @@ test('native symlink roots and read-only address detection preserve native routi
   assert.equal(hostedAgentAddress(absent, {}), null);
   assert(!existsSync(s.root));
 });
+
+test('hosted CLI forwards urgent finish and retained queued Candidate reprioritisation', async t => {
+  const s = agentFixture(t);
+  http(t, s);
+  const finished = await agentCli([
+    s.root,
+    'finish',
+    JSON.stringify({
+      ...s.address,
+      candidateId: s.candidate.id,
+      composeOperationId: '11111111-1111-4111-8111-111111111111',
+      priority: 'urgent',
+    }),
+  ]);
+  assert.equal(finished.result.submission.request.priority, 'urgent');
+  assert.equal(finished.result.queuePosition, 1);
+  const operationId = randomUUID(),
+    command = { submissionId: finished.result.submission.id, priority: 'normal', operationId };
+  const changed = await agentCli([s.root, 'prioritize', JSON.stringify(command)]);
+  assert.equal(changed.result.priority, 'normal');
+  const first = s.calls.find(c => c.name === 'projectHostedLandingPriority:prioritize');
+  assert.equal(first.args.expectedVersion, 0);
+  assert.equal(
+    (await agentCli([s.root, 'prioritize', JSON.stringify(command)])).operationId,
+    changed.operationId,
+  );
+  assert.deepEqual(s.calls.filter(c => c.name === first.name).at(-1).args, first.args);
+});

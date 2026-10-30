@@ -32,6 +32,7 @@ export const hostedAgentActions = [
 /** Owner settings commands. Not advertised in capabilities: released clients parse
  * that list strictly, and the server enforces owner authority on each call. */
 export const hostedAgentOwnerActions = [
+  'prioritize',
   'configure-check',
   'configure-runner',
   'check-settings',
@@ -136,8 +137,10 @@ export const hostedAgentCommandSchemas = {
       after: uuid.nullable().default(null),
       accept: z.boolean().optional(),
       keepOpen: z.boolean().optional(),
+      priority: z.enum(['urgent', 'normal']).optional(),
     })
     .strict(),
+  prioritize: z.object({ submissionId: uuid, priority: z.enum(['urgent', 'normal']) }).strict(),
   cancel: z.object({ submissionId: uuid }).strict(),
   revert: z.object({ ...message, target: revertTargetSchema }).strict(),
   abandon: z

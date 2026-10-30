@@ -498,6 +498,22 @@ export async function executeHostedAgent(
     });
     return session.mutation('projectHostedChecks:enqueue', { request: canonicalPayload(request) });
   }
+  if (action === 'prioritize') {
+    const command = hostedAgentCommandSchemas.prioritize.parse(input);
+    const request = await session.journal.retain('priority-request', async () => {
+      const current = await session.query<{ request: { priorityVersion?: number } }>(
+        'projectHostedLanding:status',
+        { submissionId: command.submissionId },
+      );
+      return {
+        ...command,
+        operationId,
+        authorityEpoch: epoch,
+        expectedVersion: current.request.priorityVersion ?? 0,
+      };
+    });
+    return session.mutation('projectHostedLandingPriority:prioritize', request);
+  }
   if (action === 'cancel') {
     const command = hostedAgentCommandSchemas.cancel.parse(input);
     const request = await session.journal.retain('cancel-request', () =>
@@ -570,6 +586,7 @@ export async function executeHostedAgent(
           authorityEpoch: epoch,
           composeOperationId,
           after: command.after,
+          ...(command.priority ? { priority: command.priority } : {}),
           check: await checkSelection(session, command.check),
           ...(command.keepOpen === undefined ? {} : { keepOpen: command.keepOpen }),
         }),
@@ -623,6 +640,7 @@ export async function executeHostedAgent(
       candidateId,
       expectedHead: candidate.result.status === 'clean' ? candidate.result.head : null,
       agent: true,
+      ...(command.priority ? { priority: command.priority } : {}),
       check: await checkSelection(session, command.check),
       finish: { composeOperationId, after: command.after },
       ...(command.keepOpen === undefined ? {} : { keepOpen: command.keepOpen }),
@@ -639,11 +657,16 @@ export async function executeHostedAgent(
     request: canonicalPayload({ ...request, governanceVersion: 1 }),
   });
   let queueAheadSelection: unknown;
+  let queuePosition: number | null | undefined;
   try {
-    const read = await session.query<{ queueAheadSelection?: unknown }>('projectHostedLanding:status', {
+    const read = await session.query<{
+      queueAheadSelection?: unknown;
+      queuePosition?: number | null;
+    }>('projectHostedLanding:status', {
       submissionId: (result as { id: string }).id,
     });
     queueAheadSelection = read.queueAheadSelection;
+    queuePosition = read.queuePosition;
   } catch {
     /* Advisory reads never affect admission. */
   }
@@ -651,6 +674,7 @@ export async function executeHostedAgent(
     phase: 'finish',
     composeOperationId,
     submission: result,
+    ...(queuePosition === undefined ? {} : { queuePosition }),
     ...(queueAheadSelection ? { queueAheadSelection } : {}),
   };
 }

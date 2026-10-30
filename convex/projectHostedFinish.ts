@@ -1,3 +1,4 @@
+import { activeLandingOrder, landingQueuePosition, landingStateForReader } from './projectHostedLandingOrder';
 import { hostedQueueAheadSelection } from './projectHostedQueueAhead';
 // SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
@@ -43,7 +44,7 @@ export const resume = mutation({
 /** S05-style cursor: observers subscribe/reconnect to one request version. They
  * cause no wake or compute. A named pending source phase is visible immediately. */
 export const status = query({
-  args: { ...identity, version: v.optional(v.number()) },
+  args: { ...identity, version: v.optional(v.number()), priorityInfo: v.optional(v.literal(1)) },
   returns: v.string(),
   handler: async (ctx, input) => {
     try {
@@ -52,11 +53,16 @@ export const status = query({
       await accessibleProject(ctx, input.projectId, user.subject);
       const { state } = await loadLanding(ctx, input),
         { value } = await loadFinish(ctx, input);
+      const order =
+        state.phase === 'queued'
+          ? await activeLandingOrder(ctx, { projectId: input.projectId, channel: 'main' })
+          : undefined;
       return canonicalPayload({
         version: state.version,
-        unchanged: input.version === state.version,
-        submission: state,
-        queueAheadSelection: await hostedQueueAheadSelection(ctx, state),
+        unchanged: state.phase !== 'queued' && input.version === state.version,
+        submission: landingStateForReader(state, input.priorityInfo),
+        queuePosition: await landingQueuePosition(ctx, state, order),
+        queueAheadSelection: await hostedQueueAheadSelection(ctx, state, order),
         pendingAttempt: value.pending,
         selection: { inputs: value.source.inputs, dependencies: value.source.dependencies },
       });

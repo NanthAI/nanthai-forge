@@ -1407,7 +1407,12 @@ run. Driver replies and scheduler deliveries are safe to repeat. Enqueue retries
 can repair a failed wake by inspecting its durable scheduler receipt. There is no
 empty-queue poller, browser heartbeat or recurring check observation.
 
-Only runnable requests enter selection, ordered by Channel sequence. Checking,
+Only runnable requests enter selection. Indexed priority-class heads select urgent
+owner requests before normal requests; shared native ordering supplies arrival
+order and within-class fairness for batch selection and queue positions. Missing
+legacy priority means normal. Owner reprioritisation patches one queued submission
+without a wake or poller. Unstarted batches yield to urgent work before reserving
+a check; reserved checks continue. See [hosted queue priority](operations/landing-batches.md#hosted-queue-priority). Checking,
 ready and terminal records remain readable without hiding later independent work.
 H10 run updates transactionally schedule one coalesced check wake; bounded metadata
 pages reactivate its waiters and wake their Channel. Fan-out automatically continues

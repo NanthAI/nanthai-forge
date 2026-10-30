@@ -67,6 +67,7 @@ export type HostedAgentResponse = {
 /** The shared CLI/MCP transport. Source bytes use the existing verified exchange;
  * every dispatch is finite and every mutation is pinned before network IO. */
 export class HostedAgentTransport {
+  private priorityReads: boolean | undefined;
   constructor(
     readonly root: string,
     readonly address: HostedAgentAddress,
@@ -324,10 +325,34 @@ export class HostedAgentTransport {
     };
   }
   async query<T = unknown>(name: string, args: Record<string, unknown>): Promise<T> {
-    const value = await this.exchange.client.query(makeFunctionReference<'query'>(name), {
-      ...args,
-      projectId: this.address.projectId,
-    });
+    const priorityRead = [
+      'projectHostedLanding:status',
+      'projectHostedFinish:status',
+      'projectHostedFinishObserve:page',
+    ].includes(name);
+    const request = { ...args, projectId: this.address.projectId };
+    let value: unknown;
+    if (priorityRead && this.priorityReads !== false) {
+      try {
+        value = await this.exchange.client.query(makeFunctionReference<'query'>(name), {
+          ...request,
+          priorityInfo: 1,
+        });
+        this.priorityReads = true;
+      } catch (error) {
+        // Read-only negotiation with a released server. Authorization and source
+        // failures never trigger a retry or a native/alternate-source fallback.
+        const message = error instanceof Error ? error.message : '';
+        if (
+          !message.includes('ArgumentValidationError') ||
+          !message.includes('priorityInfo') ||
+          !/extra field/i.test(message)
+        )
+          throw error;
+        this.priorityReads = false;
+        value = await this.exchange.client.query(makeFunctionReference<'query'>(name), request);
+      }
+    } else value = await this.exchange.client.query(makeFunctionReference<'query'>(name), request);
     return (typeof value === 'string' ? JSON.parse(value) : value) as T;
   }
   async mutation<T = unknown>(name: string, args: Record<string, unknown>): Promise<T> {

@@ -134,7 +134,9 @@ export async function landingFixture(source = null) {
       JSON.parse,
     );
   const status = (submissionId, actor = 'owner') =>
-    call('landingStatus', api.status, { projectId: f.projectId, submissionId }, actor).then(JSON.parse);
+    call('landingStatus', api.status, { projectId: f.projectId, submissionId, priorityInfo: 1 }, actor).then(
+      JSON.parse,
+    );
   const queue = () =>
     [...f.tables.projectHostedLandingQueues.values()].find(r => r.projectId === f.projectId);
   const pendingTasks = () =>

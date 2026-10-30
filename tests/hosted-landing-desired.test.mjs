@@ -37,7 +37,12 @@ const submit = (f, command) =>
     .then(JSON.parse);
 const read = (f, operationId, actor = 'owner') =>
   f
-    .tx('desiredRead', observe.page, { projectId: f.projectId, operationId, nextVersion: 0 }, actor)
+    .tx(
+      'desiredRead',
+      observe.page,
+      { projectId: f.projectId, operationId, nextVersion: 0, priorityInfo: 1 },
+      actor,
+    )
     .then(JSON.parse);
 function pauseSource(f) {
   const row = [...f.tables.projectHostedOperations.values()].find(
@@ -299,4 +304,18 @@ test('a reserved desired landing survives main moving before admission and remai
   const files = JSON.parse(f.c.objects.get(f.currentMain().head)).files;
   assert(files.some(file => file.path === 'accepted.txt'));
   assert(files.some(file => file.path === 'selected.txt'));
+});
+
+test('owner urgent priority survives desired composition into its canonical queued submission', async t => {
+  const f = await finishFixture(t),
+    command = { ...request(f), priority: 'urgent' };
+  const state = await submit(f, command);
+  assert.equal(state.priority, 'urgent');
+  assert.equal(state.request.priority, 'urgent');
+  await f.drain();
+  const current = (await read(f, command.operationId)).submission;
+  assert.equal(current.id, state.id);
+  assert.equal(current.priority, 'urgent');
+  assert.equal(current.request.priority, 'urgent');
+  assert.match(current.priorityReason, /project owner/);
 });
