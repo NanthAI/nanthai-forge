@@ -11,7 +11,7 @@ const choices = {
   split: 'Route around: move your edit off this file or into a separate Lane.',
 };
 /** Stable per Lane and notice, so repeating a printed command replays the same answer. */
-const answerId = (laneId: string, noticeId: string) => {
+export const answerId = (laneId: string, noticeId: string) => {
   const hex = createHash('sha256').update(`overlap-answer\0${laneId}\0${noticeId}`).digest('hex');
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-8${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
 };

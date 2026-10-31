@@ -19,6 +19,7 @@ import { wakePostAccept } from './post-accept-main.js';
 import { acceptedLifecycle } from './agent-autonomy-lifecycle.js';
 import type { AcceptanceActor } from './autonomy-policy.js';
 import { readPolicy, setPolicy, localPerson } from './work-autonomy.js';
+import { policyReadView } from './autonomy-policy.js';
 import { recordMetadata, scopedMetadata } from './work-record-metadata.js';
 import type { WorkRecordTransaction } from './work-record-transaction.js';
 import { nativeObjects } from './native-objects.js';
@@ -433,7 +434,7 @@ export class WorkService {
       )
         return composeLandingInputs(this.store, input, options);
       if (input.action === 'policy')
-        return { revision: this.store.revision(), result: readPolicy(this.store) };
+        return { revision: this.store.revision(), result: policyReadView(readPolicy(this.store)) };
       if (input.action === 'set-policy') return setPolicy(this.store, input, this.actor, expectedRevision);
       if (input.action === 'accept-channel') {
         const command = channelCommandSchema.parse(input);

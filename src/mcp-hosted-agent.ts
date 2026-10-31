@@ -1,6 +1,13 @@
 import { hostedOverlapNotifications } from './mcp-hosted-overlaps.js';
 // SPDX-License-Identifier: Apache-2.0
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer, RegisteredTool } from '@modelcontextprotocol/sdk/server/mcp.js';
+import {
+  AGENT_DEFAULTS,
+  agentDefaultLines,
+  effectiveAgentDefaults,
+  type EffectiveAgentDefaults,
+} from './agent-parallel-defaults.js';
+import { canonicalPayload } from './hosted-source-operation.js';
 import { z } from 'zod';
 import { hostedAgentCommandSchemas } from './hosted-agent-contract.js';
 import { lowerMcpCommand, verbInputSchemas } from './mcp-verbs.js';
@@ -70,9 +77,11 @@ export function registerHostedAgentWorkflow(
         'decide',
         'peer-ack',
         'overlap-acks',
+        'ack',
+        'preflight',
       ],
       description:
-        'Hosted Lane actions over the same CLI transport and recovery journal. Verbs: {action:start|save|land, mode?, ...fields of the old action}: start open|reopen; save sync|candidate|overlap-answer|overlap-answers|friction|decision; land save (checkOnly:true checks without landing). Old names still work; checkpoint aliases save. Retain original parameters/operationId after unknown replies; a new UUID starts new work. Finish always requests agent acceptance under current project policy, including with account credentials. Pending is not accepted. finish priority:urgent is owner-only (other submitters retain normal with a reason). prioritize changes a queued Candidate submission priority:urgent|normal; it never cancels a running check.',
+        "Hosted Lane actions over the same CLI transport and recovery journal. Verbs: {action:start|save|land, mode?, ...fields of the old action}: start open|reopen; save sync|candidate|overlap-answer|overlap-answers|friction|decision; land save (checkOnly:true checks without landing). Old names still work; checkpoint aliases save. Retain original parameters/operationId after unknown replies; a new UUID starts new work. Finish always requests agent acceptance under current project policy, including with account credentials. Pending is not accepted. finish priority:urgent is owner-only (other submitters retain normal with a reason). prioritize changes a queued Candidate submission priority:urgent|normal; it never cancels a running check. ack answers every pending overlap notice on a Lane; preflight runs the saved head's affected tests here and records the result for land.",
     },
     {
       name: 'forge_check',
@@ -87,6 +96,22 @@ export function registerHostedAgentWorkflow(
         'Read hosted metrics or decisions in bounded pages, constant-size capabilities or one selected Lane/run/source operation/submission. Decisions accepts target? and cursor?. No Work hydration, worker wake or idle observer.',
     },
   ];
+  // Project rules: defaults until the first call reads the live policy, then regenerated from it.
+  const rules = (defaults: EffectiveAgentDefaults) =>
+    `\nProject rules:\n${agentDefaultLines(defaults)
+      .map(line => `- ${line}`)
+      .join('\n')}`;
+  let applied = canonicalPayload(AGENT_DEFAULTS);
+  const task = { description: groups[0]!.description, tool: undefined as RegisteredTool | undefined };
+  const refreshRules = <T>(value: T) => {
+    const live = transport.agentDefaults;
+    if (live && canonicalPayload(live) !== applied && task.tool) {
+      applied = canonicalPayload(live);
+      task.tool.update({ description: task.description + rules(live) });
+    }
+    return value;
+  };
+  groups[0]!.description += rules(effectiveAgentDefaults(undefined));
   for (const group of groups) {
     const options = group.actions.map(action => {
       const canonical = action === 'checkpoint' ? 'save' : action === 'run' ? 'check' : action;
@@ -95,7 +120,7 @@ export function registerHostedAgentWorkflow(
     });
     // New verb forms come first: the older action objects strip unknown keys such as `mode`.
     const all = [...verbInputSchemas(true, group.actions, false), ...options];
-    server.registerTool(
+    const tool = server.registerTool(
       group.name,
       {
         description: group.description,
@@ -112,9 +137,12 @@ export function registerHostedAgentWorkflow(
             transport.address,
             transport,
             extra?.signal,
-          ).then(notifyOverlaps);
+          )
+            .then(notifyOverlaps)
+            .then(refreshRules);
         }),
     );
+    if (group.name === 'forge_task') task.tool = tool;
   }
   const planning = (['planning', 'put-planning-item', 'comment-planning-item'] as const).map(action =>
     hostedAgentCommandSchemas[action].extend({ action: z.literal(action), operationId: z.uuid().optional() }),

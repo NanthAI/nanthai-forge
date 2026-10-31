@@ -15,6 +15,8 @@ import { canonicalPayload } from '../src/hosted-source-operation';
 import { invariant } from '../src/errors';
 import { report } from './errors';
 import { requireCutoverVersion } from '../src/cutover-version';
+import { effectivePolicy } from '../src/autonomy-policy';
+import { effectiveAgentDefaults } from '../src/agent-parallel-defaults';
 /** Discovery is a current-authority read, never a worker wake or an availability promise. */
 export const capabilities = query({
   args: {
@@ -26,6 +28,7 @@ export const capabilities = query({
     mirrorVersion: v.optional(v.literal(1)),
     metricReceiptVersion: v.optional(v.literal(1)),
     planningVersion: v.optional(v.literal(1)),
+    defaultsVersion: v.optional(v.literal(1)),
   },
   returns: v.string(),
   handler: async (
@@ -39,6 +42,7 @@ export const capabilities = query({
       mirrorVersion,
       metricReceiptVersion,
       planningVersion,
+      defaultsVersion,
     },
   ) => {
     try {
@@ -51,6 +55,9 @@ export const capabilities = query({
         hostedAgentCapabilitiesSchema.parse({
           ...(overlapVersion === 1 ? { overlapVersion: 1 } : {}),
           ...(metricReceiptVersion === 1 ? { metricReceiptVersion: 1 } : {}),
+          ...(defaultsVersion === 1
+            ? { agentDefaults: effectiveAgentDefaults(effectivePolicy(project).agentDefaults) }
+            : {}),
           ...(noticeVersion === 1 ? { needsFix: needsFix(project) } : {}),
           ...(mirrorVersion === 1 ? { githubMirror: await githubMirrorStatus(ctx, project) } : {}),
           schema: 1,

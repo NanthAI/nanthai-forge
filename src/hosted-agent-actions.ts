@@ -312,6 +312,8 @@ function checkLocalLane(session: HostedAgentSession, laneId?: string) {
   );
   return marker;
 }
+const CANCEL_COST =
+  "Cancelling discards this submission's queue place, its checks and the retry link. To recover from a failed check, fix the same Lane and land again (it resubmits with retry); a new Lane starts from zero.";
 export async function executeHostedAgent(
   session: HostedAgentSession,
   action: HostedAgentAction,
@@ -542,7 +544,11 @@ export async function executeHostedAgent(
     const request = await session.journal.retain('cancel-request', () =>
       hostedLandingCancelSchema.parse({ operationId, authorityEpoch: epoch, ...command }),
     );
-    return session.mutation('projectHostedLanding:cancel', { request: canonicalPayload(request) });
+    const cancelled = await session.mutation<Record<string, unknown>>('projectHostedLanding:cancel', {
+      request: canonicalPayload(request),
+    });
+    // Item 4 of the agent defaults: the cheap path after a failure is the same Lane, not a new one.
+    return typeof cancelled === 'object' && cancelled ? { ...cancelled, cost: CANCEL_COST } : cancelled;
   }
   invariant(action === 'finish', 'HOSTED_ACTION_UNSUPPORTED', 'Unsupported hosted action.');
   return executeHostedFinish(session, input);

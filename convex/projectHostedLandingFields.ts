@@ -19,6 +19,14 @@ const lease = v.object({
   attemptId: v.string(),
 });
 export const hostedLandingTables = {
+  /** One row per stall alert tier sent; replays and late alarms find it and send nothing. */
+  projectHostedStallAlerts: defineTable({
+    projectId: v.id('hostedProjects'),
+    submissionId: v.string(),
+    lastProgressAt: v.string(),
+    tier: v.union(v.literal(1), v.literal(2)),
+    value: v.string(),
+  }).index('by_project_and_submission', ['projectId', 'submissionId']),
   projectHostedLandingBatches: defineTable({
     projectId: v.id('hostedProjects'),
     batchId: v.string(),
@@ -110,10 +118,13 @@ export const hostedLandingTables = {
         actor: v.string(),
         priority: v.union(v.literal('urgent'), v.literal('normal')),
         expectedVersion: v.number(),
+        asOwner: v.optional(v.literal(true)),
       }),
     ),
     selectionKey: v.optional(v.string()),
     hold: v.optional(v.literal('main-red')),
+    /** Set when main changed a file this queued, not-yet-checked entry changes (JSON). */
+    wouldConflict: v.optional(v.string()),
     runnable: v.boolean(),
     phase,
     runId: v.union(v.string(), v.null()),

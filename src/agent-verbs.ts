@@ -86,6 +86,8 @@ export const namedReads = [
   'planning',
   'put-planning-item',
   'comment-planning-item',
+  'preflight',
+  'ack',
 ] as const;
 
 /** Old lifecycle spellings that are now a start/save/land mode (the alias rows of the V1 table). */

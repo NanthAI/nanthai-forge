@@ -18,7 +18,7 @@ import {
 } from '../src/hosted-landing';
 import { effectivePolicy, type AcceptanceActor } from '../src/autonomy-policy';
 import { canonicalPayload } from '../src/hosted-source-operation';
-import { digest } from '../src/portable-hash';
+import { acceptancePolicyDigest } from '../src/policy-digest';
 import { invariant } from '../src/errors';
 import type { ScopedRecheckBasis } from '../src/scoped-recheck-policy';
 
@@ -195,7 +195,7 @@ export async function pinLandingAttempt(
     },
     check,
     policy,
-    policyDigest: digest(canonicalPayload(policy)),
+    policyDigest: acceptancePolicyDigest(policy),
     operations: input.operations,
   });
 }

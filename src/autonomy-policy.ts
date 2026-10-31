@@ -4,6 +4,11 @@ import { checkLogsSchema } from './check-log-policy.js';
 import { invariant } from './errors.js';
 import { legacyCheckCredentialsRefSchema } from './legacy-check-credentials.js';
 import { trustConfigSchema } from './agent-trust-config.js';
+import {
+  agentDefaultsSchema,
+  effectiveAgentDefaults,
+  mergeAgentDefaults,
+} from './agent-parallel-defaults.js';
 export const autoExchangeSchema = z.object({
   enabled: z.boolean().default(false),
   debounceMs: z.number().safe().nonnegative().default(30_000),
@@ -26,6 +31,8 @@ export const autonomyPolicySchema = z.object({
   checkLogs: checkLogsSchema.optional(),
   /** B2.6: absent is off; enabling is an owner decision. */
   trust: trustConfigSchema.optional(),
+  /** Parallel-work defaults for agents; absent fields take their documented defaults. */
+  agentDefaults: agentDefaultsSchema.optional(),
   preset: z.enum(['supervised', 'trusted', 'autonomous', 'custom']),
   acceptance: z.object({
     mode: z.enum(['review', 'auto-on-pass']),
@@ -114,6 +121,16 @@ export function effectivePolicy(data: { autonomyPolicy?: AutonomyPolicy | undefi
   // manual unless explicitly opted in, including when no checks policy exists.
   return policy.checks ? { ...policy, checks: { fallback: 'manual', ...policy.checks } } : policy;
 }
+/** The `policy` read: stored policy plus every agent default filled in, so agents see effective values.
+ * Landing evidence keeps the stored policy, so digests do not change when a default does. */
+export const policyReadView = (policy: AutonomyPolicy): AutonomyPolicy => ({
+  ...policy,
+  agentDefaults: effectiveAgentDefaults(policy.agentDefaults),
+});
+/** Compare-and-swap accepts the stored form or the read view (filled agent defaults). */
+export const samePolicy = (expected: AutonomyPolicy, previous: AutonomyPolicy) =>
+  JSON.stringify(expected) === JSON.stringify(previous) ||
+  JSON.stringify(expected) === JSON.stringify(policyReadView(previous));
 export const policyWriteSchema = z
   .object({
     action: z.literal('set-policy'),
@@ -133,6 +150,7 @@ export const policyWriteSchema = z
     notify: autonomyPolicySchema.shape.notify.partial().optional(),
     githubMirror: autonomyPolicySchema.shape.githubMirror,
     trust: trustConfigSchema.optional(),
+    agentDefaults: agentDefaultsSchema.optional(),
     autoExchange: z
       .object({
         enabled: z.boolean().optional(),
@@ -172,12 +190,16 @@ export function editedPolicy(previous: AutonomyPolicy, command: PolicyWrite): Au
     command.lifecycle ||
     command.notify ||
     command.githubMirror ||
-    command.trust;
+    command.trust ||
+    command.agentDefaults;
   const githubMirror = command.githubMirror ?? previous.githubMirror;
   const policy = autonomyPolicySchema.parse({
     ...base,
     ...(githubMirror ? { githubMirror } : {}),
     ...((command.trust ?? previous.trust) ? { trust: command.trust ?? previous.trust } : {}),
+    ...((command.agentDefaults ?? previous.agentDefaults)
+      ? { agentDefaults: mergeAgentDefaults(previous.agentDefaults, command.agentDefaults) }
+      : {}),
     autoExchange: { ...autoExchangeSchema.parse({}), ...previous.autoExchange, ...command.autoExchange },
     ...(edited ? { preset: 'custom' } : {}),
     ...(command.checks

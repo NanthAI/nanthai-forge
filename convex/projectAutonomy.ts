@@ -16,6 +16,8 @@ import {
   effectivePolicy,
   policyWriteSchema,
   editedPolicy,
+  policyReadView,
+  samePolicy,
   type AcceptanceActor,
 } from '../src/autonomy-policy';
 import { invariant } from '../src/errors';
@@ -38,7 +40,7 @@ export const read = query({
     try {
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to read project policy.');
-      return effectivePolicy(await accessibleProject(ctx, input.projectId, user.subject));
+      return policyReadView(effectivePolicy(await accessibleProject(ctx, input.projectId, user.subject)));
     } catch (error) {
       return report(error);
     }
@@ -83,7 +85,7 @@ export const set = mutation({
       }
       const previous = effectivePolicy(project);
       invariant(
-        !command.expectedPolicy || JSON.stringify(command.expectedPolicy) === JSON.stringify(previous),
+        !command.expectedPolicy || samePolicy(command.expectedPolicy, previous),
         'POLICY_CHANGED',
         'Project policy changed. Refresh it before editing.',
       );

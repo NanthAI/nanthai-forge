@@ -136,7 +136,7 @@ export const submit = receiptMutation({
         actor: actor.id,
         at,
         sequence: 0,
-        ...landingPriority(project.owner, actor.id, command.priority),
+        ...landingPriority(project, actor, command.priority),
         priorityVersion: 0,
         version: 0,
         firstAttemptId: attemptId,

@@ -221,7 +221,11 @@ test('a stalled desired composition alarms without a requester and backs off to 
     { _handler: ctx => notifyDesiredCompose(ctx, f.projectId, command.composeOperationId) },
     {},
   );
-  assert.equal(f.pending()[0].scheduledTime, Date.now(), 'source event bypasses backoff');
+  assert.equal(
+    f.pending().find(task => task.name === 'projectHostedLandingDesired:drive').scheduledTime,
+    Date.now(),
+    'source event bypasses backoff',
+  );
   await f.drain();
   await f.passChecks();
   await f.drain();
@@ -309,6 +313,11 @@ test('a reserved desired landing survives main moving before admission and remai
 test('owner urgent priority survives desired composition into its canonical queued submission', async t => {
   const f = await finishFixture(t),
     command = { ...request(f), priority: 'urgent' };
+  // Finishes arrive as agent calls; urgentRoles must include agents for them to stay urgent.
+  const project = f.tables.hostedProjects.get(f.projectId);
+  f.patch('hostedProjects', f.projectId, {
+    autonomyPolicy: { ...project.autonomyPolicy, agentDefaults: { urgentRoles: ['owner', 'agents'] } },
+  });
   const state = await submit(f, command);
   assert.equal(state.priority, 'urgent');
   assert.equal(state.request.priority, 'urgent');

@@ -17,6 +17,8 @@ export const control = await import(moduleUrl('../convex/projectHostedFinishCont
 export const records = await import(moduleUrl('../convex/projectHostedRecords.ts'));
 export const landingApi = await import(moduleUrl('../convex/projectHostedLanding.ts'));
 const stallApi = await import(moduleUrl('../convex/projectHostedLandingStall.ts'));
+const stallAlertApi = await import(moduleUrl('../convex/projectHostedLandingStallAlert.ts'));
+const wouldConflictApi = await import(moduleUrl('../convex/projectHostedLandingWouldConflict.ts'));
 const batchAbandon = await import(moduleUrl('../convex/projectHostedBatchAbandon.ts'));
 const convexSourceModules = Object.fromEntries(
   await Promise.all(
@@ -95,7 +97,11 @@ export async function finishFixture(
     candidate,
     state: { sha256: candidate.result.head, size: c.objects.get(candidate.result.head).length },
   });
-  f.patch('hostedProjects', f.projectId, { autonomyPolicy: policyPreset('trusted') });
+  // Fake time jumps to each scheduled task, so a check waiting for passChecks() would reach both
+  // stall-alert tiers; alert behaviour has its own tests (hosted-stall-alerts.test.mjs).
+  f.patch('hostedProjects', f.projectId, {
+    autonomyPolicy: { ...policyPreset('trusted'), agentDefaults: { stallAlerts: { enabled: false } } },
+  });
   const blobs = new Map(),
     metrics = {
       planUploads: [],
@@ -106,6 +112,7 @@ export async function finishFixture(
       sourceJobs: 0,
       ticks: 0,
       stepCalls: [],
+      stallDeliveries: [],
       convexSourceCalls: [],
       convexStorageCalls: 0,
     };
@@ -276,6 +283,13 @@ export async function finishFixture(
         );
       } else if (task.name === 'projectHostedLandingStall:alarm') {
         await tx('landingAlarm', stallApi.alarm, input);
+      } else if (task.name === 'projectHostedLandingStallAlert:alert') {
+        await tx('stallAlert', stallAlertApi.alert, input);
+      } else if (task.name === 'projectHostedLandingWouldConflict:mark') {
+        await tx('wouldConflict', wouldConflictApi.mark, input);
+      } else if (task.name === 'projectHostedLandingStallAlert:deliver') {
+        // Owner channels are faked: record what would be sent, never call a network.
+        metrics.stallDeliveries.push(input);
       } else if (task.name === 'projectHostedBatchAbandon:reselect') {
         await tx('batchAbandon', batchAbandon.reselect, input);
       } else if (task.name === 'projectHostedLandingDesired:drive') {

@@ -11,9 +11,9 @@ import { report } from './errors';
 
 /** One finite agent read. No source objects, Work hydration, scheduler or subscription. */
 export const read = query({
-  args: { projectId: v.id('hostedProjects'), laneId: v.string() },
+  args: { projectId: v.id('hostedProjects'), laneId: v.string(), paths: v.optional(v.literal(true)) },
   returns: v.string(),
-  handler: async (ctx, { projectId, laneId }) => {
+  handler: async (ctx, { projectId, laneId, paths }) => {
     try {
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to read hosted overlaps.');
@@ -121,6 +121,15 @@ export const read = query({
       const compute = () =>
         hostedOverlapAdvice(focus, currentPeers.slice(0, 50), latest, main, answered, complete);
       let advice = compute();
+      // Preflight selection input: free here, the Lane's projection is already loaded.
+      const changedPaths = paths
+        ? {
+            changedPaths: {
+              paths: (JSON.parse(focus.changes) as { path: string }[]).map(change => change.path),
+              complete: focus.complete,
+            },
+          }
+        : {};
       if (acks.length > 100) {
         // A large old inbox stays bounded. Verify every displayed item against the
         // exact answer index, so an answer outside the window can never repeat.
@@ -150,6 +159,7 @@ export const read = query({
         }
         return JSON.stringify({
           ...advice,
+          ...changedPaths,
           unacknowledgedOverlaps: {
             ...advice.unacknowledgedOverlaps,
             count: null,
@@ -157,7 +167,7 @@ export const read = query({
           },
         });
       }
-      return JSON.stringify(advice);
+      return JSON.stringify({ ...advice, ...changedPaths });
     } catch (error) {
       return report(error);
     }

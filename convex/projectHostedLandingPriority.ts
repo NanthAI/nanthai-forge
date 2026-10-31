@@ -10,6 +10,8 @@ import { canonicalPayload } from '../src/hosted-source-operation';
 import { invariant } from '../src/errors';
 import { report } from './errors';
 import { recordMutationReceipt } from './projectSelfMetricReceiptStore';
+import { effectivePolicy } from '../src/autonomy-policy';
+import { effectiveAgentDefaults, urgentAllowed, urgentRefusal } from '../src/agent-parallel-defaults';
 
 /** One submission patch, no wake/poller or progress fan-out. The retained CAS
  * prevents an old retry from undoing a later owner's priority change. */
@@ -21,12 +23,23 @@ export const prioritize = mutation({
     priority: v.union(v.literal('urgent'), v.literal('normal')),
     expectedVersion: v.number(),
     authorityEpoch: v.number(),
+    asOwner: v.optional(v.literal(true)),
   },
   returns: v.string(),
   handler: async (ctx, input) => {
     try {
       const actor = await acceptanceActor(ctx, true);
-      await ownedProject(ctx, input.projectId, actor.id);
+      const project = await ownedProject(ctx, input.projectId, actor.id);
+      if (input.priority === 'urgent') {
+        const defaults = effectiveAgentDefaults(effectivePolicy(project).agentDefaults);
+        // Role only: the owner's own session or asOwner; agents on the owner's credential are 'agents'.
+        const session = await acceptanceActor(ctx);
+        invariant(
+          urgentAllowed(defaults, { owner: project.owner, actor: session, asOwner: input.asOwner }),
+          'URGENT_NOT_ALLOWED',
+          urgentRefusal(defaults),
+        );
+      }
       await hostedWriteProject(ctx, input.projectId, actor.id, input.authorityEpoch);
       const { row, state } = await loadLanding(ctx, input);
       const change = {
@@ -34,6 +47,7 @@ export const prioritize = mutation({
         actor: actor.id,
         priority: input.priority,
         expectedVersion: input.expectedVersion,
+        ...(input.asOwner ? { asOwner: true as const } : {}),
       };
       if (row.priorityChange?.operationId === input.operationId) {
         invariant(

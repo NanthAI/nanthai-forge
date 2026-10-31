@@ -73,6 +73,88 @@ selects another file.
   again to keep waiting.
 - Ctrl-C stops waiting, never the landing.
 
+## Project settings
+
+These settings are part of the project policy, under `agentDefaults`. They change what agents are
+told and what `land --save` (old name `finish`) accepts. Read the effective values, with every
+default filled in, with `nforge hosted-work ROOT '{"action":"policy"}'` (native owners:
+`nforge policy ROOT`); `nforge agent ROOT capabilities` returns them with the generated `rules`.
+The owner changes one with `set-policy`, for example:
+
+```sh
+nforge hosted-work ROOT '{"action":"set-policy","operationId":"UUID","agentDefaults":{"preflight":"advise"}}'
+```
+
+An edit changes only the fields it names. Editing `agentDefaults` never invalidates a queued
+landing: landings are pinned to the acceptance policy, which leaves these settings out.
+
+| Setting | Default | Why | Change |
+| --- | --- | --- | --- |
+| `preflight` | `require` | About 30% of first landing checks failed (2026-10-30), and every failure costs a full landing round on the project runner. A local run of the affected tests catches most of them first. | `advise` prints the set without refusing; `off` removes it. |
+| `preflightMaxMinutes` | `10` | A large affected set would make preflight slower than the landing check it saves. Above this estimate, preflight is advice only. | Any whole number of minutes; `0` makes every set advisory. |
+| `overlapGate` | `block` | Agents finished over unanswered overlap notices and found the clash only at composition. One answer per notice (keep your change, or route around) costs seconds. | `warn` adds the notice to the receipt without refusing; `off` removes it. |
+| `urgentRoles` | `["owner"]` | Builders marked routine landings urgent, which pushed every other landing back. Urgent is for a red main or an incident the owner names. | `["owner","agents"]` lets agents on the owner's login use it again. |
+| `checkpointNudgeMinutes` | `30` | A builder that stops unexpectedly loses everything unsaved. Saves take under a minute. | Any number of minutes; `0` turns the nudge off. |
+| `stallAlerts` | on, 15 and 30 min | A check outage (2026-10-30, every result upload refused from 18:35 to 21:05) stalled landings for hours before anyone looked. | `{"stallAlerts":{"enabled":false}}`, thresholds, recipients and webhook preset below. |
+
+### preflight
+
+- `nforge agent ROOT preflight '{"laneId":"…"}'` runs in the Lane checkout. It selects the saved
+  head's affected tests with the landing check's selector, runs `build:core` when the project has
+  that script, runs the tests here and records the result in `ROOT.forge-client`.
+- `"run":false` only plans: the test files, an estimate in minutes and the command.
+- Save first. Preflight refuses unsaved edits, because its record names one saved head.
+- `land --save` then looks for a passing record for the head it is about to land. Without one it
+  refuses with `PREFLIGHT_REQUIRED`, the number of files, the estimate and the preflight command.
+- Never blocking on missing data: when the saved paths or the selection are unavailable, or the
+  selection is empty, `land --save` goes ahead and says why in `defaults.preflight`.
+- The estimate is 4 seconds per test file at one test at a time.
+- The record is local, like the tests themselves. It is evidence for this machine's agent, not a
+  check result; the landing check still runs on the project runner.
+
+### overlapGate
+
+- `nforge agent ROOT ack '{"laneId":"…"}'` answers every pending overlap notice on the Lane in one
+  command (`accept-order`: keep your change and land in order). `"choice":"split"` records that you
+  moved your edit off the file. Answers have stable ids, so repeating the command replays them.
+- With `block`, `land --save` refuses with `OVERLAP_UNANSWERED` while a notice is open, and prints
+  the `ack` command. The check uses the overlap read that the land receipt already makes.
+
+### urgentRoles
+
+- `owner` is the project owner acting in person: a signed-in session, or the owner's CLI with
+  `"asOwner":true` on `prioritize`. `agents` are agents running on the owner's CLI login.
+- Agents share the owner's login, so this is a default-behaviour guard, not an access rule.
+  Contributors never jump the queue, whatever this setting says.
+- `prioritize` with `urgent` from another role is refused with `URGENT_NOT_ALLOWED`. A landing
+  submitted with `priority:"urgent"` by another role stays normal, and its `priorityReason` says why.
+
+### checkpointNudgeMinutes
+
+- Hosted Lane receipts carry `unsavedFor`: minutes since the oldest file edit newer than the Lane's
+  last save. Past the threshold they also carry `nudge` with the save command.
+- It is computed from local file times when an agent calls Forge. Nothing runs in between.
+
+### stallAlerts
+
+- Alerts ride the existing landing stall alarm, which fires after 15 minutes without progress.
+  An idle project schedules nothing.
+- Tier 1, at `notifyAfterMinutes` (default 15): what is stuck, why, what was already retried and
+  the repair command. Tier 2, at `repeatAfterMinutes` (default 30): the same with a diagnosis (the
+  dead step, the last error, who is waiting). Each tier is sent once per stall; progress stops them.
+- The stuck agent sees the latest alert as `stallAlert` on its landing and finish status reads. Alerts never rewrite the landing itself.
+- Channels:
+  - `email`: up to 10 recipient addresses, sent with Cloudflare Email Service from
+    `support@nanthai.tech` (deployment variable `FORGE_ALERT_EMAIL_FROM` overrides it). Needs the
+    deployment variables `FORGE_ALERT_EMAIL_TOKEN` and `FORGE_ALERT_EMAIL_ACCOUNT_ID`.
+  - `webhook`: one POST to the URL in the deployment variable `FORGE_ALERT_WEBHOOK_URL`, shaped for
+    the preset: `ntfy` (phone push; recommended), `slack`, `discord`, `telegram` or `generic` (JSON
+    `{subject,text}`). `off` by default.
+- The webhook URL and the email token are secrets. They live only in deployment environment
+  variables, never in the policy, the repository, logs, receipts or alert text. Delivery logs carry
+  the channel and HTTP status only.
+- Example: `{"agentDefaults":{"stallAlerts":{"email":["you@example.com"],"webhook":"ntfy"}}}`.
+
 ## Always on
 
 These have no setting: they fix failures and have no sensible alternative.
@@ -102,8 +184,16 @@ These have no setting: they fix failures and have no sensible alternative.
   - An action the deployment does not offer says that the server may be older and needs a deploy.
   - A response this CLI cannot parse says that the versions likely differ.
   - Newer actions advertised by the server no longer break older CLIs.
+- **No saves during an active land.** Saving a Lane while its land is queued or checking would
+  throw away the checks; the save is refused unless it says `supersedeFinish:true`.
+- **Retry the same Lane.** A failed land returns `retryCommand` for the same Lane. `cancel`
+  receipts carry `cost`: cancelling discards the queue place, the checks and the retry link.
+- **Stale queued landings say so.** When a landing changes a file that a queued, not-yet-checked
+  landing also changes, that entry is marked `wouldConflict` with the files. Its next receipt says
+  to sync and land the same Lane again; the new land replaces the queued entry. This is path
+  advice, not a proven text conflict. Each land reads at most 50 queued entries.
 
-## Project settings
+## What agents are told
 
-Project-wide parallel-work policy (finish preflight, overlap gate, urgent priority, save nudges) is
-part of the project policy. Read it with `nforge policy ROOT`.
+The agent skill, MCP tool descriptions, `capabilities` (`rules`) and `llms.txt` carry one line per
+active rule, generated from the effective settings. A rule that is off adds nothing.

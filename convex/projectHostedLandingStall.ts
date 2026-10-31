@@ -13,6 +13,7 @@ import { desiredLanding } from './projectHostedLandingDesiredWake';
 import { hostedLandingStateSchema } from '../src/hosted-landing';
 import { hostedLandingStall } from '../src/hosted-landing-stall';
 import { canonicalPayload } from '../src/hosted-source-operation';
+import { scheduleStallAlert } from './projectHostedLandingStallAlert';
 export const alarm = internalMutation({
   args: { projectId: v.id('hostedProjects'), submissionId: v.string(), lastProgressAt: v.string() },
   returns: v.null(),
@@ -35,6 +36,8 @@ export async function raiseLandingAlarm(
   const stall = hostedLandingStall(state, now);
   if (!stall || state.observation.stall?.lastProgressAt === stall.lastProgressAt) return null;
   const next = { ...state, version: state.version + 1, observation: { ...state.observation, stall } };
+  const project = await ctx.db.get(input.projectId);
+  if (project) await scheduleStallAlert(ctx, { ...input, lastProgressAt: stall.lastProgressAt }, project);
   if (canonical) {
     await writeLanding(ctx, canonical, next, canonical.runnable);
     if (state.phase === 'queued') {

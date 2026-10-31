@@ -22,14 +22,19 @@ const advice = z.object({
     more: z.number(),
     coverage: z.string(),
   }),
+  /** The Lane's saved base-to-head paths, when asked (paths:true) and current. */
+  changedPaths: z.object({ paths: z.array(z.string()), complete: z.boolean() }).optional(),
 });
 /** Advice never changes a save receipt; observation failures remain explicitly unknown. */
 export async function readHostedOverlapAdvice(
   transport: Pick<HostedAgentTransport, 'query'>,
   laneId: string,
+  paths = false,
 ) {
   try {
-    return advice.parse(await transport.query('projectHostedOverlaps:read', { laneId }));
+    return advice.parse(
+      await transport.query('projectHostedOverlaps:read', { laneId, ...(paths ? { paths: true } : {}) }),
+    );
   } catch (error) {
     const safe = hostedActionError(error, 'overlap observation');
     if (['PROJECT_UNAVAILABLE', 'AUTH_REQUIRED', 'FORBIDDEN', 'SOURCE_AUTHORITY_CHANGED'].includes(safe.code))

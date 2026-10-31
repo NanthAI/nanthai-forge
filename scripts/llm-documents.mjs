@@ -2,6 +2,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { packageDocuments } from './package-documents.mjs';
+import { AGENT_DEFAULTS, agentDefaultLines } from './agent-default-lines.mjs';
 
 const repository = 'https://github.com/NanthAI/nanthai-forge/blob/main';
 
@@ -44,6 +45,8 @@ const agentRules = [
   'Let `finish` compose concurrent Lanes into one check on the project runner. A failing Lane is dropped from the batch and the others still land after passing. Do not rebase or babysit a merge queue.',
   'Read peers and presence before editing; announce your paths and resolve overlap early. These observations are advisory and can be incomplete.',
   'Governance: contributors propose and cannot write source or Channels directly; the owner accepts. Protected paths and review-required policy stop at `awaiting-review` for a person.',
+  // Default project rules (docs/parallel-work-defaults.md); a project's `policy` read shows its own.
+  ...agentDefaultLines(AGENT_DEFAULTS),
 ];
 
 const startHere = new Set([

@@ -14,6 +14,21 @@ Use ordinary search/read/edit tools on the selected source. For recorded deliver
 
 - The backlog is Forge planning: read `planning`, start from an Issue (`start {"planningItemId":"ISSUE_ID"}`), comment decisions on it (`comment-planning-item`).
 
+## Project rules
+
+Defaults; a project can change them. `nforge agent ROOT capabilities` returns your project's `rules`, `policy` its settings ([parallel-work defaults](../../docs/parallel-work-defaults.md)).
+
+<!-- agent-defaults:start (generated from scripts/agent-default-lines.mjs) -->
+- Before land, run your affected tests: nforge agent ROOT preflight '{"laneId":"…"}' (land refuses without a pass for the saved head; sets over 10 min are advisory).
+- Answer overlap notices before land: nforge agent ROOT ack '{"laneId":"…"}' (land refuses while one is open).
+- Save at least every 30 minutes of edits.
+- Never request urgent priority; it is owner-only.
+- After land is submitted, do not save, sync or edit that Lane until it lands or fails.
+- If a landing fails, fix it in the same Lane and land again; never cancel and start a new Lane.
+- If a queued landing reports wouldConflict, sync and land the same Lane again.
+- A LANDING_STALLED receipt names its repair command; run that, do not resubmit.
+<!-- agent-defaults:end -->
+
 ## Short forms
 
 ```sh

@@ -4,18 +4,34 @@ import type { LandingChannel, LandingRow } from './projectHostedLandingStore';
 import type { HostedLandingState } from '../src/hosted-landing';
 import { orderLandingEntries } from '../src/landing-batch-order';
 import { hostedLandingStateSchema } from '../src/hosted-landing';
+import type { Doc } from './_generated/dataModel';
+import { effectivePolicy } from '../src/autonomy-policy';
+import { effectiveAgentDefaults, urgentAllowed, urgentRefusal } from '../src/agent-parallel-defaults';
 
-export function landingPriority(owner: string, actor: string, requested?: 'urgent' | 'normal') {
-  const allowed = owner === actor;
-  return {
-    priority: requested === 'urgent' && allowed ? ('urgent' as const) : ('normal' as const),
-    priorityReason:
-      requested === 'urgent'
-        ? allowed
-          ? 'Urgent requested by the project owner or an agent acting for the owner.'
-          : 'Normal: only the project owner or an agent acting for the owner may jump the landing queue.'
-        : 'Normal arrival order with fairness within the priority class.',
-  };
+/** Queue jumping: the project owner only, further limited by agentDefaults.urgentRoles. */
+export function landingPriority(
+  project: Pick<Doc<'hostedProjects'>, 'owner' | 'autonomyPolicy'>,
+  actor: { id: string; kind: 'agent' | 'person' },
+  requested?: 'urgent' | 'normal',
+) {
+  if (requested !== 'urgent')
+    return {
+      priority: 'normal' as const,
+      priorityReason: 'Normal arrival order with fairness within the priority class.',
+    };
+  const defaults = effectiveAgentDefaults(effectivePolicy(project).agentDefaults);
+  if (project.owner !== actor.id)
+    return {
+      priority: 'normal' as const,
+      priorityReason:
+        'Normal: only the project owner or an agent acting for the owner may jump the landing queue.',
+    };
+  return urgentAllowed(defaults, { owner: project.owner, actor })
+    ? {
+        priority: 'urgent' as const,
+        priorityReason: 'Urgent requested by the project owner or an agent acting for the owner.',
+      }
+    : { priority: 'normal' as const, priorityReason: `Normal: ${urgentRefusal(defaults)}` };
 }
 export function landingPriorityState(row: LandingRow, state: HostedLandingState): HostedLandingState {
   return {

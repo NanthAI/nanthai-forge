@@ -46,7 +46,8 @@ export async function liveLaneFinish(
           )
           .take(1);
     const rows = [
-      ...requests.map(row => row.value),
+      // A queued entry marked wouldConflict is replaced in place by the Lane's next land (sync + save).
+      ...requests.filter(row => !row.wouldConflict).map(row => row.value),
       ...(desired && !(await landingRow(ctx, desired)) ? [desired.value] : []),
     ];
     for (const value of rows) {

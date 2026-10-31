@@ -16,6 +16,8 @@ import { loadLanding } from './projectHostedLandingStore';
 import { scheduleFinish } from './projectHostedFinishWake';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { invariant } from '../src/errors';
+import { readWouldConflict } from './projectHostedLandingWouldConflict';
+import { latestStallAlert } from './projectHostedLandingStallAlert';
 import { report } from './errors';
 const identity = { projectId: v.id('hostedProjects'), submissionId: v.string() };
 /** Event/startup repair of this one pending request. It allocates no new attempt
@@ -51,8 +53,10 @@ export const status = query({
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to read hosted finish progress.');
       await accessibleProject(ctx, input.projectId, user.subject);
-      const { state } = await loadLanding(ctx, input),
+      const { row, state } = await loadLanding(ctx, input),
         { value } = await loadFinish(ctx, input);
+      const wouldConflict = state.phase === 'queued' ? readWouldConflict(row) : undefined;
+      const stallAlert = await latestStallAlert(ctx, input, state);
       const order =
         state.phase === 'queued'
           ? await activeLandingOrder(ctx, { projectId: input.projectId, channel: 'main' })
@@ -65,6 +69,8 @@ export const status = query({
         queueAheadSelection: await hostedQueueAheadSelection(ctx, state, order),
         pendingAttempt: value.pending,
         selection: { inputs: value.source.inputs, dependencies: value.source.dependencies },
+        ...(wouldConflict ? { wouldConflict } : {}),
+        ...(stallAlert ? { stallAlert } : {}),
       });
     } catch (error) {
       return report(error);

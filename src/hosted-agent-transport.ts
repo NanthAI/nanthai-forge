@@ -19,6 +19,9 @@ import {
   unknownActionError,
 } from './hosted-agent-version.js';
 import { enrichHostedQueueAhead } from './queue-ahead-hosted.js';
+import { ackAnswers, checkpointNudge, finishGates, unsavedMinutes } from './agent-default-gates.js';
+import { preflightPlan, runPreflight } from './agent-preflight.js';
+import { agentDefaultLines, type EffectiveAgentDefaults } from './agent-parallel-defaults.js';
 import { dirname, basename, resolve } from 'node:path';
 import { existsSync, realpathSync } from 'node:fs';
 import {
@@ -48,6 +51,7 @@ import {
   hostedAgentAddressSchema,
   hostedAgentCapabilitiesSchema,
   hostedAgentOwnerActions,
+  hostedAgentClientActions,
   hostedAgentCommandSchemas,
   type HostedAgentAddress,
   type HostedAgentAction,
@@ -63,6 +67,8 @@ import {
   takeCallerReceipts,
   writeCallerReceipts,
 } from './hosted-metric-outbox.js';
+/** Agent-default refusals carry their own next step. */
+const gateCodes = new Set(['OVERLAP_UNANSWERED', 'PREFLIGHT_REQUIRED']);
 /** Existing CLI mutations that accept deferred caller receipts; no extra calls. */
 const receiptMutations = new Set([
   'projectHostedStart:start',
@@ -100,6 +106,14 @@ export type HostedAgentResponse = {
  * every dispatch is finite and every mutation is pinned before network IO. */
 export class HostedAgentTransport {
   private priorityReads: boolean | undefined;
+  private defaults: EffectiveAgentDefaults | undefined;
+  /** Effective project agent defaults from the latest capability read (undefined on older servers). */
+  get agentDefaults() {
+    return this.defaults;
+  }
+  private cachedAdvice:
+    | { laneId: string; value: Awaited<ReturnType<typeof readHostedOverlapAdvice>> }
+    | undefined;
   /** Requester whose deferred receipts this deployment accepts; unset until negotiated. */
   private receiptActor: string | undefined;
   private callerActor: string | null = null;
@@ -250,6 +264,7 @@ export class HostedAgentTransport {
           mirrorVersion: 1,
           metricReceiptVersion: 1,
           planningVersion: 1,
+          defaultsVersion: 1,
         };
         for (;;) {
           try {
@@ -266,7 +281,7 @@ export class HostedAgentTransport {
             )
               throw error;
             const field =
-              /extra field\s+[`'"]?(noticeVersion|resolveVersion|overlapVersion|mirrorVersion|metricReceiptVersion|planningVersion)\b/i.exec(
+              /extra field\s+[`'"]?(noticeVersion|resolveVersion|overlapVersion|mirrorVersion|metricReceiptVersion|planningVersion|defaultsVersion)\b/i.exec(
                 error.message,
               )?.[1];
             // Preserve independently supported features, and never repeat a
@@ -303,7 +318,7 @@ export class HostedAgentTransport {
         !capabilities.actions.includes(action as (typeof capabilities.actions)[number]) &&
         !(
           capabilities.authority.mode !== 'native-owner' &&
-          (hostedAgentOwnerActions as readonly string[]).includes(action)
+          [...hostedAgentOwnerActions, ...hostedAgentClientActions].includes(action as never)
         )
       )
         throw unadvertisedActionError(action);
@@ -337,7 +352,16 @@ export class HostedAgentTransport {
             command.data,
           ),
         );
-      if (action === 'capabilities') return this.response(action, null, capabilities);
+      if (action === 'capabilities') {
+        this.defaults = capabilities.agentDefaults;
+        return this.response(action, null, {
+          ...capabilities,
+          ...(capabilities.agentDefaults ? { rules: agentDefaultLines(capabilities.agentDefaults) } : {}),
+        });
+      }
+      this.defaults = capabilities.agentDefaults;
+      if (action === 'ack' || action === 'preflight')
+        return await this.clientAction(action, command.data as Record<string, unknown>);
       if (action === 'check-settings')
         return this.response(action, null, await hostedCheckSettings(this.query.bind(this), capabilities));
       if (observation && action === 'status' && Object.keys(command.data).length === 0)
@@ -414,6 +438,13 @@ export class HostedAgentTransport {
         },
         waitSource: (operationId, initial, kind) =>
           waitHostedAgentSource(this.address, operationId, initial, signal, this.subscribeSource, kind),
+        finishGates: async (laneId: string, head: string) =>
+          finishGates(
+            root,
+            capabilities.agentDefaults,
+            { laneId, head },
+            await this.overlapAdvice(laneId, capabilities.agentDefaults?.preflight !== 'off'),
+          ),
         marker: () => {
           const marker = readHostedLaneCheckout(root);
           if (marker)
@@ -538,7 +569,9 @@ export class HostedAgentTransport {
       if (safe.code === 'HOSTED_ACTION_UNSUPPORTED' || safe.code === 'CLI_UPGRADE_REQUIRED') throw safe;
       throw new ForgeError(
         safe.code,
-        `${safe.code === 'HOSTED_ACTION_FAILED' ? `Hosted agent ${action} failed.` : safe.message} Retry the original hosted agent action and parameters to reconcile its retained operation.`,
+        gateCodes.has(safe.code)
+          ? safe.message
+          : `${safe.code === 'HOSTED_ACTION_FAILED' ? `Hosted agent ${action} failed.` : safe.message} Retry the original hosted agent action and parameters to reconcile its retained operation.`,
       );
     }
   }
@@ -581,7 +614,8 @@ export class HostedAgentTransport {
     result: unknown,
     overlapLaneId?: string,
   ): Promise<HostedAgentResponse> {
-    const advice = overlapLaneId ? await readHostedOverlapAdvice(this, overlapLaneId) : undefined;
+    const advice = overlapLaneId ? await this.overlapAdvice(overlapLaneId) : undefined;
+    this.cachedAdvice = undefined;
     const notice =
       advice && overlapLaneId ? hostedOverlapNotice(this.root, overlapLaneId, advice) : undefined;
     // Delivered means returned on a Lane-changing action; a bare status read is not a delivery.
@@ -594,9 +628,72 @@ export class HostedAgentTransport {
       operationId,
       resolved: operationId ? { operationId } : null,
       result: await hostedConflictAdvice(this, await enrichHostedQueueAhead(this, result)),
-      ...advice,
+      ...(advice ? (({ changedPaths: _paths, ...shown }) => shown)(advice) : {}),
       ...(notice ? { overlapNotice: notice } : {}),
+      ...this.nudge(action),
     };
+  }
+  /** One overlap read per dispatch: a finish gate and its receipt share it. */
+  private async overlapAdvice(laneId: string, paths = false) {
+    if (this.cachedAdvice?.laneId === laneId) return this.cachedAdvice.value;
+    const value = await readHostedOverlapAdvice(this, laneId, paths);
+    this.cachedAdvice = { laneId, value };
+    return value;
+  }
+  /** unsavedFor and the checkpoint nudge, on Lane calls only; a local stat walk, no timers. */
+  private nudge(action: HostedAgentAction) {
+    if (!this.defaults || ['save', 'capabilities', 'metrics', 'check-settings'].includes(action)) return {};
+    const root = hostedAgentRoot(this.root);
+    const laneId = readHostedLaneCheckout(root)?.selection.laneId;
+    return laneId ? checkpointNudge(root, laneId, this.defaults, unsavedMinutes(root)) : {};
+  }
+  private async clientAction(action: 'ack' | 'preflight', input: Record<string, unknown>) {
+    const root = hostedAgentRoot(this.root);
+    const marker = readHostedLaneCheckout(root);
+    const laneId = (input.laneId as string | undefined) ?? marker?.selection.laneId;
+    invariant(laneId, 'BAD_ARGUMENT', `Select laneId, or run ${action} inside the Lane directory.`);
+    if (action === 'ack') {
+      const { choice, text } = hostedAgentCommandSchemas.ack.parse(input);
+      const answered = [];
+      // Five notices per read; a bounded loop answers a larger inbox (each round: one read, one write).
+      for (let round = 0; round < 20; round++) {
+        const advice = await readHostedOverlapAdvice(this, laneId);
+        const answers = ackAnswers(laneId, advice, choice, text);
+        if (!answers.length) break;
+        const recorded = await executeHostedRecords(this, 'overlap-acks', { answers });
+        answered.push(...((recorded.result as { answers?: unknown[] }).answers ?? []));
+      }
+      return this.response(action, null, {
+        status: answered.length ? 'recorded' : 'none',
+        answered: answered.length,
+        next: answered.length
+          ? 'Land again; a newer overlap shows a new notice.'
+          : 'No pending overlap notices.',
+      });
+    }
+    const command = hostedAgentCommandSchemas.preflight.parse(input);
+    invariant(
+      marker?.selection.laneId === laneId,
+      'HOSTED_CHECKOUT_REQUIRED',
+      'Run preflight in the Lane checkout; it tests the saved files here.',
+    );
+    const advice = await readHostedOverlapAdvice(this, laneId, true);
+    const plan = preflightPlan(root, advice.changedPaths);
+    const head = marker.selection.head;
+    if (plan.status === 'unavailable' || !command.run)
+      return this.response(action, null, { laneId, head, plan });
+    const minutes = unsavedMinutes(root);
+    invariant(
+      minutes === null,
+      'LANE_DIRTY',
+      'Save first: preflight records a result for the saved head, and these files have unsaved edits.',
+    );
+    return this.response(action, null, {
+      laneId,
+      head,
+      plan,
+      receipt: runPreflight(root, laneId, head, plan),
+    });
   }
   async query<T = unknown>(name: string, args: Record<string, unknown>): Promise<T> {
     const priorityRead = [
@@ -691,4 +788,6 @@ export type HostedAgentSession = {
   mutation: <T = unknown>(name: string, args: Record<string, unknown>) => Promise<T>;
   main: () => Promise<z.infer<typeof hostedMainV2Schema>>;
   marker: () => ReturnType<typeof readHostedLaneCheckout>;
+  /** Agent-default finish gates (overlap, preflight); refusals throw, advisories return. */
+  finishGates?: (laneId: string, head: string) => Promise<Record<string, unknown>>;
 };

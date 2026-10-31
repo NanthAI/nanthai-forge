@@ -1,4 +1,5 @@
 import { finishRetryReasonSchema } from './hosted-landing.js';
+import { effectiveAgentDefaultsSchema } from './agent-parallel-defaults.js';
 import { hostedRecordCommands } from './hosted-record-input.js';
 import { hostedMirrorStatusSchema } from './hosted-github-mirror-status.js';
 import { contractTestsInput } from './intent-test-contract.js';
@@ -54,6 +55,8 @@ export const hostedAgentRecordActions = [
   'peer-ack',
   'overlap-acks',
 ] as const;
+/** Composed by the client from existing reads and mutations; never advertised in capabilities. */
+export const hostedAgentClientActions = ['ack', 'preflight'] as const;
 export const hostedAgentAddressSchema = z.object({ url: z.url(), projectId: z.string().min(1) }).strict();
 export type HostedAgentAddress = z.infer<typeof hostedAgentAddressSchema>;
 export const hostedAgentCapabilitiesSchema = z
@@ -61,6 +64,8 @@ export const hostedAgentCapabilitiesSchema = z
     overlapVersion: z.literal(1).optional(),
     /** Deferred caller outcome/delivery receipts may ride on CLI mutations. */
     metricReceiptVersion: z.literal(1).optional(),
+    /** Effective parallel-work defaults (project policy), when the client asks with defaultsVersion:1. */
+    agentDefaults: effectiveAgentDefaultsSchema.optional(),
     needsFix: z.array(z.record(z.string(), z.json())).optional(),
     githubMirror: hostedMirrorStatusSchema.nullable().optional(),
     schema: z.literal(1),
@@ -156,7 +161,24 @@ export const hostedAgentCommandSchemas = {
     })
     .strict()
     .refine(command => !command.retry || Boolean(command.reason), 'A retry records its reason.'),
-  prioritize: z.object({ submissionId: uuid, priority: z.enum(['urgent', 'normal']) }).strict(),
+  /** asOwner: the project owner is issuing this, not an agent acting alone (urgentRoles). */
+  prioritize: z
+    .object({
+      submissionId: uuid,
+      priority: z.enum(['urgent', 'normal']),
+      asOwner: z.literal(true).optional(),
+    })
+    .strict(),
+  /** Client-composed: answer every pending overlap notice on the Lane in one batch. */
+  ack: z
+    .object({
+      ...lane,
+      choice: z.enum(['accept-order', 'swap', 'split']).default('accept-order'),
+      text: z.string().min(1).max(2000).optional(),
+    })
+    .strict(),
+  /** Client-composed: select the saved head's affected tests, run them here and record the result. */
+  preflight: z.object({ ...lane, run: z.boolean().default(true) }).strict(),
   cancel: z.object({ submissionId: uuid }).strict(),
   revert: z.object({ ...message, target: revertTargetSchema }).strict(),
   abandon: z

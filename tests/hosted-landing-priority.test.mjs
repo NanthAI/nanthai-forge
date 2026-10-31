@@ -56,7 +56,8 @@ test('owner urgent finishes pass earlier normal arrivals; default is normal and 
   f.patch('projectHostedLandingRequests', [...f.tables.projectHostedLandingRequests.values()][0]._id, {
     priority: undefined,
   });
-  const urgent = await f.enqueue(f.request({ priority: 'urgent' }));
+  // urgentRoles defaults to the owner in person; agents on the owner's login stay normal.
+  const urgent = await f.enqueue(f.request({ priority: 'urgent', agent: false }));
   assert.equal(normal.priority, 'normal');
   assert.equal(urgent.priority, 'urgent');
   assert.equal((await f.status(urgent.id)).queuePosition, 1);
@@ -514,7 +515,7 @@ test('an unstarted urgent batch also takes precedence over an unstarted normal b
 
 test('released strict wait and stack readers retain legacy shapes; priority readers opt in', async () => {
   const f = await landingFixture(),
-    submitted = await f.enqueue(f.request({ priority: 'urgent' }));
+    submitted = await f.enqueue(f.request({ priority: 'urgent', agent: false }));
   const legacySchema = hostedLandingStateSchema
     .omit({ priority: true, priorityReason: true, priorityVersion: true })
     .extend({ request: hostedLandingRequestSchema.omit({ priority: true }) })

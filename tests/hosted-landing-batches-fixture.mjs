@@ -31,6 +31,7 @@ export async function batchesFixture(
   if (batching) {
     const policy = policyPreset('trusted');
     f.patch('hostedProjects', f.projectId, {
+      // Fake time jumps to each scheduled task; alerts have their own tests (hosted-stall-alerts.test.mjs).
       autonomyPolicy: {
         ...policy,
         acceptance: {
@@ -39,6 +40,7 @@ export async function batchesFixture(
           ...(batchMaxSize ? { batchMaxSize } : {}),
           ...(admissionCheck ? { admissionCheck } : {}),
         },
+        agentDefaults: { stallAlerts: { enabled: false } },
       },
     });
   }

@@ -92,6 +92,8 @@
     "scripts/hosted-actions-execute.mjs",
     "scripts/hosted-actions-job.mjs",
     "scripts/test-impact.mjs",
+    "scripts/agent-default-lines.mjs",
+    "scripts/agent-default-lines.d.mts",
     "scripts/test-import-graph.mjs",
     "scripts/convex-function-names.mjs",
     "scripts/test-directory-path.mjs",

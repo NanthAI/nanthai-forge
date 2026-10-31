@@ -12,6 +12,7 @@ import {
   editedPolicy,
   policyWriteSchema,
   reviewReason,
+  samePolicy,
   type AcceptanceActor,
 } from './autonomy-policy.js';
 import type { WorkStore } from './work-store.js';
@@ -45,7 +46,7 @@ export function setPolicy(store: WorkStore, input: unknown, actor: AcceptanceAct
     invariant(data.revision === revision, 'WORK_STALE', 'Work changed. Refresh before editing policy.');
     const previous = effectivePolicy(data);
     invariant(
-      !command.expectedPolicy || JSON.stringify(command.expectedPolicy) === JSON.stringify(previous),
+      !command.expectedPolicy || samePolicy(command.expectedPolicy, previous),
       'POLICY_CHANGED',
       'Project policy changed. Refresh it before editing.',
     );

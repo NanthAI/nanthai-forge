@@ -124,6 +124,15 @@ test('each live phase freezes the Lane; terminal finishes and finishes on an old
   assert.equal((await save(old, [old.change('old')])).result.state.status, 'staging');
 });
 
+test('cost-builder replay: a queued finish marked wouldConflict no longer freezes the Lane, so sync and re-land replace it', async () => {
+  const s = await saveFixture();
+  await liveFinish(s, { phase: 'queued' });
+  await assert.rejects(save(s, [s.change('sync main')]), code('LANE_FINISH_ACTIVE'));
+  const row = [...s.tables.projectHostedLandingRequests.values()].find(r => r.projectId === s.projectId);
+  s.patch('projectHostedLandingRequests', row._id, { wouldConflict: '{}' });
+  assert.equal((await save(s, [s.change('sync main')])).result.state.status, 'staging');
+});
+
 test('an unchanged checkpoint keeps the live finish and its proof', async () => {
   const s = await saveFixture();
   await liveFinish(s, { phase: 'ready' });
@@ -196,7 +205,7 @@ test('READY accepts before an urgent queued entry, and urgent still leads when n
   const f = await landingFixture();
   const passed = await f.enqueue();
   await f.enqueue();
-  const urgent = await f.enqueue(f.request({ priority: 'urgent' }));
+  const urgent = await f.enqueue(f.request({ priority: 'urgent', agent: false }));
   assert.equal(urgent.priority, 'urgent');
   const next = () => f.run('next', ctx => order.nextLandingRow(ctx, channel(f)), {});
   assert.equal((await next()).submissionId, urgent.id, 'nothing READY: urgent leads');
@@ -209,7 +218,7 @@ test('READY accepts before an urgent queued entry, and urgent still leads when n
 test('READY-first holds for the queue claim, the train selector and the status read', async () => {
   const f = await landingFixture();
   const passed = await f.enqueue();
-  const urgent = await f.enqueue(f.request({ priority: 'urgent' }));
+  const urgent = await f.enqueue(f.request({ priority: 'urgent', agent: false }));
   markReady(f, passed.id);
   const queue = f.queue();
   const train = await f.run('train', ctx => wake.nextTrainLandingRow(ctx, queue), {});
@@ -222,7 +231,7 @@ test('READY-first holds for the queue claim, the train selector and the status r
 test('READY entries order urgent-first among themselves and skip held or review-waiting ones', async () => {
   const f = await landingFixture();
   const a = await f.enqueue(),
-    b = await f.enqueue(f.request({ priority: 'urgent' })),
+    b = await f.enqueue(f.request({ priority: 'urgent', agent: false })),
     c = await f.enqueue();
   for (const entry of [a, b, c]) markReady(f, entry.id);
   const next = () => f.run('next', ctx => order.nextReadyLandingRow(ctx, channel(f)), {});

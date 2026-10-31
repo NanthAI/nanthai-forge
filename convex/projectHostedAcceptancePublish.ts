@@ -23,7 +23,8 @@ import { hostedRecordSchema } from '../src/hosted-records';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { effectivePolicy, type AcceptanceActor } from '../src/autonomy-policy';
 import { landingObservation } from '../src/hosted-landing';
-import { digest } from '../src/portable-hash';
+import { acceptancePolicyDigest } from '../src/policy-digest';
+import { scheduleWouldConflict } from './projectHostedLandingWouldConflict';
 import { governanceReason, requiresGovernedCheck } from '../src/public-governance';
 import { invariant } from '../src/errors';
 import { validCrossHeadProof } from '../src/hosted-cross-head-proof';
@@ -92,7 +93,7 @@ export async function publishAcceptance(
   const actor = ownerApproval ?? attempt.actor;
   const policy = effectivePolicy(project);
   invariant(
-    digest(canonicalPayload(policy)) === attempt.policyDigest,
+    acceptancePolicyDigest(policy) === attempt.policyDigest,
     'POLICY_CHANGED',
     'Current landing policy differs from the pinned attempt.',
   );
@@ -327,6 +328,11 @@ export async function publishAcceptance(
     receipt.snapshot.revision,
     candidate.governance?.paths ?? null,
   );
+  await scheduleWouldConflict(ctx, {
+    projectId: claim.projectId,
+    paths: candidate.governance?.paths ?? null,
+    landedSubmissionId: state.id,
+  });
   const next = {
     ...state,
     version: state.version + 1,

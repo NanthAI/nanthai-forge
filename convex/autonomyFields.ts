@@ -23,6 +23,33 @@ export const autonomyPolicy = v.object({
       establishedVendors: v.optional(v.array(v.string())),
     }),
   ),
+  agentDefaults: v.optional(
+    v.object({
+      preflight: v.optional(v.union(v.literal('off'), v.literal('advise'), v.literal('require'))),
+      preflightMaxMinutes: v.optional(v.number()),
+      urgentRoles: v.optional(v.array(v.union(v.literal('owner'), v.literal('agents')))),
+      overlapGate: v.optional(v.union(v.literal('off'), v.literal('warn'), v.literal('block'))),
+      checkpointNudgeMinutes: v.optional(v.number()),
+      stallAlerts: v.optional(
+        v.object({
+          enabled: v.optional(v.boolean()),
+          notifyAfterMinutes: v.optional(v.number()),
+          repeatAfterMinutes: v.optional(v.number()),
+          email: v.optional(v.array(v.string())),
+          webhook: v.optional(
+            v.union(
+              v.literal('off'),
+              v.literal('ntfy'),
+              v.literal('slack'),
+              v.literal('discord'),
+              v.literal('telegram'),
+              v.literal('generic'),
+            ),
+          ),
+        }),
+      ),
+    }),
+  ),
   preset: v.union(
     v.literal('supervised'),
     v.literal('trusted'),

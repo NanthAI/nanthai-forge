@@ -81,6 +81,11 @@ retry identical parameters after a lost reply. A new explicit operationId starts
 Hosted start returns Lane pins; start --open materializes it; land --save saves an opened Lane,
 composes and submits durable agent landing. Pending is not accepted.
 
+Project agent defaults (nforge agent ROOT policy shows them; docs/parallel-work-defaults.md):
+preflight runs the saved head's affected tests here and records the result; land --save refuses
+without it (preflight:require). ack answers every pending overlap notice; land --save refuses while
+one is open (overlapGate:block). Receipts carry unsavedFor and a save nudge; urgent is owner-only.
+
 Reads: tests, status, landing, observe, wait, log, link,
        records, candidate, provenance, candidates, review, diff, show, brief, peers,
        handoff-read, making-of, metrics, improve, decisions, policy, check-settings, capabilities,
@@ -187,6 +192,8 @@ const examples: Record<string, unknown> = {
   observe: { operationId: 'ORIGINAL_UUID', waitMs: 1000 },
   log: { operationId: 'ORIGINAL_UUID', stream: 'stderr', tail: 4096 },
   prioritize: { submissionId: 'SUBMISSION_ID', priority: 'urgent' },
+  ack: { laneId: 'LANE_ID', choice: 'accept-order' },
+  preflight: { laneId: 'LANE_ID' },
   cancel: { operationId: 'ORIGINAL_UUID' },
   accept: { viewId: 'CANDIDATE_ID' },
   complete: { laneId: 'LANE_ID' },
@@ -275,7 +282,13 @@ function actionHelp(action: string): string {
       'Confirm the proposed proving tests for a clean Candidate. Send candidateId, runId of a completed run on that exact source, expectedHead, expectedVersion and operationId. Optional tests replaces the proposed list. Complete measurements must total under 90000 ms. Missing timings and over-budget contracts are refused explicitly. The acceptance gate remains unchanged.\n';
   if (action === 'prioritize')
     result +=
-      'Hosted owner command: prioritize {submissionId,priority:"urgent"|"normal"}. Reorders a queued Candidate; no running check is cancelled. Replay the same operationId after an unknown reply.\n';
+      'Hosted owner command: prioritize {submissionId,priority:"urgent"|"normal"}. Reorders a queued Candidate; no running check is cancelled. Replay the same operationId after an unknown reply. urgent follows agentDefaults.urgentRoles (default owner only): agents on the owner\'s credential are refused unless the owner issues it with asOwner:true.\n';
+  if (action === 'ack')
+    result +=
+      'Hosted: ack {laneId?,choice?:"accept-order"|"swap"|"split",text?} answers every pending overlap notice on the Lane (stable answer ids, so a repeat replays). accept-order keeps your change and lands in order; split records that you routed around.\n';
+  if (action === 'preflight')
+    result +=
+      "Hosted: preflight {laneId?,run?:true} selects the saved head's affected tests with the landing check's selector, builds (build:core) and runs them here, and records the result in ROOT.forge-client. run:false only plans (tests, estimateMinutes, command). Save first; land --save accepts a passing record for the same saved head.\n";
   if (action === 'tests')
     result +=
       'Read the scoped landing test selection for the Lane saved head versus current main. Returns scope, reason, tests, command and source pins; command is null when no test files are selected. Run it in the Lane after building. Checkpoint edits and ask again after sync or main changes. Includes contractProposal with per-file historical estimates (unknown timings are null), current contract and version. candidateId selects exact composed source; runId reads its complete measured timing reports. Read-only; no check is started.\n';

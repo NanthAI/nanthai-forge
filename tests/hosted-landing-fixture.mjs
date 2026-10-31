@@ -5,6 +5,7 @@ import { getFunctionName } from 'convex/server';
 import { checksFixture, code } from './hosted-checks-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { canonicalPayload } from '../dist/hosted-source-operation.js';
+import { legacyPolicy } from '../dist/autonomy-policy.js';
 export const api = await import(moduleUrl('../convex/projectHostedLanding.ts'));
 export const driver = await import(moduleUrl('../convex/projectHostedLandingDriver.ts'));
 export const control = await import(moduleUrl('../convex/projectHostedLandingControl.ts'));
@@ -12,6 +13,8 @@ export const store = await import(moduleUrl('../convex/projectHostedLandingStore
 export const wake = await import(moduleUrl('../convex/projectHostedLandingWake.ts'));
 export const pins = await import(moduleUrl('../convex/projectHostedLandingPins.ts'));
 const alarms = await import(moduleUrl('../convex/projectHostedLandingStall.ts'));
+const stallAlerts = await import(moduleUrl('../convex/projectHostedLandingStallAlert.ts'));
+const wouldConflict = await import(moduleUrl('../convex/projectHostedLandingWouldConflict.ts'));
 const records = await import(moduleUrl('../convex/projectHostedRecords.ts'));
 const schema = (await import(moduleUrl('../convex/schema.ts'))).default;
 export { code };
@@ -22,6 +25,11 @@ export async function landingFixture(source = null) {
   const selected = source ? { ...source, store: { ...source.store, call: source.store.transaction } } : null;
   const f = await checksFixture(selected);
   f.tables._scheduled_functions = new Map();
+  // Fake time jumps to each scheduled task; alerts have their own tests (hosted-stall-alerts.test.mjs).
+  if (!f.tables.hostedProjects.get(f.projectId).autonomyPolicy)
+    f.patch('hostedProjects', f.projectId, {
+      autonomyPolicy: { ...legacyPolicy(), agentDefaults: { stallAlerts: { enabled: false } } },
+    });
   let now = Date.now(),
     schedulerFailure = false;
   const metrics = {
@@ -31,6 +39,7 @@ export async function landingFixture(source = null) {
     actionTicks: [],
     metadataArgumentBytes: 0,
     calls: 0,
+    stallDeliveries: [],
   };
   const main = {
     schema: 2,
@@ -162,7 +171,23 @@ export async function landingFixture(source = null) {
           (ctx, input) => alarms.raiseLandingAlarm(ctx, input, now),
           task.args[0],
         );
-      else if (task.name === 'projectHostedLandingDriver:checkWake')
+      else if (task.name === 'projectHostedLandingStallAlert:alert')
+        result = await run(
+          'stallAlert',
+          (ctx, input) => stallAlerts.raiseStallAlert(ctx, input, now),
+          task.args[0],
+        );
+      else if (task.name === 'projectHostedLandingWouldConflict:mark')
+        result = await run(
+          'wouldConflict',
+          (ctx, input) => wouldConflict.markWouldConflict(ctx, input, now),
+          task.args[0],
+        );
+      else if (task.name === 'projectHostedLandingStallAlert:deliver') {
+        // Owner channels are faked: record what would be sent, never call a network.
+        metrics.stallDeliveries.push(task.args[0]);
+        result = null;
+      } else if (task.name === 'projectHostedLandingDriver:checkWake')
         result = await call('landingCheckWake', driver.checkWake, task.args[0]);
       else if (stopAfterClaim) result = await claim(task);
       else {

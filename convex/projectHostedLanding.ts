@@ -8,6 +8,8 @@ import {
 } from './projectHostedLandingOrder';
 import { hostedQueueAheadSelection } from './projectHostedQueueAhead';
 import { scheduleLandingAlarm } from './projectHostedLandingStallWake';
+import { readWouldConflict } from './projectHostedLandingWouldConflict';
+import { latestStallAlert } from './projectHostedLandingStallAlert';
 import { reuseHostedLanding } from './projectHostedLandingIdentity';
 // SPDX-License-Identifier: Apache-2.0
 import { startLandingAdmission } from './projectHostedLandingAdmission';
@@ -95,7 +97,9 @@ export const status = query({
   handler: async (ctx, input) => {
     try {
       await reader(ctx, input.projectId);
-      const { state } = await loadLanding(ctx, input);
+      const { row, state } = await loadLanding(ctx, input);
+      const wouldConflict = state.phase === 'queued' ? readWouldConflict(row) : undefined;
+      const stallAlert = await latestStallAlert(ctx, input, state);
       const attempt = await loadLandingAttempt(ctx, {
         projectId: input.projectId,
         attemptId: state.attemptId,
@@ -109,6 +113,8 @@ export const status = query({
         queuePosition: await landingQueuePosition(ctx, state, order),
         attempt,
         queueAheadSelection: await hostedQueueAheadSelection(ctx, state, order),
+        ...(wouldConflict ? { wouldConflict } : {}),
+        ...(stallAlert ? { stallAlert } : {}),
       });
     } catch (error) {
       return report(error);
@@ -289,7 +295,7 @@ export async function enqueueHostedLanding(
     at: first.at,
     request,
     sequence,
-    ...landingPriority(project.owner, actor.id, request.priority),
+    ...landingPriority(project, actor, request.priority),
     priorityVersion: 0,
     version: reserved ? 1 : 0,
     firstAttemptId: attempt.id,
@@ -318,7 +324,7 @@ export async function enqueueHostedLanding(
       : {}),
     ...(request.revertOf ? { revertOf: request.revertOf } : {}),
     actor: actor.id,
-    ...landingPriority(project.owner, actor.id, request.priority),
+    ...landingPriority(project, actor, request.priority),
     priorityVersion: 0,
     sequence,
     ...(reused.selectionKey ? { selectionKey: reused.selectionKey } : {}),

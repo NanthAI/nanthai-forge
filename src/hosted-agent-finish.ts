@@ -13,6 +13,7 @@ import { recoverHostedCandidate } from './hosted-agent-resolution.js';
 import { agentSourceOutcome, checkSelection } from './hosted-agent-actions.js';
 import { canonicalPayload } from './hosted-source-operation.js';
 import { invariant } from './errors.js';
+import { shellQuote } from './agent-brief-render.js';
 import { hostedAgentDirectory, readAgentJson } from './hosted-agent-journal.js';
 import { finishRetryHint, type FinishContext } from './hosted-agent-finish-identity.js';
 import type { HostedAgentSession } from './hosted-agent-transport.js';
@@ -58,14 +59,38 @@ async function replayFinish(session: HostedAgentSession) {
   const queuePosition = session.journal.get<{ queuePosition?: number | null }>(
     'finish-queue-advice',
   )?.queuePosition;
+  const submission = await session.mutation<HostedLandingState>('projectHostedLanding:enqueue', {
+    request: canonicalPayload(request),
+  });
   return {
     phase: 'finish',
     composeOperationId,
-    submission: await session.mutation('projectHostedLanding:enqueue', {
-      request: canonicalPayload(request),
-    }),
+    submission,
     ...(queuePosition === undefined ? {} : { queuePosition }),
+    ...(await queuedConflict(session, submission)),
   };
+}
+
+/** A replay of a queued, not-yet-checked landing reports when main has since changed its files. */
+export async function queuedConflict(session: HostedAgentSession, submission: HostedLandingState) {
+  if (submission.phase !== 'queued') return {};
+  try {
+    const { wouldConflict } = await session.query<{ wouldConflict?: { next: string } }>(
+      'projectHostedLanding:status',
+      { submissionId: submission.id },
+    );
+    if (!wouldConflict) return {};
+    const laneId = session.marker()?.selection.laneId;
+    return {
+      wouldConflict,
+      next: 'sync-and-land',
+      nextCommand: `nforge agent ${shellQuote(session.root)} land --save ${shellQuote(
+        JSON.stringify(laneId ? { laneId } : {}),
+      )}`,
+    };
+  } catch {
+    return {}; /* Advisory read; the replay result stands. */
+  }
 }
 
 async function reuseCheckedFinish(session: HostedAgentSession, command: FinishCommand) {
@@ -99,11 +124,11 @@ async function reuseCheckedFinish(session: HostedAgentSession, command: FinishCo
 export async function executeHostedFinish(session: HostedAgentSession, input: unknown) {
   const result = await executeFinishWork(session, input);
   const context = session.journal.get<FinishContext>('finish-context');
-  return finishRetryHint(
-    session.root,
-    hostedAgentCommandSchemas.finish.parse(context?.command ?? input),
-    result as Record<string, unknown>,
-  );
+  const defaults = session.journal.get<Record<string, unknown>>('finish-defaults');
+  return finishRetryHint(session.root, hostedAgentCommandSchemas.finish.parse(context?.command ?? input), {
+    ...(result as Record<string, unknown>),
+    ...(defaults ? { defaults } : {}),
+  });
 }
 
 async function executeFinishWork(session: HostedAgentSession, input: unknown) {
@@ -145,6 +170,11 @@ async function executeFinishWork(session: HostedAgentSession, input: unknown) {
       }
     }
     const selection = clean ?? session.marker()!.selection;
+    // Agent defaults (overlap gate, preflight) judge the saved head this finish will land.
+    if (session.finishGates) {
+      const advice = await session.finishGates(selection.laneId, selection.head);
+      if (Object.keys(advice).length) await session.journal.retain('finish-defaults', () => advice);
+    }
     command.inputs = [
       {
         laneId: selection.laneId,
