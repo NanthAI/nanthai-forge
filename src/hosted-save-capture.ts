@@ -28,8 +28,15 @@ import type { SaveChange } from './hosted-save.js';
 import { workLocked } from './work-lock.js';
 import { canonicalPayload } from './hosted-source-operation.js';
 import { forgeCachePath } from './forge-cache-paths.js';
+import { neverIndex } from './forge-disk.js';
+import { machineObjectsDirectory, rememberObject } from './machine-object-store.js';
 
-/** Private disk snapshot: bounded buffers, no link target traversal or repository execution. */
+/** Small files hash in memory; only changed bytes ever reach the save staging. */
+const memoryLimit = 1024 * 1024;
+/** Private disk snapshot: bounded buffers, no link target traversal or repository execution.
+ * An unchanged file writes nothing; a changed one is staged under its digest, so a save costs
+ * only its changed bytes. Changed blobs also go to the machine object store, so a later open of
+ * this head on this machine downloads none of them. */
 function captureFile(root: string, path: string, directory: string, previous?: NativeFile) {
   const absolute = join(root, path),
     stat = lstatSync(absolute),
@@ -41,14 +48,15 @@ function captureFile(root: string, path: string, directory: string, previous?: N
       : stat.mode & 0o111
         ? 'executable'
         : 'file';
-  let pin: { sha256: string; size: number };
+  let pin: { sha256: string; size: number },
+    bytes: Buffer | null = null;
   if (stat.isSymbolicLink()) {
     invariant(
       realpathSync(dirname(absolute)) === dirname(absolute),
       'SOURCE_CHANGED',
       'Source directory changed during capture.',
     );
-    const bytes = readlinkSync(absolute, { encoding: 'buffer' });
+    bytes = readlinkSync(absolute, { encoding: 'buffer' });
     const after = lstatSync(absolute);
     invariant(
       after.isSymbolicLink() &&
@@ -64,27 +72,31 @@ function captureFile(root: string, path: string, directory: string, previous?: N
       'SOURCE_CHANGED',
       'Source directory changed during capture.',
     );
-    writeFileSync(temporary, bytes, { flag: 'wx', mode: 0o600 });
     pin = { sha256: digest(bytes), size: bytes.length };
   } else {
     invariant(stat.isFile(), 'SOURCE_READ_FAILED', 'Save source must be a regular file or symlink.');
     const source = new SourceFileReader(root, path, 'SOURCE_CHANGED'),
-      target = openSync(temporary, 'wx', 0o600);
+      chunks: Buffer[] = [],
+      target = source.size > memoryLimit ? openSync(temporary, 'wx', 0o600) : null;
     try {
-      pin = source.scan(bytes => {
-        let offset = 0;
-        while (offset < bytes.length) offset += writeSync(target, bytes, offset, bytes.length - offset);
+      pin = source.scan(chunk => {
+        if (target === null) chunks.push(Buffer.from(chunk));
+        else {
+          let offset = 0;
+          while (offset < chunk.length) offset += writeSync(target, chunk, offset, chunk.length - offset);
+        }
       });
       invariant(
         lstatSync(absolute).mode === stat.mode,
         'SOURCE_CHANGED',
         'Source mode changed during capture.',
       );
-      fsyncSync(target);
+      if (target !== null) fsyncSync(target);
     } finally {
       source.close();
-      closeSync(target);
+      if (target !== null) closeSync(target);
     }
+    if (target === null) bytes = Buffer.concat(chunks);
   }
   if (mode === 'gitlink') {
     invariant(
@@ -92,13 +104,19 @@ function captureFile(root: string, path: string, directory: string, previous?: N
       'INVALID_GITLINK',
       'A submodule pointer must contain its full pinned commit SHA.',
     );
-    gitlinkCommit(readFileSync(temporary));
+    gitlinkCommit(bytes ?? readFileSync(temporary));
   }
+  const observed = { file: { blob: pin.sha256, mode }, pin };
+  if (previous && previous.blob === pin.sha256 && previous.mode === mode) {
+    if (!bytes) rmSync(temporary, { force: true });
+    return { ...observed, changed: false };
+  }
+  if (bytes) writeFileSync(temporary, bytes, { flag: 'wx', mode: 0o600 });
   const final = join(directory, pin.sha256);
   if (checkoutPathExists(final)) rmSync(temporary);
   else renameSync(temporary, final);
   syncFile(final);
-  return { file: { blob: pin.sha256, mode }, pin };
+  return { ...observed, changed: true };
 }
 export async function captureHostedSave(root: string, directory: string) {
   root = realpathSync(root);
@@ -110,9 +128,9 @@ export async function captureHostedSave(root: string, directory: string) {
   const changes: SaveChange[] = [],
     files: { pin: { sha256: string; size: number }; path: string }[] = [];
   for (const path of local.sort()) {
-    const observed = captureFile(root, path, directory, baseline.get(path)),
-      old = baseline.get(path);
-    if (!old || old.blob !== observed.file.blob || old.mode !== observed.file.mode) {
+    const old = baseline.get(path),
+      observed = captureFile(root, path, directory, old);
+    if (observed.changed) {
       changes.push({
         path,
         before: old ? { blob: old.blob, mode: old.mode } : null,
@@ -121,6 +139,8 @@ export async function captureHostedSave(root: string, directory: string) {
       files.push({ pin: observed.pin, path: observed.pin.sha256 });
     }
   }
+  const machine = machineObjectsDirectory();
+  for (const file of files) await rememberObject(machine, join(directory, file.path), file.pin.sha256);
   const present = new Set(local);
   for (const path of marker.materialized)
     if (!forgeCachePath(path) && !present.has(path)) {
@@ -130,6 +150,7 @@ export async function captureHostedSave(root: string, directory: string) {
   // Capture is retry state, never a Work owner or a Lane publication.
   const result = { marker, changes, files };
   mkdirSync(`${root}.forge-client`, { recursive: true, mode: 0o700 });
+  neverIndex(`${root}.forge-client`);
   return workLocked(join(`${root}.forge-client`, 'lock'), () => {
     const path = join(directory, 'capture.json');
     if (checkoutPathExists(path)) return JSON.parse(readFileSync(path, 'utf8')) as typeof result;

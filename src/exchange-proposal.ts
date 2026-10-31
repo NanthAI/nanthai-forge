@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
-import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import { realpathSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { tmpdir } from 'node:os';
 import { makeFunctionReference } from 'convex/server';
 import { z } from 'zod';
 import { ConvexExchange } from './exchange-client.js';
 import { pullNativeExchange } from './native-exchange.js';
 import { WorkService } from './work.js';
 import { invariant } from './errors.js';
+import { forgeTempDir } from './forge-disk.js';
 const requestSchema = z
   .object({
     url: z.url(),
@@ -48,7 +48,7 @@ export async function receiveProposal(root: string, input: unknown) {
     'PROJECT_CHANGED',
     'Select this project’s proposal.',
   );
-  const scratch = realpathSync(mkdtempSync(join(tmpdir(), 'forge-receive-proposal-')));
+  const scratch = realpathSync(forgeTempDir('receive-proposal'));
   try {
     const directory = join(scratch, 'proposal');
     await pullNativeExchange(request.proposalId, directory, transport, { exportOnly: true });

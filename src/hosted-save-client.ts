@@ -1,6 +1,14 @@
 import { hostedActionError } from './hosted-action-error.js';
 // SPDX-License-Identifier: Apache-2.0
-import { lstatSync, mkdirSync, readFileSync, realpathSync, rmSync } from 'node:fs';
+import {
+  lstatSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { makeFunctionReference } from 'convex/server';
@@ -27,6 +35,43 @@ const saveCommandSchema = z
   .object({ operationId: z.uuid(), message: z.string(), supersedeFinish: z.boolean().optional() })
   .strict();
 
+const blobName = /^[0-9a-f]{64}$/;
+/** Remove the staged blobs of a save the server has acknowledged. Retries reuse request.json and
+ * pages.json and never read these bytes again; the small JSON files stay for exact retry. */
+function dropStagedBlobs(directory: string) {
+  try {
+    for (const name of readdirSync(directory)) if (blobName.test(name)) rmSync(join(directory, name));
+  } catch {
+    /* Removal only frees space; a later save retries it. */
+  }
+}
+/** Earlier saves of this checkout keep staged blobs only while unacknowledged: acknowledged ones, and
+ * prepared ones no pending baseline names (older clients kept every save's full tree). */
+function dropAcknowledgedSaves(client: string, current: string) {
+  const saves = join(client, 'saves');
+  let names: string[];
+  try {
+    names = readdirSync(saves).filter(name => name !== current);
+  } catch {
+    return;
+  }
+  const pending = new Set<string>();
+  for (const name of readdirSync(client))
+    if (name.startsWith('save-baseline-'))
+      try {
+        pending.add(JSON.parse(readFileSync(join(client, name), 'utf8')).operationId);
+      } catch {
+        /* An unreadable baseline protects nothing it cannot name. */
+      }
+  for (const name of names) {
+    const directory = join(saves, name);
+    if (
+      checkoutPathExists(join(directory, 'acknowledged')) ||
+      (checkoutPathExists(join(directory, 'request.json')) && !pending.has(name))
+    )
+      dropStagedBlobs(directory);
+  }
+}
 /** One bounded API drive. Pending jobs complete server-side; callers may read
  * progress later without keeping a tab, coding host or owner process alive. */
 export async function saveHostedLane(
@@ -56,6 +101,9 @@ async function saveOnce(
       'Save cache directory must be real.',
     );
   }
+  workLocked(join(`${root}.forge-client`, 'lock'), () =>
+    dropAcknowledgedSaves(`${root}.forge-client`, command.operationId),
+  );
   const original = join(directory, 'command.json'),
     identity = { root, projectId: exchange.projectId, ...command };
   workLocked(join(`${root}.forge-client`, 'lock'), () => {
@@ -67,6 +115,9 @@ async function saveOnce(
       );
     else durableReplace(original, canonicalPayload(identity));
   });
+  // A settled save answers its retry from the receipt it already applied.
+  const settled = join(directory, 'terminal.json');
+  if (checkoutPathExists(settled)) return JSON.parse(readFileSync(settled, 'utf8'));
   const capturePath = join(directory, 'capture.json');
   // An earlier save whose reply was not seen pins this baseline. Settle it first,
   // or every new save captures against the old head and the server refuses it.
@@ -205,6 +256,9 @@ async function saveOnce(
     }
     throw error;
   }
+  // The server holds the request and every staged blob it names.
+  writeFileSync(join(directory, 'acknowledged'), '', { mode: 0o600 });
+  dropStagedBlobs(directory);
   if (prepared.terminal) {
     applyHostedSaveReceipt(root, capture, request, prepared.terminal);
     return prepared.terminal;
@@ -315,6 +369,19 @@ function applyHostedSaveReceipt(
     durableReplace(join(root, '.forge/hosted-lane.json'), JSON.stringify(marker));
     clearPending();
   });
+  settleSave(root, request.operationId, terminal);
+}
+/** Once its outcome is applied, a save keeps only its command, request and outcome: the capture
+ * (a full baseline copy, ~400 KB for 3,000 files) and pages are never read again. */
+function settleSave(root: string, operationId: string, terminal: unknown) {
+  const directory = `${root}.forge-client/saves/${operationId}`;
+  try {
+    durableReplace(join(directory, 'terminal.json'), JSON.stringify(terminal));
+    for (const name of ['capture.json', 'pages.json']) rmSync(join(directory, name), { force: true });
+    dropStagedBlobs(directory);
+  } catch {
+    /* Space only; the retained files still answer a retry. */
+  }
 }
 
 /** Reconcile the one save pinned to this marker without scanning history or

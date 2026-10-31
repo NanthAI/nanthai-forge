@@ -44,8 +44,12 @@ selects another file.
   A `node_modules` link is removed as a link; the shared install stays.
 - A deployment without the batched read prunes nothing.
 - `nforge prune` is a dry run; `--apply` removes. `--scan DIRECTORY` first registers existing
-  checkouts in DIRECTORY and in its `*.forge-client/lanes/`. An explicit prune with
-  `autoPruneHours` set to 0 uses 3 hours.
+  checkouts in DIRECTORY and in its `*.forge-client/lanes/`. With `--apply` it also removes links
+  in DIRECTORY whose target was a `*.forge-client/lanes/` copy that no longer exists. An explicit
+  prune with `autoPruneHours` set to 0 uses 3 hours.
+- One root per Lane: `open` at a new path moves the copy `start` made in
+  `ROOT.forge-client/lanes/LANE_ID` there instead of downloading a second tree. It reports
+  `movedFrom`. A copy whose client lock is held, or one on another volume, is left alone.
 
 ### clientCacheMaxGB and clientCacheMaxAgeHours
 
@@ -56,6 +60,15 @@ selects another file.
   and runs no timer. A pass that runs out of its 15-second budget continues on the next start.
 - A copy is kept when it is the caller's own Lane, holds the work lock or was used in the last ten
   minutes, is the target of a symlink beside ROOT (conflict checkouts), or has unsaved edits.
+
+### Local disk
+
+- Forge temp output goes to `$TMPDIR/forge-tmp/PURPOSE-PID-RANDOM`. Any CLI start removes entries
+  there not written for 2 hours, at most once an hour, unless their process is still alive.
+- Forge writes an empty `.metadata_never_index` (Spotlight exclusion) into each `ROOT.forge-client`,
+  `$TMPDIR/forge-tmp`, the peers cache root and runtime release directories. Lane roots get none:
+  the file would be an untracked source file. Keep Lane roots in a directory you exclude from
+  Spotlight, for example with `touch DIRECTORY/.metadata_never_index`.
 
 ### localHeavySlots
 

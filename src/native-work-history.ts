@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import { readFileSync, writeFileSync, mkdtempSync, rmSync, realpathSync } from 'node:fs';
+import { readFileSync, writeFileSync, rmSync, realpathSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
-import { tmpdir } from 'node:os';
 import { WorkStore } from './work-store.js';
 import { NativeSource } from './native-source.js';
 import { historicalCommandSchema, type HistoricalWork } from './native-history-types.js';
@@ -13,6 +12,7 @@ import { digest } from './hash.js';
 import { invariant } from './errors.js';
 import { isCheckLogPath, runLogRecord } from './check-log-policy.js';
 import { parseWorkBytes } from './work-metadata.js';
+import { forgeTempDir } from './forge-disk.js';
 
 export function validateHistoricalObjects(store: WorkStore, records: HistoricalWork[]) {
   const source = new NativeSource(store.root);
@@ -94,7 +94,7 @@ export async function historicalWork(store: WorkStore, input: unknown, revision:
         manifest = manifestSchema.parse(JSON.parse(manifestBytes.toString('utf8'))),
         work = readFileSync(join(directory, 'work.json'));
       // The explicit Git compatibility boundary validates full original refs, source and private evidence.
-      const scratch = realpathSync(mkdtempSync(join(tmpdir(), 'forge-history-validation-')));
+      const scratch = realpathSync(forgeTempDir('history-validation'));
       try {
         await restoreWork(directory, join(scratch, 'original'));
       } finally {
@@ -164,7 +164,7 @@ export async function historicalWork(store: WorkStore, input: unknown, revision:
         ...snapshot.record,
       },
     };
-  const scratch = realpathSync(mkdtempSync(join(tmpdir(), 'forge-history-read-'))),
+  const scratch = realpathSync(forgeTempDir('history-read')),
     path = join(scratch, 'original.tar.gz');
   try {
     writeFileSync(path, bytes, { flag: 'wx', mode: 0o600 });

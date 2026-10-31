@@ -3,13 +3,13 @@ import { convexSchemaErrors } from './integration-preview-schema.js';
 import { spawnSync } from 'node:child_process';
 import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { tmpdir } from 'node:os';
 import { checkEnvironment, checkProcessEnvironment } from './check-environment.js';
 import { digest } from './hash.js';
 import { invariant } from './errors.js';
 import type { NativeSource } from './native-source.js';
 import type { WorkStore } from './work-store.js';
 import type { Check, CheckEnvironment, Lane } from './work-types.js';
+import { forgeTempDir } from './forge-disk.js';
 
 export type PreviewCheck = Pick<Check, 'name' | 'executable' | 'args'> &
   Partial<Pick<Check, 'id' | 'definition' | 'env' | 'credentials'>>;
@@ -39,7 +39,7 @@ export function previewChecks(source: NativeSource, main: string, checks: Check[
 /** A preview owns every writable source/dependency byte. Dependency preparation
  * is local only, and requires identical package and lock bytes. */
 export class PreviewChecks {
-  readonly directory = mkdtempSync(join(tmpdir(), 'forge-integration-'));
+  readonly directory = forgeTempDir('forge-integration');
   private dependencies: { signature: string; path: string } | undefined;
   constructor(
     private readonly store: WorkStore,

@@ -10,7 +10,6 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
-import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { z } from 'zod';
@@ -25,6 +24,7 @@ import { fingerprintPrivateFile } from './files.js';
 import { digest } from './hash.js';
 import { invariant } from './errors.js';
 import { nativeGitContributionHttp } from './native-git-receive.js';
+import { forgeTempDir } from './forge-disk.js';
 
 export const nativeContributionScope = contributionCommandSchema
   .pick({ operationId: true, intentId: true, expectedBase: true })
@@ -170,7 +170,7 @@ export async function gitContributionHttp(
     'BAD_METHOD',
     'Use the native clone/fetch/push service for this original contribution.',
   );
-  const directory = mkdtempSync(join(tmpdir(), 'forge-git-http-'));
+  const directory = forgeTempDir('git-http');
   chmodSync(directory, 0o700);
   try {
     const scope = nativeContributionScope.parse({

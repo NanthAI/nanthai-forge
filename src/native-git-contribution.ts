@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join } from 'node:path';
-import { tmpdir } from 'node:os';
 import { z } from 'zod';
 import { digest } from './hash.js';
 import { fingerprintPrivateFile, readSource } from './files.js';
@@ -13,6 +12,7 @@ import { fullGitBundle } from './work-git-bundle.js';
 import { workGit } from './work-git.js';
 import { startNativeContribution, registerNativeContribution } from './native-contribution-register.js';
 import type { WorkStore } from './work-store.js';
+import { forgeTempDir } from './forge-disk.js';
 
 const gitId = z.string().regex(/^[0-9a-f]{40}(?:[0-9a-f]{24})?$/),
   sha = z.string().regex(/^[0-9a-f]{64}$/);
@@ -89,7 +89,7 @@ export async function importNativeGitContribution(
     'Original Git bundle changed during selection.',
   );
   const projected = await prepareNativeProjection(store, command.expectedBase);
-  const scratch = mkdtempSync(join(tmpdir(), 'forge-native-git-contribution-'));
+  const scratch = forgeTempDir('native-git-contribution');
   try {
     const repo = join(scratch, 'input.git');
     workGit(scratch, [

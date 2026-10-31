@@ -322,6 +322,13 @@ recheck access and return their original receipt without rewinding newer edits.
 checkout through the hosted save APIs. The hosted agent CLI uses this same
 source-client helper; browser editor wiring is separate. The operation retains its command, captured
 bytes, full baseline and delta pages in the sibling `.forge-client/saves` cache.
+Only changed files are captured to disk; unchanged files are hashed in memory (up to 1 MiB each)
+or through a temporary file that is removed. Once `prepare` succeeds, the server holds the request
+and every staged blob, so the save removes its staged blobs and writes `acknowledged`. Once its
+outcome is applied, it keeps only `command.json`, `request.json` and `terminal.json`, and a retry
+answers from `terminal.json`. The next save of the checkout also removes staged blobs left by
+earlier saves that were acknowledged, or that were prepared and are no longer pending (older
+clients kept a full tree copy per save). A save that was never acknowledged keeps its bytes.
 Retry the original operation after a lost upload, commit or response. Later local
 edits remain on disk; retry uploads the captured bytes. Successful reconciliation
 advances only the matching checkout baseline marker, without installing files.

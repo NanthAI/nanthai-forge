@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { initNative } from './native-work.js';
 import { NativeSource } from './native-source.js';
@@ -11,13 +10,14 @@ import { selectBatch } from './landing-batch-store.js';
 import { policyPreset, editedPolicy } from './autonomy-policy.js';
 import type { ReplayWorkload } from './landing-replay.js';
 import type { LandingBatch } from './landing-batch-types.js';
+import { forgeTempDir } from './forge-disk.js';
 
 export const replayStamp = (ms: number) => new Date(Date.UTC(2026, 0, 1) + ms).toISOString();
 const seed = '76cf3468-0123-4567-89ab-000000000001';
 /** Disposable synthetic source plus the production selector/overlap planner.
  * No dispatch, worker, credentials or real provider is constructed or invoked. */
 export class ReplayPlanner {
-  readonly root = mkdtempSync(join(tmpdir(), 'forge-train-replay-'));
+  readonly root = forgeTempDir('train-replay');
   private readonly work;
   private readonly source;
   readonly data;

@@ -8,7 +8,6 @@ import {
   closeSync,
   lstatSync,
   mkdirSync,
-  mkdtempSync,
   openSync,
   readFileSync,
   realpathSync,
@@ -16,16 +15,16 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
-import { tmpdir } from 'node:os';
 import { captureArtifacts } from './work-artifacts.js';
 import { fingerprintPrivateFile } from './files.js';
 import { ForgeError, invariant } from './errors.js';
 import { artifactArchivePlan, materializeArtifactAliases } from './native-artifact-alias.js';
+import { forgeTempDir } from './forge-disk.js';
 
 const code = 'INVALID_WORK_BACKUP';
 const env = () => childEnv({ extra: { LC_ALL: 'C' } });
 function tar(args: string[], cwd: string, input?: Buffer): Buffer {
-  const scratch = mkdtempSync(join(tmpdir(), 'forge-tar-')),
+  const scratch = forgeTempDir('tar'),
     output = join(scratch, 'stdout');
   let fd: number | undefined;
   try {
@@ -80,7 +79,7 @@ export async function withWorkArchive<T>(
   input: string,
   use: (directory: string, archive: { sha256: string; size: number }) => Promise<T>,
 ): Promise<T> {
-  const scratch = realpathSync(mkdtempSync(join(tmpdir(), 'forge-backup-')));
+  const scratch = realpathSync(forgeTempDir('backup'));
   chmodSync(scratch, 0o700);
   try {
     const [captured] = await captureArtifacts(realpathSync(dirname(input)), scratch, [basename(input)]);

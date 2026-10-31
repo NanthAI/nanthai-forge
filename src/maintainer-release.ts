@@ -24,6 +24,7 @@ import {
   type ReleaseStage,
 } from './maintainer-release-schema.js';
 import { releaseChild } from './maintainer-release-child.js';
+import { neverIndex } from './forge-disk.js';
 
 export type ReleaseExecutor = (
   journal: ReleaseJournal,
@@ -69,6 +70,7 @@ function createRelease(store: WorkStore, input: ReleaseRequest): ReleaseJournal 
   const { bytes: previous, ...previousCli } = releaseSelection(request.cliPath);
   mkdirSync(directory, { recursive: true, mode: 0o700 });
   mkdirSync(destination, { recursive: true, mode: 0o700 });
+  neverIndex(request.runtimeDirectory);
   releaseWrite(join(directory, 'previous-cli'), previous, 0o600);
   const journal: ReleaseJournal = {
     schema: 1,

@@ -10,7 +10,6 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
-import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { z } from 'zod';
@@ -28,6 +27,7 @@ import { fullGitBundle } from './work-git-bundle.js';
 import { streamGit } from './work-git-stream.js';
 import { fingerprintPrivateFile } from './files.js';
 import { invariant } from './errors.js';
+import { forgeTempDir } from './forge-disk.js';
 
 export const nativeGitReceiveScopeSchema = z
   .object({
@@ -204,7 +204,7 @@ export async function nativeGitContributionHttp(
     'Select the original native Intent base.',
   );
   const projected = await prepareNativeProjection(store, base),
-    directory = mkdtempSync(join(tmpdir(), 'forge-native-git-http-'));
+    directory = forgeTempDir('native-git-http');
   chmodSync(directory, 0o700);
   try {
     const scope = nativeGitReceiveScopeSchema.parse({

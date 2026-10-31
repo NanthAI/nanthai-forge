@@ -10,6 +10,7 @@ import { makeFunctionReference } from 'convex/server';
 import { hostedAgentCommandSchemas, type HostedAgentAction } from './hosted-agent-contract.js';
 import { hostedStartSchema, hostedStartResultSchema } from './hosted-lane.js';
 import { checkoutHostedLane } from './hosted-lane-checkout.js';
+import { adoptNestedLaneCopy } from './hosted-lane-adopt.js';
 import { ConvexLaneTransport } from './hosted-lane-transport.js';
 import { saveHostedLane } from './hosted-save-client.js';
 import { transitionHostedLane } from './hosted-lifecycle-client.js';
@@ -410,13 +411,15 @@ export async function executeHostedAgent(
   if (action === 'open') {
     const command = hostedAgentCommandSchemas.open.parse(input);
     await session.query('projectHostedLanes:select', { laneId: command.laneId });
-    return session.journal.retain('open-result', () =>
-      checkoutHostedLane(
+    return session.journal.retain('open-result', async () => {
+      const movedFrom = adoptNestedLaneCopy(session.root, command.laneId, session.address);
+      const opened = await checkoutHostedLane(
         session.root,
         { ...command, ...session.address, operationId },
         new ConvexLaneTransport(session.exchange),
-      ),
-    );
+      );
+      return movedFrom ? { ...opened, movedFrom } : opened;
+    });
   }
   if (action === 'save') {
     const command = hostedAgentCommandSchemas.save.parse(input);

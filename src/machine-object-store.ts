@@ -5,6 +5,7 @@ import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { inTestProcess } from './test-isolation.js';
+import { neverIndex } from './forge-disk.js';
 
 /** One content-addressed object directory per OS user, shared by every checkout root on
  * this machine. Disposable bytes only: readers verify each digest before use, and access
@@ -35,6 +36,7 @@ export async function rememberObject(machine: string | null, source: string, id:
   try {
     if (!created.has(machine)) {
       mkdirSync(machine, { recursive: true, mode: 0o700 });
+      neverIndex(machine);
       created.add(machine);
     }
     await cloneFile(source, temporary);

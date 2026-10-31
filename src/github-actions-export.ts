@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { tmpdir } from 'node:os';
 import { commitActionsSnapshot } from './github-actions-commit.js';
 import { retrySyncGit, syncGit, syncGitSleep } from './github-sync-git.js';
 import { durableReplace } from './native-durability.js';
@@ -13,6 +12,7 @@ import type { ActionsFailure } from './github-actions-api.js';
 import { ensureActionsPush } from './github-actions-push.js';
 import type { ActionsAttempt, ActionsBranchEvidence, ActionsDiscovery } from './github-actions-infra.js';
 import type { ActionsJobLogEvidence } from './github-actions-job-evidence.js';
+import { forgeTempDir } from './forge-disk.js';
 
 export type ActionsJournal = {
   pin: string;
@@ -108,9 +108,7 @@ export async function deleteActionsRef(
   const ref = `refs/heads/forge-check/${plan.runId}`,
     remote = `https://github.com/${journal.repo}.git`;
   // Deletion needs no source objects. A reclaimed export can use an empty disposable Git repo.
-  const temporary = existsSync(join(plan.source, '.git'))
-    ? undefined
-    : mkdtempSync(join(tmpdir(), 'forge-ref-cleanup-'));
+  const temporary = existsSync(join(plan.source, '.git')) ? undefined : forgeTempDir('ref-cleanup');
   const root = temporary ?? plan.source;
   try {
     if (temporary) await git(root, ['init', '--bare', '--template=']);

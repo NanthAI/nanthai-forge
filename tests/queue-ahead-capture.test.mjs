@@ -116,11 +116,13 @@ test('hosted finish observation then save captures zero paths at dogfood size', 
   for (let i = 0; i < 84; i++) put(f.root, `queue-ahead-objects/objects/${i}`);
   const operationId = randomUUID();
   await transport.dispatch('save', { operationId, message: 'Save after observation' });
-  const capture = JSON.parse(
-    readFileSync(join(`${f.root}.forge-client`, 'saves', operationId, 'capture.json')),
-  );
-  assert.deepEqual(capture.changes, []);
-  assert.deepEqual(capture.files, []);
+  // A settled save keeps only its command, request and outcome; nothing was staged.
+  assert.deepEqual(readdirSync(join(`${f.root}.forge-client`, 'saves', operationId)).sort(), [
+    'acknowledged',
+    'command.json',
+    'request.json',
+    'terminal.json',
+  ]);
   const request = JSON.parse(
     f.calls.findLast(call => call.name === 'projectHostedSaves:prepare').args.request,
   );
@@ -139,7 +141,7 @@ test('hosted finish observation then save captures zero paths at dogfood size', 
       functionCalls: f.calls.length + statusCalls + objectCalls,
       objectPins,
       downloads,
-      capturedPaths: capture.changes.length,
+      capturedPaths: request.changeCount,
       peakRssKiB: process.resourceUsage().maxRSS,
       wallMs: Math.round(performance.now() - start),
     }),

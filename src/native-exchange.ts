@@ -4,13 +4,11 @@ import {
   copyFileSync,
   existsSync,
   mkdirSync,
-  mkdtempSync,
   realpathSync,
   renameSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { z } from 'zod';
 import { portableCheckPath } from './check-log-policy.js';
@@ -24,6 +22,7 @@ import { nativeManifestSchema, sourceManifestSchema } from './work-archive-metad
 import { overlayHostedJournal, restoreWork } from './work-backup.js';
 import { parseWorkBytes } from './work-metadata.js';
 import { WorkStore } from './work-store.js';
+import { forgeTempDir } from './forge-disk.js';
 export type TransferReceipt = {
   uploadedObjects: number;
   uploadedBytes: number;
@@ -78,7 +77,7 @@ export async function pullNativeExchange(
     'INVALID_WORK_BACKUP',
     'Exchange repeats a logical path.',
   );
-  const directory = realpathSync(mkdtempSync(join(tmpdir(), 'forge-exchange-')));
+  const directory = realpathSync(forgeTempDir('exchange'));
   let downloadedBytes = 0,
     reusedBytes = 0;
   try {

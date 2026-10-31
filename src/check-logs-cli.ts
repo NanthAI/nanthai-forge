@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { downloadArchiveFile, type ArchivePart } from './archive-download-file.js';
-import { readFileSync, writeFileSync, existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { tmpdir } from 'node:os';
 import { randomUUID, createHash } from 'node:crypto';
 import { makeFunctionReference } from 'convex/server';
 import { WorkStore } from './work-store.js';
@@ -16,6 +15,7 @@ import { continueLongAction } from './long-action.js';
 import { ForgeError, invariant } from './errors.js';
 import { digest } from './hash.js';
 import { durableReplace } from './native-durability.js';
+import { forgeTempDir } from './forge-disk.js';
 
 const help = 'nforge maintenance check-logs ROOT --dry-run|--apply --plan FILE [--hosted]';
 /** One-off owner command. Dry-run records the exact local/hosted scope; apply
@@ -167,7 +167,7 @@ export async function checkLogsCli(args: string[]) {
         continue;
       }
 
-      const directory = mkdtempSync(join(tmpdir(), 'forge-check-log-migration-'));
+      const directory = forgeTempDir('check-log-migration');
       try {
         const path = join(directory, 'original.tar.gz');
         const signed = await client.mutation(makeFunctionReference<'mutation'>('backupTransfer:sign'), {

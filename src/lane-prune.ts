@@ -122,6 +122,11 @@ export async function laneHousekeeping(input: {
   const pruneMs = settings.autoPruneHours * hour,
     idleMs = settings.idleLaneHours * hour;
   const links = input.scan ? adoptLaneCheckouts(input.scan, now).links : new Map<string, string[]>();
+  // A link whose Lane copy is gone (removed by GC or by hand) is only clutter; remove it with its target.
+  if (input.apply)
+    for (const [target, paths] of links)
+      if (!exists(target) && target.includes(`.forge-client${sep}lanes${sep}`))
+        for (const path of paths) rmSync(path, { force: true });
   const excludedRoots = (input.exclude?.roots ?? []).map(root => resolve(root));
   const excludedLanes = new Set(input.exclude?.laneIds ?? []);
   const result: LaneHousekeeping = { idle: [], pruned: [], kept: [], apply: input.apply };

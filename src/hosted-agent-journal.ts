@@ -10,6 +10,7 @@ import { workLocked } from './work-lock.js';
 import { checkoutPathExists } from './hosted-checkout-files.js';
 import { invariant } from './errors.js';
 import type { HostedAgentAddress } from './hosted-agent-contract.js';
+import { neverIndex } from './forge-disk.js';
 export function hostedAgentRoot(root: string) {
   root = resolve(root);
   mkdirSync(dirname(root), { recursive: true });
@@ -26,6 +27,7 @@ export function hostedAgentDirectory(root: string) {
       'Agent client cache must be a real directory.',
     );
   }
+  neverIndex(cache);
   return directory;
 }
 export function readAgentJson(path: string): unknown {

@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import { mkdtempSync, rmSync, existsSync, readFileSync, realpathSync } from 'node:fs';
+import { rmSync, existsSync, readFileSync, realpathSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
-import { tmpdir } from 'node:os';
 import { digest } from './hash.js';
 import { invariant } from './errors.js';
 import { NativeSource } from './native-source.js';
@@ -14,6 +13,7 @@ import {
   nativeContributionCommandSchema,
   type NativeContributionCommand,
 } from './native-contribution-types.js';
+import { forgeTempDir } from './forge-disk.js';
 
 const request = (c: NativeContributionCommand) =>
   digest(
@@ -56,7 +56,7 @@ export async function importNativeContribution(store: WorkStore, input: unknown,
       'INVALID_CONTRIBUTION',
       'The native archive differs from its selected digest.',
     );
-    const scratch = mkdtempSync(join(tmpdir(), 'forge-contribution-'));
+    const scratch = forgeTempDir('contribution');
     try {
       // Full existing restore validates manifest bytes and complete reachable
       // source/evidence closure. Its Work lives only in temporary storage.

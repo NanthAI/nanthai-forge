@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { mkdtempSync, chmodSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { chmodSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { streamGit } from './work-git-stream.js';
@@ -12,6 +11,7 @@ import { channelStatus, exportChannelBundle } from './work-channel.js';
 import { channelCommandSchema } from './work-types.js';
 import { workGit } from './work-git.js';
 import { ForgeError, invariant } from './errors.js';
+import { forgeTempDir } from './forge-disk.js';
 
 export async function gitHttp(root: string, url: URL, request: IncomingMessage, response: ServerResponse) {
   if (url.pathname.startsWith('/api/git/contribute/'))
@@ -56,7 +56,7 @@ export async function gitHttp(root: string, url: URL, request: IncomingMessage, 
     'BAD_ARGUMENT',
     'Use an original acceptance UUID.',
   );
-  const directory = mkdtempSync(join(tmpdir(), 'forge-git-http-'));
+  const directory = forgeTempDir('git-http');
   chmodSync(directory, 0o700);
   let bundle: string | undefined;
   try {

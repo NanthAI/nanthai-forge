@@ -1,21 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 import { diskGuard } from './disk-guard.js';
-import {
-  closeSync,
-  existsSync,
-  lstatSync,
-  mkdtempSync,
-  openSync,
-  realpathSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs';
-import { tmpdir } from 'node:os';
+import { closeSync, existsSync, lstatSync, openSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Lane } from './work-types.js';
 import { execFileSync } from 'node:child_process';
 import { invariant } from './errors.js';
 import { gitCommand, gitFailure, gitTimeout } from './work-git-command.js';
+import { forgeTempDir } from './forge-disk.js';
 
 export function workGit(
   root: string,
@@ -42,7 +33,7 @@ export function workGit(
   // `hash-object --stdin` on a 1 MiB blob). Hand Git the same bytes as a private file descriptor instead.
   let spill: { directory: string; fd: number } | undefined;
   if (input !== undefined && Buffer.byteLength(input) > 32 * 1024) {
-    const directory = mkdtempSync(join(tmpdir(), 'forge-git-input-')),
+    const directory = forgeTempDir('git-input'),
       file = join(directory, 'input');
     writeFileSync(file, input, { mode: 0o600 });
     spill = { directory, fd: openSync(file, 'r') };

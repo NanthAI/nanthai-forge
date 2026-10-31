@@ -1,15 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import {
-  constants,
-  copyFileSync,
-  mkdirSync,
-  mkdtempSync,
-  chmodSync,
-  rmSync,
-  writeFileSync,
-  realpathSync,
-} from 'node:fs';
-import { tmpdir } from 'node:os';
+import { constants, copyFileSync, mkdirSync, chmodSync, rmSync, writeFileSync, realpathSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { digest } from './hash.js';
 import { safeRelative, fingerprintPrivateFile } from './files.js';
@@ -21,6 +11,7 @@ import { invariant } from './errors.js';
 import { draftUrl, observeDraft, uploadDraft } from './work-netlify.js';
 import type { WorkStore } from './work-store.js';
 import type { Deployment, DeploymentCommand, EnvironmentCommand, WorkData } from './work-types.js';
+import { forgeTempDir } from './forge-disk.js';
 
 export async function deploymentWork(store: WorkStore, command: DeploymentCommand, revision: number) {
   invariant(Number.isSafeInteger(revision) && revision >= 0, 'BAD_ARGUMENT', 'Send a valid work revision.');
@@ -100,7 +91,7 @@ export async function deploymentWork(store: WorkStore, command: DeploymentComman
     return deployment;
   });
   if (command.action === 'deploy-release' && !original.attemptedAt) {
-    const directory = realpathSync(mkdtempSync(join(tmpdir(), 'forge-netlify-')));
+    const directory = realpathSync(forgeTempDir('netlify'));
     chmodSync(directory, 0o700);
     // Staging owns bytes only; the existing WorkStore journals the sole upload attempt before any provider write.
     mkdirSync(join(directory, 'public'), { mode: 0o700 });
@@ -195,7 +186,7 @@ export async function deploymentWork(store: WorkStore, command: DeploymentComman
   });
   if (!selected.attemptedAt) return { revision: store.load().revision, result: selected };
   // Read-only CLI calls use another fresh directory: retained upload files/config can never become executable input.
-  const directory = realpathSync(mkdtempSync(join(tmpdir(), 'forge-netlify-read-')));
+  const directory = realpathSync(forgeTempDir('netlify-read'));
   chmodSync(directory, 0o700);
   try {
     const observation = await observeDraft(directory, selected);
