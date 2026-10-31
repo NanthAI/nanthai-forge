@@ -8,6 +8,7 @@ import type { LaneTransport } from './hosted-lane-checkout.js';
 import { hostedDownloadPageSize, type HostedDownloadDescriptor } from './hosted-download-page.js';
 import { readSigned, type SignedObject } from './exchange-r2-read.js';
 import { invariant } from './errors.js';
+import { latestClientSourcePack } from './source-pack-client.js';
 /** Reuse project-scoped membership, batched R2 signing and dual-location byte transport. */
 export class ConvexLaneTransport implements LaneTransport {
   readonly objectPageSize = hostedDownloadPageSize;
@@ -24,6 +25,9 @@ export class ConvexLaneTransport implements LaneTransport {
       | 'onDownloadProgress'
     >,
   ) {}
+  sourcePack() {
+    return latestClientSourcePack(this.exchange.client as never, this.exchange.projectId);
+  }
   async select(laneId: string) {
     return hostedLaneSelectionSchema.parse(
       JSON.parse(

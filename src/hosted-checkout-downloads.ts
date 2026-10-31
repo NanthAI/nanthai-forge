@@ -19,6 +19,7 @@ import type { ContentPin } from './native-exchange.js';
 import type { ConvexExchange } from './exchange-client.js';
 import type { DownloadRow } from './blob-download-format.js';
 import type { CheckoutObjectTransport } from './hosted-checkout-cache.js';
+import { latestClientSourcePack } from './source-pack-client.js';
 const rowSchema = z.discriminatedUnion('location', [
   z.object({
     digest: z.string(),
@@ -53,6 +54,9 @@ export class HostedCheckoutDownloads implements CheckoutObjectTransport {
   private readonly recipes = new Map<string, ObjectRecipe>();
   private readonly rows = new Map<string, DownloadRow & { url?: string }>();
   constructor(private readonly exchange: Pick<ConvexExchange, 'client' | 'projectId'>) {}
+  sourcePack() {
+    return latestClientSourcePack(this.exchange.client as never, this.exchange.projectId);
+  }
   async objects(digests: string[]): Promise<ContentPin[]> {
     const rows = z
       .array(rowSchema)

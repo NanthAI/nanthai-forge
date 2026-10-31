@@ -226,7 +226,8 @@ test('6000-file download measurement keeps source calls within the existing page
   assert.equal(sourceCalls.length, 16); // One manifest window and fifteen file windows.
   assert(sourceCalls.every(call => call.digests.length <= 400));
   assert.equal(s.traffic.downloads, 6002);
-  assert(s.traffic.peak > 1 && s.traffic.peak <= 3);
+  // Three page workers, each with up to 16 concurrent object reads (actionsReadConcurrency).
+  assert(s.traffic.peak > 3 && s.traffic.peak <= 3 * 16);
   assert.equal(readFileSync(join(s.directory, 'candidate/source/file-5999.txt'), 'utf8'), 'synthetic-5999');
   t.diagnostic(
     JSON.stringify({

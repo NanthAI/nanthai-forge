@@ -14,8 +14,8 @@ import { HostedCheckoutCache, type CheckoutObjectTransport } from './hosted-chec
 import {
   checkoutPathExists,
   cleanHostedCheckout,
-  installHostedFile,
-  flushHostedCheckout,
+  installHostedFiles,
+  flushHostedCheckoutFiles,
 } from './hosted-checkout-files.js';
 import {
   hostedLaneCheckoutSchema,
@@ -132,6 +132,10 @@ export async function checkoutHostedLane(
     root,
     downloadedObjects: cache.downloadedObjects,
     downloadedBytes: cache.downloadedBytes,
+    ...(cache.sourcePack
+      ? { sourcePack: cache.sourcePack, packObjects: cache.packObjects, packBytes: cache.packBytes }
+      : {}),
+    ...(cache.machineObjects ? { machineObjects: cache.machineObjects } : {}),
     replayed,
   });
   if (operation.complete) return result(true);
@@ -156,7 +160,7 @@ export async function checkoutHostedLane(
   identity(hostedLaneSelectionSchema.parse(await transport.select(request.laneId)));
   const stage = mkdtempSync(join(cache.root, 'checkout-'));
   try {
-    for (const file of files) installHostedFile(stage, cache.objects, file);
+    await installHostedFiles(stage, cache.objects, files);
     mkdirSync(join(stage, '.forge'), { mode: 0o700 });
     const marker: HostedLaneCheckoutMarker = {
       schema: 1,
@@ -169,7 +173,7 @@ export async function checkoutHostedLane(
       materialized: files.map(file => file.path),
     };
     durableReplace(join(stage, '.forge', hostedLaneMarkerName), JSON.stringify(marker));
-    flushHostedCheckout(stage);
+    await flushHostedCheckoutFiles(stage);
     workLocked(lock, () => {
       operation = operationSchema.parse(json(receiptPath));
       if (operation.complete) return;

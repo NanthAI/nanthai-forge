@@ -64,9 +64,15 @@ export async function createSourcePack(stateRef: string, state: NativeState, cac
     throw error;
   }
 }
-export async function downloadSourcePack(pack: SourcePack & { url: string }, path: string, request = fetch) {
+/** Bounded by size and checksum; the deadline covers slow client links (default 10 min). */
+export async function downloadSourcePack(
+  pack: SourcePack & { url: string },
+  path: string,
+  request = fetch,
+  timeoutMs = 600_000,
+) {
   invariant(pack.size <= sourcePackBytes, 'SOURCE_HASH_MISMATCH', 'Oversized pack.');
-  const response = await request(pack.url, { redirect: 'error', signal: AbortSignal.timeout(120_000) });
+  const response = await request(pack.url, { redirect: 'error', signal: AbortSignal.timeout(timeoutMs) });
   invariant(response.ok && response.body, 'SOURCE_UNAVAILABLE', 'Pack unavailable.');
   let size = 0;
   await pipeline(
@@ -86,11 +92,51 @@ export async function downloadSourcePack(pack: SourcePack & { url: string }, pat
   );
 }
 export async function unpackSourcePack(pack: SourcePack, state: NativeState, path: string, cache: string) {
+  const expected = [...state.files].sort((a, b) => (a.path < b.path ? -1 : 1));
+  await readSourcePack(pack, path, cache, files => {
+    invariant(files.length === expected.length, 'SOURCE_HASH_MISMATCH', 'Pack State differs.');
+    for (let i = 0; i < expected.length; i++) {
+      const file = files[i]!,
+        selected = expected[i]!;
+      invariant(
+        file.path === selected.path && file.blob === selected.blob && file.mode === selected.mode,
+        'SOURCE_HASH_MISMATCH',
+        'Pack inventory differs.',
+      );
+    }
+    return () => true;
+  });
+}
+/** Client cache fill: every written object is checked against its own digest, so the
+ * pack needs no State match; `keep` selects which verified objects are written. */
+export async function unpackSourcePackObjects(
+  pack: SourcePack,
+  path: string,
+  directory: string,
+  keep: (blob: string) => boolean,
+) {
+  const written: string[] = [];
+  await readSourcePack(pack, path, directory, () => blob => {
+    const selected = keep(blob);
+    if (selected) written.push(blob);
+    return selected;
+  });
+  return written;
+}
+type PackFile = { path: string; blob: string; mode: string; size: number };
+async function readSourcePack(
+  pack: SourcePack,
+  path: string,
+  directory: string,
+  inventory: (files: PackFile[]) => (blob: string) => boolean,
+) {
   const input = createReadStream(path);
   const stream = input.pipe(createGunzip());
   const iterator = stream[Symbol.asyncIterator]();
   let pending: Buffer = Buffer.alloc(0),
-    expanded = 0;
+    expanded = 0,
+    writing = 0;
+  const writes = new Set<Promise<void>>();
   const take = async (length: number) => {
     const parts: Buffer[] = [];
     let left = length;
@@ -117,24 +163,20 @@ export async function unpackSourcePack(pack: SourcePack, state: NativeState, pat
     const length = (await take(4)).readUInt32BE();
     invariant(length <= 16 * 1024 * 1024, 'SOURCE_HASH_MISMATCH', 'Pack header exceeds cache bound.');
     const header = JSON.parse((await take(length)).toString('utf8'));
-    const expected = [...state.files].sort((a, b) => (a.path < b.path ? -1 : 1));
     invariant(
       header.version === 1 &&
         header.stateRef === pack.stateRef &&
         Array.isArray(header.files) &&
-        header.files.length === expected.length &&
-        pack.fileCount === expected.length,
+        header.files.length === pack.fileCount,
       'SOURCE_HASH_MISMATCH',
       'Pack State differs.',
     );
     let total = 0;
-    for (let i = 0; i < expected.length; i++) {
-      const file = header.files[i],
-        selected = expected[i]!;
+    for (const file of header.files as PackFile[]) {
       invariant(
-        file.path === selected.path &&
-          file.blob === selected.blob &&
-          file.mode === selected.mode &&
+        typeof file?.path === 'string' &&
+          typeof file.blob === 'string' &&
+          /^[0-9a-f]{64}$/.test(file.blob) &&
           Number.isSafeInteger(file.size) &&
           file.size >= 0 &&
           file.size <= sourcePackFileBytes,
@@ -144,18 +186,33 @@ export async function unpackSourcePack(pack: SourcePack, state: NativeState, pat
       total += file.size;
       invariant(total <= sourcePackTreeBytes, 'SOURCE_HASH_MISMATCH', 'Pack tree exceeds cache bound.');
     }
-    await mkdir(cache, { recursive: true });
-    for (const file of header.files) {
+    const keep = inventory(header.files);
+    await mkdir(directory, { recursive: true });
+    for (const file of header.files as PackFile[]) {
       const bytes = await take(file.size);
       invariant(digest(bytes) === file.blob, 'SOURCE_HASH_MISMATCH', 'Pack file differs.');
-      await writeFile(join(cache, file.blob), bytes, { mode: 0o600 });
+      if (!keep(file.blob)) continue;
+      // Bounded concurrent writes (16 files, 64 MiB): small-file latency dominates large trees.
+      const write: Promise<void> = writeFile(join(directory, file.blob), bytes, { mode: 0o600 }).finally(
+        () => {
+          writes.delete(write);
+          writing -= bytes.length;
+        },
+      );
+      // Handled here and re-observed below, so a failure never becomes an unhandled rejection.
+      write.catch(() => undefined);
+      writes.add(write);
+      writing += bytes.length;
+      while (writes.size >= 16 || writing > 64 * 1024 * 1024) await Promise.race(writes);
     }
+    await Promise.all(writes);
     invariant(
       !pending.length && (await iterator.next()).done,
       'SOURCE_HASH_MISMATCH',
       'Trailing pack bytes.',
     );
   } finally {
+    await Promise.allSettled(writes);
     stream.destroy();
     input.destroy();
   }

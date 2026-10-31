@@ -59,6 +59,7 @@ export async function openHostedRootLane(
       objects: ids => downloads.objects(ids),
       downloadToFile: (pin, path) => downloads.downloadToFile(pin, path),
       downloadFiles: files => downloads.downloadFiles(files),
+      sourcePack: () => downloads.sourcePack(),
       select: async laneId => {
         const value = await exchange.client.query(
           makeFunctionReference<'query'>('projectHostedLanes:select'),

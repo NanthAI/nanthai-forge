@@ -116,6 +116,7 @@ export async function hostedCloneCli(
       objects: ids => downloads!.objects(ids),
       downloadToFile: (pin, path) => downloads!.downloadToFile(pin, path),
       downloadFiles: files => downloads!.downloadFiles(files),
+      sourcePack: () => downloads!.sourcePack(),
     },
   );
 }

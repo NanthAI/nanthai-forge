@@ -15,7 +15,7 @@ import { invariant } from '../src/errors';
 import { report } from './errors';
 import { hostedDownloadPageSize, type HostedDownloadDescriptor } from '../src/hosted-download-page';
 
-async function readableProject(ctx: MutationCtx, projectId: Id<'hostedProjects'>) {
+export async function readableProject(ctx: MutationCtx, projectId: Id<'hostedProjects'>) {
   const user = await ctx.auth.getUserIdentity();
   if (user) return accessibleProject(ctx, projectId, user.subject);
   const project = await ctx.db.get(projectId);

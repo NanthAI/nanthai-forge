@@ -22,7 +22,7 @@ Agents use three verbs: `start`, `save` and `land`. Reads keep their names (`sta
 | `finish` with `accept` (native) / hosted `finish` | `land --save` |
 | `finish` without `accept` (native) / hosted `accept:false` | `land --save --check-only` |
 | `land-ready` | `land --resume-ready` |
-| `accept`, `cancel`, `revert`, `undo-revert`, `undo-sync`, `abandon`, `complete`, `complete-merged`, `clean`, `take`, `guidance`, `pre-edit`, `install-hooks`, `uninstall-hooks`, `friction-triage`, `set-policy`, `define-check`, `configure-check`, `configure-runner`, `prioritize` | `nforge x ROOT ACTION` |
+| `accept`, `cancel`, `revert`, `undo-revert`, `undo-sync`, `abandon`, `complete`, `complete-merged`, `clean`, `take`, `guidance`, `pre-edit`, `install-hooks`, `uninstall-hooks`, `friction-triage`, `set-policy`, `define-check`, `configure-check`, `configure-runner`, `prioritize`, `source-pack` | `nforge x ROOT ACTION` |
 
 Old names keep working for at least one released version and print their new form once on stderr; stdout, JSON and replay identity do not change. Later sections still name the underlying actions (for example `finish`, `checkpoint`) where they describe receipts and wire fields; those are the actions the verbs above run. MCP tools keep their current names and arguments in this release.
 

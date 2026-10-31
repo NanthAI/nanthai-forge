@@ -61,7 +61,7 @@ try {
       const { warmPackCache } = await import('../dist/hosted-actions-job-pack.js');
       await warmPackCache(source.state, directory, cache);
       source.connection = client.transport();
-      source.reader = new SourceWorkerReader(cache, source.connection.transport);
+      source.reader = new SourceWorkerReader(cache, source.connection.transport, undefined, 16);
       await refreshActionsSourcePack(client, source, cache);
     } catch {
       console.log('source pack: refresh skipped');

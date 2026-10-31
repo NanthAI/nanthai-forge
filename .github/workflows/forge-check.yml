@@ -65,6 +65,9 @@ jobs:
   hosted-plan:
     if: ${{ inputs.deployment != '' }}
     runs-on: ${{ fromJSON(inputs.runs_on || '"ubuntu-latest"') }}
+    # Source arrives as one R2 pack plus changed objects (target under a minute); the
+    # bound stops a stuck transfer long before GitHub's 6 h default.
+    timeout-minutes: 30
     permissions:
       contents: read
       id-token: write
@@ -115,6 +118,8 @@ jobs:
     needs: hosted-plan
     name: forge-hosted-${{ matrix.shard }}
     runs-on: ${{ fromJSON(inputs.runs_on || '"ubuntu-latest"') }}
+    # Shards are planned for 3-8 min of tests; project checks may be longer, never 6 h.
+    timeout-minutes: 90
     permissions:
       contents: read
       id-token: write
@@ -163,6 +168,7 @@ jobs:
     name: Refresh optional Forge source pack
     continue-on-error: true
     runs-on: ${{ fromJSON(inputs.runs_on || '"ubuntu-latest"') }}
+    timeout-minutes: 20
     permissions:
       contents: read
       id-token: write

@@ -195,6 +195,7 @@ const examples: Record<string, unknown> = {
   prioritize: { submissionId: 'SUBMISSION_ID', priority: 'urgent' },
   ack: { laneId: 'LANE_ID', choice: 'accept-order' },
   preflight: { laneId: 'LANE_ID' },
+  'source-pack': {},
   cancel: { operationId: 'ORIGINAL_UUID' },
   accept: { viewId: 'CANDIDATE_ID' },
   complete: { laneId: 'LANE_ID' },
@@ -290,6 +291,9 @@ function actionHelp(action: string): string {
   if (action === 'preflight')
     result +=
       "Hosted: preflight {laneId?,run?:true} selects the saved head's affected tests with the landing check's selector, builds (build:core) and runs them here, and records the result in ROOT.forge-client. run:false only plans (tests, estimateMinutes, command). Save first; land --save accepts a passing record for the same saved head.\n";
+  if (action === 'source-pack')
+    result +=
+      'Hosted operator repair: x ROOT source-pack {} packs the current hosted main from this machine (objects come from the pack, the machine cache or object downloads) and publishes it to R2, so checks and Lane opens read one pack instead of every object. status current means the latest pack is already main; seed, cutover or import of a large repo should be followed by this.\n';
   if (action === 'tests')
     result +=
       'Read the scoped landing test selection for the Lane saved head versus current main. Returns scope, reason, tests, command and source pins; command is null when no test files are selected. Run it in the Lane after building. Checkpoint edits and ask again after sync or main changes. Includes contractProposal with per-file historical estimates (unknown timings are null), current contract and version. candidateId selects exact composed source; runId reads its complete measured timing reports. Read-only; no check is started.\n';

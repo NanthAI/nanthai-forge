@@ -11,12 +11,14 @@ import { digest } from './hash.js';
 import { invariant } from './errors.js';
 import { scopedRecheckBase } from './scoped-recheck-policy.js';
 
+/** Parallel R2 GETs per descriptor window when the pack is absent or for the delta. */
+export const actionsReadConcurrency = 16;
 export async function materializeActionsSource(client: ActionsJobClient, directory: string, cache: string) {
   const started = Date.now(),
     run = client.run!;
   const connection = client.transport(),
     { transport, resolve, prepareRecipes } = connection;
-  let reader = new SourceWorkerReader(cache, transport);
+  let reader = new SourceWorkerReader(cache, transport, undefined, actionsReadConcurrency);
   // A scoped recheck also needs the checked base inventory; it shares this window.
   const recheckBase = scopedRecheckBase(run.gate);
   let heads = [run.request.expectedHead, run.candidate.base.head, ...(recheckBase ? [recheckBase] : [])];
@@ -59,21 +61,32 @@ export async function materializeActionsSource(client: ActionsJobClient, directo
                   await reader.bytes((await transport.describeBatch!([pack.stateRef]))[0]!),
                 );
               })();
+      console.log(`source: downloading pack ${pack.stateRef} (${pack.size} bytes, ${pack.fileCount} files)`);
       await downloadSourcePack(pack, archive, client.request);
+      console.log(`source: pack downloaded in ${((Date.now() - started) / 1000).toFixed(1)}s; unpacking`);
       await unpackSourcePack(pack, packState, archive, cache);
       const old = new Map(packState.files.map(file => [file.path, file]));
       selected = state.files.filter(file => old.get(file.path)?.blob !== file.blob);
       packed = packState;
-    } catch {
+    } catch (error) {
       reason = 'invalid or unavailable pack';
+      // Codes only: messages of network errors may carry signed URLs into public logs.
+      console.log(
+        `source: pack unusable (${(error as { code?: string })?.code ?? 'error'}); reading objects`,
+      );
       // Discard every extracted cache byte. A failed pack must not supply W2 bytes.
       await rm(cache, { recursive: true, force: true });
       await mkdir(cache, { recursive: true });
-      reader = new SourceWorkerReader(cache, transport);
+      reader = new SourceWorkerReader(cache, transport, undefined, actionsReadConcurrency);
     } finally {
       await rm(archive, { force: true });
     }
   }
+  if (!packed && selected.length > 1000)
+    console.log(
+      `source: no usable source pack (${reason}); reading ${selected.length} objects individually. ` +
+        'The pack job publishes one after this plan; repair now with: nforge x ROOT source-pack',
+    );
   const download = async () => {
     let next = 0,
       completed = 0,
@@ -131,7 +144,7 @@ export async function materializeActionsSource(client: ActionsJobClient, directo
     selected = state.files;
     await rm(cache, { recursive: true, force: true });
     await mkdir(cache, { recursive: true });
-    reader = new SourceWorkerReader(cache, transport);
+    reader = new SourceWorkerReader(cache, transport, undefined, actionsReadConcurrency);
     await materialize();
   }
   const old = new Map(packed?.files.map(file => [file.path, file]) ?? []);

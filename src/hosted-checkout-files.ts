@@ -8,8 +8,11 @@ import {
   copyFileSync,
   chmodSync,
   symlinkSync,
+  constants,
 } from 'node:fs';
+import { chmod, copyFile, open } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
+import { mapExchange } from './exchange-parallel.js';
 import { digest } from './hash.js';
 import { invariant } from './errors.js';
 import type { NativeFile } from './native-state-format.js';
@@ -89,10 +92,52 @@ export function installHostedFile(stage: string, objects: string, file: NativeFi
     );
     symlinkSync(bytes, target);
   } else {
-    copyFileSync(source, target);
+    // A clone shares blocks until edited (APFS/Btrfs); other filesystems copy.
+    copyFileSync(source, target, constants.COPYFILE_FICLONE);
     chmodSync(target, file.mode === 'executable' ? 0o755 : 0o644);
     syncFile(target);
   }
+}
+/** Same result as installHostedFile per file, with bounded concurrent clone/chmod/fsync:
+ * per-file latency, not bandwidth, dominates trees of tens of thousands of files. */
+export async function installHostedFiles(stage: string, objects: string, files: NativeFile[]) {
+  for (const directory of new Set(files.map(file => dirname(join(stage, file.path)))))
+    mkdirSync(directory, { recursive: true });
+  await mapExchange(files, 16, async file => {
+    const target = join(stage, file.path),
+      source = join(objects, file.blob);
+    if (file.mode === 'symlink') return installHostedFile(stage, objects, file);
+    await copyFile(source, target, constants.COPYFILE_FICLONE);
+    await chmod(target, file.mode === 'executable' ? 0o755 : 0o644);
+    const handle = await open(target, 'r');
+    try {
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+  });
+}
+/** flushHostedCheckout with concurrent directory fsyncs. */
+export async function flushHostedCheckoutFiles(directory: string) {
+  const directories: string[] = [];
+  const walk = (path: string) => {
+    directories.push(path);
+    for (const name of readdirSync(path)) {
+      const child = join(path, name),
+        stat = lstatSync(child);
+      if (stat.isDirectory() && !stat.isSymbolicLink()) walk(child);
+    }
+  };
+  walk(directory);
+  if (process.platform === 'win32') return;
+  await mapExchange(directories, 16, async path => {
+    const handle = await open(path, 'r');
+    try {
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+  });
 }
 export function flushHostedCheckout(directory: string) {
   for (const name of readdirSync(directory)) {

@@ -58,6 +58,8 @@ import {
   type HostedAgentCapabilities,
 } from './hosted-agent-contract.js';
 import { executeHostedAgent, hostedCheckSettings } from './hosted-agent-actions.js';
+import { publishClientSourcePack } from './source-pack-client.js';
+import { HostedCheckoutDownloads } from './hosted-checkout-downloads.js';
 import { selectHostedFinish } from './hosted-agent-finish-identity.js';
 import { reconcileHostedSave } from './hosted-save-client.js';
 import {
@@ -385,6 +387,21 @@ export class HostedAgentTransport {
         });
       }
       this.defaults = capabilities.agentDefaults;
+      if (action === 'source-pack') {
+        hostedAgentCommandSchemas['source-pack'].parse(command.data);
+        const main = await this.query<{ head: string }>('projectHostedChannels:current', {});
+        return this.response(
+          action,
+          null,
+          await publishClientSourcePack({
+            client: this.exchange.client as never,
+            projectId: this.address.projectId,
+            head: main.head,
+            cacheRoot: `${hostedAgentRoot(this.root)}.forge-client`,
+            transport: new HostedCheckoutDownloads(this.exchange),
+          }),
+        );
+      }
       if (action === 'ack' || action === 'preflight')
         return await this.clientAction(action, command.data as Record<string, unknown>);
       if (action === 'check-settings')

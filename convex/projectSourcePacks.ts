@@ -2,6 +2,7 @@
 import { v } from 'convex/values';
 import { makeFunctionReference } from 'convex/server';
 import { internalMutation, type MutationCtx, type ActionCtx } from './_generated/server';
+import type { Id } from './_generated/dataModel';
 import { selectedSourcePacks } from './projectSourcePackStore';
 import { actionsSession, sessionArgs, type SessionInput } from './projectHostedActionsSession';
 import {
@@ -25,22 +26,33 @@ export async function prepareSourcePack(ctx: MutationCtx, input: PackInput, now 
     'EVIDENCE_CHANGED',
     'Pack the pinned accepted base.',
   );
+  return reserveSourcePack(ctx, input.projectId, object, input.cleanupAck, now);
+}
+/** Shared by the check runner (pinned base) and signed-in clients (current main).
+ * Callers have already authorized the project and selected the expected State. */
+export async function reserveSourcePack(
+  ctx: MutationCtx,
+  projectId: Id<'hostedProjects'>,
+  object: SourcePackUpload,
+  cleanupAck: string | undefined,
+  now: number,
+) {
   if (!r2Enabled()) return null;
   const state = await ctx.db
     .query('projectObjects')
-    .withIndex('by_project_and_digest', q => q.eq('projectId', input.projectId).eq('digest', object.stateRef))
+    .withIndex('by_project_and_digest', q => q.eq('projectId', projectId).eq('digest', object.stateRef))
     .unique();
   invariant(
     state && !state.removed && isStored(state),
     'SOURCE_UNAVAILABLE',
     'Project State is unavailable.',
   );
-  let row = await selectedSourcePacks(ctx, input.projectId);
-  const objectKey = sourcePackKey(input.projectId, object.stateRef, object.sha256);
+  let row = await selectedSourcePacks(ctx, projectId);
+  const objectKey = sourcePackKey(projectId, object.stateRef, object.sha256);
   if (row?.latest?.objectKey === objectKey) return null;
-  if (input.cleanupAck) {
+  if (cleanupAck) {
     invariant(
-      row?.other?.objectKey === input.cleanupAck && row.other.expiresAt <= now && row.other.deleting,
+      row?.other?.objectKey === cleanupAck && row.other.expiresAt <= now && row.other.deleting,
       'WORK_STALE',
       'Pack cleanup changed.',
     );
@@ -69,15 +81,22 @@ export async function prepareSourcePack(ctx: MutationCtx, input: PackInput, now 
     ready: false,
   };
   if (row) await ctx.db.patch(row._id, { other });
-  else await ctx.db.insert('projectSourcePacks', { projectId: input.projectId, other });
+  else await ctx.db.insert('projectSourcePacks', { projectId, other });
   return { target: await presignPut(r2Config(), objectKey, { digest: object.sha256, size: object.size }) };
 }
 export async function commitSourcePack(ctx: MutationCtx, input: PackInput) {
   const { run } = await actionsSession(ctx, input);
   const object = sourcePackUploadSchema.parse(JSON.parse(input.object));
   invariant(object.stateRef === run.candidate.base.head, 'EVIDENCE_CHANGED', 'Pack State changed.');
-  const key = sourcePackKey(input.projectId, object.stateRef, object.sha256);
-  const row = await selectedSourcePacks(ctx, input.projectId);
+  return promoteSourcePack(ctx, input.projectId, object);
+}
+export async function promoteSourcePack(
+  ctx: MutationCtx,
+  projectId: Id<'hostedProjects'>,
+  object: SourcePackUpload,
+) {
+  const key = sourcePackKey(projectId, object.stateRef, object.sha256);
+  const row = await selectedSourcePacks(ctx, projectId);
   if (row?.latest?.objectKey === key) return null;
   invariant(
     row?.other &&
@@ -105,9 +124,32 @@ export async function sourcePackCommand(
   object: SourcePackUpload,
 ) {
   const data = { ...input, object: JSON.stringify(object) };
-  const prepareRef = makeFunctionReference<'mutation'>('projectSourcePacks:prepare');
+  return sourcePackFlow(input.projectId, phase, object, {
+    prepare: cleanupAck =>
+      ctx.runMutation(
+        makeFunctionReference<'mutation'>('projectSourcePacks:prepare'),
+        cleanupAck ? { ...data, cleanupAck } : data,
+      ),
+    authorize: () =>
+      ctx.runMutation(makeFunctionReference<'mutation'>('projectHostedActionsSession:session'), input),
+    commit: () => ctx.runMutation(makeFunctionReference<'mutation'>('projectSourcePacks:commit'), data),
+  });
+}
+type PackSteps = {
+  prepare(cleanupAck?: string): Promise<{ cleanup?: string; target?: unknown } | null>;
+  authorize(): Promise<unknown>;
+  commit(): Promise<null>;
+};
+/** Prepare signs one PUT (after deleting an expired reservation); commit authorizes,
+ * verifies the uploaded size/checksum with HEAD, then promotes the reservation. */
+export async function sourcePackFlow(
+  projectId: string,
+  phase: 'prepare' | 'commit',
+  object: SourcePackUpload,
+  steps: PackSteps,
+) {
   if (phase === 'prepare') {
-    let result = await ctx.runMutation(prepareRef, data);
+    let result = await steps.prepare();
     if (result?.cleanup) {
       const response = await fetch(await presignDelete(r2Config(), result.cleanup), {
         method: 'DELETE',
@@ -115,17 +157,14 @@ export async function sourcePackCommand(
         signal: AbortSignal.timeout(20_000),
       });
       invariant(response.ok || response.status === 404, 'R2_VERIFY_FAILED', 'Old pack deletion failed.');
-      result = await ctx.runMutation(prepareRef, { ...data, cleanupAck: result.cleanup });
+      result = await steps.prepare(result.cleanup);
     }
     return result?.target ?? null;
   }
   // Authorize before HEAD too. A separate mutation is necessary: signed upload
   // size/checksum verification is external I/O and cannot run in a transaction.
-  await ctx.runMutation(makeFunctionReference<'mutation'>('projectHostedActionsSession:session'), input);
-  const observed = await headObject(
-    r2Config(),
-    sourcePackKey(input.projectId, object.stateRef, object.sha256),
-  );
+  await steps.authorize();
+  const observed = await headObject(r2Config(), sourcePackKey(projectId, object.stateRef, object.sha256));
   invariant(
     observed.status === 'ok' &&
       observed.size === object.size &&
@@ -133,5 +172,5 @@ export async function sourcePackCommand(
     'R2_VERIFY_FAILED',
     'Pack upload verification failed.',
   );
-  return ctx.runMutation(makeFunctionReference<'mutation'>('projectSourcePacks:commit'), data);
+  return steps.commit();
 }

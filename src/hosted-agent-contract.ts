@@ -56,7 +56,7 @@ export const hostedAgentRecordActions = [
   'overlap-acks',
 ] as const;
 /** Composed by the client from existing reads and mutations; never advertised in capabilities. */
-export const hostedAgentClientActions = ['ack', 'preflight'] as const;
+export const hostedAgentClientActions = ['ack', 'preflight', 'source-pack'] as const;
 export const hostedAgentAddressSchema = z.object({ url: z.url(), projectId: z.string().min(1) }).strict();
 export type HostedAgentAddress = z.infer<typeof hostedAgentAddressSchema>;
 export const hostedAgentCapabilitiesSchema = z
@@ -179,6 +179,8 @@ export const hostedAgentCommandSchemas = {
     .strict(),
   /** Client-composed: select the saved head's affected tests, run them here and record the result. */
   preflight: z.object({ ...lane, run: z.boolean().default(true) }).strict(),
+  /** Client-composed operator repair: pack the current hosted main and publish it to R2. */
+  'source-pack': z.object({}).strict(),
   cancel: z.object({ submissionId: uuid }).strict(),
   revert: z.object({ ...message, target: revertTargetSchema }).strict(),
   abandon: z

@@ -488,6 +488,40 @@ about $0.003–$0.0094/month amortized, before free allowance and account-level 
 rounding; requests also have free allowances. See [R2 pricing](https://developers.cloudflare.com/r2/pricing/).
 There is no new paid provider or mirror dependency.
 
+Without a usable pack, planning reads objects with 16 concurrent GETs per descriptor
+window (the paged descriptor calls are unchanged) and logs a line naming the repair
+action. Pack download and unpack also log progress. `hosted-plan` stops after 30
+minutes, `hosted-check` shards after 90 and `hosted-pack` after 20, instead of
+GitHub's 6 h default.
+
+### Source packs outside checks
+
+Signed-in clients read the same pack. `projectSourcePackClient:latest` (project
+reader, one mutation, writes nothing) returns the latest pack with a signed GET.
+A Lane open, sync or clone that misses 500 or more objects downloads that pack once,
+writes every object whose bytes match its own digest, and fetches only what the
+pack lacks through the paged object path. Older servers, a missing pack or any pack
+failure fall back to that object path. The checkout is still verified file by file.
+
+`nforge x ROOT source-pack {}` is the operator repair and backfill. It reads current
+hosted main, fetches its objects through the pack, machine-store and object paths,
+builds the deterministic pack locally and publishes it with
+`projectSourcePackClient:publish` (owner or contributor; prepare signs one PUT for
+the current main head only, commit verifies R2 HEAD and promotes it into the same
+`projectSourcePacks` slots). It returns `status: current` when the latest pack
+already matches main. Run it after a seed, cutover or import of a large repository;
+later checks then refresh the pack through `hosted-pack`. Calls: one `latest`
+mutation, two actions (four nested mutations), one PUT and one HEAD.
+
+Clients also keep one machine-wide object store,
+`${XDG_CACHE_HOME:-~/.cache}/forge/objects` (`FORGE_OBJECT_CACHE` moves it, `off`
+disables it; test processes leave it off unless set). Files are content-addressed,
+owner-only and written with temp-and-rename, so concurrent processes need no lock.
+Each checkout root clones (APFS/Btrfs) verified objects from it into its private
+cache, so a second Lane of the same project reads no bytes from R2 and makes no
+object signing call. Nothing evicts it yet; a collector can delete any file at any
+time, because readers verify each digest and refetch on a miss.
+
 Deploy additive schema/backend support first, then publish the runner modules,
 script and workflow together. The first successful full check seeds a base pack;
 subsequent checks can use it. An old runner ignores the optional response; a new

@@ -51,6 +51,7 @@ export const operatorActions = [
   'configure-check',
   'configure-runner',
   'prioritize',
+  'source-pack',
 ] as const;
 
 /** Named reads keep their names; no notice. `resolve` is the hosted conflict save, kept as-is. The planning

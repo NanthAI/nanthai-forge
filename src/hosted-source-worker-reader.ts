@@ -117,7 +117,18 @@ export class SourceWorkerReader {
         for (const [index, pin] of raw.entries())
           await this.file({ object: pin, recipe: null }, async () => streams[index]!);
       }
-      for (const ref of window) await this.file(ref);
+      if (this.concurrency <= 1) for (const ref of window) await this.file(ref);
+      else {
+        // Bounded parallel GETs: per-object latency, not bandwidth, limits large trees.
+        let next = 0;
+        const worker = async () => {
+          while (next < window.length) await this.file(window[next++]!);
+        };
+        const results = await Promise.allSettled(
+          Array.from({ length: Math.min(this.concurrency, window.length) }, worker),
+        );
+        for (const result of results) if (result.status === 'rejected') throw result.reason;
+      }
     }
   }
   private readonly saved = new Map<string, WorkerPin>();
@@ -125,6 +136,8 @@ export class SourceWorkerReader {
     readonly directory: string,
     private readonly transport: SourceWorkerTransport,
     private readonly progress: () => Promise<void> = async () => {},
+    /** Raw objects streamed at once per window; 1 keeps the one-at-a-time worker contract. */
+    private readonly concurrency = 1,
   ) {}
   /** A job-private verified cache, never a persistent authorization cache. */
   async file(input: WorkerObject, read?: () => Promise<AsyncIterable<Uint8Array>>): Promise<string> {
