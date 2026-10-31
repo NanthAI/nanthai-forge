@@ -18,6 +18,7 @@ import {
 import { invariant } from '../src/errors';
 import { retainUploadCleanup, scheduleUploadSweep, retryRemovedUpload } from './projectLifecycle';
 import { report } from './errors';
+import { findObject } from './projectObjectFind';
 
 export const proposalArgs = {
   projectId: v.id('hostedProjects'),
@@ -264,12 +265,7 @@ export const completeObjects = internalMutation({
         'Select this actor’s object proposal.',
       );
       await intentAuthority(ctx, proposal.projectId, actor, proposal.intentId);
-      const root = await ctx.db
-        .query('projectObjects')
-        .withIndex('by_project_and_digest', q =>
-          q.eq('projectId', proposal.projectId).eq('digest', proposal.digest),
-        )
-        .unique();
+      const root = await findObject(ctx, proposal.projectId, proposal.digest);
       invariant(
         root && !root.removed && isStored(root) && root.size === proposal.size,
         'INVALID_WORK_BACKUP',

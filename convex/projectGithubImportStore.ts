@@ -10,10 +10,12 @@ import { createProject } from './projectCreation';
 import { githubHostedProject } from '../src/hosted-github-bootstrap';
 import { HOSTED_WORK_INDEX_FORMAT } from '../src/work-hosted-summary';
 import { isStored } from './projectObjectFields';
+import { findObject } from './projectObjectFind';
 import { invariant } from '../src/errors';
 import { initialImportProgress, initialArchiveCursor } from '../src/github-import-pages';
 import { completion, recipePin, completeObjects } from './projectGithubImportBatch';
 import { retain, inventoryEntry } from './projectGithubImportInventory';
+import { catalogEntry, recordWindow } from './projectGithubImportCatalog';
 
 const key = { actor: v.string(), operationId: v.string(), request: v.string() };
 async function find(ctx: QueryCtx, input: { actor: string; operationId: string; request: string }) {
@@ -152,8 +154,6 @@ export const advance = internalMutation({
         await blobStore(ctx).delete(input.cursor);
       return false;
     }
-    if (row.protocol === 3)
-      await completeObjects(ctx, row.projectId, input.objects ?? [], input.recipes ?? []);
     if (row.protocol === 2) {
       await completeObjects(ctx, row.projectId, input.objects ?? [], input.recipes ?? []);
       await retain(ctx, row, input.entries ?? []);
@@ -205,8 +205,8 @@ export const advance = internalMutation({
     return true;
   },
 });
-/** Archive page receipt: verified object bindings plus counters, in the same
- * run (step). It schedules nothing; the running action continues. */
+/** Archive window receipt: the verified objects one upload window stored (one
+ * inventory row, no row per object) plus counters. It schedules nothing. */
 export const archiveProgress = internalMutation({
   args: {
     ...identity,
@@ -215,16 +215,16 @@ export const archiveProgress = internalMutation({
     bytes: v.number(),
     totalBytes: v.number(),
     submodules: v.number(),
-    objects: v.array(completion),
-    recipes: v.array(recipePin),
+    objects: v.array(catalogEntry),
   },
   returns: v.boolean(),
   handler: async (ctx, input) => {
     const row = await readJob(ctx, input);
     invariant(row.protocol === 3, 'IMPORT_PAGE_CHANGED', 'Only archive imports record archive pages.');
-    // Bindings name bytes already verified in storage, so a superseded run may still bind them.
-    await completeObjects(ctx, row.projectId, input.objects, input.recipes);
-    if (row.step !== input.step || row.phase === 'ready') return false;
+    if (row.phase === 'ready') return false;
+    // Objects name bytes already verified in storage, so a superseded run may still record them.
+    await recordWindow(ctx, row, input.objects);
+    if (row.step !== input.step) return false;
     await ctx.db.patch(row._id, {
       completed: input.completed,
       total: input.total,
@@ -293,10 +293,7 @@ export const publish = internalMutation({
     // Each source binding was committed in an earlier bounded import step. Only
     // metadata and the final selected-main pointer publish here.
     for (const object of bootstrap.objects) {
-      const bound = await ctx.db
-        .query('projectObjects')
-        .withIndex('by_project_and_digest', q => q.eq('projectId', row.projectId).eq('digest', object.sha256))
-        .unique();
+      const bound = await findObject(ctx, row.projectId, object.sha256);
       invariant(
         bound && !bound.removed && bound.size === object.size && isStored(bound),
         'INVALID_WORK_BACKUP',

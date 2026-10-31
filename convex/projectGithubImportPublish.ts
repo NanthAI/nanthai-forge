@@ -3,7 +3,8 @@
 import type { ActionCtx } from './_generated/server';
 import type { Doc } from './_generated/dataModel';
 import { internal } from './_generated/api';
-import { ImportUpload } from './projectGithubImportUpload';
+import { ImportUpload, type ImportCatalog } from './projectGithubImportUpload';
+import { catalogPages } from './projectObjectFind';
 import { githubImportedWork, type GithubHostedFile } from '../src/hosted-github-bootstrap';
 import { materializeWork, type IndexEntry } from '../src/work-hosted-index';
 import { sourceTreeEntries } from '../src/source-tree-index';
@@ -14,11 +15,19 @@ import { githubConfig } from './access';
 import { invariant } from '../src/errors';
 import { importPageFiles } from '../src/github-import-pages';
 
+const stagedPageBytes = 2 * 1024 * 1024;
+/** ~35 KB rows: the web's 100-row record window stays a few MB at the archive limit. */
+const treePathsPerRow = 500;
 export type ImportRows = Record<'imported' | 'blobs', { key: string; value: string }[]>;
 /** Metadata is traversed in bounded ordered pages. No whole repository array,
  * State string, manifest string or projection crosses an RPC boundary. Archive
  * imports pass their verified rows in key order instead of an inventory. */
-export async function publishImport(ctx: ActionCtx, job: Doc<'projectGithubImports'>, memory?: ImportRows) {
+export async function publishImport(
+  ctx: ActionCtx,
+  job: Doc<'projectGithubImports'>,
+  memory?: ImportRows,
+  catalog?: ImportCatalog,
+) {
   const identity = { id: job._id, actor: job.owner };
   async function* pages(part: string) {
     if (memory) {
@@ -38,7 +47,7 @@ export async function publishImport(ctx: ActionCtx, job: Doc<'projectGithubImpor
       yield rows;
     }
   }
-  const upload = new ImportUpload(ctx, job.projectId, job.owner);
+  const upload = new ImportUpload(ctx, job.projectId, job.owner, 8, catalog);
   async function* stateBytes() {
     yield Buffer.from('{"schema":1,"kind":"forge-source-state","parents":[],"files":[');
     let first = true;
@@ -94,6 +103,23 @@ export async function publishImport(ctx: ActionCtx, job: Doc<'projectGithubImpor
     yield Buffer.from(prefix.slice(split));
   }
   const root = await upload.stream(manifestBytes());
+  if (catalog) {
+    // Every stored object (sources, chunks, recipes, State, manifest) becomes a
+    // sorted catalog row of objectCatalogPage pins: O(pages) documents, no row per object.
+    const pages = catalogPages([...catalog.stored.values()]);
+    for (const entry of catalog.stored.values())
+      invariant(
+        !entry.recipe || catalog.stored.has(entry.recipe.digest),
+        'IMPORT_INCOMPLETE',
+        'A recipe object is not stored.',
+      );
+    for (let at = 0; at < pages.length; at += 32)
+      await ctx.runMutation(internal.projectGithubImportCatalog.publish, {
+        ...identity,
+        step: job.step,
+        pages: pages.slice(at, at + 32),
+      });
+  }
   const parents = Object.assign(new Map([[head, [] as string[]]]), { files: new Map([[head, []]]) });
   const projection = materializeWork(data, minimal, [], 'objects', parents);
   projection.metadata.counts.sourceBlobs = blobs + 1;
@@ -102,6 +128,7 @@ export async function publishImport(ctx: ActionCtx, job: Doc<'projectGithubImpor
   await ctx.runMutation(internal.projectGithubImportPublication.begin, {
     ...identity,
     step: job.step,
+    ...(catalog ? { objectCatalog: true } : {}),
     root,
     state,
     work,
@@ -120,13 +147,27 @@ export async function publishImport(ctx: ActionCtx, job: Doc<'projectGithubImpor
       channels: [{ name: 'main', head }],
     },
   });
-  let batch = 0;
-  const stage = async (entries: IndexEntry[]) => {
+  // Projection pages are bounded by entries and bytes, not one call per page.
+  let batch = 0,
+    staged: IndexEntry[] = [],
+    stagedBytes = 0;
+  const flush = async () => {
+    if (!staged.length) return;
     await ctx.runMutation(internal.projectGithubImportPublication.stage, {
       ...identity,
       batch: batch++,
-      entries,
+      entries: staged,
     });
+    staged = [];
+    stagedBytes = 0;
+  };
+  const stage = async (entries: IndexEntry[]) => {
+    for (const entry of entries) {
+      const size = Buffer.byteLength(JSON.stringify(entry));
+      if (staged.length >= 1000 || (staged.length && stagedBytes + size > stagedPageBytes)) await flush();
+      staged.push(entry);
+      stagedBytes += size;
+    }
   };
   await stage(projection.entries);
   let position = 0;
@@ -134,6 +175,7 @@ export async function publishImport(ctx: ActionCtx, job: Doc<'projectGithubImpor
     const paths = sourceTreeEntries(
       head,
       rows.map(row => JSON.parse(row.value)),
+      treePathsPerRow,
     );
     await stage(
       paths
@@ -146,18 +188,21 @@ export async function publishImport(ctx: ActionCtx, job: Doc<'projectGithubImpor
     );
     position += rows.length;
   }
+  // Catalog-backed generations resolve sourceBlobs from the object catalog.
   position = 1;
-  for await (const rows of pages('blobs')) {
-    await stage(
-      rows.map(row => ({
-        collection: 'sourceBlobs',
-        key: row.key,
-        parent: '',
-        position: position++,
-        value: row.value,
-      })),
-    );
-  }
+  if (!catalog)
+    for await (const rows of pages('blobs')) {
+      await stage(
+        rows.map(row => ({
+          collection: 'sourceBlobs',
+          key: row.key,
+          parent: '',
+          position: position++,
+          value: row.value,
+        })),
+      );
+    }
+  await flush();
   const access = await authorizeGithub(job.repository, job.owner, githubConfig());
   invariant(
     job.visibility === 'private' || !access.repository.private,

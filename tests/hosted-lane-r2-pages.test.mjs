@@ -58,9 +58,12 @@ function fixture(t) {
               fields[key] = value;
               return index;
             },
+            lte: () => index,
           };
           select(index);
           return {
+            // No object catalog in this fixture: per-object rows only.
+            order: () => ({ take: async () => [] }),
             unique: async () => {
               counts.reads++;
               if (table === 'cliCredentials') return fields.credentialId === 'device' ? credential : null;

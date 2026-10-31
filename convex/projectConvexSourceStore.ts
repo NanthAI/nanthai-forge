@@ -25,6 +25,7 @@ import { ForgeError } from '../src/errors';
 import { sourceOutput } from './projectSourceStepFields';
 import { storeSourceOutputs } from './projectConvexSourceOutput';
 import { presignGet, r2Config } from './r2';
+import { findObject } from './projectObjectFind';
 const identity = { projectId: v.id('hostedProjects'), jobId: v.string() };
 const rowFor = (ctx: MutationCtx, projectId: Id<'hostedProjects'>, jobId: string) =>
   ctx.db
@@ -213,12 +214,7 @@ export const begin = sourceMutation({
     const locations = [];
     if (!active.row.cursor) {
       const descriptor = await saveObject(ctx, args.projectId, active.job.input);
-      const object = await ctx.db
-        .query('projectObjects')
-        .withIndex('by_project_and_digest', q =>
-          q.eq('projectId', args.projectId).eq('digest', active.job.input.sha256),
-        )
-        .unique();
+      const object = await findObject(ctx, args.projectId, active.job.input.sha256);
       invariant(object, 'SOURCE_UNAVAILABLE', 'Source input is absent.');
       const url =
         object.location === 'r2' && object.r2Key ? await presignGet(r2Config(), object.r2Key) : null;

@@ -291,6 +291,7 @@ export const purge = internalMutation({
 
     for (const table of [
       'projectGithubImportInventory',
+      'projectObjectCatalog',
       'projectPublicationPages',
       'projectPublicationAttempts',
       'projectReturnPages',

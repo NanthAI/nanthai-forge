@@ -16,6 +16,7 @@ import { presignGet, r2Config } from './r2';
 import { invariant } from '../src/errors';
 import { report } from './errors';
 import { finishHostedOperation } from './projectHostedOperations';
+import { findObject } from './projectObjectFind';
 
 const identity = { projectId: v.id('hostedProjects'), operationId: v.string() },
   jobIdentity = { projectId: v.id('hostedProjects'), jobId: v.string() };
@@ -142,12 +143,7 @@ export const resultDownload = internalMutation({
       'A completed source result manifest is required.',
     );
     await saveObject(ctx, input.projectId, job.output);
-    const object = await ctx.db
-      .query('projectObjects')
-      .withIndex('by_project_and_digest', q =>
-        q.eq('projectId', input.projectId).eq('digest', job.output!.sha256),
-      )
-      .unique();
+    const object = await findObject(ctx, input.projectId, job.output!.sha256);
     const url =
       object?.location === 'r2' && object.r2Key
         ? await presignGet(r2Config(), object.r2Key)

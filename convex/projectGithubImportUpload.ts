@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import type { ActionCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import { internal } from './_generated/api';
-import { presignPut, r2Config, headObject, checksumOf } from './r2';
+import { presignPut, r2Config, headObject, checksumOf, r2Key } from './r2';
 import { exchangeFetch } from '../src/exchange-request';
 import { ObjectRecipeBuilder } from '../src/object-chunks';
 import { digest } from '../src/hash';
@@ -13,6 +13,13 @@ import { invariant } from '../src/errors';
 import { importPageBytes, importPageFiles } from '../src/github-import-pages';
 export type Completions = { id: Id<'projectObjects'>; storageId?: Id<'_storage'>; key?: string }[];
 export type Recipes = { digest: string; size: number; recipeDigest: string; recipeSize: number }[];
+export type CatalogEntry = { digest: string; size: number; recipe?: { digest: string; size: number } };
+/** Catalog mode (archive imports): stored objects are this map, not projectObjects
+ * rows. Each window is one receipt; publication writes the sorted catalog. */
+export type ImportCatalog = {
+  stored: Map<string, CatalogEntry>;
+  record: (objects: CatalogEntry[]) => Promise<void>;
+};
 /** Retains at most an 8 MiB physical window plus one stream read/chunk. */
 export class ImportUpload {
   private objects = new Map<string, Buffer>();
@@ -20,6 +27,7 @@ export class ImportUpload {
   peakBufferedBytes = 0;
   private completions: Completions = [];
   private recipes: Recipes = [];
+  private entries: CatalogEntry[] = [];
   /** Objects newly written by this upload; already stored ones are skipped. */
   uploaded = 0;
   constructor(
@@ -27,10 +35,11 @@ export class ImportUpload {
     private projectId: Id<'hostedProjects'>,
     private actor: string,
     private concurrency = 8,
+    private catalog?: ImportCatalog,
   ) {}
   put = (bytes: Buffer) => {
     const pin = { sha256: digest(bytes), size: bytes.length };
-    if (!this.objects.has(pin.sha256)) {
+    if (!this.objects.has(pin.sha256) && !this.catalog?.stored.has(pin.sha256)) {
       this.objects.set(pin.sha256, Buffer.from(bytes));
       this.bytes += bytes.length;
       this.peakBufferedBytes = Math.max(this.peakBufferedBytes, this.bytes);
@@ -44,6 +53,10 @@ export class ImportUpload {
     const pending = [...this.objects];
     this.objects.clear();
     this.bytes = 0;
+    if (this.catalog) {
+      await this.storeCatalogWindow(pending);
+      return true;
+    }
     for (let start = 0; start < pending.length; start += importPageFiles) {
       const page = pending.slice(start, start + importPageFiles);
       const prepared = await this.ctx.runMutation(internal.projectGithubImportBatch.prepare, {
@@ -87,13 +100,71 @@ export class ImportUpload {
     }
     return true;
   }
+  /** Create-only PUTs to content-addressed keys; no Convex call per window. */
+  private async storeCatalogWindow(pending: [string, Buffer][]) {
+    const config = r2Config(),
+      stored = this.catalog!.stored;
+    await mapExchange(pending, this.concurrency, async ([digest, bytes]) => {
+      if (stored.has(digest)) return;
+      const key = r2Key(this.projectId, digest),
+        put = await presignPut(config, key, { digest, size: bytes.length });
+      const response = await exchangeFetch('R2 import page upload', put.url, {
+        method: 'PUT',
+        headers: put.headers,
+        body: new Uint8Array(bytes),
+      });
+      invariant(
+        response.ok || response.status === 412,
+        'R2_UPLOAD_FAILED',
+        'Object storage could not upload source.',
+      );
+      if (!response.ok) {
+        const head = await headObject(config, key);
+        invariant(
+          head.status === 'ok' &&
+            head.size === bytes.length &&
+            (!head.checksum || head.checksum === checksumOf(digest)),
+          'R2_VERIFY_FAILED',
+          'Object storage could not verify source.',
+        );
+      }
+      this.uploaded++;
+      const entry = { digest, size: bytes.length };
+      stored.set(digest, entry);
+      this.entries.push(entry);
+    });
+  }
   async commit() {
+    if (this.catalog) {
+      const objects = this.catalogReceipt();
+      if (objects.length) await this.catalog.record(objects);
+      return;
+    }
     if (!this.completions.length && !this.recipes.length) return;
     await this.ctx.runMutation(internal.projectGithubImportBatch.complete, {
       projectId: this.projectId,
       actor: this.actor,
       ...this.receipt(),
     });
+  }
+  /** Stored raw objects, plus recipes whose recipe object is already stored. */
+  catalogReceipt() {
+    const stored = this.catalog!.stored,
+      ready = this.recipes.filter(pin => stored.has(pin.recipeDigest));
+    this.recipes = this.recipes.filter(pin => !stored.has(pin.recipeDigest));
+    for (const pin of ready) {
+      const entry = {
+        digest: pin.digest,
+        size: pin.size,
+        recipe: { digest: pin.recipeDigest, size: pin.recipeSize },
+      };
+      if (stored.has(pin.digest)) continue;
+      stored.set(pin.digest, entry);
+      this.entries.push(entry);
+    }
+    const objects = this.entries;
+    this.entries = [];
+    return objects;
   }
   receipt() {
     const value = { objects: this.completions, recipes: this.recipes };

@@ -8,6 +8,7 @@ import { invariant } from '../src/errors';
 import { hostedMainSchema } from '../src/hosted-main';
 import { requireSourceContract, sourceAuthority } from '../src/hosted-source-authority';
 import { report } from './errors';
+import { findObject } from './projectObjectFind';
 /** One transaction observes both the selected source generation and Channel receipt. */
 export const current = query({
   args: {
@@ -93,10 +94,7 @@ export const objects = query({
       await accessibleProject(ctx, projectId, user.subject);
       return await Promise.all(
         digests.map(async sha256 => {
-          const row = await ctx.db
-            .query('projectObjects')
-            .withIndex('by_project_and_digest', q => q.eq('projectId', projectId).eq('digest', sha256))
-            .unique();
+          const row = await findObject(ctx, projectId, sha256);
           invariant(
             row && !row.removed && isStored(row),
             'SOURCE_UNAVAILABLE',

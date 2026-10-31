@@ -8,6 +8,7 @@ import { isStored } from './projectObjectFields';
 import { invariant } from '../src/errors';
 import { removeExclusive } from './projectStorage';
 import { report } from './errors';
+import { findObject } from './projectObjectFind';
 
 export const migrateArchive = internalMutation({
   args: {
@@ -45,12 +46,7 @@ export const migrateArchive = internalMutation({
         'PROJECT_CHANGED',
         'Original archive changed during migration.',
       );
-      const object = await ctx.db
-        .query('projectObjects')
-        .withIndex('by_project_and_digest', q =>
-          q.eq('projectId', backup.projectId).eq('digest', input.manifestDigest),
-        )
-        .unique();
+      const object = await findObject(ctx, backup.projectId, input.manifestDigest);
       invariant(
         object && isStored(object) && !object.removed && object.size === input.manifestSize,
         'INVALID_WORK_BACKUP',

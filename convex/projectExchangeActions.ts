@@ -16,6 +16,7 @@ import { exchangeObjectReader, bytesFromRow, type ExchangeObjectReader } from '.
 import { resolveExchangeRoot, isExchangeRoot } from '../src/native-exchange-tree';
 
 import { CUTOVER_UPGRADE } from '../src/cutover-version';
+import type { ObjectView } from './projectObjectFind';
 
 async function caller(ctx: ActionCtx) {
   const user = await ctx.auth.getUserIdentity();
@@ -37,7 +38,7 @@ const downloadReply = v.union(
   v.object({ direct: v.literal(true), digest: v.string(), size: v.number() }),
 );
 type DownloadReply = { digest: string; size: number } & ({ data: ArrayBuffer } | { direct: true });
-const directReply = (row: Doc<'projectObjects'>): DownloadReply => ({
+const directReply = (row: ObjectView): DownloadReply => ({
   direct: true,
   digest: row.digest,
   size: row.size,
@@ -53,7 +54,7 @@ export const downloadBatch = action({
         'BAD_ARGUMENT',
         'Read small content in batches of at most eight; larger content uses ranged downloads.',
       );
-      const rows: Doc<'projectObjects'>[] = await ctx.runQuery(internal.projectObjects.resolve, {
+      const rows: ObjectView[] = await ctx.runQuery(internal.projectObjects.resolve, {
         projectId,
         actor,
         digests,
@@ -231,7 +232,7 @@ export const downloadPart = action({
   handler: async (ctx, { projectId, digest, offset }): Promise<DownloadReply> => {
     try {
       const actor = await caller(ctx),
-        rows: Doc<'projectObjects'>[] = await ctx.runQuery(internal.projectObjects.resolve, {
+        rows: ObjectView[] = await ctx.runQuery(internal.projectObjects.resolve, {
           projectId,
           actor,
           digests: [digest],

@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
+import { getFunctionName } from 'convex/server';
 import { pagedFixture } from './github-import-pages-fixture.mjs';
 import { readObjectRecipe } from '../dist/object-chunks.js';
 import { filePage, importPageBytes, importPathKey } from '../dist/github-import-pages.js';
@@ -42,7 +43,12 @@ test('28,905 files / 4,089 directories / two gitlinks use bounded pages within t
     trees.set(hex(dir + 1), tree);
   }
   for (let index = 0; index < submodules; index++)
-    root.push({ path: `submodule-${index}`, sha: hex(60000 + index), mode: '160000', type: 'commit' });
+    root.push({
+      path: `submodule-${index}`,
+      sha: hex(60000 + index),
+      mode: '160000',
+      type: 'commit',
+    });
   const old = globalThis.fetch;
   t.after(() => {
     globalThis.fetch = old;
@@ -60,7 +66,10 @@ test('28,905 files / 4,089 directories / two gitlinks use bounded pages within t
         license: null,
       });
     if (path.includes('/commits/'))
-      return Response.json({ sha: 'a'.repeat(40), commit: { tree: { sha: hex(1) } } });
+      return Response.json({
+        sha: 'a'.repeat(40),
+        commit: { tree: { sha: hex(1) } },
+      });
     // Truncated recursive listing: this budget covers directory-by-directory discovery.
     if (path.includes('/git/trees/') && new URL(url).searchParams.has('recursive'))
       return Response.json({ sha: hex(1), truncated: true, tree: [] });
@@ -86,7 +95,11 @@ test('28,905 files / 4,089 directories / two gitlinks use bounded pages within t
     const beforeScheduled = s.scheduled.length;
     await s.worker(id);
     if (job.totalKnown && job.completed === job.total)
-      assert.equal(s.scheduled.length, beforeScheduled, 'publication schedules no idle continuation');
+      assert.deepEqual(
+        s.scheduled.slice(beforeScheduled).map(task => getFunctionName(task.fn)),
+        s.scheduled.length > beforeScheduled ? ['projectGithubImportCatalog:purge'] : [],
+        'publication schedules only the bounded progress-row purge',
+      );
     assert.notEqual(
       s.tables.projectGithubImports.get(id).phase,
       'error',
@@ -108,7 +121,14 @@ test('28,905 files / 4,089 directories / two gitlinks use bounded pages within t
   assert.ok(calls <= 1000, `${calls} executions exceed the whole-import ceiling`);
   assert.ok(s.stats().maxCursorBytes < 1024);
   assert.ok(s.stats().maxPayloadBytes < 1024 * 1024);
-  assert.equal(s.tables.projectGithubImportInventory.size > files, true);
+  // Progress rows are transient: the purge chain deletes them in bounded pages after ready.
+  const purge = () =>
+    s.scheduled.findIndex(task => getFunctionName(task.fn) === 'projectGithubImportCatalog:purge');
+  for (let run = 0; run < 200 && purge() >= 0; run++) {
+    const [task] = s.scheduled.splice(purge(), 1);
+    await s.modules.projectGithubImportCatalog.purge._handler(s.ctx, task.args);
+  }
+  assert.equal(s.tables.projectGithubImportInventory.size, 0);
   const project = s.tables.hostedProjects.get(job.projectId),
     backup = s.tables.projectBackups.get(project.currentBackup);
   const read = async pin => {
@@ -144,7 +164,6 @@ test('28,905 files / 4,089 directories / two gitlinks use bounded pages within t
   // Completion installs no continuation. A finite status read does not enqueue work.
   await s.modules.projectGithubImport.status._handler(s.ctx, { id });
   assert.equal(s.scheduled.length, scheduled);
-  assert.equal(s.tables.projectGithubImportInventory.size > directories, true);
   t.diagnostic(
     JSON.stringify({
       files,

@@ -3,11 +3,11 @@
 import { v } from 'convex/values';
 import { action } from './cliServer';
 import { internal } from './_generated/api';
-import type { Doc } from './_generated/dataModel';
 import { invariant } from '../src/errors';
 import { objectRecipeSchema, readObjectRecipe, objectChunkPageBytes } from '../src/object-chunks';
 import { recipeValidationReader } from './projectObjectRecipeValidation';
 import { report } from './errors';
+import type { ObjectView } from './projectObjectFind';
 const pin = { projectId: v.id('hostedProjects'), digest: v.string(), size: v.number() };
 const valid = (digest: string, size: number) =>
   /^[0-9a-f]{64}$/.test(digest) && Number.isSafeInteger(size) && size >= 0;
@@ -61,7 +61,7 @@ export const representation = action({
     try {
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to read project source.');
-      const rows: Doc<'projectObjects'>[] = await ctx.runQuery(internal.projectObjects.resolve, {
+      const rows: ObjectView[] = await ctx.runQuery(internal.projectObjects.resolve, {
         projectId: input.projectId,
         actor: user.subject,
         digests: [input.digest],

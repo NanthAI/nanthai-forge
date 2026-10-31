@@ -20,6 +20,8 @@ export const returnProjection = v.object({
   removed: v.array(v.object({ collection: v.string(), key: v.string() })),
 });
 export const generationFields = {
+  /** Source blobs resolve through the project object catalog (no per-blob record). */
+  objectCatalog: v.optional(v.literal(true)),
   ensureCursor: v.optional(v.string()),
   ensureRetry: v.optional(v.string()),
   returnRetired: v.optional(v.literal(true)),

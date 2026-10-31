@@ -8,13 +8,14 @@ import { parseWorkBytes } from '../src/work-metadata';
 import { v } from 'convex/values';
 import { action } from './cliServer';
 import { internal } from './_generated/api';
-import type { Doc, Id } from './_generated/dataModel';
+import type { Id } from './_generated/dataModel';
 import { objectBytes } from './projectExchangeActions';
 import { projectArchiveMetadata } from './projectArchiveMetadata';
 import { nativeManifestSchema } from '../src/work-archive-metadata';
 import { digest } from '../src/hash';
 import { invariant } from '../src/errors';
 import { report } from './errors';
+import type { ObjectView } from './projectObjectFind';
 export const migrate = action({
   args: {
     backupId: v.id('projectBackups'),
@@ -121,7 +122,7 @@ export const migrate = action({
       ];
       for (let offset = 0; offset < unique.length; offset += 100) {
         const pins = unique.slice(offset, offset + 100),
-          rows: Doc<'projectObjects'>[] = await ctx.runQuery(internal.projectObjects.resolve, {
+          rows: ObjectView[] = await ctx.runQuery(internal.projectObjects.resolve, {
             projectId: project._id,
             actor: user.subject,
             digests: pins.map(file => file.sha256),

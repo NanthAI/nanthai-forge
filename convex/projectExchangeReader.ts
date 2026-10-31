@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 'use node';
 import type { ActionCtx } from './_generated/server';
-import type { Doc, Id } from './_generated/dataModel';
+import type { Id } from './_generated/dataModel';
 import { internal } from './_generated/api';
 import { invariant } from '../src/errors';
 import {
@@ -14,9 +14,10 @@ import {
 } from './projectObjectContent';
 
 import { reviewBytes } from './projectReviewBytes';
+import type { ObjectView } from './projectObjectFind';
 
 type Pin = { sha256: string; size: number };
-export async function bytesFromRow(ctx: ActionCtx, row: Doc<'projectObjects'>, pin: Pin, actor?: string) {
+export async function bytesFromRow(ctx: ActionCtx, row: ObjectView, pin: Pin, actor?: string) {
   if (isRaw(row)) {
     await metadata(ctx, row, pin);
     return content(ctx, row, pin);
@@ -44,7 +45,7 @@ export function exchangeObjectReader(
   const reservations = new WeakMap<Promise<Buffer>, number>();
   const resolve = async (projectId: Id<'hostedProjects'>, actor: string, pins: Pin[]) => {
     if (!pins.length) return ctx.runQuery(internal.projectObjects.resolve, { projectId, actor, digests: [] });
-    const rows: Doc<'projectObjects'>[] = [];
+    const rows: ObjectView[] = [];
     for (let offset = 0; offset < pins.length;) {
       const window: Pin[] = [];
       let bytes = 0;

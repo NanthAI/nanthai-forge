@@ -6,7 +6,7 @@ import { blobStore } from './blobStore';
 import { storageDigest } from './projectStorage';
 import { isStored } from './projectObjectFields';
 import type { DownloadRow } from '../src/blob-download-format';
-import { selectedGeneration, record, recordPartition } from './projectWorkIndexStore';
+import { selectedGeneration, readRecord, recordPartition } from './projectWorkIndexStore';
 import { workProject } from './projectWorkHead';
 import { accessibleProject } from './projectAuthority';
 import { isR2Object } from './projectObjectFields';
@@ -14,6 +14,7 @@ import { r2Config, r2Key, presignGet } from './r2';
 import { invariant } from '../src/errors';
 import { report } from './errors';
 import { hostedDownloadPageSize, type HostedDownloadDescriptor } from '../src/hosted-download-page';
+import { findObject } from './projectObjectFind';
 
 export async function readableProject(ctx: MutationCtx, projectId: Id<'hostedProjects'>) {
   const user = await ctx.auth.getUserIdentity();
@@ -44,10 +45,7 @@ export const signDownloads = mutation({
       const found = [];
       for (const digest of new Set(digests)) {
         if (!/^[0-9a-f]{64}$/.test(digest)) continue;
-        const row = await ctx.db
-          .query('projectObjects')
-          .withIndex('by_project_and_digest', q => q.eq('projectId', projectId).eq('digest', digest))
-          .unique();
+        const row = await findObject(ctx, projectId, digest);
         if (row && !row.removed && isR2Object(row) && row.r2Key === r2Key(projectId, digest))
           found.push({ digest, size: row.size, key: row.r2Key });
       }
@@ -94,10 +92,7 @@ export const describe = mutation({
       );
       const result: (DownloadRow & { url?: string })[] = [];
       for (const digest of digests) {
-        const row = await ctx.db
-          .query('projectObjects')
-          .withIndex('by_project_and_digest', q => q.eq('projectId', projectId).eq('digest', digest))
-          .unique();
+        const row = await findObject(ctx, projectId, digest);
         invariant(
           row && isStored(row) && !row.removed,
           'INVALID_WORK_BACKUP',
@@ -163,7 +158,7 @@ export const source = mutation({
         generation?.backupId === backupId
           ? await Promise.all(
               digests.map(async id => {
-                const row = await record(ctx, recordPartition(generation), 'sourceBlobs', id);
+                const row = await readRecord(ctx, recordPartition(generation), 'sourceBlobs', id);
                 if (!row) return null;
                 try {
                   const pin = JSON.parse(row.value) as { sha256: string; size: number };
@@ -211,10 +206,7 @@ export const lanePage = mutation({
       );
       const result: HostedDownloadDescriptor[] = [];
       for (const digest of digests) {
-        const row = await ctx.db
-          .query('projectObjects')
-          .withIndex('by_project_and_digest', q => q.eq('projectId', projectId).eq('digest', digest))
-          .unique();
+        const row = await findObject(ctx, projectId, digest);
         invariant(
           row && !row.removed && isStored(row),
           'SOURCE_UNAVAILABLE',

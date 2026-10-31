@@ -25,6 +25,7 @@ import { landingObservation } from '../src/hosted-landing';
 import type { FinishCommand } from '../src/hosted-finish';
 import { ForgeError, invariant } from '../src/errors';
 import { reuseContext } from './projectHostedReuseStore';
+import { findObject, objectRow } from './projectObjectFind';
 export type FinishIdentity = LandingIdentity & { wakeId: string };
 export async function finishStep(ctx: MutationCtx, input: FinishIdentity): Promise<FinishCommand | null> {
   const { row, value } = await loadFinish(ctx, input);
@@ -111,10 +112,7 @@ export async function finishStep(ctx: MutationCtx, input: FinishIdentity): Promi
       }
       const plan = canonicalPayload(hostedComposeInput(source.state, source.operation.firstAttempt.at));
       const pin = savePin(JSON.parse(plan));
-      const object = await ctx.db
-        .query('projectObjects')
-        .withIndex('by_project_and_digest', q => q.eq('projectId', input.projectId).eq('digest', pin.sha256))
-        .unique();
+      const object = await findObject(ctx, input.projectId, pin.sha256);
       if (object && !object.removed && object.size === pin.size && isStored(object)) {
         await submitHostedCompose(ctx, {
           projectId: input.projectId,
@@ -142,7 +140,7 @@ export async function finishStep(ctx: MutationCtx, input: FinishIdentity): Promi
           'SOURCE_HASH_MISMATCH',
           'Source plan binding differs.',
         );
-        await ctx.db.patch(object._id, { location: 'r2', r2Key: key });
+        await ctx.db.patch((await objectRow(ctx, object))._id, { location: 'r2', r2Key: key });
       }
       await scheduleFinish(ctx, row, 30_000, true);
       return { kind: 'plan', value: plan, pin };
@@ -153,10 +151,7 @@ export async function finishStep(ctx: MutationCtx, input: FinishIdentity): Promi
     const kind = plan.inputsNext ? 'inputs' : 'dependencies';
     const pin = plan.inputsNext ?? plan.dependenciesNext;
     if (pin) {
-      const object = await ctx.db
-        .query('projectObjects')
-        .withIndex('by_project_and_digest', q => q.eq('projectId', input.projectId).eq('digest', pin.sha256))
-        .unique();
+      const object = await findObject(ctx, input.projectId, pin.sha256);
       invariant(
         object && !object.removed && object.size === pin.size && isStored(object),
         'SOURCE_UNAVAILABLE',
@@ -258,10 +253,7 @@ async function resumeFinishIOOnce(
       'WORK_OPERATION_CHANGED',
       'Upload only the original pending source plan.',
     );
-    const old = await ctx.db
-      .query('projectObjects')
-      .withIndex('by_project_and_digest', q => q.eq('projectId', input.projectId).eq('digest', pin.sha256))
-      .unique();
+    const old = await findObject(ctx, input.projectId, pin.sha256);
     invariant(
       !old || (!old.removed && old.size === pin.size),
       'SOURCE_HASH_MISMATCH',
@@ -276,7 +268,7 @@ async function resumeFinishIOOnce(
         'SOURCE_HASH_MISMATCH',
         'Resume the exact reserved R2 source plan.',
       );
-      await ctx.db.patch(old._id, { r2Committed: true });
+      await ctx.db.patch((await objectRow(ctx, old))._id, { r2Committed: true });
     } else {
       // Read-only compatibility for an already-issued legacy IO callback.
       const metadata = await blobStore(ctx).getMetadata(input.storageId!);
@@ -295,7 +287,7 @@ async function resumeFinishIOOnce(
           nonce: crypto.randomUUID(),
           removed: false,
         });
-      else if (!isStored(old)) await ctx.db.patch(old._id, { storageId });
+      else if (!isStored(old)) await ctx.db.patch((await objectRow(ctx, old))._id, { storageId });
     }
     await submitHostedCompose(ctx, {
       projectId: input.projectId,

@@ -4,6 +4,7 @@ import type { Id } from './_generated/dataModel';
 import { invariant } from '../src/errors';
 import { r2Key } from './r2';
 import { isR2Object } from './projectObjectFields';
+import { findObject, objectRow } from './projectObjectFind';
 export type SourceOutput = {
   sha256: string;
   size: number;
@@ -38,12 +39,7 @@ export async function storeSourceOutputs(
         'Source output project binding changed.',
       );
     } else {
-      const recipe = await ctx.db
-        .query('projectObjects')
-        .withIndex('by_project_and_digest', q =>
-          q.eq('projectId', projectId).eq('digest', pin.recipe!.sha256),
-        )
-        .unique();
+      const recipe = await findObject(ctx, projectId, pin.recipe!.sha256);
       invariant(
         recipe &&
           !recipe.removed &&
@@ -58,10 +54,7 @@ export async function storeSourceOutputs(
       : pin.storageId
         ? { storageId: pin.storageId, recipe: undefined }
         : { storageId: undefined, recipe: { digest: pin.recipe!.sha256, size: pin.recipe!.size } };
-    const old = await ctx.db
-      .query('projectObjects')
-      .withIndex('by_project_and_digest', q => q.eq('projectId', projectId).eq('digest', pin.sha256))
-      .unique();
+    const old = await findObject(ctx, projectId, pin.sha256);
     invariant(!old || old.size === pin.size, 'SOURCE_HASH_MISMATCH', 'Stored source size changed.');
     if (!old)
       await ctx.db.insert('projectObjects', {
@@ -78,13 +71,14 @@ export async function storeSourceOutputs(
       old.removed ||
       (!old.storageId && !old.recipe && !old.r2Committed)
     )
-      await ctx.db.patch(old._id, {
+      await ctx.db.patch((await objectRow(ctx, old))._id, {
         ...encoding,
         ...(!pin.r2Key ? { location: undefined, r2Key: undefined, r2Committed: undefined } : {}),
         removed: false,
         sourceReferenced: true,
       });
-    else if (!old.sourceReferenced) await ctx.db.patch(old._id, { sourceReferenced: true });
+    else if (!old.sourceReferenced)
+      await ctx.db.patch((await objectRow(ctx, old))._id, { sourceReferenced: true });
     if (!old?.sourceReferenced)
       await ctx.db.insert('projectCheckLogSourcePins', { projectId: projectId, digest: pin.sha256 });
   }

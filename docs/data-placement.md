@@ -33,7 +33,8 @@ Every entry has an owner reason and expires on 2027-01-31; an expired entry fail
 | Tables | Hold | Grows with |
 | --- | --- | --- |
 | `projectObjects` | One row per physical object: digest, size, placement (`r2Key`, `location`, legacy `storageId`), recipe pin. No bytes. | Repo size |
-| `projectGithubImports`, `projectGithubImportInventory` | GitHub import jobs and their paged inventory (keys and positions per page). | Repo size, per import |
+| `projectObjectCatalog` | Sorted pins of a GitHub archive import, 256 per row (digest, size, recipe), instead of one `projectObjects` row per object; `findObject` reads it. | Repo size / 256 |
+| `projectGithubImports`, `projectGithubImportInventory` | GitHub import jobs and their paged inventory (keys and positions per page). Inventory rows are deleted once the import is published. | Repo size, during an import |
 | `projectSourcePacks` | Latest source pack per project (R2 key and pins). | Fixed |
 | `projectSourceSteps`, `projectSourceTasks`, `projectSourceBatches`, `projectSourcePools` | Source-job steps, fan-out tasks and worker pools; cursors are `r2source:` pins. | Activity |
 | `projectHostedStates`, `projectHostedSaves`, `projectHostedSavePages`, `projectHostedSyncs`, `projectHostedSeeds`, `projectHostedSeedPages` | Saved States and their paged inputs/outputs. | Activity (pages, not files) |

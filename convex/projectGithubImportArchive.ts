@@ -23,7 +23,8 @@ import { ObjectRecipeBuilder, objectChunkBytes } from '../src/object-chunks';
 import { mapExchange } from '../src/exchange-parallel';
 import { digest } from '../src/hash';
 import { invariant } from '../src/errors';
-import { ImportUpload } from './projectGithubImportUpload';
+import { ImportUpload, type CatalogEntry } from './projectGithubImportUpload';
+import { windowEntries } from './projectGithubImportCatalog';
 import { publishImport, type ImportRows } from './projectGithubImportPublish';
 import type { GithubHostedFile } from '../src/hosted-github-bootstrap';
 
@@ -54,7 +55,24 @@ export async function runArchiveImport(ctx: ActionCtx, job: Doc<'projectGithubIm
   const listing = await listGithubTree(job.repository, cursor.tree, token);
   invariant(listing, 'GITHUB_RESPONSE', 'GitHub no longer lists this commit tree completely.');
   const listed = new Map(listing.files.map(file => [file.path, file]));
-  const upload = new ImportUpload(ctx, job.projectId, job.owner, archiveUploadConcurrency);
+  // Progress is the stored objects themselves: one receipt per earlier window.
+  const stored = new Map<string, CatalogEntry>();
+  for (let after = ''; ;) {
+    const rows = await ctx.runQuery(internal.projectGithubImportCatalog.stored, { ...input, after });
+    if (!rows.length) break;
+    for (const row of rows) for (const entry of windowEntries(row.value)) stored.set(entry.digest, entry);
+    after = rows.at(-1)!.key;
+  }
+  const saveWindow = async (objects: CatalogEntry[]) => {
+    await ctx.runMutation(internal.projectGithubImportStore.archiveProgress, {
+      ...input,
+      step: job.step,
+      ...counters(),
+      objects,
+    });
+  };
+  const catalog = { stored, record: saveWindow };
+  const upload = new ImportUpload(ctx, job.projectId, job.owner, archiveUploadConcurrency, catalog);
   const imported = new Map<string, GithubHostedFile>();
   let bytes = 0;
   const record = (entry: GithubSourceEntry, pin: { blob: string; size: number }) => {
@@ -73,14 +91,7 @@ export async function runArchiveImport(ctx: ActionCtx, job: Doc<'projectGithubIm
     totalBytes: listing.totalBytes,
     submodules: listing.submodules,
   });
-  const flush = async () => {
-    await ctx.runMutation(internal.projectGithubImportStore.archiveProgress, {
-      ...input,
-      step: job.step,
-      ...counters(),
-      ...upload.receipt(),
-    });
-  };
+  const flush = () => saveWindow(upload.catalogReceipt());
   const drain = async (force = false) => {
     if (await upload.drain(force)) await flush();
   };
@@ -191,5 +202,5 @@ export async function runArchiveImport(ctx: ActionCtx, job: Doc<'projectGithubIm
   }
   for (const [sha256, size] of [...blobs].sort(([a], [b]) => (a < b ? -1 : 1)))
     rows.blobs.push({ key: sha256, value: JSON.stringify({ sha256, size }) });
-  await publishImport(ctx, { ...job, ...counters(), totalKnown: true }, rows);
+  await publishImport(ctx, { ...job, ...counters(), totalKnown: true }, rows, catalog);
 }

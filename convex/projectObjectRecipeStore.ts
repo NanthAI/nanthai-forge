@@ -4,6 +4,7 @@ import { internalMutation, internalQuery } from './_generated/server';
 import { activeProject } from './projectAuthority';
 import { isStored } from './projectObjectFields';
 import { invariant } from '../src/errors';
+import { findObject, objectRow } from './projectObjectFind';
 
 // Only the action that has streamed and verified complete logical bytes calls
 // this mutation. Binding is immutable; equivalent raw/recipe races keep the winner.
@@ -19,21 +20,13 @@ export const bind = internalMutation({
   returns: v.null(),
   handler: async (ctx, input) => {
     await activeProject(ctx, input.projectId, input.actor);
-    const recipe = await ctx.db
-      .query('projectObjects')
-      .withIndex('by_project_and_digest', q =>
-        q.eq('projectId', input.projectId).eq('digest', input.recipeDigest),
-      )
-      .unique();
+    const recipe = await findObject(ctx, input.projectId, input.recipeDigest);
     invariant(
       recipe && !recipe.removed && isStored(recipe) && recipe.size === input.recipeSize,
       'INVALID_WORK_BACKUP',
       'Verified object recipe is unavailable.',
     );
-    let row = await ctx.db
-      .query('projectObjects')
-      .withIndex('by_project_and_digest', q => q.eq('projectId', input.projectId).eq('digest', input.digest))
-      .unique();
+    let row = await findObject(ctx, input.projectId, input.digest);
     invariant(
       !row || (row.size === input.size && !row.removed),
       'INVALID_WORK_BACKUP',
@@ -50,7 +43,9 @@ export const bind = internalMutation({
       });
       row = (await ctx.db.get(id))!;
     }
-    await ctx.db.patch(row._id, { recipe: { digest: input.recipeDigest, size: input.recipeSize } });
+    await ctx.db.patch((await objectRow(ctx, row))._id, {
+      recipe: { digest: input.recipeDigest, size: input.recipeSize },
+    });
     return null;
   },
 });
@@ -62,10 +57,7 @@ export const stored = internalQuery({
   returns: v.boolean(),
   handler: async (ctx, input) => {
     await activeProject(ctx, input.projectId, input.actor);
-    const row = await ctx.db
-      .query('projectObjects')
-      .withIndex('by_project_and_digest', q => q.eq('projectId', input.projectId).eq('digest', input.digest))
-      .unique();
+    const row = await findObject(ctx, input.projectId, input.digest);
     invariant(
       !row || (row.size === input.size && !row.removed),
       'INVALID_WORK_BACKUP',

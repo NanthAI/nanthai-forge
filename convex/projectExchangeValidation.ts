@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 'use node';
 import type { ActionCtx } from './_generated/server';
-import type { Doc, Id } from './_generated/dataModel';
+import type { Id } from './_generated/dataModel';
 import { internal } from './_generated/api';
 import { invariant } from '../src/errors';
 import { mapExchange } from '../src/exchange-parallel';
+import type { ObjectView } from './projectObjectFind';
 /** Validate project-bound immutable receipts in pages; never cache authority. */
 export async function validateExchangePins(
   ctx: ActionCtx,
@@ -25,7 +26,7 @@ export async function validateExchangePins(
   const pages = [];
   for (let offset = 0; offset < unique.length; offset += 100) pages.push(unique.slice(offset, offset + 100));
   await mapExchange(pages, 4, async page => {
-    const rows: Doc<'projectObjects'>[] = await ctx.runQuery(internal.projectObjects.resolve, {
+    const rows: ObjectView[] = await ctx.runQuery(internal.projectObjects.resolve, {
       projectId,
       actor,
       digests: page.map(pin => pin.sha256),

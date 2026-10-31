@@ -104,10 +104,16 @@ export function recordsFixture() {
             const definition = schema.tables[table].export().indexes.find(x => x.indexDescriptor === index);
             assert(definition, `${table}.${index} exists`);
             const equalities = [];
+            let upper = null;
             const bounds = {
               eq: (field, value) => {
                 assert.equal(field, definition.fields[equalities.length], 'index equality order');
                 equalities.push(value);
+                return bounds;
+              },
+              lte: (field, value) => {
+                assert.equal(field, definition.fields[equalities.length], 'index range follows equalities');
+                upper = { field, value };
                 return bounds;
               },
             };
@@ -134,6 +140,7 @@ export function recordsFixture() {
               });
             }
             selected = indexes.get(cacheKey).groups.get(JSON.stringify(equalities)) ?? [];
+            if (upper) selected = selected.filter(row => row[upper.field] <= upper.value);
             return q;
           },
           order: order => {

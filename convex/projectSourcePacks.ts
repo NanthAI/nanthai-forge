@@ -14,6 +14,7 @@ import {
 import { presignPut, presignDelete, r2Config, headObject, checksumOf, putExpiry } from './r2';
 import { invariant } from '../src/errors';
 import { isStored } from './projectObjectFields';
+import { findObject } from './projectObjectFind';
 
 type PackInput = SessionInput & { object: string; cleanupAck?: string };
 /** Two slots include in-flight uploads. Reserve before PUT, so races and failed
@@ -37,10 +38,7 @@ export async function reserveSourcePack(
   cleanupAck: string | undefined,
   now: number,
 ) {
-  const state = await ctx.db
-    .query('projectObjects')
-    .withIndex('by_project_and_digest', q => q.eq('projectId', projectId).eq('digest', object.stateRef))
-    .unique();
+  const state = await findObject(ctx, projectId, object.stateRef);
   invariant(
     state && !state.removed && isStored(state),
     'SOURCE_UNAVAILABLE',

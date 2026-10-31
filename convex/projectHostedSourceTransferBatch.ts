@@ -9,6 +9,7 @@ import { canonicalPayload } from '../src/hosted-source-operation';
 import { invariant } from '../src/errors';
 import { isStored } from './projectObjectFields';
 import { r2Config, headObject, checksumOf } from './r2';
+import { findObject, objectRow } from './projectObjectFind';
 
 const identity = { projectId: v.id('hostedProjects'), input: v.string(), executionId: v.string() };
 const pin = v.object({ sha256: v.string(), size: v.number() });
@@ -54,10 +55,7 @@ export const pending = internalMutation({
     const result = [];
     for (const value of input.pins) {
       const pin = saveObjectSchema.parse(value);
-      const object = await ctx.db
-        .query('projectObjects')
-        .withIndex('by_project_and_digest', q => q.eq('projectId', input.projectId).eq('digest', pin.sha256))
-        .unique();
+      const object = await findObject(ctx, input.projectId, pin.sha256);
       invariant(
         object &&
           !object.removed &&
@@ -81,10 +79,7 @@ export const verified = internalMutation({
     await authorizeSourceTransfer(ctx, input);
     for (const expected of input.objects) {
       const pin = saveObjectSchema.parse(expected.pin);
-      const object = await ctx.db
-        .query('projectObjects')
-        .withIndex('by_project_and_digest', q => q.eq('projectId', input.projectId).eq('digest', pin.sha256))
-        .unique();
+      const object = await findObject(ctx, input.projectId, pin.sha256);
       invariant(
         object &&
           !object.removed &&
@@ -95,7 +90,7 @@ export const verified = internalMutation({
         'SOURCE_UNAVAILABLE',
         'The output binding changed during storage verification.',
       );
-      if (!object.r2Committed) await ctx.db.patch(object._id, { r2Committed: true });
+      if (!object.r2Committed) await ctx.db.patch((await objectRow(ctx, object))._id, { r2Committed: true });
     }
     return null;
   },

@@ -8,6 +8,7 @@ import { objectDocument, isStored } from './projectObjectFields';
 import { invariant } from '../src/errors';
 import { report } from './errors';
 import { r2Config, r2Key, presignPut, type R2Config } from './r2';
+import { findObject, objectRow } from './projectObjectFind';
 const pin = v.object({ digest: v.string(), size: v.number() });
 const valid = (digest: string, size: number) =>
   /^[0-9a-f]{64}$/.test(digest) && Number.isSafeInteger(size) && size >= 0;
@@ -27,10 +28,7 @@ export const missing = query({
       );
       const missing: string[] = [];
       for (const p of objects) {
-        const row = await ctx.db
-          .query('projectObjects')
-          .withIndex('by_project_and_digest', q => q.eq('projectId', projectId).eq('digest', p.digest))
-          .unique();
+        const row = await findObject(ctx, projectId, p.digest);
         invariant(
           !row || row.size === p.size,
           'INVALID_WORK_BACKUP',
@@ -67,10 +65,8 @@ async function prepareObject(
       r2 ??= r2Config();
     }
     invariant(valid(digest, size), 'BAD_ARGUMENT', 'Use the exact content digest and size.');
-    let row = await ctx.db
-      .query('projectObjects')
-      .withIndex('by_project_and_digest', q => q.eq('projectId', projectId).eq('digest', digest))
-      .unique();
+    const found = await findObject(ctx, projectId, digest);
+    let row = found && (await objectRow(ctx, found));
     invariant(
       !row || (row.size === size && !row.removed),
       'INVALID_WORK_BACKUP',
@@ -187,10 +183,7 @@ export const available = query({
           'Content size differs from the original digest.',
         );
         sizes.set(p.digest, p.size);
-        const row = await ctx.db
-          .query('projectObjects')
-          .withIndex('by_project_and_digest', q => q.eq('projectId', projectId).eq('digest', p.digest))
-          .unique();
+        const row = await findObject(ctx, projectId, p.digest);
         invariant(
           !row || (row.size === p.size && !row.removed),
           'INVALID_WORK_BACKUP',
@@ -244,10 +237,7 @@ export const resolve = internalQuery({
       );
       const rows = [];
       for (const digest of digests) {
-        const row = await ctx.db
-          .query('projectObjects')
-          .withIndex('by_project_and_digest', q => q.eq('projectId', projectId).eq('digest', digest))
-          .unique();
+        const row = await findObject(ctx, projectId, digest);
         invariant(
           row && isStored(row) && !row.removed,
           'INVALID_WORK_BACKUP',

@@ -36,6 +36,7 @@ import { hostedLandingRequestSchema } from '../src/hosted-landing';
 import { presignPut, r2Config, r2Key } from './r2';
 import { verifyArchiveUpload } from './archiveUpload';
 import { ForgeError, invariant } from '../src/errors';
+import { findObject, objectRow } from './projectObjectFind';
 
 type Identity = { projectId: Id<'hostedProjects'>; runId: string };
 type Recovery = {
@@ -1003,12 +1004,7 @@ export const transfer = internalMutation({
         'SOURCE_HASH_MISMATCH',
         'Recovery metadata differs.',
       );
-      const object = await ctx.db
-        .query('projectObjects')
-        .withIndex('by_project_and_digest', q =>
-          q.eq('projectId', input.projectId).eq('digest', upload.pin.sha256),
-        )
-        .unique();
+      const object = await findObject(ctx, input.projectId, upload.pin.sha256);
       const key = r2Key(input.projectId, upload.pin.sha256);
       if (!object)
         await ctx.db.insert('projectObjects', {
@@ -1028,7 +1024,11 @@ export const transfer = internalMutation({
           'Recovery metadata binding differs.',
         );
         if (input.committed)
-          await ctx.db.patch(object._id, { location: 'r2', r2Key: key, r2Committed: true });
+          await ctx.db.patch((await objectRow(ctx, object))._id, {
+            location: 'r2',
+            r2Key: key,
+            r2Committed: true,
+          });
       }
     }
     if (!input.committed) return canonicalPayload({ uploads: state.uploads, token });

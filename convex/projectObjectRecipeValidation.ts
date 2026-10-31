@@ -1,19 +1,20 @@
 // SPDX-License-Identifier: Apache-2.0
 'use node';
 import type { ActionCtx } from './_generated/server';
-import type { Doc, Id } from './_generated/dataModel';
+import type { Id } from './_generated/dataModel';
 import { internal } from './_generated/api';
 import { objectContent } from './projectObjectContent';
 import type { ChunkPin } from '../src/object-chunks';
 import { invariant } from '../src/errors';
+import type { ObjectView } from './projectObjectFind';
 
 /** Invocation-local descriptor window, never cached authorization. Each window
  * resolves under current access before IO and again after its consumed bytes.
  * Only descriptors are retained; objectContent still verifies each exact pin. */
 export function recipeValidationReader(ctx: ActionCtx, projectId: Id<'hostedProjects'>, actor: string) {
-  const rows = new Map<string, Doc<'projectObjects'>>(),
+  const rows = new Map<string, ObjectView>(),
     used = new Set<string>();
-  const resolve = (digests: string[]): Promise<Doc<'projectObjects'>[]> =>
+  const resolve = (digests: string[]): Promise<ObjectView[]> =>
     ctx.runQuery(internal.projectObjects.resolve, { projectId, actor, digests });
   const finish = async () => {
     if (used.size) await resolve([...used]);

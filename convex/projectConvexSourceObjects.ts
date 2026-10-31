@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
-import type { Doc } from './_generated/dataModel';
 import { activeStep } from './projectConvexSourceStore';
 import { saveObjects } from './projectHostedSaveStore';
 import { record, recordPartition, selectedGeneration } from './projectWorkIndexStore';
@@ -9,6 +8,7 @@ import { invariant } from '../src/errors';
 import { sourceMutation } from './projectConvexSourceErrors';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { presignGet, r2Config } from './r2';
+import { findObject, type ObjectView } from './projectObjectFind';
 const identity = { projectId: v.id('hostedProjects'), jobId: v.string(), step: v.number() };
 /** Object storage locations stay inside the trusted action. No worker HTTP
  * grant, callback ingress, HMAC, Modal credential or repository URL is involved. */
@@ -34,16 +34,13 @@ export const resolve = sourceMutation({
       generation = project ? await selectedGeneration(ctx, project) : null;
     const pending = [...args.digests].reverse(),
       seen = new Set(args.known),
-      selected: { row: Doc<'projectObjects'>; url: string | null }[] = [];
+      selected: { row: ObjectView; url: string | null }[] = [];
     let bytes = 0;
     while (pending.length && selected.length < 100 * (args.windows ?? 1)) {
       const id = pending.pop()!;
       if (seen.has(id)) continue;
       seen.add(id);
-      const row = await ctx.db
-        .query('projectObjects')
-        .withIndex('by_project_and_digest', q => q.eq('projectId', args.projectId).eq('digest', id))
-        .unique();
+      const row = await findObject(ctx, args.projectId, id);
       if (!row || row.removed || !isStored(row)) {
         invariant(!args.digests.includes(id), 'SOURCE_UNAVAILABLE', 'Exact source object is absent.');
         continue;

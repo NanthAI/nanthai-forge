@@ -18,6 +18,7 @@ import { canonicalPayload, hostedPayloadHash } from '../src/hosted-source-operat
 import { invariant } from '../src/errors';
 import { report } from './errors';
 import { isStored } from './projectObjectFields';
+import { findObject } from './projectObjectFind';
 
 const args = {
   projectId: v.id('hostedProjects'),
@@ -163,12 +164,7 @@ async function execute(ctx: MutationCtx, input: Input, action: 'start' | 'intent
     'Hosted main changed from the expected head and receipt.',
   );
   if (payload.initialHead) {
-    const object = await ctx.db
-      .query('projectObjects')
-      .withIndex('by_project_and_digest', q =>
-        q.eq('projectId', projectId).eq('digest', payload.initialHead!),
-      )
-      .unique();
+    const object = await findObject(ctx, projectId, payload.initialHead!);
     invariant(
       object && !object.removed && isStored(object),
       'SOURCE_UNAVAILABLE',

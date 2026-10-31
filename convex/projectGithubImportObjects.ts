@@ -6,6 +6,7 @@ import { activeOwnedProject } from './projectAuthority';
 import { storageDigest } from './projectStorage';
 import { isStored } from './projectObjectFields';
 import { invariant } from '../src/errors';
+import { findObject, objectRow } from './projectObjectFind';
 const pin = { projectId: v.id('hostedProjects'), actor: v.string(), digest: v.string(), size: v.number() };
 /** Internal only: the importer has verified these bytes against the Git object.
  * No cross-project digest-existence oracle is exposed to clients. */
@@ -14,10 +15,7 @@ export const reuse = internalMutation({
   returns: v.boolean(),
   handler: async (ctx, input) => {
     await activeOwnedProject(ctx, input.projectId, input.actor);
-    const bound = await ctx.db
-      .query('projectObjects')
-      .withIndex('by_project_and_digest', q => q.eq('projectId', input.projectId).eq('digest', input.digest))
-      .unique();
+    const bound = await findObject(ctx, input.projectId, input.digest);
     if (bound) {
       invariant(
         bound.size === input.size && !bound.removed,
@@ -44,10 +42,7 @@ export const bind = internalMutation({
       'INVALID_WORK_BACKUP',
       'Imported object differs from verified source.',
     );
-    const own = await ctx.db
-      .query('projectObjects')
-      .withIndex('by_project_and_digest', q => q.eq('projectId', input.projectId).eq('digest', input.digest))
-      .unique();
+    const own = await findObject(ctx, input.projectId, input.digest);
     if (own && isStored(own)) {
       if (own.storageId !== input.storageId) await blobStore(ctx).delete(input.storageId);
       return null;
@@ -58,7 +53,7 @@ export const bind = internalMutation({
       .take(20);
     const existing = shared.find(row => row.storageId && row.size === input.size);
     const storageId = existing?.storageId ?? input.storageId;
-    if (own) await ctx.db.patch(own._id, { storageId });
+    if (own) await ctx.db.patch((await objectRow(ctx, own))._id, { storageId });
     else
       await ctx.db.insert('projectObjects', {
         projectId: input.projectId,
@@ -77,10 +72,7 @@ export const stored = internalQuery({
   returns: v.boolean(),
   handler: async (ctx, input) => {
     await activeOwnedProject(ctx, input.projectId, input.actor);
-    const row = await ctx.db
-      .query('projectObjects')
-      .withIndex('by_project_and_digest', q => q.eq('projectId', input.projectId).eq('digest', input.digest))
-      .unique();
+    const row = await findObject(ctx, input.projectId, input.digest);
     return !!(row && !row.removed && row.size === input.size && isStored(row));
   },
 });
@@ -92,10 +84,7 @@ export const reserve = internalMutation({
   returns: v.string(),
   handler: async (ctx, input) => {
     await activeOwnedProject(ctx, input.projectId, input.actor);
-    const row = await ctx.db
-      .query('projectObjects')
-      .withIndex('by_project_and_digest', q => q.eq('projectId', input.projectId).eq('digest', input.digest))
-      .unique();
+    const row = await findObject(ctx, input.projectId, input.digest);
     if (row) {
       invariant(row.size === input.size && !row.removed, 'INVALID_WORK_BACKUP', 'Object binding changed.');
       return row.nonce;

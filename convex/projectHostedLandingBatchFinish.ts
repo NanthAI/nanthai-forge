@@ -27,6 +27,7 @@ import { scheduleFinish, watchFinishCompose } from './projectHostedFinishWake';
 import { isStored } from './projectObjectFields';
 import { hostedStartMain } from './projectHostedChannels';
 import { invariant } from '../src/errors';
+import { findObject, objectRow } from './projectObjectFind';
 
 export async function batchFinishStep(
   ctx: MutationCtx,
@@ -178,12 +179,7 @@ export async function batchFinishStep(
   }
   const upload = source.uploads[batch.uploadIndex];
   if (upload) {
-    const object = await ctx.db
-      .query('projectObjects')
-      .withIndex('by_project_and_digest', q =>
-        q.eq('projectId', input.projectId).eq('digest', upload.pin.sha256),
-      )
-      .unique();
+    const object = await findObject(ctx, input.projectId, upload.pin.sha256);
     const objectKey = r2Key(input.projectId, upload.pin.sha256);
     if (object) {
       invariant(
@@ -198,7 +194,7 @@ export async function batchFinishStep(
         await wakeBatch(ctx, key);
         return { handled: true, command: null };
       }
-      await ctx.db.patch(object._id, { location: 'r2', r2Key: objectKey });
+      await ctx.db.patch((await objectRow(ctx, object))._id, { location: 'r2', r2Key: objectKey });
     } else
       await ctx.db.insert('projectObjects', {
         projectId: input.projectId,
@@ -233,18 +229,13 @@ export async function resumeBatchIO(
     'WORK_OPERATION_CHANGED',
     'Resume only the retained batch metadata upload.',
   );
-  const object = await ctx.db
-    .query('projectObjects')
-    .withIndex('by_project_and_digest', q =>
-      q.eq('projectId', input.projectId).eq('digest', upload.pin.sha256),
-    )
-    .unique();
+  const object = await findObject(ctx, input.projectId, upload.pin.sha256);
   invariant(
     object && !object.removed && object.size === upload.pin.size && object.r2Key === input.key,
     'SOURCE_HASH_MISMATCH',
     'Batch metadata reservation differs.',
   );
-  await ctx.db.patch(object._id, { r2Committed: true });
+  await ctx.db.patch((await objectRow(ctx, object))._id, { r2Committed: true });
   await writeBatch(ctx, key, { ...batch, uploadIndex: batch.uploadIndex + 1 });
   const { row } = await loadFinish(ctx, input);
   if (row.wake) await ctx.scheduler.cancel(row.wake.taskId);

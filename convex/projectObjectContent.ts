@@ -3,7 +3,7 @@
 import type { ActionCtx } from './_generated/server';
 import { indexObjectRead, isIndexReadContext } from './projectWorkIndexRetry';
 import { blobStore } from './blobStore';
-import type { Doc, Id } from './_generated/dataModel';
+import type { Id } from './_generated/dataModel';
 import { internal } from './_generated/api';
 import { exchangeFetch } from '../src/exchange-request';
 import { invariant } from '../src/errors';
@@ -13,15 +13,16 @@ import { isR2Object } from './projectObjectFields';
 import { r2Config, presignGet } from './r2';
 import { readRecipeTrees } from './projectObjectTreeRead';
 import { objectRecipeSchema, objectChunkPageBytes, type ChunkPin } from '../src/object-chunks';
+import type { ObjectView } from './projectObjectFind';
 
 /** Raw bytes live in Convex storage or a committed R2 object (not a recipe). */
-export const isRaw = (row: Doc<'projectObjects'>) => !!row.storageId || isR2Object(row);
+export const isRaw = (row: ObjectView) => !!row.storageId || isR2Object(row);
 /** Where raw bytes are cached by identity. */
-export const rawKey = (row: Doc<'projectObjects'>) => row.storageId ?? row.r2Key;
+export const rawKey = (row: ObjectView) => row.storageId ?? row.r2Key;
 
 /** Server-side read of an R2 object by signed GET. Used only where Convex itself needs the bytes
  * (publication, derived views); clients read R2 directly. Verifies size and sha256. */
-async function r2Content(ctx: ActionCtx, row: Doc<'projectObjects'>, pin: ChunkPin) {
+async function r2Content(ctx: ActionCtx, row: ObjectView, pin: ChunkPin) {
   const url = await presignGet(r2Config(), row.r2Key!);
   const response = await exchangeFetch(
     'server R2 object download',
@@ -48,7 +49,7 @@ async function r2Content(ctx: ActionCtx, row: Doc<'projectObjects'>, pin: ChunkP
   return data;
 }
 
-async function readMetadata(ctx: ActionCtx, row: Doc<'projectObjects'>, pin: ChunkPin) {
+async function readMetadata(ctx: ActionCtx, row: ObjectView, pin: ChunkPin) {
   if (isR2Object(row)) {
     // Existence and bytes are proven by the verified read itself; there is no separate metadata read.
     invariant(
@@ -70,7 +71,7 @@ async function readMetadata(ctx: ActionCtx, row: Doc<'projectObjects'>, pin: Chu
     'Stored content differs from its digest.',
   );
 }
-async function readContent(ctx: ActionCtx, row: Doc<'projectObjects'>, pin: ChunkPin) {
+async function readContent(ctx: ActionCtx, row: ObjectView, pin: ChunkPin) {
   if (isR2Object(row)) return r2Content(ctx, row, pin);
   const blob = await blobStore(ctx).get(row.storageId!);
   invariant(blob, 'INVALID_WORK_BACKUP', 'Stored content is unavailable.');
@@ -82,9 +83,9 @@ async function readContent(ctx: ActionCtx, row: Doc<'projectObjects'>, pin: Chun
   );
   return bytes;
 }
-export const rawMetadata = (ctx: ActionCtx, row: Doc<'projectObjects'>, pin: ChunkPin) =>
+export const rawMetadata = (ctx: ActionCtx, row: ObjectView, pin: ChunkPin) =>
   indexObjectRead(ctx, pin, () => readMetadata(ctx, row, pin));
-export const rawContent = (ctx: ActionCtx, row: Doc<'projectObjects'>, pin: ChunkPin) =>
+export const rawContent = (ctx: ActionCtx, row: ObjectView, pin: ChunkPin) =>
   indexObjectRead(ctx, pin, () => readContent(ctx, row, pin));
 type RawReader = typeof rawContent;
 
@@ -96,7 +97,7 @@ function resolver(ctx: ActionCtx, projectId: Id<'hostedProjects'>, actor: string
   let previous: ChunkPin[] = [];
   const resolve = async (pins: ChunkPin[]) => {
     const unique = [...new Map(pins.map(pin => [pin.sha256, pin])).values()];
-    const rows = new Map<string, Doc<'projectObjects'>>();
+    const rows = new Map<string, ObjectView>();
     for (let start = 0; start < unique.length;) {
       let end = start,
         size = 0;
@@ -107,7 +108,7 @@ function resolver(ctx: ActionCtx, projectId: Id<'hostedProjects'>, actor: string
         end++;
       }
       const window = unique.slice(start, end);
-      const found: Doc<'projectObjects'>[] = await ctx.runQuery(internal.projectObjects.resolve, {
+      const found: ObjectView[] = await ctx.runQuery(internal.projectObjects.resolve, {
         projectId,
         actor,
         digests: window.map(pin => pin.sha256),
@@ -159,7 +160,7 @@ function resolver(ctx: ActionCtx, projectId: Id<'hostedProjects'>, actor: string
 /** The page shares recipe-body and tree-level resolve windows, never access decisions. */
 export async function objectContents(
   ctx: ActionCtx,
-  rows: Doc<'projectObjects'>[],
+  rows: ObjectView[],
   pins: ChunkPin[],
   actor: string,
   ancestors: ReadonlySet<string> | ReadonlySet<string>[] = new Set(),
@@ -228,7 +229,7 @@ export async function objectContents(
 }
 export async function objectContent(
   ctx: ActionCtx,
-  row: Doc<'projectObjects'>,
+  row: ObjectView,
   pin: ChunkPin,
   actor: string,
   ancestors: ReadonlySet<string> = new Set(),
@@ -239,7 +240,7 @@ export async function objectContent(
 /** A bound recipe already proved the full hash; ranges verify every fetched node. */
 export async function objectRange(
   ctx: ActionCtx,
-  row: Doc<'projectObjects'>,
+  row: ObjectView,
   actor: string,
   offset: number,
   length = 2 * 1024 * 1024,

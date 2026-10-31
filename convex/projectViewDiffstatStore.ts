@@ -2,7 +2,7 @@
 import { v } from 'convex/values';
 import { internalQuery, internalMutation, type QueryCtx, type MutationCtx } from './_generated/server';
 import { accessibleProject } from './projectAuthority';
-import { record, recordPartition, selectedGeneration } from './projectWorkIndexStore';
+import { record, readRecord, recordPartition, selectedGeneration } from './projectWorkIndexStore';
 import { invariant } from '../src/errors';
 import type { Id } from './_generated/dataModel';
 const selection = {
@@ -38,7 +38,7 @@ export const read = internalQuery({
       stats = await record(ctx, partition, 'diffstats', key);
     const pins = await Promise.all(
       [view.base, view.head].map(async head => {
-        const row = await record(ctx, partition, 'sourceBlobs', head);
+        const row = await readRecord(ctx, partition, 'sourceBlobs', head);
         invariant(row, 'SOURCE_UNAVAILABLE', 'View source pin is unavailable.');
         return JSON.parse(row.value);
       }),

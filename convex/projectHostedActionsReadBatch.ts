@@ -7,6 +7,7 @@ import { blobStore } from './blobStore';
 import { presignGet, r2Config } from './r2';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { invariant } from '../src/errors';
+import { findObject } from './projectObjectFind';
 
 /** One live job/actor/epoch/lease check per bounded window, never a reusable
  * authorization cache. Recipe leaves still require their own exact grants. */
@@ -33,10 +34,7 @@ export const describeAndGrant = internalMutation({
       const descriptor = await saveObject(ctx, input.projectId, { sha256 });
       let target = null;
       if (!descriptor.recipe) {
-        const row = await ctx.db
-          .query('projectObjects')
-          .withIndex('by_project_and_digest', q => q.eq('projectId', input.projectId).eq('digest', sha256))
-          .unique();
+        const row = await findObject(ctx, input.projectId, sha256);
         const url =
           row?.location === 'r2' && row.r2Key
             ? await presignGet(r2Config(), row.r2Key)

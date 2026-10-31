@@ -7,6 +7,7 @@ import { accessibleProject } from './projectAuthority';
 import { isStored } from './projectObjectFields';
 import { r2Config, r2Key } from './r2';
 import { invariant } from '../src/errors';
+import { findObject, objectRow } from './projectObjectFind';
 export const prepare = internalMutation({
   args: { projectId: v.id('hostedProjects'), actor: v.string(), digest: v.string(), size: v.number() },
   returns: v.object({
@@ -24,10 +25,8 @@ export const prepare = internalMutation({
       'INVALID_WORK_BACKUP',
       'Use verified logical metadata pins.',
     );
-    let row = await ctx.db
-      .query('projectObjects')
-      .withIndex('by_project_and_digest', q => q.eq('projectId', input.projectId).eq('digest', input.digest))
-      .unique();
+    const found = await findObject(ctx, input.projectId, input.digest);
+    let row = found && (await objectRow(ctx, found));
     invariant(
       !row || (row.size === input.size && !row.removed),
       'INVALID_WORK_BACKUP',

@@ -63,7 +63,7 @@ test('3000 source outputs keep RPCs at one stage per 100 objects and prefer R2 o
   const ctx = {
     storage: forbiddenStorage,
     db: {
-      query() {
+      query(table) {
         let id;
         return {
           withIndex(_name, fn) {
@@ -72,9 +72,18 @@ test('3000 source outputs keep RPCs at one stage per 100 objects and prefer R2 o
                 if (k === 'digest') id = v;
                 return q;
               },
+              lte: () => q,
             };
             fn(q);
             return this;
+          },
+          order() {
+            return this;
+          },
+          // No GitHub-import object catalog in this fixture.
+          async take() {
+            assert.equal(table, 'projectObjectCatalog');
+            return [];
           },
           async unique() {
             return rows.get(id) ?? null;

@@ -7,7 +7,7 @@ import { paginationOptsValidator } from 'convex/server';
 import { query, type QueryCtx } from './cliServer';
 import type { Id } from './_generated/dataModel';
 import { accessibleProject } from './projectAuthority';
-import { selectedGeneration, recordPartition, record } from './projectWorkIndexStore';
+import { selectedGeneration, recordPartition, record, readRecord } from './projectWorkIndexStore';
 import { invariant } from '../src/errors';
 import { report } from './errors';
 import type { whyNotes } from '../src/view-read-model';
@@ -20,7 +20,7 @@ async function value(
   collection: string,
   key: string,
 ) {
-  const row = await record(ctx, partition, collection, key);
+  const row = await readRecord(ctx, partition, collection, key);
   if (!row) return null;
   const header = JSON.parse(row.value);
   if (!header.payloadKey) return header;

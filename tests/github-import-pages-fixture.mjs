@@ -5,6 +5,7 @@ const modules = Object.fromEntries(
   await Promise.all(
     [
       'projectGithubImportInventory',
+      'projectGithubImportCatalog',
       'projectGithubImportBatch',
       'projectGithubImportPublication',
       'projectGithubImportStore',
@@ -41,6 +42,13 @@ export function pagedFixture() {
       shared.get(row.digest).push(id);
     }
     return id;
+  };
+  const remove = s.ctx.db.delete;
+  s.ctx.db.delete = async id => {
+    const row = s.tables.projectGithubImportInventory?.get(id);
+    if (row) inventories.get(`${row.jobId}:${row.part}`)?.delete(row.key);
+    documentsWritten++;
+    return remove(id);
   };
   const patch = s.ctx.db.patch;
   s.ctx.db.patch = async (id, values) => {
@@ -79,8 +87,14 @@ export function pagedFixture() {
             ? [own.get(`${eq('projectId')}:${eq('digest')}`)].filter(Boolean)
             : (shared.get(eq('digest')) ?? []);
       else {
-        const group = inventories.get(`${eq('jobId')}:${eq('part')}`) ?? new Map();
-        ids = eq('key') !== undefined ? [group.get(eq('key'))].filter(Boolean) : [...group.values()];
+        // A job-only prefix (purge) spans every part of that job.
+        const groups =
+          eq('part') === undefined
+            ? [...inventories].filter(([key]) => key.startsWith(`${eq('jobId')}:`)).map(([, group]) => group)
+            : [inventories.get(`${eq('jobId')}:${eq('part')}`) ?? new Map()];
+        ids = groups.flatMap(group =>
+          eq('key') !== undefined ? [group.get(eq('key'))].filter(Boolean) : [...group.values()],
+        );
       }
       const result = ids.map(id => s.tables[table].get(id)).filter(matches);
       const field = index?.endsWith('position') ? 'position' : 'key';

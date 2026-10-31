@@ -6,12 +6,13 @@ import { pagedFixture } from './github-import-pages-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { tarEntries } from '../dist/github-tar.js';
 import { readObjectRecipe } from '../dist/object-chunks.js';
-import { storedBytes } from './default-r2.mjs';
+import { startFakeR2, fakeR2Config } from './fake-r2.mjs';
 const schema = (await import(moduleUrl('../convex/schema.ts'))).default;
 const agent = await import(moduleUrl('../convex/projectHostedAgent.ts'));
 const channels = await import(moduleUrl('../convex/projectHostedChannels.ts'));
 const start = await import(moduleUrl('../convex/projectHostedStart.ts'));
 const birth = await import(moduleUrl('../convex/projectHostedBirth.ts'));
+const { findObject } = await import(moduleUrl('../convex/projectObjectFind.ts'));
 const gitSha = bytes => createHash('sha1').update(`blob ${bytes.length}\0`).update(bytes).digest('hex');
 const hex = n => n.toString(16).padStart(40, '0');
 
@@ -93,13 +94,35 @@ function repository({ files = 30, directories = 3, submodules = 1 } = {}) {
   return { tree, archive: tarball(members), bodies, files: files + 3 + submodules };
 }
 
-function serve(t, repo, counts) {
-  const old = globalThis.fetch;
-  t.after(() => (globalThis.fetch = old));
+const r2Env = {
+  R2_ACCOUNT_ID: fakeR2Config.accountId,
+  R2_BUCKET: fakeR2Config.bucket,
+  R2_ACCESS_KEY_ID: fakeR2Config.accessKeyId,
+  R2_SECRET_ACCESS_KEY: fakeR2Config.secretAccessKey,
+  FORGE_BLOBS: 'r2',
+};
+/** Synthetic GitHub plus a strict fake R2 bucket (create-only, checksummed PUTs). */
+async function serve(t, repo, counts) {
+  const saved = Object.fromEntries(Object.keys(r2Env).map(name => [name, process.env[name]]));
+  Object.assign(process.env, r2Env);
+  const native = globalThis.fetch,
+    bucket = await startFakeR2(),
+    restore = bucket.install(),
+    old = globalThis.fetch;
+  t.after(async () => {
+    globalThis.fetch = old;
+    restore();
+    globalThis.fetch = native;
+    for (const [name, value] of Object.entries(saved))
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    await bucket.close();
+  });
   globalThis.fetch = async (url, options = {}) => {
     if (new URL(url).hostname.endsWith('.r2.cloudflarestorage.com')) return old(url, options);
     const u = new URL(url),
       path = u.pathname;
+    if (u.host === bucket.host) return old(url, options);
     const count = name => (counts[name] = (counts[name] ?? 0) + 1);
     if (u.hostname === 'codeload.github.com') {
       count('archive');
@@ -135,6 +158,7 @@ function serve(t, repo, counts) {
     }
     throw Error(`Unexpected synthetic request ${path}`);
   };
+  return bucket;
 }
 async function importArchive(s) {
   const id = await s.modules.projectGithubImport.start._handler(s.ctx, {
@@ -152,7 +176,7 @@ test('a 28,905-file tree imports through one archive stream within an O(pages) b
   const repo = repository({ files: 28905, directories: 4089, submodules: 2 }),
     counts = {},
     s = pagedFixture();
-  serve(t, repo, counts);
+  const bucket = await serve(t, repo, counts);
   const started = performance.now();
   const job = await importArchive(s);
   const executions = calls(s),
@@ -161,7 +185,22 @@ test('a 28,905-file tree imports through one archive stream within an O(pages) b
   assert.equal(job.completed, repo.files);
   // Only the archive-omitted and archive-rewritten files cost a blob request.
   assert.deepEqual(counts, { trees: 2, tarball: 1, archive: 1, blobs: 2 });
-  assert.equal(s.tables.projectGithubImportInventory.size < 100, true, 'no per-file inventory rows');
+  // Issue 7cbb881c line 3: no per-file row survives ready; documents are O(pages).
+  const catalogRows = [...s.tables.projectObjectCatalog.values()].filter(r => r.projectId === job.projectId);
+  const catalogued = catalogRows.reduce((sum, row) => sum + row.sizes.length, 0);
+  assert.equal(s.tables.projectGithubImportInventory.size, 0, 'import progress rows are deleted at ready');
+  assert.equal(
+    [...s.tables.projectObjects.values()].filter(r => r.projectId === job.projectId).length,
+    0,
+    'no per-object rows',
+  );
+  assert.equal(catalogRows.length, Math.ceil(catalogued / 256));
+  assert.ok(catalogued >= repo.files - 10, `${catalogued} catalogued objects`);
+  assert.ok(
+    [...s.tables.projectWorkRecords.values()].filter(r => r.collection === 'sourceBlobs').length <= 1,
+    'catalog-backed generation keeps no per-blob record (only the State header row)',
+  );
+  assert.ok(stats.documentsWritten < 1000, `${stats.documentsWritten} documents written`);
   assert.ok(executions <= 5 * Math.ceil(repo.files / 1000) + 10, `${executions} executions`);
   t.diagnostic(
     JSON.stringify({
@@ -171,6 +210,8 @@ test('a 28,905-file tree imports through one archive stream within an O(pages) b
       executions,
       ...stats,
       inventoryRows: s.tables.projectGithubImportInventory.size,
+      catalogRows: catalogRows.length,
+      r2Objects: bucket.objects.size,
       ms: Math.round(performance.now() - started),
       rss: process.memoryUsage().rss,
     }),
@@ -185,10 +226,8 @@ test('a 28,905-file tree imports through one archive stream within an O(pages) b
   assert.ok(caps.actions.includes('start') && caps.actions.length > 5);
   const main = JSON.parse(await channels.current._handler(s.ctx, { projectId: project._id }));
   assert.equal(main.head, backup.preview.head);
-  const object = digest =>
-    [...s.tables.projectObjects.values()].find(r => r.projectId === project._id && r.digest === digest);
-  const read = pin => storedBytes(s, object(pin.sha256));
-  const row = object(main.head),
+  const read = async pin => bucket.objects.get(bucket.key(`v1/p/${project._id}/o/${pin.sha256}`));
+  const row = await findObject(s.ctx, project._id, main.head),
     chunks = [];
   if (row.recipe)
     for await (const chunk of readObjectRecipe(JSON.parse(await read({ sha256: row.recipe.digest })), read))
@@ -209,7 +248,7 @@ test('a 28,905-file tree imports through one archive stream within an O(pages) b
 test('incident replay: an imported project starts a hosted Lane with no native owner ever created', async t => {
   const repo = repository({ files: 5, directories: 1, submodules: 0 }),
     s = pagedFixture();
-  serve(t, repo, {});
+  await serve(t, repo, {});
   const job = await importArchive(s);
   for (const table of Object.keys(schema.tables)) s.tables[table] ??= new Map();
   const main = JSON.parse(await channels.current._handler(s.ctx, { projectId: job.projectId }));
@@ -228,7 +267,7 @@ test('incident replay: an imported project starts a hosted Lane with no native o
 
 test('make-editable converts an existing native-owner import once, owner only, unchanged source only', async t => {
   const s = pagedFixture();
-  serve(t, repository({ files: 3, directories: 1, submodules: 0 }), {});
+  await serve(t, repository({ files: 3, directories: 1, submodules: 0 }), {});
   const job = await importArchive(s),
     projectId = job.projectId;
   for (const table of Object.keys(schema.tables)) s.tables[table] ??= new Map();

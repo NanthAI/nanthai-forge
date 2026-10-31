@@ -1,19 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 'use node';
 import type { ActionCtx } from './_generated/server';
-import type { Doc } from './_generated/dataModel';
 import { rawContent, rawKey } from './projectObjectContent';
+import type { ObjectView } from './projectObjectFind';
 
 // Verified raw storage bytes only. The caller must freshly authorize and validate storage metadata
 // before using this memo. Never memoize project rows, recipe closures or authorization decisions.
 const entries = new Map<string, Buffer>();
 let size = 0;
 const budget = 16 * 1024 * 1024;
-export async function reviewBytes(
-  ctx: ActionCtx,
-  row: Doc<'projectObjects'>,
-  pin: { sha256: string; size: number },
-) {
+export async function reviewBytes(ctx: ActionCtx, row: ObjectView, pin: { sha256: string; size: number }) {
   const key = JSON.stringify([row.projectId, rawKey(row), pin.sha256, pin.size]);
   const hit = entries.get(key);
   if (hit) return Buffer.from(hit);

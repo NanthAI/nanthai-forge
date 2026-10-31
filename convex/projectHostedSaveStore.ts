@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
 import type { MutationCtx, QueryCtx } from './_generated/server';
-import type { Doc, Id } from './_generated/dataModel';
+import type { Id } from './_generated/dataModel';
 import { activeProject } from './projectAuthority';
 import { readHostedRecord, hostedWriteProject } from './projectHostedRecords';
 import { hostedLaneSchema } from '../src/hosted-lane';
@@ -10,6 +10,7 @@ import { hostedOperationSchema, canonicalPayload } from '../src/hosted-source-op
 import { hostedOperationRow } from './projectHostedOperations';
 import { isStored } from './projectObjectFields';
 import { invariant } from '../src/errors';
+import { findObject, type ObjectView } from './projectObjectFind';
 
 export const saveStateSchema = z
   .object({
@@ -77,28 +78,23 @@ export async function saveObjects(
   projectId: Id<'hostedProjects'>,
   pins: readonly { sha256: string; size?: number }[],
   /** Rows this transaction already read for the same project; they are not read again. */
-  loaded: readonly Doc<'projectObjects'>[] = [],
+  loaded: readonly ObjectView[] = [],
 ) {
-  const rows = new Map<string, Doc<'projectObjects'>>(
+  const rows = new Map<string, ObjectView>(
     loaded.filter(row => row.projectId === projectId).map(row => [row.digest, row]),
   );
   const result = [];
   let fence: string | undefined;
   for (const pin of pins) {
     let row = rows.get(pin.sha256);
-    if (!row) {
-      row =
-        (await ctx.db
-          .query('projectObjects')
-          .withIndex('by_project_and_digest', q => q.eq('projectId', projectId).eq('digest', pin.sha256))
-          .unique()) ?? undefined;
-    }
+    if (!row) row = (await findObject(ctx, projectId, pin.sha256)) ?? undefined;
     invariant(
       row && !row.removed && isStored(row) && (pin.size === undefined || row.size === pin.size),
       'SOURCE_UNAVAILABLE',
       'Commit the exact project source object before staging it.',
     );
-    if ('patch' in ctx.db && !row.sourceReferenced) {
+    // Catalog objects are source by construction (sourceReferenced, no row).
+    if ('patch' in ctx.db && !row.sourceReferenced && row._id !== undefined) {
       await ctx.db.patch(row._id, { sourceReferenced: true });
       fence = row.digest;
       row = { ...row, sourceReferenced: true };

@@ -8,6 +8,8 @@ import { indexEntry } from './projectWorkIndexFields';
 import { HOSTED_WORK_INDEX_FORMAT } from '../src/work-hosted-summary';
 import { digest } from '../src/portable-hash';
 import { isStored } from './projectObjectFields';
+import { findObject } from './projectObjectFind';
+import { purgeInventory } from './projectGithubImportCatalog';
 import { invariant } from '../src/errors';
 import { selectBornMain } from './projectHostedBirth';
 const pin = v.object({ sha256: v.string(), size: v.number() });
@@ -20,6 +22,7 @@ export const begin = internalMutation({
     work: pin,
     preview: projectBackupPreview,
     metadata: v.string(),
+    objectCatalog: v.optional(v.boolean()),
   },
   returns: v.object({ generationId: v.id('projectWorkGenerations') }),
   handler: async (ctx, input) => {
@@ -38,10 +41,7 @@ export const begin = internalMutation({
       return { generationId: job.publication.generationId };
     }
     for (const pin of [input.root, input.state, input.work]) {
-      const row = await ctx.db
-        .query('projectObjects')
-        .withIndex('by_project_and_digest', q => q.eq('projectId', job.projectId).eq('digest', pin.sha256))
-        .unique();
+      const row = await findObject(ctx, job.projectId, pin.sha256);
       invariant(
         row && !row.removed && row.size === pin.size && isStored(row),
         'IMPORT_INCOMPLETE',
@@ -71,6 +71,7 @@ export const begin = internalMutation({
       status: 'building',
       nextBatch: 0,
       metadata: input.metadata,
+      ...(input.objectCatalog ? { objectCatalog: true as const } : {}),
     });
     await ctx.db.patch(job._id, {
       publication: { backupId, generationId, head: input.state.sha256, root: input.root.sha256 },
@@ -97,7 +98,8 @@ export const stage = internalMutation({
       value: digest(JSON.stringify(input.entries)),
     };
     if (input.batch < generation.nextBatch) {
-      await retain(ctx, job, [receipt]);
+      // Receipts are transient: after ready they are deleted, never recreated.
+      if (job.phase !== 'ready') await retain(ctx, job, [receipt]);
       return null;
     }
     invariant(
@@ -156,6 +158,7 @@ export const finish = internalMutation({
       origin: 'github-import',
     });
     await ctx.db.patch(job._id, { phase: 'ready', error: undefined });
+    await purgeInventory(ctx, job._id, job.owner);
     return null;
   },
 });

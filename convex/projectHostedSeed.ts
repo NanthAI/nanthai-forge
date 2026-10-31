@@ -18,6 +18,7 @@ import {
 } from '../src/hosted-seed-protocol';
 import { invariant } from '../src/errors';
 import { report } from './errors';
+import { findObject } from './projectObjectFind';
 
 const identity = { projectId: v.id('hostedProjects'), operationId: v.string() };
 async function caller(ctx: QueryCtx | MutationCtx, projectId: Id<'hostedProjects'>) {
@@ -151,10 +152,7 @@ export const commitPage = internalMutation({
         'Seed objects must be unique and ordered across pages.',
       );
       last = pin.sha256;
-      const stored = await ctx.db
-        .query('projectObjects')
-        .withIndex('by_project_and_digest', q => q.eq('projectId', input.projectId).eq('digest', pin.sha256))
-        .unique();
+      const stored = await findObject(ctx, input.projectId, pin.sha256);
       invariant(
         stored && !stored.removed && isStored(stored) && stored.size === pin.size,
         'INVALID_WORK_BACKUP',
@@ -224,12 +222,7 @@ export const commit = internalMutation({
       'CHANNEL_CHANGED',
       'Selected source or journal moved after seed start.',
     );
-    const content = await ctx.db
-      .query('projectObjects')
-      .withIndex('by_project_and_digest', q =>
-        q.eq('projectId', input.projectId).eq('digest', request.root.sha256),
-      )
-      .unique();
+    const content = await findObject(ctx, input.projectId, request.root.sha256);
     invariant(
       content && isStored(content) && !content.removed && content.size === request.root.size,
       'INVALID_WORK_BACKUP',

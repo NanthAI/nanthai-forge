@@ -10,6 +10,7 @@ import { accessibleProject } from './projectAuthority';
 import { generationDocument, indexEntry } from './projectWorkIndexFields';
 import { invariant } from '../src/errors';
 import { projectExecution } from './projectExecution';
+import { findObject } from './projectObjectFind';
 
 // Incremental source returns retain the public generation. Its disposable
 // record partition can be reused directly; this pointer never forms a chain.
@@ -38,6 +39,27 @@ export async function record(
       q.eq('generationId', generationId).eq('collection', collection).eq('key', key),
     )
     .unique();
+}
+type RecordValue = Pick<
+  Doc<'projectWorkRecords'>,
+  'collection' | 'key' | 'parent' | 'position' | 'value' | 'status' | 'actor'
+>;
+/** Read-only lookup. Catalog-backed generations (GitHub import) keep no
+ * per-blob record: their sourceBlobs resolve from the project object catalog. */
+export async function readRecord(
+  ctx: QueryCtx | MutationCtx,
+  generationId: Id<'projectWorkGenerations'>,
+  collection: string,
+  key: string,
+): Promise<RecordValue | null> {
+  const row = await record(ctx, generationId, collection, key);
+  if (row || collection !== 'sourceBlobs') return row;
+  const partition = await ctx.db.get(generationId);
+  if (!partition?.objectCatalog) return null;
+  const object = await findObject(ctx, partition.projectId, key);
+  return object && !object.removed
+    ? { collection, key, parent: '', position: 0, value: JSON.stringify({ sha256: key, size: object.size }) }
+    : null;
 }
 export const current = internalQuery({
   args: { projectId: v.id('hostedProjects'), owner: v.string() },
@@ -295,7 +317,7 @@ export const returnLookups = internalQuery({
     const result: (import('../src/work-hosted-index').IndexEntry | null)[] = [];
     let bytes = 0;
     for (const key of input.keys) {
-      const row = await record(ctx, recordPartition(generation), key.collection, key.key);
+      const row = await readRecord(ctx, recordPartition(generation), key.collection, key.key);
       const size = row ? new TextEncoder().encode(JSON.stringify(row)).byteLength : 4;
       if (result.length && bytes + size > 2 * 1024 * 1024) break;
       result.push(
@@ -397,7 +419,7 @@ export const lookups = internalQuery({
     }
     return await Promise.all(
       input.keys.map(async key => {
-        const row = await record(ctx, recordPartition(generation), key.collection, key.key);
+        const row = await readRecord(ctx, recordPartition(generation), key.collection, key.key);
         return row
           ? {
               ...(row.status ? { status: row.status } : {}),

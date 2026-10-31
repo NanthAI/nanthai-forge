@@ -4,16 +4,17 @@ import type { IndexEntry } from './work-hosted-index.js';
 export function sourceTreeEntries(
   head: string,
   files: readonly { path: string; mode?: string }[],
+  pathsPerRow = 100,
 ): IndexEntry[] {
   const paths = files.map(file => file.path).sort();
   const entries: IndexEntry[] = [];
-  for (let offset = 0; offset < paths.length; offset += 100)
+  for (let offset = 0; offset < paths.length; offset += pathsPerRow)
     entries.push({
       collection: 'sourceTreePaths',
       key: `${head}:${offset}`,
       parent: head,
       position: offset,
-      value: JSON.stringify({ paths: paths.slice(offset, offset + 100) }),
+      value: JSON.stringify({ paths: paths.slice(offset, offset + pathsPerRow) }),
     });
   entries.push({
     collection: 'sourceTrees',

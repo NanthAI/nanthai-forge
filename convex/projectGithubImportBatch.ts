@@ -8,6 +8,7 @@ import { storageDigest, removeExclusive } from './projectStorage';
 import { r2Config, r2Key } from './r2';
 import { invariant } from '../src/errors';
 import { importPageFiles } from '../src/github-import-pages';
+import { findObject, objectRow } from './projectObjectFind';
 export const objectPin = v.object({ digest: v.string(), size: v.number() });
 export const completion = v.object({
   id: v.id('projectObjects'),
@@ -42,10 +43,8 @@ export const prepare = internalMutation({
         'INVALID_WORK_BACKUP',
         'Use verified object pins.',
       );
-      let row = await ctx.db
-        .query('projectObjects')
-        .withIndex('by_project_and_digest', q => q.eq('projectId', project._id).eq('digest', pin.digest))
-        .unique();
+      const found = await findObject(ctx, project._id, pin.digest);
+      let row = found && (await objectRow(ctx, found));
       invariant(
         !row || (row.size === pin.size && !row.removed),
         'INVALID_WORK_BACKUP',
@@ -117,19 +116,13 @@ export async function completeObjects(
     }
   }
   for (const pin of recipes) {
-    const recipe = await ctx.db
-      .query('projectObjects')
-      .withIndex('by_project_and_digest', q => q.eq('projectId', projectId).eq('digest', pin.recipeDigest))
-      .unique();
+    const recipe = await findObject(ctx, projectId, pin.recipeDigest);
     invariant(
       recipe && isStored(recipe) && !recipe.removed && recipe.size === pin.recipeSize,
       'INVALID_WORK_BACKUP',
       'Verified recipe is unavailable.',
     );
-    const row = await ctx.db
-      .query('projectObjects')
-      .withIndex('by_project_and_digest', q => q.eq('projectId', projectId).eq('digest', pin.digest))
-      .unique();
+    const row = await findObject(ctx, projectId, pin.digest);
     invariant(
       !row || (!row.removed && row.size === pin.size),
       'INVALID_WORK_BACKUP',
@@ -137,7 +130,7 @@ export async function completeObjects(
     );
     if (row && isStored(row)) continue;
     const value = { recipe: { digest: pin.recipeDigest, size: pin.recipeSize } };
-    if (row) await ctx.db.patch(row._id, value);
+    if (row) await ctx.db.patch((await objectRow(ctx, row))._id, value);
     else
       await ctx.db.insert('projectObjects', {
         projectId,

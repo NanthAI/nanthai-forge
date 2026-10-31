@@ -25,9 +25,10 @@ export const isStored = (row: {
 /** A committed object in R2 (as opposed to Convex storage or a recipe). */
 export const isR2Object = (row: { location?: string; r2Committed?: boolean; r2Key?: string }) =>
   row.location === 'r2' && !!row.r2Committed && !!row.r2Key;
+/** A stored object as resolved: its row, or a catalog entry (no `_id`). */
 export const objectDocument = v.object({
-  _id: v.id('projectObjects'),
-  _creationTime: v.number(),
+  _id: v.optional(v.id('projectObjects')),
+  _creationTime: v.optional(v.number()),
   ...objectFields,
 });
 export const objectTables = {
@@ -38,4 +39,19 @@ export const objectTables = {
     .index('by_digest_and_removed', ['digest', 'removed'])
     .index('by_storage', ['storageId'])
     .index('by_nonce', ['nonce']),
+  /** Sorted, immutable object catalog pages: one row per `objectCatalogPage`
+   * stored objects instead of one row per object (GitHub import). */
+  projectObjectCatalog: defineTable({
+    projectId: v.id('hostedProjects'),
+    first: v.string(),
+    last: v.string(),
+    /** Concatenated 64-hex digests, ascending. */
+    digests: v.string(),
+    sizes: v.array(v.number()),
+    /** Logical objects stored as a recipe (no raw bytes of their own). */
+    recipes: v.array(v.object({ index: v.number(), digest: v.string(), size: v.number() })),
+    origin: v.string(),
+  })
+    .index('by_project', ['projectId'])
+    .index('by_project_and_first', ['projectId', 'first']),
 };

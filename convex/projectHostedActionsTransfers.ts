@@ -16,6 +16,7 @@ import { invariant } from '../src/errors';
 import { r2Config, r2Key, presignGet, presignPut, headObject, checksumOf } from './r2';
 import { blobStore } from './blobStore';
 import { isStored } from './projectObjectFields';
+import { findObject, objectRow } from './projectObjectFind';
 
 const args = {
   projectId: v.id('hostedProjects'),
@@ -79,10 +80,7 @@ export const grant = internalMutation({
       // The fixed trusted reader requests only hash-pinned input/recipe closure.
       // Project membership is checked for each exact object, including recipe leaves.
       await saveObject(ctx, input.projectId, pin);
-      const object = await ctx.db
-        .query('projectObjects')
-        .withIndex('by_project_and_digest', q => q.eq('projectId', input.projectId).eq('digest', pin.sha256))
-        .unique();
+      const object = await findObject(ctx, input.projectId, pin.sha256);
       const url =
         object?.location === 'r2' && object.r2Key
           ? await presignGet(r2Config(), object.r2Key)
@@ -92,10 +90,7 @@ export const grant = internalMutation({
       invariant(url, 'SOURCE_UNAVAILABLE', 'Read a raw source object or its exact recipe leaves.');
       return { url, headers: {} };
     }
-    let object = await ctx.db
-      .query('projectObjects')
-      .withIndex('by_project_and_digest', q => q.eq('projectId', input.projectId).eq('digest', pin.sha256))
-      .unique();
+    let object = await findObject(ctx, input.projectId, pin.sha256);
     invariant(
       !object || (!object.removed && object.size === pin.size),
       'SOURCE_HASH_MISMATCH',
@@ -132,7 +127,7 @@ export const grant = internalMutation({
     }
     if (!object.r2Committed && object.r2SweepKey === object.r2Key) {
       const key = `${r2Key(input.projectId, pin.sha256)}/u/${crypto.randomUUID()}`;
-      await ctx.db.patch(object._id, { r2Key: key, r2PreparedAt: Date.now() });
+      await ctx.db.patch((await objectRow(ctx, object))._id, { r2Key: key, r2PreparedAt: Date.now() });
       object = { ...object, r2Key: key };
     }
     invariant(object.r2Key, 'SOURCE_UNAVAILABLE', 'Output storage binding is unavailable.');
@@ -147,10 +142,7 @@ export const pending = internalMutation({
   handler: async (ctx, input) => {
     const { pin } = await authorizeActionsTransfer(ctx, input);
     invariant(pin, 'BAD_ARGUMENT', 'Select exact object bytes.');
-    const object = await ctx.db
-      .query('projectObjects')
-      .withIndex('by_project_and_digest', q => q.eq('projectId', input.projectId).eq('digest', pin.sha256))
-      .unique();
+    const object = await findObject(ctx, input.projectId, pin.sha256);
     invariant(
       object &&
         !object.removed &&
@@ -170,10 +162,7 @@ export const verified = internalMutation({
   handler: async (ctx, input) => {
     const { pin } = await authorizeActionsTransfer(ctx, input);
     invariant(pin, 'BAD_ARGUMENT', 'Select exact object bytes.');
-    const object = await ctx.db
-      .query('projectObjects')
-      .withIndex('by_project_and_digest', q => q.eq('projectId', input.projectId).eq('digest', pin.sha256))
-      .unique();
+    const object = await findObject(ctx, input.projectId, pin.sha256);
     invariant(
       object &&
         !object.removed &&
@@ -184,7 +173,7 @@ export const verified = internalMutation({
       'SOURCE_UNAVAILABLE',
       'The output binding changed during storage verification.',
     );
-    if (!object.r2Committed) await ctx.db.patch(object._id, { r2Committed: true });
+    if (!object.r2Committed) await ctx.db.patch((await objectRow(ctx, object))._id, { r2Committed: true });
     return null;
   },
 });

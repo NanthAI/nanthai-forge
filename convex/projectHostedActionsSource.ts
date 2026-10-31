@@ -7,6 +7,7 @@ import { presignGet, r2Config } from './r2';
 import { blobStore } from './blobStore';
 import { directSourceWindow } from '../src/hosted-actions-direct';
 import { invariant } from '../src/errors';
+import { findObject } from './projectObjectFind';
 /** One bounded descriptor+GET window. Bytes go storage→runner, never via Convex. */
 export const resolve = internalMutation({
   args: { ...sessionArgs, digests: v.array(v.string()) },
@@ -21,10 +22,7 @@ export const resolve = internalMutation({
     const result = [];
     for (const digest of input.digests) {
       invariant(/^[a-f0-9]{64}$/.test(digest), 'BAD_ARGUMENT', 'Select exact source hashes.');
-      const row = await ctx.db
-        .query('projectObjects')
-        .withIndex('by_project_and_digest', q => q.eq('projectId', input.projectId).eq('digest', digest))
-        .unique();
+      const row = await findObject(ctx, input.projectId, digest);
       invariant(
         row && !row.removed && isStored(row),
         'SOURCE_UNAVAILABLE',

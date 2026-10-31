@@ -5,6 +5,7 @@ import { mirrorJob } from './projectGithubMirrorQueue';
 import { isStored } from './projectObjectFields';
 import { presignGet, r2Config } from './r2';
 import { invariant } from '../src/errors';
+import { findObject } from './projectObjectFind';
 export const resolve = internalQuery({
   args: { jobId: v.id('projectGithubMirrorJobs'), step: v.number(), digests: v.array(v.string()) },
   returns: v.string(),
@@ -14,10 +15,7 @@ export const resolve = internalQuery({
     invariant(input.digests.length <= 100, 'BAD_ARGUMENT', 'Resolve source in bounded windows.');
     const result = [];
     for (const digest of input.digests) {
-      const row = await ctx.db
-        .query('projectObjects')
-        .withIndex('by_project_and_digest', q => q.eq('projectId', active.job.projectId).eq('digest', digest))
-        .unique();
+      const row = await findObject(ctx, active.job.projectId, digest);
       invariant(
         row && !row.removed && isStored(row),
         'SOURCE_UNAVAILABLE',
