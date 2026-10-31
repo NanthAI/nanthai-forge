@@ -1,7 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, existsSync, rmSync, symlinkSync, utimesSync } from 'node:fs';
+import {
+  mkdtempSync,
+  mkdirSync,
+  writeFileSync,
+  existsSync,
+  readdirSync,
+  rmSync,
+  symlinkSync,
+  utimesSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { pruneReleases, slimReleaseBuild, settleRelease } from '../dist/maintainer-release-retention.js';
@@ -101,7 +110,19 @@ test('a completed release drops netlify plugins, node_modules and .git from its 
     mkdirSync(join(build, path), { recursive: true });
   writeFileSync(join(build, '.netlify', 'state.json'), '{}');
   writeFileSync(join(build, 'package.json'), '{}');
-  assert.deepEqual(slimReleaseBuild(journalFor(f.dir, build)), ['node_modules', '.netlify/plugins', '.git']);
+  for (const name of ['.env.local', '.env', '.env.example']) writeFileSync(join(build, name), 'SECRET=1');
+  assert.deepEqual(slimReleaseBuild(journalFor(f.dir, build)), [
+    'node_modules',
+    '.netlify/plugins',
+    '.git',
+    '.env',
+    '.env.example',
+    '.env.local',
+  ]);
+  assert.deepEqual(
+    readdirSync(build).filter(name => name.startsWith('.env')),
+    [],
+  );
   assert.ok(!existsSync(join(build, '.netlify', 'plugins')));
   assert.ok(existsSync(join(build, '.netlify', 'state.json')));
   assert.ok(existsSync(join(build, 'package.json')));

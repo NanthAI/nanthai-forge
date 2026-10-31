@@ -57,7 +57,9 @@ a cleanup error never fails the release):
 
 - Its build source drops `node_modules`, `.netlify/plugins` (the Netlify CLI's own
   0.5 GB `node_modules`, created during the web deploy) and `.git`: a release is
-  about 0.2 GB instead of 1.2 GB. A completed release never rebuilds.
+  about 0.2 GB instead of 1.2 GB. A completed release never rebuilds. It also drops
+  the top-level `.env*` files the build stage copied in (deploy credentials), so no
+  secret copy stays on disk; only file names are logged.
 - Old releases under `runtimeDirectory/releases` are removed except the release
   just finished, the one `installed-owner` points at, and each release named
   `previous` in a kept release's `owner-install-selection.json`, up to

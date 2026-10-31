@@ -106,6 +106,8 @@ export function pruneReleases(
 /**
  * A completed release never reruns its build: drop what only build, deploy and resume needed.
  * The Netlify CLI fills `.netlify/plugins` with its own node_modules (0.5 GB) during the web deploy.
+ * The build stage copies the development `.env.local` (deploy credentials) into the source: every
+ * top-level `.env*` file goes too. Only names are returned or logged, never contents.
  */
 export function slimReleaseBuild(journal: ReleaseJournal) {
   const build = journal.stages.find(stage => stage.name === 'build')?.attempts.at(-1)?.receipt?.result.path;
@@ -115,6 +117,11 @@ export function slimReleaseBuild(journal: ReleaseJournal) {
     if (!existsSync(join(build, path))) continue;
     rmSync(join(build, path), { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
     removed.push(path);
+  }
+  for (const entry of readdirSync(build, { withFileTypes: true })) {
+    if (!entry.name.startsWith('.env') || entry.isDirectory()) continue;
+    rmSync(join(build, entry.name), { force: true });
+    removed.push(entry.name);
   }
   return removed;
 }

@@ -141,7 +141,10 @@ test('a failed release deletes nothing; a completed one retires old releases and
   });
   const build = join(releases, f.request.operationId, 'build-x', 'source');
   const execute = (journal, name, directory, fail) => {
-    if (name === 'build') mkdirSync(join(build, '.netlify', 'plugins', 'node_modules'), { recursive: true });
+    if (name === 'build') {
+      mkdirSync(join(build, '.netlify', 'plugins', 'node_modules'), { recursive: true });
+      writeFileSync(join(build, '.env.local'), 'SECRET=1');
+    }
     writeFileSync(
       join(releases, f.request.operationId, 'owner-install-selection.json'),
       JSON.stringify({ previous: join(releases, old[2], 'install-x') }),
@@ -155,6 +158,7 @@ test('a failed release deletes nothing; a completed one retires old releases and
   );
   for (const id of old) assert.ok(existsSync(join(releases, id)));
   assert.ok(existsSync(join(build, '.netlify', 'plugins')));
+  assert.ok(existsSync(join(build, '.env.local'))); // Resumable: kept until the release completes.
   assert.equal(maintainerRelease(f.store, f.request.operationId, { execute }).complete, true);
   assert.deepEqual(
     old.map(id => existsSync(join(releases, id))),
@@ -162,6 +166,7 @@ test('a failed release deletes nothing; a completed one retires old releases and
   );
   assert.ok(existsSync(join(releases, f.request.operationId)));
   assert.ok(!existsSync(join(build, '.netlify', 'plugins')));
+  assert.ok(!existsSync(join(build, '.env.local')));
 });
 
 test('unknown provider reply never deploys twice; exact observation resumes original source', t => {
