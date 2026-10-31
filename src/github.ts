@@ -57,21 +57,8 @@ export function githubInput(input: string): { repository: string; ref: string | 
   return { repository: `${owner}/${name.replace(/\.git$/, '')}`, ref: kind ? rest.join('/') : undefined };
 }
 
-export async function githubJson<T>(path: string, token?: string, request: GithubFetch = fetch): Promise<T> {
-  invariant(
-    path.startsWith('/') && !path.split(/[/?]/).includes('..'),
-    'BAD_GITHUB_PATH',
-    'Invalid GitHub API path.',
-  );
-  const response = await request(`https://api.github.com${path}`, {
-    signal: AbortSignal.timeout(30_000),
-    headers: {
-      Accept: 'application/vnd.github+json',
-      'X-GitHub-Api-Version': '2022-11-28',
-      'User-Agent': 'NanthAi-Forge',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-  });
+/** GitHub's primary and secondary limits: a retryable error with the provider's reset. */
+export function assertGithubRateLimit(response: Response): void {
   if (
     response.status === 429 ||
     (response.status === 403 &&
@@ -96,6 +83,24 @@ export async function githubJson<T>(path: string, token?: string, request: Githu
       deadlines.length ? Math.max(...deadlines) : now + 60_000,
     );
   }
+}
+
+export async function githubJson<T>(path: string, token?: string, request: GithubFetch = fetch): Promise<T> {
+  invariant(
+    path.startsWith('/') && !path.split(/[/?]/).includes('..'),
+    'BAD_GITHUB_PATH',
+    'Invalid GitHub API path.',
+  );
+  const response = await request(`https://api.github.com${path}`, {
+    signal: AbortSignal.timeout(30_000),
+    headers: {
+      Accept: 'application/vnd.github+json',
+      'X-GitHub-Api-Version': '2022-11-28',
+      'User-Agent': 'NanthAi-Forge',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+  });
+  assertGithubRateLimit(response);
   invariant(
     response.ok,
     'GITHUB_UNAVAILABLE',

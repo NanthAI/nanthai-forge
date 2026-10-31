@@ -119,3 +119,20 @@ node --import ./tests/check-runtime.mjs --test --test-concurrency=1 tests/benchm
 
 The test reports numeric retained metadata size and wall duration. It does not
 measure live Convex billing, provider action peak memory, or real cleanup latency.
+
+## Large live import (B1.5c)
+
+`scripts/benchmark-import-projection.mjs TREE.json` replays a saved recursive
+GitHub tree through the real paged import handlers with synthetic bytes of each
+file's exact size. It prints executions, documents read and written, and peak
+memory before any live run. `scripts/benchmark-t3code-import.mjs DIR SPEC` runs the
+live import under this guard and writes `journal.json`, `progress.jsonl` and
+`report.json` to DIR. Run it again with the same DIR to resume the same
+operation; earlier reports stay as `report-<ms>.json`.
+
+GitHub serves one REST request per source blob and per directory. A
+29,000-file repository therefore needs about 33,000 requests against a token
+limit of 5,000 per hour. That limit is shared with every other use of the same
+GitHub user. A rate-limited blob stops the job with `GITHUB_RATE_LIMIT` and the
+provider reset time. The driver repeats the same operation after the reset, and
+after a dev redeploy that interrupted the worker.

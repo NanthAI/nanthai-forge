@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { createHash } from 'node:crypto';
-import { githubJson, type GithubFetch } from './github.js';
+import { assertGithubRateLimit, githubJson, type GithubFetch } from './github.js';
 import { invariant } from './errors.js';
 import { safeRelative } from './files.js';
 import { digest } from './hash.js';
@@ -149,6 +149,7 @@ export async function streamGithubSourceBlob(
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
   });
+  assertGithubRateLimit(response);
   invariant(
     response.ok && response.body,
     'GITHUB_UNAVAILABLE',

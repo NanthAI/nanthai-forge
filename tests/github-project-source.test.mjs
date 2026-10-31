@@ -213,6 +213,28 @@ test('raw blob hash and length failures never reach the object sink', async () =
   }
 });
 
+test('a rate-limited blob is a retryable rate limit with the provider reset, not lost access', async () => {
+  const reset = Math.floor(Date.now() / 1000) + 600;
+  const entry = { path: 'a.txt', sha: 'c'.repeat(40), size: 1, mode: '100644' };
+  await assert.rejects(
+    readGithubSourceBlob(
+      'fixture/repo',
+      entry,
+      undefined,
+      async () =>
+        new Response('', {
+          status: 403,
+          headers: { 'x-ratelimit-remaining': '0', 'x-ratelimit-reset': String(reset) },
+        }),
+    ),
+    error => error.code === 'GITHUB_RATE_LIMIT' && error.retryAt === reset * 1000,
+  );
+  await assert.rejects(
+    readGithubSourceBlob('fixture/repo', entry, undefined, async () => new Response('', { status: 404 })),
+    error => error.code === 'GITHUB_UNAVAILABLE',
+  );
+});
+
 test('gitlinks retain mode and pinned commits without requesting blobs or traversing submodules', async () => {
   let calls = 0;
   const original = {
