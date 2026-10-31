@@ -283,6 +283,8 @@ export async function finishFixture(
         );
       } else if (task.name === 'projectHostedLandingStall:alarm') {
         await tx('landingAlarm', stallApi.alarm, input);
+      } else if (task.name === 'projectHostedLandingStall:deadline') {
+        await tx('landingDeadline', stallApi.deadline, input);
       } else if (task.name === 'projectHostedLandingStallAlert:alert') {
         await tx('stallAlert', stallAlertApi.alert, input);
       } else if (task.name === 'projectHostedLandingWouldConflict:mark') {

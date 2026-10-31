@@ -171,6 +171,12 @@ export async function landingFixture(source = null) {
           (ctx, input) => alarms.raiseLandingAlarm(ctx, input, now),
           task.args[0],
         );
+      else if (task.name === 'projectHostedLandingStall:deadline')
+        result = await run(
+          'landingDeadline',
+          (ctx, input) => alarms.resolveStalledLanding(ctx, input, now),
+          task.args[0],
+        );
       else if (task.name === 'projectHostedLandingStallAlert:alert')
         result = await run(
           'stallAlert',

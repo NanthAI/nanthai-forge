@@ -1,5 +1,6 @@
-import { loadBatch, writeBatch } from './projectHostedLandingBatchStore';
 // SPDX-License-Identifier: Apache-2.0
+import { loadBatch, writeBatch } from './projectHostedLandingBatchStore';
+import { advanceBatchFallback } from './projectHostedLandingBatchFallback';
 import type { MutationCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import type { z } from 'zod';
@@ -33,6 +34,8 @@ export async function cancelHostedLanding(
     reason?: string;
     request: z.infer<typeof hostedLandingCancelSchema>;
     abandonOperationId?: string;
+    /** The stall deadline ended it (metric 5.3): a Forge outcome, not an operator cancel. */
+    drop?: true;
   },
 ) {
   const { projectId, actor, request } = input;
@@ -40,7 +43,11 @@ export async function cancelHostedLanding(
   // Automatic child cancellations retain requester and parent provenance without
   // counting as additional operator intervention commands in self-metrics.
   const payload = {
-    kind: input.abandonOperationId ? 'hosted-abandon-landing-cancel' : 'hosted-landing-cancel',
+    kind: input.drop
+      ? 'hosted-landing-drop'
+      : input.abandonOperationId
+        ? 'hosted-abandon-landing-cancel'
+        : 'hosted-landing-cancel',
     request,
     ...(input.abandonOperationId ? { parentOperationId: input.abandonOperationId } : {}),
     ...(input.reason ? { reason: input.reason } : {}),
@@ -100,7 +107,7 @@ export async function cancelHostedLanding(
         phase: 'terminal-failed',
         observation: landingObservation('cancelled'),
         error: {
-          code: 'LANDING_CANCELLED',
+          code: input.drop ? 'LANDING_STALLED' : 'LANDING_CANCELLED',
           message: input.reason ?? 'The hosted landing request was cancelled.',
         },
       };
@@ -112,6 +119,9 @@ export async function cancelHostedLanding(
       const key = { projectId, batchId };
       const { batch } = await loadBatch(ctx, key);
       await writeBatch(ctx, key, { ...batch, phase: batch.phase === 'landed' ? 'landed' : 'fallback' });
+      // This member's finish never runs again, and it may hold the individual
+      // fallback turn: hand the turn on now (Issue 108a24e3, peers queued 36 h).
+      await advanceBatchFallback(ctx, key, (await loadBatch(ctx, key)).batch, state.id);
       result = (await loadLanding(ctx, identity)).state;
     }
     // Invalidate cancelled member IO after release has scheduled its peers.

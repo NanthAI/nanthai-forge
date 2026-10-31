@@ -1282,7 +1282,15 @@ receipts, `status --pending` and landing observations. A missing wait reason is
 reported as `unrecorded-wait`, with the landing controller named. Native workers
 own one deadline while unalarmed work is pending. Hosted entries retain one alarm
 deadline, transfer it during admission and cancel it at settlement. Reading never drives or repairs the queue. Real progress clears
-the alarm and starts a new deadline. Idle and settled queues have no recurring
+the alarm and starts a new deadline. A hosted queued entry whose alarm fired gets
+one more deadline 60 minutes after its last progress (the dropped-landing limit).
+It re-drives the entry; if that makes no progress and nothing is left to drive it
+(not claimable, no pending attempt of its own, no batch peer holding the fallback
+turn or a run), Forge ends it as `terminal-failed` with `LANDING_STALLED` and a
+reason through the cancellation path, so the requester gets an outcome and batch
+peers are re-selected. While something live still drives it, the deadline re-arms
+at 2, 4, 8 and 16 hours and then stops; it never ends live work. Cancelling a
+batch member hands the individual fallback turn to the next member at once. Idle and settled queues have no recurring
 alarm wake. The hosted preparation watchdog grows from 30 seconds to one hour
 while no progress is recorded (three controller calls per hour at that cap);
 source completion still wakes it immediately.
