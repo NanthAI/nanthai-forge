@@ -264,6 +264,22 @@ test('only landed exact saved heads complete; newer saves, lifecycle changes, si
   );
 });
 
+test('completeOnAccept skips a pinned Lane and still completes its unpinned sibling', async () => {
+  const f = await acceptanceFixture(),
+    plain = await f.lane(),
+    // Seeded pinned, so the Candidate records its exact current pins and only the pin can skip it.
+    pinned = await f.lane({ pinned: true });
+  const item = await f.makeCandidate([plain, pinned], [], {
+    governance: { version: 1, paths: ['src/leaf.ts'], ownerInputs: false },
+  });
+  const { state } = await checked(f, item);
+  const { receipt } = await f.accept(state);
+  assert.equal(receipt.completion.enabled, true);
+  await f.materialize(receipt.id);
+  assert.equal((await f.readLane(plain.laneId)).state, 'completed');
+  assert.equal((await f.readLane(pinned.laneId)).state, 'active', 'a pinned Lane is never completed');
+});
+
 test('disabled completion policy preserves all Lane state and never completes an Intent', async () => {
   const f = await acceptanceFixture(),
     lane = await f.lane(),

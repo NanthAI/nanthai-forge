@@ -18,7 +18,7 @@ const receiptSchema = z
   .object({ at: z.string(), completion: z.object({ pages: z.number(), enabled: z.boolean() }).loose() })
   .loose();
 /** Operator sweep: complete every active Lane whose exact saved head an accepted receipt landed.
- * Receipts whose own acceptance already completes (completeOnAccept) are skipped. One call reads at
+ * Receipts whose own acceptance already completes (completeOnAccept) are skipped, and so is any pinned Lane. One call reads at
  * most RECEIPTS receipts and about ENTRIES Lane entries; the caller resumes from `next` until `done`.
  * Re-running is safe: a Lane that is no longer active, or changed after landing, is never written. */
 export const completeMerged = mutation({
@@ -73,7 +73,7 @@ export const completeMerged = mutation({
             });
             if (!current) continue;
             const lane = hostedLaneSchema.parse(JSON.parse(current.value));
-            if (lane.state !== 'active' || !sameSaveLane(lane, entry)) continue;
+            if (lane.state !== 'active' || lane.pinned || !sameSaveLane(lane, entry)) continue;
             await writeHostedRecord(ctx, {
               projectId: input.projectId,
               actor: project.owner,

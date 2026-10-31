@@ -17,7 +17,7 @@ export type LaneAddress = { url: string; projectId: string };
 export type LaneStateReader = (
   address: LaneAddress,
   laneIds: string[],
-) => Promise<Map<string, string> | null>;
+) => Promise<Map<string, string | { state: string; pinned?: boolean }> | null>;
 export type IdleLane = { laneId: string; outcome?: string; idleHours: number; root: string };
 export type LaneHousekeeping = {
   idle: IdleLane[];
@@ -137,6 +137,7 @@ export async function laneHousekeeping(input: {
   if (!thresholds.length) return result;
   const due = entries.filter(entry => now - entry.lastActionAt >= Math.min(...thresholds));
   const states = new Map<string, string | null>();
+  const pins = new Map<string, boolean>();
   const groups = new Map<string, LaneRegistryEntry[]>();
   for (const entry of due) {
     const key = JSON.stringify([entry.url, entry.projectId]);
@@ -146,7 +147,7 @@ export async function laneHousekeeping(input: {
     const [url, projectId] = JSON.parse(key) as [string, string];
     for (let index = 0; index < group.length; index += 100) {
       const page = group.slice(index, index + 100);
-      let read: Map<string, string> | null = null;
+      let read: Map<string, string | { state: string; pinned?: boolean }> | null = null;
       try {
         read = await input.readStates(
           { url, projectId },
@@ -155,7 +156,12 @@ export async function laneHousekeeping(input: {
       } catch {
         read = null;
       }
-      for (const entry of page) states.set(entry.laneId, read?.get(entry.laneId) ?? null);
+      for (const entry of page) {
+        const row = read?.get(entry.laneId);
+        states.set(entry.laneId, row === undefined ? null : typeof row === 'string' ? row : row.state);
+        if (read && row !== undefined)
+          pins.set(entry.laneId, typeof row === 'string' ? false : Boolean(row.pinned));
+      }
     }
   }
   const isDirty = input.isDirty ?? hostedLaneDirty;
@@ -163,6 +169,14 @@ export async function laneHousekeeping(input: {
   for (const entry of due) {
     const state = states.get(entry.laneId) ?? null,
       idleFor = now - entry.lastActionAt;
+    // The server flag wins and refreshes this client's mirror; an unreadable server keeps the last known pin.
+    const pinned = pins.get(entry.laneId) ?? Boolean(entry.pinned);
+    if (pins.has(entry.laneId) && pinned !== Boolean(entry.pinned))
+      recordLane({ laneId: entry.laneId, pinned, lastActionAt: entry.lastActionAt }, now);
+    if (pinned) {
+      result.kept.push({ laneId: entry.laneId, reason: 'pinned' });
+      continue;
+    }
     const listIdle = () =>
       result.idle.push({
         laneId: entry.laneId,
@@ -241,8 +255,9 @@ export function convexLaneStates(
     const rows = (typeof value === 'string' ? JSON.parse(value) : value) as {
       laneId: string;
       state: string;
+      pinned?: boolean;
     }[];
-    return new Map(rows.map(row => [row.laneId, row.state]));
+    return new Map(rows.map(row => [row.laneId, { state: row.state, pinned: row.pinned === true }]));
   };
 }
 

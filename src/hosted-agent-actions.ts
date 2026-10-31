@@ -34,8 +34,18 @@ import { invariant } from './errors.js';
 import { plannedIntent } from './hosted-agent-planning.js';
 import { unadvertisedActionError } from './hosted-agent-version.js';
 import { completeMergedLanes } from './hosted-agent-complete.js';
+import { recordLane, readLaneEntry } from './lane-registry.js';
 import { saveExpectedSchema } from './hosted-save.js';
 import type { HostedAgentSession } from './hosted-agent-transport.js';
+const pinResultSchema = z
+  .object({
+    laneId: z.uuid(),
+    pinned: z.boolean(),
+    state: z.enum(['active', 'completed', 'abandoned']),
+    changed: z.boolean(),
+    version: z.number(),
+  })
+  .strict();
 const outcome = z.object({ outcome: z.object({ status: z.string(), result: z.unknown().optional() }) });
 export function agentSourceOutcome(value: unknown) {
   const parsed = outcome.safeParse(value);
@@ -456,6 +466,22 @@ export async function executeHostedAgent(
       syncRequestSchema.parse({ kind: 'revert', operationId, authorityEpoch: epoch, ...command }),
     );
     return driveAgentSource(session, 'Sync', operationId, request);
+  }
+  if (action === 'pin') {
+    const command = hostedAgentCommandSchemas.pin.parse(input);
+    const laneId = command.laneId ?? session.marker()?.selection.laneId;
+    invariant(laneId, 'BAD_ARGUMENT', 'Select laneId or open a hosted Lane.');
+    const result = pinResultSchema.parse(
+      await session.mutation('projectHostedLanePin:setPin', {
+        authorityEpoch: epoch,
+        laneId,
+        pinned: command.pinned,
+      }),
+    );
+    // Advisory machine-local mirror so prune and cache GC keep the checkout even offline.
+    const known = readLaneEntry(laneId);
+    if (known) recordLane({ laneId, pinned: command.pinned, lastActionAt: known.lastActionAt });
+    return { phase: 'pin', ...result };
   }
   if (action === 'complete-merged') {
     hostedAgentCommandSchemas['complete-merged'].parse(input);

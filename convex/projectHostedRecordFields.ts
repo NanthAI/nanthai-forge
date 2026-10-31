@@ -21,6 +21,8 @@ const indexed = {
   status: v.string(),
   version: v.number(),
   ownerOnly: v.optional(v.boolean()),
+  /** Lane owner pin, mirrored from the record so reads never open bodies. */
+  pinned: v.optional(v.boolean()),
 };
 export const hostedRecordFields = {
   ...identity,

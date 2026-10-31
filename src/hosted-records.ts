@@ -51,6 +51,8 @@ export const hostedRecordSchema = z.discriminatedUnion('kind', [
       sourceVersion: version,
       lifecycleVersion: version,
       state: z.enum(['active', 'completed', 'abandoned']),
+      /** Owner pin: cleanup (complete-merged, completeOnAccept, prune, cache GC) never completes or deletes it. Absent when unpinned. */
+      pinned: z.literal(true).optional(),
       authorityEpoch: version,
       revert: z.object({ receiptId: z.uuid(), previous: hash, accepted: hash }).strict().optional(),
       resolution: z
@@ -137,7 +139,7 @@ export function hostedRecordIndex(record: HostedRecord) {
     case 'intent':
       return { parent: record.creatorAccountId, status: record.status };
     case 'lane':
-      return { parent: record.intentId, status: record.state };
+      return { parent: record.intentId, status: record.state, ...(record.pinned ? { pinned: true } : {}) };
     case 'save':
       return { parent: record.laneId, status: 'saved' };
     case 'candidate':

@@ -57,7 +57,7 @@ export async function completeAcceptedHeads(ctx: MutationCtx, input: ReceiptIden
     });
     invariant(current, 'SOURCE_UNAVAILABLE', 'An accepted Lane is unavailable.');
     const lane = hostedLaneSchema.parse(JSON.parse(current.value));
-    if (lane.state !== 'active' || !sameSaveLane(lane, entry)) continue;
+    if (lane.state !== 'active' || lane.pinned || !sameSaveLane(lane, entry)) continue;
     await writeHostedRecord(ctx, {
       projectId: input.projectId,
       actor: project.owner,

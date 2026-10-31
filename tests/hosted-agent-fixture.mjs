@@ -258,6 +258,14 @@ export function agentFixture(t) {
         priority: request.priority,
         priorityVersion: request.expectedVersion + 1,
       }));
+    else if (name === 'projectHostedLanePin:setPin')
+      result = {
+        laneId: args.laneId,
+        pinned: args.pinned,
+        state: 'active',
+        changed: true,
+        version: lane.version + 1,
+      };
     else if (name === 'projectHostedLanding:cancel')
       result = once(id, () => ({
         id: request.submissionId,

@@ -69,6 +69,7 @@ export function registerHostedAgentWorkflow(
         'resolve',
         'finish',
         'prioritize',
+        'pin',
         'cancel',
         'revert',
         'abandon',
@@ -81,7 +82,7 @@ export function registerHostedAgentWorkflow(
         'preflight',
       ],
       description:
-        "Hosted Lane actions over the same CLI transport and recovery journal. Verbs: {action:start|save|land, mode?, ...fields of the old action}: start open|reopen; save sync|candidate|overlap-answer|overlap-answers|friction|decision; land save (checkOnly:true checks without landing). Old names still work; checkpoint aliases save. Retain original parameters/operationId after unknown replies; a new UUID starts new work. Finish always requests agent acceptance under current project policy, including with account credentials. Pending is not accepted. finish priority:urgent is owner-only (other submitters retain normal with a reason). prioritize changes a queued Candidate submission priority:urgent|normal; it never cancels a running check. ack answers every pending overlap notice on a Lane; preflight runs the saved head's affected tests here and records the result for land.",
+        "Hosted Lane actions over the same CLI transport and recovery journal. Verbs: {action:start|save|land, mode?, ...fields of the old action}: start open|reopen; save sync|candidate|overlap-answer|overlap-answers|friction|decision; land save (checkOnly:true checks without landing). Old names still work; checkpoint aliases save. Retain original parameters/operationId after unknown replies; a new UUID starts new work. Finish always requests agent acceptance under current project policy, including with account credentials. Pending is not accepted. finish priority:urgent is owner-only (other submitters retain normal with a reason). prioritize changes a queued Candidate submission priority:urgent|normal; it never cancels a running check. pin {laneId?,pinned?:true|false} is an owner command: a pinned Lane is skipped by complete-merged, completeOnAccept, Intent cascade, prune and cache GC, and an explicit complete or abandon refuses it until unpinned. ack answers every pending overlap notice on a Lane; preflight runs the saved head's affected tests here and records the result for land.",
     },
     {
       name: 'forge_check',

@@ -18,6 +18,8 @@ export const laneRegistryEntrySchema = z.object({
   lastActionAt: z.number(),
   /** Terminal state this client observed; the server read confirms before any removal. */
   state: z.enum(['completed', 'abandoned']).optional(),
+  /** Owner pin as this client last saw it: prune and cache GC keep the checkout. The server decides; housekeeping refreshes it. */
+  pinned: z.boolean().optional(),
   /** The Forge command this machine is running in the Lane now; a dead pid means it is stale. */
   running: z.object({ action: z.string(), pid: z.number(), since: z.number() }).nullable().optional(),
 });

@@ -105,7 +105,10 @@ export function gcNestedLanes(input: {
   } catch {
     /* Without a parent listing, nothing is protected by link; the other guards still apply. */
   }
-  const registry = new Map(listLanes().map(entry => [resolve(entry.root), entry.lastActionAt]));
+  const lanes = listLanes();
+  const registry = new Map(lanes.map(entry => [resolve(entry.root), entry.lastActionAt]));
+  // Owner-pinned Lanes (this client's registry mirror of the server flag) are never evicted.
+  const pinned = new Set(lanes.filter(entry => entry.pinned).map(entry => entry.laneId));
   const keep = new Set(input.keepLaneIds ?? []);
   const copies = names.map(laneId => {
     const copy = join(directory, laneId);
@@ -149,13 +152,15 @@ export function gcNestedLanes(input: {
     if (!tooOld && !tooBig) continue;
     const reason = keep.has(item.laneId)
       ? 'the caller’s Lane'
-      : lockHeld(item.copy) || now - item.used < GRACE_MS
-        ? 'in use'
-        : linked.has(item.copy)
-          ? 'linked from a sibling directory'
-          : isDirty(item.copy)
-            ? 'unsaved edits'
-            : null;
+      : pinned.has(item.laneId)
+        ? 'pinned'
+        : lockHeld(item.copy) || now - item.used < GRACE_MS
+          ? 'in use'
+          : linked.has(item.copy)
+            ? 'linked from a sibling directory'
+            : isDirty(item.copy)
+              ? 'unsaved edits'
+              : null;
     if (reason) {
       result.kept.push({ laneId: item.laneId, reason });
       continue;

@@ -58,6 +58,7 @@ const rows = [
   ['reopen', 'start --reopen', 'reopen', 'reopen'],
   ['complete', 'x complete'],
   ['complete-merged', 'x complete-merged'],
+  ['pin', 'x pin'],
   ['clean', 'x clean'],
   ['take', 'x take'],
   ['link', null],
@@ -240,6 +241,7 @@ test('old and new spellings send the same hosted request; only the old one print
     ['revert', ['x', 'revert'], { message: 'R' }],
     ['abandon', ['x', 'abandon'], { laneId }],
     ['prioritize', ['x', 'prioritize'], { submissionId, priority: 'urgent' }],
+    ['pin', ['x', 'pin'], { laneId, pinned: true }],
     ['configure-check', ['x', 'configure-check'], { name: 'verify' }],
     ['configure-runner', ['x', 'configure-runner'], { provider: 'self-hosted' }],
   ];

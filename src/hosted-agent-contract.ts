@@ -45,6 +45,7 @@ export const hostedAgentPlanningActions = ['planning', 'put-planning-item', 'com
  * that list strictly, and the server enforces owner authority on each call. */
 export const hostedAgentOwnerActions = [
   'prioritize',
+  'pin',
   'configure-check',
   'configure-runner',
   'check-settings',
@@ -209,6 +210,8 @@ export const hostedAgentCommandSchemas = {
     .strict(),
   /** Close one Lane whose work landed; a repeat is a no-op. */
   complete: z.object({ ...lane }).strict(),
+  /** Owner pin: cleanup (complete-merged, completeOnAccept, Intent cascade, prune, cache GC) skips the Lane. */
+  pin: z.object({ ...lane, pinned: z.boolean().default(true) }).strict(),
   /** Close every active Lane whose exact saved head an accepted receipt landed. */
   'complete-merged': z.object({}).strict(),
   reopen: z

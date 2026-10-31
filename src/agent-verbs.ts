@@ -39,6 +39,7 @@ export const operatorActions = [
   'abandon',
   'complete',
   'complete-merged',
+  'pin',
   'clean',
   'take',
   'guidance',

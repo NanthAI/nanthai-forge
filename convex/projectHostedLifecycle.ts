@@ -98,6 +98,11 @@ export const transition = mutation({
           'Only an active Lane can be completed.',
         );
         invariant(
+          !record.pinned || request.action === 'reopen',
+          'LANE_PINNED',
+          'The owner pinned this Lane. Unpin it (pin with pinned:false) before completing or abandoning it.',
+        );
+        invariant(
           request.action !== 'abandon' || !target.dirty || target.saveOperationId,
           'LANE_DIRTY',
           'Lane has unsaved edits. Use saveFirst:true to save before abandoning.',

@@ -92,7 +92,7 @@ Reads: tests, status, landing, observe, wait, log, link,
        handoff-read, making-of, metrics, improve, decisions, policy, check-settings, capabilities,
        planning (hosted backlog; writes: put-planning-item, comment-planning-item; start planningItemId).
 Operator (nforge x ROOT ACTION): accept, cancel, revert, undo-revert, undo-sync, abandon,
-       complete, complete-merged, clean, take, guidance, pre-edit, install-hooks, uninstall-hooks,
+       complete, complete-merged, pin, clean, take, guidance, pre-edit, install-hooks, uninstall-hooks,
        friction-triage, set-policy, define-check, configure-check, configure-runner, prioritize.
 Old action names (checkpoint, sync, compose, run, check, finish, open, reopen, land-ready,
 confirm-tests, handoff, report, friction, decide, peer-ack, integrate, and operator actions under
@@ -202,6 +202,7 @@ const examples: Record<string, unknown> = {
   abandon: { laneId: 'LANE_ID', reason: 'Superseded by accepted work', saveFirst: true },
   reopen: { laneId: 'LANE_ID' },
   'complete-merged': { channel: 'main' },
+  pin: { laneId: 'LANE_ID', pinned: true },
   clean: { apply: false, kinds: ['check-workspaces', 'lane-deps', 'lanes'] },
   status: { laneId: 'LANE_ID' },
   records: { collection: 'lanes', state: 'active', merged: false, offset: 0, limit: 50 },
@@ -285,6 +286,9 @@ function actionHelp(action: string): string {
   if (action === 'prioritize')
     result +=
       'Hosted owner command: prioritize {submissionId,priority:"urgent"|"normal"}. Reorders a queued Candidate; no running check is cancelled. Replay the same operationId after an unknown reply. urgent follows agentDefaults.urgentRoles (default owner only): agents on the owner\'s credential are refused unless the owner issues it with asOwner:true.\n';
+  if (action === 'pin')
+    result +=
+      'Hosted owner command: x ROOT pin {laneId?,pinned?:true|false}. A pinned Lane is skipped by complete-merged, completeOnAccept, Intent cascade, prune and client cache GC, and an explicit complete or abandon refuses it (LANE_PINNED) until you unpin it with pinned:false. Reopen still works. Any state can be pinned, including a completed Lane. A repeat is a no-op.\n';
   if (action === 'ack')
     result +=
       'Hosted: ack {laneId?,choice?:"accept-order"|"swap"|"split",text?} answers every pending overlap notice on the Lane (stable answer ids, so a repeat replays). accept-order keeps your change and lands in order; split records that you routed around.\n';
@@ -340,6 +344,7 @@ function actionHelp(action: string): string {
       'tests',
       'confirm-tests',
       'prioritize',
+      'pin',
       'configure-check',
       'configure-runner',
       'check-settings',

@@ -57,7 +57,8 @@ export async function advanceLifecycle(ctx: MutationCtx, plan: LifecyclePlan) {
     });
     invariant(row, 'SOURCE_UNAVAILABLE', 'A selected child Lane is unavailable.');
     const lane = hostedLaneSchema.parse(JSON.parse(row.value));
-    if (lane.state !== 'active') continue;
+    // A pinned Lane is the owner's to close; an Intent cascade never abandons it.
+    if (lane.state !== 'active' || lane.pinned) continue;
     const record = {
       ...lane,
       version: lane.version + 1,
