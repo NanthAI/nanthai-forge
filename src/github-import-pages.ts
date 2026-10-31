@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { z } from 'zod';
 /** Scheduling/encoding boundaries, never repository exclusions or user quotas. */
 export const importPageFiles = 1000;
 export const importPageBytes = 8 * 1024 * 1024;
@@ -12,6 +13,16 @@ export const initialImportProgress = (): ImportProgress => ({
   discovered: 1,
   after: '',
 });
+/** Archive imports keep only the pinned root tree and run count: progress is the
+ * content-addressed objects already stored, never a per-file inventory. */
+export const archiveCursorSchema = z
+  .object({
+    schema: z.literal(3),
+    tree: z.string().regex(/^[0-9a-f]{40}(?:[0-9a-f]{24})?$/),
+    runs: z.number().int().nonnegative(),
+  })
+  .strict();
+export const initialArchiveCursor = (tree: string) => ({ schema: 3 as const, tree, runs: 0 });
 export function filePage<T extends { size: number }>(
   rows: T[],
   encode: (row: T) => unknown = row => row,

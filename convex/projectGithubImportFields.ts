@@ -2,7 +2,7 @@
 import { defineTable } from 'convex/server';
 import { v } from 'convex/values';
 export const githubImportFields = {
-  protocol: v.optional(v.literal(2)),
+  protocol: v.optional(v.union(v.literal(2), v.literal(3))),
   publication: v.optional(
     v.object({
       backupId: v.id('projectBackups'),

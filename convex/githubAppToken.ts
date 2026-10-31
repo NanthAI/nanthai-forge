@@ -7,7 +7,7 @@ import type { Id } from './_generated/dataModel';
 import { operatorBinding } from './githubBindingAccess';
 import type { ActionCtx } from './_generated/server';
 import { githubRequest } from '../src/hosted-github-api';
-import { invariant } from '../src/errors';
+import { ForgeError, invariant } from '../src/errors';
 export type GithubAppPermissions = Record<string, 'read' | 'write'>;
 /** Least privilege for check dispatch/cancel; checks create no refs or commits. */
 export const actionsPermissions: GithubAppPermissions = { actions: 'write', contents: 'read' };
@@ -85,6 +85,26 @@ async function mintInstallationToken(
     'GitHub App token is unavailable.',
   );
   return result.token;
+}
+/** Import reads on the App's own quota, never the importer's: contents and
+ * metadata read on exactly one repository, by the numeric ID an authorized
+ * lookup returned. Null when the App is not configured or not installed there,
+ * in which case the caller keeps its already authorized credential. */
+export async function importReadToken(repo: string, repoId: unknown, request: typeof fetch = fetch) {
+  if (!process.env.GITHUB_APP_ID || !process.env.GITHUB_APP_PRIVATE_KEY) return null;
+  if (typeof repoId !== 'number' || !Number.isSafeInteger(repoId) || repoId <= 0) return null;
+  try {
+    const { api, installation } = await appInstallation(repo, request, Date.now());
+    return await mintInstallationToken(
+      api,
+      installation.id,
+      { repository_ids: [repoId] },
+      { contents: 'read', metadata: 'read' },
+    );
+  } catch (error) {
+    if (error instanceof ForgeError) return null;
+    throw error;
+  }
 }
 /** Read-only preflight: the App is installed on the repository and its accepted
  * permissions cover the request. One GitHub call; no token is minted. A pending

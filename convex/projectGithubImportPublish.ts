@@ -12,12 +12,20 @@ import { digest } from '../src/hash';
 import { authorizeGithub } from '../src/github-access';
 import { githubConfig } from './access';
 import { invariant } from '../src/errors';
+import { importPageFiles } from '../src/github-import-pages';
 
+export type ImportRows = Record<'imported' | 'blobs', { key: string; value: string }[]>;
 /** Metadata is traversed in bounded ordered pages. No whole repository array,
- * State string, manifest string or projection crosses an RPC boundary. */
-export async function publishImport(ctx: ActionCtx, job: Doc<'projectGithubImports'>) {
+ * State string, manifest string or projection crosses an RPC boundary. Archive
+ * imports pass their verified rows in key order instead of an inventory. */
+export async function publishImport(ctx: ActionCtx, job: Doc<'projectGithubImports'>, memory?: ImportRows) {
   const identity = { id: job._id, actor: job.owner };
   async function* pages(part: string) {
+    if (memory) {
+      const rows = memory[part as keyof ImportRows];
+      for (let at = 0; at < rows.length; at += importPageFiles) yield rows.slice(at, at + importPageFiles);
+      return;
+    }
     let after = '';
     while (true) {
       const rows = await ctx.runQuery(internal.projectGithubImportInventory.scan, {

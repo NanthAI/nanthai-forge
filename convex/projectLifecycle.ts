@@ -280,7 +280,7 @@ export const purge = internalMutation({
         const task = await ctx.db.system.get(job.task);
         if (task && task.state.kind === 'pending') await ctx.scheduler.cancel(job.task);
       }
-      if (job.protocol !== 2) await blobStore(ctx).delete(job.cursor);
+      if (job.protocol === undefined) await blobStore(ctx).delete(job.cursor);
       await ctx.db.delete(job._id);
     }
     if (imports.length === 50) {

@@ -20,10 +20,13 @@ export class ImportUpload {
   peakBufferedBytes = 0;
   private completions: Completions = [];
   private recipes: Recipes = [];
+  /** Objects newly written by this upload; already stored ones are skipped. */
+  uploaded = 0;
   constructor(
     private ctx: ActionCtx,
     private projectId: Id<'hostedProjects'>,
     private actor: string,
+    private concurrency = 8,
   ) {}
   put = (bytes: Buffer) => {
     const pin = { sha256: digest(bytes), size: bytes.length };
@@ -48,9 +51,10 @@ export class ImportUpload {
         actor: this.actor,
         objects: page.map(([digest, bytes]) => ({ digest, size: bytes.length })),
       });
-      await mapExchange(page, 8, async ([digest, bytes], i) => {
+      await mapExchange(page, this.concurrency, async ([digest, bytes], i) => {
         const target = prepared[i]!;
         if (target.stored) return;
+        this.uploaded++;
         if (target.key) {
           const config = r2Config(),
             put = await presignPut(config, target.key, { digest, size: bytes.length });
@@ -64,14 +68,18 @@ export class ImportUpload {
             'R2_UPLOAD_FAILED',
             'Object storage could not upload source.',
           );
-          const head = await headObject(config, target.key);
-          invariant(
-            head.status === 'ok' &&
-              head.size === bytes.length &&
-              (!head.checksum || head.checksum === checksumOf(digest)),
-            'R2_VERIFY_FAILED',
-            'Object storage could not verify source.',
-          );
+          // The signed SHA-256 checksum and length make a successful PUT a
+          // verified write. Only an existing key (412) needs its bytes checked.
+          if (!response.ok) {
+            const head = await headObject(config, target.key);
+            invariant(
+              head.status === 'ok' &&
+                head.size === bytes.length &&
+                (!head.checksum || head.checksum === checksumOf(digest)),
+              'R2_VERIFY_FAILED',
+              'Object storage could not verify source.',
+            );
+          }
           this.completions.push({ id: target.id, key: target.key });
         } else {
           const storageId = await this.ctx.storage.store(

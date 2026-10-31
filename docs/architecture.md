@@ -782,8 +782,11 @@ transport state; they do not grant hosted access or move a Channel. See
 
 Projects have an explicit optional `sourceAuthority` record with mode
 `native-owner`, `server-shadow` or `server` and a nonnegative fencing epoch.
-New projects from native upload, browser bootstrap and GitHub import all record
-`native-owner` at epoch 0. Missing legacy fields mean that same authority;
+Projects created for a native upload record `native-owner` at epoch 0 and switch
+through the drained-owner cutover. Browser/CLI bootstrap and GitHub import have no
+native owner: their publishing transaction moves the project to `server` at epoch
+1, selects hosted `main` at the published head and writes the same cutover receipt
+(`projectHostedBirth`). Missing legacy fields mean `native-owner` at epoch 0;
 creation retries preserve an existing record. Hosting requests, presence and
 heartbeats never select authority. `projectSourceAuthority:current` checks
 current project access and reads that project row without scanning or migrating

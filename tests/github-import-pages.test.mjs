@@ -59,6 +59,9 @@ test('28,905 files / 4,089 directories / two gitlinks use bounded pages within t
       });
     if (path.includes('/commits/'))
       return Response.json({ sha: 'a'.repeat(40), commit: { tree: { sha: hex(1) } } });
+    // Truncated recursive listing: this budget covers directory-by-directory discovery.
+    if (path.includes('/git/trees/') && new URL(url).searchParams.has('recursive'))
+      return Response.json({ sha: hex(1), truncated: true, tree: [] });
     if (path.includes('/git/trees/')) {
       const id = path.split('/').at(-1);
       return Response.json({ sha: id, truncated: false, tree: trees.get(id) });

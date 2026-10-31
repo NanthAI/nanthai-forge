@@ -6,6 +6,8 @@ import { internal } from './_generated/api';
 import type { Id, Doc } from './_generated/dataModel';
 import { githubInput } from '../src/github';
 import { beginGithubSource } from '../src/github-project-source';
+import { listGithubTree } from '../src/github-archive-source';
+import { importReadToken } from './githubAppToken';
 import { authorizeGithub } from '../src/github-access';
 import { githubConfig } from './access';
 import { invariant } from '../src/errors';
@@ -54,7 +56,24 @@ export const start = action({
         ref ?? access.repository.default_branch,
         access.token,
       );
+      // One recursive listing decides the transfer: a complete tree streams the
+      // commit archive; a truncated one keeps directory-by-directory discovery.
+      const listing = await listGithubTree(
+        source.repository,
+        source.pending[0]!.sha,
+        (await importReadToken(access.repository.full_name, (access.repository as { id?: unknown }).id)) ??
+          access.token,
+      );
       return await ctx.runMutation(internal.projectGithubImportStore.begin, {
+        ...(listing
+          ? {
+              archive: {
+                total: listing.files.length,
+                totalBytes: listing.totalBytes,
+                submodules: listing.submodules,
+              },
+            }
+          : {}),
         ...key,
         name: input.name?.trim() || access.repository.full_name.split('/').at(-1)!,
         repository: source.repository,

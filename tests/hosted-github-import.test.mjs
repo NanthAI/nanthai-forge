@@ -65,6 +65,9 @@ function fixture(t, { privateRepository = false, tooLarge = false, submodules = 
       });
     if (p.includes('/commits/'))
       return Response.json({ sha: 'a'.repeat(40), commit: { tree: { sha: 'b'.repeat(40) } } });
+    // A truncated recursive listing keeps these cases on directory-by-directory discovery.
+    if (p.includes('/git/trees/') && new URL(url).searchParams.has('recursive'))
+      return Response.json({ sha: 'b'.repeat(40), truncated: true, tree: [] });
     if (p.includes('/git/trees/'))
       return Response.json({
         sha: 'b'.repeat(40),

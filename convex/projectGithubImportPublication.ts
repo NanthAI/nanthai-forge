@@ -9,6 +9,7 @@ import { HOSTED_WORK_INDEX_FORMAT } from '../src/work-hosted-summary';
 import { digest } from '../src/portable-hash';
 import { isStored } from './projectObjectFields';
 import { invariant } from '../src/errors';
+import { selectBornMain } from './projectHostedBirth';
 const pin = v.object({ sha256: v.string(), size: v.number() });
 export const begin = internalMutation({
   args: {
@@ -24,7 +25,7 @@ export const begin = internalMutation({
   handler: async (ctx, input) => {
     const job = await readJob(ctx, input);
     invariant(
-      job.protocol === 2 && job.step === input.step && job.completed === job.total && job.totalKnown,
+      job.protocol !== undefined && job.step === input.step && job.completed === job.total && job.totalKnown,
       'IMPORT_INCOMPLETE',
       'Complete the pinned source before publication.',
     );
@@ -145,6 +146,14 @@ export const finish = internalMutation({
         initialRevision: 0,
         revision: 0,
       },
+    });
+    // Born hosted: agents start Lanes on the imported main with no native owner.
+    await selectBornMain(ctx, project, {
+      operationId: job.operationId,
+      head: publication.head,
+      backupId: publication.backupId,
+      generationId: generation._id,
+      origin: 'github-import',
     });
     await ctx.db.patch(job._id, { phase: 'ready', error: undefined });
     return null;

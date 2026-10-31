@@ -30,7 +30,7 @@ const at = '2026-01-01T00:00:00.000Z';
 const code = expected => error => (error.data?.code ?? error.code) === expected;
 const defaultAuthority = { mode: 'native-owner', epoch: 0 };
 
-test('native upload, browser bootstrap and GitHub import explicitly retain native authority', async () => {
+test('native upload and an unpublished GitHub import keep native authority; a browser project is hosted from birth', async () => {
   const s = state([]);
   const nativeId = await native.open._handler(s.ctx, { key: randomUUID(), name: 'Native' });
   const input = { operationId: randomUUID(), name: 'Browser', at };
@@ -60,11 +60,16 @@ test('native upload, browser bootstrap and GitHub import explicitly retain nativ
     visibility: 'private',
   });
   const importedId = s.tables.projectGithubImports.get(importId).projectId;
-  for (const projectId of [nativeId, browserId, importedId]) {
+  for (const projectId of [nativeId, importedId]) {
     const project = s.tables.hostedProjects.get(projectId);
     assert.deepEqual(project.sourceAuthority, defaultAuthority);
     assert.deepEqual(await authority.current._handler(s.ctx, { projectId }), defaultAuthority);
   }
+  const born = { mode: 'server', epoch: 1 };
+  assert.deepEqual(s.tables.hostedProjects.get(browserId).sourceAuthority, born);
+  assert.deepEqual(await authority.current._handler(s.ctx, { projectId: browserId }), born);
+  const main = [...s.tables.projectHostedChannels.values()].find(row => row.projectId === browserId);
+  assert.equal(JSON.parse(main.selection).head, seed.head);
   assert.equal(s.tables.hostedProjects.get(nativeId).hostingRequest, undefined);
   assert.ok(s.tables.hostedProjects.get(browserId).hostingRequest);
   assert.ok(s.tables.hostedProjects.get(importedId).hostingRequest);

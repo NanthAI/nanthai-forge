@@ -70,6 +70,7 @@ Usage:
   nforge maintenance check-logs ROOT --dry-run|--apply --plan FILE [--hosted]
   nforge maintenance r2-backfill <root> [--dry-run|--verify] [--resume] [--state FILE]
   nforge hosted-work <deployment-url> <project-id> JSON
+  nforge make-editable <deployment-url> <project-id> [operation-uuid]
   nforge coordination <deployment-url> <project-id> JSON
   nforge mcp-coordination <deployment-url> <project-id>
   nforge exchange ROOT pull [--target NEW_DIRECTORY]
@@ -169,6 +170,8 @@ async function main(args: string[]): Promise<unknown> {
   }
   if (args[0] === 'maintenance') return (await import('./maintenance-cli.js')).maintenanceCli(args.slice(1));
   if (args[0] === 'hosted-work') return hostedWorkCli(args.slice(1));
+  if (args[0] === 'make-editable')
+    return (await import('./make-editable-cli.js')).makeEditableCli(args.slice(1));
   if (args[0] === 'coordination') return coordinationCli(args.slice(1));
   if (args[0] === 'mcp-coordination') {
     invariant(

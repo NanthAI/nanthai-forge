@@ -24,6 +24,7 @@ import {
 } from '../src/github-import-pages';
 import { ImportUpload } from './projectGithubImportUpload';
 import { publishImport } from './projectGithubImportPublish';
+import { runArchiveImport } from './projectGithubImportArchive';
 export const run = internalAction({
   args: { id: v.id('projectGithubImports'), actor: v.string() },
   returns: v.null(),
@@ -31,6 +32,10 @@ export const run = internalAction({
     const { job, entries } = await ctx.runQuery(internal.projectGithubImportInventory.page, input);
     if (job.phase === 'ready') return null;
     try {
+      if (job.protocol === 3) {
+        await runArchiveImport(ctx, job, input);
+        return null;
+      }
       invariant(
         job.protocol === 2,
         'IMPORT_RESTART_REQUIRED',

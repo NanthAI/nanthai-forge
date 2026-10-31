@@ -569,6 +569,16 @@ Planning groups Issues under Initiatives, with status and linked-Intent filters,
 
 Code opens Files. Native hosted projects browse the exact `main` head through the existing authorized source-review reader: the manifest populates the expandable tree, and source text is read on demand in pages. Tree dots mark files and folders an open Lane touches, coloured by the most urgent Lane. The This file column shows Changing now, Symbols (top-level JavaScript/TypeScript declarations on the loaded page) and History (the most recent acceptances touching the file). The folder-card Graph mode is removed; identifier reference maps remain available from the indexed file inspector. Imported GitHub repositories retain their source reader.
 
+An editable GitHub import lists the commit tree in one recursive request. A
+complete listing streams the commit's archive once and stores each file as a
+content-addressed object, proving it against its Git object ID first; files the
+archive omits or rewrites (export-ignore, export-subst, LFS) are fetched by Git
+blob. Convex sees one prepare and one completion per page of up to 1,000 objects
+and no per-file inventory. A truncated listing (very large trees) uses
+directory-by-directory discovery and per-blob reads instead. Reads use the GitHub
+App's installation token when the App is installed on the repository, otherwise
+the importer's existing credential.
+
 Editable GitHub imports retain submodules as atomic pointers: path, Git mode `160000`, and pinned commit SHA. `.gitmodules` stays an ordinary source file. Code and Now show `submodule → <url> @ <short sha>`; a submodule is a leaf, never an expandable source folder. Import status reports “N submodules kept as pointers”. No submodule repository or contents are fetched. In a hosted Lane checkout the pointer is a plain file containing the full commit SHA; editing that SHA saves a pointer update. Save, composition, landing and the GitHub mirror retain the pointer, and the mirror emits a Git commit entry rather than a blob. Opposing SHA updates produce an atomic conflict for the existing hosted resolution flow.
 
 Settings › Transfer & backups groups local work, source return and archive import into three sections. Copy agent prompt starts local handoff; the Work journal and source pull request downloads share a row, with restore instructions disclosed below. The return checkpoint selector includes its own Load more choice beside Return to Forge. Source verification is disclosed below that row. Archive import uses an English file button and retains private backup history.
@@ -622,8 +632,13 @@ reusing it with a different name is refused. The next-step prompt appears after
 creation: add an agent or import an existing project archive. It can be dismissed.
 The empty project uses the same retained object checkpoint and indexed Work as an
 uploaded native project. Its initial main receipt remains source authority but is
-not counted as a completed code change in Now. Agent source-writing Lanes still use the existing local
-workflow. GitHub imports remain read-only code analysis, without an editable Forge main.
+not counted as a completed code change in Now. The project is hosted from birth:
+its source authority is the server and hosted `main` is selected, so agents start
+and land Lanes with no local native owner. An editable GitHub import is hosted the
+same way once it is ready. Imports published before this was the case stay
+native-owner until their owner runs `nforge make-editable DEPLOYMENT PROJECT_ID`,
+which selects hosted `main` from the already stored import (nothing is uploaded).
+It is refused if the source changed after the import; use the owner cutover then.
 
 For the signed-in owner's existing Clerk username, canonical project URLs use that
 username and replace the older ID URL in the browser. Other owners keep their

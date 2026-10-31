@@ -10,6 +10,7 @@ import { invariant } from '../src/errors';
 import { storageDigest } from './projectStorage';
 import { report } from './errors';
 import { r2Key } from './r2';
+import { selectBornMain } from './projectHostedBirth';
 
 export const bootstrapInput = { operationId: v.string(), name: v.string() };
 const requestFor = (name: string) => JSON.stringify(['empty-hosted-project', name.trim()]);
@@ -165,6 +166,13 @@ export const publish = internalMutation({
         currentBackup: backupId,
         revision: 1,
         work: { backupId, generationId, operationId: input.operationId, initialRevision: 0, revision: 0 },
+      });
+      await selectBornMain(ctx, project, {
+        operationId: input.operationId,
+        head: bootstrap.head,
+        backupId,
+        generationId,
+        origin: 'new-project',
       });
       return { projectId: project._id, created: true };
     } catch (error) {

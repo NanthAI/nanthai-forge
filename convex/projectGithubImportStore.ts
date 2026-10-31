@@ -12,7 +12,7 @@ import { HOSTED_WORK_INDEX_FORMAT } from '../src/work-hosted-summary';
 import { isStored } from './projectObjectFields';
 import { invariant } from '../src/errors';
 import { r2Enabled } from './r2';
-import { initialImportProgress } from '../src/github-import-pages';
+import { initialImportProgress, initialArchiveCursor } from '../src/github-import-pages';
 import { completion, recipePin, completeObjects } from './projectGithubImportBatch';
 import { retain, inventoryEntry } from './projectGithubImportInventory';
 
@@ -66,6 +66,8 @@ export const begin = internalMutation({
     at: v.string(),
     cursor: v.string(),
     rootTree: v.optional(v.string()),
+    /** A complete recursive listing was seen: stream the commit archive. */
+    archive: v.optional(v.object({ total: v.number(), totalBytes: v.number(), submodules: v.number() })),
     visibility: v.union(v.literal('public'), v.literal('private')),
   },
   returns: v.id('projectGithubImports'),
@@ -96,17 +98,23 @@ export const begin = internalMutation({
       repository: input.repository,
       commit: input.commit,
       at: input.at,
-      cursor: input.rootTree ? JSON.stringify(initialImportProgress()) : input.cursor,
-      ...(input.rootTree ? { protocol: 2 as const } : {}),
+      cursor:
+        input.rootTree && input.archive
+          ? JSON.stringify(initialArchiveCursor(input.rootTree))
+          : input.rootTree
+            ? JSON.stringify(initialImportProgress())
+            : input.cursor,
+      ...(input.rootTree ? { protocol: input.archive ? (3 as const) : (2 as const) } : {}),
       step: 0,
-      phase: 'discovering',
-      totalKnown: false,
+      phase: input.archive ? 'importing' : 'discovering',
+      totalKnown: Boolean(input.archive),
       completed: 0,
-      total: 0,
+      total: input.archive?.total ?? 0,
       bytes: 0,
-      totalBytes: 0,
+      totalBytes: input.archive?.totalBytes ?? 0,
+      ...(input.archive ? { submodules: input.archive.submodules } : {}),
     });
-    if (input.rootTree)
+    if (input.rootTree && !input.archive)
       await ctx.db.insert('projectGithubImportInventory', {
         projectId: project._id,
         jobId: id,
@@ -142,9 +150,12 @@ export const advance = internalMutation({
   handler: async (ctx, input) => {
     const row = await readJob(ctx, input);
     if (row.step !== input.step || row.phase === 'ready') {
-      if (row.protocol !== 2 && row.cursor !== input.cursor) await blobStore(ctx).delete(input.cursor);
+      if (row.protocol === undefined && row.cursor !== input.cursor)
+        await blobStore(ctx).delete(input.cursor);
       return false;
     }
+    if (row.protocol === 3)
+      await completeObjects(ctx, row.projectId, input.objects ?? [], input.recipes ?? []);
     if (row.protocol === 2) {
       await completeObjects(ctx, row.projectId, input.objects ?? [], input.recipes ?? []);
       await retain(ctx, row, input.entries ?? []);
@@ -187,12 +198,45 @@ export const advance = internalMutation({
       totalKnown: !input.discovering,
       error: undefined,
     });
-    if (row.protocol !== 2) await blobStore(ctx).delete(row.cursor);
+    if (row.protocol === undefined) await blobStore(ctx).delete(row.cursor);
     const task = await ctx.scheduler.runAfter(0, internal.projectGithubImportWorker.run, {
       id: row._id,
       actor: row.owner,
     });
     await ctx.db.patch(row._id, { task });
+    return true;
+  },
+});
+/** Archive page receipt: verified object bindings plus counters, in the same
+ * run (step). It schedules nothing; the running action continues. */
+export const archiveProgress = internalMutation({
+  args: {
+    ...identity,
+    completed: v.number(),
+    total: v.number(),
+    bytes: v.number(),
+    totalBytes: v.number(),
+    submodules: v.number(),
+    objects: v.array(completion),
+    recipes: v.array(recipePin),
+  },
+  returns: v.boolean(),
+  handler: async (ctx, input) => {
+    const row = await readJob(ctx, input);
+    invariant(row.protocol === 3, 'IMPORT_PAGE_CHANGED', 'Only archive imports record archive pages.');
+    // Bindings name bytes already verified in storage, so a superseded run may still bind them.
+    await completeObjects(ctx, row.projectId, input.objects, input.recipes);
+    if (row.step !== input.step || row.phase === 'ready') return false;
+    await ctx.db.patch(row._id, {
+      completed: input.completed,
+      total: input.total,
+      bytes: input.bytes,
+      totalBytes: input.totalBytes,
+      submodules: input.submodules,
+      totalKnown: true,
+      phase: 'importing',
+      error: undefined,
+    });
     return true;
   },
 });
