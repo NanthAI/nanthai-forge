@@ -186,6 +186,8 @@ export const hostedAgentCommandSchemas = {
       ...lane,
       reason: z.string().min(1),
       saveFirst: z.boolean().default(false),
+      /** Keep unsaved edits in a local patch next to the checkout, then abandon. */
+      keepPatch: z.boolean().default(false),
       target: z
         .object({
           kind: z.literal('intent'),

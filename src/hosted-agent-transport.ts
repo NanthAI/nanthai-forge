@@ -68,7 +68,14 @@ import {
   writeCallerReceipts,
 } from './hosted-metric-outbox.js';
 /** Agent-default refusals carry their own next step. */
-const gateCodes = new Set(['OVERLAP_UNANSWERED', 'PREFLIGHT_REQUIRED']);
+// These messages carry their own next command; a generic replay hint would contradict it.
+const gateCodes = new Set([
+  'OVERLAP_UNANSWERED',
+  'PREFLIGHT_REQUIRED',
+  'SAVE_PENDING',
+  'SAVE_REBASE_CONFLICT',
+  'LANE_NOT_ACTIVE',
+]);
 /** Existing CLI mutations that accept deferred caller receipts; no extra calls. */
 const receiptMutations = new Set([
   'projectHostedStart:start',

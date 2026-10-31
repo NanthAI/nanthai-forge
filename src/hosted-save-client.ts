@@ -15,22 +15,36 @@ import { workLocked } from './work-lock.js';
 import { saveResultSchema } from './hosted-save.js';
 import { canonicalPayload } from './hosted-source-operation.js';
 import { buildSavePages, saveRequestSchema, saveBytes, savePin } from './hosted-save.js';
-import { invariant } from './errors.js';
+import { ForgeError, invariant } from './errors.js';
+import { keepPatchCommand, pendingSavePath, rebaseHostedCheckout } from './hosted-save-rebase.js';
 import type { ConvexExchange } from './exchange-client.js';
 import type { SaveChange, SaveRequest } from './hosted-save.js';
 import type { ContentPin } from './native-exchange.js';
+
+type SaveExchange = Pick<ConvexExchange, 'client' | 'projectId' | 'uploadFile' | 'upload' | 'missing'> &
+  Partial<Pick<ConvexExchange, 'uploadLazyBatch' | 'downloadToFile' | 'downloadBatch' | 'prepareDownloads'>>;
+const saveCommandSchema = z
+  .object({ operationId: z.uuid(), message: z.string(), supersedeFinish: z.boolean().optional() })
+  .strict();
 
 /** One bounded API drive. Pending jobs complete server-side; callers may read
  * progress later without keeping a tab, coding host or owner process alive. */
 export async function saveHostedLane(
   root: string,
   command: { operationId: string; message: string; supersedeFinish?: boolean },
-  exchange: Pick<ConvexExchange, 'client' | 'projectId' | 'uploadFile' | 'upload' | 'missing'> &
-    Partial<Pick<ConvexExchange, 'uploadLazyBatch'>>,
+  exchange: SaveExchange,
 ) {
-  z.object({ operationId: z.uuid(), message: z.string(), supersedeFinish: z.boolean().optional() })
-    .strict()
-    .parse(command);
+  const first = await saveOnce(root, command, exchange, true);
+  return first === rebased ? saveOnce(root, command, exchange, false) : first;
+}
+const rebased = Symbol('rebased');
+async function saveOnce(
+  root: string,
+  command: { operationId: string; message: string; supersedeFinish?: boolean },
+  exchange: SaveExchange,
+  repair: boolean,
+) {
+  saveCommandSchema.parse(command);
   invariant(!lstatSync(root).isSymbolicLink(), 'UNSAFE_PATH', 'Checkout directory must be real.');
   root = realpathSync(root);
   const directory = `${root}.forge-client/saves/${command.operationId}`;
@@ -54,6 +68,9 @@ export async function saveHostedLane(
     else durableReplace(original, canonicalPayload(identity));
   });
   const capturePath = join(directory, 'capture.json');
+  // An earlier save whose reply was not seen pins this baseline. Settle it first,
+  // or every new save captures against the old head and the server refuses it.
+  if (!checkoutPathExists(capturePath)) await settlePriorHostedSave(root, command.operationId, exchange);
   const capture: Awaited<ReturnType<typeof captureHostedSave>> = checkoutPathExists(capturePath)
     ? JSON.parse(readFileSync(capturePath, 'utf8'))
     : await captureHostedSave(root, directory);
@@ -145,10 +162,7 @@ export async function saveHostedLane(
       return request;
     });
   }
-  const pending = join(
-    `${root}.forge-client`,
-    `save-baseline-${digest(canonicalPayload(capture.marker))}.json`,
-  );
+  const pending = pendingSavePath(root, capture.marker);
   workLocked(join(`${root}.forge-client`, 'lock'), () => {
     if (!checkoutPathExists(pending)) durableReplace(pending, canonicalPayload(command));
   });
@@ -166,7 +180,7 @@ export async function saveHostedLane(
     const refused = hostedActionError(error, 'save');
     // A refusal began no server operation. Drop the retained capture so a later
     // save reads the working files again instead of resuming these stale bytes.
-    if (refused.code === 'LANE_FINISH_ACTIVE') {
+    if (refused.code === 'LANE_FINISH_ACTIVE' || refused.code === 'WORK_STALE') {
       workLocked(join(`${root}.forge-client`, 'lock'), () => {
         if (
           checkoutPathExists(pending) &&
@@ -175,6 +189,18 @@ export async function saveHostedLane(
           rmSync(pending);
         rmSync(directory, { recursive: true, force: true });
       });
+      if (refused.code === 'WORK_STALE') {
+        // The server Lane moved past this checkout. Rebase once onto it, keeping
+        // every local edit, and save the same operation from the new baseline.
+        const laneId = capture.marker.selection.laneId;
+        invariant(
+          repair && exchange.downloadBatch && exchange.downloadToFile && exchange.prepareDownloads,
+          'WORK_STALE',
+          `The Lane moved past this checkout again while the save was repaired. Nothing was saved. Retry the same save; if it repeats, keep your edits and abandon this checkout: ${keepPatchCommand(root, laneId)}`,
+        );
+        await rebaseHostedCheckout(root, exchange as Parameters<typeof rebaseHostedCheckout>[1]);
+        return rebased;
+      }
       throw refused;
     }
     throw error;
@@ -230,10 +256,7 @@ function applyHostedSaveReceipt(
   terminal: { outcome: { status: string; result?: unknown } },
 ) {
   workLocked(join(`${root}.forge-client`, 'lock'), () => {
-    const pending = join(
-      `${root}.forge-client`,
-      `save-baseline-${digest(canonicalPayload(capture.marker))}.json`,
-    );
+    const pending = pendingSavePath(root, capture.marker);
     const clearPending = () => {
       if (
         checkoutPathExists(pending) &&
@@ -300,11 +323,9 @@ function applyHostedSaveReceipt(
 export async function reconcileHostedSave(root: string, exchange: Parameters<typeof saveHostedLane>[2]) {
   const marker = readHostedLaneCheckout(root);
   if (!marker) return null;
-  const pending = join(`${root}.forge-client`, `save-baseline-${digest(canonicalPayload(marker))}.json`);
+  const pending = pendingSavePath(root, marker);
   if (!checkoutPathExists(pending)) return null;
-  const command = z
-    .object({ operationId: z.uuid(), message: z.string(), supersedeFinish: z.boolean().optional() })
-    .parse(JSON.parse(readFileSync(pending, 'utf8')));
+  const command = saveCommandSchema.parse(JSON.parse(readFileSync(pending, 'utf8')));
   const directory = `${root}.forge-client/saves/${command.operationId}`;
   const capture = JSON.parse(readFileSync(join(directory, 'capture.json'), 'utf8'));
   const request = saveRequestSchema.parse(JSON.parse(readFileSync(join(directory, 'request.json'), 'utf8')));
@@ -337,4 +358,63 @@ export async function reconcileHostedSave(root: string, exchange: Parameters<typ
   );
   if (resumed.outcome) return null;
   return { phase: 'save', saveOperationId: command.operationId, progress: resumed };
+}
+
+/** Before a new save or abandon captures: settle the earlier save pinned to this
+ * baseline. No pending file means no call (the normal path). Otherwise one
+ * progress read: a completed save advances the marker, a refused or never-started
+ * one is dropped (the new capture supersedes its bytes), and one still
+ * publishing is resumed by its original operation. */
+export async function settlePriorHostedSave(
+  root: string,
+  operationId: string | null,
+  exchange: SaveExchange,
+): Promise<void> {
+  const marker = readHostedLaneCheckout(root);
+  if (!marker) return;
+  const pending = pendingSavePath(root, marker);
+  if (!checkoutPathExists(pending)) return;
+  const prior = saveCommandSchema.parse(JSON.parse(readFileSync(pending, 'utf8')));
+  if (prior.operationId === operationId) return;
+  const directory = `${root}.forge-client/saves/${prior.operationId}`;
+  let progress: { terminal?: { outcome: { status: string; result?: unknown } } | null };
+  try {
+    progress = JSON.parse(
+      await exchange.client.query(makeFunctionReference<'query'>('projectHostedSaves:progress'), {
+        projectId: exchange.projectId,
+        operationId: prior.operationId,
+      }),
+    );
+  } catch (error) {
+    if (hostedActionError(error, 'save reconciliation').code !== 'NOT_FOUND') throw error;
+    workLocked(join(`${root}.forge-client`, 'lock'), () => {
+      if (
+        checkoutPathExists(pending) &&
+        JSON.parse(readFileSync(pending, 'utf8')).operationId === prior.operationId
+      )
+        rmSync(pending);
+      rmSync(directory, { recursive: true, force: true });
+    });
+    return;
+  }
+  const capture = JSON.parse(readFileSync(join(directory, 'capture.json'), 'utf8'));
+  const request = saveRequestSchema.parse(JSON.parse(readFileSync(join(directory, 'request.json'), 'utf8')));
+  if (progress.terminal) {
+    applyHostedSaveReceipt(root, capture, request, progress.terminal);
+    return;
+  }
+  const resumed = await saveHostedLane(
+    root,
+    {
+      operationId: prior.operationId,
+      message: prior.message,
+      ...(prior.supersedeFinish ? { supersedeFinish: true } : {}),
+    },
+    exchange,
+  );
+  if (resumed.outcome) return;
+  throw new ForgeError(
+    'SAVE_PENDING',
+    `The earlier save ${prior.operationId} is still publishing. Nothing new was captured. Retry this same save in a few seconds; it then saves on top of it.`,
+  );
 }

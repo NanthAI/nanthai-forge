@@ -465,15 +465,17 @@ export async function executeHostedAgent(
         {
           operationId,
           action,
-          ...('reason' in command ? { reason: command.reason, saveFirst: command.saveFirst } : {}),
+          ...('reason' in command
+            ? { reason: command.reason, saveFirst: command.saveFirst, keepPatch: command.keepPatch }
+            : {}),
         },
         session.exchange,
       );
     }
     invariant(
-      command.target || !('saveFirst' in command) || !command.saveFirst,
+      command.target || !('saveFirst' in command) || (!command.saveFirst && !command.keepPatch),
       'HOSTED_CHECKOUT_REQUIRED',
-      'Saving local edits first requires an opened Lane checkout.',
+      'Saving or keeping local edits first requires an opened Lane checkout.',
     );
     const request = await session.journal.retain('lifecycle-request', async () => {
       const lane = !command.target ? await selectAgentLane(session, command.laneId) : null;

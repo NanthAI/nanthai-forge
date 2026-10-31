@@ -326,6 +326,19 @@ Retry the original operation after a lost upload, commit or response. Later loca
 edits remain on disk; retry uploads the captured bytes. Successful reconciliation
 advances only the matching checkout baseline marker, without installing files.
 
+Saves self-repair a stale checkout. A save whose source job finished after its
+reply leaves a `save-baseline-*` file pinned to the old marker; the next save (or
+abandon) settles it first with one `progress` read (none when no file exists), so
+it never captures against the old head. If preparation is refused `WORK_STALE`
+(the Lane moved on the server, for example a sync whose local apply was refused),
+the refused operation began nothing: its retained capture is dropped, the
+checkout is rebased onto the current Lane (one Lane read, plus the new manifest and
+changed blobs in page-sized batches) and the same operation saves again. Rebase
+only rewrites paths the server changed whose working file still equals the old
+baseline. Otherwise `SAVE_REBASE_CONFLICT` changes nothing and prints one repair
+command: abandon with `keepPatch:true`. A save made while the earlier one still
+publishes returns `SAVE_PENDING`; retry the same save.
+
 A delta names each changed path's exact prior blob/mode and its replacement or
 explicit deletion. Unmaterialized absent paths remain unchanged. Local additions,
 rename-as-delete/add, executable modes, symlinks and binary bytes use the same
@@ -952,9 +965,13 @@ parent pages resolve all applied children before background head-index promotion
 finishes. Status-filtered internal Lane pages evaluate effective state over
 bounded indexed pages; an empty page is not end of history.
 
-`transitionHostedLane(root,{operationId,action,reason?,saveFirst?},exchange)` is an
+`transitionHostedLane(root,{operationId,action,reason?,saveFirst?,keepPatch?},exchange)` is an
 API helper for an ordinary H04 checkout, with no native owner/listener. It refuses
-known dirty abandonment with `LANE_DIRTY` unless `saveFirst:true`, retains the
+known dirty abandonment with `LANE_DIRTY` unless `saveFirst:true` or
+`keepPatch:true`. `keepPatch` writes the unsaved edits to `ROOT.kept-OP.patch`
+next to the checkout (whole-file hunks for `patch -p1`/`git apply`; binary files,
+links and submodule pointers are copied to `ROOT.kept-OP-files/`), then abandons
+against the server's current Lane, so a stale checkout cannot block it. It retains the
 original command and child capture/UUID, drives H07 once, then submits the
 compound parent. Pending returns preserve both identities. Lost uploads/replies,
 failed saves, stale pins and disconnects retain local files and captured bytes.

@@ -4,7 +4,10 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { makeFunctionReference } from 'convex/server';
 import { z } from 'zod';
-import { saveHostedLane } from './hosted-save-client.js';
+import { saveHostedLane, settlePriorHostedSave } from './hosted-save-client.js';
+import { keepHostedEditsPatch } from './hosted-abandon-patch.js';
+import { saveRequestSchema } from './hosted-save.js';
+import { hostedLaneSelectionSchema } from './hosted-lane.js';
 import { captureHostedSave } from './hosted-save-capture.js';
 import { readHostedLaneCheckout, hostedLaneCheckoutMarkerSchema } from './hosted-lane-checkout-marker.js';
 import { durableReplace } from './native-durability.js';
@@ -21,6 +24,7 @@ const commandSchema = z
     action: z.enum(['abandon', 'reopen']),
     reason: z.string().trim().max(4000).default(''),
     saveFirst: z.boolean().default(false),
+    keepPatch: z.boolean().default(false),
   })
   .strict();
 /** Finite API-only compound drive. Saves use their original capture and child UUID;
@@ -32,6 +36,11 @@ export async function transitionHostedLane(
 ) {
   const parsed = commandSchema.parse(command);
   invariant(parsed.action !== 'abandon' || parsed.reason, 'BAD_ARGUMENT', 'Give a reason for abandoning.');
+  invariant(
+    !parsed.keepPatch || (parsed.action === 'abandon' && !parsed.saveFirst),
+    'BAD_ARGUMENT',
+    'keepPatch keeps unsaved edits in a local patch while abandoning; saveFirst saves them instead. Pick one.',
+  );
   invariant(!lstatSync(root).isSymbolicLink(), 'UNSAFE_PATH', 'Checkout directory must be real.');
   root = realpathSync(root);
   const cache = `${root}.forge-client`,
@@ -46,6 +55,8 @@ export async function transitionHostedLane(
   }
   const lock = join(cache, 'lock'),
     path = join(directory, `${parsed.operationId}.json`);
+  // A save whose reply was never seen must not read as unsaved edits or pin a stale baseline.
+  if (!checkoutPathExists(path)) await settlePriorHostedSave(root, null, exchange);
   const original = workLocked(lock, () => {
     const identity = { root, projectId: exchange.projectId, ...parsed };
     if (checkoutPathExists(path)) {
@@ -60,6 +71,7 @@ export async function transitionHostedLane(
         saveOperationId: string;
         request: unknown | null;
         selection: HostedLaneCheckoutMarker['selection'];
+        kept?: ReturnType<typeof keepHostedEditsPatch>;
       };
     }
     const marker = readHostedLaneCheckout(root);
@@ -68,7 +80,13 @@ export async function transitionHostedLane(
       'WORK_OPERATION_CHANGED',
       'Open this project’s Lane before changing its lifecycle.',
     );
-    const saved = { identity, saveOperationId: randomUUID(), request: null, selection: marker.selection };
+    const saved: {
+      identity: typeof identity;
+      saveOperationId: string;
+      request: unknown | null;
+      selection: HostedLaneCheckoutMarker['selection'];
+      kept?: ReturnType<typeof keepHostedEditsPatch>;
+    } = { identity, saveOperationId: randomUUID(), request: null, selection: marker.selection };
     durableReplace(path, canonicalPayload(saved));
     return saved;
   });
@@ -104,9 +122,12 @@ export async function transitionHostedLane(
       sourceVersion: original.selection.sourceVersion,
       lifecycleVersion: original.selection.lifecycleVersion,
     };
-    let dirty = false;
+    let dirty = false,
+      kept: ReturnType<typeof keepHostedEditsPatch> | undefined,
+      selected: HostedLaneCheckoutMarker['selection'] | undefined;
     if (parsed.action === 'abandon') {
-      const capture = await captureHostedSave(root, join(cache, 'saves', original.saveOperationId));
+      const captured = join(cache, 'saves', original.saveOperationId),
+        capture = await captureHostedSave(root, captured);
       invariant(
         canonicalPayload(capture.marker.selection) === canonicalPayload(original.selection),
         'WORK_STALE',
@@ -114,10 +135,24 @@ export async function transitionHostedLane(
       );
       dirty = capture.changes.length > 0;
       invariant(
-        !dirty || parsed.saveFirst,
+        !dirty || parsed.saveFirst || parsed.keepPatch,
         'LANE_DIRTY',
-        'Lane has unsaved edits. Use saveFirst:true to save before abandoning.',
+        'Lane has unsaved edits. Use saveFirst:true to save them before abandoning, or keepPatch:true to keep them in a local patch file next to the checkout and abandon.',
       );
+      if (dirty && parsed.keepPatch) {
+        // Every edit is now in the patch, so nothing unsaved is lost and the
+        // abandon pins the server's current Lane (a stale checkout cannot block it).
+        kept = keepHostedEditsPatch(root, parsed.operationId, capture, captured);
+        dirty = false;
+        selected = hostedLaneSelectionSchema.parse(
+          JSON.parse(
+            await exchange.client.query(makeFunctionReference<'query'>('projectHostedLanes:select'), {
+              projectId: exchange.projectId,
+              laneId: original.selection.laneId,
+            }),
+          ),
+        );
+      }
       if (parsed.saveFirst) {
         childProgress = await saveHostedLane(
           root,
@@ -137,23 +172,40 @@ export async function transitionHostedLane(
           };
       }
     }
+    // A save-first child may have rebased onto a moved Lane; bind its exact baseline.
+    const child = join(cache, 'saves', original.saveOperationId, 'request.json');
+    const pinned =
+      parsed.saveFirst && checkoutPathExists(child)
+        ? saveRequestSchema.parse(JSON.parse(readFileSync(child, 'utf8'))).expected
+        : selected
+          ? {
+              head: selected.head,
+              version: selected.version,
+              sourceVersion: selected.sourceVersion,
+              lifecycleVersion: selected.lifecycleVersion,
+            }
+          : expected;
     const request = hostedLifecycleRequestSchema.parse({
       operationId: parsed.operationId,
       action: parsed.action,
       reason: parsed.reason,
-      authorityEpoch: original.selection.authority.epoch,
+      authorityEpoch: (selected ?? original.selection).authority.epoch,
       target: {
         kind: 'lane',
         laneId: original.selection.laneId,
-        expected,
+        expected: pinned,
         dirty,
         saveOperationId: parsed.action === 'abandon' && parsed.saveFirst ? original.saveOperationId : null,
       },
     });
     original.request = workLocked(lock, () => {
       const saved = JSON.parse(readFileSync(path, 'utf8'));
-      if (saved.request) return saved.request;
-      durableReplace(path, canonicalPayload({ ...original, request }));
+      if (saved.request) {
+        original.kept = saved.kept;
+        return saved.request;
+      }
+      durableReplace(path, canonicalPayload({ ...original, request, ...(kept ? { kept } : {}) }));
+      if (kept) original.kept = kept;
       return request;
     });
   }
@@ -194,5 +246,5 @@ export async function transitionHostedLane(
       progress: childProgress,
       lifecycle: result,
     };
-  return { phase: 'lifecycle' as const, result };
+  return { phase: 'lifecycle' as const, result, ...(original.kept ? { kept: original.kept } : {}) };
 }
