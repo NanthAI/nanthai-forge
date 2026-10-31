@@ -7,7 +7,7 @@
 // Gates (brief): claude-usage 5h <= 40% and weekly < 85% to start a model cell; the
 // deployed Forge commit is recorded before and after (a change voids the cell).
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, writeFileSync, readFileSync, appendFileSync, rmSync, existsSync } from 'node:fs';
+import { mkdirSync, writeFileSync, readFileSync, appendFileSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { homedir } from 'node:os';
 import { launchAgent } from './agent.mjs';
@@ -15,6 +15,7 @@ import { prompt } from './prompt.mjs';
 import * as github from './github-arm.mjs';
 import { forgeArm, convexMeter } from './forge-arm.mjs';
 import { oracleCommit, runOracle, grade } from './oracle.mjs';
+import { sharedDeps, linkDeps } from './deps.mjs';
 
 const B = process.env.BENCH_ROOT || join(homedir(), 'NanthAI/forge-bench/b15d');
 const config = JSON.parse(readFileSync(join(B, 'config.json'), 'utf8'));
@@ -49,8 +50,10 @@ function diskFreeGb() {
   const line = sh('df', ['-k', '/System/Volumes/Data']).split('\n').at(-1).trim().split(/\s+/);
   return Number(line[3]) / 1024 / 1024;
 }
-/** Estimated peak disk of this cell (handoff table); first runs record the real delta.
- * One shared dependency install keyed by the lockfile is counted until it exists. */
+/** Estimated peak disk of this cell; each run records the real before/after delta.
+ * Dependencies come from the shared install (deps.mjs): links and APFS clones cost
+ * near-zero blocks, and an agent's own `vp install` re-clones from the shared store.
+ * Measured 2026-10-31: a linked checkout adds 0 GB over its sources. */
 function diskNeed() {
   const parts = {};
   if (arm === 'github') {
@@ -60,10 +63,7 @@ function diskNeed() {
     parts.laneRoots = N * 0.5;
     parts.resetAndOracleRoots = 1.0;
   }
-  if (!dry) {
-    parts.buildAndTestCaches = N * (arm === 'forge' ? 0.5 : 0.3);
-    if (!existsSync(join(B, 'deps'))) parts.sharedDependencyInstallAndToolchain = 2.4;
-  }
+  if (!dry) parts.buildAndTestCaches = N * 0.2;
   const needGb = Object.values(parts).reduce((a, b) => a + b, 0);
   return { parts, needGb, floorGb: 15, requiredGb: 15 + needGb };
 }
@@ -104,6 +104,7 @@ function forgeBuild() {
   }
 }
 
+const shared = sharedDeps(B, config.baseCheckout);
 const gates = {
   usage: usageGate(),
   forgeBuild: forgeBuild(),
@@ -119,6 +120,7 @@ if (!dry) {
     refuse('claude 5h usage above 40% (quota isolation)');
   if (gates.usage.weekly === null || gates.usage.weekly >= 85) refuse('claude weekly usage at or above 85%');
   if (arm === 'forge' && !config.forge.qualifiedAt) refuse('Forge adapter not qualified by a dry run');
+  if (!shared) refuse('shared dependency install missing (deps.mjs): build deps/ first');
 }
 // Lead's hard disk gate (2026-10-31, builders hit ENOSPC): free >= 15 GB + this cell's need.
 if (gates.disk.freeGb < gates.disk.requiredGb)
@@ -132,6 +134,13 @@ mkdirSync(bin, { recursive: true });
 const armEnv =
   arm === 'github' ? { GH_REPO: github.repository, GIT_TERMINAL_PROMPT: '0' } : forge.binDir(bin);
 const scripted = arm === 'github' ? github.scriptedAgent(bin, 'github') : null;
+// The cell's agents share one writable clone of the toolchain (vp locks and caches
+// its package manager there), like one developer machine; deps/ stays read-only.
+const vpHome = join(ws, 'vp');
+if (shared) execFileSync('cp', ['-cR', shared.vpHome, vpHome]);
+const depsEnv = shared
+  ? { VP_HOME: vpHome, npm_config_store_dir: join(shared.home, 'Library/pnpm/store') }
+  : {};
 
 // Reset to the frozen base (outside cell timing).
 event({ event: 'reset-start' });
@@ -168,18 +177,23 @@ async function worker(k) {
       branch = `agent-${k}/${task.id}`;
     const prepStart = Date.now();
     let laneId = null,
-      env = { PATH: `${bin}:/usr/local/bin:${process.env.PATH}` };
+      env = {
+        PATH: `${bin}:${shared ? join(vpHome, 'bin') + ':' : ''}/usr/local/bin:${process.env.PATH}`,
+        ...depsEnv,
+      };
     if (arm === 'github') {
       await github.workspace(hub, root, branch);
       env = { ...env, ...armEnv };
     } else
       laneId = await forge.startLane(join(ws, 'anchor'), root, `${task.id}: ${task.prompt.split('\n')[0]}`);
+    const deps = shared ? linkDeps(shared, root) : null;
     const dispatchedAt = Date.now();
     event({
       event: 'dispatch',
       worker: k,
       task: task.id,
       laneId,
+      deps,
       prepSeconds: (dispatchedAt - prepStart) / 1000,
     });
     const text = prompt(
@@ -198,7 +212,11 @@ async function worker(k) {
       timeoutMs: config.agentTimeoutMinutes * 60_000,
       // GitHub: the hub is the shared clone's object store (read-only for the agent).
       // Forge: the nforge CLI bundle lives beside the denied control checkouts.
-      extraReads: arm === 'github' ? [hub] : [dirname(dirname(config.forge.cli))],
+      extraReads: [
+        ...(arm === 'github' ? [hub] : [dirname(dirname(config.forge.cli))]),
+        ...(shared ? [shared.deps] : []),
+      ],
+      extraWrites: shared ? [vpHome] : [],
       scripted: dry
         ? arm === 'github'
           ? { command: scripted, args: [branch, task.id] }

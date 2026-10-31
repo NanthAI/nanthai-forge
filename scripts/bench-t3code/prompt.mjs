@@ -7,7 +7,7 @@ export function template(task) {
 YOUR TASK
 ${task.prompt}
 
-Implement the change in the source, and add or update tests for the behavior described. Keep unrelated code unchanged. The project's check runs \`bash .bench/ci.sh\`: it installs the toolchain and runs the test suites of packages/shared, packages/provider-pi, packages/client-runtime and packages/source-control-forgejo. You may run focused tests locally, for example \`vp install\` once and then \`vp test run --config ../../vite.config.ts --dir . src/<file>.test.ts\` inside the package (packages/client-runtime uses \`vp test run src/<file>.test.ts\`).
+Implement the change in the source, and add or update tests for the behavior described. Keep unrelated code unchanged. The project's check runs \`bash .bench/ci.sh\`: it installs the toolchain and runs the test suites of packages/shared, packages/provider-pi, packages/client-runtime and packages/source-control-forgejo. Dependencies for those packages are already installed in your workspace, so you do not need \`vp install\`. You may run focused tests locally, for example \`vp test run --config ../../vite.config.ts --dir . src/<file>.test.ts\` inside the package (packages/client-runtime uses \`vp test run src/<file>.test.ts\`).
 
 ${WORKFLOW_SLOT}
 
