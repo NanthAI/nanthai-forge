@@ -27,7 +27,10 @@ function fixture(t, files = 3000, changed = 10) {
   const bytes = new Map(),
     packed = [];
   for (let i = 0; i < files; i++) {
-    const value = Buffer.from(`file ${i}\n${'x'.repeat(i % 97)}`);
+    // Every 50th file repeats an earlier file's content: real trees share blobs across paths.
+    const value = Buffer.from(
+      i % 50 === 49 ? `file ${i - 1}\n${'x'.repeat((i - 1) % 97)}` : `file ${i}\n${'x'.repeat(i % 97)}`,
+    );
     bytes.set(digest(value), value);
     packed.push({ path: `src/${i}.ts`, blob: digest(value), mode: 'file' });
   }
@@ -91,7 +94,7 @@ test('Lane open reads one pack plus changed objects, and a second root reads onl
   // Budget: one pack read and one signing page for the 10 changed files (was 30 pages).
   assert.deepEqual(first.calls, { objects: 1, sourcePack: 1, downloads: 10 });
   assert.equal(cold.sourcePack, 'used');
-  assert.equal(cold.packObjects, ids.length - 10);
+  assert.equal(cold.packObjects, new Set(ids).size - 10);
   for (const id of ids) assert.deepEqual(readFileSync(join(cold.objects, id)), data.bytes.get(id));
   // The machine store keeps every verified object, including pack entries this tree no longer uses.
   assert.equal(readdirSync(machine).filter(name => !name.startsWith('.')).length, data.bytes.size);
@@ -100,7 +103,7 @@ test('Lane open reads one pack plus changed objects, and a second root reads onl
   const warm = new HostedCheckoutCache(join(data.directory, 'b.forge-client'), second, undefined, machine);
   await warm.ensure(ids);
   assert.deepEqual(second.calls, { objects: 0, sourcePack: 0, downloads: 0 });
-  assert.equal(warm.machineObjects, ids.length);
+  assert.equal(warm.machineObjects, new Set(ids).size);
   for (const id of ids) assert.deepEqual(readFileSync(join(warm.objects, id)), data.bytes.get(id));
 });
 
@@ -128,7 +131,7 @@ test('missing, small or invalid packs fall back to per-object reads with exact b
   await missing.ensure(ids);
   assert.equal(missing.sourcePack, 'missing');
   assert.equal(none.calls.sourcePack, 1);
-  assert.equal(none.calls.downloads, ids.length);
+  assert.equal(none.calls.downloads, new Set(ids).size);
 
   const pack = await packFor(t, data);
   const small = transport(data.bytes, pack);

@@ -115,13 +115,14 @@ export async function unpackSourcePackObjects(
   directory: string,
   keep: (blob: string) => boolean,
 ) {
-  const written: string[] = [];
+  const written = new Set<string>();
+  // Files with identical content share one blob: write and report it once.
   await readSourcePack(pack, path, directory, () => blob => {
-    const selected = keep(blob);
-    if (selected) written.push(blob);
-    return selected;
+    if (written.has(blob) || !keep(blob)) return false;
+    written.add(blob);
+    return true;
   });
-  return written;
+  return [...written];
 }
 type PackFile = { path: string; blob: string; mode: string; size: number };
 async function readSourcePack(
