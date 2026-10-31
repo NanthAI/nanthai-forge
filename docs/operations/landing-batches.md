@@ -1,5 +1,7 @@
 # Local landing batches
 
+This page describes the native-owner landing path used by local projects. The dogfood project has landed through the hosted queue since the cutover on 2026-10-28, so most of this page does not describe how Forge lands its own work. The native-owner path and its worker are deleted with B1.9 (owner decision 2026-10-31).
+
 Native `finish` operations with an explicitly configured check runner queue code
 candidates in Work format 17 (18 with unified Intents). The managed owner worker resumes incomplete batches and dependency waits.
 `land-ready` remains an explicit finite recovery command. Legacy projects without a runner policy retain their existing
@@ -361,42 +363,9 @@ Multiple owner processes can observe; only the queue holder drives a channel.
 Runner/controller infrastructure recovery retains its existing semantics: no
 arbitrary local command is automatically rerun merely because its runner died.
 
-### Owner Mac launchd setup
+### Owner Mac launchd setup (retired)
 
-The lead installs the existing `serve` process using
-`scripts/launchd/com.nanthai.forge-owner.plist`. Replace `__NODE__` and `__CLI__`
-with absolute paths to the supported Node executable and the reviewed installed
-`dist/cli.js`; replace `__OWNER__`, `__PORT__`, `__NODE_BIN__` and `__STATE_DIR__`
-with the canonical owner, selected port, Node directory and a private log directory.
-Use XML escaping for replacements. The template sets `FORGE_CHECK_SCOPED=1`, matching the installed maintainer CLI
-wrapper. Keep that setting aligned with the submitter; preserve any intentional
-`FORGE_CHECK_FULL` or other check configuration in both runtimes. The service's `PATH`
-starts with the selected Node directory and need not match agent shell ordering.
-The template contains no credentials. Preserve
-any owner-selected environment configuration in the existing service setup; do
-not embed secret values in the plist. The CLI startup URL contains a local token,
-so keep its log directory private and never copy those logs into a report.
-
-After installing the reviewed build and writing the substituted plist as
-`~/Library/LaunchAgents/com.nanthai.forge-owner.plist` (mode 0600), the lead runs:
-
-```sh
-plutil -lint "$HOME/Library/LaunchAgents/com.nanthai.forge-owner.plist"
-launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/com.nanthai.forge-owner.plist"
-launchctl enable "gui/$(id -u)/com.nanthai.forge-owner"
-launchctl kickstart "gui/$(id -u)/com.nanthai.forge-owner"
-```
-
-For an existing service, boot it out before bootstrapping a replacement plist so
-launchd reloads its environment. After a build-only update, use
-`launchctl kickstart -k "gui/$(id -u)/com.nanthai.forge-owner"` to restart the loaded
-service with the reviewed build.
-
-Observe local pending status to confirm recovery. Stop driving with
-`launchctl bootout "gui/$(id -u)/com.nanthai.forge-owner"`; saved submissions
-remain. Re-enable with bootstrap/enable/kickstart. Accepted history is retained;
-undo accepted source through the existing checked compensating change. These
-commands are lead installation steps, not actions performed by a finite agent.
+No owner service runs for the dogfood project. Its launchd jobs were unloaded on 2026-10-29, and it lands through the hosted queue (see [Hosted queue priority](#hosted-queue-priority)). The template `scripts/launchd/com.nanthai.forge-owner.plist` and the `nforge serve` process it starts are still in the repository. Owner decision 2026-10-31: both are deleted with B1.9.
 
 ### Durable client admission
 

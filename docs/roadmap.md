@@ -1,8 +1,8 @@
 # Roadmap
 
-What we are doing, in what order, and why. Six phases. Phases 1–4 are done. Phase 5 is next. Phase 5 is private alpha; Phase 6 is public beta. Open work items live in the [backlog](backlog.md); what works today is in [status](status.md). Keep this page current: update the status lines when a stage changes.
+What we are doing, in what order, and why. Six phases. Phases 1–4 are done. Phase 5 is in progress and stays open until its exit criteria 2 and 5 are met (see below). Phase 5 is private alpha; Phase 6 is public beta. Open work items live in Forge planning (see the [backlog](backlog.md) page); what works today is in [status](status.md). Keep this page current: update the status lines when a stage changes.
 
-Last updated: 2026-10-25.
+Last updated: 2026-10-31.
 
 ## Direction
 
@@ -44,13 +44,13 @@ Goal: make landing fast, make checks trustworthy and cheap, and lay the groundwo
 
 Delivered:
 
-- Scope-aware checks, concurrent checkpoints, landing batches and remote runners. Landing measured 2–3× faster than the GitHub merge queue on the same runners. A full check takes about 5–6 minutes on Blacksmith. About 134 landings completed.
+- Scope-aware checks, concurrent checkpoints, landing batches and remote runners. Landing measured 2–3× faster than the GitHub merge queue on the same runners. A full check took about 5–6 minutes on Blacksmith (historical: Blacksmith use ended on 2026-10-25). About 134 landings completed.
 - Clean-environment checks, authorization fixes and runner qualification. The restore drill passed.
 - Performance instrumentation, client error capture and cheaper idle tabs and source returns.
 - Intent vocabulary, UI coherence, quickstart, glossary and agent docs.
 - Hosted main, browser project creation and resumable lossless GitHub import.
 
-Closed on 2026-10-20. Current measurements and capabilities are in [status](status.md). Remaining work follows below and in the [backlog](backlog.md).
+Closed on 2026-10-20. Current measurements and capabilities are in [status](status.md). Remaining work follows below and in Forge planning (see the [backlog](backlog.md) page).
 
 ## Phase 4: we're happy using it (done)
 
@@ -60,7 +60,7 @@ Started on 2026-10-21. Work in order:
 
 1. **R3 metadata-only publication and return — done**, except the big-backlog measurement. Routine push fell from 95 minutes to about 3 minutes; push #21 took 186 seconds. See the [R2 storage plan](r2-storage-plan.md#r3-owner-derived-publication-and-source-return-done).
 2. **Carried-over fixes — done**: P03, P04, P12, P15 and P27; hosted-unsynced state; incremental deploy export; retained runner cost estimates.
-3. **Hosted Lanes — built** (H01–H18b, H22a and H22b): start, save, compose, land, revert and abandon from the site with all Macs offline, through a server-side landing queue with compare-and-swap main. Checks run on the project's own GitHub Actions or Blacksmith runners. The H22b live smoke with a registered GitHub App moves into Phase 5 Bet 1, where the hosted path becomes the only accept path.
+3. **Hosted Lanes — built** (H01–H18b, H22a and H22b): start, save, compose, land, revert and abandon from the site with all Macs offline, through a server-side landing queue with compare-and-swap main. Checks ran on the project's own GitHub Actions or Blacksmith runners (since 2026-10-25, Blacksmith is not used). The H22b live smoke with a registered GitHub App moves into Phase 5 Bet 1, where the hosted path becomes the only accept path.
 4. **The lead's routine in the product — done**: `nforge land` batch landing with `--wait` progress, the landing train (S01–S17), automatic exchange, the release command and GitHub sync.
 5. **Off-machine recovery — done**: inventory, restore and reconnect, and weekly backups. The recovery drill passed on 2026-10-24 (recover in 9 seconds; see the [recovery drill](operations/recovery-drill.md)).
 6. **Predictive overlap warnings — done**: overlap alerts on save, and overlap-aware landing order.
@@ -71,22 +71,26 @@ Moved to Phase 5: the agent-coordination benchmark (forge-bench R3), which now r
 
 Closed on 2026-10-25. Experiments E1 and E3 are published in [why-forge](why-forge.md#when-one-change-in-the-burst-fails): overlap alerts now reach every overlapping pair at save time, but not always before the next save; with one failing change, a tuned GitHub merge queue landed about 5.2× faster. Both feed Phase 5. Closing also fixed two idle Convex cost leaks: a sync drainer that retried a failing publish, and a project-delete purge that rescheduled itself forever.
 
-## Phase 5: one authority, three bets, then private alpha (planned)
+## Phase 5: one authority, three bets, then private alpha (in progress)
 
-Goal: Forge runs itself for the Forge team, with numbers to show it, before outside users arrive. The full plan with slices, acceptance criteria, metrics and the stage-by-stage critical path is in the [Phase 5 plan](phase5-plan.md). Reads that never write and automatic Lane snapshots are Phase 4 prerequisites.
+Goal: Forge runs itself for the Forge team, with numbers to show it, before outside users arrive. The full plan with slices, acceptance criteria, metrics and the stage-by-stage critical path is in the [Phase 5 plan](phase5-plan.md), which marks each row done, partial or not started. Reads that never write and automatic Lane snapshots are Phase 4 prerequisites. Phase 5 started on 2026-10-25 and is in its last stage (5.8).
 
-1. **Stage 5.1: self-metrics and decision records.** Forge records eight numbers about itself, including operator interventions per landing, and owner decisions become records shown in Now, briefs and the making-of.
-2. **Bet 1: one authority, now, then delete (critical path, starts day one).** Prerequisites first: the authority switch with writer fencing, finish through the hosted landing queue, a one-time hosted seed, browser accept on the hosted path, a pull-based Mac runner and recovery that folds hosted-only work. Then cutover: hosted main is the only accept path, the Mac is a runner and a cache, and about 13,000–16,000 lines of dual-master code are deleted.
-3. **Storage spike, both ways.** A native store on R2 against Git-native objects, on the same criteria; the winner is decided after. Either way, Lanes become APFS reflink clones with snapshots.
-4. **Landing without an operator.** Land is a desired state driven by a server controller; no-op entries finish themselves; a stall alarm; check reuse keyed on content, so restarts, sleep and Wi-Fi loss re-run nothing and strand nothing.
-5. **Bet 2: per-Intent contract checks**, with the full suite continuous on `main`, flake-aware culprit finding, and trust earned per path per actor (owner approves defaults first).
-6. **Experiments E1–E3**, published next to the 2.36× landing figure whichever way they go.
-7. **Bet 3: coordination that bites.** Overlap at first write through a pre-edit hook for Claude Code and Codex, semantic conflicts from contract tests, and deterministic merge of edits to different declarations. The R3 coordination benchmark runs only after the hook lands.
-8. **After cutover: vocabulary consolidation.** Candidates first-class, Lanes as workspaces, about 37 actions down to start, save and land plus reads, and a CLI generated from the MCP surface.
+**Phase 5 stays open until two exit criteria are met** (owner decision, 2026-10-31): the benchmark is published (exit criterion 2: E1–E3 and R3, with the Forge-versus-GitHub benchmark on a real repository, B1.5d), and an import works with no Mac in 5 minutes or less (exit criterion 5). Today the second takes 16 min 56 s on the t3code repository. A GitHub import now becomes an agent-writable hosted project with no Mac step (landed in `84741d8e`); the time is not yet within 5 minutes.
 
-**Frozen until E1 and E3 have numbers and Bet 1 is cut over:** browser editing (H19a), two-way GitHub sync (H23 and H24), H19b, H20 and H21, hosted landing gaps not needed by Bet 1, CI adapters, the landing timeline UI and CI insights.
+Where each item stands:
 
-**After the bets:** a trial with outside users, a polished first project through GitHub import, and newcomer docs.
+1. **Stage 5.1: self-metrics and decision records — done.** Forge records its own numbers (landings by path, interventions, check minutes and reuse, bills) and owner decisions are records. Several metric rows are still partly unknown; the baseline table in the plan is the Phase 5 start, not today's values.
+2. **Bet 1: one authority — cutover applied on 2026-10-28; one step left.** Hosted main is the only accept path for the dogfood project. The Mac no longer accepts, runs checks or pushes; checks run on free GitHub-hosted runners. The push, source-return, relay, format-ladder, reconcile and legacy-accept code is deleted (B1.6–B1.8). Still to do: purging the retired tables (B1.9, gated on backups, dated about 2026-11-09). Owner decision 2026-10-31: `nforge serve` and the native-owner code are deleted with B1.9. Also still to do: a GitHub import that is fast enough (criterion 5 above).
+3. **R2 for bytes.** Owner decision 2026-10-31: R2 is required everywhere; the per-project opt-in and the `FORGE_BLOBS` flag are being removed (Issue 8678148e, not landed). Until it lands, new bytes go to R2 only when the flag and the project opt-in are both set, and some Convex file storage remains.
+4. **Landing without an operator — done.** A server controller drives landings, entries finish themselves, a stall alarm exists, and check reuse is keyed on content. On 2026-10-31 two entries were found queued for about a day after their stall alarm fired, because the alarm does not yet reach a human (Issue 7e38bf5e).
+5. **Bet 2: contract checks — mostly done.** The contract gate has been on for the dogfood project since 2026-10-30; the continuous main audit, flake classification and culprit bisection are live; batch demotion (B2.5) has landed, but its acceptance (trusted landings pass without a batch) is not yet evidenced. Trust per path per actor (B2.6) has landed disabled and waits for the owner to approve defaults.
+6. **Experiments.** E1 and E3 are published in [why-forge](why-forge.md). E2 was replaced by B1.5d: the benchmark harness has landed and the Forge arm on t3code is not yet published. The R3 re-measure (B3.5) and the gate-time and cost figures (G8) are not started.
+7. **Bet 3: coordination that bites — mostly done.** Overlap at first write, semantic conflicts and overlaps in Now have landed. An overlap-delivery fix landed on 2026-10-30; before it, no overlap notice was delivered that day. Declaration-level merge (B3.4) waits until at least 20 cases exist.
+8. **Vocabulary.** `start`, `save` and `land` landed with operator verbs under `nforge x`. Alias removal and the CLI generated from the MCP surface (V2b, V3) move to Phase 6.
+
+**Unfrozen on 2026-10-31** (the freeze condition, E1 and E3 published and the cutover landed, has held since 2026-10-28): the failed-file report (G5), flake containment (G4), two-way GitHub sync (H23, H24), and the landing timeline, CI insights and hosted Lane rows (H19b–H21), which fold into the Now view. **Still frozen:** anchored comments, which need declaration identity from B3.4. **Dropped:** browser code editing (H19a), and CI adapters for Azure DevOps and GitLab (GitHub Actions only for the beta; revisit on outside-user demand). The per-machine check cache (G7) is superseded by the packs work, and gate time and the E3 rematch (G8) are carried as planning Issues.
+
+**After the bets:** a trial with outside users, a polished first project through GitHub import, and newcomer docs. Not started.
 
 ## Phase 6: public beta (planned)
 
@@ -165,7 +169,7 @@ Goal: open Forge to public use with a free core and sustainable hosting.
 
 ## Related documents
 
-- [Backlog](backlog.md): open items and friction, grouped.
+- [Backlog](backlog.md): points to Forge planning, where open work lives.
 - [R2 storage plan](r2-storage-plan.md): why and how bulk bytes leave the database.
 - [Status](status.md): what works today.
 - [Design constraints](decisions.md), [architecture](architecture.md), [operations](operations.md).

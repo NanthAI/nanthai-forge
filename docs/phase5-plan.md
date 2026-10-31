@@ -8,7 +8,7 @@ Forge should run itself. Today about 30 landings a day reach main, but only with
 
 ## The three bets
 
-**Bet 1: one authority, now, then delete.** Owner: "one authority is key." Hosted main, updated by compare-and-swap, becomes the only accept path. The Mac becomes a runner and a cache. Then we delete the dual-master code: exchange push, source return, the owner relay, old Work format readers, the staleness strip and the reconcile paths. Bet 1 should have come sooner; its prerequisites go first and everything else fits around it.
+**Bet 1: one authority, now, then delete.** Owner: "one authority is key." Hosted main, updated by compare-and-swap, becomes the only accept path. The plan was for the Mac to become a runner and a cache; as built, the Mac runner was retired on 2026-10-29 in favour of free GitHub-hosted runners, and the Mac keeps only a cache. Then we delete the dual-master code: exchange push, source return, the owner relay, old Work format readers, the staleness strip and the reconcile paths. Bet 1 should have come sooner; its prerequisites go first and everything else fits around it.
 
 **Bet 2: per-Intent contract gates; full suite continuous.** An Intent declares the tests that prove it. For trusted and autonomous actors, acceptance needs only that contract to pass on the exact Candidate. The full suite runs continuously on main after acceptance, with flake-aware culprit finding and automatic fix-forward or revert. Batches, shards and scoped checks become optimisations, not the gate.
 
@@ -61,6 +61,38 @@ The critical path is Bet 1: **B1.2a → B1.2b–d → B1.2e → B1.5a → B1.5b 
 | 5.6 | B1.9 table purge (owner approves) | B2.3 audit; B2.4a–b culprit finding; B3.2 semantic conflict; B3.4 declaration merge; V2a |
 | 5.7 | | B2.5, B2.6 (owner approves defaults); B3.3; V2b, V3; B3.5 re-measure including R3 |
 | 5.8 | | X2 end-of-phase items; exit criteria; outside-user trial preparation |
+
+## Where the plan stands
+
+Phase 5 started on 2026-10-25 and is in its last stage (5.8). **Phase 5 stays open until exit criteria 2 and 5 are met** (owner decision, 2026-10-31); see [Exit criteria](#exit-criteria). Status key: **done** = on main with the plan's acceptance met; **partial** = on main but the acceptance, a flag or a measurement is missing; **not started**; **replaced** or **retired**. Open work lives in Forge planning; Issue ids are the first eight characters.
+
+| Rows | Status | Notes |
+| --- | --- | --- |
+| B1.1, B1.2a–e, B1.4a, B1.4b, B1.5a, B1.5b | done | Cutover applied 2026-10-28 (server authority, epoch 1). The Mac no longer accepts. |
+| B1.3a, B1.3b | retired | Built, then replaced by free GitHub-hosted Actions runners; the Mac check worker was stopped on 2026-10-29. |
+| B1.5c big-repo import benchmark | partial | The t3code import (about 29,000 files) ran and was measured, but "each within budget, idle 0 after" was not met. An import with no Mac landed in `84741d8e`; it takes 16 min 56 s on t3code against a target of 5 minutes or less (Issues 7cbb881c, dd98f431). |
+| B1.5d replayed benchmark | partial | The harness landed and a dry run on GitHub passed; the Forge arm is not published (Issues cb23529a, 13475957). |
+| B1.6a–c, B1.7, B1.8 | done | Push, source return, relay, format ladder, reconcile, staleness strip and legacy accept are deleted. |
+| B1.9 purge retired tables | not started | Export taken; `--execute` waits for two weekly backups, dated about 2026-11-09 (Issue 64d7192b). Owner decision 2026-10-31: `nforge serve` and the native-owner code are deleted with B1.9. |
+| Q1–Q5 landing without an operator | done | Controller, self-finishing entries, stall alarm, content-keyed reuse, lifecycle drill. The alarm does not yet reach a human (Issue 7e38bf5e). |
+| M1–M3 metrics, D1 decisions, SP1, SP2, X1 | done | The baseline table below has not been re-run; several rows are still partly unknown. |
+| P5-RC records packing | partial | No before/after bytes report (Issue 1586b8b5). |
+| P5-SG Git source layer | partial | First sub-slice and the pack writer landed; no live migration (Issue 676efbc2). |
+| B2.1, B2.2, B2.3, B2.4a–b | done | The contract gate has been on for the dogfood project since 2026-10-30. |
+| B2.5 demote batches | partial | Landed; "trusted landings pass without a batch" is not yet evidenced. |
+| B2.6 trust per path per actor | partial | Landed disabled; waits for the owner to approve defaults. |
+| E1, E3 | done | Published in [why Forge](why-forge.md). The E3 re-run (G8) is not started (Issue 39942bfe). |
+| E2 | replaced | By B1.5d (owner, 2026-10-29). |
+| B3.1, B3.2, B3.3a–b | done | Overlap at first write, semantic conflict, overlaps in Now. |
+| B3.4 declaration-level merge | not started | Dated: waits for at least 20 cases (Issue 82e8ddb8). |
+| B3.5 re-measure and R3 | not started | Exit criterion 2 needs it. |
+| V1, V2a | done | `start`, `save` and `land` with operator verbs under `nforge x`. |
+| V2b, V3 | not started | Moved to Phase 6 (Issue df34d40f). |
+| X2 end-of-phase items | partial | Bundle hygiene done; generated hotspot files and observe-only checks are not found landed (Issue f93a8c2c). |
+| G1–G3, G6 gate parity | done | Actions warm cache, shards, scoped checks, runner label. G4 and G5 are unfrozen; see the unfreeze decisions (Issues 82fbf17f, b083afb6). |
+| G7 per-machine cache | partial | Direct R2 reads exist; the machine-wide object cache is part of the packs work (Issue 13475957). |
+| G8 gate time, dollars per landing, E3 re-run | not started | Issue 39942bfe. |
+| Exit criterion 5 outside-user trial | not started | Needs the import time above and newcomer docs (Issue 59aaeb23). |
 
 ## Self-metrics (first)
 
@@ -192,6 +224,8 @@ current-window status sample must not be saved as a completed-week report. There
 is no hosted schedule, timer, background collector or idle Convex usage.
 
 ### Published baseline
+
+This is the Phase 5 start baseline. It has not been re-run. Metrics slices 1–3 have since landed and produce live values; one 24-hour reading on 2026-10-30 showed 57 landings (14 first-try, 25 after retry, 17 after a fixer, 1 unknown), 134 interventions (partial) and 319 check runs. Rows 5.2, 5.4, 5.5, 5.6 (reuse) and 5.8 are still partly unknown.
 
 The baseline uses UTC `[2026-10-14,2026-10-25)` (through October 24), computed
 read-only from the dogfood owner's Forge records at Work revision 25741. No
@@ -412,6 +446,7 @@ Split by group; all depend on B1.5b. SP1 is decided; P5-SG lands alongside B1.6�
 - **Size:** S. **Depends on:** B1.6–B1.8 landed for two weekly backups. **Owner approves** (retention change).
 - **Changes:** export, then purge and remove definitions for `ownerAcceptanceTables`, `publicationTables`, `metadataPublication`, `ownerDerived`, `intentMigration`, `projectReturnSupersessions` and `exchangeCleanup*`.
 - **Acceptance:** the export restores into a scratch deployment; schema push passes; Route A on the newest backup still passes.
+- **Also (owner decision 2026-10-31):** `nforge serve` and the native-owner recovery and release-owner code are deleted with this slice.
 
 ## Landing without an operator (Q)
 
@@ -586,6 +621,13 @@ Frozen under decision 4:
 
 **Unfreezes when** E1 and E3 are published and B1.5b (cutover) has landed. Bug fixes to frozen surfaces are allowed.
 
+**Unfreeze decisions (2026-10-31).** The condition has held since 2026-10-28. The owner delegated the call to the lead, using these criteria: off the Mac, single-operation parity with GitHub, a multi-agent win, cheap, no fluff.
+
+- **Unfrozen:** the failed-file report (G5, Issue b083afb6), flake containment (G4, Issue 82fbf17f), two-way GitHub sync (H23, H24, Issue 27e13362), and the landing timeline, CI insights and hosted Lane rows (H19b–H21), which fold into the Now view (Issue 9e748e41).
+- **Carried elsewhere:** G8 gate time and the E3 re-run (Issue 39942bfe). G7 is superseded by the packs machine-object store (Issue 13475957).
+- **Still frozen:** anchored comments, which depend on declaration identity from B3.4 (Issue 82e8ddb8).
+- **Dropped:** browser code editing (H19a, since agents and local editors cover it), and CI adapters for Azure DevOps and GitLab (GitHub Actions only for the beta; revisit on outside-user demand).
+
 ## After the bets
 
 The rest of the old Phase 5 list follows: an outside-user trial, a polished first project through GitHub import, and newcomer docs. Carried friction stays documented in the roadmap's Workflow friction section and is not scheduled; the hub-module split for test selection is likely dissolved by B2.1.
@@ -621,6 +663,14 @@ Phase 5 closes when all of these hold:
 3. Bet 1 is cut over with one authority, and B1.6–B1.8 have landed with LOC removed reported.
 4. The Q4 lifecycle drill passes.
 5. The outside-user trial is ready to start: newcomer docs and a first project through GitHub import work for someone who did not build Forge.
+
+Where each stands (2026-10-31):
+
+1. **Partly met.** Metrics slices 1–3 are live; several rows are still partly unknown (see the baseline note).
+2. **Not met.** E1 and E3 are published; E2 was replaced by B1.5d, whose Forge arm is not published; R3 (B3.5) is not started. **Owner decision: Phase 5 stays open until this is met.**
+3. **Mostly met.** Cutover applied 2026-10-28 and B1.6–B1.8 landed; B1.9 (the table purge, with `nforge serve` and the native-owner code) is dated about 2026-11-09. LOC removed is in the builders' handoffs; no summary is published.
+4. **Met.** The Q4 lifecycle drill passed on GitHub runners.
+5. **Not met.** **Owner decision: Phase 5 stays open until an import works with no Mac in 5 minutes or less.** The no-Mac import landed in `84741d8e`; on t3code it takes 16 min 56 s today. Newcomer docs and a quickstart tested by someone who did not build Forge are not done.
 
 ## Review coverage
 

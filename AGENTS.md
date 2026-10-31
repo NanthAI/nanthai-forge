@@ -39,6 +39,10 @@ Ideas, decisions and friction you find go into planning as Issues (`put-planning
 - **Freeze after landing is submitted**: no save, sync or edit until it is terminal; a new save supersedes it and discards its checks.
 - **Tests follow the change**: locally run the affected set (`nforge agent ROOT tests`), not the whole suite; the landing check is the full run.
 - **Stay with work you depend on**: do not stop while a landing, import or test run you need is still running; wait for it.
+- **Save at milestones**: save the Lane at least every ~30 minutes of edits. A Lane that is never saved loses everything if the agent stops.
+- **A killed wait is not a failed landing**: if your process is stopped while `land` is waiting, resume it with `land --save '{"operationId":"ORIGINAL_UUID"}'` (or re-run the same request). It continues the same landing and reuses its checks.
+- **Fix the class, not the instance**: when a bug is one case of a pattern (a per-item call, a storage write in the wrong place, a missing timeout), search the repo for every other instance and fix or list them. If the pattern must never return, add a check to `npm run verify`.
+- **Report friction with evidence** (`friction`): the action, the error code, the Lane id and what you did instead, so the pattern can be fixed rather than worked around.
 - **Efficiency by design**: state Convex calls, DB I/O, memory and wall time at real scale before building. Convex calls per operation must not rise; idle costs zero calls; no per-item calls in loops, no polling.
 
 Record a handoff before stopping.

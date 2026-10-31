@@ -455,6 +455,8 @@ Designed, not built: an opt-in OpenTelemetry intake. Claude Code and Codex can e
 
 ## Acceptance from the hosted browser
 
+**Status.** Most of this section describes the pre-cutover path, where a bound local owner consumes hosted Accept requests. Since the cutover on 2026-10-28, a project with server authority accepts only through hosted landing (see the last paragraph of this section). `nforge host` refuses `--listen`, `--sync-agent`, `--auto-sync` and `--no-auto-sync` with `CLI_UPGRADE_REQUIRED`, so no owner process polls for requests, and nothing waits for a local receipt. `nforge serve` still starts a local Git/Work server; it is deleted with B1.9 (owner decision, 2026-10-31).
+
 A native project created by `nforge host` remains canonical on its bound local
 owner. The hosting key and native backup format distinguish it from Git-backed
 and hosted-canonical projects. Hosted Accept records an owner-scoped request,

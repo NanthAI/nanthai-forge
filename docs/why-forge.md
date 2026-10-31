@@ -30,6 +30,8 @@ measured (below); whether alerts make agents' work better has not.
 
 ## Measured landing throughput
 
+**These numbers are historical.** Every figure on this page was measured between 2026-10-20 and 2026-10-25, before Forge landed its own work on the hosted path (cutover on 2026-10-28). The first table ran on GitHub-hosted runners; the P2 repeat and E3 below ran on Blacksmith runners, which Forge stopped using on 2026-10-25. None of it has been re-measured on today's path. The benchmark on a real repository (B1.5d) and the re-run of E3 (G8) are not yet published.
+
 Measured on **2026-10-20**, P1c attempt 9 (01:40–07:50 UTC), using the same seed
 (one squashed Forge main tree, `9db0122d`) on both sides. Both Forge's check runner
 and GitHub's merge queue ran on GitHub-hosted `ubuntu-latest`, with four test
@@ -69,8 +71,8 @@ faster:** it put the three good changes on main in a median 189 s; Forge took
 had been as fast as a GitHub PR check, GitHub would still be about 2.4× faster.
 Neither side landed the bad change or turned main red, and Forge used fewer check
 jobs (20–25 against 48–54). Forge isolates a failure by checking prefixes one
-after another, and that serial recovery is what lost. The fix is planned in the
-[Phase 5 plan](phase5-plan.md#landing-without-an-operator-q).
+after another, and that serial recovery is what lost. The Phase 5 plan covers the
+fix ([landing without an operator](phase5-plan.md#landing-without-an-operator-q)); the E3 re-run (G8) is not started.
 
 ### Overlap alerts between live agents
 
@@ -81,7 +83,7 @@ On the current build every overlapping agent pair and file raised an alert at sa
 time (90 / 90), and 84 / 90 reached both agents' transcripts. Alerts arrive with an
 agent's next Forge call, so a fast second save can come first: only 2 / 5 replays
 delivered the first alert to both agents before the second save. Delivery at first
-write is planned. Sources: the forge-bench results `E1-2026-10-24.md`,
+write has since landed (B3.1); it has not been re-measured. Sources: the forge-bench results `E1-2026-10-24.md`,
 `E1-2026-10-25.md` and `E3-2026-10-24.md`.
 
 This measures landing throughput of completed changes. It does not measure agent
