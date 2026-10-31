@@ -5,7 +5,12 @@ import { waitHostedAgentSource } from './hosted-agent-source-wait.js';
 import { recoverHostedFinish, hostedConflictAdvice } from './hosted-agent-resolution.js';
 import type { HostedRunSubscription } from './hosted-agent-observe.js';
 import { executeHostedRecords } from './hosted-agent-records.js';
-import { hostedAgentRecordActions, hostedAgentPlanningActions } from './hosted-agent-contract.js';
+import {
+  hostedAgentRecordActions,
+  hostedAgentPlanningActions,
+  hostedAgentPolicyActions,
+} from './hosted-agent-contract.js';
+import { executeHostedPolicy } from './hosted-agent-policy.js';
 import { executeHostedPlanning, markPlanningStarted } from './hosted-agent-planning.js';
 import { executeHostedMetrics } from './hosted-agent-metrics.js';
 import { laneLiveness, recordLane, withLaneCommand } from './lane-registry.js';
@@ -75,6 +80,7 @@ const quietActions = new Set([
   'capabilities',
   'metrics',
   'check-settings',
+  'policy',
   'status',
   'observe',
   'landing',
@@ -89,6 +95,7 @@ const gateCodes = new Set([
   'SAVE_PENDING',
   'SAVE_REBASE_CONFLICT',
   'LANE_NOT_ACTIVE',
+  'POLICY_CHANGED',
 ]);
 /** Existing CLI mutations that accept deferred caller receipts; no extra calls. */
 const receiptMutations = new Set([
@@ -179,9 +186,17 @@ export class HostedAgentTransport {
   /** Local Lane activity for idle listing and prune: one small file write, no network. */
   private touchLane(action: string, input: Record<string, unknown>, response: HostedAgentResponse) {
     if (
-      ['capabilities', 'metrics', 'check-settings', 'status', 'observe', 'landing', 'start', 'open'].includes(
-        action,
-      )
+      [
+        'capabilities',
+        'metrics',
+        'check-settings',
+        'policy',
+        'status',
+        'observe',
+        'landing',
+        'start',
+        'open',
+      ].includes(action)
     )
       return;
     const laneId =
@@ -202,7 +217,16 @@ export class HostedAgentTransport {
     outcome: { result?: unknown; error?: unknown },
     operationId: string | null,
   ) {
-    if (['capabilities', 'metrics', 'check-settings', ...hostedAgentPlanningActions].includes(action)) return;
+    if (
+      [
+        'capabilities',
+        'metrics',
+        'check-settings',
+        ...hostedAgentPlanningActions,
+        ...hostedAgentPolicyActions,
+      ].includes(action)
+    )
+      return;
     writeCallerReceipts(
       metricOutboxDirectory(this.address),
       callerReceipts({
@@ -227,6 +251,7 @@ export class HostedAgentTransport {
         'landing',
         'check-settings',
         'metrics',
+        'policy',
         ...hostedAgentPlanningActions,
       ].includes(requestedAction)
     )
@@ -283,6 +308,16 @@ export class HostedAgentTransport {
       );
       if (!observation && operationId !== undefined)
         invariant(z.uuid().safeParse(operationId).success, 'BAD_ARGUMENT', 'operationId must be a UUID.');
+      // Policy needs no capability discovery: the server authorizes it, so each command is one call.
+      if ((hostedAgentPolicyActions as readonly string[]).includes(action)) {
+        const policy = await executeHostedPolicy(
+          this,
+          action as (typeof hostedAgentPolicyActions)[number],
+          command.data as Record<string, unknown>,
+          operationId as string | undefined,
+        );
+        return this.response(action, policy.operationId, policy.result);
+      }
       let discovery: unknown;
       try {
         let options: Record<string, 1> = {

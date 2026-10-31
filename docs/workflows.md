@@ -181,7 +181,7 @@ Accepted and superseded Candidates show their retained disposition instead of de
 
 ## Autonomy policy
 
-`nforge policy ROOT` (also `nforge agent ROOT policy`) reads the typed `AutonomyPolicy` exported from the package. Local Work status and agent status include `autonomyPolicy`. The token-authenticated local HTTP Work API accepts `policy` and `set-policy` commands. MCP exposes them through `forge_work_overview` and `forge_task`. Hosted clients use `projectAutonomy.read` and `projectAutonomy.set`; `nforge hosted-work DEPLOYMENT PROJECT_ID '{"action":"policy"}'` and `forge_hosted_work` expose the same read/write commands without needing a Work index.
+`nforge policy ROOT` (also `nforge agent ROOT policy`) reads the typed `AutonomyPolicy` exported from the package. Local Work status and agent status include `autonomyPolicy`. The token-authenticated local HTTP Work API accepts `policy` and `set-policy` commands. MCP exposes them through `forge_work_overview` and `forge_task`. Hosted clients use `projectAutonomy.read` and `projectAutonomy.set`. On a hosted ROOT, `nforge agent ROOT policy` is one query and `nforge x ROOT set-policy` is one mutation (no capability call; the server enforces owner authority). Without an `operationId`, `set-policy` generates one and returns it; replay it with the same fields to reconcile an unknown outcome. `nforge hosted-work DEPLOYMENT PROJECT_ID '{"action":"policy"}'` and `forge_hosted_work` expose the same read/write commands without needing a Work index.
 
 ```sh
 nforge set-policy ROOT '{"operationId":"UUID","preset":"trusted"}'

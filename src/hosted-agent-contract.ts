@@ -12,6 +12,7 @@ import { saveExpectedSchema } from './hosted-save.js';
 import { safeRelative } from './safe-relative.js';
 import { planningCommentCommandSchema, planningPutSchema } from './work-planning-types.js';
 import { invariant } from './errors.js';
+import { policyWriteObject } from './autonomy-policy.js';
 import { hostedCheckCommandSchema, hostedCheckRunnerSchema } from './hosted-check.js';
 export const hostedAgentActions = [
   'tests',
@@ -57,6 +58,9 @@ export const hostedAgentRecordActions = [
   'peer-ack',
   'overlap-acks',
 ] as const;
+/** Project policy: one Convex call each, served before capability discovery. Not advertised;
+ * the server enforces owner authority on set-policy. */
+export const hostedAgentPolicyActions = ['policy', 'set-policy'] as const;
 /** Composed by the client from existing reads and mutations; never advertised in capabilities. */
 export const hostedAgentClientActions = ['ack', 'preflight', 'source-pack'] as const;
 export const hostedAgentAddressSchema = z.object({ url: z.url(), projectId: z.string().min(1) }).strict();
@@ -269,6 +273,16 @@ export const hostedAgentCommandSchemas = {
     })
     .strict(),
   'check-settings': z.object({}).strict(),
+  /** Effective project policy, one read. */
+  policy: z.object({}).strict(),
+  /** Owner-only merge of policy fields; operationId (a UUID, generated if omitted) makes a replay a no-op. */
+  'set-policy': policyWriteObject
+    .omit({ action: true, operationId: true })
+    .strict()
+    .refine(
+      value => value.acceptance?.ownerApprovalPaths === undefined || value.governanceVersion === 1,
+      'Editing owner approval paths requires governanceVersion:1.',
+    ),
   /** Finite page of the backlog (Initiatives and Issues). id reads one item with its comments. */
   planning: z
     .object({

@@ -128,10 +128,18 @@ export const policyReadView = (policy: AutonomyPolicy): AutonomyPolicy => ({
   agentDefaults: effectiveAgentDefaults(policy.agentDefaults),
 });
 /** Compare-and-swap accepts the stored form or the read view (filled agent defaults). */
+/** Key order is not meaningful: a policy copied from a read and re-parsed reorders its fields. */
+const sortedJson = (value: unknown) =>
+  JSON.stringify(value, (_key, item: unknown) =>
+    item && typeof item === 'object' && !Array.isArray(item)
+      ? Object.fromEntries(Object.entries(item).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
+      : item,
+  );
 export const samePolicy = (expected: AutonomyPolicy, previous: AutonomyPolicy) =>
-  JSON.stringify(expected) === JSON.stringify(previous) ||
-  JSON.stringify(expected) === JSON.stringify(policyReadView(previous));
-export const policyWriteSchema = z
+  sortedJson(expected) === sortedJson(previous) ||
+  sortedJson(expected) === sortedJson(policyReadView(previous));
+/** The unrefined fields, so hosted agent transports can omit action and operationId. */
+export const policyWriteObject = z
   .object({
     action: z.literal('set-policy'),
     governanceVersion: z.literal(1).optional(),
@@ -160,11 +168,11 @@ export const policyWriteSchema = z
       })
       .optional(),
   })
-  .strict()
-  .refine(
-    value => value.acceptance?.ownerApprovalPaths === undefined || value.governanceVersion === 1,
-    'Editing owner approval paths requires governanceVersion:1.',
-  );
+  .strict();
+export const policyWriteSchema = policyWriteObject.refine(
+  value => value.acceptance?.ownerApprovalPaths === undefined || value.governanceVersion === 1,
+  'Editing owner approval paths requires governanceVersion:1.',
+);
 export type PolicyWrite = z.infer<typeof policyWriteSchema>;
 export function editedPolicy(previous: AutonomyPolicy, command: PolicyWrite): AutonomyPolicy {
   invariant(
