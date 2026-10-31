@@ -52,21 +52,43 @@ test('incident replay: four finishes in one minute share one full check and one 
   assert.equal(f.pending().length, 0);
 });
 
-test('a failed batch splits into exact serial single checks; a culprit retains its own named test', async t => {
+test('a failed batch checks both halves at once; a culprit retains its own named test', async t => {
   const f = await batchesFixture(t);
+  const runOf = i =>
+    [...f.tables.projectHostedLandingRequests.values()].find(r => r.submissionId === f.entries[i].state.id)
+      .runId;
+  const settle = async () => {
+    for (const run of f.runs().filter(r => r.status === 'queued')) {
+      if (run.id === runOf(1)) await f.fail(run.id);
+      else await f.rawChecks.pass(await f.rawChecks.activate(run.id));
+    }
+    await f.drain();
+  };
   await f.drain();
   await f.fail(f.runs()[0].id, 'tests/combined.test.mjs');
   await f.drain();
-  for (let i = 0; i < 4; i++) {
-    const [run] = f.runs().filter(r => r.status === 'queued');
-    assert(run, `member ${i} has one exact check`);
-    if (i === 1) await f.fail(run.id);
-    else await f.rawChecks.pass(await f.rawChecks.activate(run.id));
-    await f.drain();
-  }
-  assert.equal(f.runs().length, 5, 'one batch plus one check per member');
+  const halves = f.runs().filter(r => r.status === 'queued');
+  assert.equal(halves.length, 2, 'both halves compose and check in parallel');
+  assert(
+    states(f).every(s => !s.batchSolo),
+    'halves are cohorts, not serial singles',
+  );
+  await settle();
+  assert.equal(states(f).filter(s => s.phase === 'landed').length, 2, 'the good half lands');
+  for (let i = 0; i < 4 && states(f).some(s => s.phase === 'checking'); i++) await settle();
+  assert.equal(states(f).filter(s => s.phase === 'checking').length, 0);
+  // One batch, two halves, two singles of the failed half; the passing single
+  // checked on the old main rechecks once on main including the good half.
+  assert.equal(f.runs().length, 6);
+  const receipts = [...f.tables.projectHostedAcceptances.values()].map(r => JSON.parse(r.value));
+  const single = receipts.find(r => r.submissionId === f.entries[0].state.id);
+  assert.equal(
+    single.previous.head,
+    receipts.find(r => r.submissionId === f.entries[2].state.id).candidate.head,
+  );
   assert.equal(states(f).filter(s => s.phase === 'landed').length, 3);
   const failed = states(f).find(s => s.phase === 'terminal-failed');
+  assert.equal(failed.id, f.entries[1].state.id);
   assert.match(failed.error.message, /tests\/member-1.test.mjs/);
   assert(!JSON.parse(f.c.objects.get(f.currentMain().head)).files.some(f => f.path === 'member-1'));
   assert.equal(f.pending().length, 0);

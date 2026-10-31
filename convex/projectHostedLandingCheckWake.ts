@@ -29,6 +29,8 @@ export async function notifyLandingCheck(
   input: {
     projectId: Id<'hostedProjects'>;
     runId: string;
+    /** False for a progress write: an admitting request waits for the terminal one. */
+    terminal?: boolean;
   },
 ) {
   const waiting = await ctx.db
@@ -37,11 +39,11 @@ export async function notifyLandingCheck(
       q.eq('projectId', input.projectId).eq('runId', input.runId).eq('phase', 'checking'),
     )
     .take(1);
-  if (!waiting.length) return;
-  const row = await checkWakeRow(ctx, input);
+  if (!waiting.length || (input.terminal === false && waiting[0]!.admitting)) return;
+  const row = await checkWakeRow(ctx, { projectId: input.projectId, runId: input.runId });
   if (row?.wake) {
     const task = await ctx.db.system.get(row.wake.taskId);
     if (task?.state.kind === 'pending' || task?.state.kind === 'inProgress') return;
   }
-  await scheduleCheckWake(ctx, input, row);
+  await scheduleCheckWake(ctx, { projectId: input.projectId, runId: input.runId }, row);
 }

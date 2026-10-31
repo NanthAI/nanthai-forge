@@ -13,6 +13,9 @@ import {
 } from './projectHostedLandingEvents';
 export { scheduleLandingWake, wakeLandingQueue } from './projectHostedLandingEvents';
 import { landingRow } from './projectHostedLandingStore';
+import { loadHostedCheck } from './projectHostedCheckStore';
+import { hostedCheckTerminal } from '../src/hosted-check';
+import { settleLandingAdmission } from './projectHostedLandingAdmission';
 import { hostedLandingStateSchema } from '../src/hosted-landing';
 import { nextLandingRow, nextReadyLandingRow, orderHostedLandingRows } from './projectHostedLandingOrder';
 import { canonicalPayload } from '../src/hosted-source-operation';
@@ -172,7 +175,20 @@ export async function wakeLandingCheck(
       q.eq('projectId', input.projectId).eq('runId', input.runId).eq('phase', 'checking'),
     )
     .paginate({ cursor: null, numItems: 100, maximumRowsRead: 100, maximumBytesRead: 96 * 1024 });
+  let run: Awaited<ReturnType<typeof loadHostedCheck>>['run'] | null = null,
+    woken = false;
   for (const row of page.page) {
+    if (row.admission?.status === 'checking' && row.admission.runId === input.runId) {
+      // Progress writes wake too; only the run's own terminal result settles
+      // admission, and an unsettled admission costs no queue tick.
+      run ??= (await loadHostedCheck(ctx, input)).run;
+      if (hostedCheckTerminal(run)) {
+        await settleLandingAdmission(ctx, row, run);
+        woken = true;
+      }
+      continue;
+    }
+    woken = true;
     const state = hostedLandingStateSchema.parse(JSON.parse(row.value));
     state.phase = 'queued';
     state.version++;
@@ -180,7 +196,7 @@ export async function wakeLandingCheck(
     await recordLandingObservation(ctx, state, null);
     await ctx.db.patch(row._id, { phase: 'queued', runnable: true, value: canonicalPayload(state) });
   }
-  if (page.page.length) await wakeLandingQueue(ctx, { projectId: input.projectId, channel: 'main' });
+  if (woken) await wakeLandingQueue(ctx, { projectId: input.projectId, channel: 'main' });
   if (!page.isDone) await scheduleCheckWake(ctx, { projectId: input.projectId, runId: input.runId }, wake);
   else await ctx.db.patch(wake._id, { wake: null });
 }

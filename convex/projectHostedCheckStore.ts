@@ -113,7 +113,11 @@ export async function writeHostedCheck(
     status: run.status,
     value: semanticPayload(hostedCheckRunSchema.parse(run), true),
   });
-  await notifyLandingCheck(ctx, { projectId: run.projectId as Id<'hostedProjects'>, runId: run.id });
+  await notifyLandingCheck(ctx, {
+    projectId: run.projectId as Id<'hostedProjects'>,
+    runId: run.id,
+    terminal: hostedCheckTerminal(run),
+  });
 }
 export async function completeHostedCheck(ctx: MutationCtx, run: HostedCheckRun) {
   await onGateRunTerminal(ctx, run);

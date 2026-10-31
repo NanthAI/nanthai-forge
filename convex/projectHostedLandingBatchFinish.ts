@@ -1,4 +1,5 @@
 import { advanceBatchFallback } from './projectHostedLandingBatchFallback';
+import { splitLandingBatch } from './projectHostedLandingBatchSplit';
 // SPDX-License-Identifier: Apache-2.0
 import { releaseUnstartedBatchForPriority } from './projectHostedLandingBatchPriority';
 import type { Doc } from './_generated/dataModel';
@@ -49,6 +50,13 @@ export async function batchFinishStep(
   ) {
     // A pre-upgrade alarm may already be consumed. Resume/event repair must
     // reselect the member too, without needing another timer or a backfill.
+    // A cohort that cannot compose (2026-10-30: a merge step failed on every
+    // retry) splits into parallel halves; no test failed, so nobody waits in
+    // a serial single-check line.
+    if (batch.phase === 'composing') {
+      await splitLandingBatch(ctx, key, batch);
+      return { handled: true, command: null };
+    }
     const fallback = { ...batch, phase: 'fallback' as const };
     await writeBatch(ctx, key, fallback);
     return advanceBatchFallback(ctx, key, fallback, state.id);
@@ -78,8 +86,7 @@ export async function batchFinishStep(
   if (source.operation.terminal) {
     const outcome = source.operation.terminal.outcome;
     if (outcome.status === 'failed') {
-      await writeBatch(ctx, key, { ...batch, phase: 'fallback' });
-      await wakeBatch(ctx, key);
+      await splitLandingBatch(ctx, key, batch);
       return { handled: true, command: null };
     }
     const candidate = hostedRecordSchema.options[3].parse(outcome.result);

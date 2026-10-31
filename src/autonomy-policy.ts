@@ -40,6 +40,10 @@ export const autonomyPolicySchema = z.object({
     /** Native: `optimistic` opts into optimistic landing. Hosted: `batched` opts into
      * landing batches; absent checks each deferred entry alone. */
     landing: z.enum(['batched', 'optimistic']).optional(),
+    /** Hosted batches: check each member's own affected set before it joins a cohort. Absent is off. */
+    admissionCheck: z.boolean().optional(),
+    /** Hosted batches: fixed cohort size; absent picks it from the recent failure rate. */
+    batchMaxSize: z.number().int().min(1).max(8).optional(),
     /** Remote runners only: wait up to this long after the oldest queued landing before the first check. */
     batchWindowMs: z.number().int().min(0).max(60_000).optional(),
     autoActors: z.array(z.string().min(1)).optional(),

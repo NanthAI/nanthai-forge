@@ -11,6 +11,7 @@ import {
   landingObservation,
 } from '../src/hosted-landing';
 import { HOSTED_BATCH_MEMBERS, hostedBatching } from '../src/hosted-landing-batch';
+import { cohortSize, hostedAdmission } from '../src/hosted-landing-admission';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import {
   landingRow,
@@ -34,7 +35,13 @@ export const batchSchema = z
     at: z.iso.datetime(),
     composeOperationId: z.uuid(),
     checkOperationId: z.uuid(),
-    phase: z.enum(['composing', 'checking', 'fallback', 'landed', 'superseded']),
+    /** `split`: retired into parallel halves; `failed`: platform retries exhausted. */
+    phase: z.enum(['composing', 'checking', 'fallback', 'landed', 'superseded', 'split', 'failed']),
+    /** A half of this earlier cohort, after its shared check failed. */
+    parentId: z.uuid().optional(),
+    /** Every member passed its own admission check. */
+    admitted: z.boolean().optional(),
+    platformRetries: z.number().int().nonnegative().optional(),
     members: z.array(hostedLandingAttemptSchema).min(2).max(HOSTED_BATCH_MEMBERS),
     memberDetails: z.array(batchMemberDetailSchema).max(HOSTED_BATCH_MEMBERS).optional(),
     failure: batchFailureSchema.optional(),
@@ -78,7 +85,7 @@ export async function writeBatch(
 }
 export async function wakeBatch(ctx: MutationCtx, input: BatchIdentity) {
   const { batch } = await loadBatch(ctx, input);
-  if (batch.phase === 'landed' || batch.phase === 'superseded') return;
+  if (['landed', 'superseded', 'split', 'failed'].includes(batch.phase)) return;
   const row = await finishRow(ctx, { projectId: input.projectId, submissionId: batch.leaderId ?? batch.id });
   if (row) await scheduleFinish(ctx, row);
 }
@@ -96,6 +103,10 @@ export async function formLandingBatch(
   const own = hostedLandingAttemptSchema.parse(JSON.parse(selected.row.batchSelection));
   // Opt-in is pinned with the admitted policy; members share its digest.
   if (!hostedBatching(own.policy)) return false;
+  const admission = hostedAdmission(own.policy),
+    queue = await landingQueue(ctx, { projectId: input.projectId, channel: 'main' }),
+    limit = cohortSize(own.policy, queue?.checkHistory, admission);
+  if (limit < 2) return false;
   const order = await activeLandingOrder(
     ctx,
     { projectId: input.projectId, channel: 'main' },
@@ -107,7 +118,7 @@ export async function formLandingBatch(
     if ((key.priority ?? 'normal') !== (selected.state.priority ?? 'normal')) continue;
     const row = await landingRow(ctx, { projectId: input.projectId, submissionId: key.submissionId });
     if (row?.batchable) windows.push(row);
-    if (windows.length >= HOSTED_BATCH_MEMBERS) break;
+    if (windows.length >= limit) break;
   }
   const members = windows
     .flatMap(row => {
@@ -122,7 +133,7 @@ export async function formLandingBatch(
         ? [{ row, state, attempt }]
         : [];
     })
-    .slice(0, HOSTED_BATCH_MEMBERS);
+    .slice(0, limit);
   if (members.length < 2 || !members.some(m => m.state.id === input.submissionId)) return false;
   const batch: LandingBatch = {
     id: crypto.randomUUID(),
@@ -132,6 +143,7 @@ export async function formLandingBatch(
     checkOperationId: crypto.randomUUID(),
     phase: 'composing',
     members: members.map(m => m.attempt),
+    ...(admission ? { admitted: members.every(m => m.row.admission?.status === 'passed') } : {}),
     uploadIndex: 0,
   };
   await ctx.db.insert('projectHostedLandingBatches', {
@@ -262,7 +274,7 @@ export async function retryLandingBatch(ctx: MutationCtx, input: BatchIdentity, 
         phase: 'queued',
         observation: landingObservation('queued'),
         error: null,
-        timing: { submittedAt: state.at, composeStartedAt: new Date().toISOString() },
+        timing: { submittedAt: state.at, composeStartedAt: new Date(Date.now()).toISOString() },
       },
       false,
     );

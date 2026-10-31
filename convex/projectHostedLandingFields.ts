@@ -72,6 +72,8 @@ export const hostedLandingTables = {
       v.null(),
     ),
     lease: v.union(lease, v.null()),
+    /** Recent cohort outcomes for sizing (`1` passed, `0` a test failed), newest last. */
+    checkHistory: v.optional(v.object({ first: v.optional(v.string()), admitted: v.optional(v.string()) })),
   }).index('by_project_and_channel', ['projectId', 'channel']),
   projectHostedLandingRequests: defineTable({
     alarm,
@@ -82,6 +84,20 @@ export const hostedLandingTables = {
     candidateId: v.optional(v.string()),
     batchSelection: v.optional(v.string()),
     batchable: v.optional(v.boolean()),
+    /** Server-only admission run of this submission's own Candidate (not in the state body). */
+    admission: v.optional(
+      v.object({
+        runId: v.string(),
+        status: v.union(
+          v.literal('checking'),
+          v.literal('passed'),
+          v.literal('failed'),
+          v.literal('unavailable'),
+        ),
+        endedAt: v.optional(v.number()),
+      }),
+    ),
+    admitting: v.optional(v.literal(true)),
     revertOf: v.optional(v.string()),
     actor: v.string(),
     sequence: v.number(),
@@ -155,6 +171,12 @@ export const hostedLandingTables = {
     ])
     .index('by_project_and_channel_and_phase_and_sequence', ['projectId', 'channel', 'phase', 'sequence'])
     .index('by_project_and_channel_and_sequence', ['projectId', 'channel', 'sequence'])
+    .index('by_project_and_channel_and_admitting_and_sequence', [
+      'projectId',
+      'channel',
+      'admitting',
+      'sequence',
+    ])
     .index('by_project_and_run_and_phase', ['projectId', 'runId', 'phase']),
   projectHostedLandingAttempts: defineTable({
     projectId: v.id('hostedProjects'),

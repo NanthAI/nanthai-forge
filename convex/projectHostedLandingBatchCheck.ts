@@ -1,5 +1,12 @@
 import { diagnoseBatchFailure } from '../src/hosted-batch-diagnosis';
 import { advanceBatchFallback } from './projectHostedLandingBatchFallback';
+import { checkFailureKind } from '../src/hosted-landing-admission';
+import { loneAdmission } from './projectHostedLandingAdmission';
+import {
+  recordCohortOutcome,
+  retryLandingBatchCheck,
+  splitLandingBatch,
+} from './projectHostedLandingBatchSplit';
 import { ForgeError, invariant } from '../src/errors';
 import { readHostedRecord } from './projectHostedRecords';
 import { hostedRecordSchema } from '../src/hosted-records';
@@ -61,13 +68,13 @@ async function prepareLandingCheckOnce(
         const details = (batch.memberDetails ?? []).filter(
           member => !batch.included || batch.included.includes(member.submissionId),
         );
-        const failure = diagnoseBatchFailure(details, run, semantic);
-        if (
-          run.status === 'passed' &&
-          !failure.failedTests.length &&
-          !semantic.overBudget &&
-          !semantic.conflicts.length
-        ) {
+        const outcome = checkFailureKind(run, semantic);
+        if (outcome === 'platform') {
+          // Runner unavailable, Actions 403/server error, cancelled or timed out:
+          // no test failed, so the cohort stays together and checks again.
+          await retryLandingBatchCheck(ctx, key, batch, attempt, run);
+        } else if (outcome === 'passed') {
+          await recordCohortOutcome(ctx, key, batch, true);
           await requireHostedCheckEvidence(ctx, {
             projectId: claim.projectId,
             actor: attempt.actor.id,
@@ -97,6 +104,7 @@ async function prepareLandingCheckOnce(
             );
           }
         } else {
+          await recordCohortOutcome(ctx, key, batch, false);
           // At most eight exact metadata reads in this mutation, only after a
           // failed shared check. Large source path lists never enter batch state.
           const originals = await Promise.all(
@@ -118,12 +126,7 @@ async function prepareLandingCheckOnce(
               return { ...member, paths: candidate.governance?.paths ?? member.paths };
             }),
           );
-          await writeBatch(ctx, key, {
-            ...batch,
-            phase: 'fallback',
-            failure: diagnoseBatchFailure(originals, run, semantic),
-          });
-          await wakeBatch(ctx, key);
+          await splitLandingBatch(ctx, key, batch, diagnoseBatchFailure(originals, run, semantic));
         }
       }
     }
@@ -132,6 +135,10 @@ async function prepareLandingCheckOnce(
   }
   if (!attempt.deferredCheck) return false;
   if (!state.batchSolo && (await formLandingBatch(ctx, claim, { row: selected.row, state }))) {
+    await releaseLandingQueue(ctx, queue, now);
+    return true;
+  }
+  if (!state.batchSolo && (await loneAdmission(ctx, claim, selected))) {
     await releaseLandingQueue(ctx, queue, now);
     return true;
   }

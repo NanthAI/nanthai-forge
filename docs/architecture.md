@@ -1446,7 +1446,9 @@ order and within-class fairness for batch selection and queue positions. Missing
 legacy priority means normal. Owner reprioritisation patches one queued submission
 without a wake or poller. Hosted batches are opt-in (`acceptance.landing:
 "batched"`). Unstarted batches yield to urgent work before reserving
-a check; reserved checks continue. A retained train with no member checking holds
+a check; reserved checks continue. Opt-in admission runs (`acceptance.admissionCheck`)
+wake their request only on a terminal run write, and size and split cohorts as
+described in [hosted queue priority](operations/landing-batches.md#hosted-queue-priority). A retained train with no member checking holds
 later deferred entries for at most `HOSTED_TRAIN_HOLD_MS` after its newest compose;
 then selection drops it, with one scheduled queue wake for the hold's end. See [hosted queue priority](operations/landing-batches.md#hosted-queue-priority). Checking,
 ready and terminal records remain readable without hiding later independent work.

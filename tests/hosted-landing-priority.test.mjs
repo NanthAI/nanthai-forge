@@ -13,6 +13,22 @@ import { acceptanceFixture } from './hosted-acceptance-fixture.mjs';
 const priority = await import(moduleUrl('../convex/projectHostedLandingPriority.ts'));
 const order = await import(moduleUrl('../convex/projectHostedLandingOrder.ts'));
 const batchPriority = await import(moduleUrl('../convex/projectHostedLandingBatchPriority.ts'));
+const batchStore = await import(moduleUrl('../convex/projectHostedLandingBatchStore.ts'));
+// A failed shared test now splits the cohort; individual fallback remains for
+// governance or membership changes, cancellation and publication errors.
+const toFallback = f =>
+  f.transaction(
+    'fallback-trigger',
+    {
+      _handler: async ctx => {
+        const batch = JSON.parse([...f.tables.projectHostedLandingBatches.values()][0].value),
+          key = { projectId: f.projectId, batchId: batch.id };
+        await batchStore.writeBatch(ctx, key, { ...batch, phase: 'fallback' });
+        await batchStore.wakeBatch(ctx, key);
+      },
+    },
+    {},
+  );
 const prior = Object.fromEntries(Object.keys(synthetic).map(k => [k, process.env[k]]));
 test.before(() => Object.assign(process.env, synthetic));
 test.after(() => {
@@ -217,6 +233,7 @@ test('reserved batch checks remain intact', async t => {
 test('fallback urgency takes precedence over normal members and a suspect hint', async t => {
   const f = await batchesFixture(t, { count: 3 });
   await f.drain();
+  await toFallback(f);
   await f.fail(f.runs()[0].id);
   for (
     let tick = 0;
@@ -230,7 +247,17 @@ test('fallback urgency takes precedence over normal members and a suspect hint',
     batch = JSON.parse(row.value),
     urgent = f.entries[2];
   f.patch('projectHostedLandingBatches', row._id, {
-    value: JSON.stringify({ ...batch, failure: { ...batch.failure, suspects: [urgent.state.id] } }),
+    value: JSON.stringify({
+      ...batch,
+      failure: {
+        runId: f.runs()[0].id,
+        failedTests: [],
+        pairs: [],
+        overBudgetPairs: [],
+        ...batch.failure,
+        suspects: [urgent.state.id],
+      },
+    }),
   });
   await prioritize(f, command(f, urgent.state.id));
   await f.drain();
@@ -246,6 +273,7 @@ test('fallback urgency takes precedence over normal members and a suspect hint',
 test('fallback priority preserves a running normal check and selects urgent next', async t => {
   const f = await batchesFixture(t, { count: 3 });
   await f.drain();
+  await toFallback(f);
   await f.fail(f.runs()[0].id, 'tests/unattributed.test.mjs');
   await f.drain();
   assert.equal(f.runs().length, 2);
@@ -266,6 +294,7 @@ test('fallback priority preserves a running normal check and selects urgent next
 test('fallback priority keeps an in-flight solo preparation and reads only its batch', async t => {
   const f = await batchesFixture(t, { count: 3 });
   await f.drain();
+  await toFallback(f);
   await f.fail(f.runs()[0].id, 'tests/unattributed.test.mjs');
   for (
     let tick = 0;

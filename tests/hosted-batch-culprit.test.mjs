@@ -233,7 +233,7 @@ test('incident replay: B and C pass alone but fail together; both statuses name 
   );
 });
 
-test('a suspect submitted first is checked last while every queued member explains its wait', async t => {
+test('a suspect submitted first checks alone while the clean members recheck together', async t => {
   const failed = 'tests/culprit.test.mjs';
   const f = await batchesFixture(t, { count: 3, memberPaths: [failed, 'member-1', 'member-2'] });
   await f.drain();
@@ -241,16 +241,25 @@ test('a suspect submitted first is checked last while every queued member explai
   await f.drain();
   const snapshot = states(f);
   assert(snapshot[0].batchDiagnostic.likelyCulprit);
-  assert.equal(snapshot[0].batchDiagnostic.waitingFor, snapshot[1].id);
-  const run = f.runs().find(run => run.status === 'queued');
-  const files = JSON.parse(f.c.objects.get(run.request.expectedHead)).files.map(file => file.path);
-  assert(files.includes('member-1'));
-  assert(!files.includes(failed));
+  assert.match(snapshot[0].batchDiagnostic.message, /Rechecking alone on accepted main/);
+  for (const i of [1, 2]) {
+    assert(!snapshot[i].batchDiagnostic.likelyCulprit);
+    assert.equal(snapshot[i].batchDiagnostic.waitingFor, null, 'nobody waits in a serial line');
+  }
+  const queued = f.runs().filter(run => run.status === 'queued');
+  assert.equal(queued.length, 2, 'the clean cohort and the suspect check at the same time');
+  const files = queued.map(run =>
+    JSON.parse(f.c.objects.get(run.request.expectedHead)).files.map(file => file.path),
+  );
+  const cohort = files.find(paths => paths.includes('member-1'));
+  assert(cohort.includes('member-2'));
+  assert(!cohort.includes(failed), 'the clean cohort excludes the likely member');
   for (let i = 0; i < 3; i++) {
     await f.passChecks();
     await f.drain();
   }
   assert(states(f).every(state => state.phase === 'landed'));
+  // One shared, the clean cohort, the suspect, and one recheck of whichever lands second.
   assert.equal(f.runs().length, 4);
 });
 

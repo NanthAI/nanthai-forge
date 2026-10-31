@@ -98,12 +98,15 @@ export function batchMemberDiagnostic(
   failure: BatchFailure | undefined,
   state: { id: string; phase: string; batchSolo?: true | undefined },
   next: string | null,
+  /** `split`: the cohort rechecks in parallel groups instead of individual fallback. */
+  mode: 'fallback' | 'split' = 'fallback',
 ) {
+  const split = mode === 'split';
   const own = members.find(member => member.submissionId === state.id);
   const likelyCulprit = failure?.suspects.includes(state.id) ?? false;
   const terminal = state.phase === 'landed' || state.phase === 'terminal-failed';
   const individualPassed = Boolean(state.batchSolo && state.phase === 'landed');
-  const waitingFor = terminal || next === state.id ? null : next;
+  const waitingFor = split || terminal || next === state.id ? null : next;
   const failsTogetherWith = (failure?.pairs ?? []).flatMap(pair => {
     if (!pair.members.includes(state.id)) return [];
     const peer = members.find(member => member.submissionId === pair.members.find(id => id !== state.id));
@@ -125,12 +128,18 @@ export function batchMemberDiagnostic(
       : ('no-declared-contract' as const);
   const nextMember = members.find(member => member.submissionId === next);
   const message = [
-    failure
-      ? `Shared batch run ${failure.runId} required individual fallback.`
-      : 'Shared batch evidence cannot be published.',
+    split
+      ? failure
+        ? `Shared batch run ${failure.runId} failed; the cohort split to recheck in parallel.`
+        : 'The cohort could not compose; it split to recheck in parallel.'
+      : failure
+        ? `Shared batch run ${failure.runId} required individual fallback.`
+        : 'Shared batch evidence cannot be published.',
     likelyCulprit
       ? 'Likely member: failing files match this member changed paths or declared contract tests.'
-      : 'No matching failure evidence; individual fallback runs before likely members.',
+      : split
+        ? 'No matching failure evidence; this member rechecks with the other unnamed members.'
+        : 'No matching failure evidence; individual fallback runs before likely members.',
     coverage === 'declared-contract'
       ? ''
       : coverage === 'unavailable'
@@ -140,13 +149,17 @@ export function batchMemberDiagnostic(
       peer =>
         `Likely fails together with ${peer.outcome} (${peer.intentId}; submission ${peer.submissionId}) on ${peer.tests.length} failing contract test files; shared-batch evidence does not isolate the pair.`,
     ),
-    individualPassed
-      ? 'Individual fallback passed on accepted main.'
-      : terminal
-        ? 'Individual fallback settled.'
-        : waitingFor
-          ? `Waiting for individual fallback of ${nextMember?.outcome ?? next} (${next}).`
-          : 'Running individual fallback on accepted main.',
+    split
+      ? likelyCulprit
+        ? 'Rechecking alone on accepted main.'
+        : 'Rechecking after the split.'
+      : individualPassed
+        ? 'Individual fallback passed on accepted main.'
+        : terminal
+          ? 'Individual fallback settled.'
+          : waitingFor
+            ? `Waiting for individual fallback of ${nextMember?.outcome ?? next} (${next}).`
+            : 'Running individual fallback on accepted main.',
     ...(failure?.overBudgetPairs ?? []).map(
       pair =>
         `Pair ${pair.intents.join(' + ')} measured ${pair.measuredMs} ms, over the existing under-90000 ms budget; pair attribution is unavailable.`,

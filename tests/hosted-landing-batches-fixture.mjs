@@ -21,6 +21,9 @@ export async function batchesFixture(
     memberPaths,
     memberFileCount = 1,
     batching = true,
+    // Mechanics tests pin the earlier fixed cohort of eight; null selects auto sizing.
+    batchMaxSize = 8,
+    admissionCheck = false,
   } = {},
 ) {
   const f = await finishFixture(t, { fileCount });
@@ -28,7 +31,15 @@ export async function batchesFixture(
   if (batching) {
     const policy = policyPreset('trusted');
     f.patch('hostedProjects', f.projectId, {
-      autonomyPolicy: { ...policy, acceptance: { ...policy.acceptance, landing: 'batched' } },
+      autonomyPolicy: {
+        ...policy,
+        acceptance: {
+          ...policy.acceptance,
+          landing: 'batched',
+          ...(batchMaxSize ? { batchMaxSize } : {}),
+          ...(admissionCheck ? { admissionCheck } : {}),
+        },
+      },
     });
   }
   const entries = [];
@@ -110,8 +121,16 @@ export async function batchesFixture(
     return state;
   };
   for (let i = 0; i < count; i++) await add(i);
-  const publications = [];
+  const publications = [],
+    auditWakes = [];
   const execute = async (task, stop = null) => {
+    // Scoped acceptance arms the main audit cadence wake (count or age); these
+    // fixtures record it instead of running a deferred full audit.
+    if (task.name === 'projectHostedMainAudit:start') {
+      auditWakes.push(task.args[0]);
+      f.patch('_scheduled_functions', task._id, { state: { kind: 'canceled' } });
+      return;
+    }
     if (task.name === 'projectHostedBatchAbandon:reselect') {
       f.advanceClock(Math.max(0, task.scheduledTime - Date.now()));
       f.patch('_scheduled_functions', task._id, { state: { kind: 'inProgress' } });
@@ -194,7 +213,7 @@ export async function batchesFixture(
       }),
     );
   };
-  return { ...f, entries, add, execute, drain, runs, fail, publications };
+  return { ...f, entries, add, execute, drain, runs, fail, publications, auditWakes };
 }
 export const synthetic = {
   FORGE_HOSTED_CHECK_KEY_ID: 'SYNTHETIC',

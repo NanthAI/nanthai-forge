@@ -10,6 +10,7 @@ import { hostedQueueAheadSelection } from './projectHostedQueueAhead';
 import { scheduleLandingAlarm } from './projectHostedLandingStallWake';
 import { reuseHostedLanding } from './projectHostedLandingIdentity';
 // SPDX-License-Identifier: Apache-2.0
+import { startLandingAdmission } from './projectHostedLandingAdmission';
 import { v } from 'convex/values';
 import { mutation, query, receiptMutation } from './cliServer';
 import { acceptanceActor } from './projectAutonomy';
@@ -276,6 +277,7 @@ export async function enqueueHostedLanding(
     at: first.at,
     operations: { check: first.ids.check!, accept: first.ids.accept! },
   });
+  const admission = await startLandingAdmission(ctx, { projectId: input.projectId, attempt, request });
   const queue = await ensureLandingQueue(ctx, { projectId: input.projectId, channel: request.channel });
   const sequence = queue.sequence + 1;
   const state = hostedLandingStateSchema.parse({
@@ -292,7 +294,7 @@ export async function enqueueHostedLanding(
     version: reserved ? 1 : 0,
     firstAttemptId: attempt.id,
     attemptId: attempt.id,
-    phase: 'queued',
+    phase: admission ? 'checking' : 'queued',
     ...((reserved?.supersedes ?? reused.supersedes)
       ? {
           supersedes: reserved?.supersedes ?? reused.supersedes,
@@ -300,7 +302,7 @@ export async function enqueueHostedLanding(
         }
       : {}),
     timing: { submittedAt: first.at, ...reserved?.timing, composedAt: new Date().toISOString() },
-    observation: landingObservation('queued'),
+    observation: landingObservation(admission ? 'checking' : 'queued'),
     error: null,
   });
   await insertLandingAttempt(ctx, attempt);
@@ -310,16 +312,19 @@ export async function enqueueHostedLanding(
     submissionId,
     operationId: request.operationId,
     candidateId: request.candidateId,
-    ...(attempt.deferredCheck ? { batchSelection: canonicalPayload(attempt), batchable: true } : {}),
+    ...(attempt.deferredCheck ? { batchSelection: canonicalPayload(attempt), batchable: !admission } : {}),
+    ...(admission
+      ? { admission: { runId: admission, status: 'checking' as const }, admitting: true as const }
+      : {}),
     ...(request.revertOf ? { revertOf: request.revertOf } : {}),
     actor: actor.id,
     ...landingPriority(project.owner, actor.id, request.priority),
     priorityVersion: 0,
     sequence,
     ...(reused.selectionKey ? { selectionKey: reused.selectionKey } : {}),
-    runnable: true,
+    runnable: !admission,
     phase: state.phase as import('./projectHostedLandingStore').LandingRow['phase'],
-    runId: attempt.check?.runId ?? null,
+    runId: attempt.check?.runId ?? admission,
     attemptId: attempt.id,
     value: canonicalPayload(state),
   });

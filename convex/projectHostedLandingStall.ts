@@ -1,5 +1,6 @@
 import { loadBatch, writeBatch } from './projectHostedLandingBatchStore';
 import { advanceBatchFallback } from './projectHostedLandingBatchFallback';
+import { splitLandingBatch } from './projectHostedLandingBatchSplit';
 import { wakeLandingQueue } from './projectHostedLandingWake';
 import { finishRow, scheduleFinish } from './projectHostedFinishWake';
 // SPDX-License-Identifier: Apache-2.0
@@ -43,10 +44,15 @@ export async function raiseLandingAlarm(
         const { batch: original } = await loadBatch(ctx, key);
         // A queued member has already exceeded the existing progress deadline.
         // An active batch must not retain it indefinitely while later work lands.
-        const batch =
-          original.phase === 'checking' || original.phase === 'composing'
-            ? { ...original, phase: 'fallback' as const }
-            : original;
+        // A cohort stuck composing (2026-10-30: one merge step failed on every
+        // retry) splits into halves that compose apart, in parallel; no test
+        // failed, so nobody joins a serial single-check line.
+        if (original.phase === 'composing') {
+          await splitLandingBatch(ctx, key, original);
+          await wakeLandingQueue(ctx, { projectId: input.projectId, channel: 'main' });
+          return null;
+        }
+        const batch = original.phase === 'checking' ? { ...original, phase: 'fallback' as const } : original;
         if (batch.phase === 'fallback' || batch.phase === 'landed') {
           // Repair and re-select in this alarm transaction, including legacy
           // members whose original batch leader has already stopped driving.

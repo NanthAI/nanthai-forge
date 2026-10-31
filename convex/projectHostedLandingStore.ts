@@ -4,6 +4,7 @@ import { makeFunctionReference } from 'convex/server';
 import { semanticPayload } from '../src/semantic-payload';
 import { hostedLandingProgressAt } from '../src/hosted-landing-stall';
 import { scheduleLandingAlarm } from './projectHostedLandingStallWake';
+import { releaseAdmissionWaiters } from './projectHostedLandingAdmissionWake';
 // SPDX-License-Identifier: Apache-2.0
 import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
@@ -181,9 +182,12 @@ export async function writeLanding(
   await scheduleLandingAlarm(ctx, state);
   await retainLandingProgress(ctx, state);
   await recordLandingObservation(ctx, state);
+  // An admission run holds the request until it settles; it never joins a cohort meanwhile.
+  const admitting = row.admission?.status === 'checking' && state.phase === 'checking';
   await ctx.db.patch(row._id, {
     attemptId: state.attemptId,
-    runId: attempt.check?.runId ?? null,
+    runId: attempt.check?.runId ?? (admitting ? row.admission!.runId : null),
+    admitting: admitting ? true : undefined,
     batchSelection:
       !state.batchSolo && (attempt.deferredCheck || row.batchSelection)
         ? canonicalPayload(attempt)
@@ -191,6 +195,8 @@ export async function writeLanding(
     batchable: Boolean(
       !state.batchId &&
       !state.batchSolo &&
+      !admitting &&
+      row.admission?.status !== 'failed' &&
       (attempt.deferredCheck || row.batchSelection) &&
       (state.phase === 'queued' || state.phase === 'checking'),
     ),
@@ -198,9 +204,10 @@ export async function writeLanding(
     runnable,
     value: semanticPayload(state),
   });
+  if (row.admitting && !admitting) await releaseAdmissionWaiters(ctx, row.projectId);
   if (
     row.runId &&
-    (row.runId !== (attempt.check?.runId ?? null) ||
+    (row.runId !== (attempt.check?.runId ?? (admitting ? row.admission!.runId : null)) ||
       state.phase === 'terminal-failed' ||
       state.phase === 'landed')
   )

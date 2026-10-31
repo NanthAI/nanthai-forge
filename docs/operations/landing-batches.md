@@ -547,6 +547,45 @@ selects the next entry; the retained members continue through their own finish
 and check wakes. One queue wake is scheduled for the end of a hold, and none
 while a member is checking.
 
+Cohort size is `acceptance.batchMaxSize` (1 to 8) when set. Absent, the queue
+picks the k that minimises expected checks per member, 1/k + 1 - (1-p)^k, capped
+at 8. p is the failure rate of the last 20 shared checks of that kind (first
+checks, or cohorts of admitted members), smoothed by a prior worth four outcomes:
+0.3 for first checks and 0.05 for admitted cohorts, which can only fail by
+interaction. Unadmitted cohorts start at three; admitted cohorts at five. Each
+settled shared check or admission writes one outcome to the queue row.
+
+`acceptance.admissionCheck: true` adds a per-change admission on GitHub Actions
+runners. Each batchable arrival immediately runs its own Candidate's affected set
+(the scoped gate, or its contract gate when the actor is contract-eligible), in
+parallel with every other arrival. A failing test ends that submission alone with
+`CHECK_FAILED` and its failing files; it never joins a cohort. An admission that
+ends without a failing test lets the member join unadmitted. An admitted member
+waits, not runnable and with no timer, while an earlier arrival is still
+admitting; the last admission to settle releases it, so arrivals that admit
+together form one cohort. An admitted member without a cohort lands on its own
+admission run when that run is still exact evidence on current main, with no
+second run; scoped evidence counts towards the main audit cadence. Admission is
+off by default: a clean five-member cohort runs six checks instead of one and
+uses about 30% more Convex calls per landing. With one bad change in four, it
+runs five checks instead of six and uses about 38% fewer.
+
+A shared check that fails a test splits its cohort into groups that check at
+the same time. Members whose changed paths or declared contract tests match the
+failing files (the retained diagnosis) check alone and the other members compose
+together as a new cohort; without such a match, the cohort splits into two
+halves. A group of one lands on its held admission run when that is still exact
+evidence on current main; admission never runs again. Two or more groups of one
+share one serial individual line, likely members last, with the existing
+per-member diagnosis, so one landing does not force every other single to
+recheck. A cohort that lands second meets the moved main and rechecks on main
+including the first. A cohort that cannot compose, because its compose fails or
+the stall alarm finds it still composing, splits the same way. A shared check that ends
+without a failing test file or report (runner unavailable, Actions 403 or server
+error, cancelled, timed out) is a platform failure: the same cohort checks again,
+recomposing only if main moved, at most twice. After that every member ends with
+`CHECK_NOT_PASSED` and without `batchSolo`; a resubmit re-derives eligibility.
+
 Batch formation follows the same order and groups one priority class. A mixed
 batch after a promotion, or a normal batch with urgent work waiting outside it
 (including members of another unstarted batch), is superseded before its check

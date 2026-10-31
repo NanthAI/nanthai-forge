@@ -20,6 +20,15 @@ const retained = f => {
   return { row, batch: JSON.parse(row.value) };
 };
 const transaction = (f, name, callback) => f.transaction(name, { _handler: callback }, {});
+// A failed shared test now splits the cohort; individual fallback remains for
+// governance or membership changes, cancellation and publication errors.
+const toFallback = f =>
+  transaction(f, 'fallback-trigger', async ctx => {
+    const { batch } = retained(f),
+      key = { projectId: f.projectId, batchId: batch.id };
+    await batchStore.writeBatch(ctx, key, { ...batch, phase: 'fallback' });
+    await batchStore.wakeBatch(ctx, key);
+  });
 const fallback = await import(moduleUrl('../convex/projectHostedLandingBatchFallback.ts'));
 const landingStore = await import(moduleUrl('../convex/projectHostedLandingStore.ts'));
 
@@ -108,6 +117,7 @@ test('a necessary shared-to-individual fallback records BATCH_FALLBACK rather th
   await f.drain();
   const original = (await f.status(f.entries[0].state.id)).attempt,
     main = f.currentMain();
+  await toFallback(f);
   await f.fail(f.runs()[0].id);
   while (retained(f).batch.phase !== 'fallback') await f.execute(f.pending()[0]);
   const { batch } = retained(f);
@@ -152,6 +162,7 @@ test('incident replay: fallback detaches and requeues all three members atomical
   const before = f.counts.length,
     started = performance.now();
   await f.drain();
+  await toFallback(f);
   await f.fail(f.runs()[0].id);
   for (let tick = 0; retained(f).batch.phase !== 'fallback'; tick++) {
     assert(tick < 100);
@@ -253,6 +264,7 @@ for (const endedPhase of ['fallback', 'landed'])
   test(`stall alarm repairs legacy orphaned members of a ${endedPhase} batch without a resume`, async t => {
     const f = await batchesFixture(t, { count: 3 });
     await f.drain();
+    await toFallback(f);
     await f.fail(f.runs()[0].id);
     await f.drain();
     await f.passChecks();
@@ -443,6 +455,7 @@ test('a queue claim racing individual source preparation cannot settle the obsol
   const driver = await import(moduleUrl('../convex/projectHostedLandingDriver.ts'));
   const f = await batchesFixture(t, { count: 3 });
   await f.drain();
+  await toFallback(f);
   await f.fail(f.runs()[0].id);
   for (let tick = 0; retained(f).batch.phase !== 'fallback'; tick++) {
     assert(tick < 100);
@@ -567,8 +580,16 @@ for (const stalledPhase of ['composing', 'checking'])
       submissionId: state.id,
       lastProgressAt: state.at,
     });
-    assert.equal(retained(f).batch.phase, 'fallback');
-    assert(states(f).every(state => !state.batchId && state.batchSolo));
+    if (stalledPhase === 'checking') {
+      assert.equal(retained(f).batch.phase, 'fallback');
+      assert(states(f).every(state => !state.batchId && state.batchSolo));
+    } else {
+      // A cohort that cannot compose splits into groups that compose apart.
+      assert.equal(retained(f).batch.phase, 'split');
+      // Halves of two and one: the pair is a new cohort, the single checks alone.
+      assert.equal(states(f).filter(state => state.batchSolo).length, 1);
+      assert.equal(new Set(states(f).flatMap(state => state.batchId ?? [])).size, 1);
+    }
     await f.drain();
     for (let i = 0; i < 3; i++) {
       await f.passChecks();
