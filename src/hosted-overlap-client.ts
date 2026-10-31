@@ -30,10 +30,15 @@ export async function readHostedOverlapAdvice(
   transport: Pick<HostedAgentTransport, 'query'>,
   laneId: string,
   paths = false,
+  items?: number,
 ) {
   try {
     return advice.parse(
-      await transport.query('projectHostedOverlaps:read', { laneId, ...(paths ? { paths: true } : {}) }),
+      await transport.query('projectHostedOverlaps:read', {
+        laneId,
+        ...(paths ? { paths: true } : {}),
+        ...(items ? { items } : {}),
+      }),
     );
   } catch (error) {
     const safe = hostedActionError(error, 'overlap observation');

@@ -354,6 +354,7 @@ export async function publishAcceptance(
     run,
   });
   await enqueueGithubMirror(ctx, project, receipt);
-  if (receipt.completion.enabled && plan.inputPages) await scheduleAcceptanceCompletion(ctx, identity);
+  // The completion tick also retires landed work from overlap, so it runs even when keepOpen or policy skips completion.
+  if (plan.inputPages) await scheduleAcceptanceCompletion(ctx, identity);
   return { status: 'landed' as const, receipt };
 }

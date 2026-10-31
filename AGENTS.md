@@ -52,7 +52,9 @@ byte budget and pagination; see `diff --help`.
 
 `nforge agent OWNER show '{"state":"STATE","path":"src/file.ts"}'` writes exact
 file bytes to stdout, without JSON or an added newline. `laneId` instead of `state`
-selects the Lane's saved head. Binary/invalid UTF-8 and files over 1 MiB require
+selects the Lane's saved head; `channel:"main"` selects the Channel's current head. A hosted
+checkout reads its own Lane by default and also takes `channel:"main"`; a failed read is a
+structured error, never an empty stdout. Binary/invalid UTF-8 and files over 1 MiB require
 `force:true`. MCP `forge_review` exposes `diff` and `show`; `show` returns source
 pins and `content` with `encoding:"utf8"` or `"base64"`.
 

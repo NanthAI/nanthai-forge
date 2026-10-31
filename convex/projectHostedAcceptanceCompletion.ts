@@ -9,6 +9,7 @@ import {
 } from './projectHostedAcceptanceStore';
 import { readHostedRecord, writeHostedRecord } from './projectHostedRecords';
 import { sameSaveLane } from './projectHostedSaveStore';
+import { retireLandedOverlapLanes } from './projectHostedOverlapLanded';
 import { hostedAcceptanceSchema } from '../src/hosted-acceptance';
 import { validateComposePage, composeLaneSchema } from '../src/hosted-compose';
 import { hostedLaneSchema } from '../src/hosted-lane';
@@ -27,7 +28,11 @@ export async function completeAcceptedHeads(ctx: MutationCtx, input: ReceiptIden
     'SOURCE_UNAVAILABLE',
     'The accepted completion ledger differs.',
   );
+  // Landed work leaves the open-overlap index on the first tick, even when completion is off (keepOpen)
+  // or skips a Lane whose pins moved after finish. Idempotent and bounded to one input page.
+  if (!receipt.completion.enabled && plan.inputPages) await retireLandedOverlapLanes(ctx, input);
   if (!receipt.completion.enabled || plan.appliedPage === plan.inputPages) return { complete: true };
+  if (plan.appliedPage === 0 && plan.appliedEntry === 0) await retireLandedOverlapLanes(ctx, input);
   const project = await ctx.db.get(input.projectId);
   invariant(
     project &&

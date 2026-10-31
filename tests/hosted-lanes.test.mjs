@@ -139,6 +139,10 @@ test('lost start response reconciles original IDs/time after main, authority and
     await s.invoke('select', reads.select, { projectId: s.projectId, laneId: first.lane.laneId }),
   );
   assert.equal(selected.head, nextHead);
+  // Liveness: head reports when the Lane record last changed, from the record already read.
+  const read = await s.invoke('head', reads.head, { projectId: s.projectId, laneId: first.lane.laneId });
+  assert.equal(read.lastActivityAt, original.at);
+  assert.equal(read.head, nextHead);
   assert.equal(selected.sourceVersion, 1);
   assert.equal(selected.authority.epoch, 2);
   assert.equal(s.tables.projectHostedRecords.size, 3);

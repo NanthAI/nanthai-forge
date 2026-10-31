@@ -29,11 +29,16 @@ export const agentShowSchema = z
   .object({
     state: state.optional(),
     laneId: z.string().uuid().optional(),
+    /** The Channel's current head, e.g. main. */
+    channel: z.string().min(1).optional(),
     path: z.string().refine(safeRelative),
     force: z.boolean().default(false),
   })
   .strict()
-  .refine(input => !!input.state !== !!input.laneId, 'Select exactly one state or laneId.');
+  .refine(
+    input => [input.state, input.laneId, input.channel].filter(Boolean).length === 1,
+    'Select exactly one state, laneId or channel.',
+  );
 
 export function readAgentDiff(store: WorkStore, input: z.input<typeof agentDiffSchema>) {
   const command = agentDiffSchema.parse(input);
@@ -89,13 +94,22 @@ function gitFile(store: WorkStore, head: string, path: string, force: boolean) {
 }
 
 /** Read only retained source: never the Lane working copy or a symlink target. */
-export function readAgentShow(store: WorkStore, input: z.input<typeof agentShowSchema>) {
+export function readAgentShow(
+  store: WorkStore,
+  input: z.input<typeof agentShowSchema>,
+  /** The Channel's current head; supplied by the caller to keep this module free of Work policy imports. */
+  channelHead: (name: string) => string | null = () => null,
+) {
   const command = agentShowSchema.parse(input);
   return store.observing(() => {
     const lane = command.laneId ? store.select('lanes', command.laneId) : undefined;
     invariant(!command.laneId || lane, 'NOT_FOUND', 'Lane not found.');
-    const head = command.state ?? lane!.head;
-    invariant(head, 'SOURCE_UNAVAILABLE', 'The selected Lane has no saved State.');
+    const head = command.channel ? channelHead(command.channel) : (command.state ?? lane!.head);
+    invariant(
+      head,
+      command.channel ? 'NOT_FOUND' : 'SOURCE_UNAVAILABLE',
+      command.channel ? 'Channel not found.' : 'The selected Lane has no saved State.',
+    );
     let file: { blob: string; mode: string; bytes: Buffer };
     if (store.native) {
       const source = new NativeSource(store.root),
@@ -116,6 +130,7 @@ export function readAgentShow(store: WorkStore, input: z.input<typeof agentShowS
       result: {
         state: head,
         ...(command.laneId ? { laneId: command.laneId } : {}),
+        ...(command.channel ? { channel: command.channel } : {}),
         path: command.path,
         blob: file.blob,
         mode: file.mode,

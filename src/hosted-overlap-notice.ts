@@ -69,3 +69,15 @@ export function overlapBanner(notice: HostedOverlapNotice) {
   ];
   return lines.join('\n');
 }
+
+const shown = new Set<string>();
+/** The banner for notices this process has not printed yet, so an early print is never repeated at exit. */
+export function overlapBannerOnce(notice: HostedOverlapNotice) {
+  const fresh = notice.items.filter(item => !shown.has(item.noticeId));
+  for (const item of notice.items) shown.add(item.noticeId);
+  return fresh.length ? overlapBanner({ ...notice, items: fresh }) : '';
+}
+/** Record notices another path already printed (a relayed child process), without printing. */
+export function markOverlapShown(notice: HostedOverlapNotice) {
+  for (const item of notice.items) shown.add(item.noticeId);
+}

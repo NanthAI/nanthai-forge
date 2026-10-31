@@ -7,7 +7,7 @@ import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { AgentWorkflow } from '../dist/agent-workflow.js';
 import { initNative } from '../dist/native-work.js';
-import { SHOW_MAX_BYTES } from '../dist/agent-source-read.js';
+import { SHOW_MAX_BYTES, readAgentShow } from '../dist/agent-source-read.js';
 import { fixture as gitFixture, git, code } from './helpers.mjs';
 import { readWorkBytes } from './work-store-fixture.mjs';
 
@@ -86,6 +86,14 @@ for (const native of [true, false]) {
     assert.equal(text.state, lane.head);
     assert.equal(text.content, '\ufeffone\r\nlast');
     assert.equal(text.encoding, 'utf8');
+    // A Channel name reads that Channel's current head (here: a Channel with a head, and one without).
+    const onMain = readAgentShow(f.agent.work.store, { channel: 'main', path: 'a.txt' }, name =>
+      name === 'main' ? lane.head : null,
+    ).result;
+    assert.equal(onMain.channel, 'main');
+    assert.equal(onMain.state, lane.head);
+    assert.equal(onMain.content, text.content);
+    await assert.rejects(f.act('show', { channel: 'main', path: 'a.txt' }), code('NOT_FOUND'));
     assert.equal((await show('nested/colon:name.txt')).result.content, 'nested');
     assert.equal((await show('empty.txt')).result.size, 0);
     assert.equal((await show('link')).result.content, 'a.txt');
@@ -135,6 +143,8 @@ test('source-read actions validate selectors, full digests and contained paths',
     { action: 'show', path: 'a.txt' },
     { action: 'show', laneId: lane.laneId, state: lane.head, path: 'a.txt' },
     { action: 'show', state: 'main', path: 'a.txt' },
+    { action: 'show', channel: 'main', state: lane.head, path: 'a.txt' },
+    { action: 'show', channel: 'main', laneId: lane.laneId, path: 'a.txt' },
     ...['../outside', '/absolute', 'nested/../a.txt', 'nested\\a.txt'].map(path => ({
       action: 'show',
       state: lane.head,

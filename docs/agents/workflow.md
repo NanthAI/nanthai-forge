@@ -28,6 +28,8 @@ Old names keep working for at least one released version and print their new for
 
 ## The backlog is Forge planning
 
+Hosted `land --save` reports progress while it works, on stderr. The operation id, the replay command and an overlap notice print as soon as the submission is accepted, not when the wait ends; a long queue ends with a single wait command (also the `waitCommand` field of the finish receipt) that resumes by one subscription read per change instead of a polling loop. Landed and completed work leaves the open-overlap index, so an overlap notice names only Lanes that still hold unlanded work. `status {laneId}` shows `lastActivityAt` (when the Lane record last changed) and `local`: the last command this machine ran in the Lane and whether a Forge command is running there now. Neither adds server reads while idle.
+
 Hosted projects keep their backlog as planning: Initiatives group Issues, and an Issue is the work an agent starts. The same records show in the web app under Work > Planning. Read, write and start from them without leaving the agent command surface:
 
 ```sh

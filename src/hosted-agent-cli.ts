@@ -8,6 +8,9 @@ import { durableReplace } from './native-durability.js';
 import { observeHostedRun, hostedWaitSchema } from './hosted-agent-observe.js';
 import { observeHostedSubmissions } from './hosted-agent-submission-wait.js';
 import { invariant } from './errors.js';
+import { withLaneCommand } from './lane-registry.js';
+import { markerIdentity } from './lane-prune.js';
+import { landSummary } from './hosted-land-summary.js';
 import { HostedAgentTransport } from './hosted-agent-transport.js';
 /** Address selection precedes construction of native WorkStore/owner services. */
 export function hostedAgentAddress(
@@ -59,14 +62,26 @@ export async function hostedAgentCli(
     process.once('SIGINT', stop);
     process.once('SIGTERM', stop);
     try {
-      const response = await (selectedWait.runId ? observeHostedRun : observeHostedSubmissions)(
-        transport,
-        command,
-        controller.signal,
-        event => process.stdout.write(`${JSON.stringify(event)}\n`),
+      // A waiting agent is alive: show it as running in its Lane (local file write, no network).
+      const emit = (event: unknown) => process.stdout.write(`${JSON.stringify(event)}\n`);
+      const response = await withLaneCommand(markerIdentity(root)?.laneId ?? undefined, 'wait', async () =>
+        selectedWait.runId
+          ? await observeHostedRun(transport, command, controller.signal, emit)
+          : await observeHostedSubmissions(transport, command, controller.signal, emit),
       );
       process.exitCode =
         response.result.status === 'timeout' ? 2 : response.result.status === 'cancelled' ? 130 : 0;
+      // The NDJSON stream stays machine-readable; the outcome also prints as plain stderr lines.
+      const { submissions, status } = response.result as {
+        submissions?: { submission: unknown }[];
+        status: string;
+      };
+      if (!selectedWait.runId && status === 'terminal')
+        for (const entry of submissions ?? [])
+          for (const line of landSummary({
+            result: { phase: 'finish', submission: entry.submission },
+          } as never))
+            process.stderr.write(`${line}\n`);
       return response;
     } finally {
       process.removeListener('SIGINT', stop);

@@ -11,9 +11,15 @@ import { report } from './errors';
 
 /** One finite agent read. No source objects, Work hydration, scheduler or subscription. */
 export const read = query({
-  args: { projectId: v.id('hostedProjects'), laneId: v.string(), paths: v.optional(v.literal(true)) },
+  args: {
+    projectId: v.id('hostedProjects'),
+    laneId: v.string(),
+    paths: v.optional(v.literal(true)),
+    /** Notices to list, 5 by default; ack asks for more so one read answers a large inbox. */
+    items: v.optional(v.number()),
+  },
   returns: v.string(),
-  handler: async (ctx, { projectId, laneId, paths }) => {
+  handler: async (ctx, { projectId, laneId, paths, items }) => {
     try {
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to read hosted overlaps.');
@@ -26,32 +32,16 @@ export const read = query({
       });
       invariant(record, 'NOT_FOUND', 'Hosted Lane not found on this project.');
       const lane = hostedLaneSchema.parse(JSON.parse(record.value));
-      const [mine, peers, main, latest, acks, headers] = await Promise.all([
+      const [mine, main, latest] = await Promise.all([
         ctx.db
           .query('projectHostedOverlapLanes')
           .withIndex('by_project_and_lane', q => q.eq('projectId', projectId).eq('laneId', laneId))
           .unique(),
-        ctx.db
-          .query('projectHostedOverlapLanes')
-          .withIndex('by_project_and_open', q => q.eq('projectId', projectId).eq('open', true))
-          .order('desc')
-          .take(51),
         hostedStartMain(ctx, projectId),
         ctx.db
           .query('projectHostedOverlapMain')
           .withIndex('by_project', q => q.eq('projectId', projectId))
           .unique(),
-        ctx.db
-          .query('projectHostedOverlapAcks')
-          .withIndex('by_project_and_lane_and_notice', q => q.eq('projectId', projectId).eq('laneId', laneId))
-          .take(101),
-        ctx.db
-          .query('projectHostedRecordHeads')
-          .withIndex('by_project_and_kind_and_status', q =>
-            q.eq('projectId', projectId).eq('kind', 'lane').eq('status', 'active'),
-          )
-          .order('desc')
-          .take(51),
       ]);
       let baseSequence = mine?.baseSequence ?? null;
       if (baseSequence === null) {
@@ -81,6 +71,33 @@ export const read = query({
               changes: '[]',
               complete: lane.head === lane.base.head,
             };
+      // A Lane with no saved path changes cannot overlap anything: skip the peer, head and answer
+      // reads (the bulk of this query's I/O) instead of scanning every open Lane for nothing.
+      const idle = focus.complete && focus.changes === '[]';
+      const readPeers = () =>
+        Promise.all([
+          ctx.db
+            .query('projectHostedOverlapLanes')
+            .withIndex('by_project_and_open', q => q.eq('projectId', projectId).eq('open', true))
+            .order('desc')
+            .take(51),
+          ctx.db
+            .query('projectHostedOverlapAcks')
+            .withIndex('by_project_and_lane_and_notice', q =>
+              q.eq('projectId', projectId).eq('laneId', laneId),
+            )
+            .take(101),
+          ctx.db
+            .query('projectHostedRecordHeads')
+            .withIndex('by_project_and_kind_and_status', q =>
+              q.eq('projectId', projectId).eq('kind', 'lane').eq('status', 'active'),
+            )
+            .order('desc')
+            .take(51),
+        ]);
+      const [peers, acks, headers] = idle
+        ? ([[], [], []] as Awaited<ReturnType<typeof readPeers>>)
+        : await readPeers();
       const versions = new Map(headers.map(header => [header.key, header.version]));
       // Newest-first windows hold current work, but retained stale active Lanes can still push
       // a live peer out of the 51-row window (2026-10-30: 125 active heads hid every peer).
@@ -119,7 +136,15 @@ export const read = query({
         );
       const answered = new Set(acks.map(ack => ack.noticeId));
       const compute = () =>
-        hostedOverlapAdvice(focus, currentPeers.slice(0, 50), latest, main, answered, complete);
+        hostedOverlapAdvice(
+          focus,
+          currentPeers.slice(0, 50),
+          latest,
+          main,
+          answered,
+          complete,
+          Math.min(50, Math.max(1, Math.floor(items ?? 5))),
+        );
       let advice = compute();
       // Preflight selection input: free here, the Lane's projection is already loaded.
       const changedPaths = paths

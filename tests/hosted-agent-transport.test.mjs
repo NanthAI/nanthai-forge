@@ -95,6 +95,12 @@ test('pending source and finish steps return promptly and retain all child opera
   );
   assert.deepEqual(next.result.submission, first.result.submission);
   assert.equal(next.result.submission.request.finish.composeOperationId, first.result.composeOperationId);
+  // A long queue outlives any poller: the receipt names the one wake-driven command that resumes it.
+  for (const receipt of [first, next])
+    assert.equal(
+      receipt.result.waitCommand.replace(/^nforge agent '[^']*\/client'/, 'nforge agent ROOT'),
+      `nforge agent ROOT wait '{"operationIds":["${first.operationId}"],"timeoutSeconds":3600}'`,
+    );
 });
 
 test('changed explicit operation payload fails, while later main and Lane movement cannot replace retained pins', async t => {

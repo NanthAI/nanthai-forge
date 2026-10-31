@@ -16,7 +16,8 @@ import { invariant } from './errors.js';
 import { shellQuote } from './agent-brief-render.js';
 import { hostedAgentDirectory, readAgentJson } from './hosted-agent-journal.js';
 import { finishRetryHint, type FinishContext } from './hosted-agent-finish-identity.js';
-import type { HostedAgentSession } from './hosted-agent-transport.js';
+import { landWaitCommand } from './hosted-land-wait.js';
+import type { HostedAgentResponse, HostedAgentSession } from './hosted-agent-transport.js';
 
 type FinishCommand = z.infer<typeof hostedAgentCommandSchemas.finish>;
 
@@ -125,9 +126,18 @@ export async function executeHostedFinish(session: HostedAgentSession, input: un
   const result = await executeFinishWork(session, input);
   const context = session.journal.get<FinishContext>('finish-context');
   const defaults = session.journal.get<Record<string, unknown>>('finish-defaults');
-  return finishRetryHint(session.root, hostedAgentCommandSchemas.finish.parse(context?.command ?? input), {
+  const receipt = {
     ...(result as Record<string, unknown>),
     ...(defaults ? { defaults } : {}),
+  };
+  // One wake-driven command that resumes a long queue; absent once the outcome is final.
+  const waitCommand = landWaitCommand(session.root, {
+    operationId: session.journal.operationId,
+    result: receipt,
+  } as HostedAgentResponse);
+  return finishRetryHint(session.root, hostedAgentCommandSchemas.finish.parse(context?.command ?? input), {
+    ...receipt,
+    ...(waitCommand ? { waitCommand } : {}),
   });
 }
 

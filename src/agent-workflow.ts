@@ -77,7 +77,7 @@ import { ensureLaneDirectory } from './agent-lane-directory.js';
 import { agentStart, agentCheckpoint } from './agent-workflow-mutations.js';
 import { agentSync, type SyncCommand } from './agent-sync.js';
 import { allRecords } from './agent-lifecycle.js';
-import { resolveAgentDefaults } from './agent-defaults.js';
+import { currentChannelHead, resolveAgentDefaults } from './agent-defaults.js';
 import { laneReceipt, viewReceipt, runReceipt, acceptanceReceipt } from './agent-receipts.js';
 import { readAgentDiff, readAgentShow } from './agent-source-read.js';
 import { readAgentReview } from './agent-review.js';
@@ -455,7 +455,7 @@ export class AgentWorkflow {
     if (command.action === 'show') {
       const { action: _action, ...selection } = command;
       void _action;
-      return readAgentShow(store, selection);
+      return readAgentShow(store, selection, name => currentChannelHead(store, name));
     }
     if (command.action === 'review') {
       const { action: _action, ...review } = command;

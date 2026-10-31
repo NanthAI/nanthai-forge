@@ -18,6 +18,8 @@ export const laneRegistryEntrySchema = z.object({
   lastActionAt: z.number(),
   /** Terminal state this client observed; the server read confirms before any removal. */
   state: z.enum(['completed', 'abandoned']).optional(),
+  /** The Forge command this machine is running in the Lane now; a dead pid means it is stale. */
+  running: z.object({ action: z.string(), pid: z.number(), since: z.number() }).nullable().optional(),
 });
 export type LaneRegistryEntry = z.infer<typeof laneRegistryEntrySchema>;
 
@@ -82,4 +84,43 @@ export function listLanes(): LaneRegistryEntry[] {
   return names
     .filter(name => /^[0-9a-f-]{36}\.json$/.test(name))
     .flatMap(name => readLaneEntry(name.slice(0, -5)) ?? []);
+}
+
+const alive = (pid: number) => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'EPERM';
+  }
+};
+/** Mark a Forge command as running in the Lane: one local file write, no network, no timer. */
+export function beginLaneCommand(laneId: string, action: string, now = Date.now()) {
+  recordLane({ laneId, running: { action, pid: process.pid, since: now } }, now);
+}
+/** Clear only this process's marker, so a concurrent command's own marker survives. */
+export function endLaneCommand(laneId: string, now = Date.now()) {
+  if (readLaneEntry(laneId)?.running?.pid === process.pid) recordLane({ laneId, running: null }, now);
+}
+/** Run `work` with the Lane marked as running; the marker is removed even when `work` throws. */
+export async function withLaneCommand<T>(laneId: string | undefined, action: string, work: () => Promise<T>) {
+  if (!laneId) return work();
+  beginLaneCommand(laneId, action);
+  try {
+    return await work();
+  } finally {
+    endLaneCommand(laneId);
+  }
+}
+/** Liveness from this machine's registry: last command touching the Lane and whether one runs now. */
+export function laneLiveness(laneId: string) {
+  const entry = readLaneEntry(laneId);
+  if (!entry) return null;
+  const running = entry.running && alive(entry.running.pid) ? entry.running : null;
+  return {
+    lastActionAt: new Date(entry.lastActionAt).toISOString(),
+    running: running
+      ? { action: running.action, pid: running.pid, since: new Date(running.since).toISOString() }
+      : null,
+  };
 }

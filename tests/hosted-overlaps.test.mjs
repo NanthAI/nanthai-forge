@@ -23,6 +23,7 @@ import { overlapBanner } from '../dist/hosted-overlap-notice.js';
 const overlaps = await import(moduleUrl('../convex/projectHostedOverlaps.ts'));
 const records = await import(moduleUrl('../convex/projectHostedRecords.ts'));
 const tracking = await import(moduleUrl('../convex/projectHostedOverlapStore.ts'));
+const landed = await import(moduleUrl('../convex/projectHostedOverlapLanded.ts'));
 const capabilities = await import(moduleUrl('../convex/projectHostedAgent.ts'));
 const acks = await import(moduleUrl('../convex/projectHostedOverlapAcks.ts'));
 const deliveries = await import(moduleUrl('../convex/projectHostedOverlapDeliveries.ts'));
@@ -170,6 +171,37 @@ async function setup(t) {
   };
 }
 
+/** Save path changes on a Lane's record. A Lane with none cannot overlap and is read without its peers. */
+const trackChange = (s, lane, paths = [delta('a.txt')], intent = 'My change') =>
+  s.transaction(
+    'track-change',
+    {
+      _handler: async ctx => {
+        const row = await records.readHostedRecord(ctx, {
+          projectId: s.projectId,
+          actor: 'owner',
+          kind: 'lane',
+          key: lane.id,
+        });
+        const current = JSON.parse(row.value);
+        await records.writeHostedRecord(ctx, {
+          projectId: s.projectId,
+          actor: 'owner',
+          authorityEpoch: 1,
+          expectedVersion: current.version,
+          record: {
+            ...current,
+            head: String(current.version + 1).padStart(64, 'e'),
+            version: current.version + 1,
+            sourceVersion: current.sourceVersion + 1,
+          },
+          overlap: { baseSequence: 0, intent, changes: paths },
+        });
+      },
+    },
+    {},
+  );
+
 test('two separate checkout roots save the same file; second response reports peer and hosted acknowledgement suppresses it', async t => {
   const { s, lane, peer, transport } = await setup(t);
   const first = transport(lane),
@@ -252,6 +284,82 @@ test('two separate checkout roots save the same file; second response reports pe
     await s.transaction('closed-peer', overlaps.read, { projectId: s.projectId, laneId: lane.id }),
   );
   assert.equal(closed.unacknowledgedOverlaps.count, 0);
+});
+
+test('a Lane whose saved head just landed stops being an overlap peer, even while its record is still active', async t => {
+  // Replay of efa2859d / bcdcc4aa: efa2859d landed, then bcdcc4aa finished and was told efa2859d was open.
+  const { s, lane, peer, transport } = await setup(t);
+  const landedLane = transport(lane),
+    finishing = transport(peer);
+  await landedLane.dispatch('save', { operationId: randomUUID(), message: 'efa2859d work' });
+  const before = await finishing.dispatch('save', { operationId: randomUUID(), message: 'bcdcc4aa work' });
+  assert.equal(before.unacknowledgedOverlaps.count, 1, 'the open peer is named while it is open');
+  assert.equal(before.overlapNotice.items[0].with[0].lane, lane.id);
+  const row = [...s.tables.projectHostedOverlapLanes.values()].find(item => item.laneId === lane.id);
+  const object = { object: { sha256: 'a'.repeat(64), size: 1 }, recipe: null };
+  const entry = (laneId, head) => ({
+    laneId,
+    head,
+    version: 0,
+    sourceVersion: 0,
+    lifecycleVersion: 0,
+    state: object,
+  });
+  const receiptId = randomUUID();
+  const page = entries => ({
+    projectId: s.projectId,
+    receiptId,
+    kind: 'inputs',
+    index: 0,
+    digest: 'd'.repeat(64),
+    root: 'r'.repeat(64),
+    value: JSON.stringify({ schema: 1, kind: 'forge-hosted-compose-page', entries, next: null }),
+  });
+  // A different head landed for that Lane id: the saved head is still unlanded work.
+  s.insert('projectHostedAcceptancePages', page([entry(lane.id, 'f'.repeat(64))]));
+  const retire = () =>
+    s.transaction(
+      'retire',
+      { _handler: ctx => landed.retireLandedOverlapLanes(ctx, { projectId: s.projectId, receiptId }) },
+      {},
+    );
+  assert.equal(await retire(), 0);
+  assert.equal(
+    JSON.parse(await s.transaction('still-open', overlaps.read, { projectId: s.projectId, laneId: peer.id }))
+      .unacknowledgedOverlaps.count,
+    1,
+  );
+  // Exact landed head: retired in the accepting transaction, before the completion ledger runs.
+  for (const id of [...s.tables.projectHostedAcceptancePages.keys()])
+    s.tables.projectHostedAcceptancePages.delete(id);
+  s.insert('projectHostedAcceptancePages', page([entry(lane.id, row.head)]));
+  assert.equal(await retire(), 1);
+  const after = JSON.parse(
+    await s.transaction('after-landing', overlaps.read, { projectId: s.projectId, laneId: peer.id }),
+  );
+  assert.equal(after.unacknowledgedOverlaps.count, 0);
+  assert.deepEqual(after.unacknowledgedOverlaps.items, []);
+  const retiredRow = [...s.tables.projectHostedOverlapLanes.values()].find(item => item.laneId === lane.id);
+  assert.equal(retiredRow.open, false);
+  assert.equal(await retire(), 0, 'replaying the retirement changes nothing');
+  // Further work in the same Lane (keepOpen) is tracked open again by its next save.
+  await s.transaction(
+    'saved-again',
+    {
+      _handler: ctx =>
+        tracking.trackHostedOverlapLane(
+          ctx,
+          s.projectId,
+          { ...lane, head: 'e'.repeat(64) },
+          { baseSequence: 0, changes: [delta('a.txt')] },
+        ),
+    },
+    {},
+  );
+  assert.equal(
+    [...s.tables.projectHostedOverlapLanes.values()].find(item => item.laneId === lane.id).open,
+    true,
+  );
 });
 
 test('main moves over a saved Lane file; status reports commits and the conflicting path', async t => {
@@ -528,6 +636,7 @@ test('acceptance updates compact main paths in the same publication and retry do
 
 test('unprojected active peers report incomplete coverage', async t => {
   const { s, lane, peer } = await setup(t);
+  await trackChange(s, lane);
   const projection = [...s.tables.projectHostedOverlapLanes.values()].find(row => row.laneId === peer.id);
   s.tables.projectHostedOverlapLanes.delete(projection._id);
   const observed = JSON.parse(
@@ -538,6 +647,7 @@ test('unprojected active peers report incomplete coverage', async t => {
 
 test('missing staged lifecycle evidence is unavailable, never an open-peer fallback', async t => {
   const { s, lane, peer } = await setup(t);
+  await trackChange(s, lane);
   const row = [...s.tables.projectHostedOverlapLanes.values()].find(row => row.laneId === peer.id);
   s.patch('projectHostedOverlapLanes', row._id, { lifecyclePlanId: 'missing-plan' });
   await assert.rejects(
@@ -672,4 +782,47 @@ test('retained stale active Lanes never hide a live peer from the notice', async
   const response = await second.dispatch('save', { operationId: randomUUID(), message: 'second' });
   assert.equal(response.unacknowledgedOverlaps.count, 1);
   assert.equal(response.overlapNotice.items[0].file, 'a.txt');
+});
+
+for (const keepOpen of [false, true])
+  test(`accepted input Lanes leave the open overlap index${keepOpen ? ' even when keepOpen leaves them active' : ''}`, async () => {
+    const f = await acceptanceFixture();
+    const entry = await f.lane();
+    const item = await f.makeCandidate([entry], [], {
+      governance: { version: 1, paths: ['src/shared.ts'], ownerInputs: true },
+    });
+    const { state } = await f.ready(item, keepOpen ? { keepOpen: true } : {});
+    const overlapRow = () =>
+      [...f.tables.projectHostedOverlapLanes.values()].find(row => row.laneId === entry.laneId);
+    assert.equal(overlapRow().open, true, 'open before it lands');
+    const { receipt } = await f.accept(state);
+    assert.equal(overlapRow().open, true, 'the accepting transaction stays constant-size');
+    const tasks = f.pendingTasks().filter(task => task.name.endsWith(':complete'));
+    assert.equal(tasks.length, 1, 'one scheduled tick even when completion is off; no extra task');
+    await f.materialize(receipt.id);
+    assert.equal(overlapRow().open, false, 'landed work is no longer open overlap work');
+    assert.equal((await f.readLane(entry.laneId)).state, keepOpen ? 'active' : 'completed');
+  });
+
+test('overlap reads are O(1): a Lane without saved changes touches no peers, and one read lists a large inbox for ack', async t => {
+  const { s, lane, peer } = await setup(t);
+  const read = (name, laneId, extra = {}) =>
+    s.transaction(name, overlaps.read, { projectId: s.projectId, laneId, ...extra });
+  // No saved paths: nothing can overlap, so the peer, head and answer tables are not read at all.
+  const idle = JSON.parse(await read('idle', lane.id));
+  assert.equal(idle.unacknowledgedOverlaps.count, 0);
+  assert.equal(idle.unacknowledgedOverlaps.coverage, 'hosted');
+  const idleCount = s.counts.find(count => count.name === 'idle');
+  assert(!idleCount.touched.includes('projectHostedOverlapAcks'), 'answers stay unread for an idle Lane');
+  assert(idleCount.documents <= 10, `idle read touches ${idleCount.documents} documents`);
+  // Twelve shared files: the default read lists five, an ack-sized read lists them all in one call.
+  const paths = Array.from({ length: 12 }, (_, i) => delta(`src/shared-${i}.ts`));
+  await trackChange(s, lane, paths);
+  await trackChange(s, peer, paths, 'Peer change');
+  const few = JSON.parse(await read('few', lane.id));
+  assert.equal(few.unacknowledgedOverlaps.items.length, 5);
+  assert.equal(few.unacknowledgedOverlaps.count, 12);
+  const all = JSON.parse(await read('all', lane.id, { items: 50 }));
+  assert.equal(all.unacknowledgedOverlaps.items.length, 12);
+  assert.equal(s.counts.filter(count => count.name === 'all').length, 1);
 });

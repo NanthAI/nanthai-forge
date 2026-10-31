@@ -8,7 +8,7 @@ import { executeHostedRecords } from './hosted-agent-records.js';
 import { hostedAgentRecordActions, hostedAgentPlanningActions } from './hosted-agent-contract.js';
 import { executeHostedPlanning, markPlanningStarted } from './hosted-agent-planning.js';
 import { executeHostedMetrics } from './hosted-agent-metrics.js';
-import { recordLane } from './lane-registry.js';
+import { laneLiveness, recordLane, withLaneCommand } from './lane-registry.js';
 import { convexLaneStates, laneHousekeeping, markerIdentity } from './lane-prune.js';
 import { shareDependencies } from './shared-dependencies.js';
 import { readClientSettings } from './client-settings.js';
@@ -67,6 +67,17 @@ import {
   takeCallerReceipts,
   writeCallerReceipts,
 } from './hosted-metric-outbox.js';
+/** Reads and checkout creation: they neither show a Lane as working nor count as its activity. */
+const quietActions = new Set([
+  'capabilities',
+  'metrics',
+  'check-settings',
+  'status',
+  'observe',
+  'landing',
+  'start',
+  'open',
+]);
 /** Agent-default refusals carry their own next step. */
 // These messages carry their own next command; a generic replay hint would contradict it.
 const gateCodes = new Set([
@@ -145,8 +156,15 @@ export class HostedAgentTransport {
     signal?: AbortSignal,
   ): Promise<HostedAgentResponse> {
     this.callerOperationId = typeof input.operationId === 'string' ? input.operationId : null;
+    const running = quietActions.has(requestedAction)
+      ? undefined
+      : typeof input.laneId === 'string'
+        ? input.laneId
+        : (markerIdentity(this.root)?.laneId ?? undefined);
     try {
-      const response = await this.dispatchCaller(requestedAction, input, signal);
+      const response = await withLaneCommand(running, requestedAction, () =>
+        this.dispatchCaller(requestedAction, input, signal),
+      );
       this.retainCaller(requestedAction, { result: response.result }, response.operationId);
       this.touchLane(requestedAction, input, response);
       return response;
@@ -391,6 +409,10 @@ export class HostedAgentTransport {
             )) as Record<string, unknown>),
             ...(capabilities.needsFix ? { needsFix: capabilities.needsFix } : {}),
             ...(capabilities.githubMirror !== undefined ? { githubMirror: capabilities.githubMirror } : {}),
+            // Liveness: lastActivityAt above is the server record; this is the command this machine runs now.
+            ...(typeof (command.data as { laneId?: string }).laneId === 'string'
+              ? { local: laneLiveness((command.data as { laneId: string }).laneId) }
+              : {}),
           },
           capabilities.overlapVersion === 1 ? (command.data as { laneId?: string }).laneId : undefined,
         );
@@ -662,9 +684,10 @@ export class HostedAgentTransport {
     if (action === 'ack') {
       const { choice, text } = hostedAgentCommandSchemas.ack.parse(input);
       const answered = [];
-      // Five notices per read; a bounded loop answers a larger inbox (each round: one read, one write).
+      // A bounded loop answers an inbox larger than one read (each round: one read, one write).
       for (let round = 0; round < 20; round++) {
-        const advice = await readHostedOverlapAdvice(this, laneId);
+        // 50 notices per read: one read answers the usual inbox instead of one read per five.
+        const advice = await readHostedOverlapAdvice(this, laneId, false, 50);
         const answers = ackAnswers(laneId, advice, choice, text);
         if (!answers.length) break;
         const recorded = await executeHostedRecords(this, 'overlap-acks', { answers });

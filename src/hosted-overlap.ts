@@ -94,6 +94,7 @@ export function hostedOverlapAdvice(
   current: { head: string; sourceRevision: number },
   answered: Set<string>,
   complete = true,
+  maxItems = 5,
 ) {
   const paths = new Set<string>((JSON.parse(mine.changes) as OverlapChange[]).map(change => change.path));
   complete &&= mine.complete;
@@ -113,10 +114,10 @@ export function hostedOverlapAdvice(
       if (!paths.has(path)) continue;
       // Without answers there is no need to hash every omitted display item.
       const noticeId =
-        answered.size || items.length < 5 ? digest(JSON.stringify(['first-write', lanes, path])) : '';
+        answered.size || items.length < maxItems ? digest(JSON.stringify(['first-write', lanes, path])) : '';
       if (answered.has(noticeId)) continue;
       count++;
-      if (items.length === 5) continue;
+      if (items.length === maxItems) continue;
       items.push({
         noticeId,
         file: path,

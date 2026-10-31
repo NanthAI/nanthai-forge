@@ -12,6 +12,7 @@ import { overlapLines, type PredictiveOverlap } from './agent-predictive-overlap
 import { retainedFinishCommand } from './agent-finish-journal.js';
 import { invariant } from './errors.js';
 import { hostedLandCli, LAND_CHILD_ENV } from './hosted-land-cli.js';
+import { hostedShowCli } from './hosted-show-cli.js';
 import { HostedAgentTransport } from './hosted-agent-transport.js';
 import { housekeepingLines, type IdleLane } from './lane-prune.js';
 
@@ -255,7 +256,7 @@ function actionHelp(action: string): string {
       'Select laneId for base-to-live changes, or from/to full State digests for an immutable comparison. Omit paths for a summary; paths selects exact relative files and contextual hunks. Same budgets and pagination as review: maxBytes 1024..48000 (default 12000), context 0..10, limit 1..100, offset; continue with returned head/base and expectedReviewTree. Lane comparisons accept expectedHead.\n';
   if (action === 'show')
     result +=
-      'Select exactly one state (full digest) or laneId (saved head), plus a relative file path. Writes exact bytes to stdout without JSON or an added newline. Binary/invalid UTF-8 or files over 1 MiB require force:true. MCP returns source pins and content with encoding utf8 or base64.\n';
+      'Select exactly one state (full digest), laneId (saved head) or channel ("main": its current head), plus a relative file path. Hosted checkouts default to the opened Lane and accept channel:"main". Writes exact bytes to stdout without JSON or an added newline. Binary/invalid UTF-8 or files over 1 MiB require force:true. MCP returns source pins and content with encoding utf8 or base64.\n';
   if (action === 'link')
     result +=
       'Select exactly one laneId, viewId or save (full source digest). path is an optional relative source file; line requires path. Links target the hosted app; an unpublished head may be unavailable until source is pushed.\n';
@@ -485,6 +486,10 @@ async function runAgentCli(args: string[], options: AgentCliOptions, notices: st
         wait: client.wait ?? (options.process ? undefined : false),
         detach: Boolean(options.process),
       });
+    if (action === 'show') {
+      await hostedShowCli(root, command, hosted);
+      return undefined;
+    }
     if (action !== 'start' || !options.process) return hostedAgentCli(root, action, command, hosted);
     const transport = new HostedAgentTransport(root, hosted);
     // The Lane id and path print before the checkout downloads, so a slow open never hides them.

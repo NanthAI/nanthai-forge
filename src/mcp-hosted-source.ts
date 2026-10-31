@@ -6,6 +6,7 @@ import { HostedCheckoutCache } from './hosted-checkout-cache.js';
 import { ConvexLaneTransport } from './hosted-lane-transport.js';
 import { hostedLaneSelectionSchema } from './hosted-lane.js';
 import { hostedLaneExpectationSchema, readHostedLaneCheckout } from './hosted-lane-checkout-marker.js';
+import { hostedMainV2Schema } from './hosted-main.js';
 import { parseNativeState } from './native-state-format.js';
 import { reviewTextPage } from './source-review-format.js';
 import { safeRelative } from './safe-relative.js';
@@ -27,6 +28,8 @@ export const hostedSourceSelectionSchema = z
   .object({
     laneId: z.uuid().optional(),
     expected: hostedLaneExpectationSchema.optional(),
+    /** Read the project's current main instead of a Lane. */
+    channel: z.literal('main').optional(),
   })
   .strict();
 export const hostedSourceShowSchema = hostedSourceSelectionSchema
@@ -79,12 +82,31 @@ export async function selectHostedSource(transport: HostedAgentTransport, input:
   );
   return selection;
 }
+/** Main's current State, read fresh and authorized; never a Lane working copy. */
+async function selectHostedMain(transport: HostedAgentTransport) {
+  const value = await transport.query('projectHostedChannels:current', {});
+  const main = sourceProtocol(() => hostedMainV2Schema.parse(value));
+  invariant(
+    main.projectId === transport.address.projectId,
+    'PROJECT_UNAVAILABLE',
+    'Main belongs to another project.',
+  );
+  return main;
+}
 async function fileBytes(
   transport: HostedAgentTransport,
   input: z.infer<typeof hostedSourceSelectionSchema>,
   path: string,
 ) {
-  const selection = await selectHostedSource(transport, input);
+  invariant(
+    input.channel === undefined || (!input.laneId && !input.expected),
+    'BAD_ARGUMENT',
+    'Select channel main or a Lane, not both.',
+  );
+  const main = input.channel === 'main' ? await selectHostedMain(transport) : undefined;
+  const selection = main
+    ? { head: main.head, channel: 'main' as const, sourceRevision: main.sourceRevision }
+    : await selectHostedSource(transport, input);
   const cache = new HostedCheckoutCache(
     `${transport.root}.forge-client`,
     new ConvexLaneTransport(transport.exchange),
@@ -96,14 +118,14 @@ async function fileBytes(
   await cache.ensure([entry.blob]);
   const bytes = readFileSync(join(cache.objects, entry.blob));
   // Cache hits do not grant fresh access. Recheck the original selection before returning bytes.
-  await selectHostedSource(transport, {
-    laneId: selection.laneId,
-    expected: {
-      head: selection.head,
-      version: selection.version,
-      sourceVersion: selection.sourceVersion,
-    },
-  });
+  if (main) await selectHostedMain(transport);
+  else {
+    const lane = selection as Awaited<ReturnType<typeof selectHostedSource>>;
+    await selectHostedSource(transport, {
+      laneId: lane.laneId,
+      expected: { head: lane.head, version: lane.version, sourceVersion: lane.sourceVersion },
+    });
+  }
   return { selection, entry, bytes };
 }
 export async function showHostedSource(transport: HostedAgentTransport, input: unknown) {
@@ -125,7 +147,7 @@ export async function showHostedSource(transport: HostedAgentTransport, input: u
     sourceContext: pins,
     result: {
       state: pins.head,
-      laneId: pins.laneId,
+      ...('laneId' in pins ? { laneId: pins.laneId } : { channel: pins.channel }),
       path,
       blob: entry.blob,
       mode: entry.mode,

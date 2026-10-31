@@ -259,8 +259,7 @@ export async function publishLandingBatch(ctx: MutationCtx, claim: LandingClaim,
     };
     await writeLanding(ctx, member.row, next, false);
     await settleLandingOperation(ctx, next);
-    if (receipt.completion.enabled && member.plan.inputPages)
-      await scheduleAcceptanceCompletion(ctx, identity);
+    if (member.plan.inputPages) await scheduleAcceptanceCompletion(ctx, identity);
     receipts.push(receipt);
   }
   const last = receipts.at(-1)!;

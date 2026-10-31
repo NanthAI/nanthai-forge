@@ -38,11 +38,14 @@ export const head = query({
     version: v.number(),
     sourceVersion: v.number(),
     lifecycleVersion: v.number(),
+    /** When the Lane's record last changed (save, sync or lifecycle): no extra reads. */
+    lastActivityAt: v.string(),
   }),
   handler: async (ctx, input) => {
     try {
       const { lane } = await laneRecord(ctx, input);
       return {
+        lastActivityAt: lane.at,
         head: lane.head,
         version: lane.version,
         sourceVersion: lane.sourceVersion,
