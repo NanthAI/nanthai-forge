@@ -7,7 +7,7 @@
 // Gates (brief): claude-usage 5h <= 40% and weekly < 85% to start a model cell; the
 // deployed Forge commit is recorded before and after (a change voids the cell).
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, writeFileSync, readFileSync, appendFileSync, statfsSync, rmSync } from 'node:fs';
+import { mkdirSync, writeFileSync, readFileSync, appendFileSync, rmSync, existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { homedir } from 'node:os';
 import { launchAgent } from './agent.mjs';
@@ -34,6 +34,9 @@ const dir = join(B, 'runs', cellId),
 mkdirSync(join(B, 'runs'), { recursive: true });
 mkdirSync(dir); // write-once: an existing cell directory fails here
 mkdirSync(ws, { recursive: true });
+// Each cell's checkouts and temp dirs go away on every exit path (refusal, crash, signal).
+process.on('exit', () => rmSync(ws, { recursive: true, force: true }));
+for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(signal, () => process.exit(130));
 const event = entry =>
   appendFileSync(
     join(dir, 'events.jsonl'),
@@ -41,6 +44,29 @@ const event = entry =>
   );
 const sh = (cmd, args) => execFileSync(cmd, args, { encoding: 'utf8', maxBuffer: 64 << 20 }).trim();
 
+/** GiB available on the data volume, the same figure `df -g /System/Volumes/Data` prints. */
+function diskFreeGb() {
+  const line = sh('df', ['-k', '/System/Volumes/Data']).split('\n').at(-1).trim().split(/\s+/);
+  return Number(line[3]) / 1024 / 1024;
+}
+/** Estimated peak disk of this cell (handoff table); first runs record the real delta.
+ * One shared dependency install keyed by the lockfile is counted until it exists. */
+function diskNeed() {
+  const parts = {};
+  if (arm === 'github') {
+    parts.hub = 0.3;
+    parts.checkouts = N * 0.14;
+  } else {
+    parts.laneRoots = N * 0.5;
+    parts.resetAndOracleRoots = 1.0;
+  }
+  if (!dry) {
+    parts.buildAndTestCaches = N * (arm === 'forge' ? 0.5 : 0.3);
+    if (!existsSync(join(B, 'deps'))) parts.sharedDependencyInstallAndToolchain = 2.4;
+  }
+  const needGb = Object.values(parts).reduce((a, b) => a + b, 0);
+  return { parts, needGb, floorGb: 15, requiredGb: 15 + needGb };
+}
 function usageGate() {
   try {
     const u = JSON.parse(sh('claude-usage', ['--json']));
@@ -81,7 +107,7 @@ function forgeBuild() {
 const gates = {
   usage: usageGate(),
   forgeBuild: forgeBuild(),
-  diskFreeGb: (statfsSync(B).bavail * statfsSync(B).bsize) / 1e9,
+  disk: { freeGb: diskFreeGb(), ...diskNeed() },
 };
 const refuse = reason => {
   writeFileSync(join(dir, 'result.json'), JSON.stringify({ cellId, refused: reason, gates }, null, 1));
@@ -94,11 +120,11 @@ if (!dry) {
   if (gates.usage.weekly === null || gates.usage.weekly >= 85) refuse('claude weekly usage at or above 85%');
   if (arm === 'forge' && !config.forge.qualifiedAt) refuse('Forge adapter not qualified by a dry run');
 }
-// Model cells install dependencies per workspace; dry runs only check out sparse source
-// (~0.14 GB per worktree plus the hub). The reserve protects other work on the Mac.
-const diskNeedGb = dry ? N * 0.15 + 1 : N * (arm === 'forge' ? 0.6 : 0.3) + 2;
-if (gates.diskFreeGb < diskNeedGb)
-  refuse(`disk ${gates.diskFreeGb.toFixed(1)} GB free is too low for ${N} workspaces`);
+// Lead's hard disk gate (2026-10-31, builders hit ENOSPC): free >= 15 GB + this cell's need.
+if (gates.disk.freeGb < gates.disk.requiredGb)
+  refuse(
+    `disk ${gates.disk.freeGb.toFixed(1)} GB free < ${gates.disk.requiredGb.toFixed(1)} GB required (15 GB floor + ${gates.disk.needGb.toFixed(1)} GB cell need: ${JSON.stringify(gates.disk.parts)})`,
+  );
 
 const forge = arm === 'forge' ? forgeArm(config.forge) : null;
 const bin = join(ws, 'bin');
@@ -294,6 +320,7 @@ const result = {
   oracle,
   upstreamAudit: arm === 'github' ? github.upstreamAudit(new Date(cellStart).toISOString()) : null,
   forgeDeployChanged: deployChanged,
+  diskAfterGb: diskFreeGb(),
   voided,
 };
 writeFileSync(join(dir, 'result.json'), JSON.stringify(result, null, 1) + '\n', { flag: 'wx' });

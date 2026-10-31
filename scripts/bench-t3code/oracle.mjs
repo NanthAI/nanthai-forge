@@ -3,7 +3,7 @@
 // the fork (public, free minutes). Works from a fork commit (GitHub arm) or from a
 // directory holding Forge's final main (Forge arm), so both arms use one grader.
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { readFileSync, rmSync } from 'node:fs';
 import { setTimeout as wait } from 'node:timers/promises';
 import { repository } from './github-arm.mjs';
 
@@ -59,6 +59,7 @@ export function oracleCommit({ meta, tasks, setup, label, fromCommit, fromDirect
   const tree = git(['write-tree']);
   const commit = git(['commit-tree', tree, '-p', parent, '-m', `bench oracle ${label}`]);
   git(['push', '-q', '--force', 'fork', `${commit}:refs/heads/oracle/${label}`]);
+  rmSync(env.GIT_INDEX_FILE, { force: true });
   return {
     commit,
     branch: `oracle/${label}`,
