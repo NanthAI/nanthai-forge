@@ -16,41 +16,32 @@ Use Node 24.22.1+ (24.x). A change is done when `npm run verify` passes. If you 
 
 ## We build Forge with Forge
 
-The canonical project is the native owner at `$FORGE_OWNER` (the local native owner directory); its `main` Channel is the real source. A separate local Git checkout is a mirror and can lag.
-For ownerless hosted ROOTs, see [Work on a hosted project](docs/quickstart.md#work-on-a-hosted-project).
+Forge is hosted: the project's hosted `main` Channel is the only source of truth. A local Git checkout is a mirror and can lag; never commit there.
+
+The backlog is Forge planning (Initiatives group Issues). Start work from its Issue, so the Lane, the Intent and the evidence stay linked and the Issue closes when the work lands:
 
 ```sh
-nforge agent OWNER start '{"outcome":"What you are changing"}'   # returns a Lane path
-# edit files in that Lane path with your normal tools
-nforge agent OWNER land --save '{"laneId":"…","message":"…"}'
+nforge agent ROOT planning '{"status":"open","limit":50}'          # what is planned and in flight
+nforge agent ROOT start '{"planningItemId":"ISSUE_ID"}'            # or {"outcome":"…"} for unplanned work; returns a Lane path
+# edit files only in that Lane path with your normal tools
+nforge agent ROOT land --save '{"laneId":"…","message":"…"}'
+nforge agent ROOT comment-planning-item '{"itemId":"ISSUE_ID","text":"What landed, follow-ups"}'
 ```
 
-Record a handoff before stopping. Run heavy local commands through `nforge heavy CMD`; `land --save` waits for the outcome. Defaults and settings: [parallel-work defaults](docs/parallel-work-defaults.md).
+Ideas, decisions and friction you find go into planning as Issues (`put-planning-item`), not only into a handoff. When Forge gets in your way, also run `nforge agent ROOT friction '{"laneId":"…","title":"…","detail":"…","area":"…"}'`.
 
-Three verbs: `start`, `save` and `land`. `land --save` saves, merges the latest `main`, runs the `verify` check and accepts on pass; `save --sync` brings `main` in on demand. Operator actions (`abandon`, `accept`, `cancel`, `revert`, …) run as `nforge x OWNER ACTION`. Old names such as `finish` and `checkpoint` still work and print their new form. Details: [agent workflow](docs/agents/workflow.md). Lifecycle receipts include advisory local peers; incomplete coverage never establishes independence. `start.scope.paths` retains planned claims; other lifecycle scopes declare relevance for that call. Use `peers {"laneId":"…","detail":true}` or `forge_peers` for details. Clean saves succeed with an unchanged head. When Forge gets in your way, run `nforge agent OWNER save --friction '{"laneId":"…","title":"…","detail":"…","area":"…"}'`; `nforge improve OWNER` groups the reports that guide the next slice.
+`land --save` saves, updates from main, composes a Candidate, runs the check and accepts under the project policy. Details: [agent workflow](docs/agents/workflow.md). Receipts include advisory peers; incomplete coverage never establishes independence (`peers {"laneId":"…","detail":true}` or `forge_peers`).
 
-## Hosted landing gate
+**Working rules for every agent**
 
-Existing policies without `acceptance.gate` keep full checks. The dogfood project runs
-`gate: contract` (on since 2026-10-30); revert with `set-policy` `acceptance.gate: full`.
-Explicit trusted and
-autonomous presets select the contract gate; supervised projects, contributors,
-system changes and Intents without contracts keep the full gate. A contract run
-checks the declared tests, changed tests and composed Intent union on the exact
-Candidate. Protected paths require a full check and owner acceptance under the
-existing governance rules. With the contract policy enabled, unknown paths also
-require full evidence and owner acceptance.
+- **Finish your own Lane** and fix your own failures: after a failed check, fix it and land the same Lane again (no cancel and recreate). Abandon Lanes you will not land.
+- **Answer overlap notices** before your next edit to that file and before landing (`ack`, or `ack … split`). Never land over an unanswered notice.
+- **Freeze after landing is submitted**: no save, sync or edit until it is terminal; a new save supersedes it and discards its checks.
+- **Tests follow the change**: locally run the affected set (`nforge agent ROOT tests`), not the whole suite; the landing check is the full run.
+- **Stay with work you depend on**: do not stop while a landing, import or test run you need is still running; wait for it.
+- **Efficiency by design**: state Convex calls, DB I/O, memory and wall time at real scale before building. Convex calls per operation must not rise; idle costs zero calls; no per-item calls in loops, no polling.
 
-With the contract gate enabled, main may be briefly red. The hosted main audit
-runs asynchronously; automatic recovery reverts a single clean culprit or opens a
-fix-forward Intent, retaining the Lane and an undo command. Contract acceptance
-pauses while main is red; full-gated fixes can still land. Enable this policy only
-after the hosted audit and automatic recovery slices are deployed. See
-[the effective gate table](docs/workflows.md#hosted-acceptance-gate).
-
-Trust per path per actor (`autonomyPolicy.trust`) is off until the owner approves
-its defaults. Enabled, a supervised path runs the full gate; your level shows in
-your brief. Details: [trust](docs/workflows.md#trust-per-path-per-actor).
+Record a handoff before stopping.
 
 ## Agent source commands
 
