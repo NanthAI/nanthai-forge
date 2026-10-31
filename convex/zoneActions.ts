@@ -87,7 +87,6 @@ async function zoneExport(ctx: ActionCtx, id: Id<'sourceZones'>, reader: string)
       return encodeHostedArtifact(scoped);
     },
     () => access(ctx, id, reader),
-    source.job.r2Writes ?? false,
   );
   invariant(record?.storageId, 'INVALID_ARTIFACT', 'Stored source is unavailable.');
   return { ...source, record };

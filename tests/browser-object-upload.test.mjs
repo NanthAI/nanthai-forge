@@ -95,20 +95,6 @@ test('browser logical objects PUT directly to R2, verify checksums and reuse com
   assert.equal(fake.requests.filter(r => r.method === 'HEAD').length, 4);
 });
 
-test('browser upload preserves Convex POST/complete when deployment R2 mode is off', async t => {
-  for (const options of [{ flag: '' }, { flag: '', optIn: false }])
-    await t.test(JSON.stringify(options), async t => {
-      const { s, fake } = await setup(t, options),
-        input = archive(),
-        browser = client(s).client;
-      browser.action = () => assert.fail('Convex fallback does not call R2 commit');
-      assert.deepEqual(await uploadArchiveObjects(browser, 'project', input.file), pinOf(input.manifest));
-      assert.ok(rows(s).every(row => row.storageId && !row.location && !row.r2Committed));
-      assert.equal(s.files.size, 4);
-      assert.equal(fake.requests.length, 0);
-    });
-});
-
 test('browser upload uses deployment R2 mode without the legacy project opt-in', async t => {
   const { s } = await setup(t, { optIn: false }),
     input = archive();

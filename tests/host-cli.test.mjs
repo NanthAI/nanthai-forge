@@ -127,7 +127,7 @@ function setup(t, git = false, empty = false) {
       );
       transport.client.query = (ref, args) => s.ctx.runQuery(ref, args);
       transport.client.action = (ref, args) => s.ctx.runAction(ref, args);
-      transport.client.mutation = async () => []; // no R2 objects
+      transport.client.mutation = (ref, args) => s.ctx.runMutation(ref, args);
       transport.uploadLazyBatch = async objects => {
         let bytes = 0;
         for (const object of objects) {

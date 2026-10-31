@@ -7,7 +7,8 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { fixture, preparedCheckpoint, modules } from './project-exchange-fixture.mjs';
+import { fixture, preparedCheckpoint, modules, legacyObject } from './project-exchange-fixture.mjs';
+import { defaultR2Config, defaultR2Objects, interceptDefaultR2 } from './default-r2.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { initNative } from '../dist/native-work.js';
 import { WorkService } from '../dist/work.js';
@@ -80,34 +81,29 @@ test('hosted log pages read only retained run bytes and recheck current read aut
     stream: 'stdout',
     offset: 0,
   };
-  const page = JSON.parse(await log._handler(s.ctx, args));
-  assert.equal(page.nextOffset, 16384);
-  assert(page.more);
-  const end = JSON.parse(await log._handler(s.ctx, { ...args, offset: page.nextOffset }));
-  assert.match(end.text, /✖ retained failure/);
-  assert.equal(end.more, false);
   // A retained R2 log is described, never read or returned by the server action.
   const logPin = source.manifest.files.find(file => file.path === `check-${runId}/stdout.log`),
-    object = [...s.tables.projectObjects.values()].find(row => row.digest === logPin.sha256),
-    original = structuredClone(object),
-    originalFetch = globalThis.fetch;
-  delete object.storageId;
-  Object.assign(object, { location: 'r2', r2Committed: true, r2Key: `v1/p/project/o/${logPin.sha256}` });
-  globalThis.fetch = async () => {
+    object = [...s.tables.projectObjects.values()].find(row => row.digest === logPin.sha256);
+  assert.equal(object.location, 'r2');
+  const restore = interceptDefaultR2(() => {
     throw new Error('A metadata-only log read must not fetch R2 bytes.');
-  };
+  });
   try {
     const direct = JSON.parse(await log._handler(s.ctx, args));
     assert.deepEqual(direct.direct, { sha256: logPin.sha256, size: logPin.size });
     assert.equal(direct.text, undefined);
     assert.equal(direct.backupId, backupId);
   } finally {
-    globalThis.fetch = originalFetch;
-    delete object.location;
-    delete object.r2Committed;
-    delete object.r2Key;
-    Object.assign(object, original);
+    restore();
   }
+  // A log stored before R2 was the only byte path still pages from Convex storage.
+  await legacyObject(s, defaultR2Objects.get(`${defaultR2Config.bucket}/${object.r2Key}`));
+  const page = JSON.parse(await log._handler(s.ctx, args));
+  assert.equal(page.nextOffset, 16384);
+  assert(page.more);
+  const end = JSON.parse(await log._handler(s.ctx, { ...args, offset: page.nextOffset }));
+  assert.match(end.text, /✖ retained failure/);
+  assert.equal(end.more, false);
   await assert.rejects(log._handler(s.ctx, { ...args, offset: -1 }), code('BAD_ARGUMENT'));
   await assert.rejects(log._handler(s.ctx, { ...args, runId: randomUUID() }), code('NOT_FOUND'));
   s.caller('stranger');

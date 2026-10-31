@@ -1052,7 +1052,6 @@ test('legacy HTTP session shape remains a run with additive capabilities; unknow
 });
 
 test('source pack reservations bound project storage to two objects and delete older objects before replacement', async t => {
-  variables(t, { FORGE_BLOBS: 'r2' });
   const s = await fixture(t);
   await s.bind();
   const stateRef = s.run.candidate.base.head;
@@ -1192,7 +1191,6 @@ test('source pack commit verifies R2 size/checksum and reauthorizes after HEAD',
 });
 
 test('expired pending uploads are fenced before DELETE so late commit cannot publish a deleted pack', async t => {
-  variables(t, { FORGE_BLOBS: 'r2' });
   const s = await fixture(t);
   await s.bind();
   const stateRef = s.run.candidate.base.head;

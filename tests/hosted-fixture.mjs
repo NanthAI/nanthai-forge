@@ -19,7 +19,6 @@ import { checkDocument, insertedDocument, updatedDocument } from './convex-args.
 import { validateContext } from './convex-context.mjs';
 const schema = (await import(moduleUrl('../convex/schema.ts'))).default;
 const artifactStorage = await import(moduleUrl('../convex/artifactStorage.ts'));
-const importStorage = await import(moduleUrl('../convex/importStorage.ts'));
 const projectExchangeCache = await import(moduleUrl('../convex/projectExchangeCache.ts'));
 const derivedArtifacts = await import(moduleUrl('../convex/derivedArtifacts.ts'));
 const imports = await import(moduleUrl('../convex/imports.ts'));
@@ -461,7 +460,6 @@ export function state(jobs = [job()], { keysetPaging = false } = {}) {
     projectWorkIndexActions,
     derivedArtifacts,
     artifactStorage,
-    importStorage,
     projectExchangeCache,
     imports,
     lifecycle,

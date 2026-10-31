@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { digest } from '../dist/hash.js';
 export function fakeSourceR2(t) {
   const keys = {
-    FORGE_BLOBS: 'r2',
+    CONVEX_CLOUD_URL: 'https://example.convex.cloud',
     R2_ACCOUNT_ID: 'synthetic',
     R2_BUCKET: 'synthetic',
     R2_ACCESS_KEY_ID: 'synthetic',

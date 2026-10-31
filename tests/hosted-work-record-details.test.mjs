@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
+import { storedBytes } from './default-r2.mjs';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { getFunctionName } from 'convex/server';
@@ -106,7 +107,7 @@ for (const mode of ['native-owner', 'server'])
     const detail = snapshot.data.runs[0].detailRef;
     const rows = [...s.tables.projectObjects.values()];
     const row = rows.find(row => row.digest === detail.sha256);
-    const bytes = new Uint8Array(await (await s.ctx.storage.get(row.storageId)).arrayBuffer());
+    const bytes = new Uint8Array(await storedBytes(s, row));
     assert.deepEqual(
       hydrateRun(snapshot.data.runs[0], () => bytes),
       s.original,

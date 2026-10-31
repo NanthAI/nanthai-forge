@@ -82,21 +82,21 @@ export const step = internalAction({
   handler: async (ctx, input): Promise<null> => {
     let plan: MirrorPlan | undefined;
     let started: { phase: MirrorPlan['phase']; index: number } | undefined;
-    let storage: ReturnType<typeof sourceStorage> | undefined;
+    let durable: ReturnType<typeof sourceStorage> | undefined;
     try {
       const raw: string | null = await ctx.runMutation(mutation('projectGithubMirrorStore:begin'), input);
       if (!raw) return null;
       const loaded = JSON.parse(raw);
-      storage = sourceStorage(ctx, loaded.projectId);
+      durable = sourceStorage(ctx, loaded.projectId);
       const token = await installationToken(ctx, loaded.projectId, loaded.repository);
       const io: MirrorIO = { ...mirrorSource(ctx, input), api: githubRequest(token) };
       if (loaded.cursor) {
-        plan = JSON.parse(Buffer.from(await storage.read(loaded.cursor)).toString('utf8'));
+        plan = JSON.parse(Buffer.from(await durable.read(loaded.cursor)).toString('utf8'));
       } else plan = await prepareMirror(loaded.seed, io);
       invariant(plan, 'SOURCE_UNAVAILABLE', 'Mirror continuation is unavailable.');
       started = { phase: plan.phase, index: plan.index };
       plan = await stepMirror(plan, io);
-      const cursor = plan.phase === 'done' ? null : await storage!.store(Buffer.from(JSON.stringify(plan)));
+      const cursor = plan.phase === 'done' ? null : await durable!.store(Buffer.from(JSON.stringify(plan)));
       await ctx.runMutation(mutation('projectGithubMirrorStore:commit'), {
         ...input,
         cursor,
@@ -114,7 +114,7 @@ export const step = internalAction({
       let progressUnavailable = false;
       if (progress) {
         try {
-          cursor = await storage!.store(Buffer.from(JSON.stringify(plan)));
+          cursor = await durable!.store(Buffer.from(JSON.stringify(plan)));
         } catch {
           progressUnavailable = true;
         }

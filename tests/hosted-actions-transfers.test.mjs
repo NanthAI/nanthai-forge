@@ -20,7 +20,7 @@ async function fixture(t) {
     token: claim.mapping.lease.token,
   };
   const env = {
-    FORGE_BLOBS: 'r2',
+    CONVEX_CLOUD_URL: 'https://example.convex.cloud',
     R2_ACCOUNT_ID: 'h22-fixture',
     R2_BUCKET: 'synthetic',
     R2_ACCESS_KEY_ID: 'synthetic-id',

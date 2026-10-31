@@ -11,7 +11,7 @@ import {
   sourcePackSchema,
   type SourcePackUpload,
 } from '../src/source-pack';
-import { presignPut, presignDelete, r2Config, r2Enabled, headObject, checksumOf, putExpiry } from './r2';
+import { presignPut, presignDelete, r2Config, headObject, checksumOf, putExpiry } from './r2';
 import { invariant } from '../src/errors';
 import { isStored } from './projectObjectFields';
 
@@ -37,7 +37,6 @@ export async function reserveSourcePack(
   cleanupAck: string | undefined,
   now: number,
 ) {
-  if (!r2Enabled()) return null;
   const state = await ctx.db
     .query('projectObjects')
     .withIndex('by_project_and_digest', q => q.eq('projectId', projectId).eq('digest', object.stateRef))

@@ -4,6 +4,7 @@ import { calculateOverlapMetrics, calculateAuthorityMetrics } from './self-metri
 import { calculateBillingMetrics } from './self-metrics-billing.js';
 import { calculateRedMainMetrics } from './self-metrics-red-main.js';
 import { calculateStorageMetrics } from './self-metrics-storage.js';
+import { calculatePlacementMetrics } from './self-metrics-placement.js';
 import type { MetricInput, MetricPeriod, MetricRecords, SelfMetricsReader } from './self-metrics-types.js';
 export type { SelfMetricsReader, MetricRecords, MetricPeriod } from './self-metrics-types.js';
 const excluded = new Set(['start', 'checkpoint', 'finish', 'land']);
@@ -364,6 +365,7 @@ export function calculateSelfMetrics(
     metric8: joined(calculateBillingMetrics(records, { ...period, asOf })),
     redMain: joined(calculateRedMainMetrics(records, { ...period, asOf })),
     disk: joined(calculateStorageMetrics(records, { ...period, asOf })),
+    placement: joined(calculatePlacementMetrics(records)),
     metric5: {
       partial: !!mutationGaps.length,
       gaps: mutationGaps,

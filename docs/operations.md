@@ -1595,9 +1595,9 @@ To restore live IDs, grants and audit together, restore a whole-instance snapsho
 
 "Permanently delete object" removes encrypted values, grants and audit rows and leaves a minimal receipt. Reconcile an interrupted deletion from "Deletion receipts". Existing downloads and the GitHub credential itself are unaffected, so revoke the credential at GitHub as well.
 
-## R2 object storage (write path)
+## R2 object storage
 
-New project objects can be uploaded straight to Cloudflare R2 instead of Convex file storage. This is the R1 write path and R2 dual read of the [R2 storage plan](r2-storage-plan.md). Reads dispatch per object, so an opted-in project pushes, publishes and pulls end to end. Keep it to throwaway projects until a real-bucket smoke has passed.
+Every byte goes to Cloudflare R2: project objects, import uploads, source-job outputs and cursors, check logs, backups, proposals, packs and indexed artifacts. There is no per-project opt-in and no deployment flag; new projects write R2 from their first byte. Convex holds records only. [Data placement](data-placement.md) lists every table and byte store; the guard in `tests/hot-storage-invariant.test.mjs` fails verify on any new Convex file-storage write.
 
 ### Convex environment
 
@@ -1605,23 +1605,19 @@ Read only inside Convex functions and never sent to clients.
 
 | Name | Meaning |
 | --- | --- |
-| `FORGE_BLOBS` | `r2` turns the write path on for opted-in projects. Anything else, or unset, keeps Convex storage. |
 | `R2_ACCOUNT_ID` | Cloudflare account id; the endpoint is `https://<account>.r2.cloudflarestorage.com/<bucket>/<key>`. |
+| `R2_ENDPOINT` | Optional. Another S3-compatible origin, for example a self-hosted bucket: `https://…`, or `http://` on loopback only. |
 | `R2_BUCKET` | Private bucket name, for example `forge-blobs-dev`. |
 | `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` | S3 credentials for an R2 API token with Object Read & Write on that one bucket. |
 
-With the flag on and an opted-in project, a missing variable fails the upload with `R2_NOT_CONFIGURED` rather than falling back.
-
-### Per-project opt-in
-
-The owner runs `projectObjectCommit:setR2Writes` with `{ projectId, enabled }`. The default is off. The deployment admin can set it with the internal `projectObjectCommit:setR2WritesAdmin` (`npx convex run`), which is how smoke tests flip it. Both the flag and the opt-in must be on for R2 writes. Rollback: set `enabled` to false or unset `FORGE_BLOBS`; new writes return to Convex storage and nothing is deleted.
+A missing variable fails the write with `R2_NOT_CONFIGURED`; Forge never falls back to Convex file storage. `FORGE_BLOBS` and `projectObjectCommit:setR2Writes` no longer exist. The `r2Writes` column on older project and import rows is kept but ignored.
 
 ### Behaviour to know
 
 - Upload URLs expire after 15 minutes. Objects are never overwritten; a repeated upload of the same content is accepted as already stored.
-- Download URLs expire after 5 minutes; readers sign again once on expiry. Objects already committed to R2 stay readable when `FORGE_BLOBS` is unset, as long as the `R2_*` settings are present; without them reads of those objects fail with `R2_NOT_CONFIGURED`.
+- Download URLs expire after 5 minutes; readers sign again once on expiry.
 - A corrupt or tampered object is rejected with `BLOB_DIGEST_MISMATCH` and never written.
-- Prepared but uncommitted objects are not swept yet (slice R7).
+- Rows written to Convex file storage before R2 was the only path stay readable there. `nforge maintenance r2-backfill ROOT --dry-run` reports what is left to move and which Convex copies cleanup could delete ([R2 backfill](operations/r2-backfill.md)). Deleting them is a separate owner-approved step.
 
 ## Self-host
 
@@ -1640,7 +1636,6 @@ Always pass `--env-file DIR/deployment.env` to every `npx convex` command so you
 ```sh
 npx convex env set CLERK_JWT_ISSUER_DOMAIN '' --env-file DIR/deployment.env
 npx convex env set FORGE_CLI_ISSUER '' --env-file DIR/deployment.env
-npx convex env set FORGE_BLOBS convex --env-file DIR/deployment.env
 npx convex deploy --env-file DIR/deployment.env --typecheck enable --yes
 ```
 
@@ -1654,9 +1649,9 @@ Build the browser with `VITE_CLERK_PUBLISHABLE_KEY=''` and `node --env-file=DIR/
 
 **Backend upgrade:** create a fresh instance with the new pin and restore a snapshot into it. Keep the old instance until you accept the result. Rollback restores a snapshot into a fresh instance on the old pin.
 
-**Storage:** `FORGE_BLOBS=convex` explicitly stores indexed imports and their binary derivatives in native file storage, included in file-inclusive snapshots. Hosted deployments retain R2 artifact writes when this native mode is not selected; missing R2 configuration still fails explicitly, and existing R2 references still read from R2. The launcher accepts an optional private dotenv file as a third `start` argument. It sets native S3 storage with five buckets (`S3_STORAGE_EXPORTS_BUCKET`, `_SNAPSHOT_IMPORTS_`, `_MODULES_`, `_FILES_`, `_SEARCH_`) and `AWS_*` credentials. Changing the argument on an existing database does not move its files. Restore a snapshot into a fresh instance instead.
+**Storage:** a self-hosted instance stores bytes in R2 like every deployment; there is no Convex byte mode. Set the `R2_*` settings, or `R2_ENDPOINT` for another S3-compatible bucket. Without them, every byte write fails with `R2_NOT_CONFIGURED`. File-inclusive snapshots hold only legacy copies, not the bucket. The launcher accepts an optional private dotenv file as a third `start` argument. It sets native S3 storage with five buckets (`S3_STORAGE_EXPORTS_BUCKET`, `_SNAPSHOT_IMPORTS_`, `_MODULES_`, `_FILES_`, `_SEARCH_`) and `AWS_*` credentials. Changing the argument on an existing database does not move its files. Restore a snapshot into a fresh instance instead.
 
-`node scripts/selfhost-smoke.mjs` runs the repeatable check against the pinned public repo `sindresorhus/is-plain-obj`. It needs a read-only `GITHUB_TOKEN` and configures native file storage on each fresh or restored instance. On failure it reports the stage, a command label with private arguments withheld, exit status and a bounded, secret-redacted diagnostic tail, including the import job error when acquisition fails. Raw diagnostics remain in the invocation’s private temporary directory; deployment environment contents are never printed.
+`node scripts/selfhost-smoke.mjs` runs the repeatable check against the pinned public repo `sindresorhus/is-plain-obj`. It needs a read-only `GITHUB_TOKEN`. It starts a local S3-compatible bucket and points each fresh or restored instance at it through `R2_ENDPOINT`. On failure it reports the stage, a command label with private arguments withheld, exit status and a bounded, secret-redacted diagnostic tail, including the import job error when acquisition fails. Raw diagnostics remain in the invocation’s private temporary directory; deployment environment contents are never printed.
 
 **Licenses:** Forge's server is AGPL-3.0-only and the launcher and client are Apache-2.0 (see [LICENSE.md](../LICENSE.md)). The downloaded Convex backend has its own FSL-1.1-Apache-2.0 terms. Inventories: [npm](dependency-licenses.md) and [native backend](native-dependency-licenses.md). The native one is partial and not an SBOM.
 

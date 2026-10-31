@@ -12,8 +12,8 @@ import type { BackfillCheck, BackfillPage, BackfillTarget, BackfillTransport } f
 export const MAINTENANCE_HELP = `nforge maintenance check-logs ROOT --dry-run|--apply --plan FILE [--hosted]
 nforge maintenance r2-backfill ROOT [--dry-run|--verify [--full-digest]] [--resume] [--state FILE]
 nforge maintenance r2-backfill DEPLOYMENT PROJECT_ID [--dry-run|--verify [--full-digest]] [--resume] [--state FILE]
-Run with the existing owner login or FORGE_AUTH_TOKEN. Enable projectObjectCommit:setR2Writes first.
-Dry-run reads counts/bytes only. Run streams through private local files; resume uses the original state file.
+Run with the existing owner login or FORGE_AUTH_TOKEN. New bytes already go to R2; this moves legacy Convex copies.
+Dry-run reads counts/bytes only, including Convex copies already in R2 that cleanup could delete. Run streams through private local files; resume uses the original state file.
 Verify HEAD-checks every backfilled row and downloads a SHA-256 sample (first, then every 100th row).
 Add --full-digest to download and verify every migrated object, with the same paged resume state.
 No Convex files are deleted. A full verified pass reports a date 14 days later; purge is separate.

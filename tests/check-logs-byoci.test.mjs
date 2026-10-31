@@ -345,7 +345,12 @@ test('synthetic realistic export and seed closure byte measurements', async t =>
 
 test('hosted cleanup dry-run/apply deletes Convex and R2 log objects, preserves shared source, and retries', async t => {
   const { moduleUrl } = await import('./convex-module.mjs');
-  const { fixture: hostedFixture, modules, upload } = await import('./project-exchange-fixture.mjs');
+  // Legacy Convex copies (written before R2 was the only path); one gets a fake R2 copy below.
+  const {
+    fixture: hostedFixture,
+    modules,
+    legacyObject: upload,
+  } = await import('./project-exchange-fixture.mjs');
   for (const name of ['projectCheckLogCleanup', 'projectCheckLogCleanupStore'])
     modules[name] = await import(moduleUrl(`../convex/${name}.ts`));
   const f = fixture(t),

@@ -32,7 +32,6 @@ export async function derivedArtifact(
   pin: string,
   build: () => Promise<Blob | string>,
   checkAccess: () => Promise<unknown>,
-  _r2 = false,
 ): Promise<Derived | null> {
   const file = await blobStore(ctx).getMetadata(original);
   invariant(file, 'INVALID_ARTIFACT', 'Stored source is unavailable.');
@@ -72,7 +71,7 @@ export async function derivedArtifact(
     ...(typeof value === 'string'
       ? { inline: value }
       : {
-          uploadType: `application/x-forge-derived-${process.env.FORGE_BLOBS === 'convex' ? '' : 'r2-'}${randomUUID()}`,
+          uploadType: `application/x-forge-derived-r2-${randomUUID()}`,
         }),
   };
   // Reconcile a lost reservation reply before beginning any storage side effect.
@@ -89,12 +88,9 @@ export async function derivedArtifact(
   if (!row || row.inline !== undefined || row.storageId) return row;
   let storageId: string;
   try {
-    storageId = await blobStore(ctx).store(
-      new Blob([bytes], { type: row.uploadType! }),
-      row.uploadType!.startsWith('application/x-forge-derived-r2-')
-        ? { r2Namespace: `v1/d/${row._id}` }
-        : undefined,
-    );
+    storageId = await blobStore(ctx).store(new Blob([bytes], { type: row.uploadType! }), {
+      r2Namespace: `v1/d/${row._id}`,
+    });
   } catch (error) {
     if (!row.uploadType!.startsWith('application/x-forge-derived-r2-')) {
       const stored = await reconciled(ctx, row);

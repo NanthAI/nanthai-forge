@@ -10,6 +10,7 @@ import { sourceWorkerPlan } from '../dist/convex-source-provider.js';
 import { sourceDispatch } from '../dist/hosted-source-job-controller.js';
 import { digest } from '../dist/hash.js';
 import { convexStoreBlob } from './convex-storage-fake.mjs';
+import { interceptDefaultR2, storedBytes } from './default-r2.mjs';
 const store = await import(moduleUrl('../convex/projectConvexSourceStore.ts'));
 const worker = await import(moduleUrl('../convex/projectConvexSource.ts'));
 const objects = await import(moduleUrl('../convex/projectConvexSourceObjects.ts'));
@@ -142,7 +143,16 @@ async function fixture() {
       ctx => jobs.loadSourceJob(ctx, s.projectId, [...s.tables.projectHostedSaves.values()][0].jobId),
       {},
     );
+  // Source bytes go to R2: a platform failure is a failed PUT.
+  const restoreR2 = interceptDefaultR2((input, init, serve) => {
+    if (hooks.failStore && init?.method === 'PUT') {
+      hooks.failStore = false;
+      throw Error('fetch failed: synthetic platform failure');
+    }
+    return serve(input, init);
+  });
   const restore = () => {
+    restoreR2();
     for (const [key, value] of Object.entries(savedEnv)) {
       if (value === undefined) delete process.env[key];
       else process.env[key] = value;
@@ -282,7 +292,7 @@ test('normal 10-file save stays within the end-to-end call budget', async t => {
     const job = await s.load();
     await s.call('resultDownloadConvex', saveJobs.resultDownload, { projectId: s.projectId, jobId: job.id });
     const row = [...s.tables.projectObjects.values()].find(r => r.digest === job.output.sha256);
-    const manifest = await (await s.storage.get(row.storageId)).text();
+    const manifest = (await storedBytes(s, row)).toString();
     await s.call('publishConvex', saveJobs.publish, {
       projectId: s.projectId,
       jobId: job.id,

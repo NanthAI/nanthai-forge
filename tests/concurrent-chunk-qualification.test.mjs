@@ -6,6 +6,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { getFunctionName } from 'convex/server';
 import { moduleUrl } from './convex-module.mjs';
+import { defaultR2Objects, interceptDefaultR2 } from './default-r2.mjs';
 const checkout = dirname(dirname(fileURLToPath(import.meta.url)));
 const backend = process.env.FORGE_QUALIFY_BACKEND ?? checkout,
   clientRoot = process.env.FORGE_QUALIFY_CLIENT ?? checkout;
@@ -17,7 +18,7 @@ const recipeStore = await import(
 const { ConvexExchange } = await import(pathToFileURL(join(clientRoot, 'dist/exchange-client.js')).href);
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 
-test('concurrent chunk clients share bindings and reconcile a lost recipe reply without further POST bytes', async t => {
+test('concurrent chunk clients share bindings and reconcile a lost recipe reply without further PUT bytes', async t => {
   const s = fixture(),
     originalRun = s.ctx.runQuery,
     started = performance.now();
@@ -30,7 +31,7 @@ test('concurrent chunk clients share bindings and reconcile a lost recipe reply 
         : originalRun(ref, args);
   };
   // The in-memory provider fixture has no transactions. Serialize mutations to
-  // model Convex's atomic mutation contract; actions and POSTs remain concurrent.
+  // model Convex's atomic mutation contract; actions and R2 PUTs remain concurrent.
   let transaction = Promise.resolve();
   const mutate = (ref, args) => {
     const result = transaction.then(() => invoke(ref, args));
@@ -49,26 +50,20 @@ test('concurrent chunk clients share bindings and reconcile a lost recipe reply 
   const barrier = new Promise(resolve => {
     release = resolve;
   });
-  const fetch = globalThis.fetch;
-  globalThis.fetch = async (url, init) => {
-    if (String(url) !== 'https://fixture.invalid/upload') return fetch(url, init);
+  const restore = interceptDefaultR2(async (url, init, serve) => {
+    if (init?.method !== 'PUT') return serve(url, init);
     posts++;
     postBytes += init.body.byteLength;
     active++;
     peak = Math.max(peak, active);
     try {
       await new Promise(resolve => setImmediate(resolve));
-      const storageId = await s.ctx.storage.store(
-        new Blob([init.body], { type: init.headers['Content-Type'] }),
-      );
-      return Response.json({ storageId });
+      return await serve(url, init);
     } finally {
       active--;
     }
-  };
-  t.after(() => {
-    globalThis.fetch = fetch;
   });
+  t.after(restore);
   const clients = [0, 1].map(index => {
     const client = new ConvexExchange(
       'https://fixture.convex.cloud',
@@ -107,7 +102,7 @@ test('concurrent chunk clients share bindings and reconcile a lost recipe reply 
   assert.match(result[0].reason.message, /lost post-commit/);
   assert.equal(result[1].status, 'fulfilled');
   assert.equal(active, 0);
-  assert(peak > 1, 'POST transfers actually overlap');
+  assert(peak > 1, 'PUT transfers actually overlap');
   const initialPosts = posts,
     initialBytes = postBytes,
     before = structuredClone([...s.tables.projectObjects.values()]);
@@ -127,7 +122,7 @@ test('concurrent chunk clients share bindings and reconcile a lost recipe reply 
   assert(logical.recipe);
   assert.equal(logical.storageId, undefined);
   assert(
-    ![...s.files.values()].some(file => file.metadata.size === bytes.length),
+    ![...defaultR2Objects.values()].some(object => object.length === bytes.length),
     'no reconstructed whole-file duplicate',
   );
   const downloaded = await clients[1].download(pin);
@@ -139,7 +134,7 @@ test('concurrent chunk clients share bindings and reconcile a lost recipe reply 
       clients: 2,
       posts,
       postBytes,
-      uniquePhysicalBytes: [...s.files.values()].reduce((sum, file) => sum + file.metadata.size, 0),
+      uniquePhysicalBytes: [...defaultR2Objects.values()].reduce((sum, object) => sum + object.length, 0),
       peakConcurrentPosts: peak,
       retryPosts: posts - initialPosts,
       elapsedMs: performance.now() - started,

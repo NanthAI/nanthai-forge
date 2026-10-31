@@ -100,6 +100,9 @@ function fixture() {
   s.drain = async () => {
     for (let count = 0; s.tables.hostedProjects.get('project').removal === 'deleting'; count++) {
       assert.ok(count < 250, 'cleanup converges');
+      const project = s.tables.hostedProjects.get('project');
+      // The scheduled R2 prefix purge is an action; its effect is the purged mark.
+      if (project.r2Purge && !project.r2PrefixPurged) project.r2PrefixPurged = true;
       await modules.projectLifecycle.purge._handler(s.ctx, { projectId: 'project' });
     }
   };

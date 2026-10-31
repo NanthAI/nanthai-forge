@@ -21,17 +21,16 @@ nforge maintenance r2-backfill ROOT --verify --full-digest --state /private/path
 nforge maintenance r2-backfill ROOT --verify --full-digest --resume --state /private/path/full-verification.json
 ```
 
-Before the real run, the lead configures the existing R2 environment settings
-(see [operations](../operations.md#r2-object-storage-write-path)), including
-`FORGE_BLOBS=r2`, and calls the owner-only `projectObjectCommit:setR2Writes`
-mutation with `{projectId, enabled: true}`. The command checks that opt-in; it does
-not change it. Enable it before scanning so concurrent new pushes already use R2.
+New bytes already go to R2 on every deployment, self-host included
+(see [operations](../operations.md#r2-object-storage)); there is no opt-in to enable.
+The command refuses on an older deployment that still reports R2 writes off.
 A previously pending Convex upload can still finish while scanning. A final
 inventory detects rows missed behind the cursor; run a fresh pass with another
 state file if it reports `BACKFILL_REMAINS`.
 
 Dry-run queries indexed project rows in pages of at most 100 and reports counts,
-bytes and estimated cost. It signs no URLs, downloads no bytes, flips no rows and
+bytes and estimated cost, plus the Convex copies of rows already committed to R2
+(count and bytes) that the separate cleanup could delete. It signs no URLs, downloads no bytes, flips no rows and
 creates no local progress. The real run prints the same estimate before writes:
 decimal Convex egress GB × $0.132 plus one planned R2 standard Class A PUT per row
 at a planning rate of $4.50/million (before free tiers; HEAD/GET and storage are
@@ -142,8 +141,7 @@ private operator environment without printing them.
    for the early-purge file-inclusive backup evidence.
 3. **LIVE: R6 configuration and inventory.** Preflight: compatible readers and
    writers are deployed, the existing backend R2 configuration is available, and
-   the selected owner/project/deployment match. Enable the existing `FORGE_BLOBS`
-   R2 path and project `projectObjectCommit:setR2Writes` opt-in as described above.
+   the selected owner/project/deployment match. R2 is already the only write path.
    Run `nforge maintenance r2-backfill ROOT --dry-run` for each project. This
    contacts Convex metadata but does not transfer bytes or mutate rows. Review
    row/byte totals and the estimate; the historical 22,800-row estimate above is

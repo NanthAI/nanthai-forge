@@ -514,7 +514,7 @@ Configuration is written to the ignored `.env.local`.
 - `FORGE_SECRET_KEYS`: the Secret Object keyring (see [operations](operations.md)).
 - `GITHUB_PUBLIC_TOKEN`: optional, for public GitHub API reads only.
 
-Imports store gzip JSON in Convex file storage with a 128 MiB artifact budget. Functions never execute target repository code. After setup, `npm run smoke:hosted -- https://github.com/sindresorhus/is-plain-obj` checks live anonymous import.
+Imports store gzip JSON in R2 (`r2blob:` references, see [data placement](data-placement.md)) with a 128 MiB artifact budget. Functions never execute target repository code. After setup, `npm run smoke:hosted -- https://github.com/sindresorhus/is-plain-obj` checks live anonymous import.
 
 ### Signed-out landing review
 

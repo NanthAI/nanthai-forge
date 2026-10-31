@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 import { presign } from './presign';
-import type { R2Config } from './r2';
+import { r2Endpoint, type R2Config } from './r2';
 import { invariant } from '../src/errors';
 
 export const projectPrefix = (id: string) => `v1/p/${id}/`;
 const endpoint = (config: R2Config, key = '') => ({
-  host: `${config.accountId}.r2.cloudflarestorage.com`,
+  ...r2Endpoint(config),
   path: `/${config.bucket}/${key}`,
   accessKeyId: config.accessKeyId,
   secretAccessKey: config.secretAccessKey,

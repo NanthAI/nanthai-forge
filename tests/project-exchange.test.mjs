@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os';
 import { getFunctionName } from 'convex/server';
 import { moduleUrl } from './convex-module.mjs';
 import { state } from './hosted-fixture.mjs';
+import { legacyObject } from './project-exchange-fixture.mjs';
 import { digest } from '../dist/hash.js';
 import { ConvexExchange } from '../dist/exchange-client.js';
 import { initNative } from '../dist/native-work.js';
@@ -26,6 +27,8 @@ const names = [
   'projectBackups',
   'projectWork',
   'projectWorkActions',
+  'projectObjectCommit',
+  'projectObjectDownloads',
 ];
 const modules = Object.fromEntries(
   await Promise.all(names.map(async name => [name, await import(moduleUrl(`../convex/${name}.ts`))])),
@@ -54,6 +57,11 @@ function fixture() {
       };
   return s;
 }
+async function putR2(s, row, bytes) {
+  const response = await fetch(row.target.url, { method: 'PUT', headers: row.target.headers, body: bytes });
+  assert(response.ok || response.status === 412);
+  await modules.projectObjectCommit.commitBatch._handler(s.ctx, { objects: [{ id: row.id }] });
+}
 function transport(s, previous = null) {
   return {
     missing: pins =>
@@ -67,9 +75,7 @@ function transport(s, previous = null) {
         digest: p.sha256,
         size: p.size,
       });
-      if (row.stored) return;
-      const id = await s.ctx.storage.store(new Blob([bytes], { type: row.contentType }));
-      await objects.complete._handler(s.ctx, { id: row.id, storageId: id });
+      if (!row.stored) await putR2(s, row, bytes);
     },
     publish: (p, _metadataOnly, ownerDerived) =>
       actions.publish._handler(s.ctx, {
@@ -83,6 +89,18 @@ function transport(s, previous = null) {
       }),
     manifest: backupId => actions.manifest._handler(s.ctx, { backupId }),
     download: async p => {
+      const first = await actions.downloadPart._handler(s.ctx, {
+        projectId: 'project',
+        digest: p.sha256,
+        offset: 0,
+      });
+      if (first.direct) {
+        const [signed] = await modules.projectObjectDownloads.signDownloads._handler(s.ctx, {
+          projectId: 'project',
+          digests: [p.sha256],
+        });
+        return Buffer.from(await (await fetch(signed.url)).arrayBuffer());
+      }
       const chunks = [];
       let offset = 0;
       do {
@@ -98,23 +116,20 @@ function transport(s, previous = null) {
     },
   };
 }
-test('project object storage reconciles unknown uploads, preserves project isolation and removes duplicate uploads', async () => {
+test('project object storage puts bytes in R2, deduplicates and preserves project isolation', async () => {
   const s = fixture(),
     bytes = Buffer.from('private source'),
     pin = { projectId: 'project', digest: digest(bytes), size: bytes.length };
   const row = await objects.prepare._handler(s.ctx, pin);
   assert.equal(row.created, true);
-  const id = await s.ctx.storage.store(new Blob([bytes], { type: row.contentType }));
-  assert.equal((await objects.reconcile._handler(s.ctx, { id: row.id, cursor: null })).stored, true);
+  assert.equal(row.target.kind, 'r2');
+  await putR2(s, row, bytes);
   const retry = await objects.prepare._handler(s.ctx, pin);
   assert.equal(retry.id, row.id);
   assert.equal(retry.stored, true);
-  const duplicate = await s.ctx.storage.store(new Blob([bytes], { type: row.contentType }));
-  await objects.complete._handler(s.ctx, { id: row.id, storageId: duplicate });
-  assert.ok(!s.files.has(duplicate));
-  assert.ok(s.files.has(id));
-  const wrong = await s.ctx.storage.store(new Blob([bytes]));
-  await assert.rejects(objects.complete._handler(s.ctx, { id: row.id, storageId: wrong }));
+  assert.equal(retry.target, undefined);
+  assert.equal(s.tables.projectObjects.get(row.id).location, 'r2');
+  assert.equal(s.files.size, 0);
   for (const actor of [undefined, 'stranger']) {
     s.caller(actor);
     await assert.rejects(
@@ -126,13 +141,12 @@ test('project object storage reconciles unknown uploads, preserves project isola
     await assert.rejects(
       actions.downloadPart._handler(s.ctx, { projectId: 'project', digest: pin.digest, offset: 0 }),
     );
-    await assert.rejects(objects.complete._handler(s.ctx, { id: row.id, storageId: id }));
   }
   s.caller('owner');
   s.tables.hostedProjects.set('other', { ...s.tables.hostedProjects.get('project'), _id: 'other' });
   const other = await objects.prepare._handler(s.ctx, { ...pin, projectId: 'other' });
   assert.notEqual(other.id, row.id);
-  await assert.rejects(objects.complete._handler(s.ctx, { id: other.id, storageId: id }));
+  assert.notEqual(other.target.url, row.target.url);
   assert.deepEqual(
     await objects.missing._handler(s.ctx, {
       projectId: 'other',
@@ -142,40 +156,37 @@ test('project object storage reconciles unknown uploads, preserves project isola
   );
 });
 
-test('explicit project deletion removes shared object bytes once, including unresolved uploads, preserves foreign objects and reconciles late uploads', async () => {
+test('explicit project deletion removes every object row, including unresolved uploads, and preserves foreign files', async () => {
   const s = fixture(),
     lifecycle = await import(moduleUrl('../convex/projectLifecycle.ts')),
     t = transport(s);
   const pin = { sha256: digest('retained'), size: 8 };
   await t.upload(pin, Buffer.from('retained'));
-  const unknown = await objects.prepare._handler(s.ctx, {
-    projectId: 'project',
-    digest: digest('unknown'),
-    size: 7,
-  });
-  const unknownId = await s.ctx.storage.store(new Blob(['unknown'], { type: unknown.contentType }));
+  await objects.prepare._handler(s.ctx, { projectId: 'project', digest: digest('unknown'), size: 7 });
   const foreignId = await s.ctx.storage.store(new Blob(['keep'], { type: 'application/x-foreign' }));
   await lifecycle.permanentlyDelete._handler(s.ctx, {
     projectId: 'project',
     operationId: randomUUID(),
     expectedRevision: 0,
   });
-  for (let n = 0; n < 20 && s.tables.hostedProjects.get('project').removal !== 'deleted'; n++)
+  for (let n = 0; n < 20 && s.tables.hostedProjects.get('project').removal !== 'deleted'; n++) {
     await lifecycle.purge._handler(s.ctx, { projectId: 'project' });
+    // The scheduled R2 prefix purge (tests/r2-maintenance.test.mjs) finishes before the tombstone.
+    const project = s.tables.hostedProjects.get('project');
+    if (project.r2Purge) project.r2PrefixPurged = true;
+  }
   assert.equal(s.tables.hostedProjects.get('project').removal, 'deleted');
-  assert.ok(!s.files.has(unknownId));
+  assert.ok(s.tables.hostedProjects.get('project').r2Purge, 'every deletion purges its R2 prefix');
   assert.ok(s.files.has(foreignId));
   assert.equal(
     [...s.tables.projectObjects.values()].every(row => row.removed && !row.storageId),
     true,
   );
-  const late = await s.ctx.storage.store(new Blob(['unknown'], { type: unknown.contentType }));
-  await objects.complete._handler(s.ctx, { id: unknown.id, storageId: late });
-  assert.ok(!s.files.has(late));
   await assert.rejects(
     objects.prepare._handler(s.ctx, { projectId: 'project', digest: pin.sha256, size: pin.size }),
   );
 });
+
 test('explicit native archive migration keeps backup IDs and old journals, verifies complete restore, and retires containers only after reference-safe switch', async t => {
   const { setup } = await import('./r2-harness.mjs');
   await setup(t);
@@ -301,82 +312,12 @@ test('explicit native archive migration keeps backup IDs and old journals, verif
     e => e.code === 'INVALID_WORK_BACKUP',
   );
 });
-test('batch transfer commits successful members and reconciles lost POST/finalize replies without resending stored bytes', async t => {
-  const { ConvexExchange } = await import('../dist/exchange-client.js'),
-    s = fixture(),
-    client = new ConvexExchange('https://example.convex.cloud', 'test-only', 'project', randomUUID(), null);
-  let losePost = true,
-    loseComplete = false,
-    posts = 0;
-  const calls = [],
-    nativeFetch = globalThis.fetch;
-  t.after(() => {
-    globalThis.fetch = nativeFetch;
-  });
-  client.client = {
-    query: async (ref, args) => objects[getFunctionName(ref).split(':')[1]]._handler(s.ctx, args),
-    mutation: async (ref, args) => {
-      const name = getFunctionName(ref).split(':')[1];
-      calls.push(name);
-      const result = await objects[name]._handler(s.ctx, args);
-      if (name === 'completeBatch' && loseComplete) {
-        loseComplete = false;
-        throw new Error('lost finalize');
-      }
-      return result;
-    },
-  };
-  globalThis.fetch = async (url, options) => {
-    assert.equal(url, 'https://fixture.invalid/upload');
-    posts++;
-    const id = await s.ctx.storage.store(new Blob([options.body], { type: options.headers['Content-Type'] }));
-    if (losePost) {
-      losePost = false;
-      throw new Error('lost post reply');
-    }
-    return Response.json({ storageId: id });
-  };
-  const content = ['one', 'two'].map(value => ({
-    pin: { sha256: digest(value), size: 3 },
-    bytes: Buffer.from(value),
-  }));
-  await assert.rejects(
-    client.uploadBatch(content),
-    error => error.code === 'EXCHANGE_REQUEST_FAILED' && /Convex object upload/.test(error.message),
-  );
-  assert.equal(posts, 2);
-  assert.equal([...s.tables.projectObjects.values()].filter(row => row.storageId).length, 1);
-  assert.deepEqual(calls, ['prepareBatch', 'completeBatch']);
-  assert.deepEqual(await client.uploadBatch(content), { uploadedObjects: 0, uploadedBytes: 0 });
-  assert.equal(posts, 2);
-  assert.equal([...s.tables.projectObjects.values()].filter(row => row.storageId).length, 2);
-  const later = ['three', 'four'].map(value => ({
-    pin: { sha256: digest(value), size: value.length },
-    bytes: Buffer.from(value),
-  }));
-  loseComplete = true;
-  await assert.rejects(client.uploadBatch(later), /lost finalize/);
-  assert.equal(posts, 4);
-  assert.deepEqual(await client.uploadBatch(later), { uploadedObjects: 0, uploadedBytes: 0 });
-  assert.equal(posts, 4);
-  s.caller('stranger');
-  await assert.rejects(
-    objects.prepareBatch._handler(s.ctx, {
-      projectId: 'project',
-      objects: [{ digest: digest('no'), size: 2 }],
-    }),
-  );
-  const own = [...s.tables.projectObjects.values()][0];
-  await assert.rejects(
-    objects.completeBatch._handler(s.ctx, { objects: [{ id: own._id, storageId: own.storageId }] }),
-  );
-});
-test('small-content batches verify all bytes and current access while larger content retains ranged downloads', async () => {
+test('small legacy Convex batches verify all bytes and current access while larger content retains ranged downloads', async () => {
   const s = fixture(),
-    tx = transport(s),
     contents = [Buffer.from('one'), Buffer.from('two')],
     pins = contents.map(bytes => ({ sha256: digest(bytes), size: bytes.length }));
-  for (let i = 0; i < pins.length; i++) await tx.upload(pins[i], contents[i]);
+  // Copies written before R2 was the only path stay readable from Convex until cleanup.
+  for (const bytes of contents) await legacyObject(s, bytes);
   const args = { projectId: 'project', digests: pins.map(pin => pin.sha256) };
   const result = await actions.downloadBatch._handler(s.ctx, args);
   assert.deepEqual(
@@ -442,29 +383,4 @@ test('retiring an already absent exclusive archive reconciles when the provider 
   assert.equal(await removeExclusive(s.ctx, id), true);
   s.tables.projectBackups.set('still-referenced', { _id: 'still-referenced', storageId: id });
   assert.equal(await removeExclusive(s.ctx, id), false);
-});
-
-test('legacy metadata cache reconciles lost store replies, deduplicates and remains subject to current read authority', async () => {
-  const s = fixture(),
-    cache = modules.projectExchangeCache,
-    bytes = Buffer.from('verified materialized bytes'),
-    input = { projectId: 'project', actor: 'owner', digest: digest(bytes), size: bytes.length };
-  const pending = await cache.prepare._handler(s.ctx, input),
-    storageId = await s.ctx.storage.store(new Blob([bytes], { type: pending.contentType }));
-  const retry = await cache.prepare._handler(s.ctx, input);
-  assert.equal(retry.id, pending.id);
-  assert.equal(retry.created, false);
-  const reconciled = await cache.reconcile._handler(s.ctx, { id: pending.id, actor: 'owner', cursor: null });
-  assert.equal(reconciled.stored, true);
-  const duplicate = await s.ctx.storage.store(new Blob([bytes], { type: pending.contentType }));
-  await cache.complete._handler(s.ctx, { id: pending.id, actor: 'owner', storageId: duplicate });
-  assert(s.files.has(storageId));
-  assert(!s.files.has(duplicate));
-  await assert.rejects(cache.prepare._handler(s.ctx, { ...input, actor: 'stranger' }));
-  await assert.rejects(cache.reconcile._handler(s.ctx, { id: pending.id, actor: 'stranger', cursor: null }));
-  s.tables.hostedProjects.get('project').removal = 'deleted';
-  s.tables.projectObjects.get(pending.id).removed = true;
-  const late = await s.ctx.storage.store(new Blob([bytes], { type: pending.contentType }));
-  await cache.complete._handler(s.ctx, { id: pending.id, actor: 'owner', storageId: late });
-  assert(!s.files.has(late));
 });

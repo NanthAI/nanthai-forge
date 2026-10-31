@@ -9,6 +9,7 @@ import { digest } from '../dist/hash.js';
 import { moduleUrl } from './convex-module.mjs';
 import { fixture, upload, modules } from './project-exchange-fixture.mjs';
 import { HOSTED_WORK_INDEX_FORMAT } from '../dist/work-hosted-summary.js';
+import { storedBytes } from './default-r2.mjs';
 const main = await import(moduleUrl('../convex/projectMain.ts'));
 function setup(t) {
   const dir = mkdtempSync(join(tmpdir(), 'hosted-main-'));
@@ -288,7 +289,11 @@ test('server-selected hosted A is materialized while uploaded native main remain
         digest: pin.sha256,
         offset: 0,
       });
-      writeFileSync(path, Buffer.from(part.data), { mode: 0o600 });
+      // R2 objects answer `direct`; the test bucket stands in for the signed download.
+      const row = [...s.tables.projectObjects.values()].find(
+        item => item.projectId === 'project' && item.digest === pin.sha256,
+      );
+      writeFileSync(path, part.direct ? await storedBytes(s, row) : Buffer.from(part.data), { mode: 0o600 });
     },
   };
   const result = await checkoutHostedMain(client.root, client.request(), transport);

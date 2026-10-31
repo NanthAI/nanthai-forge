@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { randomUUID, createHash } from 'node:crypto';
 import { moduleUrl } from './convex-module.mjs';
 import { state } from './hosted-fixture.mjs';
+import { settleR2Purge } from './default-r2.mjs';
 const lifecycle = await import(moduleUrl('../convex/projectLifecycle.ts'));
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 async function removedProject() {
@@ -38,8 +39,10 @@ async function removedProject() {
     operationId: randomUUID(),
     expectedRevision: 0,
   });
-  for (let i = 0; i < 20 && s.tables.hostedProjects.get('project').removal !== 'deleted'; i++)
+  for (let i = 0; i < 20 && s.tables.hostedProjects.get('project').removal !== 'deleted'; i++) {
+    settleR2Purge(s.tables.hostedProjects.get('project'));
     await lifecycle.purge._handler(s.ctx, { projectId: 'project' });
+  }
   assert.equal(s.tables.hostedProjects.get('project').removal, 'deleted');
   for (const table of ['projectCoordinationSessions', 'projectCoordinationEvents'])
     assert.deepEqual([...s.tables[table].keys()], ['foreign']);

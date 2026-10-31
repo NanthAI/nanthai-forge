@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { defaultR2Config, defaultR2Objects, storedBytes } from './default-r2.mjs';
 import { randomUUID, createHash } from 'node:crypto';
 import { getFunctionName } from 'convex/server';
 import { moduleUrl } from './convex-module.mjs';
@@ -139,7 +140,7 @@ test('retry-safe personal mirror publishes complete source/Work atomically and d
   const row = [...s.tables.projectObjects.values()].find(
     row => row.projectId === job.projectId && row.digest === digest(s.bytes),
   );
-  assert.deepEqual(Buffer.from(await s.files.get(row.storageId).blob.arrayBuffer()), s.bytes);
+  assert.deepEqual(await storedBytes(s, row), s.bytes);
   assert.equal(backup.preview.channels[0].name, 'main');
   const count = s.tables.projectBackups.size;
   await s.advance(id);
@@ -296,11 +297,15 @@ test('existing explicit project deletion removes import progress and preserves a
     b = s.tables.projectGithubImports.get(second);
   const shared = [...s.tables.projectObjects.values()].find(
     row => row.projectId === b.projectId && row.digest === digest(s.bytes),
-  ).storageId;
+  ).r2Key;
   const lifecycle = await import(moduleUrl('../convex/projectLifecycle.ts'));
   await s.ctx.db.patch(a.projectId, { removal: 'deleting' });
-  for (let i = 0; i < 100 && s.tables.hostedProjects.get(a.projectId).removal !== 'deleted'; i++)
+  for (let i = 0; i < 100 && s.tables.hostedProjects.get(a.projectId).removal !== 'deleted'; i++) {
+    const project = s.tables.hostedProjects.get(a.projectId);
+    // The scheduled R2 prefix purge is an action; its effect is the purged mark.
+    if (project.r2Purge && !project.r2PrefixPurged) project.r2PrefixPurged = true;
     await lifecycle.purge._handler(s.ctx, { projectId: a.projectId });
+  }
   assert.equal(s.tables.hostedProjects.get(a.projectId).removal, 'deleted');
   assert.equal(s.tables.projectGithubImports.has(first), false);
   assert.equal(
@@ -308,7 +313,7 @@ test('existing explicit project deletion removes import progress and preserves a
     false,
   );
   assert.equal(s.files.has(a.cursor), false);
-  assert.equal(s.files.has(shared), true);
+  assert.equal(defaultR2Objects.has(`${defaultR2Config.bucket}/${shared}`), true);
   assert.equal(s.tables.hostedProjects.get(b.projectId).currentBackup !== null, true);
 });
 
@@ -317,9 +322,8 @@ test('supported new import writes source and metadata to R2 and retries an inter
   const s = fixture(t),
     id = await s.start();
   const job = s.tables.projectGithubImports.get(id);
-  assert.equal(s.tables.hostedProjects.get(job.projectId).r2Writes, true);
-  s.ctx.storage.store = () => assert.fail('opted-in import must not store Convex bytes');
-  s.ctx.storage.generateUploadUrl = () => assert.fail('opted-in import must not generate Convex upload URLs');
+  s.ctx.storage.store = () => assert.fail('imports never store Convex bytes');
+  s.ctx.storage.generateUploadUrl = () => assert.fail('imports never generate Convex upload URLs');
   await s.advance(id);
   assert.equal(JSON.parse(s.tables.projectGithubImports.get(id).cursor).schema, 2);
   const run = s.ctx.runMutation;
@@ -426,7 +430,7 @@ test('hosted import retains both gitlinks and gitmodules and reports pointer cov
   const row = [...s.tables.projectObjects.values()].find(
     row => row.projectId === job.projectId && row.digest === backup.preview.head,
   );
-  const state = JSON.parse(await s.files.get(row.storageId).blob.text());
+  const state = JSON.parse((await storedBytes(s, row)).toString());
   assert.deepEqual(
     state.files.filter(f => f.mode === 'gitlink').map(f => f.path),
     ['vendor-a', 'vendor-b'],

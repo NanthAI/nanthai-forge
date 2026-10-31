@@ -108,7 +108,11 @@ test('owner bills are idempotent, owner-only, paged in one call, and give per-pe
   const writes = f.meter.writes,
     calls = f.meter.calls;
   const { records } = await readHostedMetricPages(f.query, period);
-  assert.equal(f.meter.calls - calls, 9, 'eight metric streams plus one bill page');
+  assert.equal(
+    f.meter.calls - calls,
+    10,
+    'eight metric streams, one bill page and one bytes-by-location page',
+  );
   assert.equal(f.meter.writes, writes, 'reading metrics writes nothing');
   const result = metricsSurface(records, period);
   const periods = result.totals['5.8'].periods;

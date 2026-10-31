@@ -114,9 +114,8 @@ bounds with one retry; range-less archive responses still discard their prefix a
 cancel the unused suffix.
 
 R2 signed GETs are checked for every uncached object, even with new R2 writes disabled. Signing
-returns no URL for Convex-stored objects, which retain their existing download fallback. Previously
-committed R2 rows remain readable with `FORGE_BLOBS` unset; the write flag and project
-opt-in do not change their storage location.
+returns no URL for Convex-stored objects, which retain their existing download fallback. Every new
+object is written to R2; there is no write flag or project opt-in.
 
 Journal export pages hosted events and streams checkpoint byte reconstruction. Schema-1
 Work reconstruction reads four byte chunks at a time; record checkpoints keep their

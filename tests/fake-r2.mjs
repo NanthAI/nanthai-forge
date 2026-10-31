@@ -20,8 +20,10 @@ const b64 = bytes => createHash('sha256').update(bytes).digest('base64');
 const networkFetch = globalThis.fetch;
 const mustSign = ['content-length', 'if-none-match', 'x-amz-checksum-sha256'];
 
-export async function startFakeR2(config = fakeR2Config) {
-  const host = `${config.accountId}.r2.cloudflarestorage.com`;
+/** `local: true` serves at its own loopback origin (`fake.endpoint`, for R2_ENDPOINT) instead
+ * of standing in for the account host through `install()`. */
+export async function startFakeR2(config = fakeR2Config, { local = false } = {}) {
+  let host = `${config.accountId}.r2.cloudflarestorage.com`;
   const objects = new Map(); // "bucket/key" -> Buffer
   const fake = {
     host,
@@ -196,5 +198,9 @@ export async function startFakeR2(config = fakeR2Config) {
     }
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  if (local) {
+    host = fake.host = `127.0.0.1:${server.address().port}`;
+    fake.endpoint = `http://${host}`;
+  }
   return fake;
 }

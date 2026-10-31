@@ -19,6 +19,7 @@ export async function backfillInventory(transport: BackfillTransport) {
   let count = 0,
     bytes = 0,
     enabled = true;
+  const deletable = { count: 0, bytes: 0 };
   let revision: number | undefined,
     changed = false;
   for (const kind of backfillKinds) {
@@ -30,11 +31,13 @@ export async function backfillInventory(transport: BackfillTransport) {
       count += page.page.length;
       bytes += page.page.reduce((sum, pin) => sum + pin.size, 0);
       enabled &&= page.r2Writes;
+      deletable.count += page.retained?.count ?? 0;
+      deletable.bytes += page.retained?.bytes ?? 0;
       if (page.isDone) break;
       cursor = page.cursor;
     }
   }
-  return { ...backfillEstimate(count, bytes), enabled, revision: revision ?? 0, changed };
+  return { ...backfillEstimate(count, bytes), enabled, revision: revision ?? 0, changed, deletable };
 }
 export async function runR2Backfill(
   transport: BackfillTransport,
@@ -54,9 +57,16 @@ export async function runR2Backfill(
   log(
     `Estimate: ${inventory.count} rows, ${inventory.bytes} bytes; Convex ${inventory.egressGB.toFixed(3)} GB × $0.132 = $${inventory.convexUSD.toFixed(4)}; R2 Class A ≈ $${inventory.r2ClassAUSD.toFixed(4)}; total ≈ $${inventory.totalUSD.toFixed(4)} (one planned PUT/row, before free tiers; retries, HEAD/GET and storage excluded).`,
   );
+  log(
+    `Convex copies already in R2 (deletable by the separate cleanup): ${inventory.deletable.count} rows, ${inventory.deletable.bytes} bytes. Rows still only in Convex storage: ${inventory.count}, ${inventory.bytes} bytes.`,
+  );
   if (options.dryRun) return inventory;
   if (!options.verify)
-    invariant(inventory.enabled, 'R2_NOT_ENABLED', 'Enable project R2 writes before backfill.');
+    invariant(
+      inventory.enabled,
+      'R2_NOT_ENABLED',
+      'This deployment stores bytes natively; configure R2 before backfill.',
+    );
   const statePath = resolve(options.statePath),
     mode = options.verify ? 'verify' : 'run';
   let state: BackfillState;

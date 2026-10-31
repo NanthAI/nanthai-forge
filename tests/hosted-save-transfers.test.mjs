@@ -50,7 +50,7 @@ async function fixture(t) {
     result: { status: 'heartbeat', sequence: 1 },
   };
   const env = {
-      FORGE_BLOBS: 'r2',
+      CONVEX_CLOUD_URL: 'https://example.convex.cloud',
       R2_ACCOUNT_ID: 'h07-fixture',
       R2_BUCKET: 'synthetic',
       R2_ACCESS_KEY_ID: 'synthetic-id',

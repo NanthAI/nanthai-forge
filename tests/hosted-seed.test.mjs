@@ -15,6 +15,7 @@ import { prepareHostedSeed, seedHostedProject } from '../dist/hosted-seed.js';
 import { SEED_EMPTY } from '../dist/hosted-seed-protocol.js';
 import { digest } from '../dist/hash.js';
 import { readRecoveryInventory } from '../dist/recovery-inventory.js';
+import { storedBytes } from './default-r2.mjs';
 for (const name of ['projectHostedSeed', 'projectHostedSeedActions'])
   modules[name] = await import(moduleUrl(`../convex/${name}.ts`));
 function setup(t, count = 220) {
@@ -107,7 +108,7 @@ test('native main and complete record bytes seed through bounded pages without a
   const workRow = [...f.s.tables.projectObjects.values()].find(
     row => row.digest === prepared.request.work.sha256,
   );
-  assert.deepEqual(Buffer.from(await (await f.s.ctx.storage.get(workRow.storageId)).arrayBuffer()), before);
+  assert.deepEqual(await storedBytes(f.s, workRow), before);
   assert.equal(Buffer.from(retained.files[0].bytes, 'base64').toString(), recovery);
   assert.equal(digest(before), prepared.request.work.sha256);
   const count = f.uploaded.length,

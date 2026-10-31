@@ -4,7 +4,9 @@ import assert from 'node:assert/strict';
 import { getFunctionName } from 'convex/server';
 import { moduleUrl } from './convex-module.mjs';
 import { checkArgs } from './convex-args.mjs';
-import { fixture, upload } from './project-exchange-fixture.mjs';
+// These checks hook Convex storage reads (memo, metadata, tampering), which still serve legacy
+// rows; R2 reads are covered by tests/r2-read-path.test.mjs.
+import { fixture, legacyObject as upload } from './project-exchange-fixture.mjs';
 import { HOSTED_WORK_INDEX_FORMAT } from '../dist/work-hosted-summary.js';
 const store = await import(moduleUrl('../convex/projectViewDiffstatStore.ts'));
 const { compute } = await import(moduleUrl('../convex/projectViewDiffstats.ts'));

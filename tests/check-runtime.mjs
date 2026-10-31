@@ -2,6 +2,7 @@
 import { appendFileSync, lstatSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { installDefaultR2 } from './default-r2.mjs';
 // A killed test process (timeout, CI cancel) never runs its exit handler. Each run first removes the
 // private directories of earlier runs: our own prefixes, older than two hours (a live run is younger).
 const ownPrefixes = ['forge-test-'];
@@ -30,6 +31,8 @@ const home = mkdtempSync(join(tmpdir(), 'forge-test-home-'));
 process.env.HOME = home;
 process.env.USERPROFILE = home;
 process.env.FORGE_TEST_MODE = '1';
+// Bytes always go to R2 (there is no Convex byte mode): every test process gets an in-memory bucket.
+installDefaultR2();
 const cleanup = () => {
   rmSync(directory, { recursive: true, force: true });
   rmSync(config, { recursive: true, force: true });

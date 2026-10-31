@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
 import { query } from './cliServer';
+import type { QueryCtx } from './_generated/server';
+import type { Id } from './_generated/dataModel';
 import { accessibleProject } from './projectAuthority';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import type { HostedAcceptance } from '../src/hosted-acceptance';
@@ -20,6 +22,26 @@ const tables = {
   operations: 'projectHostedOperations',
   attempts: 'projectHostedLandingAttempts',
 } as const;
+/** Project metrics are readable by the owner and agent-guidance maintainers. */
+export async function metricsReader(ctx: QueryCtx, projectId: Id<'hostedProjects'>) {
+  const user = await ctx.auth.getUserIdentity();
+  invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to read project metrics.');
+  const project = await accessibleProject(ctx, projectId, user.subject);
+  if (project.owner !== user.subject) {
+    const member = await ctx.db
+      .query('projectContributors')
+      .withIndex('by_project_and_contributor', q =>
+        q.eq('projectId', projectId).eq('contributor', user.subject),
+      )
+      .unique();
+    invariant(
+      member?.agentGuidanceMaintainer === true,
+      'PROJECT_UNAVAILABLE',
+      'Project metrics require owner or maintainer access.',
+    );
+  }
+  return project;
+}
 /** Compact, demand-driven pages. A finite context horizon is explicit in coverage.
  * Nothing in this query wakes execution or materializes metric records. */
 export const page = query({
@@ -43,22 +65,7 @@ export const page = query({
   returns: v.string(),
   handler: async (ctx, input) => {
     try {
-      const user = await ctx.auth.getUserIdentity();
-      invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to read project metrics.');
-      const project = await accessibleProject(ctx, input.projectId, user.subject);
-      if (project.owner !== user.subject) {
-        const member = await ctx.db
-          .query('projectContributors')
-          .withIndex('by_project_and_contributor', q =>
-            q.eq('projectId', input.projectId).eq('contributor', user.subject),
-          )
-          .unique();
-        invariant(
-          member?.agentGuidanceMaintainer === true,
-          'PROJECT_UNAVAILABLE',
-          'Project metrics require owner or maintainer access.',
-        );
-      }
+      const project = await metricsReader(ctx, input.projectId);
       const from = Date.parse(input.from),
         to = Date.parse(input.to);
       invariant(

@@ -5,7 +5,15 @@ import { exchangeFetch } from '../src/exchange-request';
 import { ForgeError } from '../src/errors';
 import { presign } from './presign';
 
-export type R2Config = { accountId: string; bucket: string; accessKeyId: string; secretAccessKey: string };
+export type R2Endpoint = { scheme: 'https' | 'http'; host: string };
+export type R2Config = {
+  accountId: string;
+  bucket: string;
+  accessKeyId: string;
+  secretAccessKey: string;
+  /** Operator override (R2_ENDPOINT) for an S3-compatible store, e.g. a self-hosted bucket. */
+  endpoint?: R2Endpoint;
+};
 export type R2PutTarget = { kind: 'r2'; url: string; headers: Record<string, string> };
 /** Upload URLs live 15 minutes. */
 export const putExpiry = 900;
@@ -13,8 +21,8 @@ const headExpiry = 60;
 /** Download URLs live 5 minutes; revocation reaches new URLs at once and issued ones within this window. */
 export const getExpiry = 300;
 
-export const r2Enabled = () => process.env.FORGE_BLOBS === 'r2';
-/** Fails closed: a missing setting is a typed error, never a silent fallback. */
+/** Bytes go to R2 on every deployment, self-host included, for every project; there is no
+ * opt-in, flag or Convex byte mode. Fails closed: a missing setting is a typed error. */
 export function r2Config(): R2Config {
   const env = process.env,
     accountId = env.R2_ACCOUNT_ID,
@@ -24,14 +32,40 @@ export function r2Config(): R2Config {
   if (!accountId || !bucket || !accessKeyId || !secretAccessKey)
     throw new ForgeError(
       'R2_NOT_CONFIGURED',
-      'Object storage is enabled but R2_ACCOUNT_ID, R2_BUCKET, R2_ACCESS_KEY_ID or R2_SECRET_ACCESS_KEY is missing on the backend.',
+      'Object storage needs R2_ACCOUNT_ID, R2_BUCKET, R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY on the backend; Forge never falls back to Convex file storage.',
     );
-  return { accountId, bucket, accessKeyId, secretAccessKey };
+  const endpoint = endpointOf(env.R2_ENDPOINT);
+  return { accountId, bucket, accessKeyId, secretAccessKey, ...(endpoint ? { endpoint } : {}) };
 }
+/** An https origin, or http on loopback only; never a path, query or credentials. */
+function endpointOf(value: string | undefined): R2Endpoint | undefined {
+  if (!value) return undefined;
+  let url: URL | null = null;
+  try {
+    url = new URL(value);
+  } catch {}
+  const loopback = !!url && /^(?:127\.0\.0\.1|localhost|\[::1\])$/.test(url.hostname);
+  if (
+    !url ||
+    !(url.protocol === 'https:' || (url.protocol === 'http:' && loopback)) ||
+    url.pathname !== '/' ||
+    url.search ||
+    url.hash ||
+    url.username ||
+    url.password
+  )
+    throw new ForgeError(
+      'R2_NOT_CONFIGURED',
+      'R2_ENDPOINT must be an https origin, or an http origin on loopback.',
+    );
+  return { scheme: url.protocol === 'http:' ? 'http' : 'https', host: url.host };
+}
+/** R2's account host by default. Path-style: virtual-host style fails the TLS handshake. */
+export const r2Endpoint = (config: R2Config): R2Endpoint =>
+  config.endpoint ?? { scheme: 'https', host: `${config.accountId}.r2.cloudflarestorage.com` };
 export const r2Key = (projectId: string, digest: string) => `v1/p/${projectId}/o/${digest}`;
-// Path-style on the account host: virtual-host style fails the TLS handshake.
 const target = (config: R2Config, key: string) => ({
-  host: `${config.accountId}.r2.cloudflarestorage.com`,
+  ...r2Endpoint(config),
   path: `/${config.bucket}/${key}`,
 });
 const base64 = (hex: string) =>

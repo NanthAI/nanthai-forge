@@ -6,6 +6,21 @@ import { createHash } from 'node:crypto';
 import { getFunctionName } from 'convex/server';
 import { streamGithubSourceBlob, githubBlobEndpointBytes } from '../dist/github-project-source.js';
 import { ObjectRecipeBuilder } from '../dist/object-chunks.js';
+import { defaultR2Config } from './default-r2.mjs';
+// Import bytes go to R2. This process keeps only each PUT's digest and size, not the bytes.
+Object.assign(process.env, {
+  R2_ACCOUNT_ID: defaultR2Config.accountId,
+  R2_BUCKET: defaultR2Config.bucket,
+  R2_ACCESS_KEY_ID: defaultR2Config.accessKeyId,
+  R2_SECRET_ACCESS_KEY: defaultR2Config.secretAccessKey,
+});
+globalThis.fetch = async (url, init) => {
+  assert.equal(init.method, 'PUT');
+  const bytes = Buffer.from(await new Response(init.body).arrayBuffer()),
+    key = decodeURIComponent(new URL(url).pathname).split('/').at(-1);
+  stored.set(key, { digest: createHash('sha256').update(bytes).digest('hex'), size: bytes.length });
+  return new Response(null, { status: 200 });
+};
 const { ImportUpload } = await import(process.argv[2]);
 const objects = new Map(),
   stored = new Map();
@@ -18,33 +33,24 @@ const ctx = {
       return args.objects.map(pin => {
         if (!objects.has(pin.digest)) objects.set(pin.digest, { ...pin, id: pin.digest });
         const row = objects.get(pin.digest);
-        return {
-          id: row.id,
-          stored: !!row.storageId || !!row.recipe,
-          contentType: `application/x-fixture-${row.id}`,
-        };
+        return { id: row.id, stored: !!row.key || !!row.recipe, key: row.id };
       });
     assert.equal(name, 'projectGithubImportBatch:complete');
     for (const object of args.objects) {
       const row = objects.get(object.id),
-        bytes = stored.get(object.storageId);
+        bytes = stored.get(object.key);
       assert.equal(bytes.digest, row.digest);
       assert.equal(bytes.size, row.size);
-      row.storageId = object.storageId;
+      row.key = object.key;
     }
     for (const pin of args.recipes) {
-      assert.ok(objects.get(pin.recipeDigest).storageId);
+      assert.ok(objects.get(pin.recipeDigest).key);
       if (!objects.has(pin.digest)) objects.set(pin.digest, { ...pin, recipe: pin.recipeDigest });
     }
     return null;
   },
   storage: {
-    store: async blob => {
-      const bytes = Buffer.from(await blob.arrayBuffer()),
-        id = `external-${stored.size}`;
-      stored.set(id, { digest: createHash('sha256').update(bytes).digest('hex'), size: bytes.length });
-      return id;
-    },
+    store: () => assert.fail('import bytes never go to Convex storage'),
   },
 };
 const size = githubBlobEndpointBytes,
@@ -92,7 +98,7 @@ upload.recipe(pin, builder.finish({ sha256: pin.blob, size }).bytes);
 await upload.drain(true);
 await upload.commit();
 assert.ok(objects.get(expected).recipe);
-assert.equal(objects.get(expected).storageId, undefined);
+assert.equal(objects.get(expected).key, undefined);
 console.log(
   JSON.stringify({
     logicalBytes: size,

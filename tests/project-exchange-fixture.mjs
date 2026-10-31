@@ -7,6 +7,7 @@ import { getFunctionName } from 'convex/server';
 import { moduleUrl } from './convex-module.mjs';
 import { state } from './hosted-fixture.mjs';
 import { digest } from '../dist/hash.js';
+import { defaultR2Config, defaultR2Objects } from './default-r2.mjs';
 import { initNative } from '../dist/native-work.js';
 import { WorkStore } from '../dist/work-store.js';
 
@@ -80,10 +81,49 @@ export async function upload(s, bytes, projectId = 'project') {
     size: pin.size,
   });
   if (!prepared.stored) {
-    const storageId = await s.ctx.storage.store(new Blob([bytes], { type: prepared.contentType }));
-    await modules.projectObjects.complete._handler(s.ctx, { id: prepared.id, storageId });
+    // Bytes go to R2 (the test process's default bucket or a test's fake), then commit after HEAD.
+    const response = await fetch(prepared.target.url, {
+      method: 'PUT',
+      headers: prepared.target.headers,
+      body: bytes,
+    });
+    if (!response.ok && response.status !== 412) throw Error(`R2 upload failed: ${response.status}`);
+    await modules.projectObjectCommit.commitBatch._handler(s.ctx, { objects: [{ id: prepared.id }] });
   }
   return pin;
+}
+/** A project object written before R2 was the only byte path: its bytes live in Convex file
+ * storage until the cleanup (Issue 40dad5e0) moves them. Nothing new is written this way. */
+export async function legacyObject(s, bytes, projectId = 'project') {
+  const pin = { sha256: digest(bytes), size: bytes.length },
+    nonce = randomUUID(),
+    storageId = await s.ctx.storage.store(new Blob([bytes], { type: `application/x-forge-object-${nonce}` }));
+  const found = [...s.tables.projectObjects.values()].find(
+    row => row.projectId === projectId && row.digest === pin.sha256,
+  );
+  if (found)
+    Object.assign(found, { storageId, location: undefined, r2Key: undefined, r2Committed: undefined });
+  else {
+    const id = `legacy-${pin.sha256.slice(0, 12)}-${projectId}`;
+    s.tables.projectObjects.set(id, {
+      _id: id,
+      _creationTime: Date.now(),
+      projectId,
+      digest: pin.sha256,
+      size: pin.size,
+      nonce,
+      removed: false,
+      storageId,
+    });
+  }
+  return pin;
+}
+/** Moves every R2 object row to a legacy Convex copy of the same bytes, for read checks that hook
+ * Convex storage (they still guard legacy rows until the cleanup, Issue 40dad5e0). */
+export async function asLegacyRows(s) {
+  for (const row of [...s.tables.projectObjects.values()])
+    if (row.location === 'r2' && row.r2Key)
+      await legacyObject(s, defaultR2Objects.get(`${defaultR2Config.bucket}/${row.r2Key}`), row.projectId);
 }
 export async function checkpoint(t, s, additionalObjects = 0) {
   const dir = mkdtempSync(join(tmpdir(), 'forge-publication-')),

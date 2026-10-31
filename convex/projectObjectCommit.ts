@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
-import { action, mutation, internalQuery, internalMutation } from './cliServer';
+import { action, internalQuery, internalMutation } from './cliServer';
 import { internal } from './_generated/api';
-import { activeProject, activeOwnedProject } from './projectAuthority';
+import { activeProject } from './projectAuthority';
 import { r2Config, headObject, checksumOf, type HeadResult } from './r2';
 import { invariant } from '../src/errors';
 import { report } from './errors';
@@ -115,31 +115,5 @@ export const commitBatch = action({
     } catch (error) {
       return report(error);
     }
-  },
-});
-
-/** Owner-only per-project opt-in for new objects in R2 (also needs FORGE_BLOBS=r2). */
-export const setR2Writes = mutation({
-  args: { projectId: v.id('hostedProjects'), enabled: v.boolean() },
-  returns: v.null(),
-  handler: async (ctx, { projectId, enabled }) => {
-    try {
-      const user = await ctx.auth.getUserIdentity();
-      invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to change project settings.');
-      const project = await activeOwnedProject(ctx, projectId, user.subject);
-      if ((project.r2Writes ?? false) !== enabled) await ctx.db.patch(projectId, { r2Writes: enabled });
-      return null;
-    } catch (error) {
-      return report(error);
-    }
-  },
-});
-/** Deployment-admin switch for smoke tests: `npx convex run projectObjectCommit:setR2WritesAdmin`. */
-export const setR2WritesAdmin = internalMutation({
-  args: { projectId: v.id('hostedProjects'), enabled: v.boolean() },
-  returns: v.null(),
-  handler: async (ctx, { projectId, enabled }) => {
-    await ctx.db.patch(projectId, { r2Writes: enabled });
-    return null;
   },
 });

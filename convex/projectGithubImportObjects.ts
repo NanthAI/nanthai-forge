@@ -4,7 +4,6 @@ import { blobStore } from './blobStore';
 import { internalMutation, internalQuery } from './_generated/server';
 import { activeOwnedProject } from './projectAuthority';
 import { storageDigest } from './projectStorage';
-import { r2Enabled } from './r2';
 import { isStored } from './projectObjectFields';
 import { invariant } from '../src/errors';
 const pin = { projectId: v.id('hostedProjects'), actor: v.string(), digest: v.string(), size: v.number() };
@@ -27,26 +26,8 @@ export const reuse = internalMutation({
       );
       if (isStored(bound)) return true;
     }
-    if (r2Enabled()) return false;
-    const shared = await ctx.db
-      .query('projectObjects')
-      .withIndex('by_digest_and_removed', q => q.eq('digest', input.digest).eq('removed', false))
-      .take(20);
-    const row = shared.find(row => row.size === input.size && row.storageId);
-    if (!row) return false;
-    const stored = await ctx.db.system.get(row.storageId!);
-    if (!stored || stored.size !== input.size || storageDigest(stored.sha256) !== input.digest) return false;
-    if (bound) await ctx.db.patch(bound._id, { storageId: row.storageId });
-    else
-      await ctx.db.insert('projectObjects', {
-        projectId: input.projectId,
-        digest: input.digest,
-        size: input.size,
-        nonce: crypto.randomUUID(),
-        removed: false,
-        storageId: row.storageId!,
-      });
-    return true;
+    // New bytes always upload to R2; only an already stored binding is reused.
+    return false;
   },
 });
 export const bind = internalMutation({
@@ -128,14 +109,5 @@ export const reserve = internalMutation({
       removed: false,
     });
     return nonce;
-  },
-});
-
-export const placement = internalQuery({
-  args: { projectId: v.id('hostedProjects'), actor: v.string() },
-  returns: v.boolean(),
-  handler: async (ctx, { projectId, actor }) => {
-    await activeOwnedProject(ctx, projectId, actor);
-    return r2Enabled();
   },
 });

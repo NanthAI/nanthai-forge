@@ -100,6 +100,7 @@ export function metricsHeadline(t: MetricTotals) {
     partial: Object.values(t).some(m => m.partial),
     gaps: [...new Set(Object.values(t).flatMap(m => m.gaps))],
     diskWarning: t.disk.warning,
+    placementWarning: t.placement.warning,
   };
 }
 export type MetricsHeadline = ReturnType<typeof metricsHeadline>;
@@ -112,5 +113,6 @@ export function formatMetricsHeadline(value: MetricsHeadline) {
       .map(([source, min]) => `${source} ${number(min)} min`)
       .join(', ')}`,
     ...(value.diskWarning ? [value.diskWarning] : []),
+    ...(value.placementWarning ? [value.placementWarning] : []),
   ];
 }

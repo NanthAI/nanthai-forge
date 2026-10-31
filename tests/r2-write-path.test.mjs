@@ -6,7 +6,7 @@ import { fakeR2Config } from './fake-r2.mjs';
 import { digest } from '../dist/hash.js';
 import { putR2 } from '../dist/exchange-blobs.js';
 
-import { setup, client, pinOf } from './r2-harness.mjs';
+import { setup, client, pinOf, pendingConvexRow } from './r2-harness.mjs';
 const objects = modules.projectObjects,
   commit = modules.projectObjectCommit;
 const content = values =>
@@ -15,16 +15,13 @@ const prepare = (s, values) =>
   objects.prepareBatch._handler(s.ctx, { projectId: 'project', objects: values.map(pinOf) });
 const rows = s => [...s.tables.projectObjects.values()];
 
-test('with deployment R2 mode off, prepareBatch retains the Convex path', async t => {
-  for (const options of [{ flag: '' }, { flag: 'other' }]) {
-    const { s } = await setup(t, options),
-      [row] = await prepare(s, ['plain']);
-    assert.equal(row.uploadUrl, 'https://fixture.invalid/upload');
-    assert.equal(row.target, undefined);
-    const stored = rows(s)[0];
-    assert.equal(stored.location, undefined);
-    assert.equal(stored.r2Key, undefined);
-  }
+test('a new project with no opt-in writes R2', async t => {
+  const { s } = await setup(t, { optIn: false }),
+    [row] = await prepare(s, ['plain']);
+  assert.equal(s.tables.hostedProjects.get('project').r2Writes, undefined);
+  assert.equal(row.uploadUrl, undefined);
+  assert.equal(row.target.kind, 'r2');
+  assert.equal(rows(s)[0].location, 'r2');
 });
 
 test('deployment R2 mode returns a presigned create-only PUT and pending R2 row', async t => {
@@ -55,31 +52,25 @@ test('deployment R2 mode returns a presigned create-only PUT and pending R2 row'
   ]);
 });
 
-test('missing configuration with the flag on fails closed with a typed error and inserts nothing', async t => {
+test('missing R2 configuration on a cloud deployment fails closed with a typed error and inserts nothing', async t => {
   const { s } = await setup(t, { credentials: false });
   await assert.rejects(prepare(s, ['x']), e => e.data?.code === 'R2_NOT_CONFIGURED');
   assert.equal(rows(s).length, 0);
 });
 
-test('single-object prepare uses deployment R2 mode and the same fallback as batches', async t => {
-  for (const options of [{}, { flag: '' }, { optIn: false }, { flag: 'other' }])
+test('single-object prepare writes R2 like batches', async t => {
+  for (const options of [{}, { optIn: false }])
     await t.test(JSON.stringify(options), async t => {
-      const { s } = await setup(t, options),
-        pin = pinOf('single object'),
+      const { s } = await setup(t, options);
+      const pin = pinOf('single object'),
         prepared = await objects.prepare._handler(s.ctx, { projectId: 'project', ...pin }),
         [batch] = await prepare(s, ['single object']);
       assert.equal(prepared.id, batch.id);
       assert.equal(prepared.stored, false);
-      assert.equal(prepared.uploadUrl, batch.uploadUrl);
-      assert.deepEqual(prepared.target?.headers, batch.target?.headers);
-      if (options.flag === undefined) {
-        assert.equal(prepared.target.kind, 'r2');
-        assert.equal(rows(s)[0].location, 'r2');
-        assert.equal(prepared.uploadUrl, undefined);
-      } else {
-        assert.equal(prepared.target, undefined);
-        assert.equal(prepared.uploadUrl, 'https://fixture.invalid/upload');
-      }
+      assert.deepEqual(prepared.target.headers, batch.target.headers);
+      assert.equal(prepared.target.kind, 'r2');
+      assert.equal(rows(s)[0].location, 'r2');
+      assert.equal(prepared.uploadUrl, undefined);
     });
 });
 
@@ -135,10 +126,8 @@ test('CLI uploads go straight to R2, commit after a HEAD check, and dedupe after
 });
 
 test('a pending Convex reservation switches new upload targets to deployment R2 mode', async t => {
-  const { s, fake } = await setup(t, { flag: '' }),
-    [first] = await prepare(s, ['old-a']);
-  assert.ok(first.uploadUrl);
-  process.env.FORGE_BLOBS = 'r2';
+  const { s, fake } = await setup(t);
+  pendingConvexRow(s, 'old-a');
   const [again] = await prepare(s, ['old-a']);
   assert.equal(again.target.kind, 'r2');
   assert.equal(again.uploadUrl, undefined);
@@ -233,26 +222,16 @@ test('commitBatch needs current project access and an r2 row', async t => {
   await assert.rejects(commit.commitBatch._handler(s.ctx, { objects: [{ id: row.id }] }));
   assert.equal(rows(s)[0].r2Committed, undefined);
   s.caller('owner');
-  s.tables.hostedProjects.get('project').r2Writes = false;
-  process.env.FORGE_BLOBS = 'convex';
-  const convexRow = (await objects.prepare._handler(s.ctx, { projectId: 'project', ...pinOf('legacy') })).id;
+  const convexRow = pendingConvexRow(s, 'legacy');
   await assert.rejects(
     commit.commitBatch._handler(s.ctx, { objects: [{ id: convexRow }] }),
     e => e.data?.code === 'BAD_ARGUMENT',
   );
 });
 
-test('only the owner can change the project opt-in', async t => {
-  const { s } = await setup(t, { optIn: false }),
-    project = () => s.tables.hostedProjects.get('project');
-  s.caller('stranger');
-  await assert.rejects(commit.setR2Writes._handler(s.ctx, { projectId: 'project', enabled: true }));
-  assert.equal(project().r2Writes, undefined);
-  s.caller('owner');
-  await commit.setR2Writes._handler(s.ctx, { projectId: 'project', enabled: true });
-  assert.equal(project().r2Writes, true);
-  await commit.setR2Writes._handler(s.ctx, { projectId: 'project', enabled: false });
-  assert.equal(project().r2Writes, false);
+test('the per-project R2 opt-in no longer exists', () => {
+  assert.equal(commit.setR2Writes, undefined);
+  assert.equal(commit.setR2WritesAdmin, undefined);
 });
 
 test('deployment R2 mode keeps new and pending objects in R2 without the legacy opt-in', async t => {

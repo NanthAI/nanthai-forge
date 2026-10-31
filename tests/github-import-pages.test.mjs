@@ -5,6 +5,7 @@ import { pagedFixture } from './github-import-pages-fixture.mjs';
 import { readObjectRecipe } from '../dist/object-chunks.js';
 import { filePage, importPageBytes, importPathKey } from '../dist/github-import-pages.js';
 import { digest } from '../dist/hash.js';
+import { storedBytes } from './default-r2.mjs';
 const sha = bytes => createHash('sha1').update(`blob ${bytes.length}\0`).update(bytes).digest('hex');
 const hex = n => n.toString(16).padStart(40, '0');
 
@@ -47,7 +48,8 @@ test('28,905 files / 4,089 directories / two gitlinks use bounded pages within t
     globalThis.fetch = old;
   });
   let blobRequests = 0;
-  globalThis.fetch = async url => {
+  globalThis.fetch = async (url, init) => {
+    if (new URL(url).hostname.endsWith('.r2.cloudflarestorage.com')) return old(url, init);
     const path = new URL(url).pathname;
     if (path === '/repos/fixture/scale')
       return Response.json({
@@ -113,7 +115,7 @@ test('28,905 files / 4,089 directories / two gitlinks use bounded pages within t
     const row = [...s.tables.projectObjects.values()].find(
       row => row.projectId === project._id && row.digest === pin.sha256,
     );
-    return Buffer.from(await s.files.get(row.storageId).blob.arrayBuffer());
+    return storedBytes(s, row);
   };
   const logical = async hash => {
     const row = [...s.tables.projectObjects.values()].find(

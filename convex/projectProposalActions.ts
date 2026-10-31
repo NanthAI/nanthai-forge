@@ -32,10 +32,6 @@ async function checkedComplete(
   if (proposal.status === 'stored')
     return await ctx.runMutation(internal.projectProposals.complete, { id, actor, storageId });
   await ctx.runQuery(internal.projectProposals.validateUpload, { id, actor, storageId });
-  const r2: boolean = await ctx.runQuery(internal.projectExchangeCache.placement, {
-    projectId: proposal.projectId,
-    actor,
-  });
   const bytes = await projectArchiveMetadata(
     ctx,
     storageId,
@@ -43,7 +39,6 @@ async function checkedComplete(
     proposal.digest,
     () => ctx.runQuery(internal.projectProposals.get, { id, actor }),
     true,
-    r2,
   );
   validateProposalMetadata(proposal, bytes);
   // The atomic final mutation rechecks current grant and server-created Intent after these asynchronous reads.

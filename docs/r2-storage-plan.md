@@ -38,18 +38,17 @@ Principle: R2 holds every blob. No database function receives or returns file by
 | R7 | Prefix purge, abandoned-upload sweep, scheduled database-only export, optional bucket lock | Done; awaiting landing, local purge/sweep and database-only backup fixtures; live operator run remains |
 | R8 | Optional public Worker with edge cache on a custom subdomain | Later |
 
-Order: R0, R1, R2, then R3a and R4 in parallel, R3b, R6, R5, R7. R0 to R2 alone remove egress for pulls and new pushes. During dual read every reader dispatches on the row's location, so old and new paths coexist. Rollback: unset the flag and new writes return to the old storage; rows already in R2 stay readable; old storage stays for 14 days after verification unless the owner explicitly approves the guarded early-purge procedure below.
+Order: R0, R1, R2, then R3a and R4 in parallel, R3b, R6, R5, R7. R0 to R2 alone remove egress for pulls and new pushes. During dual read every reader dispatches on the row's location, so old and new paths coexist. There is no rollback to Convex writes: R2 is the only write path (see [data placement](data-placement.md)); rows already in Convex storage stay readable; old storage stays for 14 days after verification unless the owner explicitly approves the guarded early-purge procedure below.
 
 ## R1 write path
 
-Off by default, and byte-for-byte the old behaviour when off. New objects go to R2 only when both the Convex environment has `FORGE_BLOBS=r2` and the project owner has opted in. Objects already stored stay where they are.
+Always on, for every project and every deployment, self-host included. The opt-in, the `FORGE_BLOBS` flag and the Convex byte mode are gone. Objects already stored stay where they are.
 
-- `projectObjects:prepare` and `prepareBatch` insert new rows with `location: 'r2'` and `r2Key` (`v1/p/<projectId>/o/<sha256>`) and return `target: { kind: 'r2', url, headers }`, a 15 minute presigned PUT. The signature covers `content-length`, `if-none-match: *` and `x-amz-checksum-sha256`; no content type is signed or supplied by Forge. A client can add an unsigned content type; typed `Blob`/`File` PUT bodies can supply it implicitly. Forge PUTs use byte arrays or untyped streams. A pending R2 row whose opt-in was later turned off returns to the Convex path.
-- The browser archive importer uploads each logical source/Work object through `projectObjects:prepare`. Opted-in new objects use the signed PUT directly from the browser, omitting JavaScript's forbidden Content-Length header so the browser supplies it from the Blob. A successful PUT or create-only 412 goes through the same HEAD-based `commitBatch`; failed or aborted transfers leave pending rows and do not complete the import. Existing Convex objects and projects without the opt-in keep the POST/reconcile/complete path.
+- `projectObjects:prepare` and `prepareBatch` insert new rows with `location: 'r2'` and `r2Key` (`v1/p/<projectId>/o/<sha256>`) and return `target: { kind: 'r2', url, headers }`, a 15 minute presigned PUT. The signature covers `content-length`, `if-none-match: *` and `x-amz-checksum-sha256`; no content type is signed or supplied by Forge. A client can add an unsigned content type; typed `Blob`/`File` PUT bodies can supply it implicitly. Forge PUTs use byte arrays or untyped streams.
+- The browser archive importer uploads each logical source/Work object through `projectObjects:prepare`. New objects use the signed PUT directly from the browser, omitting JavaScript's forbidden Content-Length header so the browser supplies it from the Blob. A successful PUT or create-only 412 goes through the same HEAD-based `commitBatch`; failed or aborted transfers leave pending rows and do not complete the import. The POST/complete path is gone; objects already in Convex storage remain readable.
 - The CLI sends the PUT with those headers, with the existing bounded upload concurrency (8 per window), retries 5xx, 429 and network errors with backoff, and treats 412 (object already there) as success.
 - `projectObjectCommit:commitBatch` (an action) sends one signed HEAD per new object in parallel and checks the size, and the checksum when R2 returns it. HEAD requests send unsigned `Accept-Encoding: identity` so compressible content types retain their stored length. A successful HEAD without `Content-Length` is a verification error, never a size mismatch. Verified rows get `r2Committed`; a missing or wrong object returns a typed error (`R2_OBJECT_MISSING`, `R2_OBJECT_SIZE_MISMATCH`, `R2_OBJECT_CHECKSUM_MISMATCH`, `R2_VERIFY_FAILED`) and leaves the row pending. Retrying the same call is safe.
-- Missing R2 settings with the flag and opt-in on fail closed with `R2_NOT_CONFIGURED`.
-Enable it for a project: set the Convex environment variables in [operations](operations.md#r2-object-storage-write-path), then run the owner-only mutation `projectObjectCommit:setR2Writes` with `{ projectId, enabled: true }`. Turn it off the same way, or unset `FORGE_BLOBS`.
+- Missing R2 settings fail closed with `R2_NOT_CONFIGURED`. Settings: [operations](operations.md#r2-object-storage).
 
 ## R2 dual read
 
@@ -58,11 +57,11 @@ CLI/server object, artifact, backfill and archive reads request unsigned
 Archive part reads retain HTTP Range with identity encoding; restore and checkout
 reuse these verified readers.
 
-Reads of committed R2 rows work end to end, so a push to an opted-in project now uploads, publishes and pulls back. Rows in Convex storage keep their old read paths unchanged, and a project can hold both.
+Reads of committed R2 rows work end to end, so a push now uploads, publishes and pulls back. Rows in Convex storage keep their old read paths unchanged, and a project can hold both.
 
 - `projectObjectDownloads:signDownloads` `{ projectId, digests ≤ 100 }` is the single choke point. It is a mutation that writes nothing, so Convex does not cache the function result and each call signs fresh URLs. It checks current access on every call (owner, current contributor or reader, a non-revoked device credential, and a project that is not being deleted) and returns `{ digest, size, url }` for each digest that is a committed, non-removed R2 row of that project. Unknown, pending, other-project and Convex-stored digests are absent from the result.
 - URLs are path-style, region `auto`, valid for 5 minutes. Revocation reaches new URLs at once; an issued URL lives at most 5 minutes. Ranged reads use HTTP `Range` on the same URL.
-- Committed rows stay readable when `FORGE_BLOBS` is unset (the rollback rule), as long as the R2 settings are configured. A digest that needs signing with missing settings fails with `R2_NOT_CONFIGURED`; Convex-only projects never need the settings.
+- A digest that needs signing with missing settings fails with `R2_NOT_CONFIGURED`.
 - Public projects sign without sign-in, at most 100 digests per call. TODO(owner): there is no anonymous budget counter yet. Adding one is a user-facing limit and needs owner approval.
 - CLI and agent readers (`src/exchange-r2-read.ts`, used by pull, checkout, landing and agent reads through the exchange client) retain signed URLs only in process memory, per client, project and digest. They reuse a URL until 60 seconds before its signed expiry, then ask `signDownloads` only for uncached digests (at most 100 per call). URLs are never written to disk or logs. Verified local byte-cache hits skip signing and GETs while retaining current project-binding checks, including when writing those bytes to a file. Other reads use 8 parallel GETs, retry 5xx, 429 and network errors with backoff, discard a cached URL on 403, sign again once and then fail with `EXCHANGE_DOWNLOAD_DENIED` if the replacement is refused. Every download verifies size and sha256 before the bytes are used or written; a mismatch is `BLOB_DIGEST_MISMATCH`. Digests that are not R2 rows fall through to the old download actions and are not cached as signed URLs, so Convex-only fetches still ask `signDownloads`.
 - Browser: Code (including exact State/raw), Lane/Candidate review, change maps and search use `web/src/browser-source.ts`. `projectObjectDownloads:source` returns exact checkpoint and disposable source pins, never file bytes; an absent pin index falls back to reading the same immutable manifest in the browser. `describe` returns project-authorized location metadata (R2, Convex URL or recipe), in pages of 100. `src/blob-download.ts` batches R2 signing at 100 and GETs at eight, calls `verifiedBytes` before exposing bytes, and refreshes once on 403 or a CORS-masked network failure. Convex rows remain readable directly through their storage URLs. Private access is rechecked before and after reads, even on byte-cache hits. Public anonymous reads use the same source/describe/sign access boundary. No anonymous budget number has been added; its owner-approval TODO remains.
@@ -173,13 +172,12 @@ landing; local fake-storage timings are not hosted measurements.
 
 Hosted GitHub-import source objects, recipe parts and bootstrap metadata use the
 same project opt-in as exchange. Their immutable progress cursors use the artifact
-blob seam once the project is opted in. Legacy exchange metadata materialization and compressed archive metadata
-sidecars also respect that opt-in. A committed R2 root is valid for proposal completion;
+blob seam. Legacy exchange metadata materialization and compressed archive metadata
+sidecars also go to R2. A committed R2 root is valid for proposal completion;
 check outputs, logs and native agent artifacts already travel as exchange objects.
 
-Indexed imports predate `hostedProjects` and have their own owner-only
-`importStorage:setR2Writes` mutation (`{ id, enabled }`). With this opt-in and
-`FORGE_BLOBS=r2`, the indexer stores its gzip artifact in R2. Public analysis runners
+Indexed imports store their gzip artifact in R2 (the old `importStorage:setR2Writes`
+opt-in is gone). Public analysis runners
 build the bytes locally, then send only digest/size to `/worker/uploadTarget`, PUT
 directly, and publish after the backend verifies HEAD. The in-action indexer and
 hosted GitHub-import worker still process source bytes inside Convex; moving their

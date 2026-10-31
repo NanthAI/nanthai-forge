@@ -7,8 +7,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { getFunctionName } from 'convex/server';
 import { moduleUrl } from './convex-module.mjs';
-import { setup, client } from './r2-harness.mjs';
-import { upload, modules } from './project-exchange-fixture.mjs';
+import { setup, client, legacyObject } from './r2-harness.mjs';
+import { modules } from './project-exchange-fixture.mjs';
 import { digest } from '../dist/hash.js';
 import { runR2Backfill, backfillEstimate } from '../dist/r2-backfill.js';
 const backend = await import(moduleUrl('../convex/projectR2Backfill.ts'));
@@ -35,15 +35,8 @@ async function harness(t) {
   return { s, fake, transport, options, lines, dir };
 }
 const seed = async (h, texts) => {
-  // Seed the original Convex placement before switching this synthetic deployment to R2.
-  const mode = process.env.FORGE_BLOBS;
-  process.env.FORGE_BLOBS = 'convex';
-  try {
-    for (const text of texts) await upload(h.s, Buffer.from(text));
-  } finally {
-    if (mode === undefined) delete process.env.FORGE_BLOBS;
-    else process.env.FORGE_BLOBS = mode;
-  }
+  // Copies written before R2 was the only path, still in Convex file storage.
+  for (const text of texts) await legacyObject(h.s, Buffer.from(text));
 };
 const stored = (s, id) => s.tables.projectObjects.get(id);
 const requests = (h, method) => h.fake.requests.filter(r => r.method === method);
@@ -333,9 +326,6 @@ test('owner checks, deployment mode and page bounds protect every maintenance ro
   await assert.rejects(h.transport.targets(pins));
   await assert.rejects(h.transport.check(pins, 'op', true));
   h.s.caller('owner');
-  process.env.FORGE_BLOBS = 'convex';
-  await assert.rejects(runR2Backfill(h.transport, h.options), e => e.code === 'R2_NOT_ENABLED');
-  process.env.FORGE_BLOBS = 'r2';
   await assert.rejects(h.transport.targets(Array(101).fill(pins[0])), e => e.data?.code === 'BAD_ARGUMENT');
   await assert.rejects(
     h.transport.check(Array(101).fill(pins[0]), 'op', true),

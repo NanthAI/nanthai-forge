@@ -16,6 +16,7 @@ import { minutesBetween, type MetricPeriod, type MetricRecords } from './self-me
 import { readHostedBills } from './self-metrics-bills.js';
 import { metricReceiptRowSchema } from './self-metric-receipts.js';
 import { hostedCallerReceipts } from './self-metrics-hosted-receipts.js';
+import { readPlacement } from './self-metrics-placement.js';
 export type MetricQuery = ((name: string, args: Record<string, unknown>) => Promise<unknown>) & {
   objects?: MetricObjects;
 };
@@ -290,6 +291,7 @@ export async function readHostedMetricPages(query: MetricQuery, period: MetricPe
       throw hostedActionError(error, 'metrics');
     });
     hostedCallerReceipts(records, receiptRows, receiptCoverage, period);
+    await readPlacement(query, period, records);
     const requests = records.submissions;
     joinMetricAttempts(records, attempts, pins);
     await hydrateMetricInputs(records, pins, lanes, saves, query.objects);

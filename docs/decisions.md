@@ -13,7 +13,7 @@ These rules hold the design together. Break one only with an explicit owner deci
 9. **History is kept.** No automatic age or count deletion, no quotas and no retention deadlines unless the owner asks. Collection removes only verified unreferenced objects.
 10. **Live signals are advisory.** Sessions and messages are never locks, never authorization and never acceptance. Declared readiness is not checked or accepted source.
 11. **No sandbox claims.** Do not describe Lanes, worktrees, MCP permissions or scoped grants as confinement.
-12. **Hosted stack is fixed for development.** Convex storage, Clerk identity, the Forge GitHub App and Netlify hosting. Optional self-host does not move the development deployment to S3. PostHog is deferred.
+12. **Hosted stack is fixed for development.** Convex for records, Cloudflare R2 for every byte, Clerk identity, the Forge GitHub App and Netlify hosting. R2 is required on every deployment, self-host included (any S3-compatible bucket through `R2_ENDPOINT`). Convex file storage holds only legacy copies awaiting cleanup ([data placement](data-placement.md)). PostHog is deferred.
 13. **No new restrictions without being asked.** Do not add user-facing limits, extra steps, delays, access conditions or retention rules. A review finding does not authorize them.
 
 Constraint 7 was replaced by the owner on 2026-10-25, superseding "Native is the daily format". The [SP1 storage decision](research/sp1-storage.md) records the evidence and implementation order.

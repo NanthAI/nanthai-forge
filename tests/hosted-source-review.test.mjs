@@ -3,7 +3,7 @@ import { commitValidatedCheckpoint } from './project-exchange-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { getFunctionName } from 'convex/server';
-import { fixture, checkpoint, modules } from './project-exchange-fixture.mjs';
+import { fixture, checkpoint, modules, asLegacyRows } from './project-exchange-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 const { readSourceReview } = await import(moduleUrl('../convex/projectSourceReview.ts'));
 // Server-only source/anchor validation retains its exact-source contract. The public browser
@@ -17,6 +17,8 @@ async function setup(t) {
   const s = fixture(),
     source = await checkpoint(t, s),
     backupId = await commitValidatedCheckpoint(s, source);
+  // These checks hook Convex storage reads; R2 review reads are covered by browser-r2-bytes.
+  await asLegacyRows(s);
   return {
     ...s,
     source,

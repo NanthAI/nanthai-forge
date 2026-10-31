@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
 import { getFunctionName } from 'convex/server';
-import { fixture, modules, upload } from './project-exchange-fixture.mjs';
+import { fixture, modules, upload, legacyObject } from './project-exchange-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { buildObjectRecipe } from '../dist/object-chunks.js';
 import { digest } from '../dist/hash.js';
@@ -30,10 +30,12 @@ function setup() {
       };
   return s;
 }
+// Leaves are legacy Convex copies so the fault tests can damage their bytes in place;
+// recipes over R2 leaves are covered by r2-read-path, r2-backfill and r2-head-identity.
 async function prepare(s, bytes, projectId = 'project') {
   const built = buildObjectRecipe(bytes);
-  for (const content of built.objects.values()) await upload(s, content, projectId);
-  const root = await upload(s, built.bytes, projectId);
+  for (const content of built.objects.values()) await legacyObject(s, content, projectId);
+  const root = await legacyObject(s, built.bytes, projectId);
   return {
     ...built,
     input: {
@@ -117,7 +119,7 @@ test('missing, corrupt and whole-digest mismatch recipe content never creates a 
     if (fault === 'corrupt') s.files.get(leafRow.storageId).blob = new Blob(['changed']);
     if (fault === 'wrong hash') {
       const changed = { ...built.recipe, object: { ...built.recipe.object, sha256: 'f'.repeat(64) } };
-      const root = await upload(s, Buffer.from(JSON.stringify(changed)));
+      const root = await legacyObject(s, Buffer.from(JSON.stringify(changed)));
       built.input.digest = changed.object.sha256;
       built.input.recipeDigest = root.sha256;
       built.input.recipeSize = root.size;
@@ -168,36 +170,23 @@ test('current owner/contributor authority and final project state are checked; r
   );
 });
 
-test('raw/recipe completion races preserve the first verified binding and reconcile late raw uploads', async () => {
+test('raw/recipe completion races preserve the first verified binding', async () => {
   for (const rawFirst of [false, true]) {
     const s = setup(),
       bytes = randomBytes(3 * 1024 * 1024),
       built = await prepare(s, bytes);
-    const prepared = await modules.projectObjects.prepare._handler(s.ctx, {
-      projectId: 'project',
-      digest: digest(bytes),
-      size: bytes.length,
-    });
-    const storageId = await s.ctx.storage.store(new Blob([bytes], { type: prepared.contentType }));
-    if (rawFirst) await modules.projectObjects.complete._handler(s.ctx, { id: prepared.id, storageId });
+    if (rawFirst) await upload(s, bytes);
     await recipes.complete._handler(s.ctx, built.input);
-    await modules.projectObjects.complete._handler(s.ctx, { id: prepared.id, storageId });
     const bound = row(s, digest(bytes));
-    assert.equal(!!bound.storageId, rawFirst);
+    assert.equal(!!bound.r2Committed, rawFirst);
     assert.equal(!!bound.recipe, !rawFirst);
-    assert.equal(s.files.has(storageId), rawFirst);
-    const reconciled = await modules.projectObjects.reconcile._handler(s.ctx, {
-      id: prepared.id,
-      cursor: null,
-    });
-    assert.equal(reconciled.stored, true);
     const again = await modules.projectObjects.prepare._handler(s.ctx, {
       projectId: 'project',
       digest: digest(bytes),
       size: bytes.length,
     });
     assert.equal(again.stored, true);
-    assert.equal(again.uploadUrl, undefined);
+    assert.equal(again.target, undefined);
   }
 });
 

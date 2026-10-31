@@ -13,6 +13,7 @@ import { decodeHostedArtifact } from '../dist/hosted-artifact.js';
 import { releases, release, digest, main, portNumber } from './selfhost.mjs';
 import { githubOidcIssuer, verifyGithubOidc } from './selfhost-oidc.mjs';
 import { assertSmokeImport, deploySmoke, smokeCommand, smokeFailure } from './selfhost-smoke-support.mjs';
+import { startFakeR2, fakeR2Config } from '../tests/fake-r2.mjs';
 
 // ponytail: real native smoke runs one pinned public checkout; add more platforms only after this owner is measured.
 const root = await mkdtemp(join(tmpdir(), 'forge-native-smoke-')),
@@ -111,8 +112,17 @@ async function stop(directory) {
   }
   processes.delete(directory);
 }
+// Self-host needs object storage like every deployment: a local S3-compatible bucket.
+const bucket = await startFakeR2(fakeR2Config, { local: true });
+const r2 = {
+  R2_ACCOUNT_ID: fakeR2Config.accountId,
+  R2_BUCKET: fakeR2Config.bucket,
+  R2_ACCESS_KEY_ID: fakeR2Config.accessKeyId,
+  R2_SECRET_ACCESS_KEY: fakeR2Config.secretAccessKey,
+  R2_ENDPOINT: bucket.endpoint,
+};
 async function deploy(directory) {
-  deploySmoke(args => cli(directory, args), { issuer: realOidc ? githubOidcIssuer : '', token, keys });
+  deploySmoke(args => cli(directory, args), { issuer: realOidc ? githubOidcIssuer : '', token, keys, r2 });
 }
 function archiveFor(pin, platform, provided) {
   const asset = releases[pin]?.[platform];
@@ -352,5 +362,6 @@ try {
 } finally {
   for (const directory of processes.keys()) await stop(directory);
   for (const log of logs) await log.close();
+  await bucket.close();
   if (succeeded) await rm(root, { recursive: true, force: true }); // Only this invocation's freshly owned temporary instances.
 }

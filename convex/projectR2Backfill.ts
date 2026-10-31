@@ -4,7 +4,7 @@ import { query, mutation, internalQuery, internalMutation } from './cliServer';
 import { activeOwnedProject, accessibleProject } from './projectAuthority';
 import { backfillKind, backfillPin } from './r2BackfillFields';
 import { tableFor, pinFor, selected, current } from './r2BackfillRows';
-import { r2Enabled, r2Key, r2Config, presignPut, presignGet } from './r2';
+import { r2Key, r2Config, presignPut, presignGet } from './r2';
 import { invariant } from '../src/errors';
 import { report } from './errors';
 
@@ -22,6 +22,8 @@ export const page = query({
     cursor: v.string(),
     r2Writes: v.boolean(),
     r2Revision: v.number(),
+    /** Convex copies of rows already committed to R2: what cleanup could delete. */
+    retained: v.optional(v.object({ count: v.number(), bytes: v.number() })),
   }),
   handler: async (ctx, { projectId, kind, cursor, verify }) => {
     try {
@@ -32,6 +34,15 @@ export const page = query({
         .query(tableFor[kind])
         .withIndex('by_project', q => q.eq('projectId', projectId))
         .paginate({ cursor, numItems: 100 });
+      const retained = { count: 0, bytes: 0 };
+      for (const row of result.page) {
+        const pin = pinFor(row, kind),
+          source = selected(row, kind);
+        if (pin?.location === 'r2' && source?.r2Committed && !source.r2ConvexPurged) {
+          retained.count++;
+          retained.bytes += pin.size;
+        }
+      }
       return {
         page: result.page.flatMap(row => {
           const pin = pinFor(row, kind),
@@ -42,8 +53,9 @@ export const page = query({
         }),
         cursor: result.continueCursor,
         isDone: result.isDone,
-        r2Writes: r2Enabled(),
+        r2Writes: true,
         r2Revision: project.r2BackfillRevision ?? 0,
+        retained,
       };
     } catch (error) {
       return report(error);
@@ -66,7 +78,6 @@ export const targets = mutation({
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to maintain project storage.');
       await activeOwnedProject(ctx, projectId, user.subject);
-      invariant(r2Enabled(), 'R2_NOT_ENABLED', 'Enable R2 writes for this project before backfill.');
       invariant(pins.length <= 100, 'BAD_ARGUMENT', 'Backfill pages contain at most 100 rows.');
       const config = r2Config(),
         targets = [];
@@ -115,7 +126,7 @@ export const flip = internalMutation({
   returns: v.array(v.string()),
   handler: async (ctx, { projectId, actor, operationId, pins }) => {
     const project = await activeOwnedProject(ctx, projectId, actor);
-    invariant(r2Enabled(), 'R2_NOT_ENABLED', 'Enable R2 writes for this project before backfill.');
+    r2Config();
     invariant(pins.length <= 100, 'BAD_ARGUMENT', 'Backfill pages contain at most 100 rows.');
     const flipped = [];
     let changed = false;

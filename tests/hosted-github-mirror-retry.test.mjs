@@ -12,6 +12,7 @@ import { prepareMirror } from '../dist/hosted-github-mirror.js';
 import { githubRequest } from '../dist/hosted-github-api.js';
 import { hostedMirrorStatusText } from '../dist/hosted-github-mirror-status.js';
 import { readHostedCliStatus } from '../dist/hosted-cli-status.js';
+import { interceptDefaultR2 } from './default-r2.mjs';
 const queue = await import(moduleUrl('../convex/projectGithubMirrorQueue.ts'));
 const store = await import(moduleUrl('../convex/projectGithubMirrorStore.ts'));
 const action = await import(moduleUrl('../convex/projectGithubMirror.ts'));
@@ -92,6 +93,7 @@ async function fixture(t, fail, source) {
   const prior = Object.fromEntries(Object.keys(values).map(k => [k, process.env[k]]));
   Object.assign(process.env, values);
   globalThis.fetch = async (url, init) => {
+    if (new URL(url).hostname.endsWith('.r2.cloudflarestorage.com')) return originalFetch(url, init);
     if (url.endsWith('/installation')) return Response.json({ id: 42 });
     if (url.includes('/access_tokens')) return Response.json({ token: 'synthetic-token' });
     if (url.endsWith('/blobs') && fail()) return new Response('synthetic private response', { status: 500 });
@@ -208,9 +210,12 @@ test('partial cursor storage failure still records the API failure and retries t
   let requests = 0;
   const f = await fixture(t, () => ++requests === 2, { before: {}, after: { a: 'first', b: 'second' } });
   f.patch('projectGithubMirrorJobs', f.input.jobId, { failures: 3 });
-  f.ctx.storage.store = async () => {
-    throw Error('synthetic storage failure');
-  };
+  // Cursor checkpoints are R2 objects: their PUT fails.
+  t.after(
+    interceptDefaultR2((input, init, serve) =>
+      init?.method === 'PUT' ? new Response(null, { status: 500 }) : serve(input, init),
+    ),
+  );
   await f.step();
   assert.equal(f.job().status, 'retrying');
   assert.equal(f.job().cursor, f.cursor);

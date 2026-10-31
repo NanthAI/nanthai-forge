@@ -55,38 +55,33 @@ export class ImportUpload {
         const target = prepared[i]!;
         if (target.stored) return;
         this.uploaded++;
-        if (target.key) {
-          const config = r2Config(),
-            put = await presignPut(config, target.key, { digest, size: bytes.length });
-          const response = await exchangeFetch('R2 import page upload', put.url, {
-            method: 'PUT',
-            headers: put.headers,
-            body: new Uint8Array(bytes),
-          });
+        // Every import object uploads to R2; prepare always returns its key.
+        invariant(target.key, 'R2_REQUIRED', 'Import objects upload to R2 only.');
+        const config = r2Config(),
+          put = await presignPut(config, target.key, { digest, size: bytes.length });
+        const response = await exchangeFetch('R2 import page upload', put.url, {
+          method: 'PUT',
+          headers: put.headers,
+          body: new Uint8Array(bytes),
+        });
+        invariant(
+          response.ok || response.status === 412,
+          'R2_UPLOAD_FAILED',
+          'Object storage could not upload source.',
+        );
+        // The signed SHA-256 checksum and length make a successful PUT a
+        // verified write. Only an existing key (412) needs its bytes checked.
+        if (!response.ok) {
+          const head = await headObject(config, target.key);
           invariant(
-            response.ok || response.status === 412,
-            'R2_UPLOAD_FAILED',
-            'Object storage could not upload source.',
+            head.status === 'ok' &&
+              head.size === bytes.length &&
+              (!head.checksum || head.checksum === checksumOf(digest)),
+            'R2_VERIFY_FAILED',
+            'Object storage could not verify source.',
           );
-          // The signed SHA-256 checksum and length make a successful PUT a
-          // verified write. Only an existing key (412) needs its bytes checked.
-          if (!response.ok) {
-            const head = await headObject(config, target.key);
-            invariant(
-              head.status === 'ok' &&
-                head.size === bytes.length &&
-                (!head.checksum || head.checksum === checksumOf(digest)),
-              'R2_VERIFY_FAILED',
-              'Object storage could not verify source.',
-            );
-          }
-          this.completions.push({ id: target.id, key: target.key });
-        } else {
-          const storageId = await this.ctx.storage.store(
-            new Blob([new Uint8Array(bytes)], { type: target.contentType }),
-          );
-          this.completions.push({ id: target.id, storageId });
         }
+        this.completions.push({ id: target.id, key: target.key });
       });
       if (start + importPageFiles < pending.length) await this.commit();
     }

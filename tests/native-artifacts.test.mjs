@@ -6,13 +6,8 @@ import { state } from './hosted-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 const { derivedArtifact, derivedBytes } = await import(moduleUrl('../convex/derivedArtifactActions.ts'));
 
+// Derivatives of a legacy Convex original go to R2 (the test runtime's default bucket).
 async function native(t) {
-  const previous = process.env.FORGE_BLOBS;
-  process.env.FORGE_BLOBS = 'convex';
-  t.after(() => {
-    if (previous === undefined) delete process.env.FORGE_BLOBS;
-    else process.env.FORGE_BLOBS = previous;
-  });
   const s = state([]);
   const original = await s.ctx.storage.store(new Blob(['original']));
   const derive = pin =>
@@ -27,19 +22,11 @@ async function native(t) {
   return { s, derive };
 }
 
-test('native derivatives reconcile lost store and attach replies without duplicate files', async t => {
+test('derivatives reconcile a lost attach reply in R2 without Convex files', async t => {
   const { s, derive } = await native(t);
-  const store = s.ctx.storage.store;
-  let lostStore = true;
-  s.ctx.storage.store = async blob => {
-    const id = await store(blob);
-    if (lostStore) {
-      lostStore = false;
-      throw Error('lost store reply');
-    }
-    return id;
-  };
+  s.ctx.storage.store = () => assert.fail('derivatives never write Convex storage');
   const first = await derive('store');
+  assert.match(first.storageId, /^r2blob:/);
   assert.equal(Buffer.from(await derivedBytes(s.ctx, first)).toString(), 'derived');
   assert.equal((await derive('store')).storageId, first.storageId);
   const mutation = s.ctx.runMutation;
@@ -54,11 +41,11 @@ test('native derivatives reconcile lost store and attach replies without duplica
   };
   const second = await derive('attach');
   assert.equal((await derive('attach')).storageId, second.storageId);
-  assert.equal(s.files.size, 3);
+  assert.equal(s.files.size, 1, 'only the legacy original');
   assert.equal(s.tables.derivedArtifacts.size, 2);
 });
 
-test('2800 native artifact operations keep constant per-operation calls and document I/O', async t => {
+test('2800 derivative operations keep constant per-operation calls and document I/O', async t => {
   const { s, derive } = await native(t);
   const calls = new Map();
   let reads = 0,
@@ -103,16 +90,20 @@ test('2800 native artifact operations keep constant per-operation calls and docu
   assert.deepEqual(Object.fromEntries(calls), {
     'derivedArtifacts:get': count,
     'derivedArtifacts:reserve': count,
+    'artifactStorage:reserve': count,
+    'artifactStorage:commit': count,
+    'artifactStorage:get': count,
+    'artifactStorage:markCommitted': count,
     'derivedArtifacts:attach': count,
   });
-  assert.equal(reads, 6 * count);
-  assert.equal(writes, 2 * count);
-  assert.equal(s.tables.artifactBlobs.size, 0);
+  assert.equal(reads, 9 * count);
+  assert.equal(writes, 4 * count);
+  assert.equal(s.tables.artifactBlobs.size, count);
   assert.equal(s.scheduled.length, 0);
   t.diagnostic(
     JSON.stringify({
       operations: count,
-      calls: 3 * count,
+      calls: 7 * count,
       reads,
       writes,
       wallMs: Math.round(performance.now() - started),

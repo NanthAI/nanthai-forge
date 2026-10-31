@@ -337,13 +337,12 @@ for (const mode of ['revoked', 'removed', 'rebound', 'corrupt', 'expired']) {
 }
 
 test('mixed R2 and Convex-only Lane pages keep the real legacy byte path', async t => {
-  const { setup, client } = await import('./r2-harness.mjs');
-  const { s, fake } = await setup(t, { flag: '', optIn: false });
+  const { setup, client, legacyObject } = await import('./r2-harness.mjs');
+  const { s, fake } = await setup(t, { optIn: false });
   const exchange = client(s),
     values = [Buffer.from('legacy'), Buffer.from('modern'), Buffer.alloc(0)];
   const pins = values.map(bytes => ({ sha256: digest(bytes), size: bytes.length }));
-  await exchange.uploadBatch([{ pin: pins[0], bytes: values[0] }]);
-  process.env.FORGE_BLOBS = 'r2';
+  await legacyObject(s, values[0]);
   await exchange.uploadBatch(pins.slice(1).map((pin, index) => ({ pin, bytes: values[index + 1] })));
   const directory = mkdtempSync(join(tmpdir(), 'forge-lane-mixed-'));
   t.after(() => rmSync(directory, { recursive: true, force: true }));

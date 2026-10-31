@@ -1,15 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 import { v, type Infer } from 'convex/values';
-import { blobStore } from './blobStore';
 import type { Id } from './_generated/dataModel';
 import type { MutationCtx } from './_generated/server';
 import { query, mutation, internalQuery } from './cliServer';
 import { activeProject, accessibleProject } from './projectAuthority';
 import { objectDocument, isStored } from './projectObjectFields';
-import { storageDigest, scanComplete } from './projectStorage';
 import { invariant } from '../src/errors';
 import { report } from './errors';
-import { r2Enabled, r2Config, r2Key, presignPut, type R2Config } from './r2';
+import { r2Config, r2Key, presignPut, type R2Config } from './r2';
 const pin = v.object({ digest: v.string(), size: v.number() });
 const valid = (digest: string, size: number) =>
   /^[0-9a-f]{64}$/.test(digest) && Number.isSafeInteger(size) && size >= 0;
@@ -50,7 +48,6 @@ const preparedObject = v.object({
   id: v.id('projectObjects'),
   stored: v.boolean(),
   created: v.boolean(),
-  uploadUrl: v.optional(v.string()),
   target: v.optional(
     v.object({ kind: v.literal('r2'), url: v.string(), headers: v.record(v.string(), v.string()) }),
   ),
@@ -60,14 +57,14 @@ async function prepareObject(
   ctx: MutationCtx,
   { projectId, digest, size }: { projectId: Id<'hostedProjects'>; digest: string; size: number },
   authorized = false,
-  r2: R2Config | null = null,
+  r2?: R2Config,
 ): Promise<Infer<typeof preparedObject>> {
   try {
     if (!authorized) {
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to exchange project source.');
       await activeProject(ctx, projectId, user.subject);
-      r2 = r2Enabled() ? r2Config() : null;
+      r2 ??= r2Config();
     }
     invariant(valid(digest, size), 'BAD_ARGUMENT', 'Use the exact content digest and size.');
     let row = await ctx.db
@@ -87,23 +84,21 @@ async function prepareObject(
         size,
         nonce: crypto.randomUUID(),
         removed: false,
-        ...(r2 ? { location: 'r2' as const, r2Key: r2Key(projectId, digest), r2PreparedAt: Date.now() } : {}),
+        location: 'r2' as const,
+        r2Key: r2Key(projectId, digest),
+        r2PreparedAt: Date.now(),
       });
       row = (await ctx.db.get(id))!;
-    } else if (!isStored(row) && r2 && row.location !== 'r2') {
-      // Reconcile a reservation created before the deployment switched storage.
+    } else if (!isStored(row) && row.location !== 'r2') {
+      // A pending reservation from before R2 was the only path now uploads to R2.
       await ctx.db.patch(row._id, {
         location: 'r2',
         r2Key: r2Key(projectId, digest),
         r2PreparedAt: Date.now(),
       });
       row = (await ctx.db.get(row._id))!;
-    } else if (!isStored(row) && row.location === 'r2' && !r2) {
-      // Pending R2 row but R2 writes are now off: return it to the Convex path.
-      await ctx.db.patch(row._id, { location: 'convex', r2Key: undefined });
-      row = (await ctx.db.get(row._id))!;
     }
-    if (row.location === 'r2' && !isStored(row) && r2) {
+    if (row.location === 'r2' && !isStored(row)) {
       const patch = {
         r2PreparedAt: Date.now(),
         ...(row.r2SweepKey === row.r2Key
@@ -123,9 +118,12 @@ async function prepareObject(
       contentType: `application/x-forge-object-${row.nonce}`,
       ...(stored
         ? {}
-        : row.location === 'r2'
-          ? { target: await presignPut(r2!, row.r2Key ?? r2Key(projectId, digest), { digest, size }) }
-          : { uploadUrl: await blobStore(ctx).generateUploadUrl() }),
+        : {
+            target: await presignPut(r2 ?? r2Config(), row.r2Key ?? r2Key(projectId, digest), {
+              digest,
+              size,
+            }),
+          }),
     };
   } catch (error) {
     return report(error);
@@ -136,46 +134,6 @@ export const prepare = mutation({
   returns: preparedObject,
   handler: (ctx, args) => prepareObject(ctx, args),
 });
-async function completeObject(
-  ctx: MutationCtx,
-  { id, storageId }: { id: Id<'projectObjects'>; storageId: Id<'_storage'> },
-) {
-  try {
-    const user = await ctx.auth.getUserIdentity(),
-      row = await ctx.db.get(id),
-      project = row && (await ctx.db.get(row.projectId));
-    invariant(user && row && project, 'PROJECT_UNAVAILABLE', 'This original upload is unavailable.');
-    const file = await ctx.db.system.get(storageId);
-    invariant(
-      file &&
-        file.contentType === `application/x-forge-object-${row.nonce}` &&
-        file.size === row.size &&
-        storageDigest(file.sha256) === row.digest,
-      'INVALID_WORK_BACKUP',
-      'Uploaded content differs from its project-bound digest.',
-    );
-    if (row.removed || ['deleting', 'deleted'].includes(project.removal ?? '')) {
-      invariant(
-        project.owner === user.subject,
-        'PROJECT_UNAVAILABLE',
-        'This upload is unavailable with current access.',
-      );
-      await blobStore(ctx).delete(storageId);
-      return null;
-    }
-    await activeProject(ctx, row.projectId, user.subject);
-    if (row.storageId || row.recipe) {
-      if (row.storageId !== storageId) await blobStore(ctx).delete(storageId);
-      return null;
-    }
-    await ctx.db.patch(id, { storageId });
-    return null;
-  } catch (error) {
-    return report(error);
-  }
-}
-const uploadedObject = v.object({ id: v.id('projectObjects'), storageId: v.id('_storage') });
-export const complete = mutation({ args: uploadedObject.fields, returns: v.null(), handler: completeObject });
 export const prepareBatch = mutation({
   args: { projectId: v.id('hostedProjects'), objects: v.array(pin) },
   returns: v.array(preparedObject),
@@ -190,9 +148,9 @@ export const prepareBatch = mutation({
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to exchange project source.');
       // One atomic mutation has one authority snapshot for this project.
       const project = await activeProject(ctx, projectId, user.subject);
-      // Deployment R2 mode controls new placement, including legacy projects without opt-in.
-      const r2 = r2Enabled() ? r2Config() : null;
-      if (r2 && !project.r2StorageUsed) await ctx.db.patch(projectId, { r2StorageUsed: true });
+      // Every project writes R2, including legacy projects created before R2 was the only path.
+      const r2 = r2Config();
+      if (!project.r2StorageUsed) await ctx.db.patch(projectId, { r2StorageUsed: true });
       const result = [];
       for (const pin of objects) result.push(await prepareObject(ctx, { projectId, ...pin }, true, r2));
       return result;
@@ -251,44 +209,18 @@ export const available = query({
     }
   },
 });
-export const completeBatch = mutation({
-  args: { objects: v.array(uploadedObject) },
-  returns: v.null(),
-  handler: async (ctx, { objects }) => {
-    try {
-      invariant(objects.length <= 100, 'BAD_ARGUMENT', 'Complete content in pages of at most 100.');
-      for (const object of objects) await completeObject(ctx, object);
-      return null;
-    } catch (error) {
-      return report(error);
-    }
-  },
-});
 export const reconcile = mutation({
   args: { id: v.id('projectObjects'), cursor: v.union(v.string(), v.null()) },
   returns: v.object({ stored: v.boolean(), isDone: v.boolean(), cursor: v.string() }),
-  handler: async (ctx, { id, cursor }) => {
+  handler: async (ctx, { id }) => {
     try {
       const user = await ctx.auth.getUserIdentity(),
         row = await ctx.db.get(id);
       invariant(user && row, 'PROJECT_UNAVAILABLE', 'This original upload is unavailable.');
       await activeProject(ctx, row.projectId, user.subject);
       if (isStored(row)) return { stored: true, isDone: true, cursor: '' };
-      // R2 rows never appear in Convex file storage; HEAD verification commits them.
-      if (row.location === 'r2') return { stored: false, isDone: true, cursor: '' };
-      const page = await ctx.db.system.query('_storage').order('desc').paginate({ cursor, numItems: 100 });
-      const file = page.page.find(
-        file =>
-          file.contentType === `application/x-forge-object-${row.nonce}` &&
-          file.size === row.size &&
-          storageDigest(file.sha256) === row.digest,
-      );
-      if (file) await ctx.db.patch(id, { storageId: file._id });
-      return {
-        stored: !!file,
-        isDone: !!file || scanComplete(page, row._creationTime),
-        cursor: page.continueCursor,
-      };
+      // Bytes only reach R2, where create-only PUTs and HEAD verification commit them.
+      return { stored: false, isDone: true, cursor: '' };
     } catch (error) {
       return report(error);
     }

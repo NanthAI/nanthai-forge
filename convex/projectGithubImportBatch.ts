@@ -5,7 +5,7 @@ import type { Id } from './_generated/dataModel';
 import { activeOwnedProject } from './projectAuthority';
 import { isStored } from './projectObjectFields';
 import { storageDigest, removeExclusive } from './projectStorage';
-import { r2Config, r2Key, r2Enabled } from './r2';
+import { r2Config, r2Key } from './r2';
 import { invariant } from '../src/errors';
 import { importPageFiles } from '../src/github-import-pages';
 export const objectPin = v.object({ digest: v.string(), size: v.number() });
@@ -33,9 +33,8 @@ export const prepare = internalMutation({
       'INVALID_WORK_BACKUP',
       'Split physical objects into bounded pages.',
     );
-    // Placement is pinned at creation, never silently changed by a later switch.
-    const r2 = r2Enabled();
-    if (r2) r2Config();
+    // Every object goes to R2; missing settings fail before any row is reserved.
+    r2Config();
     const result = [];
     for (const pin of input.objects) {
       invariant(
@@ -53,32 +52,19 @@ export const prepare = internalMutation({
         'Original object binding changed.',
       );
       if (!row) {
-        let storageId: Id<'_storage'> | undefined;
-        if (!r2) {
-          // Bounded candidate search, not a source/existence oracle. Larger sets
-          // can miss reuse and upload identical bytes without changing content.
-          const shared = await ctx.db
-            .query('projectObjects')
-            .withIndex('by_digest_and_removed', q => q.eq('digest', pin.digest).eq('removed', false))
-            .take(5);
-          for (const candidate of shared) {
-            if (!candidate.storageId || candidate.size !== pin.size) continue;
-            const stored = await ctx.db.system.get(candidate.storageId);
-            if (stored && stored.size === pin.size && storageDigest(stored.sha256) === pin.digest) {
-              storageId = candidate.storageId;
-              break;
-            }
-          }
-        }
         const id = await ctx.db.insert('projectObjects', {
           projectId: project._id,
           ...pin,
           nonce: crypto.randomUUID(),
           removed: false,
-          ...(storageId ? { storageId } : {}),
-          ...(r2 ? { location: 'r2' as const, r2Key: r2Key(project._id, pin.digest) } : {}),
+          location: 'r2' as const,
+          r2Key: r2Key(project._id, pin.digest),
         });
         row = (await ctx.db.get(id))!;
+      } else if (!isStored(row) && row.location !== 'r2') {
+        // A pending reservation from before R2 was the only path now uploads to R2.
+        await ctx.db.patch(row._id, { location: 'r2', r2Key: r2Key(project._id, pin.digest) });
+        row = (await ctx.db.get(row._id))!;
       }
       result.push({
         id: row._id,

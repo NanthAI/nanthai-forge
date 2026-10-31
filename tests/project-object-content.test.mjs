@@ -2,7 +2,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { getFunctionName } from 'convex/server';
-import { fixture, upload } from './project-exchange-fixture.mjs';
+// These checks hook Convex storage reads (memo, metadata, tampering), which still serve legacy
+// rows; R2 reads are covered by tests/r2-read-path.test.mjs.
+import { fixture, legacyObject as upload } from './project-exchange-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { digest } from '../dist/hash.js';
 const { objectRange } = await import(moduleUrl('../convex/projectObjectContent.ts'));

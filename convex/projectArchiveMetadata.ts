@@ -68,7 +68,6 @@ export async function projectArchiveMetadata(
   digest: string,
   checkAccess: () => Promise<unknown>,
   cache = true,
-  r2 = false,
 ) {
   if (!cache || storageId.startsWith('r2archive:'))
     return readOriginalMetadata(ctx, storageId, size, digest, checkAccess);
@@ -94,7 +93,6 @@ export async function projectArchiveMetadata(
       return encodeWorkMetadataSidecar(original);
     },
     checkAccess,
-    r2,
   );
   await checkAccess();
   if (original) return original;

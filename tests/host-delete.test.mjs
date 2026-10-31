@@ -19,6 +19,7 @@ import { coordinationClient } from '../dist/coordination-client.js';
 import { deleteHostedProject, parseDeleteProjectOptions } from '../dist/host-delete.js';
 import { moduleUrl } from './convex-module.mjs';
 import { state } from './hosted-fixture.mjs';
+import { settleR2Purge } from './default-r2.mjs';
 const backups = await import(moduleUrl('../convex/projectBackups.ts'));
 const lifecycle = await import(moduleUrl('../convex/projectLifecycle.ts'));
 const deployment = 'https://fixture.convex.cloud';
@@ -265,6 +266,7 @@ test('real public handlers accept a CLI owner identity and scheduled purge reach
       if (submitted && ++reads === 2) {
         for (let i = 0; s.tables.hostedProjects.get('project').removal === 'deleting'; i++) {
           assert.ok(i < 250);
+          settleR2Purge(s.tables.hostedProjects.get('project'));
           await lifecycle.purge._handler(s.ctx, { projectId: 'project' });
         }
       }

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import test from 'node:test';
+import { storedBytes } from './default-r2.mjs';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -62,7 +63,7 @@ test('browser creation publishes an empty retained State, initialized indexed Wo
   assert.deepEqual(snapshot.data.lanes, []);
   assert.deepEqual(snapshot.data.intents, []);
   const row = [...s.tables.projectObjects.values()].find(row => row.digest === snapshot.manifest.head);
-  const source = JSON.parse(await s.files.get(row.storageId).blob.text());
+  const source = JSON.parse((await storedBytes(s, row)).toString());
   assert.deepEqual(source.files, []);
   assert.deepEqual(source.parents, []);
   const generation = s.tables.projectWorkGenerations.get(project.work.generationId);
@@ -151,7 +152,7 @@ test('publication validates all immutable bytes and rolls back a corrupt bootstr
   assert.equal(s.tables.projectObjects.size, 0);
 });
 
-test('a second prepared publisher reconciles the winner and removes only its unused bytes', async () => {
+test('a second prepared publisher reconciles the winner and reuses its content-addressed R2 bytes', async () => {
   const s = setup(),
     args = input(),
     run = s.ctx.runMutation;
@@ -165,8 +166,8 @@ test('a second prepared publisher reconciles the winner and removes only its unu
   };
   const id = await s.create(args);
   assert.equal(s.tables.hostedProjects.size, 1);
-  assert.equal(s.files.size, 3);
-  assert.equal(s.deleted.length, 3);
+  assert.equal(s.files.size, 0, 'no Convex bytes');
+  assert.equal(s.deleted.length, 0, 'both publishers wrote the same R2 keys');
   assert.equal(await s.create(args), id);
 });
 
@@ -237,7 +238,7 @@ test('fresh hosted main checks out zero file blobs with a valid receipt and repl
     downloadToFile: async (pin, path) => {
       downloaded.push(pin.sha256);
       const row = [...s.tables.projectObjects.values()].find(row => row.digest === pin.sha256);
-      writeFileSync(path, Buffer.from(await s.files.get(row.storageId).blob.arrayBuffer()));
+      writeFileSync(path, await storedBytes(s, row));
     },
   };
   const directory = mkdtempSync(join(tmpdir(), 'forge-empty-main-'));

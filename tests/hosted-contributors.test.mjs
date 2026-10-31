@@ -26,6 +26,7 @@ for (const name of [
   'projectProposals',
   'projectObjects',
   'projectObjectDownloads',
+  'projectObjectCommit',
   'projectProposalObjects',
   'projectExchangeActions',
   'projectExchange',
@@ -659,14 +660,12 @@ test('email contributor lookup is exact, owner-bound and preserves the existing 
 test('new contributor proposals transfer objects, preserve old archives, pull directly for native import and recheck access', async t => {
   const s = await setup(t),
     c = await candidate(t, s);
-  // This exercises legacy Convex POST/complete; the next test covers R2 proposals.
-  process.env.FORGE_BLOBS = 'convex';
   const { uploadArchiveObjects } = await import(moduleUrl('../web/src/archive-object-upload.ts'));
   const { ConvexExchange } = await import('../dist/exchange-client.js');
   const { pullNativeExchange } = await import('../dist/native-exchange.js');
   const { NativeSource } = await import('../dist/native-source.js');
   const nativeFetch = globalThis.fetch;
-  s.ctx.storage.generateUploadUrl = async () => 'https://fixture.invalid/object-upload';
+  s.ctx.storage.generateUploadUrl = () => assert.fail('proposal objects upload to R2 only');
   let posts = 0;
   globalThis.fetch = async (url, init) => {
     if (String(url).startsWith('https://fixture.convex.cloud/api/')) {
@@ -675,18 +674,16 @@ test('new contributor proposals transfer objects, preserve old archives, pull di
       const value = await modules[name][method]._handler(s.ctx, jsonToConvex(request.args[0]));
       return Response.json({ status: 'success', value: convexToJson(value) });
     }
-    if (url !== 'https://fixture.invalid/object-upload') return nativeFetch(url, init);
-    posts++;
-    assert.match(init.headers['Content-Type'], /^application\/x-forge-object-/);
-    const storageId = await s.ctx.storage.store(
-      new Blob([init.body], { type: init.headers['Content-Type'] }),
-    );
-    return Response.json({ storageId });
+    if (init?.method === 'PUT') posts++;
+    return nativeFetch(url, init);
   };
   t.after(() => {
     globalThis.fetch = nativeFetch;
   });
-  const client = { mutation: (ref, args) => s.ctx.runMutation(ref, args) };
+  const client = {
+    mutation: (ref, args) => s.ctx.runMutation(ref, args),
+    action: (ref, args) => s.ctx.runAction(ref, args),
+  };
   const pin = await uploadArchiveObjects(client, 'project', new File([c.bytes], 'proposal.tar.gz'));
   assert.notEqual(pin.digest, c.input.digest, 'source manifest, not compressed transport bytes');
   const input = { ...c.input, ...pin };
@@ -732,7 +729,7 @@ test('new contributor proposals transfer objects, preserve old archives, pull di
   transport.client = {
     action: (ref, args) => s.ctx.runAction(ref, args),
     query: (ref, args) => s.ctx.runQuery(ref, args),
-    mutation: async () => [], // no R2 objects
+    mutation: (ref, args) => s.ctx.runMutation(ref, args),
   };
   const target = join(s.dir, 'object-proposal');
   await pullNativeExchange(row._id, target, transport, { exportOnly: true });

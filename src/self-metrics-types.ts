@@ -70,6 +70,8 @@ export type MetricRecords = {
   surfaceGaps?: string[];
   observations?: MetricObservation[];
   diskSamples?: DiskSample[];
+  /** Convex file-storage writes in the window (hosted); bytes belong in R2. */
+  placement?: import('./self-metrics-placement.js').ConvexBytesWritten;
   moves: MetricMove[];
   submissions: MetricSubmission[];
   runs: MetricRun[];

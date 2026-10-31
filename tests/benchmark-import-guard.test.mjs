@@ -6,6 +6,7 @@ import { moduleUrl } from './convex-module.mjs';
 import { state } from './hosted-fixture.mjs';
 import { ImportBenchmarkMonitor } from '../scripts/benchmark-import-monitor.mjs';
 import { importBenchmarkGuard, benchmarkLogStream } from '../scripts/benchmark-import-guard.mjs';
+import { settleR2Purge } from './default-r2.mjs';
 const benchmark = await import(moduleUrl('../convex/projectBenchmark.ts'));
 const lifecycle = await import(moduleUrl('../convex/projectLifecycle.ts'));
 const imports = await import(moduleUrl('../convex/projectGithubImportStore.ts'));
@@ -250,10 +251,12 @@ test('synthetic runaway reaches 5000 including failures, cancels running/pending
     assert(page < 100, 'ordinary deletion converges');
     const task = s.scheduled.find(
       entry =>
-        getFunctionName(entry.fn) === 'projectLifecycle:purge' &&
-        s.tasks.get(entry.id).state.kind === 'pending',
+        ['projectLifecycle:purge', 'projectR2Maintenance:purgeDeletedProjectPage'].includes(
+          getFunctionName(entry.fn),
+        ) && s.tasks.get(entry.id).state.kind === 'pending',
     );
     assert(task, 'deletion retains its scheduled continuation');
+    settleR2Purge(s.tables.hostedProjects.get('project'));
     await lifecycle.purge._handler(s.ctx, { projectId: 'project' });
     s.tasks.set(task.id, { state: { kind: 'success' } });
   }

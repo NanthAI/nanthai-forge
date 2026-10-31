@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { getFunctionName } from 'convex/server';
-import { setup, client } from './r2-harness.mjs';
+import { setup, client, legacyObject } from './r2-harness.mjs';
 import { modules } from './project-exchange-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { ObjectDownloadReader } from '../dist/blob-download.js';
@@ -27,11 +27,11 @@ function browser(s) {
     },
   };
 }
+/** r2 = false seeds a legacy Convex copy, written before R2 was the only path. */
 async function upload(s, bytes, r2 = true) {
-  if (r2) process.env.FORGE_BLOBS = 'r2';
-  else delete process.env.FORGE_BLOBS;
   const value = Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes);
-  await client(s).uploadBatch([{ pin: pin(value), bytes: value }]);
+  if (r2) await client(s).uploadBatch([{ pin: pin(value), bytes: value }]);
+  else await legacyObject(s, value);
   return pin(value);
 }
 async function sourceFixture(t, locations = [true, false]) {

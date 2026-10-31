@@ -20,6 +20,8 @@ async function hmac(key: ArrayBuffer | string, data: string): Promise<ArrayBuffe
 export type PresignInput = {
   method: 'GET' | 'PUT' | 'POST' | 'HEAD' | 'DELETE';
   host: string;
+  /** `http` only for an operator's loopback S3-compatible endpoint (R2_ENDPOINT). */
+  scheme?: 'https' | 'http';
   path: string;
   accessKeyId: string;
   secretAccessKey: string;
@@ -36,6 +38,7 @@ export type PresignInput = {
 export async function presign({
   method,
   host,
+  scheme = 'https',
   path,
   accessKeyId,
   secretAccessKey,
@@ -81,5 +84,5 @@ export async function presign({
   let key = await hmac('AWS4' + secretAccessKey, day);
   for (const part of [region, service, 'aws4_request']) key = await hmac(key, part);
   const signature = hex(await hmac(key, toSign));
-  return `https://${host}${canonicalPath}?${canonicalQuery}&X-Amz-Signature=${signature}`;
+  return `${scheme}://${host}${canonicalPath}?${canonicalQuery}&X-Amz-Signature=${signature}`;
 }

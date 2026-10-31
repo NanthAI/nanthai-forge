@@ -6,6 +6,7 @@ import { pagedFixture } from './github-import-pages-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { tarEntries } from '../dist/github-tar.js';
 import { readObjectRecipe } from '../dist/object-chunks.js';
+import { storedBytes } from './default-r2.mjs';
 const schema = (await import(moduleUrl('../convex/schema.ts'))).default;
 const agent = await import(moduleUrl('../convex/projectHostedAgent.ts'));
 const channels = await import(moduleUrl('../convex/projectHostedChannels.ts'));
@@ -96,6 +97,7 @@ function serve(t, repo, counts) {
   const old = globalThis.fetch;
   t.after(() => (globalThis.fetch = old));
   globalThis.fetch = async (url, options = {}) => {
+    if (new URL(url).hostname.endsWith('.r2.cloudflarestorage.com')) return old(url, options);
     const u = new URL(url),
       path = u.pathname;
     const count = name => (counts[name] = (counts[name] ?? 0) + 1);
@@ -185,7 +187,7 @@ test('a 28,905-file tree imports through one archive stream within an O(pages) b
   assert.equal(main.head, backup.preview.head);
   const object = digest =>
     [...s.tables.projectObjects.values()].find(r => r.projectId === project._id && r.digest === digest);
-  const read = async pin => Buffer.from(await s.files.get(object(pin.sha256).storageId).blob.arrayBuffer());
+  const read = pin => storedBytes(s, object(pin.sha256));
   const row = object(main.head),
     chunks = [];
   if (row.recipe)

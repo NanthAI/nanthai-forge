@@ -43,7 +43,6 @@ export async function migratedWork(
             backup.digest,
             () => _ctx.runQuery(internal.projectBackups.get, { id: backup._id, owner }),
             true,
-            project.r2Writes ?? false,
           )
         ).manifest;
   const root = workRecordRootSchema.parse(JSON.parse(bytes!.toString('utf8')));

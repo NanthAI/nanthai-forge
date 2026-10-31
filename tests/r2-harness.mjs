@@ -8,16 +8,23 @@ import { startFakeR2, fakeR2Config } from './fake-r2.mjs';
 import { digest } from '../dist/hash.js';
 import { ConvexExchange } from '../dist/exchange-client.js';
 
-const envNames = ['FORGE_BLOBS', 'R2_ACCOUNT_ID', 'R2_BUCKET', 'R2_ACCESS_KEY_ID', 'R2_SECRET_ACCESS_KEY'];
+const envNames = [
+  'CONVEX_CLOUD_URL',
+  'R2_ACCOUNT_ID',
+  'R2_BUCKET',
+  'R2_ACCESS_KEY_ID',
+  'R2_SECRET_ACCESS_KEY',
+];
 export const pinOf = text => ({ digest: digest(text), size: Buffer.byteLength(text) });
 
-/** A Convex fixture with the R2 flag, credentials and the project opt-in set, plus a fake R2. */
-export async function setup(t, { flag = 'r2', optIn = true, credentials = true } = {}) {
+/** A Convex cloud deployment fixture (bytes always go to R2) with R2 credentials, plus a fake R2.
+ * `optIn` only sets the retired per-project flag on the row; placement ignores it. */
+export async function setup(t, { optIn = true, credentials = true } = {}) {
   const saved = Object.fromEntries(envNames.map(name => [name, process.env[name]])),
     fake = await startFakeR2(),
     restore = fake.install(),
     s = fixture();
-  // Convex-stored objects (R2 off, or written before it was on) upload to the fixture's upload URL.
+  // Legacy Convex-stored objects (written before R2 was the only path) upload to the fixture's upload URL.
   const r2Fetch = globalThis.fetch;
   globalThis.fetch = async (url, init) => {
     if (url !== 'https://fixture.invalid/upload') return r2Fetch(url, init);
@@ -26,8 +33,7 @@ export async function setup(t, { flag = 'r2', optIn = true, credentials = true }
     );
     return Response.json({ storageId });
   };
-  if (flag) process.env.FORGE_BLOBS = flag;
-  else delete process.env.FORGE_BLOBS;
+  process.env.CONVEX_CLOUD_URL = 'https://example.convex.cloud';
   const env = {
     R2_ACCOUNT_ID: fakeR2Config.accountId,
     R2_BUCKET: fakeR2Config.bucket,
@@ -48,6 +54,21 @@ export async function setup(t, { flag = 'r2', optIn = true, credentials = true }
   });
   return { s, fake };
 }
+/** A reservation made before R2 was the only byte path: no placement, no bytes yet. */
+export function pendingConvexRow(s, text, projectId = 'project') {
+  const pin = pinOf(text),
+    id = `pending-${pin.digest.slice(0, 12)}`;
+  s.tables.projectObjects.set(id, {
+    _id: id,
+    _creationTime: Date.now(),
+    projectId,
+    ...pin,
+    nonce: randomUUID(),
+    removed: false,
+  });
+  return id;
+}
+export { legacyObject } from './project-exchange-fixture.mjs';
 export function client(s) {
   const exchange = new ConvexExchange(
       'https://example.convex.cloud',

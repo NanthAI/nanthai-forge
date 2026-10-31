@@ -336,6 +336,7 @@ for (const { files, gitlinks = false } of [
       calls = [],
       authCalls = [];
     globalThis.fetch = async (url, init) => {
+      if (new URL(url).hostname.endsWith('.r2.cloudflarestorage.com')) return previousFetch(url, init);
       if (url.endsWith('/installation')) {
         authCalls.push(url);
         return new Response(JSON.stringify({ id: 42 }));

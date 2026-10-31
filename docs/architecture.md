@@ -151,22 +151,19 @@ Freshness comes from rereading source, never from timestamps. Re-indexing captur
 
 **Native objects.** `NativeSource.put` hashes each file and stores it once under `.forge/work/objects`. A State is a manifest of paths, blob hashes, modes and parent States. A changed file is stored whole. Capture reports which paths were excluded and why. Retained files and their directory prefixes are indexed once per capture, preserving tracked files through ignore rules. Native ancestry queries stop at a verified match and share verified parent information only within one operation; full history traversal remains available for merge bases and exports. State manifests and their on-disk format are unchanged. `src/state-git.ts` converts a State to Git blobs and trees in-process and back to its exact manifest bytes, keeping the SHA-256 State identity; it reports a manifest it cannot reproduce instead of converting it. `src/state-git-catalog.ts` stores a converted save through the `ObjectStore` interface as at most one Git pack v2 of new trees (`src/state-git-pack.ts`: deflated, no deltas) and one catalog page holding the record and Git-to-SHA-256 blob aliases; a page chains at most 16 packs back to a snapshot that holds every tree, so a reader rebuilds and verifies the exact manifest without downloading file bytes. No production path uses either yet.
 
-**Hosted blob access.** Convex functions access file storage through `BlobStore` (`convex/blobStore.ts`); CLI exchange uses `ExchangeBlobs` (`src/exchange-blobs.ts`). Project objects dispatch on each row's `location`, with `r2Key` and a verified commit for R2. Server-built indexed artifacts and import cursors use opaque `r2blob:` references to `artifactBlobs` metadata, alongside legacy Convex storage IDs. Deployment R2 mode controls new project-object placement, including projects without the legacy per-project opt-in. R2 artifact writes reserve immutable pins before create-only checksum-bound PUTs and commit after HEAD verification. Readers keep dual-location support and verify downloaded bytes. See the [R2 storage plan](r2-storage-plan.md) for remaining compatibility paths.
+**Hosted blob access.** Bytes go to R2; Convex holds records ([data placement](data-placement.md) lists every table and byte store). Every deployment (self-host included) and every project writes R2, with no opt-in, flag or Convex byte mode; missing R2 settings fail with `R2_NOT_CONFIGURED`. Nothing writes Convex file storage, and `tests/hot-storage-invariant.test.mjs` fails verify on any write, and on any read, storage handle or `_storage` field outside its dated allowlist. Convex functions read bytes through `BlobStore` (`convex/blobStore.ts`); CLI exchange uses `ExchangeBlobs` (`src/exchange-blobs.ts`). Project objects dispatch on each row's `location`, with `r2Key` and a verified commit for R2. Server-built indexed artifacts and import cursors use opaque `r2blob:` references to `artifactBlobs` metadata. R2 writes reserve immutable pins before create-only checksum-bound PUTs and commit after HEAD verification. Readers still read legacy Convex storage IDs until cleanup and verify downloaded bytes.
 
-Indexed imports and binary derivatives default to R2 independently of the old
-opt-in flags. Native self-host instances can explicitly select `FORGE_BLOBS=convex`
-to keep those artifacts in native file-inclusive snapshots. Derivative reservations
-retain their storage mode in the upload type so unknown upload replies reconcile
-through their original storage path. Existing R2 references always retain R2 reads.
+Indexed imports and binary derivatives go to R2. Legacy derivative reservations
+made before that still reconcile through Convex storage. Existing R2 references always retain R2 reads.
 
 The fixed Convex source provider writes output bytes and durable cursor/fanout
-progress directly to R2 when `FORGE_BLOBS=r2`. Checksum-bound create-only PUTs
+progress directly to R2. Checksum-bound create-only PUTs
 and HEAD checks precede existing batched output publication; there is no new
 per-object Convex RPC. Cursor and task data use project-bound `r2source:`
 references carrying their exact digest and size, alongside existing Convex IDs.
 These internal progress references address immutable project object keys directly;
 the owning step/task rows retain them. R2 placement takes precedence over any
-retained Convex fallback copy. Turning off new R2 writes preserves R2 reads.
+retained legacy Convex copy.
 
 Hosted check selection/recipe objects, browser bootstrap objects, Work detail
 objects and mirror continuations use the same checksum-verified R2 source seam.

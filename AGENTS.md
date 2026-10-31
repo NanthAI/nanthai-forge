@@ -93,6 +93,7 @@ pins and `content` with `encoding:"utf8"` or `"base64"`.
 - Trace the current code before changing it. Make the smallest complete change.
 - Test behavior, including failure paths; authorization and network changes need negative tests.
 - Forge stands alone: no dependency on Edge accounts, deployments or runtimes.
+- Bytes go to R2; Convex holds records, read and written O(pages). See [data placement](docs/data-placement.md).
 
 ## Docs
 

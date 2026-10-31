@@ -11,7 +11,6 @@ import { githubHostedProject } from '../src/hosted-github-bootstrap';
 import { HOSTED_WORK_INDEX_FORMAT } from '../src/work-hosted-summary';
 import { isStored } from './projectObjectFields';
 import { invariant } from '../src/errors';
-import { r2Enabled } from './r2';
 import { initialImportProgress, initialArchiveCursor } from '../src/github-import-pages';
 import { completion, recipePin, completeObjects } from './projectGithubImportBatch';
 import { retain, inventoryEntry } from './projectGithubImportInventory';
@@ -87,7 +86,6 @@ export const begin = internalMutation({
     );
     await ctx.db.patch(project._id, {
       hostingRequest: input.request,
-      ...(input.rootTree ? { r2Writes: r2Enabled() } : {}),
     });
     const id = await ctx.db.insert('projectGithubImports', {
       visibility: input.visibility,

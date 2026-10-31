@@ -117,7 +117,6 @@ export async function readSource(
         return Buffer.byteLength(value) <= 64_000 ? value : new Blob([value], { type: 'application/json' });
       },
       () => currentAccess(ctx, id, user?.subject),
-      job.r2Writes ?? false,
     );
     invariant(stored, 'INVALID_ARTIFACT', 'Stored source is unavailable.');
     const cached = JSON.parse(Buffer.from(await derivedBytes(ctx, stored)).toString('utf8'));

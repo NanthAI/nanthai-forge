@@ -21,7 +21,6 @@ export interface BlobReader {
   getMetadata(id: BlobId): Promise<BlobMetadata | null>;
 }
 export interface BlobWriter extends BlobReader {
-  generateUploadUrl(): Promise<string>;
   delete(id: BlobId): Promise<void>;
 }
 export interface BlobStore extends BlobWriter {
@@ -37,7 +36,7 @@ export function blobStore(ctx: { storage: StorageActionWriter }): BlobStore;
 export function blobStore(ctx: { storage: StorageWriter }): BlobWriter;
 export function blobStore(ctx: { storage: StorageReader }): BlobReader;
 export function blobStore(ctx: Context): BlobStore {
-  const s = () => ctx.storage as StorageActionWriter;
+  const storage = ctx.storage as StorageActionWriter;
   const row = async (ref: string): Promise<Doc<'artifactBlobs'> | null> => {
     invariant(ctx.runQuery, 'INVALID_ARTIFACT', 'Artifact bytes require an action.');
     const value = await ctx.runQuery(internal.artifactStorage.get, { ref });
@@ -45,7 +44,7 @@ export function blobStore(ctx: Context): BlobStore {
   };
   return {
     get: async id => {
-      if (!artifactBlobId(id)) return s().get(id);
+      if (!artifactBlobId(id)) return storage.get(id);
       const value = await row(id);
       if (!value) return null;
       const response = await exchangeFetch(
@@ -63,8 +62,7 @@ export function blobStore(ctx: Context): BlobStore {
       return new Blob([bytes], { type: value.contentType });
     },
     store: async (blob, options) => {
-      if (!options?.r2Namespace)
-        return s().store(blob, options?.sha256 ? { sha256: options.sha256 } : undefined);
+      invariant(options?.r2Namespace, 'R2_REQUIRED', 'Artifact bytes need an R2 namespace.');
       invariant(ctx.runMutation && ctx.runAction, 'INVALID_ARTIFACT', 'Artifact uploads require an action.');
       const bytes = new Uint8Array(await blob.arrayBuffer());
       const value: Doc<'artifactBlobs'> = await ctx.runMutation(internal.artifactStorage.reserve, {
@@ -91,7 +89,7 @@ export function blobStore(ctx: Context): BlobStore {
       return ref;
     },
     delete: async id => {
-      if (!artifactBlobId(id)) return s().delete(id);
+      if (!artifactBlobId(id)) return storage.delete(id);
       if (ctx.db && ctx.scheduler) {
         const value = await ctx.db.get(artifactBlobId(id)!);
         if (value && !value.removed) {
@@ -104,16 +102,15 @@ export function blobStore(ctx: Context): BlobStore {
       }
     },
     getUrl: async id => {
-      if (!artifactBlobId(id)) return s().getUrl(id);
+      if (!artifactBlobId(id)) return storage.getUrl(id);
       const value = await row(id);
       return value ? presignGet(r2Config(), value.r2Key) : null;
     },
     getMetadata: async id => {
-      if (!artifactBlobId(id)) return s().getMetadata(id);
+      if (!artifactBlobId(id)) return storage.getMetadata(id);
       if (ctx.db) return artifactMetadata({ db: ctx.db }, id);
       const value = await row(id);
       return value ? { size: value.size, sha256: value.digest, contentType: value.contentType } : null;
     },
-    generateUploadUrl: () => s().generateUploadUrl(),
   };
 }

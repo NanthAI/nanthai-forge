@@ -58,7 +58,7 @@ process.on('message', async message => {
         return spec ? new Blob([bytes(spec)]) : null;
       },
       store: async (blob, options) => {
-        if (process.env.FORGE_BLOBS === 'r2')
+        if (process.env.R2_ACCOUNT_ID)
           throw Error('Hot source worker called Convex storage.store in R2 mode');
         return rpc('store', { bytes: await convexStoreBlob(blob, options) });
       },

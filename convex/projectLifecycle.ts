@@ -460,13 +460,8 @@ export const purge = internalMutation({
       await schedule(ctx, (await ctx.db.get(projectId))!);
       return null;
     }
-    if (
-      (project.r2StorageUsed ||
-        project.r2BackfillRevision ||
-        project.r2Writes ||
-        process.env.FORGE_R2_MAINTENANCE === '1') &&
-      !project.r2PrefixPurged
-    ) {
+    // Every project writes R2, so every deletion purges its R2 prefix once.
+    if (!project.r2PrefixPurged) {
       await scheduleR2Purge(ctx, project);
       return null;
     }

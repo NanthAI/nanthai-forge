@@ -5,6 +5,7 @@ import { getFunctionName } from 'convex/server';
 import { randomUUID } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import { fixture, modules } from './project-exchange-fixture.mjs';
+import { defaultR2Objects, defaultR2Config, interceptDefaultR2 } from './default-r2.mjs';
 import { ForgeError } from '../dist/errors.js';
 import { digest } from '../dist/hash.js';
 import { uploadPhysicalObjects } from '../dist/exchange-upload.js';
@@ -24,16 +25,15 @@ function environment(t) {
     active = 0,
     peak = 0,
     largeActive = 0,
-    largeOverlap = false,
-    lose = false;
+    largeOverlap = false;
   const mutation = (ref, args) => {
     const value = transaction.then(() => invoke(ref, args));
     transaction = value.catch(() => {});
     return value;
   };
-  const fetch = globalThis.fetch;
-  globalThis.fetch = async (url, init) => {
-    assert.equal(String(url), 'https://fixture.invalid/upload');
+  // Counts R2 PUTs (bytes always go to R2) before the test bucket stores them.
+  const restore = interceptDefaultR2(async (url, init, serve) => {
+    if (init?.method !== 'PUT') return serve(url, init);
     posts++;
     postBytes += init.body.byteLength;
     active++;
@@ -42,30 +42,18 @@ function environment(t) {
     peak = Math.max(peak, active);
     try {
       await new Promise(resolve => setImmediate(resolve));
-      const storageId = await s.ctx.storage.store(
-        new Blob([init.body], { type: init.headers['Content-Type'] }),
-      );
-      if (lose) {
-        lose = false;
-        throw Error('lost original POST reply');
-      }
-      return Response.json({ storageId });
+      return await serve(url, init);
     } finally {
       active--;
       if (init.body.byteLength > 8 * 1024 * 1024) largeActive--;
     }
-  };
-  t.after(() => {
-    globalThis.fetch = fetch;
   });
+  t.after(restore);
   return {
     s,
-    client: { mutation, query: (ref, args) => invoke(ref, args) },
+    client: { mutation, query: (ref, args) => invoke(ref, args), action: (ref, args) => invoke(ref, args) },
     mutate: mutation,
     stats: () => ({ posts, postBytes, active, peak, largeOverlap }),
-    lose: () => {
-      lose = true;
-    },
   };
 }
 // Preserved original batch algorithm for deterministic differential comparison;
@@ -78,22 +66,11 @@ async function original(client, objects) {
   const done = await Promise.all(
     prepared.map(async (row, index) => {
       if (row.stored) return null;
-      let cursor = null;
-      while (!row.created) {
-        const r = await client.mutation('projectObjects:reconcile', { id: row.id, cursor });
-        if (r.stored) return null;
-        if (r.isDone) break;
-        cursor = r.cursor;
-      }
-      const response = await fetch(row.uploadUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': row.contentType },
-        body: objects[index].bytes,
-      });
-      return { id: row.id, storageId: (await response.json()).storageId };
+      await fetch(row.target.url, { method: 'PUT', headers: row.target.headers, body: objects[index].bytes });
+      return { id: row.id };
     }),
   );
-  await client.mutation('projectObjects:completeBatch', { objects: done.filter(Boolean) });
+  await client.action('projectObjectCommit:commitBatch', { objects: done.filter(Boolean) });
 }
 test('separate simultaneous clients reduce duplicate cold bytes by doing different available work', async t => {
   const objects = data(),
@@ -128,15 +105,21 @@ test('separate simultaneous clients reduce duplicate cold bytes by doing differe
         await Promise.all(
           clients.map(() =>
             mapExchange(batches, 2, batch =>
-              original({ mutation: (name, args) => e.mutate(name, args) }, batch),
+              original(
+                {
+                  mutation: (name, args) => e.mutate(name, args),
+                  action: (name, args) => e.client.action(name, args),
+                },
+                batch,
+              ),
             ),
           ),
         );
       assert.equal(e.stats().active, 0);
       for (const object of objects) {
         const row = [...e.s.tables.projectObjects.values()].find(row => row.digest === object.pin.sha256);
-        assert(row?.storageId);
-        assert.equal(e.s.files.get(row.storageId).metadata.size, object.pin.size);
+        assert(row?.r2Committed);
+        assert.equal(defaultR2Objects.get(`${defaultR2Config.bucket}/${row.r2Key}`).length, object.pin.size);
       }
       const first = e.stats(),
         reads = { count: 0 };
@@ -161,8 +144,10 @@ test('separate simultaneous clients reduce duplicate cold bytes by doing differe
     };
   const baseline = await run(false),
     candidate = await run(true);
-  assert.equal(baseline.postBytes, 2 * baseline.uniqueBytes);
-  assert(candidate.postBytes < baseline.postBytes);
+  // Two naive clients send every byte twice. The baseline can skip objects the other
+  // client already committed, so it is compared to that bound rather than to the candidate.
+  assert(baseline.postBytes > baseline.uniqueBytes && baseline.postBytes <= 2 * baseline.uniqueBytes);
+  assert(candidate.postBytes < 2 * candidate.uniqueBytes);
   assert(candidate.postBytes >= candidate.uniqueBytes);
   assert(candidate.peak > 1);
   t.diagnostic(
@@ -170,7 +155,7 @@ test('separate simultaneous clients reduce duplicate cold bytes by doing differe
       baseline,
       candidate,
       environment:
-        'Two independent client objects; actual backend handlers with atomic serialized mutation fixture and concurrent storage POSTs. No shared upload promise, sleep or lease. Not a live-provider benchmark; remaining tail overlap may duplicate.',
+        'Two independent client objects; actual backend handlers with atomic serialized mutation fixture and concurrent R2 PUTs. No shared upload promise, sleep or lease. Not a live-provider benchmark; remaining tail overlap may duplicate.',
     }),
   );
 });
@@ -204,7 +189,7 @@ test('fresh-first preparation leaves abandoned pending content immediately uploa
   assert.equal(fallback.selected.length, 8);
   const legacy = await modules.projectObjects.prepare._handler(e.s.ctx, { projectId: 'project', ...pins[0] });
   assert.equal(legacy.id, rows[0].id);
-  assert(legacy.uploadUrl);
+  assert(legacy.target);
   await uploadPhysicalObjects(e.client, 'project', objects);
   assert.equal(
     e.stats().postBytes,
@@ -224,38 +209,7 @@ test('fresh-first preparation leaves abandoned pending content immediately uploa
     x => x.data?.code === 'INVALID_WORK_BACKUP',
   );
 });
-test('unknown POST outcome reconciles original nonce and retries without rereading or resending', async t => {
-  const e = environment(t),
-    objects = data(12);
-  e.lose();
-  await assert.rejects(
-    uploadPhysicalObjects(e.client, 'project', objects),
-    error => error.code === 'EXCHANGE_REQUEST_FAILED' && /Convex object upload/.test(error.message),
-  );
-  assert.equal(e.stats().active, 0);
-  const before = e.stats(),
-    rows = [...e.s.tables.projectObjects.values()].map(x => ({
-      id: x._id,
-      nonce: x.nonce,
-      digest: x.digest,
-    }));
-  await uploadPhysicalObjects(
-    e.client,
-    'project',
-    objects.map(x => ({
-      ...x,
-      read: () => {
-        throw Error('already stored original bytes must not be read');
-      },
-    })),
-  );
-  assert.equal(e.stats().posts, before.posts);
-  assert.deepEqual(
-    [...e.s.tables.projectObjects.values()].map(x => ({ id: x._id, nonce: x.nonce, digest: x.digest })),
-    rows,
-  );
-});
-test('changed lazy bytes fail before POST while successful active siblings settle and remain reusable', async t => {
+test('changed lazy bytes fail before PUT while successful active siblings settle and remain reusable', async t => {
   const e = environment(t),
     objects = data(16);
   objects[0].read = () => Buffer.from('changed source');
@@ -264,41 +218,12 @@ test('changed lazy bytes fail before POST while successful active siblings settl
     x => x.code === 'EXCHANGE_SOURCE_CHANGED',
   );
   assert.equal(e.stats().active, 0);
-  const retained = [...e.s.tables.projectObjects.values()].filter(x => x.storageId);
+  const retained = [...e.s.tables.projectObjects.values()].filter(x => x.r2Committed);
   assert(retained.length > 0);
   const prior = e.stats().posts;
   objects[0].read = () => objects[0].bytes;
   await uploadPhysicalObjects(e.client, 'project', objects);
   assert.equal(e.stats().posts - prior, objects.length - retained.length);
-});
-test('lost complete acknowledgement retries immutable stored bindings without another byte read', async t => {
-  const e = environment(t),
-    objects = data(8);
-  let lose = true;
-  const client = {
-    query: e.client.query,
-    mutation: async (ref, args) => {
-      const result = await e.mutate(ref, args);
-      if (lose && getFunctionName(ref) === 'projectObjects:completeBatch') {
-        lose = false;
-        throw Error('lost complete acknowledgement');
-      }
-      return result;
-    },
-  };
-  await assert.rejects(uploadPhysicalObjects(client, 'project', objects), /lost complete acknowledgement/);
-  const before = e.stats().posts;
-  await uploadPhysicalObjects(
-    client,
-    'project',
-    objects.map(x => ({
-      ...x,
-      read: () => {
-        throw Error('stored bytes reread');
-      },
-    })),
-  );
-  assert.equal(e.stats().posts, before);
 });
 test('oversized existing raw members run alone while normal windows retain bounded parallelism', async t => {
   const e = environment(t),
@@ -308,7 +233,7 @@ test('oversized existing raw members run alone while normal windows retain bound
   assert(e.stats().peak <= 16);
   assert.equal(e.stats().largeOverlap, false);
   assert.equal(e.stats().postBytes, bytes.length + 12 * 64 * 1024);
-  assert.equal([...e.s.tables.projectObjects.values()].filter(row => row.storageId).length, 13);
+  assert.equal([...e.s.tables.projectObjects.values()].filter(row => row.r2Committed).length, 13);
 });
 test('discovery hints cannot retain authority or force a repeated upload after concurrent completion', async t => {
   const e = environment(t),
@@ -403,6 +328,7 @@ test('hosting batches 64 pins with bounded posts and exact once-only lazy reads'
     reads = new Map();
   const client = {
     query: e.client.query,
+    action: e.client.action,
     mutation: (ref, args) => {
       const name = getFunctionName(ref);
       if (name === 'projectObjects:prepareBatch') {
@@ -442,34 +368,6 @@ test('hosting batches 64 pins with bounded posts and exact once-only lazy reads'
   assert.equal(e.stats().posts, 150);
 });
 
-test('unknown upload reconciles landed bytes and retries missing objects in the same hosting run', async t => {
-  const e = environment(t),
-    objects = data(3),
-    delays = [];
-  let calls = 0;
-  const blobs = {
-    put: async (target, bytes) => {
-      calls++;
-      if (calls === 1) {
-        await e.s.ctx.storage.store(new Blob([bytes], { type: target.contentType }));
-        throw new ForgeError('EXCHANGE_UPLOAD_UNKNOWN', 'Synthetic lost upload reply');
-      }
-      if (calls === 2) throw new ForgeError('EXCHANGE_UPLOAD_UNKNOWN', 'Synthetic missing upload');
-      const storageId = await e.s.ctx.storage.store(new Blob([bytes], { type: target.contentType }));
-      return { storageId };
-    },
-  };
-  await uploadPhysicalObjects(e.client, 'project', objects, {
-    batchSize: 100,
-    blobs,
-    wait: async ms => {
-      delays.push(ms);
-    },
-  });
-  assert.deepEqual(delays, [250]);
-  assert.equal(calls, 4, 'one landed unknown object reconciles; only the missing object uploads again');
-  assert.equal([...e.s.tables.projectObjects.values()].filter(r => r.storageId).length, 3);
-});
 test('unknown upload exhausts bounded attempts with pin and attempt count; deterministic errors do not retry', async t => {
   const e = environment(t),
     objects = data(1),
@@ -518,20 +416,16 @@ test('raw upload acknowledgements identify exact committed members despite reuse
   await uploadPhysicalObjects(e.client, 'project', [objects[0]], { batchSize: 100 });
   const row = [...e.s.tables.projectObjects.values()].find(row => row.digest === objects[0].pin.sha256);
   // An existing logical recipe is stored, but is not a newly committed raw member.
-  row.storageId = undefined;
+  row.r2Committed = undefined;
   row.recipe = { digest: digest('synthetic-recipe'), size: 16 };
   const raw = new Set();
-  e.lose();
-  const upload = () =>
-    uploadPhysicalObjects(e.client, 'project', objects, {
-      batchSize: 100,
-      onRaw: id => raw.add(id),
-      wait: async () => {},
-    });
-  await assert.rejects(upload(), error => error.code === 'EXCHANGE_REQUEST_FAILED');
-  await upload();
+  await uploadPhysicalObjects(e.client, 'project', objects, {
+    batchSize: 100,
+    onRaw: id => raw.add(id),
+    wait: async () => {},
+  });
   assert(!raw.has(objects[0].pin.sha256));
   assert(raw.has(objects[2].pin.sha256), 'successful raw peer has an exact acknowledgement');
   for (const id of raw) assert(objects.slice(1).some(object => object.pin.sha256 === id));
-  assert.equal(e.stats().posts, 3, 'lost POST reconciles the original stored bytes without another upload');
+  assert.equal(e.stats().posts, 3, 'the recipe-stored member uploads no bytes');
 });

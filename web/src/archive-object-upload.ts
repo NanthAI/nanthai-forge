@@ -22,7 +22,8 @@ export async function uploadArchiveObjects(
       size = bytes.length;
     if (!uploaded.has(digest)) {
       const prepared = await client.mutation(api.projectObjects.prepare, { projectId, digest, size });
-      if (!prepared.stored && prepared.target) {
+      if (!prepared.stored) {
+        if (!prepared.target) throw new Error('The original content upload is unavailable.');
         // The browser supplies Content-Length from the Blob; JavaScript cannot set it.
         const headers = Object.fromEntries(
           Object.entries(prepared.target.headers).filter(([name]) => name.toLowerCase() !== 'content-length'),
@@ -32,21 +33,6 @@ export async function uploadArchiveObjects(
           throw new Error(`Content upload returned HTTP ${response.status}.`);
         // A create-only retry may find existing bytes; HEAD still verifies their exact pins.
         await client.action(api.projectObjectCommit.commitBatch, { objects: [{ id: prepared.id }] });
-      } else if (!prepared.stored) {
-        const observed = prepared.created
-          ? undefined
-          : await client.mutation(api.projectObjects.reconcile, { id: prepared.id, cursor: null });
-        if (!observed?.stored) {
-          if (!prepared.uploadUrl) throw new Error('The original content upload is unavailable.');
-          const response = await fetch(prepared.uploadUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': prepared.contentType },
-            body: blob,
-          });
-          if (!response.ok) throw new Error(`Content upload returned HTTP ${response.status}.`);
-          const { storageId } = (await response.json()) as { storageId: Id<'_storage'> };
-          await client.mutation(api.projectObjects.complete, { id: prepared.id, storageId });
-        }
       }
       uploaded.set(digest, size);
     }

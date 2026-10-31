@@ -14,7 +14,6 @@ const { storeProjectArtifact } = await import(moduleUrl('../convex/projectArtifa
 const { rawContent } = await import(moduleUrl('../convex/projectObjectContent.ts'));
 const indexer = await import(moduleUrl('../convex/indexer.ts'));
 const remote = await import(moduleUrl('../convex/remote.ts'));
-const importStorage = await import(moduleUrl('../convex/importStorage.ts'));
 const { derivedArtifact, derivedBytes } = await import(moduleUrl('../convex/derivedArtifactActions.ts'));
 const { default: worker } = await import(moduleUrl('../netlify/functions/analyze-background.mts'));
 const artifactStorage = await import(moduleUrl('../convex/artifactStorage.ts'));
@@ -69,21 +68,20 @@ function indexed(s, optIn = true) {
   });
 }
 
-test('server-built project artifacts use deployment R2 mode and retain dual reads', async t => {
-  for (const options of [{}, { flag: '' }, { optIn: false }]) {
+test('server-built project artifacts go to R2 with or without the retired opt-in', async t => {
+  for (const options of [{}, { optIn: false }]) {
     await t.test(JSON.stringify(options), async t => {
       const { s, fake } = await setup(t, options),
         bytes = Buffer.from('project artifact');
-      const r2 = options.flag !== '';
-      if (r2) noConvexWrites(s);
+      noConvexWrites(s);
       await storeProjectArtifact(s.ctx, 'project', 'owner', bytes);
       const [row] = s.tables.projectObjects.values();
-      assert.equal(row.location === 'r2', r2);
-      assert.equal(fake.objects.size, r2 ? 1 : 0);
+      assert.equal(row.location, 'r2');
+      assert.equal(fake.objects.size, 1);
       assert.deepEqual(await rawContent(s.ctx, row, { sha256: row.digest, size: row.size }), bytes);
       await storeProjectArtifact(s.ctx, 'project', 'owner', bytes);
       assert.equal(s.tables.projectObjects.size, 1);
-      assert.equal(r2 ? fake.objects.size : s.files.size, 1);
+      assert.equal(fake.objects.size, 1);
     });
   }
 });
@@ -133,7 +131,6 @@ test('indexed imports store R2 gzip, reconcile a lost publication reply, and rea
   await indexer.run._handler(s.ctx, { id: 'indexed', generation: 1 });
   assert.equal(fake.objects.size, count);
   assert.equal(fake.requests.filter(r => r.method === 'PUT').length, 1);
-  delete process.env.FORGE_BLOBS;
   assert.equal(
     (await decodeHostedArtifact(await blobStore(s.ctx).get(row.artifactKey))).content['a.ts'],
     text,
@@ -141,7 +138,7 @@ test('indexed imports store R2 gzip, reconcile a lost publication reply, and rea
 });
 
 test('indexed imports and binary derivatives use R2 without the old flag or per-import opt-in', async t => {
-  for (const options of [{ flag: '' }, { optIn: false }])
+  for (const options of [{}, { optIn: false }])
     await t.test(JSON.stringify(options), async t => {
       const { s, fake } = await setup(t, options);
       indexed(s, options.optIn !== false);
@@ -156,7 +153,6 @@ test('indexed imports and binary derivatives use R2 without the old flag or per-
         '',
         async () => new Blob(['derived']),
         async () => {},
-        options.optIn !== false,
       );
       assert.equal(Buffer.from(await derivedBytes(s.ctx, record)).toString(), 'derived');
       assert.equal(fake.objects.size, 2);
@@ -164,41 +160,14 @@ test('indexed imports and binary derivatives use R2 without the old flag or per-
     });
 });
 
-test('native imports and derivatives use file storage without R2 configuration', async t => {
-  const { s, fake } = await setup(t, { flag: 'convex', credentials: false });
-  indexed(s, false);
-  const text = github(t);
-  await indexer.run._handler(s.ctx, { id: 'indexed', generation: 1 });
-  const row = s.tables.imports.get('indexed');
-  assert.equal(row.phase, 'ready', row.error);
-  assert.doesNotMatch(row.artifactKey, /^r2blob:/);
-  assert.equal(
-    (await decodeHostedArtifact(await blobStore(s.ctx).get(row.artifactKey))).content['a.ts'],
-    text,
-  );
-  const record = await derivedArtifact(
-    s.ctx,
-    row.artifactKey,
-    'export',
-    '',
-    async () => new Blob(['native derivative']),
-    async () => {},
-  );
-  assert.doesNotMatch(record.uploadType, /derived-r2-/);
-  assert.equal(Buffer.from(await derivedBytes(s.ctx, record)).toString(), 'native derivative');
-  assert.equal(fake.requests.length, 0);
-  assert.equal(s.tables.artifactBlobs.size, 0);
-  assert.equal(s.files.size, 2);
-});
-
 test('hosted imports still fail explicitly when R2 is unconfigured', async t => {
-  const { s } = await setup(t, { flag: '', credentials: false });
+  const { s } = await setup(t, { credentials: false });
   indexed(s, false);
   github(t);
   await indexer.run._handler(s.ctx, { id: 'indexed', generation: 1 });
   const row = s.tables.imports.get('indexed');
   assert.equal(row.phase, 'error');
-  assert.match(row.error, /Object storage is enabled but R2_ACCOUNT_ID/);
+  assert.match(row.error, /Object storage needs R2_ACCOUNT_ID/);
   assert.equal(s.files.size, 0);
 });
 
@@ -310,17 +279,9 @@ test('explicit R2 cleanup deletes only its artifact and a late commit cannot rev
   assert.equal(fake.objects.size, 1);
 });
 
-test('artifact commit checks size/checksum and import opt-in checks current ownership', async t => {
+test('artifact commit checks size and checksum', async t => {
   const { s, fake } = await setup(t);
   indexed(s, false);
-  s.caller('outsider');
-  await assert.rejects(
-    importStorage.setR2Writes._handler(s.ctx, { id: 'indexed', enabled: true }),
-    e => e.data?.code === 'IMPORT_UNAVAILABLE',
-  );
-  s.caller('owner');
-  await importStorage.setR2Writes._handler(s.ctx, { id: 'indexed', enabled: true });
-  assert.equal(s.tables.imports.get('indexed').r2Writes, true);
   const pin = pinOf('expected');
   const row = await artifactStorage.reserve._handler(s.ctx, {
     namespace: 'v1/i/indexed/g/9',

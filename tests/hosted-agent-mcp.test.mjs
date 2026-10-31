@@ -290,6 +290,8 @@ test('MCP hosted metrics uses eight finite metadata streams, one bill page and i
       billPages++;
       return JSON.stringify({ page: [], isDone: true, continueCursor: '' });
     }
+    if (getFunctionName(ref) === 'projectBytePlacement:convexWritten')
+      return { count: 0, bytes: 0, isDone: true, cursor: '' };
     if (getFunctionName(ref) !== 'projectSelfMetrics:page') return original(ref, args);
     checkArgs(api.page, args, 'metrics');
     pages++;

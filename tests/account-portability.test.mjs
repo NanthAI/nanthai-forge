@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { moduleUrl } from './convex-module.mjs';
 import { state, job, providers } from './hosted-fixture.mjs';
+import { settleR2Purge } from './default-r2.mjs';
 const account = await import(moduleUrl('../convex/accountActions.ts'));
 const plan = await import(moduleUrl('../convex/accountPlan.ts'));
 const teams = await import(moduleUrl('../convex/teams.ts'));
@@ -360,6 +361,7 @@ test('selected native project and SecretObject retain exact child receipts throu
   const { purge: projectPurge } = await import(moduleUrl('../convex/projectLifecycle.ts')),
     { purge: secretPurge } = await import(moduleUrl('../convex/secretLifecycle.ts'));
   for (let n = 0; n < 5; n++) {
+    settleR2Purge(f.tables.hostedProjects.get('project'));
     await projectPurge._handler(f.ctx, { projectId: 'project' });
     const deletion = [...f.tables.secretDeletions.values()][0];
     await secretPurge._handler(f.ctx, { deletionId: deletion._id });

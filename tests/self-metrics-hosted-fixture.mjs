@@ -4,7 +4,12 @@ import { moduleUrl } from './convex-module.mjs';
 import { checkArgs, checkDocument } from './convex-args.mjs';
 const api = await import(moduleUrl('../convex/projectSelfMetrics.ts'));
 const bills = await import(moduleUrl('../convex/projectSelfMetricBills.ts'));
-const handlers = { 'projectSelfMetrics:page': api.page, 'projectSelfMetricBills:page': bills.page };
+const placement = await import(moduleUrl('../convex/projectBytePlacement.ts'));
+const handlers = {
+  'projectSelfMetrics:page': api.page,
+  'projectSelfMetricBills:page': bills.page,
+  'projectBytePlacement:convexWritten': placement.convexWritten,
+};
 const schema = (await import(moduleUrl('../convex/schema.ts'))).default;
 export const period = { from: '2026-10-28T00:00:00.000Z', to: '2026-11-04T00:00:00.000Z' };
 export const seam = '2026-10-28T00:00:00.000Z';
@@ -46,6 +51,20 @@ export function fixture() {
   const ctx = {
     auth: { getUserIdentity: async () => (actor ? { subject: actor } : null) },
     db: {
+      // Convex file storage, newest first; nothing writes it, so it is empty.
+      system: {
+        query: table => {
+          assert.equal(table, '_storage');
+          return {
+            order: () => ({
+              paginate: async () => {
+                meter.documents++;
+                return { page: [], isDone: true, continueCursor: '' };
+              },
+            }),
+          };
+        },
+      },
       insert: async (table, row) => {
         meter.writes++;
         return put(table, row, new Date().toISOString())._id;

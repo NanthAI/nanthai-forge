@@ -318,7 +318,7 @@ const projectFields = {
   agentGuidance: v.optional(v.string()),
   exchangeCleanupCursor: v.optional(v.string()),
   exchangeCleanupDone: v.optional(v.boolean()),
-  /** Owner opt-in for new objects in R2 (also needs FORGE_BLOBS=r2). Default off. */
+  /** Retired opt-in; kept for existing rows. Placement no longer reads it: bytes always go to R2. */
   r2Writes: v.optional(v.boolean()),
   r2BackfillRevision: v.optional(v.number()),
   r2StorageUsed: v.optional(v.boolean()),

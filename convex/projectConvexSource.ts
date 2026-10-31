@@ -42,7 +42,7 @@ export function convexSourceTransport(
   const input = { projectId, jobId, step };
   const locations = new Map<string, ObjectLocation>(initial.map(row => [row.descriptor.object.sha256, row])),
     outputs: SourceOutput[] = [];
-  const storage = sourceStorage(ctx, projectId);
+  const durable = sourceStorage(ctx, projectId);
   const resolve = async (
     ids: string[],
     ancestry = false,
@@ -124,7 +124,7 @@ export function convexSourceTransport(
         'SOURCE_HASH_MISMATCH',
         'Source output changed.',
       );
-      const ref = await storage.store(bytes),
+      const ref = await durable.store(bytes),
         r2 = sourceR2Pin(ref);
       outputs.push({
         ...pin,
@@ -150,11 +150,11 @@ export const step = internalAction({
     if (!loaded) return null;
     const state = JSON.parse(loaded),
       { io, outputs } = convexSourceTransport(ctx, input, state.locations),
-      storage = sourceStorage(ctx, input.projectId);
+      durable = sourceStorage(ctx, input.projectId);
     let cursor: SourceStepCursor = initialSourceStep(state.input),
       progress: SourceProgress | null = null;
     if (state.cursor) {
-      const loaded = await loadSourceProgress(await storage.read(state.cursor), storage.read);
+      const loaded = await loadSourceProgress(await durable.read(state.cursor), durable.read);
       cursor = loaded.cursor;
       progress = loaded.value;
     }
@@ -170,7 +170,7 @@ export const step = internalAction({
         );
         invariant(!joined.failure, joined.failure ?? 'SOURCE_WORKER_FAILED', 'A bounded source step failed.');
         const results: SourceTaskProgress[] = [];
-        for (const ref of joined.outputs) if (ref) results.push(await loadTaskData(ref, storage.read));
+        for (const ref of joined.outputs) if (ref) results.push(await loadTaskData(ref, durable.read));
         applySourceFanout(cursor, joined, results, ref => enqueueSourceObject(cursor, ref));
       }
       result = await runSourceStep(cursor, io);
@@ -190,7 +190,7 @@ export const step = internalAction({
     const saved =
       result.cursor.phase === 'done'
         ? null
-        : (await saveSourceProgress(result.cursor, progress, storage.store)).id;
+        : (await saveSourceProgress(result.cursor, progress, durable.store)).id;
     if (fanout) {
       const plan = fanout as SourceFanout;
       // The saved cursor refers to States this step already uploaded; the step

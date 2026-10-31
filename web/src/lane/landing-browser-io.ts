@@ -75,28 +75,13 @@ export function landingBrowserIO(client: ConvexReactClient, projectId: Id<'hoste
         size: pin.size,
       });
       if (prepared.stored) return;
-      if (prepared.target) {
-        const headers = Object.fromEntries(
-          Object.entries(prepared.target.headers).filter(([name]) => name.toLowerCase() !== 'content-length'),
-        );
-        const response = await fetch(prepared.target.url, { method: 'PUT', headers, body: blob });
-        invariant(response.ok || response.status === 412, 'SOURCE_UNAVAILABLE', 'Metadata upload failed.');
-        await client.action(api.projectObjectCommit.commitBatch, { objects: [{ id: prepared.id }] });
-      } else {
-        const observed = prepared.created
-          ? null
-          : await client.mutation(api.projectObjects.reconcile, { id: prepared.id, cursor: null });
-        if (observed?.stored) return;
-        invariant(prepared.uploadUrl, 'SOURCE_UNAVAILABLE', 'Metadata upload is unavailable.');
-        const response = await fetch(prepared.uploadUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': prepared.contentType },
-          body: blob,
-        });
-        invariant(response.ok, 'SOURCE_UNAVAILABLE', 'Metadata upload failed.');
-        const result = await response.json();
-        await client.mutation(api.projectObjects.complete, { id: prepared.id, storageId: result.storageId });
-      }
+      invariant(prepared.target, 'SOURCE_UNAVAILABLE', 'Metadata upload is unavailable.');
+      const headers = Object.fromEntries(
+        Object.entries(prepared.target.headers).filter(([name]) => name.toLowerCase() !== 'content-length'),
+      );
+      const response = await fetch(prepared.target.url, { method: 'PUT', headers, body: blob });
+      invariant(response.ok || response.status === 412, 'SOURCE_UNAVAILABLE', 'Metadata upload failed.');
+      await client.action(api.projectObjectCommit.commitBatch, { objects: [{ id: prepared.id }] });
     },
   };
   return io;

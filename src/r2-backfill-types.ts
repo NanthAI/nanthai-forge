@@ -14,6 +14,7 @@ export type BackfillPage = {
   isDone: boolean;
   r2Writes: boolean;
   r2Revision: number;
+  retained?: { count: number; bytes: number };
 };
 export type BackfillCheck = {
   id: string;

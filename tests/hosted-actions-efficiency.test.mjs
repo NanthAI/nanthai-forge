@@ -20,7 +20,7 @@ const transfers = await import(moduleUrl('../convex/projectHostedActionsTransfer
 
 function environment(t) {
   const env = {
-    FORGE_BLOBS: 'r2',
+    CONVEX_CLOUD_URL: 'https://example.convex.cloud',
     R2_ACCOUNT_ID: 'synthetic',
     R2_BUCKET: 'synthetic',
     R2_ACCESS_KEY_ID: 'synthetic',

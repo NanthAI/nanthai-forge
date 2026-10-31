@@ -13,7 +13,7 @@ import {
 import { saveObjectSchema } from '../src/hosted-save';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { invariant } from '../src/errors';
-import { r2Config, r2Enabled, r2Key, presignGet, presignPut, headObject, checksumOf } from './r2';
+import { r2Config, r2Key, presignGet, presignPut, headObject, checksumOf } from './r2';
 import { blobStore } from './blobStore';
 import { isStored } from './projectObjectFields';
 
@@ -106,7 +106,7 @@ export const grant = internalMutation({
     if (object && isStored(object)) return { stored: true as const };
     const project = await ctx.db.get(input.projectId);
     invariant(
-      r2Enabled() && project,
+      project,
       'SOURCE_WORKER_UNAVAILABLE',
       'Hosted source output requires the configured project object-store path.',
     );

@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { modules } from './project-exchange-fixture.mjs';
 import { fakeR2Config } from './fake-r2.mjs';
-import { setup, client, pinOf } from './r2-harness.mjs';
+import { setup, client, pinOf, legacyObject } from './r2-harness.mjs';
 import { digest } from '../dist/hash.js';
 import { initNative } from '../dist/native-work.js';
 import { WorkStore } from '../dist/work-store.js';
@@ -27,14 +27,12 @@ const sign = (s, values, projectId = 'project') =>
 const code = expected => error => error.data?.code === expected || error.code === expected;
 const keyOf = (fake, text) => fake.key(`v1/p/project/o/${pinOf(text).digest}`);
 
-/** Convex-stored rows next to R2 rows in one project: some uploaded with R2 off, the rest with it on. */
+/** Legacy Convex-stored rows next to R2 rows in one project. */
 async function mixed(t) {
-  const harness = await setup(t, { flag: '' }),
+  const harness = await setup(t),
     { s } = harness,
     exchange = client(s);
-  await exchange.uploadBatch(content(['legacy-a', 'legacy-b']));
-  process.env.FORGE_BLOBS = 'r2';
-  s.tables.hostedProjects.get('project').r2Writes = true;
+  for (const text of ['legacy-a', 'legacy-b']) await legacyObject(s, Buffer.from(text));
   await exchange.uploadBatch(content(['modern-a', 'modern-b', 'modern-c']));
   return { ...harness, exchange };
 }
@@ -271,11 +269,10 @@ test('the fake serves Range reads with 206 and rejects an unsatisfiable range', 
   assert.equal((await fetch(url, { headers: { Range: 'bytes=40-' } })).status, 416);
 });
 
-test('committed r2 rows stay readable with FORGE_BLOBS unset, directly from the CLI', async t => {
+test('committed r2 rows stay readable directly from the CLI', async t => {
   const { s } = await setup(t),
     writer = client(s);
   await writer.uploadBatch(content(['stays readable']));
-  delete process.env.FORGE_BLOBS;
   assert.equal((await sign(s, ['stays readable'])).length, 1);
   assert.equal((await client(s).downloadBatch(pins(['stays readable'])))[0].toString(), 'stays readable');
   const rowsNow = await objects.resolve._handler(s.ctx, {
@@ -311,10 +308,9 @@ test('pending r2 rows are not readable until committed', async t => {
   );
 });
 
-test('flag off: signDownloads reads nothing for convex rows and needs no R2 settings', async t => {
-  const { s } = await setup(t, { flag: '', optIn: false, credentials: false }),
-    exchange = client(s);
-  await exchange.uploadBatch(content(['plain']));
+test('legacy Convex rows: signDownloads signs nothing and the bytes still read', async t => {
+  const { s } = await setup(t, { optIn: false });
+  await legacyObject(s, Buffer.from('plain'));
   assert.deepEqual(await sign(s, ['plain']), []);
   assert.equal((await client(s).downloadBatch(pins(['plain'])))[0].toString(), 'plain');
 });

@@ -9,7 +9,6 @@ import { internal } from './_generated/api';
 import { emptyHostedProject } from '../src/hosted-bootstrap';
 import { report } from './errors';
 import { invariant } from '../src/errors';
-import { r2Enabled } from './r2';
 import { storeSourceBytes } from './projectSourceBytes';
 
 export const create = action({
@@ -21,12 +20,10 @@ export const create = action({
       if (existing) return existing;
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'AUTH_REQUIRED', 'Sign in to create a project.');
-      const prepared = r2Enabled()
-        ? await ctx.runMutation(internal.projectBootstrapStore.prepare, input)
-        : null;
-      const at = prepared?.at ?? new Date().toISOString();
+      const prepared = await ctx.runMutation(internal.projectBootstrapStore.prepare, input);
+      const at = prepared.at;
       const bootstrap = emptyHostedProject(input.operationId, at);
-      const projectId = prepared?.projectId ?? null;
+      const projectId = prepared.projectId;
       const objects = [];
       for (const object of bootstrap.objects) {
         const nonce = randomUUID();
@@ -36,7 +33,6 @@ export const create = action({
           new TextEncoder().encode(object.text),
           object,
           true,
-          `application/x-forge-object-${nonce}`,
         );
         objects.push({ ...stored, nonce });
       }

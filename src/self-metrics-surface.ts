@@ -147,6 +147,7 @@ export function metricTotals(
             (e.type === 'full-result' || e.type === 'culprit') && Date.parse(e.at) <= Date.parse(period.to),
         ).length,
     ),
+    placement: wrap(result.placement, records.placement ? 1 : 0),
     disk: wrap(
       result.disk,
       (records.diskSamples ?? records.receipts.flatMap(r => (r.disk ? [r.disk] : []))).filter(
