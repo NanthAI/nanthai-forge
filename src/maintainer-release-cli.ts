@@ -9,7 +9,7 @@ export const RELEASE_HELP = `nforge release ROOT --command-file FILE
 nforge release ROOT --resume UUID [--reconcile OBSERVATION_FILE]
 nforge release ROOT --status UUID
 Explicit maintainer release: accepted main → export → build → dev backend → web → package → install → select CLI.
-FILE: {operationId,runtimeDirectory,configurationDirectory,cliPath,npmCli,reuseExport?}.
+FILE: {operationId,runtimeDirectory,configurationDirectory,cliPath,npmCli,reuseExport?,retainReleases?}.
 Reuse the original UUID to resume the original source, even after main moves.
 Provider outcomes without a success receipt stay unknown; inspect the original deployment before reconciling.
 See docs/operations/release.md. Landing and recovery exchange are independent.

@@ -28,6 +28,7 @@ import {
   mergeGithub,
 } from './bench-landing-github.mjs';
 import { prepareGithubClone, seedNativeGit } from './bench-landing-seed.mjs';
+import { teardownBench } from './bench-teardown.mjs';
 import { PAIRS, runnerPolicy, burstMetrics, actionsCost } from './bench-landing-v2.mjs';
 
 export function parseArgs(argv) {
@@ -77,6 +78,7 @@ export function parseArgs(argv) {
     else if (flag === '--max-minutes') options.maxMinutes = Number(value(flag));
     else if (flag === '--dry-run') options.dryRun = true;
     else if (flag === '--cleanup') options.cleanup = true;
+    else if (flag === '--keep-checkouts') options.keepCheckouts = true;
     else throw new Error(`Unknown option ${flag}`);
   }
   if (!options.source) throw new Error('--source NATIVE_OWNER is required');
@@ -491,7 +493,16 @@ async function burstSample(side, setup, k, token) {
   };
 }
 
+/** Checkouts under --work are removed when the run ends or fails (logs and --out stay); --max-minutes keeps them to resume. */
 export async function main(argv, run = exec) {
+  const state = {};
+  try {
+    return await runBench(argv, run, state);
+  } finally {
+    if (state.teardown) teardownBench(state.teardown, { log: message => console.error(message) });
+  }
+}
+async function runBench(argv, run, state) {
   const options = parseArgs(argv);
   const resumed =
     !options.dryRun && existsSync(options.out) ? JSON.parse(readFileSync(options.out, 'utf8')) : null;
@@ -537,6 +548,7 @@ export async function main(argv, run = exec) {
   options.forgeCheckRepo = `${owner}/${repoName(new Date(), options.pair)}-forgecheck`;
   if (!options.dryRun) {
     mkdirSync(options.work, { recursive: true });
+    if (!options.keepCheckouts) state.teardown = options.work;
     // A resumed result must retain its original manifest; never recreate ownership evidence.
     const manifest = loadManifest(options.manifest, !resumed);
     if (resumed?.manifest?.runId !== undefined && resumed.manifest.runId !== manifest.runId)
@@ -581,7 +593,9 @@ export async function main(argv, run = exec) {
           continue;
         if (Date.now() > deadline)
           return (
-            save(), console.error(`Stopped at --max-minutes; rerun with --out ${options.out} to resume.`)
+            (state.teardown = undefined),
+            save(),
+            console.error(`Stopped at --max-minutes; rerun with --out ${options.out} to resume.`)
           );
         const token = randomUUID().slice(0, 8),
           load = os.loadavg()[0];

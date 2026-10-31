@@ -128,6 +128,42 @@ for (const failed of releaseStages)
     assert.equal(calls.length, 0);
   });
 
+test('a failed release deletes nothing; a completed one retires old releases and slims its build', t => {
+  const f = fixture(t);
+  const releases = join(f.request.runtimeDirectory, 'releases');
+  const old = ['aaaaaaaa', 'bbbbbbbb', 'cccccccc'].map(id => `${id}-0000-4000-8000-000000000000`);
+  old.forEach((id, i) => {
+    mkdirSync(join(releases, id, 'install-x'), { recursive: true });
+    writeFileSync(
+      join(releases, id, 'owner-install-selection.json'),
+      JSON.stringify({ previous: i ? join(releases, old[i - 1], 'install-x') : join(f.dir, 'legacy') }),
+    );
+  });
+  const build = join(releases, f.request.operationId, 'build-x', 'source');
+  const execute = (journal, name, directory, fail) => {
+    if (name === 'build') mkdirSync(join(build, '.netlify', 'plugins', 'node_modules'), { recursive: true });
+    writeFileSync(
+      join(releases, f.request.operationId, 'owner-install-selection.json'),
+      JSON.stringify({ previous: join(releases, old[2], 'install-x') }),
+    );
+    return receipt(journal, name, fail ? 'failed' : 'succeeded', name === 'build' ? { path: build } : {});
+  };
+  f.request.retainReleases = 2;
+  assert.equal(
+    maintainerRelease(f.store, f.request, { execute: (j, n, d) => execute(j, n, d, n === 'owner') }).complete,
+    false,
+  );
+  for (const id of old) assert.ok(existsSync(join(releases, id)));
+  assert.ok(existsSync(join(build, '.netlify', 'plugins')));
+  assert.equal(maintainerRelease(f.store, f.request.operationId, { execute }).complete, true);
+  assert.deepEqual(
+    old.map(id => existsSync(join(releases, id))),
+    [false, false, true],
+  );
+  assert.ok(existsSync(join(releases, f.request.operationId)));
+  assert.ok(!existsSync(join(build, '.netlify', 'plugins')));
+});
+
 test('unknown provider reply never deploys twice; exact observation resumes original source', t => {
   const f = fixture(t),
     calls = [];

@@ -21,6 +21,8 @@ export const releaseRequestSchema = z
     cliPath: z.string().min(1),
     npmCli: z.string().min(1),
     reuseExport: z.string().min(1).optional(),
+    /** Rollback chain depth kept under releases/ after a successful release; default 3. */
+    retainReleases: z.number().int().min(1).max(50).optional(),
   })
   .strict();
 export type ReleaseRequest = z.infer<typeof releaseRequestSchema>;

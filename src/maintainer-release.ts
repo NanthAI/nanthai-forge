@@ -25,6 +25,7 @@ import {
 } from './maintainer-release-schema.js';
 import { releaseChild } from './maintainer-release-child.js';
 import { neverIndex } from './forge-disk.js';
+import { settleRelease } from './maintainer-release-retention.js';
 
 export type ReleaseExecutor = (
   journal: ReleaseJournal,
@@ -210,7 +211,9 @@ export function maintainerRelease(
         save();
         if (attempt.receipt.status !== 'succeeded') return releaseSummary(journal);
       }
-      return releaseSummary(journal);
+      const summary = releaseSummary(journal);
+      if (summary.complete) settleRelease(journal);
+      return summary;
     },
     { operation: 'maintainer release' },
   );

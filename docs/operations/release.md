@@ -32,7 +32,8 @@ against the invoking directory on first use; absolute paths are convenient.
   "configurationDirectory": "/private/forge-development-config",
   "cliPath": "/private/bin/nforge",
   "npmCli": "/private/node/lib/node_modules/npm/bin/npm-cli.js",
-  "reuseExport": "/private/previous-release/export"
+  "reuseExport": "/private/previous-release/export",
+  "retainReleases": 3
 }
 ```
 
@@ -46,10 +47,25 @@ credential vault. Do not put secrets in request files, observations, or reports.
 The selected Node executable and npm CLI path are retained for resume.
 
 `reuseExport` is optional. The native exporter validates it and falls back to a
-full export if it is unavailable or unusable. No existing export, build, package,
-installation or release directory is deleted. Outputs live in new directories
-under `runtimeDirectory/releases/UUID`. A pre-existing directory for a new
-operation ID is preserved and reported explicitly.
+full export if it is unavailable or unusable. A failed or interrupted release
+deletes nothing. Outputs live in new directories under
+`runtimeDirectory/releases/UUID`. A pre-existing directory for a new operation ID
+is preserved and reported explicitly.
+
+When every stage has succeeded, the release cleans up after itself (best effort;
+a cleanup error never fails the release):
+
+- Its build source drops `node_modules`, `.netlify/plugins` (the Netlify CLI's own
+  0.5 GB `node_modules`, created during the web deploy) and `.git`: a release is
+  about 0.2 GB instead of 1.2 GB. A completed release never rebuilds.
+- Old releases under `runtimeDirectory/releases` are removed except the release
+  just finished, the one `installed-owner` points at, and each release named
+  `previous` in a kept release's `owner-install-selection.json`, up to
+  `retainReleases` deep (default 3: current, previous, the one before). A release is
+  also kept while any process has a file open below it (checked with `lsof`; a
+  failed check counts as in use), and an unfinished release without a selection file
+  is kept for a day so it can resume. A removed release can no longer serve as
+  `reuseExport`; the exporter then does a full export.
 
 ## Run deploy number N
 
