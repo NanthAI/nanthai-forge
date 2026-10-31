@@ -104,8 +104,9 @@ async function activityCounts(ctx: QueryCtx, project: Doc<'hostedProjects'>) {
   result.unannouncedActiveLanes = [...lanes].filter(id => !attributed.has(id)).length;
   return result;
 }
-// A changing client refreshKey reruns time-window queries even when no new reports arrive.
-const args = { projectId: v.id('hostedProjects'), refreshKey: v.optional(v.number()) };
+// Reactive on server writes only: a client-supplied time argument would re-run this per project per minute
+// for every idle tab. Counts stay as of the last write until the next one.
+const args = { projectId: v.id('hostedProjects') };
 export const counts = coordinationQuery({
   args,
   returns: countFields,

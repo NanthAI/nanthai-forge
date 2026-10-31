@@ -22,10 +22,7 @@ export function HomeProjectRow({
   choose: () => void;
 }) {
   const now = useNow();
-  const counts = useQuery(api.projectCoordination.counts, {
-    projectId: project.id,
-    refreshKey: Math.floor(now / 60000),
-  });
+  const counts = useQuery(api.projectCoordination.counts, { projectId: project.id });
   const raw = useQuery(workIndex.workspace, { projectId: project.id });
   const workspace = useMemo(() => (raw ? (JSON.parse(raw) as WorkIndexWorkspace) : null), [raw]);
   const local = useWorkRecords<MoveRecord & { head: string }>(project.id, workspace, 'channelMoves');

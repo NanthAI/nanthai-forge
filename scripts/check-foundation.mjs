@@ -4,6 +4,7 @@ import { resolve, dirname, relative, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { renderDependencyLicenses } from './render-dependency-licenses.mjs';
 import { localPathFindings } from './check-local-paths.mjs';
+import { idleQueryFindings } from './check-idle-queries.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const errors = [];
@@ -35,6 +36,8 @@ function walk(dir) {
 const files = walk(root);
 for (const file of files) {
   errors.push(...localPathFindings(relative(root, file), readFileSync(file)));
+  if (['.ts', '.tsx'].includes(extname(file)))
+    errors.push(...idleQueryFindings(relative(root, file), readFileSync(file, 'utf8')));
   if (extname(file) === '.json') {
     try {
       JSON.parse(readFileSync(file, 'utf8'));
