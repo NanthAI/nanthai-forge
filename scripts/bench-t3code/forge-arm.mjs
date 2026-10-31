@@ -118,6 +118,23 @@ export function forgeArm(config) {
         .filter(Boolean)
         .map(line => ({ status: line[0], path: line.slice(2) }));
     },
+    /** Harness-only `land --save` that answers the shipped defaults' refusals the way an
+     * agent would (overlapGate block -> ack accept-order; preflight require -> preflight),
+     * then retries. Cell agents answer these themselves from the refusal message. */
+    async landAnswering(root, laneId, message) {
+      for (let attempt = 1; ; attempt++) {
+        try {
+          return await nfAsync(root, 'land', { laneId, message }, ['--save']);
+        } catch (error) {
+          const out = String(error.stdout ?? '') + String(error.stderr ?? '');
+          const code = out.match(/"code":"([A-Z_]+)"/)?.[1];
+          if (attempt >= 4 || !['OVERLAP_UNANSWERED', 'PREFLIGHT_REQUIRED'].includes(code)) throw error;
+          console.log(`land refused ${code}; answering (attempt ${attempt})`);
+          if (code === 'OVERLAP_UNANSWERED') await nfAsync(root, 'ack', { laneId, choice: 'accept-order' });
+          else await nfAsync(root, 'preflight', { laneId });
+        }
+      }
+    },
     /** Reset main to base content with one landing: restore modified/deleted, drop added. */
     async reset({ meta, baseCommit, baseCheckout, anchor, root }) {
       const laneId = await arm.startLane(anchor, root, 'bench reset to base');
@@ -131,8 +148,7 @@ export function forgeArm(config) {
         }
       }
       let landed = null;
-      if (changes.length)
-        landed = await nfAsync(root, 'land', { laneId, message: 'bench: reset main to base' }, ['--save']);
+      if (changes.length) landed = await arm.landAnswering(root, laneId, 'bench: reset main to base');
       const after = arm.diffFromBase(meta, baseCommit, root);
       arm.abandon(root, laneId);
       arm.removeRoot(root);

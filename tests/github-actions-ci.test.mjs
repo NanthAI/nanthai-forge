@@ -248,6 +248,40 @@ for (const scope of ['partial', 'full'])
     });
   });
 
+test('arbitrary Actions commands get npm ci only in npm-locked projects', t => {
+  const { root, write } = fixture(t);
+  const previous = {
+    cwd: process.cwd(),
+    plan: process.env.FORGE_ACTIONS_PLAN,
+    shard: process.env.FORGE_ACTIONS_SHARD,
+  };
+  t.after(() => {
+    process.chdir(previous.cwd);
+    for (const [key, value] of [
+      ['FORGE_ACTIONS_PLAN', previous.plan],
+      ['FORGE_ACTIONS_SHARD', previous.shard],
+    ])
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+  });
+  write('plan.json', JSON.stringify({ standard: false, command: ['bash', '.bench/ci.sh'], groups: [] }));
+  process.chdir(root);
+  process.env.FORGE_ACTIONS_PLAN = join(root, 'plan.json');
+  process.env.FORGE_ACTIONS_SHARD = 'static';
+  const calls = [],
+    execute = (command, args) => calls.push([command, ...args]);
+  write('pnpm-lock.yaml', 'lockfileVersion: 9.0\n');
+  runActionsCheck(execute);
+  assert.deepEqual(calls, [['bash', '.bench/ci.sh']]);
+  calls.length = 0;
+  write('package-lock.json', '{"lockfileVersion":3}');
+  runActionsCheck(execute);
+  assert.deepEqual(calls, [
+    ['npm', 'ci', '--ignore-scripts'],
+    ['bash', '.bench/ci.sh'],
+  ]);
+});
+
 test('explicit lists are not silently ignored by arbitrary commands', async t => {
   const { root, write } = fixture(t);
   write('a.txt', 'fixture');

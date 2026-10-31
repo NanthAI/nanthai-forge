@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { childEnv } from './child-env.mjs';
 // Shared executor for exported Forge snapshots and benchmark Git checkouts.
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { runDocumentationChecks } from './check-documentation.mjs';
 export function runActionsCheck(execute = execFileSync, { install = true, build = true } = {}) {
@@ -35,7 +35,10 @@ export function runActionsCheck(execute = execFileSync, { install = true, build 
   };
   const run = (executable, args) => execute(executable, args, { env, stdio: 'inherit' });
   const npm = (...args) => run('npm', args);
-  if (install) npm('ci', '--ignore-scripts');
+  // A project's own check command owns its setup (pnpm, Vite+, ...); only Forge's
+  // recipe and npm-locked projects get the npm install.
+  const npmLocked = existsSync('package-lock.json') || existsSync('npm-shrinkwrap.json');
+  if (install && (plan.standard || npmLocked)) npm('ci', '--ignore-scripts');
   if (!plan.standard) {
     if (shard !== 'static') throw new Error('Arbitrary commands have only a static job.');
     run(plan.command[0], plan.command.slice(1));

@@ -128,6 +128,12 @@ if (gates.disk.freeGb < gates.disk.requiredGb)
     `disk ${gates.disk.freeGb.toFixed(1)} GB free < ${gates.disk.requiredGb.toFixed(1)} GB required (15 GB floor + ${gates.disk.needGb.toFixed(1)} GB cell need: ${JSON.stringify(gates.disk.parts)})`,
   );
 
+// Forge's machine-wide object store (FORGE_OBJECT_CACHE), kept warm across cells like
+// the GitHub arm's hub clone: a Lane open then clones local objects instead of fetching
+// 29k objects (2026-10-31: 132 s warm vs ~20 min cold; the client pack path failed).
+// Harness opens and agents' nforge both inherit it; agents may read it, not write it.
+const objectCache = join(B, 'forge-cache', 'objects');
+if (arm === 'forge') process.env.FORGE_OBJECT_CACHE = objectCache;
 const forge = arm === 'forge' ? forgeArm(config.forge) : null;
 const bin = join(ws, 'bin');
 mkdirSync(bin, { recursive: true });
@@ -213,7 +219,7 @@ async function worker(k) {
       // GitHub: the hub is the shared clone's object store (read-only for the agent).
       // Forge: the nforge CLI bundle lives beside the denied control checkouts.
       extraReads: [
-        ...(arm === 'github' ? [hub] : [dirname(dirname(config.forge.cli))]),
+        ...(arm === 'github' ? [hub] : [dirname(dirname(config.forge.cli)), objectCache]),
         ...(shared ? [shared.deps] : []),
       ],
       extraWrites: shared ? [vpHome] : [],
