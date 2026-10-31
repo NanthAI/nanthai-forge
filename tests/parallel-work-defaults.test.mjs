@@ -73,6 +73,8 @@ test('client settings default on, persist per machine and explain their source',
     idleLaneHours: 1,
     localHeavySlots: 'auto',
     shareDependencies: true,
+    clientCacheMaxGB: 2,
+    clientCacheMaxAgeHours: 24,
     landWait: true,
   });
   assert.equal(clientSettingsCli([]).settings.landWait.source, 'default');
@@ -110,7 +112,8 @@ test('start lists idle open Lanes and prunes finished roots after one batched re
     return new Map(laneIds.map(laneId => [laneId, state(lanes.indexOf(laneId))]));
   };
   const memory = process.memoryUsage().heapUsed;
-  const result = await laneHousekeeping({ readStates, address, apply: true, now });
+  // These Lanes stand for unsaved work: idle active Lanes with edits are listed, never removed.
+  const result = await laneHousekeeping({ readStates, address, apply: true, now, isDirty: () => true });
   // Dogfood budget: 250 due Lanes -> 3 calls, never one per Lane.
   assert.deepEqual(reads, [100, 100, 50]);
   assert(process.memoryUsage().heapUsed - memory < 64 * 2 ** 20);

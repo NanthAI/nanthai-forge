@@ -33,6 +33,7 @@ import {
 import { invariant } from './errors.js';
 import { plannedIntent } from './hosted-agent-planning.js';
 import { unadvertisedActionError } from './hosted-agent-version.js';
+import { completeMergedLanes } from './hosted-agent-complete.js';
 import { saveExpectedSchema } from './hosted-save.js';
 import type { HostedAgentSession } from './hosted-agent-transport.js';
 const outcome = z.object({ outcome: z.object({ status: z.string(), result: z.unknown().optional() }) });
@@ -456,34 +457,50 @@ export async function executeHostedAgent(
     );
     return driveAgentSource(session, 'Sync', operationId, request);
   }
-  if (action === 'abandon' || action === 'reopen') {
+  if (action === 'complete-merged') {
+    hostedAgentCommandSchemas['complete-merged'].parse(input);
+    return completeMergedLanes(session, epoch);
+  }
+  if (action === 'abandon' || action === 'reopen' || action === 'complete') {
     const command = hostedAgentCommandSchemas[action].parse(input);
-    if (!command.target && session.marker()) {
+    if (action === 'complete') {
+      const lane = await selectAgentLane(session, command.laneId);
+      if (lane.state === 'completed')
+        return { phase: 'lifecycle', noop: true, lane: { laneId: lane.laneId, state: lane.state } };
+      invariant(lane.state === 'active', 'WORK_STALE', `A ${lane.state} Lane cannot be completed.`);
+    }
+    const target = 'target' in command ? command.target : undefined;
+    const abandonment = action === 'abandon' ? hostedAgentCommandSchemas.abandon.parse(input) : null;
+    if (!target && session.marker()) {
       checkLocalLane(session, command.laneId);
       return transitionHostedLane(
         session.root,
         {
           operationId,
           action,
-          ...('reason' in command
-            ? { reason: command.reason, saveFirst: command.saveFirst, keepPatch: command.keepPatch }
+          ...(abandonment
+            ? {
+                reason: abandonment.reason,
+                saveFirst: abandonment.saveFirst,
+                keepPatch: abandonment.keepPatch,
+              }
             : {}),
         },
         session.exchange,
       );
     }
     invariant(
-      command.target || !('saveFirst' in command) || (!command.saveFirst && !command.keepPatch),
+      target || !(abandonment?.saveFirst || abandonment?.keepPatch),
       'HOSTED_CHECKOUT_REQUIRED',
       'Saving or keeping local edits first requires an opened Lane checkout.',
     );
     const request = await session.journal.retain('lifecycle-request', async () => {
-      const lane = !command.target ? await selectAgentLane(session, command.laneId) : null;
+      const lane = !target ? await selectAgentLane(session, command.laneId) : null;
       return hostedLifecycleRequestSchema.parse({
         operationId,
         authorityEpoch: epoch,
         action,
-        target: command.target ?? {
+        target: target ?? {
           kind: 'lane',
           laneId: lane!.laneId,
           expected: saveExpectedSchema.parse({
@@ -495,7 +512,7 @@ export async function executeHostedAgent(
           dirty: false,
           saveOperationId: null,
         },
-        ...('reason' in command ? { reason: command.reason } : {}),
+        ...(abandonment ? { reason: abandonment.reason } : {}),
       });
     });
     return session.mutation('projectHostedLifecycle:transition', { request: canonicalPayload(request) });

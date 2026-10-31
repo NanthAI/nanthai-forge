@@ -4,9 +4,12 @@ import { join, resolve, sep } from 'node:path';
 import { makeFunctionReference } from 'convex/server';
 import { forgetLane, listLanes, recordLane, type LaneRegistryEntry } from './lane-registry.js';
 import { readClientSettings, type ClientSettings } from './client-settings.js';
+import { hostedLaneDirty } from './hosted-lane-dirty.js';
 import { invariant } from './errors.js';
 
 const hour = 3_600_000;
+/** Unsaved-edit checks hash a whole checkout; bound them per pass. */
+const DIRTY_CHECKS = 8;
 const terminal = new Set(['completed', 'abandoned']);
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 export type LaneAddress = { url: string; projectId: string };
@@ -111,6 +114,8 @@ export async function laneHousekeeping(input: {
   exclude?: { roots?: string[]; laneIds?: string[] };
   scan?: string;
   now?: number;
+  /** Replaceable in tests. True when the root has edits that are not saved. */
+  isDirty?: (root: string) => boolean;
 }): Promise<LaneHousekeeping> {
   const now = input.now ?? Date.now(),
     settings = input.settings ?? readClientSettings();
@@ -153,24 +158,31 @@ export async function laneHousekeeping(input: {
       for (const entry of page) states.set(entry.laneId, read?.get(entry.laneId) ?? null);
     }
   }
+  const isDirty = input.isDirty ?? hostedLaneDirty;
+  let dirtyChecks = 0;
   for (const entry of due) {
     const state = states.get(entry.laneId) ?? null,
       idleFor = now - entry.lastActionAt;
-    if (state === 'active' && idleMs > 0 && idleFor >= idleMs) {
+    const listIdle = () =>
       result.idle.push({
         laneId: entry.laneId,
         ...(entry.outcome ? { outcome: entry.outcome } : {}),
         idleHours: Math.round((idleFor / hour) * 10) / 10,
         root: entry.root,
       });
+    // An active Lane idle past the prune age loses its root only when nothing in it is unsaved;
+    // `open` restores it from the saved head.
+    const activeIdle = state === 'active' && pruneMs > 0 && idleFor >= pruneMs;
+    if (state === 'active' && !activeIdle) {
+      if (idleMs > 0 && idleFor >= idleMs) listIdle();
       continue;
     }
-    if (!state || !terminal.has(state) || pruneMs === 0 || idleFor < pruneMs) {
+    if (!state || (!activeIdle && !terminal.has(state)) || pruneMs === 0 || idleFor < pruneMs) {
       if (!state) result.kept.push({ laneId: entry.laneId, reason: 'state unknown' });
       continue;
     }
     const root = resolve(entry.root);
-    const reason =
+    let reason =
       excludedRoots.some(path => inside(path, root) || inside(root, path)) || inside(process.cwd(), root)
         ? 'in use by this command'
         : markerIdentity(root)?.laneId !== entry.laneId
@@ -178,7 +190,15 @@ export async function laneHousekeeping(input: {
           : nestedLanes(root)
             ? 'contains other Lane roots'
             : null;
+    if (!reason && activeIdle)
+      reason =
+        dirtyChecks++ >= DIRTY_CHECKS
+          ? 'unsaved-edit check deferred'
+          : isDirty(root)
+            ? 'unsaved edits'
+            : null;
     if (reason) {
+      if (activeIdle && idleMs > 0 && idleFor >= idleMs) listIdle();
       result.kept.push({ laneId: entry.laneId, reason });
       continue;
     }

@@ -1,17 +1,17 @@
 import { trustAgents } from './autonomy-fixture.mjs';
+import { scratchDir } from './helpers.mjs';
 // SPDX-License-Identifier: Apache-2.0
 import nodeTest from 'node:test';
 // A fixture must fail with its test name instead of waiting for the ten-minute file watchdog.
 const test = (name, fn) => nodeTest(name, { timeout: 30_000 }, fn);
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { AgentWorkflow } from '../dist/agent-workflow.js';
 import { initNative } from '../dist/native-work.js';
 
 async function setup(script = "console.log('ok')") {
-  const root = mkdtempSync(join(tmpdir(), 'forge-agent-clean-'));
+  const root = scratchDir('forge-test-agent-clean-');
   writeFileSync(join(root, 'file.txt'), 'original\n');
   writeFileSync(join(root, '.gitignore'), 'node_modules/\n');
   initNative(root);

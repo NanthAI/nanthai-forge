@@ -268,7 +268,10 @@ test('disabled completion policy preserves all Lane state and never completes an
   const f = await acceptanceFixture(),
     lane = await f.lane(),
     item = await f.makeCandidate([lane]);
-  f.patch('hostedProjects', f.projectId, { autonomyPolicy: policyPreset('supervised') });
+  const policy = policyPreset('supervised');
+  f.patch('hostedProjects', f.projectId, {
+    autonomyPolicy: { ...policy, lifecycle: { ...policy.lifecycle, completeOnAccept: false } },
+  });
   const { state } = await f.ready(item);
   const { receipt } = await f.accept(state);
   assert.equal(receipt.completion.enabled, false);

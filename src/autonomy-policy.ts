@@ -100,7 +100,7 @@ export function policyPreset(preset: Exclude<AutonomyPolicy['preset'], 'custom'>
     integrationPreview: { auto: false },
     ownerRootUpdates: false,
     laneUpdates: preset === 'supervised' ? 'ask' : 'auto',
-    lifecycle: { completeOnAccept: preset !== 'supervised', cleanRegenerableCopies: preset === 'autonomous' },
+    lifecycle: { completeOnAccept: true, cleanRegenerableCopies: preset === 'autonomous' },
     notify: { awaySummary: true },
   };
 }

@@ -1,5 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
-import { lstatSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import {
+  lstatSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  renameSync,
+  rmSync,
+  utimesSync,
+  writeFileSync,
+} from 'node:fs';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
@@ -7,6 +16,8 @@ import { digest } from './hash.js';
 
 /** Disposable local acceleration, never Work or source authority. Keys include exact
  * source identities; live entries additionally require fresh filesystem metadata. */
+const SWEEP_EVERY_MS = 3_600_000;
+const MAX_AGE_MS = 24 * 3_600_000;
 export class PeersCache {
   private readonly directory: string;
   constructor(root: string, directory?: string) {
@@ -30,6 +41,27 @@ export class PeersCache {
       return undefined;
     }
   }
+  /** Every entry is a new file for a new source identity and nothing else removes them (1.1 GB, 44,000
+   * files on one Mac). At most once an hour, drop entries not written for a day. */
+  private sweep(now = Date.now()) {
+    try {
+      const stamp = join(this.directory, '.swept');
+      try {
+        if (now - lstatSync(stamp).mtimeMs < SWEEP_EVERY_MS) return;
+      } catch {
+        /* first sweep */
+      }
+      writeFileSync(stamp, '');
+      utimesSync(stamp, now / 1000, now / 1000);
+      for (const name of readdirSync(this.directory)) {
+        if (name === '.swept') continue;
+        const path = join(this.directory, name);
+        if (now - lstatSync(path).mtimeMs > MAX_AGE_MS) rmSync(path, { force: true });
+      }
+    } catch {
+      /* Disposable cache: a failed sweep only repeats. */
+    }
+  }
   write(key: string, value: unknown) {
     const path = join(this.directory, digest(key)),
       temporary = `${path}-${randomUUID()}`;
@@ -43,6 +75,7 @@ export class PeersCache {
         flag: 'wx',
       });
       renameSync(temporary, path);
+      this.sweep();
     } catch {
       // Cache availability never determines observation coverage.
     }

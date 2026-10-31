@@ -21,7 +21,7 @@ import type { ConvexExchange } from './exchange-client.js';
 const commandSchema = z
   .object({
     operationId: z.uuid(),
-    action: z.enum(['abandon', 'reopen']),
+    action: z.enum(['abandon', 'reopen', 'complete']),
     reason: z.string().trim().max(4000).default(''),
     saveFirst: z.boolean().default(false),
     keepPatch: z.boolean().default(false),

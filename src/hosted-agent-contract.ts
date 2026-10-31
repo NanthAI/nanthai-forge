@@ -28,6 +28,8 @@ export const hostedAgentActions = [
   'revert',
   'abandon',
   'reopen',
+  'complete',
+  'complete-merged',
   'status',
   'observe',
   'capabilities',
@@ -201,6 +203,10 @@ export const hostedAgentCommandSchemas = {
         .optional(),
     })
     .strict(),
+  /** Close one Lane whose work landed; a repeat is a no-op. */
+  complete: z.object({ ...lane }).strict(),
+  /** Close every active Lane whose exact saved head an accepted receipt landed. */
+  'complete-merged': z.object({}).strict(),
   reopen: z
     .object({
       ...lane,

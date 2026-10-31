@@ -19,6 +19,8 @@ selects another file.
 | `idleLaneHours` | `1` | Agents forgot open Lanes, which kept counting as active work and kept their disk. `start` lists your open Lanes on this machine that have had no Forge action for this long. | `nforge settings idleLaneHours 0` stops the list. |
 | `localHeavySlots` | `auto` | About 20 agents shared a 16 GB laptop. Unlimited parallel builds and test runs swapped the machine; 3 at a time kept it responsive. `auto` allows one heavy command per 5 GB of RAM, capped at half the cores and never below 1 (16 GB with 8 cores gives 3). | A number sets the slots; `0` turns the limit off. |
 | `shareDependencies` | `true` | Each Lane needs `node_modules` (261 MB for Forge itself), and every agent ran `npm ci`. When a Lane opens, its `node_modules` becomes a link to one install per exact lockfile. | `nforge settings shareDependencies false`. |
+| `clientCacheMaxGB` | `2` | `ROOT.forge-client/lanes` collected full ~100 MB copies of other Lanes that nothing removed (262 copies, 5.8 GB in one client directory). They are a cache now: past this size, the least recently used copies are removed. | `nforge settings clientCacheMaxGB 0` removes the size cap. |
+| `clientCacheMaxAgeHours` | `24` | The same cache: a copy nobody used for this long is removed. | `nforge settings clientCacheMaxAgeHours 0` removes the age limit. |
 | `landWait` | `true` | Agents wrapped `land --save` in a polling loop to learn the outcome. `land --save` now waits by default and prints a compact summary. | `--no-wait` on one command, or `nforge settings landWait false`. |
 
 ### autoPruneHours and idleLaneHours
@@ -34,12 +36,26 @@ selects another file.
   - the root is not where the command runs;
   - the root holds no other Lane roots;
   - the checkout marker still names that Lane.
+- An `active` Lane with no Forge action for `autoPruneHours` is also removed, but only when its
+  checkout has no unsaved edits: every file is hashed in place against the Lane's baseline
+  State and nothing is written. At most 8 such checks run per pass; an edited root stays and is
+  listed as idle. `open` restores a removed root from the saved head.
 - Pruning removes the root, its `ROOT.forge-client` cache and its `ROOT.forge-metrics.jsonl`.
   A `node_modules` link is removed as a link; the shared install stays.
 - A deployment without the batched read prunes nothing.
 - `nforge prune` is a dry run; `--apply` removes. `--scan DIRECTORY` first registers existing
   checkouts in DIRECTORY and in its `*.forge-client/lanes/`. An explicit prune with
   `autoPruneHours` set to 0 uses 3 hours.
+
+### clientCacheMaxGB and clientCacheMaxAgeHours
+
+- Other Lanes materialized by a call (conflict checkouts, `with:` inputs, overlap reads) land in
+  `ROOT.forge-client/lanes/LANE_ID`. Each use refreshes `.forge/cache-use.json` in the copy.
+- At most once an hour, from the CLI start, one local pass removes copies over the age limit and
+  then least recently used copies until the directory is under the size cap. It reads no server
+  and runs no timer. A pass that runs out of its 15-second budget continues on the next start.
+- A copy is kept when it is the caller's own Lane, holds the work lock or was used in the last ten
+  minutes, is the target of a symlink beside ROOT (conflict checkouts), or has unsaved edits.
 
 ### localHeavySlots
 

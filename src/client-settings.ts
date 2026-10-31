@@ -18,6 +18,10 @@ export const clientSettingsSchema = z
     localHeavySlots: z.union([z.literal('auto'), z.number().int().nonnegative()]).default('auto'),
     /** Lane open links node_modules to one install per lockfile hash. */
     shareDependencies: z.boolean().default(true),
+    /** Nested Lane copies under ROOT.forge-client/lanes are a cache: size cap in GB per client directory (0 = no size cap). */
+    clientCacheMaxGB: z.number().nonnegative().finite().default(2),
+    /** Evict nested Lane copies unused for this many hours (0 = no age limit). */
+    clientCacheMaxAgeHours: z.number().nonnegative().finite().default(24),
     /** land --save waits for the outcome and prints a compact failure summary. */
     landWait: z.boolean().default(true),
   })

@@ -10,6 +10,17 @@ export function fixture(t, files = {}) {
   for (const [name, text] of Object.entries(files)) write(root, name, text);
   return root;
 }
+const scratch = new Set();
+/** A temp directory for helpers that have no test context; removed when this test file's process exits. */
+export function scratchDir(prefix) {
+  if (!scratch.size)
+    process.once('exit', () => {
+      for (const path of scratch) rmSync(path, { recursive: true, force: true });
+    });
+  const path = mkdtempSync(join(tmpdir(), prefix));
+  scratch.add(path);
+  return path;
+}
 export function write(root, name, content) {
   const path = join(root, name);
   mkdirSync(dirname(path), { recursive: true });

@@ -1,9 +1,9 @@
 import { trustAgents } from './autonomy-fixture.mjs';
+import { scratchDir } from './helpers.mjs';
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
@@ -22,7 +22,7 @@ const git = (root, args) =>
     },
   }).trim();
 function fixture(native) {
-  const root = mkdtempSync(join(tmpdir(), 'forge-agent-lifecycle-'));
+  const root = scratchDir('forge-test-agent-lifecycle-');
   writeFileSync(join(root, 'file.txt'), 'original\n');
   if (native) initNative(root);
   else {

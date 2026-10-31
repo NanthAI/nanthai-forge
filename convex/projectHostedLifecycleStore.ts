@@ -24,6 +24,13 @@ export const lifecyclePlan = (
       q.eq('projectId', input.projectId).eq('actor', input.actor).eq('operationId', input.operationId),
     )
     .unique();
+/** The Lane state each lifecycle action leaves behind. */
+export const laneStateAfter = (action: 'abandon' | 'reopen' | 'complete') =>
+  action === 'abandon'
+    ? ('abandoned' as const)
+    : action === 'complete'
+      ? ('completed' as const)
+      : ('active' as const);
 export function lifecycleResult(plan: LifecyclePlan) {
   const request = hostedLifecycleRequestSchema.parse(JSON.parse(plan.request));
   return hostedLifecycleResultSchema.parse({
@@ -50,7 +57,7 @@ export function lifecycleResult(plan: LifecyclePlan) {
                 : request.target.expected
               ).version + 1,
             lifecycleVersion: request.target.expected.lifecycleVersion + 1,
-            state: request.action === 'abandon' ? 'abandoned' : 'active',
+            state: laneStateAfter(request.action),
           }
         : null,
   });
@@ -138,7 +145,7 @@ export async function writeLifecycleEvent(
   index: number,
 ) {
   const request = hostedLifecycleRequestSchema.parse(JSON.parse(plan.request));
-  const to = request.action === 'abandon' ? 'abandoned' : 'active';
+  const to = laneStateAfter(request.action);
   await ctx.db.insert('projectHostedLifecycleEvents', {
     projectId: plan.projectId,
     kind: before.kind,
@@ -164,7 +171,7 @@ export async function applyLifecycleRecord(
   before: Awaited<ReturnType<typeof lifecycleTarget>>['record'],
 ) {
   const request = hostedLifecycleRequestSchema.parse(JSON.parse(plan.request));
-  const status = request.action === 'abandon' ? ('abandoned' as const) : ('active' as const);
+  const status = laneStateAfter(request.action);
   await writeHostedRecord(ctx, {
     projectId: plan.projectId,
     actor: plan.actor,

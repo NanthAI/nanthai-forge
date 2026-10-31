@@ -43,6 +43,7 @@ import { hostedActionError } from './hosted-action-error.js';
 import { ForgeError, invariant } from './errors.js';
 import { hostedMainV2Schema } from './hosted-main.js';
 import { hostedRootLanePath, openHostedRootLane } from './hosted-root-checkout.js';
+import { gcNestedLanesHourly } from './client-cache-gc.js';
 import { hostedStartResultSchema } from './hosted-lane.js';
 import { readHostedLaneCheckout } from './hosted-lane-checkout-marker.js';
 import { HostedAgentJournal, hostedAgentRoot } from './hosted-agent-journal.js';
@@ -190,7 +191,7 @@ export class HostedAgentTransport {
     const state =
       action === 'abandon'
         ? ('abandoned' as const)
-        : action === 'finish' && /"phase":"landed"/.test(text)
+        : action === 'complete' || (action === 'finish' && /"phase":"landed"/.test(text))
           ? ('completed' as const)
           : undefined;
     recordLane({ laneId, ...(state ? { state } : {}) });
@@ -434,6 +435,7 @@ export class HostedAgentTransport {
           capabilities.overlapVersion === 1 ? (command.data as { laneId?: string }).laneId : undefined,
         );
       const root = hostedAgentRoot(this.root);
+      this.gcClientCache(root, [markerIdentity(root)?.laneId, (command.data as { laneId?: unknown }).laneId]);
       if (action === 'start' || action === 'open') hostedRootLanePath(root, this.address);
       const replaying =
         typeof operationId === 'string' &&
@@ -627,6 +629,17 @@ export class HostedAgentTransport {
       return await shareDependencies(path);
     } catch (error) {
       return { status: 'failed', message: error instanceof Error ? error.message : String(error) };
+    }
+  }
+  /** Nested Lane copies are a cache: at most one bounded local pass an hour, never a failure. */
+  private gcClientCache(root: string, keep: unknown[]) {
+    try {
+      gcNestedLanesHourly({
+        root,
+        keepLaneIds: keep.filter((id): id is string => typeof id === 'string'),
+      });
+    } catch {
+      /* Cache housekeeping is advisory. */
     }
   }
   /** start lists the caller's idle open Lanes and prunes finished Lane roots: registry plus one batched read. */

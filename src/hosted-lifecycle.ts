@@ -6,7 +6,7 @@ export const hostedLifecycleRequestSchema = z
   .object({
     operationId: z.uuid(),
     authorityEpoch: number,
-    action: z.enum(['abandon', 'reopen']),
+    action: z.enum(['abandon', 'reopen', 'complete']),
     reason: z.string().trim().max(4000).default(''),
     target: z.discriminatedUnion('kind', [
       z
@@ -34,6 +34,8 @@ export const hostedLifecycleRequestSchema = z
       ctx.addIssue({ code: 'custom', message: 'Give a reason for abandoning.' });
     if (r.action === 'reopen' && r.target.kind === 'intent' && r.target.cascade)
       ctx.addIssue({ code: 'custom', message: 'Intent reopen retains independent child lifecycle states.' });
+    if (r.action === 'complete' && r.target.kind !== 'lane')
+      ctx.addIssue({ code: 'custom', message: 'Hosted complete closes one Lane.' });
   });
 export type HostedLifecycleRequest = z.infer<typeof hostedLifecycleRequestSchema>;
 export const hostedLifecycleResultSchema = z
@@ -41,7 +43,7 @@ export const hostedLifecycleResultSchema = z
     schema: z.literal(1),
     operationId: z.uuid(),
     receiptId: z.uuid(),
-    action: z.enum(['abandon', 'reopen']),
+    action: z.enum(['abandon', 'reopen', 'complete']),
     target: z.enum(['lane', 'intent']),
     id: z.uuid(),
     status: z.enum(['pending', 'applied', 'stale', 'failed']),
@@ -49,7 +51,7 @@ export const hostedLifecycleResultSchema = z
     children: number,
     saveOperationId: z.uuid().nullable(),
     cancellation: z.literal('not-requested'),
-    lane: saveExpectedSchema.extend({ state: z.enum(['active', 'abandoned']) }).nullable(),
+    lane: saveExpectedSchema.extend({ state: z.enum(['active', 'abandoned', 'completed']) }).nullable(),
   })
   .strict();
 export type HostedLifecycleResult = z.infer<typeof hostedLifecycleResultSchema>;

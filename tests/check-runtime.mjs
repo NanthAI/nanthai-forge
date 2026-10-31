@@ -1,7 +1,20 @@
 // SPDX-License-Identifier: Apache-2.0
-import { appendFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { appendFileSync, lstatSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+// A killed test process (timeout, CI cancel) never runs its exit handler. Each run first removes the
+// private directories of earlier runs: our own prefixes, older than two hours (a live run is younger).
+const ownPrefixes = ['forge-test-'];
+try {
+  for (const name of readdirSync(tmpdir()))
+    if (ownPrefixes.some(prefix => name.startsWith(prefix))) {
+      const path = join(tmpdir(), name);
+      if (Date.now() - lstatSync(path).mtimeMs > 2 * 3_600_000)
+        rmSync(path, { recursive: true, force: true });
+    }
+} catch {
+  /* Sweeping is best effort; another run may be removing the same directory. */
+}
 const directory = mkdtempSync(join(tmpdir(), 'forge-test-check-queue-'));
 process.env.FORGE_CHECK_QUEUE_DIR = directory;
 // Synthetic locks held by this test process expect immediate WORK_BUSY; lock-wait tests opt in explicitly.
@@ -17,11 +30,18 @@ const home = mkdtempSync(join(tmpdir(), 'forge-test-home-'));
 process.env.HOME = home;
 process.env.USERPROFILE = home;
 process.env.FORGE_TEST_MODE = '1';
-process.once('exit', () => {
+const cleanup = () => {
   rmSync(directory, { recursive: true, force: true });
   rmSync(config, { recursive: true, force: true });
   rmSync(home, { recursive: true, force: true });
-});
+};
+process.once('exit', cleanup);
+// The test runner stops a timed-out file with SIGTERM, which skips 'exit'.
+for (const signal of ['SIGTERM', 'SIGINT'])
+  process.once(signal, () => {
+    cleanup();
+    process.kill(process.pid, signal);
+  });
 
 // Optional per-file wall times include module loading, test execution and teardown.
 const timingFile = process.env.FORGE_TEST_TIMINGS;

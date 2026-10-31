@@ -9,6 +9,7 @@ import { hostedLaneSelectionSchema } from './hosted-lane.js';
 import { makeFunctionReference } from 'convex/server';
 import { readAgentJson } from './hosted-agent-journal.js';
 import { checkoutPathExists } from './hosted-checkout-files.js';
+import { touchNestedLane } from './client-cache-gc.js';
 import { invariant } from './errors.js';
 import type { z } from 'zod';
 import type { hostedAgentCommandSchemas } from './hosted-agent-contract.js';
@@ -52,7 +53,7 @@ export async function openHostedRootLane(
   path = hostedRootLanePath(root, address, command.laneId),
 ) {
   const downloads = new HostedCheckoutDownloads(exchange);
-  return checkoutHostedLane(
+  const opened = await checkoutHostedLane(
     path,
     { ...command, ...address },
     {
@@ -73,4 +74,6 @@ export async function openHostedRootLane(
     },
     join(`${root}.forge-client`, 'objects'),
   );
+  touchNestedLane(path);
+  return opened;
 }

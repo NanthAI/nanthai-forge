@@ -69,7 +69,9 @@ test('source releases retain original acceptance through Channel advance/rollbac
     });
     const acceptance = (await dispatch(accept)).result,
       created = (await dispatch(release)).result;
-    assert.deepEqual(created.acceptance, acceptance);
+    // Completion receipts describe the Lanes closed at accept time; the retained acceptance omits them.
+    const { completed: _completed, lifecycleAction: _lifecycleAction, ...retained } = acceptance;
+    assert.deepEqual(created.acceptance, retained);
     assert.equal(created.notes, release.notes);
     await dispatch({
       ...accept,

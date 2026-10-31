@@ -106,7 +106,8 @@ for (const native of [true, false])
     assert.equal(landedSubmission.submissionId, submission.submissionId);
     assert.equal(landedSubmission.state, 'landed');
     assert.equal(landedSubmission.complete, true);
-    assert.equal(p.store.select('lanes', lane.laneId).state, 'active');
+    // completeOnAccept is on for every preset of a new project, so acceptance closes the landed Lane.
+    assert.equal(p.store.select('lanes', lane.laneId).state, 'completed');
   });
 for (const native of [true, false])
   test(`${native ? 'native' : 'Git'} allowlisted actors, exact passing evidence, and protected deletions`, async t => {

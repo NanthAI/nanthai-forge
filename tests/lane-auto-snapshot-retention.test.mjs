@@ -169,6 +169,12 @@ test('reopening after an expired dry run restores protection before apply or col
 test('expired snapshot objects are collected only when unreachable; shared main objects survive', async t => {
   const p = await fixture(t);
   // Give main a recorded root that shares the unchanged blob with the snapshot.
+  // This test keeps the Lane open after main accepts it; completion on accept would close it.
+  await p.agent.dispatch({
+    action: 'set-policy',
+    operationId: randomUUID(),
+    lifecycle: { completeOnAccept: false },
+  });
   await p.agent.dispatch({ action: 'checkpoint', laneId: p.lane.laneId, message: 'Save to main' });
   const saved = p.store.select('lanes', p.lane.laneId);
   const view = (

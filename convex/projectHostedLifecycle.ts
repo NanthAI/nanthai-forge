@@ -49,7 +49,7 @@ export const transition = mutation({
       const auth = { projectId: input.projectId, actor, operationId: request.operationId };
       const prepared = await beginHostedOperation(ctx, {
         ...auth,
-        metricAction: request.action,
+        ...(request.action === 'complete' ? {} : { metricAction: request.action }),
         payload: request,
         request: { schema: 1, ...auth, expected, payloadHash: hostedPayloadHash(request, expected) },
         firstAttempt: {
@@ -91,6 +91,11 @@ export const transition = mutation({
             (target.saveOperationId !== null || sameSaveLane(record, target.expected)),
           'WORK_STALE',
           'Hosted Lane changed from its lifecycle pins.',
+        );
+        invariant(
+          request.action !== 'complete' || record.kind !== 'lane' || record.state === 'active',
+          'WORK_STALE',
+          'Only an active Lane can be completed.',
         );
         invariant(
           request.action !== 'abandon' || !target.dirty || target.saveOperationId,
