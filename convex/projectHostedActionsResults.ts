@@ -22,7 +22,8 @@ import { applyCheckRetryBudget, capCheckReports } from '../src/check-report-cap'
 import { checkFileSummary } from '../src/check-file-summary';
 import { invariant } from '../src/errors';
 export const output = internalMutation({
-  args: { ...sessionArgs, index: v.number(), log: v.string() },
+  // withRun: an inline-log result also needs the session run to verify the stored object.
+  args: { ...sessionArgs, index: v.number(), log: v.string(), withRun: v.optional(v.boolean()) },
   returns: v.any(),
   handler: async (ctx, input) => {
     const { run } = await actionsSession(ctx, input),
@@ -33,10 +34,11 @@ export const output = internalMutation({
       entries.map(entry => ({ ...entry, projectId: input.projectId })),
       outputSigningKey,
     );
-    return presignPut(r2Config(), outputKey(input.projectId, run.id, log.object), {
+    const target = await presignPut(r2Config(), outputKey(input.projectId, run.id, log.object), {
       digest: log.object.sha256,
       size: log.object.size,
     });
+    return input.withRun ? { target, run } : target;
   },
 });
 export const result = internalMutation({

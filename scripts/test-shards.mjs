@@ -133,19 +133,28 @@ export function partitionTests(files, count, durations = {}, workers = 2) {
 // Rounded above the observed 23s p75 control preparation, allowing Candidate build
 // and result upload too. This is a planning estimate, never measured test evidence.
 export const shardJobOverheadMs = 60_000;
-/** Scoped selections above this share of the suite use the full-run wall target. */
-export const scopedAsFullShare = 0.7;
+/** Estimated test time per shard when capacity is idle. Planning and job setup add
+ * about 1.5 minutes before the slowest shard, and static runs in parallel. */
+export const shardTargetMs = 150_000;
+export const maxTestShards = 20;
+/** Convex function calls per check across Actions jobs: eight jobs (seven test
+ * shards plus static) at six calls each, as before results carried their log. */
+export const checkCallBudget = 48;
 
 /** Prefer the wall target when capacity is idle. Under pressure maximize estimated
  * checks per occupied runner-second, accounting for unused slots and job startup.
- * Budget includes static; org capacity also reserves the optional parallel pack. */
+ * Budget includes static; org capacity also reserves the optional parallel pack.
+ * `callsPerJob` is the Convex calls one job makes; jobs times calls stays within
+ * checkCallBudget, so more shards never mean more Convex calls per check. */
 export function timedShards(
   files,
   durations = {},
-  { full = false, concurrencyBudget = 9, activeChecks = 1, jobCap, suite } = {},
+  { concurrencyBudget = 12, callsPerJob = 6, activeChecks = 1, jobCap } = {},
 ) {
   if (!Number.isSafeInteger(concurrencyBudget) || concurrencyBudget < 2)
     throw new Error('Expected a concurrency budget of at least two jobs.');
+  if (!Number.isSafeInteger(callsPerJob) || callsPerJob < 1 || callsPerJob * 2 > checkCallBudget)
+    throw new Error('Expected per-job Convex calls that fit two jobs in the check call budget.');
   const capacity = jobCap ?? 20;
   if (
     !Number.isSafeInteger(activeChecks) ||
@@ -154,26 +163,27 @@ export function timedShards(
     capacity < 3
   )
     throw new Error('Expected positive check demand and capacity for test, static and pack jobs.');
+  const unique = [...new Set(files)];
   const maximum = Math.min(
     concurrencyBudget - 1,
+    Math.floor(checkCallBudget / callsPerJob) - 1,
+    maxTestShards,
     jobCap === undefined ? Infinity : capacity - 2,
-    new Set(files).size,
+    unique.length,
   );
   if (!maximum) return [];
   const measured = Object.values(durations).some(positive);
-  // A scoped selection that is most of the suite costs more runner minutes on the short
-  // scoped target than a full run does, so it plans like one. The timing history is
-  // pruned to the checked inventory, so its size stands in for the suite unless given.
-  const known = suite ?? Object.values(durations).filter(positive).length;
-  const wide = measured && known > 0 && new Set(files).size > known * scopedAsFullShare;
-  // Reserve two minutes for planning, job startup and artifact/dependency restore.
-  const target = (full || wide ? 480 : 180) * 1000;
+  // No shard can finish before its slowest file, so more shards past that point
+  // only spend runner minutes.
+  const fallback = testDuration('', durations);
+  const heaviest = Math.max(...unique.map(file => (positive(durations[file]) ? durations[file] : fallback)));
+  const target = Math.max(shardTargetMs, heaviest);
   const limit = measured ? maximum : Math.min(8, maximum);
   let groups,
     best,
     bestRate = -1;
   for (let count = 1; count <= limit; count++) {
-    groups = partitionTests(files, count, durations);
+    groups = partitionTests(unique, count, durations);
     const estimates = groups.map(group => shardDuration(group, durations));
     // Plan, static and optional pack consume runner time too. The org hard cap
     // remains GitHub's; this is a fluid throughput estimate, not a reservation.

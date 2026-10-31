@@ -399,7 +399,8 @@ For 3,000 raw source objects, a full nine-job check uses 87 Convex function
 invocations including HTTP actions, nested functions, enqueue, dispatch and webhook;
 a two-job scoped check uses 45, and docs-only uses 39. The formula is
 `17 + 2 * ceil(sourceObjects / 400) + 6 * jobs`, including one Candidate/base
-manifest window. Recipe metadata/leaves add their actual bounded descriptor
+manifest window. With `results.inlineLog` the job term is `4 * jobs`, so a full
+twelve-job check uses 81, the same as an eight-job check without it. Recipe metadata/leaves add their actual bounded descriptor
 windows; issued download grants expire after five minutes. GitHub API and object
 storage requests are separate from Convex function calls. A 6,000-object full
 fixture budgets 101 calls. The added term is one pre-spawn query per job, with no nested call or active polling. Page concurrency does not change these call counts:
@@ -522,16 +523,22 @@ monitor Actions cache storage across old lockfile keys when comparing the roughl
 1 GiB cache budget. This workflow does not introduce a cache deletion policy.
 
 Hosted test shard counts use the existing per-file timing history and two-worker
-LPT estimates. When capacity is idle the planner picks the smallest count predicted to fit 480 seconds
-for a full check or 180 seconds for a scoped/contract check, reserving 120 seconds
-of the ten/five minute target for planning and preparation. The runner setting
-`concurrencyBudget` includes the static job and defaults to nine (eight test jobs).
-Planning is serial; an optional pack job is additional. Eight test jobs therefore
-mean eleven total jobs per check, or ten concurrent jobs after planning.
+LPT estimates. When capacity is idle the planner picks the smallest count predicted to
+fit 150 seconds of tests per shard, or the slowest single test file when that is longer:
+no shard can finish before its slowest file, so more shards past that point only spend
+runner minutes. The count is also capped by Convex calls per check: jobs times calls per
+job stays within 48 (eight jobs at six calls, the cost before results carried their log).
+A server advertising `results.inlineLog` takes the bounded log inside the result call,
+so a job makes four calls (preflight query, result action, output and result
+mutations) and a check may use twelve jobs; older servers keep six calls and eight jobs.
+A result whose request would crowd the 512 KiB metadata window keeps the separate
+output upload. The runner setting `concurrencyBudget` includes the static job and
+defaults to twelve (eleven test jobs); test jobs never exceed twenty.
+Planning is serial; an optional pack job is additional.
 Configure it through the existing owner command, for example:
 
 ```sh
-nforge agent ROOT configure-runner '{"provider":"github-actions","repository":"OWNER/REPO","concurrencyBudget":9}'
+nforge agent ROOT configure-runner '{"provider":"github-actions","repository":"OWNER/REPO","concurrencyBudget":12}'
 ```
 
 On standard GitHub-hosted runners, planning samples this workflow's queued and
@@ -556,7 +563,7 @@ workload instead of eight; a small scoped workload still needs one. The selected
 groups remain digest-pinned. This is a planning estimate, not an org reservation
 or a new admission rule; GitHub enforces its actual concurrency limit.
 
-Without a capacity sample, missing history retains the previous eight-shard fallback within that budget;
+Without timing history the planner falls back to at most eight round-robin shards within that budget;
 unknown test files use historical p75. Every selected file remains in the plan.
 A long individual file or a saturated budget can exceed the target; the planner
 never drops tests or turns a failed test green to meet a duration. Contract tests,

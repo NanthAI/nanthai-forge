@@ -71,7 +71,18 @@ export const directCommandSchema = z.discriminatedUnion('kind', [
     .strip(),
   z.object({ kind: z.literal('plan'), plan: directPlanSchema }).strip(),
   z.object({ kind: z.literal('output'), index: checkNumber, log: directLogSchema }).strip(),
-  z.object({ kind: z.literal('result'), result: directResultSchema }).strip(),
+  z
+    .object({
+      kind: z.literal('result'),
+      result: directResultSchema,
+      // Base64 of result.log's bytes; the server stores them before the result commits.
+      logBytes: z
+        .string()
+        .max(Math.ceil(directLogBytes / 3) * 4)
+        .regex(/^[A-Za-z0-9+/]*={0,2}$/)
+        .optional(),
+    })
+    .strip(),
 ]);
 export const directRequestSchema = z
   .object({

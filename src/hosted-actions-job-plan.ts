@@ -11,6 +11,7 @@ import { standardSelection } from '../scripts/test-impact.mjs';
 import { timedShards } from '../scripts/test-shards.mjs';
 import { hostedActionsRecipeSchema } from './hosted-actions.js';
 import { ActionsJobClient } from './hosted-actions-job-client.js';
+import { actionsJobCalls } from './hosted-actions-capabilities.js';
 import { invariant } from './errors.js';
 import { materializeActionsSource } from './hosted-actions-job-source.js';
 import { scopedRecheckBase } from './scoped-recheck-policy.js';
@@ -82,8 +83,8 @@ export async function prepareActionsJob(
   const groups =
     standard && selection.scope !== 'docs'
       ? timedShards(selection.tests, client.timings, {
-          full: selection.scope === 'full',
-          concurrencyBudget: run.configuration.concurrencyBudget ?? 9,
+          concurrencyBudget: run.configuration.concurrencyBudget ?? 12,
+          callsPerJob: actionsJobCalls(client.capabilities),
           ...capacity,
         })
       : [];

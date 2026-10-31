@@ -12,6 +12,9 @@ import { ActionsJobClient } from './hosted-actions-job-client.js';
 import { checkFileSummary } from './check-file-summary.js';
 import { invariant } from './errors.js';
 import { setupActionsJob } from './hosted-actions-job-setup.js';
+import { actionsInlineLogCapability } from './hosted-actions-capabilities.js';
+/** Below the server's 512 KiB request window, leaving room for identity fields. */
+const inlineRequestBytes = 448 * 1024;
 /** Credentials remain in the fixed supervisor; the project receives a clean env.
  * Full stdout stays on Actions. Forge retains at most 64 KiB per job. */
 async function executeActiveActionsJob(
@@ -104,7 +107,22 @@ async function executeActiveActionsJob(
         failureSummary: exitCode ? tail.toString('utf8').slice(-4096) : '',
       }
     : undefined;
-  if (log) {
+  const result = {
+    index,
+    exitCode,
+    ...(log ? { log } : {}),
+    contractReports: reports.reports,
+    testFiles: checkFileSummary(reports.reports),
+    execution: { startedAt, endedAt: new Date().toISOString() },
+  };
+  // One result call stores the log too, unless it would crowd the server's metadata window.
+  const logBytes =
+    log &&
+    client.capabilities.includes(actionsInlineLogCapability) &&
+    Buffer.byteLength(JSON.stringify(result)) + Math.ceil(tail.length / 3) * 4 <= inlineRequestBytes
+      ? tail.toString('base64')
+      : undefined;
+  if (log && logBytes === undefined) {
     const target = (await client.call({ kind: 'output', index, log })) as {
       url: string;
       headers: Record<string, string>;
@@ -118,17 +136,8 @@ async function executeActiveActionsJob(
     });
     invariant(response.ok || response.status === 412, 'R2_VERIFY_FAILED', 'Output upload failed.');
   }
-  await client.call({
-    kind: 'result',
-    result: {
-      index,
-      exitCode,
-      ...(log ? { log } : {}),
-      contractReports: reports.reports,
-      testFiles: checkFileSummary(reports.reports),
-      execution: { startedAt, endedAt: new Date().toISOString() },
-    },
-  });
+  result.execution.endedAt = new Date().toISOString();
+  await client.call({ kind: 'result', result, ...(logBytes !== undefined ? { logBytes } : {}) });
   return exitCode;
 }
 

@@ -8,7 +8,7 @@ import { recordsFixture } from './hosted-records-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { sourceWorkerPlan } from '../dist/convex-source-provider.js';
 import { hostedPayloadHash } from '../dist/hosted-source-operation.js';
-import { saveBytes } from '../dist/hosted-save.js';
+import { buildSavePages, saveBytes } from '../dist/hosted-save.js';
 import { digest } from '../dist/hash.js';
 const names = [
   'projectConvexSourceStore',
@@ -348,4 +348,42 @@ export async function scaleFixture({ parallelism = 4, delay = 0, guardRss = fals
       }
     },
   };
+}
+/** A save input changing `count` 100 KiB files of a `baselineCount`-file deep State. */
+export async function saveInput(s, count, baselineCount = count) {
+  const original = await s.putSpec(Buffer.from('baseline\n')),
+    files = Array.from({ length: baselineCount }, (_, i) => ({
+      path: `deep/a/b/c/d/${String(i).padStart(6, '0')}.txt`,
+      blob: original.sha256,
+      mode: 'file',
+    }));
+  const baseline = await s.json({
+      schema: 1,
+      kind: 'forge-source-state',
+      parents: [],
+      files,
+      message: 'base',
+      at,
+    }),
+    changes = [];
+  for (let i = 0; i < count; i++) {
+    const pin = await s.putSpec({ size: 100 * 1024, index: i });
+    changes.push({
+      path: files[i].path,
+      before: { blob: original.sha256, mode: 'file' },
+      after: { blob: pin.sha256, mode: 'file', content: { object: pin, recipe: null } },
+    });
+  }
+  const pages = buildSavePages(changes);
+  for (const p of pages.pages) await s.json(p.value);
+  return s.json({
+    schema: 1,
+    kind: 'forge-hosted-save-input',
+    baseline: { object: baseline, recipe: null },
+    pages: pages.root,
+    pageCount: pages.pages.length,
+    changeCount: count,
+    message: '500 MB',
+    at,
+  });
 }

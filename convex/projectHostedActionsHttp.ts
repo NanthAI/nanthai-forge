@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 import { actionsPreflightSignature } from '../src/hosted-actions-preflight';
 import { makeFunctionReference } from 'convex/server';
-import { httpAction } from './_generated/server';
+import { httpAction, type ActionCtx } from './_generated/server';
 import { z } from 'zod';
 import { sourcePackCommand } from './projectSourcePacks';
 import { verifyActionsOidc } from '../src/github-actions-oidc';
-import { directRequestSchema } from '../src/hosted-actions-direct';
+import { directRequestSchema, directResultSchema } from '../src/hosted-actions-direct';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { verifyOutputObject } from './projectHostedOutputApi';
 import { directOutput } from '../src/hosted-actions-direct';
@@ -17,6 +17,7 @@ import type { Id } from './_generated/dataModel';
 import { invariant } from '../src/errors';
 import { storeSourceBytes } from './projectSourceBytes';
 import { savePin } from '../src/hosted-save';
+import type { SessionInput } from './projectHostedActionsSession';
 export const handle = httpAction(async (ctx, request) => {
   let reason: 'authorization' | 'validation' | 'storage' | 'cancelled' = 'authorization';
   try {
@@ -109,6 +110,38 @@ export const handle = httpAction(async (ctx, request) => {
           : { selectionR2Key: selection.r2Key }),
         ...('storageId' in recipe ? { recipeStorage: recipe.storageId } : { recipeR2Key: recipe.r2Key }),
       });
+    } else if (command.logBytes !== undefined) {
+      // Inline log: authorize and store the bytes, then verify them like a separate
+      // output upload would. The result transaction repeats authority/fence checks.
+      reason = 'validation';
+      const log = command.result.log,
+        body = Uint8Array.from(atob(command.logBytes), c => c.charCodeAt(0));
+      invariant(
+        log && body.length === log.object.size,
+        'BAD_ARGUMENT',
+        'Log bytes differ from the result log.',
+      );
+      reason = 'authorization';
+      const { target, run } = (await ctx.runMutation(
+        makeFunctionReference<'mutation'>('projectHostedActionsResults:output'),
+        { ...input, index: command.result.index, log: canonicalPayload(log), withRun: true },
+      )) as { target: { url: string; headers: Record<string, string> }; run: HostedCheckRun };
+      reason = 'storage';
+      // The signed create-only PUT enforces the sha256; 412 means this object is already stored.
+      const stored = await fetch(target.url, {
+        method: 'PUT',
+        headers: target.headers,
+        body,
+        redirect: 'error',
+        signal: AbortSignal.timeout(20_000),
+      });
+      invariant(stored.ok || stored.status === 412, 'R2_VERIFY_FAILED', 'Output upload failed.');
+      await verifyOutputObject(
+        input.projectId,
+        directOutput(run, command.result.index, log, outputSigningKey(run.keyId))[0]!.message,
+      );
+      reason = 'authorization';
+      value = await settleResult(ctx, input, command.result, phase => (reason = phase));
     } else {
       // Storage verification happens outside the result transaction. The transaction
       // repeats authority/fence checks before atomically committing output and evidence.
@@ -125,37 +158,7 @@ export const handle = httpAction(async (ctx, request) => {
         );
       }
       reason = 'authorization';
-      value = await ctx.runMutation(makeFunctionReference<'mutation'>('projectHostedActionsResults:result'), {
-        ...input,
-        result: canonicalPayload(command.result),
-      });
-      const settled = value as HostedCheckRun;
-      if (hostedCheckTerminal(settled)) {
-        const final = (await ctx.runMutation(
-          makeFunctionReference<'mutation'>('projectHostedActionsOutput:prepare'),
-          input,
-        )) as { root: OutputRoot; target: { url: string; headers: Record<string, string> } } | null;
-        if (final) {
-          reason = 'storage';
-          const stored = await fetch(final.target.url, {
-            method: 'PUT',
-            headers: final.target.headers,
-            body: canonicalPayload(final.root),
-            redirect: 'error',
-            signal: AbortSignal.timeout(20_000),
-          });
-          invariant(stored.ok || stored.status === 412, 'R2_VERIFY_FAILED', 'Output manifest upload failed.');
-          await verifyOutputObject(
-            input.projectId,
-            outputMessage(settled, { kind: 'final', root: final.root }),
-          );
-          reason = 'authorization';
-          await ctx.runMutation(makeFunctionReference<'mutation'>('projectHostedActionsOutput:apply'), {
-            ...input,
-            root: canonicalPayload(final.root),
-          });
-        }
-      }
+      value = await settleResult(ctx, input, command.result, phase => (reason = phase));
     }
     const headers: Record<string, string> = { 'Cache-Control': 'no-store' };
     if (command.kind === 'session') {
@@ -184,3 +187,38 @@ export const handle = httpAction(async (ctx, request) => {
     );
   }
 });
+
+/** Commit one job result; the last one also publishes the final output manifest. */
+async function settleResult(
+  ctx: ActionCtx,
+  input: SessionInput,
+  result: z.infer<typeof directResultSchema>,
+  phase: (reason: 'authorization' | 'storage') => void,
+) {
+  const settled: HostedCheckRun = await ctx.runMutation(
+    makeFunctionReference<'mutation'>('projectHostedActionsResults:result'),
+    { ...input, result: canonicalPayload(result) },
+  );
+  if (!hostedCheckTerminal(settled)) return settled;
+  const final = (await ctx.runMutation(
+    makeFunctionReference<'mutation'>('projectHostedActionsOutput:prepare'),
+    input,
+  )) as { root: OutputRoot; target: { url: string; headers: Record<string, string> } } | null;
+  if (!final) return settled;
+  phase('storage');
+  const stored = await fetch(final.target.url, {
+    method: 'PUT',
+    headers: final.target.headers,
+    body: canonicalPayload(final.root),
+    redirect: 'error',
+    signal: AbortSignal.timeout(20_000),
+  });
+  invariant(stored.ok || stored.status === 412, 'R2_VERIFY_FAILED', 'Output manifest upload failed.');
+  await verifyOutputObject(input.projectId, outputMessage(settled, { kind: 'final', root: final.root }));
+  phase('authorization');
+  await ctx.runMutation(makeFunctionReference<'mutation'>('projectHostedActionsOutput:apply'), {
+    ...input,
+    root: canonicalPayload(final.root),
+  });
+  return settled;
+}

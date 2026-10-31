@@ -696,6 +696,88 @@ test('OIDC HTTP commits one bounded log with its shard result and reconciles a l
   assert([...s.tables.projectHostedOutputHeads.values()][0].final);
   assert.equal(s.tables.projectHostedOutputStreams.size, 1);
 });
+test('an inline log is authorized, stored and verified inside the one result call', async t => {
+  const s = await fixture(t, 1);
+  await s.bind();
+  await s.prepare();
+  const bytes = Buffer.from('synthetic inline failure summary');
+  const { digest } = await import('../dist/hash.js');
+  const result = {
+    index: 0,
+    exitCode: 7,
+    log: { object: { sha256: digest(bytes), size: bytes.length }, failureSummary: 'synthetic failure' },
+  };
+  const puts = [];
+  t.mock.method(globalThis, 'fetch', async (url, init) => {
+    if (url === `${actionsIssuer}/.well-known/jwks`) return jwks();
+    if (init.method === 'PUT') {
+      puts.push(Buffer.from(init.body));
+      return new Response(null, { status: 200 });
+    }
+    const finalRoot = [...s.tables.projectHostedOutputHeads.values()][0];
+    if (url.includes('checks') && !url.includes(digest(bytes))) {
+      const { rootForOutput } = await import(moduleUrl('../convex/projectHostedOutputStore.ts'));
+      const { canonicalPayload } = await import('../dist/hosted-source-operation.js');
+      const rootBytes = Buffer.from(canonicalPayload(rootForOutput(s.id, '123', finalRoot)));
+      return new Response(null, {
+        status: 200,
+        headers: {
+          'content-length': String(rootBytes.length),
+          'x-amz-checksum-sha256': Buffer.from(digest(rootBytes), 'hex').toString('base64'),
+        },
+      });
+    }
+    return new Response(null, {
+      status: 200,
+      headers: {
+        'content-length': String(bytes.length),
+        'x-amz-checksum-sha256': Buffer.from(digest(bytes), 'hex').toString('base64'),
+      },
+    });
+  });
+  const finalOutput = await import(moduleUrl('../convex/projectHostedActionsOutput.ts'));
+  const modules = {
+    projectHostedActionsOutput: finalOutput,
+    projectHostedActionsSession: sessions,
+    projectHostedActionsResults: results,
+  };
+  const mutations = [];
+  const ctx = {
+    runMutation: (ref, input) => {
+      mutations.push(getFunctionName(ref));
+      const [name, method] = getFunctionName(ref).split(':');
+      return s.call(modules[name], method, input);
+    },
+  };
+  const send = logBytes =>
+    handle._handler(
+      ctx,
+      new Request(`${audience}/checks/actions`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${oidc()}` },
+        body: JSON.stringify({ ...s.id, fence: 1, command: { kind: 'result', result, logBytes } }),
+      }),
+    );
+  // Bytes that differ from the declared log are refused before any database access.
+  const wrong = await send(Buffer.from('short').toString('base64'));
+  assert.equal(wrong.status, 403);
+  assert.equal((await wrong.json()).reason, 'validation');
+  assert.deepEqual(mutations, []);
+  const first = await send(bytes.toString('base64'));
+  assert.equal(first.status, 200);
+  assert.equal((await first.json()).status, 'failed');
+  assert.deepEqual(puts[0], bytes);
+  // One output and one result mutation per job; no separate output action or session read.
+  assert.deepEqual(mutations.slice(0, 2), [
+    'projectHostedActionsResults:output',
+    'projectHostedActionsResults:result',
+  ]);
+  assert(!mutations.includes('projectHostedActionsSession:session'));
+  assert.equal(s.tables.projectHostedOutputChunks.size, 1);
+  assert([...s.tables.projectHostedOutputHeads.values()][0].final);
+  assert.equal(s.tables.projectHostedOutputStreams.size, 1);
+});
+
 test('watchdog settles a dispatch with no reply or webhook once; cancelled pre-dispatch schedules no watchdog', async t => {
   const s = await fixture(t);
   await s.reserve();

@@ -139,7 +139,7 @@ function actionsRunnerSettings(configuration: z.infer<typeof currentSettings>['c
     workflow: '.github/workflows/forge-check.yml',
     ref: 'main',
     runsOn: configuration.runsOn ?? 'ubuntu-latest',
-    concurrencyBudget: configuration.concurrencyBudget ?? 9,
+    concurrencyBudget: configuration.concurrencyBudget ?? 12,
     runner: githubActionsRunnerDescription(configuration.runsOn ?? 'ubuntu-latest'),
     installation: direct ? 'derived per operation via the GitHub App' : 'from the credential reference',
     results: direct ? 'OIDC session plus workflow_run webhook' : 'controller callback',

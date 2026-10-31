@@ -8,6 +8,8 @@ import { randomUUID } from 'node:crypto';
 import {
   hostedActionsCapabilities,
   actionsPreflightCapability,
+  actionsInlineLogCapability,
+  actionsJobCalls,
 } from '../dist/hosted-actions-capabilities.js';
 import { z } from 'zod';
 import { ConvexHttpClient } from 'convex/browser';
@@ -21,7 +23,7 @@ import { createSourcePack } from '../dist/source-pack-archive.js';
 import { refreshSourcePack, sourcePackFileBytes } from '../dist/source-pack.js';
 import { gzipSync, gunzipSync } from 'node:zlib';
 import { truncateSync } from 'node:fs';
-import { partitionTests, timedShards, shardDuration } from '../scripts/test-shards.mjs';
+import { partitionTests, timedShards, shardDuration, checkCallBudget } from '../scripts/test-shards.mjs';
 function fixture(
   t,
   {
@@ -342,6 +344,36 @@ test('queue pressure changes pinned shard groups without new Convex calls or los
   assert.equal(s.calls.filter(call => call.kind === 'result').length, 0);
 });
 
+test('shard count keeps Convex calls per check within the budget for old and inline-log servers', async t => {
+  const tests = Array.from({ length: 80 }, (_, i) => `tests/budget-${i}.test.mjs`);
+  const timingHistory = {
+    version: 1,
+    runs: [],
+    files: Object.fromEntries(tests.map(file => [file, { durationMs: 45000, updatedAt: '2026-01-01' }])),
+  };
+  const oldServer = hostedActionsCapabilities.filter(value => value !== actionsInlineLogCapability);
+  for (const [capabilities, shards, calls] of [
+    [oldServer, 7, 6],
+    [hostedActionsCapabilities, 11, 4],
+  ]) {
+    const s = fixture(t, { timingHistory, capabilities });
+    s.run.request.expectedHead = s.state([
+      s.entry('package-lock.json', '{}'),
+      ...tests.map(file => s.entry(file, '// synthetic')),
+    ]).sha256;
+    const prepared = await prepareActionsJob(
+      s.client,
+      join(s.directory, 'candidate'),
+      join(s.directory, 'cache'),
+    );
+    assert.equal(actionsJobCalls(capabilities), calls);
+    assert.equal(prepared.recipe.groups.length, shards);
+    assert.equal(prepared.matrix.length, shards + 1);
+    assert(prepared.matrix.length * calls <= checkCallBudget);
+    assert.deepEqual(prepared.recipe.groups.flat().sort(), tests.slice().sort());
+  }
+});
+
 test('planner consumes session timing history for balanced LPT shards; empty and corrupt history preserve round-robin', async t => {
   const tests = Array.from(
     { length: 80 },
@@ -364,11 +396,11 @@ test('planner consumes session timing history for balanced LPT shards; empty and
     );
     assert.deepEqual(
       prepared.recipe.groups,
-      timedShards(tests, Object.keys(filesHistory).length ? durations : {}, { full: true }),
+      timedShards(tests, Object.keys(filesHistory).length ? durations : {}, { callsPerJob: 4 }),
     );
     assert.equal(s.calls.filter(call => call.kind === 'session').length, 2);
     if (Object.keys(filesHistory).length) {
-      assert.equal(prepared.recipe.groups.length, 1);
+      assert.equal(prepared.recipe.groups.length, 2);
       const estimates = prepared.recipe.groups.map(group => shardDuration(group, durations));
       assert(Math.max(...estimates) <= Math.min(...estimates) * 1.2);
       t.diagnostic(
@@ -475,8 +507,9 @@ test('untrusted traversal manifests and altered downloads fail before materializ
     /Native|Invalid|validation|input/i,
   );
 });
+const withoutInlineLog = hostedActionsCapabilities.filter(value => value !== actionsInlineLogCapability);
 test('fixed supervisor records actual child exit, strips OIDC env and posts bounded output', async t => {
-  const s = fixture(t),
+  const s = fixture(t, { capabilities: withoutInlineLog }),
     candidate = join(s.directory, 'candidate'),
     prepared = await prepareActionsJob(s.client, candidate, join(s.directory, 'objects'));
   const path = join(s.directory, 'plan.json');
@@ -514,6 +547,71 @@ test('fixed supervisor records actual child exit, strips OIDC env and posts boun
   assert.equal(result.log.object.sha256, digest(uploaded));
   assert.equal(result.contractReports['tests/synthetic.test.mjs'].failed, true);
 });
+test('an inline-log server receives the bounded log inside the one result call', async t => {
+  const s = fixture(t),
+    candidate = join(s.directory, 'candidate'),
+    prepared = await prepareActionsJob(s.client, candidate, join(s.directory, 'objects'));
+  const path = join(s.directory, 'plan.json');
+  writeFileSync(path, JSON.stringify(prepared.recipe));
+  const posted = [];
+  const realCall = s.client.call.bind(s.client);
+  s.client.call = async command => {
+    if (command.kind !== 'output' && command.kind !== 'result') return realCall(command);
+    posted.push(command);
+    return {};
+  };
+  const uploads = t.mock.method(globalThis, 'fetch', async () => new Response(null, { status: 200 }));
+  t.mock.method(process.stdout, 'write', () => true);
+  const program = `console.log('x'.repeat(70000)); console.log('__FORGE_TESTS__'+JSON.stringify({file:'tests/synthetic.test.mjs',complete:true,durationMs:5,results:[{name:'synthetic',passed:false}]})); process.exitCode = 7;`;
+  const exit = await executeActionsJob(s.client, candidate, path, 'static', [
+    process.execPath,
+    '--eval',
+    program,
+  ]);
+  assert.equal(exit, 7);
+  assert.deepEqual(
+    posted.map(command => command.kind),
+    ['result'],
+  );
+  assert.equal(uploads.mock.callCount(), 0, 'the server stores the log; the runner makes no PUT');
+  const [{ result, logBytes }] = posted;
+  const bytes = Buffer.from(logBytes, 'base64');
+  assert(bytes.length <= 65536);
+  assert.deepEqual(result.log.object, { sha256: digest(bytes), size: bytes.length });
+  assert.equal(result.exitCode, 7);
+  assert.equal(result.contractReports['tests/synthetic.test.mjs'].failed, true);
+  assert.equal(actionsJobCalls(hostedActionsCapabilities), 4);
+  assert.equal(actionsJobCalls(withoutInlineLog), 6);
+});
+
+test('a result too large to carry its log falls back to the separate output upload', async t => {
+  const s = fixture(t),
+    candidate = join(s.directory, 'candidate'),
+    prepared = await prepareActionsJob(s.client, candidate, join(s.directory, 'objects'));
+  const path = join(s.directory, 'plan.json');
+  writeFileSync(path, JSON.stringify(prepared.recipe));
+  const posted = [];
+  s.client.call = async command => {
+    posted.push(command);
+    return command.kind === 'output' ? { url: 'https://output.invalid/log', headers: {} } : {};
+  };
+  const uploads = t.mock.method(globalThis, 'fetch', async () => new Response(null, { status: 200 }));
+  t.mock.method(process.stdout, 'write', () => true);
+  // About 450 KiB of failure excerpts: with the base64 log the request would pass the window.
+  const program = `for(let i=0;i<300;i++)console.log('__FORGE_TESTS__'+JSON.stringify({file:'tests/wide-'+i+'.test.mjs',complete:true,durationMs:5,failed:true,firstError:'e'.repeat(1500),results:[{name:'n',passed:false}]}));`;
+  assert.equal(
+    await executeActionsJob(s.client, candidate, path, 'static', [process.execPath, '--eval', program]),
+    0,
+  );
+  assert.deepEqual(
+    posted.map(command => command.kind),
+    ['output', 'result'],
+  );
+  assert.equal('logBytes' in posted[1], false);
+  assert.equal(uploads.mock.callCount(), 1);
+  assert.equal(Object.keys(posted[1].result.contractReports).length, 300);
+});
+
 test('workflow keeps the native plan branch and uses OIDC without GitHub secrets for hosted jobs', () => {
   const workflow = readFileSync(new URL('../.github/workflows/forge-check.yml', import.meta.url), 'utf8');
   assert.match(workflow, /inputs.deployment == '' && inputs.plan != '\[\]'/);
@@ -589,8 +687,10 @@ for (const flaky of [false, true])
       0,
     );
     assert.equal(posted.filter(command => command.kind === 'result').length, 1);
-    assert.equal(posted.filter(command => command.kind === 'output').length, 1);
-    assert.equal(posted.length, 2);
+    // The bounded log rides inside the result: no separate output call.
+    assert.equal(posted.filter(command => command.kind === 'output').length, 0);
+    assert.equal(posted.length, 1);
+    assert.equal(typeof posted[0].logBytes, 'string');
     assert.equal(s.calls.filter(command => command.kind === 'preflight').length, 1);
     const reports = posted.find(command => command.kind === 'result').result.contractReports;
     assert.equal(Object.keys(reports).length, 600);

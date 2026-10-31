@@ -558,7 +558,7 @@ test('CLI configure-runner github-actions routes to the App action, derives the 
     workflow: '.github/workflows/forge-check.yml',
     ref: 'main',
     runsOn: 'ubuntu-latest',
-    concurrencyBudget: 9,
+    concurrencyBudget: 12,
     runner: 'runner: ubuntu-latest',
     installation: 'derived per operation via the GitHub App',
     results: 'OIDC session plus workflow_run webhook',

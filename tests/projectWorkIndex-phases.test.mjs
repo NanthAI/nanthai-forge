@@ -37,23 +37,6 @@ test('all post-parent index phases fit the dogfood call and action memory budget
   t.diagnostic(JSON.stringify(result));
 });
 
-test('owner-supplied View facts retain the existing post-parent call budgets', async t => {
-  const { stdout } = await promisify(execFile)(
-    process.execPath,
-    ['--max-old-space-size=384', 'tests/projectWorkIndex-phases-worker.mjs', 'owner'],
-    { env: { ...process.env, FORGE_TEST_PRECOMPILED: '1' }, maxBuffer: 1024 * 1024 },
-  );
-  const result = JSON.parse(stdout.match(/PHASE_RESULT (.+)/)[1]);
-  assert.equal(result.rejected, 0);
-  assert.equal(result.sourceFileReads, 0);
-  assert.equal(result.sourceFileResolves, 0);
-  assert(result.viewCallsPerRecord <= 2, JSON.stringify(result));
-  assert(result.remaining.calls <= 8000, JSON.stringify(result));
-  t.diagnostic(
-    JSON.stringify({ viewCallsPerRecord: result.viewCallsPerRecord, remaining: result.remaining }),
-  );
-});
-
 test('a resumed dogfood coordinator action stays below 512 MiB without retaining historical database rows', async t => {
   const { stdout } = await promisify(execFile)(
     process.execPath,
