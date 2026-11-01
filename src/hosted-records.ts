@@ -100,7 +100,12 @@ export const hostedRecordSchema = z.discriminatedUnion('kind', [
       algorithm: z.string().min(1),
       result: z.discriminatedUnion('status', [
         z.object({ status: z.literal('clean'), head: hash }).strict(),
-        z.object({ status: z.literal('conflict'), conflicts: object }).strict(),
+        z
+          .object({
+            status: z.literal('conflict'),
+            conflicts: object,
+          })
+          .strict(),
       ]),
     })
     .strict(),

@@ -35,8 +35,10 @@ export async function finishStep(ctx: MutationCtx, input: FinishIdentity): Promi
   await ctx.db.patch(row._id, { wake: null });
   const { row: landing, state } = await loadLanding(ctx, input);
   try {
-    const batchStep = await batchFinishStep(ctx, input, row);
-    if (batchStep.handled) return batchStep.command;
+    if (!value.pending?.precompose) {
+      const batchStep = await batchFinishStep(ctx, input, row);
+      if (batchStep.handled) return batchStep.command;
+    }
     if (state.phase === 'landed' || state.phase === 'terminal-failed') return null;
     await hostedWriteProject(ctx, input.projectId, state.actor, state.request.authorityEpoch);
     if (value.recoveryRunId) {
@@ -89,15 +91,15 @@ export async function finishStep(ctx: MutationCtx, input: FinishIdentity): Promi
           } else {
             // Unknown proof outcome: one ordinary exact check, never a second
             // simultaneous analysis. Late callbacks are fenced by pending ID.
-            await installFinishCompose(ctx, row, value);
+            await installFinishCompose(ctx, row, value, undefined, source);
           }
           return null;
         }
-        if (await reuseContext(ctx, input)) {
+        if (!value.pending.precompose && (await reuseContext(ctx, input))) {
           await scheduleFinish(ctx, row, 30_000, true);
           return { kind: 'reuse', pendingId: value.pending.id };
         }
-        await installFinishCompose(ctx, row, value);
+        await installFinishCompose(ctx, row, value, undefined, source);
         return null;
       }
       if (source.state.status === 'submitted') {

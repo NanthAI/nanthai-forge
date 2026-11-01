@@ -19,7 +19,7 @@ import { readJson, sourceStepBytes, full, type StepMeter } from './hosted-source
 import type { SourceStepCursor, StepTransport } from './hosted-source-step.js';
 import { sourceWindows } from './hosted-source-fanout.js';
 import { invariant } from './errors.js';
-import { sourceAncestryCut } from './hosted-source-ancestry-cut.js';
+import { sourceAncestryCut, sourceAncestryFrontier } from './hosted-source-ancestry-cut.js';
 import type { WorkerObject } from './hosted-source-worker-format.js';
 
 export async function prepareMergeStep(c: SourceStepCursor, io: StepTransport, m: StepMeter) {
@@ -155,7 +155,15 @@ export async function prepareMergeStep(c: SourceStepCursor, io: StepTransport, m
     }
   }
   c.states = [...new Set(c.states)].filter(id => !c.parents[id]);
-  const boundary = sourceAncestryCut(c.parents, c.states);
+  const roots =
+    kind === 'forge-hosted-compose-input'
+      ? [
+          composeInputSchema.parse(c.plan).base.head,
+          ...c.selections.map(v => (v as { head: string }).head),
+          ...Object.values(composeInputSchema.parse(c.plan).restoreBases ?? {}).map(ref => ref.object.sha256),
+        ]
+      : syncRoots(c);
+  const boundary = sourceAncestryCut(c.parents, c.states, roots);
   if (boundary) {
     c.ancestryBoundary = boundary;
     c.states = [];
@@ -167,16 +175,28 @@ export async function prepareMergeStep(c: SourceStepCursor, io: StepTransport, m
   if (full(m)) return;
   // Derived parent rows are prefetch hints only. Every returned manifest is
   // hash verified and its actual parents extend the frontier, even on gaps.
+  const frontier = sourceAncestryFrontier(c.parents, c.states, roots);
+  const selected = new Set(frontier),
+    deferred = c.states.filter(id => !selected.has(id));
   let refs: WorkerObject[];
   if (io.ancestry && Object.keys(c.parents).length >= 32)
-    refs = await io.ancestry(c.states.slice(0, 100), Object.keys(c.parents), io.fanout ? 4 : 1);
+    refs = await io.ancestry(
+      frontier.slice(0, 100),
+      [...Object.keys(c.parents), ...deferred],
+      io.fanout ? 4 : 1,
+    );
   else {
     // Nearby branches usually meet after a few verified frontiers. Reading a
     // 400-State hint window first can cross that common cut and transfer the
     // whole retained history before we can prove it unnecessary. Deep graphs
     // retain the existing paged hint traversal after this bounded local search.
     invariant(io.describeBatch, 'SOURCE_WORKER_UNAVAILABLE', 'Resolve ancestry in windows.');
-    refs = await io.describeBatch(c.states.slice(0, 100));
+    refs = await io.describeBatch(frontier.slice(0, 100));
+  }
+  if (deferred.length) refs = refs.filter(ref => !deferred.includes(ref.object.sha256));
+  if (!refs.length) {
+    invariant(io.describeBatch, 'SOURCE_WORKER_UNAVAILABLE', 'Resolve the selected ancestry frontier.');
+    refs = await io.describeBatch(frontier.slice(0, 100));
   }
   const windows = sourceWindows(refs);
   if (io.fanout && windows.length > 1) {
@@ -332,4 +352,24 @@ function manifestConflict(result: { output: { sha256: string } }, source: Memory
     composeResultSchema.parse(JSON.parse(source.object(result.output.sha256).toString('utf8'))).result
       .status === 'conflict'
   );
+}
+
+/** The selected sync roots, not the prefetched frontier, define the proof. */
+function syncRoots(c: SourceStepCursor): string[] {
+  const work = syncInputSchema.parse(c.plan).work;
+  if (work.mode === 'resolution') return Object.keys(c.parents); // Retain the conservative legacy proof.
+  if (work.mode === 'revert') return [work.previous.object.sha256, work.accepted.object.sha256];
+  if (work.mode === 'sync')
+    return [
+      work.left.object.sha256,
+      work.right.object.sha256,
+      ...(work.stackBase ? [work.stackBase.object.sha256] : []),
+    ];
+  return [
+    work.left.object.sha256,
+    work.resolution.left,
+    work.resolution.right,
+    work.resolution.draftHead,
+    ...(work.resolution.mergeBase ? [work.resolution.mergeBase] : []),
+  ];
 }

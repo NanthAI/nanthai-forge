@@ -9,6 +9,7 @@ import type { Doc } from './_generated/dataModel';
 import type { MutationCtx } from './_generated/server';
 import type { FinishIdentity } from './projectHostedFinishControl';
 import { retainBatchConflict } from './projectHostedLandingBatchConflict';
+import { batchConflictPeers } from './projectHostedLandingConflictPeers';
 import { loadFinish } from './projectHostedFinishStore';
 import { loadLanding } from './projectHostedLandingStore';
 import {
@@ -125,6 +126,13 @@ export async function batchFinishStep(
         member,
         main: source.state.request.expectedMain,
         conflict,
+        peerLanes: await batchConflictPeers(
+          ctx,
+          input.projectId,
+          batch,
+          member.candidate.id,
+          dropped.map(d => d.candidateId),
+        ),
         at: batch.at,
       });
     }

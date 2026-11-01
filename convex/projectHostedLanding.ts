@@ -1,4 +1,5 @@
 import { readQueueStatus, queueAwareLandingState } from './projectHostedQueueStatus';
+import { finishPendingForReader } from '../src/hosted-finish';
 import {
   landingPriority,
   nextLandingRow,
@@ -417,7 +418,7 @@ export const candidate = query({
         run,
         reverseCandidateId: reverse?.candidateId ?? null,
         message: finish ? JSON.parse(finish.value).source.message : null,
-        pendingAttempt: finish ? JSON.parse(finish.value).pending : null,
+        pendingAttempt: finish ? finishPendingForReader(JSON.parse(finish.value).pending) : null,
         receipt: receipt ? JSON.parse(receipt.value) : null,
         ahead:
           ahead && !['landed', 'terminal-failed'].includes(ahead.phase)

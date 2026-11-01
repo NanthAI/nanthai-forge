@@ -6,6 +6,7 @@ import { desiredLanding } from './projectHostedLandingDesiredWake';
 import { hostedLandingStateSchema } from '../src/hosted-landing';
 import { landingAlias } from './projectHostedLandingIdentity';
 // SPDX-License-Identifier: Apache-2.0
+import { finishPendingForReader } from '../src/hosted-finish';
 import { v } from 'convex/values';
 import { query } from './cliServer';
 import { accessibleProject } from './projectAuthority';
@@ -93,7 +94,7 @@ export const page = query({
       const queue = await readQueueStatus(ctx, state);
       const wouldConflict = state.phase === 'queued' ? readWouldConflict(selectedRow) : undefined;
       const finish = await finishRow(ctx, { projectId: input.projectId, submissionId: state.id });
-      const pendingAttempt = finish ? JSON.parse(finish.value).pending : null;
+      const pendingAttempt = finish ? finishPendingForReader(JSON.parse(finish.value).pending) : null;
       const events = [];
       let nextVersion = input.nextVersion,
         resnapshot = false;
@@ -119,6 +120,7 @@ export const page = query({
         const event = JSON.parse(row.value);
         events.push({
           ...event,
+          pendingAttempt: finishPendingForReader(event.pendingAttempt),
           submission: landingStateForReader(
             hostedLandingStateSchema.parse(event.submission),
             input.priorityInfo,

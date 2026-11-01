@@ -11,8 +11,28 @@ export const hostedFinishSchema = z
     recoveryRunId: z.uuid().optional(),
     restoreBases: composeInputSchema.shape.restoreBases,
     check: landingCheckSelectionSchema.nullable(),
+    precomposed: z
+      .object({
+        operationId: z.uuid(),
+        parentAttemptId: z.uuid(),
+        main: hostedLandingAttemptSchema.shape.main,
+      })
+      .strict()
+      .optional(),
     pending: z
       .object({
+        precompose: z
+          .object({
+            peerLanes: z.array(z.uuid()),
+            paths: z.array(z.string()),
+            runnable: z.boolean(),
+            next: z
+              .object({ main: hostedLandingAttemptSchema.shape.main, peerLanes: z.array(z.uuid()) })
+              .strict()
+              .optional(),
+          })
+          .strict()
+          .optional(),
         id: z.uuid(),
         parentAttemptId: z.uuid(),
         number: z.number().int().positive().safe(),
@@ -42,3 +62,11 @@ export type FinishCommand =
       selection: { attemptId: string; kind: 'inputs' | 'dependencies'; index: number };
     }
   | { kind: 'plan'; value: string; pin: { sha256: string; size: number }; batchId?: string };
+
+/** Private probe scheduling is not a released pending-attempt protocol field. */
+export function finishPendingForReader(value: HostedFinish['pending']) {
+  if (!value) return null;
+  const { precompose, ...pending } = value;
+  void precompose;
+  return pending;
+}

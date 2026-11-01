@@ -23,7 +23,8 @@ export async function prepareBatchCompose(ctx: MutationCtx, input: BatchIdentity
   const first = batch.members[0]!;
   const auth = { projectId: input.projectId, actor: first.actor.id, operationId: batch.composeOperationId };
   const existing = await composeRow(ctx, auth);
-  if (existing && batch.uploads) return { ...(await loadCompose(ctx, auth)), auth, uploads: batch.uploads };
+  if (existing && batch.uploads)
+    return { ...(await loadCompose(ctx, auth, true, existing)), auth, uploads: batch.uploads };
   const inputs = buildComposePages([]),
     dependencies = buildComposePages(
       await Promise.all(

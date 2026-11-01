@@ -102,7 +102,27 @@ for (const count of [10, 50])
       while (states(f).some(state => state.phase !== 'landed')) {
         assert(++waves <= count);
         const pending = f.runs().filter(run => run.status === 'queued');
-        assert(pending.length);
+        assert(
+          pending.length,
+          JSON.stringify({
+            batching,
+            states: states(f),
+            tasks: f.pending(),
+            queues: [...f.tables.projectHostedLandingQueues.values()],
+            rows: [...f.tables.projectHostedLandingRequests.values()].map(
+              ({ submissionId, runnable, runId, attemptId }) => ({
+                submissionId,
+                runnable,
+                runId,
+                attemptId,
+              }),
+            ),
+            finishes: [...f.tables.projectHostedFinishes.values()].map(row => ({
+              id: row.submissionId,
+              value: JSON.parse(row.value),
+            })),
+          }),
+        );
         peakChecks = Math.max(peakChecks, pending.length);
         assert(pending.length <= 6);
         await f.passChecks();

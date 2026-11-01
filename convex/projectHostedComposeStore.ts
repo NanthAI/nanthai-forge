@@ -5,7 +5,7 @@ import { notifyDesiredCompose } from './projectHostedLandingDesiredWake';
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
 import type { MutationCtx, QueryCtx } from './_generated/server';
-import type { Id } from './_generated/dataModel';
+import type { Doc, Id } from './_generated/dataModel';
 import { activeProject } from './projectAuthority';
 import { hostedWriteProject } from './projectHostedRecords';
 import { hostedOperationRow } from './projectHostedOperations';
@@ -25,6 +25,10 @@ export const composeStateSchema = z
     restoreBases: z.record(z.uuid(), saveWorkerObjectSchema).optional(),
     batch: batchComposeSchema.optional(),
     dropped: batchDroppedSchema.optional(),
+    conflictSummary: z
+      .object({ paths: z.array(z.string()), more: z.number().int().nonnegative() })
+      .strict()
+      .optional(),
     request: composeRequestSchema,
     main: saveWorkerObjectSchema,
     inputs: progress,
@@ -47,10 +51,20 @@ export const composeForJob = (ctx: QueryCtx | MutationCtx, projectId: Id<'hosted
     .query('projectHostedComposes')
     .withIndex('by_project_and_job', q => q.eq('projectId', projectId).eq('jobId', jobId))
     .unique();
-export async function loadCompose(ctx: QueryCtx | MutationCtx, input: SaveIdentity, writing = true) {
+export async function loadCompose(
+  ctx: QueryCtx | MutationCtx,
+  input: SaveIdentity,
+  writing = true,
+  known?: Doc<'projectHostedComposes'>,
+) {
   const project = await activeProject(ctx, input.projectId, input.actor);
-  const row = await composeRow(ctx, input);
+  const row = known ?? (await composeRow(ctx, input));
   invariant(row, 'NOT_FOUND', 'Prepare this original hosted composition first.');
+  invariant(
+    row.projectId === input.projectId && row.actor === input.actor && row.operationId === input.operationId,
+    'WORK_OPERATION_CHANGED',
+    'Read only the selected compose operation.',
+  );
   const state = composeStateSchema.parse(JSON.parse(row.value));
   if (writing) await hostedWriteProject(ctx, input.projectId, input.actor, state.request.authorityEpoch);
   const operation = await hostedOperationRow(ctx, input.projectId, input.actor, input.operationId);

@@ -1,3 +1,4 @@
+import { scheduleLandingPrecompose } from './projectHostedLandingPrecompose';
 // SPDX-License-Identifier: Apache-2.0
 import type { MutationCtx } from './_generated/server';
 import { requireLandingLease, type LandingClaim } from './projectHostedLandingControl';
@@ -9,7 +10,12 @@ import {
   writeLanding,
   settleLandingOperation,
 } from './projectHostedLandingStore';
-import { acceptancePlan, acceptanceRow, acceptanceSelection } from './projectHostedAcceptanceStore';
+import {
+  acceptancePlan,
+  acceptanceRow,
+  acceptanceSelection,
+  type ReceiptIdentity,
+} from './projectHostedAcceptanceStore';
 import { releaseLandingQueue } from './projectHostedLandingWake';
 import { hostedWriteProject, readHostedRecord } from './projectHostedRecords';
 import { channelRow } from './projectHostedChannels';
@@ -195,6 +201,7 @@ export async function publishLandingBatch(ctx: MutationCtx, claim: LandingClaim,
   };
   let previousSnapshot = main.snapshotId;
   const receipts = [];
+  const completions: ReceiptIdentity[] = [];
   for (const [index, member] of members.entries()) {
     const receipt = hostedAcceptanceSchema.parse({
       schema: 1,
@@ -265,7 +272,7 @@ export async function publishLandingBatch(ctx: MutationCtx, claim: LandingClaim,
     invariant(currentRow, 'SOURCE_UNAVAILABLE', 'The batch member disappeared.');
     await writeLanding(ctx, currentRow, next, false);
     await settleLandingOperation(ctx, next);
-    if (member.plan.inputPages) await scheduleAcceptanceCompletion(ctx, identity);
+    if (member.plan.inputPages) completions.push(identity);
     receipts.push(receipt);
   }
   const last = receipts.at(-1)!;
@@ -281,6 +288,17 @@ export async function publishLandingBatch(ctx: MutationCtx, claim: LandingClaim,
       }),
     ),
   });
+  const precompose = {
+    receiptIds: receipts.map(receipt => receipt.id),
+  };
+  for (const [index, identity] of completions.entries())
+    await scheduleAcceptanceCompletion(ctx, { ...identity, ...(index === 0 ? { precompose } : {}) });
+  if (!completions.length)
+    await scheduleLandingPrecompose(ctx, {
+      projectId: claim.projectId,
+      ...precompose,
+      candidate: { id: last.candidate.id, actor: last.actor.id, digest: last.candidate.digest },
+    });
   await writeBatch(ctx, key, { ...batch, phase: 'landed' });
   await releaseLandingQueue(ctx, queue, now);
   await noteMainLanding(ctx, { project, receipt: last, run });

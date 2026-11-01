@@ -142,8 +142,12 @@ export async function acceptanceFixture(source = null) {
     });
     return readLane(id);
   };
-  const materialize = receiptId =>
-    run('acceptanceComplete', completion.completeAcceptedHeads, { projectId: f.projectId, receiptId });
+  const materialize = (receiptId, precompose) =>
+    run('acceptanceComplete', completion.completeAcceptedHeads, {
+      projectId: f.projectId,
+      receiptId,
+      ...(precompose ? { precompose } : {}),
+    });
   const main = () => JSON.parse(f.tables.projectHostedChannels.get(f.mainId).selection);
   return {
     ...f,

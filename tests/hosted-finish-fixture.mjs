@@ -19,6 +19,7 @@ export const landingApi = await import(moduleUrl('../convex/projectHostedLanding
 const stallApi = await import(moduleUrl('../convex/projectHostedLandingStall.ts'));
 const stallAlertApi = await import(moduleUrl('../convex/projectHostedLandingStallAlert.ts'));
 const wouldConflictApi = await import(moduleUrl('../convex/projectHostedLandingWouldConflict.ts'));
+const precomposeApi = await import(moduleUrl('../convex/projectHostedLandingPrecompose.ts'));
 const batchAbandon = await import(moduleUrl('../convex/projectHostedBatchAbandon.ts'));
 const convexSourceModules = Object.fromEntries(
   await Promise.all(
@@ -288,6 +289,8 @@ export async function finishFixture(
         await tx('landingDeadline', stallApi.deadline, input);
       } else if (task.name === 'projectHostedLandingStallAlert:alert') {
         await tx('stallAlert', stallAlertApi.alert, input);
+      } else if (task.name === 'projectHostedLandingPrecompose:start') {
+        await tx('precomposeStart', precomposeApi.start, input);
       } else if (task.name === 'projectHostedLandingWouldConflict:mark') {
         await tx('wouldConflict', wouldConflictApi.mark, input);
       } else if (task.name === 'projectHostedLandingStallAlert:deliver') {
@@ -313,7 +316,7 @@ export async function finishFixture(
       } else if (task.name === 'projectHostedFinishDriver:dependents') {
         await tx('finishDependents', driver.dependents, input);
       } else if (task.name === 'projectHostedAcceptance:complete') {
-        await f.materialize(input.receiptId);
+        await f.materialize(input.receiptId, input.precompose);
       } else if (task.name === 'projectHostedActionsDirect:dispatch') {
         // Provider dispatch IO; tests drive the run lifecycle directly.
       } else if (

@@ -214,12 +214,23 @@ test('incident replay: B and C pass alone but fail together; both statuses name 
   const counts = f.counts.slice(before);
   const cost = {
     calls: counts.length,
+    sourceJobs: f.metrics.sourceJobs,
     reads: counts.reduce((n, c) => n + c.documents, 0),
     writes: counts.reduce((n, c) => n + c.writes, 0),
     peakRssBytes: process.resourceUsage().maxRSS * 1024,
     wallMs: performance.now() - started,
   };
-  assert(cost.calls < 180 && cost.reads < 3200 && cost.writes < 1100, JSON.stringify(cost));
+  const operations = {};
+  for (const count of counts) {
+    const op = (operations[count.name] ??= { calls: 0, reads: 0, writes: 0 });
+    op.calls++;
+    op.reads += count.documents;
+    op.writes += count.writes;
+  }
+  assert(
+    cost.calls < 180 && cost.reads < 3200 && cost.writes < 1100,
+    JSON.stringify({ ...cost, operations }),
+  );
   assert(cost.peakRssBytes < 512 * 1024 * 1024, JSON.stringify(cost));
   t.diagnostic(
     JSON.stringify({

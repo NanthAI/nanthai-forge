@@ -1,3 +1,4 @@
+import { scheduleLandingPrecompose } from './projectHostedLandingPrecompose';
 import { trackHostedOverlapMain } from './projectHostedOverlapStore';
 import { hostedAcceptGate, holdMainRed } from './projectHostedGate';
 import { protectedGatePaths } from '../src/contract-gate-policy';
@@ -355,6 +356,13 @@ export async function publishAcceptance(
   });
   await enqueueGithubMirror(ctx, project, receipt);
   // The completion tick also retires landed work from overlap, so it runs even when keepOpen or policy skips completion.
-  if (plan.inputPages) await scheduleAcceptanceCompletion(ctx, identity);
+  const precompose = { receiptIds: [receipt.id] };
+  if (plan.inputPages) await scheduleAcceptanceCompletion(ctx, { ...identity, precompose });
+  else
+    await scheduleLandingPrecompose(ctx, {
+      projectId: claim.projectId,
+      ...precompose,
+      candidate: { id: receipt.candidate.id, actor: receipt.actor.id, digest: receipt.candidate.digest },
+    });
   return { status: 'landed' as const, receipt };
 }

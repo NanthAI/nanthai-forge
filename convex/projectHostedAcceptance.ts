@@ -170,7 +170,13 @@ export const publish = internalMutation({
   handler: async (ctx, input) => canonicalPayload(await publishSelected(ctx, input)),
 });
 export const complete = internalMutation({
-  args: { projectId: v.id('hostedProjects'), receiptId: v.string() },
+  args: {
+    projectId: v.id('hostedProjects'),
+    receiptId: v.string(),
+    precompose: v.optional(
+      v.object({ receiptIds: v.array(v.string()), paths: v.optional(v.array(v.string())) }),
+    ),
+  },
   returns: v.object({ complete: v.boolean() }),
   handler: completeAcceptedHeads,
 });

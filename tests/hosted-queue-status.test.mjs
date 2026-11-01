@@ -160,6 +160,52 @@ test('moving train progress suppresses the follower alarm and retracts a retaine
   );
 });
 
+test('a slow live check retains follower ownership despite its advisory alarm; terminal checks do not', async t => {
+  const previous = process.env.FORGE_HOSTED_CHECK_KEY_ID;
+  process.env.FORGE_HOSTED_CHECK_KEY_ID = 'SYNTHETIC';
+  t.after(() => {
+    if (previous === undefined) delete process.env.FORGE_HOSTED_CHECK_KEY_ID;
+    else process.env.FORGE_HOSTED_CHECK_KEY_ID = previous;
+  });
+  const f = await landingFixture();
+  const a = await f.enqueue(
+    f.request({
+      check: {
+        kind: 'request',
+        checkId: f.checkId,
+        expectedDefinition: f.definition.digest,
+        expectedConfiguration: f.configuration.digest,
+        expectedEnvironment: f.runner.environmentFingerprint,
+      },
+    }),
+  );
+  await f.drain();
+  const b = await f.enqueue();
+  const old = new Date(Date.now() - 3 * LANDING_STALL_MS).toISOString();
+  const head = (await f.status(a.id)).request;
+  assert.equal(head.phase, 'checking');
+  const slowHead = { ...head, version: head.version + 1, observation: { ...head.observation } };
+  slowHead.observation.stall = hostedLandingStall(slowHead, Date.now() + 48 * 60 * 60_000);
+  assert(slowHead.observation.stall);
+  await setState(f, slowHead);
+  const queued = { ...b, at: old, timing: { submittedAt: old } };
+  f.patch('projectHostedLandingRequests', rowOf(f, b.id)._id, { value: JSON.stringify(queued) });
+  f.patch('projectHostedLandingQueues', f.queue()._id, { wake: null, lease: null });
+  assert.equal((await f.status(b.id)).queue.owner, 'check runner / landing controller');
+  const scheduled = f.metrics.scheduled;
+  await f.run('liveCheckDeadline', (ctx, input) => alarms.resolveStalledLanding(ctx, input), {
+    projectId: f.projectId,
+    submissionId: b.id,
+    lastProgressAt: old,
+    attempt: 0,
+  });
+  assert.equal(f.metrics.scheduled, scheduled + 1, 'only the existing recovery deadline is rearmed');
+  const [run] = [...f.tables.projectHostedCheckRuns.values()].map(row => JSON.parse(row.value));
+  await f.rawChecks.cancel(run.id);
+  f.patch('projectHostedLandingQueues', f.queue()._id, { wake: null, lease: null });
+  assert.equal((await f.status(b.id)).queue.owner, null, 'a terminal check cannot own the wait');
+});
+
 test('genuinely ownerless queued work alarms with the predecessor identity it waits behind', async () => {
   const f = await landingFixture();
   const a = await f.enqueue(),

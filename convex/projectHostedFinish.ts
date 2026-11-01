@@ -2,6 +2,7 @@ import { readQueueStatus, queueAwareLandingState } from './projectHostedQueueSta
 import { landingStateForReader } from './projectHostedLandingOrder';
 import { hostedQueueAheadSelection } from './projectHostedQueueAhead';
 // SPDX-License-Identifier: Apache-2.0
+import { finishPendingForReader } from '../src/hosted-finish';
 import { v } from 'convex/values';
 import { mutation, query } from './cliServer';
 import { acceptanceActor } from './projectAutonomy';
@@ -66,7 +67,7 @@ export const status = query({
         queuePosition: queue?.position ?? null,
         queue,
         queueAheadSelection: await hostedQueueAheadSelection(ctx, state, undefined, queue?.entriesAhead),
-        pendingAttempt: value.pending,
+        pendingAttempt: finishPendingForReader(value.pending),
         selection: { inputs: value.source.inputs, dependencies: value.source.dependencies },
         ...(wouldConflict ? { wouldConflict } : {}),
         ...(stallAlert ? { stallAlert } : {}),

@@ -110,6 +110,9 @@ export async function publishHostedCompose(ctx: MutationCtx, input: SaveIdentity
   await writeComposeState(ctx, row._id, {
     ...state,
     ...(output.dropped ? { dropped: output.dropped } : {}),
+    ...(result.status === 'conflict' && result.paths
+      ? { conflictSummary: { paths: result.paths, more: result.more ?? 0 } }
+      : {}),
     status: 'completed',
   });
   return JSON.parse(semanticPayload(terminal)) as typeof terminal;

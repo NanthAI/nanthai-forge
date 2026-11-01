@@ -32,7 +32,13 @@ test('205 included Lanes and 10,050 retained receipts keep final CAS constant; c
   const { receipt } = await f.accept(state);
   assert.equal(receipt.completion.lanes, 205);
   const final = f.counts.filter(c => c.name === 'acceptanceAccept').at(-1);
-  assert(final.ranges <= 40 && final.documents <= 40 && final.writes <= 15);
+  const firstCompletion = f.pendingTasks().find(task => task.name === 'projectHostedAcceptance:complete')
+    .args[0];
+  assert(
+    Buffer.byteLength(JSON.stringify(firstCompletion.precompose)) < 1024,
+    'publication retains a small trigger, not source path lists',
+  );
+  assert(final.ranges <= 40 && final.documents <= 40 && final.writes <= 15, JSON.stringify(final));
   assert(final.readBytes < 40 * 1024 && final.writeBytes < 16 * 1024);
   assert(!final.touched.includes('projectHostedAcceptancePages'));
   // 40 = 39 plus the one submission-order read before claiming main (incident e4aee4fe); still constant.
@@ -42,7 +48,7 @@ test('205 included Lanes and 10,050 retained receipts keep final CAS constant; c
     assert(++ticks < 30, 'only outstanding finite completion work schedules itself');
     const task = f.pendingTasks().find(t => t.name === 'projectHostedAcceptance:complete');
     f.patch('_scheduled_functions', task._id, { state: { kind: 'inProgress' } });
-    await f.materialize(task.args[0].receiptId);
+    await f.materialize(task.args[0].receiptId, task.args[0].precompose);
     f.patch('_scheduled_functions', task._id, { state: { kind: 'success' } });
   }
   assert.equal(ticks, 11);
@@ -51,7 +57,7 @@ test('205 included Lanes and 10,050 retained receipts keep final CAS constant; c
   const completedPlan = [...f.tables.projectHostedAcceptancePlans.values()][0];
   assert.equal(completedPlan.appliedPage, 3);
   const scheduled = f.metrics.scheduled;
-  await f.materialize(receipt.id);
+  await f.materialize(receipt.id, firstCompletion.precompose);
   assert.equal(f.metrics.scheduled, scheduled, 'idle completed plans schedule nothing');
   console.log(
     'H14 scale evidence',

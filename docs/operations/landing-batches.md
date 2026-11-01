@@ -247,6 +247,52 @@ not assert minimal blame. Parallel diagnosis retains earlier failed prefixes eve
 when a longer prefix passes. A full passing batch still accepts atomically,
 without requiring every intermediate prefix to pass.
 
+Accepted main transitions also schedule a finite background precomposition window
+of up to 50 queued submissions, including members of a waiting group. Two metadata
+passes of ten entries start potentially overlapping or unknown-coverage source
+before warming the next ordinary unchecked known-disjoint entry. Groups, fallback
+members and independently checking entries keep their existing preparation for
+disjoint changes. Later proven-disjoint entries keep
+ordinary queue composition, avoiding quadratic clean recomposition on every main
+move. Each probe
+retains the original input/dependency pins and uses the ordinary verified source
+worker. It reserves no check and does not change group membership. A clean result
+is cached against its immutable original selection and exact main receipt for a
+later individual retry, including fallback metadata-attempt rotation. Installation
+checks those exact input/dependency roots and main again. A real conflict immediately settles the waiting submission with
+`COMPOSITION_CONFLICT`; its error message names the retained resolution
+Candidate, the first ten conflicting paths (with an additional-file count and
+complete R2 conflict pages) and the input Lanes of the main transition. The signed
+summary stays in internal compose metadata; released Candidate and pending-attempt
+DTOs retain their strict shapes for already-running agents. The next
+status, observe or active wait sees this canonical outcome before queue selection.
+No client read starts probes, and idle queues schedule no precomposition work.
+The existing first post-publication completion tick starts this work; ordinary
+acceptance adds no queue read or scheduling write to its final CAS. The trigger
+retains receipt IDs and resolves the accepted Candidate by its signed digest in
+the background, keeping path lists out of publication scheduling metadata.
+Delayed events keep their earlier path and Lane context while each new job pins
+actual current main, so a newer disjoint landing cannot hide an older conflict.
+If main moves during a probe, that event retains one latest target and its peer
+Lanes. Completion resumes that target before returning the entry to the queue;
+repeated deliveries neither cancel the running source job nor duplicate it.
+The retained revision and peer context stay together even if a newer main event
+has not arrived. Clean probes do not rewrite public progress or re-arm stall timers.
+An obsolete conflict on an earlier accepted head is retained as an artifact;
+the latest notified compose or ordinary current-head continuation decides the
+outcome, so a later main fix cannot produce a stale terminal conflict.
+Probes retain queue eligibility. When the head reaches its pending probe it keeps
+the existing queue lease, which completion releases immediately; later probes
+finishing first cannot jump older entries into the train.
+Entries outside the optimization window retain ordinary queue composition.
+
+Source ancestry reduction proves a cut relative to the selected roots. It reduces
+verified parent paths in descendant-first order, so prefetching the shared base
+cannot force traversal below it. Frontier scheduling investigates unresolved
+branches above a known common ancestor before fetching its older history; deferred
+IDs remain pending until the proof is complete. Unknown side branches and cycles cannot prove a
+cut; recursive merge bases, source bytes and exact hash verification are preserved.
+
 Passing independent halves or pairs never licenses accepting their union. Later
 queued entries are recomposed and checked on actual main after a passing prefix
 lands; evidence from the old composition is not transferred. Candidate dependency

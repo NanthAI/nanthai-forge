@@ -81,10 +81,14 @@ export async function readQueueStatus(
     (queue.lease?.until ?? 0) > now ||
     wake?.state.kind === 'inProgress' ||
     (wake?.state.kind === 'pending' && (queue.wake?.at ?? 0) > now - LANDING_STALL_MS);
-  const owner =
-    predecessor && !predecessor.observation.stall
-      ? predecessor.phase === 'checking' && liveRun && !hostedCheckTerminal(liveRun)
-        ? 'check runner / landing controller'
+  // A retained slow-check alarm is advice, not evidence that its still-live
+  // runner vanished. Keep the check owner so follower recovery deadlines do
+  // not repeatedly redrive the same healthy fallback controllers.
+  const owner = predecessor
+    ? predecessor.phase === 'checking' && liveRun && !hostedCheckTerminal(liveRun)
+      ? 'check runner / landing controller'
+      : predecessor.observation.stall
+        ? null
         : pending?.composeOperationId &&
             Date.parse(hostedLandingProgressAt(predecessor)) > now - LANDING_STALL_MS
           ? 'source worker / finish controller'
@@ -93,7 +97,7 @@ export async function readQueueStatus(
             : predecessor.phase === 'ready' && pending?.wake && pending.wake.at > now - LANDING_STALL_MS
               ? 'finish controller'
               : null
-      : null;
+    : null;
   const lastProgressAt = latestLandingProgress([
     hostedLandingProgressAt(state),
     queue.status.lastProgressAt,

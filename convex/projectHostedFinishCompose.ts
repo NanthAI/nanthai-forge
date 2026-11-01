@@ -17,7 +17,8 @@ import {
   type LandingIdentity,
 } from './projectHostedLandingStore';
 import { pinLandingAttempt } from './projectHostedLandingPins';
-import { wakeLandingQueue } from './projectHostedLandingWake';
+import { wakeLandingQueue, releaseLandingQueue } from './projectHostedLandingWake';
+import { landingQueue } from './projectHostedLandingStore';
 import { writeFinish, failFinish } from './projectHostedFinishStore';
 import { scheduleFinish } from './projectHostedFinishWake';
 import { hostedFinishBackoff, type HostedFinish } from '../src/hosted-finish';
@@ -28,6 +29,35 @@ import { invariant } from '../src/errors';
 import { validCrossHeadProof, type CrossHeadProof } from '../src/hosted-cross-head-proof';
 import { scopedRecheckBasis } from './projectHostedScopedRecheck';
 import { requireHostedCheckEvidence } from './projectHostedCheckRead';
+async function wakeAfterPrecompose(
+  ctx: MutationCtx,
+  projectId: Doc<'projectHostedFinishes'>['projectId'],
+  submissionId: string,
+  runnable: boolean,
+) {
+  const input = { projectId, channel: 'main' as const };
+  const queue = await landingQueue(ctx, input);
+  if (queue?.lease?.submissionId === submissionId) await releaseLandingQueue(ctx, queue);
+  else if (runnable) await wakeLandingQueue(ctx, input);
+}
+/** Consume only a committed main event retained while this job was running.
+ * Repeated events occupy one slot; job completion, never an idle timer, resumes
+ * the latest observed main. The ordinary queue cannot take the entry between
+ * probes because reservation and settlement share this mutation. */
+async function continuePrecompose(ctx: MutationCtx, row: Doc<'projectHostedFinishes'>, value: HostedFinish) {
+  const probe = value.pending?.precompose;
+  if (!probe?.next) return false;
+  const { next, ...context } = probe;
+  await reserveFinishRetry(
+    ctx,
+    (await ctx.db.get(row._id))!,
+    { ...value, pending: null },
+    'CHECK_EVIDENCE_REFRESH',
+    { ...context, peerLanes: [...new Set([...context.peerLanes, ...next.peerLanes])] },
+    { head: next.main.head, receipt: { id: next.main.receiptId } },
+  );
+  return true;
+}
 /** A main race is not a retry of the old request or a reusable check. Retain a
  * named child before IO, yield with bounded backoff, and resume that child only. */
 export async function reserveFinishRetry(
@@ -35,44 +65,63 @@ export async function reserveFinishRetry(
   row: Doc<'projectHostedFinishes'>,
   value: HostedFinish,
   cause: 'BATCH_FALLBACK' | 'CHECK_EVIDENCE_REFRESH' = 'CHECK_EVIDENCE_REFRESH',
+  precompose?: NonNullable<HostedFinish['pending']>['precompose'],
+  observedMain?: { head: string; receipt: { id: string } },
 ) {
   invariant(!value.pending, 'WORK_STALE', 'Resume the already pending finish attempt.');
   const input = { projectId: row.projectId, submissionId: row.submissionId };
   const { row: landing, state } = await loadLanding(ctx, input);
   const previous = await loadLandingAttempt(ctx, { projectId: row.projectId, attemptId: state.attemptId });
-  const main = await hostedStartMain(ctx, row.projectId);
+  const main = observedMain ?? (await hostedStartMain(ctx, row.projectId));
+  const cached =
+    !precompose &&
+    value.precomposed &&
+    canonicalPayload(value.precomposed.main) ===
+      canonicalPayload({ head: main.head, receiptId: main.receipt.id })
+      ? value.precomposed
+      : undefined;
+  // Batch fallback can rotate metadata attempts without changing this finish's
+  // immutable original selection. Its same-main source cache remains valid;
+  // installation independently checks exact input/dependency roots below.
   const pending = {
+    ...(precompose ? { precompose } : {}),
     id: crypto.randomUUID(),
     parentAttemptId: previous.id,
     number: previous.number + 1,
     at: new Date(Date.now()).toISOString(),
     main: { head: main.head, receiptId: main.receipt.id },
-    operations: { compose: crypto.randomUUID(), check: crypto.randomUUID(), accept: crypto.randomUUID() },
+    operations: {
+      compose: cached?.operationId ?? crypto.randomUUID(),
+      check: crypto.randomUUID(),
+      accept: crypto.randomUUID(),
+    },
   };
   const mainChanged = main.head !== previous.main.head || main.receipt.id !== previous.main.receiptId;
-  await retainLandingProgress(ctx, state, {
-    code: mainChanged ? 'CHANNEL_CHANGED' : cause,
-    message: mainChanged
-      ? `${await mainMoveReason(ctx, row.projectId, previous, main.head, state.sequence)}; a named child recomposes the original selection.`
-      : cause === 'BATCH_FALLBACK'
-        ? 'The shared batch fell back to an individual Candidate; main did not change.'
-        : 'The acceptance evidence needs an exact refresh; main did not change.',
-  });
+  if (!precompose)
+    await retainLandingProgress(ctx, state, {
+      code: mainChanged ? 'CHANNEL_CHANGED' : cause,
+      message: mainChanged
+        ? `${await mainMoveReason(ctx, row.projectId, previous, main.head, state.sequence)}; a named child recomposes the original selection.`
+        : cause === 'BATCH_FALLBACK'
+          ? 'The shared batch fell back to an individual Candidate; main did not change.'
+          : 'The acceptance evidence needs an exact refresh; main did not change.',
+    });
   await writeFinish(ctx, row, { ...value, pending });
-  await writeLanding(
-    ctx,
-    landing,
-    {
-      ...state,
-      version: state.version + 1,
-      timing: { submittedAt: state.at, ...state.timing, composeStartedAt: pending.at },
-      observation: landingObservation('queued'),
-      error: null,
-    },
-    false,
-  );
+  if (!precompose)
+    await writeLanding(
+      ctx,
+      landing,
+      {
+        ...state,
+        version: state.version + 1,
+        timing: { submittedAt: state.at, ...state.timing, composeStartedAt: pending.at },
+        observation: landingObservation('queued'),
+        error: null,
+      },
+      false,
+    );
   const current = (await ctx.db.get(row._id))!;
-  await scheduleFinish(ctx, current, hostedFinishBackoff(pending.number));
+  await scheduleFinish(ctx, current, precompose ? 0 : hostedFinishBackoff(pending.number));
 }
 /** Why this re-check happens: the landings that moved main since the stale
  * attempt was composed, and whether each was submitted before this one. One
@@ -114,7 +163,7 @@ export async function prepareFinishCompose(ctx: MutationCtx, input: LandingIdent
     pending = value.pending!;
   const auth = { projectId: input.projectId, actor: state.actor, operationId: pending.operations.compose };
   const old = await composeRow(ctx, auth);
-  if (old) return loadCompose(ctx, auth);
+  if (old) return loadCompose(ctx, auth, true, old);
   const request = { ...value.source, operationId: auth.operationId, expectedMain: pending.main };
   const expected = { authorityEpoch: request.authorityEpoch, ...request.expectedMain };
   const prepared = await beginHostedOperation(ctx, {
@@ -177,30 +226,127 @@ export async function installFinishCompose(
   row: Doc<'projectHostedFinishes'>,
   value: HostedFinish,
   proof?: CrossHeadProof,
+  preparedSource?: Awaited<ReturnType<typeof loadCompose>>,
 ) {
   const input = { projectId: row.projectId, submissionId: row.submissionId };
   const { row: landing, state } = await loadLanding(ctx, input),
     pending = value.pending!;
-  const source = await loadCompose(ctx, {
-    projectId: row.projectId,
-    actor: state.actor,
-    operationId: pending.operations.compose,
-  });
+  const source =
+    preparedSource ??
+    (await loadCompose(ctx, {
+      projectId: row.projectId,
+      actor: state.actor,
+      operationId: pending.operations.compose,
+    }));
   const terminal = source.operation.terminal;
   invariant(terminal, 'WORK_STALE', 'Wait for the original source job to settle.');
   if (terminal.outcome.status === 'failed') {
-    await failFinish(ctx, input, terminal.outcome.error.code, terminal.outcome.error.message);
+    if (pending.precompose) {
+      if (await continuePrecompose(ctx, row, value)) return;
+      // Speculative infrastructure failure is not a source conflict. Let the
+      // ordinary queue retry on demand, without an idle probe retry loop.
+      await writeFinish(ctx, row, { ...value, pending: null });
+      if (pending.precompose.runnable && !landing.runnable)
+        await ctx.db.patch(landing._id, { runnable: true });
+      await scheduleFinish(ctx, (await ctx.db.get(row._id))!);
+      await wakeAfterPrecompose(
+        ctx,
+        row.projectId,
+        state.id,
+        pending.precompose.runnable || landing.runnable,
+      );
+    } else await failFinish(ctx, input, terminal.outcome.error.code, terminal.outcome.error.message);
     return;
   }
   const candidate = hostedRecordSchema.parse(terminal.outcome.result);
   invariant(
     candidate.kind === 'candidate' &&
       candidate.id === source.state.candidateId &&
+      canonicalPayload(candidate.base) === canonicalPayload(pending.main) &&
       canonicalPayload(candidate.inputs) === canonicalPayload(value.source.inputs.root) &&
       canonicalPayload(candidate.dependencies) === canonicalPayload(value.source.dependencies.root),
     'WORK_OPERATION_CHANGED',
     'The named recompose changed the original exact selection.',
   );
+  if (pending.precompose) {
+    const obsoleteConflict =
+      candidate.result.status === 'conflict' &&
+      (await hostedStartMain(ctx, row.projectId)).head !== pending.main.head;
+    // A real earlier conflict may already have disappeared on accepted main.
+    // Retain its artifact, but let the latest notified source job (or ordinary
+    // current-head controller) decide before publishing a terminal outcome.
+    if (obsoleteConflict && (await continuePrecompose(ctx, row, value))) return;
+    // A probe never reserves a check or replaces shared batch membership. Keep
+    // a clean result for an ordinary retry; a real conflict settles immediately.
+    await writeFinish(ctx, row, {
+      ...value,
+      pending: null,
+      ...(candidate.result.status === 'clean'
+        ? {
+            precomposed: {
+              operationId: pending.operations.compose,
+              parentAttemptId: pending.parentAttemptId,
+              main: pending.main,
+            },
+          }
+        : {}),
+    });
+    if (candidate.result.status === 'conflict' && !obsoleteConflict) {
+      // Terminal readers must select this exact conflict, never the earlier
+      // clean Candidate whose immutable inputs the probe recomposed. Pin its
+      // child attempt without allocating a check or replacing batch membership.
+      const original = await loadLandingAttempt(ctx, {
+        projectId: row.projectId,
+        attemptId: state.firstAttemptId,
+      });
+      const attempt = await pinLandingAttempt(ctx, {
+        ...input,
+        actor: original.actor,
+        deferCheck: false,
+        request: {
+          ...state.request,
+          expectedMain: pending.main,
+          candidateId: candidate.id,
+          expectedHead: null,
+          check: null,
+        },
+        attemptId: pending.id,
+        parentAttemptId: pending.parentAttemptId,
+        number: pending.number,
+        at: pending.at,
+        operations: { check: pending.operations.check, accept: pending.operations.accept },
+        retainedSelection: original.candidate,
+      });
+      await insertLandingAttempt(ctx, attempt);
+      await writeLanding(
+        ctx,
+        landing,
+        { ...state, version: state.version + 1, attemptId: attempt.id },
+        false,
+      );
+      const paths = source.state.conflictSummary?.paths ?? pending.precompose.paths;
+      const more = source.state.conflictSummary?.more ?? 0;
+      await failFinish(
+        ctx,
+        input,
+        'COMPOSITION_CONFLICT',
+        `Candidate ${candidate.id} conflicts in ${paths.join(', ')}${more ? ` (and ${more} more files in its retained conflict pages)` : ''} against main ${pending.main.head}${pending.precompose.peerLanes.length ? ` (accepted Lane(s) ${pending.precompose.peerLanes.join(', ')})` : ''}. Run nforge agent . sync '${JSON.stringify({ candidateId: candidate.id })}', resolve the files, then land again.`,
+      );
+      await wakeAfterPrecompose(ctx, row.projectId, state.id, true);
+    } else {
+      if (await continuePrecompose(ctx, row, value)) return;
+      if (pending.precompose.runnable && !landing.runnable)
+        await ctx.db.patch(landing._id, { runnable: true });
+      if (!state.batchDiagnostic?.waitingFor) await scheduleFinish(ctx, (await ctx.db.get(row._id))!);
+      await wakeAfterPrecompose(
+        ctx,
+        row.projectId,
+        state.id,
+        pending.precompose.runnable || landing.runnable,
+      );
+    }
+    return;
+  }
   const original = await loadLandingAttempt(ctx, {
     projectId: row.projectId,
     attemptId: state.firstAttemptId,

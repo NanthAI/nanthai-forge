@@ -14,11 +14,15 @@ import { hostedAcceptanceSchema } from '../src/hosted-acceptance';
 import { validateComposePage, composeLaneSchema } from '../src/hosted-compose';
 import { hostedLaneSchema } from '../src/hosted-lane';
 import { invariant } from '../src/errors';
+import { scheduleLandingPrecompose } from './projectHostedLandingPrecompose';
+type CompletionInput = ReceiptIdentity & {
+  precompose?: { receiptIds: string[]; paths?: string[] };
+};
 /** Only an accepted marker activates the staged landed-head ledger. Canonical
  * Lane status is a bounded projection of that ledger. No source/Intent changes. */
-export const scheduleAcceptanceCompletion = (ctx: MutationCtx, input: ReceiptIdentity) =>
+export const scheduleAcceptanceCompletion = (ctx: MutationCtx, input: CompletionInput) =>
   ctx.scheduler.runAfter(0, makeFunctionReference<'mutation'>('projectHostedAcceptance:complete'), input);
-export async function completeAcceptedHeads(ctx: MutationCtx, input: ReceiptIdentity) {
+export async function completeAcceptedHeads(ctx: MutationCtx, input: CompletionInput) {
   const row = await acceptanceRow(ctx, input);
   invariant(row, 'NOT_FOUND', 'Completion requires an actual accepted receipt.');
   const receipt = hostedAcceptanceSchema.parse(JSON.parse(row.value));
@@ -28,6 +32,14 @@ export async function completeAcceptedHeads(ctx: MutationCtx, input: ReceiptIden
     'SOURCE_UNAVAILABLE',
     'The accepted completion ledger differs.',
   );
+  // Reuse the already scheduled post-publication tick. No queue query or new
+  // scheduling write belongs in the acceptance CAS, including an empty queue.
+  if (input.precompose && plan.appliedPage === 0 && plan.appliedEntry === 0)
+    await scheduleLandingPrecompose(ctx, {
+      projectId: input.projectId,
+      receiptIds: input.precompose.receiptIds,
+      candidate: { id: receipt.candidate.id, actor: receipt.actor.id, digest: receipt.candidate.digest },
+    });
   // Landed work leaves the open-overlap index on the first tick, even when completion is off (keepOpen)
   // or skips a Lane whose pins moved after finish. Idempotent and bounded to one input page.
   if (!receipt.completion.enabled && plan.inputPages) await retireLandedOverlapLanes(ctx, input);
@@ -75,6 +87,7 @@ export async function completeAcceptedHeads(ctx: MutationCtx, input: ReceiptIden
   const appliedPage = end === entries.length ? plan.appliedPage + 1 : plan.appliedPage;
   await ctx.db.patch(plan._id, { appliedPage, appliedEntry: end === entries.length ? 0 : end });
   const complete = appliedPage === plan.inputPages;
-  if (!complete) await scheduleAcceptanceCompletion(ctx, input);
+  if (!complete)
+    await scheduleAcceptanceCompletion(ctx, { projectId: input.projectId, receiptId: input.receiptId });
   return { complete };
 }

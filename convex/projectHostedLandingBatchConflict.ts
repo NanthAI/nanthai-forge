@@ -19,6 +19,7 @@ export async function retainBatchConflict(
     member: HostedLandingAttempt;
     main: HostedLandingAttempt['main'];
     conflict: BatchDropped[number];
+    peerLanes: string[];
     at: string;
   },
 ) {
@@ -73,6 +74,6 @@ export async function retainBatchConflict(
     ctx,
     { projectId: input.projectId, submissionId: member.submissionId },
     'COMPOSITION_CONFLICT',
-    `Batch member ${member.candidate.id} conflicts in Candidate ${candidate.id}; retained conflict root ${input.conflict.conflicts.sha256}. Run nforge agent . sync '${JSON.stringify({ candidateId: candidate.id })}', edit the returned conflict files, then run its resolve command.`,
+    `Candidate ${candidate.id} conflicts in ${(input.conflict.paths ?? []).join(', ')}${input.conflict.more ? ` (and ${input.conflict.more} more files)` : ''} against composed prefix ${input.main.head}${input.peerLanes.length ? ` (peer Lane(s) ${input.peerLanes.join(', ')})` : ''}; retained conflict root ${input.conflict.conflicts.sha256}. Run nforge agent . sync '${JSON.stringify({ candidateId: candidate.id })}', edit the returned conflict files, then run its resolve command.`,
   );
 }
