@@ -7,6 +7,10 @@
 // shared install's copy: cross-package tests see the agent's edits.
 // The agent sandbox may read deps/ but never write it (agent.mjs), so one agent cannot
 // change another agent's dependencies. No task changes package.json or the lockfile.
+// The install is keyed by lockfile AND filter set: the part 3 scope added packages without
+// changing the lockfile, and a lock-only key silently reused the smaller install.
+// deps/browsers holds playwright-core's Chromium headless shell for the server preview
+// tests (PLAYWRIGHT_BROWSERS_PATH, the same for both arms).
 import { execFileSync, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createHash } from 'node:crypto';
@@ -15,8 +19,18 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-/** Packages the check (`.bench/ci.sh`) tests; the install uses the same filters. */
-export const PACKAGES = ['shared', 'provider-pi', 'client-runtime', 'source-control-forgejo'];
+/** Workspace packages the check (`.bench/ci.sh`) installs (`--filter <name>...`), by
+ * package name: two are not `@t3tools/<dir>` (packages/effect-codex-app-server, apps/server
+ * = `t3`). The check tests the first five in full and t3's src/preview. */
+export const PACKAGES = [
+  '@t3tools/shared',
+  '@t3tools/provider-pi',
+  '@t3tools/client-runtime',
+  '@t3tools/source-control-forgejo',
+  'effect-codex-app-server',
+  't3',
+];
+export const installFilters = (packages = PACKAGES) => packages.flatMap(p => ['--filter', `${p}...`]);
 export const NODE_VERSION = '26.12.1';
 export const VP_VERSION = '1.4.0';
 
@@ -27,14 +41,26 @@ export function lockHash(checkout) {
     .slice(0, 12);
 }
 
-/** The toolchain (vp + Node) and the install for this lockfile; null if not built yet. */
-export function sharedDeps(benchRoot, checkout) {
+/** Install directory name: lockfile hash plus a hash of the filter set. */
+export function installKey(checkout, packages = PACKAGES) {
+  const filters = createHash('sha256').update(installFilters(packages).join(' ')).digest('hex').slice(0, 8);
+  return `${lockHash(checkout)}-${filters}`;
+}
+
+/** The toolchain (vp + Node), the install for this lockfile and filter set, and the browser;
+ * null if any is not built yet. */
+export function sharedDeps(benchRoot, checkout, packages = PACKAGES) {
   const deps = join(benchRoot, 'deps');
-  const install = join(deps, lockHash(checkout));
+  const install = join(deps, installKey(checkout, packages));
   const vpHome = join(deps, 'vp');
-  if (!existsSync(join(install, 'node_modules', '.pnpm')) || !existsSync(join(vpHome, 'bin', 'vp')))
+  const browsers = join(deps, 'browsers');
+  if (
+    !existsSync(join(install, 'node_modules', '.pnpm')) ||
+    !existsSync(join(vpHome, 'bin', 'vp')) ||
+    !existsSync(browsers)
+  )
     return null;
-  return { deps, install, vpHome, home: join(deps, 'home') };
+  return { deps, install, vpHome, browsers, home: join(deps, 'home') };
 }
 
 /** node_modules directories of the install, outside other node_modules (read once). */
@@ -102,7 +128,8 @@ export function buildSharedDeps(benchRoot, checkout, installer) {
   const deps = join(benchRoot, 'deps'),
     home = join(deps, 'home'),
     vpHome = join(deps, 'vp'),
-    install = join(deps, lockHash(checkout));
+    install = join(deps, installKey(checkout)),
+    browsers = join(deps, 'browsers');
   mkdirSync(home, { recursive: true });
   const env = {
     ...process.env,
@@ -118,7 +145,13 @@ export function buildSharedDeps(benchRoot, checkout, installer) {
   if (!existsSync(join(vpHome, 'bin', 'vp'))) run('bash', [installer]);
   run('rsync', ['-a', '--exclude', '.git', checkout + '/', install + '/']);
   run('vp', ['env', 'use', NODE_VERSION], install);
-  run('vp', ['install', ...PACKAGES.flatMap(p => ['--filter', `@t3tools/${p}...`])], install);
+  run('vp', ['install', ...installFilters()], install);
+  // Same browser as the check: playwright-core's pinned Chromium headless shell.
+  execFileSync(
+    join(vpHome, 'bin', 'node'),
+    ['apps/server/node_modules/playwright-core/cli.js', 'install', '--only-shell', 'chromium'],
+    { cwd: install, env: { ...env, PLAYWRIGHT_BROWSERS_PATH: browsers }, stdio: 'inherit' },
+  );
   return sharedDeps(benchRoot, checkout);
 }
 

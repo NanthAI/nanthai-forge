@@ -20,7 +20,8 @@ import { realConflicts, mergeConflicts } from '../scripts/bench-t3code/hunks.mjs
 import { execFileSync } from 'node:child_process';
 import ts from 'typescript';
 import { testCases, changedTitles, titleMatches, attribute } from '../scripts/bench-t3code/attribution.mjs';
-import { grade, parseOracle } from '../scripts/bench-t3code/oracle.mjs';
+import { grade, parseOracle, SUITES } from '../scripts/bench-t3code/oracle.mjs';
+import { installKey, PACKAGES } from '../scripts/bench-t3code/deps.mjs';
 import {
   usage,
   codexUsage,
@@ -41,17 +42,23 @@ import { coordinationOf } from '../scripts/bench-t3code/broker.mjs';
 import { settled, openLanes, resolveLanes } from '../scripts/bench-t3code/forge-arm.mjs';
 
 const ids = [
-  't27097',
-  't27101',
-  't27513',
-  't27372',
   't27514',
   't27521',
-  't27539',
+  't19456',
+  't23766',
   't26563',
   't26770',
   't27069',
+  't23938',
+  't22302',
+  't27456',
 ];
+/** Each dispatch group sits in consecutive positions of the order. */
+const groupsContiguous = order =>
+  DESIGN.dispatchGroups.every(g => {
+    const at = g.map(id => order.indexOf(id)).sort((a, b) => a - b);
+    return at.at(-1) - at[0] === g.length - 1;
+  });
 
 test('batches: concurrent pairs at N 1,3,5, sequential N 10 alternating, never over 10 agents', () => {
   const all = batches(ids);
@@ -63,13 +70,30 @@ test('batches: concurrent pairs at N 1,3,5, sequential N 10 alternating, never o
     assert.equal(b.mode, b.N === 10 ? 'sequential' : 'concurrent');
     assert.deepEqual(b.cells[0].order, b.cells[1].order, 'both arms share the order');
     assert.deepEqual([...b.order].sort(), [...ids].sort());
-    assert.equal(Math.abs(b.order.indexOf('t27514') - b.order.indexOf('t27521')), 1);
+    assert.ok(groupsContiguous(b.order), `${b.key}: dispatch groups back to back`);
   }
   const n10 = rep => batch(ids, 10, rep).cells[0].arm;
   assert.deepEqual([n10(1), n10(2), n10(3)], ['github', 'forge', 'github'], 'first arm alternates by rep');
   assert.equal(new Set(schedule(ids).map(c => c.key)).size, 24, 'every cell reps 1-3 is addressable');
   assert.deepEqual(batches(ids), all, 'deterministic');
   assert.notDeepEqual(taskOrder(ids, 'a'), taskOrder(ids, 'b'));
+});
+
+test('dispatch groups: each kept together with its inner order varying; a partial group is not', () => {
+  const inner = new Set();
+  for (let i = 0; i < 200; i++) {
+    const order = taskOrder(ids, `seed-${i}`);
+    assert.ok(groupsContiguous(order), `seed-${i}`);
+    assert.deepEqual([...order].sort(), [...ids].sort());
+    inner.add(order.filter(id => DESIGN.dispatchGroups[2].includes(id)).join(','));
+  }
+  assert.equal(inner.size, 6, 'every inner order of the preview triple occurs');
+  // Without t27456 the triple is not a unit; its other members are shuffled freely.
+  const partial = ids.filter(id => id !== 't27456');
+  const apart = Array.from({ length: 200 }, (_, i) => taskOrder(partial, `p-${i}`)).some(
+    order => Math.abs(order.indexOf('t19456') - order.indexOf('t22302')) > 1,
+  );
+  assert.ok(apart);
 });
 
 const cellResult = ({ times, landed = times.length, strict }) => ({
@@ -538,7 +562,7 @@ test('grade: per-task cases on a shared file, strict and lenient, wording-only, 
     'ORACLE passed g.test.ts 1/1',
     `ORACLE-CASE passed g.test.ts ${b64('g one')} ${b64('')}`,
     `ORACLE-CASE skipped h.test.ts ${b64('h needs nushell')} ${b64('')}`,
-    ...['a', 'b', 'c', 'd'].map(p => `ORACLE-PACKAGE ${p} passed 1/1`),
+    ...SUITES.map(p => `ORACLE-PACKAGE ${p} passed 1/1`),
   ];
   const result = parseOracle(lines);
   const owners = { files: { 'f.test.ts': { changes: 'tB', 'stops when it $pi': 'tA' } } };
@@ -552,6 +576,41 @@ test('grade: per-task cases on a shared file, strict and lenient, wording-only, 
   assert.ok(Math.abs(g.lenientScore - 2 / 3) < 1e-9);
   assert.equal(g.existingSuitesGreen, true, '"x keeps" is unowned and passed; a base skip is no failure');
   assert.equal(g.existingSkipped, 1);
+  // Every suite of the scope must report: one missing suite is not a green cell.
+  const short = grade(tasks, parseOracle(lines.slice(0, -1)), owners);
+  assert.equal(short.existingSuitesGreen, false);
+  assert.equal(short.suiteGreen, false);
+});
+
+test('scope: oracle suites, the check and the dependency install name the same packages', () => {
+  const ci = readFileSync(new URL('../scripts/bench-t3code/oracle.sh', import.meta.url), 'utf8');
+  assert.deepEqual(SUITES, [
+    '@t3tools/shared',
+    '@t3tools/provider-pi',
+    '@t3tools/client-runtime',
+    '@t3tools/source-control-forgejo',
+    'effect-codex-app-server',
+    't3:src/preview',
+  ]);
+  assert.deepEqual(
+    SUITES.map(s => s.split(':')[0]),
+    PACKAGES,
+    'deps installs exactly the packages the oracle tests',
+  );
+  assert.match(ci, /PLAYWRIGHT_HOST_PLATFORM_OVERRIDE=ubuntu24\.04-x64/);
+  // The install is keyed by the lockfile and the filter set: a new filter set on the same
+  // lockfile is a new install, never a silent reuse of the old one.
+  const dir = mkdtempSync(join(tmpdir(), 'forge-b15d-deps-'));
+  try {
+    writeFileSync(join(dir, 'pnpm-lock.yaml'), 'lockfileVersion: 9\n');
+    const now = installKey(dir),
+      old = installKey(dir, ['@t3tools/shared']);
+    assert.match(now, /^[0-9a-f]{12}-[0-9a-f]{8}$/);
+    assert.equal(now.split('-')[0], old.split('-')[0], 'same lockfile');
+    assert.notEqual(now, old, 'different filter set');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('usage: totals every turn and model, keeps the last turn apart', () => {
@@ -613,6 +672,18 @@ test('contamination: reaching for upstream, solution refs or history voids the t
   assert.equal(fork('gh pr checks 12 --watch', [12]), false, 'its own PR');
   assert.equal(fork('gh pr diff 7', [12]), true, "an earlier cell's PR");
   assert.equal(fork('git fetch origin pull/7/head', [12]), true);
+  const sha = (input, mergeShas) =>
+    scanTask({
+      session: { source: 'transcript', actions: [{ tool: 'Bash', input }], seen: [] },
+      prNumbers,
+      mergeShas,
+    }).void;
+  const merge = 'afb8619e1ddcda94388e3cba89f2c1384e85d711';
+  assert.equal(sha('git show afb8619e', [merge]), true, 'a task merge commit is a solution ref');
+  assert.equal(sha(`git fetch origin ${merge}`, [merge]), true);
+  assert.equal(sha('git show afb8619', [merge]), true, 'from 7 hex characters');
+  assert.equal(sha('git show afb861', [merge]), false, 'shorter is not a ref');
+  assert.equal(sha('git log -1 deadbeefcafe', [merge]), false, 'other commits are fine');
   const lane = '11111111-1111-4111-8111-111111111111',
     other = '22222222-2222-4222-8222-222222222222';
   const own = [{ verb: 'agent land', args: ['{}'], operationIds: [lane], ids: [lane] }];

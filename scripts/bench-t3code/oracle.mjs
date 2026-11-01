@@ -1,12 +1,13 @@
 // B1.5d oracle: each task's own PR tests (original versions) plus the existing suites of
-// the four packages, run on the exact final main of a cell, on GitHub Actions in the fork
+// the check's scope (oracle.sh SUITES: five packages and apps/server/src/preview), run on the
+// exact final main of a cell, on GitHub Actions in the fork
 // (public, free minutes). Works from a fork commit (GitHub arm) or from a directory holding
 // Forge's final main (Forge arm), so both arms use one grader.
 // Leak rule (B1): the grading branch and run exist only while no agent runs (after every
 // landing settled); both are deleted right after the log is read, and the log is kept here.
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
@@ -16,6 +17,10 @@ import { gitlinks } from './forge-arm.mjs';
 
 const run = promisify(execFile);
 const ORACLE_SH = join(import.meta.dirname, 'oracle.sh');
+/** The suites oracle.sh runs (its `suites=` line); every one must report for a green cell. */
+export const SUITES = readFileSync(ORACLE_SH, 'utf8')
+  .match(/^suites="([^"]+)"/m)[1]
+  .split(' ');
 const METADATA = [':!.forge', ':!.nforge', ':!node_modules', ':!**/node_modules'];
 
 export async function oracleCommit({ meta, tasks, label, fromCommit, fromDirectory, baseCommit }) {
@@ -179,14 +184,15 @@ export function grade(tasks, result, owners) {
     lenientScore: values.reduce((a, t) => a + t.lenient, 0) / Math.max(1, values.length),
     fileLevelSuccess: values.filter(t => t.fileLevel === 'passed').length,
     existingSuitesGreen:
-      Object.keys(result.packages ?? {}).length === 4 && existing.every(c => c.status !== 'failed'),
+      Object.keys(result.packages ?? {}).length === SUITES.length &&
+      existing.every(c => c.status !== 'failed'),
     existingSkipped: existing.filter(c => c.status !== 'passed' && c.status !== 'failed').length,
     existingFailures: existing
       .filter(c => c.status === 'failed')
       .map(c => `${c.file} :: ${c.fullName}`)
       .slice(0, 50),
     suiteGreen:
-      Object.values(result.packages ?? {}).length === 4 &&
+      Object.values(result.packages ?? {}).length === SUITES.length &&
       Object.values(result.packages).every(p => p.status === 'passed'),
   };
 }

@@ -26,13 +26,19 @@ export const DESIGN = Object.freeze({
   primary: { timeToMain: 'lower', landed: 'higher', strict: 'higher' },
   rep3Spread: 0.25,
   seed: 'b15d-rerun-2026-11-01',
-  // The one same-file pair in the task window is dispatched back to back (random
-  // position, random inner order), so at N >= 2 they normally run at the same time.
-  adjacentPair: ['t27514', 't27521'],
+  // Tasks that touch the same files are dispatched back to back as one unit (random
+  // position, random inner order), so at N >= 2 they normally run at the same time: the
+  // Pi pair (same files, references merge clean), the Codex pair (one test-file conflict)
+  // and the preview triple (two conflicting pairs and one clean control).
+  dispatchGroups: [
+    ['t27514', 't27521'],
+    ['t23938', 't23766'],
+    ['t19456', 't22302', 't27456'],
+  ],
   // A batch with a void cell (infrastructure reasons) is re-run once, whole, after the reps
   // it belongs to. Both attempts are published.
   maxAttempts: 2,
-  tasksSha256: 'b973140041a294c731a668eb682228def00d95a2f6b1849a4514565749f4c403',
+  tasksSha256: 'dc4346af484794cc181a953b37a42c132b9bf57abcd4b6a0b871e3f84c7b52f1',
 });
 
 /** Deterministic 32-bit PRNG seeded from a string (sha256 -> mulberry32). */
@@ -46,21 +52,27 @@ export function rng(seedText) {
   };
 }
 
-/** Fisher-Yates over the task ids with the adjacent pair kept together as one unit. */
-export function taskOrder(taskIds, seedText, pair = DESIGN.adjacentPair) {
-  const random = rng(seedText);
-  const together = pair.every(id => taskIds.includes(id));
-  const units = together
-    ? [
-        ...taskIds.filter(id => !pair.includes(id)).map(id => [id]),
-        random() < 0.5 ? [...pair] : [...pair].reverse(),
-      ]
-    : taskIds.map(id => [id]);
-  for (let i = units.length - 1; i > 0; i--) {
+/** In-place Fisher-Yates with the given random source. */
+function shuffle(items, random) {
+  for (let i = items.length - 1; i > 0; i--) {
     const j = Math.floor(random() * (i + 1));
-    [units[i], units[j]] = [units[j], units[i]];
+    [items[i], items[j]] = [items[j], items[i]];
   }
-  return units.flat();
+  return items;
+}
+
+/** Fisher-Yates over the task ids with each dispatch group kept together as one unit
+ * (its inner order shuffled first, groups in DESIGN order). A group missing any of its
+ * tasks is not kept together. */
+export function taskOrder(taskIds, seedText, groups = DESIGN.dispatchGroups) {
+  const random = rng(seedText);
+  const together = groups.filter(g => g.every(id => taskIds.includes(id)));
+  const grouped = new Set(together.flat());
+  const units = [
+    ...taskIds.filter(id => !grouped.has(id)).map(id => [id]),
+    ...together.map(g => shuffle([...g], random)),
+  ];
+  return shuffle(units, random).flat();
 }
 
 export const cellSeed = (N, rep) => `${DESIGN.seed}/n${N}/r${rep}`;

@@ -173,7 +173,11 @@ const scripted = arm === 'github' ? github.scriptedAgent(bin) : scriptedForge(bi
 const vpHome = join(ws, 'vp');
 if (shared) await promisify(execFile)('cp', ['-cR', shared.vpHome, vpHome]);
 const depsEnv = shared
-  ? { VP_HOME: vpHome, npm_config_store_dir: join(shared.home, 'Library/pnpm/store') }
+  ? {
+      VP_HOME: vpHome,
+      npm_config_store_dir: join(shared.home, 'Library/pnpm/store'),
+      PLAYWRIGHT_BROWSERS_PATH: shared.browsers,
+    }
   : {};
 const sampler = startSampler(join(dir, 'samples.jsonl'));
 result.load = {
@@ -440,6 +444,7 @@ const runnerChanged = Boolean(
 const calls = readCalls(callLog);
 const laneTask = new Map([...records].filter(r => r.laneId).map(r => [r.laneId, r.task]));
 const prNumbers = all.map(t => t.pr);
+const mergeShas = all.map(t => t.mergeCommit);
 const perTask = [],
   contamination = {};
 for (const r of records) {
@@ -457,6 +462,7 @@ for (const r of records) {
       calls: mine,
       ownIds: new Set([r.laneId].filter(Boolean)),
       prNumbers,
+      mergeShas,
       ownPrs: r.landing?.prs ?? [],
       workspace: join(ws, r.task),
     });

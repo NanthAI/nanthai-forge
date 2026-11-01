@@ -14,9 +14,18 @@ landings per hour, correctness, cost, and how each handles agents touching the s
 
 ## Design
 
-- **Repository and tasks.** `pingdotgg/t3code` at `52f4ec6f` plus `.bench/ci.sh`; the 10 tasks
-  are 10 later upstream PRs (title and description only), frozen in `tasks.json`
-  (sha256 `b973140041a2…f4c403`). The table below is the task list for every cell.
+- **Repository and tasks.** `pingdotgg/t3code` at `52f4ec6f` (C) plus six unselected upstream
+  prerequisites of the preview tasks and `.bench/ci.sh` (see Same tree); the 10 tasks are 10
+  later upstream PRs (title and description only), frozen in `tasks.json` (sha256
+  `dc4346af4847…7c52f1`, rebuilt byte for byte by `tasks.mjs`). The table below is the task
+  list for every cell.
+- **Task set (lead, 2026-11-01 12:50).** The first set had no real conflict: the one same-file
+  pair, t27514 and t27521, merges clean as references. Five tasks with no file contact
+  (t27097, t27101, t27513, t27539, t27372) were replaced by five that conflict for real:
+  the Codex pair t23938/t23766 (one conflict in `client.test.ts`) and the preview triple
+  t19456/t22302/t27456 (t22302 with t19456: one conflict in `ServerBrowser.ts`; t27456 with
+  t19456: four in `ServerBrowser.test.ts`; t22302 with t27456 merges clean, a control). Every
+  task is red on the base and green with its reference in the check's scope (Same check).
 - **Cells and batches.** N = 1, 3, 5, 10 agents; both arms. One cell = N concurrent workers
   of one arm taking the 10 tasks from one queue until it is empty. One **batch** = the Forge
   cell and the GitHub cell of one (N, rep).
@@ -27,8 +36,11 @@ landings per hour, correctness, cost, and how each handles agents touching the s
   GitHub).
 - **Task order.** Shuffled per cell with a recorded seed `b15d-rerun-2026-11-01/n<N>/r<rep>`
   (sha256 → mulberry32 → Fisher-Yates). Both arms of one (N, rep) use the same seed, so they
-  get the same order (a paired comparison). The one same-file pair (t27514, t27521) is shuffled
-  as one unit with a random inner order: they are dispatched back to back, so at N ≥ 2 they normally run at the same time (the record shows whether they did).
+  get the same order (a paired comparison). Three dispatch groups are each shuffled as one unit
+  with a random inner order (`DESIGN.dispatchGroups`): the Pi pair (t27514, t27521), the Codex
+  pair (t23938, t23766) and the preview triple (t19456, t22302, t27456). A group's tasks are
+  dispatched back to back, so at N ≥ 2 they normally run at the same time (the record shows
+  whether they did).
 - **Reps (adaptive, pre-registered).** Rep 1 (N = 1, 3, 5, 10), then rep 2. Rep 3 runs for an N
   only when its reps 1 and 2 are "too different", decided by `plan.mjs rep3Decision` from the
   three primary metrics of each valid cell: **time to main** (median over the cell's landed
@@ -68,14 +80,24 @@ landings per hour, correctness, cost, and how each handles agents touching the s
 
 ## Same conditions in both arms
 
-- **Same tree.** Both arms start every cell from one base tree, fork commit `50edd7a7`
-  (t3code@C + `.bench/ci.sh` + `.github/workflows/bench-ci.yml`, upstream workflows removed).
+- **Same tree.** Both arms start every cell from one base tree, fork commit `fa3b7349`: the
+  earlier bench base `50edd7a7` (t3code@C + `.bench/ci.sh` + `.github/workflows/bench-ci.yml`,
+  upstream workflows removed) plus the source and test changes of six unselected upstream
+  preview prerequisites (#21745, #22739, #25436, #22062, #25028, #24244; 9 files, no lockfile
+  or manifest change; commit `2d1f007f`), plus this plan's `.bench/ci.sh`. It is the
+  research's source base `a2f901ef` with the bench scaffolding instead of upstream's
+  workflows, so `.bench/ci.sh` and `bench-ci.yml` are the only workflow files and are
+  identical for both arms. No task's solution or hidden test is in it (22 owned case titles
+  checked).
   Forge main is reset to exactly that tree (proved on a fresh Lane of main after the reset).
   Agents get the FULL tree in both arms, `.repos` included (t3code's AGENTS.md sends agents
   there): a Forge Lane, or a non-sparse clone of the fork's main. Only the CI checkout stays
   sparse, as upstream's CI is, and it is the same in both arms.
-- **Same dependencies.** One shared install per lockfile, linked into every checkout the same
-  way (`deps.mjs`); one writable toolchain copy per cell.
+- **Same dependencies.** One shared install per lockfile and filter set (the check's six
+  packages, `t3` and `effect-codex-app-server` included), linked into every checkout the same
+  way (`deps.mjs`); one writable toolchain copy per cell; one shared Chromium headless shell
+  (playwright-core's pinned build, `PLAYWRIGHT_BROWSERS_PATH`) for the preview tests. Both
+  arms link from the same cache with the same call.
 - **Same workspace-prep rule (lead, 2026-11-01).** Per-cell setup runs before the start
   barrier in both arms and is not timed: the reset of main (GitHub force push, Forge one
   landing), GitHub's one hub clone of the fork per cell (a developer's existing clone; Forge's
@@ -93,7 +115,9 @@ landings per hour, correctness, cost, and how each handles agents touching the s
   4.8 s (3.5-19.6 s). Forge's prep is almost all `open` (`start` takes 1.4-1.8 s): it
   materialises the full 28,881-file, 318 MB tree. GitHub's `switch` checks out the same tree
   from the hub in 2.3-3.0 s. That gap is a Forge product cost and stays in the wall-time
-  comparison; it is filed as Forge friction, not adjusted for.
+  comparison; it is filed as Forge friction, not adjusted for. The Lane-start fix (main
+  `a294a8bf`, 2026-11-01) measured start + open at 3-7 s on the dogfood project; the part 3 dry
+  batch re-measures prep per phase in both arms before any scored cell.
 - **Same prompt** except the source-workflow paragraph. The full difference:
 
 ```diff
@@ -105,6 +129,25 @@ landings per hour, correctness, cost, and how each handles agents touching the s
   queue (HEADGREEN, up to 10 per group) and push CI. Forge: one check per landing through
   Forge's runner (`forge-check.yml`, a plan job and a run job). Runner image and resolved
   action SHAs are recorded from the first and last job of every cell in both arms.
+- **Check scope (pre-registered, part 3).** `.bench/ci.sh` installs the toolchain and
+  `--filter`s `t3...` plus the five packages below, installs playwright-core's Chromium headless
+  shell (on Linux with `PLAYWRIGHT_HOST_PLATFORM_OVERRIDE=ubuntu24.04-x64`: `ubuntu-latest` is
+  Ubuntu 26.04, which playwright-core 1.60 refuses; upstream runs these tests on 24.04), then
+  runs every suite and fails if any failed: the full suites of `@t3tools/shared`,
+  `@t3tools/provider-pi`, `@t3tools/client-runtime`, `@t3tools/source-control-forgejo` and
+  `effect-codex-app-server`, and `apps/server` (`t3`) `src/preview` (10 files). The whole
+  `apps/server` suite is not in scope: it did not finish in 900 s in research and fails on the
+  base in `GitVcsDriverCore`, `UsageService`, `externalLauncher` and long-socket-path CLI
+  cases, none of which a task touches.
+- **Check qualification (2026-11-01, fork `bench-ci.yml`, both arms' script).** Base green 3 of
+  3 runs (job 99-139 s). Each task with only its hidden tests: red, failing only in its own
+  test files (failed cases t27514 2, t27521 1, t19456 2, t23766 1, t26563 3, t26770 2, t27069 2,
+  t23938 13, t22302 2, t27456 1). Each task with its reference: green (job 87-133 s, script
+  73-119 s). The Forge check passed on the base tree when the bench project's main was reset to
+  it (one landing through `verify`). **No test is excluded** on either arm. Disclosed: on the
+  bench Mac (agents' local runs, both arms alike) `src/preview/PortScanner.test.ts` "stops an
+  agent's server through its job's group, and only a listed server" fails 3 of 3 while it passes
+  on the runner 3 of 3; agents may see it fail locally.
 - **Same samplers.** Mac load and memory every 30 s, the GitHub API budget before and after,
   and clock offsets to GitHub and Convex, identically in both arms.
 
@@ -140,11 +183,13 @@ commit.
   `git push -u` and `gh pr create` work as in a normal clone; the per-cell hub fetches `main`
   only.
 - Forge main is reset and verified against the base before every cell.
+- Check qualification pushed `oracle/qual3-*` branches only while no agent ran and deleted each
+  branch and its run after saving the log locally (`BENCH_ROOT/qualification-part3/`).
 - Earlier cells' PRs stay visible on the fork and earlier landings stay in Forge history, so an
   automatic audit reads every agent transcript (tool calls and what they returned) and every
   Forge relay call, and voids a task on: upstream references (`pingdotgg`, upstream PR URLs or
   task PR numbers in git/gh/curl commands), solution or grading refs (`q/…`, `oracle/…`,
-  `oracle.sh`), bench data (`forge-bench`, `forge-cache`, `tasks.json`), listing other PRs
+  `oracle.sh`, any task's upstream merge commit from 7 hex characters), bench data (`forge-bench`, `forge-cache`, `tasks.json`), listing other PRs
   (`gh pr list --state merged|closed|all`, `gh search`), all-refs history (`git log/fetch --all`,
   `git ls-remote`), GitHub history APIs (`/pulls`, `/compare`, `/events`, `/git/refs`,
   `/branches`), opening any fork PR but its own (`gh pr view|diff|checkout|checks N`,
@@ -179,17 +224,24 @@ commit.
 ## Correctness (oracle)
 
 The oracle overlays each task's original PR test files on the exact final main and runs the
-full suites of the four packages on GitHub Actions, the same for both arms.
+check's scope (the five full package suites and `apps/server/src/preview`, `oracle.sh` with the
+same install and browser as `.bench/ci.sh`) on GitHub Actions, the same for both arms.
+Qualified on 2026-11-01 with the harness's own `grade()`: on the base, strict 0/10 and the
+existing suites green; on all ten references composed (the one source conflict resolved as the
+union of both upstream changes), strict 10/10, all six suites green, no existing failure.
 
 - **Case ownership.** A test file changed by one task belongs to that task (all its cases).
-  A file changed by several tasks (only `provider-pi/src/server/adapter.test.ts`, t27514 and
-  t27521) runs in its latest version, and each case goes to the last task, in merge order,
+  A file changed by several tasks (`provider-pi/src/server/adapter.test.ts`: t27514, t27521;
+  `effect-codex-app-server/src/client.test.ts`: t23938, t23766;
+  `apps/server/src/preview/ServerBrowser.test.ts`: t19456, t22302, t27456) runs in its latest
+  version, and each case goes to the last task, in merge order,
   whose PR added or changed it (the PR version against its parent). Cases no task owns are the
   existing suite.
 - **Strict** (primary): a task passes when its test files ran and every case it owns passed.
 - **Lenient**: per task, the share of its owned cases that passed; a cell's lenient score is the
   mean over tasks. Failures that only compare two string literals are flagged `wordingOnly`.
-- **Existing suites green**: no case that no task owns failed, in all four packages (cases the
+- **Existing suites green**: every suite of the scope reported and no case that no task owns
+  failed (cases the
   base itself skips on the runner, 2 in `shell.test.ts`, are counted apart). A task's own case
   counts only when it passed.
 - The file-level score used before this plan is kept as `fileLevelSuccess` for reference.
@@ -224,14 +276,17 @@ full suites of the four packages on GitHub Actions, the same for both arms.
 - **Per overlap class and arm**: landed-clean rate (landed with no conflict, failed check,
   rejected push or extra attempt) and added minutes (time to main minus the same task's median
   time to main at N = 1 in the same arm).
-- **How much overlap there is.** In the upstream window only t27514 and t27521 change the same
-  files; no other merged PR in the four checked packages shares a file with any task (checked
-  over every PR in `raw/merged-prs.json`). Adding tasks would also need new hidden-test
-  qualification and a new usage estimate, so the task list stays at 10. Instead the pair is
-  dispatched together in every cell (see Task order), which gives 9 concurrent same-file pairs
-  per arm at N ≥ 3. Same-package groups (shared ×4, provider-pi ×4 including the pair) give
-  package-level contact. With this few true overlaps, coordination results are reported per
-  pair and as counts, not as rates with confidence intervals.
+- **How much overlap there is.** Real conflicts come from three pairs, all in two clusters:
+  t23938/t23766 (`effect-codex-app-server/src/client.test.ts`, new tests at adjacent insertion
+  points: one conflict), t22302/t19456 (`apps/server/src/preview/ServerBrowser.ts`, adjacent
+  lines of one function: one conflict) and t27456/t19456 (`ServerBrowser.test.ts` helpers:
+  four conflict regions). t22302/t27456 and the Pi pair t27514/t27521 touch the same files but
+  their references merge clean (same-file controls). Two conflicting pairs share t19456, so they
+  are not independent samples. Models' edits may differ from the references, so ground truth
+  per cell comes from each cell's captured edits (above), not from this list. Each group is
+  dispatched together in every cell (see Task order). With this few true overlaps,
+  coordination results are reported per pair and as counts, not as rates with confidence
+  intervals.
 
 ## Void rules
 
@@ -289,42 +344,50 @@ Batches in run order, with the task order (both arms), from `node scripts/bench-
 
 | # | Batch | Mode | Agents at once | Cell order | Seed | Task order |
 | --- | --- | --- | --- | --- | --- | --- |
-| 1 | n10-r1 | sequential | 10 | github then forge | `b15d-rerun-2026-11-01/n10/r1` | t27097, t27069, t27513, t27521, t27514, t27539, t27372, t26563, t27101, t26770 |
-| 2 | n5-r1 | concurrent | 10 | forge + github | `b15d-rerun-2026-11-01/n5/r1` | t27097, t27513, t27521, t27514, t26563, t27539, t27372, t26770, t27069, t27101 |
-| 3 | n3-r1 | concurrent | 6 | forge + github | `b15d-rerun-2026-11-01/n3/r1` | t27372, t27521, t27514, t27513, t26770, t27539, t27069, t27101, t27097, t26563 |
-| 4 | n1-r1 | concurrent | 2 | forge + github | `b15d-rerun-2026-11-01/n1/r1` | t26563, t27069, t27514, t27521, t26770, t27372, t27097, t27513, t27539, t27101 |
-| 5 | n1-r2 | concurrent | 2 | forge + github | `b15d-rerun-2026-11-01/n1/r2` | t27539, t26770, t27101, t27372, t27514, t27521, t27097, t26563, t27069, t27513 |
-| 6 | n3-r2 | concurrent | 6 | forge + github | `b15d-rerun-2026-11-01/n3/r2` | t27539, t26563, t27372, t27097, t26770, t27514, t27521, t27069, t27101, t27513 |
-| 7 | n5-r2 | concurrent | 10 | forge + github | `b15d-rerun-2026-11-01/n5/r2` | t27069, t27514, t27521, t27101, t26770, t27539, t27372, t27097, t26563, t27513 |
-| 8 | n10-r2 | sequential | 10 | forge then github | `b15d-rerun-2026-11-01/n10/r2` | t27521, t27514, t27101, t26563, t27539, t27069, t27372, t27097, t26770, t27513 |
+| 1 | n10-r1 | sequential | 10 | github then forge | `b15d-rerun-2026-11-01/n10/r1` | t26563, t26770, t27069, t27456, t22302, t19456, t23938, t23766, t27514, t27521 |
+| 2 | n5-r1 | concurrent | 10 | forge + github | `b15d-rerun-2026-11-01/n5/r1` | t26563, t27069, t26770, t19456, t22302, t27456, t23766, t23938, t27514, t27521 |
+| 3 | n3-r1 | concurrent | 6 | forge + github | `b15d-rerun-2026-11-01/n3/r1` | t27514, t27521, t22302, t27456, t19456, t27069, t26770, t23938, t23766, t26563 |
+| 4 | n1-r1 | concurrent | 2 | forge + github | `b15d-rerun-2026-11-01/n1/r1` | t27456, t19456, t22302, t23766, t23938, t26770, t27069, t27521, t27514, t26563 |
+| 5 | n1-r2 | concurrent | 2 | forge + github | `b15d-rerun-2026-11-01/n1/r2` | t23766, t23938, t19456, t22302, t27456, t26770, t27521, t27514, t27069, t26563 |
+| 6 | n3-r2 | concurrent | 6 | forge + github | `b15d-rerun-2026-11-01/n3/r2` | t23766, t23938, t22302, t27456, t19456, t27521, t27514, t26563, t26770, t27069 |
+| 7 | n5-r2 | concurrent | 10 | forge + github | `b15d-rerun-2026-11-01/n5/r2` | t22302, t19456, t27456, t27069, t26770, t26563, t23766, t23938, t27521, t27514 |
+| 8 | n10-r2 | sequential | 10 | forge then github | `b15d-rerun-2026-11-01/n10/r2` | t27069, t26770, t22302, t19456, t27456, t23766, t23938, t26563, t27514, t27521 |
 
 Rep 3, only for an N the rep-3 rule selects, run in this order (N descending):
 
 | Batch | Mode | Agents at once | Cell order | Seed | Task order |
 | --- | --- | --- | --- | --- | --- |
-| n10-r3 | sequential | 10 | github then forge | `b15d-rerun-2026-11-01/n10/r3` | t27097, t27069, t26770, t27101, t27514, t27521, t27539, t27513, t27372, t26563 |
-| n5-r3 | concurrent | 10 | forge + github | `b15d-rerun-2026-11-01/n5/r3` | t27539, t27372, t26770, t27069, t27514, t27521, t27101, t27513, t26563, t27097 |
-| n3-r3 | concurrent | 6 | forge + github | `b15d-rerun-2026-11-01/n3/r3` | t27069, t27513, t27539, t27101, t27372, t27097, t26770, t27521, t27514, t26563 |
-| n1-r3 | concurrent | 2 | forge + github | `b15d-rerun-2026-11-01/n1/r3` | t27521, t27514, t27372, t27513, t27097, t26563, t27539, t27101, t26770, t27069 |
+| n10-r3 | sequential | 10 | github then forge | `b15d-rerun-2026-11-01/n10/r3` | t26563, t27521, t27514, t27069, t26770, t27456, t19456, t22302, t23938, t23766 |
+| n5-r3 | concurrent | 10 | forge + github | `b15d-rerun-2026-11-01/n5/r3` | t23766, t23938, t27521, t27514, t27069, t22302, t19456, t27456, t26563, t26770 |
+| n3-r3 | concurrent | 6 | forge + github | `b15d-rerun-2026-11-01/n3/r3` | t19456, t27456, t22302, t27069, t23938, t23766, t26770, t27514, t27521, t26563 |
+| n1-r3 | concurrent | 2 | forge + github | `b15d-rerun-2026-11-01/n1/r3` | t26770, t27514, t27521, t27069, t26563, t22302, t19456, t27456, t23938, t23766 |
 
 ## Cost estimate
 
 From the no-model dry batch n3-r1 (attempt 4, 2026-11-01, both arms at once, 10 tasks each,
-scripted agents that save, sync, resolve and land for real) and the real-model N = 1 checks:
+scripted agents that save, sync, resolve and land for real; old four-package check), the
+real-model N = 1 checks, and the part 3 check qualification (new scope, 2026-11-01):
+
+- **Check job length, new scope.** GitHub `bench-check` job 87-139 s (13 runs: base 3, each
+  reference 10; script 73-127 s, of which setup 17-24 s and `src/preview` 11-22 s). Forge
+  check on the base: plan job 71 s, run job 103 s (script 81 s). The old four-package check
+  took 1-2 billed minutes per job; the new one 2-3 (GitHub rounds each job up to a minute).
+- **Per landing structure** (unchanged from the dry batch): Forge 1.5 check runs (2 jobs
+  each) per task, GitHub 3.3 runs (PR, merge queue, main push) per task.
 
 | Per task | Forge arm | GitHub arm |
 | --- | --- | --- |
 | Convex (metered: function calls, database I/O, egress, action compute) | $0.0056 (dry N = 3: $0.0558 per cell, 627 executions, 6.7k document reads, 9.7 MB database read, 14.2 MB egress); $0.0026 real-model N = 1 | none |
-| GitHub Actions billed minutes | 5.3 (1.5 runs, 3 jobs; real-model N = 1: 4) | 6.6 (3.3 runs: PR, merge queue, main push) |
+| GitHub Actions billed minutes | ~6.8 (1.5 runs × (2 + 2.5); old check 5.3) | ~8.3 (3.3 runs × 2.5; old check 6.6) |
 
 Whole run, Forge tasks × Convex per task, with a 2× margin for N = 10 contention and real
 agents' extra reads (status, logs, retries) on the dry rate:
 
 | Scope | Forge tasks | Convex | Actions minutes (both arms) |
 | --- | --- | --- | --- |
-| Reps 1-2 (8 batches) | 80 | $0.45 ($0.90 with margin) | ~950 |
-| Plus rep 3 for every N | 120 | $0.67 ($1.34) | ~1,430 |
-| Worst case: every batch re-run once, rep 3 for every N | 240 | $1.34 ($2.69) | ~2,850 |
+| Reps 1-2 (8 batches) | 80 | $0.45 ($0.90 with margin) | ~1,200 |
+| Plus rep 3 for every N | 120 | $0.67 ($1.34) | ~1,820 |
+| Worst case: every batch re-run once, rep 3 for every N | 240 | $1.34 ($2.69) | ~3,650 |
 
 Every case is under the $5 Convex stop (`drive.mjs` BUDGET_USD, checked before each batch
 from the scored cells' metered spend). Not metered: R2 operations and bytes, and Convex
@@ -332,22 +395,23 @@ storage (disclosed in every Forge cell's `convex.notMetered`). GitHub Actions mi
 both repositories are public and the organisation is on the Team plan; they matter for the
 60-concurrent-job limit (N = 10 peaks near 30 jobs). Agent tokens are the owner's Codex plan
 quota, not dollars; the driver waits on its usage windows (Void rules). Each no-model dry run
-cost under $0.10 of Convex ($0.0558 for the N = 3 pair, $0.0026 for N = 1).
+cost under $0.10 of Convex ($0.0558 for the N = 3 pair, $0.0026 for N = 1). The final pinned
+dry batch on the new base re-measures these rates; its numbers are in the part 3 handoff.
 
 ## Tasks
 
 | Task | Upstream PR | Overlap class | Test files |
 | --- | --- | --- | --- |
-| t27097 | #27097 | same-package:shared | `shared/src/nodeSqliteClient.test.ts` |
-| t27101 | #27101 | disjoint:client-runtime | `client-runtime/src/connection/registry.test.ts`, `client-runtime/src/connection/supervisor.test.ts` |
-| t27513 | #27513 | same-package:provider-pi | `provider-pi/src/server/status.test.ts` |
-| t27372 | #27372 | same-package:shared | `shared/src/filePreview.test.ts`, `shared/src/video.test.ts` |
-| t27514 | #27514 | overlap:pi-adapter (same files as 27521) | `provider-pi/src/server/adapter.test.ts` |
-| t27521 | #27521 | overlap:pi-adapter (same files as 27514) | `provider-pi/src/server/adapter.test.ts` |
-| t27539 | #27539 | same-package:provider-pi | `provider-pi/src/server/mcpExtensionSource.test.ts` |
+| t27514 | #27514 | same-file:pi-adapter (reference merge clean) | `provider-pi/src/server/adapter.test.ts` |
+| t27521 | #27521 | same-file:pi-adapter (reference merge clean) | `provider-pi/src/server/adapter.test.ts` |
+| t19456 | #19456 | overlap:preview (source and test-helper pairs) | `apps/server/src/preview/ServerBrowser.test.ts` |
+| t23766 | #23766 | overlap:codex-client-tests (same test insertion) | `effect-codex-app-server/src/client.test.ts` |
 | t26563 | #26563 | same-package:shared | `shared/src/changedFileKind.test.ts` |
 | t26770 | #26770 | disjoint:source-control-forgejo | `source-control-forgejo/src/server/ForgejoSourceControlProvider.test.ts` |
 | t27069 | #27069 | same-package:shared | `shared/src/schemaJson.test.ts` |
+| t23938 | #23938 | overlap:codex-client-tests (same test insertion) | `effect-codex-app-server/src/_internal/stdio.test.ts`, `effect-codex-app-server/src/client.test.ts` |
+| t22302 | #22302 | overlap:preview (source and test-helper pairs) | `apps/server/src/preview/ServerBrowser.test.ts`, `apps/server/src/preview/ServerBrowserPage.test.ts` |
+| t27456 | #27456 | overlap:preview (source and test-helper pairs) | `apps/server/src/preview/ServerBrowser.test.ts` |
 
 ## Runbook
 

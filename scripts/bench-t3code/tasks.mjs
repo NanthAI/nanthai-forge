@@ -10,21 +10,25 @@ import { join } from 'node:path';
 
 export const base = {
   repository: 'pingdotgg/t3code',
-  commit: '52f4ec6f9420abc8f4c033528f95397fd2716f0b',
-  commitTitle: 'perf(gitcafe): PR sync makes 2x fewer GitCafe requests for unchanged PRs (#27100)',
+  commit: 'a2f901effb59a81126f4b343b204928f2f87f81f',
+  upstreamParent: '52f4ec6f9420abc8f4c033528f95397fd2716f0b',
+  commitTitle:
+    'LOCAL PROPOSAL: C plus six preview prerequisites and their own tests; harness builder owns bench CI normalization and final pins',
 };
-// Overlap design: one same-file pair, two same-package groups, two disjoint tasks.
+// Overlap design (part 3, lead 2026-11-01 12:50): three dispatch groups (plan.mjs
+// DESIGN.dispatchGroups) plus same-package and disjoint tasks. The Pi pair touches the same
+// files but its references merge clean; the Codex pair and two preview pairs conflict.
 export const groups = {
-  27514: 'overlap:pi-adapter (same files as 27521)',
-  27521: 'overlap:pi-adapter (same files as 27514)',
-  27513: 'same-package:provider-pi',
-  27539: 'same-package:provider-pi',
-  27097: 'same-package:shared',
-  27372: 'same-package:shared',
+  27514: 'same-file:pi-adapter (reference merge clean)',
+  27521: 'same-file:pi-adapter (reference merge clean)',
+  19456: 'overlap:preview (source and test-helper pairs)',
+  23766: 'overlap:codex-client-tests (same test insertion)',
   26563: 'same-package:shared',
-  27069: 'same-package:shared',
-  27101: 'disjoint:client-runtime',
   26770: 'disjoint:source-control-forgejo',
+  27069: 'same-package:shared',
+  23938: 'overlap:codex-client-tests (same test insertion)',
+  22302: 'overlap:preview (source and test-helper pairs)',
+  27456: 'overlap:preview (source and test-helper pairs)',
 };
 const isTest = path => /\.test\.(ts|tsx|mjs|cjs|js)$/.test(path);
 

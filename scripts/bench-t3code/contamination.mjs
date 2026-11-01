@@ -4,9 +4,13 @@
 const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g;
 
 /** Rules on actions (tool inputs). `prNumbers` are every task's upstream PR numbers;
- * `ownPrs` the fork PRs this agent opened (any other fork PR is an earlier cell's answer). */
-export function actionRules(prNumbers, ownPrs = []) {
+ * `ownPrs` the fork PRs this agent opened (any other fork PR is an earlier cell's answer);
+ * `mergeShas` every task's upstream merge commit (a solution ref, matched from 7 hex
+ * characters). */
+export function actionRules(prNumbers, ownPrs = [], mergeShas = []) {
   const own = new Set(ownPrs.map(String));
+  const shas = mergeShas.filter(Boolean).map(s => s.toLowerCase());
+  const hexRuns = s => s.toLowerCase().match(/\b[0-9a-f]{7,40}\b/g) ?? [];
   const prRef = /\bgh\s+pr\s+(?:view|diff|checkout|checks|comment|merge)\s+#?(\d+)|\bpull\/(\d+)/g;
   const prs = new RegExp(`\\b(${prNumbers.join('|')})\\b`);
   return [
@@ -27,6 +31,7 @@ export function actionRules(prNumbers, ownPrs = []) {
     },
     { id: 'task-pr-number', test: s => /\b(gh|git|curl|wget)\b/.test(s) && prs.test(s) },
     { id: 'other-fork-pr', test: s => [...s.matchAll(prRef)].some(m => !own.has(m[1] ?? m[2])) },
+    { id: 'solution-merge-sha', test: s => hexRuns(s).some(h => shas.some(sha => sha.startsWith(h))) },
   ];
 }
 
@@ -58,10 +63,11 @@ export function scanTask({
   ownIds = new Set(),
   prNumbers,
   ownPrs = [],
+  mergeShas = [],
   workspace = null,
 }) {
   const hits = [];
-  const rules = actionRules(prNumbers, ownPrs);
+  const rules = actionRules(prNumbers, ownPrs, mergeShas);
   // Workspaces sit under the bench root: the agent's own absolute paths (Codex patches use
   // them) are not bench data; any other path under the bench root still is.
   const own = input => (workspace ? input.split(workspace).join('<workspace>') : input);
