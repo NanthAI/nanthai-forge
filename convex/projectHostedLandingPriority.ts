@@ -1,3 +1,4 @@
+import { retainQueueStatus } from './projectHostedQueueStatus';
 // SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
 import { mutation } from './cliServer';
@@ -76,6 +77,7 @@ export const prioritize = mutation({
         priorityChange: change,
       };
       await ctx.db.patch(row._id, patch);
+      await retainQueueStatus(ctx, landingPriorityState({ ...row, ...patch }, state));
       // priorityChange keeps only the latest change; every change is its own receipt.
       await recordMutationReceipt(ctx, {
         projectId: input.projectId,

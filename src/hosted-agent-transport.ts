@@ -747,7 +747,12 @@ export class HostedAgentTransport {
       action,
       operationId,
       resolved: operationId ? { operationId } : null,
-      result: await hostedConflictAdvice(this, await enrichHostedQueueAhead(this, result)),
+      // Finite canonical reads never hydrate conflict/advice source. Mutating
+      // flows may still prepare their existing actionable conflict checkout.
+      result:
+        action === 'status' || action === 'observe'
+          ? enrichHostedQueueAhead(this, result)
+          : await hostedConflictAdvice(this, enrichHostedQueueAhead(this, result)),
       ...(advice ? (({ changedPaths: _paths, ...shown }) => shown)(advice) : {}),
       ...(notice ? { overlapNotice: notice } : {}),
       ...this.nudge(action),

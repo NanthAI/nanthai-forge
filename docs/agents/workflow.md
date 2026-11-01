@@ -1336,13 +1336,17 @@ entry headers and selected batch/run progress; terminal continuations follow eac
 prefix's exact run ID without hydrating unrelated run evidence.
 
 After 15 minutes without a recorded run, batch-step or acceptance event, pending
-entries expose `stall:{code,step,missingOwner,lastProgressAt,alarmAt,message}` in
+native entries expose `stall:{code,step,missingOwner,lastProgressAt,alarmAt,message}` in
 receipts, `status --pending` and landing observations. A missing wait reason is
-reported as `unrecorded-wait`, with the landing controller named. Native workers
+reported as `unrecorded-wait`, with the landing controller named. Hosted queued
+entries count queue-head progress too: a live predecessor or queue owner suppresses
+the follower alarm, and an ownerless wait names the predecessor it waits behind.
+Queued receipts show position, entries ahead, live predecessor and an approximate
+ETA based on shared-check groups and observed parallel service waves. Native workers
 own one deadline while unalarmed work is pending. Hosted entries retain one alarm
 deadline, transfer it during admission and cancel it at settlement. Reading never drives or repairs the queue. Real progress clears
-the alarm and starts a new deadline. A hosted queued entry whose alarm fired gets
-one more deadline 60 minutes after its last progress (the dropped-landing limit);
+the alarm and starts a new deadline. A hosted queued entry reaching its alarm deadline retains
+one orphan-recovery deadline 60 minutes after its last progress (the dropped-landing limit);
 entries waiting for review or a dependency never get one. Checking entries keep
 the run lease watchdog instead. At the deadline Forge re-drives the entry (a cohort
 stuck composing is split into halves that compose apart); if that makes no progress and nothing is left to drive it
@@ -1520,8 +1524,11 @@ idle queues add no function calls or scheduled work.
 
 ## Queue-ahead conflict advice
 
-Pending `land` results, Lane status submissions and `landing` reads include
-`queueAhead` when there are entries ahead. The preview says **“if entry X / Lane
+Pending hosted receipts include `queue` with position, total entries, entries ahead,
+the live predecessor and an approximate group-aware ETA. `observe`, `status` and
+`landing` return current canonical server state without computing source advice.
+They include `queueAhead` only when advice is already cached for the exact current
+authorized pins; a cache miss reports `queueAheadUnavailable`. The preview says **“if entry X / Lane
 Y lands, paths conflict”**. It is advisory: it never rejects, delays or reorders
 submission. A checking entry or one whose check passed is `actionable`; a merely
 queued entry is `fyi`. Clean pairs produce no conflict advice. Unavailable source
@@ -1529,7 +1536,7 @@ is reported separately and never treated as a clean merge.
 
 The preview uses immutable submitted Candidate heads against current main, rather
 than later Lane edits. It considers at most eight earlier pending entries, with
-at most sixteen logical source compositions on a cold cache. Exact
+at most sixteen logical source compositions during an explicit preview. Finite hosted reads perform zero compositions. Exact
 (main, submitted head, earlier head) results are reused; `cost` reports composition
 calls, cache hits and elapsed milliseconds. Hosted cold source can require lazy
 object-resolution retries, reported as `objectResolutions`. Repository checks and

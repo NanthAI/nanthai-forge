@@ -1,3 +1,4 @@
+import { retainQueueStatus } from './projectHostedQueueStatus';
 // SPDX-License-Identifier: Apache-2.0
 import { makeFunctionReference } from 'convex/server';
 import type { MutationCtx, QueryCtx } from './_generated/server';
@@ -58,6 +59,7 @@ export async function recordLandingObservation(
   state: HostedLandingState,
   pendingAttempt?: unknown,
 ) {
+  await retainQueueStatus(ctx, state);
   const finish =
     pendingAttempt === undefined
       ? await ctx.db

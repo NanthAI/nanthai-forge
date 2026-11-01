@@ -14,9 +14,23 @@ import {
   queueAheadPreview,
   type QueueAheadEntry,
   type QueueAheadCache,
+  type QueueAheadPreview,
 } from './queue-ahead-preview.js';
 import { hostedAgentDirectory } from './hosted-agent-journal.js';
 import type { HostedAgentTransport } from './hosted-agent-transport.js';
+
+const selectionCache = (transport: HostedAgentTransport) =>
+  new PeersCache(
+    `${transport.address.url}/${transport.address.projectId}`,
+    join(dirname(hostedAgentDirectory(transport.root)), 'queue-ahead-responses'),
+  );
+const selectionKey = (transport: HostedAgentTransport, selection: unknown) =>
+  JSON.stringify([
+    transport.address.url,
+    transport.address.projectId,
+    transport.root,
+    queueAheadSelectionSchema.parse(selection),
+  ]);
 
 /** Finite explicit observation. The server selects exact authorized pins, the
  * existing verified object reader and native reducer compute outside Convex.
@@ -110,17 +124,40 @@ export async function hostedQueueAhead(transport: HostedAgentTransport, selectio
       objectResolutions: reader.resolvedObjects,
       durationMs: Math.round(performance.now() - started),
     };
+    selectionCache(transport).write(selectionKey(transport, selected), result);
     return result;
   } finally {
     await rm(root, { recursive: true, force: true });
   }
 }
-export async function enrichHostedQueueAhead(transport: HostedAgentTransport, value: unknown) {
+/** Status attaches only a verdict already computed for the fresh authorized
+ * selection. Cache misses never hydrate source, compose, schedule or wait. Long
+ * explicit previews cache pins, never a submission snapshot; a subsequent read
+ * must select canonical state again before this cache can be used. */
+export function enrichHostedQueueAhead(transport: HostedAgentTransport, value: unknown) {
   if (!value || typeof value !== 'object') return value;
   const result = value as Record<string, unknown>;
   if (!result.queueAheadSelection) return value;
   try {
-    return { ...result, queueAhead: await hostedQueueAhead(transport, result.queueAheadSelection) };
+    const queueAhead = selectionCache(transport).read<QueueAheadPreview>(
+      selectionKey(transport, result.queueAheadSelection),
+    );
+    return queueAhead
+      ? {
+          ...result,
+          queueAhead: {
+            ...queueAhead,
+            cached: true,
+            cost: {
+              ...queueAhead.cost,
+              composeCalls: 0,
+              cacheHits: queueAhead.considered,
+              durationMs: 0,
+              objectResolutions: 0,
+            },
+          },
+        }
+      : { ...result, queueAheadUnavailable: true };
   } catch {
     return { ...result, queueAheadUnavailable: true };
   }

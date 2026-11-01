@@ -19,6 +19,11 @@ const lease = v.object({
   attemptId: v.string(),
 });
 export const hostedLandingTables = {
+  projectHostedLandingQueueStatus: defineTable({
+    projectId: v.id('hostedProjects'),
+    page: v.number(),
+    value: v.string(),
+  }).index('by_project_and_page', ['projectId', 'page']),
   /** One row per stall alert tier sent; replays and late alarms find it and send nothing. */
   projectHostedStallAlerts: defineTable({
     projectId: v.id('hostedProjects'),
@@ -74,6 +79,16 @@ export const hostedLandingTables = {
     channel: v.literal('main'),
     sequence: v.number(),
     train: v.optional(v.array(v.string())),
+    status: v.optional(
+      v.object({
+        total: v.number(),
+        groups: v.number(),
+        runningGroups: v.optional(v.number()),
+        horizon: v.array(v.string()),
+        lastProgressAt: v.string(),
+        serviceMs: v.optional(v.number()),
+      }),
+    ),
     fence: v.number(),
     wake: v.union(
       v.object({ taskId: v.id('_scheduled_functions'), id: v.string(), at: v.number() }),

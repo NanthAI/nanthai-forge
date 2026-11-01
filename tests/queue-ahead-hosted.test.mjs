@@ -12,7 +12,7 @@ import { syncFixture } from './hosted-sync-fixture.mjs';
 import { saveBytes } from '../dist/hosted-save.js';
 import { NativeSource } from '../dist/native-source.js';
 import { buildComposePages } from '../dist/hosted-compose.js';
-import { hostedQueueAhead } from '../dist/queue-ahead-hosted.js';
+import { hostedQueueAhead, enrichHostedQueueAhead } from '../dist/queue-ahead-hosted.js';
 const startApi = await import(moduleUrl('../convex/projectHostedStart.ts'));
 
 function phase(f, state, next) {
@@ -103,6 +103,25 @@ test('hosted preview uses verified bytes and native merge, caches composes, and 
   preview = await hostedQueueAhead(f.transport(), selection);
   assert.equal(preview.cost.composeCalls, 0);
   assert.equal(preview.cost.cacheHits, 1);
+  const cached = enrichHostedQueueAhead(f.transport(), {
+    submission: { phase: 'queued' },
+    queueAheadSelection: selection,
+  });
+  assert.deepEqual(cached.queueAhead.conflicts, preview.conflicts);
+  const changed = enrichHostedQueueAhead(f.transport(), {
+    queueAheadSelection: { ...selection, mine: main },
+  });
+  assert.equal(changed.queueAhead, undefined, 'old pins cannot attach after a source change');
+  const otherProject = enrichHostedQueueAhead(
+    { ...f.transport(), address: { ...f.address, projectId: 'other-project' } },
+    { queueAheadSelection: selection },
+  );
+  assert.equal(otherProject.queueAhead, undefined, 'cached advice cannot cross a project binding');
+  const otherRoot = enrichHostedQueueAhead(
+    { ...f.transport(), root: `${f.root}/.` },
+    { queueAheadSelection: selection },
+  );
+  assert.equal(otherRoot.queueAhead, undefined, 'cached shell commands retain their exact root context');
   assert.equal(f.objects.size, before);
   assert.deepEqual((await hostedQueueAhead(f.transport(), { ...selection, ahead: [] })).conflicts, []);
   f.allow(false);

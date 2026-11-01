@@ -1,3 +1,4 @@
+import { readQueueStatus } from './projectHostedQueueStatus';
 // SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
 import { makeFunctionReference } from 'convex/server';
@@ -47,7 +48,14 @@ export async function raiseLandingAlarm(ctx: MutationCtx, input: Stalled, now = 
   if (!row || row.alarm?.lastProgressAt !== input.lastProgressAt) return null;
   await ctx.db.patch(row._id, { alarm: null });
   const state = hostedLandingStateSchema.parse(JSON.parse(row.value));
-  const stall = hostedLandingStall(state, now);
+  const queue = canonical && state.phase === 'queued' ? await readQueueStatus(ctx, state, now) : null;
+  const stall = hostedLandingStall(state, now, queue);
+  if (!stall && queue && state.observation.state === 'pending') {
+    // Keep the existing orphan-recovery deadline even when a healthy train owns
+    // the wait. No follower alarm, alert or controller redrive is warranted.
+    await scheduleDropDeadline(ctx, input, 0, Date.parse(input.lastProgressAt) + LANDING_DROP_MS);
+    return null;
+  }
   if (!stall || state.observation.stall?.lastProgressAt === stall.lastProgressAt) return null;
   if (canonical?.orderWait && canonical.phase === 'ready') {
     // A passed entry waiting for an older submission is not stalled: the older
@@ -141,10 +149,13 @@ export async function resolveStalledLanding(
   if (!row) return null;
   const state = hostedLandingStateSchema.parse(JSON.parse(row.value));
   if (state.phase !== 'queued' || !stalledSince(state, input.lastProgressAt)) return null;
-  await redriveQueued(ctx, input, row, state);
-  const after = await loadLanding(ctx, input);
+  // A live train already owns progress. Preserve its existing recovery deadline
+  // and backoff, without redriving healthy controllers on every follower timer.
+  const queue = await readQueueStatus(ctx, state, now);
+  if (!queue?.owner) await redriveQueued(ctx, input, row, state);
+  const after = queue?.owner ? { row, state } : await loadLanding(ctx, input);
   if (after.state.phase !== 'queued' || !stalledSince(after.state, input.lastProgressAt)) return null;
-  const owner = await liveOwner(ctx, input, after.row, after.state);
+  const owner = queue?.owner ?? (await liveOwner(ctx, input, after.row, after.state));
   if (owner) {
     // Never end work something live still drives; its own path re-selects this entry.
     if (input.attempt < LANDING_DROP_ATTEMPTS)

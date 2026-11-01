@@ -1,8 +1,7 @@
+import { readQueueStatus, queueAwareLandingState } from './projectHostedQueueStatus';
 import {
   landingPriority,
-  landingQueuePosition,
   nextLandingRow,
-  activeLandingOrder,
   landingPriorityState,
   landingStateForReader,
 } from './projectHostedLandingOrder';
@@ -104,15 +103,13 @@ export const status = query({
         projectId: input.projectId,
         attemptId: state.attemptId,
       });
-      const order =
-        state.phase === 'queued'
-          ? await activeLandingOrder(ctx, { projectId: input.projectId, channel: 'main' })
-          : undefined;
+      const queue = await readQueueStatus(ctx, state);
       return canonicalPayload({
-        request: landingStateForReader(state, input.priorityInfo),
-        queuePosition: await landingQueuePosition(ctx, state, order),
+        request: landingStateForReader(queueAwareLandingState(state, queue), input.priorityInfo),
+        queuePosition: queue?.position ?? null,
+        queue,
         attempt,
-        queueAheadSelection: await hostedQueueAheadSelection(ctx, state, order),
+        queueAheadSelection: await hostedQueueAheadSelection(ctx, state, undefined, queue?.entriesAhead),
         ...(wouldConflict ? { wouldConflict } : {}),
         ...(stallAlert ? { stallAlert } : {}),
       });

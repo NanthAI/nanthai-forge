@@ -178,7 +178,12 @@ export async function finishStep(ctx: MutationCtx, input: FinishIdentity): Promi
         },
       };
     }
-    const claim = await claimReadyLanding(ctx, { ...selection, channel: 'main', owner: plan.receiptId });
+    const claim = await claimReadyLanding(
+      ctx,
+      { ...selection, channel: 'main', owner: plan.receiptId },
+      Date.now(),
+      false,
+    );
     if (!claim) {
       await scheduleFinish(ctx, (await ctx.db.get(row._id))!, 250);
       return null;

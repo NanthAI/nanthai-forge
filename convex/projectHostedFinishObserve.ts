@@ -1,4 +1,6 @@
-import { landingQueuePosition, activeLandingOrder, landingStateForReader } from './projectHostedLandingOrder';
+import { readWouldConflict } from './projectHostedLandingWouldConflict';
+import { readQueueStatus, queueAwareLandingState } from './projectHostedQueueStatus';
+import { landingStateForReader } from './projectHostedLandingOrder';
 import { hostedQueueAheadSelection } from './projectHostedQueueAhead';
 import { desiredLanding } from './projectHostedLandingDesiredWake';
 import { hostedLandingStateSchema } from '../src/hosted-landing';
@@ -73,7 +75,8 @@ export const page = query({
           canonicalOperationId: state.operationId,
           authority: sourceAuthority(project),
           submission: landingStateForReader(state, input.priorityInfo),
-          queuePosition: await landingQueuePosition(ctx, state),
+          queuePosition: null,
+          queue: null,
           queueAheadSelection: await hostedQueueAheadSelection(ctx, state),
           pendingAttempt: null,
           events: [{ submission: landingStateForReader(state, input.priorityInfo), pendingAttempt: null }],
@@ -83,14 +86,12 @@ export const page = query({
         });
       }
       invariant(rows.length === 1 || alias, 'NOT_FOUND', 'Select one hosted landing operation.');
-      const { state } = await loadLanding(ctx, {
+      const { row: selectedRow, state } = await loadLanding(ctx, {
         projectId: input.projectId,
         submissionId: rows[0]?.submissionId ?? alias!.submissionId,
       });
-      const order =
-        state.phase === 'queued'
-          ? await activeLandingOrder(ctx, { projectId: input.projectId, channel: 'main' })
-          : undefined;
+      const queue = await readQueueStatus(ctx, state);
+      const wouldConflict = state.phase === 'queued' ? readWouldConflict(selectedRow) : undefined;
       const finish = await finishRow(ctx, { projectId: input.projectId, submissionId: state.id });
       const pendingAttempt = finish ? JSON.parse(finish.value).pending : null;
       const events = [];
@@ -106,7 +107,10 @@ export const page = query({
           )
           .unique();
         if (!row) {
-          events.push({ submission: landingStateForReader(state, input.priorityInfo), pendingAttempt });
+          events.push({
+            submission: landingStateForReader(queueAwareLandingState(state, queue), input.priorityInfo),
+            pendingAttempt,
+          });
           nextVersion = state.version + 1;
           resnapshot = true;
           break;
@@ -126,9 +130,11 @@ export const page = query({
         operationId: input.operationId,
         canonicalOperationId: state.operationId,
         authority: sourceAuthority(project),
-        submission: landingStateForReader(state, input.priorityInfo),
-        queuePosition: await landingQueuePosition(ctx, state, order),
-        queueAheadSelection: await hostedQueueAheadSelection(ctx, state, order),
+        submission: landingStateForReader(queueAwareLandingState(state, queue), input.priorityInfo),
+        queuePosition: queue?.position ?? null,
+        queue,
+        ...(wouldConflict ? { wouldConflict } : {}),
+        queueAheadSelection: await hostedQueueAheadSelection(ctx, state, undefined, queue?.entriesAhead),
         pendingAttempt,
         events,
         nextVersion,

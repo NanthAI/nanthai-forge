@@ -49,6 +49,7 @@ async function replayFinish(session: HostedAgentSession) {
       composeOperationId,
       ...(progress === undefined ? {} : { progress }),
       submission,
+      ...(await queuedConflict(session, submission)),
     };
   }
   const request = session.journal.get<Record<string, unknown>>('finish-request');
@@ -58,9 +59,6 @@ async function replayFinish(session: HostedAgentSession) {
     await session.journal.retain('finish-check-run', () => run);
     return { phase: 'check', composeOperationId, run };
   }
-  const queuePosition = session.journal.get<{ queuePosition?: number | null }>(
-    'finish-queue-advice',
-  )?.queuePosition;
   const submission = await session.mutation<HostedLandingState>('projectHostedLanding:enqueue', {
     request: canonicalPayload(request),
   });
@@ -68,7 +66,6 @@ async function replayFinish(session: HostedAgentSession) {
     phase: 'finish',
     composeOperationId,
     submission,
-    ...(queuePosition === undefined ? {} : { queuePosition }),
     ...(await queuedConflict(session, submission)),
   };
 }
@@ -77,13 +74,26 @@ async function replayFinish(session: HostedAgentSession) {
 export async function queuedConflict(session: HostedAgentSession, submission: HostedLandingState) {
   if (submission.phase !== 'queued') return {};
   try {
-    const { wouldConflict } = await session.query<{ wouldConflict?: { next: string } }>(
-      'projectHostedLanding:status',
-      { submissionId: submission.id },
-    );
-    if (!wouldConflict) return {};
+    const read = await session.query<{
+      request: HostedLandingState;
+      queuePosition?: number | null;
+      queue?: unknown;
+      queueAheadSelection?: unknown;
+      wouldConflict?: { next: string };
+    }>('projectHostedLanding:status', { submissionId: submission.id });
+    const { wouldConflict } = read;
+    // The read can settle the submission while enqueue's reply is in flight.
+    // Never combine its newer metadata with the older admission snapshot.
+    const current = {
+      submission: read.request ?? submission,
+      queuePosition: read.queuePosition,
+      ...(read.queue ? { queue: read.queue } : {}),
+      ...(read.queueAheadSelection ? { queueAheadSelection: read.queueAheadSelection } : {}),
+    };
+    if (!wouldConflict || current.submission.phase !== 'queued') return current;
     const laneId = session.marker()?.selection.laneId;
     return {
+      ...current,
       wouldConflict,
       next: 'sync-and-land',
       nextCommand: `nforge agent ${shellQuote(session.root)} land --save ${shellQuote(
@@ -251,7 +261,13 @@ async function executeFinishWork(session: HostedAgentSession, input: unknown) {
         request: canonicalPayload({ ...desired, governanceVersion: 1 }),
       });
       markLandStep('submitted');
-      return { phase: 'finish', composeOperationId, progress, submission };
+      return {
+        phase: 'finish',
+        composeOperationId,
+        progress,
+        submission,
+        ...(await queuedConflict(session, submission as HostedLandingState)),
+      };
     }
     const candidate = hostedRecordSchema.options[3].parse(completed.result);
     if (candidate.result.status === 'conflict' && session.capabilities.actions.includes('resolve')) {
@@ -313,27 +329,10 @@ async function executeFinishWork(session: HostedAgentSession, input: unknown) {
     request: canonicalPayload({ ...request, governanceVersion: 1 }),
   });
   markLandStep('submitted');
-  let queueAheadSelection: unknown;
-  let queuePosition: number | null | undefined;
-  try {
-    const read = await session.query<{ queueAheadSelection?: unknown; queuePosition?: number | null }>(
-      'projectHostedLanding:status',
-      { submissionId: (result as { id: string }).id },
-    );
-    queueAheadSelection = read.queueAheadSelection;
-    queuePosition = read.queuePosition;
-  } catch {
-    /* Advisory reads never affect admission. */
-  }
-  const queueAdvice = await session.journal.retain<{ queuePosition?: number | null }>(
-    'finish-queue-advice',
-    () => (queuePosition === undefined ? {} : { queuePosition }),
-  );
   return {
     phase: 'finish',
     composeOperationId,
     submission: result,
-    ...(queueAdvice.queuePosition === undefined ? {} : { queuePosition: queueAdvice.queuePosition }),
-    ...(queueAheadSelection ? { queueAheadSelection } : {}),
+    ...(await queuedConflict(session, result as HostedLandingState)),
   };
 }

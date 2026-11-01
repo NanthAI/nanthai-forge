@@ -22,6 +22,8 @@ export const hostedSubmissionWaitSchema = z
 const eventSchema = z.object({
   submission: hostedLandingStateSchema,
   pendingAttempt: hostedFinishSchema.shape.pending,
+  queue: z.unknown().optional(),
+  wouldConflict: z.unknown().optional(),
 });
 const pageSchema = z.object({
   projectId: z.string(),
@@ -34,6 +36,8 @@ const pageSchema = z.object({
   nextVersion: z.number().int().nonnegative(),
   isDone: z.boolean(),
   resnapshot: z.boolean(),
+  queue: z.unknown().optional(),
+  wouldConflict: z.unknown().optional(),
 });
 const decode = (value: unknown) => (typeof value === 'string' ? JSON.parse(value) : value);
 /** Durable submission versions plus S05 selection-scoped deduplication. Live
@@ -168,7 +172,18 @@ export async function observeHostedSubmissions(
       'Submission observation differs from the selected project/operation.',
     );
     const key = `submission:${state.id}`;
-    const hash = digest(JSON.stringify(event));
+    // ETA moves with the clock, without a committed queue change. It belongs in
+    // the receipt but must not turn a reconnect or duplicate wake into progress.
+    const hashEvent =
+      event.queue && typeof event.queue === 'object'
+        ? {
+            ...event,
+            queue: Object.fromEntries(
+              Object.entries(event.queue).filter(([key]) => key !== 'eta' && key !== 'message'),
+            ),
+          }
+        : event;
+    const hash = digest(JSON.stringify(hashEvent));
     if (cursor.seen.seen.get(key) === hash) return;
     cursor.seen.seen.set(key, hash);
     changed = true;
@@ -220,16 +235,25 @@ export async function observeHostedSubmissions(
           'Submission page has an invalid version range.',
         );
         cursor.versions.set(operationId, event.submission.version + 1);
-        publish(operationId, event, page.resnapshot);
+        // The final page supplies the fresh canonical state and queue metadata.
+        // Publish that version once below, rather than again after its retained event.
+        if (!page.isDone || event.submission.version !== page.submission.version)
+          publish(operationId, event, page.resnapshot);
       }
       cursor.versions.set(operationId, page.nextVersion);
       current.set(
         operationId,
         page.isDone
-          ? { submission: page.submission, pendingAttempt: page.pendingAttempt }
+          ? {
+              submission: page.submission,
+              pendingAttempt: page.pendingAttempt,
+              ...(page.queue ? { queue: page.queue } : {}),
+              ...(page.wouldConflict ? { wouldConflict: page.wouldConflict } : {}),
+            }
           : page.events.at(-1)!,
       );
       if (page.isDone) {
+        publish(operationId, current.get(operationId)!, page.resnapshot);
         await readInputs(operationId);
         return;
       }

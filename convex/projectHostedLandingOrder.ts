@@ -1,3 +1,4 @@
+import { readQueueStatus } from './projectHostedQueueStatus';
 // SPDX-License-Identifier: Apache-2.0
 import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { LandingChannel, LandingRow } from './projectHostedLandingStore';
@@ -201,20 +202,10 @@ export async function activeLandingOrder(
   return [...running, ...orderHostedLandingRows(keys.filter(row => row.phase === 'queued'))];
 }
 export type LandingOrder = Awaited<ReturnType<typeof activeLandingOrder>>;
-export async function landingQueuePosition(
-  ctx: QueryCtx | MutationCtx,
-  state: HostedLandingState,
-  selected?: LandingOrder,
-) {
-  if (state.phase !== 'queued') return null;
-  const order =
-    selected ??
-    (await activeLandingOrder(ctx, {
-      projectId: state.projectId as LandingChannel['projectId'],
-      channel: 'main',
-    }));
-  const position = order.findIndex(row => row.submissionId === state.id);
-  return position < 0 ? null : position + 1;
+/** Position uses the materialized read model; never scan the active queue from
+ * a finite reader. Batch selection may still request compact ordering windows. */
+export async function landingQueuePosition(ctx: QueryCtx | MutationCtx, state: HostedLandingState) {
+  return (await readQueueStatus(ctx, state))?.position ?? null;
 }
 
 /** Released wait/stack readers parse submission bodies strictly. Keep their

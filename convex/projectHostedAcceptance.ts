@@ -24,8 +24,9 @@ async function publishSelected(
   claim: import('./projectHostedLandingControl').LandingClaim,
   now = Date.now(),
   ownerApproval?: import('../src/autonomy-policy').AcceptanceActor,
+  selectedState?: Awaited<ReturnType<typeof acceptanceSelection>>['state'],
 ) {
-  const { state } = await acceptanceSelection(ctx, claim);
+  const state = selectedState ?? (await acceptanceSelection(ctx, claim)).state;
   return state.batchId && !state.batchSolo
     ? publishLandingBatch(ctx, claim, now)
     : publishAcceptance(ctx, claim, now, ownerApproval);
@@ -77,25 +78,36 @@ export const accept = mutation({
   returns: v.string(),
   handler: async (ctx, input) => {
     try {
-      const { attempt } = await caller(ctx, input);
+      const { attempt, state } = await caller(ctx, input);
       if (await acceptanceRow(ctx, { projectId: input.projectId, receiptId: attempt.operations.accept }))
         return canonicalPayload(
-          await publishSelected(ctx, {
-            ...input,
-            channel: 'main',
-            owner: attempt.operations.accept,
-            token: 0,
-          }),
+          await publishSelected(
+            ctx,
+            {
+              ...input,
+              channel: 'main',
+              owner: attempt.operations.accept,
+              token: 0,
+            },
+            Date.now(),
+            undefined,
+            state,
+          ),
         );
-      const claim = await claimReadyLanding(ctx, {
-        ...input,
-        channel: 'main',
-        owner: attempt.operations.accept,
-      });
+      const claim = await claimReadyLanding(
+        ctx,
+        {
+          ...input,
+          channel: 'main',
+          owner: attempt.operations.accept,
+        },
+        Date.now(),
+        false,
+      );
       // An older submission still holding its place takes main first.
       return canonicalPayload(
         claim && !('waitingFor' in claim)
-          ? await publishSelected(ctx, claim)
+          ? await publishSelected(ctx, claim, Date.now(), undefined, state)
           : { status: 'pending', reason: 'queued' },
       );
     } catch (error) {
@@ -117,7 +129,7 @@ export const approve = mutation({
         'PROJECT_UNAVAILABLE',
         'Owner approval requires explicit person acceptance.',
       );
-      const { attempt } = await acceptanceSelection(ctx, input);
+      const { attempt, state } = await acceptanceSelection(ctx, input);
       if (await acceptanceRow(ctx, { projectId: input.projectId, receiptId: attempt.operations.accept }))
         return canonicalPayload(
           await publishSelected(
@@ -125,15 +137,21 @@ export const approve = mutation({
             { ...input, channel: 'main', owner: attempt.operations.accept, token: 0 },
             Date.now(),
             actor,
+            state,
           ),
         );
-      const claim = await claimReadyLanding(ctx, {
-        ...input,
-        channel: 'main',
-        owner: attempt.operations.accept,
-      });
+      const claim = await claimReadyLanding(
+        ctx,
+        {
+          ...input,
+          channel: 'main',
+          owner: attempt.operations.accept,
+        },
+        Date.now(),
+        false,
+      );
       if (!claim || 'waitingFor' in claim) return canonicalPayload({ status: 'pending', reason: 'queued' });
-      const published = await publishSelected(ctx, claim, Date.now(), actor);
+      const published = await publishSelected(ctx, claim, Date.now(), actor, state);
       await recordMutationReceipt(ctx, {
         projectId: input.projectId,
         actor: actor.id,

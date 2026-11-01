@@ -1,4 +1,5 @@
-import { activeLandingOrder, type LandingOrder } from './projectHostedLandingOrder';
+import type { LandingOrder } from './projectHostedLandingOrder';
+import { landingQueue } from './projectHostedLandingEvents';
 import { landingRow } from './projectHostedLandingStore';
 import { loadHostedCheck } from './projectHostedCheckStore';
 // SPDX-License-Identifier: Apache-2.0
@@ -17,20 +18,24 @@ async function selectQueueAhead(
   ctx: QueryCtx | MutationCtx,
   state: HostedLandingState,
   selected?: LandingOrder,
+  entriesAhead?: number,
 ) {
   if (
+    entriesAhead === 0 ||
     !['queued', 'checking', 'ready'].includes(state.phase) ||
     (state.phase !== 'queued' && state.sequence <= 1)
   )
     return null;
   const projectId = state.projectId as Id<'hostedProjects'>;
-  const ordered = selected ?? (await activeLandingOrder(ctx, { projectId, channel: 'main' }));
+  const queue = selected ? null : await landingQueue(ctx, { projectId, channel: 'main' });
+  const ordered = selected ?? (queue?.status?.horizon ?? []).map(submissionId => ({ submissionId }));
   const position = ordered.findIndex(row => row.submissionId === state.id);
-  const aheadKeys = position < 0 ? [] : ordered.slice(0, position);
+  const aheadKeys = position < 0 ? ordered : ordered.slice(0, position);
   const rows = [];
   for (const key of aheadKeys.slice(0, QUEUE_AHEAD_LIMIT)) {
     const row = await landingRow(ctx, { projectId, submissionId: key.submissionId });
-    if (row) rows.push(row);
+    if (row && row.submissionId !== state.id && ['queued', 'checking', 'ready'].includes(row.phase))
+      rows.push(row);
   }
   if (!rows.length) return null;
   const mine = await loadLandingAttempt(ctx, { projectId, attemptId: state.attemptId });
@@ -38,6 +43,7 @@ async function selectQueueAhead(
   const ahead = [];
   for (const row of rows.slice(0, QUEUE_AHEAD_LIMIT)) {
     const peer = hostedLandingStateSchema.parse(JSON.parse(row.value));
+    if (state.batchId && peer.batchId === state.batchId) continue;
     const attempt = await loadLandingAttempt(ctx, { projectId, attemptId: peer.attemptId });
     if (!attempt.candidate.head) continue;
     const status =
@@ -53,7 +59,9 @@ async function selectQueueAhead(
     main: main.head,
     mine: mine.candidate.head,
     ahead,
-    more: aheadKeys.length > QUEUE_AHEAD_LIMIT,
+    more: selected
+      ? aheadKeys.length > QUEUE_AHEAD_LIMIT
+      : (entriesAhead ?? (queue?.status?.total ?? 1) - 1) > QUEUE_AHEAD_LIMIT && position < 0,
   });
 }
 
@@ -61,9 +69,10 @@ export async function hostedQueueAheadSelection(
   ctx: QueryCtx | MutationCtx,
   state: HostedLandingState,
   selected?: LandingOrder,
+  entriesAhead?: number,
 ) {
   try {
-    return await selectQueueAhead(ctx, state, selected);
+    return await selectQueueAhead(ctx, state, selected, entriesAhead);
   } catch {
     return { unavailable: true };
   }

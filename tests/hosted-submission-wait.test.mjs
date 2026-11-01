@@ -148,9 +148,18 @@ test('one hosted wait follows several operation IDs, deduplicates wakes and ends
       [a.request.operationId, 0],
       [b.request.operationId, 0],
       [a.request.operationId, 1],
+      [b.request.operationId, 0],
       [a.request.operationId, 2],
+      [b.request.operationId, 0],
       [b.request.operationId, 1],
     ],
+  );
+  assert.deepEqual(
+    s.events
+      .filter(event => event.operationId === b.request.operationId && event.version === 0)
+      .map(event => event.queue.position),
+    [2, 2, 1],
+    'the follower sees predecessor progress and settlement without changing its own version',
   );
   assert.equal(s.counts().closes, 1);
   assert.equal(s.counts().unsubscribes, 2);
@@ -436,6 +445,29 @@ test('any-change observes an initial baseline, and resumed cursors report only n
     [0, 1, 2],
   );
   assert.equal(s.counts().opens, 1);
+});
+
+test('queue-only progress emits one refreshed receipt without duplicating its retained version', async () => {
+  const s = await fixture(),
+    a = await s.start(),
+    b = await s.start();
+  const waiting = s.wait({ operationIds: [b.request.operationId], until: 'any-change' });
+  await turn();
+  assert.equal(s.events.length, 1);
+  assert.equal(s.events[0].queue.position, 2);
+  s.wake();
+  await turn();
+  assert.equal(s.events.length, 1, 'a duplicate wake is not queue progress');
+  await s.update(a.state.id, 'landed');
+  s.wake();
+  const result = await waiting;
+  assert.equal(result.result.status, 'changed');
+  assert.deepEqual(
+    s.events.map(event => event.version),
+    [0, 0],
+  );
+  assert.equal(s.events[1].queue.position, 1);
+  assert.equal(s.counts().closes, 1);
 });
 
 test('live revocation, pre-cancellation and partial subscription setup failures close observers', async () => {

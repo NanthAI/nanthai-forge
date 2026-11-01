@@ -123,7 +123,11 @@ async function legacyOrphan(t) {
 
 test('the stall alarm arms one deadline at the dropped-landing limit, and nothing else', async t => {
   const { f, target, at } = await legacyOrphan(t);
-  assert(stateOf(f, target.id).observation.stall, 'the alarm recorded the stall');
+  assert.equal(
+    stateOf(f, target.id).observation.stall,
+    undefined,
+    'a live fallback runner owns the wait; no false follower alarm',
+  );
   const deadlines = f.pending().filter(task => task.name === 'projectHostedLandingStall:deadline');
   assert.equal(deadlines.length, 1);
   assert.equal(deadlines[0].args[0].submissionId, target.id);
@@ -221,6 +225,11 @@ test('a member waiting behind a live runner is not dropped; the deadline re-arms
   assert.equal(stateOf(f, target.id).phase, 'queued');
   const rearmed = f.pending().filter(task => task.name === 'projectHostedLandingStall:deadline');
   assert.equal(rearmed.length, 1);
+  assert.equal(
+    f.pending().filter(task => !task.name.startsWith('projectHostedLandingStall:')).length,
+    0,
+    'a live runner keeps recovery ownership without an extra controller redrive',
+  );
   assert.equal(rearmed[0].args[0].attempt, 1);
   assert.equal(rearmed[0].scheduledTime, Date.now() + 2 * LANDING_DROP_MS);
 });

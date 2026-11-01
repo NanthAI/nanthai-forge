@@ -1,3 +1,4 @@
+import { withQueueStatusBatch } from './projectHostedQueueStatusWrite';
 // SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
 import { makeFunctionReference } from 'convex/server';
@@ -87,16 +88,18 @@ async function cancelLanePage(
 export async function cancelAbandonedLanesLandings(ctx: MutationCtx, plan: Plan, targets: Target[]) {
   // Old applied plans have no pinned queue and must not trigger retroactive work.
   if (plan.landingSequence === undefined) return;
-  const budget = { selections: 10, cancellations: 2 };
-  const pending: Target[] = [];
-  for (const target of targets) {
-    if (!budget.selections || !budget.cancellations) pending.push(target);
-    else {
-      const next = await cancelLanePage(ctx, plan, target, budget);
-      if (next) pending.push(next);
+  return withQueueStatusBatch(ctx, async () => {
+    const budget = { selections: 10, cancellations: 2 };
+    const pending: Target[] = [];
+    for (const target of targets) {
+      if (!budget.selections || !budget.cancellations) pending.push(target);
+      else {
+        const next = await cancelLanePage(ctx, plan, target, budget);
+        if (next) pending.push(next);
+      }
     }
-  }
-  if (pending.length) await schedule(ctx, plan, pending);
+    if (pending.length) await schedule(ctx, plan, pending);
+  });
 }
 export const cancelAbandonedLaneLandings = (
   ctx: MutationCtx,

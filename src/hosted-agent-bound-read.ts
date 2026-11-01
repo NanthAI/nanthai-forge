@@ -42,10 +42,11 @@ export async function boundLandingStatus(
       nextVersion: 0,
     });
     const parsed = z.object({ submission: hostedLandingStateSchema }).parse(page);
-    const advice = (await enrichHostedQueueAhead(transport, page)) as { queueAhead?: unknown };
+    const advice = enrichHostedQueueAhead(transport, page) as { queueAhead?: unknown };
     submissions.push({
       ...parsed.submission,
       ...(advice.queueAhead ? { queueAhead: advice.queueAhead } : {}),
+      ...((page as { queue?: unknown }).queue ? { queue: (page as { queue: unknown }).queue } : {}),
     });
   }
   const terminal =

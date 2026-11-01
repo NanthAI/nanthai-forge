@@ -95,7 +95,12 @@ test('hosted finish observation then save captures zero paths at dogfood size', 
     composeOperationId: randomUUID(),
     message: 'Synthetic finish',
   });
-  assert.equal(finished.result.queueAhead.cost.composeCalls, 2);
+  assert.equal(finished.result.queueAhead, undefined, 'cold finite finish does not compose advice');
+  assert.equal(finished.result.queueAheadUnavailable, true);
+  assert.equal(objectCalls, 0);
+  assert.equal(downloads, 0);
+  const preview = await hostedQueueAhead(transport, selection);
+  assert.equal(preview.cost.composeCalls, 2);
   const coldCalls = f.calls.length + statusCalls,
     coldObjectCalls = objectCalls,
     coldDownloads = downloads;

@@ -461,7 +461,7 @@ No cost cap, collection delay or scheduling policy is added by accounting or rep
 
 ## Queue-ahead preview cost and applicability
 
-Submission and observation expose the advisory
+Submission and observation may attach an already cached advisory
 [queue-ahead preview](../agents/workflow.md#queue-ahead-conflict-advice). Each pair
 uses the existing source composition reducer: main with the earlier submitted
 Candidate, then the submitting Candidate with that projected main. The result
@@ -469,12 +469,27 @@ names conflicting paths and the exact earlier entry; it does not predict a
 combined landing order. Existing priority, fairness and batch selection remain
 authoritative. Eight entries bound speculative composition, not admission.
 
-The disposable cache stores source verdicts only. Confidence and applicability
-come from current queue records on every read, so failed, ejected and cancelled
-entries cannot retain advice through a cached result. A peer that already conflicts
+Finite hosted `observe`, `status` and `landing` reads return canonical state without
+waiting for source download or speculative composition. They attach only advice
+already cached for the exact fresh authorized selection, including main, submitted
+head, peer pins and peer phases. A cache miss reports `queueAheadUnavailable`.
+Explicit preview computation retains its pins and cost; it never caches a status
+snapshot. After a long preview, another canonical read must select applicability
+before the cached advice can appear. Failed, ejected and cancelled entries cannot
+retain advice through a cached result. A peer that already conflicts
 with main is unavailable speculation, rather than a claim about the submitting
 Lane. Hosted reducers run outside Convex on the existing hash-verified object
 transport; generated preview States are never uploaded or accepted as evidence.
+
+Queued receipts also include `queue`: total entries, entries ahead, live predecessor
+identity/phase/progress and an approximate ETA. Members sharing `batchId` count as
+one service group, including parallel checking groups. ETA uses recent observed
+selection-to-commit service time, or an explicit initial estimate of three minutes
+per group; it is advisory and does not delay admission or change queue order.
+Queue-head progress extends queued entries' progress clock. Waiting behind a live
+predecessor does not raise `LANDING_STALLED`; old false alarms are retracted from
+current reads. An ownerless wait names its predecessor in the alarm. The existing
+orphan-recovery deadline remains, so losing that predecessor cannot strand work.
 
 ## Hosted queue priority
 
@@ -596,9 +611,14 @@ healthy-before-suspect preference within the selected priority class. An already
 selected solo preparation or running check continues; priority applies at the
 next selection. A suspect hint cannot override an owner's urgent choice.
 
-A priority mutation writes one submission and schedules nothing. Queue positions
-and batch selection read active ordering metadata in 50-row indexed sequence windows, retaining compact keys rather
-than Work or submission bodies. Next-entry selection reads indexed priority-class
+A priority mutation updates its submission and the derived ordering projection,
+with no new scheduling. Committed queue events maintain compact ordering pages of
+128 entries; ordering changes read/write O(pages), while ordinary timing progress
+updates only the queue clock. Existing bulk check-wake and abandonment mutations
+flush their directory once before commit, rather than rewriting it per member.
+A selected status reads its exact page, the channel
+summary and its live predecessor with a fixed metadata-read budget independent
+of queue length. Batch selection retains its indexed windows. Next-entry selection reads indexed priority-class
 heads, including legacy normal rows. Explicit reads add no background work or
 polling; idle queues incur zero additional Convex calls.
 

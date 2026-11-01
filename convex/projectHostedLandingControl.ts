@@ -305,6 +305,7 @@ export async function claimReadyLanding(
     owner: string;
   },
   now = Date.now(),
+  watchdog = true,
 ): Promise<LandingClaim | { waitingFor: string; until: number | null } | null> {
   const queue = await landingQueue(ctx, input);
   invariant(queue, 'NOT_FOUND', 'Hosted landing queue not found.');
@@ -367,6 +368,9 @@ export async function claimReadyLanding(
     attemptId: input.attemptId,
   };
   await ctx.db.patch(queue._id, { fence: lease.token, lease, wake: null });
-  await scheduleLandingWake(ctx, { ...queue, fence: lease.token, lease, wake: null }, lease.until, now);
+  // Atomic explicit acceptance publishes or rolls back this lease in the same
+  // mutation. Its callers need no watchdog for a gap that cannot exist.
+  if (watchdog)
+    await scheduleLandingWake(ctx, { ...queue, fence: lease.token, lease, wake: null }, lease.until, now);
   return { ...input, token: lease.token };
 }

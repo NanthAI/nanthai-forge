@@ -1,3 +1,4 @@
+import { withQueueStatusBatch } from './projectHostedQueueStatusWrite';
 // SPDX-License-Identifier: Apache-2.0
 import { checkWakeRow, scheduleCheckWake } from './projectHostedLandingCheckWake';
 export { notifyLandingCheck } from './projectHostedLandingCheckWake';
@@ -220,7 +221,7 @@ export async function releaseLandingQueue(
 }
 /** Consume a bounded metadata window. Removing checking from the matching index
  * permits continuation without scanning prior terminal work or skipping rows. */
-export async function wakeLandingCheck(
+async function wakeLandingCheckPage(
   ctx: MutationCtx,
   input: {
     projectId: Id<'hostedProjects'>;
@@ -266,3 +267,6 @@ export async function wakeLandingCheck(
   if (!page.isDone) await scheduleCheckWake(ctx, { projectId: input.projectId, runId: input.runId }, wake);
   else await ctx.db.patch(wake._id, { wake: null });
 }
+
+export const wakeLandingCheck = (ctx: MutationCtx, input: Parameters<typeof wakeLandingCheckPage>[1]) =>
+  withQueueStatusBatch(ctx, () => wakeLandingCheckPage(ctx, input));

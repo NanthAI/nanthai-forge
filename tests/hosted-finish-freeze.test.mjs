@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { saveFixture, api } from './hosted-saves-fixture.mjs';
-import { landingFixture } from './hosted-landing-fixture.mjs';
+import { landingFixture, store } from './hosted-landing-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { hostedLandingStateSchema } from '../dist/hosted-landing.js';
 
@@ -190,15 +190,18 @@ test('refusal costs a bounded constant number of reads and an idle Lane costs no
 
 const channel = f => ({ projectId: f.projectId, channel: 'main' });
 const rows = f => [...f.tables.projectHostedLandingRequests.values()];
-const markReady = (f, id, overrides = {}) => {
+const markReady = async (f, id, overrides = {}) => {
   const row = rows(f).find(r => r.submissionId === id);
   const state = JSON.parse(row.value);
-  f.patch('projectHostedLandingRequests', row._id, {
-    phase: 'ready',
-    runnable: true,
-    value: JSON.stringify({ ...state, phase: 'ready' }),
-    ...overrides,
-  });
+  // Use the committed transition so its status projection changes atomically.
+  await f.run(
+    'markReady',
+    async ctx => {
+      await store.writeLanding(ctx, row, { ...state, phase: 'ready', version: state.version + 1 }, true);
+      if (Object.keys(overrides).length) await ctx.db.patch(row._id, overrides);
+    },
+    {},
+  );
 };
 
 test('READY accepts before an urgent queued entry, and urgent still leads when nothing is READY', async () => {
@@ -209,7 +212,7 @@ test('READY accepts before an urgent queued entry, and urgent still leads when n
   assert.equal(urgent.priority, 'urgent');
   const next = () => f.run('next', ctx => order.nextLandingRow(ctx, channel(f)), {});
   assert.equal((await next()).submissionId, urgent.id, 'nothing READY: urgent leads');
-  markReady(f, passed.id);
+  await markReady(f, passed.id);
   assert.equal((await next()).submissionId, passed.id, 'a READY proof never ages behind urgent');
   // Status reads the same order: the passed proof is ahead of the urgent entry.
   assert.equal((await f.status(urgent.id)).queuePosition, 2);
@@ -219,7 +222,7 @@ test('READY-first holds for the queue claim, the train selector and the status r
   const f = await landingFixture();
   const passed = await f.enqueue();
   const urgent = await f.enqueue(f.request({ priority: 'urgent', agent: false }));
-  markReady(f, passed.id);
+  await markReady(f, passed.id);
   const queue = f.queue();
   const train = await f.run('train', ctx => wake.nextTrainLandingRow(ctx, queue), {});
   assert.equal(train.submissionId, passed.id);
@@ -233,7 +236,7 @@ test('READY entries order urgent-first among themselves and skip held or review-
   const a = await f.enqueue(),
     b = await f.enqueue(f.request({ priority: 'urgent', agent: false })),
     c = await f.enqueue();
-  for (const entry of [a, b, c]) markReady(f, entry.id);
+  for (const entry of [a, b, c]) await markReady(f, entry.id);
   const next = () => f.run('next', ctx => order.nextReadyLandingRow(ctx, channel(f)), {});
   assert.equal((await next()).submissionId, b.id, 'urgent READY leads other READY');
   const held = rows(f).find(r => r.submissionId === b.id);
