@@ -181,3 +181,47 @@ test('a near-4-MiB baseline fits the runtime memory budget under a constrained h
   assert(metrics.heapUsed + metrics.arrayBuffers < 64 * 1024 * 1024, JSON.stringify(metrics));
   t.diagnostic(JSON.stringify(metrics));
 });
+
+test('State and manifest uploads overlap, but a failed write prevents a successful result', async () => {
+  for (const fail of [false, true]) {
+    const s = fixture(4000),
+      upload = s.io.upload;
+    let started,
+      release,
+      calls = 0;
+    const firstStarted = new Promise(resolve => {
+      started = resolve;
+    });
+    const blocked = new Promise(resolve => {
+      release = resolve;
+    });
+    s.io.upload = async (pin, stream) => {
+      calls++;
+      if (calls === 1) {
+        started();
+        await blocked;
+        if (fail) throw Error('synthetic State upload failure');
+      }
+      return upload(pin, stream);
+    };
+    const saving = runSmallSourceSave(s.input, s.io);
+    let settled = false;
+    saving.then(
+      () => {
+        settled = true;
+      },
+      () => {
+        settled = true;
+      },
+    );
+    try {
+      await firstStarted;
+      assert.equal(calls, 2, 'manifest upload starts while the State upload is pending');
+      assert.equal(settled, false, 'save cannot succeed before both writes settle');
+    } finally {
+      release();
+    }
+    if (fail) await assert.rejects(saving, /synthetic State upload failure/);
+    else assert(await saving);
+  }
+});

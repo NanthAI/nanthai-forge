@@ -21,7 +21,9 @@ Node worker. The fallback reuses the begin result and prepared descriptors;
 it does not allocate another execution or repeat the begin mutation. Both
 paths retain exact hash verification, current authority checks, result formats
 and the existing atomic commit/publication. Source bytes still go only to R2.
-There is no per-project small-save lock or application queue.
+The State and its result manifest upload concurrently; publication waits for
+both checksum-verified writes. There is no per-project small-save lock or
+application queue.
 
 The small-save source job uses six invocations: dispatch mutation, step action,
 begin mutation, two batched descriptor mutations and commit mutation. This was

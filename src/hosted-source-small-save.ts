@@ -97,13 +97,16 @@ export async function runSmallSourceSave(
     if (value) files.set(change.path, { path: change.path, ...value });
     else files.delete(change.path);
   }
-  const publish = async (bytes: Uint8Array) => {
+  const uploads: Promise<void>[] = [];
+  const publish = (bytes: Uint8Array) => {
     const pin = { sha256: digest(bytes), size: bytes.length };
-    await io.upload(
-      pin,
-      (async function* () {
-        yield bytes;
-      })(),
+    uploads.push(
+      io.upload(
+        pin,
+        (async function* () {
+          yield bytes;
+        })(),
+      ),
     );
     return pin;
   };
@@ -122,9 +125,9 @@ export async function runSmallSourceSave(
       'INVALID_NATIVE_SOURCE',
       'Source file and directory paths overlap.',
     );
-    state = await publish(new TextEncoder().encode(JSON.stringify(next)));
+    state = publish(new TextEncoder().encode(JSON.stringify(next)));
   }
-  return publish(
+  const output = publish(
     new TextEncoder().encode(
       JSON.stringify(
         workerResultSchema.parse({
@@ -136,4 +139,8 @@ export async function runSmallSourceSave(
       ),
     ),
   );
+  // The manifest references the State pin, but their immutable R2 writes are independent.
+  const settled = await Promise.allSettled(uploads);
+  for (const result of settled) if (result.status === 'rejected') throw result.reason;
+  return output;
 }
