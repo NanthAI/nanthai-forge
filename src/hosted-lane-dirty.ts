@@ -5,16 +5,19 @@ import { readHostedLaneCheckout } from './hosted-lane-checkout-marker.js';
 import { forgeCachePath } from './forge-cache-paths.js';
 import { digest } from './hash.js';
 import { nativePaths } from './source-paths.js';
+import { indexedBlob, readCheckoutStatIndex } from './checkout-stat-index.js';
 
 const LARGE_FILE = 256 * 1024 * 1024;
 /** True when the checkout differs from its saved baseline, or when that cannot be established.
- * Read-only and local: it hashes files in place and writes nothing, unlike a save capture. */
+ * Read-only and local: it hashes files in place (skipping those the checkout stat index vouches
+ * for) and writes nothing, unlike a save capture. */
 export function hostedLaneDirty(root: string): boolean {
   try {
     const marker = readHostedLaneCheckout(root);
     if (!marker) return true;
     const baseline = new Map(marker.state.files.map(file => [file.path, file]));
-    const local = nativePaths(root, [...baseline.keys()]);
+    const local = nativePaths(root, [...baseline.keys()]),
+      index = readCheckoutStatIndex(root);
     for (const path of local) {
       const old = baseline.get(path);
       if (!old) return true;
@@ -28,6 +31,7 @@ export function hostedLaneDirty(root: string): boolean {
           : stat.mode & 0o111
             ? 'executable'
             : 'file';
+      if (mode === old.mode && indexedBlob(index, path, stat, old.blob)) continue;
       const bytes = stat.isSymbolicLink()
         ? readlinkSync(absolute, { encoding: 'buffer' })
         : readFileSync(absolute);

@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { nativePaths } from './source-paths.js';
+import { indexedBlob, readCheckoutStatIndex } from './checkout-stat-index.js';
 import { forgeCachePath } from './forge-cache-paths.js';
 import { SourceFileReader } from './source-file-reader.js';
 import { digest } from './hash.js';
@@ -29,8 +30,9 @@ export type FinishContext = {
   previous: FinishSelection | null;
 };
 
-/** Only one Lane's metadata and a 1 MiB scan buffer. Source is reread on every
- * new shorthand selection; a cached fingerprint is never source authority. */
+/** Only one Lane's metadata and a 1 MiB scan buffer. Source is reread on every new
+ * shorthand selection, except files whose lstat the checkout stat index ties to their baseline
+ * blob; a cached fingerprint is never source authority. */
 export function finishSourceFingerprint(root: string, command: Command) {
   const marker = readHostedLaneCheckout(root);
   if (
@@ -48,12 +50,17 @@ export function finishSourceFingerprint(root: string, command: Command) {
   const local = nativePaths(root, [...files.keys()]);
   const present = new Set(local);
   for (const path of marker.materialized) if (!forgeCachePath(path) && !present.has(path)) files.delete(path);
-  const scratch = Buffer.allocUnsafe(1024 * 1024);
+  const scratch = Buffer.allocUnsafe(1024 * 1024),
+    index = readCheckoutStatIndex(root);
   for (const path of local) {
     const stat = lstatSync(join(root, path));
     const mode = stat.isSymbolicLink() ? 'symlink' : stat.mode & 0o111 ? 'executable' : 'file';
+    const baseline = files.get(path)?.blob;
     let blob: string;
-    if (mode === 'symlink') blob = digest(readlinkSync(join(root, path), { encoding: 'buffer' }));
+    // The same blob the bytes would hash to: the stat index vouches only for unchanged baseline files.
+    const indexed = baseline ? indexedBlob(index, path, stat, baseline) : undefined;
+    if (indexed) blob = indexed;
+    else if (mode === 'symlink') blob = digest(readlinkSync(join(root, path), { encoding: 'buffer' }));
     else {
       const reader = new SourceFileReader(root, path, 'SOURCE_CHANGED');
       try {

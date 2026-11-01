@@ -17,6 +17,7 @@ import { markerIdentity } from './lane-prune.js';
 import { landPhase, landSummary, resultOf, terminalPhases } from './hosted-land-summary.js';
 import { landAnnouncement, landWaitCommand } from './hosted-land-wait.js';
 import { markOverlapShown, overlapBannerOnce, type HostedOverlapNotice } from './hosted-overlap-notice.js';
+import { LAND_INVOKED_ENV, landTiming, landTimingLine, startLandTiming } from './land-timing.js';
 
 export { landPhase, landSummary };
 
@@ -40,6 +41,7 @@ export async function submitHostedLand(
   transport = new HostedAgentTransport(root, address),
   rounds = 30,
 ) {
+  startLandTiming(Number(process.env[LAND_INVOKED_ENV]));
   let response = (await hostedAgentCli(root, 'finish', command, address, transport)) as HostedAgentResponse;
   // The first receipt already carries the operation id and any overlap notice: show them now, not at exit.
   announce(root, command, response);
@@ -56,7 +58,12 @@ export async function submitHostedLand(
     );
     response = (await hostedAgentCli(root, 'finish', command, address, transport)) as HostedAgentResponse;
   }
-  return response;
+  // Where the time before submission went: in the receipt, and one line for people.
+  const timing = landTiming();
+  if (!timing) return response;
+  const line = landTimingLine(timing);
+  if (line) process.stderr.write(`${line}\n`);
+  return { ...response, landTiming: timing };
 }
 
 /** Copy a growing file to stderr; stop() flushes the rest. A short local timer, no network. */
@@ -104,7 +111,12 @@ async function detachedSubmit(
       'finish',
       JSON.stringify(command),
     ],
-    { detached: true, stdio: ['ignore', out, err], env: { ...process.env, [LAND_CHILD_ENV]: '1' } },
+    {
+      detached: true,
+      stdio: ['ignore', out, err],
+      // The submitter times from when this command started, not from its own spawn.
+      env: { ...process.env, [LAND_CHILD_ENV]: '1', [LAND_INVOKED_ENV]: String(performance.timeOrigin) },
+    },
   );
   closeSync(out);
   closeSync(err);

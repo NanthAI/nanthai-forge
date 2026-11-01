@@ -30,6 +30,13 @@ import { canonicalPayload } from './hosted-source-operation.js';
 import { forgeCachePath } from './forge-cache-paths.js';
 import { neverIndex } from './forge-disk.js';
 import { machineObjectsDirectory, rememberObject } from './machine-object-store.js';
+import {
+  indexedBlob,
+  readCheckoutStatIndex,
+  statEntry,
+  writeCheckoutStatIndex,
+  type CheckoutStatIndex,
+} from './checkout-stat-index.js';
 
 /** Small files hash in memory; only changed bytes ever reach the save staging. */
 const memoryLimit = 1024 * 1024;
@@ -37,7 +44,13 @@ const memoryLimit = 1024 * 1024;
  * An unchanged file writes nothing; a changed one is staged under its digest, so a save costs
  * only its changed bytes. Changed blobs also go to the machine object store, so a later open of
  * this head on this machine downloads none of them. */
-function captureFile(root: string, path: string, directory: string, previous?: NativeFile) {
+function captureFile(
+  root: string,
+  path: string,
+  directory: string,
+  previous: NativeFile | undefined,
+  index: CheckoutStatIndex,
+) {
   const absolute = join(root, path),
     stat = lstatSync(absolute),
     temporary = join(directory, randomUUID());
@@ -48,6 +61,14 @@ function captureFile(root: string, path: string, directory: string, previous?: N
       : stat.mode & 0o111
         ? 'executable'
         : 'file';
+  // An unchanged file (same lstat as when its baseline blob was last read) is not read again.
+  if (previous && previous.mode === mode && indexedBlob(index, path, stat, previous.blob))
+    return {
+      file: { blob: previous.blob, mode },
+      pin: { sha256: previous.blob, size: stat.size },
+      changed: false,
+      stat,
+    };
   let pin: { sha256: string; size: number },
     bytes: Buffer | null = null;
   if (stat.isSymbolicLink()) {
@@ -109,27 +130,31 @@ function captureFile(root: string, path: string, directory: string, previous?: N
   const observed = { file: { blob: pin.sha256, mode }, pin };
   if (previous && previous.blob === pin.sha256 && previous.mode === mode) {
     if (!bytes) rmSync(temporary, { force: true });
-    return { ...observed, changed: false };
+    return { ...observed, changed: false, stat };
   }
   if (bytes) writeFileSync(temporary, bytes, { flag: 'wx', mode: 0o600 });
   const final = join(directory, pin.sha256);
   if (checkoutPathExists(final)) rmSync(temporary);
   else renameSync(temporary, final);
   syncFile(final);
-  return { ...observed, changed: true };
+  return { ...observed, changed: true, stat };
 }
 export async function captureHostedSave(root: string, directory: string) {
   root = realpathSync(root);
   const marker = readHostedLaneCheckout(root);
   invariant(marker, 'NOT_FOUND', 'Open a hosted Lane before preparing a save.');
   mkdirSync(directory, { recursive: true, mode: 0o700 });
+  const since = Date.now(),
+    index = readCheckoutStatIndex(root),
+    observedStats = new Map<string, ReturnType<typeof statEntry>>();
   const baseline = new Map(marker.state.files.map(file => [file.path, file])),
     local = nativePaths(root, [...baseline.keys()]);
   const changes: SaveChange[] = [],
     files: { pin: { sha256: string; size: number }; path: string }[] = [];
   for (const path of local.sort()) {
     const old = baseline.get(path),
-      observed = captureFile(root, path, directory, old);
+      observed = captureFile(root, path, directory, old, index);
+    observedStats.set(path, statEntry(observed.stat, observed.file.blob));
     if (observed.changed) {
       changes.push({
         path,
@@ -151,6 +176,7 @@ export async function captureHostedSave(root: string, directory: string) {
   const result = { marker, changes, files };
   mkdirSync(`${root}.forge-client`, { recursive: true, mode: 0o700 });
   neverIndex(`${root}.forge-client`);
+  writeCheckoutStatIndex(root, since, observedStats);
   return workLocked(join(`${root}.forge-client`, 'lock'), () => {
     const path = join(directory, 'capture.json');
     if (checkoutPathExists(path)) return JSON.parse(readFileSync(path, 'utf8')) as typeof result;

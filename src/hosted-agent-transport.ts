@@ -68,6 +68,7 @@ import { publishClientSourcePack } from './source-pack-client.js';
 import { HostedCheckoutDownloads } from './hosted-checkout-downloads.js';
 import { selectHostedFinish } from './hosted-agent-finish-identity.js';
 import { reconcileHostedSave } from './hosted-save-client.js';
+import { markLandStep, type LandTiming } from './land-timing.js';
 import {
   callerReceipts,
   clearCallerReceipts,
@@ -129,6 +130,8 @@ export type HostedAgentResponse = {
   overlapNotice?: HostedOverlapNotice;
   /** start only: your idle open Lanes and finished Lane roots pruned on this machine. */
   localLanes?: { idle: unknown[]; pruned: { count: number; bytes: number } };
+  /** land --save only: where the submitting process spent its time before submission. */
+  landTiming?: LandTiming;
 };
 /** The shared CLI/MCP transport. Source bytes use the existing verified exchange;
  * every dispatch is finite and every mutation is pinned before network IO. */
@@ -550,6 +553,7 @@ export class HostedAgentTransport {
           operationId: journal.operationId,
         });
       } else {
+        if (action === 'finish') markLandStep('ready');
         result = await executeHostedAgent(session, action, command.data);
         const planningItemId =
           action === 'start' && (command.data as { planningItemId?: string }).planningItemId;

@@ -17,6 +17,7 @@ import { shellQuote } from './agent-brief-render.js';
 import { hostedAgentDirectory, readAgentJson } from './hosted-agent-journal.js';
 import { finishRetryHint, type FinishContext } from './hosted-agent-finish-identity.js';
 import { landWaitCommand } from './hosted-land-wait.js';
+import { markLandStep } from './land-timing.js';
 import type { HostedAgentResponse, HostedAgentSession } from './hosted-agent-transport.js';
 
 type FinishCommand = z.infer<typeof hostedAgentCommandSchemas.finish>;
@@ -168,6 +169,7 @@ async function executeFinishWork(session: HostedAgentSession, input: unknown) {
     const clean = context?.clean;
     if (!clean) {
       const saveOperationId = await session.journal.id('save');
+      markLandStep('saveStarted');
       const saved = await saveHostedLane(
         session.root,
         { operationId: saveOperationId, message: command.message },
@@ -178,6 +180,7 @@ async function executeFinishWork(session: HostedAgentSession, input: unknown) {
           await session.journal.retain('finish-source-failed', () => true);
         return { phase: 'save', saveOperationId, progress: saved };
       }
+      markLandStep('saved');
     }
     const selection = clean ?? session.marker()!.selection;
     // Agent defaults (overlap gate, preflight) judge the saved head this finish will land.
@@ -185,6 +188,7 @@ async function executeFinishWork(session: HostedAgentSession, input: unknown) {
       const advice = await session.finishGates(selection.laneId, selection.head);
       if (Object.keys(advice).length) await session.journal.retain('finish-defaults', () => advice);
     }
+    markLandStep('gated');
     command.inputs = [
       {
         laneId: selection.laneId,
@@ -212,6 +216,7 @@ async function executeFinishWork(session: HostedAgentSession, input: unknown) {
       }),
       composeOperationId,
     );
+    markLandStep('composed');
     const completed = agentSourceOutcome(progress);
     if (completed?.status !== 'completed') {
       if (command.accept === false) {
@@ -231,14 +236,11 @@ async function executeFinishWork(session: HostedAgentSession, input: unknown) {
           ...(command.keepOpen === undefined ? {} : { keepOpen: command.keepOpen }),
         }),
       );
-      return {
-        phase: 'finish',
-        composeOperationId,
-        progress,
-        submission: await session.mutation('projectHostedLandingDesired:submit', {
-          request: canonicalPayload({ ...desired, governanceVersion: 1 }),
-        }),
-      };
+      const submission = await session.mutation('projectHostedLandingDesired:submit', {
+        request: canonicalPayload({ ...desired, governanceVersion: 1 }),
+      });
+      markLandStep('submitted');
+      return { phase: 'finish', composeOperationId, progress, submission };
     }
     const candidate = hostedRecordSchema.options[3].parse(completed.result);
     if (candidate.result.status === 'conflict' && session.capabilities.actions.includes('resolve')) {
@@ -291,6 +293,7 @@ async function executeFinishWork(session: HostedAgentSession, input: unknown) {
   });
   if (command.accept === false) {
     const run = await session.mutation('projectHostedChecks:enqueue', { request: canonicalPayload(request) });
+    markLandStep('submitted');
     await session.journal.retain('finish-check-run', () => run);
     return { phase: 'check', composeOperationId, run };
   }
@@ -298,6 +301,7 @@ async function executeFinishWork(session: HostedAgentSession, input: unknown) {
   const result = await session.mutation('projectHostedLanding:enqueue', {
     request: canonicalPayload({ ...request, governanceVersion: 1 }),
   });
+  markLandStep('submitted');
   let queueAheadSelection: unknown;
   let queuePosition: number | null | undefined;
   try {

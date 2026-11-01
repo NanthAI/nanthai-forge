@@ -28,6 +28,7 @@ import { keepPatchCommand, pendingSavePath, rebaseHostedCheckout } from './hoste
 import type { ConvexExchange } from './exchange-client.js';
 import type { SaveChange, SaveRequest } from './hosted-save.js';
 import type { ContentPin } from './native-exchange.js';
+import { markLandStep } from './land-timing.js';
 
 type SaveExchange = Pick<ConvexExchange, 'client' | 'projectId' | 'uploadFile' | 'upload' | 'missing'> &
   Partial<Pick<ConvexExchange, 'uploadLazyBatch' | 'downloadToFile' | 'downloadBatch' | 'prepareDownloads'>>;
@@ -125,6 +126,7 @@ async function saveOnce(
   const capture: Awaited<ReturnType<typeof captureHostedSave>> = checkoutPathExists(capturePath)
     ? JSON.parse(readFileSync(capturePath, 'utf8'))
     : await captureHostedSave(root, directory);
+  markLandStep('captured');
   invariant(
     capture.marker.selection.projectId === exchange.projectId,
     'WORK_OPERATION_CHANGED',
@@ -213,6 +215,7 @@ async function saveOnce(
       return request;
     });
   }
+  markLandStep('uploaded');
   const pending = pendingSavePath(root, capture.marker);
   workLocked(join(`${root}.forge-client`, 'lock'), () => {
     if (!checkoutPathExists(pending)) durableReplace(pending, canonicalPayload(command));
@@ -297,6 +300,7 @@ async function saveOnce(
   const result = JSON.parse(
     await exchange.client.mutation(makeFunctionReference<'mutation'>('projectHostedSaveJobs:submit'), args),
   );
+  markLandStep('saveSubmitted');
   if (result.outcome) applyHostedSaveReceipt(root, capture, request, result);
   return result;
 }

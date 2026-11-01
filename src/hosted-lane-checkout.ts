@@ -10,6 +10,7 @@ import { digest } from './hash.js';
 import { invariant } from './errors.js';
 import { readSource } from './files.js';
 import { workLocked } from './work-lock.js';
+import { indexInstalledFiles, writeCheckoutStatIndex } from './checkout-stat-index.js';
 import { HostedCheckoutCache, type CheckoutObjectTransport } from './hosted-checkout-cache.js';
 import {
   checkoutPathExists,
@@ -174,6 +175,8 @@ export async function checkoutHostedLane(
     };
     durableReplace(join(stage, '.forge', hostedLaneMarkerName), JSON.stringify(marker));
     await flushHostedCheckoutFiles(stage);
+    // Stats of the private stage carry over the rename, so the first save reads only edited files.
+    const installed = indexInstalledFiles(stage, files);
     workLocked(lock, () => {
       operation = operationSchema.parse(json(receiptPath));
       if (operation.complete) return;
@@ -192,6 +195,7 @@ export async function checkoutHostedLane(
         renameSync(stage, root);
         syncDirectory(dirname(root));
         syncDirectory(cache.root);
+        writeCheckoutStatIndex(root, installed.since, installed.entries);
       }
       operation.complete = true;
       durableReplace(receiptPath, JSON.stringify(operation));
