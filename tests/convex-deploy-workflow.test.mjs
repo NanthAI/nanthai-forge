@@ -14,3 +14,15 @@ test('dev Convex deploys only from main pushes inside the locked environment', (
   assert.match(workflow, /CONVEX_DEPLOY_KEY: \$\{\{ secrets\.CONVEX_DEPLOY_KEY \}\}/);
   assert.equal(workflow.match(/secrets\./g).length, 1);
 });
+
+// Convex imports shared reducers and transports from src; changes there must reach the server.
+test('backend and shared source changes automatically deploy Convex', () => {
+  for (const path of [
+    'convex/**',
+    'src/**',
+    'package.json',
+    'package-lock.json',
+    '.github/workflows/convex-deploy.yml',
+  ])
+    assert(workflow.includes(`      - '${path}'`), `paths filter covers ${path}`);
+});
