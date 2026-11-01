@@ -42,13 +42,18 @@ export function sandboxProfile({ workspace, benchRoot, extraWrites = [], extraRe
       join(dirname(dirname(benchRoot)), name),
     ),
   ];
+  // Node resolves a script's realpath by lstat-ing every parent, so readable paths under
+  // a denied root (the CLI in forge-phase5) need metadata on their ancestors (no contents).
+  const ancestors = new Set();
+  for (const p of [...extraWrites, ...extraReads])
+    for (let d = dirname(p); d !== dirname(d); d = dirname(d)) ancestors.add(d);
   const q = JSON.stringify;
   return `(version 1)
 (allow default)
 (deny file-write*)
 (allow file-write* ${writes.map(p => `(subpath ${q(p)})`).join(' ')})
 (deny file-read* ${denies.map(p => `(subpath ${q(p)})`).join(' ')})
-(allow file-read-metadata (subpath ${q(benchRoot)}))
+(allow file-read-metadata (subpath ${q(benchRoot)})${[...ancestors].map(p => ` (literal ${q(p)})`).join('')})
 (allow file-read* (subpath ${q(workspace)}) (subpath ${q(workspace + '.forge-client')}) (subpath ${q(dirname(workspace) + '/bin')}) ${[...extraWrites, ...extraReads].map(p => `(subpath ${q(p)})`).join(' ')})
 `;
 }

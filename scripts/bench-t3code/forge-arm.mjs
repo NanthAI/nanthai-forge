@@ -5,9 +5,19 @@
 import { execFileSync, execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 const run = promisify(execFile);
-import { mkdirSync, writeFileSync, chmodSync, rmSync, existsSync, copyFileSync, unlinkSync } from 'node:fs';
+import {
+  mkdirSync,
+  writeFileSync,
+  chmodSync,
+  rmSync,
+  existsSync,
+  copyFileSync,
+  unlinkSync,
+  realpathSync,
+} from 'node:fs';
+import { createServer } from 'node:http';
 import { randomUUID } from 'node:crypto';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
 import { ImportBenchmarkMonitor } from '../benchmark-import-monitor.mjs';
 
@@ -51,6 +61,9 @@ export function forgeArm(config) {
       .at(-1);
     return line ? JSON.parse(line) : { raw: stdout.slice(-2000) };
   };
+  // Agent workspace (realpath) -> land/finish operationIds seen by the nforge broker.
+  const landOps = new Map();
+  const workspaceKey = root => (existsSync(root) ? realpathSync(root) : resolve(root));
   const arm = {
     name: 'forge',
     nf,
@@ -68,16 +81,35 @@ export function forgeArm(config) {
     status(root, laneId) {
       return nf(root, 'status', { laneId });
     },
-    /** System of record: the Lane's saved head is in accepted main. */
+    /** System of record: the server's landing submission for the agent's own land/finish
+     * operations (recorded by the nforge broker), read with `observe`. Lane `status`
+     * carries no landing state. */
+    /** Remember the operationIds in one land/finish call's output for this workspace. */
+    recordLandOps(root, output) {
+      const key = workspaceKey(root);
+      const ops = landOps.get(key) ?? new Set();
+      for (const [, id] of output.matchAll(/"?operationId"?[:\s]+"?([0-9a-f-]{36})/g)) ops.add(id);
+      landOps.set(key, ops);
+    },
     landing(root, laneId) {
-      const s = arm.status(root, laneId).result?.lane ?? {};
-      return {
-        landed: Boolean(s.merged || s.state === 'landed' || s.state === 'completed'),
-        state: s.state ?? null,
-        mergedInto: s.mergedInto ?? null,
-        acceptedAt: s.acceptedAt ?? s.landedAt ?? null,
-        lastCheck: s.lastCheck ?? null,
-      };
+      const ops = landOps.get(workspaceKey(root)) ?? new Set();
+      const seen = [];
+      for (const operationId of ops) {
+        const s = nf(root, 'observe', { ...X, operationId }).result?.submission ?? {};
+        seen.push({ operationId, phase: s.phase ?? null });
+        if (s.phase === 'landed')
+          return {
+            landed: true,
+            state: 'landed',
+            operationId,
+            receiptId: s.acceptance?.receiptId ?? null,
+            mainHead: s.acceptance?.head ?? null,
+            acceptedAt: s.timing?.committedAt ?? s.timing?.settledAt ?? null,
+            submittedAt: s.timing?.submittedAt ?? null,
+            laneId,
+          };
+      }
+      return { landed: false, state: seen.at(-1)?.phase ?? null, operations: seen, acceptedAt: null, laneId };
     },
     /** By address from an empty directory: an agent's unsaved edits never block it
      * (LANE_DIRTY) and a stale checkout baseline never fails it (WORK_STALE). */
@@ -95,12 +127,77 @@ export function forgeArm(config) {
       rmSync(root + '.forge-client', { recursive: true, force: true });
       rmSync(root + '.forge-metrics.jsonl', { force: true });
     },
-    binDir(bin) {
+    /** Agents' `nforge` goes through an unsandboxed localhost broker: macOS sandboxes
+     * cannot exec setuid /bin/ps, which the CLI needs for its process identity
+     * (PROCESS_IDENTITY_UNAVAILABLE). The broker runs the real CLI only when the call's
+     * cwd and ROOT are inside the calling agent's own workspace (token per agent). */
+    async binDir(bin) {
       mkdirSync(bin, { recursive: true });
+      const roots = new Map();
+      const inside = (root, p) => p === root || p.startsWith(root + '/');
+      const server = createServer((req, res) => {
+        let body = '';
+        req
+          .on('data', d => (body += d))
+          .on('end', () => {
+            const reply = value => res.end(JSON.stringify(value));
+            try {
+              const { token, cwd, args } = JSON.parse(body);
+              const root = roots.get(token);
+              const target = ['agent', 'x'].includes(args[0]) && args[1] ? resolve(cwd, args[1]) : cwd;
+              if (!root || !inside(root, resolve(cwd)) || !inside(root, target))
+                return reply({ stdout: '', stderr: 'bench: nforge is limited to your workspace\n', code: 2 });
+              execFile(
+                '/usr/local/bin/node',
+                [cli, ...args],
+                { cwd, maxBuffer: 64 << 20 },
+                (error, stdout, stderr) => {
+                  if (['land', 'finish'].includes(args[2])) arm.recordLandOps(root, `${stdout}\n${stderr}`);
+                  reply({
+                    stdout,
+                    stderr,
+                    code: error ? (typeof error.code === 'number' ? error.code : 1) : 0,
+                  });
+                },
+              );
+            } catch (error) {
+              reply({ stdout: '', stderr: `bench broker: ${error.message}\n`, code: 2 });
+            }
+          });
+      });
+      server.requestTimeout = 0;
+      server.headersTimeout = 0;
+      await new Promise(done => server.listen(0, '127.0.0.1', done));
+      server.unref();
+      const client = join(bin, 'nforge-client.mjs');
+      writeFileSync(
+        client,
+        // node:http, not fetch: undici's 300 s headers timeout would cut a long land --save.
+        `import { request } from 'node:http';
+const req = request(process.env.BENCH_NFORGE_URL, { method: 'POST' }, res => {
+  let body = '';
+  res.setEncoding('utf8').on('data', d => (body += d)).on('end', () => {
+    const { stdout, stderr, code } = JSON.parse(body);
+    process.stdout.write(stdout); process.stderr.write(stderr); process.exitCode = code;
+  });
+});
+req.end(JSON.stringify({ token: process.env.BENCH_NFORGE_TOKEN, cwd: process.cwd(), args: process.argv.slice(2) }));
+`,
+      );
       const file = join(bin, 'nforge');
-      writeFileSync(file, `#!/bin/bash\nexec /usr/local/bin/node ${JSON.stringify(cli)} "$@"\n`);
+      writeFileSync(file, `#!/bin/bash\nexec /usr/local/bin/node ${JSON.stringify(client)} "$@"\n`);
       chmodSync(file, 0o755);
-      return {};
+      return {
+        /** Env for one agent confined to root. */
+        agentEnv(root) {
+          const token = randomUUID();
+          roots.set(token, realpathSync(root));
+          return {
+            BENCH_NFORGE_URL: `http://127.0.0.1:${server.address().port}/`,
+            BENCH_NFORGE_TOKEN: token,
+          };
+        },
+      };
     },
     /** Changed paths of a materialized main vs the base commit (sparse paths excluded). */
     diffFromBase(meta, baseCommit, root) {

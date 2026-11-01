@@ -7,12 +7,13 @@
 // Gates (brief): claude-usage 5h <= 40% and weekly < 85% to start a model cell; the
 // deployed Forge commit is recorded before and after (a change voids the cell).
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, writeFileSync, readFileSync, appendFileSync, rmSync } from 'node:fs';
+import { mkdirSync, writeFileSync, readFileSync, appendFileSync, rmSync, realpathSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { homedir } from 'node:os';
 import { launchAgent } from './agent.mjs';
 import { prompt } from './prompt.mjs';
 import * as github from './github-arm.mjs';
+import { landingFields, cellSummary } from './score.mjs';
 import { forgeArm, convexMeter } from './forge-arm.mjs';
 import { oracleCommit, runOracle, grade } from './oracle.mjs';
 import { sharedDeps, linkDeps } from './deps.mjs';
@@ -138,7 +139,7 @@ const forge = arm === 'forge' ? forgeArm(config.forge) : null;
 const bin = join(ws, 'bin');
 mkdirSync(bin, { recursive: true });
 const armEnv =
-  arm === 'github' ? { GH_REPO: github.repository, GIT_TERMINAL_PROMPT: '0' } : forge.binDir(bin);
+  arm === 'github' ? { GH_REPO: github.repository, GIT_TERMINAL_PROMPT: '0' } : await forge.binDir(bin);
 const scripted = arm === 'github' ? github.scriptedAgent(bin, 'github') : null;
 // The cell's agents share one writable clone of the toolchain (vp locks and caches
 // its package manager there), like one developer machine; deps/ stays read-only.
@@ -190,8 +191,10 @@ async function worker(k) {
     if (arm === 'github') {
       await github.workspace(hub, root, branch);
       env = { ...env, ...armEnv };
-    } else
+    } else {
       laneId = await forge.startLane(join(ws, 'anchor'), root, `${task.id}: ${task.prompt.split('\n')[0]}`);
+      env = { ...env, ...armEnv.agentEnv(root) };
+    }
     const deps = shared ? linkDeps(shared, root) : null;
     const dispatchedAt = Date.now();
     event({
@@ -217,9 +220,10 @@ async function worker(k) {
       env,
       timeoutMs: config.agentTimeoutMinutes * 60_000,
       // GitHub: the hub is the shared clone's object store (read-only for the agent).
-      // Forge: the nforge CLI bundle lives beside the denied control checkouts.
+      // Forge: the nforge CLI bundle lives beside the denied control checkouts; its
+      // node_modules may be a symlink to another checkout, so allow the real path too.
       extraReads: [
-        ...(arm === 'github' ? [hub] : [dirname(dirname(config.forge.cli)), objectCache]),
+        ...(arm === 'github' ? [hub] : [...forgeCliReads(config.forge.cli), objectCache]),
         ...(shared ? [shared.deps] : []),
       ],
       extraWrites: shared ? [vpHome] : [],
@@ -239,11 +243,6 @@ async function worker(k) {
       arm === 'github'
         ? github.landing(branch, new Date(prepStart).toISOString())
         : forge.landing(root, laneId);
-    const landedAtMs = landing.mergedAt
-      ? Date.parse(landing.mergedAt)
-      : landing.acceptedAt
-        ? Number(landing.acceptedAt) || Date.parse(landing.acceptedAt)
-        : null;
     const record = {
       task: task.id,
       overlap: task.overlap,
@@ -252,8 +251,7 @@ async function worker(k) {
       branch: arm === 'github' ? branch : null,
       dispatchedAt: new Date(dispatchedAt).toISOString(),
       agent: receipt,
-      landing,
-      timeToMainSeconds: landedAtMs ? (landedAtMs - dispatchedAt) / 1000 : null,
+      ...landingFields(landing, dispatchedAt),
     };
     records.push(record);
     event({ event: 'task-done', ...record });
@@ -264,12 +262,7 @@ async function worker(k) {
 }
 await Promise.all(Array.from({ length: N }, (_, k) => worker(k + 1)));
 const cellEnd = Date.now();
-const landedTimes = records
-  .map(r => r.landing.mergedAt ?? r.landing.acceptedAt)
-  .filter(Boolean)
-  .map(t => (typeof t === 'number' ? t : Date.parse(t)));
-const wallSeconds =
-  landedTimes.length === tasks.length ? (Math.max(...landedTimes) - cellStart) / 1000 : null;
+const summary = cellSummary(records, tasks.length, cellStart);
 const convex = meter?.stop() ?? null;
 
 // Grade the exact final main.
@@ -319,10 +312,7 @@ const result = {
   resetReceipt,
   startedAt: new Date(cellStart).toISOString(),
   endedAt: new Date(cellEnd).toISOString(),
-  wallSecondsToAllLanded: wallSeconds,
-  landed: records.filter(r => r.landing.landed).length,
-  tasks: tasks.length,
-  landingsPerHour: wallSeconds ? (tasks.length / wallSeconds) * 3600 : null,
+  ...summary,
   records,
   tokens: dry
     ? null
@@ -353,8 +343,13 @@ console.log(
   JSON.stringify({
     cellId,
     landed: result.landed,
-    wallSeconds,
+    wallSeconds: result.wallSecondsToAllLanded,
     strict: oracle?.grade?.strictSuccess ?? null,
     voided,
   }),
 );
+
+function forgeCliReads(cli) {
+  const pkg = dirname(dirname(cli));
+  return [...new Set([pkg, realpathSync(pkg), realpathSync(join(pkg, 'node_modules'))])];
+}
