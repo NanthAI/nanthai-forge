@@ -1,6 +1,6 @@
 # R2 backfill
 
-The project owner runs this maintenance command after enabling R2 writes. It moves
+The project owner runs this maintenance command to move bytes written before R2 became the only byte path. It moves
 stored project objects (including checkpoint roots, metadata and recipe leaves),
 legacy backup/proposal archives and retained original archive receipts. Logical
 recipe rows have no file of their own; their stored leaves move independently.

@@ -11,7 +11,7 @@ do not automatically repeat locally. See [GitHub Actions and Blacksmith checks](
 To switch the runner for a new check:
 
 ```sh
-nforge agent OWNER set-policy '{"checks":{"runner":"local"}}'
+nforge x OWNER set-policy '{"checks":{"runner":"local"}}'
 ```
 
 Modal is retired. Historical `modal` policies and receipts, including

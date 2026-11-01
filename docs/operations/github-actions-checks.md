@@ -1,12 +1,12 @@
 # GitHub Actions checks
 
-Native owners can run the pinned check candidate on GitHub-hosted or Blacksmith
-compute using the owner's existing `gh` authentication and Git credentials:
+Native owners can run the pinned check candidate on GitHub-hosted
+compute (any `runsOn` label; Forge's own project uses free `ubuntu-latest` runners and stopped using Blacksmith on 2026-10-25) using the owner's existing `gh` authentication and Git credentials:
 
 ```sh
-nforge agent OWNER set-policy '{"checks":{"runner":"github-actions","repo":"OWNER/REPO","runsOn":"ubuntu-latest"}}'
+nforge x OWNER set-policy '{"checks":{"runner":"github-actions","repo":"OWNER/REPO","runsOn":"ubuntu-latest"}}'
 # Or select the installed Blacksmith label:
-nforge agent OWNER set-policy '{"checks":{"runsOn":"blacksmith-4vcpu-ubuntu-2404"}}'
+nforge x OWNER set-policy '{"checks":{"runsOn":"blacksmith-4vcpu-ubuntu-2404"}}'
 ```
 
 The target must be a repository the owner intends to receive this source. Private

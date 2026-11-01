@@ -18,7 +18,7 @@ Use Node 24.22.1+ (24.x). A change is done when `npm run verify` passes. If you 
 
 Forge is hosted: the project's hosted `main` Channel is the only source of truth. A local Git checkout is a mirror and can lag; never commit there.
 
-The backlog is Forge planning (Initiatives group Issues). Start work from its Issue, so the Lane, the Intent and the evidence stay linked and the Issue closes when the work lands:
+The backlog is Forge planning (Initiatives group Issues). Start work from its Issue, so the Lane, the Intent and the evidence stay linked and the Issue closes when its Intent completes (the next `planning` read records it):
 
 ```sh
 nforge agent ROOT planning '{"status":"open","limit":50}'          # what is planned and in flight
@@ -35,9 +35,9 @@ Ideas, decisions and friction you find go into planning as Issues (`put-planning
 **Working rules for every agent**
 
 - **Finish your own Lane** and fix your own failures: after a failed check, fix it and land the same Lane again (no cancel and recreate). Abandon Lanes you will not land.
-- **Answer overlap notices** before your next edit to that file and before landing (`ack`, or `ack … split`). Never land over an unanswered notice.
+- **Answer overlap notices** before your next edit to that file and before landing (`ack '{"laneId":"…"}'`, or add `"choice":"split"`). Never land over an unanswered notice.
 - **Freeze after landing is submitted**: no save, sync or edit until it is terminal; a new save supersedes it and discards its checks.
-- **Tests follow the change**: locally run the affected set (`nforge agent ROOT tests`), not the whole suite; the landing check is the full run.
+- **Tests follow the change**: locally run the affected set with `nforge agent ROOT preflight '{"laneId":"…"}'` (`land --save` refuses without a pass for the saved head, by default), not the whole suite; the landing check is the full run.
 - **Stay with work you depend on**: do not stop while a landing, import or test run you need is still running; wait for it.
 - **Save at milestones**: save the Lane at least every ~30 minutes of edits. A Lane that is never saved loses everything if the agent stops.
 - **A killed wait is not a failed landing**: if your process is stopped while `land` is waiting, resume it with `land --save '{"operationId":"ORIGINAL_UUID"}'` (or re-run the same request). It continues the same landing and reuses its checks.
@@ -93,7 +93,7 @@ pins and `content` with `encoding:"utf8"` or `"base64"`.
 - Trace the current code before changing it. Make the smallest complete change.
 - Test behavior, including failure paths; authorization and network changes need negative tests.
 - Forge stands alone: no dependency on Edge accounts, deployments or runtimes.
-- Bytes go to R2; Convex holds records, read and written O(pages). See [data placement](docs/data-placement.md).
+- Bytes go to R2 on every deployment, for every project; Convex holds records, read and written O(pages). `npm run verify` fails a new Convex file-storage use. See [data placement](docs/data-placement.md).
 
 ## Docs
 

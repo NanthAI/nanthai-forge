@@ -1,6 +1,6 @@
 # R2 storage plan
 
-Plan to move every file blob from the application database's file storage to Cloudflare R2, so that file bytes never pass through database functions. Status: R0–R3 and R6 are landed; R4 browser bytes, R5 artifacts and R7 purge/sweep are implemented and awaiting landing. R4 has local fake-browser qualification; live CORS qualification, deployment qualification and the actual R6 backfill remain lead-run work. Related: [roadmap](roadmap.md), [egress](operations/egress.md), [compute and egress](operations/compute-egress.md), [source exchange](operations/source-exchange.md).
+Plan to move every file blob from the application database's file storage to Cloudflare R2, so that file bytes never pass through database functions. Status: R0–R7 are on main, and since 2026-10-31 R2 is the only byte path on every deployment and project (see [data placement](data-placement.md)); the per-project opt-in and flag described in R1 are gone. Live CORS qualification and the legacy Convex copies (backfill, then delete; Issue 40dad5e0) remain owner-decision work. Related: [roadmap](roadmap.md), [egress](operations/egress.md), [compute and egress](operations/compute-egress.md), [source exchange](operations/source-exchange.md).
 
 ## Why
 
@@ -27,15 +27,13 @@ Principle: R2 holds every blob. No database function receives or returns file by
 | Slice | Content | Status |
 | --- | --- | --- |
 | R0 | A single blob-store seam in the backend and CLI (no behaviour change), `location` and key fields on object rows, and a presigner using `crypto.subtle` with the AWS reference test vector | Landed |
-| R1 | Signed PUT write path behind a flag and per-project opt-in; commit step with HEAD checks; CLI direct upload with PUT concurrency of 8 or more | Landed |
+| R1 | Signed PUT write path behind a flag and per-project opt-in; commit step with HEAD checks; CLI direct upload with PUT concurrency of 8 or more | Landed; the flag and opt-in were later removed (R2 only) |
 | R2 | Signed GET read path; readers dispatch on each row's location; browser sha256 helper; mixed-location tests, revoked members, expired URLs | Landed; local fake qualification, real-bucket smoke pending |
-| R3 | Owner display data, metadata publication and durable source return | Landed; protocol 3 removes push-time display derivation, local qualification only |
-| R4 | Browser bytes: code view, review and archive download through signed URLs; CORS | Done; awaiting landing, local fake-browser qualification, live CORS qualification remains lead-only |
-| R5 | Imports, zones, agents and proposals build artifacts into R2 | Done; server/runner artifacts and browser logical-object uploads use the project opt-in |
+| R3 | Owner display data, metadata publication and durable source return | Landed; protocol 3 removes push-time display derivation, local qualification only. Source return was later deleted. |
+| R4 | Browser bytes: code view, review and archive download through signed URLs; CORS | Landed; local fake-browser qualification, live CORS qualification remains lead-only |
+| R5 | Imports, zones, agents and proposals build artifacts into R2 | Done; server/runner artifacts and browser logical-object uploads write to R2 |
 | R6 | Backfill: export, upload each file after checking its digest, flip rows in pages; keep old storage 14 days as fallback | Landed; lead-run command implemented, deployment qualification and actual run remain |
-| R7 | Prefix purge, abandoned-upload sweep, scheduled database-only export, optional bucket lock | Done; awaiting landing |
-| R5 | Imports, zones, agents and proposals build artifacts into R2 | Done; awaiting landing |
-| R7 | Prefix purge, abandoned-upload sweep, scheduled database-only export, optional bucket lock | Done; awaiting landing, local purge/sweep and database-only backup fixtures; live operator run remains |
+| R7 | Prefix purge, abandoned-upload sweep, scheduled database-only export, optional bucket lock | Landed |
 | R8 | Optional public Worker with edge cache on a custom subdomain | Later |
 
 Order: R0, R1, R2, then R3a and R4 in parallel, R3b, R6, R5, R7. R0 to R2 alone remove egress for pulls and new pushes. During dual read every reader dispatches on the row's location, so old and new paths coexist. There is no rollback to Convex writes: R2 is the only write path (see [data placement](data-placement.md)); rows already in Convex storage stay readable; old storage stays for 14 days after verification unless the owner explicitly approves the guarded early-purge procedure below.

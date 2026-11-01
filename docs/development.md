@@ -8,13 +8,13 @@ The CLI and standard check refuse other Node versions with `UNSUPPORTED_NODE`. T
 
 ```sh
 npm ci --ignore-scripts      # locked install, no lifecycle scripts
-npm run verify               # check + format:check + typecheck + lint + build + test, run concurrently
+npm run verify               # check + documents + schema + Convex runtime imports + format:check + typecheck + lint + build + test, run concurrently
 npm run format               # oxfmt --write; run before committing
 ```
 
 | Command | What it does |
 | --- | --- |
-| `npm run check` | Validates JSON, Markdown links, license inventory freshness and required root files |
+| `npm run check` | Validates JSON, Markdown links, license inventory freshness and required root files; rejects machine-specific home paths and live-query arguments or `refreshKey` values driven by the clock (idle tabs must cost nothing) |
 | `npm run typecheck` | Native TypeScript for core, Convex and Netlify; tsc 5.9.3 for web |
 | `npm run typecheck:tsc` | Explicit tsc 5.9.3 fallback for all four projects |
 | `npm run build:core` | Native TypeScript JavaScript and published declarations |
@@ -27,6 +27,8 @@ npm run format               # oxfmt --write; run before committing
 | `npm run smoke:package` | Packs and installs the tarball offline, then checks its file list and notice hashes |
 
 Tests use synthetic repositories and real Git, Node and MCP subprocesses. Pass-or-fail is the only result that counts: a skipped test is not a pass. Automatic cleanup tests control the working-directory probes through `tests/cleanup-process-fixture.mjs`, including the concurrent finish child, so unrelated host processes and unavailable `/proc` or `lsof` coverage cannot change lifecycle assertions. `tests/clean-processes.test.mjs` separately exercises both OS scanner branches, missing probes, unreadable processes and process-exit races with synthetic inputs; unknown coverage continues to retain local copies.
+
+Two guards keep hosted code on the intended path. `tests/hot-storage-invariant.test.mjs` fails any new use of Convex file storage in `convex/` (write, read, handle or `v.id('_storage')` field): bytes go to R2 ([data placement](data-placement.md)), and the few remaining uses are legacy-read allowlist entries with a count and an expiry date. `node scripts/check-convex-runtime.mjs` (a verify step) fails when a Convex module without `"use node"` reaches a `node:` builtin through `src/`.
 
 The compact Work/detail and native companion fixtures close their MCP clients and HTTP servers before removing owner directories. CLI presence workers are detached; directory removal retries transient `ENOTEMPTY` errors while those workers release their queue files.
 
@@ -209,7 +211,7 @@ For new prose under `docs/`, add a matching JSON manifest under `scripts/package
 
 ### The standard check
 
-`scripts/forge-check.mjs` installs locked dependencies, selects impact from the runner’s pinned Candidate comparison, and verifies with the Node that launches it. The existing `verify` check ID stays unchanged. Forge-launched checks share the machine queue and disk guards described in [operations](operations.md). Validated native standard-check docs-overlap retries classify immutable merged bytes with the installed selector before admission and run merged static checks outside the heavyweight queue; disk guards still apply. Unclassified changes and code interactions keep ordinary admission. Direct `npm run verify` / `node scripts/forge-check.mjs` invocations bypass Forge's queue; use recorded `run` / `finish` to coordinate dogfood checks. Test execution preloads `tests/check-runtime.mjs` so synthetic fixture checks use a private queue per test process, separate from real dogfood checks. The automatic-cleanup tests also import that setup themselves, so direct focused runs stay isolated without a preload flag; their process coverage uses one mutable mock per test. Cross-process reliability tests explicitly share one queue. For focused check-run tests use `node --import ./tests/check-runtime.mjs --test tests/local-reliability.test.mjs`. No test assertion is bypassed.
+`scripts/forge-check.mjs` installs locked dependencies, selects impact from the runner’s pinned Candidate comparison, and verifies with the Node that launches it. The existing `verify` check ID stays unchanged. Forge-launched checks share the machine queue and disk guards described in [operations](operations.md). Validated native standard-check docs-overlap retries classify immutable merged bytes with the installed selector before admission and run merged static checks outside the heavyweight queue; disk guards still apply. Unclassified changes and code interactions keep ordinary admission. Direct `npm run verify` / `node scripts/forge-check.mjs` invocations bypass Forge's queue; use recorded `save --check` / `land --save` to coordinate dogfood checks (hosted projects run them on GitHub-hosted Actions runners; the Mac no longer accepts or checks). Test execution preloads `tests/check-runtime.mjs` so synthetic fixture checks use a private queue per test process, separate from real dogfood checks. The automatic-cleanup tests also import that setup themselves, so direct focused runs stay isolated without a preload flag; their process coverage uses one mutable mock per test. Cross-process reliability tests explicitly share one queue. For focused check-run tests use `node --import ./tests/check-runtime.mjs --test tests/local-reliability.test.mjs`. No test assertion is bypassed.
 
 `npm run verify` is `scripts/verify.mjs`. It runs the verification stages concurrently: `check`, `format:check`, the four project typechecks and `lint` start together with `build:core` then `build:web`, and the tests and tsc 5.9.3 Convex compatibility check start as soon as the core build finishes instead of after every static step. Static-step output is buffered; tests stream completed/failed counts and failure names as TAP results arrive. Each completed failing file also emits its file-attributed diagnostic block immediately, while other files and static steps continue. Passing steps print their totals and a timing table closes the run. The default test-file budget is `min(max(1, floor((available CPUs - 2) / check slots)), 8)`, where check slots is `FORGE_MAX_CONCURRENT_CHECKS` or the check queue default `max(1, floor(CPUs / 4))`, so concurrent checks together leave two CPUs free (4 workers per check on a 10-CPU machine with 2 slots). Set `FORGE_TEST_WORKERS` to a positive integer to compare or override it. The runner starts historically slow files first. Each test file has a 600000 ms wall-clock hang guard, covering module loading, tests, teardown and leaked child handles. Set `FORGE_TEST_FILE_TIMEOUT_MS` to a positive integer in milliseconds (up to 2147483647) to override it. A timeout names the file, kills its process group and fails verification; queued files get their own deadline when started. This is a suite scheduling budget; fixture queues remain private per test process and queue correctness tests keep their explicit overrides. `FORGE_GIT_TIMEOUT_MS` (default 20000, accepted range 1000 to 3600000) is the per-command ceiling for local Git; the check sets it to 240000 because several checks usually share one machine.
 
@@ -223,7 +225,7 @@ clone/fetch suites and the three contribution wire cases retain protocol coverag
 `tests/native-git-http.test.mjs` failed intermittently (about 1 run in 25, even on an idle machine, and far more often under load). Root cause: `workGit` passed large stdin (a 1 MiB blob for `git hash-object -w --stdin`) through `spawnSync`'s pipe, which sometimes stalled until the 20 s command limit and surfaced as a 400 from the Git endpoint. `workGit` now gives Git inputs over 32 KiB as a private temporary file descriptor (same bytes, removed afterwards); 0 of 48 concurrent runs failed afterwards, against 2 of 48 before. The history fixture also supplies synthetic commit bytes through a file descriptor so its multi-megabyte commit tests avoid the same synchronous pipe stall. The Git client and test time limits were also raised (600 s and 900 s) because they are hang guards; no assertion changed.
 
 ```sh
-nforge agent ROOT define-check '{"name":"verify","executable":"/abs/node","args":["scripts/forge-check.mjs"]}'
+nforge x ROOT define-check '{"name":"verify","executable":"/abs/node","args":["scripts/forge-check.mjs"]}'
 ```
 
 The large Work-records round-trip test uses a 300-second hang guard so concurrent full checks can complete its unchanged size and restoration assertions. This is not a performance target.
@@ -410,11 +412,11 @@ For recorded historical replays, `scripts/measure-test-impact.mjs` accepts expli
 `.github/workflows/foundation.yml` compares exact Git pins. Markdown-only changes,
 including packaged docs, run foundation and package-document checks on pull requests. Other changes
 run full verification on pinned Node 24.22.1, plus native self-host.
-For each Node version, one static job runs the non-test verify stages and package
+One static job runs the non-test verify stages and package
 smoke, and shares its builds with eight parallel test shards on GitHub-hosted
-`ubuntu-latest` runners. `scripts/public-verify.mjs` reuses Forge's full selection,
+`ubuntu-latest` runners (Node 24.22.1 is the only version in the matrices). `scripts/public-verify.mjs` reuses Forge's full selection,
 round-robin partition and Actions executor; every current test file is assigned
-once per Node version, including newly added files. Both matrices disable
+to a shard, including newly added files. Both matrices disable
 fail-fast, and native self-host is independent. The final `verify` job always runs
 and requires every selected job to succeed, including all shards; only jobs
 excluded by the docs-only scope may be skipped. Branch protection can require
@@ -422,8 +424,9 @@ this single `verify` check. Pushes to main share a concurrency group: a newer pu
 cancels older queued or running main verifies. Main pushes always select the full
 audit, including docs-only pushes that may supersede an unfinished code audit.
 Pull requests and manual runs each
-keep their own group. Eight test shards keep one full audit below the Free org
-concurrency allowance while preserving the full suite and every static stage.
+keep their own group. Eight test shards keep one full audit well inside the org's concurrent-job
+allowance while preserving the full suite and every static stage.
+Separately, `.github/workflows/web-deploy.yml` builds the web app and deploys it to the dev Netlify site on pushes to main that touch web, source, docs or package files.
 
 ## Code map
 
@@ -446,9 +449,9 @@ Keep modules narrow (about 300 lines) with one owner. Use TypeScript, pin depend
 
 ## Dogfooding
 
-Forge develops Forge. The canonical native owner is `$FORGE_OWNER` (set to your local native owner directory). A separate local Git checkout is a compatibility mirror and can lag. Native `main`, the hosted project and GitHub `main` may differ, so check exact pins.
+Forge develops Forge. The project's hosted `main` Channel is the only source of truth ([AGENTS.md](../AGENTS.md)). A local Git checkout is a mirror and can lag; never commit there. Hosted `main` and GitHub `main` may differ, so check exact pins. `$FORGE_OWNER` in the commands below stands for a local native owner directory (used by the benchmark and UI-bot scripts).
 
-Work through `nforge agent ROOT start`, edit the returned Lane, then `finish`. Accepting a Channel, publishing to GitHub and deploying are separate choices. Never overwrite another Lane to match the mirror. Put throwaway builds, exports and test owners under a local scratch directory such as `~/.forge-runtime`, not Documents or iCloud.
+Work through `nforge agent ROOT start`, edit the returned Lane, then `land --save` (see [AGENTS.md](../AGENTS.md) and the [agent workflow](agents/workflow.md)). Start from a planning Issue (`start {planningItemId}`) so the Issue closes when the Intent completes. Publishing to GitHub and deploying are separate choices. Never overwrite another Lane to match the mirror. Put throwaway builds, exports and test owners under a local scratch directory such as `~/.forge-runtime`, not Documents or iCloud.
 
 ### Landing benchmark against Git+GitHub
 
@@ -459,10 +462,10 @@ node scripts/bench-landing.mjs --source OWNER --dry-run                  # print
 node scripts/bench-landing.mjs --source OWNER --work ~/.forge-runtime/bench --max-minutes 9
 ```
 
-- **Forge:** `agent start` → edit → `finish` with `accept:true` and `FORGE_CHECK_SCOPED=1` until main moves. Finish stderr progress lines split the time into prepare (checkpoint/sync/compose), queue wait, check and landing, by line arrival. The check runner's own queued/started/ended times are recorded beside them. By default this runs in a throwaway native owner imported from the source owner's `main`, with the standard check and the trusted preset. `--forge-owner source` lands into the real owner instead; `--hosted` then also times `nforge exchange ROOT push`, and `--github-mirror OWNER/NAME` times `github-sync --push` until that branch moves. There is no automatic GitHub push today.
+- **Forge:** `agent start` → edit → `finish` with `accept:true` and `FORGE_CHECK_SCOPED=1` until main moves. Finish stderr progress lines split the time into prepare (checkpoint/sync/compose), queue wait, check and landing, by line arrival. The check runner's own queued/started/ended times are recorded beside them. By default this runs in a throwaway native owner imported from the source owner's `main`, with the standard check and the trusted preset. `--forge-owner source` lands into the real owner instead; `--hosted` then records whether that owner is bound to a hosted project (the push step it once timed was removed), and `--github-mirror OWNER/NAME` times `github-sync --push` until that branch moves. There is no automatic GitHub push today.
 - **Git+GitHub:** branch → commit → push → `gh pr create` → poll `gh pr checks` → `gh pr merge --squash` → poll until `main` moves. A repository `<owner>/forge-bench-YYYYMMDD-<pair>` is created from the same exported `main`. Its only workflow uses the same scoped selection and Actions check executor as `scripts/forge-check.mjs`, against the PR base/head on GitHub-hosted `ubuntu-latest`. The harness installs a required `bench-required` status check via a main ruleset (or branch protection); setup fails if neither is available. This aggregate check requires every check job to succeed. Check time is GitHub's started→completed span; queue wait is the rest of the wait.
 
-Select `--pair P1|P2|P4` for the fair compute matrix: P1 uses GitHub-hosted runners on both sides; P2 uses Blacksmith on both; P4 runs the GitHub side alone. Override labels with `--gh-runs-on LABEL` and `--forge-runs-on LABEL`, Actions workers with `--gh-shards N`, and Forge routing with `--forge-runner local|github-actions`. The throwaway owner's check policy records the chosen route. The `github-actions` route requires a CLI supporting that policy. Every GitHub workflow runs one static job plus N test-shard jobs, including N=1, and one required aggregate check. Explicit shard counts use the selection's original order and round-robin membership, matching Forge's Actions plan. Both sides use the Actions check executor for static contracts, builds, test commands and worker budgets; warmed duration estimates are not copied between services.
+Select `--pair P1|P2|P4` for the fair compute matrix: P1 uses GitHub-hosted runners on both sides; P2 uses Blacksmith on both (paid, and no longer used for Forge's own CI; run it only with a spend limit set); P4 runs the GitHub side alone. Override labels with `--gh-runs-on LABEL` and `--forge-runs-on LABEL`, Actions workers with `--gh-shards N`, and Forge routing with `--forge-runner local|github-actions`. The throwaway owner's check policy records the chosen route. The `github-actions` route requires a CLI supporting that policy. Every GitHub workflow runs one static job plus N test-shard jobs, including N=1, and one required aggregate check. Explicit shard counts use the selection's original order and round-robin membership, matching Forge's Actions plan. Both sides use the Actions check executor for static contracts, builds, test commands and worker budgets; warmed duration estimates are not copied between services.
 
 `--gh-merge-queue` enables repository auto-merge before installing a main merge-queue ruleset when the repository supports it; otherwise it records the unavailable response and squash-merges after required checks. The selected `mergePath` is retained in setup and samples. The benchmark workflow checks pull requests, merge groups and main after landing. Existing unrelated rulesets remain in force.
 
@@ -473,6 +476,8 @@ node scripts/bench-landing.mjs --source OWNER --pair P1 --burst 4,8 --dry-run
 ```
 
 `--github-owner ORG` selects the repository owner (default: the authenticated gh login); `--visibility public|private` defaults to private. P1/P2 automatically create a separate `forge-bench-YYYYMMDD-<pair>-forgecheck` target, register the generated Forge dispatch workflow on its default branch and configure the throwaway owner's runner policy. Build core before running the harness. Dry runs print exact repository names, visibility, workflow registrations, ruleset payload, policy, scenarios and burst plan without invoking subprocesses or the network; the default owner is shown as `<login>`. For the public org plan, add `--github-owner NanthAI --visibility public --gh-merge-queue`. Single samples include `doneToMain` from the completed edit/commit to landing, in addition to phase timings. Rerun with the same `--out` to resume; finished samples are kept. `--cleanup` is cleanup-only: it writes the current results and runs no setup or samples before deleting only repositories recorded as created by this run in `<out>.manifest.json` (needs the `delete_repo` gh scope). The manifest records creation times and deletion receipts. Missing or uncertain ownership evidence refuses cleanup; explicitly supplied existing repositories are never adopted as run-owned. Local results remain available. When a run ends or fails, `scripts/bench-teardown.mjs` removes the Git/Forge checkouts, bare seeds and installed dependency trees under `--work` and keeps logs, JSON and summaries (`--keep-checkouts` skips it; `--max-minutes` stops keep them to resume; a directory holding a `.bench-keep` file is skipped). Other harnesses call `teardownBench(dir)` or `node scripts/bench-teardown.mjs WORK_DIR [--dry-run]`. Private Actions runs consume account minutes. Seeds contain one parentless commit with the exact selected source main tree, preserving blob bytes and modes without exporting native history or applying Git attributes. Queue merges submit `gh pr merge --auto` without a method or branch deletion flag and wait for main to move. Real runs create repositories and push source; dry-run output is a plan, not measured benchmark evidence.
+
+`node scripts/benchmark-t3code-import.mjs DIR '{"repository":"o/r","ref":"SHA","name":"..."}'` runs a live big-repository GitHub import under the [scheduled import guard](operations/import-benchmark-guard.md). `DIR` receives `journal.json`, `progress.jsonl` and `report.json`; run it again with the same `DIR` to resume the same import after a crash. It uses a Convex deployment login and the saved `nforge` login, and creates a project named by `name`; it deletes that project only when the guard trips. The import time that counts for Phase 5 is the no-Mac import: 16 min 56 s on the t3code repository against a target of 5 minutes or less, so Phase 5 stays open ([status](status.md)).
 
 Native capture skips filenames that begin with `secret` or `credential` followed by `.` or `-`. Do not give source files or docs such names. Use `protected-values.md`, not `secrets-guide.md`.
 
@@ -486,7 +491,7 @@ npm install --prefix ./forge-tools --ignore-scripts --offline .forge/packages/na
 
 `package:local` stages only the package whitelist, bundles locked production dependencies and runs `npm pack --ignore-scripts`. The package stays private (no registry publish) and runs no lifecycle scripts. Linux and Windows execution of the packed CLI is untested.
 
-When you add, move or delete a doc under `docs/`, update `scripts/package-documents.mjs`. `package.json` ships `docs/`, and `smoke:package` fails on any listed file that is missing or any unlisted one that is present. Keep `docs/vendor-notices/` byte-exact because tests pin their hashes.
+When you add, move or delete a doc under `docs/`, add, move or delete its manifest under `scripts/package-documents/` (see Targeted test preparation). `package.json` ships `docs/`, and `smoke:package` fails on any listed file that is missing or any unlisted one that is present. Keep `docs/vendor-notices/` byte-exact because tests pin their hashes.
 
 ## Hosted development configuration
 
@@ -513,6 +518,8 @@ Configuration is written to the ignored `.env.local`.
 - `FORGE_WEB_URL`: HTTPS origin of the Forge web app serving `/device` with the existing Clerk login. Deploy the Convex auth config, HTTP actions, functions and schema together, then publish the hosted web build. Existing Clerk/GitHub settings remain required. For a custom HTTP origin, set `FORGE_HTTP_URL` in the CLI environment; standard `.convex.cloud` deployment URLs derive `.convex.site`.
 - `FORGE_SECRET_KEYS`: the Secret Object keyring (see [operations](operations.md)).
 - `GITHUB_PUBLIC_TOKEN`: optional, for public GitHub API reads only.
+- `R2_ACCOUNT_ID`, `R2_BUCKET`, `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY`: required. Every deployment, self-host included, writes source and artifact bytes to R2, with no opt-in and no Convex-storage fallback; missing settings fail writes with `R2_NOT_CONFIGURED`. `R2_ENDPOINT` optionally points at another S3-compatible store (https, or http on loopback). See [data placement](data-placement.md).
+- The list above is the minimum for sign-in, import and R2; hosted checks, Actions and workers read further variables (for example `FORGE_WORKER_KEY`, `NETLIFY_WORKER_URL`, `FORGE_HOSTED_CHECK_KEY_ID`, `GITHUB_APP_ID` and `GITHUB_APP_PRIVATE_KEY`); see [GitHub App](operations/github-app.md) and [GitHub Actions checks](operations/github-actions-checks.md).
 
 Imports store gzip JSON in R2 (`r2blob:` references, see [data placement](data-placement.md)) with a 128 MiB artifact budget. Functions never execute target repository code. After setup, `npm run smoke:hosted -- https://github.com/sindresorhus/is-plain-obj` checks live anonymous import.
 
@@ -547,7 +554,7 @@ node scripts/perf-harness.mjs --bundle hosted-web-dist \
   --work-owner /path/to/existing/native-owner --out private-artifacts/perf/result.json
 ```
 
-This one command measures a one-file delta through the real exchange CLI and loopback HTTP backend, reads an existing accepted landing's Work records, and records bundle sizes. It creates and removes only its temporary synthetic owner. It never pushes the real project, starts a check, finishes work, accepts, deploys or backfills. The synthetic fixture has 100 roughly 4 KiB files; the initial seed push is excluded. Its three default samples include CLI startup, preparation, upload and source return, but exclude WAN latency and durable provider storage. Do not interpret this result as hosted latency.
+Without flags beyond `--bundle`, this command records bundle sizes and nothing else; with `--work-owner` it also reads an existing accepted landing's Work records from a native owner. It never pushes, starts a check, finishes work, accepts, deploys or backfills. The one-file exchange push measurement was retired with exchange push: its result is always `unrun`, and hosted save and land metrics cover the current path. `--samples` (default 3) and `--timeout` (default 60000 ms) apply to the live browser measurements.
 
 Add `--live --base DEV_URL --project PROJECT_ID --lane RETAINED_LANE_ID --build-hash DEPLOYED_HASH` for authenticated cold Now, Work and Lane first-diff measurements. Use a Vite development frontend or an explicit QA build with `VITE_FORGE_PERF=1`; normal production bundles omit the readiness markers. `--live` enables browser navigation only; push remains synthetic. Chromium and the existing user-owned `0600` UI-bot credential file are prerequisites. `--credentials` overrides its usual `~/.config/forge-ui-bot/credentials.json` location. Sign-in reuses `ui-shots`' real bot login. Cookies, tokens and browser storage remain in memory. The read-authorized project identity resolves canonical URLs before measurement; no project authority is bypassed.
 
@@ -571,7 +578,7 @@ node scripts/ui-shots.mjs --base https://<your-site>.netlify.app \
   --widths 1500,390 --themes dark,light
 ```
 
-`--base` also accepts a draft origin or `http://localhost:5179`. Lane captures also accept `--variants unified,split,inline,side-closed,files-closed`; each variant starts from an explicit diff/rail state and gets its own filename. `--project ID` overrides the project stored with the credentials; `--height` defaults to 1000. Include specific retained records with `--pages 'now,intents,lane:LANE_ID,review:VIEW_ID,settings,device'`. The tool resolves a Candidate's parent Intent through the same site's authorized Work query. It seeds its route codec from the access-checked project identity before validating readable-URL redirects. Add `--diff-file src/example.ts` to select a specific file in Lane/Review screenshots. `settings` opens the shared Settings destination's Contributors page; owner-only lifecycle settings are unavailable to the reader. `device` captures the signed-in code-entry screen without approving any login.
+`--base` also accepts a draft origin or `http://localhost:5179`. Lane captures also accept `--variants unified,split,inline,side-closed,files-closed,map`; each variant starts from an explicit diff/rail state and gets its own filename. `--project ID` overrides the project stored with the credentials; `--height` defaults to 1000. Include specific retained records with `--pages 'now,intents,lane:LANE_ID,review:VIEW_ID,settings,device'`. The tool resolves a Candidate's parent Intent through the same site's authorized Work query. It seeds its route codec from the access-checked project identity before validating readable-URL redirects. Add `--diff-file src/example.ts` to select a specific file in Lane/Review screenshots. `settings` opens the shared Settings destination's Contributors page; owner-only lifecycle settings are unavailable to the reader. `device` captures the signed-in code-entry screen without approving any login.
 
 Intent Review actions require a passing check matching the current Candidate head and exclude accepted or superseded Candidates. Intent detail work maps cluster dense save histories and show the latest five Candidates when more than six exist; the earlier link leads to the expandable Candidates list. Candidate detail uses Intent-relative numbering, and lists larger than 50 files group each loaded page by top-level folder. Folder rows count their visible files and show a diffstat when available. The final row expands the remaining paginated files; file/save provenance remains expandable. Hosted read models do not currently supply line diff totals, so those values remain absent rather than estimated.
 
@@ -678,7 +685,8 @@ must cover the exact merged Candidate. Docs and interaction acceptances still re
 full post-accept main verification and the existing fix-forward handoff on failure.
 
 
-A synthetic selector example uses the current 226-file behavior-test inventory
+A synthetic selector example uses a 226-file behavior-test inventory (a fixed
+example; the real suite is several times larger)
 with a synthetic import graph: one shared-source consumer, one consumer of both
 left and right sources, and the four fixed smoke files. With Lane changes to
 `src/left.ts` plus `docs/status.md` and main changes to `src/right.ts` plus the

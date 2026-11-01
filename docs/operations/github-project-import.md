@@ -20,9 +20,9 @@ boundaries, not repository or file exclusions. The worker obtains fresh access t
 GitHub App credential path for each action. No credentials are saved in the job
 or cursor, and no additional GitHub scopes are requested.
 
-New source-import projects select R2 when deployment R2 storage is enabled. This
-placement is retained on the project; missing R2 configuration fails explicitly.
-Other deployments use Convex file storage. Object reuse/preparation and verified
+New source-import projects write bytes to R2 on every deployment; missing R2
+configuration fails explicitly (`R2_NOT_CONFIGURED`). Older imports may still have
+Convex file-storage rows. Object reuse/preparation and verified
 completion are batched, with existing chunk recipes for large logical objects.
 Convex physical bytes can share a storage ID across projects; R2 keys and bindings remain
 project-scoped and all source reads retain current project authorization. Digest

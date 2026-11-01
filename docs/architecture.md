@@ -7,11 +7,11 @@ Forge has five parts. Each owns one kind of data, and no part quietly takes over
         |
    nforge CLI, MCP, local Git/Work HTTP    Hosted browser (Netlify)
         |                                         |
-  Native store + Work store  <-- exchange -->  Convex (hosted)
-  (your machine, canonical)                   (checkpoints, event journal,
-        |                                      sessions, messages, access)
-  Local checks (your OS account)                  |
-                                          Netlify worker (public analysis)
+  Native store + Work store  <-- pull/open -->  Convex + R2 (hosted)
+  (your machine; canonical only              (records and journal in Convex,
+  for native-owner projects)                  bytes in R2; sessions, access)
+        |                                              |
+  Local checks (your OS account)              Netlify worker (public analysis)
 ```
 
 For the vocabulary used below (Intent, Lane, Candidate, Channel, State), see [concepts](concepts.md).
@@ -25,13 +25,13 @@ For the vocabulary used below (Intent, Lane, Candidate, Channel, State), see [co
 | Analysis          | Derived, partial code graph with exact locators                                                      | `src/snapshot.ts`, `src/analyze.ts`, `src/graph-query.ts` |
 | Local execution   | Check and Playbook processes in materialized Candidates                                              | `src/work-run.ts`, `src/work-playbook.ts`                 |
 | Agent interface   | Short commands over the same owners                                                                  | `src/agent-workflow.ts`, `src/mcp-agent-workflow.ts`      |
-| Convex            | Hosted checkpoints, the Work event journal, sessions, messages, current access                       | `convex/`                                                 |
+| Convex            | Hosted records, the Work event journal, sessions, messages, current access (bytes live in R2)        | `convex/`                                                 |
 | Web               | Hosted browser UI (the only browser UI)                                                              | `web/src/`                                                |
-| Local server      | `nforge serve`: token-protected Git smart-HTTP and Work API on 127.0.0.1, no browser pages           | `src/http.ts`, `src/work-git-http.ts`, `src/work-http.ts` |
+| Local server      | `nforge serve`: token-protected Git smart-HTTP and Work API on 127.0.0.1, no browser pages; deleted with B1.9 | `src/http.ts`, `src/work-git-http.ts`, `src/work-http.ts` |
 | Netlify worker    | Public-repository analysis in the background                                                         | `netlify/functions/`                                      |
 | Git compatibility | Import, export, projections and publication                                                          | `src/native-git*.ts`, `src/work-git*.ts`                  |
 
-The local native owner is canonical for Forge's own development. A hosted project holds checkpoints you send it plus its own metadata journal. Source synchronization is explicit unless the owner enables the separate `autoExchange` policy. Its saved-mutation driver shares bound-push serialization and retained-operation reconciliation, with no idle polling. Bound owners also send advisory agent presence and lifecycle metadata automatically, with a binding opt-out; these updates do not transfer source or check artifacts.
+A project has one source authority (`sourceAuthority.mode`, see [hosted source authority](#hosted-source-authority-and-operation-contracts)). Forge's own project has been under server authority since 2026-10-28: hosted main, Lanes and the landing queue are canonical, and the Mac holds regenerable caches and cannot accept. A native-owner project still keeps source and Work in its local owner; the native-owner code and `nforge serve` are deleted with B1.9 (owner decision, 2026-10-31). Exchange push, source return and the `autoExchange` policy are retired. `nforge exchange` only pulls, opens, restores and migrates, and old push commands return `CLI_UPGRADE_REQUIRED`. Local activity updates presence only and starts no hosted metadata sender. See [source exchange](operations/source-exchange.md).
 
 For a server-authoritative binding, hosted Channel and Lane records select
 source. Bound start materialises verified hosted/R2 objects into the existing
@@ -42,6 +42,8 @@ in that path. The two-method source object interface keeps content identity
 separate from current R2 storage keys. Reads and cache-lag observations occur on
 commands, with no additional idle polling. See the [cutover procedure](operations.md#one-authority-cutover).
 
+This paragraph mostly describes the native-owner landing driver, which is deleted with B1.9;
+server-authority projects land through the [hosted landing queue](#hosted-landing-request-queue).
 Landing clients submit a durable goal and observe its handle. Native `land`
 returns by default; only the owner controller composes, checks and settles it.
 The read-only `landing` action reconciles no work and starts no service. Native
@@ -153,7 +155,9 @@ Freshness comes from rereading source, never from timestamps. Re-indexing captur
 
 **Hosted blob access.** Bytes go to R2; Convex holds records ([data placement](data-placement.md) lists every table and byte store). Every deployment (self-host included) and every project writes R2, with no opt-in, flag or Convex byte mode; missing R2 settings fail with `R2_NOT_CONFIGURED`. Nothing writes Convex file storage, and `tests/hot-storage-invariant.test.mjs` fails verify on any write, and on any read, storage handle or `_storage` field outside its dated allowlist. Convex functions read bytes through `BlobStore` (`convex/blobStore.ts`); CLI exchange uses `ExchangeBlobs` (`src/exchange-blobs.ts`). Project objects dispatch on each row's `location`, with `r2Key` and a verified commit for R2. Server-built indexed artifacts and import cursors use opaque `r2blob:` references to `artifactBlobs` metadata. R2 writes reserve immutable pins before create-only checksum-bound PUTs and commit after HEAD verification. Readers still read legacy Convex storage IDs until cleanup and verify downloaded bytes.
 
-**Object catalog.** A GitHub archive import writes no row per object. Each upload window stores its objects in R2 under content-addressed keys and records one transient receipt. Publication then writes a sorted `projectObjectCatalog` of 256 pins per row. `findObject` (`convex/projectObjectFind.ts`) is the only digest lookup: it checks the object's own row first, then the catalog row that covers the digest. A request reads each catalog row at most once. A writer that needs a row id copies the entry into one stored row (`objectRow`). The generation's `sourceBlobs` resolve from the catalog, so there are no per-blob records. Import progress rows are deleted when main is published. A 28,905-file import writes about 300 documents (`tests/github-import-archive.test.mjs`); `tests/object-catalog.test.mjs` guards that no lookup bypasses `findObject`.
+**Object catalog.** A GitHub archive import writes no row per object. Each upload window stores its objects in R2 under content-addressed keys and records one transient receipt. Publication then writes a sorted `projectObjectCatalog` of 256 pins per row. `findObject` (`convex/projectObjectFind.ts`) is the only digest lookup: it checks the object's own row first, then the catalog row that covers the digest. A request reads each catalog row at most once. A writer that needs a row id copies the entry into one stored row (`objectRow`). The generation's `sourceBlobs` resolve from the catalog, so there are no per-blob records. Import progress rows are deleted when main is published. `tests/github-import-archive.test.mjs` imports a 28,905-file tree and asserts it writes fewer than 1,000 documents and no per-object or per-blob rows; `tests/object-catalog.test.mjs` guards that no lookup bypasses `findObject`. The import needs no Mac: publication selects hosted main and moves the project to server authority ([birth](#hosted-source-authority-and-operation-contracts)). On t3code (about 29,000 files) it takes 16 min 56 s today against a goal of 5 minutes or less, and [Phase 5](phase5-plan.md) stays open until it meets that goal.
+
+**Source packs.** A large checkout does not fetch objects one by one. A project keeps one gzip source pack of a State in R2 (`convex/projectSourcePacks.ts`, `src/source-pack.ts`): at most 300 MiB and 100,000 files, with one latest pack and one in-flight slot reserved before the signed PUT. When a client checkout is missing 500 or more objects, after the shared machine object store (`src/machine-object-store.ts`; `FORGE_OBJECT_CACHE` moves it, `off` disables it), `src/hosted-checkout-cache.ts` downloads the latest pack and unpacks it, then fetches only what is still missing. A pack is a cache: if it is absent or fails, ordinary object transfer runs. The check runner publishes packs for its pinned base through the same reservation. `nforge x ROOT source-pack` packs current hosted main from the operator's machine; run it after a seed, cutover or large import.
 
 Indexed imports and binary derivatives go to R2. Legacy derivative reservations
 made before that still reconcile through Convex storage. Existing R2 references always retain R2 reads.
@@ -173,8 +177,8 @@ Repeated check selections reuse an existing digest-bound object after HEAD
 verification, without uploading its body again; the recipe format is unchanged.
 Bootstrap reserves its operation-bound project namespace and original timestamp
 before R2 upload, then publishes source/Work atomically. A reservation is not a
-completed creation and retries preserve its bytes. Existing Convex upload
-receipts remain reconcilable after the storage-mode switch.
+completed creation and retries preserve its bytes. Legacy Convex upload
+receipts written before R2 became the only byte path remain reconcilable.
 
 Merge preparation first verifies nearby parent frontiers. It can stop older
 history only when every loaded parent path reaches one exact common frontier;
@@ -270,58 +274,7 @@ returns the same project; a changed name is refused. Concurrent prepared retries
 reconcile the winning transaction and discard only their own unused preparation
 bytes. Source files are added through the existing source-transfer boundaries.
 
-**Exchange.** Native bound pushes durably retain a consistent local Work snapshot
-and available mutable run outputs before their first hosted read. Hosted metadata
-is merged separately into that candidate and the current local owner; later local
-Work writes stay local until the next push. Known hosted checkpoint or Work CAS
-mismatches reconcile fresh hosted pins with the original local capture, with up to
-three automatic rebases after the initial attempt. Each attempt retains separate
-immutable pins and deterministic child operation IDs. Unknown outcomes reconcile
-the original receipt before changing any baseline. Explicit revision-pinned
-requests retain their exact revision checks.
-
-`nforge exchange` sends a checkpoint to a hosted project by asking which content hashes are missing and uploading only those. The Work snapshot is pinned under the owner lock; immutable source traversal, hashing and network transfer run outside it. Large files are split into content-defined chunks. Manifest and Work metadata travel as chunk trees under a small versioned root. Whole-file hashes stay the identity, and the backend verifies them before binding. A matching retry returns the original receipt. Successful native pushes retain a checksummed, project/checkpoint-scoped preparation hint: unchanged source ancestry, finished-run content and uploaded pins are reused without rereading their bytes or negotiating every object. A missing or corrupt hint falls back to full preparation. The backend reuses unchanged digest/size bindings from a completely validated prior checkpoint; those bindings are immutable until explicit project deletion, and publication rechecks active owner authority.
-
-Native owners attach an optional content-addressed derived-row sidecar to source
-return. Selection happens before derivation against the exact hosted source-return
-baseline, which may differ from the checkpoint used for upload negotiation. Only
-new State parents/ancestry, comparisons for changed Lane/Candidate records, changed Candidate
-provenance and new selected trees are supplied. Ancestry is a State's own parents;
-hosted chunks reference those parent boundaries rather than copying full closures.
-Readers compose these references with previously hosted closures and parent caches.
-Older preparation hints recover their exact digest-verified local Work snapshot;
-if that snapshot is unavailable the optional sidecar is omitted.
-
-Sidecar schema 2 and the disposable local delta cache each have a 4 MiB byte
-budget. Oversized legacy caches are skipped before reading. The client stops
-accumulating derived rows at the budget and omits oversized sidecars; the hosted
-action checks declared bytes before any object read, then validates actual bytes,
-digest and JSON. A budget miss falls back to hosted computation and never denies
-a push. The cache retains only the latest bounded delta, not historical Candidate rows
-or transitive closures. Original prepared operations retain their pins on retry;
-oversized original sidecars are omitted without changing source publication pins.
-Work and hosted schema versions stay unchanged.
-
-The existing owner-only source-return action validates the Work digest, shape,
-counts, unique keys, source pins, comparison pairs and Candidate identities without
-reading source blobs. Valid complete sidecars bypass the parent, diffstat,
-ancestry and Candidate item phases and use the existing staged delta publication.
-Missing, oversized, legacy or incomplete sidecars retain hosted computation, as do
-contributor sources. Final authority and source/Work CAS checks stay in the same
-publication transaction. A sidecar carries the existing owner's source trust;
-its metadata is disposable and never becomes source authority.
-
-Native object source returns compare the validated metadata with the selected generation, reuse immutable diffstat pairs and unchanged Candidate provenance, and derive only new source prefixes and affected Candidates. State-parent caches and complete legacy ancestry boundaries carry earlier work across receipts. New ancestry closures store bounded chunks of hashes instead of expanding a new head into individual historical pair rows. Reads compose those closures with legacy positive pairs; previously retained ancestors absent from an older candidate-pair table can be resolved from cached parents. Existing generations require no schema migration or backfill.
-
-A private return generation holds its computational cursor in file storage. Small deltas keep the selected physical record partition: the final source/Work CAS applies their changed rows and removals atomically with the receipt. The publication budget accounts for new rows, old rows read, protocol bytes and payload-cleanup scheduling. Larger deltas use the existing complete private-partition rebuild and atomic switch. These are internal transaction budgets, not limits on retained source or Work.
-
-The initial metadata reader has an 8 MiB byte memo. Derived steps share a 2 MiB immutable State-byte memo within an action, checking current authority and storage on every use. A logical step reads at most 16 States or roughly 2 MiB of source (one larger State remains readable), and drains at most 100 rows or about 500 KB. Steps checkpoint many logical items together: native delta cursors after at most 64 items or about a second of computation, full partitions once the step's State, byte or row budget is used. The server loops over committed steps for up to 30 seconds (or 1,000 steps) per invocation rather than requiring a client round trip per item, because every cold invocation rereads the cursor and snapshot. State comparison and Candidate provenance still discard historical file lists; arbitrary individual metadata or States do not have a flat-memory guarantee. The [documented action execution limit](https://docs.convex.dev/production/state/limits) remains ten minutes.
-
-Cursor contents and validated metadata travel through file storage as gzip JSON; legacy plain JSON cursors still resume. A warm worker reuses a cursor or snapshot body it stored or read, after checking current storage size and SHA-256. Each committed cursor carries the push's running storage reads, bytes, steps and invocations; the completing call returns them as `accounting` (the stored receipt is unchanged) and the CLI prints them. Setting `FORGE_SOURCE_RETURN_MAX_STEPS` or `FORGE_SOURCE_RETURN_MAX_STORAGE_BYTES` on the deployment pauses a return after a committed step with `SOURCE_RETURN_BUDGET`; pushing the same operation again resumes once the limit is raised or unset. Both are unset by default. The cursor and private rows commit atomically under a step CAS; replaced disposable cursors are removed. An old R3 partition without a computational cursor restarts its disposable rows with the original operation timestamp. Only the final source/Work CAS selects the complete result. Lost replies resume the original cursor or return the exact final receipt. Older CLIs receive `SOURCE_RETURN_PENDING` rather than mistaking partial preparation for success; current CLIs continue automatically and print phase, items done/total, durable step, elapsed time, ETA and saved restart position on stderr. JSON stdout retains the original final receipt.
-
-Diagnostics log `source-return prepare`, `prepared`, `step` (phase, durable step, row count/bytes, State count/bytes, derived rows, elapsed milliseconds and CAS result), and `complete` (published revision). No source payloads are logged. Unavailable optional ancestry/provenance remains explicitly unknown and does not deny a source return; each staging/final mutation still checks current owner authority. Unknown hosted failures remain typed `HOSTED_ACTION_FAILED` and preserve pending push pins. Full fallback Work validation and manifest/catalog processing still scale with retained metadata. Legacy archive/Git projection retains its existing full reconstruction path. The target of under 200 MB on the dogfooding project needs live post-deployment measurement. Retained-byte coverage lives in `tests/hosted-source-memory.test.mjs`; transaction/RPC budgets and the 9,200-object/854 MiB logical-source regression live in `tests/hosted-return-progress.test.mjs`. Incremental landing fixtures live in `tests/source-return-incremental.test.mjs`. See [source exchange](operations/source-exchange.md).
-
-Without a valid owner sidecar, hosted native Lane/Candidate diffstats advance through the same durable return cursor. Only changed records schedule comparisons; a step advances as many records as its State and byte budget allows, looks up immutable base/head totals in batches, compares changed files in batches of up to 100, and publishes each summary once with the index. A partly compared pair resumes from its saved offset. Unavailable or inexact source keeps line totals unknown.
+**Exchange.** Exchange push and source return are retired (Bet 1, B1.6 to B1.8): the push client and the `FORGE_SOURCE_RETURN_*` budgets no longer exist, and the delta planner no longer runs. Old `nforge exchange … push` commands and the former publication RPC addresses (for example `projectSourceReturn:returnSource`) return `CLI_UPGRADE_REQUIRED` before any transfer. `nforge exchange` now pulls hosted main into a client directory, opens a Lane, restores a retained checkpoint, receives or pulls contributor proposals and migrates older archives. Transfers ask which content hashes the other side is missing and move only those. Large files are split into content-defined chunks; manifest and Work metadata travel as chunk trees under a small versioned root. Whole-file hashes stay the identity, and the backend verifies them before binding. The remaining readers keep exact digests and recheck current project access. Saves and landings use the hosted Lane APIs below. See [source exchange](operations/source-exchange.md).
 
 **Archives.** `export-work` writes the full retained closure: source States, Work and recorded run files. It can pack this as a `.tar.gz`. Source-only release archives are narrower and contain empty Work. Browser backup and contributor-proposal imports unpack local exports and upload reusable logical objects. New hosted archive registrations are retired; historical stored archives and pending uploads retain read/resume support. Object proposals pull as validated unpacked exports for direct native contribution import. Older hosted archives are still readable and can be converted explicitly. See [operations](operations.md).
 
@@ -381,50 +334,16 @@ them. No timer, background comparison or idle scheduler is installed.
 
 Native exchange schema 2 keeps ordered collections of stable record keys and
 SHA-256 pins in a chunked record catalog. Planning versions use their id and
-version together. Only missing record bytes and catalog chunks travel; the
-delta names the exact baseline catalog, checkpoint Work digest and hosted journal
-revision, with prior/result hashes for additions, replacements and removals.
-The local Work format and its canonical pretty-printed JSON bytes stay unchanged.
-
-New checkpoint rows can carry an optional verified-record marker. The first v2
-checkpoint and old baselines use complete validation; existing rows are not
-rewritten. Later publication validates changed records and their source/record
-references, including inbound references on removals. It streams the complete
-logical Work SHA-256 from exact record segments in bounded batches rather than
-assembling another Work JSON or parsing every unchanged record. Local snapshot
-preparation, catalog reads and this hashing still scale with retained metadata.
-
-An exchange-only journal adapter replays hosted events over touched records,
-checks retained history by ordered record hashes, and uses the existing
-source-return event with its whole-JSON digest. It hydrates affected dependants,
-referenced records, Candidate families, the default Intent and selected Channels for
-the existing derived-index planner. Small updates publish through the original
-atomic source/Work CAS and operation receipt. No new writer authority or portable
-Work event is introduced.
-
-Schema-1 exchange and full reconstruction remain supported. Missing/old
-baselines, unsupported metadata changes, schema transitions, planning-journal
-operations, inserted/reordered histories and contexts beyond the internal 4 MiB preparation budget use that
-complete path. This budget selects an implementation path and never denies a
-push. A partial index cursor that outgrows atomic publication selects the
-verified checkpoint and lets the existing complete index rebuild run. Recovery
-and the logical-manifest compatibility endpoint reproduce and verify the
-original Work bytes. Current CLI readers understand both exchange versions.
-
-Local preparation pins a Work revision and immutable root under the short owner
-lock, then durably retains the operation's snapshot before network access. Running
-outputs are captured as available immutable bytes; later output and Work writes
-belong to the next push. Retries reuse the retained snapshot, never recapture it
-under the same attempt ID. A known hosted CAS mismatch reconciles the hosted
-journal with that pinned local snapshot and derives a fresh delta, with at most
-three automatic rebase attempts before returning the existing stale/conflict
-outcome. Each attempt has immutable pins and its own deterministic operation ID
-under the retained parent push ID. Unknown outcomes reconcile that attempt's
-receipt before any rebase; reusing an ID with changed pins remains invalid.
+version together. The local Work format and its canonical pretty-printed JSON
+bytes stay unchanged. Schema-1 byte trees and schema-2 record catalogs remain
+readable for retained checkpoints, hosted seeds, Work projections, journal
+reconstruction and recovery; readers verify exact Work and manifest pins. The
+publication delta planner that wrote them no longer runs, because exchange push
+is retired (see [source exchange](operations/source-exchange.md#work-record-exchange)).
 
 Hosted recipe reads share bounded descriptor windows (at most 100 digests and 2 MiB per window) across recipe bodies and tree frontiers, including ranged reads; every window resolves current project access and availability before and after byte transfer, without retaining an access cache. Full metadata-tree reads also batch internal pages by frontier into the existing result buffer.
 
-Hosted publication, Work metadata loading and source-return continuation reuse verified immutable storage bytes in bounded process memos, including recipe nodes and leaves. Every reuse resolves current project authority and checks current storage metadata; recipe closures are revalidated. CLI exchange sessions retain bounded downloaded objects by content hash and size and recheck current project bindings before returning cached bytes. Warm reuse is expendable and does not establish production savings.
+Hosted Work metadata loading and index building reuse verified immutable storage bytes in bounded process memos, including recipe nodes and leaves. Every reuse resolves current project authority and checks current storage metadata; recipe closures are revalidated. CLI exchange sessions retain bounded downloaded objects by content hash and size and recheck current project bindings before returning cached bytes. Warm reuse is expendable and does not establish production savings.
 
 Imported Code subscribes to source-free import/status-derivative invalidations. Changes, focus, network recovery and explicit reads trigger current GitHub authority and latest-head checks. Persisted endpoint derivatives and process-local public JWKS reuse avoid repeated derivation; idle tabs do not periodically invoke status actions.
 
@@ -434,7 +353,9 @@ Native checks select local or GitHub Actions execution through `checks.runner` i
 project autonomy policy. The Actions controller pins source, definition, selection
 and runtime, and binds the terminal receipt to those pins. Declared secret inputs
 stay local. Unknown remote outcomes retain execution IDs for reconciliation.
-See [GitHub Actions and Blacksmith checks](operations/github-actions-checks.md).
+Forge's own project runs its checks on free GitHub-hosted `ubuntu-latest` runners;
+Blacksmith use ended on 2026-10-25 and the Mac check worker stopped on 2026-10-29.
+See [GitHub Actions checks](operations/github-actions-checks.md).
 Modal execution has been removed. Historical policy, runner, cost and evidence
 literals remain accepted by readers; new Modal runner configurations are refused.
 Shared named-test verdicts, quarantine evidence and retained attempt logs remain
@@ -444,62 +365,19 @@ A check is an executable, its arguments, an optional environment label and expli
 
 Playbooks run a sequence of checks. Automation rules start a Playbook on an event. Evidence is reused only under the explicit native disjoint fast-path policy; acceptance revalidates the exact check and manifest-path proof and schedules full main verification. Missing coverage is unknown. A passing check, a model critique and a human review are separate facts. Accepting a Channel is an explicit step against an observed previous head. An optional Invariant can require specific evidence first.
 
-A hosted project can ask a connected local computer to run a check. The request carries only pins and the check name. The local owner validates them and keeps results and compact evidence, with local log retention and upload governed by the explicit project setting. A queued, claimed or finished status is a report. It does not prove the machine is online.
+A hosted project can still ask a connected local computer to run a check (`nforge local-checks`), though Forge's own project does not use this path. The request carries only pins and the check name. The local owner validates them and keeps results and compact evidence, with local log retention and upload governed by the explicit project setting. A queued, claimed or finished status is a report. It does not prove the machine is online.
 
 ## Making-of record
 
 `making-of` is a read model over existing records: the Intent, its Lanes (by `intentId`), its Candidates, their runs and accepted Channel moves (by `viewId`), plus local presence and self-reports from `hosted-binding.json`. Records-v2 owners read only those indexed records; older owners read loaded Work. The derivation (`src/making-of.ts`) is pure and omits values whose inputs are missing; loading and the `report` mutation live in `src/making-of-read.ts`. Runs record `queuedAt` at creation and move `startedAt` forward when the command spawns, which separates queue from running time. Self-reports are keyed by Lane, actor and optional session, keep their applied operation IDs for replay, and never change the Work revision or format.
 
-Designed, not built: an opt-in OpenTelemetry intake. Claude Code and Codex can export OTLP metrics (token and cost counters with model and session attributes) when the user enables telemetry. `nforge serve` would accept OTLP/HTTP JSON on its existing token-authenticated loopback listener, map the session to a Lane through a `forge.lane_id` resource attribute set from the Lane environment, and write the same self-report record. It stays off unless the user configures the exporter, and it drops prompt and tool-content attributes.
+Designed, not built: an opt-in OpenTelemetry intake. Claude Code and Codex can export OTLP metrics (token and cost counters with model and session attributes) when the user enables telemetry. `nforge serve` would accept OTLP/HTTP JSON on its existing token-authenticated loopback listener (but `nforge serve` is deleted with B1.9, so this needs another listener), map the session to a Lane through a `forge.lane_id` resource attribute set from the Lane environment, and write the same self-report record. It stays off unless the user configures the exporter, and it drops prompt and tool-content attributes.
 
 ## Acceptance from the hosted browser
 
-**Status.** Most of this section describes the pre-cutover path, where a bound local owner consumes hosted Accept requests. Since the cutover on 2026-10-28, a project with server authority accepts only through hosted landing (see the last paragraph of this section). `nforge host` refuses `--listen`, `--sync-agent`, `--auto-sync` and `--no-auto-sync` with `CLI_UPGRADE_REQUIRED`, so no owner process polls for requests, and nothing waits for a local receipt. `nforge serve` still starts a local Git/Work server; it is deleted with B1.9 (owner decision, 2026-10-31).
+**Status.** The owner-request relay is retired. Since the cutover on 2026-10-28, a project with server authority accepts only through hosted landing (see the last paragraph of this section), and nothing waits for a local owner receipt. The former `ownerAcceptance`, `ownerLifecycle` and `projectOwnerSync:publish` RPC addresses return `CLI_UPGRADE_REQUIRED`, and `nforge host` refuses `--listen`, `--sync-agent`, `--auto-sync` and `--no-auto-sync` with the same error, so no owner process polls for requests. Their stored request and machine tables remain for backup recovery until B1.9. Hosted Review accepts, requests changes and reverts through the hosted landing client and queue (`web/src/review/`). The browser no longer offers owner-listener actions such as Requested / Waiting for the named machine or Re-check on latest main. `nforge serve` still starts a local Git/Work server; it is deleted with B1.9 (owner decision, 2026-10-31).
 
-A native project created by `nforge host` remains canonical on its bound local
-owner. The hosting key and native backup format distinguish it from Git-backed
-and hosted-canonical projects. Hosted Accept records an owner-scoped request,
-not a `hostedChannelMoves` selection: operation UUID, exact Candidate/head, expected
-main, server-attributed requester and person/agent classification. The original
-request survives source/index refreshes. Bound pulls materialize source client directories without native Work or
-acceptance authority. Existing independent bound owners can exchange source and
-activity, but do not consume canonical acceptance requests or report their local
-Channel moves as canonical main.
-Bindings without an explicit `acceptanceOwner:true` role are not canonical owners.
-They do not consume owner requests or publish local Channel moves as canonical main;
-`nforge host ROOT --status` reports that the legacy binding has no recorded role.
-An operator must establish which directory is canonical before migrating that binding.
-No role is inferred from a matching project key or an old binding. Retry of the same operation reconciles
-its original pins and terminal result.
-
-`nforge host ROOT --listen` and `nforge serve ROOT` poll every five seconds while
-running. B5's detached `host --sync-agent` worker also consumes one request after
-flushing activity; it is opportunistic, not a persistent connection. Hosting
-performs an initial poll. Owner machine observations live separately from project Work and policy.
-The owner reports its machine name, last-seen main and
-the listener command with a `ROOT` placeholder. Last-seen is an observation; a machine not seen for
-30 seconds is labelled accordingly, not declared incapable of accepting.
-
-The consumer uses the existing native person acceptance path under the owner
-lock and current autonomy policy. Device requests retain agent classification
-and cannot acquire person acceptance authority. If main advanced after a person
-request, the owner-approved fast-path compares source manifests against the
-expected main. Only disjoint changed paths (including directory-prefix clashes)
-compose on current main without a new check. The receipt records the comparison base, both path sets,
-original Candidate/head and current main. Before the first main acceptance, the retained
-native bootstrap supplies the comparison base. Overlap or unavailable ancestry rejects as
-needs re-check; original source, checks and accepted work remain. The composed
-Candidate has a new identity; it does not inherit a passing run on that identity.
-
-Local Channel moves are durable before network delivery. The binding retains
-terminal receipts and exact metadata publication payloads for lost-reply replay.
-The consumer refreshes indexed hosted main from local receipts before reporting
-completion. Source and check-artifact transfer uses exchange, manually or through
-opt-in `autoExchange`: indexed source pins do not promise that newly composed
-bytes have already been uploaded.
-The browser says Requested / Waiting for the named machine, and only says
-Accepted into main after the local receipt arrives. Git-backed and hosted-canonical
-projects retain their existing hosted selection path.
+A native project created by `nforge host` keeps the `acceptanceOwner:true` role in its `hosted-binding.json`, and `nforge host ROOT --status` reports a legacy binding with no recorded role. That role only says which local directory is the native owner for recovery and cutover; it no longer consumes hosted requests. A bound local owner that is not under server authority accepts through its own native `accept-channel`.
 
 Revert creates a compensating-change Intent and a hand-to-agent prompt. The agent
 must create a reverse-diff Lane on current main, preserve later work, then check
@@ -509,20 +387,20 @@ Main is never rewound by this action.
 Once hosted holds source authority (`sourceAuthority.mode` is `server`, or a
 switch to it is pending), hosted landing is the only acceptance writer
 (`projectHostedLanding` / `projectHostedAcceptance`). The native `accept-channel`
-writer, shared by CLI, MCP, HTTP, agent accept, landing batches and owner
-requests, then rejects with `HOSTED_AUTHORITY`, naming the hosted project URL and
+writer, shared by CLI, MCP, HTTP, agent accept and landing batches, then
+rejects with `HOSTED_AUTHORITY`, naming the hosted project URL and
 an explicitly addressed hosted `finish` command. It checks at entry and again
 under the publication lock. There is no local override: hosted downtime pauses
 landing while editing continues. Before the switch and after a rollback to
-`native-owner`, the owner accepts as described above at its pinned epoch.
+`native-owner`, the local owner accepts through that writer at its pinned epoch.
 
 ## Collaboration
 
-Source changes and live coordination are separate. Convex stores sessions and an append-only message feed outside the Work journal. A session is an attributed claim: who, where, status and optional Intent, Lane or path. Last-seen is the time a report arrived. A heartbeat touch moves only receipt time (`lastSeen`), preserving `lastActivity` and `activityKind`; real MCP activity advances both. Bound owner observations pin activity time before transport, so delayed delivery cannot look like fresh editing. CLI lifecycle calls persist local session observations; one process-owned observer with per-Lane filesystem watchers coalesces edits about once per minute without reading or hashing source. The same edit observations drive debounced Lane auto-snapshots: a background, Lane-locked (never waited for) capture with a metadata cache into a local State and a pointer under `.forge/work/auto-snapshots`, published under its own short lock that object collection also takes; the owner Work lock is never taken. Its minute tick also observes queued/running checks. Presence observers validate the current Work format before creating owner or Lane queue tickets; unsupported formats leave the owner untouched. HTTP owns its in-process presence observer: closing the last handle aborts watchers and waits for Lane queue releases. MCP connections do not own background presence or landing workers. CLI lifecycle activity wakes an existing owner worker or retains a detached presence worker. CLI/MCP check execution uses a detached controller with an exclusive per-run process lease, retaining the original run and provider pins independently of transport lifetime. HTTP shutdown also clears the acceptance interval and waits for its active poll before returning. Hosted Now uses shared 15-minute working and 90-minute folding defaults, keep quiet sessions visible, and collapse duplicate name+Lane observations. Silence never completes a session; explicit completion or accepted/closed Lanes do. Messages and handoffs target a session, a participant or the project; acknowledgements refer to the original and are recorded per participant. Claims are advisory path scopes with an expiry. Hosted Work writes, exchange publishes and source returns insert `change` events in the same transaction. Events carry denormalized kind, recipient, Intent and Lane for indexed inbox and scoped feeds. Nothing pauses an agent, locks a file or accepts source.
+Source changes and live coordination are separate. Convex stores sessions and an append-only message feed outside the Work journal. A session is an attributed claim: who, where, status and optional Intent, Lane or path. Last-seen is the time a report arrived. A heartbeat touch moves only receipt time (`lastSeen`), preserving `lastActivity` and `activityKind`; real MCP activity advances both. CLI lifecycle calls persist local session observations; one process-owned observer with per-Lane filesystem watchers coalesces edits about once per minute without reading or hashing source. The same edit observations drive debounced Lane auto-snapshots: a background, Lane-locked (never waited for) capture with a metadata cache into a local State and a pointer under `.forge/work/auto-snapshots`, published under its own short lock that object collection also takes; the owner Work lock is never taken. Its minute tick also observes queued/running checks. Presence observers validate the current Work format before creating owner or Lane queue tickets; unsupported formats leave the owner untouched. HTTP owns its in-process presence observer: closing the last handle aborts watchers and waits for Lane queue releases. MCP connections do not own background presence or landing workers. CLI lifecycle activity wakes an existing owner worker or retains a detached presence worker. CLI/MCP check execution uses a detached controller with an exclusive per-run process lease, retaining the original run and provider pins independently of transport lifetime. Hosted Now uses shared 15-minute working and 90-minute folding defaults, keep quiet sessions visible, and collapse duplicate name+Lane observations. Silence never completes a session; explicit completion or accepted/closed Lanes do. Messages and handoffs target a session, a participant or the project; acknowledgements refer to the original and are recorded per participant. Claims are advisory path scopes with an expiry. Hosted Work writes insert `change` events in the same transaction. Events carry denormalized kind, recipient, Intent and Lane for indexed inbox and scoped feeds. Nothing pauses an agent, locks a file or accepts source.
 
-Hosted Intent, note and Channel operations use a derived indexed Work generation, rebuilt from the checkpoint and the event journal. Source return updates a ready generation in place: small deltas modify changed rows, while larger deltas stage a replacement record partition before an atomic switch under the same public generation. Browser query identities stay stable; CLI pagination cursors additionally pin the source revision, and multi-part record hydration retries if that revision changes. Missing or incompatible derived indexes return `PROJECT_WORK_INDEX_MISSING`; normal web/agent reads and commands never rebuild history. An operator can explicitly resume full preparation with `nforge hosted-work DEPLOYMENT PROJECT_ID '{"action":"rebuild-index"}'`. The cockpit strip selects the latest accepted `main` move from the pushed local `channelMoves` and hosted selection records, including its recorded timestamp, actor and exact-Candidate check. Indexed Lane `main.included` means main contains that Lane head; Candidate/run `main.included` means the checked head contains main. These opposite ancestry directions are kept separate, with unavailable ancestry reported as unknown. Accepted moves and their exact Candidate inputs also identify landed Lane heads in older indexes. Unanchored notes, Intent creation/status and planning comments use `projectWorkCommand.command`, a single mutation with an operation UUID and no client-held revision. It reads current headers, applies the shared reducer and assigns the next journal revision atomically; Convex retries concurrent transactions. Coordination messages and heartbeat touches are already independent server mutations.
+Hosted Intent, note and Channel operations use a derived indexed Work generation, rebuilt from the checkpoint and the event journal. Browser query identities stay stable; CLI pagination cursors additionally pin the source revision, and multi-part record hydration retries if that revision changes. Missing or incompatible derived indexes return `PROJECT_WORK_INDEX_MISSING`; normal web/agent reads and commands never rebuild history. An operator can explicitly resume full preparation with `nforge hosted-work DEPLOYMENT PROJECT_ID '{"action":"rebuild-index"}'`. The cockpit strip selects the latest accepted `main` move from the local `channelMoves` and hosted selection records, including its recorded timestamp, actor and exact-Candidate check. Indexed Lane `main.included` means main contains that Lane head; Candidate/run `main.included` means the checked head contains main. These opposite ancestry directions are kept separate, with unavailable ancestry reported as unknown. Accepted moves and their exact Candidate inputs also identify landed Lane heads in older indexes. Unanchored notes, Intent creation/status and planning comments use `projectWorkCommand.command`, a single mutation with an operation UUID and no client-held revision. It reads current headers, applies the shared reducer and assigns the next journal revision atomically; Convex retries concurrent transactions. Coordination messages and heartbeat touches are already independent server mutations.
 
-The `projectWorkHeads` row owns the mutable Work revision and projection metadata. Legacy project/generation fields seed it lazily; ordinary writes leave those shared documents unchanged. Revision-sensitive reads (Work state, workspace, provenance plans, exports and source return) hydrate the head; collection/detail reads depend on the stable generation and their selected record ranges. Opening or hosting a project does not run full index preparation. The compatibility `ensure` action only reads the current generation unless the explicit operator request supplies `rebuild:true`. Detail-storage migration retains the ready generation, and canonical hosted main moves do not invalidate it. Anchored notes still validate source bytes in an action; planning-item replacement, Channel acceptance and source return retain their pinned revision checks. The legacy command action remains compatible. Source return atomically selects the new checkpoint and head; journal replay and operation receipts retain contiguous revisions and original retry identities.
+The `projectWorkHeads` row owns the mutable Work revision and projection metadata. Legacy project/generation fields seed it lazily; ordinary writes leave those shared documents unchanged. Revision-sensitive reads (Work state, workspace, provenance plans and exports) hydrate the head; collection/detail reads depend on the stable generation and their selected record ranges. Opening or hosting a project does not run full index preparation. The compatibility `ensure` action only reads the current generation unless the explicit operator request supplies `rebuild:true`. Detail-storage migration retains the ready generation, and canonical hosted main moves do not invalidate it. Anchored notes still validate source bytes in an action; planning-item replacement and Channel acceptance retain their pinned revision checks. The legacy command action remains compatible. Journal replay and operation receipts retain contiguous revisions and original retry identities.
 
 Related work is found by comparing changed paths against each Candidate's base. Composition merges independent text-line changes. Overlaps, binary changes and add/delete conflicts stay explicit. Agents should announce scope, watch related activity, message when needed and acknowledge agreements. See [agents](agents.md) and [decisions](decisions.md).
 
@@ -588,33 +466,19 @@ Existing rows are populated by the bounded, idempotent internal
 `coordinationBackfill:activity({cursor})` mutation, repeating the returned cursor
 until `isDone`; counts for unbackfilled imported history are incomplete until then.
 
-Hosted Review uses this owner request path for native projects and offers every
-retained clean Candidate, including Candidates without a previous acceptance. People may
+Hosted Review lands through the hosted landing queue and offers every retained
+clean Candidate, including Candidates without a previous acceptance. People may
 accept clean unchecked Candidates; agents still need exact-Candidate passing evidence and
-the current autonomy policy. `hosted-work` CLI and `forge_hosted_work` expose
-`accept` with operationId, revision, viewId, head, archiveSha256, channel and
-previousId. The CLI/MCP command explicitly downscopes to agent authority even
-when supplied an account JWT; device credentials can never obtain person authority.
-Repeating the original pins reconciles the same request or receipt.
+the current autonomy policy (see [hosted final acceptance](#hosted-final-acceptance)).
+The `hosted-work` CLI and `forge_hosted_work` no longer have an `accept` action: agents
+land with `finish` or `land`, and device credentials can never obtain person authority.
 
-Hosted native Intent and Lane lifecycle menus queue complete, reopen and abandon
-on the same canonical owner listener. Requested and machine-waiting states are
-observations; only the owner receipt reports an applied lifecycle transition.
-Commands pin the target head/base and lifecycle state. Abandon uses B4's existing
-reason, save-first and Intent cascade semantics. Complete/reopen retain source
-and acceptance history. B4's cancel command cancels check runs: there is no
-cancelled Intent or Lane state, so these menus do not invent one. Hosted-canonical
-and Git projects retain their existing Intent status controls.
-
-An overlap rejection offers **Re-check on latest main**. It queues a separate
-owner request, composes the pinned reviewed Candidate with the latest local main using
-normal Candidate dependencies, and queues the configured check through the existing
-runner. It never accepts source. Original request ids replay the same composed
-Candidate and run even if main advances later. A text conflict retains a conflict Candidate
-and reports why no check was queued. Re-check receipts are separate from acceptance
-receipts; new source/check artifacts still require manual or opt-in automatic exchange. Deterministic
-acceptance failures do not offer an unchanged acceptance retry; transient owner
-failures retain Request again.
+The owner-listener variants of the hosted Intent and Lane lifecycle menus (complete,
+reopen and abandon queued on a canonical owner) and of **Re-check on latest main**
+(an owner request that composed a Candidate on the latest local main) are retired
+with the owner relay: `ownerLifecycle` and `ownerAcceptance` return
+`CLI_UPGRADE_REQUIRED`. Hosted agents use the lifecycle and landing APIs below.
+B4's cancel command cancels check runs: there is no cancelled Intent or Lane state.
 
 Hosted Code uses paths-only `sourceTreePaths` pages, keyed by an exact source
 head and published with the selected Work generation. The `sourceTrees` marker
@@ -632,8 +496,12 @@ An open tab costs nothing while nobody is looking. The browser's Convex client
 drops every live subscription after 30 s hidden or 5 minutes without input or
 focus (`web/src/live-reads.ts`); mounted pages keep their last values, the strip
 shows Paused, and the next input or visibility change subscribes each mounted
-read once for fresh data. Nothing polls; time-window counts advance only while
-awake.
+read once for fresh data. Nothing polls. Relative ages re-render on a local 15 s
+timer (`useNow`) that stands still while reads sleep, with no server call. A server
+count that depends on the clock, such as active agents, changes only on a server
+write or a wake, so it can read stale in an awake tab. `scripts/check-idle-queries.mjs`
+fails `npm run check` on any live query argument derived from the clock or a
+`refreshKey`.
 
 Page readiness distinguishes the first summary page from complete retained
 history. Summary consumers can render available rows while continuation pages
@@ -663,7 +531,7 @@ existing `sourceBlobs` index when its generation names the requested backup.
 It reads only those immutable objects, without walking the complete retained
 manifest. Each object read still verifies current access, storage metadata,
 size and digest; the final checkpoint check remains. Missing or inconsistent
-disposable pins, an older backup, or an index/source-return race restart the
+disposable pins, an older backup, or an index race restart the
 original manifest reader with the same backup, base and head. No source revision
 or visibility is substituted, and no new index format or backfill is required.
 
@@ -681,7 +549,7 @@ Migration maps 19→20 with unchanged batch records. Older format-aware readers
 report `WORK_UPGRADE_REQUIRED` and “upgrade nforge” before reading records or
 preparing writes. Current readers retain the earlier formats, including batches
 already written before this capability was versioned. Historical migration
-receipts remain exact. Hosted pushes retain the current representation and format.
+receipts remain exact.
 
 Unlinked issues retain their UUIDs. A single issue-to-execution link folds only
 when that pair is unique in both directions across retained planning history;
@@ -728,7 +596,7 @@ records the request as lifecycle history; Ready is derived attention. The legacy
 planning commands (`put-planning-item`, `comment-planning-item`) remain the write
 API: an Issue write updates the unified Intent (title, description, version,
 relations, memberships) and still appends its planning version or comment, which
-keeps operation-ID retries, exports and the hosted push exact. Issue IDs folded at
+keeps operation-ID retries and exports exact. Issue IDs folded at
 migration resolve through `intentAliases`, and writes through the alias or the
 Intent ID extend one version chain. Planning status sets the status of an Intent
 with no source pin (closed → completed, otherwise active); once a Lane has pinned
@@ -738,8 +606,8 @@ first Lane; composition and Git `lane` commands on an unpinned Intent fail with
 `INTENT_NOT_STARTED`. `intentState` derives Proposed, Planned, In motion and Done
 for presentation only.
 
-Native exchange sends `hostedPushWork` without down-projecting unified fields or
-unpinned Intents. Record reference validation uses the declared Work format, so
+Hosted Work keeps unified fields and unpinned Intents without down-projecting them
+(`hostedPushWork`, sent by the retired exchange push, is now called only by tests). Record reference validation uses the declared Work format, so
 formats 16, 18 and 20 accept an Intent without a base before its first Lane. Unknown
 extension fields remain opaque to reference discovery. Unified collections use format-aware record catalogs and deltas, including stable
 alias keys. Unsupported layouts keep the complete compatibility path; streamed
@@ -787,7 +655,10 @@ Projects created for a native upload record `native-owner` at epoch 0 and switch
 through the drained-owner cutover. Browser/CLI bootstrap and GitHub import have no
 native owner: their publishing transaction moves the project to `server` at epoch
 1, selects hosted `main` at the published head and writes the same cutover receipt
-(`projectHostedBirth`). Missing legacy fields mean `native-owner` at epoch 0;
+(`projectHostedBirth`). An older completed GitHub import still owned by a native
+owner switches the same way with `nforge make-editable DEPLOYMENT_URL PROJECT_ID`
+(owner only; it uses the stored bytes and uploads nothing). A project whose native
+owner journal exists keeps the drained-owner cutover instead. Missing legacy fields mean `native-owner` at epoch 0;
 creation retries preserve an existing record. Hosting requests, presence and
 heartbeats never select authority. `projectSourceAuthority:current` checks
 current project access and reads that project row without scanning or migrating
@@ -1087,6 +958,13 @@ indexes. A later writer promotes its selected visible version first, retaining
 save and landed-head lifecycle CAS behavior. No project-wide revision, source
 scan, cleanup, count ceiling or idle observer is introduced.
 
+The project owner can pin a Lane (agent verb `pin`, `{laneId, pinned}` with `pinned`
+defaulting to true; `projectHostedLanePin:setPin`). Pinning is one optional field on
+the Lane record, so it adds no table or scheduler. A pinned Lane is skipped by
+cleanup: `complete-merged`, `completeOnAccept`, Intent abandonment cascades, client
+prune and cache GC. Completing or abandoning it directly fails with `LANE_PINNED`
+until it is unpinned (`pinned:false`); reopen is allowed. Any Lane state can be pinned.
+
 The thin `transitionHostedLane` helper retains its command, child UUID and exact
 capture in its private client cache. H07 handles direct source transfers and
 save reconciliation. The lifecycle parent can wait durably for that exact save;
@@ -1278,7 +1156,8 @@ fake providers. See the
 [check API](operations/source-exchange.md#hosted-check-api).
 
 Mac runs use the same signed shard and terminal callbacks through the pull-based
-`projectHostedCheckWorker`. Completion retains `macEvidence`: machine ID, machine
+`projectHostedCheckWorker`. Forge's own Mac check worker stopped on 2026-10-29, so
+its checks run on GitHub Actions; this path remains in code. Completion retains `macEvidence`: machine ID, machine
 owner, registration session, runner fingerprint (runtime plus environment), and
 `reuseKey`. The reuse key is explicitly null until Q3 supplies the hosted content
 key; it is not evidence reuse permission. Final acceptance copies this receipt.
@@ -1362,7 +1241,8 @@ verified byte files never authorize another window. Recipe leaves retain their
 exact-pin grant checks. It builds bare Git objects from streamed
 storage objects, preserving binary bytes, modes and symlink targets without a
 checkout, filters, hooks or project execution. The existing generated Actions
-workflow honors the selected GitHub-hosted or Blacksmith label. The native State
+workflow honors the selected `runsOn` label (`ubuntu-latest` by default; Blacksmith
+labels are still accepted but unused since 2026-10-25). The native State
 and harness export commit remain distinct pins. The immutable export bundle is
 retained in project object storage before publication of `forge-check/<runId>`.
 
@@ -1485,6 +1365,18 @@ when an individual landing is cancelled. An explicit check-run cancellation stop
 the selected run, including a run shared by live landings.
 Direct Actions cancellation schedules the provider run-cancel API; restored jobs
 make one signed read-only preflight query before spawn, with no new heartbeat.
+
+A pending entry with no progress for 15 minutes records a `LANDING_STALLED` observation
+(`src/landing-stall.ts`). For a queued entry the alarm also arms one drop deadline 60
+minutes after the last progress (`LANDING_DROP_MS`, `convex/projectHostedLandingStall.ts`); entries
+waiting for review or a dependency are exempt. At the deadline Forge re-drives the
+entry, and a batch stuck composing splits into halves. If that makes no progress and
+nothing live will drive the entry (the queue, its own pending attempt, an active
+batch or a batch peer), it is ended through the cancellation path with a stated
+reason: nothing lands, the operation is settled, the queue claim is released and
+batch peers are re-selected. If something live still drives it, the deadline re-arms
+at 2, 4, 8 and 16 hours and then stops; live work is never ended. Finish the same
+Lane again to retry. See [landing workflow](agents/workflow.md).
 
 ### Hosted final acceptance
 
@@ -1645,8 +1537,8 @@ return saved Lane/State/blob pins and recheck current authorization before retur
 bytes, without Work/history hydration or substitution of local drafts. Only an
 explicit live run or submission wait creates subscriptions; every exit and server
 disconnect closes them. Finite status/observe installs no observer. All stdio MCP
-entry points close on stdin end/close or a broken output pipe, and after fifteen
-minutes without a request (`FORGE_MCP_IDLE_MS` overrides the deadline). One
+entry points close on stdin end/close or a broken output pipe, and after two
+hours without a request (`FORGE_MCP_IDLE_MS` overrides the deadline). One
 unreferenced timeout sleeps while idle; it is removed while any request is in
 flight and rearmed after the last response. Closing releases graph workers,
 watcher attachments and live waits without taking over background owner work.

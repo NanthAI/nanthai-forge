@@ -203,7 +203,7 @@ Older archives with full logs still restore; deliberately omitted provider logs
 are provider-held, not missing check evidence. Results and source validation stay
 strict, and removing log bytes does not change a passed run’s evidence hash.
 
-Local logs stay on the machine for seven days. Hosted Mac workers keep their local pipe files under `FORGE_LOCAL_CHECK_LOG_DIR` (by default, the private `forge-mac-check-logs` directory in the machine’s temp directory), outside disposable source/runtime copies. Actual check starts and explicit
+Local logs stay on the machine for seven days. A machine that runs a hosted Mac worker keeps its local pipe files under `FORGE_LOCAL_CHECK_LOG_DIR` (by default, the private `forge-mac-check-logs` directory in the machine’s temp directory), outside disposable source/runtime copies. Dogfood checks no longer run on a Mac: the Mac check worker was stopped on 2026-10-29 and checks run on GitHub-hosted Actions runners, whose logs stay with GitHub. Actual check starts and explicit
 cleanup enforce that bound; completed logs and stale logs whose collector exited are pruned on a later check start. Active collectors keep their current files. There is no idle timer. Upload is off until an owner
 explicitly enables it. The enabling command is the opt-in step:
 
@@ -369,7 +369,7 @@ For whole-deployment Convex snapshots, fresh-target restore and offline/live
 comparison tooling, see [hosted deployment durability](operations/hosted-durability.md).
 This complements project archives; the live restore drill remains unverified.
 
-Hosted projects store the same archives. Use "Store private backup" in the browser, or `nforge exchange` for incremental pushes. To work on hosted Intents locally, download the pinned archive and the current journal together, then run `nforge restore-native ARCHIVE NEW_DIR --journal HOSTED_WORK.json`. Return a new checkpoint with "Return checkpoint to hosted Forge". If another edit landed first, nothing is overwritten. Both versions stay, so download the current Work and reconcile first. A lost reply is resolved with "Reconcile original source return".
+Hosted projects store the same archives. In the browser, "Stored checkpoints" lists them: upload a source and Work archive exported from Forge, "Download source and Work" to fetch one, or "Reconcile original upload" after an unknown reply. To work on hosted Intents locally, download the pinned archive and the current journal together, then run `nforge restore-native ARCHIVE NEW_DIR --journal HOSTED_WORK.json`. There is no way to return that local copy to the hosted project: push and source return were removed, and their old RPC addresses only answer `CLI_UPGRADE_REQUIRED`. Hosted work continues through hosted Lanes and landing.
 
 ### Work format and recovery
 
@@ -512,16 +512,15 @@ and binds a replacement.
 
 ### Hosted cockpit index format and team reset
 
-Hosted Work index format **4** includes Candidate Lane/head inputs and dependency counts, run timing,
+The hosted Work index format is now **11** (`HOSTED_WORK_INDEX_FORMAT`); this section was written at format **4**, which includes Candidate Lane/head inputs and dependency counts, run timing,
 exit code, a 200-character check name and the retained failure summary (at most 4096 characters),
 and Lane save count plus the last save time and a 200-character message. Full records, messages,
 check definitions, dependencies and logs remain in their existing payloads. Reactive summaries do
 not load full checkpoint arrays or check environments. The 32,000-character payload chunks and
 100-entry/500,000-byte RPC batches are unchanged.
 
-Formats 2/3 are no longer selected. The existing `ensure` path can rebuild the disposable index
-from its source checkpoint and journal; no retained-data migration is needed. Source returns also
-publish format 4. For the team's reset release, the owner has chosen to delete the old hosted
+Older formats are no longer selected. The existing `ensure` path can rebuild the disposable index
+from its source checkpoint and journal; no retained-data migration is needed. For the team's reset release, the owner has chosen to delete the old hosted
 project and seed a replacement instead of migrating it. Only the lead performs these steps:
 
 1. Use an up-to-date Lane of accepted `main` as the deployment directory. With Node 24.22.1+ (24.x) on PATH,
@@ -564,9 +563,9 @@ project and seed a replacement instead of migrating it. Only the lead performs t
    an interrupted `--new`. Native hosting becomes ready after current source, Work and the index;
    older content continues in a resumable local background process. `host --status` reports
    **history backfilling** until the full pinned closure is validated. Use `host --wait` to follow
-   completion before testing full recovery. The initial seed eventually uploads the complete closure;
-   subsequent `nforge exchange "$OWNER" push` reuses stored objects and pins the current hosted head.
-   Recreate any desired contributor grants on the replacement explicitly.
+   completion before testing full recovery. The initial seed eventually uploads the complete closure.
+   `nforge exchange "$OWNER" push` no longer exists (it returns `CLI_UPGRADE_REQUIRED`); later changes
+   reach the hosted project through hosted Lanes and landing. Recreate any desired contributor grants on the replacement explicitly.
 
    Inspect the new format's summaries, then open the printed URL and inspect Now, a Lane and Intents:
 
@@ -602,8 +601,10 @@ and Code-tree pages. Removing it requires parity evidence for all of those pages
 
 ## Native runner selection
 
-Native checks support local and [GitHub Actions or Blacksmith](operations/github-actions-checks.md)
-runners. Existing Modal policies and receipts remain readable; new Modal runner
+Native checks support local and [GitHub Actions](operations/github-actions-checks.md)
+runners (`runsOn` takes any label; the dogfood project uses free GitHub-hosted runners).
+Blacksmith use ended on 2026-10-25; Blacksmith labels are still priced below so old
+receipts and any label you set stay readable. Existing Modal policies and receipts remain readable; new Modal runner
 selections are refused with instructions to select a supported runner. The
 `checks.fallback` field remains readable for policy compatibility; Actions does
 not automatically repeat unknown remote work locally.
@@ -615,8 +616,12 @@ and payload after an unknown reply):
 
 ```sh
 nforge set-policy OWNER '{"operationId":"UUID","checks":{"runner":"local"}}'
-nforge set-policy OWNER '{"operationId":"UUID","checks":{"runner":"github-actions","repo":"OWNER/REPO","runsOn":"blacksmith-4vcpu-ubuntu-2404","shards":4}}'
+nforge set-policy OWNER '{"operationId":"UUID","checks":{"runner":"github-actions","repo":"OWNER/REPO","runsOn":"ubuntu-latest","shards":4}}'
 ```
+
+`policy` and `set-policy` also work on a hosted project (`nforge policy ROOT`,
+`nforge set-policy ROOT JSON`, or `nforge x ROOT set-policy`). They read and write the
+hosted policy; a repeated operation UUID replays the recorded change.
 
 Every new terminal check receipt has `backend.cost`: the runner/label, estimated
 billed seconds/minutes, estimated USD, per-execution quantities and the basis.
@@ -693,7 +698,7 @@ with `npm ci --ignore-scripts`, then `npm run build:core`):
 ```sh
 node --import ./tests/check-runtime.mjs --test --test-concurrency=2 \
   tests/landing-lifecycle.test.mjs \
-  tests/hosted-landing-lifecycle.test.mjs \
+  tests/hosted-machine-lifecycle.test.mjs \
   tests/landing-check-recovery.test.mjs \
   tests/hosted-mac-runner.test.mjs
 ```
@@ -744,6 +749,19 @@ and metric 6's preservation of passed work; production interventions per landing
 check minutes and reuse rate remain unmeasured by this drill. Metric 3 is checked
 by requiring every original submission to settle, with no pending queue work.
 
+### Stalled and dropped landings
+
+A hosted landing entry with no progress for 15 minutes raises a `LANDING_STALLED`
+alarm (`stall` in its observation). For a queued entry, a second deadline 60 minutes
+after its last progress re-drives it; if nothing is left to drive it, Forge ends it
+as `terminal-failed` with `LANDING_STALLED` and a stated reason, through the
+cancellation path, so the requester gets an outcome and batch peers are re-selected.
+Nothing lands in that case; finish the same Lane again to retry. While a live owner
+(the queue, its own finish attempt, a batch or a batch peer) still drives the entry,
+Forge never ends it: the deadline re-arms at 2, 4, 8 and 16 hours and then stops.
+Entries waiting for review or a dependency are not ended. Settled and idle queues
+schedule no recurring wake. See [agent workflow](agents/workflow.md) for the receipt fields.
+
 ## Local cleanup
 
 `nforge agent ROOT clean` (MCP `forge_task` action `clean`) reclaims regenerable local disk. It is a dry run unless you send `{"apply":true}`; the dry run lists candidates grouped by kind with bytes and the reason each is safe, plus totals and every skipped item with its reason. Apply recomputes the set under the owner lock and re-validates each item (pass `items` ids from a dry run to limit it; anything that changed is skipped). `kinds` filters:
@@ -758,7 +776,9 @@ by requiring every original submission to settle, with no pending queue work.
 
 Active and paused Lanes, Work records, referenced objects and anything outside ROOT are never touched. Repeating is safe.
 
-The client also keeps its own machine files bounded without a daemon: nested Lane copies in `ROOT.forge-client/lanes` (size and age caps, [defaults](parallel-work-defaults.md#clientcachemaxgb-and-clientcachemaxagehours)), idle Lane roots without unsaved edits (`autoPruneHours`), the peers cache in the temp directory (entries older than a day, swept at most hourly on write) and dead `nforge-wake-*` channel directories (swept when a driver opens its own). Test runs create their directories under per-run prefixes, remove them on exit and on `SIGTERM`, and sweep earlier runs' `forge-test-*` directories older than two hours.
+The client also keeps its own machine files bounded without a daemon: nested Lane copies in `ROOT.forge-client/lanes` (size and age caps, [defaults](parallel-work-defaults.md#clientcachemaxgb-and-clientcachemaxagehours)), idle Lane roots without unsaved edits (`autoPruneHours`), the peers cache in the temp directory (entries older than a day, swept at most hourly on write) and dead `nforge-wake-*` channel directories (swept when a driver opens its own). Test runs create their directories under per-run prefixes, remove them on exit and on `SIGTERM`, and sweep earlier runs' `forge-test-*` directories older than two hours. Forge's own temp output goes under `$TMPDIR/forge-tmp`, swept from CLI start (entries unwritten for two hours, at most hourly, never one whose process is alive); the client directories carry an empty `.metadata_never_index` file so Spotlight skips them ([local disk](parallel-work-defaults.md#local-disk)).
+
+A hosted Lane the owner pinned (`nforge x ROOT pin '{"laneId":"LANE_ID"}'`, `pinned:false` to undo) is skipped by `prune` and the client cache GC, and by complete-merged, `completeOnAccept` and Intent cascades on the server. An explicit complete or abandon of it fails with `LANE_PINNED` until it is unpinned.
 
 With `lifecycle.cleanRegenerableCopies:true`, terminal checks immediately remove eligible remote source copies and Lane lifecycle events also sweep these copies and the seven-day retention kinds. Retention is automatic only under that existing opt-in; there is no background daemon. It removes old log prefixes and expired closed-Lane auto-snapshot pointers/caches permanently and records that fact; rerunning a check reconstructs its source copy, not its original output. A resumed run gets a separate cleanup action for its new terminal end time; repeating the same completion returns its recorded cleanup result. Dry runs do not reconcile or rewrite run records.
 
@@ -775,13 +795,16 @@ Inspection counts objects and lists verified unreferenced candidates, and change
 
 ## One authority cutover
 
-This is the Bet 1 cutover procedure for [Phase 5](phase5-plan.md#bet-1-one-authority-then-delete),
-not a claim that the project has switched. The authority transition mutation,
+This is the Bet 1 cutover procedure for [Phase 5](phase5-plan.md#bet-1-one-authority-then-delete).
+It was applied to the dogfood project on 2026-10-28 (server authority, epoch 1; see the
+[plan status](phase5-plan.md#where-the-plan-stands)); the Mac no longer accepts there. The text below is the
+procedure and the builder-side qualification as written, and still applies to any other
+bound project. The authority transition mutation,
 epoch fences and journaled native client are implemented and qualified locally
 below. The pinned cutover command and lead checklist are described below. Follow the
 [migration invariants](operations/hosted-landing-contract.md#migration-invariants-deferred-implementation)
-throughout. No deployment, account operation or real-owner cutover was performed
-for this document.
+throughout. The drills and measurements in this section were run on synthetic or copied
+owners; they are not measurements of the real cutover.
 
 ### B1.2b: drain the owner queue
 
@@ -1047,10 +1070,11 @@ step, verifies exact recovery, and exercises reverse CAS and original-operation
 replay. A pending empty input completion page is valid at entry zero; nonempty
 page cursors retain their original bounds checks.
 
-The synthetic cutover phases below were observed with Node 24.22.1. The
-runner/cache qualification is **blocked until B1.5a2 is on main**: the older
+The synthetic cutover phases below were observed with Node 24.22.1, before the
+runner/cache recovery (B1.5a2) was on main, which has since landed (`src/recovery-runner.ts`);
+the table is that earlier observation and has not been re-run here. At the time the older
 recovery entry point returned a native recovery copy rather than `runner-cache`.
-The test fails on that contract; it does not skip the recovery assertion.
+The test failed on that contract; it did not skip the recovery assertion.
 
 | Synthetic step | Seconds | Result |
 | --- | ---: | --- |
@@ -1063,7 +1087,7 @@ The test fails on that contract; it does not skip the recovery assertion.
 
 The separate bound-client/transaction tests exercise reverse CAS at epoch 2,
 receipt/head preservation and historical replay. The linked post-recovery
-rollback and a clean runner/cache result still require the prerequisite. The
+rollback and a clean runner/cache result were not obtained in that run. The
 measured synthetic landing had one queued submission and one delivered landing
 receipt (metric 3: zero dropped); no queue nudge, restart or landing retry was
 needed. Production interventions per landing (metric 5) remain unmeasured. The
@@ -1206,9 +1230,10 @@ owner locks/files that it discards anyway. Missing durable records or source,
 permission failures and other copy errors still fail; source and Work validation
 remain mandatory parts of the drill.
 
-**Unrun:** real hosted cutover and drain/admission concurrency, hosted-only
-recovery folding (B1.5a), clean-machine Route A/Route B and seven days of single
-hosted authority (B1.5b). Local fake transitions and archive recovery are not
+**Not covered by this local drill:** drain/admission concurrency on a real hosted
+deployment, hosted-only recovery folding (B1.5a), clean-machine Route A/Route B and
+seven days of single hosted authority (B1.5b). Whether the real runs of those happened is
+not recorded here. Local fake transitions and archive recovery are not
 production RPO/RTO measurements.
 
 ### Deletion inventory and last callers
@@ -1617,6 +1642,7 @@ A missing variable fails the write with `R2_NOT_CONFIGURED`; Forge never falls b
 - Upload URLs expire after 15 minutes. Objects are never overwritten; a repeated upload of the same content is accepted as already stored.
 - Download URLs expire after 5 minutes; readers sign again once on expiry.
 - A corrupt or tampered object is rejected with `BLOB_DIGEST_MISMATCH` and never written.
+- A checkout missing 500 or more objects downloads the project's latest source pack (one gzip in R2, at most 300 MiB and 100,000 files, `projectSourcePacks`) in one signed GET instead of per-object pages. A pack is a cache, not a limit: below 500 objects, or for anything the pack lacks, objects still come one by one, each verified by digest.
 - Rows written to Convex file storage before R2 was the only path stay readable there. `nforge maintenance r2-backfill ROOT --dry-run` reports what is left to move and which Convex copies cleanup could delete ([R2 backfill](operations/r2-backfill.md)). Deleting them is a separate owner-approved step.
 
 ## Self-host
@@ -1670,7 +1696,7 @@ summaries. Any page may be replayed, or the process restarted at null. New index
 writes populate the same field. Imported-history activity counts are incomplete
 until the backfill finishes; source and retained Work history remain intact.
 
-Lossless hosted source acquisition uses the [GitHub project import](operations/github-project-import.md) API, separate from the derived analysis tour.
+Lossless hosted source acquisition uses the [GitHub project import](operations/github-project-import.md) API, separate from the derived analysis tour. An import needs no Mac: it becomes an agent-writable hosted project once ready. Large imports are slow: the t3code import (about 29,000 files) took 16 min 56 s against a goal of 5 minutes or less ([status](status.md)); Phase 5 stays open until that goal is met. Archive-style imports store a sorted object catalog instead of one `projectObjects` row per object (`convex/projectGithubImportCatalog.ts`).
 
 ## Work record collection
 
@@ -1728,6 +1754,14 @@ selects the whole launchd owner install, retains the previous install and an exa
 rollback command, and verifies the restarted owner's authenticated install identity.
 Legacy directory copies migrate to a retained rollback directory and a selected
 symlink. Worker launches reject a different install from their loaded parent.
+
+After a release succeeds it cleans up on a best-effort basis. The build source copy
+drops `node_modules`, `.netlify/plugins`, `.git` and every top-level `.env*` file (the
+build stage copies the deploy `.env.local` into it, so no secret copy stays on disk; only
+names are logged). Old runtime releases are pruned except the one just finished, the one
+the owner install points at, and each earlier install named `previous`, up to
+`retainReleases` deep (default 3, at most 50); a release a process still has open, and
+an unfinished one younger than a day, are kept. Details: [release](operations/release.md).
 
 ## Import benchmark guard
 

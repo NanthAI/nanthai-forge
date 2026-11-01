@@ -37,6 +37,7 @@ These landed in Phase 4 (closed 2026-10-25). Phase 5 assumes them.
 8. **Bet 3 build waits only for E1 and E3** (confirmed 2026-10-24). E2 runs during Bet 1 and must be published before B3.5.
 9. **Every point of the 2026-10-24 review is tracked** in [Review coverage](#review-coverage); none is dropped silently.
 10. **Disk stays bounded per project** (2026-10-24). Automatic Lane snapshots of completed or abandoned Lanes are collected after the 7-day retention window; the latest snapshot of every open Lane is always kept. Forge watches free space and per-project growth (see P5-M2) and warns before either crosses its budget.
+11. **R2 is the only byte path** (2026-10-31). Every deployment and project writes bytes to R2; there is no opt-in or flag, and a guard in `npm run verify` fails any new Convex file-storage use ([data placement](data-placement.md)). Moving and deleting legacy Convex copies stays a separate owner decision (Issue 40dad5e0).
 
 ## How we work
 
@@ -70,17 +71,17 @@ Phase 5 started on 2026-10-25 and is in its last stage (5.8). **Phase 5 stays op
 | --- | --- | --- |
 | B1.1, B1.2a–e, B1.4a, B1.4b, B1.5a, B1.5b | done | Cutover applied 2026-10-28 (server authority, epoch 1). The Mac no longer accepts. |
 | B1.3a, B1.3b | retired | Built, then replaced by free GitHub-hosted Actions runners; the Mac check worker was stopped on 2026-10-29. |
-| B1.5c big-repo import benchmark | partial | The t3code import (about 29,000 files) ran and was measured, but "each within budget, idle 0 after" was not met. An import with no Mac landed in `84741d8e`; it takes 16 min 56 s on t3code against a target of 5 minutes or less (Issues 7cbb881c, dd98f431). |
+| B1.5c big-repo import benchmark | partial | The t3code import (about 29,000 files) ran and was measured, but "each within budget, idle 0 after" was not met. An import with no Mac landed in `84741d8e`; it takes 16 min 56 s on t3code against a target of 5 minutes or less (Issues 7cbb881c, dd98f431). An archive import now publishes a sorted object catalog (256 pins per row) instead of a row per object; this page carries no newer time than 16 min 56 s. |
 | B1.5d replayed benchmark | partial | The harness landed and a dry run on GitHub passed; the Forge arm is not published (Issues cb23529a, 13475957). |
 | B1.6a–c, B1.7, B1.8 | done | Push, source return, relay, format ladder, reconcile, staleness strip and legacy accept are deleted. |
 | B1.9 purge retired tables | not started | Export taken; `--execute` waits for two weekly backups, dated about 2026-11-09 (Issue 64d7192b). Owner decision 2026-10-31: `nforge serve` and the native-owner code are deleted with B1.9. |
-| Q1–Q5 landing without an operator | done | Controller, self-finishing entries, stall alarm, content-keyed reuse, lifecycle drill. The alarm does not yet reach a human (Issue 7e38bf5e). |
-| M1–M3 metrics, D1 decisions, SP1, SP2, X1 | done | The baseline table below has not been re-run; several rows are still partly unknown. |
+| Q1–Q5 landing without an operator | done | Controller, self-finishing entries, stall alarm, content-keyed reuse, lifecycle drill. A queued hosted entry that nothing live drives is re-driven and, failing that, ended after 60 minutes as `terminal-failed` (`LANDING_STALLED`) with a stated reason, so metric 5.3 sees an outcome. Stall alerts by email or webhook are on by default; whether one reaches a human depends on the recipients and webhook configured, which this page does not record (Issue 7e38bf5e). |
+| M1–M3 metrics, D1 decisions, SP1, SP2, X1 | done | The baseline table below has not been re-run; several rows are still partly unknown. The Bet 2 numbers were re-measured on 2026-10-31 (see [the Bet 2 re-measure](#bet-2-re-measure-after-admission-d-and-e-2026-10-31)). |
 | P5-RC records packing | partial | No before/after bytes report (Issue 1586b8b5). |
 | P5-SG Git source layer | partial | First sub-slice and the pack writer landed; no live migration (Issue 676efbc2). |
 | B2.1, B2.2, B2.3, B2.4a–b | done | The contract gate has been on for the dogfood project since 2026-10-30. |
 | B2.5 demote batches | partial | Landed; "trusted landings pass without a batch" is not yet evidenced. |
-| B2.6 trust per path per actor | partial | Landed disabled; waits for the owner to approve defaults. |
+| B2.6 trust per path per actor | partial | Landed disabled (policy field `trust` absent = off; `trust:{enabled:false}` records history without changing any gate); waits for the owner to approve defaults. |
 | E1, E3 | done | Published in [why Forge](why-forge.md). The E3 re-run (G8) is not started (Issue 39942bfe). |
 | E2 | replaced | By B1.5d (owner, 2026-10-29). |
 | B3.1, B3.2, B3.3a–b | done | Overlap at first write, semantic conflict, overlaps in Now. |
@@ -159,6 +160,11 @@ linked-retry intervention receipts; other owner interventions remain a named gap
 
 JSON is the default for agents and redirected output; a terminal gets a short
 text table (`--text` also selects it explicitly).
+
+Hosted metrics also report **bytes by location**: Convex file-storage writes in the
+window, which must be 0 because bytes go to R2 (`projectBytePlacement:convexWritten`,
+see [data placement](data-placement.md#measuring-it)). A non-zero value adds a
+warning; a deployment without the query reports the value as unknown (`null`), never 0.
 
 The owner records provider bills; Forge never fetches them:
 `nforge metrics record-bill ROOT --provider convex --from 2026-10-27 --to 2026-11-27 --billed-usd N --usage egress-gb=Q,db-io-gb=Q --rate egress-gb=0.132,db-io-gb=0.22`.
@@ -512,6 +518,26 @@ Split by group; all depend on B1.5b. SP1 is decided; P5-SG lands alongside B1.6�
 - **Size:** M. **Depends on:** M3, B2.2. **Owner approves defaults before enabling.**
 - **Changes:** trust is earned per path and per actor from green landings, weighted by contract size, and lost on culprit findings. An actor from a new vendor starts supervised everywhere. People can delegate areas to an actor explicitly. The effective level is shown on the Intent and in briefs.
 - **Acceptance:** fixture histories produce the expected levels; a culprit finding lowers trust on that path only; a delegation is a D1 decision record; disabled by default until the owner approves the defaults. **Metrics:** moves finish-to-main p50 and 5. Must not regress R.
+
+### Bet 2 re-measure after admission D and E (2026-10-31)
+
+Issue 4a686b9a. Same reader (`nforge metrics`) and same method as the baseline. Baseline window: 2026-10-29 11:00Z to 2026-10-30 11:00Z (59 landings). After window: 2026-10-30 23:40:26Z (just after E, `248c9950`, landed) to 2026-10-31 19:44:10Z (20.1 h, 14 landings). Full report: `forge-phase5/reports/2026-10-31/bet2-metrics.md` (not in this repo).
+
+| Metric | Baseline | After E |
+| --- | ---: | ---: |
+| First-try rate | 27.1% (16 of 59) | 71.4% (10 of 14) |
+| Full checks per landing | 5.46 (322 / 59) | 1.29 (18 / 14) |
+| Main-race attempt-minutes | 4,003 (179 attempts) | 38 (5 attempts) |
+| Finish-to-main p50 / p90 | 23.5 / 67.8 min | 12.5 / 22.4 min |
+| Cancelled attempts (waste cause `cancel`) | 73 | 0 |
+
+Read these with three caveats:
+
+- **Small sample.** 14 landings, against the 40 the Fable review asked for. At this size the rates carry roughly ±20 points. The p90 values were recomputed from landing-attempt rows; the reader prints only p50.
+- **Lower load.** 0.70 landings per hour after, against 2.46 before (3.5× lower; 2026-10-31 was a Saturday). Main races need overlapping submissions, so part of the fall in main-race minutes is fewer submissions. The reader cannot replay the baseline load.
+- **D and E are not isolated.** The span also contains finish-freeze with READY-first, the contract gate, E, D (`9547902a`) and the shard-balancing slice. The reader has no per-change attribution. The window between the baseline and E (contract gate and finish-freeze in, E and D not) still had 3.7% first-try and a 57.6 min p50, so E is the likely cause of the drop, not proven.
+
+Not met or unknown: the Bet 2 target of finish-to-main p50 under 3 minutes (12.5 min measured). Cancel cause (who or why) is unknown in both periods; the attempt row stores only the code. Baseline runner-minutes and dollars per landing are unknown (322 runs have no shard durations). Per-actor first-try rate cannot be split because every submission comes from one account. The comparison at equal load and at 40 landings is still to do: re-run with `--from 2026-10-30T23:40:26.000Z` once 40 landings exist.
 
 ## Experiments
 

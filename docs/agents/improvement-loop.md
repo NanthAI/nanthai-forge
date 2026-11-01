@@ -8,7 +8,7 @@ never merges a shared friction paragraph. Reports and triage decisions are retai
 nforge agent ROOT friction '{"laneId":"LANE_ID","title":"Check interrupted","detail":"Runner stopped during validation","area":"checks","cost":{"minutes":8,"retries":1},"workaround":"Ran the affected tests locally","evidence":["RUN_ID"]}'
 nforge improve ROOT
 nforge improve ROOT --json
-nforge agent ROOT friction-triage '{"frictionIds":["FRICTION_ID"],"status":"planned","reason":"Next runner slice"}'
+nforge x ROOT friction-triage '{"frictionIds":["FRICTION_ID"],"status":"planned","reason":"Next runner slice"}'
 ```
 
 `laneId`, `cost`, `workaround` and `evidence` are optional. Costs are self-reported;
