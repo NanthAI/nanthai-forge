@@ -7,7 +7,8 @@
 // shared install's copy: cross-package tests see the agent's edits.
 // The agent sandbox may read deps/ but never write it (agent.mjs), so one agent cannot
 // change another agent's dependencies. No task changes package.json or the lockfile.
-import { execFileSync } from 'node:child_process';
+import { execFileSync, execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, readFileSync, symlinkSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -36,8 +37,13 @@ export function sharedDeps(benchRoot, checkout) {
   return { deps, install, vpHome, home: join(deps, 'home') };
 }
 
-/** node_modules directories of the install, outside other node_modules. */
+/** node_modules directories of the install, outside other node_modules (read once). */
+const moduleDirCache = new Map();
 function moduleDirs(install) {
+  if (!moduleDirCache.has(install)) moduleDirCache.set(install, findModuleDirs(install));
+  return moduleDirCache.get(install);
+}
+function findModuleDirs(install) {
   const out = execFileSync(
     'find',
     ['.', '-name', '.git', '-prune', '-o', '-name', 'node_modules', '-type', 'd', '-print', '-prune'],
@@ -62,6 +68,26 @@ export function linkDeps(shared, checkout) {
     if (dir === 'node_modules') symlinkSync(join(src, '.pnpm'), join(dest, '.pnpm'));
     if (entries.length) {
       execFileSync('cp', ['-cRP', ...entries.map(name => join(src, name)), dest + '/']);
+      clonedEntries += entries.length;
+    }
+  }
+  return { moduleDirs: dirs.length, clonedEntries, seconds: (Date.now() - started) / 1000 };
+}
+
+/** linkDeps without blocking the harness's event loop (other workers keep running). */
+export async function linkDepsAsync(shared, checkout) {
+  const run = promisify(execFile);
+  const started = Date.now();
+  let clonedEntries = 0;
+  const dirs = moduleDirs(shared.install);
+  for (const dir of dirs) {
+    const src = join(shared.install, dir),
+      dest = join(checkout, dir);
+    mkdirSync(dest, { recursive: true });
+    const entries = readdirSync(src).filter(name => !(dir === 'node_modules' && name === '.pnpm'));
+    if (dir === 'node_modules') symlinkSync(join(src, '.pnpm'), join(dest, '.pnpm'));
+    if (entries.length) {
+      await run('cp', ['-cRP', ...entries.map(name => join(src, name)), dest + '/']);
       clonedEntries += entries.length;
     }
   }

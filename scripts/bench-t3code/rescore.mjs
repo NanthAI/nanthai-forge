@@ -1,8 +1,8 @@
-// Re-score a finished Forge cell from its agents' recorded nforge output, through the
-// same arm.recordLandOps -> arm.landing -> score.mjs path run-cell uses live.
+// Re-score a finished Forge cell from its relay call log, through the same arm.landing ->
+// score.mjs path run-cell uses live (no waiting: the cell is over).
 // Usage: node scripts/bench-t3code/rescore.mjs CELL_ID "why"
 // Keeps the original as result.before-rescore.json.
-import { readFileSync, writeFileSync, existsSync, copyFileSync, mkdirSync, rmdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, copyFileSync, mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { forgeArm } from './forge-arm.mjs';
@@ -16,43 +16,22 @@ const dir = join(B, 'runs', cellId);
 const result = JSON.parse(readFileSync(join(dir, 'result.json'), 'utf8'));
 if (result.arm !== 'forge') throw Error('rescore is for Forge cells');
 if (existsSync(join(B, 'ws', cellId))) throw Error('cell workspace still exists: is the cell running?');
-const forge = forgeArm(config.forge);
-const ws = join(B, 'ws', cellId);
-// The broker's call log holds model agents' nforge output ids; scripted agents' own
-// stdout/stderr hold theirs (dry runs before the log existed).
-const calls = existsSync(join(dir, 'nforge-calls.jsonl'))
-  ? readFileSync(join(dir, 'nforge-calls.jsonl'), 'utf8')
-      .split('\n')
-      .filter(Boolean)
-      .map(l => JSON.parse(l))
-  : [];
-const records = result.records.map(record => {
-  const root = join(ws, record.task);
-  const logged = calls
-    .filter(c => c.root.endsWith(`/${record.task}`) && /^agent (land|finish)/.test(c.verb))
-    .flatMap(c => c.operationIds.map(id => `operationId ${id}`));
-  const output = ['stdout.json', 'stderr.txt']
-    .map(ext => join(dir, 'agents', `${record.task}.${ext}`))
-    .filter(existsSync)
-    .map(file => readFileSync(file, 'utf8'))
-    .concat(logged)
-    .join('\n');
-  // landing() addresses the project explicitly; an empty directory stands in for the
-  // deleted workspace, as the harness's anchor does.
-  mkdirSync(root, { recursive: true });
-  forge.recordLandOps(root, output);
-  try {
-    return {
-      ...record,
-      ...landingFields(forge.landing(root, record.laneId), Date.parse(record.dispatchedAt)),
-    };
-  } finally {
-    forge.removeRoot(root);
-  }
-});
+const ws = join(B, 'ws', `rescore-${cellId}`);
+mkdirSync(ws, { recursive: true });
+const forge = forgeArm(config.forge, { callLog: join(dir, 'nforge-calls.jsonl'), ws });
+const records = [];
 try {
-  rmdirSync(ws); // only the empty stand-in parent; never a live cell's workspace
-} catch {}
+  for (const record of result.records)
+    records.push({
+      ...record,
+      ...landingFields(
+        await forge.landing(record.task, record.laneId, { deadlineMs: 0 }),
+        Date.parse(record.dispatchedAt),
+      ),
+    });
+} finally {
+  rmSync(ws, { recursive: true, force: true });
+}
 if (!existsSync(join(dir, 'result.before-rescore.json')))
   copyFileSync(join(dir, 'result.json'), join(dir, 'result.before-rescore.json'));
 const rescored = {
@@ -68,11 +47,5 @@ console.log(
     landed: rescored.landed,
     tasks: rescored.tasks,
     wallSeconds: rescored.wallSecondsToAllLanded,
-    perTask: records.map(r => [
-      r.task,
-      r.landing.landed,
-      r.landing.receiptId ?? r.landing.state,
-      r.timeToMainSeconds,
-    ]),
   }),
 );

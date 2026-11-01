@@ -1,44 +1,90 @@
 // B1.5d GitHub arm: public NanthAI fork, merge queue (HEADGREEN, 10/10, squash),
 // required check `bench-check` = `bash .bench/ci.sh` on ubuntu-latest.
 // All GitHub reads are finite harness observations; nothing polls while idle.
-import { execFileSync, execFile } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-const run = promisify(execFile);
-import { mkdirSync, writeFileSync, chmodSync } from 'node:fs';
+import { writeFileSync, chmodSync } from 'node:fs';
 import { join } from 'node:path';
+import { setTimeout as wait } from 'node:timers/promises';
 
+const run = promisify(execFile);
 export const repository = 'NanthAI/forge-b15d-t3code';
 export const rulesetName = 'b15d-main';
 const upstream = 'pingdotgg/t3code';
+// Agents' clones see main only (B1): no other branch of the fork is ever fetched.
+export const REFSPEC = '+refs/heads/main:refs/remotes/origin/main';
 
-const gh = (args, input) =>
-  execFileSync('gh', args, { encoding: 'utf8', input, maxBuffer: 64 << 20, stdio: ['pipe', 'pipe', 'pipe'] });
-const api = (path, ...rest) => JSON.parse(gh(['api', ...rest, path]) || 'null');
-const pages = path => JSON.parse(gh(['api', '--paginate', '--slurp', path])).flat();
+const gh = async args => (await run('gh', args, { maxBuffer: 256 << 20 })).stdout;
+const api = async (path, ...rest) => JSON.parse((await gh(['api', ...rest, path])) || 'null');
+const pages = async path => JSON.parse(await gh(['api', '--paginate', '--slurp', path])).flat();
 
-function ruleset() {
-  const found = api(`repos/${repository}/rulesets`).find(r => r.name === rulesetName);
+// GitHub's stored timestamps can disagree with real time: on 2026-11-01 every read (REST
+// and GraphQL: PRs, runs, jobs, comments, statuses) returned times one hour ahead, while
+// the create response, GitHub's HTTP Date header, Convex and the Mac agreed. The harness
+// measures that read offset (create a commit status on the fixed base commit, read it back,
+// compare with the local request midpoint) and converts every GitHub time it compares with
+// local time.
+let skewMs = 0;
+export const fromGithub = iso => (iso ? new Date(Date.parse(iso) - skewMs).toISOString() : iso);
+export const toGithub = iso => (iso ? new Date(Date.parse(iso) + skewMs).toISOString() : iso);
+export async function measureSkew(sha) {
+  const sent = Date.now();
+  const created = await api(
+    `repos/${repository}/statuses/${sha}`,
+    '-X',
+    'POST',
+    '-f',
+    'state=success',
+    '-f',
+    'context=bench-clock-probe',
+    '-f',
+    'description=B1.5d clock probe (harness)',
+  );
+  const received = Date.now();
+  const stored = (await api(`repos/${repository}/statuses/${sha}?per_page=20`)).find(
+    st => st.id === created.id,
+  );
+  if (!stored) throw Error('BENCH_CLOCK_PROBE_NOT_FOUND');
+  skewMs = Math.round(Date.parse(stored.created_at) - (sent + received) / 2);
+  return {
+    skewMs,
+    createResponseSkewMs: Math.round(Date.parse(created.created_at) - (sent + received) / 2),
+    roundTripMs: received - sent,
+    at: new Date(received).toISOString(),
+  };
+}
+
+async function setRuleset(enforcement) {
+  const found = (await api(`repos/${repository}/rulesets`)).find(r => r.name === rulesetName);
   if (!found) throw Error('BENCH_RULESET_MISSING');
-  return found.id;
+  await gh([
+    'api',
+    '-X',
+    'PUT',
+    `repos/${repository}/rulesets/${found.id}`,
+    '-f',
+    `enforcement=${enforcement}`,
+  ]);
 }
-function setRuleset(enforcement) {
-  gh(['api', '-X', 'PUT', `repos/${repository}/rulesets/${ruleset()}`, '-f', `enforcement=${enforcement}`]);
+
+/** Branches of the fork; only main and this harness's agent-* branches may exist. */
+export async function branches() {
+  return (await pages(`repos/${repository}/branches?per_page=100`)).map(b => b.name);
 }
+export const foreignBranches = names => names.filter(n => n !== 'main' && !n.startsWith('agent-'));
 
 /** Reset main to the frozen base: close open PRs, drop agent branches, force main. */
-export function reset(base) {
-  // GraphQL-backed gh reads where possible: the REST quota (5,000/h) is shared by
-  // every process on this Mac using the owner's gh login.
+export async function reset(base) {
   for (const pr of JSON.parse(
-    gh(['pr', 'list', '-R', repository, '--state', 'open', '-L', '200', '--json', 'number']),
+    await gh(['pr', 'list', '-R', repository, '--state', 'open', '-L', '200', '--json', 'number']),
   ))
-    gh(['pr', 'close', String(pr.number), '-R', repository]);
-  for (const branch of pages(`repos/${repository}/branches?per_page=100`))
-    if (branch.name.startsWith('agent-'))
-      gh(['api', '-X', 'DELETE', `repos/${repository}/git/refs/heads/${branch.name}`]);
-  setRuleset('disabled');
+    await gh(['pr', 'close', String(pr.number), '-R', repository]);
+  const names = await branches();
+  for (const name of names.filter(n => n.startsWith('agent-')))
+    await gh(['api', '-X', 'DELETE', `repos/${repository}/git/refs/heads/${name}`]);
+  await setRuleset('disabled');
   try {
-    gh([
+    await gh([
       'api',
       '-X',
       'PATCH',
@@ -49,52 +95,96 @@ export function reset(base) {
       'force=true',
     ]);
   } finally {
-    setRuleset('active');
+    await setRuleset('active');
   }
-  const head = api(`repos/${repository}/branches/main`).commit.sha;
+  const head = (await api(`repos/${repository}/branches/main`)).commit.sha;
   if (head !== base) throw Error(`BENCH_RESET_FAILED ${head}`);
-  return { main: head, at: new Date().toISOString() };
+  const foreign = foreignBranches(await branches());
+  if (foreign.length) throw Error(`BENCH_FORK_NOT_CLEAN ${foreign.slice(0, 5).join(' ')}`);
+  return { main: head, remaining: 0, at: new Date().toISOString() };
 }
 
-const SPARSE = ['/*', '!/.repos/', '!/apps/mobile/modules/t3-terminal/Vendor/**/*.a'];
-/** One local clone per cell (outside cell timing), like a developer's existing clone;
- * task workspaces borrow its objects.
- * Sparse like upstream CI: no reference repos / vendored iOS archives. */
+/** One local clone per cell (outside cell timing), like a developer's existing clone: main
+ * only, the FULL tree (.repos included, same files as a Forge Lane). Blobless history; the
+ * checkout brings every blob of main into the hub, which the task workspaces share. */
 export async function prepareHub(hub) {
   await run('git', [
     'clone',
     '-q',
     '--filter=blob:none',
-    '--no-checkout',
+    '--single-branch',
+    '--branch',
+    'main',
+    '--no-tags',
     `https://github.com/${repository}`,
     hub,
   ]);
-  await run('git', ['-C', hub, 'sparse-checkout', 'set', '--no-cone', ...SPARSE]);
-  await run('git', ['-C', hub, 'checkout', '-q', 'main']);
+  await run('git', ['-C', hub, 'config', 'remote.origin.fetch', REFSPEC]);
 }
-/** Per task: a local --shared clone of the hub (seconds, own .git/config so parallel
- * `git push -u` never contends on one config lock), pointed at the fork; blobs outside
- * the hub come lazily from the fork like any blobless clone. */
+/** Per task: a --shared clone of the hub (own .git/config), pointed at the fork, main only.
+ * Returns each step's seconds. */
 export async function workspace(hub, dir, branch) {
+  const phases = {};
+  let t = Date.now();
+  const lap = k => ((phases[k] = (Date.now() - t) / 1000), (t = Date.now()));
   const url = `https://github.com/${repository}`;
-  await run('git', ['clone', '-q', '--shared', '--no-checkout', hub, dir]);
+  await run('git', [
+    'clone',
+    '-q',
+    '--shared',
+    '--no-checkout',
+    '--single-branch',
+    '--branch',
+    'main',
+    hub,
+    dir,
+  ]);
+  lap('clone');
   await run('git', ['-C', dir, 'remote', 'set-url', 'origin', url]);
+  await run('git', ['-C', dir, 'config', 'remote.origin.fetch', REFSPEC]);
+  // Its own branch too (a glob, so fetching before the first push is fine): `git push -u`
+  // then records origin/<branch>, which `gh pr create` needs, as in a normal clone.
+  await run('git', [
+    '-C',
+    dir,
+    'config',
+    '--add',
+    'remote.origin.fetch',
+    `+refs/heads/${branch}*:refs/remotes/origin/${branch}*`,
+  ]);
   await run('git', ['-C', dir, 'config', 'remote.origin.promisor', 'true']);
   await run('git', ['-C', dir, 'config', 'remote.origin.partialclonefilter', 'blob:none']);
-  await run('git', ['-C', dir, 'fetch', '-q', 'origin', 'main']);
-  await run('git', ['-C', dir, 'sparse-checkout', 'set', '--no-cone', ...SPARSE]);
+  await run('git', ['-C', dir, 'config', 'remote.origin.tagOpt', '--no-tags']);
+  lap('config');
+  await run('git', ['-C', dir, 'fetch', '-q', 'origin']);
+  lap('fetch');
   await run('git', ['-C', dir, 'switch', '-q', '--no-track', '-c', branch, 'origin/main']);
   await run('git', ['-C', dir, 'config', 'user.name', 'bench-agent']);
   await run('git', ['-C', dir, 'config', 'user.email', 'bench-agent@users.noreply.github.com']);
-  // gh resolves the base repository from GH_REPO, so a PR can never target upstream.
-  return { env: { GH_REPO: repository, GIT_TERMINAL_PROMPT: '0' } };
+  lap('switch');
+  return phases;
 }
 
-/** System-of-record landing: this cell's PR for the head branch and its merged_at.
- * Branch names repeat across cells, so PRs created before dispatch are ignored. */
-export function landing(branch, sinceIso) {
+// Cell membership by id, not time: PR numbers and run ids only grow, while GitHub served objects
+// created 08:00-09:00 UTC on 2026-11-01 one hour late on every read, so an older PR or run
+// could fall inside a later cell's time window. markFloors records the highest PR number and
+// run id at cell start; only newer ones belong to the cell.
+const floors = { prs: null, runs: new Map() };
+export async function markFloors(repos) {
   const prs = JSON.parse(
-    gh([
+    await gh(['pr', 'list', '-R', repository, '--state', 'all', '-L', '100', '--json', 'number']),
+  );
+  floors.prs = Math.max(0, ...prs.map(pr => pr.number));
+  for (const repo of repos) {
+    const runs = (await api(`repos/${repo}/actions/runs?per_page=100`)).workflow_runs ?? [];
+    floors.runs.set(repo, Math.max(0, ...runs.map(r => r.id)));
+  }
+  return { prs: floors.prs, runs: Object.fromEntries(floors.runs) };
+}
+
+async function prsFor(branch, sinceIso) {
+  return JSON.parse(
+    await gh([
       'pr',
       'list',
       '-R',
@@ -104,54 +194,187 @@ export function landing(branch, sinceIso) {
       '--head',
       branch,
       '--json',
-      'number,createdAt,mergedAt,mergeCommit',
+      'number,createdAt,mergedAt,mergeCommit,state,autoMergeRequest',
     ]),
-  ).filter(pr => pr.createdAt >= sinceIso);
-  const merged = prs.find(pr => pr.mergedAt);
-  return {
-    prs: prs.map(pr => pr.number),
-    landed: Boolean(merged),
-    mergedAt: merged?.mergedAt ?? null,
-    mergeCommit: merged?.mergeCommit?.oid ?? null,
-  };
+  )
+    .map(pr => ({ ...pr, createdAt: fromGithub(pr.createdAt), mergedAt: fromGithub(pr.mergedAt) }))
+    .filter(pr => (floors.prs === null ? pr.createdAt >= sinceIso : pr.number > floors.prs));
 }
 
-/** Runs, check jobs and billed runner minutes for the window; red-main pushes. */
-export function windowMetrics(sinceIso, untilIso) {
-  const runs = pages(`repos/${repository}/actions/runs?per_page=100&created=>=${sinceIso}`)
+/** This cell's PR for the head branch. Waits (bounded) while a PR is still queued for merge
+ * after the agent exits, so a late merge is counted, not left racing the oracle (B7). */
+export async function landing(
+  branch,
+  sinceIso,
+  { deadlineMs = 20 * 60_000, pollMs = 30_000, agentExitedAt = Date.now() } = {},
+) {
+  const until = Date.now() + deadlineMs;
+  for (;;) {
+    const prs = await prsFor(branch, sinceIso);
+    const merged = prs.find(pr => pr.mergedAt);
+    const queued = prs.filter(pr => pr.state === 'OPEN' && pr.autoMergeRequest);
+    if (merged || !queued.length || Date.now() > until)
+      return {
+        prs: prs.map(pr => pr.number),
+        landed: Boolean(merged),
+        state: merged ? 'landed' : queued.length ? 'in-flight-at-deadline' : (prs.at(-1)?.state ?? 'no-pr'),
+        mergedAt: merged?.mergedAt ?? null,
+        mergeCommit: merged?.mergeCommit?.oid ?? null,
+        landedAfterAgentExit: merged ? Date.parse(merged.mergedAt) > agentExitedAt : null,
+        inFlight: merged ? [] : queued.map(pr => pr.number),
+      };
+    await wait(pollMs);
+  }
+}
+
+/** Wait until no PR is queued for merge (before grading). */
+export async function settleQueue({ deadlineMs = 30 * 60_000, pollMs = 30_000 } = {}) {
+  const until = Date.now() + deadlineMs;
+  for (;;) {
+    const open = JSON.parse(
+      await gh([
+        'pr',
+        'list',
+        '-R',
+        repository,
+        '--state',
+        'open',
+        '-L',
+        '200',
+        '--json',
+        'number,autoMergeRequest',
+      ]),
+    );
+    const queued = open.filter(pr => pr.autoMergeRequest).map(pr => pr.number);
+    if (!queued.length) return { settled: true, queued };
+    if (Date.now() > until) return { settled: false, queued };
+    await wait(pollMs);
+  }
+}
+
+/** Workflow runs of a repository in a window, grading runs (oracle/*, dispatch) excluded. */
+export async function windowRuns(repo, sinceIso, untilIso, keep = () => true) {
+  return (await pages(`repos/${repo}/actions/runs?per_page=100&created=>=${toGithub(sinceIso)}`))
     .flatMap(p => p.workflow_runs ?? p)
-    .filter(r => r.created_at <= untilIso);
+    .filter(
+      r =>
+        r.created_at <= toGithub(untilIso) &&
+        (!floors.runs.has(repo) || r.id > floors.runs.get(repo)) &&
+        !String(r.head_branch).startsWith('oracle/') &&
+        keep(r),
+    );
+}
+
+/** Wait (bounded) until every kept run in the window has finished, so its minutes are whole. */
+export async function settleRuns(repo, sinceIso, keep, { deadlineMs = 15 * 60_000, pollMs = 30_000 } = {}) {
+  const until = Date.now() + deadlineMs;
+  for (;;) {
+    const open = (
+      await windowRuns(repo, sinceIso, new Date(Date.now() + 3600_000).toISOString(), keep)
+    ).filter(r => r.status !== 'completed');
+    if (!open.length || Date.now() > until) return { settled: !open.length, open: open.map(r => r.id) };
+    await wait(pollMs);
+  }
+}
+
+/** Forge check runs of one project: forge-check/<id> runs whose plan job log names it. */
+export async function projectCheckRuns(repo, projectId, sinceIso, untilIso) {
+  const runs = await windowRuns(repo, sinceIso, untilIso, r => String(r.name).startsWith('forge-check/'));
+  const mine = [];
+  for (const r of runs) {
+    const jobs = (await api(`repos/${repo}/actions/runs/${r.id}/jobs?per_page=100`)).jobs;
+    const plan = jobs.find(j => j.name === 'hosted-plan') ?? jobs[0];
+    const log = plan ? await gh(['api', `repos/${repo}/actions/jobs/${plan.id}/logs`]).catch(() => '') : '';
+    if (log.includes(projectId)) mine.push(r);
+  }
+  return { runs: mine, otherProjectRuns: runs.length - mine.length };
+}
+
+/** Jobs, job seconds and billed minutes of runs (the same shape for both arms, S2). */
+export async function jobMetrics(repo, runs) {
   let jobs = 0,
     billedMinutes = 0,
-    jobSeconds = 0;
-  for (const run of runs)
-    for (const job of api(`repos/${repository}/actions/runs/${run.id}/jobs?per_page=100`).jobs) {
-      if (!job.started_at || !job.completed_at) continue;
-      jobs++;
+    jobSeconds = 0,
+    queueSeconds = 0;
+  const jobIds = [];
+  for (const r of runs)
+    for (const job of (await api(`repos/${repo}/actions/runs/${r.id}/jobs?per_page=100`)).jobs) {
+      // Skipped jobs report completed_at before started_at: no runner time.
+      if (!job.started_at || !job.completed_at || job.conclusion === 'skipped') continue;
       const s = (Date.parse(job.completed_at) - Date.parse(job.started_at)) / 1000;
+      if (s <= 0) continue;
+      jobs++;
+      jobIds.push(job.id);
       jobSeconds += s;
       billedMinutes += Math.ceil(s / 60);
+      queueSeconds += Math.max(0, (Date.parse(job.started_at) - Date.parse(job.created_at)) / 1000);
     }
   const byEvent = {};
-  for (const run of runs) byEvent[run.event] = (byEvent[run.event] ?? 0) + 1;
-  const mainPushes = runs.filter(r => r.event === 'push' && r.head_branch === 'main');
+  for (const r of runs) byEvent[r.event] = (byEvent[r.event] ?? 0) + 1;
   return {
     runs: runs.length,
     byEvent,
     jobs,
     jobSeconds,
     billedMinutes,
+    queueSeconds,
+    unfinishedRuns: runs.filter(r => r.status !== 'completed').length,
+    firstJob: jobIds[0] ?? null,
+    lastJob: jobIds.at(-1) ?? null,
+    jobIds,
+  };
+}
+
+/** Runner image and resolved action SHAs from one job's log header (S6). */
+export async function runnerInfo(repo, jobId) {
+  if (!jobId) return null;
+  try {
+    const log = (await gh(['api', `repos/${repo}/actions/jobs/${jobId}/logs`])).slice(0, 20000);
+    const pick = re => log.match(re)?.[1]?.trim() ?? null;
+    return {
+      jobId,
+      image: pick(/Image: (\S+)/),
+      imageVersion: pick(/Version: (\S+)/),
+      runnerVersion: pick(/Current runner version: '([^']+)'/),
+      actions: [...log.matchAll(/Download action repository '([^']+)' \(SHA:([0-9a-f]+)\)/g)]
+        .map(m => `${m[1]}@${m[2]}`)
+        .sort(),
+    };
+  } catch (error) {
+    return { jobId, error: String(error.message).slice(0, 200) };
+  }
+}
+
+/** Runs, check jobs, billed minutes, red-main pushes for the GitHub arm's window. */
+export async function windowMetrics(sinceIso, untilIso, branchPrs = new Map()) {
+  const runs = await windowRuns(repository, sinceIso, untilIso, r => r.event !== 'workflow_dispatch');
+  const metrics = await jobMetrics(repository, runs);
+  const mainPushes = runs.filter(r => r.event === 'push' && r.head_branch === 'main');
+  return {
+    ...metrics,
     mainPushRuns: mainPushes.length,
     redMainPushRuns: mainPushes.filter(r => r.conclusion && r.conclusion !== 'success').map(r => r.head_sha),
-    unfinishedRuns: runs.filter(r => r.status !== 'completed').length,
+    runList: runs.map(r => ({
+      id: r.id,
+      event: r.event,
+      head_branch: r.head_branch,
+      head_sha: r.head_sha,
+      conclusion: r.conclusion,
+      created_at: r.created_at,
+      updated_at: r.updated_at,
+      // pull_request runs often carry no PR link: their head branch names the task's PR.
+      pr:
+        r.pull_requests?.[0]?.number ??
+        (Number(String(r.head_branch).match(/\/pr-(\d+)-/)?.[1]) || branchPrs.get(r.head_branch) || null),
+    })),
   };
 }
 
 /** Safety audit: no PR by this account reached upstream during the window. */
-export function upstreamAudit(sinceIso) {
-  const login = api('user').login;
+export async function upstreamAudit(sinceIso) {
+  const login = (await api('user')).login;
   const found = JSON.parse(
-    gh([
+    await gh([
       'search',
       'prs',
       '--repo',
@@ -163,31 +386,42 @@ export function upstreamAudit(sinceIso) {
       '--json',
       'number,createdAt',
     ]),
-  ).filter(pr => pr.createdAt >= sinceIso);
+  ).filter(pr => fromGithub(pr.createdAt) >= sinceIso);
   return { login, upstreamPrs: found.map(pr => pr.number) };
 }
 
-export function mainHead() {
-  return api(`repos/${repository}/branches/main`).commit.sha;
+export async function mainHead() {
+  return (await api(`repos/${repository}/branches/main`)).commit.sha;
 }
 
-/** Scripted no-model agent: one trivial file through branch, PR, queue, merge. */
-export function scriptedAgent(binDir, name) {
-  const file = join(binDir, `scripted-${name}.sh`);
+/** Scripted no-model agent: one file of its own plus a line in its overlap group's shared
+ * file, through branch, PR, queue and merge; on a conflict it merges main, keeps both
+ * lines, pushes and re-queues (so the coordination counters see real rework). */
+export function scriptedAgent(binDir) {
+  const file = join(binDir, 'scripted-github.sh');
   writeFileSync(
     file,
     `#!/bin/bash
-set -euo pipefail
-branch="$1"; task="$2"
+set -uo pipefail
+branch="$1"; task="$2"; group="$3"
 mkdir -p .bench/dry && echo "dry run $task $(date -u +%FT%TZ)" > ".bench/dry/$task.md"
-git add .bench/dry && git commit -qm "bench dry run: $task"
-git push -q -u origin "$branch"
-gh pr create --base main --title "bench dry run: $task" --body "No-model dry run." >/dev/null
+[ -n "$group" ] && echo "$task" >> ".bench/dry/group-$group.md"
+git add .bench/dry && git commit -qm "bench dry run: $task" || exit 3
+for p in 1 2 3; do git push -q -u origin "$branch" && break; sleep 10; done
+gh pr create --base main --title "bench dry run: $task" --body "No-model dry run." >/dev/null || exit 4
 gh pr merge --squash --auto >/dev/null
-for i in $(seq 1 120); do
-  state=$(gh pr view --json state --jq .state)
+for i in $(seq 1 160); do
+  read -r state merge auto < <(gh pr view --json state,mergeStateStatus,autoMergeRequest --jq '[.state, .mergeStateStatus, (.autoMergeRequest != null)] | @tsv')
   [ "$state" = MERGED ] && { echo merged; exit 0; }
   [ "$state" = CLOSED ] && { echo closed; exit 1; }
+  if [ "$merge" = DIRTY ] || [ "$auto" = false ]; then
+    git fetch -q origin
+    if ! git merge -q --no-edit origin/main; then
+      git checkout origin/main -- ".bench/dry/group-$group.md" && echo "$task" >> ".bench/dry/group-$group.md"
+      git add .bench/dry && git commit -qm "bench dry run: merge main ($task)"
+    fi
+    git push -q origin "$branch"; gh pr merge --squash --auto >/dev/null
+  fi
   sleep 15
 done
 echo timeout; exit 2

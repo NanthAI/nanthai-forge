@@ -1,62 +1,96 @@
-// B1.5d Forge arm: hosted project imported from t3code@C (B1.5c), Lanes per task,
-// `land --save` with the project's `verify` check (`bash .bench/ci.sh`) on GitHub Actions.
-// QUALIFICATION: this adapter is exercised by the Forge no-model dry run; until that
-// passes, cells must not run (run-cell refuses a Forge cell without forge.qualifiedAt).
-import { execFileSync, execFile, spawn } from 'node:child_process';
+// B1.5d Forge arm: hosted project on t3code, a Lane per task, `land --save` with the
+// project's `verify` check (`bash .bench/ci.sh`) on GitHub Actions.
+// Every harness call here is async: workers never block one another, and agents' nforge
+// goes through broker.mjs in its own process, so no harness work can delay an agent.
+import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
-const run = promisify(execFile);
 import {
-  appendFileSync,
-  mkdirSync,
-  writeFileSync,
-  chmodSync,
-  rmSync,
   existsSync,
-  copyFileSync,
-  unlinkSync,
+  readFileSync,
+  readdirSync,
+  writeFileSync,
+  appendFileSync,
+  chmodSync,
+  mkdirSync,
   realpathSync,
 } from 'node:fs';
-import { createServer } from 'node:http';
+import { rm, mkdir } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join } from 'node:path';
 import { createInterface } from 'node:readline';
-import { ImportBenchmarkMonitor } from '../benchmark-import-monitor.mjs';
+import { setTimeout as wait } from 'node:timers/promises';
 
-const EXCLUDE = [
-  ':!.repos',
-  ':!apps/mobile/modules/t3-terminal/Vendor',
-  ':!.forge',
-  ':!.nforge',
-  ':!node_modules',
-  ':!**/node_modules',
-];
+const run = promisify(execFile);
 
-const OPERATION_ID = /"?operationId"?[:\s]+"?([0-9a-f-]{36})/g;
+export const TERMINAL = new Set([
+  'landed',
+  'ready',
+  'terminal-failed',
+  'cancelled',
+  'superseded',
+  'abandoned',
+]);
+/** A submission is done only when its phase is terminal and the server is not still working
+ * on it: `ready` with observation.state `pending` (pendingReason `queued`) is a passed check
+ * still waiting to land after main moved (seen 2026-11-01 n3-r1-dry-a4 t27514: ready 12:23,
+ * landed 12:39). */
+export const settled = (phase, observation) => TERMINAL.has(phase) && observation !== 'pending';
+// Forge metadata and dependency links never count as source; gitlinks (submodule pointers
+// without a .gitmodules entry under .repos) are added per base by gitlinks().
+const METADATA = [':!.forge', ':!.nforge', ':!node_modules', ':!**/node_modules'];
 
-export function forgeArm(config) {
-  const { url, projectId, cli, deployment } = config;
+export const readCalls = file =>
+  existsSync(file)
+    ? readFileSync(file, 'utf8')
+        .split('\n')
+        .filter(Boolean)
+        .map(line => JSON.parse(line))
+    : [];
+
+/** Lanes a sync conflict opened for this workspace (<root>.forge-client/lanes/<id>). */
+export function resolveLanes(root) {
+  const lanesDir = `${root}.forge-client/lanes`;
+  if (!existsSync(lanesDir)) return [];
+  return readdirSync(lanesDir)
+    .flatMap(d => {
+      try {
+        const file = join(lanesDir, d, '.forge', 'hosted-lane.json');
+        return [{ laneId: JSON.parse(readFileSync(file, 'utf8')).selection.laneId, dir: join(lanesDir, d) }];
+      } catch {
+        return [];
+      }
+    })
+    .filter(l => l.laneId);
+}
+
+/** Lanes the ledger opened and never closed (abandoned). */
+export function openLanes(ledger) {
+  if (!ledger || !existsSync(ledger)) return [];
+  const state = new Map();
+  for (const line of readFileSync(ledger, 'utf8').split('\n').filter(Boolean)) {
+    const e = JSON.parse(line);
+    if (e.op === 'open') state.set(e.laneId, e);
+    else state.delete(e.laneId);
+  }
+  return [...state.values()];
+}
+
+export function forgeArm(config, { callLog, ws, ledger = null }) {
+  // Every Lane the harness starts or finds (an agent's resolve Lanes) is logged, and closed
+  // when abandoned, so a crashed cell's Lanes are found and closed before the next cell
+  // (2026-11-01: a resolve Lane left by a SIGTERMed cell raised notices in the next one).
+  const log = (op, laneId, extra = {}) =>
+    ledger &&
+    appendFileSync(ledger, JSON.stringify({ op, laneId, at: new Date().toISOString(), ...extra }) + '\n');
+  const { url, projectId, cli } = config;
   const X = { url, projectId };
-  const nf = (root, verb, body, extra = []) => {
-    const out = execFileSync(
-      '/usr/local/bin/node',
-      [cli, 'agent', root, verb, ...extra, JSON.stringify(body)],
-      {
-        encoding: 'utf8',
-        maxBuffer: 64 << 20,
-        stdio: ['ignore', 'pipe', 'pipe'],
-      },
-    );
-    const line = out
-      .split('\n')
-      .filter(l => l.startsWith('{'))
-      .at(-1);
-    return line ? JSON.parse(line) : { raw: out.slice(-2000) };
-  };
-  const nfAsync = async (root, verb, body, extra = []) => {
+  const nf = async (root, verb, body, extra = []) => {
     const { stdout } = await run(
       '/usr/local/bin/node',
       [cli, 'agent', root, verb, ...extra, JSON.stringify(body)],
-      { maxBuffer: 64 << 20 },
+      {
+        maxBuffer: 64 << 20,
+      },
     );
     const line = stdout
       .split('\n')
@@ -64,145 +98,144 @@ export function forgeArm(config) {
       .at(-1);
     return line ? JSON.parse(line) : { raw: stdout.slice(-2000) };
   };
-  // Agent workspace (realpath) -> land/finish operationIds seen by the nforge broker.
-  const landOps = new Map();
-  const workspaceKey = root => (existsSync(root) ? realpathSync(root) : resolve(root));
+  const anchor = join(ws, '.anchor');
+  let broker = null;
   const arm = {
     name: 'forge',
     nf,
     /** Start a Lane on main and materialize it at root (outside agent timing). */
-    async startLane(anchor, root, outcome) {
-      mkdirSync(anchor, { recursive: true });
-      const started = await nfAsync(anchor, 'start', { ...X, operationId: randomUUID(), outcome });
-      // Same extraction as the lead's lane.sh: the first laneId anywhere in the receipt.
+    /** New Lane, then its checkout at root; `phases` gets each step's seconds. */
+    async startLane(root, outcome, phases = {}) {
+      let t = Date.now();
+      await mkdir(anchor, { recursive: true });
+      const started = await nf(anchor, 'start', { ...X, operationId: randomUUID(), outcome });
       const laneId = JSON.stringify(started).match(/"laneId":"([0-9a-f-]{36})"/)?.[1];
       if (!laneId) throw Error(`BENCH_FORGE_START ${JSON.stringify(started).slice(0, 500)}`);
-      await nfAsync(root, 'open', { ...X, laneId });
+      log('open', laneId, { outcome: outcome.slice(0, 80) });
+      phases.start = (Date.now() - t) / 1000;
+      t = Date.now();
+      await nf(root, 'open', { ...X, laneId });
       if (!existsSync(join(root, '.forge', 'hosted-lane.json'))) throw Error('BENCH_FORGE_OPEN');
+      phases.open = (Date.now() - t) / 1000;
       return laneId;
     },
-    status(root, laneId) {
-      return nf(root, 'status', { laneId });
+    async observe(operationId) {
+      try {
+        await mkdir(anchor, { recursive: true });
+        return (await nf(anchor, 'observe', { ...X, operationId })).result?.submission ?? null;
+      } catch (error) {
+        return { error: String(error.stdout ?? error.message).match(/"code":"([A-Z_]+)"/)?.[1] ?? 'ERROR' };
+      }
     },
-    /** System of record: the server's landing submission for the agent's own land/finish
-     * operations (recorded by the nforge broker), read with `observe`. Lane `status`
-     * carries no landing state. */
-    /** Remember the operationIds in one land/finish call's output for this workspace. */
-    recordLandOps(root, output) {
-      const key = workspaceKey(root);
-      const ops = landOps.get(key) ?? new Set();
-      for (const [, id] of output.matchAll(OPERATION_ID)) ops.add(id);
-      landOps.set(key, ops);
+    /** Every operation id the task's agent saw (any verb, S9), newest last. */
+    taskOps(task) {
+      return [
+        ...new Set(
+          readCalls(callLog)
+            .filter(c => c.task === task)
+            .flatMap(c => c.operationIds),
+        ),
+      ];
     },
-    landing(root, laneId) {
-      const ops = landOps.get(workspaceKey(root)) ?? new Set();
-      const seen = [];
-      for (const operationId of ops) {
-        // An agent's refused or replaced attempt leaves ids that are not landing
-        // operations (observe: NOT_FOUND); record them and keep looking.
-        let s;
-        try {
-          s = nf(root, 'observe', { ...X, operationId }).result?.submission ?? {};
-        } catch (error) {
+    /** System of record: the server submissions behind the agent's operations. Waits (bounded)
+     * until none is in flight, so a landing that finishes after the agent exits still counts
+     * and is never abandoned mid-check (B7). */
+    async landing(
+      task,
+      laneId,
+      { deadlineMs = 20 * 60_000, pollMs = 20_000, agentExitedAt = Date.now() } = {},
+    ) {
+      const until = Date.now() + deadlineMs;
+      for (;;) {
+        const seen = [];
+        let landed = null;
+        for (const operationId of arm.taskOps(task)) {
+          const s = await arm.observe(operationId);
+          if (!s || s.error || !s.phase) {
+            seen.push({ operationId, error: s?.error ?? 'NOT_A_SUBMISSION' });
+            continue;
+          }
           seen.push({
             operationId,
-            error: String(error.stderr ?? error.message).match(/"code":"([A-Z_]+)"/)?.[1] ?? 'ERROR',
+            phase: s.phase,
+            observation: s.observation?.state ?? null,
+            timing: s.timing ?? null,
+            error: s.error ?? null,
           });
-          continue;
+          if (s.phase === 'landed' && !landed) landed = { operationId, s };
         }
-        seen.push({ operationId, phase: s.phase ?? null });
-        if (s.phase === 'landed')
+        const inFlight = seen.filter(o => o.phase && !settled(o.phase, o.observation));
+        if (landed && !inFlight.length) {
+          const at = landed.s.timing?.committedAt ?? landed.s.timing?.settledAt ?? null;
           return {
             landed: true,
             state: 'landed',
-            operationId,
-            receiptId: s.acceptance?.receiptId ?? null,
-            mainHead: s.acceptance?.head ?? null,
-            acceptedAt: s.timing?.committedAt ?? s.timing?.settledAt ?? null,
-            submittedAt: s.timing?.submittedAt ?? null,
+            operationId: landed.operationId,
+            receiptId: landed.s.acceptance?.receiptId ?? null,
+            mainHead: landed.s.acceptance?.head ?? null,
+            acceptedAt: at,
+            submittedAt: landed.s.timing?.submittedAt ?? null,
+            landedAfterAgentExit: at ? Date.parse(at) > agentExitedAt : null,
+            operations: seen,
             laneId,
           };
+        }
+        if (!inFlight.length || Date.now() > until)
+          return {
+            landed: false,
+            state: inFlight.length ? 'in-flight-at-deadline' : (seen.at(-1)?.phase ?? null),
+            inFlight: inFlight.map(o => o.operationId),
+            operations: seen,
+            acceptedAt: null,
+            laneId,
+          };
+        await wait(pollMs);
       }
-      return { landed: false, state: seen.at(-1)?.phase ?? null, operations: seen, acceptedAt: null, laneId };
     },
-    /** By address from an empty directory: an agent's unsaved edits never block it
-     * (LANE_DIRTY) and a stale checkout baseline never fails it (WORK_STALE). */
-    abandon(root, laneId, reason = 'bench cell cleanup') {
-      const empty = join(dirname(root), '.abandon');
-      mkdirSync(empty, { recursive: true });
+    /** By address from an empty directory (never blocked by unsaved edits or a stale base).
+     * Refuses while a landing of this Lane is in flight. */
+    async abandon(root, laneId, landing, reason = 'bench cell cleanup') {
+      if (landing?.inFlight?.length) return { skipped: 'landing in flight', inFlight: landing.inFlight };
+      return arm.abandonById(laneId, reason, dirname(root));
+    },
+    /** Every Lane of one task, its own and the resolve Lanes its agent opened, once nothing
+     * of it is in flight. A landed Lane is closed too: abandoning only ends the Lane (its
+     * landed commits stay on main), so no Lane of a finished task can raise notices later. */
+    async closeTask(root, laneId, landing) {
+      if (landing?.inFlight?.length) return { skipped: 'landing in flight', inFlight: landing.inFlight };
+      const ids = [...new Set([laneId, ...resolveLanes(root).map(r => r.laneId)].filter(Boolean))];
+      for (const id of ids.slice(1)) log('open', id, { resolveOf: laneId });
+      const out = {};
+      for (const id of ids) out[id] = await arm.abandonById(id, 'bench cell cleanup', dirname(root));
+      return out;
+    },
+    async abandonById(laneId, reason = 'bench cell cleanup', near = ws) {
+      const empty = join(near, '.abandon');
+      await mkdir(empty, { recursive: true });
       try {
-        return nf(empty, 'abandon', { ...X, laneId, reason });
+        const r = await nf(empty, 'abandon', { ...X, laneId, reason });
+        log('closed', laneId, { abandoned: true });
+        return r;
       } catch (error) {
         return { error: String(error.stdout ?? error.message).slice(-500) };
       }
     },
-    removeRoot(root) {
-      rmSync(root, { recursive: true, force: true });
-      rmSync(root + '.forge-client', { recursive: true, force: true });
-      rmSync(root + '.forge-metrics.jsonl', { force: true });
+    async removeRoot(root) {
+      await rm(root, { recursive: true, force: true });
+      await rm(root + '.forge-client', { recursive: true, force: true });
+      await rm(root + '.forge-metrics.jsonl', { force: true });
     },
-    /** Agents' `nforge` goes through an unsandboxed localhost broker: macOS sandboxes
-     * cannot exec setuid /bin/ps, which the CLI needs for its process identity
-     * (PROCESS_IDENTITY_UNAVAILABLE). The broker runs the real CLI only when the call's
-     * cwd and ROOT are inside the calling agent's own workspace (token per agent). */
-    async binDir(bin, callLog) {
+    /** Start the relay process and write the agents' `nforge` client into bin. */
+    async binDir(bin) {
       mkdirSync(bin, { recursive: true });
-      const roots = new Map();
-      const inside = (root, p) => p === root || p.startsWith(root + '/');
-      const server = createServer((req, res) => {
-        let body = '';
-        req
-          .on('data', d => (body += d))
-          .on('end', () => {
-            const reply = value => res.end(JSON.stringify(value));
-            try {
-              const { token, cwd, args } = JSON.parse(body);
-              const root = roots.get(token);
-              const target = ['agent', 'x'].includes(args[0]) && args[1] ? resolve(cwd, args[1]) : cwd;
-              if (!root || !inside(root, resolve(cwd)) || !inside(root, target))
-                return reply({ stdout: '', stderr: 'bench: nforge is limited to your workspace\n', code: 2 });
-              const startedAt = new Date().toISOString();
-              execFile(
-                '/usr/local/bin/node',
-                [cli, ...args],
-                { cwd, maxBuffer: 64 << 20 },
-                (error, stdout, stderr) => {
-                  const output = `${stdout}\n${stderr}`;
-                  if (['land', 'finish'].includes(args[2])) arm.recordLandOps(root, output);
-                  // Durable record of every agent nforge call (verb, exit, operation ids,
-                  // refusal codes) so a cell can be audited or re-scored after the fact.
-                  if (callLog)
-                    appendFileSync(
-                      callLog,
-                      JSON.stringify({
-                        root,
-                        startedAt,
-                        endedAt: new Date().toISOString(),
-                        verb: args
-                          .slice(0, 3)
-                          .filter(a => a !== args[1])
-                          .join(' '),
-                        code: error ? (typeof error.code === 'number' ? error.code : 1) : 0,
-                        operationIds: [...new Set([...output.matchAll(OPERATION_ID)].map(m => m[1]))],
-                        errorCodes: [...new Set([...output.matchAll(/"code":"([A-Z_]+)"/g)].map(m => m[1]))],
-                      }) + '\n',
-                    );
-                  reply({
-                    stdout,
-                    stderr,
-                    code: error ? (typeof error.code === 'number' ? error.code : 1) : 0,
-                  });
-                },
-              );
-            } catch (error) {
-              reply({ stdout: '', stderr: `bench broker: ${error.message}\n`, code: 2 });
-            }
-          });
+      const child = spawn('/usr/local/bin/node', [join(import.meta.dirname, 'broker.mjs'), cli, callLog], {
+        stdio: ['pipe', 'pipe', 'inherit'],
       });
-      server.requestTimeout = 0;
-      server.headersTimeout = 0;
-      await new Promise(done => server.listen(0, '127.0.0.1', done));
-      server.unref();
+      const first = await new Promise((done, fail) => {
+        createInterface({ input: child.stdout }).once('line', done);
+        child.once('exit', code => fail(Error(`BENCH_BROKER_EXIT ${code}`)));
+      });
+      broker = { child, ...JSON.parse(first) };
       const client = join(bin, 'nforge-client.mjs');
       writeFileSync(
         client,
@@ -215,129 +248,138 @@ const req = request(process.env.BENCH_NFORGE_URL, { method: 'POST' }, res => {
     process.stdout.write(stdout); process.stderr.write(stderr); process.exitCode = code;
   });
 });
-req.end(JSON.stringify({ token: process.env.BENCH_NFORGE_TOKEN, cwd: process.cwd(), args: process.argv.slice(2) }));
+req.end(JSON.stringify({ token: process.env.BENCH_NFORGE_TOKEN, cwd: process.cwd(), args: process.argv.slice(2), sentAt: new Date().toISOString() }));
 `,
       );
       const file = join(bin, 'nforge');
       writeFileSync(file, `#!/bin/bash\nexec /usr/local/bin/node ${JSON.stringify(client)} "$@"\n`);
       chmodSync(file, 0o755);
-      return {
-        /** Env for one agent confined to root. */
-        agentEnv(root) {
-          const token = randomUUID();
-          roots.set(token, realpathSync(root));
-          return {
-            BENCH_NFORGE_URL: `http://127.0.0.1:${server.address().port}/`,
-            BENCH_NFORGE_TOKEN: token,
-          };
-        },
-      };
+      return broker;
     },
-    /** Changed paths of a materialized main vs the base commit (sparse paths excluded). */
-    diffFromBase(meta, baseCommit, root) {
-      const env = { ...process.env, GIT_INDEX_FILE: join(meta, '.git', `forge-diff-${process.pid}.index`) };
-      execFileSync('git', ['-C', meta, 'read-tree', baseCommit], { env });
-      execFileSync('git', ['-C', meta, `--work-tree=${root}`, 'add', '-A', '--', '.', ...EXCLUDE], { env });
-      const out = execFileSync(
-        'git',
-        ['-C', meta, 'diff', '--cached', '--name-status', '--no-renames', baseCommit],
-        { env, encoding: 'utf8' },
-      );
-      unlinkSync(env.GIT_INDEX_FILE);
-      return out
-        .split('\n')
-        .filter(Boolean)
-        .map(line => ({ status: line[0], path: line.slice(2) }));
+    /** Env for one agent confined to root; its PATH/toolchain env reaches its CLI calls. */
+    async agentEnv(root, task, env) {
+      const token = randomUUID();
+      const base = `http://127.0.0.1:${broker.port}`;
+      const res = await fetch(`${base}/register`, {
+        method: 'POST',
+        body: JSON.stringify({ admin: broker.admin, token, root: realpathSync(root), task, env }),
+      });
+      if (!(await res.json()).ok) throw Error('BENCH_BROKER_REGISTER');
+      return { BENCH_NFORGE_URL: `${base}/`, BENCH_NFORGE_TOKEN: token };
     },
+    stopBroker() {
+      broker?.child.stdin.end();
+      broker?.child.kill();
+    },
+    diffFromBase,
     /** Harness-only `land --save` that answers the shipped defaults' refusals the way an
-     * agent would (overlapGate block -> ack accept-order; preflight require -> preflight),
-     * then retries. Cell agents answer these themselves from the refusal message. */
+     * agent would (overlap -> ack accept-order; preflight require -> preflight), then retries. */
     async landAnswering(root, laneId, message) {
       for (let attempt = 1; ; attempt++) {
         try {
-          return await nfAsync(root, 'land', { laneId, message }, ['--save']);
+          return await nf(root, 'land', { laneId, message }, ['--save']);
         } catch (error) {
           const out = String(error.stdout ?? '') + String(error.stderr ?? '');
           const code = out.match(/"code":"([A-Z_]+)"/)?.[1];
           if (attempt >= 4 || !['OVERLAP_UNANSWERED', 'PREFLIGHT_REQUIRED'].includes(code)) throw error;
-          console.log(`land refused ${code}; answering (attempt ${attempt})`);
-          if (code === 'OVERLAP_UNANSWERED') await nfAsync(root, 'ack', { laneId, choice: 'accept-order' });
-          else await nfAsync(root, 'preflight', { laneId });
+          if (code === 'OVERLAP_UNANSWERED') await nf(root, 'ack', { laneId, choice: 'accept-order' });
+          else await nf(root, 'preflight', { laneId });
         }
       }
     },
-    /** Reset main to base content with one landing: restore modified/deleted, drop added. */
-    async reset({ meta, baseCommit, baseCheckout, anchor, root }) {
-      const laneId = await arm.startLane(anchor, root, 'bench reset to base');
-      const changes = arm.diffFromBase(meta, baseCommit, root);
-      for (const { status, path } of changes) {
-        const target = join(root, path);
-        if (status === 'A') rmSync(target, { force: true });
-        else {
-          mkdirSync(dirname(target), { recursive: true });
-          copyFileSync(join(baseCheckout, path), target);
-        }
+    /** Reset main to the base tree with one landing, then prove it on a fresh Lane of main:
+     * refuses (throws) unless main equals the base exactly (S4). */
+    async reset({ meta, baseCommit, root }) {
+      const laneId = await arm.startLane(root, 'bench reset to base');
+      const changes = await arm.diffFromBase(meta, baseCommit, root);
+      const added = changes.filter(c => c.status === 'A').map(c => c.path);
+      const restore = changes.filter(c => c.status !== 'A').map(c => c.path);
+      for (const path of added) await rm(join(root, path), { force: true });
+      const index = join(meta, '.git', `forge-reset-${randomUUID()}.index`);
+      try {
+        for (let i = 0; i < restore.length; i += 200)
+          await run(
+            'git',
+            ['-C', meta, `--work-tree=${root}`, 'checkout', baseCommit, '--', ...restore.slice(i, i + 200)],
+            {
+              env: { ...process.env, GIT_INDEX_FILE: index },
+            },
+          );
+      } finally {
+        await rm(index, { force: true });
       }
-      let landed = null;
-      if (changes.length) landed = await arm.landAnswering(root, laneId, 'bench: reset main to base');
-      const after = arm.diffFromBase(meta, baseCommit, root);
-      arm.abandon(root, laneId);
-      arm.removeRoot(root);
+      let phase = null,
+        s = null;
+      if (changes.length) {
+        // `land --save` may return once the landing is submitted: the submission is the
+        // record. Wait (bounded) for a terminal phase; never abandon a Lane mid-landing (B7).
+        const landed = await arm.landAnswering(root, laneId, 'bench: reset main to base');
+        const operationId = JSON.stringify(landed).match(/"operationId":"([0-9a-f-]{36})"/)?.[1];
+        const until = Date.now() + 30 * 60_000;
+        for (;;) {
+          s = operationId ? await arm.observe(operationId) : null;
+          phase = s?.phase ?? s?.error ?? null;
+          if (settled(s?.phase, s?.observation?.state) || !operationId || Date.now() > until) break;
+          await wait(15_000);
+        }
+        if (!settled(s?.phase, s?.observation?.state))
+          throw Error(`BENCH_RESET_NOT_LANDED still ${phase} (Lane ${laneId} kept)`);
+      }
+      await arm.abandon(root, laneId);
+      await arm.removeRoot(root);
+      if (changes.length && phase !== 'landed') throw Error(`BENCH_RESET_NOT_LANDED ${phase}`);
+      // Verify on main itself, not on the reset Lane's own tree.
+      const verify = root + '-verify';
+      const verifyLane = await arm.startLane(verify, 'bench reset verification');
+      const remaining = await arm.diffFromBase(meta, baseCommit, verify);
+      const lane = JSON.parse(readFileSync(join(verify, '.forge', 'hosted-lane.json'), 'utf8'));
+      await arm.abandon(verify, verifyLane);
+      await arm.removeRoot(verify);
+      if (remaining.length) throw Error(`BENCH_RESET_MISMATCH ${remaining.length} paths differ from base`);
       return {
         laneId,
+        verifyLaneId: verifyLane,
         restored: changes.length,
-        phase: landed?.result?.phase ?? landed?.phase ?? null,
-        remaining: after.length,
+        phase,
+        remaining: 0,
+        verifiedMainHead: lane.selection?.base?.head ?? null,
       };
     },
   };
   return arm;
 }
 
-/** Project-attributed Convex usage during a cell, from the provider log stream. */
-export function convexMeter({ deployment, projectId, name, cwd }) {
-  const monitor = new ImportBenchmarkMonitor({ projectId, name, since: Date.now() });
-  monitor.usage = {
-    databaseReadDocuments: 0,
-    databaseWriteDocuments: 0,
-    databaseIoReadBytes: 0,
-    databaseIoWriteBytes: 0,
-    networkEgressBytes: 0,
-  };
-  const deploymentWide = { completions: 0, ioBytes: 0, egressBytes: 0 };
-  const child = spawn('npx', ['convex', 'logs', '--deployment', deployment, '--jsonl', '--success'], {
-    cwd,
-    stdio: ['ignore', 'pipe', 'ignore'],
-  });
-  let closed = false;
-  child.on('close', () => (closed = true));
-  createInterface({ input: child.stdout }).on('line', line => {
-    if (!line.startsWith('{')) return;
-    try {
-      const event = JSON.parse(line);
-      if (event.kind === 'Completion' && !event.cachedResult) {
-        deploymentWide.completions++;
-        deploymentWide.ioBytes +=
-          (event.usageStats?.databaseIoReadBytes ?? 0) + (event.usageStats?.databaseIoWriteBytes ?? 0);
-        deploymentWide.egressBytes += event.usageStats?.networkEgressBytes ?? 0;
-      }
-      monitor.observe(event);
-    } catch {}
-  });
-  return {
-    stop() {
-      child.kill();
-      const r = monitor.report();
-      const ioGb = (monitor.usage.databaseIoReadBytes + monitor.usage.databaseIoWriteBytes) / 1e9;
-      return {
-        projectExecutions: r.total,
-        failures: r.failures,
-        usage: monitor.usage,
-        streamClosedEarly: closed,
-        deploymentWide,
-        // Convex list rates (brief): calls $2.2/M, DB I/O $0.22/GB, egress $0.132/GB.
-        costUsd: (r.total * 2.2) / 1e6 + ioGb * 0.22 + (monitor.usage.networkEgressBytes / 1e9) * 0.132,
-      };
-    },
-  };
+/** Changed paths of a materialized tree vs the base commit, whole tree (.repos included).
+ * Works on any directory (a Lane root or a git workspace: git never adds a nested .git). */
+export async function diffFromBase(meta, baseCommit, root) {
+  const env = { ...process.env, GIT_INDEX_FILE: join(meta, '.git', `forge-diff-${randomUUID()}.index`) };
+  const git = args => run('git', ['-C', meta, ...args], { env, maxBuffer: 256 << 20 });
+  try {
+    await git(['read-tree', baseCommit]);
+    const pathspec = ['.', ...METADATA, ...(await gitlinks(meta, baseCommit)).map(p => `:!${p}`)];
+    await git([`--work-tree=${root}`, 'add', '-A', '-f', '--', ...pathspec]);
+    const { stdout } = await git(['diff', '--cached', '--name-status', '--no-renames', baseCommit]);
+    return stdout
+      .split('\n')
+      .filter(Boolean)
+      .map(line => ({ status: line[0], path: line.slice(2) }));
+  } finally {
+    await rm(env.GIT_INDEX_FILE, { force: true });
+  }
+}
+
+const gitlinkCache = new Map();
+/** Submodule pointers in the base tree: Forge stores them as metadata, Git as gitlinks. */
+export async function gitlinks(meta, commit) {
+  if (!gitlinkCache.has(commit)) {
+    const { stdout } = await run('git', ['-C', meta, 'ls-tree', '-r', commit], { maxBuffer: 256 << 20 });
+    gitlinkCache.set(
+      commit,
+      stdout
+        .split('\n')
+        .filter(l => l.startsWith('160000 '))
+        .map(l => l.split('\t')[1]),
+    );
+  }
+  return gitlinkCache.get(commit);
 }

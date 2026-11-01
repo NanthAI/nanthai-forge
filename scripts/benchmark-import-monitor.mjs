@@ -7,12 +7,14 @@ export const benchmarkLimits = Object.freeze({
   quietMs: 300_000,
 });
 export class ImportBenchmarkMonitor {
-  constructor({ projectId, name, creationOperationId, since, now = Date.now }) {
+  constructor({ projectId, name, creationOperationId, since, now = Date.now, capacity = 20_000 }) {
     if (!projectId && !creationOperationId) throw Error('BENCHMARK_PROJECT_REQUIRED');
     this.target = { projectId, name };
     this.creationOperationId = creationOperationId;
     this.since = since;
     this.now = now;
+    this.capacity = capacity;
+    this.actionGbHours = 0;
     this.requests = new Map();
     this.seen = new Set();
     this.completed = new Set();
@@ -33,8 +35,8 @@ export class ImportBenchmarkMonitor {
   }
   accept(event) {
     if (
-      (!this.completed.has(event.id) && this.completed.size >= 20_000) ||
-      (!this.running.has(event.id) && this.running.size >= 20_000)
+      (!this.completed.has(event.id) && this.completed.size >= this.capacity) ||
+      (!this.running.has(event.id) && this.running.size >= this.capacity)
     ) {
       this.fail('BENCHMARK_LOG_CAPACITY');
       return;
@@ -55,6 +57,7 @@ export class ImportBenchmarkMonitor {
     const minute = Math.floor((event.at - this.since) / 60_000);
     this.minutes.set(minute, (this.minutes.get(minute) ?? 0) + 1);
     for (const key of Object.keys(this.usage)) this.usage[key] += event.usage?.[key] ?? 0;
+    this.actionGbHours += event.gbHours ?? 0;
     if (this.total >= benchmarkLimits.total) this.fail('total');
     this.advance(this.now());
   }
@@ -70,7 +73,7 @@ export class ImportBenchmarkMonitor {
     }
     let request = this.requests.get(log.requestId);
     if (!request) {
-      if (this.requests.size >= 20_000) {
+      if (this.requests.size >= this.capacity) {
         this.fail('BENCHMARK_LOG_CAPACITY');
         return;
       }
@@ -106,7 +109,7 @@ export class ImportBenchmarkMonitor {
     // OCC retries and failed executions count. Replayed transport records do not.
     const key = `${log.requestId}:${log.executionId}:${log.executionTimestamp ?? log.timestamp}:${log.timestamp}:${log.occInfo?.retryCount ?? 0}`;
     if (this.seen.has(key)) return;
-    if (this.seen.size >= 20_000) {
+    if (this.seen.size >= this.capacity) {
       this.fail('BENCHMARK_LOG_CAPACITY');
       return;
     }
@@ -119,6 +122,10 @@ export class ImportBenchmarkMonitor {
       at: log.timestamp * 1000,
       failed: Boolean(log.error),
       usage: log.usageStats,
+      // Action compute (GB-hours): memory x execution time, for actions only.
+      gbHours: /action/i.test(log.udfType ?? '')
+        ? ((log.usageStats?.actionMemoryUsedMb ?? 0) / 1024) * ((log.executionTimeMs ?? 0) / 3_600_000)
+        : 0,
     };
     if (request.own) this.accept(event);
     else request.pending.push(event);
@@ -151,6 +158,7 @@ export class ImportBenchmarkMonitor {
       coverageFailure: this.coverageFailure,
       postDelete: this.postDelete,
       usage: { ...this.usage },
+      actionGbHours: this.actionGbHours,
       quiet: this.quiet(),
       retainedExecutions: this.seen.size,
       runningExecutions: this.running.size,
