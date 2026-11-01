@@ -1331,8 +1331,12 @@ Only runnable requests enter selection. Indexed priority-class heads select urge
 owner requests before normal requests; shared native ordering supplies arrival
 order and within-class fairness for batch selection and queue positions. Missing
 legacy priority means normal. Owner reprioritisation patches one queued submission
-without a wake or poller. Hosted batches are opt-in (`acceptance.landing:
-"batched"`). Unstarted batches yield to urgent work before reserving
+without a wake or poller. Eligible hosted automatic-accept projects group by
+default (`acceptance.landing: "serial"` opts out). Up to six groups check at once
+(`checks.concurrency` overrides), each on its predecessor's pinned head and final
+receipt. Publication retains exact-source evidence and queue order; a failed or
+changed predecessor invalidates only its dependent stack. Unstarted batches yield
+to urgent work before reserving
 a check; reserved checks continue. Opt-in admission runs (`acceptance.admissionCheck`)
 wake their request only on a terminal run write, and size and split cohorts as
 described in [hosted queue priority](operations/landing-batches.md#hosted-queue-priority). A retained train with no member checking holds

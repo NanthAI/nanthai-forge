@@ -521,16 +521,29 @@ one-based `queuePosition` in the response for queued work. Position is a current
 checks ahead of queued work, and can change as other Candidates arrive or settle.
 Composing, checking, ready and terminal submissions have no queued position.
 
-Hosted batches are opt-in: `set-policy` with `acceptance.landing: "batched"`
-enables them; absent or `optimistic` keeps one deferred check per entry at the
-head of the queue. The setting is pinned with each admitted submission. A batch
-checks the full union; without batching, trusted entries keep the contract gate.
-A retained entry or batch blocks later deferred entries only while it is live:
-a member is checking, or its newest compose or selection is under 5 minutes old
-(`HOSTED_TRAIN_HOLD_MS`). Past that, the queue drops the retained train and
-selects the next entry; the retained members continue through their own finish
-and check wakes. One queue wake is scheduled for the end of a hold, and none
-while a member is checking.
+Hosted automatic-accept projects batch by default, including existing policies
+without a landing setting. `acceptance.landing: "serial"` opts out; the explicit
+`batched` setting remains valid. An explicit legacy `optimistic` setting retains
+its hosted serial behavior. Eligibility and current governance are unchanged.
+A group checks the full union without requiring separate solo checks first.
+
+The queue pipelines six groups by default. The observed GitHub merge queue used
+six simultaneous groups; matching that execution width bounds speculative waste
+while allowing ten to fifty concurrent finishes to progress. `checks.concurrency`
+overrides the width (1–16); this is runner scheduling, never an admission limit.
+Once a group's exact head and final acceptance receipt are reserved, its successor
+composes and checks on that predicted main. Publication remains ordered and fenced
+by the exact head and receipt. A passing successor keeps its evidence when the
+predecessor lands unchanged, even if the successor check completed first.
+A failed, cancelled or recomposed predecessor invalidates its dependent generations;
+the original member selections return to the queue and check again on surviving
+main. Other groups retain their evidence. Source and check completion events
+advance the pipeline; an idle queue schedules nothing.
+
+A retained compose with no live check holds its slot for at most five minutes
+(`HOSTED_TRAIN_HOLD_MS`); ordinary review, contributor and recovery work keeps its
+existing path. Metadata selection reads only bounded indexed cohort windows and
+the bounded active train, independent of queue length and retained history.
 
 Cohort size is `acceptance.batchMaxSize` (1 to 8) when set. Absent, the queue
 picks the k that minimises expected checks per member, 1/k + 1 - (1-p)^k, capped

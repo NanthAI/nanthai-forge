@@ -24,6 +24,7 @@ export async function batchesFixture(
     // Mechanics tests pin the earlier fixed cohort of eight; null selects auto sizing.
     batchMaxSize = 8,
     admissionCheck = false,
+    concurrency,
     // Agent finishes name their check. Without owner provenance on the Lane the
     // entry is not batch-eligible, so its check starts at submission, in parallel
     // with every other arrival (the dogfood main queue on 2026-11-01).
@@ -31,8 +32,7 @@ export async function batchesFixture(
   } = {},
 ) {
   const f = await finishFixture(t, { fileCount });
-  // Hosted batches are opt-in; these fixtures exercise them unless told not to.
-  if (batching) {
+  {
     const policy = policyPreset('trusted');
     f.patch('hostedProjects', f.projectId, {
       // Fake time jumps to each scheduled task; alerts have their own tests (hosted-stall-alerts.test.mjs).
@@ -40,10 +40,11 @@ export async function batchesFixture(
         ...policy,
         acceptance: {
           ...policy.acceptance,
-          landing: 'batched',
+          ...(batching === 'default' ? {} : { landing: batching ? 'batched' : 'serial' }),
           ...(batchMaxSize ? { batchMaxSize } : {}),
           ...(admissionCheck ? { admissionCheck } : {}),
         },
+        ...(concurrency ? { checks: { runner: 'github-actions', concurrency } } : {}),
         agentDefaults: { stallAlerts: { enabled: false } },
       },
     });

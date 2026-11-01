@@ -1,3 +1,5 @@
+import { predecessorStatus } from './projectHostedLandingPipeline';
+import { wakeLandingQueue } from './projectHostedLandingEvents';
 import { advanceBatchFallback } from './projectHostedLandingBatchFallback';
 import { splitLandingBatch } from './projectHostedLandingBatchSplit';
 // SPDX-License-Identifier: Apache-2.0
@@ -113,10 +115,13 @@ export async function batchFinishStep(
       return { handled: true, command: null };
     }
     const main = await hostedStartMain(ctx, input.projectId);
+    const predecessor = await predecessorStatus(ctx, key, batch);
     if (
-      included.length === batch.members.length &&
-      (main.head !== source.state.request.expectedMain.head ||
-        main.receipt.id !== source.state.request.expectedMain.receiptId)
+      predecessor === 'invalid' ||
+      (predecessor !== 'pending' &&
+        included.length === batch.members.length &&
+        (main.head !== source.state.request.expectedMain.head ||
+          main.receipt.id !== source.state.request.expectedMain.receiptId))
     ) {
       await retryLandingBatch(ctx, key, batch);
       return { handled: true, command: null };
@@ -175,6 +180,7 @@ export async function batchFinishStep(
       runId: run.id,
       included: included.map(m => m.submissionId),
     });
+    await wakeLandingQueue(ctx, { projectId: input.projectId, channel: 'main' });
     return { handled: true, command: null };
   }
   const upload = source.uploads[batch.uploadIndex];

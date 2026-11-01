@@ -1,3 +1,5 @@
+import { loadLanding, loadLandingAttempt } from './projectHostedLandingStore';
+import { predecessorStatus } from './projectHostedLandingPipeline';
 import type { BatchMemberDetail } from '../src/hosted-batch-diagnosis';
 // SPDX-License-Identifier: Apache-2.0
 import type { MutationCtx } from './_generated/server';
@@ -34,17 +36,41 @@ export async function prepareBatchCompose(ctx: MutationCtx, input: BatchIdentity
     );
   const memberDetails: BatchMemberDetail[] = [];
   if (!existing) {
-    const main = await hostedStartMain(ctx, input.projectId);
+    const current = await hostedStartMain(ctx, input.projectId);
+    invariant(
+      (await predecessorStatus(ctx, input, batch)) !== 'invalid',
+      'CHANNEL_CHANGED',
+      'The speculative predecessor changed.',
+    );
+    const base = batch.predecessor ?? { head: current.head, receiptId: current.receipt.id };
     const request = {
       operationId: auth.operationId,
       intentId: '',
       authorityEpoch: first.authorityEpoch,
-      expectedMain: { head: main.head, receiptId: main.receipt.id },
+      expectedMain: { head: base.head, receiptId: base.receiptId },
       inputs: inputs.manifest,
       dependencies: dependencies.manifest,
       message: 'Compose concurrent hosted landings',
     };
-    const contracts = await mainSemanticMembers(ctx, auth, main.receipt.id);
+    const contracts = await mainSemanticMembers(ctx, auth, current.receipt.id);
+    if (batch.predecessor) {
+      const { state } = await loadLanding(ctx, {
+        projectId: input.projectId,
+        submissionId: batch.predecessor.submissionId,
+      });
+      const attempt = await loadLandingAttempt(ctx, {
+        projectId: input.projectId,
+        attemptId: state.attemptId,
+      });
+      const row = await readHostedRecord(ctx, { ...auth, kind: 'candidate', key: attempt.candidate.id });
+      invariant(
+        row?.digest === attempt.candidate.digest,
+        'EVIDENCE_CHANGED',
+        'The predecessor Candidate changed.',
+      );
+      const candidate = hostedRecordSchema.options[3].parse(JSON.parse(row.value));
+      contracts.push(...(candidate.semanticPlan?.members ?? []));
+    }
     for (const member of batch.members) {
       const row = await readHostedRecord(ctx, { ...auth, kind: 'candidate', key: member.candidate.id });
       invariant(
@@ -95,7 +121,7 @@ export async function prepareBatchCompose(ctx: MutationCtx, input: BatchIdentity
             },
           }
         : {}),
-      main: await saveObject(ctx, input.projectId, { sha256: main.head }),
+      main: await saveObject(ctx, input.projectId, { sha256: base.head }),
       inputs: { next: null, pages: inputs.manifest.pages, count: 0 },
       dependencies: { next: null, pages: dependencies.manifest.pages, count: batch.members.length },
       candidateId: operation.operation.firstAttempt.ids.candidate!,

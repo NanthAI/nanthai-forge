@@ -10,12 +10,19 @@ export const HOSTED_BATCH_MEMBERS = 8;
  * its newest compose or selection; then the queue drops it and moves on. A healthy
  * compose takes about 90 s; a dead one must never stop the queue. */
 export const HOSTED_TRAIN_HOLD_MS = 5 * 60_000;
-/** Batches are an opt-in optimisation (`acceptance.landing: 'batched'`). By
- * default each eligible entry checks alone at the head of the queue. */
-export const hostedBatching = (policy: AutonomyPolicy) => policy.acceptance.landing === 'batched';
+// Six speculative groups match the observed merge-queue runner capacity while
+// bounding wasted checks after a failed predecessor. This is execution width,
+// never an admission limit; projects can use their existing concurrency setting.
+export const HOSTED_PIPELINE_GROUPS = 6;
+export const hostedPipelineWidth = (policy: AutonomyPolicy) =>
+  Math.min(policy.checks?.concurrency ?? HOSTED_PIPELINE_GROUPS, 16);
+/** Existing automatic-accept projects inherit grouping without a policy rewrite. */
+export const hostedBatching = (policy: AutonomyPolicy) =>
+  policy.acceptance.mode === 'auto-on-pass' &&
+  (policy.acceptance.landing === undefined || policy.acceptance.landing === 'batched');
 export const batchComposeSchema = z
   .object({
-    members: z.array(z.uuid()).min(2).max(HOSTED_BATCH_MEMBERS),
+    members: z.array(z.uuid()).min(1).max(HOSTED_BATCH_MEMBERS),
   })
   .strict();
 export const batchDroppedSchema = z

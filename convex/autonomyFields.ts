@@ -62,7 +62,7 @@ export const autonomyPolicy = v.object({
     disjointFastPath: v.optional(v.boolean()),
     hostedCrossHeadReuse: v.optional(v.boolean()),
     scopedRecheck: v.optional(v.boolean()),
-    landing: v.optional(v.union(v.literal('batched'), v.literal('optimistic'))),
+    landing: v.optional(v.union(v.literal('batched'), v.literal('optimistic'), v.literal('serial'))),
     admissionCheck: v.optional(v.boolean()),
     batchMaxSize: v.optional(v.number()),
     batchWindowMs: v.optional(v.number()),

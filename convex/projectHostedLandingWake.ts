@@ -24,21 +24,21 @@ import {
   orderHostedLandingRows,
 } from './projectHostedLandingOrder';
 import { canonicalPayload } from '../src/hosted-source-operation';
+import { loadBatch } from './projectHostedLandingBatchState';
+import { pipelinePredecessor, invalidatePipeline } from './projectHostedLandingPipeline';
 import { HOSTED_TRAIN_HOLD_MS } from '../src/hosted-landing-batch';
 
-/** The active eligible cohort retains its place while source/check IO runs.
- * Later deferred arrivals wait behind it only while it is live: a member is
- * checking or ready, or its newest compose started under HOSTED_TRAIN_HOLD_MS ago. A dead
- * compose never stops the queue; the train is dropped and its members return
- * through their own finish and check wakes. `held.until` names the one wake a
- * caller schedules when nothing is selectable yet. Eight exact reads at most,
- * plus bounded priority-class heads for non-batchable work. No history scan. */
+/** Retain a bounded stack while source/check IO runs. A fixed tail opens the
+ * next speculative slot; publication still follows queue order. Dead composes
+ * release their hold after HOSTED_TRAIN_HOLD_MS. Read at most width * eight
+ * member rows plus indexed priority heads, never queue or acceptance history.
+ * `held.until` names the single wake needed when no work is selectable yet. */
 export async function nextTrainLandingRow(
   ctx: MutationCtx,
   queue: Doc<'projectHostedLandingQueues'>,
   now = Date.now(),
   held: { until: number | null } = { until: null },
-) {
+): Promise<Doc<'projectHostedLandingRequests'> | null> {
   // A passed proof accepts before any new check or cohort starts, urgent included.
   const ready = await nextReadyLandingRow(ctx, queue);
   if (ready) return ready;
@@ -46,6 +46,28 @@ export async function nextTrainLandingRow(
     const rows = await Promise.all(
       queue.train.map(submissionId => landingRow(ctx, { projectId: queue.projectId, submissionId })),
     );
+    // A controller/source error can settle the entire predecessor without a
+    // batch-check transition. Retire its descendants on the same queue event.
+    const values = rows
+      .filter(row => row !== null)
+      .map(row => hostedLandingStateSchema.parse(JSON.parse(row.value)));
+    const failed = new Set(
+      values
+        .filter(state => state.phase === 'terminal-failed')
+        .map(state => state.batchId)
+        .filter(id => id !== undefined),
+    );
+    for (const batchId of failed) {
+      if (
+        values.some(
+          state => state.batchId === batchId && state.phase !== 'terminal-failed' && state.phase !== 'landed',
+        )
+      )
+        continue;
+      const key = { projectId: queue.projectId, batchId };
+      if (await invalidatePipeline(ctx, key, (await loadBatch(ctx, key)).batch))
+        return nextTrainLandingRow(ctx, (await landingQueue(ctx, queue))!, now, held);
+    }
     const pending = rows.filter(row => {
       if (!row || row.phase === 'landed' || row.phase === 'terminal-failed' || row.hold) return false;
       const state = hostedLandingStateSchema.parse(JSON.parse(row.value));
@@ -95,7 +117,7 @@ export async function nextTrainLandingRow(
       }
       // The train coalesces eligible deferred checks only. Ordinary owner,
       // contributor, dependency and recovery work retains its existing path.
-      // Include legacy projections without batchable; at most eight train rows
+      // Include legacy projections without batchable; only bounded train rows
       // can precede the six priority/batchability heads across all windows.
       const members = new Set(queue.train);
       const outside = [];
@@ -126,6 +148,28 @@ export async function nextTrainLandingRow(
         }
         if (priority === 'urgent' && outside.length) break;
       }
+      // A bounded speculative slot opens once the tail has fixed its source and
+      // receipt. All successors compose on that tail, never on competing main.
+      if (
+        !outside.some(row => row.priority === 'urgent') &&
+        (await pipelinePredecessor(ctx, queue, pending as NonNullable<(typeof pending)[number]>[]))
+      ) {
+        for (const priority of ['urgent', 'normal', undefined] as const) {
+          const [row] = await ctx.db
+            .query('projectHostedLandingRequests')
+            .withIndex('by_project_channel_runnable_batchable_priority_sequence', q =>
+              q
+                .eq('projectId', queue.projectId)
+                .eq('channel', queue.channel)
+                .eq('runnable', true)
+                .eq('batchable', true)
+                .eq('priority', priority),
+            )
+            .order('asc')
+            .take(1);
+          if (row) outside.push(row);
+        }
+      }
       const next = orderHostedLandingRows(outside)[0] ?? null;
       if (!next) held.until = until;
       return next;
@@ -136,7 +180,19 @@ export async function nextTrainLandingRow(
 }
 export async function retainLandingTrain(ctx: MutationCtx, input: LandingChannel, submissions: string[]) {
   const queue = await ensureLandingQueue(ctx, input);
-  await ctx.db.patch(queue._id, { train: submissions });
+  const live = await Promise.all(
+    (queue.train ?? []).map(submissionId => landingRow(ctx, { projectId: input.projectId, submissionId })),
+  );
+  await ctx.db.patch(queue._id, {
+    train: [
+      ...new Set([
+        ...live
+          .filter(row => row && row.phase !== 'landed' && row.phase !== 'terminal-failed')
+          .map(row => row!.submissionId),
+        ...submissions,
+      ]),
+    ],
+  });
 }
 export async function releaseLandingQueue(
   ctx: MutationCtx,

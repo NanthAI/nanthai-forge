@@ -1,16 +1,15 @@
-import { batchFailureSchema, batchMemberDetailSchema } from '../src/hosted-batch-diagnosis';
 import { releaseBatchMembers } from './projectHostedLandingBatchRelease';
 // SPDX-License-Identifier: Apache-2.0
-import { activeLandingOrder } from './projectHostedLandingOrder';
-import { z } from 'zod';
-import type { MutationCtx, QueryCtx } from './_generated/server';
+import { orderHostedLandingRows } from './projectHostedLandingOrder';
+import { pipelinePredecessor, invalidatePipeline } from './projectHostedLandingPipeline';
+import type { MutationCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import {
   hostedLandingAttemptSchema,
   hostedLandingStateSchema,
   landingObservation,
 } from '../src/hosted-landing';
-import { HOSTED_BATCH_MEMBERS, hostedBatching } from '../src/hosted-landing-batch';
+import { hostedBatching } from '../src/hosted-landing-batch';
 import { cohortSize, hostedAdmission } from '../src/hosted-landing-admission';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import {
@@ -27,44 +26,19 @@ import { finishRow, scheduleFinish } from './projectHostedFinishWake';
 import { retainLandingTrain } from './projectHostedLandingWake';
 import { invariant } from '../src/errors';
 
-export type BatchIdentity = { projectId: Id<'hostedProjects'>; batchId: string };
-export const batchSchema = z
-  .object({
-    id: z.uuid(),
-    leaderId: z.uuid().optional(),
-    at: z.iso.datetime(),
-    composeOperationId: z.uuid(),
-    checkOperationId: z.uuid(),
-    /** `split`: retired into parallel halves; `failed`: platform retries exhausted. */
-    phase: z.enum(['composing', 'checking', 'fallback', 'landed', 'superseded', 'split', 'failed']),
-    /** A half of this earlier cohort, after its shared check failed. */
-    parentId: z.uuid().optional(),
-    /** Every member passed its own admission check. */
-    admitted: z.boolean().optional(),
-    platformRetries: z.number().int().nonnegative().optional(),
-    members: z.array(hostedLandingAttemptSchema).min(2).max(HOSTED_BATCH_MEMBERS),
-    memberDetails: z.array(batchMemberDetailSchema).max(HOSTED_BATCH_MEMBERS).optional(),
-    failure: batchFailureSchema.optional(),
-    uploadIndex: z.number().int().nonnegative(),
-    uploads: z
-      .array(z.object({ pin: z.object({ sha256: z.string(), size: z.number() }), value: z.string() }))
-      .max(3)
-      .optional(),
-    runId: z.uuid().optional(),
-    included: z.array(z.uuid()).max(HOSTED_BATCH_MEMBERS).optional(),
-  })
-  .strict();
-export type LandingBatch = z.infer<typeof batchSchema>;
-export const batchRow = (ctx: QueryCtx | MutationCtx, input: BatchIdentity) =>
-  ctx.db
-    .query('projectHostedLandingBatches')
-    .withIndex('by_project_and_batch', q => q.eq('projectId', input.projectId).eq('batchId', input.batchId))
-    .unique();
-export async function loadBatch(ctx: QueryCtx | MutationCtx, input: BatchIdentity) {
-  const row = await batchRow(ctx, input);
-  invariant(row, 'SOURCE_UNAVAILABLE', 'The retained landing batch is unavailable.');
-  return { row, batch: batchSchema.parse(JSON.parse(row.value)) };
-}
+export {
+  batchSchema,
+  batchRow,
+  loadBatch,
+  type BatchIdentity,
+  type LandingBatch,
+} from './projectHostedLandingBatchState';
+import {
+  batchSchema,
+  loadBatch,
+  type BatchIdentity,
+  type LandingBatch,
+} from './projectHostedLandingBatchState';
 export async function writeBatch(
   ctx: MutationCtx,
   input: BatchIdentity,
@@ -76,11 +50,15 @@ export async function writeBatch(
     composeOperationId: batch.composeOperationId,
     value: canonicalPayload(batchSchema.parse(replace ? batch : { ...JSON.parse(row.value), ...batch })),
   });
+  if (['fallback', 'superseded', 'split', 'failed'].includes(batch.phase))
+    await invalidatePipeline(ctx, input, batch);
   if (batch.phase === 'fallback' || batch.phase === 'landed') await releaseBatchMembers(ctx, input, batch);
   if (batch.phase === 'superseded') {
     const queue = await landingQueue(ctx, { projectId: input.projectId, channel: 'main' });
     if (queue?.train?.some(id => batch.members.some(member => member.submissionId === id)))
-      await ctx.db.patch(queue._id, { train: undefined });
+      await ctx.db.patch(queue._id, {
+        train: queue.train.filter(id => !batch.members.some(member => member.submissionId === id)),
+      });
   }
 }
 export async function wakeBatch(ctx: MutationCtx, input: BatchIdentity) {
@@ -101,26 +79,35 @@ export async function formLandingBatch(
 ) {
   if (!selected.row.batchSelection || selected.state.batchId || selected.state.batchSolo) return false;
   const own = hostedLandingAttemptSchema.parse(JSON.parse(selected.row.batchSelection));
-  // Opt-in is pinned with the admitted policy; members share its digest.
+  // Grouping policy is pinned; members share its digest.
   if (!hostedBatching(own.policy)) return false;
   const admission = hostedAdmission(own.policy),
     queue = await landingQueue(ctx, { projectId: input.projectId, channel: 'main' }),
     limit = cohortSize(own.policy, queue?.checkHistory, admission);
-  if (limit < 2) return false;
-  const order = await activeLandingOrder(
-    ctx,
-    { projectId: input.projectId, channel: 'main' },
-    ['queued', 'checking'],
-    true,
-  );
-  const windows = [];
-  for (const key of order) {
-    if ((key.priority ?? 'normal') !== (selected.state.priority ?? 'normal')) continue;
-    const row = await landingRow(ctx, { projectId: input.projectId, submissionId: key.submissionId });
-    if (row?.batchable) windows.push(row);
-    if (windows.length >= limit) break;
+  const predecessor = await pipelinePredecessor(ctx, { projectId: input.projectId, channel: 'main' });
+  const windows = [selected.row];
+  // Bounded indexed heads exclude already-selected groups. Never enumerate the
+  // queue just to fill one cohort, even with thousands of retained submissions.
+  for (const priority of selected.row.priority === 'urgent'
+    ? (['urgent'] as const)
+    : (['normal', undefined] as const)) {
+    windows.push(
+      ...(await ctx.db
+        .query('projectHostedLandingRequests')
+        .withIndex('by_project_channel_runnable_batchable_priority_sequence', q =>
+          q
+            .eq('projectId', input.projectId)
+            .eq('channel', 'main')
+            .eq('runnable', true)
+            .eq('batchable', true)
+            .eq('priority', priority),
+        )
+        .order('asc')
+        .take(limit)),
+    );
   }
-  const members = windows
+  const ordered = orderHostedLandingRows([...new Map(windows.map(row => [row.submissionId, row])).values()]);
+  const members = ordered
     .flatMap(row => {
       const state = hostedLandingStateSchema.parse(JSON.parse(row.value));
       if (!row.batchSelection || state.batchId || state.batchSolo || state.request.finish?.after) return [];
@@ -134,7 +121,8 @@ export async function formLandingBatch(
         : [];
     })
     .slice(0, limit);
-  if (members.length < 2 || !members.some(m => m.state.id === input.submissionId)) return false;
+  if (members.length < (predecessor ? 1 : 2) || !members.some(m => m.state.id === input.submissionId))
+    return false;
   const batch: LandingBatch = {
     id: crypto.randomUUID(),
     leaderId: members[0]!.state.id,
@@ -142,6 +130,7 @@ export async function formLandingBatch(
     composeOperationId: crypto.randomUUID(),
     checkOperationId: crypto.randomUUID(),
     phase: 'composing',
+    ...(predecessor ? { predecessor } : {}),
     members: members.map(m => m.attempt),
     ...(admission ? { admitted: members.every(m => m.row.admission?.status === 'passed') } : {}),
     uploadIndex: 0,
@@ -244,7 +233,15 @@ export async function installBatchAttempt(
 /** Main moved, not a check failure: retain the cohort and create one new exact
  * shared source/check generation. Late uploads retain their old operation pins. */
 export async function retryLandingBatch(ctx: MutationCtx, input: BatchIdentity, batch: LandingBatch) {
-  const { uploads: _uploads, runId: _run, included: _included, ...retained } = batch;
+  await invalidatePipeline(ctx, input, batch);
+  const {
+    uploads: _uploads,
+    runId: _run,
+    included: _included,
+    predecessor: _predecessor,
+    ...retained
+  } = batch;
+  void _predecessor;
   void _uploads;
   void _run;
   void _included;

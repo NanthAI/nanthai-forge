@@ -23,7 +23,7 @@ async function untilStep(f) {
   }
 }
 
-test('trusted landings pass without a batch by default: each eligible entry checks alone', async t => {
+test('serial policy opt-out checks each eligible entry alone on current main', async t => {
   const f = await batchesFixture(t, { count: 3, batching: false });
   for (let tick = 0; states(f).some(s => s.phase !== 'landed'); tick++) {
     assert(tick < 300, JSON.stringify({ task: f.pending()[0]?.name, phases: states(f).map(s => s.phase) }));
@@ -80,8 +80,8 @@ test('incident replay 2026-10-30: a batch whose compose stays dead cannot block 
   t.diagnostic(JSON.stringify({ landedAfterMs: landedAt - failedAt, driverTicks }));
 });
 
-test('a train whose member is checking holds later entries past the hold, then they land in order', async t => {
-  const f = await batchesFixture(t, { count: 2 });
+test('a one-slot pipeline holds later entries while its group checks, then lands in order', async t => {
+  const f = await batchesFixture(t, { count: 2, concurrency: 1 });
   while (!f.runs().length) await f.execute(f.pending()[0]);
   const [batch] = batches(f);
   assert.equal(batch.phase, 'checking');

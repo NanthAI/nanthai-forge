@@ -44,9 +44,8 @@ export const autonomyPolicySchema = z.object({
     /** Hosted main-race recheck under the contract gate: run only tests affected by
      * both the main delta and this change; absent means on. */
     scopedRecheck: z.boolean().optional(),
-    /** Native: `optimistic` opts into optimistic landing. Hosted: `batched` opts into
-     * landing batches; absent checks each deferred entry alone. */
-    landing: z.enum(['batched', 'optimistic']).optional(),
+    /** Hosted grouping defaults on; `serial` and legacy `optimistic` opt out. Native `optimistic` is unchanged. */
+    landing: z.enum(['batched', 'optimistic', 'serial']).optional(),
     /** Hosted batches: check each member's own affected set before it joins a cohort. Absent is off. */
     admissionCheck: z.boolean().optional(),
     /** Hosted batches: fixed cohort size; absent picks it from the recent failure rate. */

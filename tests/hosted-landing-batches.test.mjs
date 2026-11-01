@@ -271,7 +271,7 @@ test('formation reads two indexed windows, takes eight members and leaves overfl
           value.withIndex = (name, builder) => {
             if (
               table === 'projectHostedLandingRequests' &&
-              name === 'by_project_and_channel_and_batchable_and_phase_and_sequence'
+              name === 'by_project_channel_runnable_batchable_priority_sequence'
             )
               windows++;
             return withIndex(name, builder);
@@ -293,7 +293,7 @@ test('formation reads two indexed windows, takes eight members and leaves overfl
   assert.equal(JSON.parse(overflow.value).batchId, undefined);
 });
 
-test('seven arrivals behind a checking solo accumulate into one current-main batch with no main-race rechecks', async t => {
+test('seven arrivals pipeline on a checking solo without replacing its proof or rechecking', async t => {
   const f = await batchesFixture(t, { count: 1 });
   await f.drain();
   const originalRun = f.runs()[0];
@@ -317,9 +317,9 @@ test('seven arrivals behind a checking solo accumulate into one current-main bat
     );
   }
   await f.drain();
-  assert.equal(f.tables.projectHostedLandingBatches.size, 0, 'do not replace in-flight solo proof');
-  assert.equal(f.runs().length, 1, 'later arrivals start no competing checks');
-  await f.passChecks();
+  assert.equal(f.tables.projectHostedLandingBatches.size, 1, 'successor composes while the solo checks');
+  assert.equal(f.runs().length, 2, 'successor checks on the predicted predecessor');
+  await f.rawChecks.pass(await f.rawChecks.activate(originalRun.id));
   await f.drain();
   const batch = JSON.parse([...f.tables.projectHostedLandingBatches.values()][0].value);
   assert.equal(batch.members.length, 7);
@@ -406,15 +406,15 @@ test('incident storage replay: eight eligible landings reuse a Convex-stored emp
   assert.equal(f.pending().length, 0);
 });
 
-test('overflow behind an eight-member cohort starts one current-main solo check after the batch lands', async t => {
+test('overflow pipelines a one-member group on the checking eight-member cohort', async t => {
   const f = await batchesFixture(t, { count: 9 });
   await f.drain();
-  assert.equal(f.runs().length, 1);
-  await f.passChecks();
+  assert.equal(f.runs().length, 2);
+  const [first, next] = f.runs();
+  assert.equal(next.candidate.base.head, first.request.expectedHead);
+  await f.rawChecks.pass(await f.rawChecks.activate(first.id));
   await f.drain();
   assert.equal(states(f).filter(s => s.phase === 'landed').length, 8);
-  assert.equal(f.runs().length, 2);
-  const next = f.runs().find(run => run.status === 'queued');
   assert.equal(next.candidate.base.head, f.currentMain().head);
   await f.passChecks();
   await f.drain();
@@ -461,7 +461,12 @@ test('a terminal finish error releases its active cohort through an event withou
     if (task.name === 'projectHostedLandingStall:alarm')
       f.patch('_scheduled_functions', task._id, { state: { kind: 'canceled' } });
   await f.drain();
-  assert.equal(f.runs().length, 2, 'the queued overflow runs after the cohort errors settle');
+  assert.equal(
+    f.runs().length,
+    3,
+    'the speculative overflow is discarded and checks surviving main after its predecessor fails',
+  );
+  assert.equal(f.runs().at(-1).candidate.base.head, f.currentMain().head);
   await f.passChecks();
   await f.drain();
   assert.equal(states(f).find(s => s.id === f.entries[8].state.id).phase, 'landed');

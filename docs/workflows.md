@@ -79,9 +79,12 @@ escalate to full. A full or docs pass satisfies either gate. Each acceptance sti
 checks the exact Candidate, current policy, main head and receipt; a contract from
 another run is not passing evidence.
 
-Trusted landings pass without a batch: each eligible entry checks alone at the
-head of the queue under this gate. Hosted landing batches are opt-in
-(`acceptance.landing: "batched"`) and always run the full gate.
+Eligible hosted automatic-accept landings group by default and run the full
+shared gate, with no separate solo check required. `acceptance.landing: "serial"`
+opts out: entries then check alone under this gate. Up to six groups pipeline on
+the exact predicted predecessor head and receipt (`checks.concurrency` overrides).
+Passing successors retain evidence and publish in order; a failed predecessor
+invalidates its dependent stack. See [hosted grouping](operations/landing-batches.md#hosted-queue-priority).
 
 When main moves under a passing full check and the clean recomposition cannot
 reuse it, the retry may run a scoped recheck (`acceptance.scopedRecheck`, absent

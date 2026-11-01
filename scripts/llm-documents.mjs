@@ -43,6 +43,7 @@ const measured = [
 const agentRules = [
   'Hosted CLI actions and parameters come from the enforced contract: run `nforge agent ROOT --help` in the hosted checkout or `nforge docs agents/hosted`. Replay the full original request including message. `land --save` accepts overlapAnswer:"accept-order"; use `wait {operationIds:[ORIGINAL_UUID]}` for the landing.',
 
+  'Hosted automatic-accept projects group landings by default and pipeline six exact-source groups (checks.concurrency overrides); acceptance.landing: serial opts out. No separate solo check is required before grouping; failed groups split to isolate failing changes.',
   'Run only the tests your change affects (`nforge agent ROOT tests`), plus typecheck, lint and format checks on touched files. Do not run the full suite locally.',
   'Let `finish` compose concurrent Lanes into one check on the project runner. A failing Lane is dropped from the batch and the others still land after passing. Do not rebase or babysit a merge queue.',
   'Read peers and presence before editing; announce your paths and resolve overlap early. These observations are advisory and can be incomplete.',

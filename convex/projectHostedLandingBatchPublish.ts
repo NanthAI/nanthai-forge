@@ -4,6 +4,7 @@ import { requireLandingLease, type LandingClaim } from './projectHostedLandingCo
 import { loadBatch, writeBatch, wakeBatch, retryLandingBatch } from './projectHostedLandingBatchStore';
 import {
   loadLanding,
+  landingRow,
   loadLandingAttempt,
   writeLanding,
   settleLandingOperation,
@@ -257,7 +258,12 @@ export async function publishLandingBatch(ctx: MutationCtx, claim: LandingClaim,
       observation: landingObservation('accepted'),
       error: null,
     };
-    await writeLanding(ctx, member.row, next, false);
+    // Earlier members can transfer order waiters to this member within this
+    // transaction. Re-read that row so its new orderWaited flag is consumed;
+    // using the preloaded row strands passing successor groups without a wake.
+    const currentRow = await landingRow(ctx, { projectId: claim.projectId, submissionId: member.state.id });
+    invariant(currentRow, 'SOURCE_UNAVAILABLE', 'The batch member disappeared.');
+    await writeLanding(ctx, currentRow, next, false);
     await settleLandingOperation(ctx, next);
     if (member.plan.inputPages) await scheduleAcceptanceCompletion(ctx, identity);
     receipts.push(receipt);
