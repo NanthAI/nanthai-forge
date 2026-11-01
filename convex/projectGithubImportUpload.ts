@@ -6,6 +6,7 @@ import type { Id } from './_generated/dataModel';
 import { internal } from './_generated/api';
 import { presignPut, r2Config, headObject, checksumOf, r2Key } from './r2';
 import { exchangeFetch } from '../src/exchange-request';
+import { withExchangeObservation, currentExchangeObservation } from '../src/exchange-observation';
 import { ObjectRecipeBuilder } from '../src/object-chunks';
 import { digest } from '../src/hash';
 import { mapExchange } from '../src/exchange-parallel';
@@ -30,6 +31,9 @@ export class ImportUpload {
   private entries: CatalogEntry[] = [];
   /** Objects newly written by this upload; already stored ones are skipped. */
   uploaded = 0;
+  putAttempts = 0;
+  putBytes = 0;
+  uploadMillis = 0;
   constructor(
     private ctx: ActionCtx,
     private projectId: Id<'hostedProjects'>,
@@ -102,16 +106,25 @@ export class ImportUpload {
   }
   /** Create-only PUTs to content-addressed keys; no Convex call per window. */
   private async storeCatalogWindow(pending: [string, Buffer][]) {
+    const started = Date.now();
     const config = r2Config(),
       stored = this.catalog!.stored;
     await mapExchange(pending, this.concurrency, async ([digest, bytes]) => {
       if (stored.has(digest)) return;
       const key = r2Key(this.projectId, digest),
         put = await presignPut(config, key, { digest, size: bytes.length });
-      const response = await exchangeFetch('R2 import page upload', put.url, {
-        method: 'PUT',
-        headers: put.headers,
-        body: new Uint8Array(bytes),
+      const { value: response } = await withExchangeObservation(async () => {
+        try {
+          return await exchangeFetch('R2 import page upload', put.url, {
+            method: 'PUT',
+            headers: put.headers,
+            body: new Uint8Array(bytes),
+          });
+        } finally {
+          const measured = currentExchangeObservation()!.measured;
+          this.putAttempts += measured.requests;
+          this.putBytes += measured.requestBodyBytes;
+        }
       });
       invariant(
         response.ok || response.status === 412,
@@ -133,6 +146,10 @@ export class ImportUpload {
       stored.set(digest, entry);
       this.entries.push(entry);
     });
+    this.uploadMillis += Date.now() - started;
+    console.log(
+      `FORGE_IMPORT_METRIC ${JSON.stringify({ projectId: this.projectId, phase: 'upload', at: Date.now(), objects: pending.length, putAttempts: this.putAttempts, putBytes: this.putBytes, uploadMillis: this.uploadMillis, peakBufferedBytes: this.peakBufferedBytes })}`,
+    );
   }
   async commit() {
     if (this.catalog) {

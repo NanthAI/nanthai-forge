@@ -28,6 +28,11 @@ export async function publishImport(
   memory?: ImportRows,
   catalog?: ImportCatalog,
 ) {
+  const started = Date.now();
+  const metric = (phase: string) =>
+    console.log(
+      `FORGE_IMPORT_METRIC ${JSON.stringify({ projectId: job.projectId, phase, at: Date.now(), elapsedMillis: Date.now() - started, putAttempts: upload.putAttempts, putBytes: upload.putBytes, uploadMillis: upload.uploadMillis })}`,
+    );
   const identity = { id: job._id, actor: job.owner };
   async function* pages(part: string) {
     if (memory) {
@@ -103,6 +108,7 @@ export async function publishImport(
     yield Buffer.from(prefix.slice(split));
   }
   const root = await upload.stream(manifestBytes());
+  metric('metadata');
   if (catalog) {
     // Every stored object (sources, chunks, recipes, State, manifest) becomes a
     // sorted catalog row of objectCatalogPage pins: O(pages) documents, no row per object.
@@ -120,6 +126,7 @@ export async function publishImport(
         pages: pages.slice(at, at + 32),
       });
   }
+  metric('catalog');
   const parents = Object.assign(new Map([[head, [] as string[]]]), { files: new Map([[head, []]]) });
   const projection = materializeWork(data, minimal, [], 'objects', parents);
   projection.metadata.counts.sourceBlobs = blobs + 1;
@@ -203,6 +210,7 @@ export async function publishImport(
       );
     }
   await flush();
+  metric('projection');
   const access = await authorizeGithub(job.repository, job.owner, githubConfig());
   invariant(
     job.visibility === 'private' || !access.repository.private,
@@ -214,4 +222,5 @@ export async function publishImport(
     step: job.step,
     batches: batch,
   });
+  metric('ready');
 }

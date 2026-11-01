@@ -26,7 +26,9 @@ import { importBenchmarkGuard } from './benchmark-import-guard.mjs';
 
 const DEPLOYMENT = process.env.FORGE_BENCH_DEPLOYMENT || 'benevolent-wildebeest-974';
 const URL = `https://${DEPLOYMENT}.convex.cloud`;
-const STATUS_EVERY_MS = 180_000; // finite harness observation, counted in the report
+const STATUS_EVERY_MS = Number(process.env.FORGE_IMPORT_STATUS_MS || 180_000); // finite harness observation, counted in the report
+if (!Number.isSafeInteger(STATUS_EVERY_MS) || STATUS_EVERY_MS < 1000)
+  throw Error('Invalid status observation interval.');
 const RATE_LIMIT_WAIT_MS = 15 * 60_000;
 /** Shared REST quota of the local gh login: { remaining, resetMs } or null. */
 function githubCore() {
@@ -114,6 +116,18 @@ guard.monitor.usage = {
 };
 const deployment = { completions: 0, failures: 0, ioReadBytes: 0, ioWriteBytes: 0, egressBytes: 0 };
 let peakMemoryMb = 0;
+const metrics = [];
+const metricNumbers = [
+  'at',
+  'elapsedMillis',
+  'files',
+  'sourceBytes',
+  'objects',
+  'putAttempts',
+  'putBytes',
+  'uploadMillis',
+  'peakBufferedBytes',
+];
 
 const logs = spawn('npx', ['convex', 'logs', '--deployment', DEPLOYMENT, '--jsonl', '--success'], {
   stdio: ['ignore', 'pipe', 'ignore'],
@@ -138,6 +152,37 @@ createInterface({ input: logs.stdout }).on('line', line => {
   }
   const before = guard.monitor.total;
   guard.observe(event);
+  // Fixed schema only: never persist provider log lines, URLs or credentials.
+  for (const line of event.logLines ?? []) {
+    const value = typeof line === 'string' ? line : (line.messages ?? []).join(' ');
+    const match = value.match(/FORGE_IMPORT_METRIC (\{.*\})/);
+    if (!match) continue;
+    try {
+      const data = JSON.parse(match[1]);
+      if (
+        data.projectId !== guard.monitor.target.projectId ||
+        ![
+          'upload',
+          'listing',
+          'archive-open',
+          'archive-complete',
+          'metadata',
+          'catalog',
+          'projection',
+          'ready',
+        ].includes(data.phase)
+      )
+        continue;
+      const metric = { phase: data.phase, executionId: event.executionId };
+      for (const key of metricNumbers) if (Number.isFinite(data[key])) metric[key] = data[key];
+      if (!metrics.some(prior => JSON.stringify(prior) === JSON.stringify(metric))) {
+        metrics.push(metric);
+        log({ event: 'metric', ...metric });
+      }
+    } catch {
+      /* Ignore unrelated provider text. */
+    }
+  }
   if (guard.monitor.total > before)
     peakMemoryMb = Math.max(peakMemoryMb, event.usageStats?.memoryUsedMb ?? 0);
   if (!journal.projectId && guard.monitor.target.projectId) {
@@ -175,6 +220,8 @@ const report = extra => {
     harness,
     deploymentWindow: deployment,
     streamFailed,
+    metrics,
+    statusEveryMs: STATUS_EVERY_MS,
   };
   writeFileSync(join(dir, 'report.json'), JSON.stringify(out, null, 1));
   return out;

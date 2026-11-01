@@ -6,8 +6,13 @@ import { api } from '../../convex/_generated/api';
 import { PendingWrite } from './pending-write';
 import { hostedError } from './snapshot';
 import { ErrorToast } from './ui/Toast';
+import ImportGithubProject from './ImportGithubProject';
 
-export default function NewHostedProject({ created }: { created: (id: Id<'hostedProjects'>) => void }) {
+export default function NewHostedProject({
+  created,
+}: {
+  created: (id: Id<'hostedProjects'>, source?: 'github') => void;
+}) {
   const client = useConvex();
   const [name, setName] = useState('');
   const [busy, setBusy] = useState(false);
@@ -31,31 +36,37 @@ export default function NewHostedProject({ created }: { created: (id: Id<'hosted
     }
   }
   return (
-    <form
-      className="fx-new-project"
-      onSubmit={event => {
-        event.preventDefault();
-        void submit();
-      }}
-    >
-      {error && (
-        <ErrorToast fieldIds={['new-hosted-project-name']} retry={() => void submit()}>
-          {error}
-        </ErrorToast>
-      )}
-      <label htmlFor="new-hosted-project-name">Project name</label>
-      <input
-        id="new-hosted-project-name"
-        value={name}
-        onChange={event => setName(event.target.value)}
-        required
-        disabled={busy}
-        aria-invalid={!!error}
-      />
-      <button className="fx-btn fx-btn-primary" disabled={busy || !name.trim()}>
-        {busy ? 'Creating…' : pending.current.pending ? 'Retry creation' : 'Create project'}
-      </button>
-    </form>
+    <>
+      <form
+        className="fx-new-project"
+        onSubmit={event => {
+          event.preventDefault();
+          void submit();
+        }}
+      >
+        {error && (
+          <ErrorToast fieldIds={['new-hosted-project-name']} retry={() => void submit()}>
+            {error}
+          </ErrorToast>
+        )}
+        <label htmlFor="new-hosted-project-name">Project name</label>
+        <input
+          id="new-hosted-project-name"
+          value={name}
+          onChange={event => setName(event.target.value)}
+          required
+          disabled={busy}
+          aria-invalid={!!error}
+        />
+        <button className="fx-btn fx-btn-primary" disabled={busy || !name.trim()}>
+          {busy ? 'Creating…' : pending.current.pending ? 'Retry creation' : 'Create project'}
+        </button>
+      </form>
+      <details>
+        <summary>Import from GitHub</summary>
+        <ImportGithubProject created={id => created(id, 'github')} />
+      </details>
+    </>
   );
 }
 

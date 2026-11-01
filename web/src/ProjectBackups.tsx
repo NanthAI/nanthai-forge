@@ -478,10 +478,10 @@ export default function ProjectBackups({ explore }: { explore?: () => void }) {
             onChange={showNewProject}
           >
             <NewHostedProject
-              created={id => {
+              created={(id, source) => {
                 showNewProject(false);
                 chooseProject(id);
-                setCreatedProject(id);
+                setCreatedProject(source === 'github' ? null : id);
               }}
             />
           </ActionPanel>

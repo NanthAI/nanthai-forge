@@ -1,5 +1,13 @@
 # GitHub project source import
 
+In the hosted app, choose **New project → Import from GitHub**, enter a repository
+URL and optionally a branch, tag or commit, and choose **Import from GitHub**.
+That form calls `projectGithubImport.start`; progress subscribes to the owned
+job and opens the writable hosted project when main is published. **Resume
+import** keeps the original operation and pinned commit after an error. The
+separate Projects **Import from GitHub · read-only analysis** link opens the
+analysis tour and does not create an editable project.
+
 `projectGithubImport.start` creates a hosted personal mirror owned by the signed-in
 importer. Its arguments are an original operation UUID, GitHub URL, optional ref
 and optional project name. Repeating the same request resumes the original job

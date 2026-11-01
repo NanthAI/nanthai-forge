@@ -54,6 +54,9 @@ export async function runArchiveImport(ctx: ActionCtx, job: Doc<'projectGithubIm
     access.token;
   const listing = await listGithubTree(job.repository, cursor.tree, token);
   invariant(listing, 'GITHUB_RESPONSE', 'GitHub no longer lists this commit tree completely.');
+  console.log(
+    `FORGE_IMPORT_METRIC ${JSON.stringify({ projectId: job.projectId, phase: 'listing', at: Date.now(), elapsedMillis: Date.now() - started, files: listing.files.length, sourceBytes: listing.totalBytes })}`,
+  );
   const listed = new Map(listing.files.map(file => [file.path, file]));
   // Progress is the stored objects themselves: one receipt per earlier window.
   const stored = new Map<string, CatalogEntry>();
@@ -123,6 +126,9 @@ export async function runArchiveImport(ctx: ActionCtx, job: Doc<'projectGithubIm
   };
   let complete = true;
   const archive = await openGithubArchive(job.repository, job.commit, token);
+  console.log(
+    `FORGE_IMPORT_METRIC ${JSON.stringify({ projectId: job.projectId, phase: 'archive-open', at: Date.now(), elapsedMillis: Date.now() - started })}`,
+  );
   for await (const file of githubArchiveFiles(archive, listed, objectChunkBytes)) {
     if (file.bytes) {
       if (gitBlobId(file.entry.sha, file.bytes) === file.entry.sha) {
@@ -173,6 +179,9 @@ export async function runArchiveImport(ctx: ActionCtx, job: Doc<'projectGithubIm
   }
   await drain(true);
   await flush();
+  console.log(
+    `FORGE_IMPORT_METRIC ${JSON.stringify({ projectId: job.projectId, phase: 'archive-complete', at: Date.now(), elapsedMillis: Date.now() - started, files: imported.size, putAttempts: upload.putAttempts, putBytes: upload.putBytes, uploadMillis: upload.uploadMillis, peakBufferedBytes: upload.peakBufferedBytes })}`,
+  );
   if (imported.size < listing.files.length || over()) {
     // Progress is the stored objects themselves; a continuation skips them.
     // A run that stored nothing new cannot converge within an action.
