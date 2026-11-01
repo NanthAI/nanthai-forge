@@ -47,9 +47,12 @@ The Git blob endpoint acquisition boundary remains 100 MB per blob; large
 supported files stream through the existing bounded chunk recipes. This is a
 provider boundary, not a new repository quota.
 
-Archive imports buffer at most one 8 MiB/1,000-object source window plus a stream
-chunk, and one bounded pack copy during upload. A window becomes one immutable,
-SHA-256-verified R2 object; singleton and empty objects can stay raw. The sorted
+Ordinary archive members drain the source buffer at the 8 MiB/1,000-object
+thresholds; a final member can cross the byte threshold. Git-blob fallback first
+fetches a bounded page of up to 100 small blobs, which can exceed 8 MiB, before
+draining. Large members stream through chunk recipes. Upload holds the staged
+source and one pack copy. Each window becomes one immutable, SHA-256-verified R2
+object; singleton and empty objects can stay raw. The sorted
 catalog retains logical digests, sizes, byte offsets and pack identities, with up
 to 256 object pins per document, including protected physical-pack bindings. Recipes keep their existing format. Reads use
 project-authorized byte ranges with the exact Range header bound into the
