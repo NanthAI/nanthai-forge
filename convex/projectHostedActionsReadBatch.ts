@@ -8,6 +8,7 @@ import { presignGet, r2Config } from './r2';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { invariant } from '../src/errors';
 import { findObject } from './projectObjectFind';
+import { packHeaders, packRange } from '../src/object-pack-range';
 
 /** One live job/actor/epoch/lease check per bounded window, never a reusable
  * authorization cache. Recipe leaves still require their own exact grants. */
@@ -37,12 +38,12 @@ export const describeAndGrant = internalMutation({
         const row = await findObject(ctx, input.projectId, sha256);
         const url =
           row?.location === 'r2' && row.r2Key
-            ? await presignGet(r2Config(), row.r2Key)
+            ? await presignGet(r2Config(), row.r2Key, packHeaders(packRange(row), row.size))
             : row?.storageId
               ? await blobStore(ctx).getUrl(row.storageId)
               : null;
         invariant(url, 'SOURCE_UNAVAILABLE', 'Read the exact raw source or its recipe leaves.');
-        target = { url, headers: {} };
+        target = { url, headers: packHeaders(packRange(row ?? {}), descriptor.object.size) };
       }
       result.push({ descriptor, target });
     }

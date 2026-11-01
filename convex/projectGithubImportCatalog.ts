@@ -9,33 +9,48 @@ import { objectCatalogPage } from './projectObjectFind';
 import { importPageFiles } from '../src/github-import-pages';
 import { digest } from '../src/portable-hash';
 import { invariant } from '../src/errors';
+import { objectPack } from './projectObjectFields';
+import type { ObjectPack } from '../src/object-pack-range';
 
 export const catalogEntry = v.object({
   digest: v.string(),
   size: v.number(),
   recipe: v.optional(v.object({ digest: v.string(), size: v.number() })),
+  pack: v.optional(objectPack),
 });
-type Entry = { digest: string; size: number; recipe?: { digest: string; size: number } };
+type Entry = { digest: string; size: number; recipe?: { digest: string; size: number }; pack?: ObjectPack };
 const catalogRow = v.object({
   first: v.string(),
   last: v.string(),
   digests: v.string(),
   sizes: v.array(v.number()),
   recipes: v.array(v.object({ index: v.number(), digest: v.string(), size: v.number() })),
+  packs: v.optional(
+    v.array(v.object({ index: v.number(), digest: v.string(), size: v.number(), offset: v.number() })),
+  ),
 });
 const pin = /^[0-9a-f]{64}$/;
 const validEntry = (entry: Entry) =>
   pin.test(entry.digest) &&
   Number.isSafeInteger(entry.size) &&
   entry.size >= 0 &&
-  (!entry.recipe || (pin.test(entry.recipe.digest) && Number.isSafeInteger(entry.recipe.size)));
+  (!entry.recipe || (pin.test(entry.recipe.digest) && Number.isSafeInteger(entry.recipe.size))) &&
+  (!entry.pack ||
+    (!entry.recipe &&
+      pin.test(entry.pack.digest) &&
+      Number.isSafeInteger(entry.pack.size) &&
+      Number.isSafeInteger(entry.pack.offset) &&
+      entry.pack.offset >= 0 &&
+      entry.size > 0 &&
+      Number.isSafeInteger(entry.pack.offset + entry.size) &&
+      entry.pack.offset + entry.size <= entry.pack.size));
 
 /** One inventory row per stored upload window (archive imports): the
  * continuation skip set until publication writes the sorted catalog. */
 export async function recordWindow(ctx: MutationCtx, job: Doc<'projectGithubImports'>, objects: Entry[]) {
   if (!objects.length) return;
   invariant(
-    objects.length <= 2 * importPageFiles && objects.every(validEntry),
+    objects.length <= 2 * importPageFiles + 1 && objects.every(validEntry),
     'IMPORT_PAGE_CHANGED',
     'Record verified object pins in bounded windows.',
   );
@@ -43,6 +58,7 @@ export async function recordWindow(ctx: MutationCtx, job: Doc<'projectGithubImpo
     digests: objects.map(entry => entry.digest).join(''),
     sizes: objects.map(entry => entry.size),
     recipes: objects.flatMap((entry, index) => (entry.recipe ? [{ index, ...entry.recipe }] : [])),
+    packs: objects.flatMap((entry, index) => (entry.pack ? [{ index, ...entry.pack }] : [])),
   });
   await retain(ctx, job, [{ part: 'objects', key: digest(value), position: 0, value }]);
 }
@@ -51,12 +67,15 @@ export function windowEntries(value: string): Entry[] {
     digests: string;
     sizes: number[];
     recipes: { index: number; digest: string; size: number }[];
+    packs?: ({ index: number } & ObjectPack)[];
   } = JSON.parse(value);
   const entries: Entry[] = row.sizes.map((size, index) => ({
     digest: row.digests.slice(index * 64, index * 64 + 64),
     size,
   }));
   for (const { index, digest, size } of row.recipes) entries[index]!.recipe = { digest, size };
+  for (const { index, digest, size, offset } of row.packs ?? [])
+    entries[index]!.pack = { digest, size, offset };
   return entries;
 }
 /** Stored windows in bounded pages (a continuation reads them once per run). */
@@ -87,14 +106,23 @@ export const publish = internalMutation({
           page.digests.length === count * 64 &&
           page.first === page.digests.slice(0, 64) &&
           page.last === page.digests.slice(-64) &&
-          page.recipes.every(row => row.index >= 0 && row.index < count),
+          page.recipes.every(row => row.index >= 0 && row.index < count) &&
+          (page.packs ?? []).every(
+            row => Number.isSafeInteger(row.index) && row.index >= 0 && row.index < count,
+          ) &&
+          new Set((page.packs ?? []).map(row => row.index)).size === (page.packs?.length ?? 0),
         'IMPORT_PAGE_CHANGED',
         'Catalog rows are malformed.',
       );
       for (let index = 0; index < count; index++) {
         const entry = page.digests.slice(index * 64, index * 64 + 64);
         invariant(
-          validEntry({ digest: entry, size: page.sizes[index]! }) &&
+          validEntry({
+            digest: entry,
+            size: page.sizes[index]!,
+            recipe: page.recipes.find(row => row.index === index),
+            pack: page.packs?.find(row => row.index === index),
+          }) &&
             (index === 0 || page.digests.slice(index * 64 - 64, index * 64) < entry),
           'IMPORT_PAGE_CHANGED',
           'Catalog rows must be sorted verified pins.',
@@ -106,7 +134,11 @@ export const publish = internalMutation({
         .take(1);
       if (previous) {
         invariant(
-          previous.digests === page.digests && previous.last === page.last,
+          previous.digests === page.digests &&
+            previous.last === page.last &&
+            JSON.stringify(previous.sizes) === JSON.stringify(page.sizes) &&
+            JSON.stringify(previous.recipes) === JSON.stringify(page.recipes) &&
+            JSON.stringify(previous.packs ?? []) === JSON.stringify(page.packs ?? []),
           'IMPORT_PAGE_CHANGED',
           'Immutable catalog changed.',
         );

@@ -23,7 +23,12 @@ export async function readNestedCheckoutNode(
       for (const id of ids) signed.add(id);
       return rows.map(row => {
         invariant(row.location === 'r2' && row.url, 'INVALID_NATIVE_SOURCE', 'Select signed source content.');
-        return { digest: row.digest, size: row.size, url: row.url };
+        return {
+          digest: row.digest,
+          size: row.size,
+          url: row.url,
+          ...(row.range ? { range: row.range } : {}),
+        };
       });
     },
     fetch: (url, init) => exchangeFetch('Checkout recipe download', url, init),

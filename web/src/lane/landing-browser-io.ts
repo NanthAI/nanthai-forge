@@ -7,6 +7,7 @@ import { saveBytes, savePin } from '../../../src/hosted-save';
 import { digest } from '../../../src/portable-hash';
 import { invariant } from '../../../src/errors';
 import type { LandingIO, Pin } from './hosted-landing-client';
+import { packHeaders, verifyPackRange, type PackRange } from '../../../src/object-pack-range';
 export function landingBrowserIO(client: ConvexReactClient, projectId: Id<'hostedProjects'>): LandingIO {
   const parse = <T>(value: unknown): T => (typeof value === 'string' ? JSON.parse(value) : value) as T;
   const io: LandingIO = {
@@ -46,18 +47,19 @@ export function landingBrowserIO(client: ConvexReactClient, projectId: Id<'hoste
         'SOURCE_UNAVAILABLE',
         'Exact composition metadata is unavailable.',
       );
-      const url =
+      const target: { url: string; range?: PackRange } | undefined =
         row.location === 'convex'
-          ? row.url
+          ? { url: row.url }
           : (
               await client.mutation(api.projectObjectDownloads.signDownloads, {
                 projectId,
                 digests: [pin.sha256],
               })
-            )[0]?.url;
-      invariant(url, 'SOURCE_UNAVAILABLE', 'Exact metadata download is unavailable.');
-      const response = await fetch(url);
+            )[0];
+      invariant(target, 'SOURCE_UNAVAILABLE', 'Exact metadata download is unavailable.');
+      const response = await fetch(target.url, { headers: packHeaders(target.range, pin.size) });
       invariant(response.ok, 'SOURCE_UNAVAILABLE', 'Metadata download failed.');
+      verifyPackRange(response, target.range, pin.size);
       const bytes = new Uint8Array(await response.arrayBuffer());
       invariant(
         bytes.length === pin.size && digest(bytes) === pin.sha256,

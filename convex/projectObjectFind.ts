@@ -2,6 +2,7 @@
 import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
 import { r2Key } from './r2';
+import type { ObjectPack } from '../src/object-pack-range';
 
 /** Objects per catalog row (~19 KB): a lookup reads one small document. */
 export const objectCatalogPage = 256;
@@ -23,6 +24,8 @@ function entry(page: Page, digest: string): CatalogObject | null {
       found = page.digests.slice(middle * 64, middle * 64 + 64);
     if (found === digest) {
       const recipe = page.recipes.find(row => row.index === middle);
+      const packed = page.packs?.find(row => row.index === middle);
+      const pack = packed && { digest: packed.digest, size: packed.size, offset: packed.offset };
       return {
         projectId: page.projectId,
         digest,
@@ -32,7 +35,12 @@ function entry(page: Page, digest: string): CatalogObject | null {
         sourceReferenced: true,
         ...(recipe
           ? { recipe: { digest: recipe.digest, size: recipe.size } }
-          : { location: 'r2' as const, r2Key: r2Key(page.projectId, digest), r2Committed: true }),
+          : {
+              location: 'r2' as const,
+              r2Key: r2Key(page.projectId, pack?.digest ?? digest),
+              r2Committed: true,
+              ...(pack ? { pack } : {}),
+            }),
       };
     }
     if (found < digest) low = middle + 1;
@@ -85,13 +93,18 @@ export async function objectRow(ctx: MutationCtx, object: ObjectView): Promise<D
     sourceReferenced: true,
     ...(object.recipe
       ? { recipe: object.recipe }
-      : { location: 'r2' as const, r2Key: object.r2Key, r2Committed: true }),
+      : {
+          location: 'r2' as const,
+          r2Key: object.r2Key,
+          r2Committed: true,
+          ...(object.pack ? { pack: object.pack } : {}),
+        }),
   });
   return (await ctx.db.get(id))!;
 }
 /** Sorted catalog rows for a set of stored objects; callers write them once. */
 export function catalogPages(
-  objects: { digest: string; size: number; recipe?: { digest: string; size: number } }[],
+  objects: { digest: string; size: number; recipe?: { digest: string; size: number }; pack?: ObjectPack }[],
 ) {
   const sorted = [...objects].sort((a, b) => (a.digest < b.digest ? -1 : a.digest > b.digest ? 1 : 0));
   const pages = [];
@@ -103,6 +116,9 @@ export function catalogPages(
       digests: rows.map(row => row.digest).join(''),
       sizes: rows.map(row => row.size),
       recipes: rows.flatMap((row, index) => (row.recipe ? [{ index, ...row.recipe }] : [])),
+      ...(rows.some(row => row.pack)
+        ? { packs: rows.flatMap((row, index) => (row.pack ? [{ index, ...row.pack }] : [])) }
+        : {}),
     });
   }
   return pages;

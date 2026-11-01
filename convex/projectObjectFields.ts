@@ -2,6 +2,7 @@
 import { defineTable } from 'convex/server';
 import { v } from 'convex/values';
 import { backfillFields } from './r2BackfillFields';
+export const objectPack = v.object({ digest: v.string(), size: v.number(), offset: v.number() });
 export const objectFields = {
   projectId: v.id('hostedProjects'),
   digest: v.string(),
@@ -12,6 +13,7 @@ export const objectFields = {
   r2SweepKey: v.optional(v.string()),
   r2PreparedAt: v.optional(v.number()),
   recipe: v.optional(v.object({ digest: v.string(), size: v.number() })),
+  pack: v.optional(objectPack),
   removed: v.boolean(),
   sourceReferenced: v.optional(v.boolean()),
 };
@@ -50,6 +52,9 @@ export const objectTables = {
     sizes: v.array(v.number()),
     /** Logical objects stored as a recipe (no raw bytes of their own). */
     recipes: v.array(v.object({ index: v.number(), digest: v.string(), size: v.number() })),
+    packs: v.optional(
+      v.array(v.object({ index: v.number(), digest: v.string(), size: v.number(), offset: v.number() })),
+    ),
     origin: v.string(),
   })
     .index('by_project', ['projectId'])

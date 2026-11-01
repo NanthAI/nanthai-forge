@@ -28,7 +28,7 @@ test('packaged docs work outside a project, with discoverable help and safe name
   assert.match(cli(['--help']).stdout, /nforge docs quickstart/);
   assert.match(cli(['docs']).stdout, /docs\/quickstart.md/);
   assert.match(cli(['docs', '--help']).stdout, /nforge docs \[name\]/);
-  assert.match(cli(['docs', 'quickstart']).stdout, /git -C "\$GIT_ROOT" rev-parse HEAD/);
+  assert.match(cli(['docs', 'quickstart']).stdout, /Import GitHub source into a hosted project/);
   assert.match(cli(['docs', 'agent']).stdout, /Forge/);
   assert.match(cli(['agent', '--help']).stdout, /nforge docs agent/);
   const denied = spawnSync(process.execPath, [cliPath, 'docs', '../package.json'], { encoding: 'utf8' });

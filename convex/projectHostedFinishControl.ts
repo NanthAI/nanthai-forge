@@ -26,6 +26,7 @@ import type { FinishCommand } from '../src/hosted-finish';
 import { ForgeError, invariant } from '../src/errors';
 import { reuseContext } from './projectHostedReuseStore';
 import { findObject, objectRow } from './projectObjectFind';
+import { packRange, packHeaders } from '../src/object-pack-range';
 export type FinishIdentity = LandingIdentity & { wakeId: string };
 export async function finishStep(ctx: MutationCtx, input: FinishIdentity): Promise<FinishCommand | null> {
   const { row, value } = await loadFinish(ctx, input);
@@ -159,7 +160,7 @@ export async function finishStep(ctx: MutationCtx, input: FinishIdentity): Promi
       );
       const url =
         object.location === 'r2' && object.r2Key
-          ? await presignGet(r2Config(), object.r2Key)
+          ? await presignGet(r2Config(), object.r2Key, packHeaders(packRange(object), object.size))
           : object.storageId
             ? await blobStore(ctx).getUrl(object.storageId)
             : null;
@@ -168,6 +169,7 @@ export async function finishStep(ctx: MutationCtx, input: FinishIdentity): Promi
       return {
         kind: 'page',
         url,
+        ...(object.pack ? { range: packRange(object)! } : {}),
         pin,
         selection: {
           attemptId: state.attemptId,

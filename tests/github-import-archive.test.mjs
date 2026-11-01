@@ -202,6 +202,8 @@ test('a 28,905-file tree imports through one archive stream within an O(pages) b
   );
   assert.ok(stats.documentsWritten < 1000, `${stats.documentsWritten} documents written`);
   assert.ok(executions <= 5 * Math.ceil(repo.files / 1000) + 10, `${executions} executions`);
+  const puts = bucket.requests.filter(request => request.method === 'PUT').length;
+  assert.ok(puts <= 80, `${puts} R2 PUTs for a t3code-size import; bytes must travel in packs`);
   t.diagnostic(
     JSON.stringify({
       files: repo.files,
@@ -212,6 +214,7 @@ test('a 28,905-file tree imports through one archive stream within an O(pages) b
       inventoryRows: s.tables.projectGithubImportInventory.size,
       catalogRows: catalogRows.length,
       r2Objects: bucket.objects.size,
+      r2Puts: puts,
       ms: Math.round(performance.now() - started),
       rss: process.memoryUsage().rss,
     }),
@@ -226,7 +229,11 @@ test('a 28,905-file tree imports through one archive stream within an O(pages) b
   assert.ok(caps.actions.includes('start') && caps.actions.length > 5);
   const main = JSON.parse(await channels.current._handler(s.ctx, { projectId: project._id }));
   assert.equal(main.head, backup.preview.head);
-  const read = async pin => bucket.objects.get(bucket.key(`v1/p/${project._id}/o/${pin.sha256}`));
+  const read = async pin => {
+    const object = await findObject(s.ctx, project._id, pin.sha256);
+    const bytes = bucket.objects.get(bucket.key(object.r2Key));
+    return object.pack ? bytes.subarray(object.pack.offset, object.pack.offset + object.size) : bytes;
+  };
   const row = await findObject(s.ctx, project._id, main.head),
     chunks = [];
   if (row.recipe)

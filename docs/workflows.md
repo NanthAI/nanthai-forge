@@ -1,6 +1,6 @@
 # Workflows
 
-Everything runs on your machine unless a section says otherwise. Commands use `nforge`. From a source checkout, use `node dist/cli.js`. Mutating commands take a client UUID. If a reply is lost, replay the same command and UUID to get the original result.
+Hosted projects acquire source, compose and land through the hosted backend. Your CLI and editor operate on local checkouts. Follow the [hosted GitHub-import quickstart](quickstart.md) for the development installation and entry point. Commands use `nforge`. Mutating commands take a client UUID. If a reply is lost, replay the same command and UUID to get the original result.
 
 ## Native flow
 
@@ -9,7 +9,7 @@ nforge init-native ./project
 nforge host ./project                  # optional: browse and review in the hosted app
 ```
 
-The browser UI is the hosted app. Locally you work through the CLI, MCP and your editor. `nforge serve ROOT [--port N]` starts a token-protected local server for Git smart-HTTP (`/api/git/`) and the Work command API (`/api/work`); it serves no browser pages. The server and the native-owner code are scheduled for deletion (see the [roadmap](roadmap.md#phase-5-one-authority-three-bets-then-private-alpha-in-progress)).
+The browser UI is the hosted app. Locally you work through the CLI, MCP and your editor. The native flow below describes existing standalone projects; the [hosted flow](quickstart.md#work-on-a-hosted-project) needs no local owner service.
 
 1. Create an Intent (an outcome with constraints) and one or more Lanes. A Lane is a directory.
 2. Edit the Lane with your editor or agent. Checkpoint it. No Git staging is involved.

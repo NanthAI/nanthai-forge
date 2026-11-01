@@ -12,6 +12,7 @@ import { r2Config, r2Key, presignPut } from './r2';
 import { verifyArchiveUpload } from './archiveUpload';
 import { exchangeFetch } from '../src/exchange-request';
 import { invariant } from '../src/errors';
+import { packHeaders, verifyPackRange } from '../src/object-pack-range';
 const identity = { projectId: v.id('hostedProjects'), submissionId: v.string() };
 const stepIdentity = { ...identity, wakeId: v.string() };
 export const step = internalMutation({
@@ -124,7 +125,7 @@ export const drive = internalAction({
       'Selection metadata exceeds its transport window.',
     );
     const response = await fetch(command.url, {
-      headers: { 'accept-encoding': 'identity' },
+      headers: { 'accept-encoding': 'identity', ...packHeaders(command.range, command.pin.size) },
       signal: AbortSignal.timeout(10_000),
     });
     invariant(
@@ -132,6 +133,7 @@ export const drive = internalAction({
       'SOURCE_UNAVAILABLE',
       'Exact selection metadata download failed.',
     );
+    verifyPackRange(response, command.range, command.pin.size);
     const reader = response.body.getReader(),
       parts: Uint8Array[] = [];
     let size = 0;

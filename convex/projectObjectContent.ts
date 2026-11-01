@@ -14,6 +14,7 @@ import { r2Config, presignGet } from './r2';
 import { readRecipeTrees } from './projectObjectTreeRead';
 import { objectRecipeSchema, objectChunkPageBytes, type ChunkPin } from '../src/object-chunks';
 import type { ObjectView } from './projectObjectFind';
+import { packRange, packHeaders, verifyPackRange } from '../src/object-pack-range';
 
 /** Raw bytes live in Convex storage or a committed R2 object (not a recipe). */
 export const isRaw = (row: ObjectView) => !!row.storageId || isR2Object(row);
@@ -23,11 +24,11 @@ export const rawKey = (row: ObjectView) => row.storageId ?? row.r2Key;
 /** Server-side read of an R2 object by signed GET. Used only where Convex itself needs the bytes
  * (publication, derived views); clients read R2 directly. Verifies size and sha256. */
 async function r2Content(ctx: ActionCtx, row: ObjectView, pin: ChunkPin) {
-  const url = await presignGet(r2Config(), row.r2Key!);
+  const url = await presignGet(r2Config(), row.r2Key!, packHeaders(packRange(row), pin.size));
   const response = await exchangeFetch(
     'server R2 object download',
     url,
-    { headers: { 'accept-encoding': 'identity' } },
+    { headers: { 'accept-encoding': 'identity', ...packHeaders(packRange(row), pin.size) } },
     { retries: isIndexReadContext(ctx) ? 0 : 1 },
   );
   if (
@@ -41,6 +42,7 @@ async function r2Content(ctx: ActionCtx, row: ObjectView, pin: ChunkPin) {
     `Stored content is unavailable in object storage (HTTP ${response.status}).`,
   );
   const data = Buffer.from(await response.arrayBuffer());
+  verifyPackRange(response, packRange(row), pin.size);
   invariant(
     data.length === pin.size && digest(data) === pin.sha256,
     'BLOB_DIGEST_MISMATCH',
@@ -181,7 +183,8 @@ export async function objectContents(
     );
     if (isRaw(row)) {
       await rawMetadata(ctx, row, pin);
-      result[i] = await raw(ctx, row, pin);
+      const bytes = await raw(ctx, row, pin);
+      result[i] = range ? bytes.subarray(range.offset, range.offset + range.length) : bytes;
       continue;
     }
     const ancestry = Array.isArray(ancestors) ? ancestors[i]! : ancestors;

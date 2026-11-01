@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
+import type { PackRange } from './object-pack-range.js';
 export const downloadPinSchema = z.object({
   sha256: z.string().regex(/^[0-9a-f]{64}$/),
   size: z.number().safe().nonnegative(),
@@ -22,8 +23,8 @@ export const downloadRecipeSchema = z.object({
   tree: downloadTreeSchema,
 });
 export type DownloadRow = { digest: string; size: number } & (
-  | { location: 'r2' }
+  | { location: 'r2'; range?: PackRange | undefined }
   | { location: 'convex'; url: string }
   | { location: 'recipe'; recipe: { digest: string; size: number } }
 );
-export type SignedDownload = { digest: string; size: number; url: string };
+export type SignedDownload = { digest: string; size: number; url: string; range?: PackRange };

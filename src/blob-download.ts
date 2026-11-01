@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { verifiedBytes } from './verified-blob.js';
 import { ForgeError, invariant } from './errors.js';
+import { packHeaders, verifyPackRange } from './object-pack-range.js';
 import {
   downloadPageSchema,
   downloadRecipeSchema,
@@ -69,6 +70,12 @@ export class ObjectDownloadReader {
   private async get(row: DownloadRow, signed?: SignedDownload) {
     invariant(row.location !== 'recipe', 'INVALID_WORK_BACKUP', 'Resolve the recipe before reading bytes.');
     let url = row.location === 'r2' ? signed!.url : row.url;
+    let range = row.location === 'r2' ? signed!.range : undefined;
+    const refresh = async () => {
+      const next = (await this.signatures([{ sha256: row.digest, size: row.size }])).get(row.digest)!;
+      url = next.url;
+      range = next.range;
+    };
     for (let attempt = 0; attempt < 2; attempt++) {
       let response: Response;
       try {
@@ -77,6 +84,7 @@ export class ObjectDownloadReader {
           // A Range would address encoded bytes, and browsers cannot request identity.
           credentials: 'omit',
           referrerPolicy: 'no-referrer',
+          headers: packHeaders(range, row.size),
         });
       } catch (error) {
         if (error instanceof ForgeError) throw error;
@@ -86,12 +94,12 @@ export class ObjectDownloadReader {
           'R2_READ_FAILED',
           'Stored content download failed.',
         );
-        url = (await this.signatures([{ sha256: row.digest, size: row.size }])).get(row.digest)!.url;
+        await refresh();
         continue;
       }
       if (row.location === 'r2' && response.status === 403 && attempt === 0) {
         await response.body?.cancel();
-        url = (await this.signatures([{ sha256: row.digest, size: row.size }])).get(row.digest)!.url;
+        await refresh();
         continue;
       }
       invariant(
@@ -99,7 +107,8 @@ export class ObjectDownloadReader {
         response.status === 403 ? 'EXCHANGE_DOWNLOAD_DENIED' : 'R2_READ_FAILED',
         `Stored content download failed (HTTP ${response.status}).`,
       );
-      if (response.status === 206)
+      verifyPackRange(response, range, row.size);
+      if (!range && response.status === 206)
         invariant(
           response.headers.get('content-range') === `bytes 0-${row.size - 1}/${row.size}`,
           'INVALID_WORK_BACKUP',

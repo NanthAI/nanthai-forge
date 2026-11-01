@@ -9,6 +9,7 @@ import { sourceMutation } from './projectConvexSourceErrors';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { presignGet, r2Config } from './r2';
 import { findObject, type ObjectView } from './projectObjectFind';
+import { packRange, packHeaders } from '../src/object-pack-range';
 const identity = { projectId: v.id('hostedProjects'), jobId: v.string(), step: v.number() };
 /** Object storage locations stay inside the trusted action. No worker HTTP
  * grant, callback ingress, HMAC, Modal credential or repository URL is involved. */
@@ -47,7 +48,10 @@ export const resolve = sourceMutation({
       }
       if (selected.length && bytes + row.size > 8 * 1024 * 1024 * (args.windows ?? 1)) break;
       bytes += row.size;
-      const url = row.location === 'r2' && row.r2Key ? await presignGet(r2Config(), row.r2Key) : null;
+      const url =
+        row.location === 'r2' && row.r2Key
+          ? await presignGet(r2Config(), row.r2Key, packHeaders(packRange(row), row.size))
+          : null;
       selected.push({ row, url });
       if (args.ancestry && generation) {
         // Hints batch a linear ancestry chain, but never establish closure.
@@ -68,6 +72,7 @@ export const resolve = sourceMutation({
       descriptor: descriptors[i]!,
       storageId: url ? null : (row.storageId ?? null),
       url,
+      ...(row.pack ? { range: packRange(row)! } : {}),
     }));
     return canonicalPayload(
       args.ancestry

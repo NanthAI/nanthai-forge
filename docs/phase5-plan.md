@@ -74,7 +74,7 @@ Phase 5 started on 2026-10-25 and is in its last stage (5.8). **Phase 5 stays op
 | B1.5c big-repo import benchmark | partial | The t3code import (about 29,000 files) ran and was measured, but "each within budget, idle 0 after" was not met. An import with no Mac landed in `84741d8e`; it takes 16 min 56 s on t3code against a target of 5 minutes or less (Issues 7cbb881c, dd98f431). An archive import now publishes a sorted object catalog (256 pins per row) instead of a row per object; this page carries no newer time than 16 min 56 s. |
 | B1.5d replayed benchmark | partial | The harness landed and a dry run on GitHub passed; the Forge arm is not published (Issues cb23529a, 13475957). |
 | B1.6a–c, B1.7, B1.8 | done | Push, source return, relay, format ladder, reconcile, staleness strip and legacy accept are deleted. |
-| B1.9 purge retired tables | not started | Export taken; `--execute` waits for two weekly backups, dated about 2026-11-09 (Issue 64d7192b). Owner decision 2026-10-31: `nforge serve` and the native-owner code are deleted with B1.9. |
+| B1.9 purge retired tables | not started | Export taken; `--execute` waits for two weekly backups, dated about 2026-11-09 (Issue 64d7192b). Owner decision 2026-10-31: the local owner HTTP server and the native-owner code are deleted with B1.9. |
 | Q1–Q5 landing without an operator | done | Controller, self-finishing entries, stall alarm, content-keyed reuse, lifecycle drill. A queued hosted entry that nothing live drives is re-driven and, failing that, ended after 60 minutes as `terminal-failed` (`LANDING_STALLED`) with a stated reason, so metric 5.3 sees an outcome. Stall alerts by email or webhook are on by default; whether one reaches a human depends on the recipients and webhook configured, which this page does not record (Issue 7e38bf5e). |
 | M1–M3 metrics, D1 decisions, SP1, SP2, X1 | done | The baseline table below has not been re-run; several rows are still partly unknown. The Bet 2 numbers were re-measured on 2026-10-31 (see [the Bet 2 re-measure](#bet-2-re-measure-after-admission-d-and-e-2026-10-31)). |
 | P5-RC records packing | partial | No before/after bytes report (Issue 1586b8b5). |
@@ -452,7 +452,7 @@ Split by group; all depend on B1.5b. SP1 is decided; P5-SG lands alongside B1.6�
 - **Size:** S. **Depends on:** B1.6–B1.8 landed for two weekly backups. **Owner approves** (retention change).
 - **Changes:** export, then purge and remove definitions for `ownerAcceptanceTables`, `publicationTables`, `metadataPublication`, `ownerDerived`, `intentMigration`, `projectReturnSupersessions` and `exchangeCleanup*`.
 - **Acceptance:** the export restores into a scratch deployment; schema push passes; Route A on the newest backup still passes.
-- **Also (owner decision 2026-10-31):** `nforge serve` and the native-owner recovery and release-owner code are deleted with this slice.
+- **Also (owner decision 2026-10-31):** the local owner HTTP server and the native-owner recovery and release-owner code are deleted with this slice.
 
 ## Landing without an operator (Q)
 
@@ -694,7 +694,7 @@ Where each stands (2026-10-31):
 
 1. **Partly met.** Metrics slices 1–3 are live; several rows are still partly unknown (see the baseline note).
 2. **Not met.** E1 and E3 are published; E2 was replaced by B1.5d, whose Forge arm is not published; R3 (B3.5) runs inside B1.5d. The first B1.5d attempt on 2026-11-01 was stopped: the Forge arm ran a stale CLI build and a preflight audit found seven harness blockers; both are being fixed before a full re-run. **Owner decision: Phase 5 stays open until this is met.**
-3. **Mostly met.** Cutover applied 2026-10-28 and B1.6–B1.8 landed; B1.9 (the table purge, with `nforge serve` and the native-owner code) is dated about 2026-11-09. LOC removed is in the builders' handoffs; no summary is published.
+3. **Mostly met.** Cutover applied 2026-10-28 and B1.6–B1.8 landed; B1.9 (the table purge, with the local owner HTTP server and the native-owner code) is dated about 2026-11-09. LOC removed is in the builders' handoffs; no summary is published.
 4. **Met.** The Q4 lifecycle drill passed on GitHub runners.
 5. **Not met.** **Owner decision: Phase 5 stays open until an import works with no Mac in 5 minutes or less.** The no-Mac import landed in `84741d8e`; on t3code it takes 16 min 56 s today. The docs must describe the hosted path truthfully; a stranger trial is not required (owner, 2026-11-01).
 

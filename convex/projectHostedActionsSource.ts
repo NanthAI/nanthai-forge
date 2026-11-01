@@ -8,6 +8,7 @@ import { blobStore } from './blobStore';
 import { directSourceWindow } from '../src/hosted-actions-direct';
 import { invariant } from '../src/errors';
 import { findObject } from './projectObjectFind';
+import { packRange, packHeaders } from '../src/object-pack-range';
 /** One bounded descriptor+GET window. Bytes go storage→runner, never via Convex. */
 export const resolve = internalMutation({
   args: { ...sessionArgs, digests: v.array(v.string()) },
@@ -30,7 +31,7 @@ export const resolve = internalMutation({
       );
       const url =
         row.location === 'r2' && row.r2Key
-          ? await presignGet(r2Config(), row.r2Key)
+          ? await presignGet(r2Config(), row.r2Key, packHeaders(packRange(row), row.size))
           : row.storageId
             ? await blobStore(ctx).getUrl(row.storageId)
             : null;
@@ -41,6 +42,7 @@ export const resolve = internalMutation({
           recipe: row.recipe ? { sha256: row.recipe.digest, size: row.recipe.size } : null,
         },
         url,
+        ...(row.pack ? { range: packRange(row)! } : {}),
       });
     }
     return result;

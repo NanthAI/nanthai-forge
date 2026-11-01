@@ -11,7 +11,7 @@ Four ideas cover most of it:
 
 More in [concepts](docs/concepts.md).
 
-For offline Git adoption through first acceptance: `nforge docs quickstart`
+For hosted GitHub import and first acceptance: `nforge docs quickstart`
 ([quickstart](docs/quickstart.md)). Browse installed documentation with `nforge docs`.
 
 ## Try it

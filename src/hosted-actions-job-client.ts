@@ -6,6 +6,7 @@ import { sourcePackDownloadSchema, type SourcePackDownload } from './source-pack
 import { digest } from './hash.js';
 import { objectRecipeSchema, objectChunkPageSchema } from './object-chunks.js';
 import { invariant } from './errors.js';
+import { packHeaders, verifyPackRange, type PackRange } from './object-pack-range.js';
 import type { z } from 'zod';
 import type { directCommandSchema } from './hosted-actions-direct.js';
 import {
@@ -174,6 +175,7 @@ export class ActionsJobClient {
           recipe: { sha256: string; size: number } | null;
         };
         url: string | null;
+        range?: PackRange;
       }
     >();
     const pending = new Map<string, Promise<void>>();
@@ -227,10 +229,12 @@ export class ActionsJobClient {
           'Exact raw source location is unavailable.',
         );
         const response = await this.request(row.url, {
+          headers: packHeaders(row.range, pin.size),
           signal: AbortSignal.timeout(60_000),
           redirect: 'error',
         });
         invariant(response.ok && response.body, 'SOURCE_UNAVAILABLE', 'Source download failed.');
+        verifyPackRange(response, row.range, pin.size);
         return response.body as unknown as AsyncIterable<Uint8Array>;
       },
       upload: async () => {
@@ -244,10 +248,12 @@ export class ActionsJobClient {
         const row = rows.get(pin.sha256)!;
         invariant(row.url, 'SOURCE_UNAVAILABLE', 'Recipe metadata needs raw storage.');
         const response = await this.request(row.url, {
+          headers: packHeaders(row.range, pin.size),
           redirect: 'error',
           signal: AbortSignal.timeout(60_000),
         });
         invariant(response.ok, 'SOURCE_UNAVAILABLE', 'Recipe metadata download failed.');
+        verifyPackRange(response, row.range, pin.size);
         invariant(response.body, 'SOURCE_UNAVAILABLE', 'Recipe metadata is unavailable.');
         const buffers: Uint8Array[] = [];
         let size = 0;

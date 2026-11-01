@@ -26,6 +26,7 @@ import { sourceOutput } from './projectSourceStepFields';
 import { storeSourceOutputs } from './projectConvexSourceOutput';
 import { presignGet, r2Config } from './r2';
 import { findObject } from './projectObjectFind';
+import { packRange, packHeaders } from '../src/object-pack-range';
 const identity = { projectId: v.id('hostedProjects'), jobId: v.string() };
 const rowFor = (ctx: MutationCtx, projectId: Id<'hostedProjects'>, jobId: string) =>
   ctx.db
@@ -219,8 +220,15 @@ export const begin = sourceMutation({
       const object = await findObject(ctx, args.projectId, active.job.input.sha256);
       invariant(object, 'SOURCE_UNAVAILABLE', 'Source input is absent.');
       const url =
-        object.location === 'r2' && object.r2Key ? await presignGet(r2Config(), object.r2Key) : null;
-      locations.push({ descriptor, storageId: url ? null : (object.storageId ?? null), url });
+        object.location === 'r2' && object.r2Key
+          ? await presignGet(r2Config(), object.r2Key, packHeaders(packRange(object), object.size))
+          : null;
+      locations.push({
+        descriptor,
+        storageId: url ? null : (object.storageId ?? null),
+        url,
+        ...(object.pack ? { range: packRange(object)! } : {}),
+      });
     }
     return canonicalPayload({
       input: active.job.input,

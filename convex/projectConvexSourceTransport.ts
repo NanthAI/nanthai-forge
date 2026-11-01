@@ -9,11 +9,13 @@ import { digest } from '../src/portable-hash';
 import { sourceStorage, sourceR2Pin } from './projectConvexSourceStorage';
 import { r2Key } from './r2';
 import { invariant } from '../src/errors';
+import { packHeaders, verifyPackRange, type PackRange } from '../src/object-pack-range';
 const reference = (name: string) => makeFunctionReference<'mutation'>(name);
 export type ObjectLocation = {
   descriptor: WorkerObject;
   storageId: Id<'_storage'> | null;
   url: string | null;
+  range?: PackRange;
 };
 export function convexSourceTransport(
   ctx: ActionCtx,
@@ -86,10 +88,11 @@ export function convexSourceTransport(
         })();
       invariant(row.url, 'SOURCE_UNAVAILABLE', 'Exact source bytes are unavailable.');
       const response = await fetch(row.url, {
-        headers: { 'accept-encoding': 'identity' },
+        headers: { 'accept-encoding': 'identity', ...packHeaders(row.range, pin.size) },
         signal: AbortSignal.timeout(15000),
       });
       invariant(response.ok && response.body, 'SOURCE_UNAVAILABLE', 'Exact source download failed.');
+      verifyPackRange(response, row.range, pin.size);
       return response.body as unknown as AsyncIterable<Uint8Array>;
     },
     upload: async (pin, stream) => {

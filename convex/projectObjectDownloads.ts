@@ -15,6 +15,8 @@ import { invariant } from '../src/errors';
 import { report } from './errors';
 import { hostedDownloadPageSize, type HostedDownloadDescriptor } from '../src/hosted-download-page';
 import { findObject } from './projectObjectFind';
+import { packRange, packHeaders } from '../src/object-pack-range';
+const rangeValue = v.optional(v.object({ offset: v.number(), total: v.number() }));
 
 export async function readableProject(ctx: MutationCtx, projectId: Id<'hostedProjects'>) {
   const user = await ctx.auth.getUserIdentity();
@@ -37,7 +39,7 @@ export async function readableProject(ctx: MutationCtx, projectId: Id<'hostedPro
  * TODO(owner): anonymous signing for public projects has no budget counter yet (docs/r2-storage-plan.md). */
 export const signDownloads = mutation({
   args: { projectId: v.id('hostedProjects'), digests: v.array(v.string()) },
-  returns: v.array(v.object({ digest: v.string(), size: v.number(), url: v.string() })),
+  returns: v.array(v.object({ digest: v.string(), size: v.number(), url: v.string(), range: rangeValue })),
   handler: async (ctx, { projectId, digests }) => {
     try {
       invariant(digests.length <= 100, 'BAD_ARGUMENT', 'Sign downloads in pages of at most 100.');
@@ -46,13 +48,28 @@ export const signDownloads = mutation({
       for (const digest of new Set(digests)) {
         if (!/^[0-9a-f]{64}$/.test(digest)) continue;
         const row = await findObject(ctx, projectId, digest);
-        if (row && !row.removed && isR2Object(row) && row.r2Key === r2Key(projectId, digest))
-          found.push({ digest, size: row.size, key: row.r2Key });
+        if (
+          row &&
+          !row.removed &&
+          isR2Object(row) &&
+          row.r2Key === r2Key(projectId, row.pack?.digest ?? digest)
+        )
+          found.push({
+            digest,
+            size: row.size,
+            key: row.r2Key,
+            ...(row.pack ? { range: packRange(row)! } : {}),
+          });
       }
       if (!found.length) return [];
       const config = r2Config();
       return await Promise.all(
-        found.map(async ({ digest, size, key }) => ({ digest, size, url: await presignGet(config, key) })),
+        found.map(async ({ digest, size, key, ...binding }) => ({
+          digest,
+          size,
+          url: await presignGet(config, key, packHeaders(binding.range, size)),
+          ...binding,
+        })),
       );
     } catch (error) {
       return report(error);
@@ -72,6 +89,7 @@ export const describe = mutation({
         size: v.number(),
         location: v.literal('r2'),
         url: v.optional(v.string()),
+        range: rangeValue,
       }),
       v.object({ digest: v.string(), size: v.number(), location: v.literal('convex'), url: v.string() }),
       v.object({
@@ -101,14 +119,17 @@ export const describe = mutation({
         const pin = { digest, size: row.size };
         if (isR2Object(row)) {
           invariant(
-            row.r2Key === r2Key(projectId, digest),
+            row.r2Key === r2Key(projectId, row.pack?.digest ?? digest),
             'INVALID_WORK_BACKUP',
             'Stored content has a different project binding.',
           );
           result.push({
             ...pin,
             location: 'r2',
-            ...(signed ? { url: await presignGet(r2Config(), row.r2Key) } : {}),
+            ...(row.pack ? { range: packRange(row)! } : {}),
+            ...(signed
+              ? { url: await presignGet(r2Config(), row.r2Key, packHeaders(packRange(row), row.size)) }
+              : {}),
           });
         } else if (row.storageId) {
           const metadata = await blobStore(ctx).getMetadata(row.storageId),
@@ -193,7 +214,9 @@ export const source = mutation({
  * The unsigned call rechecks the same bindings after client IO without re-signing. */
 export const lanePage = mutation({
   args: { projectId: v.id('hostedProjects'), digests: v.array(v.string()), signed: v.boolean() },
-  returns: v.array(v.object({ digest: v.string(), size: v.number(), url: v.optional(v.string()) })),
+  returns: v.array(
+    v.object({ digest: v.string(), size: v.number(), url: v.optional(v.string()), range: rangeValue }),
+  ),
   handler: async (ctx, { projectId, digests, signed }) => {
     try {
       const user = await ctx.auth.getUserIdentity();
@@ -214,7 +237,7 @@ export const lanePage = mutation({
         );
         if (isR2Object(row)) {
           invariant(
-            row.r2Key === r2Key(projectId, digest),
+            row.r2Key === r2Key(projectId, row.pack?.digest ?? digest),
             'INVALID_WORK_BACKUP',
             'Stored content has a different project binding.',
           );
@@ -222,7 +245,10 @@ export const lanePage = mutation({
         result.push({
           digest,
           size: row.size,
-          ...(signed && isR2Object(row) ? { url: await presignGet(r2Config(), row.r2Key!) } : {}),
+          ...(row.pack ? { range: packRange(row)! } : {}),
+          ...(signed && isR2Object(row)
+            ? { url: await presignGet(r2Config(), row.r2Key!, packHeaders(packRange(row), row.size)) }
+            : {}),
         });
       }
       return result;

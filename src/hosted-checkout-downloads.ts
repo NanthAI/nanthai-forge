@@ -20,12 +20,16 @@ import type { ConvexExchange } from './exchange-client.js';
 import type { DownloadRow } from './blob-download-format.js';
 import type { CheckoutObjectTransport } from './hosted-checkout-cache.js';
 import { latestClientSourcePack } from './source-pack-client.js';
+import { packHeaders, verifyPackRange } from './object-pack-range.js';
 const rowSchema = z.discriminatedUnion('location', [
   z.object({
     digest: z.string(),
     size: z.number().safe().nonnegative(),
     location: z.literal('r2'),
     url: z.url(),
+    range: z
+      .object({ offset: z.number().safe().nonnegative(), total: z.number().safe().positive() })
+      .optional(),
   }),
   z.object({
     digest: z.string(),
@@ -99,7 +103,10 @@ export class HostedCheckoutDownloads implements CheckoutObjectTransport {
         'Checkout content download',
         row.url!,
         {
-          headers: { 'accept-encoding': 'identity' },
+          headers: {
+            'accept-encoding': 'identity',
+            ...packHeaders(row.location === 'r2' ? row.range : undefined, pin.size),
+          },
         },
         async (response, progressed) => {
           if (response.status === 403 && row.location === 'r2' && attempt === 0) {
@@ -111,6 +118,7 @@ export class HostedCheckoutDownloads implements CheckoutObjectTransport {
             'EXCHANGE_DOWNLOAD_DENIED',
             `Stored content download failed (HTTP ${response.status}).`,
           );
+          verifyPackRange(response, row.location === 'r2' ? row.range : undefined, pin.size);
           return { refresh: false as const, value: await consume(response, progressed) };
         },
       );

@@ -16,6 +16,7 @@ import { invariant } from '../src/errors';
 import { report } from './errors';
 import { finishHostedOperation } from './projectHostedOperations';
 import { findObject } from './projectObjectFind';
+import { packHeaders, packRange, verifyPackRange, type PackRange } from '../src/object-pack-range';
 
 const identity = { projectId: v.id('hostedProjects'), operationId: v.string() },
   jobIdentity = { projectId: v.id('hostedProjects'), jobId: v.string() };
@@ -109,7 +110,14 @@ export const publish = internalMutation({
 /** Only the small worker result manifest passes through the action, never source bytes. */
 export const resultDownload = internalMutation({
   args: jobIdentity,
-  returns: v.union(v.object({ url: v.string(), size: v.number() }), v.null()),
+  returns: v.union(
+    v.object({
+      url: v.string(),
+      size: v.number(),
+      range: v.optional(v.object({ offset: v.number(), total: v.number() })),
+    }),
+    v.null(),
+  ),
   handler: async (ctx, input) => {
     const row = await syncForJob(ctx, input.projectId, input.jobId);
     if (!row) return null;
@@ -152,25 +160,25 @@ export const resultDownload = internalMutation({
     const object = await findObject(ctx, input.projectId, job.output!.sha256);
     const url =
       object?.location === 'r2' && object.r2Key
-        ? await presignGet(r2Config(), object.r2Key)
+        ? await presignGet(r2Config(), object.r2Key, packHeaders(packRange(object), object.size))
         : object?.storageId
           ? await blobStore(ctx).getUrl(object.storageId)
           : null;
     invariant(url, 'SOURCE_UNAVAILABLE', 'The exact worker result is unavailable.');
-    return { url, size: job.output.size };
+    return { url, size: job.output.size, ...(object?.pack ? { range: packRange(object)! } : {}) };
   },
 });
 export const complete = internalAction({
   args: jobIdentity,
   returns: v.union(v.string(), v.null()),
   handler: async (ctx, input): Promise<string | null> => {
-    const grant: { url: string; size: number } | null = await ctx.runMutation(
+    const grant: { url: string; size: number; range?: PackRange } | null = await ctx.runMutation(
       makeFunctionReference<'mutation'>('projectHostedSyncJobs:resultDownload'),
       input,
     );
     if (!grant) return null;
     const response = await fetch(grant.url, {
-      headers: { 'accept-encoding': 'identity' },
+      headers: { 'accept-encoding': 'identity', ...packHeaders(grant.range, grant.size) },
       signal: AbortSignal.timeout(10000),
     });
     invariant(
@@ -178,6 +186,7 @@ export const complete = internalAction({
       'SOURCE_UNAVAILABLE',
       'Worker result download failed; retry the original sync.',
     );
+    verifyPackRange(response, grant.range, grant.size);
     const reader = response.body.getReader(),
       parts: Uint8Array[] = [];
     let size = 0;

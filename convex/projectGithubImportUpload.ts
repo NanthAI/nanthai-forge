@@ -12,16 +12,22 @@ import { digest } from '../src/hash';
 import { mapExchange } from '../src/exchange-parallel';
 import { invariant } from '../src/errors';
 import { importPageBytes, importPageFiles } from '../src/github-import-pages';
+import type { ObjectPack } from '../src/object-pack-range';
 export type Completions = { id: Id<'projectObjects'>; storageId?: Id<'_storage'>; key?: string }[];
 export type Recipes = { digest: string; size: number; recipeDigest: string; recipeSize: number }[];
-export type CatalogEntry = { digest: string; size: number; recipe?: { digest: string; size: number } };
+export type CatalogEntry = {
+  digest: string;
+  size: number;
+  recipe?: { digest: string; size: number };
+  pack?: ObjectPack;
+};
 /** Catalog mode (archive imports): stored objects are this map, not projectObjects
  * rows. Each window is one receipt; publication writes the sorted catalog. */
 export type ImportCatalog = {
   stored: Map<string, CatalogEntry>;
   record: (objects: CatalogEntry[]) => Promise<void>;
 };
-/** Retains at most an 8 MiB physical window plus one stream read/chunk. */
+/** Retains one bounded source window plus its pack copy and one stream chunk. */
 export class ImportUpload {
   private objects = new Map<string, Buffer>();
   private bytes = 0;
@@ -104,21 +110,32 @@ export class ImportUpload {
     }
     return true;
   }
-  /** Create-only PUTs to content-addressed keys; no Convex call per window. */
+  /** One immutable pack per bounded window; empty and singleton objects stay raw. */
   private async storeCatalogWindow(pending: [string, Buffer][]) {
     const started = Date.now();
     const config = r2Config(),
       stored = this.catalog!.stored;
-    await mapExchange(pending, this.concurrency, async ([digest, bytes]) => {
-      if (stored.has(digest)) return;
-      const key = r2Key(this.projectId, digest),
-        put = await presignPut(config, key, { digest, size: bytes.length });
+    const fresh = pending.filter(([id]) => !stored.has(id));
+    const packed = fresh.filter(([, bytes]) => bytes.length > 0);
+    const groups =
+      packed.length > 1
+        ? [packed, ...fresh.filter(([, bytes]) => !bytes.length).map(row => [row])]
+        : fresh.map(row => [row]);
+    await mapExchange(groups, this.concurrency, async group => {
+      const bytes = group.length > 1 ? Buffer.concat(group.map(([, bytes]) => bytes)) : group[0]![1];
+      const packDigest = group.length > 1 ? digest(bytes) : group[0]![0];
+      this.peakBufferedBytes = Math.max(
+        this.peakBufferedBytes,
+        group.length > 1 ? bytes.length * 2 : bytes.length,
+      );
+      const key = r2Key(this.projectId, packDigest),
+        put = await presignPut(config, key, { digest: packDigest, size: bytes.length });
       const { value: response } = await withExchangeObservation(async () => {
         try {
           return await exchangeFetch('R2 import page upload', put.url, {
             method: 'PUT',
             headers: put.headers,
-            body: new Uint8Array(bytes),
+            body: new Uint8Array(bytes.buffer as ArrayBuffer, bytes.byteOffset, bytes.length),
           });
         } finally {
           const measured = currentExchangeObservation()!.measured;
@@ -136,15 +153,31 @@ export class ImportUpload {
         invariant(
           head.status === 'ok' &&
             head.size === bytes.length &&
-            (!head.checksum || head.checksum === checksumOf(digest)),
+            (!head.checksum || head.checksum === checksumOf(packDigest)),
           'R2_VERIFY_FAILED',
           'Object storage could not verify source.',
         );
       }
-      this.uploaded++;
-      const entry = { digest, size: bytes.length };
-      stored.set(digest, entry);
-      this.entries.push(entry);
+      let offset = 0;
+      for (const [id, content] of group) {
+        const entry: CatalogEntry = {
+          digest: id,
+          size: content.length,
+          ...(group.length > 1 ? { pack: { digest: packDigest, size: bytes.length, offset } } : {}),
+        };
+        stored.set(id, entry);
+        this.entries.push(entry);
+        this.uploaded++;
+        offset += content.length;
+      }
+      // The physical pack is source too. A later upload of these exact bytes
+      // must reuse a protected binding, never create a disposable log/artifact
+      // row whose cleanup could delete a pack referenced by accepted source.
+      if (group.length > 1 && !stored.has(packDigest)) {
+        const physical = { digest: packDigest, size: bytes.length };
+        stored.set(packDigest, physical);
+        this.entries.push(physical);
+      }
     });
     this.uploadMillis += Date.now() - started;
     console.log(

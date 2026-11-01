@@ -330,11 +330,9 @@ a worker, run checks, or change acceptance policy.
 
 ## Managed owner lifecycle
 
-The existing `serve`/MCP owner lifecycle and detached presence worker also drive
-submitted native landing batches. No separate landing daemon is created. Start
-`nforge serve OWNER --port 4173` to recover retained work immediately. An observer
-client can disconnect while the owner service keeps running. A local Mac cannot
-drive while powered off; starting the owner again reconciles saved work.
+This section describes the retained native landing controller. Hosted projects
+use the [hosted landing queue](../agents/workflow.md#landing-queue), which keeps
+running after a client disconnects and needs no local owner process.
 
 The landing worker registers wake sources before scanning, then rechecks after
 registration and each sweep. Durable Work publication wakes enqueue, check
@@ -365,7 +363,7 @@ arbitrary local command is automatically rerun merely because its runner died.
 
 ### Owner Mac launchd setup (retired)
 
-No owner service runs for the dogfood project. Its launchd jobs were unloaded on 2026-10-29, and it lands through the hosted queue (see [Hosted queue priority](#hosted-queue-priority)). The template `scripts/launchd/com.nanthai.forge-owner.plist` and the `nforge serve` process it starts are still in the repository. Owner decision 2026-10-31: both are deleted with B1.9.
+No owner service runs for the dogfood project. Its launchd jobs were unloaded on 2026-10-29, and it lands through the hosted queue (see [Hosted queue priority](#hosted-queue-priority)). The retired owner service is not part of the hosted workflow. Its code and launchd template are assigned to B1.9 removal.
 
 ### Durable client admission
 

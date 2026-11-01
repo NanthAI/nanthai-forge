@@ -4,9 +4,10 @@ import { mapExchange } from './exchange-parallel.js';
 import { ForgeError, invariant } from './errors.js';
 import { exchangeFetch } from './exchange-request.js';
 import { digest } from './hash.js';
+import { packHeaders, verifyPackRange, type PackRange } from './object-pack-range.js';
 
 /** A signed GET the server returned for one committed R2 object of the project. */
-export type SignedObject = { digest: string; size: number; url: string };
+export type SignedObject = { digest: string; size: number; url: string; range?: PackRange };
 export type SignDownloads = (projectId: string, digests: string[]) => Promise<SignedObject[]>;
 
 /** Disposable process memory, scoped to one exchange client. Never persisted or logged. */
@@ -52,13 +53,14 @@ export async function getSigned(
   attempts = 4,
   onBytes?: (done: number, total?: number) => void,
   onCall?: (name: string, pending: boolean) => void,
+  range?: PackRange,
 ): Promise<Buffer | 'forbidden'> {
   onCall?.('R2 object download', true);
   try {
     const response = await exchangeFetch(
       'R2 object download',
       url,
-      { headers: { 'accept-encoding': 'identity' } },
+      { headers: { 'accept-encoding': 'identity', ...packHeaders(range, pin.size) } },
       { retries: attempts - 1, onBytes },
     );
     if (response.status === 403) return 'forbidden';
@@ -70,6 +72,7 @@ export async function getSigned(
         `R2 object download returned HTTP ${response.status}. Retry the command.`,
       );
     const bytes = Buffer.from(await response.arrayBuffer());
+    verifyPackRange(response, range, pin.size);
     invariant(
       bytes.length === pin.size && digest(bytes) === pin.sha256,
       'BLOB_DIGEST_MISMATCH',
@@ -118,7 +121,7 @@ export async function readSigned(
     readConcurrency,
     async object => {
       const pin = wanted.get(object.digest)!;
-      let result = await getSigned(object.url, pin, 4, done => onBytes?.(pin, done), onCall);
+      let result = await getSigned(object.url, pin, 4, done => onBytes?.(pin, done), onCall, object.range);
       if (result === 'forbidden') {
         cache.delete(projectId, object.digest);
         const [again] = await sign(projectId, [object.digest]);
@@ -127,7 +130,7 @@ export async function readSigned(
           'EXCHANGE_DOWNLOAD_DENIED',
           'Object storage no longer lets this account read the selected content.',
         );
-        result = await getSigned(again.url, pin, 4, done => onBytes?.(pin, done), onCall);
+        result = await getSigned(again.url, pin, 4, done => onBytes?.(pin, done), onCall, again.range);
         invariant(
           result !== 'forbidden',
           'EXCHANGE_DOWNLOAD_DENIED',

@@ -6,6 +6,7 @@ import { isStored } from './projectObjectFields';
 import { presignGet, r2Config } from './r2';
 import { invariant } from '../src/errors';
 import { findObject } from './projectObjectFind';
+import { packRange, packHeaders } from '../src/object-pack-range';
 export const resolve = internalQuery({
   args: { jobId: v.id('projectGithubMirrorJobs'), step: v.number(), digests: v.array(v.string()) },
   returns: v.string(),
@@ -28,7 +29,11 @@ export const resolve = internalQuery({
       result.push({
         descriptor,
         storageId: row.location === 'r2' && row.r2Key ? null : (row.storageId ?? null),
-        url: row.location === 'r2' && row.r2Key ? await presignGet(r2Config(), row.r2Key) : null,
+        url:
+          row.location === 'r2' && row.r2Key
+            ? await presignGet(r2Config(), row.r2Key, packHeaders(packRange(row), row.size))
+            : null,
+        ...(row.pack ? { range: packRange(row)! } : {}),
       });
     }
     return JSON.stringify(result);

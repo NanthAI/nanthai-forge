@@ -1,128 +1,105 @@
 # GitHub project source import
 
-In the hosted app, choose **New project → Import from GitHub**, enter a repository
-URL and optionally a branch, tag or commit, and choose **Import from GitHub**.
-That form calls `projectGithubImport.start`; progress subscribes to the owned
-job and opens the writable hosted project when main is published. **Resume
-import** keeps the original operation and pinned commit after an error. The
-separate Projects **Import from GitHub · read-only analysis** link opens the
-analysis tour and does not create an editable project.
+In the development app, choose **Projects → New project → Import from GitHub**,
+enter a repository URL and optional branch, tag or commit, and choose **Import
+from GitHub**. The form calls `projectGithubImport.start`. Its owner-only progress
+subscription opens the project when complete hosted `main` is published. The
+separate read-only analysis tour calls `hosted.start` and creates no writable
+project. The [quickstart](../quickstart.md) covers installation and Lane work.
 
-`projectGithubImport.start` creates a hosted personal mirror owned by the signed-in
-importer. Its arguments are an original operation UUID, GitHub URL, optional ref
-and optional project name. Repeating the same request resumes the original job
-and commit; changing an operation's request reports `WORK_OPERATION_CHANGED`.
-`projectGithubImport.status` returns the project ID, exact Git commit, phase,
-completed/total files and bytes, whether the total is complete, and a structured
-failure. The existing `hosted.start` analysis tour remains a separate derived
-import, with its own language and text-selection rules.
+## Identity, access and publication
 
-The worker resolves the ref once, walks non-recursive Git trees and retains every
-committed regular file, executable and symlink target, including binaries, empty
-files and paths matched by committed ignore rules. It verifies raw bytes against
-Git's object hash before committing a logical file binding. Durable steps process
-pages of up to 1,000 files or 128 directories, also bounded by physical bytes,
-metadata bytes and elapsed action time. Large files stream through 1 MiB chunks;
-8 MiB upload windows bound retained source buffers. These are scheduling
-boundaries, not repository or file exclusions. The worker obtains fresh access through the existing
-GitHub App credential path for each action. No credentials are saved in the job
-or cursor, and no additional GitHub scopes are requested.
+`projectGithubImport.start` takes an original operation UUID, GitHub URL, optional
+ref and optional project name. The ref resolves once. Repeating the original
+request resumes the same job and exact commit; changing its request reports
+`WORK_OPERATION_CHANGED`. The import belongs to its signed-in importer. A public
+upstream creates a public mirror; a private upstream stays private. Access is
+checked through the existing GitHub authorization path, with a repository-scoped
+read installation token when available. Credentials are never stored in progress
+or cursor records.
 
-New source-import projects write bytes to R2 on every deployment; missing R2
-configuration fails explicitly (`R2_NOT_CONFIGURED`). Older imports may still have
-Convex file-storage rows. Object reuse/preparation and verified
-completion are batched, with existing chunk recipes for large logical objects.
-Convex physical bytes can share a storage ID across projects; R2 keys and bindings remain
-project-scoped and all source reads retain current project authorization. Digest
-reuse is internal and does not expose another project's source or existence.
-Explicit project deletion retains other projects' shared objects through the
-existing storage-reference checks and project-prefix R2 cleanup.
+`projectGithubImport.status` returns the project ID, pinned commit, phase, file and
+byte counts, known-total flag and structured failure. The browser subscribes to
+`projectGithubImportProgress.current`; server writes update it without a polling
+timer. **Resume import** keeps the original operation after an interruption.
 
-The inventory is immutable and read through ordered indexed pages. Import results,
-unique logical-blob pins and per-page progress receipts are retained separately;
-the compact cursor contains only directory positions and the last file key. No
-worker reserializes the repository inventory, and there are no cursor blobs to
-rewrite in R2. Project deletion removes these inventory rows in bounded pages.
-State/manifest bytes stream from inventory pages into content-addressed recipes.
-The derived source index is staged in retry-safe pages; selecting the final backup
-and ready generation is atomic. Interrupted publication reuses the same immutable
-pins and projection receipts. No idle worker is scheduled after completion.
+The project has no selected main or backup until all source, initialized Work and
+the ready index publish atomically. Publication selects server authority and
+hosted `main` directly. No local owner, recovery, seeding or second source upload
+is needed. Agents can start Lanes immediately. Check commands, runner setup and
+acceptance policy are configured separately. Import does not modify the upstream
+repository or claim ownership of it.
 
-Legacy source-import cursors report `IMPORT_RESTART_REQUIRED`, including a command
-to start a new operation at the original pinned commit. They do not silently switch
-revisions or publish partial main. The separate Work index cursors described below
-remain resumable.
+## Archive acquisition and packed storage
 
-A project has no selected backup/main until the complete source and initialized
-Work publish atomically. A failed or interrupted import therefore never exposes
-partial source as main. Repeating `start` with the original operation resumes a
-stopped worker. The importer creates a new project; it does not overwrite another
-project's main, claim ownership of the upstream repository, or synchronize GitHub.
-Public mirrors belong to their importer; verified upstream ownership claims are
-a separate capability. Work's portable format is unchanged.
+A complete recursive Git tree selects archive transfer (protocol 3). The worker
+streams the selected commit's tarball, follows only the validated GitHub codeload
+redirect without forwarding credentials, and verifies every retained file against
+its Git object ID. Archive-omitted or rewritten members are fetched by Git blob;
+submodules remain commit pointers. A truncated recursive tree uses paged tree/blob
+acquisition (protocol 2) instead; no partial tree is published.
 
-## Provider and representation boundaries
+Committed regular files, executable modes, symlink targets, binaries, empty files
+and committed ignored paths are retained. Source names cannot overlap the
+existing `.git`/`.forge` metadata namespaces. Git history, external LFS objects
+and derived code analysis are separate. LFS pointers remain their committed bytes.
+The Git blob endpoint acquisition boundary remains 100 MB per blob; large
+supported files stream through the existing bounded chunk recipes. This is a
+provider boundary, not a new repository quota.
 
-The GitHub Git blob endpoint documents support for files up to 100 MB. This is a
-provider acquisition limit, separate from repository aggregate size and Convex's
-1 MiB database document size. Source files larger than a database document use
-file storage and existing 1 MiB physical chunks. Discovery reports
-`GITHUB_BLOB_LIMIT` before publishing main if a blob exceeds the endpoint boundary.
-Gitlinks/submodule entries report `GITHUB_SOURCE_UNSUPPORTED`; no source is silently
-excluded. Git LFS pointer files remain the exact committed pointer bytes, matching
-`git archive`; resolving external LFS content and Git history is separate.
+Archive imports buffer at most one 8 MiB/1,000-object source window plus a stream
+chunk, and one bounded pack copy during upload. A window becomes one immutable,
+SHA-256-verified R2 object; singleton and empty objects can stay raw. The sorted
+catalog retains logical digests, sizes, byte offsets and pack identities, with up
+to 256 object pins per document, including protected physical-pack bindings. Recipes keep their existing format. Reads use
+project-authorized byte ranges with the exact Range header bound into the
+signature. They verify length, offsets and logical
+SHA-256 before use, including source workers, checks and GitHub mirrors.
 
-Native State entries also retain symlink mode. Capture, checkout, sync, review and
-Git projection read/write the link itself without following its target. Readers
-that predate symlink State support cannot consume these States. Paths still use
-Forge's existing portable path representation and metadata namespace rules.
+Progress retains one compact receipt per stored window. Continuations read these
+receipts in bounded pages, re-stream the same archive and skip stored logical
+objects. Create-only uploads reconcile existing keys by verifying their physical
+size and checksum. An interrupted action does not publish partial source. The
+worker's finite action scheduling boundaries do not exclude files. A continuation
+that cannot make progress reports a structured failure rather than looping.
 
-Local acquisition qualification passes for 400 MiB as four 100 MiB files and as
-1,600 files of 256 KiB. The largest physical chunk is 1 MiB. These are the largest
-synthetic fixtures exercised, not a live provider or maximum aggregate-size claim.
-The mixed Git fixture includes a 1 MiB + 1 byte file and compares original bytes,
-executable bits and symlinks with `git archive`.
+State, manifest and Work metadata use the same R2-backed object path. Catalog
+publication and source-index materialization use bounded pages. The ready
+transaction starts bounded deletion of transient inventory; large legacy
+inventories may need a cleanup continuation. Archive imports retain catalog
+pages and compact path-index pages, with no per-object `projectObjects` or
+`sourceBlobs` rows. Protocol-2 fallback and legacy seed/bootstrap still use their
+per-object records; they are not covered by that catalog-write claim.
 
-Qualification is local with synthetic GitHub responses and Convex storage fixtures.
-A repeated acquisition/chunk-validation run measured 309,592,064 bytes (295.3 MiB)
-maximum resident set size locally. This does not establish live provider throughput,
-billing, timeout or Convex action peak memory.
-The lead must run hosted-main checkout qualification after the selected-main and
-empty-project slices land, and exercise live imports on a disposable project.
+New imports write zero bytes to Convex file storage. Missing R2 configuration
+reports `R2_NOT_CONFIGURED`; it never switches byte stores. Old Convex copies
+remain readable through their retained bindings. Project deletion removes catalog
+and inventory rows and purges only that project's R2 prefix through the existing
+maintenance-controlled deletion chain. Removing one logical binding must not
+remove a pack used by other bindings. No new retention rule or automatic source
+expiry is introduced.
 
-If qualification requires a **single 400 MB blob**, the present Git blob endpoint
-cannot supply it. R2 alone does not remove that acquisition boundary. A follow-on
-would need a GitHub acquisition mechanism that streams those exact committed bytes,
-a resumable content-addressed multipart R2 writer with full digest verification,
-project-scoped bindings over globally deduplicated physical chunks, authenticated
-bounded-range reads, existing shared-reference deletion semantics, and atomic
-publication through the same hosted-main receipt. It must preserve operation IDs,
-source modes, private-repository authorization and lost-reply reconciliation.
+## Measurement
 
-Full Work index preparation is an explicit, rare operator action:
+`scripts/benchmark-t3code-import.mjs` calls the same source-import start entry
+point as the app and observes its status action on a disposable project. It keeps retry pins in its
+journal and observes sanitized, project-attributed provider telemetry. Set
+`FORGE_IMPORT_STATUS_MS=10000` for ten-second finite benchmark observations.
+Record the installed CLI `.commit`, repository commit, project ID and timestamps
+for every run. Numeric `FORGE_IMPORT_METRIC` records distinguish archive/listing,
+upload waits and attempts, metadata, catalog, projection and ready publication.
+The fixture guard in `tests/github-import-archive.test.mjs` bounds PUT count on a
+28.9k-file import. Synthetic results establish budgets; live elapsed time and
+billing require separate measurement. A source checkout or local fixture is not
+a published npm release or a production deployment.
+
+Full Work index rebuilding remains an explicit operator repair:
 
 ```sh
 nforge hosted-work DEPLOYMENT PROJECT_ID '{"action":"rebuild-index"}'
 ```
 
-Normal web/agent reads, commands, briefings and hosting never start or resume a
-full rebuild. Missing or incompatible indexes return `PROJECT_WORK_INDEX_MISSING`
-(or a null workspace query) with the explicit repair command. Older clients calling
-`projectWorkIndexActions:ensure` without `rebuild:true` can read a ready generation
-but cannot rebuild history. Ordinary commands update selected records and the
-Work head incrementally; accepted main moves and detail-storage migration retain
-the ready index. Full preparation consumes saved continuations and reports progress.
-
-Explicit Work index preparation retries transient transport/storage faults up to three total
-attempts, with short backoff inside the same action; application, validation and
-access errors are not retried. Exhausted reads return `pending` at the committed
-cursor. Resume continues that generation, retaining its View and changed-file
-counters; five consecutive unsuccessful resumes without cursor movement mark it
-`failed` with `WORK_INDEX_READ_FAILED` and the failing storage object pin when
-available. A failed generation returns that error on subsequent resumes. Advancing
-the cursor resets the failure streak. The explicit rebuild command shows committed Views and
-changed files, files/minute and a resume-relative ETA for discovered file output;
-file totals are labelled discovered until all Views have been projected. Legacy
-in-flight cursors remain resumable: missing counters start from committed index
-rows, and new counters are saved with the next ordinary step. No timer, scheduler
-or idle index polling is introduced.
+Normal import, browser reads and agent commands do not trigger
+`projectWorkIndexActions:ensure` to rebuild history. Retained incompatible or
+missing indexes report their existing repair command. No idle worker is scheduled
+after import completion.

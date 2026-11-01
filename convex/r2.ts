@@ -95,13 +95,14 @@ export async function presignPut(
 }
 
 /** Presigned GET for one object. Ranged reads send an HTTP `Range` header on the same URL. */
-export const presignGet = (config: R2Config, key: string) =>
+export const presignGet = (config: R2Config, key: string, headers: Record<string, string> = {}) =>
   presign({
     method: 'GET',
     ...target(config, key),
     accessKeyId: config.accessKeyId,
     secretAccessKey: config.secretAccessKey,
     expires: getExpiry,
+    headers,
   });
 
 export type HeadResult =

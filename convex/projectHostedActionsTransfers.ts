@@ -17,6 +17,7 @@ import { r2Config, r2Key, presignGet, presignPut, headObject, checksumOf } from 
 import { blobStore } from './blobStore';
 import { isStored } from './projectObjectFields';
 import { findObject, objectRow } from './projectObjectFind';
+import { packHeaders, packRange } from '../src/object-pack-range';
 
 const args = {
   projectId: v.id('hostedProjects'),
@@ -83,12 +84,12 @@ export const grant = internalMutation({
       const object = await findObject(ctx, input.projectId, pin.sha256);
       const url =
         object?.location === 'r2' && object.r2Key
-          ? await presignGet(r2Config(), object.r2Key)
+          ? await presignGet(r2Config(), object.r2Key, packHeaders(packRange(object), object.size))
           : object?.storageId
             ? await blobStore(ctx).getUrl(object.storageId)
             : null;
       invariant(url, 'SOURCE_UNAVAILABLE', 'Read a raw source object or its exact recipe leaves.');
-      return { url, headers: {} };
+      return { url, headers: packHeaders(packRange(object ?? {}), pin.size) };
     }
     let object = await findObject(ctx, input.projectId, pin.sha256);
     invariant(

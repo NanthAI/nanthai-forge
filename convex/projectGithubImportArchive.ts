@@ -31,13 +31,13 @@ import type { GithubHostedFile } from '../src/hosted-github-bootstrap';
 /** A run stops streaming here and continues in a fresh action; the platform
  * action limit is 10 minutes and publication needs headroom. */
 export const archiveRunMillis = 6 * 60_000;
-/** R2 PUTs are independent and latency-bound; source bytes stay inside the
- * 8 MiB upload window regardless of this count. */
+/** Pack and empty-object PUTs may proceed independently within the bounded
+ * source window and pack-copy memory. */
 export const archiveUploadConcurrency = 32;
 
 type Identity = { id: Id<'projectGithubImports'>; actor: string };
 /** Bytes cross the network once: GitHub archive -> verified -> content-addressed
- * R2 objects. Convex sees one prepare and one completion per 1,000-object page;
+ * R2 packs. Convex sees one compact receipt per bounded upload window;
  * no per-file inventory row is written. Every file is proven against its Git
  * object ID from the listed commit tree before it can enter the State. */
 export async function runArchiveImport(ctx: ActionCtx, job: Doc<'projectGithubImports'>, input: Identity) {

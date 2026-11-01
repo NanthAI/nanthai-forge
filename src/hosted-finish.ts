@@ -37,6 +37,7 @@ export type FinishCommand =
   | {
       kind: 'page';
       url: string;
+      range?: import('./object-pack-range.js').PackRange;
       pin: { sha256: string; size: number };
       selection: { attemptId: string; kind: 'inputs' | 'dependencies'; index: number };
     }

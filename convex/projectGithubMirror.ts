@@ -11,12 +11,18 @@ import { MemorySourceReader, MemoryMergeSource } from '../src/hosted-source-memo
 import { parseNativeState } from '../src/native-state-format';
 import type { WorkerObject, WorkerPin } from '../src/hosted-source-worker-format';
 import { ForgeError, invariant } from '../src/errors';
+import { packHeaders, verifyPackRange, type PackRange } from '../src/object-pack-range';
 import { sourceStorage } from './projectConvexSourceStorage';
 const mutation = (name: string) => makeFunctionReference<'mutation'>(name);
 /** Same recipe-aware verified reader as the fixed source worker, with one
  * logical-file cache. Descriptors and storage grants are per 100-object window. */
 export function mirrorSource(ctx: ActionCtx, input: { jobId: Id<'projectGithubMirrorJobs'>; step: number }) {
-  type Location = { descriptor: WorkerObject; storageId: Id<'_storage'> | null; url: string | null };
+  type Location = {
+    descriptor: WorkerObject;
+    storageId: Id<'_storage'> | null;
+    url: string | null;
+    range?: PackRange;
+  };
   const locations = new Map<string, Location>();
   const source = new MemoryMergeSource({});
   const describe = async (ids: string[]) => {
@@ -47,8 +53,13 @@ export function mirrorSource(ctx: ActionCtx, input: { jobId: Id<'projectGithubMi
       const blob = !row.url && row.storageId ? await ctx.storage.get(row.storageId) : null;
       if (blob) return blob.stream() as unknown as AsyncIterable<Uint8Array>;
       invariant(row.url, 'SOURCE_UNAVAILABLE', 'Mirror source bytes are unavailable.');
-      const response = await fetch(row.url, { redirect: 'error', signal: AbortSignal.timeout(30000) });
+      const response = await fetch(row.url, {
+        headers: packHeaders(row.range, pin.size),
+        redirect: 'error',
+        signal: AbortSignal.timeout(30000),
+      });
       invariant(response.ok && response.body, 'SOURCE_UNAVAILABLE', 'Mirror source download failed.');
+      verifyPackRange(response, row.range, pin.size);
       return response.body as unknown as AsyncIterable<Uint8Array>;
     },
     upload: async () => {
