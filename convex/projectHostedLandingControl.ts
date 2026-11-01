@@ -20,6 +20,7 @@ import {
   type LandingChannel,
 } from './projectHostedLandingStore';
 import { nextTrainLandingRow, scheduleLandingWake, releaseLandingQueue } from './projectHostedLandingWake';
+import { olderLandingAhead } from './projectHostedLandingOrder';
 import { hostedWriteProject, readHostedRecord } from './projectHostedRecords';
 import { loadHostedCheck } from './projectHostedCheckStore';
 import { requireHostedCheckEvidence } from './projectHostedCheckRead';
@@ -304,7 +305,7 @@ export async function claimReadyLanding(
     owner: string;
   },
   now = Date.now(),
-): Promise<LandingClaim | null> {
+): Promise<LandingClaim | { waitingFor: string; until: number | null } | null> {
   const queue = await landingQueue(ctx, input);
   invariant(queue, 'NOT_FOUND', 'Hosted landing queue not found.');
   const { state, row } = await loadLanding(ctx, input);
@@ -313,13 +314,27 @@ export async function claimReadyLanding(
     'WORK_STALE',
     'Select the current prepared landing attempt.',
   );
-  if (queue.lease && queue.lease.until > now) {
-    return queue.lease.owner === input.owner &&
-      queue.lease.submissionId === input.submissionId &&
-      queue.lease.attemptId === input.attemptId
-      ? { ...input, token: queue.lease.token }
-      : null;
+  const leased = queue.lease && queue.lease.until > now;
+  if (
+    leased &&
+    queue.lease!.owner === input.owner &&
+    queue.lease!.submissionId === input.submissionId &&
+    queue.lease!.attemptId === input.attemptId
+  )
+    return { ...input, token: queue.lease!.token };
+  // Submission order: an older live entry takes main first. The waiter keeps its
+  // passed proof and no timer, not even its stall alarm: the older entry owns
+  // progress and its own alarm, and its exit from the order wakes this one.
+  const ahead = await olderLandingAhead(ctx, row, state, now);
+  if (ahead) {
+    if (row.alarm) await ctx.scheduler.cancel(row.alarm.taskId);
+    if (row.orderWait !== ahead.row.submissionId || row.alarm)
+      await ctx.db.patch(row._id, { orderWait: ahead.row.submissionId, alarm: null });
+    if (!ahead.row.orderWaited) await ctx.db.patch(ahead.row._id, { orderWaited: true });
+    return { waitingFor: ahead.row.submissionId, until: ahead.until };
   }
+  if (row.orderWait) await ctx.db.patch(row._id, { orderWait: undefined });
+  if (leased) return null;
   if (row.priority !== 'urgent') {
     const [urgent] = await ctx.db
       .query('projectHostedLandingRequests')

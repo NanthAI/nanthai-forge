@@ -329,6 +329,7 @@ export async function enqueueHostedLanding(
     sequence,
     ...(reused.selectionKey ? { selectionKey: reused.selectionKey } : {}),
     runnable: !admission,
+    orderLive: true,
     phase: state.phase as import('./projectHostedLandingStore').LandingRow['phase'],
     runId: attempt.check?.runId ?? admission,
     attemptId: attempt.id,

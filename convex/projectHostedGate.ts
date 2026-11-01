@@ -220,7 +220,7 @@ import {
   recordLandingObservation,
   type LandingRow,
 } from './projectHostedLandingStore';
-import { finishRow } from './projectHostedFinishWake';
+import { finishRow, wakeLandingOrderWaiters } from './projectHostedFinishWake';
 import { semanticPayload } from '../src/semantic-payload';
 import type { HostedLandingState } from '../src/hosted-landing';
 
@@ -239,6 +239,10 @@ export async function holdMainRed(ctx: MutationCtx, row: LandingRow, next: Hoste
     runnable: false,
     hold: 'main-red',
     alarm: null,
+    orderLive: undefined,
+    orderWaited: undefined,
     value: semanticPayload(next),
   });
+  // A held entry gives up its submission-order place; the next waiter re-reads the gate.
+  if (row.orderWaited) await wakeLandingOrderWaiters(ctx, row);
 }

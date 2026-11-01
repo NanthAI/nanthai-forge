@@ -18,6 +18,7 @@ import {
 import { hostedLandingStateSchema, landingObservation } from '../src/hosted-landing';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { recordLandingObservation, wakeLandingQueue } from './projectHostedLandingEvents';
+import { holdsLandingOrder } from './projectHostedLandingOrder';
 
 export const auditRow = (ctx: QueryCtx | MutationCtx, projectId: Id<'hostedProjects'>) =>
   ctx.db
@@ -116,7 +117,12 @@ export async function releaseMainHolds(ctx: MutationCtx, projectId: Id<'hostedPr
     state.error = null;
     state.observation = landingObservation('queued');
     await recordLandingObservation(ctx, state, null);
-    await ctx.db.patch(row._id, { hold: undefined, runnable: true, value: canonicalPayload(state) });
+    await ctx.db.patch(row._id, {
+      hold: undefined,
+      runnable: true,
+      orderLive: holdsLandingOrder({ phase: row.phase, hold: undefined }, state) ? true : undefined,
+      value: canonicalPayload(state),
+    });
   }
   if (page.page.length) await wakeLandingQueue(ctx, { projectId, channel: 'main' });
   if (!page.isDone)

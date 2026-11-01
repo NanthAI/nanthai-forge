@@ -91,6 +91,36 @@ export async function notifyFinish(ctx: MutationCtx, state: HostedLandingState) 
       { projectId, submissionId: state.id },
     );
 }
+/** An older submission stopped holding its place in the landing order: re-drive
+ * the oldest passed entry that waited for it and hand the rest to that entry,
+ * which takes main before them anyway. Exact indexed waiters, one drive per
+ * transition, never one per waiter; the woken claim re-reads the order. Waiters
+ * own no alarm, so every one is reached: each page leaves the index range. */
+export async function wakeLandingOrderWaiters(ctx: MutationCtx, row: Doc<'projectHostedLandingRequests'>) {
+  let next: Doc<'projectHostedLandingRequests'> | null = null;
+  for (;;) {
+    const waiters = await ctx.db
+      .query('projectHostedLandingRequests')
+      .withIndex('by_project_and_orderWait_and_sequence', q =>
+        q.eq('projectId', row.projectId).eq('orderWait', row.submissionId),
+      )
+      .order('asc')
+      .take(32);
+    for (const waiter of waiters) {
+      if (next) {
+        await ctx.db.patch(waiter._id, { orderWait: next.submissionId });
+        if (!next.orderWaited) await ctx.db.patch(next._id, { orderWaited: (next.orderWaited = true) });
+        continue;
+      }
+      await ctx.db.patch(waiter._id, { orderWait: undefined });
+      const finish = await finishRow(ctx, { projectId: row.projectId, submissionId: waiter.submissionId });
+      if (finish && !JSON.parse(finish.value).pending) await scheduleFinish(ctx, finish);
+      // A waiter that no longer holds its place cannot wake others; wake the next one too.
+      if (waiter.orderLive) next = waiter;
+    }
+    if (waiters.length < 32) return;
+  }
+}
 export async function notifyFinishCompose(
   ctx: MutationCtx,
   projectId: Id<'hostedProjects'>,

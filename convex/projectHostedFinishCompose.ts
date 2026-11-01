@@ -23,7 +23,7 @@ import { scheduleFinish } from './projectHostedFinishWake';
 import { hostedFinishBackoff, type HostedFinish } from '../src/hosted-finish';
 import { hostedRecordSchema } from '../src/hosted-records';
 import { canonicalPayload, hostedPayloadHash } from '../src/hosted-source-operation';
-import { landingObservation } from '../src/hosted-landing';
+import { hostedLandingStateSchema, landingObservation } from '../src/hosted-landing';
 import { invariant } from '../src/errors';
 import { validCrossHeadProof, type CrossHeadProof } from '../src/hosted-cross-head-proof';
 import { scopedRecheckBasis } from './projectHostedScopedRecheck';
@@ -45,7 +45,7 @@ export async function reserveFinishRetry(
     id: crypto.randomUUID(),
     parentAttemptId: previous.id,
     number: previous.number + 1,
-    at: new Date().toISOString(),
+    at: new Date(Date.now()).toISOString(),
     main: { head: main.head, receiptId: main.receipt.id },
     operations: { compose: crypto.randomUUID(), check: crypto.randomUUID(), accept: crypto.randomUUID() },
   };
@@ -53,7 +53,7 @@ export async function reserveFinishRetry(
   await retainLandingProgress(ctx, state, {
     code: mainChanged ? 'CHANNEL_CHANGED' : cause,
     message: mainChanged
-      ? 'Main changed; a named child recomposes the original selection.'
+      ? `${await mainMoveReason(ctx, row.projectId, previous, main.head, state.sequence)}; a named child recomposes the original selection.`
       : cause === 'BATCH_FALLBACK'
         ? 'The shared batch fell back to an individual Candidate; main did not change.'
         : 'The acceptance evidence needs an exact refresh; main did not change.',
@@ -73,6 +73,39 @@ export async function reserveFinishRetry(
   );
   const current = (await ctx.db.get(row._id))!;
   await scheduleFinish(ctx, current, hostedFinishBackoff(pending.number));
+}
+/** Why this re-check happens: the landings that moved main since the stale
+ * attempt was composed, and whether each was submitted before this one. One
+ * indexed window of recent landings, read only when a re-check starts. */
+async function mainMoveReason(
+  ctx: MutationCtx,
+  projectId: Doc<'projectHostedFinishes'>['projectId'],
+  previous: { at: string; main: { head: string } },
+  head: string,
+  sequence: number,
+) {
+  const landed = await ctx.db
+    .query('projectHostedLandingRequests')
+    .withIndex('by_project_and_channel_and_phase_and_sequence', q =>
+      q.eq('projectId', projectId).eq('channel', 'main').eq('phase', 'landed'),
+    )
+    .order('desc')
+    .take(8);
+  const movers = landed
+    .map(row => hostedLandingStateSchema.parse(JSON.parse(row.value)))
+    .filter(s => Date.parse(s.timing?.committedAt ?? '') > Date.parse(previous.at))
+    .sort((a, b) => a.sequence - b.sequence);
+  const moved = `Main moved from ${previous.main.head.slice(0, 8)} to ${head.slice(0, 8)}`;
+  if (!movers.length) return `${moved} outside the landing queue`;
+  const named = (list: typeof movers) =>
+    list.map(s => `#${s.sequence} (${s.operationId.slice(0, 8)})`).join(', ');
+  const before = movers.filter(s => s.sequence < sequence),
+    after = movers.filter(s => s.sequence > sequence);
+  return [
+    moved,
+    ...(before.length ? [`${named(before)} landed, submitted before this one`] : []),
+    ...(after.length ? [`${named(after)} landed, submitted after this one`] : []),
+  ].join('; ');
 }
 /** Reuse trusted immutable selection roots, never re-read current Lane heads.
  * H08 already staged these pages and validated every entry before its first job. */

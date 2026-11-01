@@ -64,6 +64,29 @@ test('replay (c): package, lockfile, selector, root configuration and deletions 
   }
 });
 
+test('incident e4aee4fe: a shell script beside the bench harness keeps the main-race recheck scoped', () => {
+  const bench = [
+    ['scripts/bench/oracle.mjs', "spawnSync('bash', [join(here, 'oracle.sh')]); export const oracle = 1;"],
+    ['scripts/bench/run-cell.mjs', "import './oracle.mjs'; export const cell = 1;"],
+    ['tests/bench.test.mjs', "import '../scripts/bench/run-cell.mjs';"],
+  ];
+  // Before: 'Unclassified or deleted path: scripts/bench/oracle.sh' widened every recheck to full.
+  const selected = scopedRecheckSelection({
+    lanePaths: ['scripts/bench/oracle.sh', 'scripts/bench/run-cell.mjs'],
+    mainPaths: ['convex/main.ts'],
+    files: files(bench),
+  });
+  assert.equal(selected.scope, 'scoped', selected.reason);
+  assert.deepEqual(selected.tests, [...smokeTests].sort(), 'no test reaches both sides');
+  // The same script named by product code is runtime behavior: keep the full suite.
+  const product = scopedRecheckSelection({
+    lanePaths: ['scripts/bench/oracle.sh'],
+    mainPaths: ['convex/main.ts'],
+    files: files([...bench, ['convex/runner.ts', "const script = 'scripts/bench/oracle.sh';"]]),
+  });
+  assert.equal(product.scope, 'full');
+});
+
 test('the planner runs the scoped selection only for a server-stamped recheck with its base', () => {
   const gate = scopedRecheckGate({
     checked: { id: randomUUID(), head, digest: head },

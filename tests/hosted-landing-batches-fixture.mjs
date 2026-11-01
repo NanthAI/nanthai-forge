@@ -24,6 +24,10 @@ export async function batchesFixture(
     // Mechanics tests pin the earlier fixed cohort of eight; null selects auto sizing.
     batchMaxSize = 8,
     admissionCheck = false,
+    // Agent finishes name their check. Without owner provenance on the Lane the
+    // entry is not batch-eligible, so its check starts at submission, in parallel
+    // with every other arrival (the dogfood main queue on 2026-11-01).
+    requestCheck = false,
   } = {},
 ) {
   const f = await finishFixture(t, { fileCount });
@@ -108,7 +112,7 @@ export async function batchesFixture(
     selection.request.intentId = intentId;
     // Seed the trusted owner provenance normally produced by start/save. The
     // generic compose fixture deliberately creates unverified arbitrary Lanes.
-    for (const table of ['projectHostedRecords', 'projectHostedRecordHeads'])
+    for (const table of requestCheck ? [] : ['projectHostedRecords', 'projectHostedRecordHeads'])
       for (const row of f.tables[table].values())
         if (row.kind === 'lane' && row.key === lane.laneId) f.patch(table, row._id, { ownerOnly: true });
     const candidate = await compose(f.c, selection);
@@ -117,6 +121,17 @@ export async function batchesFixture(
       candidateId: candidate.id,
       expectedHead: candidate.result.head,
       finish: { composeOperationId: selection.request.operationId, after: null },
+      ...(requestCheck
+        ? {
+            check: {
+              kind: 'request',
+              checkId: f.rawChecks.checkId,
+              expectedDefinition: f.rawChecks.definition.digest,
+              expectedConfiguration: f.rawChecks.configuration.digest,
+              expectedEnvironment: f.rawChecks.runner.environmentFingerprint,
+            },
+          }
+        : {}),
     });
     const state = await f.enqueue(request);
     entries.push({ lane, selection, candidate, request, state });

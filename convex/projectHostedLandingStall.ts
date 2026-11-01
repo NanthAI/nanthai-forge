@@ -17,6 +17,7 @@ import { splitLandingBatch } from './projectHostedLandingBatchSplit';
 import { wakeLandingQueue } from './projectHostedLandingWake';
 import { finishRow, scheduleFinish } from './projectHostedFinishWake';
 import { cancelHostedLanding } from './projectHostedLandingCancel';
+import { holdsLandingOrder } from './projectHostedLandingOrder';
 
 type Stalled = LandingIdentity & { lastProgressAt: string };
 const identity = { projectId: v.id('hostedProjects'), submissionId: v.string(), lastProgressAt: v.string() };
@@ -48,6 +49,15 @@ export async function raiseLandingAlarm(ctx: MutationCtx, input: Stalled, now = 
   const state = hostedLandingStateSchema.parse(JSON.parse(row.value));
   const stall = hostedLandingStall(state, now);
   if (!stall || state.observation.stall?.lastProgressAt === stall.lastProgressAt) return null;
+  if (canonical?.orderWait && canonical.phase === 'ready') {
+    // A passed entry waiting for an older submission is not stalled: the older
+    // one owns progress and its own alarm. If it no longer holds its place, re-drive.
+    const ahead = await landingRow(ctx, { projectId: input.projectId, submissionId: canonical.orderWait });
+    if (ahead && holdsLandingOrder(ahead, hostedLandingStateSchema.parse(JSON.parse(ahead.value))))
+      return null;
+    const finish = await finishRow(ctx, input);
+    if (finish) await scheduleFinish(ctx, finish);
+  }
   const next = { ...state, version: state.version + 1, observation: { ...state.observation, stall } };
   const project = await ctx.db.get(input.projectId);
   if (project) await scheduleStallAlert(ctx, { ...input, lastProgressAt: stall.lastProgressAt }, project);

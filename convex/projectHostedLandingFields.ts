@@ -126,6 +126,12 @@ export const hostedLandingTables = {
     /** Set when main changed a file this queued, not-yet-checked entry changes (JSON). */
     wouldConflict: v.optional(v.string()),
     runnable: v.boolean(),
+    /** Holds its place in submission order: no newer entry may take main first. */
+    orderLive: v.optional(v.literal(true)),
+    /** A passed entry waiting for this older submission to land or stop (server-only). */
+    orderWait: v.optional(v.string()),
+    /** Set on the older submission when a newer one waits for it, so only then its exit wakes waiters. */
+    orderWaited: v.optional(v.literal(true)),
     phase,
     runId: v.union(v.string(), v.null()),
     attemptId: v.string(),
@@ -133,6 +139,13 @@ export const hostedLandingTables = {
   })
     .index('by_project', ['projectId'])
     .index('by_project_and_submission', ['projectId', 'submissionId'])
+    .index('by_project_and_channel_and_orderLive_and_sequence', [
+      'projectId',
+      'channel',
+      'orderLive',
+      'sequence',
+    ])
+    .index('by_project_and_orderWait_and_sequence', ['projectId', 'orderWait', 'sequence'])
     .index('by_project_and_hold', ['projectId', 'hold'])
     .index('by_project_and_revert_and_sequence', ['projectId', 'revertOf', 'sequence'])
     .index('by_project_and_candidate_and_sequence', ['projectId', 'candidateId', 'sequence'])

@@ -487,6 +487,24 @@ or an agent using that owner's authority, can request urgent. Other contributors
 still submit normally and receive a `priorityReason` explaining the governance rule.
 Priority changes order; it does not change check, review or acceptance requirements.
 
+Checks of independent submissions run in parallel, but submissions take main in
+that order. A passed submission waits while an older one in its priority class is
+still queued, checking or passed; an urgent one waits only for older urgent ones.
+An older entry gives up its place when it fails, stalls, is held for red main, or
+waits for review or a dependency. The waiter keeps its passed check and owns no
+timer or stall alarm: the older entry keeps its own alarm, and when it gives up its
+place or lands, only the oldest waiter is woken and the rest wait for that one. A
+waiter whose check main has since moved past re-checks after the older entry lands,
+not beside it, so it re-checks once rather than once per landing ahead. So a
+re-check after a main race is only ever caused by an entry submitted before it,
+and each re-check attempt's
+`CHANNEL_CHANGED` message names the landings that moved main and whether they
+were submitted before or after it (core-claim incident `e4aee4fe`, 2026-11-01: a
+slow submission re-checked six times in an hour while newer ones overtook it).
+When main moved only in files disjoint from the Candidate, the cross-head proof or
+the scoped re-check keeps the work bounded; a non-source file in a `scripts/` or
+`tests/` subfolder selects the code beside or naming it rather than the full suite.
+
 An owner can reprioritise a queued Candidate submission through the existing agent
 CLI or the hosted `forge_task` MCP tool:
 

@@ -92,8 +92,11 @@ export const accept = mutation({
         channel: 'main',
         owner: attempt.operations.accept,
       });
+      // An older submission still holding its place takes main first.
       return canonicalPayload(
-        claim ? await publishSelected(ctx, claim) : { status: 'pending', reason: 'queued' },
+        claim && !('waitingFor' in claim)
+          ? await publishSelected(ctx, claim)
+          : { status: 'pending', reason: 'queued' },
       );
     } catch (error) {
       return report(error);
@@ -129,7 +132,7 @@ export const approve = mutation({
         channel: 'main',
         owner: attempt.operations.accept,
       });
-      if (!claim) return canonicalPayload({ status: 'pending', reason: 'queued' });
+      if (!claim || 'waitingFor' in claim) return canonicalPayload({ status: 'pending', reason: 'queued' });
       const published = await publishSelected(ctx, claim, Date.now(), actor);
       await recordMutationReceipt(ctx, {
         projectId: input.projectId,

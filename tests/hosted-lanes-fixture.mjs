@@ -117,7 +117,12 @@ export function lanesFixture() {
                 const bounds = {
                   lte(field, value) {
                     assert.equal(field, index.fields[terms.length], 'index upper-bound order');
-                    upper = [field, value];
+                    upper = [field, value, true];
+                    return bounds;
+                  },
+                  lt(field, value) {
+                    assert.equal(field, index.fields[terms.length], 'index upper-bound order');
+                    upper = [field, value, false];
                     return bounds;
                   },
                   gt(field, value) {
@@ -138,7 +143,7 @@ export function lanesFixture() {
                       row =>
                         terms.every(([k, v]) => row[k] === v) &&
                         (!lower || row[lower[0]] > lower[1]) &&
-                        (!upper || row[upper[0]] <= upper[1]),
+                        (!upper || row[upper[0]] < upper[1] || (upper[2] && row[upper[0]] === upper[1])),
                     )
                     .sort((a, b) => {
                       for (const field of index.fields) {

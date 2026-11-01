@@ -53,8 +53,15 @@ test('two concurrent exact-run landings preserve both source changes through an 
   }
   const outcomes = await Promise.allSettled(requests.map(r => f.accept(r.state)));
   assert.equal(outcomes.filter(r => r.status === 'fulfilled' && r.value.status === 'landed').length, 1);
-  const lostIndex = outcomes.findIndex(r => r.status === 'rejected');
-  assert(lostIndex >= 0);
+  // Submission order (incident e4aee4fe): the older entry takes main first. The
+  // newer one either waited while the older held its place, or lost the race after it.
+  assert.equal(outcomes[0].status === 'fulfilled' && outcomes[0].value.status, 'landed');
+  const lostIndex = 1;
+  if (outcomes[1].status === 'fulfilled') {
+    assert.deepEqual(outcomes[1].value, { status: 'pending', reason: 'queued' });
+    [outcomes[1]] = await Promise.allSettled([f.accept(requests[1].state)]);
+  }
+  assert.equal(outcomes[lostIndex].status, 'rejected');
   assert.equal(outcomes[lostIndex].reason.data?.code ?? outcomes[lostIndex].reason.code, 'CHANNEL_CHANGED');
   assert.equal(f.tables.projectHostedAcceptances.size, 1);
   const lost = requests[lostIndex],

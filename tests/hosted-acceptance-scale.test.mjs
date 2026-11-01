@@ -35,7 +35,8 @@ test('205 included Lanes and 10,050 retained receipts keep final CAS constant; c
   assert(final.ranges <= 40 && final.documents <= 40 && final.writes <= 15);
   assert(final.readBytes < 40 * 1024 && final.writeBytes < 16 * 1024);
   assert(!final.touched.includes('projectHostedAcceptancePages'));
-  assert(!final.touched.includes('projectHostedRecordHeads') || final.documents < 40);
+  // 40 = 39 plus the one submission-order read before claiming main (incident e4aee4fe); still constant.
+  assert(!final.touched.includes('projectHostedRecordHeads') || final.documents <= 40);
   let ticks = 0;
   while (f.pendingTasks().some(t => t.name === 'projectHostedAcceptance:complete')) {
     assert(++ticks < 30, 'only outstanding finite completion work schedules itself');

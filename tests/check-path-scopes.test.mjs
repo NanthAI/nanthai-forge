@@ -139,3 +139,31 @@ test('shared test runtime/scheduler changes select every test; mixed domains are
   assert.equal(mixed.domain, 'mixed');
   assert.match(mixed.reason, /core\+web scope/);
 });
+
+test('non-source files in a scripts or tests folder select the code beside or naming them', () => {
+  const tree = new Map([
+    ...files,
+    ['scripts/bench/run.mjs', "spawnSync('bash', [join(here, 'oracle.sh')]);"],
+    ['scripts/bench/tasks.mjs', 'export const tasks = [];'],
+    ['scripts/other.mjs', 'export const other = 1;'],
+    ['tests/bench.test.mjs', "import '../scripts/bench/run.mjs';"],
+    ['tests/tasks.test.mjs', "import '../scripts/bench/tasks.mjs';"],
+    ['tests/other.test.mjs', "import '../scripts/other.mjs';"],
+    ['tests/data.test.mjs', "readFileSync(new URL('./fixtures/notes/a.txt', import.meta.url));"],
+  ]);
+  const at = paths => selectTests({ files: tree, paths });
+  const shell = at(['scripts/bench/oracle.sh']);
+  assert.equal(shell.scope, 'scoped', shell.reason);
+  // Siblings may spawn or walk it; unrelated scripts and their tests stay out.
+  assert(shell.tests.includes('tests/bench.test.mjs') && shell.tests.includes('tests/tasks.test.mjs'));
+  assert(!shell.tests.includes('tests/other.test.mjs') && !shell.tests.includes('tests/core.test.mjs'));
+  const fixture = at(['tests/fixtures/notes/a.txt']);
+  assert.equal(fixture.scope, 'scoped');
+  assert(fixture.tests.includes('tests/data.test.mjs') && !fixture.tests.includes('tests/bench.test.mjs'));
+  // A top-level file, or one named by product code or the package manifest, keeps the full suite.
+  assert.equal(at(['scripts/release.sh']).scope, 'full');
+  const named = new Map([...tree, ['src/run.ts', "const script = 'scripts/bench/oracle.sh';"]]);
+  assert.equal(selectTests({ files: named, paths: ['scripts/bench/oracle.sh'] }).scope, 'full');
+  const packaged = new Map([...tree, ['package.json', '{"files":["scripts/bench/"]}']]);
+  assert.equal(selectTests({ files: packaged, paths: ['scripts/bench/oracle.sh'] }).scope, 'full');
+});

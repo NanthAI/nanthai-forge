@@ -6,6 +6,7 @@ import { orderLandingEntries } from '../src/landing-batch-order';
 import { hostedLandingStateSchema } from '../src/hosted-landing';
 import type { Doc } from './_generated/dataModel';
 import { effectivePolicy } from '../src/autonomy-policy';
+import { HOSTED_TRAIN_HOLD_MS } from '../src/hosted-landing-batch';
 import { effectiveAgentDefaults, urgentAllowed, urgentRefusal } from '../src/agent-parallel-defaults';
 
 /** Queue jumping: the project owner only, further limited by agentDefaults.urgentRoles. */
@@ -52,6 +53,60 @@ export function orderHostedLandingRows<T extends Pick<LandingRow, 'sequence' | '
       arrivedAt: String(row.sequence).padStart(20, '0'),
     })),
   );
+}
+/** Merge-queue order (core-claim incident e4aee4fe, 2026-11-01): a slow older
+ * entry re-checked 6+ times in an hour because fast newer passes kept taking main.
+ * An entry holds its place while it is still live; one that failed, stalled, is
+ * held for red main or waits for review or a dependency gives its place up. */
+export function holdsLandingOrder(row: Pick<LandingRow, 'phase' | 'hold'>, state: HostedLandingState) {
+  return (
+    (row.phase === 'queued' || row.phase === 'checking' || row.phase === 'ready') &&
+    !row.hold &&
+    !state.error &&
+    !state.observation.stall &&
+    state.observation.state === 'pending' &&
+    state.observation.pendingReason !== 'waiting-for-review' &&
+    state.observation.pendingReason !== 'waiting-for-dependency'
+  );
+}
+/** The oldest submission that must take main before this one, or null. One
+ * indexed window per accept attempt. Urgent entries wait only for older urgent
+ * ones; batch members never wait for their own batch. A queued entry no
+ * dispatcher owns (its compose or cohort still preparing) holds its place for
+ * the train hold only, as the train does: a dead compose never stops the queue.
+ * `until` names the one wake the waiter needs when that hold ends. */
+export async function olderLandingAhead(
+  ctx: QueryCtx | MutationCtx,
+  row: LandingRow,
+  state: HostedLandingState,
+  now = Date.now(),
+) {
+  const older = await ctx.db
+    .query('projectHostedLandingRequests')
+    .withIndex('by_project_and_channel_and_orderLive_and_sequence', q =>
+      q
+        .eq('projectId', row.projectId)
+        .eq('channel', row.channel)
+        .eq('orderLive', true)
+        .lt('sequence', row.sequence),
+    )
+    .order('asc')
+    .take(16);
+  for (const other of older) {
+    if (row.priority === 'urgent' && other.priority !== 'urgent') continue;
+    const value = hostedLandingStateSchema.parse(JSON.parse(other.value));
+    if (state.batchId && value.batchId === state.batchId) continue;
+    if (!holdsLandingOrder(other, value)) continue;
+    if (other.phase !== 'queued' || other.runnable) return { row: other, state: value, until: null };
+    const until =
+      Math.max(
+        Date.parse(value.at),
+        Date.parse(value.timing?.composeStartedAt ?? value.at),
+        Date.parse(value.timing?.selectedAt ?? value.at),
+      ) + HOSTED_TRAIN_HOLD_MS;
+    if (until > now) return { row: other, state: value, until };
+  }
+  return null;
 }
 /** A passed proof ages with every main move, so a READY entry accepts before any
  * new check starts, urgent ones included: urgent leads the train, it never moves

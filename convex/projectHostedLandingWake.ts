@@ -17,7 +17,12 @@ import { loadHostedCheck } from './projectHostedCheckStore';
 import { hostedCheckTerminal } from '../src/hosted-check';
 import { settleLandingAdmission } from './projectHostedLandingAdmission';
 import { hostedLandingStateSchema } from '../src/hosted-landing';
-import { nextLandingRow, nextReadyLandingRow, orderHostedLandingRows } from './projectHostedLandingOrder';
+import {
+  holdsLandingOrder,
+  nextLandingRow,
+  nextReadyLandingRow,
+  orderHostedLandingRows,
+} from './projectHostedLandingOrder';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { HOSTED_TRAIN_HOLD_MS } from '../src/hosted-landing-batch';
 
@@ -194,7 +199,12 @@ export async function wakeLandingCheck(
     state.version++;
     // Keep the checking observation until the original run is evaluated.
     await recordLandingObservation(ctx, state, null);
-    await ctx.db.patch(row._id, { phase: 'queued', runnable: true, value: canonicalPayload(state) });
+    await ctx.db.patch(row._id, {
+      phase: 'queued',
+      runnable: true,
+      orderLive: holdsLandingOrder({ phase: 'queued', hold: row.hold }, state) ? true : undefined,
+      value: canonicalPayload(state),
+    });
   }
   if (woken) await wakeLandingQueue(ctx, { projectId: input.projectId, channel: 'main' });
   if (!page.isDone) await scheduleCheckWake(ctx, { projectId: input.projectId, runId: input.runId }, wake);

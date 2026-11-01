@@ -1,4 +1,4 @@
-import { landingPriorityState } from './projectHostedLandingOrder';
+import { holdsLandingOrder, landingPriorityState } from './projectHostedLandingOrder';
 import { cancelUnneededHostedCheck } from './projectHostedCheckCancel';
 import { makeFunctionReference } from 'convex/server';
 import { semanticPayload } from '../src/semantic-payload';
@@ -22,7 +22,7 @@ import {
   type HostedLandingAttempt,
 } from '../src/hosted-landing';
 import { hostedOperationRow } from './projectHostedOperations';
-import { notifyFinish } from './projectHostedFinishWake';
+import { notifyFinish, wakeLandingOrderWaiters } from './projectHostedFinishWake';
 import { invariant } from '../src/errors';
 export type { LandingChannel } from './projectHostedLandingEvents';
 export { landingQueue, ensureLandingQueue, recordLandingObservation } from './projectHostedLandingEvents';
@@ -184,6 +184,7 @@ export async function writeLanding(
   await recordLandingObservation(ctx, state);
   // An admission run holds the request until it settles; it never joins a cohort meanwhile.
   const admitting = row.admission?.status === 'checking' && state.phase === 'checking';
+  const orderLive = holdsLandingOrder({ phase: state.phase as LandingRow['phase'], hold: row.hold }, state);
   await ctx.db.patch(row._id, {
     attemptId: state.attemptId,
     runId: attempt.check?.runId ?? (admitting ? row.admission!.runId : null),
@@ -202,9 +203,13 @@ export async function writeLanding(
     ),
     phase: state.phase as LandingRow['phase'],
     runnable,
+    orderLive: orderLive ? true : undefined,
+    orderWait: state.phase === 'ready' ? row.orderWait : undefined,
+    orderWaited: orderLive ? row.orderWaited : undefined,
     value: semanticPayload(state),
   });
   if (row.admitting && !admitting) await releaseAdmissionWaiters(ctx, row.projectId);
+  if (row.orderWaited && !orderLive) await wakeLandingOrderWaiters(ctx, row);
   if (
     row.runId &&
     (row.runId !== (attempt.check?.runId ?? (admitting ? row.admission!.runId : null)) ||

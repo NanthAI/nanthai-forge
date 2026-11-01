@@ -183,6 +183,13 @@ export async function finishStep(ctx: MutationCtx, input: FinishIdentity): Promi
       await scheduleFinish(ctx, (await ctx.db.get(row._id))!, 250);
       return null;
     }
+    // An older submission takes main first; its next transition wakes this finish,
+    // or the end of its hold when nothing dispatches it yet (one wake, no poll).
+    if ('waitingFor' in claim) {
+      if (claim.until !== null)
+        await scheduleFinish(ctx, (await ctx.db.get(row._id))!, Math.max(0, claim.until - Date.now()));
+      return null;
+    }
     try {
       if (state.batchId && !state.batchSolo) await publishLandingBatch(ctx, claim);
       else await publishAcceptance(ctx, claim);

@@ -12,6 +12,34 @@ const ignoreTests = [
   'tests/native-workspace-files.test.mjs',
   'tests/source-durability.test.mjs',
 ];
+/** A non-source file in a folder under scripts/ or tests/ (shell, Python, notes)
+ * is data to the code that runs or reads it, which the selector never parses.
+ * Its observers are its sibling code (relative spawns, folder walks) and any
+ * file naming it or one of its folders. Product code or the package manifest
+ * naming it keeps the full suite; so does a top-level file, whose folder name
+ * says nothing (2026-11-01: scripts/bench-t3code/oracle.sh forced every main
+ * race re-check of a slow landing back to the full suite). */
+function scriptAsset(path, files) {
+  const match = /^(scripts|tests)\/((?:[^/]+\/)+)([^/]+)$/.exec(path);
+  if (!match || /\.(?:[cm]?js|[cm]?tsx?|css|json|svg|html)$/.test(path) || manualFixture(path))
+    return undefined;
+  const [, top, nested, name] = match;
+  const folder = `${top}/${nested.slice(0, -1)}`;
+  const segments = nested.slice(0, -1).split('/');
+  const folders = segments.map((_, i) => segments.slice(0, i + 1).join('/'));
+  const readers = [...files.keys()].filter(file => {
+    if (file === path) return false;
+    if (file.startsWith(`${folder}/`) && !file.slice(folder.length + 1).includes('/')) return true;
+    const text = files.get(file);
+    return text.includes(name) || folders.some(f => text.includes(`${f}/`) || text.includes(`'${f}'`));
+  });
+  if (readers.some(file => /^(?:src|web|convex|netlify)\/|^package(?:-lock)?\.json$/.test(file))) return null;
+  return {
+    domain: top === 'tests' ? 'tests' : 'scripts',
+    seeds: [path, ...readers],
+    reason: 'Script or fixture data and the code beside or naming it',
+  };
+}
 const manualFixture = path =>
   /^tests\/browser\/.+\.(?:html|tsx?)$/.test(path) ||
   /^tests\/fixtures\/(?:qa-|k-|s1b-|settings-polish\.|readable-url-settings\.|hosted-tree\/)/.test(path);
@@ -132,6 +160,8 @@ export function classifyCheckPath(path, files) {
       ],
       reason: 'Planning note and the tests and scripts that read plans',
     };
+  const asset = scriptAsset(path, files);
+  if (asset !== undefined) return asset;
   if (!files.has(path)) return null;
   if (/^scripts\/.+\.(?:mjs|js|ts)$/.test(path)) return { domain: 'scripts', seeds: [path] };
   if (/^src\/.+\.ts$/.test(path)) return { domain: 'core', seeds: [path] };
