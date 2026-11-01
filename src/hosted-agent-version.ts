@@ -9,8 +9,17 @@ import { durableReplace } from './native-durability.js';
 /** CLI/server skew is reported as an upgrade step, never as a bare unsupported action. */
 export const CLI_UPGRADE_STEP =
   'Upgrade nforge to the release that matches this deployment (reinstall @nanthai/forge from the same source), then retry the same command; retained operation IDs resume.';
-const SERVER_UPGRADE_STEP =
-  'Ask the deployment operator to deploy the matching Forge server, or use the nforge release that matches this deployment.';
+export function hostedActionAlternative(action: string) {
+  if (['land-ready', 'land'].includes(action))
+    return 'Use land --save with the full original request to submit or resume (--no-wait returns after submission); use wait {operationIds:[ORIGINAL_UUID]} to wait.';
+  if (action === 'log')
+    return 'Use observe {runId} for check status and the returned CI provider link for logs.';
+  if (['records', 'candidates', 'candidate', 'views', 'view'].includes(action))
+    return 'Use status {laneId} for a Lane or planning for the hosted backlog.';
+  if (action === 'diff')
+    return 'Compare files in your local Lane; use show {channel:"main",path} to read accepted bytes.';
+  return 'Use capabilities for deployment actions and nforge agent ROOT --help in a hosted checkout for accepted parameters.';
+}
 const known = new Set<string>(hostedAgentActions);
 const newerFile = (root: string) => join(`${root}.forge-client`, 'agent', 'server-actions.json');
 
@@ -47,14 +56,14 @@ export function unknownActionError(root: string, action: string): ForgeError {
     );
   return new ForgeError(
     'HOSTED_ACTION_UNSUPPORTED',
-    `nforge ${CUTOVER_CLI_VERSION} has no hosted action ${/^[a-z][a-z-]{0,40}$/.test(action) ? action : 'with that name'}. Read capabilities for supported actions. If it is new on your deployment: ${CLI_UPGRADE_STEP}`,
+    `nforge ${CUTOVER_CLI_VERSION} has no hosted action ${/^[a-z][a-z-]{0,40}$/.test(action) ? action : 'with that name'}. ${hostedActionAlternative(action)}`,
   );
 }
 /** The server does not advertise an action this CLI knows: the deployment is older than the CLI. */
 export function unadvertisedActionError(action: string): ForgeError {
   return new ForgeError(
     'HOSTED_ACTION_UNSUPPORTED',
-    `This deployment does not offer hosted action ${action} under its current source authority; it may predate nforge ${CUTOVER_CLI_VERSION}. ${SERVER_UPGRADE_STEP}`,
+    `This deployment does not offer hosted action ${action} under its current source authority. ${hostedActionAlternative(action)}`,
   );
 }
 export function protocolMismatchError(): ForgeError {

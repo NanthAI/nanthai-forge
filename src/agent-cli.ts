@@ -1,3 +1,4 @@
+import { hostedAgentHelp } from './hosted-agent-help.js';
 import { callerOverlaps } from './agent-caller-overlaps.js';
 import { hostedAgentAddress, hostedAgentCli } from './hosted-agent-cli.js';
 import { agentWaitCli } from './agent-wait.js';
@@ -16,7 +17,9 @@ import { hostedShowCli } from './hosted-show-cli.js';
 import { HostedAgentTransport } from './hosted-agent-transport.js';
 import { housekeepingLines, type IdleLane } from './lane-prune.js';
 
-export const AGENT_HELP = `Forge agent workflow
+export const AGENT_HELP = `Forge native owner agent workflow
+Hosted checkout help is generated from its enforced contract: nforge agent HOSTED_ROOT --help.
+Hosted command reference: nforge docs agents/hosted.
   nforge agent ROOT start|save|land [--MODE] [JSON | --command-file FILE]
   nforge agent ROOT READ [JSON | --command-file FILE]
   nforge x ROOT OPERATOR-ACTION [JSON | --command-file FILE]
@@ -424,7 +427,7 @@ async function runAgentCli(args: string[], options: AgentCliOptions, notices: st
   const client = clientOptions(rawTail),
     tail = client.rest;
   if (requestedAction === 'help' || requestedAction === '--help') {
-    process.stdout.write(AGENT_HELP);
+    process.stdout.write(hostedAgentAddress(root!, {}) ? hostedAgentHelp() : AGENT_HELP);
     return undefined;
   }
   if (requestedAction) noticeViewAlias(requestedAction);
@@ -441,7 +444,9 @@ async function runAgentCli(args: string[], options: AgentCliOptions, notices: st
   );
   if (option === '--help') {
     process.stdout.write(
-      actionHelp(action === 'view' ? 'candidate' : action === 'views' ? 'candidates' : action),
+      hostedAgentAddress(root, {})
+        ? hostedAgentHelp(lowerVerb(form!, true))
+        : actionHelp(action === 'view' ? 'candidate' : action === 'views' ? 'candidates' : action),
     );
     return undefined;
   }

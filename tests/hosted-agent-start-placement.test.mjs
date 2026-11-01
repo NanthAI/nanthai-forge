@@ -88,7 +88,8 @@ test('version skew names the upgrade step instead of a bare unsupported action',
   const s = agentFixture(t);
   await assert.rejects(s.transport().dispatch('teleport', { secret: 'private-value' }), error => {
     assert.equal(error.code, 'HOSTED_ACTION_UNSUPPORTED');
-    assert.match(error.message, /Upgrade nforge/);
+    assert.match(error.message, /Use capabilities/);
+    assert.doesNotMatch(error.message, /Upgrade nforge/);
     assert.doesNotMatch(error.message, /private-value/);
     return true;
   });
@@ -108,7 +109,8 @@ test('version skew names the upgrade step instead of a bare unsupported action',
   s.caps.actions = ['capabilities'];
   await assert.rejects(s.transport().dispatch('start', { outcome: 'Old server' }), error => {
     assert.equal(error.code, 'HOSTED_ACTION_UNSUPPORTED');
-    assert.match(error.message, /may predate nforge .*deploy the matching Forge server/);
+    assert.match(error.message, /does not offer hosted action start/);
+    assert.match(error.message, /Use capabilities/);
     assert.doesNotMatch(error.message, /Retry the original/);
     return true;
   });

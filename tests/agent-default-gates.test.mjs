@@ -194,3 +194,12 @@ test('failed preflight still refuses after a same-content save', t => {
     error => code('PREFLIGHT_REQUIRED')(error) && error.message.includes('Its last run failed.'),
   );
 });
+
+test('land accepts the overlap answer in the same call and retains observed notices', t => {
+  const root = repo(t);
+  const pending = advice({ notices: [{ noticeId: 'f'.repeat(64), file: 'src/a.ts', class: 'blocking' }] });
+  const result = finishGates(root, defaults({ preflight: 'off' }), lane, pending, 'accept-order');
+  assert.equal(result.overlap.status, 'answered');
+  assert.equal(result.overlap.choice, 'accept-order');
+  assert.deepEqual(result.overlap.notices, ['f'.repeat(64)]);
+});

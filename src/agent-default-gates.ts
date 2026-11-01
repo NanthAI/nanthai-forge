@@ -20,6 +20,7 @@ export function finishGates(
   defaults: EffectiveAgentDefaults | undefined,
   lane: { laneId: string; head: string; tree?: string },
   advice: Advice | undefined,
+  overlapAnswer?: 'accept-order',
 ) {
   const advisories: Record<string, unknown> = {};
   if (!defaults) return advisories;
@@ -27,12 +28,20 @@ export function finishGates(
   if (defaults.overlapGate !== 'off' && pending.length) {
     const ack = command(root, 'ack', { laneId: lane.laneId });
     const files = pending.map(item => item.file).join(', ');
-    if (defaults.overlapGate === 'block')
+    if (defaults.overlapGate === 'block' && overlapAnswer !== 'accept-order')
       throw new ForgeError(
         'OVERLAP_UNANSWERED',
-        `Answer the blocking overlap notice(s) on ${files} before landing (project overlapGate: block). Keep your change and land in order: ${ack}. Or route around: add "choice":"split". Then land again.`,
+        `Answer the blocking overlap notice(s) on ${files} before landing (project overlapGate: block). Keep your change and land in order: ${ack}. Or route around: add "choice":"split". Or include "overlapAnswer":"accept-order" in land --save.`,
       );
-    advisories.overlap = { status: 'unanswered', files: pending.map(item => item.file), acknowledge: ack };
+    advisories.overlap =
+      overlapAnswer === 'accept-order'
+        ? {
+            status: 'answered',
+            choice: overlapAnswer,
+            notices: pending.map(item => item.noticeId),
+            files: pending.map(item => item.file),
+          }
+        : { status: 'unanswered', files: pending.map(item => item.file), acknowledge: ack };
   }
   if (defaults.preflight !== 'off') {
     const receipt = readPreflightReceipt(root, lane.laneId);

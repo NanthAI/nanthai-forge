@@ -2,6 +2,8 @@
 
 Forge does not run agents or supply a model. Your coding harness (Codex, Claude Code or another) stays where it is. Forge gives it shared source, isolated Lanes, checks and a way to see what other agents are doing.
 
+Hosted checkout help (`nforge agent ROOT --help`) and `nforge docs agents/hosted` are generated from the enforced hosted command schemas. Use their supported actions and parameters; the native owner reference includes additional commands.
+
 The command reference is [agents/workflow.md](agents/workflow.md) and the terse runtime copy is [skills/forge-agent/SKILL.md](../skills/forge-agent/SKILL.md).
 
 ## Connect over MCP

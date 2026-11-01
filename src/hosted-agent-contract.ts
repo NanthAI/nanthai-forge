@@ -164,6 +164,7 @@ export const hostedAgentCommandSchemas = {
       accept: z.boolean().optional(),
       keepOpen: z.boolean().optional(),
       priority: z.enum(['urgent', 'normal']).optional(),
+      overlapAnswer: z.literal('accept-order').optional(),
       retry: z.boolean().optional(),
       reason: finishRetryReasonSchema.optional(),
     })

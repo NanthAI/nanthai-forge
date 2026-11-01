@@ -139,6 +139,10 @@ export async function executeHostedFinish(session: HostedAgentSession, input: un
   return finishRetryHint(session.root, hostedAgentCommandSchemas.finish.parse(context?.command ?? input), {
     ...receipt,
     ...(waitCommand ? { waitCommand } : {}),
+    replayParameters: {
+      ...hostedAgentCommandSchemas.finish.parse(context?.command ?? input),
+      operationId: session.journal.operationId,
+    },
   });
 }
 
@@ -191,6 +195,7 @@ async function executeFinishWork(session: HostedAgentSession, input: unknown) {
         selection.laneId,
         selection.head,
         savedMarker?.selection.head === selection.head ? savedMarker.tree : undefined,
+        command.overlapAnswer,
       );
       if (Object.keys(advice).length) await session.journal.retain('finish-defaults', () => advice);
     }

@@ -103,7 +103,7 @@ test('finish prints operation id, replay and wait commands, and the overlap bann
   assert.equal(response.result.phase, 'finish');
   const text = lines.join('');
   assert.match(text, new RegExp(`land: operationId ${operationId}`));
-  assert.match(text, /finish '\{"laneId":"[0-9a-f-]+","operationId":"[0-9a-f-]+"\}'/);
+  assert.match(text, /finish '\{"laneId":"[0-9a-f-]+","message":"m","operationId":"[0-9a-f-]+"\}'/);
   assert.match(
     text,
     /to keep waiting, run: nforge agent '\/tmp\/lane-root' wait '\{"operationIds":\["[0-9a-f-]+"\],"timeoutSeconds":3600\}'/,

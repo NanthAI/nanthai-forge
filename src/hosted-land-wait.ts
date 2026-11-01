@@ -34,7 +34,7 @@ export function landAnnouncement(
   if (!response.operationId) return [];
   const wait = landWaitCommand(root, response);
   return [
-    `land: operationId ${response.operationId} (replay with: nforge agent ${shellQuote(root)} finish ${shellQuote(JSON.stringify({ ...(command.laneId ? { laneId: command.laneId } : {}), operationId: response.operationId }))})`,
+    `land: operationId ${response.operationId} (replay with: nforge agent ${shellQuote(root)} finish ${shellQuote(JSON.stringify((resultOf(response) as { replayParameters?: Record<string, unknown> }).replayParameters ?? { ...command, operationId: response.operationId }))})`,
     ...(wait ? [`land: to keep waiting, run: ${wait}`] : []),
   ];
 }

@@ -3,6 +3,8 @@ name: forge-agent
 description: Concise recorded Forge Intent/Lane/check/acceptance workflow and optional graph context. Ordinary local-file questions need no skill, index, or Work setup.
 ---
 
+For hosted checkouts, use `nforge agent ROOT --help` and `nforge docs agents/hosted`: both are generated from the enforced hosted contract. The pinned native examples below describe a native owner. Hosted replay requires the full original parameters, including message; use the receipt replay command. Hosted land accepts `overlapAnswer:"accept-order"` in the same request.
+
 Use ordinary search/read/edit tools on the selected source. For recorded delivery use the installed `nforge` command; `nforge agent ROOT VERB [--MODE] --help` gives parameters (`--command-file FILE` avoids JSON quoting). Three verbs: `start`, `save` and `land`; reads keep their names; operator actions run as `nforge x ROOT ACTION`. Old names (`finish`, `checkpoint`, `sync`, `run`, …) still work and print their new form on stderr.
 
 ## Working on Forge, not GitHub

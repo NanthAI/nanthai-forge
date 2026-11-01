@@ -92,6 +92,7 @@ const quietActions = new Set([
 /** Agent-default refusals carry their own next step. */
 // These messages carry their own next command; a generic replay hint would contradict it.
 const gateCodes = new Set([
+  'BAD_ARGUMENT',
   'OVERLAP_UNANSWERED',
   'PREFLIGHT_REQUIRED',
   'SAVE_PENDING',
@@ -308,7 +309,7 @@ export class HostedAgentTransport {
       invariant(
         command.success,
         'BAD_ARGUMENT',
-        'Invalid hosted agent parameters. Read the hosted agent command help.',
+        `Invalid hosted ${requestedAction} parameters. ${command.success ? '' : command.error.issues.map(issue => `${issue.path.join('.') || 'parameters'}: ${issue.message}`).join('; ')}. Run nforge agent ROOT ${requestedAction} --help.`,
       );
       if (!observation && operationId !== undefined)
         invariant(z.uuid().safeParse(operationId).success, 'BAD_ARGUMENT', 'operationId must be a UUID.');
@@ -526,7 +527,7 @@ export class HostedAgentTransport {
         },
         waitSource: (operationId, initial, kind) =>
           waitHostedAgentSource(this.address, operationId, initial, signal, this.subscribeSource, kind),
-        finishGates: async (laneId: string, head: string, tree?: string) =>
+        finishGates: async (laneId: string, head: string, tree?: string, overlapAnswer?: 'accept-order') =>
           finishGates(
             root,
             capabilities.agentDefaults,
@@ -536,6 +537,7 @@ export class HostedAgentTransport {
               ...(tree ? { tree } : {}),
             },
             await this.overlapAdvice(laneId, capabilities.agentDefaults?.preflight !== 'off'),
+            overlapAnswer,
           ),
         marker: () => {
           const marker = readHostedLaneCheckout(root);
@@ -640,7 +642,14 @@ export class HostedAgentTransport {
       const response = await this.response(
         action,
         journal.operationId,
-        await withSourceRecovery(session, action, command.data, result),
+        await withSourceRecovery(
+          session,
+          action,
+          action === 'finish'
+            ? ((result as { replayParameters?: object }).replayParameters ?? command.data)
+            : command.data,
+          result,
+        ),
         overlapLane,
       );
       if (action === 'start') {
@@ -862,7 +871,7 @@ export class HostedAgentTransport {
     invariant(
       [laneId, operationId, submissionId, runId].filter(Boolean).length === 1,
       'BAD_ARGUMENT',
-      'Choose exactly one Lane, source operation, submission or run.',
+      'Choose exactly one operationId (original landing or source operation), submissionId or runId; status also accepts laneId.',
     );
     if (submissionId)
       return this.query('projectHostedFinish:status', {
@@ -894,5 +903,10 @@ export type HostedAgentSession = {
   main: () => Promise<z.infer<typeof hostedMainV2Schema>>;
   marker: () => ReturnType<typeof readHostedLaneCheckout>;
   /** Agent-default finish gates (overlap, preflight); refusals throw, advisories return. */
-  finishGates?: (laneId: string, head: string, tree?: string) => Promise<Record<string, unknown>>;
+  finishGates?: (
+    laneId: string,
+    head: string,
+    tree?: string,
+    overlapAnswer?: 'accept-order',
+  ) => Promise<Record<string, unknown>>;
 };

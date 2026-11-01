@@ -1,3 +1,4 @@
+import { hostedAgentHelp, hostedAgentHelpMarkdown } from './hosted-agent-help.js';
 // SPDX-License-Identifier: Apache-2.0
 import { readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -13,6 +14,10 @@ function documents(directory = 'docs'): string[] {
 /** Prints only named files from the installed documentation inventory; no project required. */
 export function docsCli(args: string[]): undefined {
   invariant(args.length <= 1, 'BAD_ARGUMENT', 'Use nforge docs [name].');
+  if (args[0] === 'agents/hosted') {
+    process.stdout.write(`${hostedAgentHelp()}\n${hostedAgentHelpMarkdown()}\n`);
+    return;
+  }
   const paths = ['README.md', 'skills/forge-agent/SKILL.md', ...documents()].sort();
   const aliases: Record<string, string> = {
     agent: 'skills/forge-agent/SKILL.md',
@@ -21,7 +26,7 @@ export function docsCli(args: string[]): undefined {
   const name = args[0];
   if (!name || name === '--help' || name === 'help') {
     process.stdout.write(
-      `nforge docs [name] — print packaged documentation (offline).\nStart: nforge docs quickstart\nAgent skill: nforge docs agent\n\n${paths.join('\n')}\n`,
+      `nforge docs [name] — print packaged documentation (offline).\nStart: nforge docs quickstart\nAgent skill: nforge docs agent\nHosted contract: nforge docs agents/hosted\n\n${paths.join('\n')}\n`,
     );
     return;
   }
