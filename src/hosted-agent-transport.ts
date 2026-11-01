@@ -527,8 +527,9 @@ export class HostedAgentTransport {
         },
         waitSource: (operationId, initial, kind) =>
           waitHostedAgentSource(this.address, operationId, initial, signal, this.subscribeSource, kind),
-        finishGates: async (laneId: string, head: string, tree?: string, overlapAnswer?: 'accept-order') =>
-          finishGates(
+        finishGates: async (laneId: string, head: string, tree?: string, overlapAnswer?: 'accept-order') => {
+          const advice = await this.overlapAdvice(laneId, capabilities.agentDefaults?.preflight !== 'off');
+          const gates = finishGates(
             root,
             capabilities.agentDefaults,
             {
@@ -536,9 +537,15 @@ export class HostedAgentTransport {
               head,
               ...(tree ? { tree } : {}),
             },
-            await this.overlapAdvice(laneId, capabilities.agentDefaults?.preflight !== 'off'),
+            advice,
             overlapAnswer,
-          ),
+          );
+          // An inline answer records the same idempotent answers as ack, so peers and the inbox see it.
+          const answers = overlapAnswer && advice ? ackAnswers(laneId, advice, overlapAnswer) : [];
+          for (let at = 0; at < answers.length; at += 100)
+            await executeHostedRecords(this, 'overlap-acks', { answers: answers.slice(at, at + 100) });
+          return gates;
+        },
         marker: () => {
           const marker = readHostedLaneCheckout(root);
           if (marker)

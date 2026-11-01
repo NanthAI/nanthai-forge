@@ -125,7 +125,7 @@ test('receipt replay preserves the normalized full original parameters and journ
   assert.equal(again.result.submission.id, first.result.submission.id);
 });
 
-test('inline accept-order on 600 notices adds zero Convex calls against the existing finish path', async t => {
+test('inline accept-order on 600 notices records the same answers as ack in bounded batches', async t => {
   const { effectiveAgentDefaults } = await import('../dist/agent-parallel-defaults.js');
   const { performance } = await import('node:perf_hooks');
   const notices = Array.from({ length: 600 }, (_, i) => ({
@@ -146,6 +146,13 @@ test('inline accept-order on 600 notices adds zero Convex calls against the exis
     const transport = s.transport(),
       original = transport.query.bind(transport);
     let reads = 0;
+    const acks = [],
+      mutate = transport.mutation.bind(transport);
+    transport.mutation = async (name, args) => {
+      if (name !== 'projectHostedOverlapAcks:append') return mutate(name, args);
+      acks.push(JSON.parse(args.request).answers);
+      return { answers: JSON.parse(args.request).answers };
+    };
     transport.query = async (name, args) => {
       if (name !== 'projectHostedOverlaps:read') return original(name, args);
       reads++;
@@ -160,17 +167,28 @@ test('inline accept-order on 600 notices adds zero Convex calls against the exis
       laneId: s.lane.laneId,
       ...(inline ? { overlapAnswer: 'accept-order' } : {}),
     });
-    return { calls: s.calls.map(c => c.name), reads, response, ms: performance.now() - start };
+    return { calls: s.calls.map(c => c.name), acks, reads, response, ms: performance.now() - start };
   }
   const before = await run(false),
     after = await run(true);
   assert.deepEqual(after.calls, before.calls);
+  assert.equal(before.acks.length, 0);
+  // Peers and the inbox see the answer: 600 answers in six 100-answer writes, no extra reads.
+  assert.deepEqual(
+    after.acks.map(batch => batch.length),
+    [100, 100, 100, 100, 100, 100],
+  );
+  assert.deepEqual(
+    after.acks.flat().map(answer => answer.noticeId),
+    notices.map(notice => notice.noticeId),
+  );
+  assert(after.acks.flat().every(answer => answer.choice === 'accept-order' && answer.laneId));
   assert.equal(after.reads, before.reads);
   assert.equal(after.reads, 1, 'gate and receipt share the existing overlap read');
   assert.equal(after.response.result.defaults.overlap.status, 'answered');
   assert.equal(after.response.result.defaults.overlap.notices.length, 600);
   t.diagnostic(
-    `600 synthetic notices: existing/inline calls ${before.calls.length}/${after.calls.length} plus ${before.reads}/${after.reads} cached overlap read; inline ${after.ms.toFixed(1)} ms; answer receipt ${JSON.stringify(after.response.result.defaults.overlap).length} bytes`,
+    `600 synthetic notices: existing/inline calls ${before.calls.length}/${after.calls.length}, inline ack writes ${after.acks.length}, plus ${before.reads}/${after.reads} cached overlap read; inline ${after.ms.toFixed(1)} ms; answer receipt ${JSON.stringify(after.response.result.defaults.overlap).length} bytes`,
   );
 });
 

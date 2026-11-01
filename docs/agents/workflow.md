@@ -10,7 +10,7 @@ In a hosted checkout, `nforge agent ROOT --help` and action help use the same sc
 
 Hosted `land --save` uses `--no-wait` to return after submission. Replay every original parameter, including `message`, using the printed replay command. `observe` and `landing` take exactly one `operationId` (the original landing UUID), `submissionId` or `runId`; use `status {laneId}` for a Lane. Use `wait {operationIds:[ORIGINAL_UUID]}` for a live landing wait.
 
-Include `overlapAnswer:"accept-order"` in `land --save` to answer the blocking notices seen by that landing in the retained request and defaults receipt, without a separate call. It applies to this landing; `ack` still records inbox answers separately. The answer does not resolve source conflicts or change project policy.
+Include `overlapAnswer:"accept-order"` in `land --save` to answer the pending notices seen by that landing without a separate `ack`. The answers are recorded exactly as `ack` records them, so peers and the inbox see them, and the defaults receipt lists them. The answer does not resolve source conflicts or change project policy.
 
 <!-- hosted-agent-contract:start -->
 | Hosted command | Accepted parameters (`?` = optional) |
