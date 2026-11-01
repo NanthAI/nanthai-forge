@@ -8,6 +8,7 @@ import { insertLandingAttempt, loadLanding, writeLanding } from './projectHosted
 import { failFinish } from './projectHostedFinishStore';
 import { hostedRecordSchema } from '../src/hosted-records';
 import { invariant } from '../src/errors';
+import { hostedStartMain } from './projectHostedChannels';
 
 /** Retain a resolvable Candidate for this particular rejected merge, including
  * the worker's exact conflict root. The original clean selection is immutable. */
@@ -22,6 +23,12 @@ export async function retainBatchConflict(
   },
 ) {
   const { member } = input;
+  const main = await hostedStartMain(ctx, input.projectId);
+  invariant(
+    input.main.head === main.head && input.main.receiptId === main.receipt.id,
+    'CHANNEL_CHANGED',
+    'Retain terminal conflicts only on the current accepted main base; recompose speculative or stale bases.',
+  );
   const row = await readHostedRecord(ctx, {
     projectId: input.projectId,
     actor: member.actor.id,

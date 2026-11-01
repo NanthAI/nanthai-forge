@@ -58,6 +58,7 @@ export async function recordLandingObservation(
   ctx: MutationCtx,
   state: HostedLandingState,
   pendingAttempt?: unknown,
+  wouldConflict?: unknown,
 ) {
   await retainQueueStatus(ctx, state);
   const finish =
@@ -76,6 +77,7 @@ export async function recordLandingObservation(
     value: semanticPayload({
       submission: state,
       pendingAttempt: pendingAttempt ?? (finish ? JSON.parse(finish.value).pending : null),
+      ...(wouldConflict ? { wouldConflict } : {}),
     }),
   });
 }

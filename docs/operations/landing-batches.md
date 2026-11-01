@@ -555,6 +555,15 @@ the original member selections return to the queue and check again on surviving
 main. Other groups retain their evidence. Source and check completion events
 advance the pipeline; an idle queue schedules nothing.
 
+A composition conflict on an unaccepted predecessor is advisory. The existing
+`wouldConflict` notice names that predecessor group and the conflicting files;
+the entry stays queued, with no agent action required. Its cohort waits on the
+predecessor's settlement event and recomposes the original selections on accepted
+main. A predecessor failure or invalidation returns live descendants to the queue.
+A conflict from that speculative base becomes terminal `COMPOSITION_CONFLICT`
+only if it persists when recomposed on real main. Conflicts composed without a
+speculative predecessor retain their existing immediate terminal behavior.
+
 A retained compose with no live check holds its slot for at most five minutes
 (`HOSTED_TRAIN_HOLD_MS`); ordinary review, contributor and recovery work keeps its
 existing path. Metadata selection reads only bounded indexed cohort windows and

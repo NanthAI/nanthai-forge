@@ -181,7 +181,15 @@ export async function writeLanding(
     delete state.observation.stall;
   await scheduleLandingAlarm(ctx, state);
   await retainLandingProgress(ctx, state);
-  await recordLandingObservation(ctx, state);
+  const advice = row.wouldConflict ? JSON.parse(row.wouldConflict) : undefined;
+  const speculative = Boolean(advice?.predecessor);
+  const retireAdvice =
+    speculative &&
+    (state.phase !== 'queued' ||
+      state.attemptId !== previous.attemptId ||
+      state.batchId !== previous.batchId);
+  const wouldConflict = retireAdvice ? undefined : row.wouldConflict;
+  await recordLandingObservation(ctx, state, undefined, speculative && !retireAdvice ? advice : undefined);
   // An admission run holds the request until it settles; it never joins a cohort meanwhile.
   const admitting = row.admission?.status === 'checking' && state.phase === 'checking';
   const orderLive = holdsLandingOrder({ phase: state.phase as LandingRow['phase'], hold: row.hold }, state);
@@ -203,6 +211,7 @@ export async function writeLanding(
     ),
     phase: state.phase as LandingRow['phase'],
     runnable,
+    wouldConflict,
     orderLive: orderLive ? true : undefined,
     orderWait: state.phase === 'ready' ? row.orderWait : undefined,
     orderWaited: orderLive ? row.orderWaited : undefined,

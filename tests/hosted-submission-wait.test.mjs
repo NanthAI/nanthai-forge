@@ -510,6 +510,52 @@ test('live revocation, pre-cancellation and partial subscription setup failures 
   assert.equal(closed, true);
 });
 
+test('speculative conflict advice is delivered by wait without a terminal outcome or a new read loop', async () => {
+  const s = await fixture(),
+    a = await s.start();
+  const row = [...s.f.tables.projectHostedLandingRequests.values()].find(
+    row => row.submissionId === a.state.id,
+  );
+  const advice = {
+    code: 'COMPOSITION_CONFLICT',
+    paths: ['src/shared.ts'],
+    more: 0,
+    predecessor: {
+      groupId: randomUUID(),
+      submissionId: randomUUID(),
+      head: 'a'.repeat(64),
+      receiptId: randomUUID(),
+    },
+    at: a.state.at,
+    next: 'Wait for the predecessor; Forge will recompose automatically.',
+  };
+  s.f.patch('projectHostedLandingRequests', row._id, { wouldConflict: JSON.stringify(advice) });
+  await s.update(a.state.id, 'queued');
+  const selection = { operationIds: [a.request.operationId], timeoutSeconds: 0 };
+  const pending = await s.wait(selection);
+  assert.equal(pending.result.status, 'timeout');
+  const event = s.events.find(event => event.wouldConflict);
+  assert.deepEqual(event.wouldConflict, advice);
+  assert.equal(event.terminal, false);
+  assert.equal(event.submission.error, null);
+  assert.deepEqual(pending.result.submissions[0].wouldConflict, advice);
+  assert.equal(s.counts().opens, 0, 'finite read creates no observer or poller');
+  const replay = await s.wait({ ...selection, cursor: pending.result.cursor });
+  assert.deepEqual(replay.result.submissions[0].wouldConflict, advice);
+  assert.equal(
+    s.events.filter(event => event.wouldConflict).length,
+    1,
+    'the same-version current snapshot and reconnect do not redeliver the advice',
+  );
+  await s.update(a.state.id, 'checking');
+  const resumed = await s.wait({ ...selection, cursor: pending.result.cursor });
+  assert.equal(
+    resumed.result.submissions[0].wouldConflict,
+    undefined,
+    'retired advice is not carried into a new source/check state',
+  );
+});
+
 test('a retained preparing submission resnapshots the same older version on reconnect', async () => {
   const s = await fixture(),
     a = await s.start();

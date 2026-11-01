@@ -110,6 +110,7 @@ export const page = query({
           events.push({
             submission: landingStateForReader(queueAwareLandingState(state, queue), input.priorityInfo),
             pendingAttempt,
+            ...(wouldConflict ? { wouldConflict } : {}),
           });
           nextVersion = state.version + 1;
           resnapshot = true;

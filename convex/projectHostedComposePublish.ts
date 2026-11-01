@@ -10,6 +10,7 @@ import { composeResultSchema } from '../src/hosted-compose';
 import { savePin } from '../src/hosted-save';
 import { digest } from '../src/portable-hash';
 import { canonicalPayload } from '../src/hosted-source-operation';
+import type { HostedRecord } from '../src/hosted-records';
 import { invariant } from '../src/errors';
 /** Constant-size publication. Selection/edge checks were paged before dispatch;
  * ancestry and bytes are verified by the fixed worker, never client display facts. */
@@ -73,6 +74,10 @@ export async function publishHostedCompose(ctx: MutationCtx, input: SaveIdentity
         output: job.output.sha256,
       });
   }
+  const publicResult: Extract<HostedRecord, { kind: 'candidate' }>['result'] =
+    result.status === 'clean'
+      ? { status: 'clean', head: result.state.sha256 }
+      : { status: 'conflict', conflicts: result.conflicts };
   const candidate = {
     kind: 'candidate' as const,
     ...(result.status === 'clean' && result.paths
@@ -87,7 +92,7 @@ export async function publishHostedCompose(ctx: MutationCtx, input: SaveIdentity
     inputs: state.request.inputs.root,
     dependencies: state.request.dependencies.root,
     algorithm: `${output.algorithm}@${job.control.runtime}`,
-    result: result.status === 'clean' ? { status: 'clean' as const, head: result.state.sha256 } : result,
+    result: publicResult,
   };
   await writeHostedRecord(ctx, {
     ...input,

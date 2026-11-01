@@ -262,9 +262,14 @@ export async function retryLandingBatch(ctx: MutationCtx, input: BatchIdentity, 
       projectId: input.projectId,
       submissionId: member.submissionId,
     });
+    // This exact prefix was retired. Its advisory must not survive recomposition.
+    const current =
+      row.wouldConflict && JSON.parse(row.wouldConflict).predecessor
+        ? { ...row, wouldConflict: undefined }
+        : row;
     await writeLanding(
       ctx,
-      row,
+      current,
       {
         ...state,
         version: state.version + 1,

@@ -157,8 +157,19 @@ export async function buildHostedComposeState(
             );
           invariant(conflicts, 'SOURCE_JOB_INVALID', 'A conflict needs exact source pins.');
           if (plan.batch && 'candidateId' in entry && plan.batch.members.includes(entry.candidateId))
-            dropped.push({ candidateId: entry.candidateId, conflicts });
-          else result = { status: 'conflict', conflicts };
+            dropped.push({
+              candidateId: entry.candidateId,
+              conflicts,
+              paths: paths.slice(0, 10),
+              more: Math.max(0, paths.length - 10),
+            });
+          else
+            result = {
+              status: 'conflict',
+              conflicts,
+              paths: paths.slice(0, 10),
+              more: Math.max(0, paths.length - 10),
+            };
         }
         await progress();
       }

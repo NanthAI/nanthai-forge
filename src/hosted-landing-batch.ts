@@ -30,6 +30,8 @@ export const batchDroppedSchema = z
     z
       .object({
         candidateId: z.uuid(),
+        paths: z.array(z.string()).max(10).optional(),
+        more: z.number().int().nonnegative().optional(),
         conflicts: z
           .object({ sha256: z.string().regex(/^[0-9a-f]{64}$/), size: z.number().int().nonnegative() })
           .strict(),

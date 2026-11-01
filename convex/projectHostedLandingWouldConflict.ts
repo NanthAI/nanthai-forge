@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import { z } from 'zod';
+import { wouldConflictSchema } from '../src/hosted-would-conflict';
+export { wouldConflictSchema, type WouldConflict } from '../src/hosted-would-conflict';
 import { v } from 'convex/values';
 import { makeFunctionReference } from 'convex/server';
 import { internalMutation, type MutationCtx } from './_generated/server';
@@ -12,16 +13,6 @@ import { canonicalPayload } from '../src/hosted-source-operation';
  * entries, most already checked or batched; the rest stay unmarked. */
 export const WOULD_CONFLICT_SCAN = 20;
 export const WOULD_CONFLICT_READS = 10;
-export const wouldConflictSchema = z
-  .object({
-    paths: z.array(z.string()).max(10),
-    more: z.number().int().nonnegative(),
-    landedSubmissionId: z.string(),
-    at: z.iso.datetime(),
-    next: z.string(),
-  })
-  .strict();
-export type WouldConflict = z.infer<typeof wouldConflictSchema>;
 
 const next = (paths: string[], more: number) =>
   `Main changed ${paths.length + more} file(s) this queued Candidate also changes (${paths.join(', ')}${more ? ', …' : ''}). ` +

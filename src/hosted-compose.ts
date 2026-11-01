@@ -65,7 +65,14 @@ export const composeResultSchema = z
     algorithm: z.literal(COMPOSE_ALGORITHM),
     result: z.discriminatedUnion('status', [
       z.object({ status: z.literal('clean'), state: object, paths: z.array(z.string()).optional() }).strict(),
-      z.object({ status: z.literal('conflict'), conflicts: object }).strict(),
+      z
+        .object({
+          status: z.literal('conflict'),
+          conflicts: object,
+          paths: z.array(z.string()).optional(),
+          more: z.number().int().nonnegative().optional(),
+        })
+        .strict(),
     ]),
   })
   .strict();

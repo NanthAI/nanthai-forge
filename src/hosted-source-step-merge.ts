@@ -307,7 +307,12 @@ export async function computeMergeStep(
     'candidateId' in value &&
     plan.batch.members.includes(value.candidateId)
   ) {
-    (c.batchDropped ??= []).push({ candidateId: value.candidateId, conflicts: manifest.result.conflicts });
+    (c.batchDropped ??= []).push({
+      candidateId: value.candidateId,
+      conflicts: manifest.result.conflicts,
+      paths: manifest.result.paths,
+      more: manifest.result.more,
+    });
   } else if (manifest.result.status === 'conflict') {
     c.output = result.output;
     c.head = null;

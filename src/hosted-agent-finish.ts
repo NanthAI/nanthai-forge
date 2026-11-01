@@ -18,6 +18,7 @@ import { hostedAgentDirectory, readAgentJson } from './hosted-agent-journal.js';
 import { finishRetryHint, type FinishContext } from './hosted-agent-finish-identity.js';
 import { landWaitCommand } from './hosted-land-wait.js';
 import { markLandStep } from './land-timing.js';
+import type { WouldConflict } from './hosted-would-conflict.js';
 import type { HostedAgentResponse, HostedAgentSession } from './hosted-agent-transport.js';
 
 type FinishCommand = z.infer<typeof hostedAgentCommandSchemas.finish>;
@@ -79,7 +80,7 @@ export async function queuedConflict(session: HostedAgentSession, submission: Ho
       queuePosition?: number | null;
       queue?: unknown;
       queueAheadSelection?: unknown;
-      wouldConflict?: { next: string };
+      wouldConflict?: WouldConflict;
     }>('projectHostedLanding:status', { submissionId: submission.id });
     const { wouldConflict } = read;
     // The read can settle the submission while enqueue's reply is in flight.
@@ -91,6 +92,13 @@ export async function queuedConflict(session: HostedAgentSession, submission: Ho
       ...(read.queueAheadSelection ? { queueAheadSelection: read.queueAheadSelection } : {}),
     };
     if (!wouldConflict || current.submission.phase !== 'queued') return current;
+    if ('predecessor' in wouldConflict)
+      return {
+        ...current,
+        wouldConflict,
+        next: 'wait-for-predecessor',
+        nextCommand: `nforge agent ${shellQuote(session.root)} wait ${shellQuote(JSON.stringify({ operationIds: [current.submission.operationId] }))}`,
+      };
     const laneId = session.marker()?.selection.laneId;
     return {
       ...current,

@@ -1,4 +1,5 @@
 import { predecessorStatus } from './projectHostedLandingPipeline';
+import { deferSpeculativeConflict } from './projectHostedLandingSpeculativeConflict';
 import { wakeLandingQueue } from './projectHostedLandingEvents';
 import { advanceBatchFallback } from './projectHostedLandingBatchFallback';
 import { splitLandingBatch } from './projectHostedLandingBatchSplit';
@@ -99,6 +100,24 @@ export async function batchFinishStep(
       'Batch worker must retain member conflicts.',
     );
     const dropped = source.state.dropped ?? [];
+    const main = await hostedStartMain(ctx, input.projectId);
+    const predecessor = await predecessorStatus(ctx, key, batch);
+    // A rejected speculative prefix is not main. Never retain a terminal
+    // conflict before checking its generation, including an all-dropped group.
+    if (
+      predecessor === 'invalid' ||
+      (predecessor !== 'pending' &&
+        ((batch.predecessor && dropped.length) ||
+          main.head !== source.state.request.expectedMain.head ||
+          main.receipt.id !== source.state.request.expectedMain.receiptId))
+    ) {
+      await retryLandingBatch(ctx, key, batch);
+      return { handled: true, command: null };
+    }
+    if (predecessor === 'pending' && dropped.length) {
+      await deferSpeculativeConflict(ctx, key, batch, dropped);
+      return { handled: true, command: null };
+    }
     for (const member of batch.members.filter(m => dropped.some(d => d.candidateId === m.candidate.id))) {
       const conflict = dropped.find(d => d.candidateId === member.candidate.id)!;
       await retainBatchConflict(ctx, {
@@ -112,18 +131,6 @@ export async function batchFinishStep(
     const included = batch.members.filter(m => !dropped.some(d => d.candidateId === m.candidate.id));
     if (!included.length) {
       await writeBatch(ctx, key, { ...batch, phase: 'landed' });
-      return { handled: true, command: null };
-    }
-    const main = await hostedStartMain(ctx, input.projectId);
-    const predecessor = await predecessorStatus(ctx, key, batch);
-    if (
-      predecessor === 'invalid' ||
-      (predecessor !== 'pending' &&
-        included.length === batch.members.length &&
-        (main.head !== source.state.request.expectedMain.head ||
-          main.receipt.id !== source.state.request.expectedMain.receiptId))
-    ) {
-      await retryLandingBatch(ctx, key, batch);
       return { handled: true, command: null };
     }
     const settings = (await loadFinish(ctx, input)).value.check;
