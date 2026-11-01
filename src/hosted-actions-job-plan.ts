@@ -129,7 +129,10 @@ export async function prepareActionsJob(
     run: client.run,
     stateBytes: source.stateBytes,
     recipe,
-    matrix: [...groups.map((_, index) => String(index)), 'static'],
+    // The static job is always an execution, including opaque commands and docs.
+    // With no test shards it can use the planning runner and its verified source.
+    singleShard: groups.length === 0 ? 'static' : '',
+    matrix: groups.length === 0 ? [] : [...groups.map((_, index) => String(index)), 'static'],
   };
 }
 

@@ -65,9 +65,8 @@ jobs:
   hosted-plan:
     if: ${{ inputs.deployment != '' }}
     runs-on: ${{ fromJSON(inputs.runs_on || '"ubuntu-latest"') }}
-    # Source arrives as one R2 pack plus changed objects (target under a minute); the
-    # bound stops a stuck transfer long before GitHub's 6 h default.
-    timeout-minutes: 30
+    # Preserve the previous plan (30 min) plus execution (90 min) allowance.
+    timeout-minutes: 120
     permissions:
       contents: read
       id-token: write
@@ -85,7 +84,7 @@ jobs:
         with:
           node-version: '24.22.1'
       # Save only trusted control dependencies; Candidate source/results are never cached.
-      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         id: deps
         with:
           path: |
@@ -97,7 +96,17 @@ jobs:
         working-directory: control
       - run: npm run build:core
         working-directory: control
+      # Candidate code shares this runner: save trusted dependencies before it executes,
+      # never with an automatic post-job cache save after project code has run.
+      - if: steps.deps.outputs.cache-hit != 'true'
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            control/node_modules
+            ~/.npm
+          key: forge-control-v1-${{ runner.os }}-${{ runner.arch }}-node-24.22.1-${{ hashFiles('control/package-lock.json') }}
       - id: plan
+        timeout-minutes: 30
         run: node control/scripts/hosted-actions-job.mjs plan
         env:
           GITHUB_TOKEN: ${{ github.token }}
@@ -105,16 +114,30 @@ jobs:
           FORGE_PROJECT_ID: ${{ inputs.projectId }}
           FORGE_RUN_ID: ${{ inputs.runId }}
           FORGE_CANDIDATE: ${{ runner.temp }}/candidate
-      - run: tar -cf "$RUNNER_TEMP/candidate.tar" -C "$RUNNER_TEMP" candidate forge-actions-plan.json forge-actions-run.json forge-pack-refresh.json forge-actions-state.json
-      - run: tar -cf "$RUNNER_TEMP/control-dist.tar" -C control dist
-      - uses: actions/upload-artifact@v4
+      # Only distributed executions and the optional pack refresh need artifacts.
+      - if: steps.plan.outputs.matrix != '[]' || steps.plan.outputs.pack_refresh == 'true'
+        run: tar -cf "$RUNNER_TEMP/candidate.tar" -C "$RUNNER_TEMP" candidate forge-actions-plan.json forge-actions-run.json forge-pack-refresh.json forge-actions-state.json
+      - if: steps.plan.outputs.matrix != '[]' || steps.plan.outputs.pack_refresh == 'true'
+        run: tar -cf "$RUNNER_TEMP/control-dist.tar" -C control dist
+      - if: steps.plan.outputs.matrix != '[]' || steps.plan.outputs.pack_refresh == 'true'
+        uses: actions/upload-artifact@v4
         with:
           name: forge-candidate
           if-no-files-found: error
           path: |
             ${{ runner.temp }}/candidate.tar
             ${{ runner.temp }}/control-dist.tar
+      - if: steps.plan.outputs.single_shard != ''
+        timeout-minutes: 90
+        run: node control/scripts/hosted-actions-job.mjs run
+        env:
+          FORGE_CONVEX_SITE: ${{ inputs.deployment }}
+          FORGE_PROJECT_ID: ${{ inputs.projectId }}
+          FORGE_RUN_ID: ${{ inputs.runId }}
+          FORGE_CANDIDATE: ${{ runner.temp }}/candidate
+          FORGE_ACTIONS_SHARD: ${{ steps.plan.outputs.single_shard }}
   hosted-check:
+    if: ${{ needs.hosted-plan.outputs.matrix != '[]' }}
     needs: hosted-plan
     name: forge-hosted-${{ matrix.shard }}
     runs-on: ${{ fromJSON(inputs.runs_on || '"ubuntu-latest"') }}

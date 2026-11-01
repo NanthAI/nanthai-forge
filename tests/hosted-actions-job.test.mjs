@@ -221,7 +221,24 @@ test('6000-file download measurement keeps source calls within the existing page
   s.run.request.expectedHead = s.state(files).sha256;
   s.run.check = { executable: 'true', args: [], definition: 'c'.repeat(64) };
   const started = performance.now();
-  await prepareActionsJob(s.client, join(s.directory, 'candidate'), join(s.directory, 'cache'));
+  const prepared = await prepareActionsJob(
+    s.client,
+    join(s.directory, 'candidate'),
+    join(s.directory, 'cache'),
+  );
+  assert.equal(prepared.singleShard, 'static');
+  assert.deepEqual(prepared.matrix, []);
+  const planPath = join(s.directory, 'plan.json');
+  writeFileSync(planPath, JSON.stringify(prepared.recipe));
+  assert.equal(s.calls.filter(call => call.kind === 'result').length, 0);
+  assert.equal(
+    await executeActionsJob(s.client, join(s.directory, 'candidate'), planPath, prepared.singleShard),
+    0,
+  );
+  // Same metadata budget as a separate execution; placement adds no function calls.
+  assert.equal(s.calls.length, 21);
+  assert.equal(s.calls.filter(call => call.kind === 'preflight').length, 1);
+  assert.equal(s.calls.filter(call => call.kind === 'result').length, 1);
   const sourceCalls = s.calls.filter(call => call.kind === 'source');
   assert.equal(sourceCalls.length, 16); // One manifest window and fifteen file windows.
   assert(sourceCalls.every(call => call.digests.length <= 400));
@@ -340,6 +357,7 @@ test('queue pressure changes pinned shard groups without new Convex calls or los
   assert.equal(prepared.recipe.groups.length, 2);
   assert.deepEqual(prepared.recipe.groups.flat().sort(), tests.sort());
   assert.equal(prepared.matrix.length, 3);
+  assert.equal(prepared.singleShard, '');
   assert.equal(s.calls.filter(call => call.kind === 'session').length, 2);
   assert.equal(s.calls.filter(call => call.kind === 'plan').length, 1);
   assert.equal(s.calls.filter(call => call.kind === 'result').length, 0);
@@ -491,7 +509,8 @@ test('fixed planner materializes verified pinned bytes, modes and links; docs sc
   const s = fixture(t),
     candidate = join(s.directory, 'candidate');
   const prepared = await prepareActionsJob(s.client, candidate, join(s.directory, 'objects'));
-  assert.deepEqual(prepared.matrix, ['static']);
+  assert.deepEqual(prepared.matrix, []);
+  assert.equal(prepared.singleShard, 'static');
   assert.equal(prepared.recipe.selection.scope, 'docs');
   assert.equal(readFileSync(join(candidate, 'README.md'), 'utf8'), 'synthetic after');
   assert(lstatSync(join(candidate, 'test-link')).isSymbolicLink());
@@ -1198,3 +1217,84 @@ test('preflight uses the pinned Convex SDK query wire format', async t => {
   await sdk.query('projectHostedActionsPreflight:check', args);
   assert.deepEqual(requests[0], requests[1]);
 });
+
+test('single execution uses the planning runner; distributed jobs and pack artifacts stay separate', () => {
+  const workflow = readFileSync('.github/workflows/forge-check.yml', 'utf8');
+  const plan = workflow.split('  hosted-plan:')[1].split('  hosted-check:')[0];
+  assert.match(
+    plan,
+    /if: steps.plan.outputs.single_shard != ''\n\s+timeout-minutes: 90\n\s+run: node control\/scripts\/hosted-actions-job.mjs run/,
+  );
+  assert.match(plan, /FORGE_ACTIONS_SHARD: \$\{\{ steps.plan.outputs.single_shard \}\}/);
+  assert.match(plan, /timeout-minutes: 120/);
+  assert.match(plan, /id: plan\n\s+timeout-minutes: 30/);
+  assert.equal(
+    (
+      plan.match(/if: steps.plan.outputs.matrix != '\[\]' \|\| steps.plan.outputs.pack_refresh == 'true'/g) ??
+      []
+    ).length,
+    3,
+  );
+  assert(plan.indexOf('uses: actions/upload-artifact') < plan.indexOf('outputs.single_shard'));
+  assert.doesNotMatch(plan, /uses: actions\/cache@/);
+  assert.match(plan, /uses: actions\/cache\/save@[a-f0-9]{40}/);
+  assert(plan.indexOf('uses: actions/cache/save@') < plan.indexOf('- id: plan'));
+  assert(plan.indexOf('uses: actions/cache/save@') < plan.indexOf('outputs.single_shard'));
+  assert.match(workflow, /hosted-check:\n\s+if: \$\{\{ needs.hosted-plan.outputs.matrix != '\[\]' \}\}/);
+  const script = readFileSync('scripts/hosted-actions-job.mjs', 'utf8');
+  assert.match(script, /single_shard=\$\{result.singleShard\}/);
+  assert.match(script, /matrix=\[\]\\nsingle_shard=\\npack_refresh=false/);
+});
+
+for (const exitCode of [0, 7])
+  test(`same-job opaque command executes the pinned command and records exit ${exitCode}`, async t => {
+    const s = fixture(t),
+      candidate = join(s.directory, 'candidate');
+    const script = `set -eu\nfor suite in 1 2 3 4 5 6; do echo "suite-$suite"; done\nexit ${exitCode}\n`;
+    s.run.check = { executable: 'bash', args: ['.bench/ci.sh'], definition: 'c'.repeat(64) };
+    s.run.request.expectedHead = s.state([s.entry('.bench/ci.sh', script)]).sha256;
+    const prepared = await prepareActionsJob(s.client, candidate, join(s.directory, 'objects'));
+    assert.equal(prepared.recipe.standard, false);
+    assert.equal(prepared.singleShard, 'static');
+    assert.deepEqual(prepared.matrix, []);
+    assert.deepEqual(prepared.recipe.command, ['bash', '.bench/ci.sh']);
+    assert.equal(s.run.plan.shardCount, 1);
+    assert.equal(s.run.plan.manifest.sha256, savePin(prepared.recipe).sha256);
+    assert.equal(
+      s.calls.some(call => call.kind === 'result'),
+      false,
+      'planning is not execution evidence',
+    );
+    const path = join(s.directory, 'plan.json');
+    writeFileSync(path, JSON.stringify(prepared.recipe));
+    t.mock.method(process.stdout, 'write', () => true);
+    assert.equal(await executeActionsJob(s.client, candidate, path, prepared.singleShard), exitCode);
+    assert.equal(s.run.status, exitCode === 0 ? 'passed' : 'failed');
+    assert.equal(s.calls.filter(call => call.kind === 'preflight').length, 1);
+    const results = s.calls.filter(call => call.kind === 'result');
+    assert.equal(results.length, 1);
+    assert.equal(results[0].result.index, 0);
+    assert.equal(results[0].result.exitCode, exitCode);
+    assert.match(Buffer.from(results[0].logBytes, 'base64').toString(), /suite-6/);
+  });
+
+for (const change of ['recipe', 'manifest'])
+  test(`same-job execution refuses a changed ${change} before spawning or reporting success`, async t => {
+    const s = fixture(t),
+      candidate = join(s.directory, 'candidate');
+    s.run.check = { executable: 'true', args: [], definition: 'c'.repeat(64) };
+    const prepared = await prepareActionsJob(s.client, candidate, join(s.directory, 'objects'));
+    const path = join(s.directory, 'plan.json');
+    const recipe = structuredClone(prepared.recipe);
+    if (change === 'recipe') recipe.command = ['false'];
+    else s.client.run.plan.manifest.sha256 = '0'.repeat(64);
+    writeFileSync(path, JSON.stringify(recipe));
+    await assert.rejects(executeActionsJob(s.client, candidate, path, prepared.singleShard), {
+      code: 'EVIDENCE_CHANGED',
+    });
+    assert.equal(s.calls.filter(call => call.kind === 'preflight').length, 1);
+    assert.equal(
+      s.calls.some(call => call.kind === 'result'),
+      false,
+    );
+  });

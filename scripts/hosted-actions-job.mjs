@@ -40,7 +40,7 @@ try {
     );
     appendFileSync(
       process.env.GITHUB_OUTPUT,
-      `matrix=${JSON.stringify(result.matrix)}\npack_refresh=${result.packRefresh.refresh}\n`,
+      `matrix=${JSON.stringify(result.matrix)}\nsingle_shard=${result.singleShard}\npack_refresh=${result.packRefresh.refresh}\n`,
     );
     // Keep source refresh out of the plan/artifact dependency path.
     writeFileSync(
@@ -80,7 +80,7 @@ try {
   if (error?.code !== 'CHECK_CANCELLED') throw error;
   console.log('Forge check cancelled.');
   if (process.argv[2] === 'plan')
-    appendFileSync(process.env.GITHUB_OUTPUT, 'matrix=[]\npack_refresh=false\n');
+    appendFileSync(process.env.GITHUB_OUTPUT, 'matrix=[]\nsingle_shard=\npack_refresh=false\n');
 }
 
 function restoreRun() {

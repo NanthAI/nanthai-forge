@@ -490,9 +490,10 @@ There is no new paid provider or mirror dependency.
 
 Without a usable pack, planning reads objects with 16 concurrent GETs per descriptor
 window (the paged descriptor calls are unchanged) and logs a line naming the repair
-action. Pack download and unpack also log progress. `hosted-plan` stops after 30
-minutes, `hosted-check` shards after 90 and `hosted-pack` after 20, instead of
-GitHub's 6 h default.
+action. Pack download and unpack also log progress. Planning is bounded to 30
+minutes and execution to 90; the combined `hosted-plan` job allows 120 minutes.
+Distributed `hosted-check` shards stop after 90 and `hosted-pack` after 20,
+instead of GitHub's 6 h default.
 
 ### Source packs outside checks
 
@@ -543,12 +544,23 @@ by configuring this runner.
 The App/OIDC workflow uses free `ubuntu-latest` runners by default. Its existing
 `hosted-plan` job restores `control/node_modules` and the npm download cache using
 SHA-pinned `actions/cache`, keyed by OS, architecture, Node 24.22.1 and the control lockfile hash.
-A miss runs `npm ci --ignore-scripts`. Only the trusted planning job saves this
-cache; test and source-pack jobs restore it read-only. Candidate source, plans and
+A miss runs `npm ci --ignore-scripts`. The planning job explicitly saves this
+cache before Candidate execution; it never saves through a post-job action after
+project code has run. Test and source-pack jobs restore it read-only. Candidate source, plans and
 check results are never cache entries. Lockfile changes create independent keys;
 there are no partial-key restores. Cache loss changes preparation time only.
 
-Planning builds control `dist` once and includes it in the existing run artifact.
+When the pinned recipe has exactly one execution job (no test groups plus the
+static execution), that execution runs in `hosted-plan` after planning. This includes
+opaque configured commands and standard docs-only checks. It uses the same persisted
+recipe, pre-spawn authorization, source/setup verification and exact result callback;
+planning alone is never passing evidence. No matrix execution job is dispatched.
+Candidate/control artifacts are uploaded only when distributed shards or the existing
+optional source-pack refresh need them. Refresh artifacts are published before the
+single execution can change its workspace. Multi-job plans retain their existing
+matrix, artifact handoff and shard evidence.
+
+Planning builds control `dist` once and includes it in the run artifact when needed.
 Shards and the optional source-pack job unpack that build beside the exact
 `github.sha` control checkout. Candidate installs/builds still use Candidate code
 and its lockfile; the shared control build is not evidence for Candidate tests.
