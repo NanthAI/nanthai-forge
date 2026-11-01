@@ -2,7 +2,13 @@
 import { createHash } from 'node:crypto';
 import { shellQuote } from './agent-brief-render.js';
 
-type Item = { noticeId: string; file: string; [extra: string]: unknown };
+type Item = {
+  noticeId: string;
+  file: string;
+  class?: 'blocking' | 'advisory';
+  reason?: string;
+  [extra: string]: unknown;
+};
 type Advice = { unacknowledgedOverlaps: { count: number | null; coverage: string; items: Item[] } };
 type Participant = { lane: string; actor: string; intent: string };
 const choices = {
@@ -32,12 +38,14 @@ export function hostedOverlapNotice(root: string, laneId: string, advice: Advice
   const { items, count, coverage } = advice.unacknowledgedOverlaps;
   if (!items.length) return undefined;
   return {
-    required: true as const,
-    summary: `${count ?? items.length} file overlap(s) between this Lane and other open Lanes. Acknowledge, coordinate through the Lanes named here, or route around before you finish.`,
+    required: items.some(item => item.class === 'blocking'),
+    summary: `${count ?? items.length} file overlap(s) between this Lane and other open Lanes. Blocking notices need an answer before landing; advisory notices need no answer.`,
     count,
     coverage,
     items: items.map(item => ({
       noticeId: item.noticeId,
+      class: item.class ?? 'advisory',
+      reason: item.reason ?? 'unavailable',
       file: item.file,
       with: ((item.participants ?? []) as Participant[]).filter(p => p.lane !== laneId),
     })),
@@ -52,19 +60,23 @@ export type HostedOverlapNotice = NonNullable<ReturnType<typeof hostedOverlapNot
 export function overlapBanner(notice: HostedOverlapNotice) {
   const lines = [
     '',
-    '!!! OVERLAP NOTICE: ACTION REQUIRED !!!',
+    notice.required ? '!!! OVERLAP NOTICE: ACTION REQUIRED !!!' : 'OVERLAP NOTICE: ADVISORY',
     notice.summary,
     ...notice.items.flatMap(item => [
-      `  - ${item.file}`,
+      `  - [${item.class}] ${item.file} (${item.reason})`,
       ...item.with.map(p => `      also changed in Lane ${p.lane} by ${p.actor}: ${p.intent}`),
     ]),
     ...(notice.count !== null && notice.count > notice.items.length
-      ? [`  (${notice.count - notice.items.length} more; acknowledge these and read again)`]
+      ? [`  (${notice.count - notice.items.length} more; read Lane status for details)`]
       : []),
-    'Acknowledge (keep your change, land in order):',
-    `  ${notice.acknowledge}`,
-    'Or route around (move off the file):',
-    `  ${notice.routeAround}`,
+    ...(notice.required
+      ? [
+          'Acknowledge (keep your change, land in order):',
+          `  ${notice.acknowledge}`,
+          'Or route around (move off the file):',
+          `  ${notice.routeAround}`,
+        ]
+      : []),
     '',
   ];
   return lines.join('\n');

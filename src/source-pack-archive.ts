@@ -114,14 +114,21 @@ export async function unpackSourcePackObjects(
   path: string,
   directory: string,
   keep: (blob: string) => boolean,
+  observe?: (blob: string, bytes: Buffer) => void,
 ) {
   const written = new Set<string>();
   // Files with identical content share one blob: write and report it once.
-  await readSourcePack(pack, path, directory, () => blob => {
-    if (written.has(blob) || !keep(blob)) return false;
-    written.add(blob);
-    return true;
-  });
+  await readSourcePack(
+    pack,
+    path,
+    directory,
+    () => blob => {
+      if (written.has(blob) || !keep(blob)) return false;
+      written.add(blob);
+      return true;
+    },
+    observe,
+  );
   return [...written];
 }
 type PackFile = { path: string; blob: string; mode: string; size: number };
@@ -130,6 +137,7 @@ async function readSourcePack(
   path: string,
   directory: string,
   inventory: (files: PackFile[]) => (blob: string) => boolean,
+  observe?: (blob: string, bytes: Buffer) => void,
 ) {
   const input = createReadStream(path);
   const stream = input.pipe(createGunzip());
@@ -193,6 +201,7 @@ async function readSourcePack(
       const bytes = await take(file.size);
       invariant(digest(bytes) === file.blob, 'SOURCE_HASH_MISMATCH', 'Pack file differs.');
       if (!keep(file.blob)) continue;
+      observe?.(file.blob, bytes);
       // Bounded concurrent writes (16 files, 64 MiB): small-file latency dominates large trees.
       const write: Promise<void> = writeFile(join(directory, file.blob), bytes, { mode: 0o600 }).finally(
         () => {

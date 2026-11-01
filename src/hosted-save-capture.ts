@@ -25,6 +25,14 @@ import { durableReplace, syncFile } from './native-durability.js';
 import { invariant } from './errors.js';
 import type { NativeFile } from './native-state-format.js';
 import type { SaveChange } from './hosted-save.js';
+import {
+  rememberOverlapSketch,
+  readOverlapText,
+  overlapTextSketch,
+  overlapTextEvidence,
+  overlapBaseBlobs,
+  rememberOverlapBases,
+} from './hosted-overlap-text.js';
 import { workLocked } from './work-lock.js';
 import { canonicalPayload } from './hosted-source-operation.js';
 import { forgeCachePath } from './forge-cache-paths.js';
@@ -67,6 +75,7 @@ function captureFile(
       file: { blob: previous.blob, mode },
       pin: { sha256: previous.blob, size: stat.size },
       changed: false,
+      sketch: null,
       stat,
     };
   let pin: { sha256: string; size: number },
@@ -130,14 +139,14 @@ function captureFile(
   const observed = { file: { blob: pin.sha256, mode }, pin };
   if (previous && previous.blob === pin.sha256 && previous.mode === mode) {
     if (!bytes) rmSync(temporary, { force: true });
-    return { ...observed, changed: false, stat };
+    return { ...observed, changed: false, stat, sketch: null };
   }
   if (bytes) writeFileSync(temporary, bytes, { flag: 'wx', mode: 0o600 });
   const final = join(directory, pin.sha256);
   if (checkoutPathExists(final)) rmSync(temporary);
   else renameSync(temporary, final);
   syncFile(final);
-  return { ...observed, changed: true, stat };
+  return { ...observed, changed: true, stat, sketch: bytes ? overlapTextSketch(bytes) : null };
 }
 export async function captureHostedSave(root: string, directory: string) {
   root = realpathSync(root);
@@ -146,7 +155,9 @@ export async function captureHostedSave(root: string, directory: string) {
   mkdirSync(directory, { recursive: true, mode: 0o700 });
   const since = Date.now(),
     index = readCheckoutStatIndex(root),
-    observedStats = new Map<string, ReturnType<typeof statEntry>>();
+    observedStats = new Map<string, ReturnType<typeof statEntry>>(),
+    cache = `${root}.forge-client`,
+    bases = overlapBaseBlobs(cache, marker.selection.base.head);
   const baseline = new Map(marker.state.files.map(file => [file.path, file])),
     local = nativePaths(root, [...baseline.keys()]);
   const changes: SaveChange[] = [],
@@ -156,14 +167,26 @@ export async function captureHostedSave(root: string, directory: string) {
       observed = captureFile(root, path, directory, old, index);
     observedStats.set(path, statEntry(observed.stat, observed.file.blob));
     if (observed.changed) {
+      const baseBlob = bases[path] ?? old?.blob ?? digest('');
+      bases[path] = baseBlob;
+      const evidence = overlapTextEvidence(
+        baseBlob,
+        baseBlob === digest('') ? overlapTextSketch(Buffer.alloc(0)) : readOverlapText(cache, baseBlob),
+        observed.sketch ?? null,
+        !path.startsWith('docs/') && /\.[cm]?[jt]sx?$/.test(path),
+      );
       changes.push({
+        ...(evidence ? { evidence } : {}),
         path,
         before: old ? { blob: old.blob, mode: old.mode } : null,
         after: { ...observed.file, content: { object: observed.pin, recipe: null } },
       });
       files.push({ pin: observed.pin, path: observed.pin.sha256 });
+      // The bytes were already read by captureFile. Store its compact sketch, never reread them.
+      if (observed.sketch) rememberOverlapSketch(cache, observed.pin.sha256, observed.sketch);
     }
   }
+  if (changes.length) rememberOverlapBases(cache, marker.selection.base.head, bases);
   const machine = machineObjectsDirectory();
   for (const file of files) await rememberObject(machine, join(directory, file.path), file.pin.sha256);
   const present = new Set(local);

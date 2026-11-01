@@ -80,9 +80,10 @@ export async function saveHostedLane(
   root: string,
   command: { operationId: string; message: string; supersedeFinish?: boolean },
   exchange: SaveExchange,
+  overlapEvidence = false,
 ) {
-  const first = await saveOnce(root, command, exchange, true);
-  return first === rebased ? saveOnce(root, command, exchange, false) : first;
+  const first = await saveOnce(root, command, exchange, true, overlapEvidence);
+  return first === rebased ? saveOnce(root, command, exchange, false, overlapEvidence) : first;
 }
 const rebased = Symbol('rebased');
 async function saveOnce(
@@ -90,6 +91,7 @@ async function saveOnce(
   command: { operationId: string; message: string; supersedeFinish?: boolean },
   exchange: SaveExchange,
   repair: boolean,
+  overlapEvidence: boolean,
 ) {
   saveCommandSchema.parse(command);
   invariant(!lstatSync(root).isSymbolicLink(), 'UNSAFE_PATH', 'Checkout directory must be real.');
@@ -190,6 +192,8 @@ async function saveOnce(
         };
       }
     }
+    // Older servers validate delta pages strictly. Reuse capability discovery; never probe per save.
+    if (!overlapEvidence) for (const change of changes) delete change.evidence;
     const built = buildSavePages(changes),
       selection = capture.marker.selection;
     request = saveRequestSchema.parse({

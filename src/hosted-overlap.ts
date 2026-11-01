@@ -1,9 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
+import { classifyOverlap, type OverlapEvidence, type OverlapClass } from './hosted-overlap-evidence.js';
 import { digest } from './portable-hash.js';
 
 export const OVERLAP_METADATA_BYTES = 128 * 1024;
 export type OverlapFile = { blob: string; mode: string } | null;
-export type OverlapChange = { path: string; before: OverlapFile; after: OverlapFile };
+export type OverlapChange = {
+  path: string;
+  before: OverlapFile;
+  after: OverlapFile;
+  evidence?: OverlapEvidence;
+};
 export type OverlapLane = {
   laneId: string;
   intentId: string;
@@ -31,6 +37,7 @@ export function boundOverlapChanges(changes: OverlapChange[], complete = true) {
   for (const change of changes) {
     const value = {
       path: change.path,
+      ...(change.evidence ? { evidence: change.evidence } : {}),
       before: change.before && { blob: change.before.blob, mode: change.before.mode },
       after: change.after && { blob: change.after.blob, mode: change.after.mode },
     };
@@ -86,7 +93,7 @@ export function advanceOverlapMain(
   return { sequence, coverageAfter, changes: JSON.stringify(selected) };
 }
 
-/** Path advice only: it predicts shared files, never a proven text merge conflict. */
+/** Saved range/symbol advice. Actual text conflicts are still decided by composition. */
 export function hostedOverlapAdvice(
   mine: OverlapLane,
   peers: OverlapLane[],
@@ -96,30 +103,49 @@ export function hostedOverlapAdvice(
   complete = true,
   maxItems = 5,
 ) {
-  const paths = new Set<string>((JSON.parse(mine.changes) as OverlapChange[]).map(change => change.path));
+  const mineChanges = new Map(
+    (JSON.parse(mine.changes) as OverlapChange[]).map(change => [change.path, change]),
+  );
+  const paths = new Set(mineChanges.keys());
   complete &&= mine.complete;
   const items: {
     noticeId: string;
+    class: OverlapClass;
+    reason: string;
     file: string;
     lanes: string[];
     text: string;
     participants: { lane: string; actor: string; intent: string }[];
   }[] = [];
-  let count = 0;
+  let count = 0,
+    blockingCount = 0,
+    advisoryCount = 0;
   for (const peer of peers) {
     if (!peer.open || peer.laneId === mine.laneId) continue;
     complete &&= peer.complete;
     const lanes = [mine.laneId, peer.laneId].sort();
-    for (const { path } of JSON.parse(peer.changes) as OverlapChange[]) {
-      if (!paths.has(path)) continue;
+    for (const change of JSON.parse(peer.changes) as OverlapChange[]) {
+      const { path } = change,
+        mineChange = mineChanges.get(path);
+      if (!mineChange) continue;
+      const classification = classifyOverlap(mineChange, change);
+      const priority = classification.class === 'blocking';
       // Without answers there is no need to hash every omitted display item.
       const noticeId =
-        answered.size || items.length < maxItems ? digest(JSON.stringify(['first-write', lanes, path])) : '';
+        answered.size ||
+        items.length < maxItems ||
+        (priority && items.some(item => item.class === 'advisory'))
+          ? digest(JSON.stringify([priority ? 'first-write' : 'first-write-advisory', lanes, path]))
+          : '';
       if (answered.has(noticeId)) continue;
       count++;
-      if (items.length === maxItems) continue;
-      items.push({
+      if (priority) blockingCount++;
+      else advisoryCount++;
+      if (items.length === maxItems && (!priority || items.every(item => item.class === 'blocking')))
+        continue;
+      const item = {
         noticeId,
+        ...classification,
         file: path,
         lanes,
         participants: [mine, peer].map(lane => ({
@@ -127,11 +153,14 @@ export function hostedOverlapAdvice(
           actor: lane.actor,
           intent: lane.intent,
         })),
-        text: `Overlap: ${path}; Lane ${peer.laneId} (${peer.intent.slice(0, 160)}). Coordinate landing order or split the change.`.slice(
+        text: `${classification.class} overlap: ${path}; Lane ${peer.laneId} (${peer.intent.slice(0, 160)}); ${classification.reason}.`.slice(
           0,
           400,
         ),
-      });
+      };
+      if (priority) items.splice(items.findIndex(item => item.class === 'advisory') >>> 0, 0, item);
+      else items.push(item);
+      if (items.length > maxItems) items.pop();
     }
   }
   const knownBase = mine.baseSequence !== null;
@@ -154,6 +183,8 @@ export function hostedOverlapAdvice(
       laneId: mine.laneId,
       head: mine.head,
       count,
+      blockingCount,
+      advisoryCount,
       items,
       coverage: complete ? 'hosted' : 'hosted-incomplete',
     },

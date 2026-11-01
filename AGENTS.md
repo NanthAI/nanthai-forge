@@ -35,7 +35,7 @@ Ideas, decisions and friction you find go into planning as Issues (`put-planning
 **Working rules for every agent**
 
 - **Finish your own Lane** and fix your own failures: after a failed check, fix it and land the same Lane again (no cancel and recreate). Abandon Lanes you will not land.
-- **Answer overlap notices** before your next edit to that file and before landing (`ack '{"laneId":"…"}'`, or add `"choice":"split"`). Never land over an unanswered notice.
+- **Answer blocking overlap notices** before landing (`ack '{"laneId":"…"}'`, or add `"choice":"split"`). Advisory notices need no answer; never land over an unanswered blocking notice.
 - **Freeze after landing is submitted**: no save, sync or edit until it is terminal; a new save supersedes it and discards its checks.
 - **Tests follow the change**: locally run the affected set with `nforge agent ROOT preflight '{"laneId":"…"}'` (`land --save` refuses without a pass for the saved head, by default), not the whole suite; the landing check is the full run.
 - **Stay with work you depend on**: do not stop while a landing, import or test run you need is still running; wait for it.

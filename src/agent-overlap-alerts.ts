@@ -15,6 +15,7 @@ import { regionsNear, type PredictiveOverlap } from './agent-predictive-overlap.
 export type OverlapAlert = {
   noticeId: string;
   kind: 'overlap-notice';
+  class?: 'blocking' | 'advisory';
   at: string;
   lanes: string[];
   heads: string[];
@@ -154,6 +155,11 @@ export function recordOverlapAlerts(
         return {
           noticeId,
           kind: 'overlap-notice' as const,
+          class:
+            item.symbols?.length ||
+            item.mine?.some(a => (item.alignedPeer ?? item.peer)?.some(b => regionsNear(a, b, 1)))
+              ? ('blocking' as const)
+              : ('advisory' as const),
           at: new Date().toISOString(),
           lanes: canonical,
           heads: canonical.map(id => lanes.find(lane => lane.id === id)!.head),

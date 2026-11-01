@@ -174,6 +174,7 @@ async function executeFinishWork(session: HostedAgentSession, input: unknown) {
         session.root,
         { operationId: saveOperationId, message: command.message },
         session.exchange,
+        session.capabilities.overlapEvidenceVersion === 1,
       );
       if (agentSourceOutcome(saved)?.status !== 'completed') {
         if (agentSourceOutcome(saved)?.status === 'failed')

@@ -29,6 +29,9 @@ const names = [
   'projectHostedStart',
   'projectHostedSaves',
   'projectHostedSaveJobs',
+  'projectHostedOverlaps',
+  'projectHostedOverlapDeliveries',
+  'projectHostedOverlapAcks',
 ];
 const modules = Object.fromEntries(
   await Promise.all(names.map(async name => [name, await import(moduleUrl(`../convex/${name}.ts`))])),

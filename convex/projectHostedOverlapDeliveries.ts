@@ -16,7 +16,15 @@ const delivery = z
     count: z.number().int().min(1),
     coverage: z.string().max(40),
     items: z
-      .array(z.object({ noticeId: z.string().regex(/^[a-f0-9]{64}$/), file: z.string().max(1024) }))
+      .array(
+        z.object({
+          noticeId: z.string().regex(/^[a-f0-9]{64}$/),
+          file: z.string().max(1024),
+          class: z.enum(['blocking', 'advisory']).default('advisory'),
+          reason: z.string().max(100).default('unavailable'),
+          lanes: z.array(z.string()).max(2).optional(),
+        }),
+      )
       .min(1)
       .max(5),
   })

@@ -61,6 +61,8 @@ const noticeFor = (root, laneId) =>
       items: [
         {
           noticeId: 'n'.repeat(64),
+          class: 'blocking',
+          reason: 'same-symbol',
           file: 'src/a.ts',
           lanes: [laneId, 'peer'],
           text: 'x',

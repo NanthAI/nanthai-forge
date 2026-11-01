@@ -58,7 +58,7 @@ export function unacknowledgedOverlaps(directory: string, laneId: string) {
   }
   if (!names.length) return { count: 0, items: [] };
   const answered = overlapAnswers(directory, laneId);
-  const items: Pick<OverlapAlert, 'noticeId' | 'file' | 'lanes' | 'text'>[] = [];
+  const items: Pick<OverlapAlert, 'noticeId' | 'class' | 'file' | 'lanes' | 'text'>[] = [];
   let count = 0;
   for (const name of names) {
     if (!/^[a-f0-9]{64}\.json$/.test(name) || answered(name.slice(0, -5))) continue;
@@ -69,6 +69,7 @@ export function unacknowledgedOverlaps(directory: string, laneId: string) {
     ) as OverlapAlert;
     items.push({
       noticeId: notice.noticeId,
+      class: notice.class ?? 'advisory',
       file: notice.file,
       lanes: notice.lanes,
       text: notice.text.slice(0, 400),

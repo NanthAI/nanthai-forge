@@ -121,7 +121,7 @@ landing: landings are pinned to the acceptance policy, which leaves these settin
 | --- | --- | --- | --- |
 | `preflight` | `require` | About 30% of first landing checks failed (2026-10-30), and every failure costs a full landing round on the project runner. A local run of the affected tests catches most of them first. | `advise` prints the set without refusing; `off` removes it. |
 | `preflightMaxMinutes` | `10` | A large affected set would make preflight slower than the landing check it saves. Above this estimate, preflight is advice only. | Any whole number of minutes; `0` makes every set advisory. |
-| `overlapGate` | `block` | Agents finished over unanswered overlap notices and found the clash only at composition. One answer per notice (keep your change, or route around) costs seconds. | `warn` adds the notice to the receipt without refusing; `off` removes it. |
+| `overlapGate` | `block` | Agents finished over unanswered overlap notices and found the clash only at composition. Only intersecting/adjacent hunks, shared symbols or delete/rename versus edit need an answer; disjoint same-file edits stay advisory. | `warn` adds the notice to the receipt without refusing; `off` removes it. |
 | `urgentRoles` | `["owner"]` | Builders marked routine landings urgent, which pushed every other landing back. Urgent is for a red main or an incident the owner names. | `["owner","agents"]` lets agents on the owner's login use it again. |
 | `checkpointNudgeMinutes` | `30` | A builder that stops unexpectedly loses everything unsaved. Saves take under a minute. | Any number of minutes; `0` turns the nudge off. |
 | `stallAlerts` | on, 15 and 30 min | A check outage (2026-10-30, every result upload refused from 18:35 to 21:05) stalled landings for hours before anyone looked. | `{"stallAlerts":{"enabled":false}}`, thresholds, recipients and webhook preset below. |
@@ -148,8 +148,10 @@ landing: landings are pinned to the acceptance policy, which leaves these settin
 - `nforge agent ROOT ack '{"laneId":"…"}'` answers every pending overlap notice on the Lane in one
   command (`accept-order`: keep your change and land in order). `"choice":"split"` records that you
   moved your edit off the file. Answers have stable ids, so repeating the command replays them.
-- With `block`, `land --save` refuses with `OVERLAP_UNANSWERED` while a notice is open, and prints
-  the `ack` command. The check uses the overlap read that the land receipt already makes.
+- With `block`, `land --save` refuses with `OVERLAP_UNANSWERED` while a blocking notice is unanswered, and prints
+  the `ack` command. Disjoint same-file or documentation hunks are advisory and need no answer.
+  Each notice records its class and reason. Missing range evidence remains advisory;
+  exact landing composition still catches conflicts. The check uses the overlap read that the land receipt already makes.
 
 ### urgentRoles
 

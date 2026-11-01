@@ -11,7 +11,7 @@ import { preflightPlan, readPreflightReceipt, runPreflight } from '../dist/agent
 
 const lane = { laneId: '11111111-1111-4111-8111-111111111111', head: 'a'.repeat(64) };
 const defaults = overrides => effectiveAgentDefaults(overrides);
-const notice = (file, noticeId = `n-${file}`) => ({ noticeId, file });
+const notice = (file, noticeId = `n-${file}`) => ({ noticeId, file, class: 'blocking' });
 const advice = ({ notices = [], paths = ['tests/b.test.mjs'], complete = true } = {}) => ({
   unacknowledgedOverlaps: { items: notices },
   changedPaths: { paths, complete },

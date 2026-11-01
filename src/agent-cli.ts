@@ -85,7 +85,7 @@ composes and submits durable agent landing. Pending is not accepted.
 Project agent defaults (nforge agent ROOT policy shows them; docs/parallel-work-defaults.md):
 preflight runs the saved head's affected tests here and records the result; land --save refuses
 without it (preflight:require). ack answers every pending overlap notice; land --save refuses while
-one is open (overlapGate:block). Receipts carry unsavedFor and a save nudge; urgent is owner-only.
+a blocking notice is open (overlapGate:block). Receipts carry unsavedFor and a save nudge; urgent is owner-only.
 
 Reads: tests, status, landing, observe, wait, log, link,
        records, candidate, provenance, candidates, review, diff, show, brief, peers,

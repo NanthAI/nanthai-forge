@@ -25,6 +25,7 @@ export const capabilities = query({
     noticeVersion: v.optional(v.literal(1)),
     resolveVersion: v.optional(v.literal(1)),
     overlapVersion: v.optional(v.literal(1)),
+    overlapEvidenceVersion: v.optional(v.literal(1)),
     mirrorVersion: v.optional(v.literal(1)),
     metricReceiptVersion: v.optional(v.literal(1)),
     planningVersion: v.optional(v.literal(1)),
@@ -39,6 +40,7 @@ export const capabilities = query({
       noticeVersion,
       resolveVersion,
       overlapVersion,
+      overlapEvidenceVersion,
       mirrorVersion,
       metricReceiptVersion,
       planningVersion,
@@ -54,6 +56,7 @@ export const capabilities = query({
       return canonicalPayload(
         hostedAgentCapabilitiesSchema.parse({
           ...(overlapVersion === 1 ? { overlapVersion: 1 } : {}),
+          ...(overlapEvidenceVersion === 1 ? { overlapEvidenceVersion: 1 } : {}),
           ...(metricReceiptVersion === 1 ? { metricReceiptVersion: 1 } : {}),
           ...(defaultsVersion === 1
             ? { agentDefaults: effectiveAgentDefaults(effectivePolicy(project).agentDefaults) }

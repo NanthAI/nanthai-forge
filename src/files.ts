@@ -177,7 +177,11 @@ export function readSource(
   }
 }
 
-export async function fingerprintPrivateFile(path: string, code = 'INVALID_FILE_EXPORT') {
+export async function fingerprintPrivateFile(
+  path: string,
+  code = 'INVALID_FILE_EXPORT',
+  observe?: (bytes: Buffer) => void,
+) {
   let fd: number;
   try {
     fd = openSync(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0));
@@ -211,9 +215,12 @@ export async function fingerprintPrivateFile(path: string, code = 'INVALID_FILE_
           offset += count;
         }
         hash.update(bytes);
+        observe?.(bytes);
       } else
-        for await (const bytes of createReadStream(path, { fd, start: 0, autoClose: false }))
+        for await (const bytes of createReadStream(path, { fd, start: 0, autoClose: false })) {
           hash.update(bytes);
+          observe?.(bytes);
+        }
       return hash.digest('hex');
     };
     const sameContentMetadata = (a: typeof before, b: typeof before) =>

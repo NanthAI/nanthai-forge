@@ -5,6 +5,7 @@ import { hostedLaneSelectionSchema } from './hosted-lane.js';
 import { safeRelative } from './safe-relative.js';
 import { canonicalPayload } from './hosted-source-operation.js';
 import { digest } from './portable-hash.js';
+import { overlapEvidenceSchema } from './hosted-overlap-evidence.js';
 import { invariant } from './errors.js';
 
 const number = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
@@ -27,6 +28,7 @@ export const saveChangeSchema = z
             .split('/')
             .some(p => p === '.forge' || p === '.git'),
       ),
+    evidence: overlapEvidenceSchema.optional(),
     before: file.nullable(),
     after: file.extend({ content: saveWorkerObjectSchema }).strict().nullable(),
   })

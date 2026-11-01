@@ -66,6 +66,7 @@ export function readEditPeers(root: string, laneId: string, path: string) {
       overlaps.push({
         noticeId: editNoticeId(lanes, path),
         kind: 'overlap-notice',
+        class: 'advisory',
         at: new Date().toISOString(),
         lanes,
         heads: [],

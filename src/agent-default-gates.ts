@@ -23,14 +23,14 @@ export function finishGates(
 ) {
   const advisories: Record<string, unknown> = {};
   if (!defaults) return advisories;
-  const pending = advice?.unacknowledgedOverlaps.items ?? [];
+  const pending = (advice?.unacknowledgedOverlaps.items ?? []).filter(item => item.class === 'blocking');
   if (defaults.overlapGate !== 'off' && pending.length) {
     const ack = command(root, 'ack', { laneId: lane.laneId });
     const files = pending.map(item => item.file).join(', ');
     if (defaults.overlapGate === 'block')
       throw new ForgeError(
         'OVERLAP_UNANSWERED',
-        `Answer the overlap notice(s) on ${files} before landing (project overlapGate: block). Keep your change and land in order: ${ack}. Or route around: add "choice":"split". Then land again.`,
+        `Answer the blocking overlap notice(s) on ${files} before landing (project overlapGate: block). Keep your change and land in order: ${ack}. Or route around: add "choice":"split". Then land again.`,
       );
     advisories.overlap = { status: 'unanswered', files: pending.map(item => item.file), acknowledge: ack };
   }

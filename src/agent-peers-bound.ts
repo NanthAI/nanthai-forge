@@ -9,11 +9,12 @@ const size = (value: unknown) => Buffer.byteLength(JSON.stringify(value));
 export function compactOverlapNotice({
   noticeId,
   kind,
+  class: classification,
   lanes,
   file,
   proposedOrder,
   participants,
-}: Pick<OverlapAlert, 'noticeId' | 'kind' | 'lanes' | 'file' | 'proposedOrder' | 'participants'>) {
+}: Pick<OverlapAlert, 'noticeId' | 'kind' | 'class' | 'lanes' | 'file' | 'proposedOrder' | 'participants'>) {
   const display = file.length > 120 ? `…${file.slice(-119)}` : file;
   const people = participants?.map(p => ({
     ...p,
@@ -23,6 +24,7 @@ export function compactOverlapNotice({
   return {
     noticeId,
     kind,
+    class: classification ?? 'advisory',
     lanes,
     file,
     proposedOrder,

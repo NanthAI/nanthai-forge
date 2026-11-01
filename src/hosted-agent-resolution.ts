@@ -139,6 +139,7 @@ export async function resolveHostedAgent(session: HostedAgentSession, input: unk
       session.root,
       { operationId: saveOperationId, message: command.message },
       session.exchange,
+      session.capabilities.overlapEvidenceVersion === 1,
     );
   let saved = await save();
   if (!completed(saved)) {

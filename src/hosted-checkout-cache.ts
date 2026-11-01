@@ -3,13 +3,13 @@ import { lstatSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { chmod, open, rename, rm } from 'node:fs/promises';
 import { mapExchange } from './exchange-parallel.js';
 import { join } from 'node:path';
-import { fingerprintPrivateFile } from './files.js';
+import { fingerprintOverlapFile, rememberOverlapText } from './hosted-overlap-text.js';
 import { invariant } from './errors.js';
 import { syncDirectory } from './native-durability.js';
 import { checkoutPathExists } from './hosted-checkout-files.js';
 import type { ContentPin } from './native-exchange.js';
 import type { SourcePackDownload } from './source-pack.js';
-import { downloadSourcePack, fileDigest, unpackSourcePackObjects } from './source-pack-archive.js';
+import { downloadSourcePack, unpackSourcePackObjects } from './source-pack-archive.js';
 import { cloneFile, machineObjectsDirectory, rememberObject } from './machine-object-store.js';
 export interface CheckoutObjectTransport {
   readonly objectPageSize?: number;
@@ -57,7 +57,7 @@ export class HostedCheckoutCache {
         'UNSAFE_PATH',
         'Client object path must be a private regular file.',
       );
-      return (await fingerprintPrivateFile(path)).sha256 === id;
+      return (await fingerprintOverlapFile(this.root, path)).sha256 === id;
     });
     let missing = unique.filter((_, index) => !cached[index]);
     if (missing.length && this.machine) missing = await this.fromMachine(missing);
@@ -103,7 +103,7 @@ export class HostedCheckoutCache {
           'Downloaded source must be a regular file.',
         );
         await chmod(path, 0o600);
-        const actual = await fingerprintPrivateFile(path);
+        const actual = await fingerprintOverlapFile(this.root, path);
         invariant(
           actual.sha256 === pin.sha256 && actual.size === pin.size,
           'INVALID_NATIVE_SOURCE',
@@ -138,7 +138,11 @@ export class HostedCheckoutCache {
         try {
           await cloneFile(source, path);
           await chmod(path, 0o600);
-          invariant((await fileDigest(path)) === id, 'INVALID_NATIVE_SOURCE', 'Machine object differs.');
+          invariant(
+            (await fingerprintOverlapFile(this.root, path)).sha256 === id,
+            'INVALID_NATIVE_SOURCE',
+            'Machine object differs.',
+          );
         } catch {
           await rm(source, { force: true });
           return false;
@@ -171,6 +175,7 @@ export class HostedCheckoutCache {
         archive,
         unpacked,
         blob => wanted.has(blob) || (this.machine !== null && !checkoutPathExists(join(this.machine, blob))),
+        (blob, bytes) => rememberOverlapText(this.root, blob, bytes),
       );
       await rm(archive, { force: true });
       await mapExchange(written, checkoutIoConcurrency, async id => {

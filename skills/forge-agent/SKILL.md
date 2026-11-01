@@ -20,7 +20,7 @@ Defaults; a project can change them. `nforge agent ROOT capabilities` returns yo
 
 <!-- agent-defaults:start (generated from scripts/agent-default-lines.mjs) -->
 - Before land, run your affected tests: nforge agent ROOT preflight '{"laneId":"…"}' (land refuses without a pass for the saved head; sets over 10 min are advisory).
-- Answer overlap notices before land: nforge agent ROOT ack '{"laneId":"…"}' (land refuses while one is open).
+- Answer blocking overlap notices before land: nforge agent ROOT ack '{"laneId":"…"}' (land refuses while a blocking notice is open).
 - Save at least every 30 minutes of edits.
 - Never request urgent priority; it is owner-only.
 - After land is submitted, do not save, sync or edit that Lane until it lands or fails.

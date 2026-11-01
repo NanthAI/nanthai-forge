@@ -19,6 +19,10 @@ import {
   boundOverlapChanges,
 } from '../dist/hosted-overlap.js';
 import { hostedOverlapNotifications } from '../dist/mcp-hosted-overlaps.js';
+import { rememberOverlapText } from '../dist/hosted-overlap-text.js';
+import { finishGates } from '../dist/agent-default-gates.js';
+import { effectiveAgentDefaults } from '../dist/agent-parallel-defaults.js';
+import { mergeNativeText } from '../dist/native-text-merge.js';
 import { overlapBanner } from '../dist/hosted-overlap-notice.js';
 const overlaps = await import(moduleUrl('../convex/projectHostedOverlaps.ts'));
 const records = await import(moduleUrl('../convex/projectHostedRecords.ts'));
@@ -32,8 +36,9 @@ const newFile = { blob: 'b'.repeat(64), mode: 'file' };
 const delta = path => ({ path, before: oldFile, after: newFile });
 const code = expected => error => (error.data?.code ?? error.code) === expected;
 
-async function setup(t) {
-  const s = await saveFixture();
+async function setup(t, options = {}) {
+  const file = options.file ?? 'a.txt';
+  const s = await saveFixture(options.base ?? 'original', file);
   const lane = JSON.parse(
     [...s.tables.projectHostedRecordBodies.values()].find(row => JSON.parse(row.value).kind === 'lane').value,
   );
@@ -81,7 +86,13 @@ async function setup(t) {
   const root = entry => {
     const root = join(directory, entry.id);
     mkdirSync(join(root, '.forge'), { recursive: true });
-    writeFileSync(join(root, 'a.txt'), entry.id === lane.id ? 'my edit' : 'peer edit');
+    mkdirSync(join(root, file, '..'), { recursive: true });
+    writeFileSync(
+      join(root, file),
+      entry.id === lane.id ? (options.mine ?? 'my edit') : (options.peer ?? 'peer edit'),
+    );
+    if (options.base)
+      rememberOverlapText(`${root}.forge-client`, s.original.sha256, Buffer.from(options.base));
     writeFileSync(
       join(root, '.forge/hosted-lane.json'),
       JSON.stringify({
@@ -103,12 +114,13 @@ async function setup(t) {
           authority: main.authority,
         },
         state: s.state,
-        scope: ['a.txt'],
-        materialized: ['a.txt'],
+        scope: [file],
+        materialized: [file],
       }),
     );
     return root;
   };
+  const discovery = [];
   const exchange = {
     projectId: s.projectId,
     async missing(pins) {
@@ -128,8 +140,12 @@ async function setup(t) {
     client: {
       async query(ref, args) {
         const name = getFunctionName(ref);
-        if (name === 'projectHostedAgent:capabilities')
+        if (name === 'projectHostedAgent:capabilities') {
+          discovery.push(args);
+          if (options.legacy && args.overlapEvidenceVersion === 1)
+            throw Error('ArgumentValidationError: extra field `overlapEvidenceVersion`');
           return s.transaction(name, capabilities.capabilities, args);
+        }
         if (name === 'projectHostedOverlaps:read') return s.transaction(name, overlaps.read, args);
         if (name === 'projectHostedSaves:progress') return s.call('progress', api.progress, args);
         if (name === 'projectHostedLanes:head') {
@@ -148,7 +164,14 @@ async function setup(t) {
           return s.transaction(name, deliveries.record, args);
         if (name === 'projectHostedOverlapAcks:append') return s.transaction(name, acks.append, args);
         if (name === 'projectHostedSaves:prepare') return s.call('prepare', api.prepare, args);
-        if (name === 'projectHostedSaves:stage') return s.call('stage', api.stage, args);
+        if (name === 'projectHostedSaves:stage') {
+          if (options.legacy)
+            assert(
+              JSON.parse(args.page).changes.every(change => !change.evidence),
+              'strict older save API receives no new metadata',
+            );
+          return s.call('stage', api.stage, args);
+        }
         if (name === 'projectHostedSaveJobs:submit') {
           const x = { request: { operationId: args.operationId } };
           const pending = await s.submit(x);
@@ -167,6 +190,7 @@ async function setup(t) {
     channel,
     main,
     exchange,
+    discovery,
     transport: entry => new HostedAgentTransport(root(entry), address, exchange),
   };
 }
@@ -429,7 +453,10 @@ test('reverted bytes clear saved paths; absent metadata stays incomplete and dis
 
 test('20 open Lanes x 200 paths use one indexed peer read; history does not enter the budget', async t => {
   const { s, lane } = await setup(t);
-  const paths = Array.from({ length: 200 }, (_, i) => delta('src/file-' + i + '.ts'));
+  const paths = Array.from({ length: 200 }, (_, i) => ({
+    ...delta('src/file-' + i + '.ts'),
+    evidence: { baseBlob: oldFile.blob, ranges: [{ start: 2, end: 3 }], symbols: [] },
+  }));
   const value = mergeOverlapChanges([], paths);
   const existing = [...s.tables.projectHostedOverlapLanes.values()].find(row => row.laneId === lane.id);
   s.patch('projectHostedOverlapLanes', existing._id, { ...value, head: lane.head });
@@ -715,7 +742,8 @@ test('CLI path: the second save returns a structured notice, delivery and one-co
   assert.equal(s.tables.projectHostedOverlapDeliveries.size, 0, 'no overlap, no delivery call');
   const response = await second.dispatch('save', { operationId: randomUUID(), message: 'second' });
   const notice = response.overlapNotice;
-  assert.equal(notice.required, true);
+  assert.equal(notice.required, false, 'missing ranges are advisory, never a false gate');
+  assert.equal(notice.items[0].class, 'advisory');
   assert.equal(notice.items.length, 1);
   assert.equal(notice.items[0].file, 'a.txt');
   assert.deepEqual(
@@ -726,9 +754,9 @@ test('CLI path: the second save returns a structured notice, delivery and one-co
   assert.match(notice.acknowledge, /^nforge agent '.+' overlap-acks '\{.*\}'$/);
   assert.match(notice.routeAround, /"choice":"split"/);
   const banner = overlapBanner(notice);
-  assert.match(banner, /OVERLAP NOTICE: ACTION REQUIRED/);
+  assert.match(banner, /OVERLAP NOTICE: ADVISORY/);
   assert(banner.includes('a.txt') && banner.includes(lane.id) && banner.includes('My change'));
-  assert(banner.includes(notice.acknowledge) && banner.includes(notice.routeAround));
+  assert(!banner.includes('Acknowledge (keep your change'), 'advisory has no required answer step');
   const deliveriesBefore = [...s.tables.projectHostedOverlapDeliveries.values()];
   assert.equal(deliveriesBefore.length, 1);
   const delivered = JSON.parse(deliveriesBefore[0].value);
@@ -825,4 +853,85 @@ test('overlap reads are O(1): a Lane without saved changes touches no peers, and
   const all = JSON.parse(await read('all', lane.id, { items: 50 }));
   assert.equal(all.unacknowledgedOverlaps.items.length, 12);
   assert.equal(s.counts.filter(count => count.name === 'all').length, 1);
+});
+
+for (const file of ['src/shared.ts', 'notes.md', 'docs/guide.txt']) {
+  test(`${file}: disjoint saved hunks stay visible advisory and pass landing without an answer`, async t => {
+    const base = Array.from({ length: 40 }, (_, i) => `line ${i}\n`).join('');
+    const mine = base.replace('line 2\n', 'my edit\n');
+    const peerText = base.replace('line 30\n', 'peer edit\n');
+    const { s, lane, peer, transport } = await setup(t, { base, mine, peer: peerText, file });
+    await transport(lane).dispatch('save', { operationId: randomUUID(), message: 'disjoint first' });
+    const second = transport(peer);
+    const saved = await second.dispatch('save', { operationId: randomUUID(), message: 'disjoint second' });
+    const notice = saved.unacknowledgedOverlaps.items[0];
+    assert.equal(notice.class, 'advisory');
+    assert.equal(notice.reason, 'disjoint-ranges');
+    assert.equal(saved.overlapNotice.required, false);
+    assert.equal(saved.unacknowledgedOverlaps.advisoryCount, 1);
+    assert.equal(saved.unacknowledgedOverlaps.blockingCount, 0);
+    assert.deepEqual(
+      finishGates(
+        second.root,
+        effectiveAgentDefaults({ preflight: 'off' }),
+        { laneId: peer.id, head: saved.unacknowledgedOverlaps.head },
+        saved,
+      ),
+      {},
+    );
+    assert.equal(s.tables.projectHostedOverlapAcks.size, 0, 'no answer was written');
+    assert(
+      mergeNativeText(Buffer.from(base), Buffer.from(mine), Buffer.from(peerText), file),
+      'ordinary landing composition remains clean',
+    );
+    const delivered = JSON.parse([...s.tables.projectHostedOverlapDeliveries.values()][0].value);
+    assert.equal(delivered.items[0].class, 'advisory', 'metric delivery retains class');
+    assert.deepEqual(delivered.items[0].lanes, [lane.id, peer.id].sort());
+    const observed = await second.dispatch('status', { laneId: peer.id });
+    assert.equal(observed.overlapNotice.items[0].class, 'advisory', 'still visible without acknowledgement');
+  });
+}
+
+test('intersecting saved hunks block before landing and composition still rejects a real conflict', async t => {
+  const base = Array.from({ length: 40 }, (_, i) => `line ${i}\n`).join('');
+  const mine = base.replace('line 2\n', 'my edit\n');
+  const peerText = base.replace('line 2\n', 'peer edit\n');
+  const { lane, peer, transport } = await setup(t, { base, mine, peer: peerText });
+  await transport(lane).dispatch('save', { operationId: randomUUID(), message: 'first intersecting' });
+  const second = transport(peer);
+  const saved = await second.dispatch('save', { operationId: randomUUID(), message: 'second intersecting' });
+  assert.equal(saved.overlapNotice.items[0].class, 'blocking');
+  assert.equal(saved.overlapNotice.required, true);
+  assert.throws(
+    () =>
+      finishGates(
+        second.root,
+        effectiveAgentDefaults({ preflight: 'off' }),
+        { laneId: peer.id, head: saved.unacknowledgedOverlaps.head },
+        saved,
+      ),
+    code('OVERLAP_UNANSWERED'),
+  );
+  assert.equal(mergeNativeText(Buffer.from(base), Buffer.from(mine), Buffer.from(peerText)), null);
+});
+
+test('range metadata negotiates on existing discovery, and older strict save APIs keep their original pages', async t => {
+  const base = 'original\nsecond\nthird\n';
+  const modern = await setup(t, { base });
+  await modern
+    .transport(modern.lane)
+    .dispatch('save', { operationId: randomUUID(), message: 'modern metadata' });
+  assert.equal(modern.discovery.length, 1, 'no new call on a supported server');
+  assert.equal(modern.discovery[0].overlapEvidenceVersion, 1);
+  const legacy = await setup(t, { base, legacy: true });
+  const result = await legacy
+    .transport(legacy.lane)
+    .dispatch('save', { operationId: randomUUID(), message: 'legacy metadata' });
+  assert.equal(result.result.outcome.status, 'completed');
+  assert.equal(
+    legacy.discovery.filter(args => args.overlapEvidenceVersion === 1).length,
+    1,
+    'one named capability fallback, no per-file probes',
+  );
+  assert.equal(legacy.discovery.at(-1).overlapVersion, 1, 'independent notice support survives');
 });

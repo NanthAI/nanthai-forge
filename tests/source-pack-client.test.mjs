@@ -145,7 +145,12 @@ test('missing, small or invalid packs fall back to per-object reads with exact b
   assert.equal(failed.sourcePack, 'failed');
   assert.equal(failed.packObjects, 0);
   for (const id of ids) assert.deepEqual(readFileSync(join(failed.objects, id)), data.bytes.get(id));
-  assert.deepEqual(readdirSync(failed.root).sort(), ['objects']);
+  assert.deepEqual(readdirSync(failed.root).sort(), ['objects', 'overlap-text']);
+  assert.deepEqual(
+    readdirSync(join(failed.root, 'overlap-text')).sort(),
+    [...new Set(ids)].map(id => `${id}.json`).sort(),
+    'only verified fallback objects get disposable line summaries',
+  );
 });
 
 test('pack objects are written only after their own digest matches', async t => {

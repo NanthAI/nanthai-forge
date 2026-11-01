@@ -328,6 +328,7 @@ export class HostedAgentTransport {
           noticeVersion: 1,
           resolveVersion: 1,
           overlapVersion: 1,
+          overlapEvidenceVersion: 1,
           mirrorVersion: 1,
           metricReceiptVersion: 1,
           planningVersion: 1,
@@ -348,7 +349,7 @@ export class HostedAgentTransport {
             )
               throw error;
             const field =
-              /extra field\s+[`'"]?(noticeVersion|resolveVersion|overlapVersion|mirrorVersion|metricReceiptVersion|planningVersion|defaultsVersion)\b/i.exec(
+              /extra field\s+[`'"]?(noticeVersion|resolveVersion|overlapVersion|overlapEvidenceVersion|mirrorVersion|metricReceiptVersion|planningVersion|defaultsVersion)\b/i.exec(
                 error.message,
               )?.[1];
             // Preserve independently supported features, and never repeat a

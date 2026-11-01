@@ -13,7 +13,7 @@ const records = await import(moduleUrl('../convex/projectHostedRecords.ts'));
 const jobs = await import(moduleUrl('../convex/projectSourceJobs.ts'));
 const callbacks = await import(moduleUrl('../convex/projectSourceJobApi.ts'));
 export const maxima = {};
-export async function saveFixture() {
+export async function saveFixture(originalText = 'original', originalPath = 'a.txt') {
   const s = lanesFixture(),
     objects = new Map(),
     scheduled = [];
@@ -87,14 +87,14 @@ export async function saveFixture() {
     objects.set(pin.sha256, bytes);
     return pin;
   };
-  const original = put('original'),
+  const original = put(originalText),
     hidden = put('unmaterialized');
   const state = {
     schema: 1,
     kind: 'forge-source-state',
     parents: [],
     files: [
-      { path: 'a.txt', blob: original.sha256, mode: 'file' },
+      { path: originalPath, blob: original.sha256, mode: 'file' },
       { path: 'hidden.txt', blob: hidden.sha256, mode: 'file' },
     ],
     message: 'seed',

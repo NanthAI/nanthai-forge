@@ -8,9 +8,18 @@ const advice = z.object({
     laneId: z.string().optional(),
     head: z.string().optional(),
     count: z.number().nullable(),
+    blockingCount: z.number().optional(),
+    advisoryCount: z.number().optional(),
     coverage: z.string(),
     items: z.array(
-      z.looseObject({ noticeId: z.string(), file: z.string(), lanes: z.array(z.string()), text: z.string() }),
+      z.looseObject({
+        noticeId: z.string(),
+        class: z.enum(['blocking', 'advisory']).default('advisory'),
+        reason: z.string().default('unavailable'),
+        file: z.string(),
+        lanes: z.array(z.string()),
+        text: z.string(),
+      }),
     ),
   }),
   behindMain: z.object({
@@ -68,7 +77,13 @@ export async function recordHostedOverlapDelivery(
         surface,
         count: overlaps.count,
         coverage: overlaps.coverage,
-        items: overlaps.items.slice(0, 5).map(item => ({ noticeId: item.noticeId, file: item.file })),
+        items: overlaps.items.slice(0, 5).map(item => ({
+          noticeId: item.noticeId,
+          file: item.file,
+          class: item.class,
+          reason: item.reason,
+          lanes: item.lanes,
+        })),
       }),
     });
   } catch {

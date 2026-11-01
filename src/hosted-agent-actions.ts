@@ -432,6 +432,7 @@ export async function executeHostedAgent(
         ...(command.supersedeFinish ? { supersedeFinish: true } : {}),
       },
       session.exchange,
+      session.capabilities.overlapEvidenceVersion === 1,
     );
   }
   if (action === 'compose')
