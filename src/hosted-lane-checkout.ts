@@ -12,6 +12,7 @@ import { invariant } from './errors.js';
 import { readSource } from './files.js';
 import { workLocked } from './work-lock.js';
 import { indexInstalledFiles, writeCheckoutStatIndex } from './checkout-stat-index.js';
+import { withCheckoutMaterialization } from './checkout-materialization.js';
 import { HostedCheckoutCache, type CheckoutObjectTransport } from './hosted-checkout-cache.js';
 import { machineObjectsDirectory } from './machine-object-store.js';
 import {
@@ -172,29 +173,31 @@ export async function checkoutHostedLane(
   identity(hostedLaneSelectionSchema.parse(await transport.select(request.laneId)));
   const stage = mkdtempSync(join(cache.root, 'checkout-'));
   try {
-    await stageHostedFiles(stage, cache.objects, files);
-    mkdirSync(join(stage, '.forge'), { mode: 0o700 });
-    const marker: HostedLaneCheckoutMarker = {
-      schema: 1,
-      kind: 'forge-hosted-lane-checkout',
-      url: request.url,
-      operationId: request.operationId,
-      selection,
-      state,
-      tree: sourceTree(state.files),
-      scope,
-      materialized: files.map(file => file.path),
-    };
-    durableReplace(join(stage, '.forge', hostedLaneMarkerName), JSON.stringify(marker));
-    // Both barriers must finish before publication; their order inside a private
-    // stage is immaterial. Drain both even on failure before removing the stage.
-    const flushed = await Promise.allSettled([
-      flushHostedFiles(stage, files),
-      flushHostedCheckoutFiles(stage, files),
-    ]);
-    for (const result of flushed) if (result.status === 'rejected') throw result.reason;
-    // Stats of the private stage carry over the rename, so the first save reads only edited files.
-    const installed = indexInstalledFiles(stage, files);
+    const installed = await withCheckoutMaterialization(stage, async () => {
+      await stageHostedFiles(stage, cache.objects, files);
+      mkdirSync(join(stage, '.forge'), { mode: 0o700 });
+      const marker: HostedLaneCheckoutMarker = {
+        schema: 1,
+        kind: 'forge-hosted-lane-checkout',
+        url: request.url,
+        operationId: request.operationId,
+        selection,
+        state,
+        tree: sourceTree(state.files),
+        scope,
+        materialized: files.map(file => file.path),
+      };
+      durableReplace(join(stage, '.forge', hostedLaneMarkerName), JSON.stringify(marker));
+      // Both barriers must finish before publication; their order inside a private
+      // stage is immaterial. Drain both even on failure before removing the stage.
+      const flushed = await Promise.allSettled([
+        flushHostedFiles(stage, files),
+        flushHostedCheckoutFiles(stage, files),
+      ]);
+      for (const result of flushed) if (result.status === 'rejected') throw result.reason;
+      // Stats of the private stage carry over the rename, so the first save reads only edited files.
+      return indexInstalledFiles(stage, files);
+    });
     workLocked(lock, () => {
       operation = operationSchema.parse(json(receiptPath));
       if (operation.complete) return;

@@ -311,6 +311,13 @@ per-Lane object-store copy before cloning the independent editing files. Older
 per-checkout object stores are still reusable when a machine object is missing.
 Copies are staged and hash-verified before a separate bounded durability pass
 fsyncs every regular file; directory flushes still precede the atomic install.
+Local clients for the same OS user and destination volume cooperatively phase
+private copy/verify/flush passes through a local FIFO queue (one pass per three
+CPU cores, up to three passes at once). All opens are admitted; waiting requests
+retain their original selection and operation. Different volumes use independent
+queues. Dead process tickets are reclaimed using kernel process start identities.
+The queue adds no hosted calls and changes no hash checks, durability barriers or
+checkout recovery steps.
 Opening verifies source hashes without building syntax or line summaries for the
 whole tree. On save, overlap evidence for changed paths is derived lazily from
 the retained baseline objects, with their digest and private-file identity checked
