@@ -132,8 +132,10 @@ landing: landings are pinned to the acceptance policy, which leaves these settin
   head's affected tests with the landing check's selector, runs `build:core` when the project has
   that script, runs the tests here and records the result in `ROOT.forge-client`.
 - `"run":false` only plans: the test files, an estimate in minutes and the command.
-- Save first. Preflight refuses unsaved edits, because its record names one saved head.
-- `land --save` then looks for a passing record for the head it is about to land. Without one it
+- Save first. Preflight refuses unsaved edits, because its record names the saved source tree.
+- `land --save` then looks for a passing record for the source tree it is about to land. A new head with the same
+  paths, file modes and blob hashes reuses that pass; changed source needs a new preflight. Older
+  records without a tree identity apply only to their exact saved head. Without a matching pass it
   refuses with `PREFLIGHT_REQUIRED`, the number of files, the estimate and the preflight command.
 - Never blocking on missing data: when the saved paths or the selection are unavailable, or the
   selection is empty, `land --save` goes ahead and says why in `defaults.preflight`.

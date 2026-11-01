@@ -11,6 +11,11 @@ import { ConvexExchange } from '../dist/exchange-client.js';
 import { ConvexError } from 'convex/values';
 import { getFunctionName } from 'convex/server';
 import { existsSync } from 'node:fs';
+import { sourceTree } from '../dist/source-tree.js';
+import { readHostedLaneCheckout } from '../dist/hosted-lane-checkout-marker.js';
+import { finishGates } from '../dist/agent-default-gates.js';
+import { runPreflight } from '../dist/agent-preflight.js';
+import { effectiveAgentDefaults } from '../dist/agent-parallel-defaults.js';
 import { saveHostedLane } from '../dist/hosted-save-client.js';
 import { buildHostedSourceState } from '../dist/hosted-source-worker.js';
 import { sourceDispatch } from '../dist/hosted-source-job-controller.js';
@@ -152,6 +157,7 @@ async function changedSave(t, legacy, scale = false, provider = 'synthetic') {
     const terminal = await saveHostedLane(root, command, exchange);
     const output = terminal.outcome.result;
     assert.equal(JSON.parse(s.objects.get(output.head)).files.length, 3000);
+    assert.equal(readHostedLaneCheckout(root).tree, sourceTree(JSON.parse(s.objects.get(output.head)).files));
     const stats = {
       ...c.stats(),
       overlapWrites: overlapWrites(),
@@ -254,9 +260,10 @@ test('ten changed files in a 3,000-file tree fit the complete save budget at dog
 
 test('unchanged save has no object or worker calls', async t => {
   environment(t);
-  const s = await composeFixture(),
-    entry = await s.lane(s.baseline);
-  const root = checkout(t, s, entry, JSON.parse(s.objects.get(s.baseline.sha256)), false);
+  const s = await composeFixture();
+  const baseline = s.state(Array.from({ length: 3000 }, (_, i) => s.file(`f${i}`, `source-${i}`)));
+  const entry = await s.lane(baseline);
+  const root = checkout(t, s, entry, JSON.parse(s.objects.get(baseline.sha256)), false);
   const c = controls(t, s),
     exchange = new ConvexExchange('https://fixture.invalid', 'synthetic', s.projectId, randomUUID(), null);
   exchange.client = c.client;
@@ -264,7 +271,55 @@ test('unchanged save has no object or worker calls', async t => {
   const terminal = await saveHostedLane(root, { operationId: randomUUID(), message: 'unchanged' }, exchange);
   assert.equal(terminal.outcome.result.unchanged, true);
   assert.equal(c.calls.length, 2);
-  t.diagnostic(JSON.stringify({ unchanged: c.stats() }));
+  const marker = readHostedLaneCheckout(root);
+  assert.equal(marker.tree, sourceTree(marker.state.files));
+  // Simulate a metadata-only State before this saved head: same full 3,000-file source,
+  // different ancestry/message/time. No source lookup or rehash belongs in the gate.
+  const before = c.calls.length;
+  const gateStarted = performance.now();
+  runPreflight(
+    root,
+    entry.laneId,
+    'f'.repeat(64),
+    {
+      status: 'planned',
+      scope: 'none',
+      reason: 'synthetic pass',
+      tests: [],
+      estimateMinutes: 0,
+      command: null,
+    },
+    marker.tree,
+  );
+  const localAdvice = {
+    unacknowledgedOverlaps: { items: [] },
+    changedPaths: { paths: ['tests/selected.test.mjs'], complete: true },
+  };
+  mkdirSync(join(root, 'tests'), { recursive: true });
+  writeFileSync(
+    join(root, 'tests/selected.test.mjs'),
+    "import test from 'node:test'; test('selected', () => {});",
+  );
+  assert.equal(
+    finishGates(root, effectiveAgentDefaults(), { ...marker.selection, tree: marker.tree }, localAdvice)
+      .preflight.status,
+    'passed',
+  );
+  assert.throws(
+    () =>
+      finishGates(root, effectiveAgentDefaults(), { ...marker.selection, tree: sourceTree([]) }, localAdvice),
+    error => error.code === 'PREFLIGHT_REQUIRED',
+  );
+  assert.equal(c.calls.length, before, 'same and changed tree gates add zero Convex calls');
+  t.diagnostic(
+    JSON.stringify({
+      unchanged: c.stats(),
+      gateExtraCalls: c.calls.length - before,
+      gateWallMs: performance.now() - gateStarted,
+      sourceFiles: marker.state.files.length,
+      rssBytes: process.memoryUsage().rss,
+    }),
+  );
 });
 
 test('a save refused for a live finish drops its retained capture and forwards the explicit override', async t => {

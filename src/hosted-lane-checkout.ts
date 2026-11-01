@@ -1,3 +1,4 @@
+import { sourceTree } from './source-tree.js';
 // SPDX-License-Identifier: Apache-2.0
 import { mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, realpathSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
@@ -170,6 +171,7 @@ export async function checkoutHostedLane(
       operationId: request.operationId,
       selection,
       state,
+      tree: sourceTree(state.files),
       scope,
       materialized: files.map(file => file.path),
     };

@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { sourceTree } from '../dist/source-tree.js';
 import { effectiveAgentDefaults } from '../dist/agent-parallel-defaults.js';
 import { ackAnswers, checkpointNudge, finishGates, unsavedMinutes } from '../dist/agent-default-gates.js';
 import { preflightPlan, readPreflightReceipt, runPreflight } from '../dist/agent-preflight.js';
@@ -140,4 +141,56 @@ test('checkpoint nudge: unsavedFor from local file times, nudge past the thresho
   });
   assert.deepEqual(checkpointNudge(root, lane.laneId, defaults({}), null), {});
   assert.equal(unsavedMinutes(join(root, 'missing')), null, 'no checkout marker: nothing to say');
+});
+
+test('preflight survives a different saved head with identical content; content, path and mode changes refuse', t => {
+  const root = repo(t);
+  const files = [
+    { path: 'tests/b.test.mjs', blob: '1'.repeat(64), mode: 'file' },
+    { path: 'src/value.ts', blob: '2'.repeat(64), mode: 'file' },
+  ];
+  const tree = sourceTree(files);
+  const receipt = runPreflight(
+    root,
+    lane.laneId,
+    lane.head,
+    preflightPlan(root, advice().changedPaths),
+    tree,
+  );
+  const saved = { ...lane, head: 'b'.repeat(64), tree: sourceTree([...files].reverse()) };
+  assert.equal(readPreflightReceipt(root, lane.laneId).tree, tree);
+  assert.equal(finishGates(root, defaults({}), saved, advice()).preflight.status, 'passed');
+  assert.equal(receipt.passed, true);
+  for (const changed of [
+    [{ ...files[0], blob: '3'.repeat(64) }, files[1]],
+    [{ ...files[0], mode: 'executable' }, files[1]],
+    [{ ...files[0], path: 'tests/renamed.test.mjs' }, files[1]],
+    files.slice(1),
+    [...files, { path: 'added', blob: '4'.repeat(64), mode: 'symlink' }],
+  ]) {
+    assert.throws(
+      () => finishGates(root, defaults({}), { ...saved, tree: sourceTree(changed) }, advice()),
+      code('PREFLIGHT_REQUIRED'),
+    );
+  }
+  assert.throws(
+    () => finishGates(root, defaults({}), { ...saved, tree: undefined }, advice()),
+    code('PREFLIGHT_REQUIRED'),
+  );
+  assert.throws(
+    () => finishGates(root, defaults({}), { ...saved, laneId: 'another-lane' }, advice()),
+    code('PREFLIGHT_REQUIRED'),
+  );
+});
+
+test('failed preflight still refuses after a same-content save', t => {
+  const root = repo(t, {
+    'tests/b.test.mjs': "import test from 'node:test'; test('fails', () => { throw Error('red'); });",
+  });
+  const tree = sourceTree([]);
+  runPreflight(root, lane.laneId, lane.head, preflightPlan(root, advice().changedPaths), tree);
+  assert.throws(
+    () => finishGates(root, defaults({}), { ...lane, head: 'b'.repeat(64), tree }, advice()),
+    error => code('PREFLIGHT_REQUIRED')(error) && error.message.includes('Its last run failed.'),
+  );
 });

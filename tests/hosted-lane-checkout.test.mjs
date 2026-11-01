@@ -21,6 +21,10 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { checkoutHostedLane } from '../dist/hosted-lane-checkout.js';
 import { readHostedLaneCheckout } from '../dist/hosted-lane-checkout-marker.js';
+import { finishGates } from '../dist/agent-default-gates.js';
+import { runPreflight, preflightPlan } from '../dist/agent-preflight.js';
+import { effectiveAgentDefaults } from '../dist/agent-parallel-defaults.js';
+import { sourceTree } from '../dist/source-tree.js';
 import { nativeFile } from '../dist/native-file.js';
 import { digest } from '../dist/hash.js';
 function setup(t) {
@@ -121,6 +125,7 @@ test('full Lane checkout round-trips executable, regular, binary, live and dangl
   const s = setup(t),
     result = await checkoutHostedLane(s.root, s.request(), s.transport);
   assert.equal(result.head, s.selection().head);
+  assert.equal(readHostedLaneCheckout(s.root).tree, sourceTree(s.files));
   for (const file of s.files) {
     const actual = nativeFile(result.root, file.path);
     assert.equal(actual.mode, file.mode);
@@ -354,4 +359,55 @@ test('redirected root, metadata and cache paths cannot overwrite their targets',
     await assert.rejects(checkoutHostedLane(s.root, s.request(), s.transport));
     assert.equal(readFileSync(join(target, 'keep'), 'utf8'), 'keep');
   }
+});
+
+test('checkout tree fields preserve preflight across equivalent States and refuse changed source without extra transport calls', async t => {
+  const s = setup(t);
+  const files = [
+    ...s.files,
+    {
+      path: 'tests/preflight.test.mjs',
+      blob: s.put("import test from 'node:test'; test('passes', () => {});"),
+      mode: 'file',
+    },
+  ];
+  s.advance(files);
+  await checkoutHostedLane(s.root, s.request(), s.transport);
+  const first = readHostedLaneCheckout(s.root);
+  const advice = {
+    unacknowledgedOverlaps: { items: [] },
+    changedPaths: { paths: ['tests/preflight.test.mjs'], complete: true },
+  };
+  runPreflight(
+    s.root,
+    first.selection.laneId,
+    first.selection.head,
+    preflightPlan(s.root, advice.changedPaths),
+    first.tree,
+  );
+  // Manifest ordering changes the State/head, but not source content.
+  s.advance([...files].reverse());
+  await checkoutHostedLane(s.root, s.request(), s.transport);
+  const same = readHostedLaneCheckout(s.root);
+  assert.notEqual(first.selection.head, same.selection.head);
+  assert.equal(first.tree, same.tree);
+  const calls = structuredClone(s.calls);
+  assert.equal(
+    finishGates(s.root, effectiveAgentDefaults(), { ...same.selection, tree: same.tree }, advice).preflight
+      .status,
+    'passed',
+  );
+  assert.deepEqual(s.calls, calls);
+  s.advance(
+    files.map(file => (file.path === 'src/a.txt' ? { ...file, blob: s.put('changed source') } : file)),
+  );
+  await checkoutHostedLane(s.root, s.request(), s.transport);
+  const changed = readHostedLaneCheckout(s.root);
+  assert.notEqual(changed.tree, first.tree);
+  const after = structuredClone(s.calls);
+  assert.throws(
+    () => finishGates(s.root, effectiveAgentDefaults(), { ...changed.selection, tree: changed.tree }, advice),
+    error => error.code === 'PREFLIGHT_REQUIRED',
+  );
+  assert.deepEqual(s.calls, after);
 });

@@ -31,6 +31,10 @@ export const hostedLaneCheckoutMarkerSchema = z
     operationId: z.uuid(),
     selection: hostedLaneSelectionSchema,
     state: stateSchema,
+    tree: z
+      .string()
+      .regex(/^[0-9a-f]{64}$/)
+      .optional(),
     scope: z.array(z.string().refine(safeRelative)).nullable(),
     materialized: z.array(z.string().refine(safeRelative)),
   })

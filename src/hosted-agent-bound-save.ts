@@ -1,3 +1,4 @@
+import { sourceTree } from './source-tree.js';
 // SPDX-License-Identifier: Apache-2.0
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
@@ -106,6 +107,7 @@ export async function saveBoundInput(
           operationId,
           selection,
           state,
+          tree: sourceTree(state.files),
           scope: null,
           materialized: state.files.map(f => f.path),
         }),

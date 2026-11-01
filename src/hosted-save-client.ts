@@ -1,3 +1,4 @@
+import { sourceTree } from './source-tree.js';
 import { hostedActionError } from './hosted-action-error.js';
 // SPDX-License-Identifier: Apache-2.0
 import {
@@ -362,6 +363,7 @@ function applyHostedSaveReceipt(
     const marker = hostedLaneCheckoutMarkerSchema.parse({
       ...old,
       state,
+      tree: sourceTree(state.files),
       materialized: [...materialized].sort(),
       selection: {
         ...old.selection,

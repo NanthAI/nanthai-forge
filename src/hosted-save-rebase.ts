@@ -1,3 +1,4 @@
+import { sourceTree } from './source-tree.js';
 // SPDX-License-Identifier: Apache-2.0
 import { lstatSync, mkdirSync, readFileSync, readlinkSync, realpathSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -105,6 +106,7 @@ export async function rebaseHostedCheckout(root: string, exchange: Exchange) {
     ...stale,
     selection: lane,
     state,
+    tree: sourceTree(state.files),
     materialized: [...materialized].sort(),
   });
   workLocked(join(`${root}.forge-client`, 'lock'), () => {

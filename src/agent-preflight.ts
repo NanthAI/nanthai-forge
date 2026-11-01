@@ -15,6 +15,10 @@ export const preflightReceiptSchema = z
     schema: z.literal(1),
     laneId: z.string(),
     head: z.string(),
+    tree: z
+      .string()
+      .regex(/^[0-9a-f]{64}$/)
+      .optional(),
     tests: z.number().int().nonnegative(),
     selection: z.string(),
     exitCode: z.number().int().nullable(),
@@ -122,6 +126,7 @@ export function runPreflight(
   laneId: string,
   head: string,
   plan: PreflightPlan & { status: 'planned' },
+  tree?: string,
 ) {
   const started = Date.now();
   let exitCode: number | null = 0;
@@ -154,6 +159,7 @@ export function runPreflight(
     schema: 1,
     laneId,
     head,
+    ...(tree ? { tree } : {}),
     tests: plan.tests.length,
     selection: plan.scope,
     exitCode,

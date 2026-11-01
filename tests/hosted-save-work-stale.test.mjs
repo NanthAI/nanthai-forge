@@ -1,3 +1,4 @@
+import { sourceTree } from '../dist/source-tree.js';
 // SPDX-License-Identifier: Apache-2.0
 // Incident replay (2026-10-30/31, Lanes 259ea29d and a2dced54): a checkpoint's
 // source job finished after the client returned, so the checkout marker kept the
@@ -225,6 +226,8 @@ test('incident replay: replaying a save refused WORK_STALE rebases onto the move
   assert(since(s, at, /lanePage/).length <= 2);
   const prepares = since(s, at, /Saves:prepare/).map(call => JSON.parse(call.args.request));
   assert.equal(prepares.length, 2, 'the stale request once, then the rebased one');
+  const repaired = readHostedLaneCheckout(s.root);
+  assert.equal(repaired.tree, sourceTree(repaired.state.files));
   assert.equal(prepares[1].expected.version, 1);
   assert.deepEqual(
     prepares.map(request => request.operationId),

@@ -182,10 +182,15 @@ async function executeFinishWork(session: HostedAgentSession, input: unknown) {
       }
       markLandStep('saved');
     }
-    const selection = clean ?? session.marker()!.selection;
+    const savedMarker = clean ? marker : session.marker();
+    const selection = clean ?? savedMarker!.selection;
     // Agent defaults (overlap gate, preflight) judge the saved head this finish will land.
     if (session.finishGates) {
-      const advice = await session.finishGates(selection.laneId, selection.head);
+      const advice = await session.finishGates(
+        selection.laneId,
+        selection.head,
+        savedMarker?.selection.head === selection.head ? savedMarker.tree : undefined,
+      );
       if (Object.keys(advice).length) await session.journal.retain('finish-defaults', () => advice);
     }
     markLandStep('gated');

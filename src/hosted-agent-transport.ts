@@ -1,3 +1,4 @@
+import { sourceTree } from './source-tree.js';
 import { withSourceRecovery } from './hosted-agent-source-recovery.js';
 import { readHostedOverlapAdvice, recordHostedOverlapDelivery } from './hosted-overlap-client.js';
 import { hostedOverlapNotice, type HostedOverlapNotice } from './hosted-overlap-notice.js';
@@ -524,11 +525,15 @@ export class HostedAgentTransport {
         },
         waitSource: (operationId, initial, kind) =>
           waitHostedAgentSource(this.address, operationId, initial, signal, this.subscribeSource, kind),
-        finishGates: async (laneId: string, head: string) =>
+        finishGates: async (laneId: string, head: string, tree?: string) =>
           finishGates(
             root,
             capabilities.agentDefaults,
-            { laneId, head },
+            {
+              laneId,
+              head,
+              ...(tree ? { tree } : {}),
+            },
             await this.overlapAdvice(laneId, capabilities.agentDefaults?.preflight !== 'off'),
           ),
         marker: () => {
@@ -791,7 +796,7 @@ export class HostedAgentTransport {
       laneId,
       head,
       plan,
-      receipt: runPreflight(root, laneId, head, plan),
+      receipt: runPreflight(root, laneId, head, plan, marker.tree ?? sourceTree(marker.state.files)),
     });
   }
   async query<T = unknown>(name: string, args: Record<string, unknown>): Promise<T> {
@@ -888,5 +893,5 @@ export type HostedAgentSession = {
   main: () => Promise<z.infer<typeof hostedMainV2Schema>>;
   marker: () => ReturnType<typeof readHostedLaneCheckout>;
   /** Agent-default finish gates (overlap, preflight); refusals throw, advisories return. */
-  finishGates?: (laneId: string, head: string) => Promise<Record<string, unknown>>;
+  finishGates?: (laneId: string, head: string, tree?: string) => Promise<Record<string, unknown>>;
 };

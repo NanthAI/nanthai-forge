@@ -4,6 +4,9 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync, readdirSync, writeFileSync, symlinkSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { runPreflight } from '../dist/agent-preflight.js';
+import { effectiveAgentDefaults } from '../dist/agent-parallel-defaults.js';
+import { readHostedLaneCheckout } from '../dist/hosted-lane-checkout-marker.js';
 import { agentFixture } from './hosted-agent-fixture.mjs';
 import { hostedAgentAddress } from '../dist/hosted-agent-cli.js';
 import { hostedAgentActions } from '../dist/hosted-agent-contract.js';
@@ -321,4 +324,29 @@ test('new priority reads negotiate an old server once; authorization failures ne
     errorCode('PROJECT_UNAVAILABLE'),
   );
   assert.equal(s.calls.length, before + 1);
+});
+
+test('hosted finish preserves a passing preflight for an equivalent source tree under another saved head', async t => {
+  const s = agentFixture(t);
+  s.caps.agentDefaults = effectiveAgentDefaults();
+  await s.transport().dispatch('open', { laneId: s.lane.laneId });
+  const marker = readHostedLaneCheckout(s.root);
+  // A previous State of this empty source differs only in its metadata/head.
+  const receipt = runPreflight(
+    s.root,
+    s.lane.laneId,
+    'f'.repeat(64),
+    {
+      status: 'planned',
+      scope: 'none',
+      reason: 'empty source',
+      tests: [],
+      estimateMinutes: 0,
+      command: null,
+    },
+    marker.tree,
+  );
+  assert.notEqual(receipt.head, marker.selection.head);
+  const result = await s.transport().dispatch('finish', { laneId: s.lane.laneId });
+  assert.equal(result.result.defaults.preflight.status, 'passed');
 });

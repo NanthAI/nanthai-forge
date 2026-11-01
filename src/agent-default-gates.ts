@@ -18,7 +18,7 @@ const command = (root: string, verb: string, body: Record<string, unknown>) =>
 export function finishGates(
   root: string,
   defaults: EffectiveAgentDefaults | undefined,
-  lane: { laneId: string; head: string },
+  lane: { laneId: string; head: string; tree?: string },
   advice: Advice | undefined,
 ) {
   const advisories: Record<string, unknown> = {};
@@ -36,7 +36,10 @@ export function finishGates(
   }
   if (defaults.preflight !== 'off') {
     const receipt = readPreflightReceipt(root, lane.laneId);
-    if (receipt?.head === lane.head && receipt.passed)
+    const sameSource =
+      receipt?.laneId === lane.laneId &&
+      (receipt.tree && lane.tree ? receipt.tree === lane.tree : receipt.head === lane.head);
+    if (sameSource && receipt?.passed)
       advisories.preflight = { status: 'passed', tests: receipt.tests, at: receipt.at };
     else {
       const plan = preflightPlan(root, advice?.changedPaths);
@@ -50,7 +53,7 @@ export function finishGates(
           estimateMinutes: plan.estimateMinutes,
           run,
         };
-        const failed = receipt?.head === lane.head ? ' Its last run failed.' : '';
+        const failed = sameSource ? ' Its last run failed.' : '';
         if (defaults.preflight === 'require' && plan.estimateMinutes <= defaults.preflightMaxMinutes)
           throw new ForgeError(
             'PREFLIGHT_REQUIRED',
