@@ -109,6 +109,7 @@ const shared = sharedDeps(B, config.baseCheckout);
 const gates = {
   usage: usageGate(),
   forgeBuild: forgeBuild(),
+  forgeCli: arm === 'forge' ? forgeCliBuild(config.forge.cli) : null,
   disk: { freeGb: diskFreeGb(), ...diskNeed() },
 };
 const refuse = reason => {
@@ -123,6 +124,12 @@ if (!dry) {
   if (arm === 'forge' && !config.forge.qualifiedAt) refuse('Forge adapter not qualified by a dry run');
   if (!shared) refuse('shared dependency install missing (deps.mjs): build deps/ first');
 }
+// 2026-11-01: a stale CLI dist (built before its src moved) voided both Forge N=1 attempts.
+// The Mac keeps one CLI, built from GitHub main; dry runs check it too.
+if (arm === 'forge' && (!gates.forgeCli.commit || gates.forgeCli.commit !== gates.forgeCli.githubMain))
+  refuse(
+    `Forge CLI build ${gates.forgeCli.commit ?? 'unknown'} is not GitHub main ${gates.forgeCli.githubMain ?? 'unknown'}`,
+  );
 // Lead's hard disk gate (2026-10-31, builders hit ENOSPC): free >= 15 GB + this cell's need.
 if (gates.disk.freeGb < gates.disk.requiredGb)
   refuse(
@@ -139,7 +146,9 @@ const forge = arm === 'forge' ? forgeArm(config.forge) : null;
 const bin = join(ws, 'bin');
 mkdirSync(bin, { recursive: true });
 const armEnv =
-  arm === 'github' ? { GH_REPO: github.repository, GIT_TERMINAL_PROMPT: '0' } : await forge.binDir(bin);
+  arm === 'github'
+    ? { GH_REPO: github.repository, GIT_TERMINAL_PROMPT: '0' }
+    : await forge.binDir(bin, join(dir, 'nforge-calls.jsonl'));
 const scripted = arm === 'github' ? github.scriptedAgent(bin, 'github') : null;
 // The cell's agents share one writable clone of the toolchain (vp locks and caches
 // its package manager there), like one developer machine; deps/ stays read-only.
@@ -352,4 +361,21 @@ console.log(
 function forgeCliReads(cli) {
   const pkg = dirname(dirname(cli));
   return [...new Set([pkg, realpathSync(pkg), realpathSync(join(pkg, 'node_modules'))])];
+}
+
+/** The one machine CLI (forge-cli/current, built from GitHub main) records its commit in .commit. */
+function forgeCliBuild(cli) {
+  const pkg = dirname(dirname(cli));
+  let commit = null,
+    githubMain = null;
+  try {
+    commit = readFileSync(join(pkg, '.commit'), 'utf8').trim();
+  } catch {}
+  try {
+    githubMain =
+      sh('git', ['ls-remote', 'https://github.com/NanthAI/nanthai-forge', 'refs/heads/main']).split(
+        /\s/,
+      )[0] || null;
+  } catch {}
+  return { cli, commit, githubMain };
 }

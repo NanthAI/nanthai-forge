@@ -2,7 +2,7 @@
 // same arm.recordLandOps -> arm.landing -> score.mjs path run-cell uses live.
 // Usage: node scripts/bench-t3code/rescore.mjs CELL_ID "why"
 // Keeps the original as result.before-rescore.json.
-import { readFileSync, writeFileSync, existsSync, copyFileSync, mkdirSync, rmSync, rmdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, copyFileSync, mkdirSync, rmdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { forgeArm } from './forge-arm.mjs';
@@ -18,12 +18,24 @@ if (result.arm !== 'forge') throw Error('rescore is for Forge cells');
 if (existsSync(join(B, 'ws', cellId))) throw Error('cell workspace still exists: is the cell running?');
 const forge = forgeArm(config.forge);
 const ws = join(B, 'ws', cellId);
+// The broker's call log holds model agents' nforge output ids; scripted agents' own
+// stdout/stderr hold theirs (dry runs before the log existed).
+const calls = existsSync(join(dir, 'nforge-calls.jsonl'))
+  ? readFileSync(join(dir, 'nforge-calls.jsonl'), 'utf8')
+      .split('\n')
+      .filter(Boolean)
+      .map(l => JSON.parse(l))
+  : [];
 const records = result.records.map(record => {
   const root = join(ws, record.task);
+  const logged = calls
+    .filter(c => c.root.endsWith(`/${record.task}`) && /^agent (land|finish)/.test(c.verb))
+    .flatMap(c => c.operationIds.map(id => `operationId ${id}`));
   const output = ['stdout.json', 'stderr.txt']
     .map(ext => join(dir, 'agents', `${record.task}.${ext}`))
     .filter(existsSync)
     .map(file => readFileSync(file, 'utf8'))
+    .concat(logged)
     .join('\n');
   // landing() addresses the project explicitly; an empty directory stands in for the
   // deleted workspace, as the harness's anchor does.
@@ -35,7 +47,7 @@ const records = result.records.map(record => {
       ...landingFields(forge.landing(root, record.laneId), Date.parse(record.dispatchedAt)),
     };
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    forge.removeRoot(root);
   }
 });
 try {

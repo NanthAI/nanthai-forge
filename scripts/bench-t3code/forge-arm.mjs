@@ -6,6 +6,7 @@ import { execFileSync, execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 const run = promisify(execFile);
 import {
+  appendFileSync,
   mkdirSync,
   writeFileSync,
   chmodSync,
@@ -29,6 +30,8 @@ const EXCLUDE = [
   ':!node_modules',
   ':!**/node_modules',
 ];
+
+const OPERATION_ID = /"?operationId"?[:\s]+"?([0-9a-f-]{36})/g;
 
 export function forgeArm(config) {
   const { url, projectId, cli, deployment } = config;
@@ -88,14 +91,25 @@ export function forgeArm(config) {
     recordLandOps(root, output) {
       const key = workspaceKey(root);
       const ops = landOps.get(key) ?? new Set();
-      for (const [, id] of output.matchAll(/"?operationId"?[:\s]+"?([0-9a-f-]{36})/g)) ops.add(id);
+      for (const [, id] of output.matchAll(OPERATION_ID)) ops.add(id);
       landOps.set(key, ops);
     },
     landing(root, laneId) {
       const ops = landOps.get(workspaceKey(root)) ?? new Set();
       const seen = [];
       for (const operationId of ops) {
-        const s = nf(root, 'observe', { ...X, operationId }).result?.submission ?? {};
+        // An agent's refused or replaced attempt leaves ids that are not landing
+        // operations (observe: NOT_FOUND); record them and keep looking.
+        let s;
+        try {
+          s = nf(root, 'observe', { ...X, operationId }).result?.submission ?? {};
+        } catch (error) {
+          seen.push({
+            operationId,
+            error: String(error.stderr ?? error.message).match(/"code":"([A-Z_]+)"/)?.[1] ?? 'ERROR',
+          });
+          continue;
+        }
         seen.push({ operationId, phase: s.phase ?? null });
         if (s.phase === 'landed')
           return {
@@ -131,7 +145,7 @@ export function forgeArm(config) {
      * cannot exec setuid /bin/ps, which the CLI needs for its process identity
      * (PROCESS_IDENTITY_UNAVAILABLE). The broker runs the real CLI only when the call's
      * cwd and ROOT are inside the calling agent's own workspace (token per agent). */
-    async binDir(bin) {
+    async binDir(bin, callLog) {
       mkdirSync(bin, { recursive: true });
       const roots = new Map();
       const inside = (root, p) => p === root || p.startsWith(root + '/');
@@ -147,12 +161,32 @@ export function forgeArm(config) {
               const target = ['agent', 'x'].includes(args[0]) && args[1] ? resolve(cwd, args[1]) : cwd;
               if (!root || !inside(root, resolve(cwd)) || !inside(root, target))
                 return reply({ stdout: '', stderr: 'bench: nforge is limited to your workspace\n', code: 2 });
+              const startedAt = new Date().toISOString();
               execFile(
                 '/usr/local/bin/node',
                 [cli, ...args],
                 { cwd, maxBuffer: 64 << 20 },
                 (error, stdout, stderr) => {
-                  if (['land', 'finish'].includes(args[2])) arm.recordLandOps(root, `${stdout}\n${stderr}`);
+                  const output = `${stdout}\n${stderr}`;
+                  if (['land', 'finish'].includes(args[2])) arm.recordLandOps(root, output);
+                  // Durable record of every agent nforge call (verb, exit, operation ids,
+                  // refusal codes) so a cell can be audited or re-scored after the fact.
+                  if (callLog)
+                    appendFileSync(
+                      callLog,
+                      JSON.stringify({
+                        root,
+                        startedAt,
+                        endedAt: new Date().toISOString(),
+                        verb: args
+                          .slice(0, 3)
+                          .filter(a => a !== args[1])
+                          .join(' '),
+                        code: error ? (typeof error.code === 'number' ? error.code : 1) : 0,
+                        operationIds: [...new Set([...output.matchAll(OPERATION_ID)].map(m => m[1]))],
+                        errorCodes: [...new Set([...output.matchAll(/"code":"([A-Z_]+)"/g)].map(m => m[1]))],
+                      }) + '\n',
+                    );
                   reply({
                     stdout,
                     stderr,
