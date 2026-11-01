@@ -43,7 +43,9 @@ export function forgeTask({ task, calls, landing, session, laneTask }) {
   const transcript = session.seen.join('\n');
   const list = notices.map(n => {
     const ack = answers.find(
-      a => (a.noticeId === null || a.noticeId === n.noticeId) && a.at >= n.deliveredAt,
+      a =>
+        (a.noticeId === null ? !a.files || a.files.includes(n.file) : a.noticeId === n.noticeId) &&
+        a.at >= n.deliveredAt,
     );
     return {
       ...n,

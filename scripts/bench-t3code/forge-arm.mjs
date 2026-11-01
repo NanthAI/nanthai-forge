@@ -237,20 +237,7 @@ export function forgeArm(config, { callLog, ws, ledger = null }) {
       });
       broker = { child, ...JSON.parse(first) };
       const client = join(bin, 'nforge-client.mjs');
-      writeFileSync(
-        client,
-        // node:http, not fetch: undici's 300 s headers timeout would cut a long land --save.
-        `import { request } from 'node:http';
-const req = request(process.env.BENCH_NFORGE_URL, { method: 'POST' }, res => {
-  let body = '';
-  res.setEncoding('utf8').on('data', d => (body += d)).on('end', () => {
-    const { stdout, stderr, code } = JSON.parse(body);
-    process.stdout.write(stdout); process.stderr.write(stderr); process.exitCode = code;
-  });
-});
-req.end(JSON.stringify({ token: process.env.BENCH_NFORGE_TOKEN, cwd: process.cwd(), args: process.argv.slice(2), sentAt: new Date().toISOString() }));
-`,
-      );
+      writeFileSync(client, readFileSync(new URL('./relay-client.mjs', import.meta.url), 'utf8'));
       const file = join(bin, 'nforge');
       writeFileSync(file, `#!/bin/bash\nexec /usr/local/bin/node ${JSON.stringify(client)} "$@"\n`);
       chmodSync(file, 0o755);

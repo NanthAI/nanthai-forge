@@ -1001,12 +1001,26 @@ test('relay: a separate process answers agents while the harness process is bloc
       const { port, admin } = await new Promise(done => broker.stdout.once('data', d => done(JSON.parse(d))));
       const post = (path, body) =>
         fetch(`http://127.0.0.1:${port}${path}`, { method: 'POST', body: JSON.stringify(body) }).then(r =>
-          r.json(),
+          r.text().then(text =>
+            text
+              .split('\n')
+              .filter(Boolean)
+              .map(JSON.parse)
+              .reduce(
+                (out, frame) => ({
+                  ...out,
+                  ...frame,
+                  stdout: (out.stdout ?? '') + (frame.stdout ?? ''),
+                  stderr: (out.stderr ?? '') + (frame.stderr ?? ''),
+                }),
+                {},
+              ),
+          ),
         );
-      assert.deepEqual(await post('/register', { admin, token: 't', root, task: 'tA' }), { ok: true });
-      assert.deepEqual(await post('/register', { admin: 'wrong', token: 'u', root: '/' }), { ok: false });
+      assert.equal((await post('/register', { admin, token: 't', root, task: 'tA' })).ok, true);
+      assert.equal((await post('/register', { admin: 'wrong', token: 'u', root: '/' })).ok, false);
       // spawnSync blocks this (harness) process for the whole client run: only an out-of-process relay can answer.
-      const client = `const post = (cwd, args) => fetch('http://127.0.0.1:${port}/', { method: 'POST', body: JSON.stringify({ token: 't', cwd, args }) }).then(r => r.json());
+      const client = `const post = (cwd, args) => fetch('http://127.0.0.1:${port}/', { method: 'POST', body: JSON.stringify({ token: 't', cwd, args }) }).then(r => r.text()).then(t => t.split('\\n').filter(Boolean).map(JSON.parse).reduce((a, f) => ({ ...a, ...f, stdout: (a.stdout ?? '') + (f.stdout ?? '') }), {}));
         const ok = await post(${JSON.stringify(root)}, ['agent', '.', 'land', '{}']);
         const out = await post(${JSON.stringify(dir)}, ['agent', '.', 'land', '{}']);
         const resolve = await post(${JSON.stringify(join(dir, 'ws.forge-client', 'lanes', 'r'))}, ['agent', '.', 'resolve', '{}']);
@@ -1080,7 +1094,7 @@ test('relay: agents keep getting answers while the harness deletes a Lane folder
         `const calls = []; const until = Date.now() + 3000;
          while (Date.now() < until) {
            const start = Date.now();
-           const r = await fetch('http://127.0.0.1:${port}/', { method: 'POST', body: JSON.stringify({ token: 't', cwd: ${JSON.stringify(root)}, args: ['agent', '.', 'status'] }) }).then(r => r.json());
+           const r = await fetch('http://127.0.0.1:${port}/', { method: 'POST', body: JSON.stringify({ token: 't', cwd: ${JSON.stringify(root)}, args: ['agent', '.', 'status'] }) }).then(r => r.text()).then(t => JSON.parse(t.trim().split('\\n').at(-1)));
            calls.push({ start, end: Date.now(), code: r.code });
            if (calls.length === 1) console.log('go');
          }

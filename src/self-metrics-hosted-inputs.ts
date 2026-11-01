@@ -29,7 +29,12 @@ export async function hydrateMetricInputs(
   const pending = new Map([...pins.values()].map(pin => [pin.sha256, pin]));
   if (objects)
     while (pending.size) {
-      const batch = [...pending.values()].slice(0, 8);
+      // Select one transfer window without copying the entire remaining queue each time.
+      const batch: MetricPin[] = [];
+      for (const pin of pending.values()) {
+        batch.push(pin);
+        if (batch.length === 8) break;
+      }
       for (const pin of batch) {
         invariant(
           pin.size <= 128 * 1024,

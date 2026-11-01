@@ -29,7 +29,12 @@ function receipts(text) {
 /** Overlap notices returned to the caller, and overlap answers it sent (metric 4). */
 export function coordinationOf(args, output) {
   const notices = [];
-  for (const r of receipts(output)) {
+  const records = receipts(output);
+  let body = {};
+  try {
+    body = JSON.parse(args.slice(3).find(arg => String(arg).trim().startsWith('{')) ?? '{}');
+  } catch {}
+  for (const r of records) {
     const n = r.overlapNotice ?? r.result?.overlapNotice;
     for (const item of n?.items ?? [])
       notices.push({
@@ -61,12 +66,44 @@ export function coordinationOf(args, output) {
   }
   const answers = [];
   if (['ack', 'overlap-acks'].includes(args[2])) {
-    let body = {};
-    try {
-      body = JSON.parse(args.at(-1));
-    } catch {}
     for (const a of body.answers ?? [body])
       answers.push({ noticeId: a.noticeId ?? null, choice: a.choice ?? 'accept-order' });
+  }
+  if (['land', 'finish'].includes(args[2]) && body.overlapAnswer === 'accept-order') {
+    const ids = new Set(),
+      files = new Set();
+    let rejected = false,
+      evidence = false;
+    for (const r of records) {
+      const overlap = (r.defaults ?? r.result?.defaults)?.overlap;
+      if (!overlap) continue;
+      if (overlap.status === 'unanswered') {
+        rejected = true;
+        continue;
+      }
+      evidence = true;
+      const named = overlap.notices ?? [];
+      for (const id of named) ids.add(id);
+      for (const file of overlap.files ?? []) files.add(file);
+      // Inline answers remove notices from the pending inbox. Their retained defaults
+      // receipt is still evidence that these notices were delivered to this agent.
+      for (let i = 0; i < Math.max(named.length, overlap.files?.length ?? 0); i++)
+        notices.push({
+          noticeId: named[i] ?? null,
+          file: overlap.files?.[i] ?? null,
+          with: [],
+          class: overlap.status === 'answered' ? 'blocking' : null,
+          reason: null,
+        });
+    }
+    if (ids.size) {
+      for (const noticeId of ids) answers.push({ noticeId, choice: body.overlapAnswer });
+    } else if (!rejected || evidence) {
+      // Older receipts name only files. Keep that scope: an inline answer with no
+      // identifiable notice must not acknowledge unrelated notices from earlier calls.
+      for (const notice of notices) if (notice.file) files.add(notice.file);
+      answers.push({ noticeId: null, files: [...files], choice: body.overlapAnswer });
+    }
   }
   return { notices, answers };
 }
@@ -103,7 +140,9 @@ export function startBroker(cli, callLog, { now = () => new Date().toISOString()
       const env = { ...process.env };
       for (const key of PASS) if (agent.env[key]) env[key] = agent.env[key];
       const execStartedAt = now();
-      execFile(
+      res.setHeader('Content-Type', 'application/x-ndjson');
+      res.flushHeaders();
+      const child = execFile(
         '/usr/local/bin/node',
         [cli, ...args],
         { cwd, env, maxBuffer: 64 << 20 },
@@ -139,9 +178,16 @@ export function startBroker(cli, callLog, { now = () => new Date().toISOString()
               ...coordinationOf(args, output),
             }) + '\n',
           );
-          reply({ stdout, stderr, code });
+          // Output already reached the caller; the last frame carries only the exit status.
+          reply({ code });
         },
       );
+      // Keep execFile's existing audit capture/buffer budget; forward the same bytes now,
+      // including partial lines, instead of withholding progress until the callback.
+      for (const stream of ['stdout', 'stderr'])
+        child[stream].setEncoding('utf8').on('data', chunk => {
+          if (!res.destroyed) res.write(JSON.stringify({ [stream]: chunk }) + '\n');
+        });
     });
   });
   server.requestTimeout = 0;

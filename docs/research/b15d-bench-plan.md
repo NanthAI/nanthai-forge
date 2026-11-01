@@ -122,7 +122,7 @@ landings per hour, correctness, cost, and how each handles agents touching the s
 
 ```diff
 -SOURCE WORKFLOW (Git + GitHub): your workspace is a git clone of NanthAI/forge-b15d-t3code; you are on branch `agent-<k>/<task>` (already created from main). Commit, `git push -u origin agent-<k>/<task>`, open a pull request with `gh pr create --base main --fill`, then add it to the merge queue with `gh pr merge --squash --auto`. The required check `bench-check` runs on the pull request and again in the merge queue; the queue merges when it passes. Follow progress with `gh pr checks` and `gh pr view --json state,mergedAt,mergeStateStatus`. If the pull request is removed from the queue or a check fails, fix it (bring in main with `git pull --no-rebase origin main` if needed), push, and enqueue again. Only use NanthAI/forge-b15d-t3code; never open pull requests anywhere else.
-+SOURCE WORKFLOW (Forge): your workspace is a Forge Lane of the hosted project b15d-t3code-hosted, already started for this task; run `nforge` commands from the workspace root. Land with `nforge agent . land --save '{"message":"<one-line summary>"}'`: it saves your edits, syncs with main, runs the project's check (`bash .bench/ci.sh`) on the project's runner and lands the change when it passes. Read the JSON receipt: `phase` `landed` means done. On a failed check it lists the failure (`nforge agent . log '{"operationId":"RUN_ID","stream":"stderr","tail":4096}'` reads more); fix and run `land --save` again. On a sync conflict it lists files with <<<<<<< lane / >>>>>>> main markers; resolve them and run `land --save` again. `nforge agent . status '{}'` shows your Lane. `nforge agent . land --help` lists options.
++SOURCE WORKFLOW (Forge): your workspace is a Forge Lane of the hosted project b15d-t3code-hosted, already started for this task; run `nforge` commands from the workspace root. Land with `nforge agent . land --save '{"message":"<one-line summary>"}'`: it saves your edits, syncs with main, runs the project's check (`bash .bench/ci.sh`) on the project's runner and lands the change when it passes. Read the JSON receipt: `phase` `landed` means done. On a failed check it lists the failure; fix and run `land --save` again. On a sync conflict it lists files with <<<<<<< lane / >>>>>>> main markers; resolve them and run `land --save` again. `nforge agent . status '{}'` shows your Lane. `nforge agent . land --save --help` lists options.
 ```
 
 - **Same check.** `bash .bench/ci.sh` on GitHub-hosted `ubuntu-latest`. GitHub: PR CI, merge
@@ -164,8 +164,9 @@ Recorded at the start and end of every **batch** (and of every cell inside it): 
 and its commit (`forge-cli/current/.commit`), GitHub main of nanthai-forge, the deployed Convex
 version (latest successful `convex-deploy.yml` head, whose `convex/` tree must equal the CLI
 commit's), the check workflow (`forge-check.yml` at main; `bench-ci.yml` at the fork base),
-the harness commit and a hash of its files, and the agent's provider, model, effort and CLI
-version. Any difference between a batch's start and end (a landing, a deploy, a CLI swap)
+the harness commit and a hash of its files (the streaming relay and hosted-only prompt
+change this pin; earlier buffered-relay results remain separate), and the agent's provider,
+model, effort and CLI version. Any difference between a batch's start and end (a landing, a deploy, a CLI swap)
 voids the batch. Both arms of a batch therefore always ran the same versions; versions may
 differ between batches and are reported per batch. A batch does not start while nanthai-forge
 has any workflow queued or running. The harness runs from a clean pinned checkout of a landed
@@ -250,7 +251,9 @@ union of both upstream changes), strict 10/10, all six suites green, no existing
 
 - **Forge, per cell at N ≥ 3**: overlap notices raised (time, task pair, file), delivered
   (returned to the agent in a CLI receipt; also checked in its transcript), acknowledged (ack
-  and choice), and whether both tasks of a pair then landed clean. A land refused until the
+  and choice, including inline `overlapAnswer` on land/finish), and whether both tasks of a pair
+  then landed clean. Inline answers use the retained receipt's notice IDs; older file-only
+  receipts match only those files. A land refused until the
   notice is answered (`OVERLAP_UNANSWERED`) counts as a delivered notice for its files. Per
   task: sync conflicts, failed checks, gate refusals (overlap, preflight; their time is in time
   to main, but answering one is not rework) and extra land attempts (re-lands after anything
@@ -326,9 +329,10 @@ batch that has a valid attempt or two void ones, and continues at the first that
 ## Disclosed differences
 
 - Forge agents' `nforge` runs through a relay outside the file sandbox (macOS sandboxes cannot
-  exec the setuid `/bin/ps` the CLI needs); the relay is a separate process, logs its own
-  overhead per call, and passes the agent's PATH and toolchain environment. Output arrives when
-  a call ends (no progress stream). This is a product gap.
+  exec the setuid `/bin/ps` the CLI needs); the relay streams stdout and stderr as they arrive,
+  including progress during a waiting command, just as GitHub commands do directly. It is a
+  separate process, logs its own overhead per call, and passes the agent's PATH and toolchain
+  environment. The final exit status and audit record follow command completion.
 - GitHub uses the merge queue for a green-main guarantee like Forge's; upstream t3code itself
   uses PR + push CI without a queue.
 - Forge reuses a machine object cache across cells; GitHub clones a fresh hub per cell, outside
