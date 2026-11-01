@@ -994,7 +994,10 @@ record per save. Immutable linked delta pages are project objects; bounded stagi
 transactions validate their order, counts and committed blob/recipe pins. A
 server-pinned input binds the exact baseline State, delta root, message and first
 attempt time. Source construction defaults to the fixed Convex worker, using the
-native State format and bounded, resumable changed-blob verification. Unchanged
+native State format and bounded, resumable changed-blob verification. One-window
+raw saves run in the Convex runtime to avoid Node cold starts; larger/recipe
+saves retain the resumable Node worker under the same execution and publication
+fences. Dispatch is transactional and adds no Node action. Unchanged
 paths are preserved from the verified baseline; no repository code runs.
 
 A trusted source-job completion schedules the save finalizer independently of the

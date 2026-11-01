@@ -13,6 +13,7 @@ import { convexStoreBlob } from './convex-storage-fake.mjs';
 import { interceptDefaultR2, storedBytes } from './default-r2.mjs';
 const store = await import(moduleUrl('../convex/projectConvexSourceStore.ts'));
 const worker = await import(moduleUrl('../convex/projectConvexSource.ts'));
+const nodeWorker = await import(moduleUrl('../convex/projectConvexSourceNode.ts'));
 const objects = await import(moduleUrl('../convex/projectConvexSourceObjects.ts'));
 const jobApi = await import(moduleUrl('../convex/projectSourceJobApi.ts'));
 const jobs = await import(moduleUrl('../convex/projectSourceJobs.ts'));
@@ -80,6 +81,10 @@ async function fixture() {
       if (hooks.failInsert && table === 'projectSourceSteps')
         throw Error('synthetic schedule transaction failure');
       return insert(table, value);
+    };
+    ctx.runAction = (ref, input) => {
+      assert.equal(getFunctionName(ref), 'projectConvexSourceNode:step');
+      return call(getFunctionName(ref), nodeWorker.step, input);
     };
     ctx.runMutation = async (ref, input) => {
       const name = getFunctionName(ref);
@@ -164,7 +169,9 @@ async function fixture() {
         ? worker.dispatch
         : task.name === 'projectConvexSource:step'
           ? worker.step
-          : null;
+          : task.name === 'projectConvexSourceNode:step'
+            ? nodeWorker.step
+            : null;
     assert(fn, task.name);
     return call(task.name, fn, task.args);
   };
@@ -198,7 +205,7 @@ test('ten-file save has one execution, atomic progress, lost-reply recovery and 
     await s.submit();
     const dispatch = s.scheduled.shift();
     assert.equal(dispatch.name, 'projectConvexSource:dispatch');
-    s.failures.add('projectConvexSourceStore:dispatch');
+    s.failures.add('projectConvexSource:dispatch');
     await assert.rejects(
       s.execute(dispatch),
       /lost reply/,
@@ -290,6 +297,12 @@ test('normal 10-file save stays within the end-to-end call budget', async t => {
     await s.execute(s.scheduled.shift());
     await s.execute(s.scheduled.shift());
     const job = await s.load();
+    assert(
+      !s.invocations.includes('projectConvexSourceNode:step'),
+      'small saves never enter Node or the fan-out pool',
+    );
+    assert.equal(s.tables.projectSourceTasks.size, 0);
+    assert.equal(s.scheduled.length, 1, 'only the existing publication action remains');
     await s.call('resultDownloadConvex', saveJobs.resultDownload, { projectId: s.projectId, jobId: job.id });
     const row = [...s.tables.projectObjects.values()].find(r => r.digest === job.output.sha256);
     const manifest = (await storedBytes(s, row)).toString();

@@ -313,7 +313,9 @@ function simulatedClock() {
   };
 }
 const isAction = item =>
-  item.name.startsWith('projectConvexSource:') || item.name.startsWith('projectConvexSourceTask:');
+  item.name.startsWith('projectConvexSource:') ||
+  item.name.startsWith('projectConvexSourceNode:') ||
+  item.name.startsWith('projectConvexSourceTask:');
 test('a job running far longer than the 60 s lease completes: every step and child completion renews it, with no extra calls', async () => {
   const plain = await scaleFixture({ parallelism: 1 });
   let expected;
@@ -349,7 +351,9 @@ test('after a failed step or child and an expired lease, one explicit trigger re
         return item.args.index === batch.total - 1;
       };
       s.failOnce.push(
-        mode === 'step' ? item => item.name === 'projectConvexSource:step' && item.args.step > 0 : lastChild,
+        mode === 'step'
+          ? item => item.name === 'projectConvexSourceNode:step' && item.args.step > 0
+          : lastChild,
       );
       await s.drain({ idle: false });
       let job = await s.job(id);

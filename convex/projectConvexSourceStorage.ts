@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-'use node';
 import type { ActionCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
-import { digest } from '../src/hash';
+import { digest } from '../src/portable-hash';
 import { invariant } from '../src/errors';
 import { r2Config, r2Key, presignGet } from './r2';
 import { storeSourceBytes } from './projectSourceBytes';

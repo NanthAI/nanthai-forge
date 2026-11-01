@@ -22,6 +22,7 @@ const names = [
   'projectHostedSourceTransferBatch',
   'projectHostedComposeSelection',
   'projectConvexSource',
+  'projectConvexSourceNode',
   'projectConvexSourceStore',
   'projectConvexSourceObjects',
 ];
@@ -77,7 +78,7 @@ export function controls(t, s) {
     const [file, method] = name.split(':');
     const fn = modules[file][method];
     checkArgs(fn, args, name);
-    if (file === 'projectConvexSource') return fn._handler(context, args);
+    if (fn.isAction) return fn._handler(context, args);
     if (
       ['commit', 'commitBatch', 'complete'].includes(method) &&
       [
@@ -94,6 +95,7 @@ export function controls(t, s) {
   const context = validateContext({
     storage,
     auth: { getUserIdentity: async () => ({ subject: 'owner' }) },
+    runAction: (ref, args) => invoke(getFunctionName(ref), args),
     runQuery: (ref, args) => invoke(getFunctionName(ref), args),
     runMutation: (ref, args) => invoke(getFunctionName(ref), args),
   });

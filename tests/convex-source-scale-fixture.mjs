@@ -11,6 +11,7 @@ import { hostedPayloadHash } from '../dist/hosted-source-operation.js';
 import { buildSavePages, saveBytes } from '../dist/hosted-save.js';
 import { digest } from '../dist/hash.js';
 const names = [
+  'projectConvexSource',
   'projectConvexSourceStore',
   'projectConvexSourceObjects',
   'projectConvexSourceFanout',
@@ -20,7 +21,10 @@ const modules = Object.fromEntries(
   await Promise.all(names.map(async n => [n, await import(moduleUrl(`../convex/${n}.ts`))])),
 );
 const actionUrls = Object.fromEntries(
-  ['projectConvexSource', 'projectConvexSourceTask'].map(n => [n, moduleUrl(`../convex/${n}.ts`)]),
+  ['projectConvexSource', 'projectConvexSourceNode', 'projectConvexSourceTask'].map(n => [
+    n,
+    moduleUrl(`../convex/${n}.ts`),
+  ]),
 );
 export const at = '2026-10-28T00:00:00.000Z';
 export async function scaleFixture({ parallelism = 4, delay = 0, guardRss = false, afterAction } = {}) {
@@ -171,7 +175,7 @@ export async function scaleFixture({ parallelism = 4, delay = 0, guardRss = fals
   const readCounts = new Map();
   async function run(item) {
     const [n, m] = item.name.split(':');
-    if (!actionUrls[n]) {
+    if (!actionUrls[n] || modules[n]?.[m]?.isMutation) {
       await invoke(item.name, item.args);
       return;
     }
@@ -202,7 +206,10 @@ export async function scaleFixture({ parallelism = 4, delay = 0, guardRss = fals
           try {
             let value;
             const a = message.args;
-            if (message.kind === 'mutation') {
+            if (message.kind === 'action-start') {
+              calls.push(a.name);
+              value = null;
+            } else if (message.kind === 'mutation') {
               if (a.name === 'projectConvexSourceFanout:complete') {
                 work--;
               }
@@ -256,7 +263,14 @@ export async function scaleFixture({ parallelism = 4, delay = 0, guardRss = fals
             });
           }
         });
-        child.send({ run: true, url: actionUrls[n], method: m, args: item.args, guardRss });
+        child.send({
+          run: true,
+          url: actionUrls[n],
+          nodeUrl: moduleUrl('../convex/projectConvexSourceNode.ts'),
+          method: m,
+          args: item.args,
+          guardRss,
+        });
       });
     } finally {
       child.kill();

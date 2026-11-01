@@ -65,6 +65,13 @@ process.on('message', async message => {
     };
     const ctx = {
       storage,
+      runAction: async (ref, args) => {
+        const name = getFunctionName(ref);
+        if (name !== 'projectConvexSourceNode:step') throw Error('unexpected nested action ' + name);
+        await rpc('action-start', { name });
+        const nodeWorker = await import(message.nodeUrl);
+        return nodeWorker.step._handler(ctx, args);
+      },
       runMutation: (ref, args) => rpc('mutation', { name: getFunctionName(ref), args }),
     };
     if (message.guardRss) {

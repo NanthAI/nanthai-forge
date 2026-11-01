@@ -1068,7 +1068,7 @@ export const transfer = internalMutation({
         },
       });
       await writeSyncState(ctx, sync.row._id, { ...sync.state, status: 'submitted' });
-      await ctx.scheduler.runAfter(0, makeFunctionReference<'action'>('projectConvexSource:dispatch'), {
+      await ctx.scheduler.runAfter(0, makeFunctionReference<'mutation'>('projectConvexSource:dispatch'), {
         projectId: input.projectId,
         jobId: sync.row.jobId,
       });

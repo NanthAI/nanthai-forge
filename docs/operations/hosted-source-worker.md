@@ -7,12 +7,39 @@ symlinks or executes repository commands. Check execution is separate from this 
 ## Default Convex provider
 
 Hosted save, compose and sync select `convex` by default. No source-worker secret
-or environment variable is required. `projectConvexSource:dispatch` runs the
-existing controller transitions inside one internal mutation: its reservation,
+or environment variable is required. `projectConvexSource:dispatch` is an internal mutation running the
+existing controller transitions: its reservation,
 fixed execution ID and first scheduled action commit together. A lost reply
 reconciles that execution. It cannot create another execution.
 
-`projectConvexSource:step` is a Node action. A small `projectSourceSteps` row holds
+`projectConvexSource:step` is a Convex-runtime action. A save with one delta
+page, a raw baseline up to 4 MiB and up to 8 MiB of raw changed objects finishes
+there, avoiding concurrent Node cold starts. Its input and delta page each fit
+128 KiB. These are runtime routing boundaries: other saves, compose, sync and
+retained continuations use `projectConvexSourceNode:step`, the same resumable
+Node worker. The fallback reuses the begin result and prepared descriptors;
+it does not allocate another execution or repeat the begin mutation. Both
+paths retain exact hash verification, current authority checks, result formats
+and the existing atomic commit/publication. Source bytes still go only to R2.
+There is no per-project small-save lock or application queue.
+
+The small-save source job uses six invocations: dispatch mutation, step action,
+begin mutation, two batched descriptor mutations and commit mutation. This was
+seven with the Node dispatch wrapper. Publication adds its existing action and
+two mutations. Large-job fallback adds one nested Node action, offset by removing
+the old dispatch action, so its function count does not increase. An ineligible
+save can reread its small input/page from R2; prepared metadata is reused and no
+additional descriptor RPC is needed. Input uploads and observer updates are
+separate from these worker counts.
+
+Convex documents 64 MiB for regular actions and 512 MiB for Node actions. Even
+S16 permits 64 actions of either runtime (but only eight scheduled jobs); S256
+permits 512 regular actions, 256 Node actions and 256 scheduled jobs. Convex
+scheduling applies those deployment limits. The four-slot application pool
+below governs child fan-out, not serial save steps. Its value is an application
+bound on expensive verification/merge children, not a Convex four-action limit.
+
+A small `projectSourceSteps` row holds
 the exact dispatch, execution ID, step number and a storage reference to progress.
 Progress references compressed metadata sections by hash and storage ID.
 Unchanged inventory, queued-digest lists and file trees are reused; queue
@@ -66,7 +93,7 @@ parents. Missing hints never prove independence. Missing coverage can increase
 metadata calls.
 
 The action reads committed project objects using internal storage locations and
-writes through Convex storage. R2 source bytes use the existing trusted object
+writes verified output bytes directly to R2. R2 source bytes use the existing trusted object
 store's signed URLs; there is no worker HTTP grant, callback or provider ingress.
 Repository bytes never choose executable code or a transfer host. No local disk
 or checkout is used. The same State ordering, modes, parents, timestamps and
@@ -88,9 +115,9 @@ write one progress blob, reusing unchanged compressed metadata sections. Each
 child similarly has one action, one begin mutation and one completion mutation,
 plus its metadata windows and progress/output storage. Forking and joining each
 add one mutation. Changing the cap changes scheduling order, not the number of
-work units or calls. Local dogfood fixtures measure 25 calls for a complete
-ten-file R2 save, including new object uploads, output storage and manifest file
-access. These are local fake-provider counts, not live latency or billing data.
+work units or calls. The synthetic 3,000-file dogfood fixture measures 21 calls for a complete
+ten-file R2 save, including new object uploads and result publication, with zero
+Convex byte-storage calls. These are local fake-provider counts, not live latency or billing data.
 
 `@convex-dev/workflow` 0.4.4 and its Workpool 0.4.7 development dependency
 were evaluated (both Apache-2.0). Neither is installed. Workpool retains a

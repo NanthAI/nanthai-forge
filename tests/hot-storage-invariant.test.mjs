@@ -26,7 +26,7 @@ const storageAllowlist = {
     '2027-01-31',
   ],
   'blobStore.ts read': [2, legacy, '2027-01-31'],
-  'projectConvexSource.ts read': [1, legacy, '2027-01-31'],
+  'projectConvexSourceTransport.ts read': [1, legacy, '2027-01-31'],
   'projectConvexSourceStorage.ts read': [1, legacy, '2027-01-31'],
   'projectGithubMirror.ts read': [1, legacy, '2027-01-31'],
   'projectR2Backfill.ts read': [

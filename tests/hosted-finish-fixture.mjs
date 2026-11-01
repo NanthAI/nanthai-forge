@@ -24,6 +24,7 @@ const convexSourceModules = Object.fromEntries(
   await Promise.all(
     [
       'projectConvexSource',
+      'projectConvexSourceNode',
       'projectConvexSourceTask',
       'projectConvexSourceFanout',
       'projectConvexSourceStore',
@@ -317,6 +318,7 @@ export async function finishFixture(
         // Provider dispatch IO; tests drive the run lifecycle directly.
       } else if (
         task.name.startsWith('projectConvexSource:') ||
+        task.name.startsWith('projectConvexSourceNode:') ||
         task.name.startsWith('projectConvexSourceTask:') ||
         task.name.startsWith('projectConvexSourceFanout:')
       ) {
@@ -327,18 +329,26 @@ export async function finishFixture(
           throw new TypeError('fetch failed');
         metrics.convexSourceCalls.push(task.name);
         if (task.name.endsWith(':dispatch')) metrics.sourceJobs++;
-        await convexSourceModules[task.name.split(':')[0]][task.name.split(':')[1]]._handler(
-          {
-            storage: sourceStorage,
-            runMutation: (ref, args) => {
-              const name = getFunctionName(ref),
-                [file, method] = name.split(':');
-              metrics.convexSourceCalls.push(name);
-              return tx(name, convexSourceModules[file][method], args);
-            },
+        const executeSource = async (name, args) => {
+          const [file, method] = name.split(':');
+          const fn = convexSourceModules[file][method];
+          return fn.isAction ? fn._handler(sourceContext, args) : tx(name, fn, args);
+        };
+        const sourceContext = {
+          storage: sourceStorage,
+          runAction: (ref, args) => {
+            const name = getFunctionName(ref);
+            metrics.convexSourceCalls.push(name);
+            return executeSource(name, args);
           },
-          input,
-        );
+          runMutation: (ref, args) => {
+            const name = getFunctionName(ref),
+              [file, method] = name.split(':');
+            metrics.convexSourceCalls.push(name);
+            return tx(name, convexSourceModules[file][method], args);
+          },
+        };
+        await executeSource(task.name, input);
         if (stop === 'after-source-callback' && task.name.endsWith(':dispatch')) {
           // Advance the exact source steps before simulating a lost completed reply.
           while (

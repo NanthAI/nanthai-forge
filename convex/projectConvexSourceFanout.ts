@@ -165,7 +165,7 @@ export const complete = sourceMutation({
     if (completed === batch.total) {
       const scheduledId = await ctx.scheduler.runAfter(
         0,
-        makeFunctionReference<'action'>('projectConvexSource:step'),
+        makeFunctionReference<'action'>('projectConvexSourceNode:step'),
         { projectId: args.projectId, jobId: args.jobId, step: args.step },
       );
       await ctx.db.patch(active.row._id, { scheduledId });

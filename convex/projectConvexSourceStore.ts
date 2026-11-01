@@ -127,7 +127,9 @@ export async function lookupConvexSource(
     ) {
       const scheduledId = await ctx.scheduler.runAfter(
         0,
-        makeFunctionReference<'action'>('projectConvexSource:step'),
+        makeFunctionReference<'action'>(
+          row.step === 0 ? 'projectConvexSource:step' : 'projectConvexSourceNode:step',
+        ),
         { projectId: args.projectId, jobId: args.jobId, step: row.step },
       );
       await ctx.db.patch(row._id, { scheduledId });
@@ -222,6 +224,7 @@ export const begin = sourceMutation({
     }
     return canonicalPayload({
       input: active.job.input,
+      jobKind: active.job.jobKind,
       dispatch: active.row.dispatch,
       executionId: active.row.executionId,
       cursor: active.row.cursor,
@@ -278,7 +281,7 @@ export const commit = sourceMutation({
     } else {
       const scheduledId = await ctx.scheduler.runAfter(
         0,
-        makeFunctionReference<'action'>('projectConvexSource:step'),
+        makeFunctionReference<'action'>('projectConvexSourceNode:step'),
         { projectId: args.projectId, jobId: args.jobId, step: args.step + 1 },
       );
       await ctx.db.patch(active.row._id, { scheduledId });

@@ -88,7 +88,7 @@ export async function submitHostedCompose(
   const job = await loadSourceJob(ctx, input.projectId, row.jobId);
   await ctx.scheduler.runAfter(
     0,
-    makeFunctionReference<'action'>(
+    makeFunctionReference<'action' | 'mutation'>(
       job.status === 'completed' || job.status === 'failed' || job.status === 'cancelled'
         ? 'projectHostedComposeJobs:complete'
         : 'projectConvexSource:dispatch',
