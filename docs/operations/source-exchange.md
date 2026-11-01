@@ -306,6 +306,18 @@ independent copies; executable modes, binary bytes and symlink target bytes are
 preserved, including dangling links. The same symlink handling applies to hosted
 main checkout.
 
+Warm checkouts use hash-verified machine objects directly, avoiding another
+per-Lane object-store copy before cloning the independent editing files. Older
+per-checkout object stores are still reusable when a machine object is missing.
+Copies are staged and hash-verified before a separate bounded durability pass
+fsyncs every regular file; directory flushes still precede the atomic install.
+Opening verifies source hashes without building syntax or line summaries for the
+whole tree. On save, overlap evidence for changed paths is derived lazily from
+the retained baseline objects, with their digest and private-file identity checked
+again. Successive saves reuse those compact original-baseline summaries; missing
+or corrupt baseline bytes leave evidence unavailable under the existing advisory
+rules. No extra server request is needed to build a summary.
+
 The install stages a complete selected directory before replacement. Dirty files,
 mode/link changes, local deletions and untracked content return `WORK_CONFLICT`
 with content preserved. Interrupted downloads leave the existing checkout intact;

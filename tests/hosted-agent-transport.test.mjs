@@ -2,7 +2,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { existsSync, readFileSync, readdirSync, writeFileSync, symlinkSync, mkdirSync } from 'node:fs';
+import {
+  existsSync,
+  readFileSync,
+  readdirSync,
+  writeFileSync,
+  symlinkSync,
+  mkdirSync,
+  renameSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { runPreflight } from '../dist/agent-preflight.js';
 import { effectiveAgentDefaults } from '../dist/agent-parallel-defaults.js';
@@ -11,7 +19,55 @@ import { agentFixture } from './hosted-agent-fixture.mjs';
 import { hostedAgentAddress } from '../dist/hosted-agent-cli.js';
 import { hostedAgentActions } from '../dist/hosted-agent-contract.js';
 import { hostedAgentRoot } from '../dist/hosted-agent-journal.js';
+import { HostedAgentTransport } from '../dist/hosted-agent-transport.js';
+import { recordLane } from '../dist/lane-registry.js';
 const errorCode = expected => error => error.code === expected;
+
+test('fresh open uses only its two checkout authorization reads and replay rechecks Lane access', async t => {
+  const s = agentFixture(t),
+    operationId = randomUUID();
+  await s.transport().dispatch('open', { laneId: s.lane.laneId, operationId });
+  assert.equal(s.calls.filter(call => call.name === 'projectHostedLanes:select').length, 2);
+  await s.transport().dispatch('open', { laneId: s.lane.laneId, operationId });
+  assert.equal(s.calls.filter(call => call.name === 'projectHostedLanes:select').length, 3);
+  // Capabilities still succeed; the selected Lane itself can no longer be read.
+  const query = s.exchange.client.query;
+  s.exchange.client.query = (reference, args) => {
+    if (args.laneId === s.lane.laneId) throw new Error('Lane access revoked');
+    return query(reference, args);
+  };
+  await assert.rejects(
+    s.transport().dispatch('open', { laneId: s.lane.laneId, operationId }),
+    errorCode('HOSTED_ACTION_FAILED'),
+  );
+});
+
+test('open rechecks Lane access before adopting a nested checkout', async t => {
+  const s = agentFixture(t),
+    previous = process.env.XDG_STATE_HOME;
+  process.env.XDG_STATE_HOME = join(s.root, '..', 'registry');
+  t.after(() => {
+    if (previous === undefined) delete process.env.XDG_STATE_HOME;
+    else process.env.XDG_STATE_HOME = previous;
+  });
+  await s.transport().dispatch('open', { laneId: s.lane.laneId });
+  const nested = join(`${s.root}.forge-client`, 'lanes', s.lane.laneId),
+    target = join(s.root, '..', 'adopted');
+  mkdirSync(join(nested, '..'), { recursive: true });
+  renameSync(s.root, nested);
+  recordLane({ laneId: s.lane.laneId, root: nested, ...s.address });
+  const query = s.exchange.client.query;
+  s.exchange.client.query = (reference, args) => {
+    if (args.laneId === s.lane.laneId) throw new Error('Lane access revoked');
+    return query(reference, args);
+  };
+  await assert.rejects(
+    new HostedAgentTransport(target, s.address, s.exchange).dispatch('open', { laneId: s.lane.laneId }),
+    errorCode('HOSTED_ACTION_FAILED'),
+  );
+  assert(existsSync(nested), 'an unauthorized open must not move the retained checkout');
+  assert.equal(existsSync(target), false);
+});
 for (const [action, api] of [
   ['start', 'projectHostedStart:start'],
   ['open', 'download'],

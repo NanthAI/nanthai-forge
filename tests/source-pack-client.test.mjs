@@ -100,10 +100,22 @@ test('Lane open reads one pack plus changed objects, and a second root reads onl
   assert.equal(readdirSync(machine).filter(name => !name.startsWith('.')).length, data.bytes.size);
 
   const second = transport(data.bytes, pack);
-  const warm = new HostedCheckoutCache(join(data.directory, 'b.forge-client'), second, undefined, machine);
+  const warm = new HostedCheckoutCache(
+    join(data.directory, 'b.forge-client'),
+    second,
+    undefined,
+    machine,
+    true,
+  );
   await warm.ensure(ids);
   assert.deepEqual(second.calls, { objects: 0, sourcePack: 0, downloads: 0 });
   assert.equal(warm.machineObjects, new Set(ids).size);
+  assert.equal(warm.objects, machine, 'verified immutable machine objects back the checkout directly');
+  assert.deepEqual(
+    readdirSync(join(warm.root, 'objects')),
+    [],
+    'a warm Lane must not clone the whole object store before cloning its editing files',
+  );
   for (const id of ids) assert.deepEqual(readFileSync(join(warm.objects, id)), data.bytes.get(id));
 });
 
@@ -145,12 +157,7 @@ test('missing, small or invalid packs fall back to per-object reads with exact b
   assert.equal(failed.sourcePack, 'failed');
   assert.equal(failed.packObjects, 0);
   for (const id of ids) assert.deepEqual(readFileSync(join(failed.objects, id)), data.bytes.get(id));
-  assert.deepEqual(readdirSync(failed.root).sort(), ['objects', 'overlap-text']);
-  assert.deepEqual(
-    readdirSync(join(failed.root, 'overlap-text')).sort(),
-    [...new Set(ids)].map(id => `${id}.json`).sort(),
-    'only verified fallback objects get disposable line summaries',
-  );
+  assert.deepEqual(readdirSync(failed.root), ['objects'], 'opening does not parse unchanged source');
 });
 
 test('pack objects are written only after their own digest matches', async t => {

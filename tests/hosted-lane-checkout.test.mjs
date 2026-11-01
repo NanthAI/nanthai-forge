@@ -16,11 +16,13 @@ import {
   renameSync,
   mkdirSync,
   readdirSync,
+  linkSync,
 } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { checkoutHostedLane } from '../dist/hosted-lane-checkout.js';
 import { readHostedLaneCheckout } from '../dist/hosted-lane-checkout-marker.js';
+import { captureHostedSave } from '../dist/hosted-save-capture.js';
 import { finishGates } from '../dist/agent-default-gates.js';
 import { runPreflight, preflightPlan } from '../dist/agent-preflight.js';
 import { effectiveAgentDefaults } from '../dist/agent-parallel-defaults.js';
@@ -140,6 +142,84 @@ test('full Lane checkout round-trips executable, regular, binary, live and dangl
   assert.equal(warm.downloadedObjects, 0);
   assert.equal(warm.downloadedBytes, 0);
 });
+
+test('a nested checkout lazily builds exact overlap evidence from its shared baseline objects', async t => {
+  const s = setup(t),
+    shared = join(s.directory, 'shared-objects');
+  await checkoutHostedLane(s.root, s.request(), s.transport, shared);
+  const cache = `${s.root}.forge-client`;
+  assert.equal(existsSync(join(cache, 'overlap-text')), false);
+  writeFileSync(join(s.root, 'src/a.txt'), 'second\n');
+  const capture = await captureHostedSave(s.root, join(s.directory, 'save'));
+  assert.equal(capture.changes.length, 1);
+  assert.deepEqual(capture.changes[0].evidence, {
+    baseBlob: s.files[0].blob,
+    ranges: [{ start: 0, end: 1 }],
+    symbols: [],
+  });
+  assert.equal(
+    readdirSync(join(cache, 'overlap-text')).length,
+    2,
+    'only original and changed text are summarized',
+  );
+});
+
+for (const mode of ['file', 'symlink'])
+  test(`machine ${mode} replacement after cache verification cannot install different source`, async t => {
+    const s = setup(t),
+      machine = join(s.directory, 'machine');
+    const previous = process.env.FORGE_OBJECT_CACHE;
+    process.env.FORGE_OBJECT_CACHE = machine;
+    t.after(() => {
+      if (previous === undefined) delete process.env.FORGE_OBJECT_CACHE;
+      else process.env.FORGE_OBJECT_CACHE = previous;
+    });
+    const file = s.files.find(file => file.mode === mode),
+      select = s.transport.select;
+    s.transport.select = async () => {
+      const selection = await select();
+      if (s.calls.select === 2) writeFileSync(join(machine, file.blob), 'tampered');
+      return selection;
+    };
+    const request = s.request();
+    await assert.rejects(checkoutHostedLane(s.root, request, s.transport), { code: 'INVALID_NATIVE_SOURCE' });
+    assert.equal(existsSync(s.root), false);
+    const recovered = await checkoutHostedLane(s.root, request, s.transport);
+    assert.deepEqual(readFileSync(join(machine, file.blob)), s.objects.get(file.blob));
+    assert.deepEqual(nativeFile(recovered.root, file.path).bytes, s.objects.get(file.blob));
+    writeFileSync(join(s.root, 'src/a.txt'), 'local edit\n');
+    assert.deepEqual(readFileSync(join(machine, s.files[0].blob)), s.objects.get(s.files[0].blob));
+  });
+for (const damage of ['permissions', 'symlink', 'hardlink'])
+  test(`a machine cache entry with unsafe ${damage} is refetched without denying the checkout`, async t => {
+    const s = setup(t),
+      machine = join(s.directory, 'machine'),
+      previous = process.env.FORGE_OBJECT_CACHE;
+    process.env.FORGE_OBJECT_CACHE = machine;
+    t.after(() => {
+      if (previous === undefined) delete process.env.FORGE_OBJECT_CACHE;
+      else process.env.FORGE_OBJECT_CACHE = previous;
+    });
+    mkdirSync(machine);
+    for (const [id, bytes] of s.objects) writeFileSync(join(machine, id), bytes, { mode: 0o600 });
+    const file = s.files[0],
+      path = join(machine, file.blob),
+      external = join(s.directory, 'preserved');
+    writeFileSync(external, s.objects.get(file.blob), { mode: 0o600 });
+    if (damage === 'permissions') chmodSync(path, 0o644);
+    else {
+      rmSync(path);
+      if (damage === 'symlink') symlinkSync(external, path);
+      else linkSync(external, path);
+    }
+    const result = await checkoutHostedLane(s.root, s.request(), s.transport);
+    assert.deepEqual(nativeFile(result.root, file.path).bytes, s.objects.get(file.blob));
+    assert.deepEqual(readFileSync(external), s.objects.get(file.blob));
+    assert.deepEqual(s.calls.downloads, [file.blob], 'only the damaged disposable entry is fetched');
+    assert.equal(lstatSync(path).nlink, 1);
+    assert.equal(lstatSync(path).mode & 0o077, 0);
+  });
+
 test('sparse marker retains omitted paths and exact baselines; expansion and full checkout are additive', async t => {
   const s = setup(t);
   await checkoutHostedLane(s.root, s.request({ paths: ['src'] }), s.transport);

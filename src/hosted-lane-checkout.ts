@@ -13,10 +13,12 @@ import { readSource } from './files.js';
 import { workLocked } from './work-lock.js';
 import { indexInstalledFiles, writeCheckoutStatIndex } from './checkout-stat-index.js';
 import { HostedCheckoutCache, type CheckoutObjectTransport } from './hosted-checkout-cache.js';
+import { machineObjectsDirectory } from './machine-object-store.js';
 import {
   checkoutPathExists,
   cleanHostedCheckout,
-  installHostedFiles,
+  stageHostedFiles,
+  flushHostedFiles,
   flushHostedCheckoutFiles,
 } from './hosted-checkout-files.js';
 import {
@@ -48,7 +50,13 @@ export async function checkoutHostedLane(
   root = resolve(root);
   mkdirSync(dirname(root), { recursive: true });
   root = join(realpathSync(dirname(root)), basename(root));
-  const cache = new HostedCheckoutCache(`${root}.forge-client`, transport, sharedObjects),
+  const cache = new HostedCheckoutCache(
+      `${root}.forge-client`,
+      transport,
+      sharedObjects,
+      machineObjectsDirectory(),
+      true,
+    ),
     lock = join(cache.root, 'lock'),
     previous = join(cache.root, 'previous'),
     receiptPath = join(cache.root, `${request.operationId}.json`);
@@ -142,7 +150,9 @@ export async function checkoutHostedLane(
   });
   if (operation.complete) return result(true);
   await cache.ensure([selection.head]);
-  const state = parseNativeState(readFileSync(join(cache.objects, selection.head)));
+  const stateBytes = readFileSync(join(cache.objects, selection.head));
+  invariant(digest(stateBytes) === selection.head, 'INVALID_NATIVE_SOURCE', 'Selected State bytes changed.');
+  const state = parseNativeState(stateBytes);
   const before = workLocked(lock, () => {
     recover();
     return baseline();
@@ -162,7 +172,7 @@ export async function checkoutHostedLane(
   identity(hostedLaneSelectionSchema.parse(await transport.select(request.laneId)));
   const stage = mkdtempSync(join(cache.root, 'checkout-'));
   try {
-    await installHostedFiles(stage, cache.objects, files);
+    await stageHostedFiles(stage, cache.objects, files);
     mkdirSync(join(stage, '.forge'), { mode: 0o700 });
     const marker: HostedLaneCheckoutMarker = {
       schema: 1,
@@ -176,7 +186,13 @@ export async function checkoutHostedLane(
       materialized: files.map(file => file.path),
     };
     durableReplace(join(stage, '.forge', hostedLaneMarkerName), JSON.stringify(marker));
-    await flushHostedCheckoutFiles(stage);
+    // Both barriers must finish before publication; their order inside a private
+    // stage is immaterial. Drain both even on failure before removing the stage.
+    const flushed = await Promise.allSettled([
+      flushHostedFiles(stage, files),
+      flushHostedCheckoutFiles(stage, files),
+    ]);
+    for (const result of flushed) if (result.status === 'rejected') throw result.reason;
     // Stats of the private stage carry over the rename, so the first save reads only edited files.
     const installed = indexInstalledFiles(stage, files);
     workLocked(lock, () => {
@@ -199,6 +215,9 @@ export async function checkoutHostedLane(
         syncDirectory(cache.root);
         writeCheckoutStatIndex(root, installed.since, installed.entries);
       }
+      // Nested Lanes share their caller's immutable objects. Retain that local
+      // cache location so saves can derive baseline evidence only when needed.
+      durableReplace(join(cache.root, 'overlap-objects.json'), JSON.stringify(cache.objects));
       operation.complete = true;
       durableReplace(receiptPath, JSON.stringify(operation));
       if (checkoutPathExists(previous)) rmSync(previous, { recursive: true });

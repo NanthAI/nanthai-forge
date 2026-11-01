@@ -1,18 +1,22 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
+import {
+  mkdtempSync,
+  mkdirSync,
+  writeFileSync,
+  rmSync,
+  readFileSync,
+  existsSync,
+  symlinkSync,
+  linkSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { digest } from '../dist/hash.js';
 import { classifyOverlap } from '../dist/hosted-overlap-evidence.js';
-import {
-  overlapTextSketch,
-  overlapTextEvidence,
-  fingerprintOverlapFile,
-  readOverlapText,
-} from '../dist/hosted-overlap-text.js';
+import { overlapTextSketch, overlapTextEvidence, readOverlapText } from '../dist/hosted-overlap-text.js';
 import { captureHostedSave } from '../dist/hosted-save-capture.js';
 import { hostedOverlapAdvice, mergeOverlapChanges } from '../dist/hosted-overlap.js';
 import { resolutionFixture } from './hosted-agent-resolution-fixture.mjs';
@@ -83,7 +87,7 @@ test('symbol evidence detects separate body changes in the same function, but no
   );
 });
 
-test('successive captures retain exact original base coordinates without reading baseline source bytes', async t => {
+test('successive captures lazily retain exact original base coordinates from verified cached bytes', async t => {
   const parent = mkdtempSync(join(tmpdir(), 'forge-overlap-precision-'));
   t.after(() => rmSync(parent, { recursive: true, force: true }));
   const root = join(parent, 'lane'),
@@ -115,16 +119,16 @@ test('successive captures retain exact original base coordinates without reading
   };
   const marker = join(root, '.forge/hosted-lane.json');
   writeFileSync(marker, JSON.stringify(state));
-  const original = join(parent, 'verification-object');
+  mkdirSync(join(cache, 'objects'), { recursive: true });
+  const original = join(cache, 'objects', s.original.sha256);
   writeFileSync(original, base, { mode: 0o600 });
-  const pin = await fingerprintOverlapFile(cache, original);
-  assert.equal(pin.sha256, s.original.sha256);
-  assert.equal(readOverlapText(cache, pin.sha256).lines.length, 40);
-  rmSync(original); // Only the sketch exists: capture cannot reread the original bytes.
+  assert.equal(existsSync(join(cache, 'overlap-text')), false, 'open needs no eager sketch');
   const first = base.replace('line 2\n', 'inserted\nline 2\n');
   writeFileSync(join(root, 'a.txt'), first);
   const captured = await captureHostedSave(root, join(parent, 'first'));
   assert.deepEqual(captured.changes[0].evidence.ranges, [{ start: 2, end: 2 }]);
+  assert.equal(readOverlapText(cache, s.original.sha256).lines.length, 40);
+  rmSync(original); // Subsequent saves reuse the original sketch after the object goes away.
   state.state.files[0].blob = digest(first);
   state.selection.head = digest('first saved state');
   writeFileSync(marker, JSON.stringify(state));
@@ -137,11 +141,38 @@ test('successive captures retain exact original base coordinates without reading
   assert.equal(projection.before.blob, s.original.sha256);
   assert.deepEqual(projection.evidence.ranges, [{ start: 30, end: 31 }]);
   assert(
-    !readFileSync(join(cache, 'overlap-text', `${pin.sha256}.json`), 'utf8').includes('line 30'),
+    !readFileSync(join(cache, 'overlap-text', `${s.original.sha256}.json`), 'utf8').includes('line 30'),
     'sketch holds hashes, not source lines',
   );
   assert.equal(overlapTextSketch(Buffer.from([0, 255])), null);
-  assert.equal(overlapTextEvidence(pin.sha256, null, null, false), undefined);
+  assert.equal(overlapTextEvidence(s.original.sha256, null, null, false), undefined);
+});
+
+test('lazy overlap evidence rejects corrupt, missing, oversized and linked baseline objects', t => {
+  const cache = mkdtempSync(join(tmpdir(), 'forge-overlap-lazy-'));
+  t.after(() => rmSync(cache, { recursive: true, force: true }));
+  mkdirSync(join(cache, 'objects'));
+  const bytes = Buffer.from('export function original() { return 1; }\n'),
+    blob = digest(bytes);
+  const path = join(cache, 'objects', blob),
+    outside = join(cache, 'original');
+  assert.equal(readOverlapText(cache, blob), null);
+  writeFileSync(path, 'corrupt');
+  assert.equal(readOverlapText(cache, blob), null);
+  assert.equal(existsSync(join(cache, 'overlap-text')), false);
+  rmSync(path);
+  writeFileSync(outside, bytes);
+  symlinkSync(outside, path);
+  assert.equal(readOverlapText(cache, blob), null);
+  rmSync(path);
+  linkSync(outside, path);
+  assert.equal(readOverlapText(cache, blob), null);
+  rmSync(path);
+  writeFileSync(path, Buffer.alloc(1024 * 1024 + 1));
+  assert.equal(readOverlapText(cache, blob), null);
+  writeFileSync(path, bytes);
+  assert.deepEqual(readOverlapText(cache, blob), overlapTextSketch(bytes));
+  assert.equal(readOverlapText(cache, '../original'), null);
 });
 
 test('blocking notices stay visible and preserve acknowledgements across changed evidence', () => {

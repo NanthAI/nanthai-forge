@@ -16,6 +16,7 @@ import { saveHostedLane } from './hosted-save-client.js';
 import { transitionHostedLane } from './hosted-lifecycle-client.js';
 import { hostedLifecycleRequestSchema } from './hosted-lifecycle.js';
 import { randomUUID } from 'node:crypto';
+import { sep } from 'node:path';
 import { hostedCheckRequestSchema, hostedSelfHostedRunnerSchema } from './hosted-check.js';
 import { hostedMacRuntime } from './hosted-mac-lease.js';
 import { checkEnvironment } from './check-environment.js';
@@ -410,7 +411,13 @@ export async function executeHostedAgent(
   }
   if (action === 'open') {
     const command = hostedAgentCommandSchemas.open.parse(input);
-    await session.query('projectHostedLanes:select', { laneId: command.laneId });
+    // Checkout authorizes before transfer and install. Journal hits skip it;
+    // adopting a nested copy also needs authorization before moving local files.
+    if (
+      session.journal.get('open-result') !== undefined ||
+      readLaneEntry(command.laneId)?.root.endsWith(`.forge-client${sep}lanes${sep}${command.laneId}`)
+    )
+      await session.query('projectHostedLanes:select', { laneId: command.laneId });
     return session.journal.retain('open-result', async () => {
       const movedFrom = adoptNestedLaneCopy(session.root, command.laneId, session.address);
       const opened = await checkoutHostedLane(

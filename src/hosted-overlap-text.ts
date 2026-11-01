@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import { mkdirSync, readFileSync, writeFileSync, renameSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
+import { lstatSync, mkdirSync, readFileSync, writeFileSync, renameSync, rmSync, realpathSync } from 'node:fs';
+import { isAbsolute, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { parser } from '@lezer/javascript';
 import type { SyntaxNode } from '@lezer/common';
@@ -9,7 +9,7 @@ import { digest } from './hash.js';
 import { attributionEdits, attributionLines } from './native-text-merge.js';
 import { durableReplace } from './native-durability.js';
 import { overlapEvidenceSchema, type OverlapEvidence } from './hosted-overlap-evidence.js';
-import { fingerprintPrivateFile } from './files.js';
+import { readSource } from './files.js';
 
 const limit = 1024 * 1024;
 const sketchSchema = z.object({
@@ -102,23 +102,35 @@ export function rememberOverlapSketch(cache: string, blob: string, sketch: Sketc
   }
 }
 export function readOverlapText(cache: string, blob: string): Sketch | null {
+  if (!/^[a-f0-9]{64}$/.test(blob)) return null;
   try {
-    return sketchSchema.parse(JSON.parse(readFileSync(sketchPath(cache, blob), 'utf8')));
+    if (lstatSync(cache).isSymbolicLink()) return null;
+    cache = realpathSync(cache);
   } catch {
     return null;
   }
-}
-/** Reuse the checkout's existing verification stream; no additional full-file read. */
-export async function fingerprintOverlapFile(cache: string, path: string) {
-  const chunks: Buffer[] = [];
-  let size = 0;
-  const pin = await fingerprintPrivateFile(path, 'INVALID_FILE_EXPORT', bytes => {
-    size += bytes.length;
-    if (size <= limit) chunks.push(Buffer.from(bytes));
-    else chunks.length = 0;
-  });
-  if (size === pin.size && size <= limit) rememberOverlapText(cache, pin.sha256, Buffer.concat(chunks));
-  return pin;
+  try {
+    return sketchSchema.parse(JSON.parse(readFileSync(sketchPath(cache, blob), 'utf8')));
+  } catch {
+    // Checkout retains verified immutable objects. Derive evidence only for a
+    // changed path, rather than parsing every file before the Lane can open.
+    // Revalidate the exact original bytes: stale/corrupt caches remain advisory.
+    try {
+      let bytes = readSource(cache, `objects/${blob}`, limit, blob);
+      if (!bytes) {
+        const reference = readSource(cache, 'overlap-objects.json', 4096);
+        const objects = reference ? JSON.parse(reference.toString('utf8')) : null;
+        if (typeof objects === 'string' && isAbsolute(objects) && !lstatSync(objects).isSymbolicLink())
+          bytes = readSource(realpathSync(objects), blob, limit, blob);
+      }
+      if (!bytes || digest(bytes) !== blob) return null;
+      const sketch = overlapTextSketch(bytes);
+      if (sketch) rememberOverlapSketch(cache, blob, sketch);
+      return sketch;
+    } catch {
+      return null;
+    }
+  }
 }
 export function overlapTextEvidence(
   baseBlob: string,

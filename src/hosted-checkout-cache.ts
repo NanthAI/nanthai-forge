@@ -3,7 +3,7 @@ import { lstatSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { chmod, open, rename, rm } from 'node:fs/promises';
 import { mapExchange } from './exchange-parallel.js';
 import { join } from 'node:path';
-import { fingerprintOverlapFile, rememberOverlapText } from './hosted-overlap-text.js';
+import { fingerprintPrivateFile } from './files.js';
 import { invariant } from './errors.js';
 import { syncDirectory } from './native-durability.js';
 import { checkoutPathExists } from './hosted-checkout-files.js';
@@ -11,6 +11,7 @@ import type { ContentPin } from './native-exchange.js';
 import type { SourcePackDownload } from './source-pack.js';
 import { downloadSourcePack, unpackSourcePackObjects } from './source-pack-archive.js';
 import { cloneFile, machineObjectsDirectory, rememberObject } from './machine-object-store.js';
+import { neverIndex } from './forge-disk.js';
 export interface CheckoutObjectTransport {
   readonly objectPageSize?: number;
   objects(digests: string[]): Promise<ContentPin[]>;
@@ -33,17 +34,26 @@ export class HostedCheckoutCache {
   packBytes = 0;
   sourcePack: 'used' | 'missing' | 'failed' | null = null;
   readonly objects: string;
+  private readonly fallbackObjects: string | null;
   constructor(
     readonly root: string,
     private readonly transport: CheckoutObjectTransport,
     objects = join(root, 'objects'),
     private readonly machine: string | null = machineObjectsDirectory(),
+    directMachine = false,
   ) {
     mkdirSync(root, { recursive: true, mode: 0o700 });
     invariant(!lstatSync(root).isSymbolicLink(), 'UNSAFE_PATH', 'Client cache must be real.');
-    this.objects = objects;
-    mkdirSync(this.objects, { recursive: true, mode: 0o700 });
-    invariant(!lstatSync(this.objects).isSymbolicLink(), 'UNSAFE_PATH', 'Client objects must be real.');
+    // The machine store already contains independent immutable objects. Verify
+    // them there and clone once into the editing tree, rather than first cloning
+    // every object into another disposable per-Lane store.
+    this.objects = directMachine && machine ? machine : objects;
+    this.fallbackObjects = this.objects === machine ? objects : machine;
+    for (const directory of new Set([objects, this.objects])) {
+      mkdirSync(directory, { recursive: true, mode: 0o700 });
+      invariant(!lstatSync(directory).isSymbolicLink(), 'UNSAFE_PATH', 'Client objects must be real.');
+    }
+    if (this.objects === this.machine) neverIndex(this.objects);
   }
   async ensure(ids: string[]) {
     const unique = [...new Set(ids)];
@@ -52,15 +62,28 @@ export class HostedCheckoutCache {
       const path = join(this.objects, id);
       if (!checkoutPathExists(path)) return false;
       const stat = lstatSync(path);
+      // A machine entry is disposable, including one with unsafe permissions or
+      // links. Refetch it instead of turning cache damage into a denied open.
+      if (
+        this.objects === this.machine &&
+        (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1 || Boolean(stat.mode & 0o077))
+      )
+        return false;
       invariant(
         stat.isFile() && !stat.isSymbolicLink() && stat.nlink === 1,
         'UNSAFE_PATH',
         'Client object path must be a private regular file.',
       );
-      return (await fingerprintOverlapFile(this.root, path)).sha256 === id;
+      const actual =
+        this.objects === this.machine
+          ? await fingerprintPrivateFile(path).catch(() => null)
+          : await fingerprintPrivateFile(path);
+      const valid = actual?.sha256 === id;
+      if (valid && this.objects === this.machine) this.machineObjects++;
+      return valid;
     });
     let missing = unique.filter((_, index) => !cached[index]);
-    if (missing.length && this.machine) missing = await this.fromMachine(missing);
+    if (missing.length && this.fallbackObjects) missing = await this.fromCache(missing);
     if (missing.length >= checkoutPackMinimum && this.transport.sourcePack && this.sourcePack === null)
       missing = await this.fromPack(missing);
     const pageSize = this.transport.objectPageSize ?? 100;
@@ -103,7 +126,7 @@ export class HostedCheckoutCache {
           'Downloaded source must be a regular file.',
         );
         await chmod(path, 0o600);
-        const actual = await fingerprintOverlapFile(this.root, path);
+        const actual = await fingerprintPrivateFile(path);
         invariant(
           actual.sha256 === pin.sha256 && actual.size === pin.size,
           'INVALID_NATIVE_SOURCE',
@@ -127,28 +150,35 @@ export class HostedCheckoutCache {
       rmSync(temporary, { recursive: true, force: true });
     }
   }
-  /** Verified clones from the machine store; a bad entry is dropped and fetched again. */
-  private async fromMachine(ids: string[]) {
+  /** Reuse the machine store, or older per-checkout objects on the direct-machine path. */
+  private async fromCache(ids: string[]) {
     const temporary = mkdtempSync(join(this.root, 'machine-'));
     try {
       const found = await mapExchange(ids, checkoutIoConcurrency, async id => {
-        const source = join(this.machine!, id),
+        const source = join(this.fallbackObjects!, id),
           path = join(temporary, id);
         if (!checkoutPathExists(source)) return false;
+        const stat = lstatSync(source);
+        if (this.fallbackObjects !== this.machine)
+          invariant(
+            stat.isFile() && !stat.isSymbolicLink() && stat.nlink === 1,
+            'UNSAFE_PATH',
+            'Client object path must be a private regular file.',
+          );
         try {
           await cloneFile(source, path);
           await chmod(path, 0o600);
           invariant(
-            (await fingerprintOverlapFile(this.root, path)).sha256 === id,
+            (await fingerprintPrivateFile(path)).sha256 === id,
             'INVALID_NATIVE_SOURCE',
             'Machine object differs.',
           );
         } catch {
-          await rm(source, { force: true });
+          if (this.fallbackObjects === this.machine) await rm(source, { force: true });
           return false;
         }
         await rename(path, join(this.objects, id));
-        this.machineObjects++;
+        if (this.fallbackObjects === this.machine) this.machineObjects++;
         return true;
       });
       return ids.filter((_, index) => !found[index]);
@@ -175,13 +205,12 @@ export class HostedCheckoutCache {
         archive,
         unpacked,
         blob => wanted.has(blob) || (this.machine !== null && !checkoutPathExists(join(this.machine, blob))),
-        (blob, bytes) => rememberOverlapText(this.root, blob, bytes),
       );
       await rm(archive, { force: true });
       await mapExchange(written, checkoutIoConcurrency, async id => {
         const path = join(unpacked, id);
-        await rememberObject(this.machine, path, id);
-        if (wanted.has(id)) await rename(path, join(this.objects, id));
+        if (this.objects !== this.machine) await rememberObject(this.machine, path, id);
+        if (wanted.has(id) || this.objects === this.machine) await rename(path, join(this.objects, id));
       });
       for (const id of written) if (wanted.delete(id)) this.packObjects++;
       this.packBytes = pack.size;
