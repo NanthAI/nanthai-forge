@@ -61,7 +61,7 @@ The critical path is Bet 1: **B1.2a → B1.2b–d → B1.2e → B1.5a → B1.5b 
 | 5.5 | B1.6a–c, B1.7, B1.8 deletions; P5-SG Git source layer and projection deletions | B2.2 policy gate; SP2 merge spike; V1 vocabulary design |
 | 5.6 | B1.9 table purge (owner approves) | B2.3 audit; B2.4a–b culprit finding; B3.2 semantic conflict; B3.4 declaration merge; V2a |
 | 5.7 | | B2.5, B2.6 (owner approves defaults); B3.3; V2b, V3; B3.5 re-measure including R3 |
-| 5.8 | | X2 end-of-phase items; exit criteria; outside-user trial preparation |
+| 5.8 | | X2 end-of-phase items; exit criteria |
 
 ## Where the plan stands
 
@@ -86,14 +86,14 @@ Phase 5 started on 2026-10-25 and is in its last stage (5.8). **Phase 5 stays op
 | E2 | replaced | By B1.5d (owner, 2026-10-29). |
 | B3.1, B3.2, B3.3a–b | done | Overlap at first write, semantic conflict, overlaps in Now. |
 | B3.4 declaration-level merge | not started | Dated: waits for at least 20 cases (Issue 82e8ddb8). |
-| B3.5 re-measure and R3 | not started | Exit criterion 2 needs it. |
+| B3.5 re-measure and R3 | not started | Folded into B1.5d as its coordination section (owner, 2026-11-01): overlap notices delivered and acknowledged (metric 4) in the Forge arm, conflicts and rework in the GitHub arm. Exit criterion 2 needs it. |
 | V1, V2a | done | `start`, `save` and `land` with operator verbs under `nforge x`. |
 | V2b, V3 | not started | Moved to Phase 6 (Issue df34d40f). |
 | X2 end-of-phase items | partial | Bundle hygiene done; generated hotspot files and observe-only checks are not found landed (Issue f93a8c2c). |
 | G1–G3, G6 gate parity | done | Actions warm cache, shards, scoped checks, runner label. G4 and G5 are unfrozen; see the unfreeze decisions (Issues 82fbf17f, b083afb6). |
 | G7 per-machine cache | partial | Direct R2 reads exist; the machine-wide object cache is part of the packs work (Issue 13475957). |
 | G8 gate time, dollars per landing, E3 re-run | not started | Issue 39942bfe. |
-| Exit criterion 5 outside-user trial | not started | Needs the import time above and newcomer docs (Issue 59aaeb23). |
+| Exit criterion 5 import with no Mac | not started | Needs the import time above and true docs. The outside-user trial is not a Phase 5 gate (owner, 2026-11-01): nothing is published and no outside user is invited until the owner decides. |
 
 ## Self-metrics (first)
 
@@ -592,7 +592,7 @@ Each result is published next to the 2.36× burst-4 figure in [why-forge](why-fo
 ### B3.5. Re-measure, including R3
 
 - **Size:** M. **Depends on:** B3.1 with its acknowledgement metric, B3.2–B3.4, E2.
-- **Changes:** rerun E1, then the coordination benchmark (forge-bench R3) using metric 4. A no-model preflight of every arm runs first. R3 does not run before B3.1 exists.
+- **Changes:** rerun E1, then the coordination benchmark (forge-bench R3) using metric 4. A no-model preflight of every arm runs first. R3 does not run before B3.1 exists. **Owner decision 2026-11-01:** R3 runs inside B1.5d (same cells, same tasks; its overlapping tasks carry the coordination signal). B3.4 is not built (its 20-case data gate is unmet) and the report says so.
 - **Acceptance:** a valid R3 result for every arm, published next to E1–E3 whichever way it goes.
 
 ## Vocabulary consolidation (V)
@@ -685,18 +685,18 @@ A check must not share its machine with agents' builds or test runs: on 2026-10-
 Phase 5 closes when all of these hold:
 
 1. Each bet metric and metric 5 are met, or honestly reported with the measured value and the reason.
-2. E1–E3 and R3 are published next to the 2.36× figure.
+2. E1–E3 and R3 are published next to the 2.36× figure. B1.5d replaces E2 and carries R3 as its coordination section (owner, 2026-11-01); it must run end to end under its pre-registered plan.
 3. Bet 1 is cut over with one authority, and B1.6–B1.8 have landed with LOC removed reported.
 4. The Q4 lifecycle drill passes.
-5. The outside-user trial is ready to start: newcomer docs and a first project through GitHub import work for someone who did not build Forge.
+5. A GitHub import works with no Mac in 5 minutes or less, and the docs are true. (Owner, 2026-11-01: the outside-user trial and any publishing, including npm and prod, wait for an owner decision and are not exit gates.)
 
 Where each stands (2026-10-31):
 
 1. **Partly met.** Metrics slices 1–3 are live; several rows are still partly unknown (see the baseline note).
-2. **Not met.** E1 and E3 are published; E2 was replaced by B1.5d, whose Forge arm is not published; R3 (B3.5) is not started. **Owner decision: Phase 5 stays open until this is met.**
+2. **Not met.** E1 and E3 are published; E2 was replaced by B1.5d, whose Forge arm is not published; R3 (B3.5) runs inside B1.5d. The first B1.5d attempt on 2026-11-01 was stopped: the Forge arm ran a stale CLI build and a preflight audit found seven harness blockers; both are being fixed before a full re-run. **Owner decision: Phase 5 stays open until this is met.**
 3. **Mostly met.** Cutover applied 2026-10-28 and B1.6–B1.8 landed; B1.9 (the table purge, with `nforge serve` and the native-owner code) is dated about 2026-11-09. LOC removed is in the builders' handoffs; no summary is published.
 4. **Met.** The Q4 lifecycle drill passed on GitHub runners.
-5. **Not met.** **Owner decision: Phase 5 stays open until an import works with no Mac in 5 minutes or less.** The no-Mac import landed in `84741d8e`; on t3code it takes 16 min 56 s today. Newcomer docs and a quickstart tested by someone who did not build Forge are not done.
+5. **Not met.** **Owner decision: Phase 5 stays open until an import works with no Mac in 5 minutes or less.** The no-Mac import landed in `84741d8e`; on t3code it takes 16 min 56 s today. The docs must describe the hosted path truthfully; a stranger trial is not required (owner, 2026-11-01).
 
 ## Review coverage
 
