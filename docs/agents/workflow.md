@@ -45,6 +45,8 @@ nforge agent ROOT start '{"planningItemId":"ISSUE_ID"}'                  # Lane 
 
 `start {planningItemId}` starts an Intent with the Issue's id, title and body and moves the Issue to `in-progress`; another start on an in-progress Issue adds a Lane. When the Intent completes or is abandoned, the next `planning` read closes (or abandons) the Issue, naming what it changed and how to undo it; pass `reconcile:false` to read without changing anything. Older deployments return `HOSTED_ACTION_UNSUPPORTED` with an upgrade message. MCP: `forge_planning`.
 
+The planned hosted Intent uses the Issue UUID as its identity; an empty legacy `intentIds` array does not mean the Issue has no Intent. Read the returned `intent` status. Hosted acceptance currently completes selected Lanes, but does not complete their Intents, so landing alone does not trigger the planning reconciliation above. A closed Issue still needs evidence for its acceptance; a landing receipt by itself does not prove every acceptance line.
+
 ## Working on Forge, not GitHub
 
 - Run only the tests your change affects, plus typecheck, lint and format checks on touched files. Never run the full suite locally: `land --save` runs the project's check on the project's runner for the combined work of concurrent Lanes.
