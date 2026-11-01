@@ -6,10 +6,11 @@ import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { gatedFixture, until } from './landing-worker-fixture.mjs';
+import { gatedFixture, mainAuditSettled, until } from './landing-worker-fixture.mjs';
 import { fixture } from './landing-batch-fixture.mjs';
 import { watchLandingWorker } from '../dist/landing-worker.js';
 import { withLandingController } from '../dist/landing-worker-context.js';
+import { readMainAuditState } from '../dist/post-accept-state.js';
 import { readLandingHandle } from '../dist/land-receipt.js';
 import { indexedReceiptPeers } from '../dist/agent-receipt-peers.js';
 
@@ -110,6 +111,7 @@ await watchLandingWorker(new WorkStore(process.argv[1]),controller.signal);`,
     } else f.release();
     await until(f, () => readLandingHandle(f.store, operationId).result.complete, 'desired landing settled');
     await stop(worker);
+    await mainAuditSettled(f);
     assert.doesNotMatch(workerErrors, /Unhandled|Error:/);
     const outcome = (await f.agent.dispatch({ action: 'landing', operationId })).result;
     assert.deepEqual(outcome.handle, handle);
@@ -132,6 +134,40 @@ await watchLandingWorker(new WorkStore(process.argv[1]),controller.signal);`,
     t.diagnostic(JSON.stringify({ boundary, droppedLandings: 0, operatorMutationsToSettle: 0, checks: 1 }));
   });
 }
+
+test('replay: a held post-accept audit keeps publishing Work after the landing is complete', async t => {
+  const f = await gatedFixture(t),
+    lane = await saved(f),
+    operationId = randomUUID();
+  await f.agent.dispatch({ action: 'land', operationId, laneIds: [lane.laneId] });
+  const controller = new AbortController(),
+    worker = watchLandingWorker(f.store, controller.signal);
+  t.after(async () => {
+    f.release();
+    controller.abort();
+    await worker;
+  });
+  await until(f, () => f.started, 'candidate check started');
+  f.pass();
+  await until(f, () => readLandingHandle(f.store, operationId).result.complete, 'desired landing settled');
+  const complete = f.store.revision();
+  controller.abort();
+  await worker;
+  // The audit check connects to the gate after the landing is complete and stays
+  // running: a revision sampled at `complete` is already stale.
+  await until(f, () => f.open > 0, 'audit check running');
+  assert.ok(f.store.revision() > complete, 'the audit published Work after the landing was complete');
+  let settled = false;
+  const audit = mainAuditSettled(f).then(() => {
+    settled = true;
+  });
+  await new Promise(resolve => setTimeout(resolve, 300));
+  assert.equal(settled, false, 'mainAuditSettled must wait for the audit that is still running');
+  f.release();
+  await audit;
+  assert.equal(readMainAuditState(f.store).status, 'idle');
+  assert.ok(f.store.load().runs.every(run => run.endedAt));
+});
 
 test('fresh operation ids reuse the pending and terminal handle, including a mixed selection', async t => {
   const f = await fixture(t, { remote: false }),

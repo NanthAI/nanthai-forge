@@ -8,10 +8,11 @@ import { createServer } from 'node:net';
 import { join } from 'node:path';
 import { fixture } from './landing-batch-fixture.mjs';
 import { landingWorkerStates } from '../dist/landing-worker-status.js';
+import { readMainAuditState } from '../dist/post-accept-state.js';
 
 // Subscribe before reading; coalesce writes rather than decoding all Work every
 // 30 ms. Keep the original 20-second failure bound and reread at that boundary.
-export function until(f, read, message, signal) {
+export function until(f, read, message, signal, limitMs = 20_000) {
   const states = join(f.store.directory, 'landing-workers');
   mkdirSync(states, { recursive: true });
   return new Promise((resolve, reject) => {
@@ -77,7 +78,7 @@ export function until(f, read, message, signal) {
             ),
           );
         }
-      }, 20_000);
+      }, limitMs);
       if (signal?.aborted) aborted();
       else changed();
     } catch (error) {
@@ -95,6 +96,22 @@ export function runningChildRun(store) {
   } finally {
     tx.dispose();
   }
+}
+
+// Accepting a landing wakes a detached main-audit driver. It starts a moment
+// after the landing is complete and keeps publishing Work (post-accept move,
+// main-check run, run progress) until it saves `idle`. The landing is complete
+// before that, so a Work revision sampled right after `complete` is only
+// comparable once the audit is over. The audit has its own wall bound: it runs
+// a real check process, which load can stretch.
+export function mainAuditSettled(f, signal) {
+  return until(
+    f,
+    () => readMainAuditState(f.store)?.status === 'idle' && f.store.load().runs.every(run => run.endedAt),
+    'main audit settled',
+    signal,
+    60_000,
+  );
 }
 
 export function settledLandingEntries(store, ids) {
@@ -176,6 +193,11 @@ export async function gatedFixture(t) {
     release();
     await new Promise(resolve => server.close(resolve));
   });
+  // Ends the checks that are running now without latching: a check that
+  // connects later (the post-accept audit) stays running until release().
+  const pass = () => {
+    for (const socket of connections) socket.end();
+  };
   await f.agent.dispatch({
     action: 'define-check',
     checkId: f.store.load().checks[0].id,
@@ -192,6 +214,10 @@ socket.on('error',()=>process.exit(1));socket.resume();`,
     get started() {
       return started;
     },
+    get open() {
+      return connections.size;
+    },
+    pass,
     release,
   };
 }
