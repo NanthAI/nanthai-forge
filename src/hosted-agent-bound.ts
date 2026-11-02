@@ -479,7 +479,9 @@ async function submitBoundAgent(
           transport: 'hosted',
           terminal: observed.every(r => r.result.status === 'terminal'),
           complete: observed.every(
-            r => z.object({ status: z.string() }).parse(r.result.run).status === 'passed',
+            r =>
+              r.result.status === 'terminal' &&
+              z.object({ status: z.string() }).parse(r.result.run).status === 'passed',
           ),
           runs: observed.map(r => r.result),
         },

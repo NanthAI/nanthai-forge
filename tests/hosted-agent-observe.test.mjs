@@ -3,6 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { getFunctionName } from 'convex/server';
+import { ForgeError } from '../dist/errors.js';
 import { ConvexError } from 'convex/values';
 import { observeHostedRun } from '../dist/hosted-agent-observe.js';
 import { registerHostedAgentWorkflow } from '../dist/mcp-hosted-agent.js';
@@ -136,8 +137,8 @@ test('timeout and request cancellation close the selected subscription without c
   assert(s.calls.every(call => /capabilities|:status$/.test(call.name)));
 });
 
-test('revocation, transport failure and invalid source/run identity remain explicit and close live observation', async t => {
-  for (const failure of ['revoke', 'transport', 'identity']) {
+test('revocation and invalid source/run identity remain explicit and close live observation', async t => {
+  for (const failure of ['revoke', 'identity']) {
     const s = fixture(t);
     const waiting = observeHostedRun(s.transport(), { runId: s.runId }, undefined, undefined, s.subscribe);
     const rejection = assert.rejects(waiting, {
@@ -213,13 +214,58 @@ test('a synchronous subscription setup failure still closes its client', async t
   await assert.rejects(
     observeHostedRun(s.transport(), { runId: s.runId }, undefined, undefined, () => ({
       onUpdate() {
-        throw new Error('Synthetic setup failure');
+        throw new ConvexError({ code: 'SOURCE_UNAVAILABLE', message: 'Synthetic setup failure' });
       },
       async close() {
         closed = true;
       },
     })),
-    { code: 'HOSTED_ACTION_FAILED' },
+    { code: 'SOURCE_UNAVAILABLE' },
   );
   assert(closed);
+});
+
+test('run observation retries HTTP 502 and returns the actual passed outcome', async t => {
+  const s = fixture(t),
+    transport = s.transport(),
+    events = [];
+  const dispatch = transport.dispatch.bind(transport);
+  let attempts = 0;
+  transport.dispatch = async (...args) => {
+    if (++attempts === 1) throw new ForgeError('EXCHANGE_REQUEST_FAILED', 'HTTP 502');
+    return dispatch(...args);
+  };
+  s.current({ status: 'passed' });
+  const result = await observeHostedRun(
+    transport,
+    { runId: s.runId },
+    undefined,
+    e => events.push(e),
+    s.subscribe,
+  );
+  assert.equal(result.result.run.status, 'passed');
+  assert.equal(attempts, 2);
+  assert.equal(events[0].type, 'observation-retry');
+  assert.equal(events[0].retryAfterMs, 2000);
+  assert.equal(s.counts().opens, 0);
+});
+
+test('persistent run observation outage reaches the deadline as in progress', async t => {
+  const s = fixture(t),
+    transport = s.transport();
+  let attempts = 0;
+  transport.dispatch = async () => {
+    attempts++;
+    throw new ForgeError('EXCHANGE_REQUEST_TIMEOUT', 'Synthetic timeout');
+  };
+  const result = await observeHostedRun(
+    transport,
+    { runId: s.runId, timeoutSeconds: 0.01 },
+    undefined,
+    undefined,
+    s.subscribe,
+  );
+  assert.equal(result.result.status, 'timeout');
+  assert.equal(result.result.inProgress, true);
+  assert.equal(attempts, 1);
 });

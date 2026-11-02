@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { retryHostedObservation } from './hosted-observation-retry.js';
 import { makeFunctionReference } from 'convex/server';
 import { hostedRunSubscription, type HostedRunSubscription } from './hosted-agent-observe.js';
 import type { HostedAgentAddress } from './hosted-agent-contract.js';
@@ -47,17 +48,36 @@ export async function waitHostedAgentSource(
   subscribe: () => HostedRunSubscription = () => hostedRunSubscription(address),
   kind: 'Sync' | 'Saves' | 'Compose' = 'Sync',
 ) {
+  let latest = initial;
+  return retryHostedObservation({
+    timeoutSeconds: 60,
+    signal,
+    emit: event => process.stderr.write(`${JSON.stringify(event)}\n`),
+    pending: () => sourceWaitSnapshot(latest),
+    attempt: (_remaining, signal) =>
+      waitHostedAgentSourceOnce(address, operationId, latest, signal, subscribe, kind, value => {
+        latest = value;
+      }),
+  });
+}
+async function waitHostedAgentSourceOnce(
+  address: HostedAgentAddress,
+  operationId: string,
+  initial: unknown,
+  signal: AbortSignal,
+  subscribe: () => HostedRunSubscription,
+  kind: 'Sync' | 'Saves' | 'Compose',
+  remember: (value: unknown) => void,
+) {
   initial = sourceWaitSnapshot(initial);
   if (stopped(initial)) return initial;
   if (signal?.aborted) return initial;
   let latest = initial;
   const client = subscribe();
   let unsubscribe: (() => void) | undefined;
-  let timer: ReturnType<typeof setTimeout> | undefined;
   let stop: (() => void) | undefined;
   try {
     return await new Promise<unknown>((resolve, reject) => {
-      timer = setTimeout(() => resolve(sourceWaitSnapshot(latest)), 60_000);
       stop = () => resolve(sourceWaitSnapshot(latest));
       signal?.addEventListener('abort', stop, { once: true });
       if (signal?.aborted) return stop();
@@ -69,7 +89,10 @@ export async function waitHostedAgentSource(
             const progress = typeof value === 'string' ? JSON.parse(value) : value;
             const observed = sourceWaitSnapshot(progress);
             if (stopped(observed)) resolve(observed);
-            else if (progress?.jobId) latest = observed;
+            else if (progress?.jobId) {
+              latest = observed;
+              remember(observed);
+            }
           } catch (error) {
             reject(error);
           }
@@ -78,7 +101,6 @@ export async function waitHostedAgentSource(
       );
     });
   } finally {
-    if (timer) clearTimeout(timer);
     if (stop) signal?.removeEventListener('abort', stop);
     try {
       unsubscribe?.();

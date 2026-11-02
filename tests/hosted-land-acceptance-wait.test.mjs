@@ -14,7 +14,8 @@ async function fixture(t, checkOnly = false) {
   const operationId = randomUUID();
   let accepted = false,
     release,
-    sourcePending = false;
+    sourcePending = false,
+    timeout = false;
   const gate = new Promise(resolve => {
     release = resolve;
   });
@@ -57,14 +58,20 @@ async function fixture(t, checkOnly = false) {
         wouldConflict: { predecessor: { head: 'speculative' }, paths: ['shared.txt'] },
       });
       await gate;
-      accepted = true;
-      emit({ type: 'submission', terminal: true, submission: response().result.submission });
-      return { result: { status: 'terminal' } };
+      accepted = !timeout;
+      if (accepted) emit({ type: 'submission', terminal: true, submission: response().result.submission });
+      return {
+        result: {
+          status: timeout ? 'timeout' : 'terminal',
+          submissions: [{ submission: response().result.submission }],
+        },
+      };
     },
     observeHostedRun: async () => {
       events.push('run-subscription');
       await gate;
       accepted = true;
+      return { result: { status: 'terminal', run: response().result.run } };
     },
   };
   const stubs = {
@@ -121,13 +128,16 @@ async function fixture(t, checkOnly = false) {
     run,
     operationId,
     response,
+    timeout: () => {
+      timeout = true;
+    },
     pendingSource: () => {
       sourcePending = true;
     },
   };
 }
 
-test('land stays waiting at ready, streams speculative advice, and reads the final exact operation once', async t => {
+test('land stays waiting at ready and returns the observed outcome without replaying finish', async t => {
   const s = await fixture(t);
   let done = false;
   const pending = s.run().then(result => {
@@ -148,11 +158,10 @@ test('land stays waiting at ready, streams speculative advice, and reads the fin
   s.release();
   const result = await pending;
   assert.equal(result.result.submission.acceptance.receiptId, 'accepted');
-  assert.equal(s.calls.length, 2, 'submission plus one canonical final replay');
-  assert.equal(s.calls[1].operationId, s.operationId);
+  assert.equal(s.calls.length, 1, 'no replay after the authoritative terminal read');
   assert(s.err.join('').includes('LANDED receipt accepted'));
   t.diagnostic(
-    '575-record history: 1 selected subscription, 0 idle calls, 1 canonical final replay; no history hydration',
+    '575-record history: 1 selected subscription, 0 idle calls, 0 final replays; no history hydration',
   );
 });
 
@@ -166,7 +175,7 @@ test('check-only still waits only for its run and returns CHECK PASSED without a
   assert.equal(result.result.run.status, 'passed');
   assert.equal(landTerminal(result), true);
   assert.deepEqual(landSummary(result), ['CHECK PASSED (not landed)']);
-  assert.equal(s.calls.length, 2);
+  assert.equal(s.calls.length, 1);
 });
 
 test('land exposes an unfinished source handoff and returns a pending exit status', async t => {
@@ -179,4 +188,19 @@ test('land exposes an unfinished source handoff and returns a pending exit statu
   assert.equal(s.calls.length, 1);
   assert(s.err.join('').includes('SOURCE PENDING'));
   assert(s.err.join('').includes('exact source continuation'));
+});
+
+test('land observation deadline returns IN PROGRESS with the exact wait command and no finish replay', async t => {
+  const s = await fixture(t);
+  s.timeout();
+  s.release();
+  const result = await s.run();
+  assert.equal(result.result.inProgress, true);
+  assert.equal(result.result.waitStatus, 'timeout');
+  assert.equal(process.exitCode, 3);
+  assert.equal(s.calls.length, 1);
+  const stderr = s.err.join('');
+  assert(stderr.includes('IN PROGRESS; wait deadline reached'));
+  assert(stderr.includes(landWaitCommand('/synthetic', result)));
+  assert(!stderr.includes('FAILED'));
 });

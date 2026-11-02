@@ -1269,6 +1269,24 @@ with older, unjournaled state explicitly resnapshots the current record; missing
 historical evidence is not invented. Authority changes trigger a fresh authorized
 snapshot while retaining immutable version identities for deduplication.
 
+After submission, a failed observation is not a failed landing. Transient HTTP
+5xx, network and timeout errors keep the active wait alive, with progress events
+and backoff of 2, 4, 8, 16 and then 30 seconds. Reconnection uses the same selection
+and cursor; successful waits add no calls and idle clients do no work. The wait
+deadline includes its first read and every retry. At the deadline the result has
+`status:"timeout", inProgress:true`; hosted CLI `land --save` and `wait` exit 3,
+print **IN PROGRESS** and the exact `nforge agent ROOT wait` command. Stopping a
+wait does not cancel the server operation. `land --save` returns the observed
+terminal receipt without replaying finish. Explicit access and protocol errors
+remain errors. If the first read never succeeds, the result has no observations
+and a null cursor; resume with the original operation selection.
+
+Unexpected errors inside `projectHostedFinishObserve:page` log one bounded
+`FORGE_FINISH_OBSERVE_FAILED` context with project/operation, requested/current
+version, query stage, phase and event count. This performs no extra DB reads or
+writes and logs no row values or exception payloads. A platform 502 before query
+execution still needs the platform request trace.
+
 Only the active call subscribes. Registration is followed by an authoritative
 reread to close missed wakeups; timeout, cancellation, errors and disconnect close
 every subscription without waking or cancelling landing work. Staged input pages

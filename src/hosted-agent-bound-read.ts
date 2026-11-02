@@ -49,6 +49,14 @@ export async function boundLandingStatus(
       ...((page as { queue?: unknown }).queue ? { queue: (page as { queue: unknown }).queue } : {}),
     });
   }
+  return boundLandingResult(store, operationId, String(retained.command.operationId), submissions);
+}
+function boundLandingResult(
+  store: WorkStore,
+  operationId: string,
+  canonicalOperationId: string,
+  submissions: (z.infer<typeof hostedLandingStateSchema> & { queue?: unknown; queueAhead?: unknown })[],
+) {
   const terminal =
     submissions.length > 0 && submissions.every(state => state.observation.state !== 'pending');
   const complete = terminal && submissions.every(state => state.observation.state === 'landed');
@@ -61,8 +69,7 @@ export async function boundLandingStatus(
       status: complete ? 'landed' : terminal ? 'terminal-failed' : (submissions[0]?.phase ?? 'preparing'),
       table: submissions.map(state => `${state.id}: ${state.observation.state}`).join('\n'),
       handle: {
-        operationId:
-          submissions.length === 1 ? submissions[0]!.operationId : String(retained.command.operationId),
+        operationId: submissions.length === 1 ? submissions[0]!.operationId : canonicalOperationId,
         entryIds: submissions.map(state => state.id),
       },
       phase: complete ? 'landed' : terminal ? 'terminal-failed' : (submissions[0]?.phase ?? 'preparing'),
@@ -92,16 +99,34 @@ export async function watchBoundLanding(
     ) as RetainedBoundSubmission;
   }
   invariant(retained.address, 'INVALID_WORK_STORE', 'The original hosted project is unavailable.');
-  let watchStatus: string | undefined;
   if (retained.hosted?.length) {
     const transport = supplied ?? new HostedAgentTransport(store.root, retained.address);
     const observed = await observeHostedSubmissions(transport, {
       operationIds: retained.hosted.map(command => command.operationId),
       timeoutSeconds: waitMs === undefined ? 60 : waitMs / 1000,
+      until: 'acceptance',
     });
-    watchStatus = observed.result.status;
+    const current = boundLandingResult(
+      store,
+      operationId,
+      String(retained.command.operationId),
+      observed.result.submissions.map(entry => {
+        const advice = enrichHostedQueueAhead(transport, entry) as { queueAhead?: unknown };
+        return {
+          ...entry.submission,
+          ...(entry.queue ? { queue: entry.queue } : {}),
+          ...(advice.queueAhead ? { queueAhead: advice.queueAhead } : {}),
+        };
+      }),
+    );
+    return current.result.terminal
+      ? current
+      : {
+          ...current,
+          result: { ...current.result, durable: true, status: observed.result.status, inProgress: true },
+        };
   }
-  const current = await boundLandingStatus(
+  return boundLandingStatus(
     store,
     { operationId },
     async () => {
@@ -109,8 +134,4 @@ export async function watchBoundLanding(
     },
     supplied,
   );
-  const result = current.result as { terminal?: boolean } & Record<string, unknown>;
-  return watchStatus && !result.terminal
-    ? { ...current, result: { ...result, status: watchStatus } }
-    : current;
 }

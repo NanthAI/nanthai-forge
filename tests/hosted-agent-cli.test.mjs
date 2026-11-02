@@ -4,7 +4,8 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { existsSync, writeFileSync, mkdirSync, symlinkSync } from 'node:fs';
 import { join } from 'node:path';
-import { hostedAgentAddress } from '../dist/hosted-agent-cli.js';
+import { hostedAgentAddress, hostedAgentCli } from '../dist/hosted-agent-cli.js';
+import { ForgeError } from '../dist/errors.js';
 import { agentCli } from '../dist/agent-cli.js';
 import { agentFixture } from './hosted-agent-fixture.mjs';
 const errorCode = expected => error => error.code === expected;
@@ -98,4 +99,45 @@ test('hosted CLI forwards urgent finish and retained queued Candidate reprioriti
     changed.operationId,
   );
   assert.deepEqual(s.calls.filter(c => c.name === first.name).at(-1).args, first.args);
+});
+
+test('hosted wait CLI reports a persistent observe 502 as IN PROGRESS with an exact resumable command', async t => {
+  const s = agentFixture(t),
+    operationId = randomUUID(),
+    err = [],
+    output = [];
+  const oldExit = process.exitCode;
+  t.after(() => {
+    process.exitCode = oldExit;
+  });
+  t.mock.method(process.stderr, 'write', text => {
+    err.push(String(text));
+    return true;
+  });
+  const oldOut = process.stdout.write;
+  t.mock.method(process.stdout, 'write', function (text, ...args) {
+    if (typeof text === 'string' && text.startsWith('{')) {
+      output.push(text);
+      return true;
+    }
+    return oldOut.call(this, text, ...args);
+  });
+  const transport = s.transport();
+  const query = transport.query.bind(transport);
+  transport.query = async (name, args) => {
+    if (name === 'projectHostedFinishObserve:page')
+      throw new ForgeError('EXCHANGE_REQUEST_FAILED', 'HTTP 502');
+    return query(name, args);
+  };
+  const command = { operationIds: [operationId], until: 'acceptance', timeoutSeconds: 0.01 };
+  const result = await hostedAgentCli(s.root, 'wait', command, s.address, transport);
+  assert.equal(result.result.status, 'timeout');
+  assert.equal(result.result.inProgress, true);
+  assert.equal(process.exitCode, 3);
+  assert(err.join('').includes('IN PROGRESS; wait deadline reached'));
+  assert(
+    err.join('').includes(`nforge agent '${s.root}' wait '${JSON.stringify({ ...command, ...s.address })}'`),
+  );
+  assert(!err.join('').includes('FAILED'));
+  assert(output.every(line => JSON.parse(line).type === 'observation-retry'));
 });

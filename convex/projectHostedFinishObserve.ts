@@ -7,14 +7,14 @@ import { hostedLandingStateSchema } from '../src/hosted-landing';
 import { landingAlias } from './projectHostedLandingIdentity';
 // SPDX-License-Identifier: Apache-2.0
 import { finishPendingForReader } from '../src/hosted-finish';
-import { v } from 'convex/values';
+import { ConvexError, v } from 'convex/values';
 import { query } from './cliServer';
 import { accessibleProject } from './projectAuthority';
 import { finishRow } from './projectHostedFinishWake';
 import { landingRow, loadLanding } from './projectHostedLandingStore';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { sourceAuthority } from '../src/hosted-source-authority';
-import { invariant } from '../src/errors';
+import { ForgeError, invariant } from '../src/errors';
 import { report } from './errors';
 
 /** Finite selected-request pages. Every page/subscription rechecks current access;
@@ -29,6 +29,10 @@ export const page = query({
   },
   returns: v.string(),
   handler: async (ctx, input) => {
+    let stage = 'authorization',
+      phase: string | null = null,
+      version: number | null = null;
+    let eventCount = 0;
     try {
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to observe hosted submissions.');
@@ -38,6 +42,7 @@ export const page = query({
         'BAD_ARGUMENT',
         'Select a submission version.',
       );
+      stage = 'operation';
       const rows = await ctx.db
         .query('projectHostedLandingRequests')
         .withIndex('by_project_and_operation', q =>
@@ -69,6 +74,7 @@ export const page = query({
               )
               .unique();
       if (!rows.length && desired) {
+        stage = 'desired';
         const state = hostedLandingStateSchema.parse(JSON.parse(desired.value));
         return canonicalPayload({
           projectId: input.projectId,
@@ -87,12 +93,17 @@ export const page = query({
         });
       }
       invariant(rows.length === 1 || alias, 'NOT_FOUND', 'Select one hosted landing operation.');
+      stage = 'landing';
       const { row: selectedRow, state } = await loadLanding(ctx, {
         projectId: input.projectId,
         submissionId: rows[0]?.submissionId ?? alias!.submissionId,
       });
+      phase = state.phase;
+      version = state.version;
+      stage = 'queue';
       const queue = await readQueueStatus(ctx, state);
       const wouldConflict = state.phase === 'queued' ? readWouldConflict(selectedRow) : undefined;
+      stage = 'finish';
       const finish = await finishRow(ctx, { projectId: input.projectId, submissionId: state.id });
       const pendingAttempt = finish ? finishPendingForReader(JSON.parse(finish.value).pending) : null;
       const events = [];
@@ -100,6 +111,7 @@ export const page = query({
         resnapshot = false;
       // Exact indexed reads keep both documents and ranges bounded, including gaps
       // in pre-journal history. Never scan unrelated operations or Work/source data.
+      stage = 'history';
       for (let n = 0; n < 20 && nextVersion <= state.version; n++) {
         const row = await ctx.db
           .query('projectHostedLandingObservations')
@@ -127,7 +139,9 @@ export const page = query({
           ),
         });
         nextVersion++;
+        eventCount = events.length;
       }
+      stage = 'response';
       return canonicalPayload({
         projectId: input.projectId,
         operationId: input.operationId,
@@ -145,6 +159,19 @@ export const page = query({
         resnapshot,
       });
     } catch (error) {
+      // Error-only, constant-size context. Do not log source, row values, caller
+      // strings or exception payloads. Platform failures before execution need
+      // the platform request trace; this identifies failures inside this query.
+      if (!(error instanceof ForgeError) && !(error instanceof ConvexError))
+        console.error('FORGE_FINISH_OBSERVE_FAILED', {
+          projectId: input.projectId,
+          operationId: /^[a-f0-9-]{36}$/i.test(input.operationId) ? input.operationId : null,
+          nextVersion: Number.isSafeInteger(input.nextVersion) ? input.nextVersion : null,
+          stage,
+          phase,
+          version,
+          eventCount,
+        });
       return report(error);
     }
   },

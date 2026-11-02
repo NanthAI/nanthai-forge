@@ -47,7 +47,7 @@ export function hostedAgentHelp(action?: string) {
     'land --save overlapAnswer:"accept-order" answers the pending notices for this landing and records them like ack, so peers see the answer.',
     'status accepts laneId; observe/landing select operationId (original landing UUID), submissionId or runId.',
     'Keep every original parameter, including message and pins, when replaying an operationId. Use the receipt replay command.',
-    'wait {operationIds:[ORIGINAL_UUID]} watches a landing; wait {runId} watches a check.',
+    'wait {operationIds:[ORIGINAL_UUID]} watches a landing; wait {runId} watches a check. Transient observation failures retry until the deadline; exit 3 means still in progress and prints the exact wait command.',
     '',
   ].join('\n');
 }

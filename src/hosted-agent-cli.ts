@@ -10,6 +10,7 @@ import { observeHostedSubmissions } from './hosted-agent-submission-wait.js';
 import { invariant } from './errors.js';
 import { withLaneCommand } from './lane-registry.js';
 import { markerIdentity } from './lane-prune.js';
+import { shellQuote } from './agent-brief-render.js';
 import { landSummary } from './hosted-land-summary.js';
 import { HostedAgentTransport } from './hosted-agent-transport.js';
 /** Address selection precedes construction of native WorkStore/owner services. */
@@ -70,7 +71,13 @@ export async function hostedAgentCli(
           : await observeHostedSubmissions(transport, command, controller.signal, emit),
       );
       process.exitCode =
-        response.result.status === 'timeout' ? 2 : response.result.status === 'cancelled' ? 130 : 0;
+        response.result.status === 'timeout' ? 3 : response.result.status === 'cancelled' ? 130 : 0;
+      if (response.result.status === 'timeout' || response.result.status === 'cancelled') {
+        const resume = `nforge agent ${shellQuote(root)} wait ${shellQuote(JSON.stringify({ ...selectedWait, ...address }))}`;
+        process.stderr.write(
+          `wait: IN PROGRESS; ${response.result.status === 'timeout' ? 'wait deadline reached' : 'stopped waiting'}; keep waiting with: ${resume}\n`,
+        );
+      }
       // The NDJSON stream stays machine-readable; the outcome also prints as plain stderr lines.
       const { submissions, status } = response.result as {
         submissions?: { submission: unknown }[];

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { makeFunctionReference } from 'convex/server';
 import { z } from 'zod';
+import { retryHostedObservation } from './hosted-observation-retry.js';
 import { hostedFinishSchema } from './hosted-finish.js';
 import { hostedLandingStateSchema } from './hosted-landing.js';
 import { sourceAuthoritySchema } from './hosted-source-authority.js';
@@ -23,6 +24,7 @@ const eventSchema = z.object({
   submission: hostedLandingStateSchema,
   pendingAttempt: hostedFinishSchema.shape.pending,
   queue: z.unknown().optional(),
+  queueAheadSelection: z.unknown().optional(),
   wouldConflict: z.unknown().optional(),
 });
 const pageSchema = z.object({
@@ -37,6 +39,7 @@ const pageSchema = z.object({
   isDone: z.boolean(),
   resnapshot: z.boolean(),
   queue: z.unknown().optional(),
+  queueAheadSelection: z.unknown().optional(),
   wouldConflict: z.unknown().optional(),
 });
 const decode = (value: unknown) => (typeof value === 'string' ? JSON.parse(value) : value);
@@ -48,6 +51,79 @@ export async function observeHostedSubmissions(
   signal?: AbortSignal,
   emit: (value: unknown) => void = () => {},
   subscribe: () => HostedRunSubscription = () => hostedRunSubscription(transport.address),
+) {
+  const command = hostedSubmissionWaitSchema.parse(input);
+  const current = new Map<string, z.infer<typeof eventSchema>>();
+  let cursor = command.cursor ?? null,
+    resnapshot = false,
+    active = true;
+  const pending = (status: 'timeout' | 'cancelled') => ({
+    schema: 1 as const,
+    transport: 'hosted' as const,
+    action: 'observe' as const,
+    operationId: null,
+    resolved: null,
+    result: {
+      status,
+      inProgress: true,
+      successful: false,
+      submissions: [...current.values()],
+      resnapshot,
+      cursor,
+    },
+  });
+  try {
+    const response = await retryHostedObservation({
+      timeoutSeconds: command.timeoutSeconds,
+      signal,
+      emit,
+      pending,
+      attempt: (timeoutSeconds, signal) =>
+        observeHostedSubmissionsOnce(
+          transport,
+          { ...command, cursor, timeoutSeconds },
+          signal,
+          value => {
+            if (!active) return;
+            const event = value as {
+              type?: string;
+              operationId?: string;
+              cursor?: string;
+              resnapshot?: boolean;
+            } & z.infer<typeof eventSchema>;
+            if (event.cursor) cursor = event.cursor;
+            resnapshot ||= Boolean(event.resnapshot);
+            if (event.type === 'submission' && event.operationId) {
+              // Keep one cursor for the whole selection, never one growing
+              // cursor per operation (which would retain quadratic metadata).
+              const { submission, pendingAttempt, queue, wouldConflict, queueAheadSelection } = event;
+              current.set(event.operationId, {
+                submission,
+                pendingAttempt,
+                ...(queue ? { queue } : {}),
+                ...(wouldConflict ? { wouldConflict } : {}),
+                ...(queueAheadSelection !== undefined ? { queueAheadSelection } : {}),
+              });
+            }
+            emit(value);
+          },
+          subscribe,
+        ),
+    });
+    return {
+      ...response,
+      result: { ...response.result, ...(response.result.status === 'timeout' ? { inProgress: true } : {}) },
+    };
+  } finally {
+    active = false;
+  }
+}
+async function observeHostedSubmissionsOnce(
+  transport: HostedAgentTransport,
+  input: unknown,
+  signal: AbortSignal,
+  emit: (value: unknown) => void,
+  subscribe: () => HostedRunSubscription,
 ) {
   const command = hostedSubmissionWaitSchema.parse(input);
   const operations = [...new Set(command.operationIds)];
@@ -129,7 +205,7 @@ export async function observeHostedSubmissions(
           nextIndex: z.number().int().nonnegative().nullable(),
         })
         .parse(await transport.query('projectHostedFinish:inputs', args));
-      if (stopped) return;
+      if (stopped || signal.aborted) return;
       if (!page.staged) {
         allTerminal = false;
         break;
@@ -203,7 +279,7 @@ export async function observeHostedSubmissions(
   };
   const drain = async (operationId: string) => {
     for (;;) {
-      if (stopped) return;
+      if (stopped || signal.aborted) return;
       const nextVersion = cursor.versions.get(operationId) ?? 0;
       const page = pageSchema.parse(
         decode(await transport.query('projectHostedFinishObserve:page', { operationId, nextVersion })),
@@ -216,7 +292,7 @@ export async function observeHostedSubmissions(
         'HOSTED_PROTOCOL_INVALID',
         'Submission page differs from the selected project/operation.',
       );
-      if (stopped) return;
+      if (stopped || signal.aborted) return;
       canonicalOperations.set(operationId, page.canonicalOperationId ?? operationId);
       const authority = JSON.stringify(page.authority);
       if (cursor.authority && cursor.authority !== authority) {
@@ -250,6 +326,9 @@ export async function observeHostedSubmissions(
               submission: page.submission,
               pendingAttempt: page.pendingAttempt,
               ...(page.queue ? { queue: page.queue } : {}),
+              ...(page.queueAheadSelection !== undefined
+                ? { queueAheadSelection: page.queueAheadSelection }
+                : {}),
               ...(page.wouldConflict ? { wouldConflict: page.wouldConflict } : {}),
             }
           : page.events.at(-1)!,
@@ -274,10 +353,10 @@ export async function observeHostedSubmissions(
       successful: terminal() && [...current.values()].every(e => e.submission.observation.state === 'landed'),
       submissions: [...current.values()],
       resnapshot,
-      cursor: cursor.encode(),
+      cursor: cursor.encode() as string | null,
     },
   });
-  let timer: ReturnType<typeof setTimeout> | undefined, stop: (() => void) | undefined;
+  let stop: (() => void) | undefined;
   try {
     for (const operation of operations) await drain(operation);
     if (terminal()) return result('terminal');
@@ -293,9 +372,9 @@ export async function observeHostedSubmissions(
       const refresh = () => {
         queue = queue
           .then(async () => {
-            if (stopped) return;
+            if (stopped || signal.aborted) return;
             for (const operation of operations) await drain(operation);
-            if (stopped) return;
+            if (stopped || signal.aborted) return;
             if (terminal()) resolve(result('terminal'));
             else if (!baseline && changed && command.until === 'any-change') resolve(result('changed'));
             changed = false;
@@ -303,13 +382,6 @@ export async function observeHostedSubmissions(
           .catch(reject);
       };
       wake = refresh;
-      const end = performance.now() + command.timeoutSeconds * 1000;
-      const expire = () => {
-        const remaining = end - performance.now();
-        if (remaining <= 0) resolve(result('timeout'));
-        else timer = setTimeout(expire, Math.min(remaining, 2_147_483_647));
-      };
-      expire();
       stop = () => resolve(result('cancelled'));
       signal?.addEventListener('abort', stop, { once: true });
       if (signal?.aborted) {
@@ -338,7 +410,6 @@ export async function observeHostedSubmissions(
     throw hostedActionError(error, 'submission observation');
   } finally {
     stopped = true;
-    if (timer) clearTimeout(timer);
     if (stop) signal?.removeEventListener('abort', stop);
     try {
       for (const unsubscribe of unsubscribes) unsubscribe();

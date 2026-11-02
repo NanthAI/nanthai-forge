@@ -2,6 +2,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import { ForgeError } from '../dist/errors.js';
+import { ConvexError } from 'convex/values';
 import { getFunctionName } from 'convex/server';
 import { observeHostedSubmissions } from '../dist/hosted-agent-submission-wait.js';
 import { registerHostedAgentWorkflow } from '../dist/mcp-hosted-agent.js';
@@ -290,9 +292,9 @@ test('revoked access, subscription failure, finite timeout and cancellation neve
     'timeout',
   );
   const waiting = s.wait({ operationIds: [a.request.operationId] });
-  const rejection = assert.rejects(waiting, code('HOSTED_ACTION_FAILED'));
+  const rejection = assert.rejects(waiting, code('PROJECT_UNAVAILABLE'));
   await turn();
-  s.fail(new Error('Synthetic transport failure'));
+  s.fail(new ConvexError({ code: 'PROJECT_UNAVAILABLE', message: 'Current access revoked' }));
   await rejection;
   s.revoke();
   await assert.rejects(
@@ -498,14 +500,14 @@ test('live revocation, pre-cancellation and partial subscription setup failures 
       undefined,
       () => ({
         onUpdate() {
-          throw new Error('Synthetic setup failure');
+          throw new ConvexError({ code: 'SOURCE_UNAVAILABLE', message: 'Synthetic setup failure' });
         },
         async close() {
           closed = true;
         },
       }),
     ),
-    code('HOSTED_ACTION_FAILED'),
+    code('SOURCE_UNAVAILABLE'),
   );
   assert.equal(closed, true);
 });
@@ -613,4 +615,213 @@ test('acceptance wait stays live at ready until the canonical landing settles', 
   assert.equal(result.result.successful, true);
   assert.equal(result.result.submissions[0].submission.phase, 'landed');
   assert.equal(s.counts().closes, 1);
+});
+
+for (const stage of ['initial', 'live'])
+  test(`submission observe 502 during ${stage} read keeps waiting and returns the real landing`, async () => {
+    const s = await fixture(),
+      a = await s.start(),
+      query = s.transport.query;
+    let fail = stage === 'initial',
+      failures = 0;
+    s.transport.query = async (...args) => {
+      if (fail) {
+        fail = false;
+        failures++;
+        throw new ForgeError('EXCHANGE_REQUEST_FAILED', 'HTTP 502');
+      }
+      return query(...args);
+    };
+    const waiting = s.wait({ operationIds: [a.request.operationId], until: 'acceptance' });
+    await turn();
+    if (stage === 'live') {
+      fail = true;
+      s.wake();
+      await turn();
+    }
+    await s.update(a.state.id, 'landed');
+    const result = await waiting;
+    assert.equal(result.result.status, 'terminal');
+    assert.equal(result.result.successful, true);
+    assert.equal(result.result.submissions[0].submission.phase, 'landed');
+    assert.equal(failures, 1);
+    assert.equal(s.events.filter(e => e.type === 'observation-retry').length, 1);
+    assert.equal(s.events.filter(e => e.type === 'submission' && e.submission.phase === 'landed').length, 1);
+    assert.equal(s.counts().opens, s.counts().closes);
+  });
+
+test('persistent observe 502 and a hung initial read both end at the wait deadline in progress', async () => {
+  for (const hangs of [false, true]) {
+    const s = await fixture(),
+      a = await s.start();
+    let calls = 0;
+    s.transport.query = async () => {
+      calls++;
+      if (hangs) return new Promise(() => {});
+      throw new ForgeError('EXCHANGE_REQUEST_FAILED', 'HTTP 502');
+    };
+    const result = await s.wait({ operationIds: [a.request.operationId], timeoutSeconds: 0.01 });
+    assert.equal(result.result.status, 'timeout');
+    assert.equal(result.result.inProgress, true);
+    assert.equal(result.result.successful, false);
+    assert.equal(calls, 1);
+    assert.equal(s.counts().opens, 0);
+    assert.equal((await s.f.status(a.state.id)).request.phase, 'queued');
+  }
+});
+
+test('a transient subscription error reconnects the selected operations and preserves the cursor', async () => {
+  const s = await fixture(),
+    a = await s.start();
+  const waiting = s.wait({ operationIds: [a.request.operationId], until: 'acceptance' });
+  await turn();
+  s.fail(new TypeError('Synthetic network error with private text'));
+  await turn();
+  await s.update(a.state.id, 'landed');
+  const result = await waiting;
+  assert.equal(result.result.successful, true);
+  assert.equal(s.counts().opens, s.counts().closes);
+  assert(!JSON.stringify(s.events).includes('private text'));
+});
+
+test('unexpected server observe errors log bounded stage context without another read', async () => {
+  const s = await fixture(),
+    a = await s.start();
+  const lines = [],
+    original = console.error;
+  console.error = (...args) => {
+    lines.push(args);
+  };
+  try {
+    // Version zero may be absent on older writers: inject a malformed selected version.
+    s.f.insert('projectHostedLandingObservations', {
+      projectId: s.f.projectId,
+      submissionId: a.state.id,
+      version: 9,
+      value: 'invalid json',
+    });
+    const requestRow = [...s.f.tables.projectHostedLandingRequests.values()][0];
+    const state = JSON.parse(requestRow.value);
+    state.version = 9;
+    s.f.patch('projectHostedLandingRequests', requestRow._id, { value: JSON.stringify(state) });
+    await assert.rejects(
+      s.transport.query('projectHostedFinishObserve:page', {
+        operationId: a.request.operationId,
+        nextVersion: 9,
+      }),
+    );
+    const diagnostic = lines.find(line => line[0] === 'FORGE_FINISH_OBSERVE_FAILED');
+    assert(diagnostic);
+    assert.deepEqual(diagnostic[1], {
+      projectId: s.f.projectId,
+      operationId: a.request.operationId,
+      nextVersion: 9,
+      stage: 'history',
+      phase: 'queued',
+      version: 9,
+      eventCount: 0,
+    });
+    assert(!JSON.stringify(diagnostic).includes('invalid json'));
+  } finally {
+    console.error = original;
+  }
+});
+
+test('an initial read completing after the deadline cannot subscribe or emit late progress', async () => {
+  const s = await fixture(),
+    a = await s.start(),
+    query = s.transport.query;
+  let release;
+  const gate = new Promise(resolve => {
+    release = resolve;
+  });
+  s.transport.query = async (...args) => {
+    await gate;
+    return query(...args);
+  };
+  const result = await s.wait({ operationIds: [a.request.operationId], timeoutSeconds: 0.01 });
+  assert.equal(result.result.inProgress, true);
+  release();
+  await turn();
+  await turn();
+  assert.equal(s.counts().opens, 0);
+  assert.equal(s.events.length, 0);
+});
+
+test('wait retains the fresh queue-ahead selection for bound callers without a final reread', async () => {
+  const s = await fixture(),
+    a = await s.start(),
+    query = s.transport.query;
+  const selection = { main: 'a'.repeat(64), mine: 'b'.repeat(64), ahead: [], more: false };
+  s.transport.query = async (...args) => ({ ...(await query(...args)), queueAheadSelection: selection });
+  const result = await s.wait({ operationIds: [a.request.operationId], timeoutSeconds: 0 });
+  assert.deepEqual(result.result.submissions[0].queueAheadSelection, selection);
+  assert.equal(s.counts().reads, 1);
+});
+
+test('575 selected operations retain one cursor and bounded metadata across an observation interruption', async () => {
+  const s = await fixture(),
+    a = await s.start(),
+    controller = new AbortController();
+  const initial = await s.transport.query('projectHostedFinishObserve:page', {
+    operationId: a.request.operationId,
+    nextVersion: 0,
+  });
+  const operationIds = Array.from({ length: 575 }, () => randomUUID());
+  let reads = 0,
+    subscriptions = 0,
+    closes = 0;
+  const transport = {
+    ...s.transport,
+    async query(_name, { operationId }) {
+      reads++;
+      const submission = {
+        ...initial.submission,
+        id: operationId,
+        operationId,
+        request: { ...initial.submission.request, operationId },
+      };
+      return {
+        ...initial,
+        operationId,
+        canonicalOperationId: operationId,
+        submission,
+        events: [],
+        nextVersion: 1,
+        isDone: true,
+      };
+    },
+  };
+  const started = performance.now();
+  const result = await observeHostedSubmissions(
+    transport,
+    { operationIds, timeoutSeconds: 60, until: 'acceptance' },
+    controller.signal,
+    () => {},
+    () => {
+      queueMicrotask(() => controller.abort());
+      return {
+        onUpdate() {
+          subscriptions++;
+          return () => {};
+        },
+        async close() {
+          closes++;
+        },
+      };
+    },
+  );
+  assert.equal(result.result.status, 'cancelled');
+  assert.equal(result.result.submissions.length, 575);
+  assert(result.result.submissions.every(entry => !('cursor' in entry) && !('type' in entry)));
+  const bytes = Buffer.byteLength(JSON.stringify(result));
+  assert(bytes < 2_000_000, `bounded selected metadata: ${bytes} bytes`);
+  assert.equal(reads, 575, 'one existing initial page per selected operation; no replay at cancellation');
+  assert.equal(subscriptions, 575);
+  assert.equal(closes, 1);
+  await turn();
+  assert.equal(reads, 575, 'no idle reads after interruption');
+  console.error(
+    `575 selected operations: ${reads} initial reads, ${subscriptions} selected subscriptions on one connection, ${bytes} retained bytes, ${Math.round(performance.now() - started)} ms`,
+  );
 });

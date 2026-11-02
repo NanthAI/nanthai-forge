@@ -158,3 +158,45 @@ test('replaying a preparing finish reconciles its stalled compose child and expo
     ],
   );
 });
+
+test('source observation reconnects after a transient network error without resubmitting source work', async t => {
+  const s = agentFixture(t),
+    operationId = randomUUID(),
+    jobId = randomUUID();
+  let subscriptions = 0,
+    closes = 0;
+  const original = process.stderr.write;
+  const progress = [];
+  process.stderr.write = chunk => {
+    progress.push(String(chunk));
+    return true;
+  };
+  t.after(() => {
+    process.stderr.write = original;
+  });
+  const result = await waitHostedAgentSource(
+    s.address,
+    operationId,
+    { status: 'submitted', jobId },
+    undefined,
+    () => ({
+      onUpdate(_ref, _args, update, error) {
+        subscriptions++;
+        queueMicrotask(() =>
+          subscriptions === 1
+            ? error(new TypeError('fetch failed synthetic private text'))
+            : update({ terminal: { outcome: { status: 'completed', result: 'same operation' } } }),
+        );
+        return () => {};
+      },
+      async close() {
+        closes++;
+      },
+    }),
+  );
+  assert.equal(result.outcome.status, 'completed');
+  assert.equal(subscriptions, 2);
+  assert.equal(closes, 2);
+  assert.equal(s.calls.length, 0, 'no source dispatch or extra HTTP call');
+  assert(!progress.join('').includes('private text'));
+});

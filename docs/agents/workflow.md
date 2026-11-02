@@ -1009,7 +1009,9 @@ including historical acceptance; a newer save reports `superseded` without credi
 the newer head or cancelling the original work.
 
 Exit codes are 0 when all targets reach a terminal outcome (including failed checks),
-or any change is observed in `any-change` mode, 2 for timeout, and 130 for cancellation.
+or any change is observed in `any-change` mode, 2 for native timeout, and 130 for cancellation.
+Hosted `wait` and `land --save` use exit 3 for an in-progress deadline, print the exact
+wait command, and keep waiting through transient observation failures until that deadline.
 Invalid input or unreadable metadata exits nonzero. `successful` in the summary and
 `ok` on each target distinguish successful outcomes from failed/interrupted ones. The summary names every target and
 its latest state. Failures include the reason, infrastructure versus check failure

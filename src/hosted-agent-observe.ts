@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { retryHostedObservation } from './hosted-observation-retry.js';
 import { ConvexClient } from 'convex/browser';
 import { makeFunctionReference, type FunctionReference } from 'convex/server';
 import { z } from 'zod';
@@ -41,6 +42,50 @@ export async function observeHostedRun(
   subscribe: () => HostedRunSubscription = () => hostedRunSubscription(transport.address),
 ) {
   const command = hostedRunWaitSchema.parse(input);
+  let latest: unknown = null,
+    active = true;
+  try {
+    const response = await retryHostedObservation({
+      timeoutSeconds: command.timeoutSeconds,
+      signal,
+      emit,
+      pending: status => ({
+        schema: 1 as const,
+        transport: 'hosted' as const,
+        action: 'observe' as const,
+        operationId: null,
+        resolved: null,
+        result: { status, inProgress: true, run: latest },
+      }),
+      attempt: (timeoutSeconds, signal) =>
+        observeHostedRunOnce(
+          transport,
+          { ...command, timeoutSeconds },
+          signal,
+          value => {
+            if (!active) return;
+            latest = value;
+            emit(value);
+          },
+          subscribe,
+        ),
+    });
+    return {
+      ...response,
+      result: { ...response.result, ...(response.result.status === 'timeout' ? { inProgress: true } : {}) },
+    };
+  } finally {
+    active = false;
+  }
+}
+async function observeHostedRunOnce(
+  transport: HostedAgentTransport,
+  input: unknown,
+  signal: AbortSignal,
+  emit: (value: unknown) => void,
+  subscribe: () => HostedRunSubscription,
+) {
+  const command = hostedRunWaitSchema.parse(input);
   const initial = await transport.dispatch('observe', { runId: command.runId });
   function run(value: unknown) {
     value = typeof value === 'string' ? JSON.parse(value) : value;
@@ -66,17 +111,9 @@ export async function observeHostedRun(
   if (!command.timeoutSeconds) return result('timeout');
   const client = subscribe();
   let unsubscribe: (() => void) | undefined;
-  let timer: ReturnType<typeof setTimeout> | undefined;
   let stop: (() => void) | undefined;
   try {
     return await new Promise<ReturnType<typeof result>>((resolve, reject) => {
-      const end = performance.now() + command.timeoutSeconds * 1000;
-      const expire = () => {
-        const remaining = end - performance.now();
-        if (remaining <= 0) resolve(result('timeout'));
-        else timer = setTimeout(expire, Math.min(remaining, 2_147_483_647));
-      };
-      expire();
       stop = () => resolve(result('cancelled'));
       signal?.addEventListener('abort', stop, { once: true });
       if (signal?.aborted) {
@@ -105,7 +142,6 @@ export async function observeHostedRun(
       throw new ForgeError('HOSTED_PROTOCOL_INVALID', 'Hosted run observation is invalid.');
     throw hostedActionError(error, 'run observation');
   } finally {
-    if (timer) clearTimeout(timer);
     if (stop) signal?.removeEventListener('abort', stop);
     try {
       unsubscribe?.();

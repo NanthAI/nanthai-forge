@@ -164,11 +164,22 @@ async function waitLanding(
   process.once('SIGINT', stop);
   process.once('SIGTERM', stop);
   try {
-    const emit = (event: unknown) => process.stdout.write(`${JSON.stringify(event)}\n`);
+    const emit = (event: unknown) => {
+      process.stdout.write(`${JSON.stringify(event)}\n`);
+      if ((event as { type?: string }).type === 'observation-retry')
+        process.stderr.write(
+          'land: observation unavailable; landing still in progress. Continuing to wait.\n',
+        );
+    };
     if (result.phase === 'check' && result.run?.id)
-      await observeHostedRun(transport, { runId: result.run.id, timeoutSeconds }, controller.signal, emit);
+      return await observeHostedRun(
+        transport,
+        { runId: result.run.id, timeoutSeconds },
+        controller.signal,
+        emit,
+      );
     else if (response.operationId)
-      await observeHostedSubmissions(
+      return await observeHostedSubmissions(
         transport,
         { operationIds: [response.operationId], timeoutSeconds, until: 'acceptance' },
         controller.signal,
@@ -178,7 +189,6 @@ async function waitLanding(
     process.removeListener('SIGINT', stop);
     process.removeListener('SIGTERM', stop);
   }
-  return !controller.signal.aborted;
 }
 
 /** land --save / finish for hosted Lanes: submit (detached), then wait for the outcome by default. */
@@ -214,21 +224,35 @@ export async function hostedLandCli(
   const finished = await withLaneCommand(markerIdentity(root)?.laneId ?? undefined, 'land', () =>
     waitLanding(transport, submitted, options.timeoutSeconds ?? 5400),
   );
-  // One replay of the same request returns the canonical terminal receipt.
-  const replay = (resultOf(submitted) as { replayParameters?: Record<string, unknown> }).replayParameters ?? {
-    ...command,
-    operationId: submitted.operationId,
+  // The authoritative read already contains the outcome. Replaying finish here
+  // could fail after acceptance or at the deadline, misreporting the landing.
+  const observation = finished?.result as
+    | {
+        status?: string;
+        run?: unknown;
+        submissions?: { submission: unknown }[];
+      }
+    | undefined;
+  const final: HostedAgentResponse = {
+    ...submitted,
+    result: {
+      ...(submitted.result as Record<string, unknown>),
+      ...(observation?.run ? { run: observation.run } : {}),
+      ...(observation?.submissions?.[0] ? { submission: observation.submissions[0].submission } : {}),
+      ...(observation?.status && observation.status !== 'terminal'
+        ? { waitStatus: observation.status, inProgress: true }
+        : {}),
+    },
   };
-  const final = (await hostedAgentCli(root, 'finish', replay, address, transport)) as HostedAgentResponse;
   const lines = landSummary(final);
   for (const line of lines) process.stderr.write(`${line}\n`);
   const outcome = landPhase(final);
   if (outcome === 'terminal-failed' || lines[0]?.startsWith('FAILED')) process.exitCode = 2;
-  else if (!finished || !landTerminal(final)) {
+  else if (!landTerminal(final)) {
     if (!(resultOf(final).phase === 'check' && resultOf(final).run?.status === 'passed')) {
       const resume = landWaitCommand(root, final);
       process.stderr.write(
-        `land: still running; ${resume ? `keep waiting with: ${resume}` : 'run the same command again to keep waiting.'}\n`,
+        `land: IN PROGRESS; ${observation?.status === 'timeout' ? 'wait deadline reached; ' : ''}${resume ? `keep waiting with: ${resume}` : 'run the same command again to keep waiting.'}\n`,
       );
       process.exitCode = 3;
     }

@@ -9,6 +9,7 @@ import { initNative } from '../dist/native-work.js';
 import { NativeSource } from '../dist/native-source.js';
 import { WorkStore } from '../dist/work-store.js';
 import { updateHostState, readHostState } from '../dist/host-binding.js';
+import { watchBoundLanding } from '../dist/hosted-agent-bound-read.js';
 import { boundAgentSubmission } from '../dist/hosted-agent-bound.js';
 import { ownerDrainBlockers, requireOwnerDrained } from '../dist/hosted-agent-owner-drain.js';
 import { transitionBoundSourceAuthority } from '../dist/source-authority-client.js';
@@ -894,4 +895,67 @@ test('hosted retry validates the reason before capturing or saving source', asyn
       code('BAD_ARGUMENT'),
     );
   assert.equal(f.calls.length, 0);
+});
+
+test('bound landing wait retries observe 502 and returns the read outcome without a fallible final read', async t => {
+  const f = fixture(t),
+    transport = f.transport();
+  await boundAgentSubmission(f.store, f.command, noNative, transport);
+  const query = transport.query.bind(transport);
+  let reads = 0;
+  transport.query = async (name, args) => {
+    if (name !== 'projectHostedFinishObserve:page') return query(name, args);
+    reads++;
+    if (reads === 1) throw new ForgeError('EXCHANGE_REQUEST_FAILED', 'HTTP 502');
+    assert.equal(reads, 2, 'no third read after an authoritative terminal result');
+    const page = await query(name, args);
+    const submission = {
+      ...page.submission,
+      phase: 'landed',
+      observation: { state: 'landed', pendingReason: null, cause: null },
+    };
+    return { ...page, submission, events: [{ submission, pendingAttempt: null }] };
+  };
+  const result = await watchBoundLanding(f.store, f.command.operationId, 10000, transport);
+  assert.equal(result.result.status, 'landed');
+  assert.equal(result.result.complete, true);
+  assert.equal(reads, 2);
+});
+
+test('bound landing wait deadline during an observe outage retains the durable pending handle', async t => {
+  const f = fixture(t),
+    transport = f.transport();
+  await boundAgentSubmission(f.store, f.command, noNative, transport);
+  let reads = 0;
+  transport.query = async () => {
+    reads++;
+    throw new ForgeError('EXCHANGE_REQUEST_FAILED', 'HTTP 502');
+  };
+  const result = await watchBoundLanding(f.store, f.command.operationId, 10, transport);
+  assert.equal(result.result.status, 'timeout');
+  assert.equal(result.result.inProgress, true);
+  assert.equal(result.result.durable, true);
+  assert.equal(result.result.terminal, false);
+  assert.equal(result.result.handle.operationId, f.command.operationId);
+  assert.equal(reads, 1);
+});
+
+test('bound check-only deadline before its first observation remains pending rather than parsing a missing run', async t => {
+  const f = fixture(t),
+    c = shorthandChecks(t, f);
+  const dispatch = c.transport.dispatch.bind(c.transport);
+  t.mock.method(c.transport, 'dispatch', async (action, command) => {
+    if (action === 'observe') throw new ForgeError('EXCHANGE_REQUEST_FAILED', 'HTTP 502');
+    return dispatch(action, command);
+  });
+  const result = await boundAgentSubmission(
+    f.store,
+    { action: 'finish', laneId: f.lane.laneId, message: 'Check', wait: true, waitMs: 10 },
+    noNative,
+    c.transport,
+  );
+  assert.equal(result.result.terminal, false);
+  assert.equal(result.result.complete, false);
+  assert.equal(result.result.runs[0].status, 'timeout');
+  assert.equal(result.result.runs[0].inProgress, true);
 });
