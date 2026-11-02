@@ -3,7 +3,7 @@ import {
   lstatSync,
   mkdirSync,
   readFileSync,
-  readdirSync,
+  opendirSync,
   renameSync,
   rmSync,
   utimesSync,
@@ -91,9 +91,22 @@ export function unknownCacheMetadata(copy: string): boolean {
   try {
     const stat = lstatSync(directory);
     if (!stat.isDirectory() || stat.isSymbolicLink()) return true;
-    return readdirSync(directory).some(
-      name => name !== 'hosted-lane.json' && (name !== 'cache-use.json' || !readUse(legacyPath(copy))),
-    );
+    const entries = opendirSync(directory);
+    try {
+      // Only two names are known. Stop at the first other entry, so even an
+      // arbitrarily large unknown metadata directory costs at most three reads.
+      for (;;) {
+        const entry = entries.readSync();
+        if (!entry) return false;
+        if (
+          entry.name !== 'hosted-lane.json' &&
+          (entry.name !== 'cache-use.json' || !readUse(legacyPath(copy)))
+        )
+          return true;
+      }
+    } finally {
+      entries.closeSync();
+    }
   } catch (error) {
     return (error as NodeJS.ErrnoException).code !== 'ENOENT';
   }

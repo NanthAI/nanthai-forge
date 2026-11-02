@@ -121,8 +121,31 @@ test('unknown Forge metadata is neither replaced nor evicted', t => {
   const path = join(c.path, '.forge/keep.json');
   fs.writeFileSync(path, 'unknown');
   assert.throws(() => cleanHostedCheckout(c.path, [], 'hosted-lane.json', true), /\.forge\/keep.json/);
+  for (let i = 0; i < 32; i++) fs.writeFileSync(join(c.path, '.forge', `unknown-${i}`), 'keep');
+  let reads = 0;
+  const opendir = fs.opendirSync,
+    readdir = fs.readdirSync;
+  t.mock.method(fs, 'opendirSync', (...args) => {
+    const directory = opendir(...args),
+      read = directory.readSync.bind(directory);
+    t.mock.method(directory, 'readSync', () => {
+      reads++;
+      return read();
+    });
+    return directory;
+  });
+  t.mock.method(fs, 'readdirSync', (path, ...args) => {
+    assert.notEqual(String(path), join(c.path, '.forge'), 'GC must not list all unknown metadata');
+    return readdir(path, ...args);
+  });
+  syncBuiltinESMExports();
+  t.after(() => {
+    t.mock.restoreAll();
+    syncBuiltinESMExports();
+  });
   const result = gcNestedLanes({ root, settings, isDirty: () => false });
   assert.equal(result.kept[0].reason, 'unknown Forge metadata');
+  assert(reads >= 1 && reads <= 3, `one to three metadata entries, observed ${reads}`);
   assert.equal(fs.readFileSync(path, 'utf8'), 'unknown');
 });
 
