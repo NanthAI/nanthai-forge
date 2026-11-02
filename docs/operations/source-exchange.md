@@ -313,26 +313,68 @@ preserved, including dangling links. The same symlink handling applies to hosted
 main checkout.
 
 Warm checkouts use hash-verified machine objects directly, avoiding another
-per-Lane object-store copy before cloning the independent editing files. Older
-per-checkout object stores are still reusable when a machine object is missing.
+per-Lane object-store copy before cloning the independent editing files. Concurrent
+misses for the same selected object set share one recoverable machine-cache fill;
+waiting callers hold no volume worker. Each caller hashes reused cache bytes
+again outside the fill lease, so followers do not serialize their verification.
+Each retains its own fresh access checks and verifies its independent editing
+inodes. A failed or killed fill retains ordinary retry/refetch behavior;
+no cached success marker authorizes bytes. Unrelated object sets proceed
+independently. Older per-checkout object stores are still reusable when a machine object is missing.
 Copies are staged and hash-verified before a separate bounded durability pass
 fsyncs every regular file; directory flushes still precede the atomic install.
 Local clients for the same OS user share one I/O worker budget per volume.
 Workers take recoverable FIFO permits across processes; cache verification/fill,
-copy/hash and both durability passes use those same permits. Each volume also has one editing write pass at a time, covering independent
-copies, durability and publication; parallel cache verification and network
-preparation take no editing-pass lease. This preserves transaction locality
-across trees without a CPU-derived count of full open pipelines. Copy/hash and
-durability use separate volume epochs, so a flush cannot repeatedly commit
-metadata another open is concurrently cloning or changing. FIFO phase admission
-drains the previous epoch before starting the next; unrelated volumes proceed
-independently. The aggregate budget is one filesystem worker per OS-assigned CPU, using
+copy/hash and both durability passes use those same permits. There is no
+whole-Lane writer lease. Copy and durability traversals share finite
+FIFO turns per volume, retaining filesystem transaction locality without
+tuning a count of open pipelines. Read-only verification and streaming reads may overlap
+copy/hash or durability under that same worker ceiling. Clone/chmod and fsync
+use separate batches, so a flush does not repeatedly commit a peer's edits.
+Matching workers fill spare capacity even behind an incompatible FIFO waiter.
+Each batch shares one existing one-second quantum: new matching arrivals cannot
+extend it. When another phase is waiting, the expired batch stops admitting
+writes, drains its active filesystem jobs, then selects the oldest waiting phase.
+Read-only jobs share both phases through FIFO admission. Workers rejoin FIFO
+when their incompatible phase or finite turn ends; unrelated phases cannot starve behind continuing writes.
+Each clone, digest check and chmod stays in the same copy phase, avoiding
+per-file phase transitions. The final copy turn continues through its barriers and publication, so queued
+peers do not dirty the filesystem between completing a tree and flushing it.
+After a one-second service quantum, long copies yield to smaller prepared
+trees or work of unknown size, and rejoin FIFO. Equal or larger queued copies
+retain transaction locality. Work hints use existing manifest file counts,
+without additional I/O. Every yield rejoins FIFO, so continuing small arrivals
+cannot prevent a large copy from progressing. Durability yields when a copy
+or metadata peer is waiting; consecutive finite durability passes retain their
+transaction locality instead of repeatedly dirtying each other with ticket updates. File barriers batch after cloning/chmod. File and directory
+flushes share one recoverable durability traversal per volume, retaining directory locality rather
+than interleaving per-file walks from many Lanes. It reuses one ticket across all turns, retaining it while uncontended and moving
+it to the FIFO tail when contended. A new ticket per directory or turn would
+dirty metadata during fsync. Waiters watch the current head ticket directory
+and the queue root, rather than attaching a watcher to every peer.
+Copies with smaller/unknown work waiting, and durability traversals with a
+different phase waiting, yield after one finite quantum of actual file work; waiting for another I/O phase does not consume that turn. Waiters hold no
+I/O workers. The private marker joins the same traversal, with each directory
+flushed once. Final publication retains the copy/barrier turn. Initial per-root journals
+share the ordinary volume I/O ceiling concurrently, so their independent
+barriers can coalesce instead of serializing all workspace preparation. Within a traversal,
+the existing sixteen-file window pipelines open, fsync and close. Each actual
+filesystem operation requires its own worker permit; all descriptors close
+before a turn yields. This retains bounded descriptors and streaming memory
+without lowering the pipeline to the number of active I/O workers.
+Directory barriers use the manifest's deduplicated ancestor set, once
+per directory per private stage; file fsyncs remain necessary because directory
+fsync alone does not guarantee new file contents on all supported filesystems.
+Unrelated volumes proceed independently. The aggregate budget is one filesystem
+worker per OS-assigned CPU, using
 `availableParallelism()` across processes. Each open's local dispatcher also
 stays within Node's filesystem pool (four by default, or the runtime's
 `UV_THREADPOOL_SIZE`). These are worker bounds, not counts of complete pipelines.
 Between I/O phases, CPU work and network waits do not retain workers. Ready I/O reuses worker tickets
 until a queued peer needs capacity, checked at the existing one-second wake
-cadence before rejoining FIFO; idle permits are retired immediately. Spare-worker
+cadence before rejoining FIFO; idle permits are retired immediately. Compatible
+read continuations reuse a write worker rather than publishing per-chunk
+tickets. Queue events invalidate negative spare-capacity probes promptly. Spare-worker
 probes use that cadence too, avoiding per-file queue metadata. No idle worker,
 watcher or timer survives an open. Pack streams acquire permits per bounded chunk;
 source bytes still stream rather than accumulating a whole tree in memory.
@@ -346,7 +388,8 @@ or checkout recovery steps change.
 
 Each attempted local open appends a bounded `kind: checkout` receipt to the existing
 `<root>.forge-metrics.jsonl` operation journal, including on failure and replay.
-It retains milliseconds for local worker stall (pending I/O with no active worker), cache verification/fill, copy/hash,
+It retains milliseconds for local admission waits (worker stalls, shared-cache
+fills and barrier-batch ownership), cache verification/fill, copy/hash,
 durability, stat indexing and publication, plus total time, file count and process
 peak RSS and the selected host/local worker budgets. Cache time includes downloads on misses; other local setup remains in
 total time. Phase times exclude recorded worker stall; the phases, stall and remaining

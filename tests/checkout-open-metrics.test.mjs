@@ -7,6 +7,43 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { withCheckoutOpenMetrics } from '../dist/checkout-open-metrics.js';
 import { ForgeError } from '../dist/errors.js';
+import { withCheckoutMaterialization, withCheckoutBatch } from '../dist/checkout-materialization.js';
+
+test('a local batch admission wait is retained as permit wait rather than durability service', async t => {
+  const dir = mkdtempSync(join(tmpdir(), 'forge-open-batch-metrics-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const root = join(dir, 'client'),
+    request = { operationId: randomUUID(), laneId: randomUUID() };
+  let release, ready;
+  const hold = new Promise(r => (release = r)),
+    entered = new Promise(r => (ready = r));
+  const owner = withCheckoutBatch(join(dir, 'batch'), async () => {
+    ready();
+    await hold;
+  });
+  await entered;
+  try {
+    await withCheckoutOpenMetrics(root, request, metrics =>
+      withCheckoutMaterialization(
+        dir,
+        () =>
+          metrics.measure('durability', async () => {
+            const waiting = withCheckoutBatch(join(dir, 'batch'), async () => 42);
+            setTimeout(release, 25);
+            return waiting;
+          }),
+        { directory: join(dir, 'io'), waited: ms => (metrics.phasesMs.slotWait += ms) },
+      ),
+    );
+  } finally {
+    release();
+    await owner;
+  }
+  const row = JSON.parse(readFileSync(root + '.forge-metrics.jsonl', 'utf8').trim());
+  assert(row.checkout.phasesMs.slotWait >= 20);
+  assert(row.checkout.phasesMs.slotWait <= row.checkout.totalMs);
+  assert(row.checkout.phasesMs.durability < row.checkout.totalMs - 20);
+});
 
 test('one bounded open receipt retains every phase and original operation on success and failure', async t => {
   const dir = mkdtempSync(join(tmpdir(), 'forge-open-metrics-'));

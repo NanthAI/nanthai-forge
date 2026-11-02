@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 import { lstatSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
-import { chmod, open, rename, rm } from 'node:fs/promises';
+import { chmod, rename, rm } from 'node:fs/promises';
 import { checkoutIo, mapCheckoutIo } from './checkout-io.js';
+import { withCheckoutBatch } from './checkout-materialization.js';
+import { digest } from './hash.js';
+import { flushCheckoutPaths } from './checkout-durability.js';
 import { join } from 'node:path';
 import { fingerprintPrivateFile } from './files.js';
 import { invariant } from './errors.js';
@@ -63,32 +66,56 @@ export class HostedCheckoutCache {
   }
   async ensure(ids: string[]) {
     const unique = [...new Set(ids)];
-    // Parallel file reads: per-file latency, not bandwidth, bounds large trees.
-    const cached = await mapCheckoutIo(unique, async id => {
-      const path = join(this.objects, id);
-      if (!checkoutPathExists(path)) return false;
-      const stat = lstatSync(path);
-      // A machine entry is disposable, including one with unsafe permissions or
-      // links. Refetch it instead of turning cache damage into a denied open.
-      if (
-        this.objects === this.machine &&
-        (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1 || Boolean(stat.mode & 0o077))
-      )
-        return false;
-      invariant(
-        stat.isFile() && !stat.isSymbolicLink() && stat.nlink === 1,
-        'UNSAFE_PATH',
-        'Client object path must be a private regular file.',
-      );
-      const actual =
-        this.objects === this.machine
-          ? await fingerprintPrivateFile(path).catch(() => null)
-          : await fingerprintPrivateFile(path);
-      const valid = actual?.sha256 === id;
-      if (valid && this.objects === this.machine) this.machineObjects++;
-      return valid;
+    const cached = await this.cached(unique);
+    const missing = unique.filter((_, index) => !cached[index]);
+    if (!missing.length) return;
+    if (this.objects !== this.machine) return this.fill(missing);
+    const directory = join(this.objects, '.fills', digest(unique.slice().sort().join('')));
+    const filled = await withCheckoutBatch(directory, async () => {
+      // Presence only avoids duplicate transfers. It never authenticates bytes:
+      // peers hash reused entries after releasing the fill lease.
+      const absent = missing.filter(id => !checkoutPathExists(join(this.objects, id)));
+      await this.fill(absent);
+      return new Set(absent);
     });
-    let missing = unique.filter((_, index) => !cached[index]);
+    const reused = missing.filter(id => !filled.has(id));
+    const valid = await this.cached(reused);
+    const invalid = reused.filter((_, index) => !valid[index]);
+    if (invalid.length) await withCheckoutBatch(directory, () => this.fill(invalid));
+  }
+  /** Cache bytes are always authenticated again after a peer fill, never trusted
+   * because a ticket or previous reader declared success. */
+  private cached(ids: string[]) {
+    return mapCheckoutIo(
+      ids,
+      async id => {
+        const path = join(this.objects, id);
+        if (!checkoutPathExists(path)) return false;
+        const stat = lstatSync(path);
+        // A machine entry is disposable, including one with unsafe permissions or
+        // links. Refetch it instead of turning cache damage into a denied open.
+        if (
+          this.objects === this.machine &&
+          (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1 || Boolean(stat.mode & 0o077))
+        )
+          return false;
+        invariant(
+          stat.isFile() && !stat.isSymbolicLink() && stat.nlink === 1,
+          'UNSAFE_PATH',
+          'Client object path must be a private regular file.',
+        );
+        const actual =
+          this.objects === this.machine
+            ? await fingerprintPrivateFile(path).catch(() => null)
+            : await fingerprintPrivateFile(path);
+        const valid = actual?.sha256 === id;
+        if (valid && this.objects === this.machine) this.machineObjects++;
+        return valid;
+      },
+      'read',
+    );
+  }
+  private async fill(missing: string[]) {
     if (missing.length && this.fallbackObjects) missing = await this.fromCache(missing);
     if (missing.length >= checkoutPackMinimum && this.transport.sourcePack && this.sourcePack === null)
       missing = await this.fromPack(missing);
@@ -139,17 +166,9 @@ export class HostedCheckoutCache {
           'Downloaded source is truncated or corrupt.',
         );
       });
-      await mapCheckoutIo(
-        files,
-        async ({ path }) => {
-          const handle = await open(path, 'r');
-          try {
-            await handle.sync();
-          } finally {
-            await handle.close();
-          }
-        },
-        'durability',
+      await flushCheckoutPaths(
+        temporary,
+        files.map(file => file.path),
       );
       await mapCheckoutIo(files, async ({ pin, path }) => {
         const target = join(this.objects, pin.sha256);

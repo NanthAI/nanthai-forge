@@ -6,15 +6,14 @@ import { join } from 'node:path';
 import { queueEntries } from '../../dist/check-queue.js';
 import assert from 'node:assert/strict';
 import { checkoutIo, checkoutVolumeCapacity } from '../../dist/checkout-io.js';
-import { withCheckoutMaterialization, withCheckoutWritePass, materializationDirectory } from '../../dist/checkout-materialization.js';
+import { withCheckoutMaterialization, withCheckoutBatch, materializationDirectory } from '../../dist/checkout-materialization.js';
 import { checkoutHostedLane } from '../../dist/hosted-lane-checkout.js';
 const [mode, directory, count] = process.argv.slice(2);
-if (mode === 'writes') {
-  await withCheckoutWritePass(directory, async () => {
-    appendFileSync(join(directory, 'events'), `${process.hrtime.bigint()} 1\n`);
-    await new Promise(resolve => setTimeout(resolve, 20));
-    appendFileSync(join(directory, 'events'), `${process.hrtime.bigint()} -1\n`);
-  }, { directory: join(directory, 'queue') });
+if (mode === 'fill' || mode === 'fill-retry') {
+  await withCheckoutBatch(join(directory, 'fill'), async () => {
+    process.send?.({ fill: true });
+    if (mode === 'fill') { process.on('message', () => {}); await new Promise(() => {}); }
+  });
 } else if (mode === 'queue') {
   await Promise.all(Array.from({ length: Number(count) }, (_, index) =>
     withCheckoutMaterialization(directory, () => checkoutIo(async () => {
@@ -39,6 +38,23 @@ if (mode === 'writes') {
   fs.copyFile = async (...args) => { assertLease(args[0]); assertLease(args[1]); return copyFile(...args); };
   fs.open = async (...args) => { assertLease(args[0]); return open(...args); };
   syncBuiltinESMExports();
+  if (mode === 'journal') {
+    const sync = syncFs.fsyncSync;
+    let paused = false;
+    syncFs.fsyncSync = fd => {
+      if (!paused && queueEntries(materializationDirectory(directory)).some(e => e.pid === process.pid && e.ticket?.holding && e.ticket.phase === 'durability')) {
+        paused = true;
+        // IPC sends can remain queued when SIGSTOP suspends the event loop.
+        // Complete the pipe write before stopping while the permit is held.
+        syncFs.writeSync(process.stdout.fd, 'journal\n');
+        // Force a readiness-to-stop window so an early SIGCONT is observable.
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
+        process.kill(process.pid, 'SIGSTOP');
+      }
+      return sync(fd);
+    };
+    syncBuiltinESMExports();
+  }
   if (mode === 'crash') {
     const original = fs.open;
     let paused = false;
