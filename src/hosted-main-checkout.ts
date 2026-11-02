@@ -14,7 +14,7 @@ import { basename, dirname, join, resolve } from 'node:path';
 import { z } from 'zod';
 import { digest } from './hash.js';
 import { invariant } from './errors.js';
-import { parseNativeState } from './native-source.js';
+import { parseNativeState } from './native-state-format.js';
 import { hostedMainSchema, type HostedMain, type MainExpectation } from './hosted-main.js';
 import { durableReplace, syncDirectory } from './native-durability.js';
 import { cleanHostedCheckout, installHostedFile, flushHostedCheckout } from './hosted-checkout-files.js';

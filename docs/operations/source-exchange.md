@@ -277,6 +277,12 @@ guided command follows the restored authority mode. See
 [Route B](../operations.md#route-b-recover-a-runner-and-cache-from-hosted) and
 [the recovery drill](recovery-drill.md) for commands and measured fixture times.
 
+Hosted main clone loads the shared State and byte-tree formats without loading
+native Work, ancestry, graph or archive-construction services. Exchange metadata
+reconstruction loads those services only when a manifest is requested. Checkout
+bytes remain bounded by the existing transfer concurrency and recipe chunk sizes;
+file manifests still scale with the selected tree.
+
 ## Hosted Lane editing checkout
 
 `nforge exchange NEW_DIRECTORY open-lane --command-file REQUEST.json` opens an

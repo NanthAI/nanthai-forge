@@ -1,7 +1,6 @@
 import { CUTOVER_CLI_VERSION } from './cutover-version.js';
 // SPDX-License-Identifier: Apache-2.0
 
-import { cachedExchangeMetadata, retainExchangeMetadata } from './exchange-receive-cache.js';
 import { ExchangeDownloadCache } from './exchange-download-cache.js';
 import { SignedDownloadCache, type SignedObject } from './exchange-r2-read.js';
 import { sourceAuthoritySchema } from './hosted-source-authority.js';
@@ -21,7 +20,6 @@ import { digest } from './hash.js';
 import { buildObjectRecipe, ObjectRecipeBuilder } from './object-chunks.js';
 import { SourceFileReader } from './source-file-reader.js';
 import { downloadExchangeFile } from './exchange-download-file.js';
-import { resolveExchangeRoot, isExchangeRoot } from './native-exchange-tree.js';
 const query = (name: string) => makeFunctionReference<'query'>(name);
 const mutation = (name: string) => makeFunctionReference<'mutation'>(name);
 const action = (name: string) => makeFunctionReference<'action'>(name);
@@ -263,6 +261,7 @@ export class ConvexExchange implements ExchangeTransport {
       'INVALID_WORK_BACKUP',
       'Checkpoint root differs from its selected digest.',
     );
+    const { cachedExchangeMetadata, retainExchangeMetadata } = await import('./exchange-receive-cache.js');
     const cached = this.metadataCacheDirectory
       ? cachedExchangeMetadata(this.metadataCacheDirectory, bytes)
       : undefined;
@@ -275,6 +274,7 @@ export class ConvexExchange implements ExchangeTransport {
         sourceDigest: original.sourceDigest ?? original.digest,
       };
     }
+    const { resolveExchangeRoot, isExchangeRoot } = await import('./native-exchange-tree.js');
     if (!isExchangeRoot(JSON.parse(original.json))) return original;
     const resolved = await resolveExchangeRoot(bytes, pins => this.downloadBatch(pins), {
       onWorkProgress: this.onWorkProgress,

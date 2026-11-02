@@ -10,14 +10,8 @@ import { buildWorkRecords, hashWorkRecords, workRecordRootSchema } from './work-
 import { buildRecordPacks, recordPackSchema } from './work-record-packs.js';
 import { buildWorkDelta } from './work-exchange-delta.js';
 import type { WorkData } from './work-types.js';
-const pinSchema = z
-  .object({ sha256: z.string().regex(/^[0-9a-f]{64}$/), size: z.number().safe().nonnegative() })
-  .strict();
-export const treeRefSchema = pinSchema
-  .extend({ height: z.number().safe().nonnegative(), length: z.number().safe().nonnegative() })
-  .strict();
-export type TreeRef = z.infer<typeof treeRefSchema>;
-export type BytePin = z.infer<typeof pinSchema>;
+import { bytePinSchema as pinSchema, treeRefSchema, type TreeRef, type BytePin } from './byte-tree-format.js';
+export { treeRefSchema, type TreeRef, type BytePin } from './byte-tree-format.js';
 const pageSchema = z
   .object({
     kind: z.literal('forge-byte-tree'),

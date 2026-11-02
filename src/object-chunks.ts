@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { digest } from './hash.js';
 import { invariant } from './errors.js';
-import { treeRefSchema, type TreeRef } from './native-exchange-tree.js';
+import { treeRefSchema, type TreeRef } from './byte-tree-format.js';
 const pinSchema = z
   .object({ sha256: z.string().regex(/^[0-9a-f]{64}$/), size: z.number().safe().nonnegative() })
   .strict();
