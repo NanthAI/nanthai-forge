@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { checkoutIo } from './checkout-io.js';
 import { openSync, closeSync, writeSync, fsyncSync, unlinkSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { mapExchange } from './exchange-parallel.js';
@@ -11,7 +12,7 @@ export async function downloadExchangeFile(
   path: string,
   read: (offset: number) => Promise<Buffer>,
 ) {
-  const fd = openSync(path, 'wx', 0o600),
+  const fd = await checkoutIo(async () => openSync(path, 'wx', 0o600)),
     hash = createHash('sha256');
   let written = 0,
     complete = false;
@@ -33,12 +34,14 @@ export async function downloadExchangeFile(
       });
       for (const bytes of parts) {
         hash.update(bytes);
-        let offset = 0;
-        while (offset < bytes.length) {
-          const count = writeSync(fd, bytes, offset, bytes.length - offset);
-          invariant(count > 0, 'EXCHANGE_DOWNLOAD_FAILED', 'Private content staging write was incomplete.');
-          offset += count;
-        }
+        await checkoutIo(async () => {
+          let offset = 0;
+          while (offset < bytes.length) {
+            const count = writeSync(fd, bytes, offset, bytes.length - offset);
+            invariant(count > 0, 'EXCHANGE_DOWNLOAD_FAILED', 'Private content staging write was incomplete.');
+            offset += count;
+          }
+        });
         written += bytes.length;
       }
     }
@@ -47,10 +50,12 @@ export async function downloadExchangeFile(
       'INVALID_WORK_BACKUP',
       'Downloaded content differs from its digest.',
     );
-    fsyncSync(fd);
+    await checkoutIo(async () => fsyncSync(fd), 'durability');
     complete = true;
   } finally {
-    closeSync(fd);
-    if (!complete) unlinkSync(path);
+    await checkoutIo(async () => {
+      closeSync(fd);
+      if (!complete) unlinkSync(path);
+    }, 'durability');
   }
 }

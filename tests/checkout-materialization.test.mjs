@@ -1,17 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
+import fs from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
 import assert from 'node:assert/strict';
 import { fork } from 'node:child_process';
 import { once } from 'node:events';
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, readdirSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import {
-  materializationDirectory,
-  materializationSlots,
-  withCheckoutMaterialization,
-} from '../dist/checkout-materialization.js';
+import { materializationDirectory, withCheckoutMaterialization } from '../dist/checkout-materialization.js';
+import { checkoutIo, checkoutVolumeCapacity } from '../dist/checkout-io.js';
 import { queueEntries } from '../dist/check-queue.js';
 import { digest } from '../dist/hash.js';
 import { readHostedLaneCheckout } from '../dist/hosted-lane-checkout-marker.js';
@@ -43,14 +42,22 @@ function worker(t, args, extra = {}) {
   return { child, done, message };
 }
 
-test('CPU-derived work phasing shares a destination volume across unrelated checkout roots', t => {
+test('unrelated checkout roots on the same device share one volume coordinator', t => {
   const root = fixture(t);
   mkdirSync(join(root, 'other'));
   assert.equal(materializationDirectory(root), materializationDirectory(join(root, 'other')));
-  assert.deepEqual([1, 2, 3, 6, 10, 64].map(materializationSlots), [1, 1, 1, 2, 3, 3]);
+  const originalDirectory = materializationDirectory(root);
+  const previous = process.env.XDG_CACHE_HOME;
+  process.env.XDG_CACHE_HOME = join(root, 'different-cache');
+  try {
+    assert.equal(materializationDirectory(root), originalDirectory);
+  } finally {
+    if (previous === undefined) delete process.env.XDG_CACHE_HOME;
+    else process.env.XDG_CACHE_HOME = previous;
+  }
 });
 
-test('50 opens across ten processes all run, with no more than three materializations at once', async t => {
+test('50 opens across ten processes all run, with one shared volume I/O budget', async t => {
   const root = fixture(t);
   const results = await Promise.all(Array.from({ length: 10 }, () => worker(t, ['queue', root, '5']).done));
   for (const result of results) assert.equal(result.code, 0, result.stderr);
@@ -58,32 +65,40 @@ test('50 opens across ten processes all run, with no more than three materializa
     .trim()
     .split('\n')
     .map(line => {
-      const [at, delta] = line.split(' ');
-      return { at: BigInt(at), delta: Number(delta) };
+      const [at, delta, phase] = line.split(' ');
+      return { at: BigInt(at), delta: Number(delta), phase };
     })
     .sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : a.delta - b.delta));
   let active = 0,
     peak = 0;
+  const phases = new Map();
   for (const event of events) {
+    phases.set(event.phase, (phases.get(event.phase) || 0) + event.delta);
+    assert(
+      [...phases.values()].filter(count => count > 0).length <= 1,
+      'copy and durability epochs must not overlap',
+    );
     active += event.delta;
     peak = Math.max(peak, active);
-    assert(active >= 0 && active <= 3, `active=${active}`);
+    assert(active >= 0 && active <= checkoutVolumeCapacity(), `active=${active}`);
   }
   assert.equal(events.length, 100);
   assert.equal(active, 0);
-  assert(peak > 1, 'the volume is not serialized');
+  assert(peak >= Math.min(2, checkoutVolumeCapacity()) && peak <= checkoutVolumeCapacity());
   assert.deepEqual(queueEntries(join(root, 'queue')), []);
 });
 
 test('a failed pass releases capacity and independent volume queues proceed separately', async t => {
   const root = fixture(t),
     failure = new Error('synthetic failure');
-  const options = { directory: join(root, 'queue'), slots: 1 };
+  const options = { directory: join(root, 'queue') };
   await assert.rejects(
     withCheckoutMaterialization(
       root,
       async () => {
-        throw failure;
+        return checkoutIo(async () => {
+          throw failure;
+        });
       },
       options,
     ),
@@ -99,18 +114,18 @@ test('a failed pass releases capacity and independent volume queues proceed sepa
   });
   const first = withCheckoutMaterialization(
     root,
-    async () => {
-      entered();
-      await gate;
-    },
+    () =>
+      checkoutIo(async () => {
+        entered();
+        await gate;
+      }),
     options,
   );
   await ready;
   try {
     assert.equal(
-      await withCheckoutMaterialization(root, async () => 'other volume', {
+      await withCheckoutMaterialization(root, () => checkoutIo(async () => 'other volume'), {
         directory: join(root, 'other-volume'),
-        slots: 1,
       }),
       'other volume',
     );
@@ -181,6 +196,100 @@ test('SIGKILL during checkout durability releases its process ticket; the origin
   const installed = readHostedLaneCheckout(join(root, 'client'));
   assert.equal(installed.operationId, request.operationId);
   for (const file of files) assert.deepEqual(readFileSync(join(root, 'client', file.path)), bytes);
-  const volumeQueues = join(extra.XDG_CACHE_HOME, 'forge', 'materialization-v1');
-  for (const name of readdirSync(volumeQueues)) assert.deepEqual(queueEntries(join(volumeQueues, name)), []);
+  assert.deepEqual(queueEntries(materializationDirectory(root)), []);
+});
+
+// Different device ids without requiring mounts or privileged setup.
+test('cache and checkout devices are deduplicated and acquired in the same order', async t => {
+  const root = fixture(t),
+    a = join(root, 'a'),
+    b = join(root, 'b');
+  mkdirSync(a);
+  mkdirSync(b);
+  const original = fs.statSync;
+  fs.statSync = (path, ...args) => {
+    const stat = original(path, ...args);
+    if (path === a) stat.dev = 101;
+    if (path === b) stat.dev = 202;
+    return stat;
+  };
+  syncBuiltinESMExports();
+  t.after(() => {
+    fs.statSync = original;
+    syncBuiltinESMExports();
+  });
+  const seen = [];
+  await Promise.all(
+    [
+      [a, b],
+      [b, a],
+    ].map(([stage, cache]) =>
+      withCheckoutMaterialization(
+        stage,
+        () =>
+          checkoutIo(async () => {
+            for (const path of [a, b]) {
+              const entries = queueEntries(materializationDirectory(path));
+              assert(entries.some(entry => entry.ticket?.holding));
+              assert(entries.filter(entry => entry.ticket?.holding).length <= checkoutVolumeCapacity());
+            }
+            seen.push(stage);
+          }),
+        { paths: [cache, stage, join(cache, 'not-created-yet')] },
+      ),
+    ),
+  );
+  assert.equal(seen.length, 2);
+  for (const path of [a, b]) assert.deepEqual(queueEntries(materializationDirectory(path)), []);
+});
+
+test('CPU and network waits consume no volume permit and completion retires spare waiters', async t => {
+  const root = fixture(t),
+    directory = join(root, 'queue');
+  let release, ready;
+  const gate = new Promise(r => (release = r)),
+    entered = new Promise(r => (ready = r));
+  const waiting = withCheckoutMaterialization(
+    root,
+    async () => {
+      ready();
+      await gate;
+    },
+    { directory },
+  );
+  await entered;
+  assert.deepEqual(queueEntries(directory), []);
+  try {
+    await withCheckoutMaterialization(
+      root,
+      () => Promise.all(Array.from({ length: 32 }, () => checkoutIo(async () => 42))),
+      { directory },
+    );
+    assert.deepEqual(queueEntries(directory), [], 'no queued spare workers survive completion');
+  } finally {
+    release();
+    await waiting;
+  }
+});
+
+test('ten processes serialize editing write passes while every request completes', async t => {
+  const root = fixture(t);
+  const results = await Promise.all(Array.from({ length: 10 }, () => worker(t, ['writes', root]).done));
+  for (const result of results) assert.equal(result.code, 0, result.stderr);
+  const events = readFileSync(join(root, 'events'), 'utf8')
+    .trim()
+    .split('\n')
+    .map(line => {
+      const [at, delta] = line.split(' ');
+      return { at: BigInt(at), delta: Number(delta) };
+    })
+    .sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : a.delta - b.delta));
+  let active = 0;
+  for (const event of events) {
+    active += event.delta;
+    assert(active >= 0 && active <= 1);
+  }
+  assert.equal(events.length, 20);
+  assert.equal(active, 0);
+  assert.deepEqual(queueEntries(join(root, 'queue')), []);
 });

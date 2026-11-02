@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { checkoutIo } from './checkout-io.js';
 import { closeSync, openSync, writeSync, unlinkSync } from 'node:fs';
 import { makeFunctionReference } from 'convex/server';
 import { z } from 'zod';
@@ -178,7 +179,7 @@ export class HostedCheckoutDownloads implements CheckoutObjectTransport {
       return this.read(pin, async (response, progressed) => {
         // Open/clean each attempt inside the request deadline; retries never append
         // to a previous partial file. Raw logical files have no in-memory size cap.
-        const fd = openSync(path, 'wx', 0o600),
+        const fd = await checkoutIo(async () => openSync(path, 'wx', 0o600)),
           hash = createHash('sha256'),
           reader = response.body?.getReader();
         let size = 0,
@@ -195,7 +196,7 @@ export class HostedCheckoutDownloads implements CheckoutObjectTransport {
                 'Downloaded source exceeds its selected size.',
               );
               hash.update(chunk.value);
-              writeAll(fd, chunk.value);
+              await checkoutIo(async () => writeAll(fd, chunk.value));
               progressed();
             }
           invariant(
@@ -205,13 +206,15 @@ export class HostedCheckoutDownloads implements CheckoutObjectTransport {
           );
           complete = true;
         } finally {
-          closeSync(fd);
-          if (!complete) unlinkSync(path);
+          await checkoutIo(async () => {
+            closeSync(fd);
+            if (!complete) unlinkSync(path);
+          });
           await reader?.cancel().catch(() => undefined);
           reader?.releaseLock();
         }
       });
-    const fd = openSync(path, 'wx', 0o600);
+    const fd = await checkoutIo(async () => openSync(path, 'wx', 0o600));
     try {
       const recipePin = { sha256: row.recipe.digest, size: row.recipe.size };
       const recipe =
@@ -227,9 +230,9 @@ export class HostedCheckoutDownloads implements CheckoutObjectTransport {
         item => this.physical(item),
         items => this.prepare(items),
       ))
-        writeAll(fd, bytes);
+        await checkoutIo(async () => writeAll(fd, bytes));
     } finally {
-      closeSync(fd);
+      await checkoutIo(async () => closeSync(fd));
     }
   }
   private async prepareRecipes(pins: ContentPin[]) {

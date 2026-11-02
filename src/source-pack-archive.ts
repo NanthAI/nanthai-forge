@@ -1,9 +1,10 @@
+import { checkoutReadStream, checkoutWriteStream } from './checkout-io-streams.js';
+import { checkoutIo } from './checkout-io.js';
 // SPDX-License-Identifier: Apache-2.0
-import { createReadStream, createWriteStream } from 'node:fs';
 import { writeFile, stat, rm, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { Readable, Transform } from 'node:stream';
-import { pipeline } from 'node:stream/promises';
+import { pipeline, finished } from 'node:stream/promises';
 import { createGzip, createGunzip } from 'node:zlib';
 import { createHash } from 'node:crypto';
 import { digest } from './hash.js';
@@ -13,7 +14,7 @@ import { sourcePackBytes, sourcePackTreeBytes, sourcePackFileBytes, type SourceP
 
 export async function fileDigest(path: string) {
   const hash = createHash('sha256');
-  for await (const bytes of createReadStream(path)) hash.update(bytes);
+  for await (const bytes of checkoutReadStream(path)) hash.update(bytes);
   return hash.digest('hex');
 }
 /** Deterministic gzip of a length-prefixed JSON inventory followed by exact file
@@ -41,7 +42,7 @@ export async function createSourcePack(stateRef: string, state: NativeState, cac
         'SOURCE_HASH_MISMATCH',
         'Pack input changed.',
       );
-      yield* createReadStream(join(cache, file.blob));
+      yield* checkoutReadStream(join(cache, file.blob));
     }
   }
   let size = 0;
@@ -55,7 +56,7 @@ export async function createSourcePack(stateRef: string, state: NativeState, cac
           done(size > sourcePackBytes ? new Error('Pack cache bound exceeded.') : null, chunk);
         },
       }),
-      createWriteStream(path, { mode: 0o600 }),
+      checkoutWriteStream(path),
     );
     return { stateRef, sha256: await fileDigest(path), size, fileCount: files.length };
   } catch (error) {
@@ -83,7 +84,7 @@ export async function downloadSourcePack(
         done(size > pack.size ? new Error('Oversized pack.') : null, chunk);
       },
     }),
-    createWriteStream(path, { mode: 0o600 }),
+    checkoutWriteStream(path),
   );
   invariant(
     size === pack.size && (await fileDigest(path)) === pack.sha256,
@@ -139,7 +140,7 @@ async function readSourcePack(
   inventory: (files: PackFile[]) => (blob: string) => boolean,
   observe?: (blob: string, bytes: Buffer) => void,
 ) {
-  const input = createReadStream(path);
+  const input = checkoutReadStream(path);
   const stream = input.pipe(createGunzip());
   const iterator = stream[Symbol.asyncIterator]();
   let pending: Buffer = Buffer.alloc(0),
@@ -196,19 +197,19 @@ async function readSourcePack(
       invariant(total <= sourcePackTreeBytes, 'SOURCE_HASH_MISMATCH', 'Pack tree exceeds cache bound.');
     }
     const keep = inventory(header.files);
-    await mkdir(directory, { recursive: true });
+    await checkoutIo(() => mkdir(directory, { recursive: true }));
     for (const file of header.files as PackFile[]) {
       const bytes = await take(file.size);
       invariant(digest(bytes) === file.blob, 'SOURCE_HASH_MISMATCH', 'Pack file differs.');
-      if (!keep(file.blob)) continue;
+      if (!(await checkoutIo(async () => keep(file.blob)))) continue;
       observe?.(file.blob, bytes);
       // Bounded concurrent writes (16 files, 64 MiB): small-file latency dominates large trees.
-      const write: Promise<void> = writeFile(join(directory, file.blob), bytes, { mode: 0o600 }).finally(
-        () => {
-          writes.delete(write);
-          writing -= bytes.length;
-        },
-      );
+      const write: Promise<void> = checkoutIo(() =>
+        writeFile(join(directory, file.blob), bytes, { mode: 0o600 }),
+      ).finally(() => {
+        writes.delete(write);
+        writing -= bytes.length;
+      });
       // Handled here and re-observed below, so a failure never becomes an unhandled rejection.
       write.catch(() => undefined);
       writes.add(write);
@@ -225,5 +226,6 @@ async function readSourcePack(
     await Promise.allSettled(writes);
     stream.destroy();
     input.destroy();
+    await finished(input, { cleanup: true }).catch(() => undefined);
   }
 }

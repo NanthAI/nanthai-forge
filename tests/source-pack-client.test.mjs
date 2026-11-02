@@ -14,6 +14,7 @@ import {
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { gzipSync } from 'node:zlib';
+import { withCheckoutMaterialization } from '../dist/checkout-materialization.js';
 import { HostedCheckoutCache, checkoutPackMinimum } from '../dist/hosted-checkout-cache.js';
 import { createSourcePack, unpackSourcePackObjects } from '../dist/source-pack-archive.js';
 import { machineObjectsDirectory } from '../dist/machine-object-store.js';
@@ -90,7 +91,7 @@ test('Lane open reads one pack plus changed objects, and a second root reads onl
 
   const first = transport(data.bytes, pack);
   const cold = new HostedCheckoutCache(join(data.directory, 'a.forge-client'), first, undefined, machine);
-  await cold.ensure(ids);
+  await withCheckoutMaterialization(cold.root, () => cold.ensure(ids), { paths: cold.ioPaths });
   // Budget: one pack read and one signing page for the 10 changed files (was 30 pages).
   assert.deepEqual(first.calls, { objects: 1, sourcePack: 1, downloads: 10 });
   assert.equal(cold.sourcePack, 'used');
@@ -153,7 +154,7 @@ test('missing, small or invalid packs fall back to per-object reads with exact b
 
   const lying = transport(data.bytes, { ...pack, sha256: 'b'.repeat(64) });
   const failed = new HostedCheckoutCache(join(data.directory, 'f.forge-client'), lying, undefined, null);
-  await failed.ensure(ids);
+  await withCheckoutMaterialization(failed.root, () => failed.ensure(ids), { paths: failed.ioPaths });
   assert.equal(failed.sourcePack, 'failed');
   assert.equal(failed.packObjects, 0);
   for (const id of ids) assert.deepEqual(readFileSync(join(failed.objects, id)), data.bytes.get(id));

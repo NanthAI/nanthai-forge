@@ -311,13 +311,40 @@ per-Lane object-store copy before cloning the independent editing files. Older
 per-checkout object stores are still reusable when a machine object is missing.
 Copies are staged and hash-verified before a separate bounded durability pass
 fsyncs every regular file; directory flushes still precede the atomic install.
-Local clients for the same OS user and destination volume cooperatively phase
-private copy/verify/flush passes through a local FIFO queue (one pass per three
-CPU cores, up to three passes at once). All opens are admitted; waiting requests
-retain their original selection and operation. Different volumes use independent
-queues. Dead process tickets are reclaimed using kernel process start identities.
-The queue adds no hosted calls and changes no hash checks, durability barriers or
-checkout recovery steps.
+Local clients for the same OS user share one I/O worker budget per volume.
+Workers take recoverable FIFO permits across processes; cache verification/fill,
+copy/hash and both durability passes use those same permits. Each volume also has one editing write pass at a time, covering independent
+copies, durability and publication; parallel cache verification and network
+preparation take no editing-pass lease. This preserves transaction locality
+across trees without a CPU-derived count of full open pipelines. Copy/hash and
+durability use separate volume epochs, so a flush cannot repeatedly commit
+metadata another open is concurrently cloning or changing. FIFO phase admission
+drains the previous epoch before starting the next; unrelated volumes proceed
+independently. The aggregate budget is one filesystem worker per OS-assigned CPU, using
+`availableParallelism()` across processes. Each open's local dispatcher also
+stays within Node's filesystem pool (four by default, or the runtime's
+`UV_THREADPOOL_SIZE`). These are worker bounds, not counts of complete pipelines.
+Between I/O phases, CPU work and network waits do not retain workers. Ready I/O reuses worker tickets
+until a queued peer needs capacity, checked at the existing one-second wake
+cadence before rejoining FIFO; idle permits are retired immediately. Spare-worker
+probes use that cadence too, avoiding per-file queue metadata. No idle worker,
+watcher or timer survives an open. Pack streams acquire permits per bounded chunk;
+source bytes still stream rather than accumulating a whole tree in memory.
+
+Cache and destination devices are acquired in sorted order when they differ.
+The queue location is independent of `XDG_CACHE_HOME`, project and object-cache
+location. Every open is admitted and retains its selection and operation while
+waiting. Dead process tickets use kernel process start identities for recovery.
+No hosted calls, digest checks, independent writable inodes, durability barriers
+or checkout recovery steps change.
+
+Each attempted local open appends a bounded `kind: checkout` receipt to the existing
+`<root>.forge-metrics.jsonl` operation journal, including on failure and replay.
+It retains milliseconds for local worker stall (pending I/O with no active worker), cache verification/fill, copy/hash,
+durability, stat indexing and publication, plus total time, file count and process
+peak RSS and the selected host/local worker budgets. Cache time includes downloads on misses; other local setup remains in
+total time. Phase times exclude recorded worker stall; the phases, stall and remaining
+setup/selection time account for the total. These receipts add no Convex calls and no idle work.
 Opening verifies source hashes without building syntax or line summaries for the
 whole tree. On save, overlap evidence for changed paths is derived lazily from
 the retained baseline objects, with their digest and private-file identity checked

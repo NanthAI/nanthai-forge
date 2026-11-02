@@ -13,6 +13,7 @@ import {
 } from 'node:fs';
 import { chmod, copyFile, open } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
+import { checkoutIo } from './checkout-io.js';
 import { mapExchange } from './exchange-parallel.js';
 import { digest } from './hash.js';
 import { invariant } from './errors.js';
@@ -110,21 +111,23 @@ export async function installHostedFiles(stage: string, objects: string, files: 
 
 /** Build independent, verified files while the whole staging tree stays private. */
 export async function stageHostedFiles(stage: string, objects: string, files: NativeFile[]) {
-  for (const directory of new Set(files.map(file => dirname(join(stage, file.path)))))
-    mkdirSync(directory, { recursive: true });
+  await checkoutIo(async () => {
+    for (const directory of new Set(files.map(file => dirname(join(stage, file.path)))))
+      mkdirSync(directory, { recursive: true });
+  });
   await mapExchange(files, 16, async file => {
     const target = join(stage, file.path),
       source = join(objects, file.blob);
-    if (file.mode === 'symlink') return installHostedFile(stage, objects, file);
-    await copyFile(source, target, constants.COPYFILE_FICLONE);
+    if (file.mode === 'symlink') return checkoutIo(async () => installHostedFile(stage, objects, file));
+    await checkoutIo(() => copyFile(source, target, constants.COPYFILE_FICLONE));
     // The shared machine cache can change between discovery and this clone.
     // Authenticate the independent installed inode before exposing it writable.
     invariant(
-      (await fingerprintPrivateFile(target, 'INVALID_NATIVE_SOURCE')).sha256 === file.blob,
+      (await checkoutIo(() => fingerprintPrivateFile(target, 'INVALID_NATIVE_SOURCE'))).sha256 === file.blob,
       'INVALID_NATIVE_SOURCE',
       'Cloned source differs from the selected content.',
     );
-    await chmod(target, file.mode === 'executable' ? 0o755 : 0o644);
+    await checkoutIo(() => chmod(target, file.mode === 'executable' ? 0o755 : 0o644));
   });
 }
 
@@ -135,11 +138,11 @@ export async function flushHostedFiles(stage: string, files: NativeFile[]) {
     16,
     async file => {
       const target = join(stage, file.path);
-      const handle = await open(target, 'r');
+      const handle = await checkoutIo(() => open(target, 'r'), 'durability');
       try {
-        await handle.sync();
+        await checkoutIo(() => handle.sync(), 'durability');
       } finally {
-        await handle.close();
+        await checkoutIo(() => handle.close(), 'durability');
       }
     },
   );
@@ -172,11 +175,11 @@ export async function flushHostedCheckoutFiles(directory: string, files?: readon
   } else walk(directory);
   if (process.platform === 'win32') return;
   await mapExchange(directories, 16, async path => {
-    const handle = await open(path, 'r');
+    const handle = await checkoutIo(() => open(path, 'r'), 'durability');
     try {
-      await handle.sync();
+      await checkoutIo(() => handle.sync(), 'durability');
     } finally {
-      await handle.close();
+      await checkoutIo(() => handle.close(), 'durability');
     }
   });
 }

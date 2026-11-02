@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { lstatSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { chmod, open, rename, rm } from 'node:fs/promises';
-import { mapExchange } from './exchange-parallel.js';
+import { checkoutIo, mapCheckoutIo } from './checkout-io.js';
 import { join } from 'node:path';
 import { fingerprintPrivateFile } from './files.js';
 import { invariant } from './errors.js';
@@ -22,8 +22,6 @@ export interface CheckoutObjectTransport {
 }
 /** Below this many missing objects, per-object pages are cheaper than one pack. */
 export const checkoutPackMinimum = 500;
-/** Concurrent local file operations (clone, hash, fsync); APFS latency dominates large trees. */
-export const checkoutIoConcurrency = 16;
 /** Disposable bytes only; fresh selection/access checks remain the caller's responsibility. */
 export class HostedCheckoutCache {
   downloadedObjects = 0;
@@ -55,10 +53,18 @@ export class HostedCheckoutCache {
     }
     if (this.objects === this.machine) neverIndex(this.objects);
   }
+  /** Include every cache device in the open's volume lease, even on fallback. */
+  get ioPaths() {
+    return [
+      this.objects,
+      ...(this.fallbackObjects ? [this.fallbackObjects] : []),
+      ...(this.machine ? [this.machine] : []),
+    ];
+  }
   async ensure(ids: string[]) {
     const unique = [...new Set(ids)];
     // Parallel file reads: per-file latency, not bandwidth, bounds large trees.
-    const cached = await mapExchange(unique, checkoutIoConcurrency, async id => {
+    const cached = await mapCheckoutIo(unique, async id => {
       const path = join(this.objects, id);
       if (!checkoutPathExists(path)) return false;
       const stat = lstatSync(path);
@@ -114,12 +120,12 @@ export class HostedCheckoutCache {
     }
   }
   private async download(pins: ContentPin[]) {
-    const temporary = mkdtempSync(join(this.root, 'download-'));
+    const temporary = await checkoutIo(async () => mkdtempSync(join(this.root, 'download-')));
     const files = pins.map(pin => ({ pin, path: join(temporary, pin.sha256) }));
     try {
       if (this.transport.downloadFiles) await this.transport.downloadFiles(files);
       else for (const { pin, path } of files) await this.transport.downloadToFile(pin, path);
-      await mapExchange(files, checkoutIoConcurrency, async ({ pin, path }) => {
+      await mapCheckoutIo(files, async ({ pin, path }) => {
         invariant(
           lstatSync(path).isFile() && !lstatSync(path).isSymbolicLink(),
           'INVALID_NATIVE_SOURCE',
@@ -132,12 +138,20 @@ export class HostedCheckoutCache {
           'INVALID_NATIVE_SOURCE',
           'Downloaded source is truncated or corrupt.',
         );
-        const handle = await open(path, 'r');
-        try {
-          await handle.sync();
-        } finally {
-          await handle.close();
-        }
+      });
+      await mapCheckoutIo(
+        files,
+        async ({ path }) => {
+          const handle = await open(path, 'r');
+          try {
+            await handle.sync();
+          } finally {
+            await handle.close();
+          }
+        },
+        'durability',
+      );
+      await mapCheckoutIo(files, async ({ pin, path }) => {
         const target = join(this.objects, pin.sha256);
         await rename(path, target);
         await rememberObject(this.machine, target, pin.sha256);
@@ -145,16 +159,16 @@ export class HostedCheckoutCache {
         this.downloadedBytes += pin.size;
       });
       // One directory flush per window instead of one per object.
-      syncDirectory(this.objects);
+      await checkoutIo(async () => syncDirectory(this.objects), 'durability');
     } finally {
-      rmSync(temporary, { recursive: true, force: true });
+      await checkoutIo(async () => rmSync(temporary, { recursive: true, force: true }));
     }
   }
   /** Reuse the machine store, or older per-checkout objects on the direct-machine path. */
   private async fromCache(ids: string[]) {
-    const temporary = mkdtempSync(join(this.root, 'machine-'));
+    const temporary = await checkoutIo(async () => mkdtempSync(join(this.root, 'machine-')));
     try {
-      const found = await mapExchange(ids, checkoutIoConcurrency, async id => {
+      const found = await mapCheckoutIo(ids, async id => {
         const source = join(this.fallbackObjects!, id),
           path = join(temporary, id);
         if (!checkoutPathExists(source)) return false;
@@ -183,7 +197,7 @@ export class HostedCheckoutCache {
       });
       return ids.filter((_, index) => !found[index]);
     } finally {
-      rmSync(temporary, { recursive: true, force: true });
+      await checkoutIo(async () => rmSync(temporary, { recursive: true, force: true }));
     }
   }
   /** One pack GET replaces per-object signing pages. Every written object passed its
@@ -194,7 +208,7 @@ export class HostedCheckoutCache {
       this.sourcePack = 'missing';
       return missing;
     }
-    const temporary = mkdtempSync(join(this.root, 'pack-'));
+    const temporary = await checkoutIo(async () => mkdtempSync(join(this.root, 'pack-')));
     try {
       const archive = join(temporary, 'pack.gz'),
         unpacked = join(temporary, 'objects'),
@@ -206,8 +220,8 @@ export class HostedCheckoutCache {
         unpacked,
         blob => wanted.has(blob) || (this.machine !== null && !checkoutPathExists(join(this.machine, blob))),
       );
-      await rm(archive, { force: true });
-      await mapExchange(written, checkoutIoConcurrency, async id => {
+      await checkoutIo(() => rm(archive, { force: true }));
+      await mapCheckoutIo(written, async id => {
         const path = join(unpacked, id);
         if (this.objects !== this.machine) await rememberObject(this.machine, path, id);
         if (wanted.has(id) || this.objects === this.machine) await rename(path, join(this.objects, id));
@@ -220,7 +234,7 @@ export class HostedCheckoutCache {
       this.sourcePack = 'failed';
       return missing;
     } finally {
-      rmSync(temporary, { recursive: true, force: true });
+      await checkoutIo(async () => rmSync(temporary, { recursive: true, force: true }));
     }
   }
 }

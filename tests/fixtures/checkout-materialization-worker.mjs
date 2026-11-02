@@ -1,22 +1,44 @@
 // SPDX-License-Identifier: Apache-2.0
-import { readFileSync, appendFileSync } from 'node:fs';
+import syncFs, { readFileSync, appendFileSync } from 'node:fs';
 import fs from 'node:fs/promises';
 import { syncBuiltinESMExports } from 'node:module';
 import { join } from 'node:path';
-import { withCheckoutMaterialization } from '../../dist/checkout-materialization.js';
+import { queueEntries } from '../../dist/check-queue.js';
+import assert from 'node:assert/strict';
+import { checkoutIo, checkoutVolumeCapacity } from '../../dist/checkout-io.js';
+import { withCheckoutMaterialization, withCheckoutWritePass, materializationDirectory } from '../../dist/checkout-materialization.js';
 import { checkoutHostedLane } from '../../dist/hosted-lane-checkout.js';
 const [mode, directory, count] = process.argv.slice(2);
-if (mode === 'queue') {
-  await Promise.all(Array.from({ length: Number(count) }, () =>
-    withCheckoutMaterialization(directory, async () => {
-      appendFileSync(join(directory, 'events'), `${process.hrtime.bigint()} 1\n`);
+if (mode === 'writes') {
+  await withCheckoutWritePass(directory, async () => {
+    appendFileSync(join(directory, 'events'), `${process.hrtime.bigint()} 1\n`);
+    await new Promise(resolve => setTimeout(resolve, 20));
+    appendFileSync(join(directory, 'events'), `${process.hrtime.bigint()} -1\n`);
+  }, { directory: join(directory, 'queue') });
+} else if (mode === 'queue') {
+  await Promise.all(Array.from({ length: Number(count) }, (_, index) =>
+    withCheckoutMaterialization(directory, () => checkoutIo(async () => {
+      appendFileSync(join(directory, 'events'), `${process.hrtime.bigint()} 1 ${index % 2 ? "durability" : "copy"}\n`);
       await new Promise(resolve => setTimeout(resolve, 20));
-      appendFileSync(join(directory, 'events'), `${process.hrtime.bigint()} -1\n`);
-    }, { directory: join(directory, 'queue'), slots: 3 }),
+      appendFileSync(join(directory, 'events'), `${process.hrtime.bigint()} -1 ${index % 2 ? "durability" : "copy"}\n`);
+    }, index % 2 ? 'durability' : 'copy'), { directory: join(directory, 'queue') }),
   ));
 } else {
   const { request, selection } = JSON.parse(readFileSync(join(directory, 'request.json')));
   const calls = { select: 0, objects: 0, downloads: 0 };
+  // Regression guard on the real checkout, not only the scheduling helper:
+  // cache hashes, clones and all asynchronous fsync descriptors require its lease.
+  const assertLease = path => {
+    if (!String(path).includes('/objects/') && !String(path).includes('/checkout-')) return;
+    const entries = queueEntries(materializationDirectory(directory));
+    assert(entries.filter(e => e.ticket?.holding).length <= checkoutVolumeCapacity());
+    assert(entries.some(e => e.pid === process.pid && e.ticket?.holding), 'checkout I/O escaped its volume budget');
+  };
+  const openSync = syncFs.openSync, copyFile = fs.copyFile, open = fs.open;
+  syncFs.openSync = (...args) => { assertLease(args[0]); return openSync(...args); };
+  fs.copyFile = async (...args) => { assertLease(args[0]); assertLease(args[1]); return copyFile(...args); };
+  fs.open = async (...args) => { assertLease(args[0]); return open(...args); };
+  syncBuiltinESMExports();
   if (mode === 'crash') {
     const original = fs.open;
     let paused = false;

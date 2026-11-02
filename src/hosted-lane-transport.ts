@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { checkoutIo } from './checkout-io.js';
 import { writeFileSync } from 'node:fs';
 import { makeFunctionReference } from 'convex/server';
 import type { ConvexExchange } from './exchange-client.js';
@@ -94,7 +95,9 @@ export class ConvexLaneTransport implements LaneTransport {
     if (small.length) {
       const bytes = await this.exchange.downloadBatch(small.map(file => file.pin));
       for (let index = 0; index < small.length; index++)
-        writeFileSync(small[index]!.path, bytes[index]!, { flag: 'wx', mode: 0o600 });
+        await checkoutIo(async () =>
+          writeFileSync(small[index]!.path, bytes[index]!, { flag: 'wx', mode: 0o600 }),
+        );
     }
     const large = legacy.filter(file => file.pin.size > 2 * 1024 * 1024);
     if (large.length) await this.exchange.prepareDownloads(large.map(file => file.pin));
@@ -111,7 +114,7 @@ export class ConvexLaneTransport implements LaneTransport {
       );
       for (const { pin, path } of files) {
         const bytes = direct.get(pin.sha256);
-        if (bytes) writeFileSync(path, bytes, { flag: 'wx', mode: 0o600 });
+        if (bytes) await checkoutIo(async () => writeFileSync(path, bytes, { flag: 'wx', mode: 0o600 }));
       }
     }
     for (const { pin } of files) this.descriptors.delete(pin.sha256);

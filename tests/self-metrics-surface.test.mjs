@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
+import { metricWeekFixtureAt } from './fixtures/metric-week-time.mjs';
 import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync, readFileSync, readdirSync, statSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -187,18 +188,16 @@ test('CLI JSON/report, registered agent action, owner status, write-triggered we
     assert.ok(status.metrics);
     assert.match(formatPendingStatus(status), /Metrics · last 7 days/);
     assert.equal(statSync(join(directory, 'work.json')).mtimeMs, before);
-    // A newly created owner correctly skips weeks ending before its birth.
-    // Close the week containing this fixture's real evidence, on any date.
-    const week = previousMetricWeek(new Date(Date.now() + 7 * 86400000).toISOString());
-    const boundary = Date.parse(week.period.to);
-    t.mock.timers.enable({ apis: ['Date'], now: boundary });
+    const snapshotAt = metricWeekFixtureAt();
+    const week = previousMetricWeek(snapshotAt);
+    t.mock.timers.enable({ apis: ['Date'], now: Date.parse(snapshotAt) });
     recordOwnerMutation(directory);
     await waitForOwnerChildren(root);
     const path = join(directory, 'metrics', week.name);
     const snapshot = readFileSync(path, 'utf8');
     const records = await nativeSelfMetricsReader(root).read();
     assert.equal(snapshot, weeklyMetricBytes(records, week.period));
-    snapshotMetricWeek(directory, new Date(boundary + 10 * 60 * 60 * 1000).toISOString());
+    snapshotMetricWeek(directory, new Date(Date.parse(snapshotAt) + 10 * 60 * 60 * 1000).toISOString());
     assert.equal(readFileSync(path, 'utf8'), snapshot);
     recordOwnerMutation(directory);
     assert.ok(readdirSync(directory).includes('metrics'));

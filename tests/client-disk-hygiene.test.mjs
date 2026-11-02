@@ -247,6 +247,7 @@ test('prune removes a clean active Lane idle past the age, and keeps an edited o
     ])
       age(path, 10);
     ageTree(`${root}.forge-client`, 10);
+    age(`${root}.forge-metrics.jsonl`, 10);
     recordLane({ laneId: ids[name], root, ...address, outcome: name, lastActionAt: now - 10 * hour }, now);
   }
   writeFileSync(join(editedRoot, 'src', 'a.txt'), 'unsaved\n');

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
+import { metricWeekFixtureAt } from './fixtures/metric-week-time.mjs';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import {
@@ -26,9 +27,7 @@ import { initNative } from '../dist/native-work.js';
 import { selfMetricsTestHooks } from '../dist/self-metrics-journal.js';
 import { cleanupOwner, waitForOwnerChildren } from './owner-cleanup.mjs';
 
-// Keep the due boundary after owners created by these tests, including when
-// the test process crosses Monday midnight. No real calendar date can expire it.
-const at = new Date(Date.now() + 14 * 86400000).toISOString();
+const at = metricWeekFixtureAt();
 const { name } = previousMetricWeek(at);
 const worker = fileURLToPath(new URL('./self-metrics-weekly-fixture.mjs', import.meta.url));
 function fixture(t, control) {
