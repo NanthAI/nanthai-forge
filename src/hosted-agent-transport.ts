@@ -1,3 +1,4 @@
+import { reconcileHostedSync } from './hosted-sync-handoff.js';
 import { sourceTree } from './source-tree.js';
 import { withSourceRecovery } from './hosted-agent-source-recovery.js';
 import { readHostedOverlapAdvice, recordHostedOverlapDelivery } from './hosted-overlap-client.js';
@@ -481,6 +482,10 @@ export class HostedAgentTransport {
       const replaying =
         typeof operationId === 'string' &&
         existsSync(resolve(`${root}.forge-client`, 'agent', `${operationId}.json`));
+      const pendingSync =
+        action === 'finish' && !replaying ? await reconcileHostedSync(root, this.exchange) : null;
+      if (pendingSync)
+        return this.response(action, typeof operationId === 'string' ? operationId : null, pendingSync);
       const pendingSave =
         action === 'finish' && !replaying ? await reconcileHostedSave(root, this.exchange) : null;
       if (pendingSave)

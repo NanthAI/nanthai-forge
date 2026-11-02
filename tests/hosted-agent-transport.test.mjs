@@ -158,7 +158,7 @@ test('pending source and finish steps return promptly and retain all child opera
   for (const receipt of [first, next])
     assert.equal(
       receipt.result.waitCommand.replace(/^nforge agent '[^']*\/client'/, 'nforge agent ROOT'),
-      `nforge agent ROOT wait '{"operationIds":["${first.operationId}"],"timeoutSeconds":3600}'`,
+      `nforge agent ROOT wait '{"operationIds":["${first.operationId}"],"until":"acceptance","timeoutSeconds":3600}'`,
     );
 });
 

@@ -1,3 +1,6 @@
+import { retainSyncHandoff, clearSyncHandoff } from './hosted-sync-handoff.js';
+import { hostedActionError } from './hosted-action-error.js';
+import { HostedAgentJournal } from './hosted-agent-journal.js';
 import { resolutionFinishSelection } from './hosted-resolution-selection.js';
 // SPDX-License-Identifier: Apache-2.0
 import { join } from 'node:path';
@@ -164,6 +167,7 @@ export async function resolveHostedAgent(session: HostedAgentSession, input: unk
       message: command.message,
     });
   });
+  const handoff = await retainSyncHandoff(session, 'resolve', command);
   let progress = await driveAgentSource(session, 'Sync', session.journal.operationId, request);
   progress = await session.waitSource(session.journal.operationId, progress);
   const parsed = syncResultSchema.safeParse(completed(progress));
@@ -172,7 +176,7 @@ export async function resolveHostedAgent(session: HostedAgentSession, input: unk
   const applied = await applyHostedSync(
     session.root,
     {
-      operationId: await session.journal.id('resolved-checkout'),
+      operationId: handoff.applyOperationId,
       url: session.address.url,
       from: source.from,
       lane: source.lane,
@@ -180,6 +184,7 @@ export async function resolveHostedAgent(session: HostedAgentSession, input: unk
     },
     new ConvexLaneTransport(session.exchange),
   );
+  clearSyncHandoff(session.root, session.journal.operationId);
   const selection = await resolutionFinishSelection(session, source);
   if ('pending' in selection) return { source: progress, applied, ...selection.pending };
   const next = { ...selection, operationId: await session.journal.id('next-finish'), accept: true };
@@ -207,13 +212,45 @@ export async function recoverHostedFinish(session: HostedAgentSession, value: un
   return { ...(value as object), recovery: await recoverHostedCandidate(session, candidateId) };
 }
 export async function recoverHostedCandidate(session: HostedAgentSession, candidateId: string) {
-  const command = hostedAgentCommandSchemas.sync.parse({
-    candidateId,
-    message: 'Prepare conflict resolution',
-  });
-  const operationId = await session.journal.id('conflict-sync');
-  const progress = await syncAgentSource(session, command, operationId);
-  return guideHostedSync(session, await session.waitSource(operationId, progress));
+  // Use the ordinary sync journal: following either the exact continuation or
+  // the canonical error's sync instruction resumes this operation. An explicit
+  // new operationId still creates an independent draft.
+  const command = hostedAgentCommandSchemas.sync.parse({ candidateId });
+  const journal = new HostedAgentJournal(
+    session.root,
+    session.address,
+    session.capabilities.actor,
+    'sync',
+    command,
+  );
+  const recovery = { ...session, journal };
+  const operationId = journal.operationId;
+  const next = { action: 'sync', ...command, operationId };
+  let progress;
+  try {
+    progress = await syncAgentSource(recovery, command, operationId);
+  } catch (error) {
+    const safe = hostedActionError(error, 'conflict recovery');
+    if (safe.code !== 'HOSTED_ACTION_FAILED') throw safe;
+    // The canonical conflict is known even when preparation's reply was lost.
+    return {
+      operationId,
+      phase: 'sync',
+      status: 'unknown',
+      error: { code: safe.code, message: safe.message },
+      next,
+      command: hostedRecoveryCommand(session.root, 'sync', next),
+    };
+  }
+  const guided = await guideHostedSync(recovery, progress);
+  if (completed(progress)) return { operationId, ...(guided as object) };
+  return {
+    operationId,
+    phase: 'sync',
+    source: progress,
+    next,
+    command: hostedRecoveryCommand(session.root, 'sync', next),
+  };
 }
 /** Read-only advice keeps the current rejected attempt (including batch members),
  * rather than guessing from the original clean submission Candidate. */

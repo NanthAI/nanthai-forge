@@ -14,7 +14,7 @@ import { waitHostedAgentSource } from './hosted-agent-source-wait.js';
 import { readClientSettings } from './client-settings.js';
 import { withLaneCommand } from './lane-registry.js';
 import { markerIdentity } from './lane-prune.js';
-import { landPhase, landSummary, resultOf, terminalPhases } from './hosted-land-summary.js';
+import { landPhase, landSummary, resultOf, landTerminal } from './hosted-land-summary.js';
 import { landAnnouncement, landWaitCommand } from './hosted-land-wait.js';
 import { markOverlapShown, overlapBannerOnce, type HostedOverlapNotice } from './hosted-overlap-notice.js';
 import { LAND_INVOKED_ENV, landTiming, landTimingLine, startLandTiming } from './land-timing.js';
@@ -164,13 +164,15 @@ async function waitLanding(
   process.once('SIGINT', stop);
   process.once('SIGTERM', stop);
   try {
+    const emit = (event: unknown) => process.stdout.write(`${JSON.stringify(event)}\n`);
     if (result.phase === 'check' && result.run?.id)
-      await observeHostedRun(transport, { runId: result.run.id, timeoutSeconds }, controller.signal);
+      await observeHostedRun(transport, { runId: result.run.id, timeoutSeconds }, controller.signal, emit);
     else if (response.operationId)
       await observeHostedSubmissions(
         transport,
-        { operationIds: [response.operationId], timeoutSeconds },
+        { operationIds: [response.operationId], timeoutSeconds, until: 'acceptance' },
         controller.signal,
+        emit,
       );
   } finally {
     process.removeListener('SIGINT', stop);
@@ -193,13 +195,16 @@ export async function hostedLandCli(
       : await detachedSubmit(root, command);
   if (!submitted) return undefined;
   const wait = options.wait ?? readClientSettings().landWait;
-  const phase = landPhase(submitted);
   if (
     !wait ||
-    (phase && terminalPhases.has(phase)) ||
+    landTerminal(submitted) ||
     ['conflict', 'save', 'compose', 'sync'].includes(String(resultOf(submitted).phase))
   ) {
-    for (const line of landSummary(submitted)) process.stderr.write(`${line}\n`);
+    const lines = landSummary(submitted);
+    for (const line of lines) process.stderr.write(`${line}\n`);
+    if (lines[0]?.startsWith('FAILED')) process.exitCode = 2;
+    else if (wait && ['save', 'compose', 'sync'].includes(resultOf(submitted).phase ?? ''))
+      process.exitCode = 3;
     return submitted;
   }
   process.stderr.write(
@@ -210,12 +215,16 @@ export async function hostedLandCli(
     waitLanding(transport, submitted, options.timeoutSeconds ?? 5400),
   );
   // One replay of the same request returns the canonical terminal receipt.
-  const final = (await hostedAgentCli(root, 'finish', command, address, transport)) as HostedAgentResponse;
+  const replay = (resultOf(submitted) as { replayParameters?: Record<string, unknown> }).replayParameters ?? {
+    ...command,
+    operationId: submitted.operationId,
+  };
+  const final = (await hostedAgentCli(root, 'finish', replay, address, transport)) as HostedAgentResponse;
   const lines = landSummary(final);
   for (const line of lines) process.stderr.write(`${line}\n`);
   const outcome = landPhase(final);
   if (outcome === 'terminal-failed' || lines[0]?.startsWith('FAILED')) process.exitCode = 2;
-  else if (!finished || !outcome || !terminalPhases.has(outcome)) {
+  else if (!finished || !landTerminal(final)) {
     if (!(resultOf(final).phase === 'check' && resultOf(final).run?.status === 'passed')) {
       const resume = landWaitCommand(root, final);
       process.stderr.write(

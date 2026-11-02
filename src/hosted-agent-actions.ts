@@ -1,3 +1,4 @@
+import { retainSyncHandoff, clearSyncHandoff } from './hosted-sync-handoff.js';
 import { guideHostedSync, resolveHostedAgent } from './hosted-agent-resolution.js';
 import { hostedRecordSchema } from './hosted-records.js';
 import { executeHostedFinish } from './hosted-agent-finish.js';
@@ -447,6 +448,10 @@ export async function executeHostedAgent(
   if (action === 'resolve') return resolveHostedAgent(session, input);
   if (action === 'sync') {
     const command = hostedAgentCommandSchemas.sync.parse(input);
+    const handoff =
+      command.apply && !command.candidateId && session.marker()
+        ? await retainSyncHandoff(session, 'sync', command)
+        : null;
     const result = await session.waitSource(
         operationId,
         await syncAgentSource(session, command, operationId),
@@ -458,7 +463,7 @@ export async function executeHostedAgent(
         const applied = await applyHostedSync(
           session.root,
           {
-            operationId: await session.journal.id('apply'),
+            operationId: handoff?.applyOperationId ?? (await session.journal.id('apply')),
             url: session.address.url,
             from: source.from,
             lane: source.lane,
@@ -466,9 +471,11 @@ export async function executeHostedAgent(
           },
           new ConvexLaneTransport(session.exchange),
         );
+        clearSyncHandoff(session.root, operationId);
         return { source: result, applied };
       }
     }
+    if (completed && handoff) clearSyncHandoff(session.root, operationId);
     return guideHostedSync(session, result, command.apply);
   }
   if (action === 'revert') {

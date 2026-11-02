@@ -589,3 +589,28 @@ test('a retained preparing submission resnapshots the same older version on reco
   );
   assert.equal(s.counts().opens, 0);
 });
+
+test('acceptance wait stays live at ready until the canonical landing settles', async () => {
+  const s = await fixture(),
+    a = await s.start();
+  await s.update(a.state.id, 'ready', {
+    observation: { state: 'pending', pendingReason: 'queued', cause: null },
+  });
+  let done = false;
+  const waiting = s.wait({ operationIds: [a.request.operationId], until: 'acceptance' }).then(value => {
+    done = true;
+    return value;
+  });
+  await turn();
+  await turn();
+  assert.equal(done, false);
+  const reads = s.counts().reads;
+  await turn();
+  assert.equal(s.counts().reads, reads, 'ready creates no idle reads');
+  await s.update(a.state.id, 'landed');
+  s.wake();
+  const result = await waiting;
+  assert.equal(result.result.successful, true);
+  assert.equal(result.result.submissions[0].submission.phase, 'landed');
+  assert.equal(s.counts().closes, 1);
+});

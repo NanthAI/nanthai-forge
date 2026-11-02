@@ -189,9 +189,13 @@ test('lost conflict-recovery reply reuses the exact sibling and preserves subseq
   f.moveMain({ overlap: true });
   const command = { laneId: f.lane.laneId };
   s.lose('projectHostedSyncJobs:submit');
-  await assert.rejects(s.transport().dispatch('finish', command), { code: 'HOSTED_ACTION_FAILED' });
+  const unknown = await s.transport().dispatch('finish', command);
+  assert.equal(unknown.result.phase, 'conflict');
+  assert.equal(unknown.result.recovery.status, 'unknown');
+  assert.equal(unknown.result.recovery.next.operationId, unknown.result.recovery.operationId);
   const recovered = await s.transport().dispatch('finish', command),
     conflict = recovered.result.recovery.conflict;
+  assert.equal(recovered.result.recovery.operationId, unknown.result.recovery.operationId);
   writeFileSync(join(conflict.root, 'a.txt'), 'do not overwrite\n');
   const replay = await s.transport().dispatch('finish', command);
   assert.equal(replay.result.recovery.conflict.laneId, conflict.laneId);

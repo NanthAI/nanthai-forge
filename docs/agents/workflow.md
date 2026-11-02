@@ -85,6 +85,9 @@ Old names keep working for at least one released version and print their new for
 
 `land --save` waits for the outcome by default; `--no-wait` returns after submission, and a killed client never stops the landing. Hosted `land --save` reports progress while it works, on stderr. The operation id, the replay command and an overlap notice print as soon as the submission is accepted, not when the wait ends; a long queue ends with a single wait command (also the `waitCommand` field of the finish receipt) that resumes by one subscription read per change instead of a polling loop. Landed and completed work leaves the open-overlap index, so an overlap notice names only Lanes that still hold unlanded work. `status {laneId}` shows `lastActivityAt` (when the Lane record last changed) and `local`: the last command this machine ran in the Lane and whether a Forge command is running there now. Neither adds server reads while idle.
 
+Hosted land waits for canonical acceptance or failure: a passing `ready` Candidate remains pending while acceptance is outstanding. Check-only calls still stop after their check. The existing wake subscription streams submission progress and advisory conflicts as NDJSON; speculative advice never settles a landing. A conflict returns promptly with its retained recovery operation and exact continuation. Following that continuation (or the ordinary sync instruction) reuses the draft; an explicit new sync `operationId` requests an independent draft. If a sync or resolve source phase outlives its client wait, the next land reconciles that exact operation and installs its pinned result before selecting source. No idle polling is added.
+
+
 Hosted projects keep their backlog as planning: Initiatives group Issues, and an Issue is the work an agent starts. The same records show in the web app under Work > Planning. Read, write and start from them without leaving the agent command surface:
 
 ```sh

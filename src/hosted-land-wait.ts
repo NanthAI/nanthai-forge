@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { shellQuote } from './agent-brief-render.js';
-import { landPhase, resultOf, terminalPhases } from './hosted-land-summary.js';
+import { resultOf, landTerminal } from './hosted-land-summary.js';
 import type { HostedAgentResponse } from './hosted-agent-transport.js';
 
 const runDone = new Set(['passed', 'failed', 'cancelled', 'runner-unavailable', 'interrupted']);
@@ -10,15 +10,14 @@ export const WAIT_COMMAND_SECONDS = 3600;
 /** The single command that resumes waiting for a pending landing or check: one server read per
  * wake from the existing subscription, never a polling loop. Undefined once the outcome is final. */
 export function landWaitCommand(root: string, response: HostedAgentResponse) {
-  const result = resultOf(response),
-    phase = landPhase(response);
+  const result = resultOf(response);
   const wait =
     result.phase === 'check' && result.run?.id
       ? runDone.has(result.run.status ?? '')
         ? null
         : { runId: result.run.id }
-      : result.phase === 'finish' && response.operationId && !(phase && terminalPhases.has(phase))
-        ? { operationIds: [response.operationId] }
+      : result.phase === 'finish' && response.operationId && !landTerminal(response)
+        ? { operationIds: [response.operationId], until: 'acceptance' }
         : null;
   return wait
     ? `nforge agent ${shellQuote(root)} wait ${shellQuote(JSON.stringify({ ...wait, timeoutSeconds: WAIT_COMMAND_SECONDS }))}`

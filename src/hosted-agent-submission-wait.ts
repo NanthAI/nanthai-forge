@@ -15,7 +15,7 @@ export const hostedSubmissionWaitSchema = z
   .object({
     operationIds: z.array(z.uuid()).min(1),
     cursor: z.string().nullable().optional(),
-    until: z.enum(['terminal', 'any-change']).default('terminal'),
+    until: z.enum(['terminal', 'any-change', 'acceptance']).default('terminal'),
     timeoutSeconds: z.number().nonnegative().finite().default(600),
   })
   .strict();
@@ -60,7 +60,9 @@ export async function observeHostedSubmissions(
   const terminal = () =>
     current.size === operations.length &&
     [...current.entries()].every(
-      ([id, e]) => e.submission.observation.state !== 'pending' || sourceTerminal.get(id),
+      ([id, e]) =>
+        e.submission.observation.state !== 'pending' ||
+        (command.until !== 'acceptance' && sourceTerminal.get(id)),
     );
   let client: HostedRunSubscription | undefined;
   let wake = () => {};
@@ -254,7 +256,7 @@ export async function observeHostedSubmissions(
       );
       if (page.isDone) {
         publish(operationId, current.get(operationId)!, page.resnapshot);
-        await readInputs(operationId);
+        if (command.until !== 'acceptance') await readInputs(operationId);
         return;
       }
       invariant(

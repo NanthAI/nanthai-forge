@@ -120,7 +120,7 @@ export const hostedWaitSchema = z
     runId: z.uuid().optional(),
     operationIds: z.array(z.uuid()).optional(),
     cursor: z.string().nullable().optional(),
-    until: z.enum(['terminal', 'any-change']).optional(),
+    until: z.enum(['terminal', 'any-change', 'acceptance']).optional(),
     timeoutSeconds: z.number().nonnegative().finite().optional(),
   })
   .strict();

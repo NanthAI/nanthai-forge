@@ -10,6 +10,8 @@ function sourceReply(value: unknown): Reply | null {
   const outcome = reply.outcome as { status?: string; error?: { code?: string } } | undefined;
   if (outcome?.status === 'failed' && outcome.error?.code) return { status: 'failed', error: outcome.error };
   for (const key of ['progress', 'source', 'recovery']) {
+    // Conflict recovery owns its own exact sync continuation.
+    if (key === 'recovery' && (reply.recovery as Reply | undefined)?.operationId) continue;
     const found = sourceReply(reply[key]);
     if (found) return found;
   }

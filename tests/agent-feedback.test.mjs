@@ -106,7 +106,7 @@ test('finish prints operation id, replay and wait commands, and the overlap bann
   assert.match(text, /finish '\{"laneId":"[0-9a-f-]+","message":"m","operationId":"[0-9a-f-]+"\}'/);
   assert.match(
     text,
-    /to keep waiting, run: nforge agent '\/tmp\/lane-root' wait '\{"operationIds":\["[0-9a-f-]+"\],"timeoutSeconds":3600\}'/,
+    /to keep waiting, run: nforge agent '\/tmp\/lane-root' wait '\{"operationIds":\["[0-9a-f-]+"\],"until":"acceptance","timeoutSeconds":3600\}'/,
   );
   assert.match(text, /OVERLAP NOTICE: ACTION REQUIRED/);
   assert.match(text, /efa2859d/);
@@ -137,7 +137,7 @@ test('the receipt carries one wait command while a landing or check is pending, 
   const queued = wait({ phase: 'finish', submission: { phase: 'queued' } });
   assert.equal(
     queued,
-    `nforge agent '/tmp/it'\\''s' wait '{"operationIds":["${operationId}"],"timeoutSeconds":3600}'`,
+    `nforge agent '/tmp/it'\\''s' wait '{"operationIds":["${operationId}"],"until":"acceptance","timeoutSeconds":3600}'`,
   );
   assert.equal(wait({ phase: 'finish', submission: { phase: 'landed' } }), undefined);
   assert.equal(wait({ phase: 'finish', submission: { phase: 'terminal-failed' } }), undefined);
