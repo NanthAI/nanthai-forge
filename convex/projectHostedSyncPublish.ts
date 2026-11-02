@@ -3,7 +3,7 @@ import type { MutationCtx } from './_generated/server';
 import { loadSync, hostedSyncInput, writeSyncState } from './projectHostedSyncStore';
 import { finishHostedOperation } from './projectHostedOperations';
 import { writeHostedRecord } from './projectHostedRecords';
-import { saveObjects, saveLane, sameSaveLane, type SaveIdentity } from './projectHostedSaveStore';
+import { saveObjects, saveLaneRecord, sameSaveLane, type SaveIdentity } from './projectHostedSaveStore';
 import { loadSourceJob } from './projectSourceJobs';
 import { syncOutputSchema, syncResultSchema } from '../src/hosted-sync';
 import { hostedLaneSelectionSchema } from '../src/hosted-lane';
@@ -84,9 +84,14 @@ export async function publishHostedSync(ctx: MutationCtx, input: SaveIdentity & 
     await writeSyncState(ctx, row._id, { ...state, status });
     return terminal;
   };
+  // Old sync state could derive true from its target alone, omitting a mixed left side.
+  const ownerInputs = state.ownerProvenance === 1 && state.ownerInputs === true;
   let lane = state.lane;
+  let clearOwnerProvenance = false;
   if (request.kind !== 'resolution' && request.kind !== 'revert') {
-    lane = await saveLane(ctx, { ...input, laneId: request.laneId });
+    const original = await saveLaneRecord(ctx, { ...input, laneId: request.laneId });
+    lane = original.lane;
+    clearOwnerProvenance = original.ownerOnly && !ownerInputs;
     if (!sameSaveLane(lane, request.expected))
       return finish(
         {
@@ -146,7 +151,13 @@ export async function publishHostedSync(ctx: MutationCtx, input: SaveIdentity & 
         status: 'pending',
       },
     };
-    await writeHostedRecord(ctx, { ...input, authorityEpoch, expectedVersion: null, record: lane });
+    await writeHostedRecord(ctx, {
+      ...input,
+      authorityEpoch,
+      expectedVersion: null,
+      ownerOnly: ownerInputs,
+      record: lane,
+    });
   } else if (state.work.mode === 'revert') {
     lane = {
       kind: 'lane',
@@ -174,6 +185,7 @@ export async function publishHostedSync(ctx: MutationCtx, input: SaveIdentity & 
     const stack = state.work.mode === 'sync' ? state.work.stackAfter : undefined;
     if (
       changed ||
+      clearOwnerProvenance ||
       result.status === 'resolved' ||
       (stack && canonicalPayload(stack) !== canonicalPayload(lane.stack))
     ) {
@@ -190,7 +202,7 @@ export async function publishHostedSync(ctx: MutationCtx, input: SaveIdentity & 
         ...input,
         authorityEpoch,
         expectedVersion: lane.version - 1,
-        ownerOnly: state.ownerInputs === true,
+        ownerOnly: ownerInputs,
         record: lane,
       });
     }

@@ -1,6 +1,7 @@
+import { candidateOwnerInputs } from './projectHostedProvenance';
 import { semanticPayload } from '../src/semantic-payload';
 import { mainSemanticMembers, mergeSemanticMembers, semanticBaseSequence } from './projectSemanticContracts';
-import { readHostedRecord } from './projectHostedRecords';
+import { readHostedRecord, hostedWriteProject } from './projectHostedRecords';
 // SPDX-License-Identifier: Apache-2.0
 import type { MutationCtx } from './_generated/server';
 import type { Doc } from './_generated/dataModel';
@@ -203,8 +204,18 @@ export async function prepareFinishCompose(ctx: MutationCtx, input: LandingIdent
       (own ? await semanticBaseSequence(ctx, input.projectId, own.base.receiptId) : 0);
   }
   const stateValue: ComposeState = {
+    ownerProvenance: 1,
     ...(value.restoreBases ? { restoreBases: value.restoreBases } : {}),
-    ownerInputs: originalCandidate?.governance?.ownerInputs === true,
+    ownerInputs: Boolean(
+      originalRow &&
+      originalCandidate &&
+      candidateOwnerInputs(
+        await hostedWriteProject(ctx, input.projectId, state.actor, request.authorityEpoch),
+        originalRow,
+        originalCandidate,
+        request.authorityEpoch,
+      ),
+    ),
     ...(semanticPlan.members.length ? { semanticPlan } : {}),
     request,
     main: await saveObject(ctx, input.projectId, { sha256: pending.main.head }),

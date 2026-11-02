@@ -71,6 +71,18 @@ later owner writes do not restore it. Missing legacy provenance cannot grant the
 exception. Recomposition retains the original provenance. Creating an owner request
 around a contributor Candidate does not make it an owner-only Candidate.
 
+Conflict recovery retains the authenticated input aggregate separately from changed
+paths, including the creator and authority epoch. A conflict summary cannot stand
+in for complete clean-Candidate paths. Resolution drafts inherit that aggregate;
+saves and resolve preserve it only while the Lane remains owner-only. Sync combines
+both sides, including an unaccepted stack parent. Batch conflicts include the
+composed prefix's provenance. Mixed inputs, unknown legacy conflict provenance and
+evidence from another authority epoch cannot grant the owner exception. Pending
+syncs prepared before two-sided provenance validation cannot seed owner-only drafts. Recovery
+reuses the aggregate already validated over selected manifest pages; publication
+never scans source history or re-reads the original selections. Finishing a
+multi-input resolution keeps every original suffix and dependency pin.
+
 ## Edit the list
 
 The owner uses the existing policy command. `acceptance.ownerApprovalPaths` replaces
@@ -119,3 +131,5 @@ only the Forge mirror App updates it, with force-push and deletion blocked by th
 GitHub ruleset. CODEOWNERS on that mirror can document the same ownership, but
 Forge's server-side policy is the authority for native landing. The mirror receives
 only accepted source; it grants no route around Forge owner approval.
+
+Pending compose and sync operations created before authenticated aggregate versioning cannot grant new owner-only provenance at publication. Their source results remain usable with unknown provenance.

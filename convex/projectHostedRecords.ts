@@ -92,7 +92,7 @@ export async function writeHostedRecord(
     expectedVersion: number | null;
     /** Trusted compose metadata, outside the client-visible immutable record body. */
     restoreBases?: string;
-    /** Trusted source reducers may clear provenance when importing unaccepted peer source. */
+    /** Trusted input aggregate; false clears Lane provenance, true seeds a new resolution/Candidate. */
     ownerOnly?: boolean;
     overlap?: { changes?: OverlapChange[]; complete?: boolean; baseSequence?: number; intent?: string };
   },
@@ -147,7 +147,9 @@ export async function writeHostedRecord(
             input.ownerOnly !== false &&
             (head ? head.ownerOnly === true : input.ownerOnly === true || record.head === record.base.head),
         }
-      : {};
+      : record.kind === 'candidate' && input.ownerOnly !== undefined
+        ? { ownerOnly: input.actor === project.owner && input.ownerOnly === true }
+        : {};
   const indexed = { ...hostedRecordIndex(record), version: record.version, ...ownerOnly },
     identity = { projectId: input.projectId, kind: record.kind, key: record.id };
   const bodyId = await ctx.db.insert('projectHostedRecordBodies', { projectId: input.projectId, value });
@@ -155,7 +157,12 @@ export async function writeHostedRecord(
     ...identity,
     ...indexed,
     bodyId,
-    ...(record.kind === 'candidate' ? { creatorAccountId: input.actor } : {}),
+    ...(record.kind === 'candidate'
+      ? {
+          creatorAccountId: input.actor,
+          ...(input.ownerOnly !== undefined ? { provenanceEpoch: input.authorityEpoch } : {}),
+        }
+      : {}),
     ...(record.kind === 'candidate' && input.restoreBases ? { restoreBases: input.restoreBases } : {}),
     digest: ref.digest,
     bytes: ref.bytes,

@@ -1,3 +1,4 @@
+import { candidateOwnerInputs } from './projectHostedProvenance';
 import { fixGate } from '../src/culprit-bisect';
 import { batchEligible } from '../src/hosted-landing-batch';
 import { semanticMember, mergeSemanticMembers } from './projectSemanticContracts';
@@ -95,6 +96,7 @@ export async function pinLandingAttempt(
   const recoveryGate = fixGate({ needsFix: row.restoreBases ?? project.needsFix?.[candidate.intentId] });
   const deferredCheck =
     !recoveryGate &&
+    candidateOwnerInputs(project, row, candidate, r.authorityEpoch) &&
     input.deferCheck !== false &&
     r.finish &&
     !r.finish.after &&

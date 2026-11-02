@@ -14,6 +14,8 @@ export const syncStateSchema = z
   .object({
     request: syncRequestSchema,
     ownerInputs: z.boolean().optional(),
+    /** Both sync sides (or the exact conflict aggregate) were authenticated. */
+    ownerProvenance: z.literal(1).optional(),
     work: syncWorkSchema,
     intentId: z.uuid(),
     base: hostedLaneSchema.shape.base,

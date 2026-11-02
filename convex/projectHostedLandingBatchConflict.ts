@@ -1,3 +1,5 @@
+import { candidateOwnerInputs } from './projectHostedProvenance';
+import { activeProject } from './projectAuthority';
 // SPDX-License-Identifier: Apache-2.0
 import type { MutationCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
@@ -20,6 +22,7 @@ export async function retainBatchConflict(
     main: HostedLandingAttempt['main'];
     conflict: BatchDropped[number];
     peerLanes: string[];
+    ownerInputs: boolean;
     at: string;
   },
 ) {
@@ -38,6 +41,7 @@ export async function retainBatchConflict(
   });
   invariant(row?.digest === member.candidate.digest, 'EVIDENCE_CHANGED', 'The conflicting member changed.');
   const old = hostedRecordSchema.options[3].parse(JSON.parse(row.value));
+  const project = await activeProject(ctx, input.projectId, member.actor.id);
   const candidate = {
     ...old,
     id: crypto.randomUUID(),
@@ -50,6 +54,8 @@ export async function retainBatchConflict(
     actor: member.actor.id,
     authorityEpoch: member.authorityEpoch,
     expectedVersion: null,
+    // The draft also contains the composed prefix, not only this member.
+    ownerOnly: input.ownerInputs && candidateOwnerInputs(project, row, old, member.authorityEpoch),
     record: candidate,
   });
   const { deferredCheck, ...pins } = member;

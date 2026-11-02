@@ -15,7 +15,7 @@ import { invariant } from '../src/errors';
 /** Constant-size publication. Selection/edge checks were paged before dispatch;
  * ancestry and bytes are verified by the fixed worker, never client display facts. */
 export async function publishHostedCompose(ctx: MutationCtx, input: SaveIdentity & { result: string }) {
-  const { row, state, operation } = await loadCompose(ctx, input, false);
+  const { row, state, operation, project } = await loadCompose(ctx, input, false);
   if (operation.terminal) return operation.terminal;
   await loadCompose(ctx, input);
   const job = await loadSourceJob(ctx, input.projectId, row.jobId),
@@ -78,10 +78,13 @@ export async function publishHostedCompose(ctx: MutationCtx, input: SaveIdentity
     result.status === 'clean'
       ? { status: 'clean', head: result.state.sha256 }
       : { status: 'conflict', conflicts: result.conflicts };
+  // Pre-upgrade batch state could omit speculative-prefix provenance.
+  const ownerInputs =
+    state.ownerProvenance === 1 && state.ownerInputs === true && input.actor === project.owner;
   const candidate = {
     kind: 'candidate' as const,
     ...(result.status === 'clean' && result.paths
-      ? { governance: { version: 1 as const, paths: result.paths, ownerInputs: state.ownerInputs === true } }
+      ? { governance: { version: 1 as const, paths: result.paths, ownerInputs } }
       : {}),
     ...(state.semanticPlan ? { semanticPlan: state.semanticPlan } : {}),
     id: state.candidateId,
@@ -98,6 +101,7 @@ export async function publishHostedCompose(ctx: MutationCtx, input: SaveIdentity
     ...input,
     authorityEpoch: state.request.authorityEpoch,
     expectedVersion: null,
+    ownerOnly: ownerInputs,
     ...(state.restoreBases ? { restoreBases: canonicalPayload(state.restoreBases) } : {}),
     record: candidate,
   });

@@ -22,6 +22,8 @@ export const composeStateSchema = z
   .object({
     semanticPlan: semanticPlanSchema.optional(),
     ownerInputs: z.boolean().optional(),
+    /** Every selected input and speculative prefix contributed authenticated proof. */
+    ownerProvenance: z.literal(1).optional(),
     restoreBases: z.record(z.uuid(), saveWorkerObjectSchema).optional(),
     batch: batchComposeSchema.optional(),
     dropped: batchDroppedSchema.optional(),

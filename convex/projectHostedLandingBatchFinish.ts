@@ -126,6 +126,7 @@ export async function batchFinishStep(
         member,
         main: source.state.request.expectedMain,
         conflict,
+        ownerInputs: source.state.ownerProvenance === 1 && source.state.ownerInputs === true,
         peerLanes: await batchConflictPeers(
           ctx,
           input.projectId,

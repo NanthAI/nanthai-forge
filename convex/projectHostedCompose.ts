@@ -11,6 +11,7 @@ import { v } from 'convex/values';
 import { mutation, query, type MutationCtx, type QueryCtx } from './cliServer';
 import type { Id } from './_generated/dataModel';
 import { activeProject } from './projectAuthority';
+import { candidateOwnerInputs } from './projectHostedProvenance';
 import { readHostedRecord } from './projectHostedRecords';
 import { beginHostedOperation } from './projectHostedOperations';
 import { hostedStartMain } from './projectHostedChannels';
@@ -103,6 +104,7 @@ export const prepare = mutation({
           : {}),
         request,
         ownerInputs: true,
+        ownerProvenance: 1,
         main: await saveObject(ctx, input.projectId, { sha256: main.head }),
         inputs: { next: request.inputs.root, pages: 0, count: 0 },
         dependencies: { next: request.dependencies.root, pages: 0, count: 0 },
@@ -206,7 +208,9 @@ export const stage = mutation({
             'WORK_STALE',
             'Select the exact clean dependency Candidate.',
           );
-          state.ownerInputs = state.ownerInputs === true && candidate.governance?.ownerInputs === true;
+          state.ownerInputs =
+            state.ownerInputs === true &&
+            candidateOwnerInputs(project, row, candidate, state.request.authorityEpoch);
           if (!contractMembers.has(candidate.intentId))
             contractMembers.set(candidate.intentId, await semanticMember(ctx, auth, candidate.intentId));
           const member = contractMembers.get(candidate.intentId);

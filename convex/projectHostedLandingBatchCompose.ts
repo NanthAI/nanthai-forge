@@ -1,3 +1,5 @@
+import { candidateOwnerInputs } from './projectHostedProvenance';
+import { activeProject } from './projectAuthority';
 import { loadLanding, loadLandingAttempt } from './projectHostedLandingStore';
 import { predecessorStatus } from './projectHostedLandingPipeline';
 import type { BatchMemberDetail } from '../src/hosted-batch-diagnosis';
@@ -53,6 +55,8 @@ export async function prepareBatchCompose(ctx: MutationCtx, input: BatchIdentity
       dependencies: dependencies.manifest,
       message: 'Compose concurrent hosted landings',
     };
+    const project = await activeProject(ctx, input.projectId, auth.actor);
+    let ownerInputs = true;
     const contracts = await mainSemanticMembers(ctx, auth, current.receipt.id);
     if (batch.predecessor) {
       const { state } = await loadLanding(ctx, {
@@ -70,6 +74,7 @@ export async function prepareBatchCompose(ctx: MutationCtx, input: BatchIdentity
         'The predecessor Candidate changed.',
       );
       const candidate = hostedRecordSchema.options[3].parse(JSON.parse(row.value));
+      ownerInputs = ownerInputs && candidateOwnerInputs(project, row, candidate, first.authorityEpoch);
       contracts.push(...(candidate.semanticPlan?.members ?? []));
     }
     for (const member of batch.members) {
@@ -81,6 +86,7 @@ export async function prepareBatchCompose(ctx: MutationCtx, input: BatchIdentity
       );
       const candidate = hostedRecordSchema.options[3].parse(JSON.parse(row.value));
       if (!request.intentId) request.intentId = candidate.intentId;
+      ownerInputs = ownerInputs && candidateOwnerInputs(project, row, candidate, first.authorityEpoch);
       contracts.push(...(candidate.semanticPlan?.members ?? []));
       const own = await semanticMember(ctx, auth, candidate.intentId);
       if (own) contracts.push(own);
@@ -112,7 +118,8 @@ export async function prepareBatchCompose(ctx: MutationCtx, input: BatchIdentity
     });
     const state: ComposeState = {
       request,
-      ownerInputs: true,
+      ownerInputs,
+      ownerProvenance: 1,
       batch: { members: batch.members.map(m => m.candidate.id) },
       ...(contracts.length
         ? {

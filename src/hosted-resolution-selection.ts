@@ -22,7 +22,11 @@ export async function resolutionFinishSelection(session: HostedAgentSession, sou
     await session.query('projectHostedCompose:candidate', { candidateId }),
   );
   invariant(
-    candidate.intentId === source.lane.intentId && candidate.result.status === 'conflict',
+    candidate.id === candidateId &&
+      candidate.intentId === source.lane.intentId &&
+      candidate.result.status === 'conflict' &&
+      candidate.result.conflicts.sha256 === source.resolution?.conflicts.sha256 &&
+      candidate.result.conflicts.size === source.resolution?.conflicts.size,
     'WORK_OPERATION_CHANGED',
     'Continue the original conflicted selection.',
   );

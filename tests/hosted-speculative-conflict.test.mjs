@@ -8,6 +8,7 @@ import { moduleUrl } from './convex-module.mjs';
 import { queuedConflict } from '../dist/hosted-agent-finish.js';
 const observe = await import(moduleUrl('../convex/projectHostedFinishObserve.ts'));
 const conflictStore = await import(moduleUrl('../convex/projectHostedLandingBatchConflict.ts'));
+const sync = await import(moduleUrl('../convex/projectHostedSync.ts'));
 const stall = await import(moduleUrl('../convex/projectHostedLandingStall.ts'));
 const speculative = await import(moduleUrl('../convex/projectHostedLandingSpeculativeConflict.ts'));
 const prior = Object.fromEntries(Object.keys(synthetic).map(key => [key, process.env[key]]));
@@ -165,6 +166,34 @@ test('predecessor landing rechecks a speculative rejection on real main and repo
   const failed = current(f, 3);
   assert.equal(failed.phase, 'terminal-failed', 'no other CI result or agent action is required');
   assert.equal(failed.error.code, 'COMPOSITION_CONFLICT');
+  const failedAttempt = [...f.tables.projectHostedLandingAttempts.values()]
+    .map(row => JSON.parse(row.value))
+    .find(attempt => attempt.id === failed.attemptId);
+  const candidateRow = [...f.tables.projectHostedRecords.values()].find(
+    row => row.kind === 'candidate' && row.key === failedAttempt.candidate.id,
+  );
+  assert.equal(
+    candidateRow.ownerOnly,
+    true,
+    'terminal recovery retains the authenticated speculative prefix',
+  );
+  assert.equal(candidateRow.provenanceEpoch, 1);
+  const candidateBody = JSON.parse(f.tables.projectHostedRecordBodies.get(candidateRow.bodyId).value);
+  const preparedResolution = JSON.parse(
+    await f.transaction('prepare-speculative-recovery', sync.prepare, {
+      projectId: f.projectId,
+      request: JSON.stringify({
+        operationId: randomUUID(),
+        authorityEpoch: 1,
+        kind: 'resolution',
+        candidateId: candidateBody.id,
+        conflicts: candidateBody.result.conflicts,
+        message: 'Retain prefix provenance',
+      }),
+    }),
+  );
+  assert.equal(preparedResolution.state.ownerInputs, true);
+
   assert.equal(rowOf(f, state.id).wouldConflict, undefined);
   const attempt = JSON.parse(
     [...f.tables.projectHostedLandingAttempts.values()].find(row => row.attemptId === failed.attemptId).value,
@@ -352,6 +381,7 @@ test('terminal conflict retention rejects a speculative base before creating a C
             member,
             main: batch.predecessor,
             conflict: source.state.dropped[0],
+            ownerInputs: source.state.ownerProvenance === 1 && source.state.ownerInputs === true,
             at: batch.at,
           }),
       },

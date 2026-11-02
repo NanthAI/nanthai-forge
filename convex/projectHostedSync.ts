@@ -6,9 +6,10 @@ import { receiptMutation, query, type QueryCtx, type MutationCtx } from './cliSe
 import type { Id } from './_generated/dataModel';
 import { activeProject } from './projectAuthority';
 import { beginHostedOperation } from './projectHostedOperations';
+import { candidateOwnerInputs } from './projectHostedProvenance';
 import { readHostedRecord } from './projectHostedRecords';
 import { hostedStartMain } from './projectHostedChannels';
-import { saveLane, sameSaveLane, saveObject } from './projectHostedSaveStore';
+import { saveLaneRecord, sameSaveLane, saveObject } from './projectHostedSaveStore';
 import { syncRow, loadSync, hostedSyncInput, type SyncState } from './projectHostedSyncStore';
 import { prepareHostedRevert } from './projectHostedRevert';
 import { syncRequestSchema } from '../src/hosted-sync';
@@ -74,6 +75,7 @@ export const prepare = receiptMutation({
         invariant(old, 'SOURCE_UNAVAILABLE', 'The original sync is unavailable.');
         return canonicalPayload({ state: JSON.parse(old.value), terminal: prepared.operation.terminal });
       }
+      const project = await activeProject(ctx, auth.projectId, auth.actor);
       let ownerInputs = false;
       let work: SyncState['work'],
         lane: SyncState['lane'] = null,
@@ -82,7 +84,8 @@ export const prepare = receiptMutation({
       const candidate = async (id: string) => {
         const row = await readHostedRecord(ctx, { ...auth, kind: 'candidate', key: id });
         invariant(row, 'NOT_FOUND', 'Select a Candidate on this project.');
-        return hostedRecordSchema.options[3].parse(JSON.parse(row.value));
+        const record = hostedRecordSchema.options[3].parse(JSON.parse(row.value));
+        return { record, ownerInputs: candidateOwnerInputs(project, row, record, request.authorityEpoch) };
       };
       if (request.kind === 'revert') {
         const selected = await prepareHostedRevert(ctx, auth, request, prepared.operation.firstAttempt);
@@ -90,7 +93,9 @@ export const prepare = receiptMutation({
         base = selected.base;
         work = selected.work;
       } else if (request.kind === 'resolution') {
-        const selected = await candidate(request.candidateId);
+        const selectedProof = await candidate(request.candidateId);
+        const selected = selectedProof.record;
+        ownerInputs = selectedProof.ownerInputs;
         invariant(
           selected.result.status === 'conflict' &&
             canonicalPayload(selected.result.conflicts) === canonicalPayload(request.conflicts),
@@ -102,7 +107,9 @@ export const prepare = receiptMutation({
         base = selected.base;
         work = { mode: 'resolution', candidateId: selected.id, conflicts: request.conflicts };
       } else {
-        lane = await saveLane(ctx, { ...auth, laneId: request.laneId });
+        const original = await saveLaneRecord(ctx, { ...auth, laneId: request.laneId });
+        lane = original.lane;
+        ownerInputs = original.ownerOnly && lane.actor === project.owner;
         invariant(sameSaveLane(lane, request.expected), 'WORK_STALE', 'Select the exact saved Lane pins.');
         intentId = lane.intentId;
         base = lane.base;
@@ -117,7 +124,6 @@ export const prepare = receiptMutation({
         } else {
           const target = request.target;
           if (target.kind === 'main') {
-            ownerInputs = true;
             const main = await hostedStartMain(ctx, auth.projectId);
             invariant(
               main.head === target.head &&
@@ -127,8 +133,9 @@ export const prepare = receiptMutation({
               'Sync against the exact observed main head and receipt.',
             );
           } else {
-            const selected = await candidate(target.candidateId);
-            ownerInputs = selected.governance?.ownerInputs === true;
+            const selectedProof = await candidate(target.candidateId);
+            const selected = selectedProof.record;
+            ownerInputs = ownerInputs && selectedProof.ownerInputs;
             invariant(
               selected.result.status === 'clean' && selected.result.head === target.head,
               'WORK_STALE',
@@ -153,7 +160,8 @@ export const prepare = receiptMutation({
               entry?.phase === 'landed' ||
               entry?.phase === 'terminal-failed';
             right = detached ? target.head : parent.head;
-            ownerInputs = detached || parentRow.ownerOnly === true;
+            ownerInputs =
+              ownerInputs && (detached || (parent.actor === project.owner && parentRow.ownerOnly === true));
             stackBase = await saveObject(ctx, auth.projectId, { sha256: lane.stack.head });
             stackAfter = { ...lane.stack, head: right, ...(detached ? { detached: true } : {}) };
           }
@@ -167,6 +175,7 @@ export const prepare = receiptMutation({
       }
       const state: SyncState = {
         ownerInputs,
+        ownerProvenance: 1,
         request,
         work,
         lane,
