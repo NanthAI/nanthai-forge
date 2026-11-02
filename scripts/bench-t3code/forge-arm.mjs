@@ -20,6 +20,7 @@ import { dirname, join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { setTimeout as wait } from 'node:timers/promises';
 import { archiveThenRemove } from './evidence.mjs';
+import { cliError } from './receipts.mjs';
 
 const run = promisify(execFile);
 
@@ -125,16 +126,18 @@ export function forgeArm(config, { callLog, ws, ledger = null, cellDir = dirname
         await mkdir(anchor, { recursive: true });
         return (await nf(anchor, 'observe', { ...X, operationId })).result?.submission ?? null;
       } catch (error) {
-        return { error: String(error.stdout ?? error.message).match(/"code":"([A-Z_]+)"/)?.[1] ?? 'ERROR' };
+        return { error: cliError(error) };
       }
     },
-    /** Every operation id the task's agent saw (any verb, S9), newest last. */
+    /** Executed landing actions only; source/coordination operations stay in the call log. */
     taskOps(task) {
       return [
         ...new Set(
           readCalls(callLog)
             .filter(c => c.task === task)
-            .flatMap(c => c.operationIds),
+            .flatMap(c => (c.operations ?? []).filter(o => ['finish', 'land'].includes(o.action)))
+            .map(o => o.operationId)
+            .filter(Boolean),
         ),
       ];
     },

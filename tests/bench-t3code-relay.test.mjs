@@ -8,6 +8,7 @@ import { mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSy
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { forgeArm, readCalls } from '../scripts/bench-t3code/forge-arm.mjs';
+import { operationsOf } from '../scripts/bench-t3code/receipts.mjs';
 import { prompt, template, WORKFLOW_SLOT } from '../scripts/bench-t3code/prompt.mjs';
 import { hostedAgentHelpEntries } from '../dist/hosted-agent-help.js';
 import { lowerVerb, parseVerbForm } from '../dist/agent-verbs.js';
@@ -67,8 +68,8 @@ const gate = fetch('http://127.0.0.1:${gate.address().port}');
 process.stdout.write(${JSON.stringify(stdout)});
 process.stderr.write(${JSON.stringify(stderr)});
 await (await gate).text();
-console.log('\\n' + JSON.stringify({ operationId: '${id}' }));
-console.error(JSON.stringify({ error: { code: 'SYNTHETIC_FAILURE' } }));
+console.log('\\n' + JSON.stringify({ action: 'finish', operationId: '${id}', result: { phase: 'finish' } }));
+console.error('\\n' + JSON.stringify({ error: { code: 'SYNTHETIC_FAILURE', message: 'synthetic stderr failure' } }));
 process.exitCode = 7;
 `,
     );
@@ -86,7 +87,7 @@ process.exitCode = 7;
     const bin = join(dir, 'bin');
     await arm.binDir(bin);
     const env = await arm.agentEnv(root, 'synthetic-600', {});
-    child = spawn(join(bin, 'nforge'), ['agent', '.', 'status', '{}'], {
+    child = spawn(join(bin, 'nforge'), ['agent', '.', 'land', '{}'], {
       cwd: root,
       env: { ...process.env, ...env },
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -114,12 +115,26 @@ process.exitCode = 7;
     await waiting;
     release();
     assert.equal((await exited)[0], 7);
-    assert.equal(out, stdout + '\n' + JSON.stringify({ operationId: id }) + '\n');
-    assert.equal(err, stderr + JSON.stringify({ error: { code: 'SYNTHETIC_FAILURE' } }) + '\n');
+    assert.equal(
+      out,
+      stdout +
+        '\n' +
+        JSON.stringify({ action: 'finish', operationId: id, result: { phase: 'finish' } }) +
+        '\n',
+    );
+    assert.equal(
+      err,
+      stderr +
+        '\n' +
+        JSON.stringify({ error: { code: 'SYNTHETIC_FAILURE', message: 'synthetic stderr failure' } }) +
+        '\n',
+    );
     const calls = readCalls(log);
     assert.equal(calls.length, 1, '600 progress records per stream still execute one CLI call');
     assert.deepEqual(calls[0].operationIds, [id]);
     assert.deepEqual(calls[0].errorCodes, ['SYNTHETIC_FAILURE']);
+    assert.deepEqual(calls[0].error, { code: 'SYNTHETIC_FAILURE', message: 'synthetic stderr failure' });
+    assert.deepEqual(calls[0].operations, [{ action: 'finish', operationId: id, receiptId: null }]);
     assert.equal(calls[0].code, 7);
     t.diagnostic(
       `600 records per stream delivered before exit; one CLI spawn, zero added Convex calls; ${Buffer.byteLength(out + err)} output bytes`,
@@ -192,5 +207,116 @@ test('harness pin: streaming client changes invalidate the previous content pin'
     );
   } finally {
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('typed broker audit excludes suggested ack IDs and landing observer retains stderr errors', async t => {
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), 'forge-test-typed-receipts-')));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const root = join(dir, 'ws');
+  mkdirSync(root);
+  const cli = join(dir, 'cli.mjs'),
+    log = join(dir, 'calls.jsonl');
+  const phantom = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+  writeFileSync(
+    cli,
+    `
+const action = process.argv[4];
+if (action === 'observe') {
+  console.log(JSON.stringify({ event: 'progress' }));
+  console.error(JSON.stringify({ error: { code: 'NOT_FOUND', message: 'No retained landing operation' } }));
+  process.exitCode = 1;
+} else {
+  const command = 'nforge agent . ack ' + JSON.stringify({ operationId: '${phantom}' });
+  console.log(command);
+  console.log(JSON.stringify({ schema: 1, action, operationId: action + '-id', result: {
+    next: { action: 'ack', operationId: '${phantom}' }, command,
+    ...(action === 'land' ? { submission: { acceptance: { receiptId: 'accepted' } } } : {}),
+  } }));
+}
+`,
+  );
+  const { startBroker } = await import('../scripts/bench-t3code/broker.mjs');
+  const broker = await startBroker(cli, log);
+  t.after(() => new Promise(done => broker.server.close(done)));
+  const post = (path, body) =>
+    fetch(`http://127.0.0.1:${broker.port}${path}`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }).then(response => response.text());
+  await post('/register', { admin: broker.admin, token: 't', root, task: 'typed' });
+  for (const action of ['sync', 'resolve', 'save', 'ack', 'land'])
+    await post('/', { token: 't', cwd: root, args: ['agent', '.', action, '{}'] });
+  const calls = readCalls(log);
+  assert.deepEqual(
+    calls.flatMap(call => call.operations),
+    ['sync', 'resolve', 'save', 'ack', 'land'].map(action => ({
+      action,
+      operationId: action + '-id',
+      receiptId: action === 'land' ? 'accepted' : null,
+    })),
+  );
+  assert.ok(calls.every(call => !call.operationIds.includes(phantom)));
+  assert.ok(
+    calls.every(call => call.ids.includes(phantom)),
+    'contamination still knows every ID shown',
+  );
+  const arm = forgeArm({ cli }, { callLog: log, ws: dir });
+  assert.deepEqual(arm.taskOps('typed'), ['land-id']);
+  const result = await arm.landing('typed', 'lane');
+  assert.deepEqual(result.operations, [
+    {
+      operationId: 'land-id',
+      error: {
+        code: 'NOT_FOUND',
+        message: 'No retained landing operation',
+      },
+    },
+  ]);
+});
+
+test('dogfood collector observes only real landings at 575 and 1150 entries with zero backend calls', async t => {
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), 'forge-test-typed-scale-')));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  for (const count of [575, 1150]) {
+    const started = performance.now(),
+      heap = process.memoryUsage().heapUsed;
+    const records = [];
+    for (const [action, size] of [
+      ['finish', count],
+      ['sync', count],
+      ['resolve', count],
+      ['ack', 560],
+      ['save', 2800],
+    ]) {
+      for (let i = 0; i < size; i++)
+        records.push({
+          task: 'scale',
+          operations: operationsOf(
+            JSON.stringify({
+              action,
+              operationId: action + i,
+              result: { next: { action: 'ack', operationId: 'phantom' + i } },
+            }),
+          ),
+        });
+    }
+    const log = join(dir, 'calls.jsonl');
+    writeFileSync(log, records.map(JSON.stringify).join('\n'));
+    const arm = forgeArm({}, { callLog: log, ws: dir });
+    let observations = 0;
+    arm.observe = async () => {
+      observations++;
+      return { phase: 'landed', observation: { state: 'complete' } };
+    };
+    assert.equal(arm.taskOps('scale').length, count);
+    const result = await arm.landing('scale', 'lane');
+    assert.equal(result.landed, true);
+    assert.equal(result.operations.length, count);
+    assert.equal(observations, count, 'one existing observation per landing, none for source/advice');
+    assert.ok(Buffer.byteLength(JSON.stringify(records)) < records.length * 160, 'compact local handles');
+    t.diagnostic(
+      `${count} landings / ${records.length} CLI records: ${observations} fake observations, zero Convex calls/documents, ${(performance.now() - started).toFixed(1)} ms, heap delta ${process.memoryUsage().heapUsed - heap} bytes, process peak RSS ${process.resourceUsage().maxRSS * 1024} bytes`,
+    );
   }
 });

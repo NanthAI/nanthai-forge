@@ -988,7 +988,7 @@ test('relay: a separate process answers agents while the harness process is bloc
     const id = '11111111-1111-4111-8111-111111111111';
     writeFileSync(
       cli,
-      `console.log(JSON.stringify({ operationId: '${id}', overlapNotice: { items: [{ noticeId: 'n1', file: 'a.ts', with: [] }] } }));\n` +
+      `console.log(JSON.stringify({ action: process.argv[4], operationId: '${id}', result: {}, overlapNotice: { items: [{ noticeId: 'n1', file: 'a.ts', with: [] }] } }));\n` +
         // A refused land prints its error on stderr (the real CLI does): its gate notice counts.
         `console.error(JSON.stringify({ error: { code: 'OVERLAP_UNANSWERED', message: 'Answer the blocking overlap notice(s) on b.ts before landing' } }));\n`,
     );

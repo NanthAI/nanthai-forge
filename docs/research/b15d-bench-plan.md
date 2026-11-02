@@ -234,6 +234,7 @@ source continuations (including save/compose within land) do not consume the eig
 attempts. Interrupted actions replay their original operation and parameters when Forge
 explicitly advises that; a repeated obstruction remains a failure. Every child response,
 error and operation identity stays in the agent transcript and broker call log.
+The collector records typed executed CLI receipts, observes only finish/land operations, and retains structured stderr errors on nonzero exits.
 
 There are no task-name, marker-path or Forge-repository exceptions in recovery. Missing or
 contradictory instructions and failed source outcomes emit `product-friction` and stop the

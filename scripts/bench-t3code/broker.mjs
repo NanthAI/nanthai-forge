@@ -10,8 +10,8 @@ import { appendFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
+import { operationsOf, cliError } from './receipts.mjs';
 
-const OPERATION_ID = /"?operationId"?[:\s]+"?([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/g;
 // Env an agent passes through to its CLI call; everything else is the relay's own.
 const PASS = ['PATH', 'VP_HOME', 'npm_config_store_dir', 'FORGE_OBJECT_CACHE'];
 
@@ -149,6 +149,9 @@ export function startBroker(cli, callLog, { now = () => new Date().toISOString()
         (error, stdout, stderr) => {
           const output = `${stdout}\n${stderr}`;
           const code = error ? (typeof error.code === 'number' ? error.code : 1) : 0;
+          // CLI completion is timed before collector work, as with the original ID scan.
+          const endedAt = now();
+          const operations = operationsOf(stdout, stderr, args[2]);
           // Durable record of every agent nforge call: the landing operations, refusals and
           // coordination events are read from here (scoring, contamination, metric 4).
           appendFileSync(
@@ -160,12 +163,17 @@ export function startBroker(cli, callLog, { now = () => new Date().toISOString()
               sentAt,
               receivedAt,
               startedAt: execStartedAt,
-              endedAt: now(),
+              endedAt,
               verb: args.filter((a, i) => i !== 1 && !String(a).startsWith('{')).join(' '),
               args: args.slice(2),
               code,
-              operationIds: [...new Set([...output.matchAll(OPERATION_ID)].map(m => m[1]))],
+              operations,
+              operationIds: [...new Set(operations.map(o => o.operationId).filter(Boolean))],
+              // Keep the existing coordination/scoring counters unchanged.
               errorCodes: [...new Set([...output.matchAll(/"code":"([A-Z_]+)"/g)].map(m => m[1]))],
+              ...(code
+                ? { error: cliError({ code: error?.code, message: error?.message, stdout, stderr }) }
+                : {}),
               // Every id the agent was shown (contamination: ids it may legitimately use).
               ids: [
                 ...new Set(

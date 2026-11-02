@@ -10,6 +10,7 @@ import { archiveThenRemove, removeWorkspace } from './evidence.mjs';
 import { forgeArm, diffFromBase } from './forge-arm.mjs';
 import { captureChanges } from './hunks.mjs';
 import { scriptedForge } from './scripted.mjs';
+import { operationsOf, cliError } from './receipts.mjs';
 
 const root = '/synthetic/any project';
 const draft = '/synthetic/other draft';
@@ -401,4 +402,103 @@ console.log('RETAINED:' + reply.result.next.operationId);`;
   });
   assert.equal(child.status, 0, child.stderr);
   assert.match(child.stdout, /RETAINED:retained/);
+});
+
+test('collector ignores suggested ack IDs and all unexecuted continuations', () => {
+  const suggested = '11111111-1111-4111-8111-111111111111';
+  const command = `nforge agent . ack '${JSON.stringify({ operationId: suggested })}'`;
+  const reply = {
+    schema: 1,
+    action: 'status',
+    operationId: null,
+    result: {
+      next: { action: 'ack', operationId: suggested },
+      command,
+    },
+    overlapNotice: { command, items: [{ ack: { operationId: suggested } }] },
+  };
+  assert.deepEqual(operationsOf(command + '\n' + JSON.stringify(reply)), []);
+  assert.deepEqual(
+    operationsOf(JSON.stringify({ error: { code: 'OVERLAP_UNANSWERED', message: command } })),
+    [],
+  );
+});
+
+test('collector retains only the executed sync/resolve/save/ack identity and landing receipt', () => {
+  for (const action of ['sync', 'resolve', 'save', 'ack']) {
+    const reply = {
+      schema: 1,
+      action,
+      operationId: 'executed',
+      result: {
+        next: { action: 'finish', operationId: 'suggested' },
+        recovery: { operationId: 'child-sync' },
+      },
+    };
+    assert.deepEqual(operationsOf(JSON.stringify(reply)), [
+      { action, operationId: 'executed', receiptId: null },
+    ]);
+  }
+  const landed = {
+    action: 'finish',
+    operationId: 'landed',
+    result: {
+      submission: { acceptance: { receiptId: 'accepted' } },
+    },
+  };
+  assert.deepEqual(operationsOf(JSON.stringify(landed) + '\n' + JSON.stringify(landed)), [
+    { action: 'finish', operationId: 'landed', receiptId: 'accepted' },
+  ]);
+  assert.deepEqual(
+    operationsOf(JSON.stringify({ action: 'land', result: {}, resolved: { operationId: 'resolved' } })),
+    [{ action: 'land', operationId: 'resolved', receiptId: null }],
+  );
+});
+
+test('collector retains stderr error code and message after stdout progress', () => {
+  assert.deepEqual(
+    cliError({
+      stdout: '{"event":"progress"}\n',
+      stderr: JSON.stringify({
+        error: { code: 'NOT_FOUND', message: 'No retained landing operation' },
+      }),
+      message: 'Command failed',
+      code: 1,
+    }),
+    {
+      code: 'NOT_FOUND',
+      message: 'No retained landing operation',
+    },
+  );
+  assert.deepEqual(
+    cliError({
+      stdout: '{"error":{"code":"OLD","message":"stdout"}}',
+      stderr: '{"error":{"code":"CURRENT","message":"stderr"}}',
+    }),
+    { code: 'CURRENT', message: 'stderr' },
+  );
+  assert.deepEqual(
+    cliError({ stdout: '', stderr: 'plain failure', message: 'child exited', code: 'ENOENT' }),
+    { code: 'ENOENT', message: 'child exited' },
+  );
+});
+
+test('collector keeps distinct receipt-only identities without inventing landing operation IDs', () => {
+  const replies = ['a', 'b'].map(receiptId => ({ action: 'land', receiptId, result: {} }));
+  assert.deepEqual(operationsOf(replies.map(JSON.stringify).join('\n')), [
+    { action: 'land', operationId: null, receiptId: 'a' },
+    { action: 'land', operationId: null, receiptId: 'b' },
+  ]);
+});
+
+test('collector matches the executed action, including public aliases, rather than JSON source text', () => {
+  const reply = JSON.stringify({ action: 'finish', operationId: 'real', result: {} });
+  assert.deepEqual(operationsOf(reply, '', 'show'), []);
+  assert.deepEqual(operationsOf(reply, '', 'land'), [
+    { action: 'finish', operationId: 'real', receiptId: null },
+  ]);
+  assert.deepEqual(
+    operationsOf(JSON.stringify({ action: 'save', operationId: 'saved', result: {} }), '', 'checkpoint'),
+    [{ action: 'save', operationId: 'saved', receiptId: null }],
+  );
 });
