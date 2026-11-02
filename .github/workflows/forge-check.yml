@@ -94,8 +94,20 @@ jobs:
       - if: steps.deps.outputs.cache-hit != 'true'
         run: npm ci --ignore-scripts
         working-directory: control
-      - run: npm run build:core
+      # Exact trusted checkout only. Never restore a prefix or save after Candidate execution.
+      - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        id: control-build
+        with:
+          path: control/dist
+          key: forge-control-dist-v1-${{ runner.os }}-${{ runner.arch }}-node-24.22.1-${{ github.sha }}-${{ hashFiles('control/package-lock.json') }}
+      - if: steps.control-build.outputs.cache-hit != 'true'
+        run: npm run build:core
         working-directory: control
+      - if: steps.control-build.outputs.cache-hit != 'true'
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: control/dist
+          key: forge-control-dist-v1-${{ runner.os }}-${{ runner.arch }}-node-24.22.1-${{ github.sha }}-${{ hashFiles('control/package-lock.json') }}
       # Candidate code shares this runner: save trusted dependencies before it executes,
       # never with an automatic post-job cache save after project code has run.
       - if: steps.deps.outputs.cache-hit != 'true'

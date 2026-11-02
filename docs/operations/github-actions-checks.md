@@ -439,8 +439,8 @@ bytes in sorted path order. It avoids tar's platform-specific metadata, extensio
 and link/path extraction rules; only verified hash-named cache files are written.
 It is bounded to 300 MiB compressed, 1 GiB file bytes, 32 MiB per file, 100,000 files
 and a 16 MiB inventory. Larger source remains checkable through W2; only caching
-is skipped. Packing and hashing stream disk files; extraction buffers at most one
-bounded file plus the inventory. There is no persistent runner-local cache.
+is skipped. Packing and hashing stream disk files; extraction uses its bounded write window
+plus the inventory. There is no persistent runner-local cache.
 
 When there is no usable pack, or the delta exceeds 300 paths or 10% of Candidate
 content bytes, the optional `hosted-pack` job runs alongside the check shards after
@@ -487,6 +487,27 @@ with a hard compressed maximum of 600 MiB. At R2 Standard's $0.015/GB-month this
 about $0.003–$0.0094/month amortized, before free allowance and account-level billing
 rounding; requests also have free allowances. See [R2 pricing](https://developers.cloudflare.com/r2/pricing/).
 There is no new paid provider or mirror dependency.
+
+After object fetch or pack extraction, independent regular files are copied and
+chmodded with at most sixteen local workers. Copies retain independent writable
+inodes; cache files are never hardlinked into Candidate source. Directory creation
+shares one in-flight promise per parent directory. Links are created after regular
+files, retaining one target buffer at a time. Final verification still lstats every
+path, checks its file/link type and executable mode, streams every regular-file
+hash and hashes every link target. It uses the same sixteen-worker window,
+including setup verification. Inventory stats share one promise per blob and run
+within that window. On failure, scheduling stops and every active worker drains
+before cleanup, pack fallback or failure publication.
+
+The additional regular-file verification buffers are at most two 64 KiB chunks
+per worker (2 MiB for sixteen); copies use filesystem copy operations. Directory
+and stat caches retain metadata only, proportional to the existing inventory.
+The sixteen-file / 64 MiB qualification budget is internal scheduling, not a
+project content limit. Source logs report manifest fetch/parse, pack fetch,
+unpack, object fetch, copy/chmod, final verification and inventory-stat wall times
+as `source: phases` in milliseconds. Retried local phases accumulate. Local
+filesystem work and trusted build caching add zero Convex calls, document reads,
+writes or idle activity at any project size; descriptor windows remain unchanged.
 
 Without a usable pack, planning reads objects with 16 concurrent GETs per descriptor
 window (the paged descriptor calls are unchanged) and logs a line naming the repair
@@ -560,13 +581,23 @@ optional source-pack refresh need them. Refresh artifacts are published before t
 single execution can change its workspace. Multi-job plans retain their existing
 matrix, artifact handoff and shard evidence.
 
-Planning builds control `dist` once and includes it in the run artifact when needed.
+Planning restores trusted control `dist` from an exact cache key containing the
+control checkout commit (`github.sha`), OS, architecture, Node 24.22.1 and control
+lockfile hash. There are no prefix restores. A miss runs the current
+`npm run build:core` in the pinned control checkout, then explicitly saves only
+`control/dist` before the planning supervisor or any Candidate code executes.
+Candidate-produced files, builds, plans and results never populate this cache;
+the key never uses a Candidate head. Cache loss retains the cold build path.
+The control commit selects trusted supervisor code; it does not certify Candidate
+code or replace any exact-Candidate checks.
+
+Planning includes that control `dist` in the run artifact when needed.
 Shards and the optional source-pack job unpack that build beside the exact
 `github.sha` control checkout. Candidate installs/builds still use Candidate code
 and its lockfile; the shared control build is not evidence for Candidate tests.
-There is no additional serial build job. Cache archives contain dependencies only;
-monitor Actions cache storage across old lockfile keys when comparing the roughly
-1 GiB cache budget. This workflow does not introduce a cache deletion policy.
+There is no additional serial build job. Dependency and exact-control-build
+archives are separate; monitor Actions cache storage across old lockfile and
+control-commit keys when comparing the roughly 1 GiB cache budget. This workflow does not introduce a cache deletion policy.
 
 Hosted test shard counts use the existing per-file timing history and two-worker
 LPT estimates. When capacity is idle the planner picks the smallest count predicted to

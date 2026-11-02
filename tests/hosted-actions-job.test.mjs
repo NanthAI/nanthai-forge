@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
+import fs from 'node:fs';
+import fsp from 'node:fs/promises';
+import { syncBuiltinESMExports } from 'node:module';
 import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, mkdirSync, writeFileSync, rmSync, lstatSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -14,6 +17,11 @@ import {
 import { z } from 'zod';
 import { ConvexHttpClient } from 'convex/browser';
 import { ActionsJobClient } from '../dist/hosted-actions-job-client.js';
+import {
+  materializeActionsSource,
+  verifySourceTree,
+  actionsFileConcurrency,
+} from '../dist/hosted-actions-job-source.js';
 import { prepareActionsJob } from '../dist/hosted-actions-job-plan.js';
 import { executeActionsJob } from '../dist/hosted-actions-job-run.js';
 import { savePin } from '../dist/hosted-save.js';
@@ -1073,7 +1081,7 @@ for (const scenario of [
     assert.equal(s.calls.filter(command => command.kind === 'session').length, 2);
   });
 
-test('hosted workflow restores only lockfile keyed dependencies, falls back cold, and transfers one control build', () => {
+test('hosted workflow restores trusted dependencies and exact control build, falls back cold, and transfers one build', () => {
   const workflow = readFileSync('.github/workflows/forge-check.yml', 'utf8');
   const jobs = name => workflow.split(`\n  ${name}:\n`)[1].split(/\n  [a-z][\w-]*:\n/)[0];
   for (const name of ['hosted-plan', 'hosted-check', 'hosted-pack']) {
@@ -1092,6 +1100,25 @@ test('hosted workflow restores only lockfile keyed dependencies, falls back cold
       assert.match(job, /tar -xf "\$RUNNER_TEMP\/control-dist.tar" -C control/);
     }
   }
+  const plan = jobs('hosted-plan');
+  const buildCache = plan.slice(plan.indexOf('# Exact trusted checkout'), plan.indexOf('# Candidate code'));
+  const keys = [...buildCache.matchAll(/key: (.+)/g)].map(match => match[1]);
+  assert.equal(keys.length, 2);
+  assert.equal(keys[0], keys[1]);
+  assert.match(
+    keys[0],
+    /forge-control-dist-v1-.*runner.os.*runner.arch.*node-24\.22\.1-.*github.sha.*hashFiles\('control\/package-lock.json'\)/,
+  );
+  assert.match(plan, /path: control\n\s+ref: \$\{\{ github.sha \}\}/);
+  assert.match(buildCache, /id: control-build/);
+  assert.match(buildCache, /if: steps.control-build.outputs.cache-hit != 'true'\n\s+run: npm run build:core/);
+  assert.match(
+    buildCache,
+    /if: steps.control-build.outputs.cache-hit != 'true'\n\s+uses: actions\/cache\/save@[a-f0-9]{40}/,
+  );
+  assert.equal((buildCache.match(/path: control\/dist/g) ?? []).length, 2);
+  assert.doesNotMatch(buildCache, /restore-keys:|candidate|runId|expectedHead/);
+  assert(plan.lastIndexOf('uses: actions/cache/save@') < plan.indexOf('- id: plan'));
   assert.match(jobs('hosted-plan'), /tar -cf "\$RUNNER_TEMP\/control-dist.tar" -C control dist/);
   assert.match(jobs('hosted-plan'), /forge-actions-state.json/);
   assert.match(jobs('hosted-plan'), /actions: read/);
@@ -1298,3 +1325,238 @@ for (const change of ['recipe', 'manifest'])
       false,
     );
   });
+
+for (const count of [2500, 29000]) {
+  test(`CI materialization qualification ${count} files`, async t => {
+    const s = fixture(t);
+    const files = Array.from({ length: count }, (_, i) =>
+      s.entry(
+        `source/group-${Math.floor(i / 100)}/file-${i}.txt`,
+        `synthetic-${i}:`.padEnd(4096, 'x'),
+        i % 100 === 0 ? 'executable' : 'file',
+      ),
+    );
+    s.run.candidate.base.head = s.state(files).sha256;
+    await cachedPack(s, files);
+    s.run.request.expectedHead = s.state(
+      files.map((file, i) => (i < 20 ? s.entry(file.path, `changed-${i}`, file.mode) : file)),
+    ).sha256;
+    await s.client.session(true);
+    const cache = join(s.directory, 'cache');
+    mkdirSync(cache);
+    const budget = observeLocalFiles(t, join(s.directory, 'candidate'));
+    const started = performance.now();
+    const rssBefore = process.memoryUsage().rss;
+    const result = await materializeActionsSource(s.client, join(s.directory, 'candidate'), cache);
+    assert.equal(result.deltaFiles, 20);
+    assert.equal(s.calls.filter(call => call.kind === 'source').length, 2);
+    assert.equal(s.traffic.downloads, 23);
+    assert(result.packed);
+    assert(budget.peakCopies > 1 && budget.peakCopies <= 16);
+    assert(budget.peakStreams > 1 && budget.peakStreams <= 16);
+    assert(budget.maxStreamBufferBytes <= 64 * 1024 * 1024);
+    assert.equal(budget.directories.size, Math.ceil(count / 100) + 1);
+    assert([...budget.directories.values()].every(calls => calls === 1));
+    assert.equal(budget.copies, count);
+    // Mutating a writable Candidate must never mutate its cached blob or sibling.
+    const unchanged = files[21];
+    assert.notEqual(
+      lstatSync(join(cache, unchanged.blob)).ino,
+      lstatSync(join(s.directory, 'candidate', unchanged.path)).ino,
+    );
+    writeFileSync(join(s.directory, 'candidate', unchanged.path), 'writable candidate');
+    assert.equal(readFileSync(join(cache, unchanged.blob), 'utf8'), s.objects.get(unchanged.blob).toString());
+    assert.equal(
+      result.totalBytes,
+      (count - 20) * 4096 +
+        Array.from({ length: 20 }, (_, i) => Buffer.byteLength(`changed-${i}`)).reduce((a, b) => a + b, 0),
+    );
+    t.diagnostic(
+      JSON.stringify({
+        files: count,
+        wallMs: performance.now() - started,
+        phases: result.phases,
+        sourceCalls: 2,
+        downloads: 23,
+        budget,
+        rssGrowth: process.memoryUsage().rss - rssBefore,
+      }),
+    );
+  });
+}
+
+function observeLocalFiles(t, directory) {
+  const metrics = {
+    copies: 0,
+    activeCopies: 0,
+    peakCopies: 0,
+    activeStreams: 0,
+    peakStreams: 0,
+    maxStreamBufferBytes: 0,
+    directories: new Map(),
+  };
+  const copy = fsp.copyFile,
+    mkdir = fsp.mkdir,
+    read = fs.createReadStream;
+  const copies = t.mock.method(fsp, 'copyFile', async (...args) => {
+    if (!String(args[1]).startsWith(directory + '/')) return copy(...args);
+    metrics.copies++;
+    metrics.peakCopies = Math.max(metrics.peakCopies, ++metrics.activeCopies);
+    try {
+      return await copy(...args);
+    } finally {
+      metrics.activeCopies--;
+    }
+  });
+  const dirs = t.mock.method(fsp, 'mkdir', async (path, ...args) => {
+    if (String(path).startsWith(directory))
+      metrics.directories.set(path, (metrics.directories.get(path) ?? 0) + 1);
+    return mkdir(path, ...args);
+  });
+  const streams = t.mock.method(fs, 'createReadStream', (path, ...args) => {
+    const stream = read(path, ...args);
+    if (String(path).startsWith(directory + '/')) {
+      metrics.peakStreams = Math.max(metrics.peakStreams, ++metrics.activeStreams);
+      metrics.maxStreamBufferBytes = Math.max(
+        metrics.maxStreamBufferBytes,
+        metrics.activeStreams * stream.readableHighWaterMark * 2,
+      );
+      stream.once('close', () => metrics.activeStreams--);
+    }
+    return stream;
+  });
+  syncBuiltinESMExports();
+  t.after(() => {
+    copies.mock.restore();
+    dirs.mock.restore();
+    streams.mock.restore();
+    syncBuiltinESMExports();
+  });
+  return metrics;
+}
+
+test('parallel source verification keeps hash, mode, link type and link target checks', async t => {
+  const s = fixture(t),
+    directory = join(s.directory, 'tree');
+  mkdirSync(directory);
+  const entry = s.entry('file', 'verified');
+  writeFileSync(join(directory, entry.path), 'verified');
+  await verifySourceTree({ files: [entry] }, directory);
+  for (const mode of ['executable', 'symlink'])
+    await assert.rejects(verifySourceTree({ files: [{ ...entry, mode }] }, directory), {
+      code: 'SOURCE_HASH_MISMATCH',
+    });
+  writeFileSync(join(directory, entry.path), 'corrupt');
+  await assert.rejects(verifySourceTree({ files: [entry] }, directory), { code: 'SOURCE_HASH_MISMATCH' });
+  rmSync(join(directory, entry.path));
+  fs.symlinkSync('wrong target', join(directory, entry.path));
+  await assert.rejects(verifySourceTree({ files: [{ ...entry, mode: 'symlink' }] }, directory), {
+    code: 'SOURCE_HASH_MISMATCH',
+  });
+});
+
+test('parallel source verification drains active work before rejecting and stops scheduling new files', async t => {
+  const info = fsp.lstat;
+  let active = 0,
+    started = 0;
+  const error = new Error('synthetic stat failure');
+  const mocked = t.mock.method(fsp, 'lstat', async () => {
+    const index = started++;
+    active++;
+    try {
+      if (index === 0) throw error;
+      await new Promise(resolve => setTimeout(resolve, 10));
+      throw new Error('later failure');
+    } finally {
+      active--;
+    }
+  });
+  syncBuiltinESMExports();
+  t.after(() => {
+    mocked.mock.restore();
+    syncBuiltinESMExports();
+    assert.equal(fsp.lstat, info);
+  });
+  await assert.rejects(
+    verifySourceTree(
+      {
+        files: Array.from({ length: 5000 }, (_, i) => ({
+          path: `file-${i}`,
+          blob: 'a'.repeat(64),
+          mode: 'file',
+        })),
+      },
+      '/synthetic',
+    ),
+    error,
+  );
+  assert.equal(active, 0);
+  assert.equal(started, actionsFileConcurrency);
+  assert(actionsFileConcurrency <= 16);
+});
+
+for (const count of [2500, 5000])
+  test(`CI directory and blob stat caches coalesce ${count} duplicate files`, async t => {
+    const s = fixture(t),
+      shared = s.entry('placeholder', 'shared bytes');
+    const files = Array.from({ length: count }, (_, i) => ({ ...shared, path: `shared/file-${i}` }));
+    s.run.request.expectedHead = s.state(files).sha256;
+    await s.client.session(true);
+    const directory = join(s.directory, 'candidate'),
+      cache = join(s.directory, 'cache');
+    mkdirSync(cache);
+    const budget = observeLocalFiles(t, directory);
+    const stat = fsp.stat;
+    let blobStats = 0;
+    const mocked = t.mock.method(fsp, 'stat', async (path, ...args) => {
+      if (path === join(cache, shared.blob)) blobStats++;
+      return stat(path, ...args);
+    });
+    syncBuiltinESMExports();
+    t.after(() => {
+      mocked.mock.restore();
+      syncBuiltinESMExports();
+    });
+    const result = await materializeActionsSource(s.client, directory, cache);
+    assert.equal(blobStats, 1);
+    assert.equal(budget.directories.get(join(directory, 'shared')), 1);
+    assert.equal(budget.copies, count);
+    assert.equal(result.totalBytes, count * Buffer.byteLength('shared bytes'));
+    assert.notEqual(
+      lstatSync(join(directory, 'shared/file-0')).ino,
+      lstatSync(join(directory, 'shared/file-1')).ino,
+    );
+  });
+
+test('parallel materialization drains copies before returning a write failure', async t => {
+  const s = fixture(t);
+  s.run.request.expectedHead = s.state(
+    Array.from({ length: 100 }, (_, i) => s.entry(`file-${i}`, `bytes-${i}`)),
+  ).sha256;
+  await s.client.session(true);
+  const cache = join(s.directory, 'cache');
+  mkdirSync(cache);
+  let active = 0,
+    started = 0;
+  const error = new Error('synthetic copy failure');
+  const mocked = t.mock.method(fsp, 'copyFile', async () => {
+    const index = started++;
+    active++;
+    try {
+      if (index === 0) throw error;
+      await new Promise(resolve => setTimeout(resolve, 10));
+      throw new Error('later copy failure');
+    } finally {
+      active--;
+    }
+  });
+  syncBuiltinESMExports();
+  t.after(() => {
+    mocked.mock.restore();
+    syncBuiltinESMExports();
+  });
+  await assert.rejects(materializeActionsSource(s.client, join(s.directory, 'candidate'), cache), error);
+  assert.equal(active, 0);
+  assert(started > 0 && started <= actionsFileConcurrency);
+  assert.equal(s.calls.filter(call => call.kind === 'plan').length, 0);
+});

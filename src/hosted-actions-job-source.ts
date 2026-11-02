@@ -9,13 +9,26 @@ import { directSourceWindow } from './hosted-actions-direct.js';
 import { fileDigest, downloadSourcePack, unpackSourcePack } from './source-pack-archive.js';
 import { digest } from './hash.js';
 import { invariant } from './errors.js';
+import { mapExchange } from './exchange-parallel.js';
 import { scopedRecheckBase } from './scoped-recheck-policy.js';
 
 /** Parallel R2 GETs per descriptor window when the pack is absent or for the delta. */
 export const actionsReadConcurrency = 16;
+/** Local scheduling only; streamed hashes use at most two 64 KiB chunks per worker. */
+export const actionsFileConcurrency = 16;
 export async function materializeActionsSource(client: ActionsJobClient, directory: string, cache: string) {
   const started = Date.now(),
     run = client.run!;
+  const phaseStarted = performance.now();
+  const phases: Record<string, number> = {};
+  const timed = async <T>(phase: string, run: () => Promise<T>): Promise<T> => {
+    const start = performance.now();
+    try {
+      return await run();
+    } finally {
+      phases[phase] = (phases[phase] ?? 0) + performance.now() - start;
+    }
+  };
   const connection = client.transport(),
     { transport, resolve, prepareRecipes } = connection;
   let reader = new SourceWorkerReader(cache, transport, undefined, actionsReadConcurrency);
@@ -42,6 +55,7 @@ export async function materializeActionsSource(client: ActionsJobClient, directo
         .then(bytes => (digest(bytes) === recheckBase ? parseNativeState(bytes) : null))
         .catch(() => null)
     : null;
+  phases.stateFetchMs = performance.now() - phaseStarted;
   let selected = state.files,
     reason = 'no pack',
     packed: NativeState | null = null;
@@ -62,9 +76,9 @@ export async function materializeActionsSource(client: ActionsJobClient, directo
                 );
               })();
       console.log(`source: downloading pack ${pack.stateRef} (${pack.size} bytes, ${pack.fileCount} files)`);
-      await downloadSourcePack(pack, archive, client.request);
+      await timed('packFetchMs', () => downloadSourcePack(pack, archive, client.request));
       console.log(`source: pack downloaded in ${((Date.now() - started) / 1000).toFixed(1)}s; unpacking`);
-      await unpackSourcePack(pack, packState, archive, cache);
+      await timed('unpackMs', () => unpackSourcePack(pack, packState, archive, cache));
       const old = new Map(packState.files.map(file => [file.path, file]));
       selected = state.files.filter(file => old.get(file.path)?.blob !== file.blob);
       packed = packState;
@@ -121,19 +135,35 @@ export async function materializeActionsSource(client: ActionsJobClient, directo
     await mkdir(directory, { recursive: true });
     // Copy even unchanged files: a clean tree applies deletions, directory changes
     // and modes without exposing any write to a link from the cached tree.
-    await download();
-    for (const file of state.files) {
-      if (file.mode === 'symlink') continue;
-      const path = join(directory, file.path);
-      await mkdir(dirname(path), { recursive: true });
-      await copyFile(join(cache, file.blob), path);
-      await chmod(path, file.mode === 'executable' ? 0o755 : 0o644);
-    }
-    for (const file of state.files.filter(file => file.mode === 'symlink')) {
-      await mkdir(dirname(join(directory, file.path)), { recursive: true });
-      await symlink(readFileSync(join(cache, file.blob), 'utf8'), join(directory, file.path));
-    }
-    await verifySourceTree(state, directory);
+    await timed('objectFetchMs', download);
+    await timed('writeMs', async () => {
+      const directories = new Map<string, Promise<unknown>>();
+      const ensureDirectory = (path: string) => {
+        const parent = dirname(path);
+        let pending = directories.get(parent);
+        if (!pending) {
+          pending = mkdir(parent, { recursive: true });
+          directories.set(parent, pending);
+        }
+        return pending;
+      };
+      await mapExchange(state.files, actionsFileConcurrency, async file => {
+        if (file.mode === 'symlink') return;
+        const path = join(directory, file.path);
+        await ensureDirectory(path);
+        await copyFile(join(cache, file.blob), path);
+        await chmod(path, file.mode === 'executable' ? 0o755 : 0o644);
+      });
+      // Links follow all regular files, as before. Retain only one link target
+      // buffer, even for a malformed oversized target that the OS will reject.
+      for (const file of state.files) {
+        if (file.mode !== 'symlink') continue;
+        const path = join(directory, file.path);
+        await ensureDirectory(path);
+        await symlink(readFileSync(join(cache, file.blob), 'utf8'), path);
+      }
+    });
+    await timed('verifyMs', () => verifySourceTree(state, directory));
   };
   try {
     await materialize();
@@ -156,17 +186,27 @@ export async function materializeActionsSource(client: ActionsJobClient, directo
   });
   let deltaBytes = 0,
     totalBytes = 0;
-  for (const file of state.files) {
-    const size = (await stat(join(cache, file.blob))).size;
-    totalBytes += size;
-    if (old.get(file.path)?.blob !== file.blob) deltaBytes += size;
-  }
+  await timed('statMs', async () => {
+    const sizes = new Map<string, Promise<number>>();
+    await mapExchange(state.files, actionsFileConcurrency, async file => {
+      let pending = sizes.get(file.blob);
+      if (!pending) {
+        pending = stat(join(cache, file.blob)).then(info => info.size);
+        sizes.set(file.blob, pending);
+      }
+      const size = await pending;
+      totalBytes += size;
+      if (old.get(file.path)?.blob !== file.blob) deltaBytes += size;
+    });
+  });
+  console.log(`source: phases ${JSON.stringify(phases)}`);
   console.log(
     packed
       ? `source: pack ${client.sourcePack!.stateRef} + delta ${changed.length} files (${deltaBytes} bytes) in ${((Date.now() - started) / 1000).toFixed(1)}s`
       : `source: full download (${reason})`,
   );
   return {
+    phases,
     state,
     stateBytes,
     base,
@@ -180,7 +220,7 @@ export async function materializeActionsSource(client: ActionsJobClient, directo
   };
 }
 export async function verifySourceTree(state: NativeState, directory: string) {
-  for (const file of state.files) {
+  await mapExchange(state.files, actionsFileConcurrency, async file => {
     const path = join(directory, file.path),
       info = await lstat(path);
     const hash =
@@ -194,5 +234,5 @@ export async function verifySourceTree(state: NativeState, directory: string) {
           ),
           await fileDigest(path));
     invariant(hash === file.blob, 'SOURCE_HASH_MISMATCH', 'Final source tree differs.');
-  }
+  });
 }
