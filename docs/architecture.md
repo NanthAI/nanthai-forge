@@ -180,9 +180,13 @@ before R2 upload, then publishes source/Work atomically. A reservation is not a
 completed creation and retries preserve its bytes. Legacy Convex upload
 receipts written before R2 became the only byte path remain reconcilable.
 
-Merge preparation first verifies nearby parent frontiers. It can stop older
-history only when every loaded parent path reaches one exact common frontier;
-multiple unknown frontiers, other roots or cycles retain normal traversal. The
+Merge preparation first verifies nearby parent frontiers. Composition and
+resolution prove their cut relative to immutable selected tips; resolution
+retains the two tips authenticated by its pinned conflict page, including across
+worker continuations. Prefetched ancestors never become additional selected
+roots. It can stop older history only when every selected parent path reaches
+one exact common frontier; multiple unknown frontiers, other roots or cycles
+retain normal traversal. Recursive merge bases above the cut remain intact. The
 operation records that explicit ancestry cut separately from stored parents.
 Native merge-base/file calculations still use exact hash-verified State bytes.
 Deep graphs retain paged hint traversal; hints never prove closure or independence.

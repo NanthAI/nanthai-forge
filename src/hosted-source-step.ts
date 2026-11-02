@@ -55,6 +55,8 @@ export type SourceStepCursor = {
   parents: Record<string, string[]>;
   /** Proven common frontier; older history cannot contain a maximal merge base. */
   ancestryBoundary?: string;
+  /** Exact tips from the pinned conflict page, independent of ancestry prefetch. */
+  resolutionRoots?: [string, string];
   verify: VerifyCursor | null;
   selections: unknown[];
   head: string | null;

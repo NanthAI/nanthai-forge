@@ -23,7 +23,17 @@ export function sourceAncestryCut(
     }
   }
   const frontier = new Set(selectedRoots),
-    ready = [...frontier].filter(id => !children.get(id));
+    ready = [...reachable].filter(id => !children.get(id));
+  // Finish the topological proof before accepting any boundary. A prefetched
+  // cycle below an otherwise common frontier must keep conservative traversal.
+  for (let i = 0; i < ready.length; i++) {
+    for (const parent of new Set(parents[ready[i]!] ?? [])) {
+      const count = children.get(parent)! - 1;
+      children.set(parent, count);
+      if (!count) ready.push(parent);
+    }
+  }
+  if (ready.length !== reachable.size) return null;
   // Legacy callers select every loaded node; the explicit roots used by source
   // composition also permit a selected tip to be the cut.
   const cut = () => {
@@ -35,14 +45,9 @@ export function sourceAncestryCut(
   for (let i = 0; i < ready.length; i++) {
     const id = ready[i]!,
       edges = parents[id];
-    if (!edges?.length) continue;
+    if (!frontier.has(id) || !edges?.length) continue;
     frontier.delete(id);
-    for (const parent of new Set(edges)) {
-      frontier.add(parent);
-      const count = children.get(parent)! - 1;
-      children.set(parent, count);
-      if (!count) ready.push(parent);
-    }
+    for (const parent of edges) frontier.add(parent);
     const boundary = cut();
     if (boundary) return boundary;
   }

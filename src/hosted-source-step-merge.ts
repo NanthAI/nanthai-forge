@@ -79,13 +79,7 @@ export async function prepareMergeStep(c: SourceStepCursor, io: StepTransport, m
       const plan = syncInputSchema.parse(c.plan),
         work = plan.work;
       if (work.mode === 'resolution') {
-        const page = composeConflictPageSchema.parse(await readJson(io, work.conflicts, m));
-        invariant(
-          canonicalPayload(savePin(page)) === canonicalPayload(work.conflicts),
-          'SOURCE_HASH_MISMATCH',
-          'Conflict page changed.',
-        );
-        c.states = [page.left, page.right];
+        c.states = await syncRoots(c, io, m);
       } else if (work.mode === 'revert') {
         c.inventory[work.previous.object.sha256] = work.previous;
         c.inventory[work.accepted.object.sha256] = work.accepted;
@@ -162,7 +156,7 @@ export async function prepareMergeStep(c: SourceStepCursor, io: StepTransport, m
           ...c.selections.map(v => (v as { head: string }).head),
           ...Object.values(composeInputSchema.parse(c.plan).restoreBases ?? {}).map(ref => ref.object.sha256),
         ]
-      : syncRoots(c);
+      : await syncRoots(c, io, m);
   const boundary = sourceAncestryCut(c.parents, c.states, roots);
   if (boundary) {
     c.ancestryBoundary = boundary;
@@ -355,9 +349,23 @@ function manifestConflict(result: { output: { sha256: string } }, source: Memory
 }
 
 /** The selected sync roots, not the prefetched frontier, define the proof. */
-function syncRoots(c: SourceStepCursor): string[] {
+async function syncRoots(c: SourceStepCursor, io: StepTransport, m: StepMeter): Promise<string[]> {
   const work = syncInputSchema.parse(c.plan).work;
-  if (work.mode === 'resolution') return Object.keys(c.parents); // Retain the conservative legacy proof.
+  if (work.mode === 'resolution') {
+    if (!c.resolutionRoots) {
+      // Older in-flight graph cursors recover from the same immutable page.
+      // Derived parent hints cannot select or replace either resolution tip.
+      const page = composeConflictPageSchema.parse(await readJson(io, work.conflicts, m));
+      invariant(
+        canonicalPayload(savePin(page)) === canonicalPayload(work.conflicts),
+        'SOURCE_HASH_MISMATCH',
+        'Conflict page changed.',
+      );
+      c.resolutionRoots = [page.left, page.right];
+    }
+    // The frontier grows independently; never alias its mutable array.
+    return [...c.resolutionRoots];
+  }
   if (work.mode === 'revert') return [work.previous.object.sha256, work.accepted.object.sha256];
   if (work.mode === 'sync')
     return [
