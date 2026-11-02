@@ -20,6 +20,7 @@ import { invariant } from './errors.js';
 import type { NativeFile } from './native-state-format.js';
 import { syncDirectory, syncFile } from './native-durability.js';
 import { fingerprintPrivateFile, readSource } from './files.js';
+import { preserveLegacyCacheUse } from './client-cache-use.js';
 
 /** Unlike existsSync, a dangling symlink still occupies a checkout path. */
 export function checkoutPathExists(path: string) {
@@ -47,13 +48,16 @@ export function cleanHostedCheckout(root: string, files: NativeFile[], markerNam
       const stat = lstatSync(join(root, path));
       if (path === '.forge') {
         invariant(
-          marked &&
-            stat.isDirectory() &&
-            !stat.isSymbolicLink() &&
-            readdirSync(join(root, path)).every(name => name === markerName),
+          marked && stat.isDirectory() && !stat.isSymbolicLink(),
           'WORK_CONFLICT',
-          'Existing Forge metadata is preserved.',
+          'Existing Forge metadata at ".forge" is preserved.',
         );
+        for (const name of readdirSync(join(root, path)))
+          invariant(
+            name === markerName || (name === 'cache-use.json' && preserveLegacyCacheUse(root)),
+            'WORK_CONFLICT',
+            `Existing Forge metadata at ${JSON.stringify(`${path}/${name}`)} is preserved.`,
+          );
         continue;
       }
       const file = allowed.get(path);
@@ -74,13 +78,17 @@ export function cleanHostedCheckout(root: string, files: NativeFile[], markerNam
             ? file.mode === 'symlink'
             : file.mode !== 'symlink' && Boolean(stat.mode & 0o111) === (file.mode === 'executable')),
         'WORK_CONFLICT',
-        'Local checkout changes are preserved.',
+        `Local checkout changes at ${JSON.stringify(path)} are preserved.`,
       );
       allowed.delete(path);
     }
   }
   visit('');
-  invariant(!allowed.size, 'WORK_CONFLICT', 'Local checkout deletions are preserved.');
+  invariant(
+    !allowed.size,
+    'WORK_CONFLICT',
+    `Local checkout deletion at ${JSON.stringify(allowed.keys().next().value)} is preserved.`,
+  );
 }
 export function installHostedFile(stage: string, objects: string, file: NativeFile) {
   const target = join(stage, file.path),

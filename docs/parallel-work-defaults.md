@@ -54,7 +54,10 @@ selects another file.
 ### clientCacheMaxGB and clientCacheMaxAgeHours
 
 - Other Lanes materialized by a call (conflict checkouts, `with:` inputs, overlap reads) land in
-  `ROOT.forge-client/lanes/LANE_ID`. Each use refreshes `.forge/cache-use.json` in the copy.
+  `ROOT.forge-client/lanes/LANE_ID`. Each use refreshes usage/size bookkeeping at `LANE_ID.forge-client/cache-use.json`, beside
+  the copy. Touch, inventory and eviction share this location; checkout replacement leaves it intact.
+  Earlier `.forge/cache-use.json` records are read as known bookkeeping and preserved beside the
+  copy before replacement. Unknown metadata is preserved and prevents eviction or replacement.
 - At most once an hour, from the CLI start, one local pass removes copies over the age limit and
   then least recently used copies until the directory is under the size cap. It reads no server
   and runs no timer. A pass that runs out of its 15-second budget continues on the next start.

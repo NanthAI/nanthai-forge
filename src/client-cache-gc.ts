@@ -1,26 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
-import {
-  lstatSync,
-  mkdirSync,
-  readFileSync,
-  readdirSync,
-  readlinkSync,
-  rmSync,
-  statSync,
-  utimesSync,
-  writeFileSync,
-} from 'node:fs';
+import { lstatSync, readdirSync, readlinkSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { readClientSettings, type ClientSettings } from './client-settings.js';
 import { hostedLaneDirty } from './hosted-lane-dirty.js';
 import { listLanes } from './lane-registry.js';
+import { isNestedLaneCopy, readCacheUse, writeCacheUse, unknownCacheMetadata } from './client-cache-use.js';
 
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const hour = 3_600_000;
 /** A copy touched this recently counts as in use by a running operation. */
 const GRACE_MS = 10 * 60_000;
 const BUDGET_MS = 15_000;
-const useFile = (copy: string) => join(copy, '.forge', 'cache-use.json');
 const exists = (path: string) => {
   try {
     return lstatSync(path);
@@ -44,17 +34,8 @@ function treeBytes(path: string): number {
 /** Mark a nested Lane copy as used now (open, reuse, read). Advisory; never throws. */
 export function touchNestedLane(copy: string, now = Date.now()) {
   try {
-    if (!/[\\/]\.forge-client[\\/]lanes[\\/][0-9a-f-]{36}$/.test(copy)) return;
-    const file = useFile(copy);
-    mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
-    let bytes: number | undefined;
-    try {
-      bytes = (JSON.parse(readFileSync(file, 'utf8')) as { bytes?: number }).bytes;
-    } catch {
-      /* first use */
-    }
-    writeFileSync(file, JSON.stringify(bytes === undefined ? {} : { bytes }));
-    utimesSync(file, now / 1000, now / 1000);
+    if (!isNestedLaneCopy(copy)) return;
+    writeCacheUse(copy, { bytes: readCacheUse(copy)?.bytes, used: now });
   } catch {
     /* Cache bookkeeping never fails a command. */
   }
@@ -112,15 +93,9 @@ export function gcNestedLanes(input: {
   const keep = new Set(input.keepLaneIds ?? []);
   const copies = names.map(laneId => {
     const copy = join(directory, laneId);
-    let used = 0;
-    for (const time of [exists(useFile(copy))?.mtimeMs, registry.get(copy), exists(copy)?.mtimeMs])
-      used = Math.max(used, time ?? 0);
-    let bytes: number | undefined;
-    try {
-      bytes = (JSON.parse(readFileSync(useFile(copy), 'utf8')) as { bytes?: number }).bytes;
-    } catch {
-      /* measured below */
-    }
+    const usage = readCacheUse(copy);
+    const used = Math.max(usage?.used ?? 0, registry.get(copy) ?? 0, exists(copy)?.mtimeMs ?? 0);
+    const bytes = usage?.bytes;
     return { laneId, copy, used, bytes };
   });
   copies.sort((a, b) => a.used - b.used);
@@ -131,12 +106,7 @@ export function gcNestedLanes(input: {
     }
     item.bytes ??= treeBytes(item.copy);
     try {
-      const file = useFile(item.copy);
-      if (exists(dirname(file))) {
-        const stat = statSync(file, { throwIfNoEntry: false });
-        writeFileSync(file, JSON.stringify({ bytes: item.bytes }));
-        if (stat) utimesSync(file, stat.mtimeMs / 1000, stat.mtimeMs / 1000);
-      }
+      writeCacheUse(item.copy, { bytes: item.bytes, used: item.used });
     } catch {
       /* The size is re-measured next time. */
     }
@@ -158,9 +128,11 @@ export function gcNestedLanes(input: {
           ? 'in use'
           : linked.has(item.copy)
             ? 'linked from a sibling directory'
-            : isDirty(item.copy)
-              ? 'unsaved edits'
-              : null;
+            : unknownCacheMetadata(item.copy)
+              ? 'unknown Forge metadata'
+              : isDirty(item.copy)
+                ? 'unsaved edits'
+                : null;
     if (reason) {
       result.kept.push({ laneId: item.laneId, reason });
       continue;

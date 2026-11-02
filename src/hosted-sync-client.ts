@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { checkoutHostedLane, type LaneTransport } from './hosted-lane-checkout.js';
 import { hostedLaneSelectionSchema } from './hosted-lane.js';
 import { hostedLaneExpectationSchema } from './hosted-lane-checkout-marker.js';
-import { invariant } from './errors.js';
+import { ForgeError, invariant } from './errors.js';
 const applySchema = z
   .object({
     operationId: z.uuid(),
@@ -23,18 +23,27 @@ export async function applyHostedSync(root: string, input: unknown, transport: L
     'WORK_OPERATION_CHANGED',
     'Apply sync to its original Lane checkout.',
   );
-  return checkoutHostedLane(
-    root,
-    {
-      operationId: request.operationId,
-      url: request.url,
-      projectId: lane.projectId,
-      laneId: lane.laneId,
-      previous: { head: from.head, version: from.version, sourceVersion: from.sourceVersion },
-      expected: { head: lane.head, version: lane.version, sourceVersion: lane.sourceVersion },
-      // Preserve sparse scope. [] expands nothing and retains earlier scope roots.
-      paths: [],
-    },
-    transport,
-  );
+  try {
+    return await checkoutHostedLane(
+      root,
+      {
+        operationId: request.operationId,
+        url: request.url,
+        projectId: lane.projectId,
+        laneId: lane.laneId,
+        previous: { head: from.head, version: from.version, sourceVersion: from.sourceVersion },
+        expected: { head: lane.head, version: lane.version, sourceVersion: lane.sourceVersion },
+        // Preserve sparse scope. [] expands nothing and retains earlier scope roots.
+        paths: [],
+      },
+      transport,
+    );
+  } catch (error) {
+    if (error instanceof ForgeError && error.code === 'WORK_CONFLICT')
+      throw new ForgeError(
+        error.code,
+        `${error.message} Source already completed; only local apply is pending. Retry the same original operation after resolving this local obstruction.`,
+      );
+    throw error;
+  }
 }

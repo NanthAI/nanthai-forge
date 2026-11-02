@@ -674,7 +674,8 @@ downloads only missing selected objects, and stages installation before checking
 local bytes and marker again. Local edits, deletions, link/mode changes and
 untracked contents are preserved on `WORK_CONFLICT`; a newer client baseline is
 `WORK_STALE`. The original server result remains successful when local install
-cannot proceed. Completed apply retries check current access but do not overwrite
+cannot proceed. Obstruction errors name the relative path and state that source already completed
+and only local apply is pending; replay the same original operation after resolving the obstruction. Completed apply retries check current access but do not overwrite
 later edits. There is no filesystem watcher, background pull or recurring timer.
 
 
