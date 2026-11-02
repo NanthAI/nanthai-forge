@@ -46,6 +46,76 @@ for (const admissionCheck of [false, true]) {
   });
 }
 
+test('FAILED singleton after progress retires shared generation and delivers canonical failure', async t => {
+  const f = await batchesFixture(t, { count: 4, batching: 'default', batchMaxSize: null });
+  await drainActive(f);
+  assert.equal(f.runs().length, 2);
+  const active = [];
+  for (const run of f.runs()) {
+    active.push(await f.rawChecks.activate(run.id));
+    await drainActive(f);
+    await f.rawChecks.callback(f.rawChecks.shard(active.at(-1), 0));
+    await drainActive(f);
+  }
+  const singleton = [...f.tables.projectHostedLandingBatches.values()]
+    .map(row => JSON.parse(row.value))
+    .find(batch => batch.members.length === 1);
+  assert(singleton?.predecessor);
+  const member = singleton.members[0].submissionId;
+  const run = active.find(run => run.id === singleton.runId);
+  assert(run);
+  await f.rawChecks.callback(f.rawChecks.shard(run, 1, 'failed'));
+  await drainActive(f);
+  assert.equal(states(f).find(state => state.id === member).phase, 'checking');
+  const terminal = f.rawChecks.complete(run, 'failed', {
+    contractReports: { 'tests/member-3.test.mjs': { failed: true, durationMs: 1 } },
+  });
+  await f.rawChecks.callback(terminal);
+  await drainActive(f);
+  const retired = JSON.parse(
+    [...f.tables.projectHostedLandingBatches.values()].find(row => row.batchId === singleton.id).value,
+  );
+  assert.equal(retired.phase, 'split', 'FAILED is consumed instead of stranded');
+  assert(states(f).find(state => state.id === member).batchSolo);
+  await f.rawChecks.pass(active.find(current => current.id !== run.id));
+  await drainActive(f);
+  for (
+    let wave = 0;
+    states(f).some(state => state.phase !== 'landed' && state.phase !== 'terminal-failed');
+    wave++
+  ) {
+    assert(wave < 10);
+    const pending = f.runs().filter(run => run.status === 'queued');
+    assert(pending.length);
+    for (const queued of pending) {
+      const current = await f.rawChecks.activate(queued.id);
+      await drainActive(f);
+      await f.rawChecks.callback(f.rawChecks.shard(current, 0));
+      await drainActive(f);
+      await f.rawChecks.callback(
+        f.rawChecks.complete(current, 'failed', {
+          contractReports: { 'tests/member-3.test.mjs': { failed: true, durationMs: 1 } },
+        }),
+      );
+    }
+    await drainActive(f);
+  }
+  const failed = states(f).find(state => state.id === member);
+  assert.equal(failed.phase, 'terminal-failed');
+  assert.equal(failed.error.code, 'CHECK_FAILED');
+  assert.match(failed.error.message, /tests\/member-3.test.mjs/);
+  assert.equal(states(f).filter(state => state.phase === 'landed').length, 3);
+  assert.equal(f.pending().length, 0);
+  const before = states(f).map(state => state.version);
+  await f.rawChecks.callback(terminal);
+  await drainActive(f);
+  assert.deepEqual(
+    states(f).map(state => state.version),
+    before,
+  );
+  assert.equal(f.pending().length, 0);
+});
+
 test('a queued bound generation is still woken, and rebinding fences its old events', async () => {
   const f = await landingFixture();
   const run = await f.rawChecks.enqueue(f.rawChecks.selection());
