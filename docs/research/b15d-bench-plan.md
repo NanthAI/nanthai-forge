@@ -206,7 +206,17 @@ commit.
   its phases (see Same workspace-prep rule). GitHub's
   stored times are corrected to real time by a per-cell clock probe (on 2026-11-01 GitHub
   returned objects created 08:00-09:00 UTC one hour late on every read); a cell is void if that
-  offset moves by more than 5 s between its start and end. Which PRs and CI runs belong to a
+  offset moves by more than 5 s between its start and end. The probe creates one commit
+  status on the fixed base and compares its list-read `created_at` with the local POST
+  midpoint. Reads request cache revalidation and retry missing IDs six times (immediately,
+  then after 250, 500, 1000, 2000 and 4000 ms), scanning up to ten 100-status pages per
+  attempt so concurrent statuses cannot hide the probe on the first page. Retry waits and
+  reads never change the measurement midpoint. Results record the status ID, read attempts
+  and pages; a permanent miss reports these diagnostics and still voids the cell. The POST
+  timestamp remains diagnostic only: it cannot measure a read-surface offset when create
+  and list timestamps disagree. GitHub documents newest-first ordering and pagination in
+  its [commit status API](https://docs.github.com/en/rest/commits/statuses#list-commit-statuses-for-a-reference).
+  Which PRs and CI runs belong to a
   cell is decided by id, not time: only PR numbers and run ids above the highest ones at cell
   start count.
 - **Wall time** per cell: cell start to the last landing (only when all 10 landed), and

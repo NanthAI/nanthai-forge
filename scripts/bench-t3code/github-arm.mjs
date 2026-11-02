@@ -27,9 +27,9 @@ const pages = async path => JSON.parse(await gh(['api', '--paginate', '--slurp',
 let skewMs = 0;
 export const fromGithub = iso => (iso ? new Date(Date.parse(iso) - skewMs).toISOString() : iso);
 export const toGithub = iso => (iso ? new Date(Date.parse(iso) + skewMs).toISOString() : iso);
-export async function measureSkew(sha) {
-  const sent = Date.now();
-  const created = await api(
+export async function measureSkew(sha, { api: call = api, now = Date.now, pause = wait } = {}) {
+  const sent = now();
+  const created = await call(
     `repos/${repository}/statuses/${sha}`,
     '-X',
     'POST',
@@ -40,17 +40,50 @@ export async function measureSkew(sha) {
     '-f',
     'description=B1.5d clock probe (harness)',
   );
-  const received = Date.now();
-  const stored = (await api(`repos/${repository}/statuses/${sha}?per_page=20`)).find(
-    st => st.id === created.id,
-  );
-  if (!stored) throw Error('BENCH_CLOCK_PROBE_NOT_FOUND');
+  const received = now();
+  const createResponseSkewMs = Math.round(Date.parse(created.created_at) - (sent + received) / 2);
+  // A successful POST can precede list visibility. Retry the read, never the write;
+  // keep the POST midpoint even when read visibility takes seconds. Page through
+  // concurrent statuses too, with finite request/memory budgets on a busy SHA.
+  const delays = [0, 250, 500, 1000, 2000, 4000];
+  let stored,
+    readAttempts = 0,
+    readPages = 0;
+  for (const delay of delays) {
+    if (delay) await pause(delay);
+    readAttempts++;
+    for (let page = 1; page <= 10; page++) {
+      const statuses = await call(
+        `repos/${repository}/statuses/${sha}?per_page=100&page=${page}`,
+        '-H',
+        'Cache-Control: no-cache',
+      );
+      readPages++;
+      stored = statuses.find(st => st.id === created.id);
+      if (stored || statuses.length < 100) break;
+    }
+    if (stored) break;
+  }
+  // Do not fall back to the POST timestamp: the probe measures the read surface,
+  // which has previously disagreed with the create response by an hour.
+  if (!stored)
+    throw Object.assign(
+      Error(
+        `BENCH_CLOCK_PROBE_NOT_FOUND: status ${created.id} on ${sha} after ${readAttempts} attempts / ${readPages} pages (createResponseSkewMs=${createResponseSkewMs})`,
+      ),
+      { code: 'BENCH_CLOCK_PROBE_NOT_FOUND' },
+    );
+  if (!Number.isFinite(Date.parse(stored.created_at)))
+    throw Error(`BENCH_CLOCK_PROBE_INVALID_TIMESTAMP: status ${created.id}`);
   skewMs = Math.round(Date.parse(stored.created_at) - (sent + received) / 2);
   return {
     skewMs,
-    createResponseSkewMs: Math.round(Date.parse(created.created_at) - (sent + received) / 2),
+    createResponseSkewMs,
     roundTripMs: received - sent,
     at: new Date(received).toISOString(),
+    statusId: created.id,
+    readAttempts,
+    readPages,
   };
 }
 
