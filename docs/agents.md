@@ -6,6 +6,8 @@ Hosted checkout help (`nforge agent ROOT --help`) and `nforge docs agents/hosted
 
 The command reference is [agents/workflow.md](agents/workflow.md) and the terse runtime copy is [skills/forge-agent/SKILL.md](../skills/forge-agent/SKILL.md).
 
+For work on Forge itself, read [AGENTS.md](../AGENTS.md), the [lead playbook](agents/lead.md) and the [builder rules](agents/briefings.md#building-forge). These repo pages carry the durable working rules across phases and harnesses.
+
 ## Connect over MCP
 
 Build or install Forge, then print a ready-made client entry:
@@ -37,15 +39,27 @@ Credentials are stored per deployment in `$XDG_CONFIG_HOME/forge/auth.json` (def
 
 ## Copy prompts and briefings
 
-Run `nforge agent ROOT brief '{"situation":"resolve-conflict","laneId":"LANE_ID","agent":"codex"}'` or `forge_brief` for a short copy prompt, full Markdown briefing and structured context. Seven templates cover starting/continuing work, conflicts, failed checks, review, handoffs and messages. Copied prompts ask the agent to fetch fresh context first. No model inference or source contents enter the prompt; applicable repository instruction files are named by path and take precedence over project guidance, personal guidance and Forge steps.
+`nforge agent ROOT brief` and `forge_brief` return fresh copy prompts, Markdown
+and structured context for work, conflicts, checks, review and handoffs. Repository
+instructions take precedence over project/personal guidance and Forge steps.
+See [briefings](agents/briefings.md) for guidance, preparation and coverage.
 
-Local `guidance` and hosted `agentGuidance.read/set` preserve up to 4,000 characters each for project and personal guidance, with retry-safe writes. Hosted `projectBriefings.brief` checks current project access. See [briefing API and setup](agents/briefings.md) for source-path preparation, live coordination, optional MCP setup and coverage limits.
+Local `start` records `startedBy {kind,name,tool?}`; `start`, `finish` and `accept`
+take optional `actor`/`tool`, defaulting from `FORGE_ACTOR`/`FORGE_ACTOR_TOOL`.
+Receipts expose `acceptedBy`. Local UI actions record the OS person, agent tools
+an agent; older attribution stays unknown. These declarations grant no authority.
 
-Local agent `start` records `startedBy {kind, name, tool?}`. `start`, `finish` and `accept` accept an optional `actor` name and `tool`; `FORGE_ACTOR` / `FORGE_ACTOR_TOOL` supply defaults. Acceptance receipts, status and records expose `acceptedBy`. Local UI/server actions record the OS person; agent workflow and MCP record an agent. Existing records keep unknown attribution. These local labels declare who acted; they grant no authority.
+Hosted `projectPeopleActions.labels({projectId,actors})` resolves currently visible
+Work/coordination actors, or roster members named by owners. Imported declarations
+cannot authorize account lookup. Results use display names without email fallback;
+project reads recheck access. Summaries use `actorDisplayName`, coordination uses
+`fromDisplayName`; unrelated accounts cannot be looked up.
 
-Hosted readers can call `projectPeopleActions.labels({projectId, actors})` for actors already visible in project Work or server coordination. Owners can also name participants in their existing roster. Imported declarations alone never authorize an unrelated account lookup. Results use display names without email fallback. The project-scoped derived names appear as `actorDisplayName` on hosted Work summaries and coordination rows (`fromDisplayName` in compact inbox items). Access is rechecked before returning names; unrelated account IDs cannot be used as a directory lookup.
-
-Hosted Candidate/run summaries expose `main {head, included}` against the current hosted main (or imported main until a hosted selection exists). Native State parents and Git bundle commit parents (SHA-1/SHA-256, including pack deltas) are indexed during generation preparation; main moves require only indexed membership lookups. `included: null` means source or parent closure is unavailable; derived-data failure does not deny retained Work reads. A run uses its own exact head.
+Hosted Candidate/run summaries report `main {head,included}` against current
+hosted main (imported main before selection). State and Git bundle parents are
+indexed at generation preparation; membership uses indexed lookups. Unknown
+source/ancestry gives `included:null`, never denial of retained Work. Runs keep
+exact heads.
 
 ## Coordination
 
@@ -65,32 +79,52 @@ MCP tools (`nforge mcp-coordination URL PROJECT_ID`); each has a matching `nforg
 
 ### Session identity and counts
 
-Each announcing process is a session, independent of device login. A session declares `kind: "agent" | "subagent" | "person"`, `harness: "claude-code" | "codex" | "cursor" | "pi" | "other"`, optional `harnessVersion` and optional `parentSessionId`. Low-level activity commands use `sessionKind` because their `kind` is already `"activity"`. Missing legacy fields read as a top-level agent with harness `"other"`. A parent link requires a live, unfinished session in the same project, from the same actor and credential. Parent links cannot cycle. Children remain subagents when their parent becomes stale or completes; they can still report completion.
+Each process announces its own session, independent of device login: `kind`
+(`agent`, `subagent`, `person`), harness/version and optional parent session.
+Low-level activity uses `sessionKind`. A parent must be live, unfinished, in the
+same project/account/credential; links cannot cycle. Children stay subagents
+when a parent ends. Missing legacy metadata means a top-level `other` agent.
+MCP detects client/harness metadata and returns `childEnvironment` for child
+launches; a child must announce itself. See [session setup and coordination](agents/workflow.md#concurrent-agents-and-the-human-cockpit)
+for detection overrides, commands, paging, acknowledgements and retry rules.
 
-MCP detects the harness from initialize `clientInfo`, then environment (`CLAUDECODE`, `CODEX_THREAD_ID`, `CURSOR_AGENT`, `PI_CODING_AGENT_DIR`), with `FORGE_HARNESS` / `FORGE_HARNESS_VERSION` available for an explicit environment declaration. `forge_announce` also accepts explicit harness/version. Its reply includes `childEnvironment: {FORGE_PARENT_SESSION: sessionId}`. Pass that environment when launching a child harness/MCP process. Each child announces its own distinct session, inheriting the parent link and defaulting to `subagent`. The server also sets this environment for its own future children; it cannot change the environment of an already-running coding harness. A session that never announces is not silently invented.
-
-`projectCoordination.counts({projectId})` is authorized like session reads. `projectCoordination.publicCounts({projectId})` works without sign-in only for public, untrashed projects and returns **only these five numeric fields**, with no names, session ids, actors, credentials, paths or Lane ids:
+`projectCoordination.counts({projectId})` is authorized like session reads.
+`publicCounts({projectId})` works only for public, untrashed projects. It returns
+only five numbers, never names, actors, credentials, paths, Lane or session ids:
 
 | Field | Meaning |
 | --- | --- |
-| `activeAgents` | Unfinished top-level agent sessions with activity within 15 minutes. Duplicate names on the same Lane collapse to their newest observation; these are not unique humans, devices or models. |
-| `activeSubagents` | Unfinished subagent sessions with activity within 15 minutes, including children of stale/completed parents and unparented sessions explicitly declared as subagents. |
-| `activePeople` | Unfinished person sessions with activity within 15 minutes. |
-| `activeLanes` | Distinct Lanes with an observed save, check or claim in the last 15 minutes. Includes hosted source-return changes, Lane checkpoint/check events, imported latest save/check summaries, and local check reports. An announcement, note, message or heartbeat alone is not Lane activity. |
-| `unannouncedActiveLanes` | Active Lanes without a live session naming that Lane or holding an active claim attributed to it. These are activity observations without live session attribution, not an estimated number of hidden agents. |
+| `activeAgents` | Unfinished top-level agents active within 15 minutes; duplicate names on one Lane collapse to the newest observation, not unique humans/models. |
+| `activeSubagents` | Unfinished subagents active within 15 minutes, including children of ended parents and declared subagents without a parent. |
+| `activePeople` | Unfinished person sessions active within 15 minutes. |
+| `activeLanes` | Distinct Lanes with save/check/claim activity in 15 minutes, including hosted source changes and local check reports; heartbeat/announcement/note alone does not count. |
+| `unannouncedActiveLanes` | Such Lanes without a live session naming them or an active claim by that session's actor; observed activity, not a hidden-agent estimate. |
 
-CLI/MCP reads use `{action:"counts"}`. Counts use server time at query execution. Convex subscriptions do not rerun just because time passes, so a live count changes on the next server write; there is no clock-driven refresh argument (`npm run check` rejects one), so idle tabs make no calls. `sessions({projectId, paginationOpts:{cursor,numItems}, parentSessionId?, all?})` pages top-level summaries by default, immediate children when `parentSessionId` is supplied, or flat project sessions with `all:true`. Rows carry `kind`, `harness`, `stale`, `parentSessionId` and an empty `subagents` array; children are never expanded inside a root query. CLI/MCP reads accept the same optional `parentSessionId` and `all` fields alongside `cursor` and `pageSize`. Continue each scope independently until `isDone`; creation order is stable across heartbeats and new inserts appear on the first live page. Credential bindings are server-only and omitted. Stale flags are computed when read; use `lastSeen` with the current clock for continuously rendered freshness.
+CLI/MCP uses `{action:"counts"}`. Counts use server time at read; subscriptions
+change on writes, never a clock refresh or poll. `sessions` pages roots, immediate
+children with `parentSessionId`, or all sessions with `all:true`. Continue each
+scope's cursor independently. Rows carry kind, harness, stale, parent and empty
+`subagents`; credentials are server-only. Order stays stable across heartbeats.
+Unpublished activity is unknown; public counts grant no per-session read access.
 
-Activity is limited to reports received by this hosted project and its selected Work index. Unpublished local saves/checks remain unknown. Public counts never make per-session detail anonymous; session, feed and claim reads retain their existing authorization.
+Heartbeat `lastSeen` differs from real `lastActivity`/`activityKind`; silence is
+not offline proof. Sessions are working through 15 minutes, quiet through 90,
+then folded; completion or linked Lane closure ends them. `touch` skips repeats
+under 20 seconds and emits no feed event. Reads create no activity.
 
-- **Last seen.** `touch` without an activity kind updates only heartbeat receipt time (`lastSeen`; repeats under 20 s are skipped; no feed event), preserving activity time. Real activity records `lastActivity` and `activityKind`. Sessions are working through 15 minutes, quiet through 90 minutes (still listed), then folded as “not seen since HH:mm”. Explicit completion or Lane acceptance/closure ends them. These are activity observations, never an online/offline claim.
-- **Addressing.** `to` is a session UUID or a participant (the `actor` shown on sessions). A message to a session must be acked by that session; one to a participant by any of their sessions. Broadcast acks are recorded per participant. Everyone with project access can still read the whole feed.
-- **Related changes.** The server adds `change` events when hosted Work is written, a checkpoint is pushed, and a source return lands (one per moved Lane, with Intent, Lane, head and up to 50 changed paths for the first four Lanes). Missing paths mean unknown, not unrelated. `related` matches your active claims, the selected session's Intent/Lane/paths, explicit scope, and anything addressed to you. It scans at most 200 events per call; keep reading while `isDone` is false.
-- **Choice answers.** Messages may carry `choices`, two or three distinct nonblank labels of at most 120 characters. `forge_message` accepts them and `forge_inbox` shows them. `forge_ack` / concise `ack` accepts `choice`, one exact label; answering implies acknowledgement. The recorded answer appears in the sender’s inbox and the shared feed, linked by `messageId`. A different answer cannot replace the participant’s recorded choice; retry the same operation UUID after an unknown outcome. Ordinary free-text messages and acknowledgements remain available.
-- **Limits** (new writes only): names 120 characters, summaries 2,000, message text 4,000, ids 200, up to 100 paths of 500 characters, page size 100, claim TTL 1 minute to 24 hours.
-- **Retries.** Every write carries an operation UUID; concise actions generate one and return it. Retrying with the same UUID returns the original result. Cursors from `feed`, `inbox` and `related` are interchangeable and survive reconnects.
+Directed session messages need that session's acknowledgement; participant
+messages allow any of their sessions, broadcasts record one per participant.
+Choices have two or three distinct labels (120 characters each); answers must
+match a label and cannot be replaced, while free text remains available.
+Related reads match claims, Intent/Lane/paths or addressees, scanning at most
+200 events per page. Missing path coverage means unknown.
 
-Announce your scope, claim the paths you will change, watch related activity, message when you need agreement and acknowledge what you read. Sessions carry a sequence number so an older report cannot replace a newer one. A completed session does not complete an Intent. Expired claims, old sessions and events are kept until the project is deleted.
+New writes allow names 120 characters, summaries 2,000, message text 4,000,
+ids 200, up to 100 paths of 500 characters, page size 100 and claim TTL one minute
+to 24 hours. Mutations use retry-safe UUIDs and increasing session sequences;
+feed/inbox/related cursors survive reconnects. Claims remain advisory. Session
+completion never completes an Intent. Expired claims, sessions and events remain
+until the project is deleted.
 
 ## Scoped source grants
 

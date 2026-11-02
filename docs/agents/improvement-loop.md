@@ -51,3 +51,23 @@ leaves unchanged run pages and retained run histories unhydrated and never
 backfills historical failures.
 
 The [principles](../principles.md) explain how reports guide product work.
+
+## Fix the class
+
+Log every workaround and address it: fix now or link a scheduled planning Issue.
+A flake gets an Issue with the reproduction, file, error and run ids when found;
+a test failing twice without a code cause must not disappear into silent retries.
+Core-claim incidents are top bugs: write the design cause, replay the incident in
+acceptance tests and verify the repaired behavior live under the approved scope.
+
+Fix the actual root cause, even when it takes longer. Product fixes serve every
+project and workload; do not special-case benchmark tasks, data or this repo.
+Search the whole repo for other instances and fix them or list them explicitly.
+When a defect class appears twice, or a fix is reverted and retried, include a
+lint rule, check script or behavioral budget test that fails the build on the
+class. Also add a guard whenever the invariant must never be broken again.
+A reminder in a brief is not a guard. Review remaining paths and real usage before
+calling the class done; tests on one named path do not establish the invariant.
+
+The [lead playbook](lead.md) covers triage, owner discussions and completion
+with evidence. New policy or restrictions still need the owner's approval.

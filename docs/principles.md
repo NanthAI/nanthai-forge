@@ -21,8 +21,10 @@ human to reconstruct what happened, that is evidence worth keeping.
 5. **Ship small, measured slices.** Choose a concrete problem, make a complete
    useful change, test failure paths and link it to the friction it addresses.
 6. **Measure again.** Compare the actual experience with the original problem.
-   Separate observed results from assumptions. Keep studying what remains and
-   change direction when the evidence calls for it.
+   Separate observed results from assumptions. Fix root causes for every project,
+   never tune behavior to one benchmark. Check billed usage and actual byte
+   placement after runtime or storage changes, not only estimated calls. Keep
+   studying what remains and change direction when the evidence calls for it.
 
 The [improvement loop](agents/improvement-loop.md) connects everyday reports,
 triage and fixing Lanes. Rankings help us decide where to look; they do not make

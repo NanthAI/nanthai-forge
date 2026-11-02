@@ -1,12 +1,95 @@
 # Agent briefings
 
-`nforge agent ROOT brief '{"situation":"resolve-conflict","laneId":"LANE_ID","agent":"codex"}'` (or `forge_brief` with the same fields) returns a short `copyText`, full Markdown briefing and structured context. Situations are `start-intent`, `add-lane`, `land-together`, `continue-lane`, `resolve-conflict`, `fix-failed-check`, `review-and-accept`, `take-handoff` and `answer-message`; agents are `claude-code`, `codex` and `generic`. Select the linked `intentId`, `laneId`, `viewId`, `runId` or `messageId`. Copied prompts tell the agent to fetch fresh context before acting. Templates use no model or inference service, and include no source contents. Instruction files are detected by path in the relevant State, including case variants and nested files. Applicable repository instructions take precedence over project guidance, personal guidance, then Forge workflow steps. `copyText` is at most 1,200 characters; full Markdown is at most 32,000, with any shortened presentation identified and complete structured context returned separately.
+`nforge agent ROOT brief '{"situation":"resolve-conflict","laneId":"LANE_ID","agent":"codex"}'`
+(or `forge_brief`) returns `copyText`, Markdown and structured context. Use the
+linked Intent, Lane, Candidate, run or message id; fetch fresh context before
+acting. `brief --help` lists situations and agents. Templates make no model calls
+and include no source contents. Detected repository instructions win over project
+guidance, personal guidance, then Forge steps. Copy text is at most 1,200 characters,
+Markdown 32,000; shortening is identified and structured context stays complete.
 
-Set local guidance with `nforge x ROOT guidance '{"operationId":"UUID","scope":"project","agentGuidance":"How agents should work"}'`; use `personal` for the current OS user. Both preserve text verbatim, accept at most 4,000 characters and reconcile retries without overwriting later settings. Local settings stay in owner metadata (`agent-guidance.json`), outside source and exchange; personal values are keyed by the local OS username. Hosted `agentGuidance.read/set` uses the current account; project edits allow the owner and explicitly assigned guidance maintainers. Owners can assign an existing project member through retry-safe `agentGuidance.setMaintainer({projectId, operationId, actor, maintainer})`; this permission covers only agent guidance, and changes no other project authority.
+Set local guidance with `nforge x ROOT guidance` and
+`{operationId,scope:"project"|"personal",agentGuidance}`. Each scope preserves up to
+4,000 characters verbatim, with retry-safe writes. Local guidance stays outside
+source/exchange; personal guidance is keyed by OS user. Hosted
+`agentGuidance.read/set` uses the current account. Owners and assigned guidance
+maintainers can edit project guidance; `setMaintainer` changes only that permission.
 
-The hosted query is `projectBriefings.brief({projectId, ...briefInput})`, returning the same briefing object and checking current project access. Source-only readers have no project Work access. Prepare the usual Work index with `projectWorkIndexActions.ensure` and native object-checkpoint paths with `projectBriefingActions.prepare`; clients can do this automatically without another user step. Preparation reads State manifests, never file blobs. Warm briefing queries read only structured records and derived paths. Archive/Git checkpoints report source-path coverage as unavailable; local brief supplies their paths. Candidate context includes pinned input Lanes. Claims include session IDs when recorded, including other sessions of the same account; they are advisory. Sync conflicts use Lane markers; composed conflicts use the existing Candidate-resolution workflow and check/accept the resolved Candidate. Recent notes, events and claims report partial coverage when the provider read budget is reached.
+Hosted `projectBriefings.brief({projectId,...briefInput})` checks current access;
+source-only grants cannot read Work. `projectWorkIndexActions.ensure` and
+`projectBriefingActions.prepare` prepare derived paths from State manifests, not
+file blobs. API support for client preparation is not permission for builders to
+auto-trigger index repair; follow [live-operation rules](lead.md#live-work-and-cost).
+Warm reads use structured records. Archive/Git path coverage can be unavailable;
+local brief supplies paths. Budget-limited notes/events/claims report partial
+coverage. Claims are advisory; Candidate context pins input Lanes. Resolve sync
+markers in the Lane and composed conflicts through Candidate resolution, then check.
 
-For CLI/MCP live hosted context, set `FORGE_DEPLOYMENT`, `FORGE_PROJECT_ID` and the existing `FORGE_AUTH_TOKEN` in the private process environment. This binding is explicit: failures do not silently fall back to local-only context. Without it, local brief reports that live coordination is unavailable; message/handoff IDs need the hosted binding. Hosted prompts use `ROOT` as the local-owner placeholder. The agent MCP server exposes guidance through `forge_task` and briefing through `forge_brief`; scoped source-grant servers do not gain Work access. Failed local checks retain their bounded `failureSummary` in Work for subsequent hosted exchange; older checkpoints explicitly report an unavailable summary.
+CLI/MCP hosted context needs private `FORGE_DEPLOYMENT`, `FORGE_PROJECT_ID` and
+`FORGE_AUTH_TOKEN`. Missing binding reports unavailable coordination; failure never
+falls back silently. Message/handoff ids need it. `forge_task` exposes guidance;
+`forge_brief` exposes briefings. Failed checks retain bounded summaries; older ones
+may lack them. `setup.machine` and `setup.mcpConfigured` report observed setup,
+not liveness; unobserved values are null/false. Inspection reveals no credentials
+or client file contents.
 
+## Building Forge
 
-`setup.machine` names the local Lane host (`FORGE_MACHINE` or the OS hostname), and `setup.mcpConfigured` reports a matching observed project/client MCP configuration or the live agent MCP connection. Configuration inspection returns no client file contents or credentials. Hosted briefs carry the Lane’s recorded setup observation; older/unlocated Lanes use `machine: null` and `mcpConfigured: false`, meaning setup is not observed. This is an observation, not an online/liveness guarantee.
+Read [AGENTS.md](../../AGENTS.md); leads also use the [lead playbook](lead.md).
+These repo rules replace external builder prompts and memory. The owner's current
+instructions win. Briefs specialize scope and review; they never bypass policy.
+Use [workflow](workflow.md) for commands and [parallel-work defaults](../parallel-work-defaults.md)
+for configurable product behavior.
+
+### Standard builder block
+
+Every brief includes this block by reference, keeps AGENTS.md safety rules intact
+when copied, and supplies its Issue, owned files/concepts, dependencies, scale
+budget, time box, acceptance bar and metrics that must not regress.
+
+1. Read Lane AGENTS.md, DESIGN.md and every Issue **Done when** line. Own one finite
+   task. `start {planningItemId}` creates your Lane; edit only its returned path.
+   Never commit in the mirror or edit another builder's Lane.
+2. Follow AGENTS.md secret handling and owner decision rights. Never print secrets
+   or environment values, read credentials raw into output, use production or
+   deploy/publish/change accounts/backfill without the stated authorization.
+   Compare secrets by hash; use private delivery. Tests use synthetic fixtures.
+3. State calls per record/operation, total Convex calls and DB I/O, peak memory and
+   wall time at current scale plus growth. Calls must not rise; idle is zero.
+   Batch pages; no per-item calls, polling or whole-collection/Work loads. R2 holds
+   bytes. V8 Convex functions use no Node-only globals. Assert relevant budgets.
+4. Fix root causes for every project, never tune to a benchmark. Search for every
+   instance; fix or list them. [Repeated classes and reverted fixes need a build-failing guard](improvement-loop.md#fix-the-class).
+5. Use the approved installed CLI and patched Node. Check disk before start,
+   builds and tests against the brief's reserve. Use `nforge heavy`; start servers
+   or browsers only when needed and stop them afterwards.
+6. Save at milestones/~30 minutes; read the head and capture coverage. Use `mktemp`
+   logs, never shared fixed paths. Keep a private handoff with observation time,
+   saved head, operation id and next action for interruption recovery.
+7. Read peers and coordinate shared scope before editing. Answer blocking notices
+   before landing; advisory notices need no answer. Record order/split, notice
+   counts and conflicts. Missing alerts mean friction, not independence.
+8. Save then `preflight {laneId}`. Run all affected tests: added tests, direct and
+   transitive consumers of changed/deleted modules and changed literal paths.
+   No arbitrary file cap. Include relevant docs/format/lint/type checks. Re-select
+   after sync or main changes. A near-full set belongs to the landing runner;
+   never repeat the full suite locally. The landing check is full verification.
+9. Never weaken, skip or quarantine tests or raise timeouts to hide races. Explain
+   any correction to an impossible assertion. Report observed commands, exit codes
+   and counts; label unrun work. Runtime/storage changes also need real billed
+   usage and byte-placement evidence; otherwise that acceptance stays open.
+10. Finish your own Lane unless review is required first. Check the benchmark hold
+    before each submission; wait without touching it. No routine urgent priority.
+    Freeze edits/saves/sync until terminal. Stay with all dependent work. Resume a
+    killed wait with its complete original request/id, not a shell poller.
+11. Fix failures in the same Lane and land again; never cancel and recreate.
+    Follow exact conflict/stale/stalled continuations; replay unknown outcomes.
+    Log friction with action/code/Lane/cost/workaround, then fix or link a slice.
+12. Match your receipt to your Lane/operation and verify files on accepted main.
+    Convex changes also need deployment success at that commit; the lead deploys.
+    Comment evidence per acceptance line; unmet lines stay open or name their next
+    Issue. Handoff files/choices/tests/counts/actual verification/receipt/head,
+    unverified work and next action. Abandon unused Lanes with work preserved;
+    remove only your own regenerable temporary output.
+
+Docs-only work changes no runtime usage; no live billing benchmark is needed.

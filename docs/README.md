@@ -8,6 +8,7 @@ code at the same time. Start with the guide that matches your task.
 - [Why Forge](why-forge.md): differences from GitHub, measured landing throughput and what remains unmeasured.
 - [Quickstart](quickstart.md): import GitHub source into a writable hosted project, then save and land a Lane.
 - [Concepts](concepts.md): Intents, Lanes, Candidates, checks and Channels.
+- [Lead playbook](agents/lead.md): plan, delegate, verify, measure cost and release.
 - [Agent workflow](agents/workflow.md): work in a Lane, coordinate and finish through the project's runner.
 - [Agents](agents.md) and [briefings](agents/briefings.md): CLI/MCP tools and generated agent context.
 - [Workflows](workflows.md) and [gh-compatible commands](gh-cli.md): native and Git usage.
