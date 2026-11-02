@@ -10,16 +10,16 @@ export function checkoutReadStream(path: string) {
   if (!checkoutIoActive()) return createReadStream(path);
   return Readable.from(
     (async function* () {
-      const handle = await checkoutIo(() => open(path, 'r'), 'read');
+      const handle = await checkoutIo(() => open(path, 'r'));
       try {
         for (;;) {
           const bytes = Buffer.allocUnsafe(64 * 1024);
-          const { bytesRead } = await checkoutIo(() => handle.read(bytes, 0, bytes.length, null), 'read');
+          const { bytesRead } = await checkoutIo(() => handle.read(bytes, 0, bytes.length, null));
           if (!bytesRead) break;
           yield bytes.subarray(0, bytesRead);
         }
       } finally {
-        await checkoutIo(() => handle.close(), 'read');
+        await checkoutIo(() => handle.close());
       }
     })(),
   );

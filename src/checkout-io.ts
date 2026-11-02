@@ -10,24 +10,16 @@ export function checkoutIoCapacity() {
   const configured = Number(process.env.UV_THREADPOOL_SIZE ?? 4);
   return Number.isInteger(configured) && configured > 0 ? Math.min(1024, configured) : 4;
 }
-export type CheckoutIoPhase = 'read' | 'copy' | 'durability';
+export type CheckoutIoPhase = 'copy' | 'durability';
 export type CheckoutIoExecutor = <T>(run: () => Promise<T>, phase: CheckoutIoPhase) => Promise<T>;
-const budget = new AsyncLocalStorage<{
-  execute: CheckoutIoExecutor;
-  waited?: ((ms: number) => void) | undefined;
-}>();
-export function withCheckoutIo<T>(
-  executor: CheckoutIoExecutor,
-  run: () => Promise<T>,
-  options: { waited?: ((ms: number) => void) | undefined } = {},
-) {
-  return budget.run({ execute: executor, ...options }, run);
+const budget = new AsyncLocalStorage<CheckoutIoExecutor>();
+export function withCheckoutIo<T>(executor: CheckoutIoExecutor, run: () => Promise<T>) {
+  return budget.run(executor, run);
 }
 export const checkoutIoActive = () => budget.getStore() !== undefined;
 export function checkoutIo<T>(run: () => Promise<T>, phase: CheckoutIoPhase = 'copy'): Promise<T> {
-  return budget.getStore()?.execute(run, phase) ?? run();
+  return budget.getStore()?.(run, phase) ?? run();
 }
-export const checkoutIoWaited = (ms: number) => budget.getStore()?.waited?.(ms);
 /** Producers retain the existing bounded lookahead; permits cover actual work. */
 export function mapCheckoutIo<T, R>(
   items: readonly T[],

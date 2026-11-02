@@ -1,15 +1,6 @@
-// SPDX-License-Identifier: Apache-2.0
-import { withCheckoutFileBatch } from './checkout-file-batch.js';
 import { sourceTree } from './source-tree.js';
-import {
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  writeFileSync,
-  renameSync,
-  rmSync,
-  realpathSync,
-} from 'node:fs';
+// SPDX-License-Identifier: Apache-2.0
+import { mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, realpathSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import { z } from 'zod';
 import { hostedLaneSelectionSchema, type HostedLaneSelection } from './hosted-lane.js';
@@ -23,15 +14,15 @@ import { workLocked } from './work-lock.js';
 import { indexInstalledFiles, writeCheckoutStatIndex } from './checkout-stat-index.js';
 import { withCheckoutOpenMetrics, type CheckoutOpenMetrics } from './checkout-open-metrics.js';
 import { checkoutIo } from './checkout-io.js';
-import { withCheckoutDurabilityBatch } from './checkout-durability.js';
-import { withCheckoutMaterialization } from './checkout-materialization.js';
+import { withCheckoutMaterialization, withCheckoutWritePass } from './checkout-materialization.js';
 import { HostedCheckoutCache, type CheckoutObjectTransport } from './hosted-checkout-cache.js';
 import { machineObjectsDirectory } from './machine-object-store.js';
 import {
   checkoutPathExists,
   cleanHostedCheckout,
   stageHostedFiles,
-  flushHostedStage,
+  flushHostedFiles,
+  flushHostedCheckoutFiles,
 } from './hosted-checkout-files.js';
 import {
   hostedLaneCheckoutSchema,
@@ -173,10 +164,7 @@ async function checkout(
         return result(true);
       }
       await metrics.measure('cacheVerify', () => cache.ensure([selection.head]));
-      const stateBytes = await checkoutIo(
-        async () => readFileSync(join(cache.objects, selection.head)),
-        'read',
-      );
+      const stateBytes = await checkoutIo(async () => readFileSync(join(cache.objects, selection.head)));
       invariant(
         digest(stateBytes) === selection.head,
         'INVALID_NATIVE_SOURCE',
@@ -203,94 +191,95 @@ async function checkout(
       metrics.files = files.length;
       await metrics.measure('cacheVerify', () => cache.ensure(files.map(file => file.blob)));
       identity(hostedLaneSelectionSchema.parse(await transport.select(request.laneId)));
-      await (async () => {
-        const stage = await checkoutIo(async () => mkdtempSync(join(cache.root, 'checkout-')));
-        try {
-          await withCheckoutFileBatch(
-            stage,
-            async () => {
-              const installed = await (async () => {
-                await metrics.measure('copyHash', () => stageHostedFiles(stage, cache.objects, files));
-                await checkoutIo(async () => mkdirSync(join(stage, '.forge'), { mode: 0o700 }));
-                const marker: HostedLaneCheckoutMarker = {
-                  schema: 1,
-                  kind: 'forge-hosted-lane-checkout',
-                  url: request.url,
-                  operationId: request.operationId,
-                  selection,
-                  state,
-                  tree: sourceTree(state.files),
-                  scope,
-                  materialized: files.map(file => file.path),
-                };
-                const markerPath = join(stage, '.forge', hostedLaneMarkerName);
-                // The stage is private. Its marker joins the same file/directory
-                // traversal instead of committing a second metadata transaction.
-                await checkoutIo(async () =>
-                  writeFileSync(markerPath, JSON.stringify(marker), { mode: 0o600, flag: 'wx' }),
-                );
-                await metrics.measure('durability', () => flushHostedStage(stage, files, [markerPath]));
-                // Stats of the private stage carry over the rename, so the first save reads only edited files.
-                return metrics.measure('index', () =>
-                  checkoutIo(async () => indexInstalledFiles(stage, files), 'read'),
-                );
-              })();
-              await metrics.measure('publish', () =>
-                withCheckoutDurabilityBatch(stage, () =>
-                  checkoutIo(
-                    async () =>
-                      workLocked(lock, () => {
-                        operation = operationSchema.parse(json(receiptPath));
-                        if (operation.complete) return;
-                        recover();
-                        const current = baseline();
-                        invariant(
-                          markerDigest() === operation.previousMarker ||
-                            current?.operationId === request.operationId,
-                          'WORK_STALE',
-                          'Another checkout updated this client while source was downloading.',
-                        );
-                        cleanHostedCheckout(
-                          root,
-                          materializedFiles(current),
-                          hostedLaneMarkerName,
-                          Boolean(current),
-                        );
-                        // An interrupted post-rename install already has the original marker. Reconcile it.
-                        if (current?.operationId !== request.operationId) {
-                          invariant(
-                            !checkoutPathExists(previous),
-                            'WORK_CONFLICT',
-                            'An earlier checkout backup is preserved.',
-                          );
-                          if (checkoutPathExists(root)) renameSync(root, previous);
-                          renameSync(stage, root);
-                          syncDirectory(dirname(root));
-                          syncDirectory(cache.root);
-                          writeCheckoutStatIndex(root, installed.since, installed.entries);
-                        }
-                        // Nested Lanes share their caller's immutable objects. Retain that local
-                        // cache location so saves can derive baseline evidence only when needed.
-                        durableReplace(
-                          join(cache.root, 'overlap-objects.json'),
-                          JSON.stringify(cache.objects),
-                        );
-                        operation.complete = true;
-                        durableReplace(receiptPath, JSON.stringify(operation));
-                        if (checkoutPathExists(previous)) rmSync(previous, { recursive: true });
-                      }),
-                    'durability',
-                  ),
-                ),
+      await withCheckoutWritePass(
+        cache.root,
+        async () => {
+          const stage = await checkoutIo(async () => mkdtempSync(join(cache.root, 'checkout-')));
+          try {
+            const installed = await (async () => {
+              await metrics.measure('copyHash', () => stageHostedFiles(stage, cache.objects, files));
+              await checkoutIo(async () => mkdirSync(join(stage, '.forge'), { mode: 0o700 }));
+              const marker: HostedLaneCheckoutMarker = {
+                schema: 1,
+                kind: 'forge-hosted-lane-checkout',
+                url: request.url,
+                operationId: request.operationId,
+                selection,
+                state,
+                tree: sourceTree(state.files),
+                scope,
+                materialized: files.map(file => file.path),
+              };
+              await checkoutIo(
+                async () =>
+                  durableReplace(join(stage, '.forge', hostedLaneMarkerName), JSON.stringify(marker)),
+                'durability',
               );
-            },
-            files.length,
-          );
-        } finally {
-          if (checkoutPathExists(stage))
-            await checkoutIo(async () => rmSync(stage, { recursive: true, force: true }));
-        }
-      })();
+              // Both barriers must finish before publication; their order inside a private
+              // stage is immaterial. Drain both even on failure before removing the stage.
+              const flushed = await metrics.measure('durability', () =>
+                Promise.allSettled([flushHostedFiles(stage, files), flushHostedCheckoutFiles(stage, files)]),
+              );
+              for (const result of flushed) if (result.status === 'rejected') throw result.reason;
+              // Stats of the private stage carry over the rename, so the first save reads only edited files.
+              return metrics.measure('index', () =>
+                checkoutIo(async () => indexInstalledFiles(stage, files), 'durability'),
+              );
+            })();
+            await metrics.measure('publish', () =>
+              checkoutIo(
+                async () =>
+                  workLocked(lock, () => {
+                    operation = operationSchema.parse(json(receiptPath));
+                    if (operation.complete) return;
+                    recover();
+                    const current = baseline();
+                    invariant(
+                      markerDigest() === operation.previousMarker ||
+                        current?.operationId === request.operationId,
+                      'WORK_STALE',
+                      'Another checkout updated this client while source was downloading.',
+                    );
+                    cleanHostedCheckout(
+                      root,
+                      materializedFiles(current),
+                      hostedLaneMarkerName,
+                      Boolean(current),
+                    );
+                    // An interrupted post-rename install already has the original marker. Reconcile it.
+                    if (current?.operationId !== request.operationId) {
+                      invariant(
+                        !checkoutPathExists(previous),
+                        'WORK_CONFLICT',
+                        'An earlier checkout backup is preserved.',
+                      );
+                      if (checkoutPathExists(root)) renameSync(root, previous);
+                      renameSync(stage, root);
+                      syncDirectory(dirname(root));
+                      syncDirectory(cache.root);
+                      writeCheckoutStatIndex(root, installed.since, installed.entries);
+                    }
+                    // Nested Lanes share their caller's immutable objects. Retain that local
+                    // cache location so saves can derive baseline evidence only when needed.
+                    durableReplace(join(cache.root, 'overlap-objects.json'), JSON.stringify(cache.objects));
+                    operation.complete = true;
+                    durableReplace(receiptPath, JSON.stringify(operation));
+                    if (checkoutPathExists(previous)) rmSync(previous, { recursive: true });
+                  }),
+                'durability',
+              ),
+            );
+          } finally {
+            if (checkoutPathExists(stage))
+              await checkoutIo(async () => rmSync(stage, { recursive: true, force: true }));
+          }
+        },
+        {
+          waited: ms => {
+            metrics.phasesMs.slotWait += ms;
+          },
+        },
+      );
       return result(false);
     },
     {

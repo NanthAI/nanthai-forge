@@ -11,11 +11,10 @@ import {
   constants,
   realpathSync,
 } from 'node:fs';
-import { chmod, copyFile } from 'node:fs/promises';
+import { chmod, copyFile, open } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { checkoutIo } from './checkout-io.js';
-import { flushCheckoutPaths } from './checkout-durability.js';
-import { visitCheckoutFiles, withCheckoutFileBatch } from './checkout-file-batch.js';
+import { mapExchange } from './exchange-parallel.js';
 import { digest } from './hash.js';
 import { invariant } from './errors.js';
 import type { NativeFile } from './native-state-format.js';
@@ -114,14 +113,8 @@ export function installHostedFile(stage: string, objects: string, file: NativeFi
  * repeatedly commits filesystem metadata; separate bounded passes let it coalesce.
  * Every regular file is still verified and durable before the caller installs. */
 export async function installHostedFiles(stage: string, objects: string, files: NativeFile[]) {
-  await withCheckoutFileBatch(
-    stage,
-    async () => {
-      await stageHostedFiles(stage, objects, files);
-      await flushHostedFiles(stage, files);
-    },
-    files.length,
-  );
+  await stageHostedFiles(stage, objects, files);
+  await flushHostedFiles(stage, files);
 }
 
 /** Build independent, verified files while the whole staging tree stays private. */
@@ -130,47 +123,41 @@ export async function stageHostedFiles(stage: string, objects: string, files: Na
     for (const directory of new Set(files.map(file => dirname(join(stage, file.path)))))
       mkdirSync(directory, { recursive: true });
   });
-  await visitCheckoutFiles(stage, 'copy', files, async (file, io) => {
+  await mapExchange(files, 16, async file => {
     const target = join(stage, file.path),
       source = join(objects, file.blob);
-    if (file.mode === 'symlink') return io(async () => installHostedFile(stage, objects, file));
-    // Pipeline the existing bounded file window, without per-file phase changes.
-    await io(() => copyFile(source, target, constants.COPYFILE_FICLONE));
+    if (file.mode === 'symlink') return checkoutIo(async () => installHostedFile(stage, objects, file));
+    await checkoutIo(() => copyFile(source, target, constants.COPYFILE_FICLONE));
+    // The shared machine cache can change between discovery and this clone.
+    // Authenticate the independent installed inode before exposing it writable.
     invariant(
-      (await io(() => fingerprintPrivateFile(target, 'INVALID_NATIVE_SOURCE'))).sha256 === file.blob,
+      (await checkoutIo(() => fingerprintPrivateFile(target, 'INVALID_NATIVE_SOURCE'))).sha256 === file.blob,
       'INVALID_NATIVE_SOURCE',
       'Cloned source differs from the selected content.',
     );
-    await io(() => chmod(target, file.mode === 'executable' ? 0o755 : 0o644));
+    await checkoutIo(() => chmod(target, file.mode === 'executable' ? 0o755 : 0o644));
   });
 }
 
-/** Batch the durability pass after all clones/chmods. Every file continuation
- * closes its descriptor before a finite FIFO turn can yield.
- * File fsync is required even after cloning durable cache bytes: directory
- * fsync alone cannot guarantee new inode contents on all supported filesystems. */
-function* regularPaths(stage: string, files: NativeFile[], extra: Iterable<string> = []) {
-  for (const file of files) if (file.mode !== 'symlink') yield join(stage, file.path);
-  yield* extra;
-}
+/** Every selected regular file receives its own durability barrier. */
 export async function flushHostedFiles(stage: string, files: NativeFile[]) {
-  await flushCheckoutPaths(stage, regularPaths(stage, files));
-}
-/** One traversal owns the regular files, private marker and deduplicated
- * directories. Parallel local passes must not queue against their own batch. */
-export async function flushHostedStage(stage: string, files: NativeFile[], extra: Iterable<string> = []) {
-  const directories = process.platform === 'win32' ? [] : checkoutDirectories(stage, files);
-  await flushCheckoutPaths(
-    stage,
-    (function* () {
-      yield* regularPaths(stage, files, extra);
-      yield* directories;
-    })(),
+  await mapExchange(
+    files.filter(file => file.mode !== 'symlink'),
+    16,
+    async file => {
+      const target = join(stage, file.path);
+      const handle = await checkoutIo(() => open(target, 'r'), 'durability');
+      try {
+        await checkoutIo(() => handle.sync(), 'durability');
+      } finally {
+        await checkoutIo(() => handle.close(), 'durability');
+      }
+    },
   );
 }
 /** Flush every directory. A private stage's manifest already names its complete
  * directory set, so it needs no second readdir/lstat walk of every source file. */
-function checkoutDirectories(directory: string, files?: readonly { path: string }[]) {
+export async function flushHostedCheckoutFiles(directory: string, files?: readonly { path: string }[]) {
   directory = resolve(directory);
   const directories: string[] = [];
   const walk = (path: string) => {
@@ -194,11 +181,15 @@ function checkoutDirectories(directory: string, files?: readonly { path: string 
     }
     directories.push(...known);
   } else walk(directory);
-  return directories;
-}
-export async function flushHostedCheckoutFiles(directory: string, files?: readonly { path: string }[]) {
-  if (process.platform !== 'win32')
-    await flushCheckoutPaths(directory, checkoutDirectories(directory, files));
+  if (process.platform === 'win32') return;
+  await mapExchange(directories, 16, async path => {
+    const handle = await checkoutIo(() => open(path, 'r'), 'durability');
+    try {
+      await checkoutIo(() => handle.sync(), 'durability');
+    } finally {
+      await checkoutIo(() => handle.close(), 'durability');
+    }
+  });
 }
 export function flushHostedCheckout(directory: string) {
   for (const name of readdirSync(directory)) {

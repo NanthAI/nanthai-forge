@@ -41,8 +41,7 @@ test('real copy/hash and concurrent file/directory barriers share the runtime an
   let active = 0,
     peak = 0,
     opened = 0,
-    closed = 0,
-    peakDescriptors = 0;
+    closed = 0;
   const counted = async run => {
     active++;
     peak = Math.max(peak, active);
@@ -57,7 +56,6 @@ test('real copy/hash and concurrent file/directory barriers share the runtime an
   fs.open = async (...args) => {
     const handle = await counted(() => originals.open(...args));
     opened++;
-    peakDescriptors = Math.max(peakDescriptors, opened - closed);
     const sync = handle.sync.bind(handle),
       close = handle.close.bind(handle);
     handle.sync = () => counted(sync);
@@ -79,7 +77,6 @@ test('real copy/hash and concurrent file/directory barriers share the runtime an
   assert.equal(peak, Math.min(4, checkoutVolumeCapacity()));
   assert.equal(active, 0);
   assert.equal(opened, closed);
-  assert(peakDescriptors <= 16, 'barriers retain only the existing bounded file window');
   assert(opened >= 40);
   for (const file of files) {
     assert.equal(digest(readFileSync(join(stage, file.path))), file.blob);
