@@ -1,3 +1,8 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
+import { randomUUID } from 'node:crypto';
+import { withExchangeProgress } from './exchange-progress.js';
+import { networkFailure } from './network-fetch.js';
+import { networkContinuation } from './network-continuation.js';
 import { reconcileHostedSync } from './hosted-sync-handoff.js';
 import { sourceTree } from './source-tree.js';
 import { withSourceRecovery } from './hosted-agent-source-recovery.js';
@@ -151,7 +156,14 @@ export class HostedAgentTransport {
   /** Requester whose deferred receipts this deployment accepts; unset until negotiated. */
   private receiptActor: string | undefined;
   private callerActor: string | null = null;
-  private callerOperationId: string | null = null;
+  private readonly operationContext = new AsyncLocalStorage<{ id: string | null }>();
+  private get callerOperationId() {
+    return this.operationContext.getStore()?.id ?? null;
+  }
+  private set callerOperationId(id: string | null) {
+    const current = this.operationContext.getStore();
+    if (current) current.id = id;
+  }
   /** CLI only: start reports the new Lane before its checkout downloads. */
   onStarted?: (lane: { laneId: string; path: string | null }) => void;
   constructor(
@@ -171,7 +183,16 @@ export class HostedAgentTransport {
     input: Record<string, unknown>,
     signal?: AbortSignal,
   ): Promise<HostedAgentResponse> {
-    this.callerOperationId = typeof input.operationId === 'string' ? input.operationId : null;
+    return this.operationContext.run(
+      { id: typeof input.operationId === 'string' ? input.operationId : null },
+      () => this.dispatchScoped(requestedAction, input, signal),
+    );
+  }
+  private async dispatchScoped(
+    requestedAction: string,
+    input: Record<string, unknown>,
+    signal?: AbortSignal,
+  ): Promise<HostedAgentResponse> {
     const running = quietActions.has(requestedAction)
       ? undefined
       : typeof input.laneId === 'string'
@@ -179,13 +200,24 @@ export class HostedAgentTransport {
         : (markerIdentity(this.root)?.laneId ?? undefined);
     try {
       const response = await withLaneCommand(running, requestedAction, () =>
-        this.dispatchCaller(requestedAction, input, signal),
+        withExchangeProgress({ ...(signal ? { signal } : {}) }, () =>
+          this.dispatchCaller(requestedAction, input, signal),
+        ),
       );
       this.retainCaller(requestedAction, { result: response.result }, response.operationId);
       this.touchLane(requestedAction, input, response);
       return response;
     } catch (error) {
       this.retainCaller(requestedAction, { error }, this.callerOperationId);
+      if (networkFailure(error))
+        return networkContinuation(
+          this.root,
+          this.address,
+          hostedAgentAction(requestedAction),
+          input,
+          this.callerOperationId,
+          error,
+        );
       throw error;
     }
   }
@@ -399,6 +431,9 @@ export class HostedAgentTransport {
             address: this.address,
             exchange: this.exchange,
             query: this.query.bind(this),
+            retainOperation: (id: string) => {
+              this.callerOperationId ??= id;
+            },
           },
           capabilities.actor,
           action as (typeof hostedAgentPlanningActions)[number],
@@ -432,10 +467,21 @@ export class HostedAgentTransport {
       this.defaults = capabilities.agentDefaults;
       if (action === 'source-pack') {
         hostedAgentCommandSchemas['source-pack'].parse(command.data);
-        const main = await this.query<{ head: string }>('projectHostedChannels:current', {});
+        const journal = new HostedAgentJournal(
+          this.root,
+          this.address,
+          capabilities.actor,
+          action,
+          command.data,
+          (operationId as string | undefined) ?? randomUUID(),
+        );
+        this.callerOperationId = journal.operationId;
+        const main = await journal.retain('source-pack-main', () =>
+          this.query<{ head: string }>('projectHostedChannels:current', {}),
+        );
         return this.response(
           action,
-          null,
+          journal.operationId,
           await publishClientSourcePack({
             client: this.exchange.client as never,
             projectId: this.address.projectId,
@@ -858,6 +904,19 @@ export class HostedAgentTransport {
     return (typeof value === 'string' ? JSON.parse(value) : value) as T;
   }
   async mutation<T = unknown>(name: string, args: Record<string, unknown>): Promise<T> {
+    if (!this.callerOperationId) {
+      const payload = args.request ?? args.command;
+      let command: unknown = args;
+      if (typeof payload === 'string') {
+        try {
+          command = JSON.parse(payload);
+        } catch {
+          /* The server owns validation. */
+        }
+      }
+      const identity = z.object({ operationId: z.uuid() }).safeParse(command);
+      if (identity.success) this.callerOperationId = identity.data.operationId;
+    }
     const outbox = metricOutboxDirectory(this.address);
     const pending =
       this.receiptActor && receiptMutations.has(name) ? takeCallerReceipts(outbox, this.receiptActor) : null;

@@ -1,3 +1,4 @@
+import { networkFetch } from './network-fetch.js';
 // SPDX-License-Identifier: Apache-2.0
 import { verifiedBytes } from './verified-blob.js';
 import { ForgeError, invariant } from './errors.js';
@@ -79,7 +80,7 @@ export class ObjectDownloadReader {
     for (let attempt = 0; attempt < 2; attempt++) {
       let response: Response;
       try {
-        response = await (this.transport.fetch ?? fetch)(url, {
+        response = await (this.transport.fetch ?? networkFetch)(url, {
           // Full GETs let browsers decode transfer compression before verification.
           // A Range would address encoded bytes, and browsers cannot request identity.
           credentials: 'omit',

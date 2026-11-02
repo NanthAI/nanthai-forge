@@ -1,3 +1,4 @@
+import { networkFetch } from './network-fetch.js';
 // SPDX-License-Identifier: Apache-2.0
 import { githubRepository, type GithubFetch, type GithubRepository } from './github.js';
 import { ForgeError, invariant } from './errors.js';
@@ -12,7 +13,7 @@ export async function authorizeGithub(
   repository: string,
   userId: string | undefined,
   config: GithubAccessConfig,
-  request: GithubFetch = fetch,
+  request: GithubFetch = networkFetch,
 ): Promise<{ repository: GithubRepository; token: string | undefined }> {
   try {
     const repo = await githubRepository(repository, config.publicToken, request);

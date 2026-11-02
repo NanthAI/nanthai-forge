@@ -1,6 +1,7 @@
+import { isNetworkPending } from './network-continuation.js';
 // SPDX-License-Identifier: Apache-2.0
 import { retryHostedObservation } from './hosted-observation-retry.js';
-import { ConvexClient } from 'convex/browser';
+import { deadlineConvexSubscription } from './network-convex-client.js';
 import { makeFunctionReference, type FunctionReference } from 'convex/server';
 import { z } from 'zod';
 import { resolveAuthToken } from './auth-store.js';
@@ -28,7 +29,7 @@ export interface HostedRunSubscription {
 export function hostedRunSubscription(address: HostedAgentAddress): HostedRunSubscription {
   const token = resolveAuthToken(address.url, process.env.FORGE_AUTH_TOKEN);
   invariant(token, 'AUTH_REQUIRED', 'Run nforge login or supply your current Forge sign-in token.');
-  const client = new ConvexClient(address.url, { logger: false, unsavedChangesWarning: false });
+  const client = deadlineConvexSubscription(address.url, { logger: false, unsavedChangesWarning: false });
   client.setAuth(async () => token);
   return client;
 }
@@ -87,6 +88,11 @@ async function observeHostedRunOnce(
 ) {
   const command = hostedRunWaitSchema.parse(input);
   const initial = await transport.dispatch('observe', { runId: command.runId });
+  if (isNetworkPending(initial))
+    throw new ForgeError(
+      'EXCHANGE_REQUEST_FAILED',
+      'Observation is unavailable; retain the original selection.',
+    );
   function run(value: unknown) {
     value = typeof value === 'string' ? JSON.parse(value) : value;
     const parsed = runSchema.safeParse(value);

@@ -1,5 +1,6 @@
+import { deadlineConvexClient } from './network-convex-client.js';
+import { exchangeConvexFetch } from './exchange-convex-fetch.js';
 // SPDX-License-Identifier: Apache-2.0
-import { ConvexHttpClient } from 'convex/browser';
 import { makeFunctionReference } from 'convex/server';
 import { ConvexError } from 'convex/values';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -30,10 +31,10 @@ export async function startAgentMcp(deployment: string, token: string | undefine
     'AGENT_UNAVAILABLE',
     'Set FORGE_AGENT_TOKEN to the issued agent token.',
   );
-  const client = new ConvexHttpClient(url.origin, {
+  const client = deadlineConvexClient(url.origin, {
     skipConvexDeploymentUrlCheck: true,
     logger: false,
-    fetch: (input, init) => fetch(input, { ...init, redirect: 'error' }),
+    fetch: exchangeConvexFetch(),
   });
   const describe = makeFunctionReference<'action', { token: string }, string>('agentActions:describe');
   const read = makeFunctionReference<'action', { token: string; endpoint: string }, string>(

@@ -1,3 +1,4 @@
+import { networkFetch } from './network-fetch.js';
 // SPDX-License-Identifier: Apache-2.0
 import { childEnv } from '../scripts/child-env.mjs';
 import { authStatus } from './auth-status.js';
@@ -22,7 +23,7 @@ export function httpOrigin(deployment: string) {
 async function request(origin: string, operation: string, input: unknown) {
   let response: Response;
   try {
-    response = await fetch(`${origin}/auth/device/${operation}`, {
+    response = await networkFetch(`${origin}/auth/device/${operation}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(input),

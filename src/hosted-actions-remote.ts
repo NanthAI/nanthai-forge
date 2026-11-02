@@ -1,3 +1,4 @@
+import { networkFetch } from './network-fetch.js';
 // SPDX-License-Identifier: Apache-2.0
 import { ActionsApiError, type ActionsApi } from './github-actions-api.js';
 import { actionsAccessMessage, type HostedActionsMapping } from './hosted-actions.js';
@@ -35,7 +36,7 @@ export function hostedActionsRemote(
   configuration: Configuration,
   credentials: ActionsCredentialUse,
   transport: (mapping: HostedActionsMapping) => SourceWorkerTransport,
-  request: typeof fetch = fetch,
+  request: typeof fetch = networkFetch,
   runGit = hostedActionsGit,
 ): HostedActionsRemote {
   const use = <T>(operation: (token: string) => Promise<T>) => {

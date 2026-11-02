@@ -1,3 +1,4 @@
+import { networkFetch } from './network-fetch.js';
 // SPDX-License-Identifier: Apache-2.0
 import { createHash } from 'node:crypto';
 import { createReadStream, createWriteStream, existsSync, renameSync, rmSync } from 'node:fs';
@@ -23,7 +24,7 @@ export async function spoolBackfill(url: string, path: string, pin: BackfillPin)
   const temp = path + '.partial';
   let response: Response;
   try {
-    response = await fetch(url, { redirect: 'error', headers: { 'accept-encoding': 'identity' } });
+    response = await networkFetch(url, { redirect: 'error', headers: { 'accept-encoding': 'identity' } });
   } catch {
     throw new ForgeError(
       'BACKFILL_DOWNLOAD_FAILED',
@@ -81,7 +82,7 @@ export async function putBackfill(target: BackfillTarget['target'], path: string
     const body = createReadStream(path);
     let response: Response;
     try {
-      response = await fetch(target.url, {
+      response = await networkFetch(target.url, {
         method: 'PUT',
         headers: target.headers,
         body: Readable.toWeb(body) as ReadableStream<Uint8Array>,
@@ -112,7 +113,7 @@ export async function putBackfill(target: BackfillTarget['target'], path: string
 export async function sampleBackfill(url: string, pin: BackfillPin) {
   let response: Response;
   try {
-    response = await fetch(url, { redirect: 'error', headers: { 'accept-encoding': 'identity' } });
+    response = await networkFetch(url, { redirect: 'error', headers: { 'accept-encoding': 'identity' } });
   } catch {
     throw new ForgeError('R2_VERIFY_FAILED', 'R2 verification sample transfer failed.');
   }

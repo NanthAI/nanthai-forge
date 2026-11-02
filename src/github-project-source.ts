@@ -1,3 +1,4 @@
+import { networkFetch } from './network-fetch.js';
 // SPDX-License-Identifier: Apache-2.0
 import { createHash } from 'node:crypto';
 import { assertGithubRateLimit, githubJson, type GithubFetch } from './github.js';
@@ -32,7 +33,7 @@ export async function beginGithubSource(
   repository: string,
   ref: string,
   token?: string,
-  request: GithubFetch = fetch,
+  request: GithubFetch = networkFetch,
 ): Promise<GithubSourceCursor> {
   invariant(/^[\w.-]+\/[\w.-]+$/.test(repository), 'BAD_REPOSITORY', 'Select a GitHub repository.');
   const commit = await githubJson<{ sha: string; commit: { tree: { sha: string } } }>(
@@ -62,7 +63,7 @@ export async function beginGithubSource(
 export async function discoverGithubSource(
   cursor: GithubSourceCursor,
   token?: string,
-  request: GithubFetch = fetch,
+  request: GithubFetch = networkFetch,
 ): Promise<GithubSourceCursor> {
   const directory = cursor.pending[0];
   if (!directory) return cursor;
@@ -130,7 +131,7 @@ export async function streamGithubSourceBlob(
   entry: GithubSourceEntry,
   consume: (bytes: Buffer) => Promise<void>,
   token?: string,
-  request: GithubFetch = fetch,
+  request: GithubFetch = networkFetch,
 ): Promise<{ blob: string; size: number }> {
   if (entry.mode === '160000') {
     // Feed only pointer metadata through the existing sink, never a provider request.
@@ -186,7 +187,7 @@ export async function readGithubSourceBlob(
   repository: string,
   entry: GithubSourceEntry,
   token?: string,
-  request: GithubFetch = fetch,
+  request: GithubFetch = networkFetch,
 ): Promise<Buffer> {
   invariant(entry.mode !== '160000', 'INVALID_GITLINK', 'A gitlink is a commit pointer, not a GitHub blob.');
   const parts: Buffer[] = [];
@@ -214,7 +215,7 @@ export async function importGithubSourceFile(
   cursor: GithubSourceCursor,
   put: (bytes: Buffer) => Promise<void>,
   token?: string,
-  request: GithubFetch = fetch,
+  request: GithubFetch = networkFetch,
 ) {
   invariant(!cursor.pending.length, 'IMPORT_DISCOVERING', 'Complete tree discovery before importing bytes.');
   const entry = cursor.files[cursor.completed];

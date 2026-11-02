@@ -1,3 +1,4 @@
+import { networkBoundaryFindings } from './check-network-boundaries.mjs';
 // SPDX-License-Identifier: Apache-2.0
 import { readdirSync, readFileSync, existsSync, statSync } from 'node:fs';
 import { resolve, dirname, relative, extname } from 'node:path';
@@ -36,6 +37,8 @@ function walk(dir) {
 const files = walk(root);
 for (const file of files) {
   errors.push(...localPathFindings(relative(root, file), readFileSync(file)));
+  if (['.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs'].includes(extname(file)))
+    errors.push(...networkBoundaryFindings(relative(root, file), readFileSync(file, 'utf8')));
   if (['.ts', '.tsx'].includes(extname(file)))
     errors.push(...idleQueryFindings(relative(root, file), readFileSync(file, 'utf8')));
   if (extname(file) === '.json') {

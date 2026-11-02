@@ -1,3 +1,4 @@
+import { networkFetch } from './network-fetch.js';
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
 import { invariant } from './errors.js';
@@ -47,7 +48,12 @@ export function validateActionsClaims(
   return c;
 }
 /** Fixed issuer/key URL only; an untrusted JWT never chooses a network target. */
-export async function verifyActionsOidc(token: string, audience: string, request = fetch, now = Date.now()) {
+export async function verifyActionsOidc(
+  token: string,
+  audience: string,
+  request = networkFetch,
+  now = Date.now(),
+) {
   invariant(token.length <= 16_384, 'EVIDENCE_CHANGED', 'Invalid GitHub OIDC token.');
   const parts = token.split('.');
   invariant(parts.length === 3, 'EVIDENCE_CHANGED', 'Invalid GitHub OIDC token.');

@@ -1,3 +1,4 @@
+import { networkFetch } from './network-fetch.js';
 // SPDX-License-Identifier: Apache-2.0
 import { createReadStream } from 'node:fs';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
@@ -70,7 +71,7 @@ export async function publishClientSourcePack(input: {
       headers: Record<string, string>;
     } | null;
     if (target) {
-      const response = await (input.request ?? fetch)(target.url, {
+      const response = await (input.request ?? networkFetch)(target.url, {
         method: 'PUT',
         headers: target.headers,
         body: createReadStream(archive),

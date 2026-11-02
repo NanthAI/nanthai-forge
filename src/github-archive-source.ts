@@ -1,3 +1,4 @@
+import { networkFetch } from './network-fetch.js';
 // SPDX-License-Identifier: Apache-2.0
 import { createHash } from 'node:crypto';
 import { assertGithubRateLimit, githubJson, type GithubFetch } from './github.js';
@@ -16,7 +17,7 @@ export async function listGithubTree(
   repository: string,
   tree: string,
   token?: string,
-  request: GithubFetch = fetch,
+  request: GithubFetch = networkFetch,
 ): Promise<GithubListing | null> {
   invariant(gitId(tree), 'GITHUB_RESPONSE', 'GitHub returned an invalid object identity.');
   const reply = await githubJson<{
@@ -93,7 +94,7 @@ export async function openGithubArchive(
   repository: string,
   commit: string,
   token?: string,
-  request: GithubFetch = fetch,
+  request: GithubFetch = networkFetch,
 ): Promise<AsyncIterable<Uint8Array>> {
   invariant(gitId(commit), 'GITHUB_RESPONSE', 'GitHub returned an invalid commit.');
   const headers = { 'X-GitHub-Api-Version': '2022-11-28', 'User-Agent': 'NanthAi-Forge' };

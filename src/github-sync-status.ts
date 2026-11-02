@@ -1,6 +1,8 @@
+import { deadlineConvexClient } from './network-convex-client.js';
+import { exchangeConvexFetch } from './exchange-convex-fetch.js';
 // SPDX-License-Identifier: Apache-2.0
 import { createHash } from 'node:crypto';
-import { ConvexHttpClient } from 'convex/browser';
+import type { ConvexHttpClient } from 'convex/browser';
 import { makeFunctionReference } from 'convex/server';
 import { coordinationCredentials } from './coordination-client.js';
 import { readHostState } from './host-binding.js';
@@ -20,11 +22,10 @@ export async function publishGithubStatus(store: WorkStore, supplied?: Pick<Conv
     let client = supplied;
     if (!client) {
       const credentials = coordinationCredentials(host.deployment, process.env.FORGE_AUTH_TOKEN);
-      const http = new ConvexHttpClient(credentials.url, {
+      const http = deadlineConvexClient(credentials.url, {
         skipConvexDeploymentUrlCheck: true,
         logger: false,
-        fetch: (input, init) =>
-          fetch(input, { ...init, redirect: 'error', signal: AbortSignal.timeout(10_000) }),
+        fetch: exchangeConvexFetch({ totalTimeoutMs: 10_000 }),
       });
       http.setAuth(credentials.token);
       client = http;

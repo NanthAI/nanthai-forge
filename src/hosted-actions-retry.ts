@@ -1,3 +1,5 @@
+import { withExchangeProgress } from './exchange-progress.js';
+import { networkDeadline, networkFailure } from './network-fetch.js';
 // SPDX-License-Identifier: Apache-2.0
 import { ForgeError } from './errors.js';
 
@@ -18,11 +20,15 @@ export async function retryActionsInfrastructure<T>(
     if (remaining <= 0)
       throw new ForgeError('RUNNER_UNAVAILABLE', 'Actions infrastructure deadline exceeded.');
     try {
-      return await operation(AbortSignal.timeout(Math.min(timeoutMs, remaining)));
+      return await networkDeadline(
+        signal => withExchangeProgress({ signal, networkRetries: 0 }, () => operation(signal)),
+        Math.min(timeoutMs, remaining),
+      );
     } catch (error) {
       const name = (error as Error)?.name;
       const transient =
         error instanceof TransientActionsError ||
+        networkFailure(error) ||
         name === 'TimeoutError' ||
         name === 'AbortError' ||
         name === 'TypeError' ||

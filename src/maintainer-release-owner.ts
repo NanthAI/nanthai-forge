@@ -1,3 +1,4 @@
+import { networkFetch } from './network-fetch.js';
 // SPDX-License-Identifier: Apache-2.0
 import { existsSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
@@ -49,7 +50,7 @@ export type OwnerReleaseDependencies = {
 };
 async function answers(runtime: OwnerRuntime) {
   try {
-    const response = await fetch(`http://127.0.0.1:${runtime.port}/api/owner`, {
+    const response = await networkFetch(`http://127.0.0.1:${runtime.port}/api/owner`, {
       headers: { authorization: `Bearer ${runtime.token}` },
       signal: AbortSignal.timeout(1000),
       redirect: 'error',

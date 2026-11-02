@@ -1,3 +1,4 @@
+import { networkFetch } from './network-fetch.js';
 // SPDX-License-Identifier: Apache-2.0
 import { createHash } from 'node:crypto';
 import { Readable } from 'node:stream';
@@ -30,7 +31,7 @@ export function sourceWorkerHttp(config: {
     'SOURCE_WORKER_UNAVAILABLE',
     'Configure the trusted source-control ingress.',
   );
-  const request = config.fetch ?? fetch;
+  const request = config.fetch ?? networkFetch;
   const control = async (action: string, value: unknown) => {
     const response = await request(new URL(action, base.href.endsWith('/') ? base : base.href + '/'), {
       method: 'POST',

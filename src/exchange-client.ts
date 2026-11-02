@@ -1,3 +1,4 @@
+import { deadlineConvexClient } from './network-convex-client.js';
 import { CUTOVER_CLI_VERSION } from './cutover-version.js';
 // SPDX-License-Identifier: Apache-2.0
 
@@ -8,7 +9,7 @@ import { hostedMainSchema, type MainExpectation } from './hosted-main.js';
 import { exchangeConvexFetch } from './exchange-convex-fetch.js';
 import { retryExchange } from './exchange-retry.js';
 import { resolveAuthToken } from './auth-store.js';
-import { ConvexHttpClient } from 'convex/browser';
+import type { ConvexHttpClient } from 'convex/browser';
 
 import { makeFunctionReference } from 'convex/server';
 import type { ContentPin, ExchangeTransport } from './native-exchange.js';
@@ -70,7 +71,7 @@ export class ConvexExchange implements ExchangeTransport {
       'AUTH_REQUIRED',
       'Run nforge login or set FORGE_AUTH_TOKEN to your current Forge sign-in token.',
     );
-    this.client = new ConvexHttpClient(url, {
+    this.client = deadlineConvexClient(url, {
       skipConvexDeploymentUrlCheck: true,
       logger: false,
       fetch: exchangeConvexFetch({}, (name, pending) => this.onCall?.(name, pending)),

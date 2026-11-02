@@ -1,3 +1,4 @@
+import { networkFetch } from './network-fetch.js';
 // SPDX-License-Identifier: Apache-2.0
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -140,10 +141,13 @@ export async function observeDraft(
     const observed: (typeof files)[number] = { path: file.path, status: 'unconfirmed' };
     if (item.state === 'ready' && url) {
       try {
-        const response = await fetch(new URL(file.path.split('/').map(encodeURIComponent).join('/'), url), {
-          redirect: 'manual',
-          signal: AbortSignal.timeout(120_000),
-        });
+        const response = await networkFetch(
+          new URL(file.path.split('/').map(encodeURIComponent).join('/'), url),
+          {
+            redirect: 'manual',
+            signal: AbortSignal.timeout(120_000),
+          },
+        );
         observed.httpStatus = response.status;
         const hash = createHash('sha256');
         let size = 0;

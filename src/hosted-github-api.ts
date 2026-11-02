@@ -1,3 +1,4 @@
+import { networkFetch } from './network-fetch.js';
 // SPDX-License-Identifier: Apache-2.0
 import { ForgeError } from './errors.js';
 export type GithubRequest = <T>(path: string, method?: string, body?: unknown) => Promise<T>;
@@ -29,7 +30,7 @@ export class GithubMirrorApiError extends ForgeError {
   }
 }
 /** Errors never include response bodies, request payloads or credentials. */
-export function githubRequest(token: string, request: typeof fetch = fetch): GithubRequest {
+export function githubRequest(token: string, request: typeof fetch = networkFetch): GithubRequest {
   return async <T>(path: string, method = 'GET', body?: unknown): Promise<T> => {
     const payload = body === undefined ? undefined : JSON.stringify(body);
     const response = await request(`https://api.github.com${path}`, {

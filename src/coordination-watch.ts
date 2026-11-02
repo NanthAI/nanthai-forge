@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { ConvexClient } from 'convex/browser';
+import { deadlineConvexSubscription } from './network-convex-client.js';
 import { makeFunctionReference } from 'convex/server';
 import type { FunctionReference } from 'convex/server';
 import { coordinationCredentials } from './coordination-client.js';
@@ -109,7 +109,7 @@ export function watchCoordination(
   input: WatchInput,
 ) {
   const credentials = coordinationCredentials(deployment, token);
-  const client = new ConvexClient(credentials.url, { logger: false, unsavedChangesWarning: false });
+  const client = deadlineConvexSubscription(credentials.url, { logger: false, unsavedChangesWarning: false });
   // A bounded call uses only the explicitly supplied credential; no refresh/elevation side channel.
   client.setAuth(async () => credentials.token);
   return watchCoordinationFeed(client, projectId, input, sessionId =>

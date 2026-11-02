@@ -1,3 +1,4 @@
+import { isNetworkPending } from './network-continuation.js';
 // SPDX-License-Identifier: Apache-2.0
 import { join, resolve } from 'node:path';
 import { hostedAgentAddressSchema, type HostedAgentAddress } from './hosted-agent-contract.js';
@@ -104,6 +105,11 @@ export async function hostedAgentCli(
   let result;
   try {
     result = await transport.dispatch(action, command, signal ?? controller.signal);
+    if (isNetworkPending(result)) {
+      const pending = result.result as { command: string };
+      process.stderr.write(`IN PROGRESS; network response unavailable. Continue: ${pending.command}\n`);
+      process.exitCode = 3;
+    }
   } finally {
     process.removeListener('SIGINT', stop);
     process.removeListener('SIGTERM', stop);

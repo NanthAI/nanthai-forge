@@ -165,12 +165,14 @@ export async function readStateGit(
   page: string,
   known?: LoadedStateGit,
 ): Promise<LoadedStateGit> {
-  const value = parsePage(await fetch(store, page)),
+  const value = parsePage(await readCatalogObject(store, page)),
     snapshotPage = value.snapshot ?? page,
     reuse = known?.snapshot.page === snapshotPage ? known : undefined;
   const [snapshotValue, ...fetched] = await Promise.all([
-    !value.snapshot ? value : (reuse?.snapshot.value ?? fetch(store, snapshotPage).then(parsePage)),
-    ...value.packs.map(async id => reuse?.packs.get(id) ?? trees(await fetch(store, id))),
+    !value.snapshot
+      ? value
+      : (reuse?.snapshot.value ?? readCatalogObject(store, snapshotPage).then(parsePage)),
+    ...value.packs.map(async id => reuse?.packs.get(id) ?? trees(await readCatalogObject(store, id))),
   ]);
   invariant(
     !snapshotValue.snapshot && snapshotValue.packs.length === 1 && snapshotValue.packs[0] === value.packs[0],
@@ -208,7 +210,7 @@ function trees(pack: Buffer) {
     invariant(object.type === 'tree', 'GIT_OBJECT_INVALID', 'A State pack holds only trees.');
   return objects;
 }
-async function fetch(store: Pick<ObjectStore, 'get'>, id: string) {
+async function readCatalogObject(store: Pick<ObjectStore, 'get'>, id: string) {
   const bytes = await store.get(id);
   invariant(digest(bytes) === id, 'SOURCE_HASH_MISMATCH', 'A stored object differs from its pin.');
   return bytes;

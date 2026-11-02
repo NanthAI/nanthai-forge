@@ -1,3 +1,4 @@
+import { networkFetch } from './network-fetch.js';
 // SPDX-License-Identifier: Apache-2.0
 import { sourceLanguage } from './languages.js';
 import { ignoreLayer, ignoredBy, ignoreNames } from './source-ignore.js';
@@ -85,7 +86,11 @@ export function assertGithubRateLimit(response: Response): void {
   }
 }
 
-export async function githubJson<T>(path: string, token?: string, request: GithubFetch = fetch): Promise<T> {
+export async function githubJson<T>(
+  path: string,
+  token?: string,
+  request: GithubFetch = networkFetch,
+): Promise<T> {
   invariant(
     path.startsWith('/') && !path.split(/[/?]/).includes('..'),
     'BAD_GITHUB_PATH',
@@ -131,7 +136,7 @@ export async function githubJson<T>(path: string, token?: string, request: Githu
 export async function githubRepository(
   repository: string,
   token?: string,
-  request: GithubFetch = fetch,
+  request: GithubFetch = networkFetch,
 ): Promise<GithubRepository> {
   const repo = await githubJson<GithubRepository>(`/repos/${repository}`, token, request);
   invariant(
@@ -150,7 +155,7 @@ export async function captureGithub(
   ref: string | undefined,
   token?: string,
   progress: (done: number, total: number) => Promise<void> = async () => {},
-  request: GithubFetch = fetch,
+  request: GithubFetch = networkFetch,
 ): Promise<HostedArtifact> {
   const prefix = `/repos/${repository.full_name}`;
   const commit = await githubJson<{ sha: string; commit: { tree: { sha: string } } }>(

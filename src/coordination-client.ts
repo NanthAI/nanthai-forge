@@ -1,6 +1,8 @@
+import { deadlineConvexClient } from './network-convex-client.js';
+import { exchangeConvexFetch } from './exchange-convex-fetch.js';
 // SPDX-License-Identifier: Apache-2.0
 import { resolveAuthToken } from './auth-store.js';
-import { ConvexHttpClient } from 'convex/browser';
+import type { ConvexHttpClient } from 'convex/browser';
 import type { FunctionReference } from 'convex/server';
 import { ForgeError, invariant } from './errors.js';
 
@@ -44,11 +46,10 @@ export function coordinationClient(
   options?: { signal: AbortSignal },
 ): ConvexHttpClient {
   const credentials = coordinationCredentials(deployment, token);
-  const client = new ConvexHttpClient(credentials.url, {
+  const client = deadlineConvexClient(credentials.url, {
     skipConvexDeploymentUrlCheck: true,
     logger: false,
-    fetch: (input, init) =>
-      fetch(input, { ...init, redirect: 'error', ...(options ? { signal: options.signal } : {}) }),
+    fetch: exchangeConvexFetch({}, undefined, options?.signal),
   });
   client.setAuth(credentials.token);
   return client;

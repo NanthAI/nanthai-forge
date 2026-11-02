@@ -1,3 +1,4 @@
+import { isNetworkPending } from './network-continuation.js';
 // SPDX-License-Identifier: Apache-2.0
 import { observedConflictRecovery } from './hosted-observed-conflict.js';
 import { makeFunctionReference } from 'convex/server';
@@ -151,6 +152,11 @@ async function observeHostedSubmissionsOnce(
   const command = hostedSubmissionWaitSchema.parse(input);
   const operations = [...new Set(command.operationIds)];
   const discovery = await transport.dispatch('capabilities', {});
+  if (isNetworkPending(discovery))
+    throw new ForgeError(
+      'EXCHANGE_REQUEST_FAILED',
+      'Observation is unavailable; retain the original selection.',
+    );
   const actor = z.object({ actor: z.string() }).parse(discovery.result).actor;
   const cursor = new HostedSubmissionWaitCursor(transport.address, actor, operations, command.cursor);
   const canonicalOperations = new Map<string, string>();

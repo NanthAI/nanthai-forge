@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { isNetworkPending } from './network-continuation.js';
 import { normalizeHostedFinishResult } from './hosted-agent-finish-result.js';
 import { spawn } from 'node:child_process';
 import { closeSync, fstatSync, mkdirSync, openSync, readFileSync, readSync, rmSync } from 'node:fs';
@@ -142,11 +143,12 @@ async function detachedSubmit(
   rmSync(`${base}.out`, { force: true });
   rmSync(`${base}.err`, { force: true });
   const line = stdout.trim().split('\n').at(-1);
-  if (code !== 0 || !line) {
+  if ((code !== 0 && code !== 3) || !line) {
     process.exitCode = code || 1;
     return null;
   }
   const response = JSON.parse(line) as HostedAgentResponse;
+  if (code === 3) process.exitCode = 3;
   // The relayed stderr already showed this notice; the final banner must not repeat it.
   const notice = noticeOf(response);
   if (notice) markOverlapShown(notice);
@@ -205,6 +207,7 @@ export async function hostedLandCli(
       ? await submitHostedLand(root, command, address)
       : await detachedSubmit(root, command);
   if (!submitted) return undefined;
+  if (isNetworkPending(submitted)) return submitted;
   const wait = options.wait ?? readClientSettings().landWait;
   if (
     !wait ||

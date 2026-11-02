@@ -1,3 +1,4 @@
+import { networkFetch } from './network-fetch.js';
 // SPDX-License-Identifier: Apache-2.0
 import type { HostedLandingState } from './hosted-landing.js';
 import type { EffectiveAgentDefaults } from './agent-parallel-defaults.js';
@@ -127,7 +128,7 @@ export async function deliverStallAlert(
   alert: Pick<StallAlert, 'subject' | 'text'>,
   settings: EffectiveAgentDefaults['stallAlerts'],
   env: Env,
-  send: typeof fetch = fetch,
+  send: typeof fetch = networkFetch,
 ) {
   const results: { channel: AlertRequest['channel']; status: number | 'failed' }[] = [];
   for (const request of stallAlertRequests(alert, settings, env)) {

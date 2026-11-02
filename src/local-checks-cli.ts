@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { ConvexClient } from 'convex/browser';
+import { deadlineConvexSubscription } from './network-convex-client.js';
 import { createHash } from 'node:crypto';
 import { hostname } from 'node:os';
 import { WorkStore } from './work-store.js';
@@ -28,7 +28,7 @@ export async function localChecksCli(args: string[]): Promise<void> {
     runnerId = createHash('sha256')
       .update(JSON.stringify([credentials.url, projectId, store.root, hostname()]))
       .digest('hex');
-  const client = new ConvexClient(credentials.url, { logger: false, unsavedChangesWarning: false });
+  const client = deadlineConvexSubscription(credentials.url, { logger: false, unsavedChangesWarning: false });
   client.setAuth(async () => credentials.token);
   const scope = { projectId, runnerId },
     controller = new AbortController(),

@@ -357,7 +357,12 @@ test('long actions keep the seven-minute header and total deadline; quick calls 
   ]) {
     timers.length = 0;
     await fetch(`https://fixture.invalid/api/${api}`, { body: JSON.stringify({ path, args: [{}] }) });
-    assert.deepEqual(timers.slice(0, 2), [30000, 120000], path);
+    // The total deadline may be armed before the header deadline; both budgets remain exact.
+    assert.deepEqual(
+      timers.slice(0, 2).sort((a, b) => a - b),
+      [30000, 120000],
+      path,
+    );
   }
 });
 

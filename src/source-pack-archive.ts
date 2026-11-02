@@ -1,3 +1,4 @@
+import { networkFetch } from './network-fetch.js';
 import { checkoutReadStream, checkoutWriteStream } from './checkout-io-streams.js';
 import { checkoutIo } from './checkout-io.js';
 // SPDX-License-Identifier: Apache-2.0
@@ -69,7 +70,7 @@ export async function createSourcePack(stateRef: string, state: NativeState, cac
 export async function downloadSourcePack(
   pack: SourcePack & { url: string },
   path: string,
-  request = fetch,
+  request = networkFetch,
   timeoutMs = 600_000,
 ) {
   invariant(pack.size <= sourcePackBytes, 'SOURCE_HASH_MISMATCH', 'Oversized pack.');

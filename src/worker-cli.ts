@@ -1,3 +1,4 @@
+import { networkFetch } from './network-fetch.js';
 import { CUTOVER_CLI_VERSION } from './cutover-version.js';
 // SPDX-License-Identifier: Apache-2.0
 import { deliverMacCallback } from './hosted-mac-delivery.js';
@@ -143,7 +144,7 @@ export async function workerCli(args: string[]) {
         ),
       ),
     put: async (target, headers, bytes) => {
-      const response = await fetch(target, {
+      const response = await networkFetch(target, {
         method: 'PUT',
         headers,
         body: bytes as BodyInit,

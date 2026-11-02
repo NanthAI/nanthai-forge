@@ -11,7 +11,9 @@ import type { PlanningItem, PlanningWrite } from './work-planning-types.js';
 
 /** Planning is the hosted Work journal's Issues and Initiatives. This file only drives the existing
  * indexed reads and the existing owner `projectWorkActions:command`; it adds no storage. */
-export type PlanningPort = Pick<HostedAgentSession, 'query' | 'address' | 'exchange' | 'root'>;
+export type PlanningPort = Pick<HostedAgentSession, 'query' | 'address' | 'exchange' | 'root'> & {
+  retainOperation?: (id: string) => void;
+};
 type Workspace = { generationId: string; revision: number; sourceRevision?: number };
 type Page = {
   generationId: string | null;
@@ -264,6 +266,7 @@ export async function executeHostedPlanning(
     return { operationId: null, result: await readPlanning(port, read) };
   }
   const journal = new HostedAgentJournal(port.root, port.address, actor, action, input, operationId);
+  port.retainOperation?.(journal.operationId);
   if (action === 'comment-planning-item') {
     const comment = hostedAgentCommandSchemas['comment-planning-item'].parse(input);
     const revision = await writePlanning(

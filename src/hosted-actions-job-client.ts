@@ -1,3 +1,4 @@
+import { networkFetch } from './network-fetch.js';
 // SPDX-License-Identifier: Apache-2.0
 import { actionsPreflightTicketSchema, type ActionsPreflightTicket } from './hosted-actions-preflight.js';
 import type { HostedCheckRun } from './hosted-check.js';
@@ -29,7 +30,7 @@ export class ActionsJobClient {
     readonly site: string,
     readonly projectId: string,
     readonly runId: string,
-    readonly request = fetch,
+    readonly request = networkFetch,
   ) {}
   async call(command: z.infer<typeof directCommandSchema>) {
     if (this.expires < Date.now() + 30_000) {
