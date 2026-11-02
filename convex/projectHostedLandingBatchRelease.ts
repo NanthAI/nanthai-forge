@@ -14,6 +14,13 @@ export async function releaseBatchMembers(ctx: MutationCtx, input: BatchIdentity
   for (const member of batch.members) {
     const current = await loadLanding(ctx, { projectId: input.projectId, submissionId: member.submissionId });
     if (current.state.phase === 'landed' || current.state.batchId !== batch.id) continue;
+    if (
+      batch.included &&
+      !batch.included.includes(current.state.id) &&
+      current.state.phase !== 'terminal-failed' &&
+      batch.phase === 'landed'
+    )
+      continue;
     const { batchId: _batch, batchNeedsSoloCompose: needsCompose, ...state } = current.state;
     void _batch;
     const terminal = state.phase === 'terminal-failed';

@@ -26,6 +26,7 @@ export const batchSchema = z
     members: z.array(hostedLandingAttemptSchema).min(1).max(HOSTED_BATCH_MEMBERS),
     memberDetails: z.array(batchMemberDetailSchema).max(HOSTED_BATCH_MEMBERS).optional(),
     failure: batchFailureSchema.optional(),
+    transition: z.object({ code: z.string(), message: z.string() }).strict().optional(),
     uploadIndex: z.number().int().nonnegative(),
     uploads: z
       .array(z.object({ pin: z.object({ sha256: z.string(), size: z.number() }), value: z.string() }))

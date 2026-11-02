@@ -1,4 +1,5 @@
 import { predecessorStatus } from './projectHostedLandingPipeline';
+import { settleBatchConflicts, retainSurvivorTrain } from './projectHostedLandingCohortConflicts';
 import { deferSpeculativeConflict } from './projectHostedLandingSpeculativeConflict';
 import { wakeLandingQueue } from './projectHostedLandingEvents';
 import { advanceBatchFallback } from './projectHostedLandingBatchFallback';
@@ -47,6 +48,15 @@ export async function batchFinishStep(
   const key = { projectId: input.projectId, batchId };
   const { batch } = await loadBatch(ctx, key);
   if (batch.phase === 'superseded') return { handled: true, command: null };
+  if (
+    state.batchId === batch.id &&
+    batch.included &&
+    state.phase === 'queued' &&
+    !batch.included.includes(state.id)
+  ) {
+    await settleBatchConflicts(ctx, key, batch);
+    return { handled: true, command: null };
+  }
   if (await releaseUnstartedBatchForPriority(ctx, key, batch)) return { handled: true, command: null };
   if (
     state.phase === 'queued' &&
@@ -62,14 +72,27 @@ export async function batchFinishStep(
       await splitLandingBatch(ctx, key, batch);
       return { handled: true, command: null };
     }
-    const fallback = { ...batch, phase: 'fallback' as const };
+    const fallback = {
+      ...batch,
+      phase: 'fallback' as const,
+      transition: { code: 'LANDING_STALLED', message: 'The shared check stopped making progress.' },
+    };
     await writeBatch(ctx, key, fallback);
     return advanceBatchFallback(ctx, key, fallback, state.id);
   }
-  if (
-    batch.phase === 'fallback' ||
-    (batch.phase === 'landed' && (state.phase !== 'landed' || state.batchOriginId))
-  ) {
+  if (batch.phase === 'landed' && state.batchId && !['landed', 'terminal-failed'].includes(state.phase)) {
+    const fallback = {
+      ...batch,
+      phase: 'fallback' as const,
+      transition: {
+        code: 'BATCH_MEMBER_ORPHANED',
+        message: 'A nonterminal member outlived its settled cohort; restore its individual preparation.',
+      },
+    };
+    await writeBatch(ctx, key, fallback);
+    return advanceBatchFallback(ctx, key, fallback, state.id);
+  }
+  if (batch.phase === 'fallback') {
     if (state.batchId) await writeBatch(ctx, key, batch);
     return advanceBatchFallback(ctx, key, batch, state.id);
   }
@@ -78,25 +101,18 @@ export async function batchFinishStep(
     return { handled: false, command: null };
   if (state.id !== (batch.leaderId ?? batch.id) || batch.phase !== 'composing')
     return { handled: true, command: null };
-  for (const member of batch.members) {
-    const current = await loadLanding(ctx, { projectId: input.projectId, submissionId: member.submissionId });
-    if (current.state.phase === 'terminal-failed') {
-      await writeBatch(ctx, key, { ...batch, phase: 'fallback' });
-      await wakeBatch(ctx, key);
-      return { handled: true, command: null };
-    }
-    await hostedWriteProject(ctx, input.projectId, member.actor.id, member.authorityEpoch);
-  }
   const source = await prepareBatchCompose(ctx, key);
   if (source.operation.terminal) {
     const outcome = source.operation.terminal.outcome;
     if (outcome.status === 'failed') {
-      await splitLandingBatch(ctx, key, batch);
+      await splitLandingBatch(ctx, key, batch, undefined, outcome.error);
       return { handled: true, command: null };
     }
     const candidate = hostedRecordSchema.options[3].parse(outcome.result);
     invariant(
-      candidate.result.status === 'clean',
+      candidate.id === source.state.candidateId &&
+        candidate.result.status === 'clean' &&
+        canonicalPayload(candidate.base) === canonicalPayload(source.state.request.expectedMain),
       'COMPOSITION_CONFLICT',
       'Batch worker must retain member conflicts.',
     );
@@ -108,18 +124,42 @@ export async function batchFinishStep(
     if (
       predecessor === 'invalid' ||
       (predecessor !== 'pending' &&
-        ((batch.predecessor && dropped.length) ||
-          main.head !== source.state.request.expectedMain.head ||
+        (main.head !== source.state.request.expectedMain.head ||
           main.receipt.id !== source.state.request.expectedMain.receiptId))
     ) {
       await retryLandingBatch(ctx, key, batch);
       return { handled: true, command: null };
     }
-    if (predecessor === 'pending' && dropped.length) {
-      await deferSpeculativeConflict(ctx, key, batch, dropped);
-      return { handled: true, command: null };
+    const included = batch.members.filter(m => !dropped.some(d => d.candidateId === m.candidate.id));
+    for (const member of batch.members) {
+      const current = await loadLanding(ctx, {
+        projectId: input.projectId,
+        submissionId: member.submissionId,
+      });
+      if (current.state.phase === 'terminal-failed') {
+        if (!included.includes(member)) continue;
+        await writeBatch(ctx, key, {
+          ...batch,
+          phase: 'fallback',
+          transition: {
+            code: 'BATCH_MEMBER_SETTLED',
+            message: 'A member included in the shared Candidate settled before its evidence was installed.',
+          },
+        });
+        await wakeBatch(ctx, key);
+        return { handled: true, command: null };
+      }
+      await hostedWriteProject(ctx, input.projectId, member.actor.id, member.authorityEpoch);
     }
-    for (const member of batch.members.filter(m => dropped.some(d => d.candidateId === m.candidate.id))) {
+    if (predecessor === 'pending' && dropped.length) await deferSpeculativeConflict(ctx, key, batch, dropped);
+    for (const member of batch.members.filter(
+      m => predecessor !== 'pending' && dropped.some(d => d.candidateId === m.candidate.id),
+    )) {
+      if (
+        (await loadLanding(ctx, { projectId: input.projectId, submissionId: member.submissionId })).state
+          .phase === 'terminal-failed'
+      )
+        continue;
       const conflict = dropped.find(d => d.candidateId === member.candidate.id)!;
       await retainBatchConflict(ctx, {
         projectId: input.projectId,
@@ -137,9 +177,12 @@ export async function batchFinishStep(
         at: batch.at,
       });
     }
-    const included = batch.members.filter(m => !dropped.some(d => d.candidateId === m.candidate.id));
     if (!included.length) {
-      await writeBatch(ctx, key, { ...batch, phase: 'landed' });
+      await writeBatch(ctx, key, {
+        ...batch,
+        included: [],
+        phase: predecessor === 'pending' ? 'composing' : 'landed',
+      });
       return { handled: true, command: null };
     }
     const settings = (await loadFinish(ctx, input)).value.check;
@@ -196,6 +239,12 @@ export async function batchFinishStep(
       runId: run.id,
       included: included.map(m => m.submissionId),
     });
+    await retainSurvivorTrain(
+      ctx,
+      key,
+      included.map(member => member.submissionId),
+      batch,
+    );
     await wakeLandingQueue(ctx, { projectId: input.projectId, channel: 'main' });
     return { handled: true, command: null };
   }
@@ -228,7 +277,15 @@ export async function batchFinishStep(
         r2Key: objectKey,
       });
     await scheduleFinish(ctx, originalRow, 30_000, true);
-    return { handled: true, command: { kind: 'plan', ...upload, batchId: batch.id } };
+    return {
+      handled: true,
+      command: {
+        kind: 'plan',
+        ...upload,
+        batchId: batch.id,
+        batchComposeOperationId: batch.composeOperationId,
+      },
+    };
   }
   await submitHostedCompose(ctx, source.auth);
   await watchFinishCompose(ctx, originalRow._id, batch.at);
@@ -240,7 +297,8 @@ export async function resumeBatchIO(
 ) {
   const key = { projectId: input.projectId, batchId: input.command.batchId! };
   const { batch } = await loadBatch(ctx, key);
-  if (batch.phase !== 'composing') return;
+  if (batch.phase !== 'composing' || input.command.batchComposeOperationId !== batch.composeOperationId)
+    return;
   const source = await prepareBatchCompose(ctx, key),
     upload = source.uploads[batch.uploadIndex];
   invariant(

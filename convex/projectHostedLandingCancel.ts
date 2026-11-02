@@ -118,10 +118,20 @@ export async function cancelHostedLanding(
     if (batchId) {
       const key = { projectId, batchId };
       const { batch } = await loadBatch(ctx, key);
-      await writeBatch(ctx, key, { ...batch, phase: batch.phase === 'landed' ? 'landed' : 'fallback' });
+      const rejected = batch.included && !batch.included.includes(state.id) && batch.phase !== 'fallback';
+      if (!rejected)
+        await writeBatch(ctx, key, {
+          ...batch,
+          phase: batch.phase === 'landed' ? 'landed' : 'fallback',
+          transition: {
+            code: result.error?.code ?? 'LANDING_CANCELLED',
+            message: result.error?.message ?? 'A batch member was cancelled.',
+          },
+        });
       // This member's finish never runs again, and it may hold the individual
       // fallback turn: hand the turn on now (Issue 108a24e3, peers queued 36 h).
-      await advanceBatchFallback(ctx, key, (await loadBatch(ctx, key)).batch, state.id);
+      if (!rejected && batch.phase !== 'landed')
+        await advanceBatchFallback(ctx, key, (await loadBatch(ctx, key)).batch, state.id);
       result = (await loadLanding(ctx, identity)).state;
     }
     // Invalidate cancelled member IO after release has scheduled its peers.

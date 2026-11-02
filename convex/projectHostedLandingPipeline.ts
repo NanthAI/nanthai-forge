@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+import { cancelUnneededHostedCheck } from './projectHostedCheckCancel';
+import { withQueueStatusBatch } from './projectHostedQueueStatusWrite';
 import type { MutationCtx } from './_generated/server';
 import type { LandingChannel, LandingRow } from './projectHostedLandingStore';
 import {
@@ -33,7 +35,6 @@ export async function pipelinePredecessor(ctx: MutationCtx, input: LandingChanne
   if (!rows.length || rows.some(row => row.hold || (row.phase !== 'checking' && row.phase !== 'ready')))
     return undefined;
   const tail = rows.at(-1)!;
-  const state = hostedLandingStateSchema.parse(JSON.parse(tail.value));
   const attempt = await loadLandingAttempt(ctx, { projectId: input.projectId, attemptId: tail.attemptId });
   const groups = new Set(
     rows.map(row => {
@@ -44,7 +45,6 @@ export async function pipelinePredecessor(ctx: MutationCtx, input: LandingChanne
   if (
     !hostedBatching(attempt.policy) ||
     groups.size >= hostedPipelineWidth(attempt.policy) ||
-    state.batchSolo ||
     !attempt.check ||
     !attempt.candidate.head
   )
@@ -81,7 +81,11 @@ export async function predecessorStatus(ctx: MutationCtx, input: BatchIdentity, 
 /** Retire only descendants of this generation. Restore each original selection
  * as a new immutable deferred attempt; late source/check callbacks cannot land
  * the discarded stack. All work is bounded by configured width * cohort size. */
-export async function invalidatePipeline(ctx: MutationCtx, input: BatchIdentity, batch: LandingBatch) {
+async function invalidatePipelineOnce(
+  ctx: MutationCtx,
+  input: BatchIdentity,
+  batch: { members: { submissionId: string }[] },
+) {
   const queue = await landingQueue(ctx, { projectId: input.projectId, channel: 'main' });
   const train = queue?.train ?? [];
   let last = -1;
@@ -91,6 +95,7 @@ export async function invalidatePipeline(ctx: MutationCtx, input: BatchIdentity,
   const retired = new Set<string>();
   const invalid = new Set(batch.members.map(member => member.submissionId));
   const removed = new Set<string>();
+  const runs = new Set<string>();
   for (const submissionId of train.slice(last + 1)) {
     const current = await loadLanding(ctx, { projectId: input.projectId, submissionId });
     if (!livePipelineRow(current.row) || !current.state.batchId || retired.has(current.state.batchId))
@@ -111,6 +116,7 @@ export async function invalidatePipeline(ctx: MutationCtx, input: BatchIdentity,
         submissionId: original.submissionId,
       });
       if (!livePipelineRow(row)) continue;
+      if (row.runId) runs.add(row.runId);
       const parent = await loadLandingAttempt(ctx, {
         projectId: input.projectId,
         attemptId: state.attemptId,
@@ -139,11 +145,19 @@ export async function invalidatePipeline(ctx: MutationCtx, input: BatchIdentity,
           error: null,
         },
         true,
+        false,
       );
     }
   }
+  // All bindings move atomically. Release each old shared run once, after its
+  // final waiter has left, rather than querying the same live peers per member.
+  for (const runId of runs) await cancelUnneededHostedCheck(ctx, { projectId: input.projectId, runId });
   if (!removed.size) return false;
   await ctx.db.patch(queue!._id, { train: train.filter(id => !removed.has(id)) });
   await wakeLandingQueue(ctx, { projectId: input.projectId, channel: 'main' });
   return true;
+}
+
+export async function invalidatePipeline(...args: Parameters<typeof invalidatePipelineOnce>) {
+  return withQueueStatusBatch(args[0], () => invalidatePipelineOnce(...args));
 }

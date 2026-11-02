@@ -246,6 +246,16 @@ test('changed exact run pins cannot authorize any shared publication', async t =
     f.runs().some(r => r.status === 'queued'),
     'members retain an exact single fallback',
   );
+  const transition = JSON.parse([...f.tables.projectHostedLandingBatches.values()][0].value).transition;
+  assert(transition?.code && transition.message, 'retain the structured failure that caused fallback');
+  assert(
+    states(f).every(
+      state =>
+        state.batchDiagnostic?.message.includes(transition.code) &&
+        state.batchDiagnostic.message.includes(transition.message),
+    ),
+    'report the retained internal cause through the released diagnostic message',
+  );
   for (let i = 0; i < 4; i++) {
     await f.passChecks();
     await f.drain();

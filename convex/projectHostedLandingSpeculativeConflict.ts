@@ -7,8 +7,8 @@ import { canonicalPayload } from '../src/hosted-source-operation';
 import { wouldConflictSchema } from '../src/hosted-would-conflict';
 import { invariant } from '../src/errors';
 
-/** A speculative rejection is advice, never terminal evidence. Park this
- * bounded cohort on the predecessor's existing order-settlement event. No run,
+/** A speculative rejection is advice, never terminal evidence. Park only the
+ * rejected members of this bounded cohort on the predecessor's existing order-settlement event. No run,
  * replacement attempt, periodic wake or per-member Convex call is allocated. */
 export async function deferSpeculativeConflict(
   ctx: MutationCtx,
@@ -21,12 +21,15 @@ export async function deferSpeculativeConflict(
     projectId: input.projectId,
     submissionId: batch.predecessor.submissionId,
   });
-  for (const member of batch.members) {
+  for (const member of batch.members.filter(member =>
+    dropped.some(drop => drop.candidateId === member.candidate.id),
+  )) {
     const conflict = dropped.find(drop => drop.candidateId === member.candidate.id);
     const { row, state } = await loadLanding(ctx, {
       projectId: input.projectId,
       submissionId: member.submissionId,
     });
+    if (state.phase === 'landed' || state.phase === 'terminal-failed') continue;
     let current = row;
     if (conflict) {
       const paths = conflict.paths ?? [],
@@ -42,7 +45,7 @@ export async function deferSpeculativeConflict(
           paths,
           more,
           at: batch.at,
-          next: `Advisory COMPOSITION_CONFLICT in ${files}${more ? ` (and ${more} more files)` : ''} against speculative predecessor group ${predecessor.state.batchId ?? predecessor.state.id}. This entry stays queued; Forge will recompose it on accepted main when the predecessor settles. No agent action is needed.`,
+          next: `Advisory COMPOSITION_CONFLICT in ${files}${more ? ` (and ${more} more files)` : ''} against speculative predecessor group ${predecessor.state.batchId ?? predecessor.state.id}. This entry stays queued; Forge will reevaluate its retained merge on accepted main when the predecessor settles. No agent action is needed.`,
         }),
       );
       if (row.wouldConflict !== advice) {
@@ -55,15 +58,13 @@ export async function deferSpeculativeConflict(
         current = (await landingRow(ctx, { projectId: input.projectId, submissionId: state.id }))!;
       }
     }
-    // The predecessor owns progress and its alarm. Every waiting member must
-    // relinquish its own deadline, including a non-conflicting/non-leader one;
-    // otherwise its stale compose alarm splits this cohort while CI is live.
+    // The predecessor owns rejected-member progress. Relinquish their alarms
+    // so a stale compose alarm cannot split independently checking survivors.
     if (current.alarm) await ctx.scheduler.cancel(current.alarm.taskId);
-    const leader = state.id === (batch.leaderId ?? batch.id);
-    if (current.alarm || (leader && current.orderWait !== predecessor.state.id))
+    if (current.alarm || current.orderWait !== predecessor.state.id)
       await ctx.db.patch(current._id, {
         alarm: null,
-        ...(leader ? { orderWait: predecessor.state.id } : {}),
+        orderWait: predecessor.state.id,
       });
   }
   if (!predecessor.row.orderWaited) await ctx.db.patch(predecessor.row._id, { orderWaited: true });

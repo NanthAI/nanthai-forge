@@ -66,8 +66,19 @@ export async function splitLandingBatch(
   input: BatchIdentity,
   batch: LandingBatch,
   failure?: BatchFailure,
+  transition?: LandingBatch['transition'],
 ) {
   const pending = await pendingMembers(ctx, input, batch);
+  const cause =
+    transition ??
+    batch.transition ??
+    (failure
+      ? {
+          code: 'CHECK_NOT_PASSED',
+          message: `Shared run ${failure.runId} failed; its members split to recheck.`,
+        }
+      : undefined);
+  batch = { ...batch, ...(cause ? { transition: cause } : {}) };
   await writeBatch(ctx, input, { ...batch, phase: 'split', ...(failure ? { failure } : {}) });
   const at = new Date(Date.now()).toISOString();
   const likely = new Set(failure?.suspects ?? []);
@@ -110,7 +121,14 @@ export async function splitLandingBatch(
     }
     const cohort = child(group, 'composing');
     await insert(cohort, group, member => ({
-      batchDiagnostic: batchMemberDiagnostic(batch.memberDetails ?? [], failure, member.state, null, 'split'),
+      batchDiagnostic: batchMemberDiagnostic(
+        batch.memberDetails ?? [],
+        failure,
+        member.state,
+        null,
+        'split',
+        cause,
+      ),
       phase: 'queued',
       observation: landingObservation('queued'),
       error: null,
@@ -133,6 +151,17 @@ export async function splitLandingBatch(
         }
       : {}),
     ...(failure ? { failure } : {}),
+    transition:
+      cause ??
+      (failure
+        ? {
+            code: 'CHECK_NOT_PASSED',
+            message: `Shared run ${failure.runId} failed; split singleton members check individually.`,
+          }
+        : {
+            code: 'SOURCE_UNAVAILABLE',
+            message: 'The shared source operation failed; split singleton members compose individually.',
+          }),
   };
   await insert(line, singles, () => ({}));
   await writeBatch(ctx, { projectId: input.projectId, batchId: line.id }, { ...line, phase: 'fallback' });
@@ -154,7 +183,14 @@ async function checkAlone(
       ...state,
       batchOriginId: batch.id,
       batchSolo: true,
-      batchDiagnostic: batchMemberDiagnostic(batch.memberDetails ?? [], batch.failure, state, null, 'split'),
+      batchDiagnostic: batchMemberDiagnostic(
+        batch.memberDetails ?? [],
+        batch.failure,
+        state,
+        null,
+        'split',
+        batch.transition,
+      ),
       version: state.version + 1,
       phase: 'queued',
       observation: landingObservation('queued'),

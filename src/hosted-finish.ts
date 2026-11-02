@@ -61,7 +61,13 @@ export type FinishCommand =
       pin: { sha256: string; size: number };
       selection: { attemptId: string; kind: 'inputs' | 'dependencies'; index: number };
     }
-  | { kind: 'plan'; value: string; pin: { sha256: string; size: number }; batchId?: string };
+  | {
+      kind: 'plan';
+      value: string;
+      pin: { sha256: string; size: number };
+      batchId?: string;
+      batchComposeOperationId?: string;
+    };
 
 /** Private probe scheduling is not a released pending-attempt protocol field. */
 export function finishPendingForReader(value: HostedFinish['pending']) {

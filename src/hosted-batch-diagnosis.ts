@@ -100,6 +100,7 @@ export function batchMemberDiagnostic(
   next: string | null,
   /** `split`: the cohort rechecks in parallel groups instead of individual fallback. */
   mode: 'fallback' | 'split' = 'fallback',
+  cause?: { code: string; message: string },
 ) {
   const split = mode === 'split';
   const own = members.find(member => member.submissionId === state.id);
@@ -131,10 +132,14 @@ export function batchMemberDiagnostic(
     split
       ? failure
         ? `Shared batch run ${failure.runId} failed; the cohort split to recheck in parallel.`
-        : 'The cohort could not compose; it split to recheck in parallel.'
+        : cause
+          ? `The cohort split to recheck in parallel: ${cause.code}: ${cause.message}`
+          : 'The cohort could not compose; it split to recheck in parallel.'
       : failure
         ? `Shared batch run ${failure.runId} required individual fallback.`
-        : 'Shared batch evidence cannot be published.',
+        : cause
+          ? `Shared batch transitioned to individual fallback: ${cause.code}: ${cause.message}`
+          : 'The cohort transitioned to individual fallback; the legacy record has no retained cause.',
     likelyCulprit
       ? 'Likely member: failing files match this member changed paths or declared contract tests.'
       : split

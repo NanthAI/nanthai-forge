@@ -107,7 +107,21 @@ async function redriveQueued(
       await wakeLandingQueue(ctx, { projectId: input.projectId, channel: 'main' });
       return;
     }
-    const batch = original.phase === 'checking' ? { ...original, phase: 'fallback' as const } : original;
+    const batch =
+      original.phase === 'checking'
+        ? {
+            ...original,
+            phase: 'fallback' as const,
+            transition: { code: 'LANDING_STALLED', message: 'The shared check stopped making progress.' },
+          }
+        : original;
+    if (batch.phase === 'landed' && state.batchId && (!batch.included || batch.included.includes(state.id))) {
+      batch.phase = 'fallback';
+      batch.transition = {
+        code: 'BATCH_MEMBER_ORPHANED',
+        message: 'A nonterminal member outlived its settled cohort; restore its individual preparation.',
+      };
+    }
     if (batch.phase === 'fallback' || batch.phase === 'landed') {
       // Repair and re-select in this transaction, including legacy members
       // whose original batch leader has already stopped driving.

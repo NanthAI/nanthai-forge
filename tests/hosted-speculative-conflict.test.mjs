@@ -52,11 +52,13 @@ async function parked(f) {
   assert.equal(state.phase, 'queued');
   assert.equal(state.observation.state, 'pending');
   assert.equal(state.error, null);
-  for (const member of batches(f).find(batch => batch.id === state.batchId).members)
+  const cohort = batches(f).find(batch => batch.id === state.batchId);
+  assert.equal(row.alarm, null, 'only the rejected member waits on predecessor progress');
+  for (const member of cohort.members.filter(member => cohort.included?.includes(member.submissionId)))
     assert.equal(
-      rowOf(f, member.submissionId).alarm,
-      null,
-      'the predecessor owns progress, including for a non-conflicting member',
+      states(f).find(state => state.id === member.submissionId).phase,
+      'checking',
+      'clean survivors check before predecessor settlement',
     );
   const advice = JSON.parse(row.wouldConflict);
   const predecessor = current(f, 2);
@@ -66,7 +68,7 @@ async function parked(f) {
   assert.match(advice.next, /collision/);
   assert.equal(advice.predecessor.submissionId, predecessor.id);
   assert.equal(advice.predecessor.groupId, predecessor.batchId);
-  assert.match(advice.next, /stays queued.*recompose.*No agent action/);
+  assert.match(advice.next, /stays queued.*reevaluate.*No agent action/);
   assert.equal(
     rowOf(f, state.id).attemptId,
     f.entries[3].state.attemptId,
@@ -113,20 +115,19 @@ test('predecessor landing rechecks a speculative rejection on real main and repo
   assert.deepEqual(page.events[0].wouldConflict, advice);
   assert.equal(page.events[0].submission.observation.state, 'pending');
   const lateAlarm = [...f.tables._scheduled_functions.values()].find(
-    task =>
-      task.name === 'projectHostedLandingStall:alarm' && task.args[0].submissionId === f.entries[4].state.id,
+    task => task.name === 'projectHostedLandingStall:alarm' && task.args[0].submissionId === state.id,
   );
-  assert(lateAlarm, 'the non-conflicting cohort member previously owned a compose alarm');
+  assert(lateAlarm, 'the rejected member previously owned a compose alarm');
   await f.transaction(
     'late-waiting-member-alarm',
     { _handler: ctx => stall.raiseLandingAlarm(ctx, lateAlarm.args[0], Date.now() + 60 * 60_000) },
     {},
   );
-  assert.equal(current(f, 4).observation.stall, undefined);
+  assert.equal(current(f, 3).observation.stall, undefined);
   assert.equal(
-    current(f, 4).batchId,
+    current(f, 3).batchId,
     state.batchId,
-    'a stale alarm cannot split a cohort whose predecessor owns progress',
+    'a stale alarm cannot split an independently checking survivor cohort',
   );
   const replay = await queuedConflict(
     {
@@ -160,7 +161,7 @@ test('predecessor landing rechecks a speculative rejection on real main and repo
   assert.equal(settled.wouldConflict, undefined, 'a fresh nonqueued state retires stale advice');
   assert.equal(settled.nextCommand, undefined);
   const originalRuns = f.runs();
-  assert.equal(originalRuns.length, 1, 'the rejected speculative cohort reserves no check');
+  assert(originalRuns.length > 1, 'the clean survivor generation checks while the predecessor is pending');
   await f.rawChecks.pass(await f.rawChecks.activate(originalRuns[0].id));
   await drainActive(f);
   const failed = current(f, 3);

@@ -64,10 +64,23 @@ export const landingAttemptRow = (
       q.eq('projectId', input.projectId).eq('attemptId', input.attemptId),
     )
     .unique();
+// Immutable pins may be read repeatedly while one bounded cohort transition
+// installs or invalidates attempts. Progress remains a fresh separate row read.
+// The cache is scoped to this invocation, never authority or a later event.
+const attemptPins = new WeakMap<QueryCtx | MutationCtx, Map<string, HostedLandingAttempt>>();
+function pinsFor(ctx: QueryCtx | MutationCtx) {
+  let pins = attemptPins.get(ctx);
+  if (!pins) attemptPins.set(ctx, (pins = new Map()));
+  return pins;
+}
 export async function loadLandingAttempt(
   ctx: QueryCtx | MutationCtx,
   input: { projectId: Id<'hostedProjects'>; attemptId: string },
 ) {
+  const pins = pinsFor(ctx),
+    key = `${input.projectId}:${input.attemptId}`;
+  const retained = pins.get(key);
+  if (retained) return retained;
   const row = await landingAttemptRow(ctx, input);
   invariant(row, 'SOURCE_UNAVAILABLE', 'The original landing attempt is unavailable.');
   const attempt = hostedLandingAttemptSchema.parse(JSON.parse(row.value));
@@ -79,6 +92,7 @@ export async function loadLandingAttempt(
     'SOURCE_UNAVAILABLE',
     'Landing attempt identity differs from its record.',
   );
+  pins.set(key, attempt);
   return attempt;
 }
 export async function insertLandingAttempt(ctx: MutationCtx, input: HostedLandingAttempt) {
@@ -125,12 +139,14 @@ export async function insertLandingAttempt(ctx: MutationCtx, input: HostedLandin
     number: attempt.number,
     value,
   });
+  pinsFor(ctx).set(`${attempt.projectId}:${attempt.id}`, attempt);
 }
 export async function writeLanding(
   ctx: MutationCtx,
   row: LandingRow,
   input: HostedLandingState,
   runnable: boolean,
+  releaseRun = true,
 ) {
   invariant(
     input.phase !== 'composing',
@@ -222,6 +238,7 @@ export async function writeLanding(
   if (row.admitting && !admitting) await releaseAdmissionWaiters(ctx, row.projectId);
   if (row.orderWaited && !orderLive) await wakeLandingOrderWaiters(ctx, row);
   if (
+    releaseRun &&
     row.runId &&
     (row.runId !== (attempt.check?.runId ?? (admitting ? row.admission!.runId : null)) ||
       state.phase === 'terminal-failed' ||

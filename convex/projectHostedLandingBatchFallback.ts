@@ -90,11 +90,14 @@ export async function advanceBatchFallback(
       )?.member;
   }
   for (const member of current) {
+    if (member.state.phase === 'landed' && !member.state.batchSolo) continue;
     const diagnostic = batchMemberDiagnostic(
       batch.memberDetails ?? [],
       batch.failure,
       member.state,
       next?.state.id ?? null,
+      'fallback',
+      batch.transition,
     );
     if (canonicalPayload(member.state.batchDiagnostic ?? null) === canonicalPayload(diagnostic)) continue;
     member.state = await writeLanding(

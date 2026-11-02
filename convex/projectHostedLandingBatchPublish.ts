@@ -1,3 +1,4 @@
+import { settleBatchConflicts } from './projectHostedLandingCohortConflicts';
 import { scheduleLandingPrecompose } from './projectHostedLandingPrecompose';
 // SPDX-License-Identifier: Apache-2.0
 import type { MutationCtx } from './_generated/server';
@@ -56,7 +57,14 @@ export async function publishLandingBatch(ctx: MutationCtx, claim: LandingClaim,
       submissionId: original.submissionId,
     });
     if (current.state.phase === 'terminal-failed') {
-      await writeBatch(ctx, key, { ...batch, phase: 'fallback' });
+      await writeBatch(ctx, key, {
+        ...batch,
+        phase: 'fallback',
+        transition: {
+          code: 'BATCH_MEMBER_SETTLED',
+          message: 'An included member settled before publication.',
+        },
+      });
       await releaseLandingQueue(ctx, queue, now);
       await wakeBatch(ctx, key);
       return { status: 'pending' as const, reason: 'Batch changed; exact single checks are queued.' };
@@ -155,7 +163,16 @@ export async function publishLandingBatch(ctx: MutationCtx, claim: LandingClaim,
     };
   }
   if (retry || mainChanged) {
-    await writeBatch(ctx, key, { ...batch, phase: 'fallback' });
+    await writeBatch(ctx, key, {
+      ...batch,
+      phase: 'fallback',
+      transition: {
+        code: mainChanged ? 'CHANNEL_CHANGED' : 'EVIDENCE_CHANGED',
+        message: mainChanged
+          ? 'Main head or receipt changed before publication.'
+          : 'Current member governance differs from the prepared batch.',
+      },
+    });
     await releaseLandingQueue(ctx, queue, now);
     await wakeBatch(ctx, key);
     return {
@@ -163,6 +180,10 @@ export async function publishLandingBatch(ctx: MutationCtx, claim: LandingClaim,
       reason: 'Main or governance changed; exact single checks are queued.',
     };
   }
+  // Resolve retained rejected merges before moving their now-matching base.
+  // Clean survivors retain the same checked generation throughout.
+  if (batch.included && batch.included.length < batch.members.length)
+    await settleBatchConflicts(ctx, key, batch);
   const head = candidate.result.head;
   const registered = await ctx.db
     .query('projectHostedStates')

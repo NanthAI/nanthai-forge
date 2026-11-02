@@ -249,6 +249,16 @@ export async function installFinishCompose(
       actor: state.actor,
       operationId: pending.operations.compose,
     }));
+  if (
+    pending.precompose &&
+    (state.phase === 'landed' || state.phase === 'terminal-failed' || (state.batchId && landing.runId))
+  ) {
+    // The shared exact generation now owns this member. A late individual
+    // probe cannot replace its check, head or terminal result.
+    await writeFinish(ctx, row, { ...value, pending: null });
+    await scheduleFinish(ctx, (await ctx.db.get(row._id))!);
+    return;
+  }
   const terminal = source.operation.terminal;
   invariant(terminal, 'WORK_STALE', 'Wait for the original source job to settle.');
   if (terminal.outcome.status === 'failed') {

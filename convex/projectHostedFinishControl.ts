@@ -215,7 +215,11 @@ export async function finishStep(ctx: MutationCtx, input: FinishIdentity): Promi
       const key = { projectId: input.projectId, batchId: state.batchId };
       const { batch } = await loadBatch(ctx, key);
       if (batch.phase === 'composing' || batch.phase === 'checking') {
-        await writeBatch(ctx, key, { ...batch, phase: 'fallback' });
+        await writeBatch(ctx, key, {
+          ...batch,
+          phase: 'fallback',
+          transition: { code: error.code, message: error.message },
+        });
         await wakeBatch(ctx, key);
         const held = await landingQueue(ctx, { projectId: input.projectId, channel: 'main' });
         if (held?.lease?.submissionId === input.submissionId) await releaseLandingQueue(ctx, held);

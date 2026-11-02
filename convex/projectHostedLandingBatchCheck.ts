@@ -1,3 +1,4 @@
+import { withQueueStatusBatch } from './projectHostedQueueStatusWrite';
 import { diagnoseBatchFailure } from '../src/hosted-batch-diagnosis';
 import { advanceBatchFallback } from './projectHostedLandingBatchFallback';
 import { checkFailureKind } from '../src/hosted-landing-admission';
@@ -85,7 +86,9 @@ async function prepareLandingCheckOnce(
             authorityEpoch: attempt.authorityEpoch,
             ...attempt.check!,
           });
-          for (const member of batch.members) {
+          for (const member of batch.members.filter(
+            member => !batch.included || batch.included.includes(member.submissionId),
+          )) {
             const { row, state: current } = await loadLanding(ctx, {
               projectId: claim.projectId,
               submissionId: member.submissionId,
@@ -205,13 +208,17 @@ async function prepareLandingCheckOnce(
  * attempts. Unexpected storage/scheduler errors still abort the transaction. */
 export async function prepareLandingCheck(...args: Parameters<typeof prepareLandingCheckOnce>) {
   try {
-    return await prepareLandingCheckOnce(...args);
+    return await withQueueStatusBatch(args[0], () => prepareLandingCheckOnce(...args));
   } catch (error) {
     const [ctx, claim, selected, now] = args;
     if (!(error instanceof ForgeError) || !selected.state.batchId || selected.state.batchSolo) throw error;
     const key = { projectId: claim.projectId, batchId: selected.state.batchId };
     const { batch } = await loadBatch(ctx, key);
-    await writeBatch(ctx, key, { ...batch, phase: 'fallback' });
+    await writeBatch(ctx, key, {
+      ...batch,
+      phase: 'fallback',
+      transition: { code: error.code, message: error.message },
+    });
     await releaseLandingQueue(ctx, selected.queue, now);
     await wakeBatch(ctx, key);
     return true;

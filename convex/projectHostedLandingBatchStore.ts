@@ -234,6 +234,16 @@ export async function installBatchAttempt(
  * shared source/check generation. Late uploads retain their old operation pins. */
 export async function retryLandingBatch(ctx: MutationCtx, input: BatchIdentity, batch: LandingBatch) {
   await invalidatePipeline(ctx, input, batch);
+  const live = [];
+  for (const original of batch.members) {
+    const current = await loadLanding(ctx, {
+      projectId: input.projectId,
+      submissionId: original.submissionId,
+    });
+    if (current.state.batchId === batch.id && !['landed', 'terminal-failed'].includes(current.state.phase))
+      live.push({ original, ...current });
+  }
+  if (!live.length) return writeBatch(ctx, input, { ...batch, phase: 'landed' });
   const {
     uploads: _uploads,
     runId: _run,
@@ -250,6 +260,8 @@ export async function retryLandingBatch(ctx: MutationCtx, input: BatchIdentity, 
     input,
     {
       ...retained,
+      members: live.map(member => member.original),
+      leaderId: live[0]!.state.id,
       composeOperationId: crypto.randomUUID(),
       checkOperationId: crypto.randomUUID(),
       phase: 'composing',
@@ -257,11 +269,7 @@ export async function retryLandingBatch(ctx: MutationCtx, input: BatchIdentity, 
     },
     true,
   );
-  for (const member of batch.members) {
-    const { row, state } = await loadLanding(ctx, {
-      projectId: input.projectId,
-      submissionId: member.submissionId,
-    });
+  for (const { row, state } of live) {
     // This exact prefix was retired. Its advisory must not survive recomposition.
     const current =
       row.wouldConflict && JSON.parse(row.wouldConflict).predecessor

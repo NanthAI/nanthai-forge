@@ -164,7 +164,10 @@ export async function finishFixture(
     } finally {
       for (const count of f.counts.filter(r => r.name === name)) {
         assert(count.ranges <= 1600 && count.documents <= 1600, `${name}: bounded reads`);
-        assert(count.readBytes < 2 * 1024 * 1024 && count.writeBytes < 512 * 1024, `${name}: metadata bytes`);
+        assert(
+          count.readBytes < 2 * 1024 * 1024 && count.writeBytes < 512 * 1024,
+          `${name}: metadata bytes ${JSON.stringify({ documents: count.documents, writes: count.writes, readBytes: count.readBytes, writeBytes: count.writeBytes })}`,
+        );
         assert(
           !count.touched.some(k =>
             [

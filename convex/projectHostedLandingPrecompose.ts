@@ -144,6 +144,7 @@ export async function precomposeWaiting(
     const state = hostedLandingStateSchema.parse(JSON.parse(row.value));
     if (
       !state.request.finish ||
+      (state.batchId && row.runId) ||
       queue?.lease?.submissionId === state.id ||
       state.observation.pendingReason === 'waiting-for-dependency' ||
       state.observation.pendingReason === 'waiting-for-review'
@@ -215,7 +216,8 @@ export async function precomposeWaiting(
       }
       // A group/fallback or independently checking entry already owns its
       // preparation. Warm only the next ordinary unchecked disjoint entry;
-      // possible conflicts still use the first pass regardless of ownership.
+      // Installed shared evidence owns its source; composing groups can still
+      // receive actual-main conflict probes before the shared result is consumed.
       if (input.cleanPass && !canWarm) continue;
     }
     await reserveFinishRetry(

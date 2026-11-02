@@ -595,7 +595,10 @@ overrides the width (1–16); this is runner scheduling, never an admission limi
 Once a group's exact head and final acceptance receipt are reserved, its successor
 composes and checks on that predicted main. Publication remains ordered and fenced
 by the exact head and receipt. A passing successor keeps its evidence when the
-predecessor lands unchanged, even if the successor check completed first.
+predecessor lands unchanged, even if the successor check completed first. An
+individual fallback with an immutable Candidate, reserved acceptance receipt and
+exact live check is also a valid predecessor; its solo flag prevents re-batching
+that member.
 A failed, cancelled or recomposed predecessor invalidates its dependent generations;
 the original member selections return to the queue and check again on surviving
 main. Other groups retain their evidence. Source and check completion events
@@ -603,11 +606,14 @@ advance the pipeline; an idle queue schedules nothing.
 
 A composition conflict on an unaccepted predecessor is advisory. The existing
 `wouldConflict` notice names that predecessor group and the conflicting files;
-the entry stays queued, with no agent action required. Its cohort waits on the
-predecessor's settlement event and recomposes the original selections on accepted
-main. A predecessor failure or invalidation returns live descendants to the queue.
+the rejected entry stays queued, with no agent action required. Only rejected members
+wait on the predecessor settlement event. Clean survivors check the retained
+shared Candidate immediately and remain grouped. When the predecessor lands with
+the exact predicted head and receipt, that completed generation is reused;
+conflicts on that now-accepted base can be retained without another merge. A
+newer main transition recomposes only the rejected selections. A predecessor failure or invalidation returns live descendants to the queue.
 A conflict from that speculative base becomes terminal `COMPOSITION_CONFLICT`
-only if it persists when recomposed on real main. Conflicts composed without a
+only on the matching accepted base or after recomposition on current main. Conflicts composed without a
 speculative predecessor retain their existing immediate terminal behavior.
 
 A retained compose with no live check holds its slot for at most five minutes
