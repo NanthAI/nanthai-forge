@@ -7,7 +7,6 @@ import type { Doc, Id } from './_generated/dataModel';
 import {
   ensureLandingQueue,
   landingQueue,
-  recordLandingObservation,
   scheduleLandingWake,
   wakeLandingQueue,
   type LandingChannel,
@@ -18,13 +17,7 @@ import { loadHostedCheck } from './projectHostedCheckStore';
 import { hostedCheckTerminal } from '../src/hosted-check';
 import { settleLandingAdmission } from './projectHostedLandingAdmission';
 import { hostedLandingStateSchema } from '../src/hosted-landing';
-import {
-  holdsLandingOrder,
-  nextLandingRow,
-  nextReadyLandingRow,
-  orderHostedLandingRows,
-} from './projectHostedLandingOrder';
-import { canonicalPayload } from '../src/hosted-source-operation';
+import { nextLandingRow, nextReadyLandingRow, orderHostedLandingRows } from './projectHostedLandingOrder';
 import { loadBatch } from './projectHostedLandingBatchState';
 import { pipelinePredecessor, invalidatePipeline } from './projectHostedLandingPipeline';
 import { HOSTED_TRAIN_HOLD_MS } from '../src/hosted-landing-batch';
@@ -219,8 +212,10 @@ export async function releaseLandingQueue(
     await scheduleLandingWake(ctx, current, pending ? now : held.until!, now);
   }
 }
-/** Consume a bounded metadata window. Removing checking from the matching index
- * permits continuation without scanning prior terminal work or skipping rows. */
+/** Consume each current run event once per live waiter. Queue phase is only a
+ * projection: both queued and checking bindings retain completion ownership.
+ * The indexed event version permits bounded continuation without moving phases
+ * or revisiting a nonterminal admission. Missing versions include legacy rows. */
 async function wakeLandingCheckPage(
   ctx: MutationCtx,
   input: {
@@ -231,16 +226,36 @@ async function wakeLandingCheckPage(
 ) {
   const wake = await checkWakeRow(ctx, input);
   if (wake?.wake?.id !== input.wakeId) return;
-  const page = await ctx.db
-    .query('projectHostedLandingRequests')
-    .withIndex('by_project_and_run_and_phase', q =>
-      q.eq('projectId', input.projectId).eq('runId', input.runId).eq('phase', 'checking'),
-    )
-    .paginate({ cursor: null, numItems: 100, maximumRowsRead: 100, maximumBytesRead: 96 * 1024 });
+  const version = wake.version ?? 1;
+  const rows: Doc<'projectHostedLandingRequests'>[] = [];
+  let more = false;
+  for (const phase of ['checking', 'queued'] as const) {
+    for (const legacy of [true, false]) {
+      const page = await ctx.db
+        .query('projectHostedLandingRequests')
+        .withIndex('by_project_run_phase_checkWakeVersion', q => {
+          const bound = q.eq('projectId', input.projectId).eq('runId', input.runId).eq('phase', phase);
+          return legacy
+            ? bound.eq('checkWakeVersion', undefined)
+            : bound.gt('checkWakeVersion', -1).lt('checkWakeVersion', version);
+        })
+        .paginate({
+          cursor: null,
+          numItems: 100 - rows.length,
+          maximumRowsRead: 100 - rows.length,
+          maximumBytesRead: 96 * 1024,
+        });
+      rows.push(...page.page);
+      more ||= !page.isDone;
+      if (more || rows.length === 100) break;
+    }
+    if (more || rows.length === 100) break;
+  }
   let run: Awaited<ReturnType<typeof loadHostedCheck>>['run'] | null = null,
     woken = false;
-  for (const row of page.page) {
+  for (const row of rows) {
     if (row.admission?.status === 'checking' && row.admission.runId === input.runId) {
+      await ctx.db.patch(row._id, { checkWakeVersion: version });
       // Progress writes wake too; only the run's own terminal result settles
       // admission, and an unsettled admission costs no queue tick.
       run ??= (await loadHostedCheck(ctx, input)).run;
@@ -251,20 +266,11 @@ async function wakeLandingCheckPage(
       continue;
     }
     woken = true;
-    const state = hostedLandingStateSchema.parse(JSON.parse(row.value));
-    state.phase = 'queued';
-    state.version++;
-    // Keep the checking observation until the original run is evaluated.
-    await recordLandingObservation(ctx, state, null);
-    await ctx.db.patch(row._id, {
-      phase: 'queued',
-      runnable: true,
-      orderLive: holdsLandingOrder({ phase: 'queued', hold: row.hold }, state) ? true : undefined,
-      value: canonicalPayload(state),
-    });
+    await ctx.db.patch(row._id, { checkWakeVersion: version, runnable: true });
   }
   if (woken) await wakeLandingQueue(ctx, { projectId: input.projectId, channel: 'main' });
-  if (!page.isDone) await scheduleCheckWake(ctx, { projectId: input.projectId, runId: input.runId }, wake);
+  if (more || rows.length === 100)
+    await scheduleCheckWake(ctx, { projectId: input.projectId, runId: input.runId }, wake);
   else await ctx.db.patch(wake._id, { wake: null });
 }
 

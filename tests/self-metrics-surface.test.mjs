@@ -187,15 +187,18 @@ test('CLI JSON/report, registered agent action, owner status, write-triggered we
     assert.ok(status.metrics);
     assert.match(formatPendingStatus(status), /Metrics · last 7 days/);
     assert.equal(statSync(join(directory, 'work.json')).mtimeMs, before);
-    const week = previousMetricWeek('2026-11-02T00:00:00.000Z');
-    t.mock.timers.enable({ apis: ['Date'], now: Date.parse('2026-11-02T00:00:00.000Z') });
+    // A newly created owner correctly skips weeks ending before its birth.
+    // Close the week containing this fixture's real evidence, on any date.
+    const week = previousMetricWeek(new Date(Date.now() + 7 * 86400000).toISOString());
+    const boundary = Date.parse(week.period.to);
+    t.mock.timers.enable({ apis: ['Date'], now: boundary });
     recordOwnerMutation(directory);
     await waitForOwnerChildren(root);
     const path = join(directory, 'metrics', week.name);
     const snapshot = readFileSync(path, 'utf8');
     const records = await nativeSelfMetricsReader(root).read();
     assert.equal(snapshot, weeklyMetricBytes(records, week.period));
-    snapshotMetricWeek(directory, '2026-11-02T10:00:00.000Z');
+    snapshotMetricWeek(directory, new Date(boundary + 10 * 60 * 60 * 1000).toISOString());
     assert.equal(readFileSync(path, 'utf8'), snapshot);
     recordOwnerMutation(directory);
     assert.ok(readdirSync(directory).includes('metrics'));

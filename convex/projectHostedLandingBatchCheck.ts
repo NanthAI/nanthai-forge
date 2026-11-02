@@ -31,6 +31,7 @@ import { hostedStartMain } from './projectHostedChannels';
 import { loadFinish } from './projectHostedFinishStore';
 import { reserveFinishRetry } from './projectHostedFinishCompose';
 import { requireHostedCheckEvidence } from './projectHostedCheckRead';
+import { retainCheckProgress } from './projectHostedLandingCheckProgress';
 
 /** Runs within the ordinary queue tick. There is no second check observer. */
 async function prepareLandingCheckOnce(
@@ -52,6 +53,7 @@ async function prepareLandingCheckOnce(
     const { batch } = await loadBatch(ctx, key);
     if (batch.phase === 'checking' && batch.runId) {
       const { run } = await loadHostedCheck(ctx, { projectId: claim.projectId, runId: batch.runId });
+      retainCheckProgress(state, run, now);
       if (hostedCheckTerminal(run)) {
         const semantic = semanticVerdict(
           run.semanticPlan,
@@ -94,6 +96,9 @@ async function prepareLandingCheckOnce(
               row,
               {
                 ...current,
+                ...(current.id === state.id
+                  ? { checkProgress: state.checkProgress, timing: state.timing }
+                  : {}),
                 phase: 'ready',
                 version: current.version + 1,
                 ...(run.testFiles ? { testFiles: run.testFiles } : {}),
@@ -128,6 +133,21 @@ async function prepareLandingCheckOnce(
           );
           await splitLandingBatch(ctx, key, batch, diagnoseBatchFailure(originals, run, semantic));
         }
+      } else {
+        // Progress may have made this request temporarily queued. Evaluation
+        // restores the train projection atomically; its run owns completion in
+        // either phase, independently of this queue tick.
+        await writeLanding(
+          ctx,
+          selected.row,
+          {
+            ...state,
+            phase: 'checking',
+            version: state.version + 1,
+            observation: landingObservation('checking'),
+          },
+          false,
+        );
       }
     }
     await releaseLandingQueue(ctx, queue, now);

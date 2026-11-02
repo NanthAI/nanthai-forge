@@ -1344,7 +1344,15 @@ later deferred entries for at most `HOSTED_TRAIN_HOLD_MS` after its newest compo
 then selection drops it, with one scheduled queue wake for the hold's end. See [hosted queue priority](operations/landing-batches.md#hosted-queue-priority). Checking,
 ready and terminal records remain readable without hiding later independent work.
 H10 run updates transactionally schedule one coalesced check wake; bounded metadata
-pages reactivate its waiters and wake their Channel. Fan-out automatically continues
+pages reactivate its waiters and wake their Channel. The current run binding owns
+completion across both queued and checking phases. Per-run event versions and an
+indexed last-delivered version on each waiter consume at most 100 requests per
+page without changing queue phase; legacy rows join on their next event. An event
+arriving between pages advances the same fanout, including waiters that already
+consumed earlier progress. A replacement run resets delivery identity. Shared and
+solo evaluators retain nonterminal progress and restore checking atomically, so
+progress keeps speculative slots available without granting publication authority.
+Fan-out automatically continues
 below document/byte windows, with no total request/history ceiling. A complete
 passing run is revalidated with `requireHostedCheckEvidence`; an overall success
 without complete shard evidence remains checking. Unexpected failures abort the

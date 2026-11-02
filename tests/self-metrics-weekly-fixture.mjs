@@ -3,7 +3,11 @@ import { appendFileSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { writeMetricWeek } from '../dist/self-metrics-weekly-worker.js';
-import { snapshotMetricWeek, weeklyMetricTestHooks } from '../dist/self-metrics-weekly.js';
+import {
+  snapshotMetricWeek,
+  weeklyMetricTestHooks,
+  previousMetricWeek,
+} from '../dist/self-metrics-weekly.js';
 
 const [owner, at, token] = process.argv.slice(2);
 if (token === 'schedule') {
@@ -31,7 +35,7 @@ if (token === 'schedule') {
             operationId: 'fixture',
             actor: { kind: 'system', name: 'fixture' },
             origin: 'system',
-            at: '2026-10-20T00:00:00.000Z',
+            at: previousMetricWeek(at).period.from,
           },
         ],
       };

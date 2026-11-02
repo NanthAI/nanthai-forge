@@ -26,7 +26,9 @@ import { initNative } from '../dist/native-work.js';
 import { selfMetricsTestHooks } from '../dist/self-metrics-journal.js';
 import { cleanupOwner, waitForOwnerChildren } from './owner-cleanup.mjs';
 
-const at = '2026-11-02T00:00:00.000Z';
+// Keep the due boundary after owners created by these tests, including when
+// the test process crosses Monday midnight. No real calendar date can expire it.
+const at = new Date(Date.now() + 14 * 86400000).toISOString();
 const { name } = previousMetricWeek(at);
 const worker = fileURLToPath(new URL('./self-metrics-weekly-fixture.mjs', import.meta.url));
 function fixture(t, control) {

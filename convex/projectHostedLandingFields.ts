@@ -72,6 +72,7 @@ export const hostedLandingTables = {
   projectHostedLandingCheckWakes: defineTable({
     projectId: v.id('hostedProjects'),
     runId: v.string(),
+    version: v.optional(v.number()),
     wake: v.union(v.object({ taskId: v.id('_scheduled_functions'), id: v.string() }), v.null()),
   }).index('by_project_and_run', ['projectId', 'runId']),
   projectHostedLandingQueues: defineTable({
@@ -149,6 +150,8 @@ export const hostedLandingTables = {
     orderWaited: v.optional(v.literal(true)),
     phase,
     runId: v.union(v.string(), v.null()),
+    /** Last delivered event of the current run, independent of queue phase. */
+    checkWakeVersion: v.optional(v.number()),
     attemptId: v.string(),
     value: v.string(),
   })
@@ -216,7 +219,8 @@ export const hostedLandingTables = {
       'admitting',
       'sequence',
     ])
-    .index('by_project_and_run_and_phase', ['projectId', 'runId', 'phase']),
+    .index('by_project_and_run_and_phase', ['projectId', 'runId', 'phase'])
+    .index('by_project_run_phase_checkWakeVersion', ['projectId', 'runId', 'phase', 'checkWakeVersion']),
   projectHostedLandingAttempts: defineTable({
     projectId: v.id('hostedProjects'),
     submissionId: v.string(),

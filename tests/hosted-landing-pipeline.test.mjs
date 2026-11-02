@@ -45,8 +45,28 @@ test('ten default finishes check stacked exact heads concurrently and publish in
   assert.equal(runs.length, 4, 'default first-check cohorts contain three members');
   assert.equal(states(f).filter(state => state.phase === 'checking').length, 10);
   const originalMain = f.currentMain();
+  const active = new Map();
+  for (const run of runs) {
+    active.set(run.id, await f.rawChecks.activate(run.id));
+    await drainActive(f);
+    // Deliver and evaluate real shard progress while the physical run is live.
+    const event = f.rawChecks.shard(active.get(run.id), 0);
+    await f.rawChecks.callback(event);
+    await drainActive(f);
+    await f.rawChecks.callback(event); // exact duplicate callback
+    await drainActive(f);
+    assert(states(f).every(state => state.phase === 'checking'));
+    assert.equal(f.pending().filter(task => !task.name.startsWith('projectHostedLandingStall:')).length, 0);
+  }
+  assert(states(f).every(state => state.checkProgress && state.timing.ciObservedAt));
+  assert(
+    [...f.tables.projectHostedLandingBatches.values()].some(
+      row => JSON.parse(row.value).members.length === 1,
+    ),
+    'singleton speculative group',
+  );
   // Complete successors first: they retain their proof while the predecessor checks.
-  for (const run of runs.slice(1).reverse()) await f.rawChecks.pass(await f.rawChecks.activate(run.id));
+  for (const run of runs.slice(1).reverse()) await f.rawChecks.pass(active.get(run.id));
   await drainActive(f);
   assert.equal(
     f.currentMain().head,
@@ -54,7 +74,7 @@ test('ten default finishes check stacked exact heads concurrently and publish in
     'a speculative pass never publishes a prefix out of order',
   );
   assert.equal(f.runs().length, 4);
-  await f.rawChecks.pass(await f.rawChecks.activate(runs[0].id));
+  await f.rawChecks.pass(active.get(runs[0].id));
   await drainActive(f);
   assert(
     states(f).every(state => state.phase === 'landed'),
@@ -87,6 +107,16 @@ test('ten default finishes check stacked exact heads concurrently and publish in
     assert.equal(receipt.previous.receiptId, run.candidate.base.receiptId);
   }
   assert.equal(f.pending().length, 0);
+  const calls = f.counts.length;
+  for (const run of active.values()) {
+    // Fresh late callbacks for a completed generation cannot revive its waiters.
+    await assert.rejects(
+      f.rawChecks.callback(f.rawChecks.complete(run)),
+      error => error.code === 'EVIDENCE_CHANGED',
+    );
+  }
+  assert.equal(f.pending().length, 0);
+  assert.equal(f.counts.slice(calls).filter(count => count.name === 'landingCheckWake').length, 0);
 });
 
 for (const count of [10, 50])
@@ -170,12 +200,32 @@ test('a failing predecessor discards speculative descendants, returns the bad me
   await drainActive(f);
   const initial = f.runs();
   assert.equal(initial.length, 4);
-  await f.fail(initial[0].id, 'tests/combined.test.mjs');
+  const active = [];
+  for (const run of initial) {
+    active.push(await f.rawChecks.activate(run.id));
+    await drainActive(f);
+    await f.rawChecks.callback(f.rawChecks.shard(active.at(-1), 0));
+    await drainActive(f);
+  }
+  await f.rawChecks.callback(
+    f.rawChecks.complete(active[0], 'failed', {
+      contractReports: { 'tests/combined.test.mjs': { failed: true, durationMs: 1 } },
+    }),
+  );
   await drainActive(f);
   assert(
     [...f.tables.projectHostedLandingBatches.values()].some(
       row => JSON.parse(row.value).phase === 'superseded',
     ),
+  );
+  const generations = states(f).map(state => state.attemptId);
+  for (const run of active.slice(1))
+    await assert.rejects(f.rawChecks.pass(run), error => error.data?.code === 'CHECK_CANCELLED');
+  await drainActive(f);
+  assert.deepEqual(
+    states(f).map(state => state.attemptId),
+    generations,
+    'late superseded runs cannot bind or publish descendant attempts',
   );
   let waves = 1;
   while (states(f).some(state => state.phase !== 'landed' && state.phase !== 'terminal-failed')) {
@@ -183,9 +233,18 @@ test('a failing predecessor discards speculative descendants, returns the bad me
     const pending = f.runs().filter(run => run.status === 'queued');
     assert(pending.length, JSON.stringify(states(f)));
     for (const run of pending) {
+      const checking = await f.rawChecks.activate(run.id);
+      await drainActive(f);
+      await f.rawChecks.callback(f.rawChecks.shard(checking, 0));
+      await drainActive(f);
       const files = JSON.parse(f.c.objects.get(run.request.expectedHead)).files;
-      if (files.some(file => file.path === 'member-1')) await f.fail(run.id);
-      else await f.rawChecks.pass(await f.rawChecks.activate(run.id));
+      if (files.some(file => file.path === 'member-1'))
+        await f.rawChecks.callback(
+          f.rawChecks.complete(checking, 'failed', {
+            contractReports: { 'tests/member-1.test.mjs': { failed: true, durationMs: 1 } },
+          }),
+        );
+      else await f.rawChecks.pass(checking);
     }
     await drainActive(f);
   }

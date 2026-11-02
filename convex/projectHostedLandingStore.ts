@@ -192,10 +192,12 @@ export async function writeLanding(
   await recordLandingObservation(ctx, state, undefined, speculative && !retireAdvice ? advice : undefined);
   // An admission run holds the request until it settles; it never joins a cohort meanwhile.
   const admitting = row.admission?.status === 'checking' && state.phase === 'checking';
+  const runId = attempt.check?.runId ?? (admitting ? row.admission!.runId : null);
   const orderLive = holdsLandingOrder({ phase: state.phase as LandingRow['phase'], hold: row.hold }, state);
   await ctx.db.patch(row._id, {
     attemptId: state.attemptId,
-    runId: attempt.check?.runId ?? (admitting ? row.admission!.runId : null),
+    runId,
+    checkWakeVersion: row.runId === runId ? row.checkWakeVersion : undefined,
     admitting: admitting ? true : undefined,
     batchSelection:
       !state.batchSolo && (attempt.deferredCheck || row.batchSelection)

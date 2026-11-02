@@ -6,8 +6,7 @@ import {
   semanticConflictMessage,
   semanticBudgetMessage,
 } from '../src/intent-semantic-conflict';
-import { digest } from '../src/portable-hash';
-import { canonicalPayload } from '../src/hosted-source-operation';
+import { retainCheckProgress } from './projectHostedLandingCheckProgress';
 // SPDX-License-Identifier: Apache-2.0
 import type { MutationCtx } from './_generated/server';
 import {
@@ -195,30 +194,7 @@ export async function advanceLandingQueue(ctx: MutationCtx, claim: LandingClaim,
     } else if (attempt.check) {
       const check = attempt.check;
       const { run } = await loadHostedCheck(ctx, { projectId: claim.projectId, runId: check.runId });
-      const progress = digest(
-        canonicalPayload({
-          id: run.id,
-          status: run.status,
-          counts: run.counts,
-          plan: run.planDigest,
-          execution: run.executionId,
-          terminal: run.terminalDigest,
-        }),
-      );
-      if (state.checkProgress !== progress) {
-        state.checkProgress = progress;
-        state.timing = { submittedAt: state.at, ...state.timing, ciProgressAt: new Date(now).toISOString() };
-      }
-      state.timing = {
-        submittedAt: state.at,
-        ...state.timing,
-        checkReservedAt: run.at,
-        ...(run.endedAt ? { ciEndedAt: run.endedAt } : {}),
-        ...(run.status === 'running' && !state.timing?.ciObservedAt
-          ? { ciObservedAt: new Date(now).toISOString() }
-          : {}),
-      };
-      if (run.testFiles) state.testFiles = run.testFiles;
+      retainCheckProgress(state, run, now);
       const semantic = semanticVerdict(attempt.semanticPlan ?? run.semanticPlan, run.contractReports ?? {}, {
         candidateId: attempt.candidate.id,
         head: attempt.candidate.head,
