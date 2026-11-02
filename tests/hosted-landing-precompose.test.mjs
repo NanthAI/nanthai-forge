@@ -342,9 +342,13 @@ test('a main move during an older probe is retained and composed before the wait
   assert.deepEqual(retained.precompose.next.main, { head: main.head, receiptId: main.receipt.id });
   const unobserved = f.moveMain({ sameHead: true });
   let ticks = 0;
-  while (f.pending().some(task => task.scheduledTime <= Date.now() + 30000)) {
+  // Isolate advisory event coalescing. A concurrent useful queue claim can now
+  // take ownership; its supersession and exact reuse have dedicated replays.
+  const advisory = task =>
+    task.name !== 'projectHostedLandingDriver:drive' && task.scheduledTime <= Date.now() + 30000;
+  while (f.pending().some(advisory)) {
     assert(++ticks < 300);
-    await f.execute(f.pending().find(task => task.scheduledTime <= Date.now() + 30000));
+    await f.execute(f.pending().find(advisory));
   }
   const status = await f.current(f.entries[0].state.id);
   assert.equal(status.submission.error?.code, 'COMPOSITION_CONFLICT');

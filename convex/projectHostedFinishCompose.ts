@@ -44,8 +44,8 @@ async function wakeAfterPrecompose(
 }
 /** Consume only a committed main event retained while this job was running.
  * Repeated events occupy one slot; job completion, never an idle timer, resumes
- * the latest observed main. The ordinary queue cannot take the entry between
- * probes because reservation and settlement share this mutation. */
+ * the latest observed main unless an ordinary claim has already taken source
+ * ownership. Reservation and settlement share this mutation. */
 async function continuePrecompose(ctx: MutationCtx, row: Doc<'projectHostedFinishes'>, value: HostedFinish) {
   const probe = value.pending?.precompose;
   if (!probe?.next) return false;
@@ -82,6 +82,7 @@ export async function reserveFinishRetry(
       canonicalPayload({ head: main.head, receiptId: main.receipt.id })
       ? value.precomposed
       : undefined;
+  // A useful claim may adopt the exact in-flight advisory source operation.
   // Batch fallback can rotate metadata attempts without changing this finish's
   // immutable original selection. Its same-main source cache remains valid;
   // installation independently checks exact input/dependency roots below.
@@ -213,18 +214,14 @@ export async function prepareFinishCompose(ctx: MutationCtx, input: LandingIdent
       originalCandidate?.semanticPlan?.afterSequence ??
       (own ? await semanticBaseSequence(ctx, input.projectId, own.base.receiptId) : 0);
   }
+  const project = await hostedWriteProject(ctx, input.projectId, state.actor, request.authorityEpoch);
   const stateValue: ComposeState = {
     ownerProvenance: 1,
     ...(value.restoreBases ? { restoreBases: value.restoreBases } : {}),
     ownerInputs: Boolean(
       originalRow &&
       originalCandidate &&
-      candidateOwnerInputs(
-        await hostedWriteProject(ctx, input.projectId, state.actor, request.authorityEpoch),
-        originalRow,
-        originalCandidate,
-        request.authorityEpoch,
-      ),
+      candidateOwnerInputs(project, originalRow, originalCandidate, request.authorityEpoch),
     ),
     ...(semanticPlan.members.length ? { semanticPlan } : {}),
     request,
@@ -235,12 +232,15 @@ export async function prepareFinishCompose(ctx: MutationCtx, input: LandingIdent
     jobOperationId: prepared.operation.firstAttempt.ids.jobOperation!,
     status: 'ready',
   };
-  await ctx.db.insert('projectHostedComposes', {
+  const fields = {
     ...auth,
     jobId: prepared.operation.firstAttempt.ids.job!,
     value: semanticPayload(stateValue),
-  });
-  return loadCompose(ctx, auth);
+  };
+  const id = await ctx.db.insert('projectHostedComposes', fields);
+  // These records and the authority check were produced in this transaction.
+  // Do not reload the same compose, operation and project just to return them.
+  return { row: (await ctx.db.get(id))!, state: stateValue, project, operation: prepared.operation };
 }
 export async function installFinishCompose(
   ctx: MutationCtx,
@@ -289,6 +289,12 @@ export async function installFinishCompose(
         state.id,
         pending.precompose.runnable || landing.runnable,
       );
+    } else if (value.precomposed?.operationId === pending.operations.compose) {
+      // Reusing a probe transfers source ownership, never its speculative
+      // infrastructure failure. The ordinary claim gets its own fresh compose.
+      const { precomposed: _probe, ...ordinary } = value;
+      void _probe;
+      await reserveFinishRetry(ctx, row, { ...ordinary, pending: null });
     } else await failFinish(ctx, input, terminal.outcome.error.code, terminal.outcome.error.message);
     return;
   }

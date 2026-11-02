@@ -259,7 +259,13 @@ retains the original input/dependency pins and uses the ordinary verified source
 worker. It reserves no check and does not change group membership. A clean result
 is cached against its immutable original selection and exact main receipt for a
 later individual retry, including fallback metadata-attempt rotation. Installation
-checks those exact input/dependency roots and main again. A real conflict immediately settles the waiting submission with
+checks those exact input/dependency roots and main again. A useful queue claim
+atomically takes source ownership from a pending probe before preparing its train
+or check. The old IO wake and compose-completion binding are fenced; late probe
+results cannot replace the claimed preparation. An individual retry can adopt the
+same source operation only on its exact main head and receipt. A failed adopted
+probe yields to a fresh ordinary composition without failing the submission.
+A real conflict immediately settles the waiting submission with
 `COMPOSITION_CONFLICT`; its error message names the retained resolution
 Candidate, the first ten conflicting paths (with an additional-file count and
 complete R2 conflict pages) and the input Lanes of the main transition. The signed

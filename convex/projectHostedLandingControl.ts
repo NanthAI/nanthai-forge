@@ -27,6 +27,7 @@ import { hostedCheckTerminal } from '../src/hosted-check';
 import { HOSTED_LANDING_LEASE_MS, landingObservation, type HostedLandingState } from '../src/hosted-landing';
 import { ForgeError, invariant } from '../src/errors';
 import { finishRow } from './projectHostedFinishWake';
+import { claimFinishPrecompose } from './projectHostedFinishPrecompose';
 export type LandingClaim = LandingChannel & {
   owner: string;
   token: number;
@@ -161,10 +162,7 @@ export async function advanceLandingQueue(ctx: MutationCtx, claim: LandingClaim,
   const { row, state, attempt, queue: held } = await requireLandingLease(ctx, claim, now);
   if (state.request.finish) {
     const finish = await finishRow(ctx, claim);
-    // Preserve the queue head while its existing background source job runs.
-    // Completion releases this lease and wakes it; no newer entry can jump into
-    // the train simply because older probes finish in a different order.
-    if (finish && JSON.parse(finish.value).pending?.precompose) return state;
+    if (finish) await claimFinishPrecompose(ctx, finish);
   }
   let phase: HostedLandingState['phase'] = 'ready',
     observation = landingObservation('queued');
