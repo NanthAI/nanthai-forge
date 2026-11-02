@@ -492,9 +492,9 @@ test('first planning session bootstraps weights from bounded, already retained t
 test('webhook backstops cancellation, failure, timeout and missing evidence; does not fabricate a pass', async t => {
   for (const [conclusion, status] of [
     ['cancelled', 'cancelled'],
-    ['failure', 'failed'],
-    ['timed_out', 'interrupted'],
-    ['success', 'interrupted'],
+    ['failure', 'runner-unavailable'],
+    ['timed_out', 'runner-unavailable'],
+    ['success', 'runner-unavailable'],
   ]) {
     const s = await fixture(t);
     await s.bind();
@@ -939,7 +939,7 @@ test('HTTP plan pairs use verified canonical R2 bytes and reuse both digests on 
       }),
     );
   r2.hooks.mismatch = true;
-  assert.equal((await send()).status, 403);
+  assert.equal((await send()).status, 503);
   assert.equal((await s.status(s.run.id)).plan, null, 'unverified bytes never publish a plan');
   assert.deepEqual(mutations, ['projectHostedActionsSession']);
   r2.hooks.mismatch = false;
@@ -1047,7 +1047,7 @@ test('legacy HTTP session shape remains a run with additive capabilities; unknow
       body: JSON.stringify({ ...s.id, command: { kind: 'session' } }),
     }),
   );
-  assert.equal(refused.status, 403);
+  assert.equal(refused.status, 503);
   assert.equal((await refused.json()).reason, 'storage');
 });
 
@@ -1398,4 +1398,42 @@ test('existing OIDC session issues preflight ticket in a header without changing
     await s.call(preflight, 'check', { ...s.id, fence: run.fence, signature: ticket.signature }),
     { status: 'active' },
   );
+});
+
+test('transient OIDC key lookup and service failures return safe infrastructure responses', async t => {
+  const s = await fixture(t);
+  await s.bind();
+  const send = ctx =>
+    handle._handler(
+      ctx,
+      new Request(`${audience}/checks/actions`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${oidc()}` },
+        body: JSON.stringify({ ...s.id, command: { kind: 'session' } }),
+      }),
+    );
+  for (const status of [429, 503]) {
+    t.mock.method(globalThis, 'fetch', async () => new Response('private-provider-body', { status }));
+    const response = await send({ runMutation: () => assert.fail('unavailable keys cannot authorize') });
+    assert.equal(response.status, 503);
+    assert.doesNotMatch(await response.text(), /private-provider-body/);
+    t.mock.restoreAll();
+  }
+  t.mock.method(globalThis, 'fetch', async () => jwks());
+  const response = await send({
+    runMutation: () => {
+      throw new Error('private-service-error');
+    },
+  });
+  assert.equal(response.status, 503);
+  assert.doesNotMatch(await response.text(), /private-service-error/);
+});
+
+test('failed shard evidence still fails the check when a later infrastructure job fails', async t => {
+  const s = await fixture(t);
+  await s.bind();
+  await s.prepare();
+  await s.call(results, 'result', { ...s.input(), result: JSON.stringify({ index: 0, exitCode: 7 }) });
+  await s.call(webhooks, 'receive', { payload: JSON.stringify(webhook(s, 'completed', 'failure')) });
+  assert.equal((await s.status(s.run.id)).status, 'failed');
 });

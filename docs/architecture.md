@@ -1149,6 +1149,11 @@ makes an unneeded check locally terminal before or after dispatch reservation an
 refuses late evidence. Live landing consumers preserve their shared check. The
 provider-stop request is separate; local cancellation never claims remote compute
 has already stopped.
+For the direct GitHub App path, a workflow failure without authenticated failed
+shard or test-report evidence is `runner-unavailable`, including bootstrap/OIDC
+failures before a plan exists. It never proves a Candidate failed. Job-side IO
+uses bounded transient retries with unchanged success-path call counts; see
+[Actions infrastructure recovery](operations/github-actions-checks.md#convex-dispatch-with-the-github-app).
 Cost starts unknown and only signed provider usage supplies observations. New
 stdout/artifact bytes never enter these Convex APIs; only object references do.
 
@@ -1326,8 +1331,13 @@ retain their causes, and ready remains pending until an actual landing receipt.
 The finite internal driver makes two short metadata transactions: claim, then
 advance. Claim also schedules a lease-recovery wake. A stopped driver therefore
 recovers the same attempt and run with a higher fencing token. Lease expiry grants
-reconciliation only; H13 never submits/repeats provider work or allocates a replacement
-run. Driver replies and scheduler deliveries are safe to repeat. Enqueue retries
+reconciliation only; lease expiry alone never repeats provider work or allocates a
+replacement run. A terminal infrastructure check uses the existing two-retry batch
+budget for standalone landings too: each retry retains the exact Candidate and
+request pins, creates a fresh check operation/run, and appends a parent-linked
+attempt with `platformRetries`. Earlier runs remain immutable. Exhaustion settles
+as an infrastructure `CHECK_NOT_PASSED`; a genuine failed check still settles as
+`CHECK_FAILED`. Driver replies and scheduler deliveries are safe to repeat. Enqueue retries
 can repair a failed wake by inspecting its durable scheduler receipt. There is no
 empty-queue poller, browser heartbeat or recurring check observation.
 

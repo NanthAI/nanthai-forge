@@ -5,6 +5,7 @@ import { internalMutation, internalAction } from './_generated/server';
 import { makeFunctionReference } from 'convex/server';
 import { writableHostedCheck, writeHostedCheck } from './projectHostedCheckStore';
 import { directActions, settleDirectActions, requestDirectCancel } from './projectHostedActionsDirect';
+import { checkFailureKind } from '../src/hosted-landing-admission';
 import { hostedCheckTerminal } from '../src/hosted-check';
 import { installationToken, githubAppRequest, actionsPermissions } from './githubAppToken';
 import { invariant } from '../src/errors';
@@ -73,10 +74,16 @@ export const receive = internalMutation({
     run.actions.workflowSha = workflow.head_sha;
     if (payload.action === 'completed') {
       const conclusion = workflow.conclusion;
+      // Workflow failure is not Candidate evidence: OIDC/source/setup can fail
+      // before tests run. Only an authenticated failed shard proves a check failed.
       await settleDirectActions(
         ctx,
         selected,
-        conclusion === 'cancelled' ? 'cancelled' : conclusion === 'failure' ? 'failed' : 'interrupted',
+        conclusion === 'cancelled'
+          ? 'cancelled'
+          : run.counts.failed > 0 || checkFailureKind(run, { conflicts: [] }) === 'tests'
+            ? 'failed'
+            : 'runner-unavailable',
         `Actions completed (${conclusion ?? 'unknown'}) without complete job evidence.`,
       );
     } else {

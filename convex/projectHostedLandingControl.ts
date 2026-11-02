@@ -21,6 +21,7 @@ import {
 import { nextTrainLandingRow, scheduleLandingWake, releaseLandingQueue } from './projectHostedLandingWake';
 import { olderLandingAhead } from './projectHostedLandingOrder';
 import { hostedWriteProject, readHostedRecord } from './projectHostedRecords';
+import { retrySoloLandingCheck } from './projectHostedLandingCheckRetry';
 import { loadHostedCheck } from './projectHostedCheckStore';
 import { requireHostedCheckEvidence } from './projectHostedCheckRead';
 import { hostedCheckTerminal } from '../src/hosted-check';
@@ -210,6 +211,9 @@ export async function advanceLandingQueue(ctx: MutationCtx, claim: LandingClaim,
         observation = landingObservation('conflict');
         state.semanticConflicts = semantic.conflicts;
         error = { code: 'INTENT_SEMANTIC_CONFLICT', message: semanticConflictMessage(semantic.conflicts) };
+      } else if (hostedCheckTerminal(run) && (await retrySoloLandingCheck(ctx, claim, attempt, run))) {
+        await releaseLandingQueue(ctx, held, now);
+        return (await loadLanding(ctx, claim)).state;
       } else if (!hostedCheckTerminal(run)) {
         phase = 'checking';
         observation = landingObservation('checking');

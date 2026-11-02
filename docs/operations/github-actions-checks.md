@@ -389,29 +389,41 @@ reservation and are never dispatched again. GitHub has no dispatch idempotency
 key: a process failure between reservation and the HTTP call can therefore leave
 zero executions, while a lost HTTP reply can leave one. Neither case silently
 creates a second execution. The Workflow run event binds the original execution
-when its dispatch reply was lost. Failed/cancelled/timed-out workflows, including
-bootstrap failures before a plan exists, settle through that event; a successful
-workflow without complete per-job evidence is interrupted, never passed. One
+when its dispatch reply was lost. Without complete job evidence, workflows settle
+as `runner-unavailable` unless an authenticated failed shard/report proves failure;
+cancellation stays cancelled. Standalone landings share the batch budget: two
+retries, three runs total, with exact Candidate/check pins and parent-linked
+attempts. Exhaustion is infrastructure `CHECK_NOT_PASSED`; genuine failures remain
+`CHECK_FAILED`. Standalone cancellation is not retried. One
 12-hour watchdog bounds a missing completion event and is cancelled on terminal
 results. There are no project scans, active-run pollers, or idle scheduled functions.
 
-For 3,000 raw source objects, a full nine-job check uses 87 Convex function
-invocations including HTTP actions, nested functions, enqueue, dispatch and webhook;
-a two-job scoped check uses 45, and docs-only uses 39. The formula is
-`17 + 2 * ceil(sourceObjects / 400) + 6 * jobs`, including one Candidate/base
-manifest window. With `results.inlineLog` the job term is `4 * jobs`, so a full
-twelve-job check uses 81, the same as an eight-job check without it. Recipe metadata/leaves add their actual bounded descriptor
-windows; issued download grants expire after five minutes. GitHub API and object
-storage requests are separate from Convex function calls. A 6,000-object full
-fixture budgets 101 calls. The added term is one pre-spawn query per job, with no nested call or active polling. Page concurrency does not change these call counts:
-raw content needs one descriptor request per page (two function invocations,
-including its HTTP action). Recipe and leaf windows are unchanged. Timing history
-adds one indexed document read to the existing planning session and one read/write
-to terminal result processing, with no per-file function calls or idle activity. The capability bootstrap adds
-two function invocations per check when the server supports timing history.
-Before the first history write, bootstrap adds at most two indexed run reads.
-Plan retries can retain unused small storage objects;
-this path adds no deletion or retention policy.
+Success uses `17 + 2 * ceil(sourceObjects / 400) + 6 * jobs` Convex calls,
+including HTTP/nested calls, enqueue, dispatch, webhook and Candidate/base manifest.
+With inline logs the job term is `4 * jobs`. For 3,000 objects: nine jobs cost
+87 calls, two cost 45, docs-only 39; twelve inline-log jobs cost 81, equal to eight
+without inline logs. The 6,000-object full fixture budgets 101 calls.
+
+Each 400-object descriptor page costs two calls regardless of page concurrency;
+recipes/leaves add their own pages. Grants expire after five minutes. GitHub/R2
+requests are separate. Each job has one pre-spawn query with no nested call or
+polling. Timing history adds one indexed planning read and one terminal read/write;
+capability bootstrap adds two calls/check and initially at most two indexed run
+reads. Plan retries may leave unused small metadata objects; retention is unchanged.
+
+Job IO retries timeout/network errors, 429 and 5xx three times total with 1/2 s
+backoff. Deadlines include body transfer: default 60 s/attempt, 180 s total;
+OIDC 20 s/attempt (63 s maximum); advisory capacity pages 5 s/attempt, 18 s total;
+pack PUT 120 s/attempt, 360 s total; pack GET 600 s total. Raw reads resume verified
+Content-Range offsets and still require the full size/hash before publication.
+
+Replays retain serialized bodies and run/fence pins: session/source are reads,
+plan uses digest CAS, results dedupe by run/index/digest, and output/pack PUTs use
+checksum-bound create-only keys. Unknown replies never repeat project execution.
+Site storage/key-lookup/service faults return 503; permanent refusals stay 403.
+Exhaustion throws sanitized `RUNNER_UNAVAILABLE`; the webhook classifies failure
+when a job cannot send a callback. Success adds zero Convex calls, DB reads/writes
+or idle activity.
 
 ### Forge source packs
 

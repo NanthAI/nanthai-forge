@@ -37,6 +37,10 @@ test('cohort size follows the smoothed failure rate; failures without a failing 
   assert.equal(cohortSizeFor(0.05), 5);
   assert.equal(cohortSizeFor(0.001), 8, 'cap 8');
   assert.equal(cohortSizeFor(0.5), 1, 'members check alone when most fail');
+  assert.equal(
+    checkFailureKind({ status: 'failed', exitCode: 1, counts: { failed: 1 } }, { conflicts: [] }),
+    'tests',
+  );
   const report = { 'tests/a.test.mjs': { failed: true } };
   assert.equal(checkFailureKind({ status: 'passed' }, { conflicts: [] }), 'passed');
   assert.equal(checkFailureKind({ status: 'failed', contractReports: report }, { conflicts: [] }), 'tests');
@@ -123,7 +127,7 @@ for (const admissionCheck of [false, true])
       const run = f.runs().at(-1);
       // Actions completed (failure) without complete job evidence: no test failed.
       const activated = await f.rawChecks.activate(run.id);
-      await f.rawChecks.callback(f.rawChecks.complete(activated, 'failed'));
+      await f.rawChecks.callback(f.rawChecks.complete(activated, 'runner-unavailable'));
       await f.drain();
     };
     await outage();

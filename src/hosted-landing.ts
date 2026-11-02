@@ -62,6 +62,8 @@ export const hostedLandingAttemptSchema = z
     recheck: scopedRecheckBasisSchema.optional(),
     semanticPlan: semanticPlanSchema.optional(),
     deferredCheck: z.literal(true).optional(),
+    /** Infrastructure retries retain the exact Candidate and parent run in the attempt chain. */
+    platformRetries: checkNumber.optional(),
     memberCandidate: z
       .object({
         id: z.uuid(),

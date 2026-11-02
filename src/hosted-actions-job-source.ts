@@ -9,6 +9,7 @@ import { directSourceWindow } from './hosted-actions-direct.js';
 import { fileDigest, downloadSourcePack, unpackSourcePack } from './source-pack-archive.js';
 import { digest } from './hash.js';
 import { invariant } from './errors.js';
+import { retryActionsInfrastructure, actionsInfrastructureResponse } from './hosted-actions-retry.js';
 import { mapExchange } from './exchange-parallel.js';
 import { scopedRecheckBase } from './scoped-recheck-policy.js';
 
@@ -76,7 +77,16 @@ export async function materializeActionsSource(client: ActionsJobClient, directo
                 );
               })();
       console.log(`source: downloading pack ${pack.stateRef} (${pack.size} bytes, ${pack.fileCount} files)`);
-      await timed('packFetchMs', () => downloadSourcePack(pack, archive, client.request));
+      await timed('packFetchMs', () =>
+        retryActionsInfrastructure(
+          signal =>
+            downloadSourcePack(pack, archive, async (url, init) =>
+              actionsInfrastructureResponse(await client.request(url, { ...init, signal })),
+            ),
+          600_000,
+          600_000,
+        ),
+      );
       console.log(`source: pack downloaded in ${((Date.now() - started) / 1000).toFixed(1)}s; unpacking`);
       await timed('unpackMs', () => unpackSourcePack(pack, packState, archive, cache));
       const old = new Map(packState.files.map(file => [file.path, file]));

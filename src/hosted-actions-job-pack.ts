@@ -9,6 +9,7 @@ import type { ActionsJobClient } from './hosted-actions-job-client.js';
 import type { materializeActionsSource } from './hosted-actions-job-source.js';
 import type { NativeState } from './native-state-format.js';
 import { digest } from './hash.js';
+import { retryActionsInfrastructure, actionsInfrastructureResponse } from './hosted-actions-retry.js';
 import { invariant } from './errors.js';
 /** Called only after publishing matrix/artifacts. Always pack the accepted base,
  * never let concurrent speculative Candidates churn the project's cache. */
@@ -51,15 +52,28 @@ export async function refreshActionsSourcePack(
       headers: Record<string, string>;
     } | null;
     if (!target) return false;
-    const response = await client.request(target.url, {
-      method: 'PUT',
-      headers: target.headers,
-      body: createReadStream(archive),
-      duplex: 'half',
-      redirect: 'error',
-      signal: AbortSignal.timeout(120_000),
-    } as unknown as RequestInit);
-    invariant(response.ok || response.status === 412, 'R2_UPLOAD_FAILED', 'Pack upload failed.');
+    await retryActionsInfrastructure(
+      async signal => {
+        const body = createReadStream(archive);
+        try {
+          const response = await actionsInfrastructureResponse(
+            await client.request(target.url, {
+              method: 'PUT',
+              headers: target.headers,
+              body,
+              duplex: 'half',
+              redirect: 'error',
+              signal,
+            } as unknown as RequestInit),
+          );
+          invariant(response.ok || response.status === 412, 'R2_UPLOAD_FAILED', 'Pack upload failed.');
+        } finally {
+          body.destroy();
+        }
+      },
+      120_000,
+      360_000,
+    );
     await client.call({ kind: 'sourcePack', phase: 'commit', object });
     return true;
   } catch {

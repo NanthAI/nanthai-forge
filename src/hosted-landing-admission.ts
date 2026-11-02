@@ -45,6 +45,8 @@ export function cohortSize(policy: AutonomyPolicy, history: OutcomeHistory | und
 }
 type FailureRun = {
   status: string;
+  counts?: { failed: number } | undefined;
+  exitCode?: number | null | undefined;
   testFiles?: { failed: unknown[] } | undefined;
   contractReports?: Record<string, { failed: boolean }> | undefined;
 };
@@ -55,6 +57,8 @@ export function checkFailureKind(
   semantic: { conflicts: unknown[]; overBudget?: unknown },
 ): 'passed' | 'tests' | 'platform' {
   const failedTests =
+    (run.status === 'failed' &&
+      (Boolean(run.counts?.failed) || (run.exitCode != null && run.exitCode !== 0))) ||
     Boolean(run.testFiles?.failed.length) ||
     Object.values(run.contractReports ?? {}).some(report => report.failed);
   if (failedTests || semantic.conflicts.length || Boolean(semantic.overBudget)) return 'tests';

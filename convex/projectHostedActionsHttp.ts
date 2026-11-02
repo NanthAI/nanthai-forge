@@ -181,9 +181,20 @@ export const handle = httpAction(async (ctx, request) => {
     if ((error as { data?: { code?: string } })?.data?.code === 'CHECK_CANCELLED') reason = 'cancelled';
     else if (error instanceof z.ZodError) reason = 'validation';
     else if (String((error as { code?: unknown })?.code ?? '').startsWith('R2_')) reason = 'storage';
+    const code =
+      (error as { data?: { code?: string }; code?: string })?.data?.code ??
+      (error as { code?: string })?.code;
+    const unavailable =
+      reason === 'storage' ||
+      code === 'RUNNER_UNAVAILABLE' ||
+      ['TimeoutError', 'AbortError', 'TypeError'].includes((error as Error)?.name) ||
+      (!code && (error as Error)?.name === 'Error' && reason !== 'validation');
     return Response.json(
       { reason, error: 'Actions request failed authorization, validation or storage verification.' },
-      { status: 403, headers: { 'Cache-Control': 'no-store' } },
+      {
+        status: unavailable ? 503 : 403,
+        headers: { 'Cache-Control': 'no-store' },
+      },
     );
   }
 });

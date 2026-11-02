@@ -14,6 +14,7 @@ import {
   actionsRefusalReasons,
   actionsPreflightCapability,
 } from './hosted-actions-capabilities.js';
+import { retryActionsInfrastructure, actionsInfrastructureResponse } from './hosted-actions-retry.js';
 import { parseTimingHistory, timingDurations } from '../scripts/test-shards.mjs';
 export class ActionsJobClient {
   run: HostedCheckRun | null = null;
@@ -37,29 +38,36 @@ export class ActionsJobClient {
       });
       await this.refreshing;
     }
-    const response = await this.request(`${this.site}/checks/actions`, {
-      method: 'POST',
-      redirect: 'error',
-      signal: AbortSignal.timeout(60_000),
-      headers: { authorization: `Bearer ${this.token}`, 'content-type': 'application/json' },
-      body: JSON.stringify({
-        projectId: this.projectId,
-        runId: this.runId,
-        ...(this.run ? { fence: this.run.fence } : {}),
-        command: actionsCommandForCapabilities(command, this.capabilities),
-      }),
+    // Session/source are reads; plan is digest-CAS; output is create-only;
+    // result is deduped by run/index/digest; sourcePack uses its immutable key.
+    const body = JSON.stringify({
+      projectId: this.projectId,
+      runId: this.runId,
+      ...(this.run ? { fence: this.run.fence } : {}),
+      command: actionsCommandForCapabilities(command, this.capabilities),
     });
-    if (!response.ok) {
-      // Only a fixed reason vocabulary may reach logs; never echo a response body.
-      const body = (await response.json().catch(() => null)) as { reason?: unknown } | null;
-      const reason = actionsRefusalReasons.find(value => value === body?.reason);
-      invariant(
-        false,
-        reason === 'cancelled' ? 'CHECK_CANCELLED' : 'RUNNER_UNAVAILABLE',
-        `Convex Actions request failed (${response.status}${reason ? `; reason: ${reason}` : ''}).`,
+    const { response, value } = await retryActionsInfrastructure(async signal => {
+      const response = await actionsInfrastructureResponse(
+        await this.request(`${this.site}/checks/actions`, {
+          method: 'POST',
+          redirect: 'error',
+          signal,
+          headers: { authorization: `Bearer ${this.token}`, 'content-type': 'application/json' },
+          body,
+        }),
       );
-    }
-    const value = await response.json();
+      if (!response.ok) {
+        // Only a fixed reason vocabulary may reach logs; never echo a response body.
+        const body = (await response.json().catch(() => null)) as { reason?: unknown } | null;
+        const reason = actionsRefusalReasons.find(value => value === body?.reason);
+        invariant(
+          false,
+          reason === 'cancelled' ? 'CHECK_CANCELLED' : 'RUNNER_UNAVAILABLE',
+          `Convex Actions request failed (${response.status}${reason ? `; reason: ${reason}` : ''}).`,
+        );
+      }
+      return { response, value: await response.json() };
+    });
     if (
       command.kind === 'session' &&
       Array.isArray(value.capabilities) &&
@@ -80,13 +88,17 @@ export class ActionsJobClient {
   private async refreshToken() {
     const url = new URL(process.env.ACTIONS_ID_TOKEN_REQUEST_URL!);
     url.searchParams.set('audience', this.site);
-    const response = await this.request(url, {
-      headers: { authorization: `Bearer ${process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN}` },
-      signal: AbortSignal.timeout(20_000),
-      redirect: 'error',
-    });
-    invariant(response.ok, 'RUNNER_UNAVAILABLE', 'GitHub OIDC token request failed.');
-    const result = (await response.json()) as { value: string };
+    const result = await retryActionsInfrastructure(async signal => {
+      const response = await actionsInfrastructureResponse(
+        await this.request(url, {
+          headers: { authorization: `Bearer ${process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN}` },
+          signal,
+          redirect: 'error',
+        }),
+      );
+      invariant(response.ok, 'RUNNER_UNAVAILABLE', 'GitHub OIDC token request failed.');
+      return (await response.json()) as { value: string };
+    }, 20_000);
     this.token = result.value;
     this.expires =
       (JSON.parse(Buffer.from(this.token.split('.')[1]!, 'base64url').toString()).exp as number) * 1000;
@@ -134,35 +146,43 @@ export class ActionsJobClient {
     if (!this.capabilities.includes(actionsPreflightCapability)) return run; // oldest server
     const ticket = actionsPreflightTicketSchema.safeParse(this.preflightTicket);
     invariant(ticket.success, 'RUNNER_UNAVAILABLE', 'Pre-spawn authorization is unavailable.');
-    const response = await this.request(`${ticket.data.endpoint}/api/query`, {
-      method: 'POST',
-      redirect: 'error',
-      signal: AbortSignal.timeout(60_000),
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        path: 'projectHostedActionsPreflight:check',
-        format: 'convex_encoded_json',
-        args: [
-          {
-            projectId: this.projectId,
-            runId: this.runId,
-            fence: run.fence,
-            signature: ticket.data.signature,
-          },
-        ],
-      }),
+    const reply = await retryActionsInfrastructure(async signal => {
+      const response = await actionsInfrastructureResponse(
+        await this.request(`${ticket.data.endpoint}/api/query`, {
+          method: 'POST',
+          redirect: 'error',
+          signal,
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            path: 'projectHostedActionsPreflight:check',
+            format: 'convex_encoded_json',
+            args: [
+              {
+                projectId: this.projectId,
+                runId: this.runId,
+                fence: run.fence,
+                signature: ticket.data.signature,
+              },
+            ],
+          }),
+        }),
+      );
+      const reply = (await response.json().catch(error => {
+        if (error instanceof SyntaxError) return null;
+        throw error;
+      })) as {
+        status?: string;
+        value?: { status?: string };
+      } | null;
+      invariant(
+        response.ok &&
+          reply?.status === 'success' &&
+          ['active', 'cancelled'].includes(reply.value?.status ?? ''),
+        'RUNNER_UNAVAILABLE',
+        'Pre-spawn authorization failed.',
+      );
+      return reply;
     });
-    const reply = (await response.json().catch(() => null)) as {
-      status?: string;
-      value?: { status?: string };
-    } | null;
-    invariant(
-      response.ok &&
-        reply?.status === 'success' &&
-        ['active', 'cancelled'].includes(reply.value?.status ?? ''),
-      'RUNNER_UNAVAILABLE',
-      'Pre-spawn authorization failed.',
-    );
     invariant(reply.value?.status !== 'cancelled', 'CHECK_CANCELLED', 'The check was cancelled.');
     return run;
   }
@@ -228,14 +248,36 @@ export class ActionsJobClient {
           'SOURCE_UNAVAILABLE',
           'Exact raw source location is unavailable.',
         );
-        const response = await this.request(row.url, {
-          headers: packHeaders(row.range, pin.size),
-          signal: AbortSignal.timeout(60_000),
-          redirect: 'error',
-        });
-        invariant(response.ok && response.body, 'SOURCE_UNAVAILABLE', 'Source download failed.');
-        verifyPackRange(response, row.range, pin.size);
-        return response.body as unknown as AsyncIterable<Uint8Array>;
+        const stream = new TransformStream<Uint8Array, Uint8Array>();
+        const writer = stream.writable.getWriter();
+        let offset = 0;
+        void retryActionsInfrastructure(async signal => {
+          if (offset === pin.size && offset > 0) return;
+          const range = offset
+            ? { offset: (row.range?.offset ?? 0) + offset, total: row.range?.total ?? pin.size }
+            : row.range;
+          const response = await actionsInfrastructureResponse(
+            await this.request(row.url!, {
+              headers: packHeaders(range, pin.size - offset),
+              signal,
+              redirect: 'error',
+            }),
+          );
+          invariant(response.ok && response.body, 'SOURCE_UNAVAILABLE', 'Source download failed.');
+          verifyPackRange(response, range, pin.size - offset);
+          for await (const chunk of response.body as unknown as AsyncIterable<Uint8Array>) {
+            invariant(offset + chunk.length <= pin.size, 'SOURCE_HASH_MISMATCH', 'Source exceeds its pin.');
+            await writer.write(chunk);
+            offset += chunk.length;
+          }
+          invariant(offset === pin.size, 'SOURCE_HASH_MISMATCH', 'Source download is incomplete.');
+        })
+          .then(
+            () => writer.close(),
+            error => writer.abort(error),
+          )
+          .catch(() => {});
+        return stream.readable as unknown as AsyncIterable<Uint8Array>;
       },
       upload: async () => {
         throw new Error('Source upload is not part of an Actions check.');
@@ -247,33 +289,37 @@ export class ActionsJobClient {
         invariant(pin.size <= 2 * 1024 * 1024, 'SOURCE_PAGE_INVALID', 'Recipe metadata must be paged.');
         const row = rows.get(pin.sha256)!;
         invariant(row.url, 'SOURCE_UNAVAILABLE', 'Recipe metadata needs raw storage.');
-        const response = await this.request(row.url, {
-          headers: packHeaders(row.range, pin.size),
-          redirect: 'error',
-          signal: AbortSignal.timeout(60_000),
+        return retryActionsInfrastructure(async signal => {
+          const response = await actionsInfrastructureResponse(
+            await this.request(row.url!, {
+              headers: packHeaders(row.range, pin.size),
+              redirect: 'error',
+              signal,
+            }),
+          );
+          invariant(response.ok, 'SOURCE_UNAVAILABLE', 'Recipe metadata download failed.');
+          verifyPackRange(response, row.range, pin.size);
+          invariant(response.body, 'SOURCE_UNAVAILABLE', 'Recipe metadata is unavailable.');
+          const buffers: Uint8Array[] = [];
+          let size = 0;
+          for await (const chunk of response.body as unknown as AsyncIterable<Uint8Array>) {
+            size += chunk.length;
+            invariant(size <= pin.size, 'SOURCE_HASH_MISMATCH', 'Recipe metadata exceeds its pinned size.');
+            buffers.push(chunk);
+          }
+          const bytes = new Uint8Array(size);
+          let offset = 0;
+          for (const chunk of buffers) {
+            bytes.set(chunk, offset);
+            offset += chunk.length;
+          }
+          invariant(
+            bytes.length === pin.size && digest(bytes) === pin.sha256,
+            'SOURCE_HASH_MISMATCH',
+            'Recipe metadata bytes changed.',
+          );
+          return JSON.parse(new TextDecoder().decode(bytes));
         });
-        invariant(response.ok, 'SOURCE_UNAVAILABLE', 'Recipe metadata download failed.');
-        verifyPackRange(response, row.range, pin.size);
-        invariant(response.body, 'SOURCE_UNAVAILABLE', 'Recipe metadata is unavailable.');
-        const buffers: Uint8Array[] = [];
-        let size = 0;
-        for await (const chunk of response.body as unknown as AsyncIterable<Uint8Array>) {
-          size += chunk.length;
-          invariant(size <= pin.size, 'SOURCE_HASH_MISMATCH', 'Recipe metadata exceeds its pinned size.');
-          buffers.push(chunk);
-        }
-        const bytes = new Uint8Array(size);
-        let offset = 0;
-        for (const chunk of buffers) {
-          bytes.set(chunk, offset);
-          offset += chunk.length;
-        }
-        invariant(
-          bytes.length === pin.size && digest(bytes) === pin.sha256,
-          'SOURCE_HASH_MISMATCH',
-          'Recipe metadata bytes changed.',
-        );
-        return JSON.parse(new TextDecoder().decode(bytes));
       };
       const recipes = digests.flatMap(id =>
         rows.get(id)!.descriptor.recipe ? [rows.get(id)!.descriptor.recipe!] : [],

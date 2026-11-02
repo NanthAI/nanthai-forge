@@ -105,6 +105,7 @@ function fixture(
         value: `header.${Buffer.from(JSON.stringify({ exp: Date.now() / 1000 + 300 })).toString('base64url')}.signature`,
       });
     }
+    if (String(url).startsWith('https://output.invalid/')) return fetch(url, init);
     if (String(url).startsWith('https://objects.invalid/') && init?.method === 'PUT') {
       const parts = [];
       for await (const chunk of init.body) parts.push(chunk);
@@ -1559,4 +1560,160 @@ test('parallel materialization drains copies before returning a write failure', 
   assert.equal(active, 0);
   assert(started > 0 && started <= actionsFileConcurrency);
   assert.equal(s.calls.filter(call => call.kind === 'plan').length, 0);
+});
+
+test('OIDC timeout then success completes the job without extra Forge calls', async t => {
+  const s = fixture(t);
+  const request = s.client.request;
+  let tokens = 0;
+  s.client.request = async (url, init) => {
+    if (String(url).startsWith('https://oidc.invalid/') && ++tokens === 1)
+      throw new DOMException('synthetic private URL must not leak', 'TimeoutError');
+    return request(url, init);
+  };
+  const prepared = await prepareActionsJob(
+    s.client,
+    join(s.directory, 'candidate'),
+    join(s.directory, 'cache'),
+  );
+  const path = join(s.directory, 'plan.json');
+  writeFileSync(path, JSON.stringify(prepared.recipe));
+  assert.equal(
+    await executeActionsJob(s.client, join(s.directory, 'candidate'), path, 'static', [
+      process.execPath,
+      '-e',
+      'process.exit(0)',
+    ]),
+    0,
+  );
+  assert.equal(tokens, 2);
+  assert.equal(s.calls.filter(c => c.kind === 'session').length, 2);
+  assert.equal(s.calls.filter(c => c.kind === 'result').length, 1);
+});
+
+test('persistent OIDC timeout returns a typed sanitized infrastructure error after three attempts', async t => {
+  const s = fixture(t);
+  let calls = 0;
+  s.client.request = async () => {
+    calls++;
+    throw new DOMException('private-token-and-url', 'TimeoutError');
+  };
+  await assert.rejects(s.client.session(), error => {
+    assert.equal(error.code, 'RUNNER_UNAVAILABLE');
+    assert.doesNotMatch(String(error), /private-token-and-url/);
+    return true;
+  });
+  assert.equal(calls, 3);
+  assert.equal(s.calls.length, 0);
+});
+
+test('site retries preserve the exact fenced result body after an unknown outcome', async t => {
+  const s = fixture(t);
+  await s.client.session();
+  const bodies = [];
+  s.client.request = async (_url, init) => {
+    bodies.push(init.body);
+    if (bodies.length === 1) throw new TypeError('fetch failed: private URL');
+    return Response.json(s.run);
+  };
+  const result = {
+    index: 0,
+    exitCode: 0,
+    execution: { startedAt: new Date().toISOString(), endedAt: new Date().toISOString() },
+  };
+  await s.client.call({ kind: 'result', result });
+  assert.equal(bodies.length, 2);
+  assert.equal(bodies[0], bodies[1]);
+  assert.equal(JSON.parse(bodies[0]).fence, s.run.fence);
+});
+
+test('an interrupted object body resumes with a verified range and no duplicated bytes', async t => {
+  const s = fixture(t);
+  await s.client.session();
+  const pin = s.put('synthetic streamed source');
+  const request = s.client.request;
+  let reads = 0;
+  s.client.request = async (url, init) => {
+    if (String(url) === `https://objects.invalid/${pin.sha256}`) {
+      reads++;
+      const bytes = s.objects.get(pin.sha256);
+      if (reads === 1) {
+        let sent = false;
+        return new Response(
+          new ReadableStream({
+            pull(controller) {
+              if (!sent) {
+                sent = true;
+                controller.enqueue(bytes.subarray(0, 5));
+              } else controller.error(new TypeError('synthetic connection reset'));
+            },
+          }),
+        );
+      }
+      assert.equal(init.headers.Range, `bytes=5-${bytes.length - 1}`);
+      return new Response(bytes.subarray(5), {
+        status: 206,
+        headers: { 'content-range': `bytes 5-${bytes.length - 1}/${bytes.length}` },
+      });
+    }
+    return request(url, init);
+  };
+  const transport = s.client.transport().transport;
+  const chunks = [];
+  for await (const chunk of await transport.read(pin)) chunks.push(chunk);
+  assert.equal(Buffer.concat(chunks).toString(), 'synthetic streamed source');
+  assert.equal(reads, 2);
+});
+
+test('source pack PUT retries an unknown outcome with fresh streams and identical immutable bytes', async t => {
+  const s = fixture(t);
+  const prepared = await prepareActionsJob(
+    s.client,
+    join(s.directory, 'candidate'),
+    join(s.directory, 'cache'),
+  );
+  const request = s.client.request;
+  const uploads = [];
+  s.client.request = async (url, init) => {
+    if (init?.method !== 'PUT') return request(url, init);
+    const parts = [];
+    for await (const part of init.body) parts.push(part);
+    const bytes = Buffer.concat(parts);
+    uploads.push(bytes);
+    s.objects.set(String(url).split('/').at(-1), bytes);
+    if (uploads.length === 1) throw new TypeError('synthetic lost storage reply');
+    return new Response(null, { status: 412 });
+  };
+  assert.equal(await prepared.refreshSourcePack(), true);
+  assert.equal(uploads.length, 2);
+  assert.deepEqual(uploads[0], uploads[1]);
+  assert.equal(s.calls.filter(c => c.kind === 'sourcePack' && c.phase === 'commit').length, 1);
+});
+
+test('output PUT timeout retries the same bytes and records the real test exit once', async t => {
+  const s = fixture(t, { capabilities: withoutInlineLog });
+  const candidate = join(s.directory, 'candidate');
+  const prepared = await prepareActionsJob(s.client, candidate, join(s.directory, 'cache'));
+  const path = join(s.directory, 'plan.json');
+  writeFileSync(path, JSON.stringify(prepared.recipe));
+  const uploads = [];
+  t.mock.method(globalThis, 'fetch', async (_url, init) => {
+    uploads.push(Buffer.from(init.body));
+    if (uploads.length === 1) throw new DOMException('synthetic', 'TimeoutError');
+    return new Response(null, { status: 412 });
+  });
+  t.mock.method(process.stdout, 'write', () => true);
+  assert.equal(
+    await executeActionsJob(s.client, candidate, path, 'static', [
+      process.execPath,
+      '-e',
+      "console.log('synthetic failure'); process.exit(7)",
+    ]),
+    7,
+  );
+  assert.equal(uploads.length, 2);
+  assert.deepEqual(uploads[0], uploads[1]);
+  const results = s.calls.filter(c => c.kind === 'result');
+  assert.equal(results.length, 1);
+  assert.equal(results[0].result.exitCode, 7);
 });

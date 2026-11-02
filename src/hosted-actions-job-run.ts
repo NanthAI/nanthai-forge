@@ -10,6 +10,7 @@ import { digest } from './hash.js';
 import { directLogBytes } from './hosted-actions-direct.js';
 import { ActionsJobClient } from './hosted-actions-job-client.js';
 import { checkFileSummary } from './check-file-summary.js';
+import { retryActionsInfrastructure, actionsInfrastructureResponse } from './hosted-actions-retry.js';
 import { invariant } from './errors.js';
 import { setupActionsJob } from './hosted-actions-job-setup.js';
 import { actionsInlineLogCapability } from './hosted-actions-capabilities.js';
@@ -127,14 +128,18 @@ async function executeActiveActionsJob(
       url: string;
       headers: Record<string, string>;
     };
-    const response = await fetch(target.url, {
-      method: 'PUT',
-      headers: target.headers,
-      body: tail,
-      redirect: 'error',
-      signal: AbortSignal.timeout(60_000),
+    await retryActionsInfrastructure(async signal => {
+      const response = await actionsInfrastructureResponse(
+        await client.request(target.url, {
+          method: 'PUT',
+          headers: target.headers,
+          body: tail,
+          redirect: 'error',
+          signal,
+        }),
+      );
+      invariant(response.ok || response.status === 412, 'R2_VERIFY_FAILED', 'Output upload failed.');
     });
-    invariant(response.ok || response.status === 412, 'R2_VERIFY_FAILED', 'Output upload failed.');
   }
   result.execution.endedAt = new Date().toISOString();
   await client.call({ kind: 'result', result, ...(logBytes !== undefined ? { logBytes } : {}) });

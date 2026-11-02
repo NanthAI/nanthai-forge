@@ -193,6 +193,7 @@ test('failed exact checks settle only their own request and retain later ready w
   await f.rawChecks.callback(f.rawChecks.complete(active, 'failed'));
   await f.drain();
   assert.equal((await f.status(failed.id)).request.observation.cause, 'check-failed');
+  assert.equal((await f.status(failed.id)).request.error.code, 'CHECK_FAILED');
   assert.equal((await f.status(later.id)).request.phase, 'ready');
   assert.equal(f.tables.projectHostedCheckRuns.size, 1);
 });
@@ -427,4 +428,59 @@ test('check result and its notification commit together; failed scheduling repla
   assert.equal((await f.rawChecks.status(run.id)).counts.completed, 1);
   assert.equal((await f.status(saved.id)).request.phase, 'checking');
   assert.equal(f.tables.projectHostedCheckRuns.size, 1);
+});
+
+test('infrastructure failures retry the exact standalone check twice and settle as infrastructure', async () => {
+  const f = await landingFixture();
+  const state = await f.enqueue(f.request({ check: requestCheck(f) }));
+  await f.drain();
+  const first = (await f.status(state.id)).attempt;
+  const seen = [];
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const current = (await f.status(state.id)).attempt;
+    const run = await f.rawChecks.activate(current.check.runId);
+    seen.push(run.id);
+    await f.rawChecks.callback({
+      ...f.rawChecks.complete(run, 'runner-unavailable'),
+      result: {
+        ...f.rawChecks.complete(run, 'runner-unavailable').result,
+        exitCode: null,
+      },
+    });
+    await f.drain();
+    const status = await f.status(state.id);
+    assert.equal(status.attempt.candidate.id, first.candidate.id);
+    assert.equal(status.attempt.candidate.head, first.candidate.head);
+    assert.equal(status.attempt.platformRetries ?? 0, Math.min(attempt + 1, 2));
+    assert.equal(status.request.phase, attempt < 2 ? 'checking' : 'terminal-failed');
+    if (attempt < 2) assert.equal(status.request.error, null);
+    else {
+      assert.equal(status.request.error.code, 'CHECK_NOT_PASSED');
+      assert.equal(status.request.observation.cause, 'infra');
+    }
+  }
+  assert.equal(new Set(seen).size, 3);
+  assert.equal(f.tables.projectHostedLandingAttempts.size, 3);
+  assert.equal(f.pendingTasks().length, 0);
+});
+
+test('a standalone check passes after its infrastructure retry with the exact Candidate retained', async () => {
+  const f = await landingFixture();
+  const state = await f.enqueue(f.request({ check: requestCheck(f) }));
+  await f.drain();
+  const first = (await f.status(state.id)).attempt;
+  const run = await f.rawChecks.activate(first.check.runId);
+  await f.rawChecks.callback(f.rawChecks.complete(run, 'runner-unavailable'));
+  await f.drain();
+  const retry = (await f.status(state.id)).attempt;
+  await f.rawChecks.pass(await f.rawChecks.activate(retry.check.runId));
+  await f.drain();
+  const status = await f.status(state.id);
+  assert.equal(status.request.phase, 'ready');
+  assert.equal(status.request.error, null);
+  assert.equal(status.attempt.candidate.id, first.candidate.id);
+  assert.equal(status.attempt.parentAttemptId, first.id);
+  assert.equal(status.attempt.platformRetries, 1);
+  assert.equal(f.tables.projectHostedCheckRuns.size, 2);
+  assert.equal(f.pendingTasks().length, 0);
 });

@@ -65,7 +65,11 @@ export async function verifyActionsOidc(token: string, audience: string, request
     redirect: 'error',
     signal: AbortSignal.timeout(10_000),
   });
-  invariant(response.ok, 'EVIDENCE_CHANGED', 'GitHub OIDC keys unavailable.');
+  invariant(
+    response.ok,
+    response.status === 429 || response.status >= 500 ? 'RUNNER_UNAVAILABLE' : 'EVIDENCE_CHANGED',
+    'GitHub OIDC keys unavailable.',
+  );
   const keys = (await response.json()) as { keys: (JsonWebKey & { kid?: string })[] };
   const jwk = keys.keys.find(
     key => key.kid === header.kid && key.kty === 'RSA' && key.alg === 'RS256' && key.use === 'sig',

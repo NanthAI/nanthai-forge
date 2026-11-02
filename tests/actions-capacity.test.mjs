@@ -94,3 +94,17 @@ test('missing credentials, invalid identities and denied or malformed responses 
     undefined,
   );
 });
+
+test('capacity page infrastructure timeout retries without extra successful-page calls', async () => {
+  const calls = { queued: 0, in_progress: 0 };
+  const result = await readActionsCapacity({
+    ...input,
+    request: async url => {
+      const status = new URL(url).searchParams.get('status');
+      if (++calls[status] === 1 && status === 'queued') throw new DOMException('synthetic', 'TimeoutError');
+      return Response.json({ workflow_runs: [] });
+    },
+  });
+  assert.deepEqual(result, { activeChecks: 1, jobCap: 20 });
+  assert.deepEqual(calls, { queued: 2, in_progress: 1 });
+});

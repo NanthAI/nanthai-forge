@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { retryActionsInfrastructure, actionsInfrastructureResponse } from '../dist/hosted-actions-retry.js';
 const pageSize = 20;
 const maxBytes = 1024 * 1024;
 
@@ -21,39 +22,47 @@ export async function readActionsCapacity({
     return undefined;
   try {
     const pages = await Promise.all(
-      ['queued', 'in_progress'].map(async status => {
-        const url = `https://api.github.com/repos/${repository}/actions/workflows/${encodeURIComponent(workflow)}/runs?status=${status}&per_page=${pageSize}`;
-        const response = await request(url, {
-          headers: {
-            authorization: `Bearer ${token}`,
-            accept: 'application/vnd.github+json',
-            'X-GitHub-Api-Version': '2026-03-10',
+      ['queued', 'in_progress'].map(status =>
+        retryActionsInfrastructure(
+          async signal => {
+            const url = `https://api.github.com/repos/${repository}/actions/workflows/${encodeURIComponent(workflow)}/runs?status=${status}&per_page=${pageSize}`;
+            const response = await actionsInfrastructureResponse(
+              await request(url, {
+                headers: {
+                  authorization: `Bearer ${token}`,
+                  accept: 'application/vnd.github+json',
+                  'X-GitHub-Api-Version': '2026-03-10',
+                },
+                redirect: 'error',
+                signal,
+              }),
+            );
+            if (!response.ok || !response.body) throw new Error('Capacity unavailable');
+            const reader = response.body.getReader(),
+              decoder = new TextDecoder();
+            let bytes = 0,
+              text = '';
+            try {
+              for (;;) {
+                const next = await reader.read();
+                if (next.done) break;
+                bytes += next.value.byteLength;
+                if (bytes > maxBytes) throw new Error('Capacity page too large');
+                text += decoder.decode(next.value, { stream: true });
+              }
+              text += decoder.decode();
+            } finally {
+              await reader.cancel();
+            }
+            const page = JSON.parse(text);
+            if (!Array.isArray(page.workflow_runs) || page.workflow_runs.length > pageSize)
+              throw new Error('Invalid capacity page');
+            return page.workflow_runs;
           },
-          redirect: 'error',
-          signal: AbortSignal.timeout(5000),
-        });
-        if (!response.ok || !response.body) throw new Error('Capacity unavailable');
-        const reader = response.body.getReader(),
-          decoder = new TextDecoder();
-        let bytes = 0,
-          text = '';
-        try {
-          for (;;) {
-            const next = await reader.read();
-            if (next.done) break;
-            bytes += next.value.byteLength;
-            if (bytes > maxBytes) throw new Error('Capacity page too large');
-            text += decoder.decode(next.value, { stream: true });
-          }
-          text += decoder.decode();
-        } finally {
-          await reader.cancel();
-        }
-        const page = JSON.parse(text);
-        if (!Array.isArray(page.workflow_runs) || page.workflow_runs.length > pageSize)
-          throw new Error('Invalid capacity page');
-        return page.workflow_runs;
-      }),
+          5000,
+          18_000,
+        ),
+      ),
     );
     const active = new Set([String(runId)]);
     for (const run of pages.flat()) {
