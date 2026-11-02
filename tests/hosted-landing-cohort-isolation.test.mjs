@@ -132,7 +132,7 @@ for (const history of [0, 575, 1150])
       wallMs: performance.now() - started,
       peakRssBytes: process.resourceUsage().maxRSS * 1024,
     };
-    assert(budget.calls <= 205 && budget.reads <= 4200 && budget.writes <= 1250, JSON.stringify(budget));
+    assert(budget.calls <= 199 && budget.reads <= 3997 && budget.writes <= 1200, JSON.stringify(budget));
     assert(budget.maxReads <= 170 && budget.maxWrites <= 55, JSON.stringify(budget));
     const idle = f.counts.length;
     await drain(f);

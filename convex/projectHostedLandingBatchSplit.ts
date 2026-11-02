@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { settleBatchConflicts } from './projectHostedLandingCohortConflicts';
 import type { MutationCtx } from './_generated/server';
 import type { BatchFailure } from '../src/hosted-batch-diagnosis';
 import type { HostedCheckRun } from '../src/hosted-check';
@@ -80,6 +81,7 @@ export async function splitLandingBatch(
       : undefined);
   batch = { ...batch, ...(cause ? { transition: cause } : {}) };
   await writeBatch(ctx, input, { ...batch, phase: 'split', ...(failure ? { failure } : {}) });
+  if (batch.included) await settleBatchConflicts(ctx, input, { ...batch, phase: 'split' });
   const at = new Date(Date.now()).toISOString();
   const likely = new Set(failure?.suspects ?? []);
   const singles: typeof pending = [];
@@ -299,6 +301,7 @@ async function failLandingBatchPlatform(
 ) {
   const pending = await pendingMembers(ctx, input, batch);
   await writeBatch(ctx, input, { ...batch, phase: 'failed' });
+  if (batch.included) await settleBatchConflicts(ctx, input, { ...batch, phase: 'failed' });
   for (const member of pending) {
     const { batchId: _batch, ...state } = member.state;
     void _batch;

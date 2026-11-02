@@ -21,13 +21,14 @@ import { pinLandingAttempt } from './projectHostedLandingPins';
 import { wakeLandingQueue, releaseLandingQueue } from './projectHostedLandingWake';
 import { landingQueue } from './projectHostedLandingStore';
 import { writeFinish, failFinish } from './projectHostedFinishStore';
-import { scheduleFinish } from './projectHostedFinishWake';
+import { scheduleFinish, wakeLandingOrderWaiters } from './projectHostedFinishWake';
 import { hostedFinishBackoff, type HostedFinish } from '../src/hosted-finish';
 import { hostedRecordSchema } from '../src/hosted-records';
 import { canonicalPayload, hostedPayloadHash } from '../src/hosted-source-operation';
 import { hostedLandingStateSchema, landingObservation } from '../src/hosted-landing';
 import { invariant } from '../src/errors';
 import { validCrossHeadProof, type CrossHeadProof } from '../src/hosted-cross-head-proof';
+import { invalidatePipeline } from './projectHostedLandingPipeline';
 import { scopedRecheckBasis } from './projectHostedScopedRecheck';
 import { requireHostedCheckEvidence } from './projectHostedCheckRead';
 async function wakeAfterPrecompose(
@@ -107,11 +108,19 @@ export async function reserveFinishRetry(
           ? 'The shared batch fell back to an individual Candidate; main did not change.'
           : 'The acceptance evidence needs an exact refresh; main did not change.',
     });
+  const retiringSolo =
+    !precompose && !state.batchId && (state.phase === 'checking' || state.phase === 'ready');
+  if (retiringSolo && landing.pipelineRetiredAttemptId !== state.attemptId)
+    await invalidatePipeline(
+      ctx,
+      { projectId: row.projectId, batchId: state.id },
+      { members: [{ submissionId: state.id }] },
+    );
   await writeFinish(ctx, row, { ...value, pending });
   if (!precompose)
     await writeLanding(
       ctx,
-      landing,
+      retiringSolo ? { ...landing, pipelineRetiredAttemptId: state.attemptId } : landing,
       {
         ...state,
         version: state.version + 1,
@@ -121,6 +130,7 @@ export async function reserveFinishRetry(
       },
       false,
     );
+  if (retiringSolo && landing.orderWaited) await wakeLandingOrderWaiters(ctx, landing, true);
   const current = (await ctx.db.get(row._id))!;
   await scheduleFinish(ctx, current, precompose ? 0 : hostedFinishBackoff(pending.number));
 }
@@ -251,7 +261,10 @@ export async function installFinishCompose(
     }));
   if (
     pending.precompose &&
-    (state.phase === 'landed' || state.phase === 'terminal-failed' || (state.batchId && landing.runId))
+    (state.phase === 'landed' ||
+      state.phase === 'terminal-failed' ||
+      pending.parentAttemptId !== state.attemptId ||
+      (state.batchId && landing.runId))
   ) {
     // The shared exact generation now owns this member. A late individual
     // probe cannot replace its check, head or terminal result.

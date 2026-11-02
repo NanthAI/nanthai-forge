@@ -289,5 +289,20 @@ export async function retryLandingBatch(ctx: MutationCtx, input: BatchIdentity, 
       false,
     );
   }
+  // A previous shared generation trimmed rejected members from the train.
+  // Restore this live cohort in its original member order before any successor
+  // can pin the new tail. Descendants were retired above, unrelated rows stay.
+  const queue = await landingQueue(ctx, { projectId: input.projectId, channel: 'main' });
+  if (queue) {
+    const train = queue.train ?? [];
+    const members = new Set(batch.members.map(member => member.submissionId));
+    const first = train.findIndex(id => members.has(id));
+    const anchor = first < 0 ? train.indexOf(batch.predecessor?.submissionId ?? '') + 1 : first;
+    const prefix = train.slice(0, anchor).filter(id => !members.has(id));
+    const suffix = train.slice(anchor).filter(id => !members.has(id));
+    await ctx.db.patch(queue._id, {
+      train: [...prefix, ...live.map(member => member.state.id), ...suffix],
+    });
+  }
   await wakeBatch(ctx, input);
 }

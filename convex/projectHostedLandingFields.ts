@@ -153,6 +153,8 @@ export const hostedLandingTables = {
     /** Last delivered event of the current run, independent of queue phase. */
     checkWakeVersion: v.optional(v.number()),
     attemptId: v.string(),
+    /** This exact solo generation is recomposing and cannot back a successor. */
+    pipelineRetiredAttemptId: v.optional(v.string()),
     value: v.string(),
   })
     .index('by_project', ['projectId'])

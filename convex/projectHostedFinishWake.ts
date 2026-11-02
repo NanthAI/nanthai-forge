@@ -96,17 +96,32 @@ export async function notifyFinish(ctx: MutationCtx, state: HostedLandingState) 
  * which takes main before them anyway. Exact indexed waiters, one drive per
  * transition, never one per waiter; the woken claim re-reads the order. Waiters
  * own no alarm, so every one is reached: each page leaves the index range. */
-export async function wakeLandingOrderWaiters(ctx: MutationCtx, row: Doc<'projectHostedLandingRequests'>) {
+export async function wakeLandingOrderWaiters(
+  ctx: MutationCtx,
+  row: Doc<'projectHostedLandingRequests'>,
+  speculativeOnly = false,
+) {
   let next: Doc<'projectHostedLandingRequests'> | null = null;
+  let after = -1;
   for (;;) {
     const waiters = await ctx.db
       .query('projectHostedLandingRequests')
       .withIndex('by_project_and_orderWait_and_sequence', q =>
-        q.eq('projectId', row.projectId).eq('orderWait', row.submissionId),
+        q.eq('projectId', row.projectId).eq('orderWait', row.submissionId).gt('sequence', after),
       )
       .order('asc')
       .take(32);
     for (const waiter of waiters) {
+      after = waiter.sequence;
+      // A re-pin retires speculative source generations, but this predecessor
+      // still owns its ordinary place in acceptance order. Only its parked
+      // conflict cohorts need a new main-based compose before settlement.
+      if (
+        speculativeOnly &&
+        (!waiter.wouldConflict ||
+          JSON.parse(waiter.wouldConflict).predecessor?.submissionId !== row.submissionId)
+      )
+        continue;
       if (next) {
         await ctx.db.patch(waiter._id, { orderWait: next.submissionId });
         if (!next.orderWaited) await ctx.db.patch(next._id, { orderWaited: (next.orderWaited = true) });

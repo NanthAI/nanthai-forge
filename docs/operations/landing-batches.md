@@ -599,7 +599,8 @@ predecessor lands unchanged, even if the successor check completed first. An
 individual fallback with an immutable Candidate, reserved acceptance receipt and
 exact live check is also a valid predecessor; its solo flag prevents re-batching
 that member.
-A failed, cancelled or recomposed predecessor invalidates its dependent generations;
+A failed, cancelled or re-pinned predecessor invalidates its dependent generations
+in that transition, including a solo tail whose head or acceptance receipt changes;
 the original member selections return to the queue and check again on surviving
 main. Other groups retain their evidence. Source and check completion events
 advance the pipeline; an idle queue schedules nothing.
@@ -611,7 +612,15 @@ wait on the predecessor settlement event. Clean survivors check the retained
 shared Candidate immediately and remain grouped. When the predecessor lands with
 the exact predicted head and receipt, that completed generation is reused;
 conflicts on that now-accepted base can be retained without another merge. A
-newer main transition recomposes only the rejected selections. A predecessor failure or invalidation returns live descendants to the queue.
+newer main transition recomposes only the rejected selections. If the shared check
+splits or fails, parked rejections also recompose individually on actual main;
+the failed survivor prefix is never terminal conflict evidence. A rejected
+member evidence or authority error settles only that member. A predecessor
+failure or invalidation returns live descendants to the queue.
+Rejected members leave the train even when every member conflicts. A retried
+cohort restores its live members in their original order before successors can
+pin its new tail. Terminal solo rows leave the train after invalidation, so
+later queue events do not repeat it.
 A conflict from that speculative base becomes terminal `COMPOSITION_CONFLICT`
 only on the matching accepted base or after recomposition on current main. Conflicts composed without a
 speculative predecessor retain their existing immediate terminal behavior.

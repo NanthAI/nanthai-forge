@@ -9,7 +9,7 @@ import { readHostedRecord, writeHostedRecord } from './projectHostedRecords';
 import { insertLandingAttempt, loadLanding, writeLanding } from './projectHostedLandingStore';
 import { failFinish } from './projectHostedFinishStore';
 import { hostedRecordSchema } from '../src/hosted-records';
-import { invariant } from '../src/errors';
+import { ForgeError, invariant } from '../src/errors';
 import { hostedStartMain } from './projectHostedChannels';
 
 /** Retain a resolvable Candidate for this particular rejected merge, including
@@ -82,4 +82,21 @@ export async function retainBatchConflict(
     'COMPOSITION_CONFLICT',
     `Candidate ${candidate.id} conflicts in ${(input.conflict.paths ?? []).join(', ')}${input.conflict.more ? ` (and ${input.conflict.more} more files)` : ''} against composed prefix ${input.main.head}${input.peerLanes.length ? ` (peer Lane(s) ${input.peerLanes.join(', ')})` : ''}; retained conflict root ${input.conflict.conflicts.sha256}. Run nforge agent . sync '${JSON.stringify({ candidateId: candidate.id })}', edit the returned conflict files, then run its resolve command.`,
   );
+}
+
+/** A rejected member owns its evidence/authority failure. Never let that error
+ * retire an independently checked survivor generation in the caller. */
+export async function settleMemberBatchConflict(...args: Parameters<typeof retainBatchConflict>) {
+  try {
+    await retainBatchConflict(...args);
+  } catch (error) {
+    if (!(error instanceof ForgeError)) throw error;
+    const [ctx, input] = args;
+    await failFinish(
+      ctx,
+      { projectId: input.projectId, submissionId: input.member.submissionId },
+      error.code,
+      error.message,
+    );
+  }
 }

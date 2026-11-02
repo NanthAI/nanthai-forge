@@ -7,7 +7,7 @@ import { deferSpeculativeConflict } from './projectHostedLandingSpeculativeConfl
 import { predecessorStatus } from './projectHostedLandingPipeline';
 import { hostedStartMain } from './projectHostedChannels';
 import { landingQueue, loadLanding, writeLanding } from './projectHostedLandingStore';
-import { retainBatchConflict } from './projectHostedLandingBatchConflict';
+import { settleMemberBatchConflict } from './projectHostedLandingBatchConflict';
 import { batchConflictPeers } from './projectHostedLandingConflictPeers';
 import { loadFinish } from './projectHostedFinishStore';
 import { reserveFinishRetry } from './projectHostedFinishCompose';
@@ -34,6 +34,10 @@ export async function retainSurvivorTrain(
  * Only rejected entries are resumed. Clean peers retain their original check.
  * If current main has since moved, only the rejected selection recomposes. */
 export async function settleBatchConflicts(ctx: MutationCtx, input: BatchIdentity, batch: LandingBatch) {
+  if (['fallback', 'split', 'failed', 'superseded'].includes(batch.phase)) {
+    await recomposeRejected(ctx, input, batch);
+    return;
+  }
   const predecessor = await predecessorStatus(ctx, input, batch);
   if (predecessor === 'invalid') {
     await retryLandingBatch(ctx, input, batch);
@@ -57,7 +61,7 @@ export async function settleBatchConflicts(ctx: MutationCtx, input: BatchIdentit
     const conflict = dropped.find(drop => drop.candidateId === member.candidate.id);
     if (!conflict) continue;
     if (exact) {
-      await retainBatchConflict(ctx, {
+      await settleMemberBatchConflict(ctx, {
         projectId: input.projectId,
         member,
         main: source.state.request.expectedMain,
@@ -73,18 +77,35 @@ export async function settleBatchConflicts(ctx: MutationCtx, input: BatchIdentit
         at: batch.at,
       });
     } else {
-      const { batchId: _batch, ...state } = current.state;
-      void _batch;
-      await writeLanding(
-        ctx,
-        current.row,
-        { ...state, batchOriginId: batch.id, batchSolo: true, version: state.version + 1 },
-        false,
-      );
-      const finish = await loadFinish(ctx, { projectId: input.projectId, submissionId: member.submissionId });
-      if (!finish.value.pending) await reserveFinishRetry(ctx, finish.row, finish.value, 'BATCH_FALLBACK');
-      else await scheduleFinish(ctx, finish.row);
+      await recomposeRejectedMember(ctx, input, batch, current);
     }
   }
   if (!batch.included?.length) await writeBatch(ctx, input, { ...batch, phase: 'landed' });
+}
+
+async function recomposeRejected(ctx: MutationCtx, input: BatchIdentity, batch: LandingBatch) {
+  for (const member of batch.members.filter(member => !batch.included?.includes(member.submissionId))) {
+    const current = await loadLanding(ctx, { projectId: input.projectId, submissionId: member.submissionId });
+    if (current.state.batchId === batch.id && !['landed', 'terminal-failed'].includes(current.state.phase))
+      await recomposeRejectedMember(ctx, input, batch, current);
+  }
+}
+
+async function recomposeRejectedMember(
+  ctx: MutationCtx,
+  input: BatchIdentity,
+  batch: LandingBatch,
+  current: Awaited<ReturnType<typeof loadLanding>>,
+) {
+  const { batchId: _batch, ...state } = current.state;
+  void _batch;
+  await writeLanding(
+    ctx,
+    current.row,
+    { ...state, batchOriginId: batch.id, batchSolo: true, version: state.version + 1 },
+    false,
+  );
+  const finish = await loadFinish(ctx, { projectId: input.projectId, submissionId: state.id });
+  if (!finish.value.pending) await reserveFinishRetry(ctx, finish.row, finish.value, 'BATCH_FALLBACK');
+  else await scheduleFinish(ctx, finish.row);
 }

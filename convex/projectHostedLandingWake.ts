@@ -57,15 +57,16 @@ export async function nextTrainLandingRow(
       if (await invalidatePipeline(ctx, key, (await loadBatch(ctx, key)).batch))
         return nextTrainLandingRow(ctx, (await landingQueue(ctx, queue))!, now, held);
     }
-    for (const state of values.filter(state => state.phase === 'terminal-failed' && !state.batchId)) {
-      if (
+    const failedSolo = values.filter(state => state.phase === 'terminal-failed' && !state.batchId);
+    if (failedSolo.length) {
+      for (const state of failedSolo)
         await invalidatePipeline(
           ctx,
           { projectId: queue.projectId, batchId: state.id },
           { members: [{ submissionId: state.id }] },
-        )
-      )
-        return nextTrainLandingRow(ctx, (await landingQueue(ctx, queue))!, now, held);
+          true,
+        );
+      return nextTrainLandingRow(ctx, (await landingQueue(ctx, queue))!, now, held);
     }
     const pending = rows.filter(row => {
       if (!row || row.phase === 'landed' || row.phase === 'terminal-failed' || row.hold) return false;

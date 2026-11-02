@@ -9,7 +9,7 @@ import { releaseUnstartedBatchForPriority } from './projectHostedLandingBatchPri
 import type { Doc } from './_generated/dataModel';
 import type { MutationCtx } from './_generated/server';
 import type { FinishIdentity } from './projectHostedFinishControl';
-import { retainBatchConflict } from './projectHostedLandingBatchConflict';
+import { settleMemberBatchConflict } from './projectHostedLandingBatchConflict';
 import { batchConflictPeers } from './projectHostedLandingConflictPeers';
 import { loadFinish } from './projectHostedFinishStore';
 import { loadLanding } from './projectHostedLandingStore';
@@ -149,7 +149,8 @@ export async function batchFinishStep(
         await wakeBatch(ctx, key);
         return { handled: true, command: null };
       }
-      await hostedWriteProject(ctx, input.projectId, member.actor.id, member.authorityEpoch);
+      if (included.includes(member))
+        await hostedWriteProject(ctx, input.projectId, member.actor.id, member.authorityEpoch);
     }
     if (predecessor === 'pending' && dropped.length) await deferSpeculativeConflict(ctx, key, batch, dropped);
     for (const member of batch.members.filter(
@@ -161,7 +162,7 @@ export async function batchFinishStep(
       )
         continue;
       const conflict = dropped.find(d => d.candidateId === member.candidate.id)!;
-      await retainBatchConflict(ctx, {
+      await settleMemberBatchConflict(ctx, {
         projectId: input.projectId,
         member,
         main: source.state.request.expectedMain,
@@ -178,11 +179,13 @@ export async function batchFinishStep(
       });
     }
     if (!included.length) {
+      await retainSurvivorTrain(ctx, key, [], batch);
       await writeBatch(ctx, key, {
         ...batch,
         included: [],
         phase: predecessor === 'pending' ? 'composing' : 'landed',
       });
+      await wakeLandingQueue(ctx, { projectId: input.projectId, channel: 'main' });
       return { handled: true, command: null };
     }
     const settings = (await loadFinish(ctx, input)).value.check;

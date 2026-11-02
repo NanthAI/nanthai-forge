@@ -1,4 +1,5 @@
 import { holdsLandingOrder, landingPriorityState } from './projectHostedLandingOrder';
+import { invalidatePipeline } from './projectHostedLandingPipelineInvalidation';
 import { cancelUnneededHostedCheck } from './projectHostedCheckCancel';
 import { makeFunctionReference } from 'convex/server';
 import { semanticPayload } from '../src/semantic-payload';
@@ -188,6 +189,23 @@ export async function writeLanding(
     'WORK_OPERATION_CHANGED',
     'The selected attempt must belong to this original request.',
   );
+  // Solo checking/ready tails can own speculative descendants too. Retire the
+  // old generation in the mutation that changes its pins or stops its proof.
+  const retiresSolo =
+    !previous.batchId &&
+    (previous.phase === 'checking' || previous.phase === 'ready') &&
+    state.phase !== 'landed' &&
+    (state.phase === 'terminal-failed' ||
+      (row.pipelineRetiredAttemptId !== previous.attemptId &&
+        (state.phase === 'queued' || previous.attemptId !== state.attemptId)));
+  if (retiresSolo)
+    await invalidatePipeline(
+      ctx,
+      { projectId: row.projectId, batchId: state.id },
+      { members: [{ submissionId: state.id }] },
+      { loadLanding, loadLandingAttempt, insertLandingAttempt, writeLanding },
+      state.phase === 'terminal-failed',
+    );
   if (previous.attemptId !== state.attemptId) await retainLandingProgress(ctx, previous, true, attempt.main);
   if (
     state.observation.stall &&
@@ -212,6 +230,8 @@ export async function writeLanding(
   const orderLive = holdsLandingOrder({ phase: state.phase as LandingRow['phase'], hold: row.hold }, state);
   await ctx.db.patch(row._id, {
     attemptId: state.attemptId,
+    pipelineRetiredAttemptId:
+      previous.attemptId === state.attemptId ? row.pipelineRetiredAttemptId : undefined,
     runId,
     checkWakeVersion: row.runId === runId ? row.checkWakeVersion : undefined,
     admitting: admitting ? true : undefined,
@@ -236,7 +256,7 @@ export async function writeLanding(
     value: semanticPayload(state),
   });
   if (row.admitting && !admitting) await releaseAdmissionWaiters(ctx, row.projectId);
-  if (row.orderWaited && !orderLive) await wakeLandingOrderWaiters(ctx, row);
+  if (row.orderWaited && (!orderLive || retiresSolo)) await wakeLandingOrderWaiters(ctx, row, orderLive);
   if (
     releaseRun &&
     row.runId &&
