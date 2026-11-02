@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { normalizeHostedFinishResult } from './hosted-agent-finish-result.js';
 import { lstatSync, readlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -175,18 +176,8 @@ export async function selectHostedFinish(
 }
 
 export function finishRetryHint(root: string, command: Command, result: Record<string, unknown>) {
-  const submission = result.submission as { observation?: { state: string } } | undefined;
-  const progress = result.progress as { outcome?: { status: string } } | undefined;
-  const run = result.run as { status?: string } | undefined;
-  const failedCheck =
-    run && ['failed', 'cancelled', 'runner-unavailable', 'interrupted'].includes(run.status ?? '');
-  if (
-    result.phase !== 'conflict' &&
-    submission?.observation?.state !== 'terminal-failed' &&
-    progress?.outcome?.status !== 'failed' &&
-    !failedCheck
-  )
-    return result;
+  // Keep the established direct-conflict envelope; its nested recovery is authoritative.
+  if (result.phase !== 'conflict') return normalizeHostedFinishResult(root, command, result);
   const retry = { ...command, retry: true, reason: 'other' };
   const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
   return {

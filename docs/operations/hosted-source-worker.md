@@ -4,6 +4,17 @@ The source worker is fixed Forge code. It treats repository content as bytes and
 never checks it out, imports it, installs its packages, runs Git, follows source
 symlinks or executes repository commands. Check execution is separate from this source service.
 
+Pending or retryable source work retains its original operation and execution;
+follow the advertised continuation to reconcile an unknown outcome. A truly
+terminal source receipt remains immutable on replay. A failed finish advertises
+a new-attempt `next:{action:"finish", ...parameters}` plus its printed `command`,
+retaining the original selection and omitting the old operation ID. CLI stderr
+prints that command, and MCP exposes the same envelope (see the
+[agent continuation contract](../agents/workflow.md)). Terminal observations drop
+obsolete pending-source advice without an additional read or mutation; conflict
+recovery retains its exact sync/resolve continuation. This response handling does
+not reclassify worker failures or repair a terminal job.
+
 ## Default Convex provider
 
 Hosted save, compose and sync select `convex` by default. No source-worker secret

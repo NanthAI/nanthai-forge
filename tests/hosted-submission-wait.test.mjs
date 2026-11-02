@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
+import { assertAgentResponseShape } from './agent-response-shape.mjs';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { ForgeError } from '../dist/errors.js';
@@ -152,6 +153,7 @@ test('one hosted wait follows several operation IDs, deduplicates wakes and ends
   const result = await waiting;
   assert.equal(result.result.status, 'terminal');
   assert.equal(result.result.successful, false);
+  for (const entry of result.result.submissions) assertAgentResponseShape({ result: entry }, '/synthetic');
   const conflict = result.result.submissions.find(e => e.submission.id === b.state.id).recovery.conflict;
   assert.equal(conflict.next.action, 'sync');
   assert.equal(conflict.error.message, 'Synthetic conflict');

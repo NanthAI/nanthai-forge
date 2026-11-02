@@ -53,7 +53,7 @@ for (const shorthand of [false, true])
     const refused = await s.transport().dispatch('finish', command);
     assert.equal(refused.operationId, first.operationId);
     assert.equal(refused.result.submission.phase, 'terminal-failed');
-    assert.equal(refused.result.next, 'retry');
+    assert.equal(refused.result.next.action, 'finish');
     assert.match(refused.result.retryCommand, /finish .*"retry":true.*"reason":"other"/);
     assert.equal(s.calls.length - before, 2, 'shorthand failure is discovery plus exact replay');
     const laterMessage = await s.transport().dispatch('finish', {
@@ -427,7 +427,7 @@ test('dogfood-size finish history stays at two replay calls and bounded source s
   const before = s.calls.length,
     started = performance.now();
   const result = await s.transport().dispatch('finish', command);
-  assert.equal(result.result.next, 'retry');
+  assert.equal(result.result.next.action, 'finish');
   assert.equal(s.calls.length - before, 2);
   assert.equal(
     s.calls.slice(before).filter(c => /enqueue|submit|prepare/.test(c.name)).length,

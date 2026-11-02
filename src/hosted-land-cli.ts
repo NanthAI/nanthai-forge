@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { normalizeHostedFinishResult } from './hosted-agent-finish-result.js';
 import { spawn } from 'node:child_process';
 import { closeSync, fstatSync, mkdirSync, openSync, readFileSync, readSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
@@ -235,14 +236,18 @@ export async function hostedLandCli(
     | undefined;
   const final: HostedAgentResponse = {
     ...submitted,
-    result: {
-      ...(submitted.result as Record<string, unknown>),
-      ...(observation?.run ? { run: observation.run } : {}),
-      ...(observation?.submissions?.[0] ? observation.submissions[0] : {}),
-      ...(observation?.status && observation.status !== 'terminal'
-        ? { waitStatus: observation.status, inProgress: true }
-        : {}),
-    },
+    result: normalizeHostedFinishResult(
+      root,
+      (submitted.result as { replayParameters?: Record<string, unknown> }).replayParameters ?? command,
+      {
+        ...(submitted.result as Record<string, unknown>),
+        ...(observation?.run ? { run: observation.run } : {}),
+        ...(observation?.submissions?.[0] ? observation.submissions[0] : {}),
+        ...(observation?.status && observation.status !== 'terminal'
+          ? { waitStatus: observation.status, inProgress: true }
+          : {}),
+      },
+    ),
   };
   const lines = landSummary(final);
   for (const line of lines) process.stderr.write(`${line}\n`);

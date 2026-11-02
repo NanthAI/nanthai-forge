@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
+import { assertAgentResponseShape } from './agent-response-shape.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
@@ -16,7 +17,9 @@ async function fixture(t, checkOnly = false) {
     release,
     sourcePending = false,
     timeout = false,
-    conflictRecovery;
+    conflictRecovery,
+    terminalFailure,
+    stalePending;
   const gate = new Promise(resolve => {
     release = resolve;
   });
@@ -33,13 +36,20 @@ async function fixture(t, checkOnly = false) {
         ? { phase: 'check', run: { id: 'run', status: accepted ? 'passed' : 'running' } }
         : {
             phase: 'finish',
+            ...(stalePending ?? {}),
             submission: {
-              phase: conflictRecovery ? 'terminal-failed' : accepted ? 'landed' : 'ready',
-              observation: { state: conflictRecovery ? 'terminal-failed' : accepted ? 'landed' : 'pending' },
+              phase: conflictRecovery || terminalFailure ? 'terminal-failed' : accepted ? 'landed' : 'ready',
+              observation: {
+                state:
+                  conflictRecovery || terminalFailure ? 'terminal-failed' : accepted ? 'landed' : 'pending',
+              },
+              ...(terminalFailure ? { error: terminalFailure } : {}),
               ...(conflictRecovery
                 ? { error: { code: 'COMPOSITION_CONFLICT', message: 'shared.txt has conflicting edits' } }
                 : {}),
-              ...(accepted ? { acceptance: { receiptId: 'accepted', head: 'head' } } : {}),
+              ...(accepted && !conflictRecovery && !terminalFailure
+                ? { acceptance: { receiptId: 'accepted', head: 'head' } }
+                : {}),
             },
           },
   });
@@ -137,6 +147,25 @@ async function fixture(t, checkOnly = false) {
     run,
     operationId,
     response,
+    stale: selection => {
+      stalePending = {
+        status: 'submitted',
+        progress: { status: 'submitted', jobId: 'retained' },
+        next: { action: 'finish', operationId },
+        command: 'obsolete continuation',
+        error: { code: 'STALE_SOURCE_RETRY', message: 'Old pending source advice' },
+        failedPhase: 'source-compose',
+        recovery: { status: 'submitted', next: { action: 'finish', operationId } },
+        source: { status: 'submitted', jobId: 'retained' },
+        replay: { operationId },
+        waitCommand: 'obsolete wait',
+        inProgress: true,
+        replayParameters: { ...selection, operationId },
+      };
+    },
+    fail: () => {
+      terminalFailure = { code: 'SYNTHETIC_FAILURE', message: 'Retained terminal failure' };
+    },
     conflict: recovery => {
       conflictRecovery = recovery;
     },
@@ -240,3 +269,92 @@ test('land returns observed composition conflict details and sync instead of a f
   assert.equal(process.exitCode, 2);
   assert(s.err.join('').includes('Continue recovery: ' + recovery.conflict.command));
 });
+
+for (const outcome of ['failure', 'landed', 'conflict'])
+  test(`response-shape guard: first waited ${outcome} clears stale source advice with zero post-wait calls`, async t => {
+    const s = await fixture(t);
+    const selection = {
+      message: "Keep 'original' selection",
+      inputs: [{ laneId: randomUUID(), expected: { head: 'pinned' } }],
+      dependencies: [{ candidateId: randomUUID() }],
+      after: null,
+      accept: true,
+      keepOpen: true,
+    };
+    s.stale(selection);
+    const pending = s.run();
+    await turn();
+    if (outcome === 'failure') s.fail();
+    if (outcome === 'conflict')
+      s.conflict({
+        conflict: {
+          next: { action: 'sync', operationId: 'retained-conflict' },
+          command: `nforge agent '/synthetic' sync '{"operationId":"retained-conflict"}'`,
+        },
+      });
+    s.release();
+    const response = await pending;
+    const next = assertAgentResponseShape(response, '/synthetic');
+    assert.equal(s.calls.length, 1, 'normalization adds zero calls, reads or finish mutations');
+    assert.equal(response.result.progress, undefined);
+    assert.equal(response.result.replay, undefined);
+    assert.equal(response.result.waitCommand, undefined);
+    assert.equal(response.result.source, undefined);
+    assert.equal(response.result.error, undefined);
+    assert.equal(response.result.failedPhase, undefined);
+    if (outcome === 'failure') {
+      assert.deepEqual(next.body, { ...selection, retry: true, reason: 'other' });
+      assert.equal(response.result.next.operationId, undefined);
+      assert.equal(response.result.recovery, undefined);
+      assert.equal(response.result.source, undefined);
+      assert.equal(response.result.retryCommand, response.result.command);
+      assert.equal(response.result.replayParameters.operationId, s.operationId);
+      assert(s.err.join('').includes('Retry: ' + response.result.command));
+      assert.equal(process.exitCode, 2);
+    } else if (outcome === 'conflict') {
+      assert.equal(next.action, 'sync');
+      assert.equal(next.body.operationId, 'retained-conflict');
+    } else {
+      assert.equal(response.result.submission.acceptance.receiptId, 'accepted');
+      assert.equal(response.result.next, undefined);
+    }
+  });
+
+for (const count of [560, 1120])
+  test(`response normalization budget: ${count} pinned inputs adds zero calls or source reads`, async t => {
+    const s = await fixture(t);
+    const selection = {
+      inputs: Array.from({ length: count }, () => ({
+        laneId: randomUUID(),
+        expected: { head: 'a'.repeat(64), version: 1 },
+      })),
+      dependencies: [],
+      message: 'Synthetic selection',
+      accept: true,
+    };
+    s.stale(selection);
+    const pending = s.run();
+    await turn();
+    s.fail();
+    const started = performance.now();
+    s.release();
+    const response = await pending;
+    const elapsedMs = performance.now() - started;
+    const next = assertAgentResponseShape(response, '/synthetic');
+    assert.deepEqual(next.body.inputs, selection.inputs);
+    assert.equal(s.calls.length, 1);
+    assert.equal(s.events.length, 1, 'one selected observation, no history hydration');
+    t.diagnostic(
+      JSON.stringify({
+        inputs: count,
+        extraConvexCalls: 0,
+        extraDbReads: 0,
+        extraDbWrites: 0,
+        sourceReads: 0,
+        idleCalls: 0,
+        elapsedMs,
+        rssBytes: process.memoryUsage().rss,
+        retryBytes: Buffer.byteLength(response.result.command),
+      }),
+    );
+  });

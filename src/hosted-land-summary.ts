@@ -18,6 +18,9 @@ type Result = {
   };
   run?: { id?: string; status?: string };
   command?: string;
+  retryCommand?: string;
+  status?: string;
+  terminal?: boolean;
   recovery?: { command?: string; conflict?: { command?: string } };
   conflict?: { command?: string };
 };
@@ -37,17 +40,23 @@ export function landSummary(response: HostedAgentResponse): string[] {
   if (phase === 'ready')
     return [submission ? 'CHECK PASSED; waiting for acceptance' : 'CHECK PASSED (not landed)'];
   if (result.phase === 'check' && result.run?.status === 'passed') return ['CHECK PASSED (not landed)'];
-  if (['save', 'compose', 'sync'].includes(result.phase ?? ''))
-    return ['SOURCE PENDING', ...(result.command ? [`Continue: ${result.command}`] : [])];
   const lines: string[] = [];
   const error = submission?.error;
   const recovery = result.recovery?.conflict?.command ?? result.recovery?.command ?? result.conflict?.command;
-  if (phase === 'terminal-failed' || error || result.run?.status === 'failed')
+  if (
+    phase === 'terminal-failed' ||
+    error ||
+    result.status === 'failed' ||
+    ['failed', 'cancelled', 'runner-unavailable', 'interrupted'].includes(result.run?.status ?? '')
+  )
     lines.push(
       `FAILED${error ? ` ${error.code}: ${(recovery ? error.message.split(' Run nforge agent ')[0]! : error.message).replace(/\s+/g, ' ').slice(0, 300)}` : ''}`,
     );
   if (result.phase === 'conflict') lines.push('FAILED COMPOSITION_CONFLICT');
   if (recovery) lines.push(`Continue recovery: ${recovery}`);
+  else if (result.retryCommand) lines.push(`Retry: ${result.retryCommand}`);
+  if (!lines.length && ['save', 'compose', 'sync'].includes(result.phase ?? ''))
+    return ['SOURCE PENDING', ...(result.command ? [`Continue: ${result.command}`] : [])];
   for (const file of submission?.testFiles?.failed?.slice(0, 20) ?? [])
     lines.push(
       `  ${file.file}${file.report?.firstError ? ` :: ${file.report.firstError.replace(/\s+/g, ' ').slice(0, 300)}` : ''}`,
@@ -60,6 +69,7 @@ export function landSummary(response: HostedAgentResponse): string[] {
 /** Requested landings settle on canonical acceptance/failure, never check readiness. */
 export function landTerminal(response: HostedAgentResponse) {
   const result = resultOf(response);
+  if (result.terminal === true) return true;
   if (result.phase === 'check')
     return ['passed', 'failed', 'cancelled', 'runner-unavailable', 'interrupted'].includes(
       result.run?.status ?? '',

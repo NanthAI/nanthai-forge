@@ -502,3 +502,56 @@ test('collector matches the executed action, including public aliases, rather th
     [{ action: 'save', operationId: 'saved', receiptId: null }],
   );
 });
+
+for (const legacy of [true, false])
+  test(`generic terminal retry envelope (${legacy ? 'legacy' : 'structured'}) retains selection and starts one new attempt`, async () => {
+    const retry = {
+      inputs: [{ laneId: 'arbitrary', expected: { head: 'pinned' } }],
+      dependencies: [{ candidateId: 'dependency' }],
+      message: 'original',
+      retry: true,
+      reason: 'other',
+    };
+    const command = `nforge agent '${root}' finish '${JSON.stringify(retry)}'`;
+    const reply = response({
+      submission: { phase: 'terminal-failed', error: { code: 'ARBITRARY_FAILURE' } },
+      ...(legacy
+        ? { next: 'retry', retry, retryCommand: command }
+        : { next: { action: 'finish', ...retry }, command, retry, retryCommand: command }),
+    });
+    const f = await fixture([reply, landed]);
+    assert.equal(f.result.landAttempts, 2);
+    assert.deepEqual(f.calls[1], { root, action: 'finish', flags: [], body: retry });
+    assert.equal(f.calls[1].body.operationId, undefined);
+  });
+
+test('terminal submission without retry is recorded as the actual failure, not a missing-continuation defect', async () => {
+  await assert.rejects(
+    fixture([
+      response({
+        submission: { phase: 'terminal-failed', error: { code: 'ANY_CODE', message: 'retained failure' } },
+      }),
+    ]),
+    error => {
+      assert.match(error.message, /BENCH_PRODUCT_FAILURE:/);
+      assert.match(error.message, /ANY_CODE/);
+      assert.doesNotMatch(error.message, /no terminal result or continuation|BENCH_PRODUCT_FRICTION/);
+      return true;
+    },
+  );
+});
+
+test('terminal retries count against the existing landing attempt budget', async () => {
+  const reply = response({
+    submission: { phase: 'terminal-failed' },
+    next: { action: 'finish', retry: true, reason: 'other' },
+  });
+  await assert.rejects(fixture([reply, reply], { maxLandAttempts: 2 }), /BENCH_LAND_ATTEMPTS_EXHAUSTED/);
+});
+
+test('an incomplete legacy retry marker never invents missing parameters', async () => {
+  await assert.rejects(
+    fixture([response({ submission: { phase: 'terminal-failed' }, next: 'retry' })]),
+    /BENCH_PRODUCT_FAILURE:/,
+  );
+});

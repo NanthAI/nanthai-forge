@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { normalizeHostedFinishResult } from './hosted-agent-finish-result.js';
 import type { HostedAgentSession } from './hosted-agent-transport.js';
 import { hostedRecoveryCommand } from './hosted-agent-resolution.js';
 
@@ -25,6 +26,10 @@ export async function withSourceRecovery(
   command: object,
   value: unknown,
 ) {
+  if (action === 'finish' && value && typeof value === 'object') {
+    const normalized = normalizeHostedFinishResult(session.root, command as Reply, value as Reply);
+    if (normalized !== value) return normalized;
+  }
   const source = sourceReply(value);
   if (!source) return value;
   const replay = { action, ...session.address, ...command, operationId: session.journal.operationId };

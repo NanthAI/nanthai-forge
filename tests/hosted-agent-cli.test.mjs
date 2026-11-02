@@ -189,3 +189,129 @@ test('hosted wait CLI returns and prints direct conflict recovery without finish
   assert(err.join('').includes('Continue recovery: ' + result.result.recovery.conflict.command));
   assert.equal(process.exitCode, 0, 'wait terminal failures retain their documented exit status');
 });
+
+// This table exercises public production wrappers, rather than only the pure normalizer.
+for (const wrapper of ['cli', 'mcp'])
+  for (const outcome of ['pending', 'retryable', 'terminal-submission', 'terminal-source'])
+    test(`response-shape guard: ${wrapper} ${outcome} retains an outcome or exact continuation`, async t => {
+      const { assertAgentResponseShape } = await import('./agent-response-shape.mjs');
+      const { registerHostedAgentWorkflow } = await import('../dist/mcp-hosted-agent.js');
+      const { getFunctionName } = await import('convex/server');
+      const s = agentFixture(t);
+      const command = {
+        operationId: randomUUID(),
+        inputs: [{ laneId: s.lane.laneId }],
+        dependencies: [{ candidateId: s.candidate.id }],
+        message: "Original 'selection'",
+        accept: outcome !== 'terminal-source',
+        keepOpen: true,
+      };
+      s.pending(outcome !== 'terminal-source');
+      const mutation = s.exchange.client.mutation;
+      s.exchange.client.mutation = async (ref, args) => {
+        const value = await mutation(ref, args);
+        if (getFunctionName(ref) !== 'projectHostedComposeJobs:submit') return value;
+        if (outcome === 'terminal-source')
+          return JSON.stringify({
+            attemptId: randomUUID(),
+            at: '2026-01-01T00:00:00.000Z',
+            outcome: {
+              status: 'failed',
+              error: { code: 'SYNTHETIC_INVALID_SOURCE', message: 'Invalid source' },
+            },
+          });
+        if (outcome === 'retryable')
+          return JSON.stringify({
+            status: 'retryable',
+            jobId: 'retained',
+            error: { code: 'SYNTHETIC_RETRY', message: 'Retry same operation' },
+          });
+        return value;
+      };
+      const transport = s.transport();
+      let invoke;
+      if (wrapper === 'mcp') {
+        const tools = new Map();
+        t.after(
+          registerHostedAgentWorkflow(
+            {
+              registerTool(name, _config, call) {
+                tools.set(name, call);
+              },
+            },
+            transport,
+          ),
+        );
+        invoke = async () => {
+          const reply = await tools.get('forge_task')({ command: { action: 'finish', ...command } }, {});
+          assert(!reply.isError, reply.content[0].text);
+          return JSON.parse(reply.content[0].text);
+        };
+      } else invoke = () => hostedAgentCli(s.root, 'finish', command, s.address, transport);
+      const first = await invoke();
+      const firstNext = assertAgentResponseShape(first, s.root);
+      if (outcome === 'terminal-submission') {
+        const submission = s.operations.get(first.operationId);
+        submission.phase = 'terminal-failed';
+        submission.observation = { state: 'terminal-failed', cause: 'rejected', pendingReason: null };
+        submission.error = { code: 'SYNTHETIC_FAILURE', message: 'Immutable terminal failure' };
+        const before = s.calls.length;
+        const replay = await invoke();
+        const next = assertAgentResponseShape(replay, s.root);
+        assert.equal(
+          s.calls.length - before,
+          2,
+          'discovery plus original admission only; no normalization reads',
+        );
+        const { operationId: _original, ...selection } = first.result.replayParameters;
+        void _original;
+        assert.deepEqual(next.body, { ...selection, retry: true, reason: 'other' });
+        assert.equal(replay.result.next.operationId, undefined);
+        assert.deepEqual(replay.result.submission, submission);
+        const again = await invoke();
+        assert.deepEqual(again.result, replay.result, 'terminal replay remains stable');
+        const { landSummary } = await import('../dist/hosted-land-summary.js');
+        assert(landSummary(replay).includes('Retry: ' + replay.result.command));
+      } else if (outcome === 'terminal-source') {
+        assert.equal(first.result.status, 'failed');
+        assert.equal(first.result.progress.outcome.error.code, 'SYNTHETIC_INVALID_SOURCE');
+        assert.equal(firstNext.body.operationId, undefined);
+        assert.equal(firstNext.body.retry, true);
+      } else {
+        assert.equal(firstNext.body.operationId, command.operationId);
+        assert.equal(firstNext.action, 'finish');
+      }
+    });
+
+test('response-shape guard itself rejects dead ends, stale terminal advice and inconsistent commands', async () => {
+  const { assertAgentResponseShape } = await import('./agent-response-shape.mjs');
+  assert.throws(() => assertAgentResponseShape({ result: { status: 'submitted' } }, '/synthetic'), /neither/);
+  assert.throws(
+    () =>
+      assertAgentResponseShape(
+        {
+          operationId: 'old',
+          result: {
+            submission: { phase: 'terminal-failed' },
+            status: 'submitted',
+            next: { action: 'finish', operationId: 'old' },
+          },
+        },
+        '/synthetic',
+      ),
+    /pending status/,
+  );
+  assert.throws(
+    () =>
+      assertAgentResponseShape(
+        {
+          result: {
+            next: { action: 'finish', retry: true },
+            command: `nforge agent /synthetic finish '{"retry":false}'`,
+          },
+        },
+        '/synthetic',
+      ),
+    /disagree/,
+  );
+});

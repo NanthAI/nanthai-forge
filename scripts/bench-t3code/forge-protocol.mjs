@@ -46,19 +46,28 @@ export function printedCommand(text, cwd) {
 }
 
 export function continuation(value, root) {
-  if (value.command) {
-    const command = printedCommand(value.command, root);
-    if (value.next) {
-      for (const [key, expected] of Object.entries(value.next)) {
+  // Current replies pair structured next with command. Older releases advertised
+  // next:"retry", retry parameters and retryCommand for the same documented action.
+  const legacyRetry = value.next === 'retry';
+  const advertised = value.command ?? (legacyRetry ? value.retryCommand : undefined);
+  const expected = legacyRetry
+    ? value.retry && typeof value.retry === 'object'
+      ? { action: 'finish', ...value.retry }
+      : undefined
+    : value.next;
+  if (advertised) {
+    const command = printedCommand(advertised, root);
+    if (expected && typeof expected === 'object') {
+      for (const [key, wanted] of Object.entries(expected)) {
         const actual = key === 'action' ? command.action : command.body[key];
-        if (JSON.stringify(actual) !== JSON.stringify(expected))
+        if (JSON.stringify(actual) !== JSON.stringify(wanted))
           friction(`Advertised next and command disagree on ${key}`);
       }
     }
     return command;
   }
-  if (value.next?.action) {
-    const { action, ...body } = value.next;
+  if (expected?.action) {
+    const { action, ...body } = expected;
     return { root, action, body, flags: [] };
   }
   return null;
@@ -125,7 +134,6 @@ export async function driveForge({
     }
     lastInterrupted = null;
     const recovery = result.recovery ?? result;
-    if (sourceFailed(recovery)) friction(`Source failed: ${JSON.stringify(recovery)}`);
     const conflict = recovery.conflict;
     if (conflict?.root) {
       const next = continuation(conflict, conflict.root);
@@ -136,7 +144,13 @@ export async function driveForge({
       command = next;
       continue;
     }
+    const terminalFailure =
+      result.submission?.phase === 'terminal-failed' ||
+      result.phase === 'terminal-failed' ||
+      (result.terminal === true && result.complete !== true);
     const next = continuation(conflict ?? recovery, command.root);
+    if (terminalFailure && !next) throw Error(`BENCH_PRODUCT_FAILURE: ${JSON.stringify(result)}`);
+    if (sourceFailed(recovery) && !terminalFailure) friction(`Source failed: ${JSON.stringify(recovery)}`);
     if (!next) friction(`Action ${command.action} returned no terminal result or continuation`);
     if (
       ['sync', 'resolve'].includes(command.action) &&
@@ -147,7 +161,9 @@ export async function driveForge({
       friction('Pending source continuation changed operation identity');
     if (command.action === 'resolve' && ['land', 'finish'].includes(next.action) && !result.applied)
       friction('Resolve advertised finish without a local apply result');
-    newLanding = ['land', 'finish'].includes(next.action) && !['land', 'finish'].includes(command.action);
+    newLanding =
+      ['land', 'finish'].includes(next.action) &&
+      (!['land', 'finish'].includes(command.action) || next.body.retry === true);
     // Keep the existing landing retry cadence; bounded sync/resolve waits drive source.
     if (['land', 'finish'].includes(next.action)) await pause();
     command = next;

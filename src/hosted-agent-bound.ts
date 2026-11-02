@@ -1,3 +1,4 @@
+import { finishRetryContinuation } from './hosted-agent-finish-result.js';
 import { finishRetryReasonSchema } from './hosted-landing.js';
 // SPDX-License-Identifier: Apache-2.0
 import { boundLandingStatus, watchBoundLanding } from './hosted-agent-bound-read.js';
@@ -110,19 +111,7 @@ export async function boundAgentSubmission(
     !result.conflict
   ) {
     const original = retained?.command ?? raw;
-    const retry = Object.fromEntries(Object.entries(original).filter(([key]) => key !== 'operationId'));
-    const command = {
-      ...retry,
-      retry: true,
-      reason: 'other',
-    };
-    const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
-    result = {
-      ...result,
-      next: 'retry',
-      retry: command,
-      retryCommand: `nforge agent ${quote(store.root)} finish ${quote(JSON.stringify(command))}`,
-    };
+    result = { ...result, ...finishRetryContinuation(store.root, original) };
   }
   return {
     ...response,

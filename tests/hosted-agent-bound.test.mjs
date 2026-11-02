@@ -852,7 +852,13 @@ test('new explicit finish after a failed saved head skips its already completed 
   submission.error = { code: 'CHECK_FAILED', message: 'Synthetic flaky check' };
   const replay = await boundAgentSubmission(f.store, command, noNative, c.transport);
   assert.equal(replay.result.complete, false);
-  assert.equal(replay.result.next, 'retry');
+  assert.equal(replay.result.next.action, 'finish');
+  assert.equal(replay.result.next.operationId, undefined);
+  assert.equal(replay.result.command, replay.result.retryCommand);
+  const { assertAgentResponseShape } = await import('./agent-response-shape.mjs');
+  const advertised = assertAgentResponseShape(replay, f.root);
+  assert.equal(advertised.body.action, undefined);
+  assert.equal(advertised.body.laneId, command.laneId);
   assert.match(replay.result.retryCommand, /finish/);
   const count = f.calls.length;
   let sourceUploads = 0,
