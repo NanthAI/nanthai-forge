@@ -230,7 +230,7 @@ export async function hostedLandCli(
     | {
         status?: string;
         run?: unknown;
-        submissions?: { submission: unknown }[];
+        submissions?: { submission: unknown; recovery?: unknown; conflict?: unknown }[];
       }
     | undefined;
   const final: HostedAgentResponse = {
@@ -238,7 +238,7 @@ export async function hostedLandCli(
     result: {
       ...(submitted.result as Record<string, unknown>),
       ...(observation?.run ? { run: observation.run } : {}),
-      ...(observation?.submissions?.[0] ? { submission: observation.submissions[0].submission } : {}),
+      ...(observation?.submissions?.[0] ? observation.submissions[0] : {}),
       ...(observation?.status && observation.status !== 'terminal'
         ? { waitStatus: observation.status, inProgress: true }
         : {}),

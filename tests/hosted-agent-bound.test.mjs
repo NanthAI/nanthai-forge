@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { printedCommand } from '../scripts/bench-t3code/forge-protocol.mjs';
 import { agentFixture } from './hosted-agent-fixture.mjs';
 import { initNative } from '../dist/native-work.js';
 import { NativeSource } from '../dist/native-source.js';
@@ -958,4 +959,61 @@ test('bound check-only deadline before its first observation remains pending rat
   assert.equal(result.result.complete, false);
   assert.equal(result.result.runs[0].status, 'timeout');
   assert.equal(result.result.runs[0].inProgress, true);
+});
+
+test('bound finish and wait return the rejected conflict recovery instead of a generic retry', async t => {
+  const f = fixture(t),
+    transport = f.transport();
+  await boundAgentSubmission(f.store, f.command, noNative, transport);
+  const submission = f.operations.get(f.command.operationId);
+  submission.phase = 'terminal-failed';
+  submission.observation = { state: 'terminal-failed', cause: 'conflict', pendingReason: null };
+  submission.error = { code: 'COMPOSITION_CONFLICT', message: 'shared.txt conflicts with accepted main' };
+  const candidateId = randomUUID();
+  const query = transport.query.bind(transport);
+  let conflictReads = 0;
+  transport.query = async (name, args) => {
+    if (name === 'projectHostedLanding:status') {
+      conflictReads++;
+      return {
+        request: submission,
+        attempt: { id: submission.attemptId, candidate: { id: candidateId, head: null } },
+      };
+    }
+    return query(name, args);
+  };
+  let recovery;
+  for (const wait of [false, true]) {
+    const before = conflictReads;
+    const result = await boundAgentSubmission(
+      f.store,
+      { ...f.command, wait, waitMs: 1000 },
+      noNative,
+      transport,
+    );
+    recovery = result.result.recovery;
+    assert.equal(recovery.conflict.candidateId, candidateId);
+    assert.equal(result.result.recovery.conflict.next.action, 'sync');
+    assert.deepEqual(result.result.recovery.conflict.error, submission.error);
+    assert.notEqual(result.result.next, 'retry');
+    assert.equal(conflictReads - before, 1);
+  }
+  // Follow the printed command from an actual native bound root with no hosted marker.
+  http(t, f);
+  f.candidate.id = candidateId;
+  f.candidate.result = {
+    status: 'conflict',
+    conflicts: { sha256: f.main.head, size: f.objects.get(f.main.head).length },
+  };
+  const next = printedCommand(recovery.conflict.command, f.root);
+  assert.deepEqual(next.body, { ...f.address, candidateId });
+  const resumed = await agentCli([next.root, next.action, JSON.stringify(next.body)]);
+  assert.equal(resumed.transport, 'hosted');
+  assert(
+    f.calls.some(
+      call =>
+        call.name === 'projectHostedSync:prepare' &&
+        JSON.parse(call.args.request).candidateId === candidateId,
+    ),
+  );
 });

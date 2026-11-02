@@ -19,6 +19,7 @@ type Result = {
   run?: { id?: string; status?: string };
   command?: string;
   recovery?: { command?: string; conflict?: { command?: string } };
+  conflict?: { command?: string };
 };
 export const resultOf = (response: HostedAgentResponse) => (response.result ?? {}) as Result;
 export function landPhase(response: HostedAgentResponse): string | undefined {
@@ -40,7 +41,7 @@ export function landSummary(response: HostedAgentResponse): string[] {
     return ['SOURCE PENDING', ...(result.command ? [`Continue: ${result.command}`] : [])];
   const lines: string[] = [];
   const error = submission?.error;
-  const recovery = result.recovery?.conflict?.command ?? result.recovery?.command;
+  const recovery = result.recovery?.conflict?.command ?? result.recovery?.command ?? result.conflict?.command;
   if (phase === 'terminal-failed' || error || result.run?.status === 'failed')
     lines.push(
       `FAILED${error ? ` ${error.code}: ${(recovery ? error.message.split(' Run nforge agent ')[0]! : error.message).replace(/\s+/g, ' ').slice(0, 300)}` : ''}`,

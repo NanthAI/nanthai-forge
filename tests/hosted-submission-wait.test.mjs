@@ -21,7 +21,13 @@ async function fixture() {
     reads = 0,
     actor = 'owner',
     duringSubscribe;
+  let conflictReads = 0;
+  const sStatus = async id => {
+    conflictReads++;
+    return f.status(id);
+  };
   const transport = {
+    root: '/synthetic',
     address: { url: 'https://fixture.invalid', projectId: f.projectId },
     async dispatch() {
       return {
@@ -33,6 +39,7 @@ async function fixture() {
       };
     },
     async query(name, args) {
+      if (name === 'projectHostedLanding:status') return sStatus(args.submissionId);
       assert.equal(name, 'projectHostedFinishObserve:page');
       reads++;
       return JSON.parse(
@@ -94,6 +101,7 @@ async function fixture() {
   return {
     f,
     transport,
+    conflictReads: () => conflictReads,
     subscribe,
     events,
     start,
@@ -144,6 +152,10 @@ test('one hosted wait follows several operation IDs, deduplicates wakes and ends
   const result = await waiting;
   assert.equal(result.result.status, 'terminal');
   assert.equal(result.result.successful, false);
+  const conflict = result.result.submissions.find(e => e.submission.id === b.state.id).recovery.conflict;
+  assert.equal(conflict.next.action, 'sync');
+  assert.equal(conflict.error.message, 'Synthetic conflict');
+  assert.equal(s.conflictReads(), 1);
   assert.deepEqual(
     s.events.map(e => [e.operationId, e.version]),
     [
@@ -824,4 +836,69 @@ test('575 selected operations retain one cursor and bounded metadata across an o
   console.error(
     `575 selected operations: ${reads} initial reads, ${subscriptions} selected subscriptions on one connection, ${bytes} retained bytes, ${Math.round(performance.now() - started)} ms`,
   );
+});
+
+test('wait reuses observed conflict recovery across wakes and exposes a single conflict continuation', async () => {
+  const s = await fixture(),
+    a = await s.start(),
+    b = await s.start();
+  await s.update(a.state.id, 'terminal-failed', {
+    error: { code: 'COMPOSITION_CONFLICT', message: 'shared.txt conflict' },
+  });
+  const waiting = observeHostedSubmissions(
+    s.transport,
+    { operationIds: [a.request.operationId, b.request.operationId], until: 'acceptance', timeoutSeconds: 5 },
+    undefined,
+    e => s.events.push(e),
+    s.subscribe,
+  );
+  await turn();
+  assert.equal(s.conflictReads(), 1);
+  s.wake();
+  await turn();
+  assert.equal(s.conflictReads(), 1, 'duplicate wakes reuse the exact observed attempt recovery');
+  await s.update(b.state.id, 'landed');
+  s.wake();
+  const result = await waiting;
+  assert.equal(result.result.status, 'terminal');
+  assert.equal(s.conflictReads(), 1);
+  const single = await observeHostedSubmissions(
+    s.transport,
+    { operationIds: [a.request.operationId], until: 'acceptance', timeoutSeconds: 0 },
+    undefined,
+    () => {},
+    s.subscribe,
+  );
+  assert.equal(single.result.recovery.conflict.next.action, 'sync');
+  assert.equal(single.result.recovery.conflict.error.message, 'shared.txt conflict');
+});
+
+test('wait preserves embedded recovery from its observation with zero conflict reads', async () => {
+  const s = await fixture(),
+    a = await s.start();
+  await s.update(a.state.id, 'terminal-failed', {
+    error: { code: 'COMPOSITION_CONFLICT', message: 'shared.txt conflict' },
+  });
+  const recovery = {
+    conflict: {
+      candidateId: randomUUID(),
+      paths: ['shared.txt'],
+      next: { action: 'sync' },
+      command: "nforge agent '/synthetic' sync '{}'",
+    },
+  };
+  const query = s.transport.query;
+  s.transport.query = async (...args) => {
+    const page = await query(...args);
+    return { ...page, events: page.events.map(event => ({ ...event, recovery })) };
+  };
+  const result = await observeHostedSubmissions(
+    s.transport,
+    { operationIds: [a.request.operationId], until: 'acceptance', timeoutSeconds: 0 },
+    undefined,
+    () => {},
+    s.subscribe,
+  );
+  assert.deepEqual(result.result.recovery, recovery);
+  assert.equal(s.conflictReads(), 0);
 });

@@ -15,7 +15,8 @@ async function fixture(t, checkOnly = false) {
   let accepted = false,
     release,
     sourcePending = false,
-    timeout = false;
+    timeout = false,
+    conflictRecovery;
   const gate = new Promise(resolve => {
     release = resolve;
   });
@@ -33,8 +34,11 @@ async function fixture(t, checkOnly = false) {
         : {
             phase: 'finish',
             submission: {
-              phase: accepted ? 'landed' : 'ready',
-              observation: { state: accepted ? 'landed' : 'pending' },
+              phase: conflictRecovery ? 'terminal-failed' : accepted ? 'landed' : 'ready',
+              observation: { state: conflictRecovery ? 'terminal-failed' : accepted ? 'landed' : 'pending' },
+              ...(conflictRecovery
+                ? { error: { code: 'COMPOSITION_CONFLICT', message: 'shared.txt has conflicting edits' } }
+                : {}),
               ...(accepted ? { acceptance: { receiptId: 'accepted', head: 'head' } } : {}),
             },
           },
@@ -63,7 +67,12 @@ async function fixture(t, checkOnly = false) {
       return {
         result: {
           status: timeout ? 'timeout' : 'terminal',
-          submissions: [{ submission: response().result.submission }],
+          submissions: [
+            {
+              submission: response().result.submission,
+              ...(conflictRecovery ? { recovery: conflictRecovery } : {}),
+            },
+          ],
         },
       };
     },
@@ -128,6 +137,9 @@ async function fixture(t, checkOnly = false) {
     run,
     operationId,
     response,
+    conflict: recovery => {
+      conflictRecovery = recovery;
+    },
     timeout: () => {
       timeout = true;
     },
@@ -203,4 +215,28 @@ test('land observation deadline returns IN PROGRESS with the exact wait command 
   assert(stderr.includes('IN PROGRESS; wait deadline reached'));
   assert(stderr.includes(landWaitCommand('/synthetic', result)));
   assert(!stderr.includes('FAILED'));
+});
+
+test('land returns observed composition conflict details and sync instead of a finish replay', async t => {
+  const s = await fixture(t);
+  const pending = s.run();
+  await turn();
+  const recovery = {
+    conflict: {
+      candidateId: randomUUID(),
+      paths: ['shared.txt'],
+      next: { action: 'sync' },
+      command: "nforge agent '/synthetic' sync '{}'",
+    },
+  };
+  s.conflict(recovery);
+  s.release();
+  const result = await pending;
+  assert.deepEqual(result.result.recovery, recovery);
+  assert.equal(result.result.recovery.conflict.next.action, 'sync');
+  assert.deepEqual(result.result.recovery.conflict.paths, ['shared.txt']);
+  assert.equal(result.result.submission.error.code, 'COMPOSITION_CONFLICT');
+  assert.equal(s.calls.length, 1, 'no finish replay to discover recovery');
+  assert.equal(process.exitCode, 2);
+  assert(s.err.join('').includes('Continue recovery: ' + recovery.conflict.command));
 });

@@ -141,3 +141,51 @@ test('hosted wait CLI reports a persistent observe 502 as IN PROGRESS with an ex
   assert(!err.join('').includes('FAILED'));
   assert(output.every(line => JSON.parse(line).type === 'observation-retry'));
 });
+
+test('hosted wait CLI returns and prints direct conflict recovery without finish', async t => {
+  const s = agentFixture(t),
+    transport = s.transport();
+  const submitted = await transport.dispatch('finish', {
+    candidateId: s.candidate.id,
+    composeOperationId: randomUUID(),
+    accept: true,
+  });
+  const submission = s.operations.get(submitted.operationId);
+  submission.phase = 'terminal-failed';
+  submission.observation = { state: 'terminal-failed', pendingReason: null, cause: 'conflict' };
+  submission.error = { code: 'COMPOSITION_CONFLICT', message: 'shared.txt conflicts with accepted main' };
+  const candidateId = randomUUID();
+  const query = transport.query.bind(transport);
+  let conflictReads = 0;
+  transport.query = async (name, args) => {
+    if (name === 'projectHostedLanding:status') {
+      conflictReads++;
+      return {
+        request: submission,
+        attempt: { id: submission.attemptId, candidate: { id: candidateId, head: null } },
+      };
+    }
+    return query(name, args);
+  };
+  const err = [],
+    oldExit = process.exitCode;
+  t.after(() => {
+    process.exitCode = oldExit;
+  });
+  t.mock.method(process.stderr, 'write', chunk => {
+    err.push(String(chunk));
+    return true;
+  });
+  const result = await hostedAgentCli(
+    s.root,
+    'wait',
+    { operationIds: [submitted.operationId], until: 'acceptance', timeoutSeconds: 0 },
+    s.address,
+    transport,
+  );
+  assert.equal(result.result.recovery.conflict.candidateId, candidateId);
+  assert.equal(result.result.recovery.conflict.next.action, 'sync');
+  assert.equal(conflictReads, 1);
+  assert(err.join('').includes('Continue recovery: ' + result.result.recovery.conflict.command));
+  assert.equal(process.exitCode, 0, 'wait terminal failures retain their documented exit status');
+});

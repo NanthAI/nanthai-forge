@@ -105,7 +105,9 @@ export async function boundAgentSubmission(
     raw?.action === 'finish' &&
     result?.transport === 'hosted' &&
     result.terminal === true &&
-    result.complete !== true
+    result.complete !== true &&
+    !result.recovery &&
+    !result.conflict
   ) {
     const original = retained?.command ?? raw;
     const retry = Object.fromEntries(Object.entries(original).filter(([key]) => key !== 'operationId'));

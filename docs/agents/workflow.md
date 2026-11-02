@@ -1012,6 +1012,9 @@ Exit codes are 0 when all targets reach a terminal outcome (including failed che
 or any change is observed in `any-change` mode, 2 for native timeout, and 130 for cancellation.
 Hosted `wait` and `land --save` use exit 3 for an in-progress deadline, print the exact
 wait command, and keep waiting through transient observation failures until that deadline.
+Observed composition conflicts include the rejected Candidate details and a `sync`
+recovery command; follow its returned conflict files and `resolve` continuation.
+There is no intermediate `finish` replay to discover recovery.
 Invalid input or unreadable metadata exits nonzero. `successful` in the summary and
 `ok` on each target distinguish successful outcomes from failed/interrupted ones. The summary names every target and
 its latest state. Failures include the reason, infrastructure versus check failure

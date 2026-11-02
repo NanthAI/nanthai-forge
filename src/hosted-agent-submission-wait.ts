@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { observedConflictRecovery } from './hosted-observed-conflict.js';
 import { makeFunctionReference } from 'convex/server';
 import { z } from 'zod';
 import { retryHostedObservation } from './hosted-observation-retry.js';
@@ -26,8 +27,10 @@ const eventSchema = z.object({
   queue: z.unknown().optional(),
   queueAheadSelection: z.unknown().optional(),
   wouldConflict: z.unknown().optional(),
+  recovery: z.unknown().optional(),
+  conflict: z.unknown().optional(),
 });
-const pageSchema = z.object({
+const pageSchema = eventSchema.extend({
   projectId: z.string(),
   operationId: z.uuid(),
   canonicalOperationId: z.uuid().optional(),
@@ -41,6 +44,8 @@ const pageSchema = z.object({
   queue: z.unknown().optional(),
   queueAheadSelection: z.unknown().optional(),
   wouldConflict: z.unknown().optional(),
+  recovery: z.unknown().optional(),
+  conflict: z.unknown().optional(),
 });
 const decode = (value: unknown) => (typeof value === 'string' ? JSON.parse(value) : value);
 /** Durable submission versions plus S05 selection-scoped deduplication. Live
@@ -96,10 +101,20 @@ export async function observeHostedSubmissions(
             if (event.type === 'submission' && event.operationId) {
               // Keep one cursor for the whole selection, never one growing
               // cursor per operation (which would retain quadratic metadata).
-              const { submission, pendingAttempt, queue, wouldConflict, queueAheadSelection } = event;
+              const {
+                submission,
+                pendingAttempt,
+                queue,
+                wouldConflict,
+                queueAheadSelection,
+                recovery,
+                conflict,
+              } = event;
               current.set(event.operationId, {
                 submission,
                 pendingAttempt,
+                ...(recovery ? { recovery } : {}),
+                ...(conflict ? { conflict } : {}),
                 ...(queue ? { queue } : {}),
                 ...(wouldConflict ? { wouldConflict } : {}),
                 ...(queueAheadSelection !== undefined ? { queueAheadSelection } : {}),
@@ -108,11 +123,18 @@ export async function observeHostedSubmissions(
             emit(value);
           },
           subscribe,
+          current,
         ),
     });
+    const entry = response.result.submissions.length === 1 ? response.result.submissions[0] : undefined;
     return {
       ...response,
-      result: { ...response.result, ...(response.result.status === 'timeout' ? { inProgress: true } : {}) },
+      result: {
+        ...response.result,
+        ...(entry?.recovery ? { recovery: entry.recovery } : {}),
+        ...(entry?.conflict ? { conflict: entry.conflict } : {}),
+        ...(response.result.status === 'timeout' ? { inProgress: true } : {}),
+      },
     };
   } finally {
     active = false;
@@ -124,6 +146,7 @@ async function observeHostedSubmissionsOnce(
   signal: AbortSignal,
   emit: (value: unknown) => void,
   subscribe: () => HostedRunSubscription,
+  previous: ReadonlyMap<string, z.infer<typeof eventSchema>>,
 ) {
   const command = hostedSubmissionWaitSchema.parse(input);
   const operations = [...new Set(command.operationIds)];
@@ -319,18 +342,32 @@ async function observeHostedSubmissionsOnce(
           publish(operationId, event, page.resnapshot);
       }
       cursor.versions.set(operationId, page.nextVersion);
+      const prior = current.get(operationId) ?? previous.get(operationId);
+      const suppliedAdvice =
+        page.events.find(
+          event =>
+            event.submission.attemptId === page.submission.attemptId &&
+            event.submission.version === page.submission.version &&
+            Boolean(event.recovery || event.conflict),
+        ) ?? (prior?.submission.attemptId === page.submission.attemptId ? prior : undefined);
       current.set(
         operationId,
         page.isDone
-          ? {
+          ? await observedConflictRecovery(transport, {
               submission: page.submission,
+              ...((page.recovery ?? suppliedAdvice?.recovery)
+                ? { recovery: page.recovery ?? suppliedAdvice?.recovery }
+                : {}),
+              ...((page.conflict ?? suppliedAdvice?.conflict)
+                ? { conflict: page.conflict ?? suppliedAdvice?.conflict }
+                : {}),
               pendingAttempt: page.pendingAttempt,
               ...(page.queue ? { queue: page.queue } : {}),
               ...(page.queueAheadSelection !== undefined
                 ? { queueAheadSelection: page.queueAheadSelection }
                 : {}),
               ...(page.wouldConflict ? { wouldConflict: page.wouldConflict } : {}),
-            }
+            })
           : page.events.at(-1)!,
       );
       if (page.isDone) {

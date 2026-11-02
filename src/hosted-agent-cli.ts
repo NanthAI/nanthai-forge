@@ -80,13 +80,13 @@ export async function hostedAgentCli(
       }
       // The NDJSON stream stays machine-readable; the outcome also prints as plain stderr lines.
       const { submissions, status } = response.result as {
-        submissions?: { submission: unknown }[];
+        submissions?: { submission: unknown; recovery?: unknown; conflict?: unknown }[];
         status: string;
       };
       if (!selectedWait.runId && status === 'terminal')
         for (const entry of submissions ?? [])
           for (const line of landSummary({
-            result: { phase: 'finish', submission: entry.submission },
+            result: { phase: 'finish', ...entry },
           } as never))
             process.stderr.write(`${line}\n`);
       return response;

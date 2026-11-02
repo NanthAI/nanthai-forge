@@ -1,3 +1,4 @@
+import { observedConflictRecovery } from './hosted-observed-conflict.js';
 import { enrichHostedQueueAhead } from './queue-ahead-hosted.js';
 // SPDX-License-Identifier: Apache-2.0
 import { existsSync, readFileSync } from 'node:fs';
@@ -43,8 +44,14 @@ export async function boundLandingStatus(
     });
     const parsed = z.object({ submission: hostedLandingStateSchema }).parse(page);
     const advice = enrichHostedQueueAhead(transport, page) as { queueAhead?: unknown };
+    const entry = await observedConflictRecovery(transport, {
+      ...(page as object),
+      submission: parsed.submission,
+    });
     submissions.push({
       ...parsed.submission,
+      ...('recovery' in entry ? { recovery: entry.recovery } : {}),
+      ...('conflict' in entry ? { conflict: entry.conflict } : {}),
       ...(advice.queueAhead ? { queueAhead: advice.queueAhead } : {}),
       ...((page as { queue?: unknown }).queue ? { queue: (page as { queue: unknown }).queue } : {}),
     });
@@ -55,11 +62,17 @@ function boundLandingResult(
   store: WorkStore,
   operationId: string,
   canonicalOperationId: string,
-  submissions: (z.infer<typeof hostedLandingStateSchema> & { queue?: unknown; queueAhead?: unknown })[],
+  submissions: (z.infer<typeof hostedLandingStateSchema> & {
+    queue?: unknown;
+    queueAhead?: unknown;
+    recovery?: unknown;
+    conflict?: unknown;
+  })[],
 ) {
   const terminal =
     submissions.length > 0 && submissions.every(state => state.observation.state !== 'pending');
   const complete = terminal && submissions.every(state => state.observation.state === 'landed');
+  const advice = submissions.find(state => state.recovery || state.conflict);
   return {
     revision: store.revision(),
     result: {
@@ -76,6 +89,8 @@ function boundLandingResult(
       terminal,
       complete,
       submissions,
+      ...(advice?.recovery ? { recovery: advice.recovery } : {}),
+      ...(advice?.conflict ? { conflict: advice.conflict } : {}),
     },
   };
 }
@@ -114,6 +129,8 @@ export async function watchBoundLanding(
         const advice = enrichHostedQueueAhead(transport, entry) as { queueAhead?: unknown };
         return {
           ...entry.submission,
+          ...(entry.recovery ? { recovery: entry.recovery } : {}),
+          ...(entry.conflict ? { conflict: entry.conflict } : {}),
           ...(entry.queue ? { queue: entry.queue } : {}),
           ...(advice.queueAhead ? { queueAhead: advice.queueAhead } : {}),
         };
