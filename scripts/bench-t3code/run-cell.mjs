@@ -31,6 +31,7 @@ import { scanTask } from './contamination.mjs';
 import { forgeTask, githubTask, cellCoordination } from './coordination.mjs';
 import { captureChanges, realConflicts } from './hunks.mjs';
 import { scriptedForge, dryGroup } from './scripted.mjs';
+import { removeWorkspace } from './evidence.mjs';
 import { gates as cellGates, diskFreeGb } from './gates.mjs';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -103,14 +104,19 @@ const writeResult = extra => {
 };
 const callLog = join(dir, 'nforge-calls.jsonl');
 const ledger = join(B, 'forge-lanes.jsonl');
-const forge = arm === 'forge' ? forgeArm(config.forge, { callLog, ws, ledger }) : null;
+const forge = arm === 'forge' ? forgeArm(config.forge, { callLog, ws, ledger, cellDir: dir }) : null;
 const lanes = new Map(); // laneId -> { task, root }
 let records = [];
+let crashing = false;
 // Crash safety: any escape writes a voided result, abandons idle Lanes and removes the cell's
 // checkouts, so the driver can re-run the cell from a clean state.
 // Agents run detached (own process groups) and are killed first; a Lane whose landing is
 // still in flight is left to finish, never abandoned (B7).
 async function crash(reason) {
+  if (forge) {
+    if (crashing) return;
+    crashing = true;
+  }
   event({ event: 'crash', reason });
   const killed = killAgents();
   writeResult({ crashed: reason, records, killedAgents: killed, voided: [`harness crash: ${reason}`] });
@@ -119,7 +125,12 @@ async function crash(reason) {
     await forge?.closeTask(root, laneId, now).catch(() => {});
   }
   forge?.stopBroker();
-  rmSync(ws, { recursive: true, force: true });
+  try {
+    if (forge) await removeWorkspace({ ws, cellDir: dir, reason: 'abnormal-exit' });
+    else rmSync(ws, { recursive: true, force: true });
+  } catch (error) {
+    event({ event: 'evidence-incomplete', error: error.message, retainedWorkspace: ws });
+  }
   process.exit(0);
 }
 process.on('uncaughtException', e => crash(String(e?.stack ?? e).slice(0, 800)));
@@ -363,7 +374,9 @@ async function dispatch(task, k) {
           record.landing ??= { landed: false, state: 'harness-error' };
         }
         event({ event: 'task-done', ...record });
-        await (forge ? forge.removeRoot(root) : rm(root, { recursive: true, force: true }));
+        record.evidence = await (forge
+          ? forge.removeRoot(root, 'task-done')
+          : rm(root, { recursive: true, force: true }));
         if (record.laneId && !record.landing?.inFlight?.length) lanes.delete(record.laneId);
       })(),
     );
@@ -372,12 +385,14 @@ async function dispatch(task, k) {
     record.landing = { landed: false, state: 'harness-error' };
     event({ event: 'task-error', task: task.id, error: record.harnessError });
     if (record.laneId) await forge.closeTask(root, record.laneId, null).catch(() => {});
-    await rm(root, { recursive: true, force: true });
+    record.evidence = await (forge
+      ? forge.removeRoot(root, 'task-error')
+      : rm(root, { recursive: true, force: true }));
   }
   return record;
 }
 async function worker(k) {
-  while (queue.length) records.push(await dispatch(queue.shift(), k));
+  while (!crashing && queue.length) records.push(await dispatch(queue.shift(), k));
 }
 await Promise.all(Array.from({ length: N }, (_, k) => worker(k + 1)));
 await Promise.all(settling);
@@ -626,7 +641,8 @@ writeResult({
   voided,
 });
 forge?.stopBroker();
-rmSync(ws, { recursive: true, force: true });
+if (forge) await removeWorkspace({ ws, cellDir: dir, reason: 'cell-done' });
+else rmSync(ws, { recursive: true, force: true });
 console.log(
   JSON.stringify({
     cellId,

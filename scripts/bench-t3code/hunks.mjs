@@ -6,7 +6,7 @@
 // sides, which merges clean, so only its own overlapping edits count.
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { existsSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, statSync, readFileSync } from 'node:fs';
 import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -34,7 +34,12 @@ export function latestTree(root) {
 /** Copy the task's changed files (vs base; build output the tree ignores is left out). */
 export async function captureChanges({ arm, meta, baseCommit, root, out, diff = diffFromBase }) {
   const tree = arm === 'forge' ? latestTree(root) : root;
-  let changes = await diff(meta, baseCommit, tree);
+  const marker =
+    arm === 'forge' ? JSON.parse(readFileSync(join(tree, '.forge', 'hosted-lane.json'), 'utf8')) : null;
+  const scope = marker?.scope ?? null;
+  let changes = await diff(meta, baseCommit, tree, scope);
+  if (scope !== null)
+    changes = changes.filter(c => scope.some(path => c.path === path || c.path.startsWith(path + '/')));
   const added = changes.filter(c => c.status === 'A').map(c => c.path);
   if (added.length) {
     const ignored = await run(
@@ -71,6 +76,7 @@ export async function captureChanges({ arm, meta, baseCommit, root, out, diff = 
   return {
     tree: tree === root ? 'lane' : 'resolve-lane',
     dir: out,
+    ...(arm === 'forge' ? { scope } : {}),
     files,
     truncated: changes.length > MAX_FILES,
   };

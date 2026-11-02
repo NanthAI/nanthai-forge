@@ -19,6 +19,7 @@ import { randomUUID } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { setTimeout as wait } from 'node:timers/promises';
+import { archiveThenRemove } from './evidence.mjs';
 
 const run = promisify(execFile);
 
@@ -75,7 +76,7 @@ export function openLanes(ledger) {
   return [...state.values()];
 }
 
-export function forgeArm(config, { callLog, ws, ledger = null }) {
+export function forgeArm(config, { callLog, ws, ledger = null, cellDir = dirname(callLog) }) {
   // Every Lane the harness starts or finds (an agent's resolve Lanes) is logged, and closed
   // when abandoned, so a crashed cell's Lanes are found and closed before the next cell
   // (2026-11-01: a resolve Lane left by a SIGTERMed cell raised notices in the next one).
@@ -220,10 +221,17 @@ export function forgeArm(config, { callLog, ws, ledger = null }) {
         return { error: String(error.stdout ?? error.message).slice(-500) };
       }
     },
-    async removeRoot(root) {
-      await rm(root, { recursive: true, force: true });
-      await rm(root + '.forge-client', { recursive: true, force: true });
-      await rm(root + '.forge-metrics.jsonl', { force: true });
+    async removeRoot(root, reason = 'remove-root') {
+      return archiveThenRemove({
+        root,
+        cellDir,
+        reason,
+        remove: async () => {
+          await rm(root, { recursive: true, force: true });
+          await rm(root + '.forge-client', { recursive: true, force: true });
+          await rm(root + '.forge-metrics.jsonl', { force: true });
+        },
+      });
     },
     /** Start the relay process and write the agents' `nforge` client into bin. */
     async binDir(bin) {
@@ -338,13 +346,25 @@ export function forgeArm(config, { callLog, ws, ledger = null }) {
 
 /** Changed paths of a materialized tree vs the base commit, whole tree (.repos included).
  * Works on any directory (a Lane root or a git workspace: git never adds a nested .git). */
-export async function diffFromBase(meta, baseCommit, root) {
+export async function diffFromBase(meta, baseCommit, root, scope = null) {
   const env = { ...process.env, GIT_INDEX_FILE: join(meta, '.git', `forge-diff-${randomUUID()}.index`) };
   const git = args => run('git', ['-C', meta, ...args], { env, maxBuffer: 256 << 20 });
   try {
     await git(['read-tree', baseCommit]);
-    const pathspec = ['.', ...METADATA, ...(await gitlinks(meta, baseCommit)).map(p => `:!${p}`)];
-    await git([`--work-tree=${root}`, 'add', '-A', '-f', '--', ...pathspec]);
+    // A requested sparse path may be absent in both trees; Git add rejects that
+    // unmatched literal. It carries no change, while tracked absences are deletions.
+    const tracked = scope === null ? [] : (await git(['ls-files', '-z'])).stdout.split('\0');
+    const selected = scope?.filter(
+      path =>
+        existsSync(join(root, path)) || tracked.some(file => file === path || file.startsWith(path + '/')),
+    );
+    const pathspec = [
+      ...(selected === undefined ? ['.'] : selected.map(p => `:(literal)${p}`)),
+      ...METADATA,
+      ...(await gitlinks(meta, baseCommit)).map(p => `:!${p}`),
+    ];
+    if (selected === undefined || selected.length)
+      await git([`--work-tree=${root}`, 'add', '-A', '-f', '--', ...pathspec]);
     const { stdout } = await git(['diff', '--cached', '--name-status', '--no-renames', baseCommit]);
     return stdout
       .split('\n')

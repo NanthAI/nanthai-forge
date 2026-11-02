@@ -222,6 +222,47 @@ commit.
 - **Convex** (Forge): project-attributed executions, DB I/O, egress and action compute from the
   log stream, at list price. R2 and storage are not metered here.
 
+## Dry protocol and pre-cleanup evidence
+
+The no-model Forge helper is a **protocol/stress driver**. Its synthetic edits exercise
+coordination; they do not implement the real tasks or establish model performance. Recovery
+uses only Forge's public structured `recovery`, `next` and printed `command` replies. It
+prefers an already returned conflict root, continues the same pending sync operation until
+terminal, edits the advertised conflict paths to keep both sides, runs the exact resolve
+continuation through local apply, then follows its advertised finish selection. Pending
+source continuations (including save/compose within land) do not consume the eight landing
+attempts. Interrupted actions replay their original operation and parameters when Forge
+explicitly advises that; a repeated obstruction remains a failure. Every child response,
+error and operation identity stays in the agent transcript and broker call log.
+
+There are no task-name, marker-path or Forge-repository exceptions in recovery. Missing or
+contradictory instructions and failed source outcomes emit `product-friction` and stop the
+task; the lead records that evidence as a product friction Issue before qualifying another
+run. The helper does not infer a successful local apply from completed server source or
+repair product metadata. GitHub helper behavior, model prompts, timing boundaries and
+scoring remain unchanged. Existing ten-second landing retry waits remain; pending source is
+driven by Forge's bounded command waits. No throughput improvement is claimed from fixtures.
+
+Before **every** Forge root removal, the cell archives the checkout's `.forge` markers,
+agent journals, sync-handoff markers, client JSON/JSONL receipts and complete adjacent
+`<root>.forge-metrics.jsonl` journals under `runs/<cellId>/evidence/`. This recursively includes
+resolution checkouts, their `<root>.forge-client` and metrics siblings, and orphaned journals
+whose checkout is absent. Reset and oracle roots use the same removal boundary. Task errors
+and abnormal exits sweep remaining workspace roots before deleting the workspace. Capture
+records list present/absent locations, every copied path, byte count and SHA-256, capture
+reason and completeness/errors; bytes are copied in full, not sampled or tailed. Failed or
+changing captures retain the workspace and record incomplete evidence. Source/object caches
+and dependency symlinks are not evidence and are not followed. Artifact capture adds local
+I/O proportional to existing journals, zero Convex calls/documents or CI runs, and zero idle
+work; file copies/hashes stream while the manifest retains one entry per evidence file.
+
+For notice-precision capture, sparse resolution roots compare against the base only over
+the checkout marker's materialized scope. Missing files outside it are unknown, never mass
+deletions. Actual changes/deletions within scope remain visible; the archived marker and
+captured scope explain the comparison. Full checkouts retain the existing whole-tree rule.
+Local qualification fixtures live in `scripts/bench-t3code/protocol-fixtures.test.mjs`; run
+with `node --test --test-concurrency=1` (no cell or benchmark driver is invoked).
+
 ## Correctness (oracle)
 
 The oracle overlays each task's original PR test files on the exact final main and runs the
