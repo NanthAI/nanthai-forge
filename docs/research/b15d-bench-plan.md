@@ -128,7 +128,11 @@ landings per hour, correctness, cost, and how each handles agents touching the s
 - **Same check.** `bash .bench/ci.sh` on GitHub-hosted `ubuntu-latest`. GitHub: PR CI, merge
   queue (HEADGREEN, up to 10 per group) and push CI. Forge: one check per landing through
   Forge's runner (`forge-check.yml`, a plan job and a run job). Runner image and resolved
-  action SHAs are recorded from the first and last job of every cell in both arms.
+  action SHAs are recorded for **every CI job** of every cell in both arms, including all
+  attempts and explicit skipped/unreadable evidence. `result.json` retains each job ID, run
+  ID, start time, image name, imageVersion, full runner version and resolved action SHAs.
+  First/last readable endpoints, retained for convenience, are chronological by job start
+  timestamp, never API return order or job ID.
 - **Check scope (pre-registered, part 3).** `.bench/ci.sh` installs the toolchain and
   `--filter`s `t3...` plus the five packages below, installs playwright-core's Chromium headless
   shell (on Linux with `PLAYWRIGHT_HOST_PLATFORM_OVERRIDE=ubuntu24.04-x64`: `ubuntu-latest` is
@@ -367,7 +371,7 @@ between its start and end (a fake landing or deploy is tested to fire this guard
 its cells refused to start or is void; or the driver was interrupted. A **cell** is void when:
 any recorded version differs between its start and end or from its batch's start record; the
 Convex meter
-lost coverage or closed early (Forge); runner image or action SHAs changed within the cell; a
+lost coverage or closed early (Forge); the runner fairness rule below fails within the arm; a
 landing was still in flight at grading; grading failed; any task hit a harness error; or the
 cell was interrupted. A **task** is void (excluded from per-task numbers, cell kept) when the
 contamination audit hits it, it hit a harness error, or its agent stopped on a usage or rate
@@ -375,6 +379,29 @@ limit (a quota error from the CLI, or a usage window at 100%). Before every batc
 waits (re-checking every 5 min, never stopping) until the agent's weekly usage is below 85%
 (and a 5h window, where the plan has one, at 40% or less), nanthai-forge is idle and the disk
 has room for both cells.
+
+**Runner fairness (owner-approved revision).** Check every executed CI job, not only endpoints:
+
+- Void a cell if its **OS image name** changes (for example `ubuntu-24.04` to
+  `ubuntu-26.04`), its runner **major version** changes, or the resolved SHA for the same
+  action repository changes within that arm. Different job types may use different action
+  subsets; an omitted action is not a SHA change. Compare action identities independent of
+  their requested ref and order, in **both** arms. Runner minor/patch changes are recorded
+  and do not alone void a cell.
+- **Concurrent batches (N = 1, 3, 5):** for each arm, count all executed jobs whose
+  imageVersion never occurs in the other arm. Sum across all such exclusive versions and
+  divide by that arm's executed job count (skipped jobs have no runner and are excluded).
+  Void the batch if this share is **strictly greater than 50% in either arm**. Exactly 50%
+  is allowed. This majority threshold defines a materially different observed pool: most
+  jobs of an arm ran on versions the other never saw. It permits minority rollout/rollback
+  exposure when concurrent jobs sample a shared hosted pool. It does not establish equal
+  performance of versions, nor require their proportions to match.
+- **Sequential batches (N = 10):** void the batch if the arms' distinct imageVersion sets
+  differ, regardless of job counts. Identical sets, including identical mixed sets, pass.
+- Mixed imageVersions that pass these rules **do not void** a cell or batch. Flag every
+  mixed or asymmetric observed pool for the report's disclosure section, with per-arm
+  version sets and job counts. Missing/unreadable logs and missing fields are explicit
+  incomplete coverage, never silently inferred from first/last or declared a pool match.
 
 **Crash safety.** Every cell writes `result.json` on every exit it controls; a crash kills its
 agents (they run in their own process groups), leaves any Lane whose landing is still in flight
@@ -387,6 +414,10 @@ batch that has a valid attempt or two void ones, and continues at the first that
 ## Analysis and reporting
 
 - Only cells inside a valid batch are scored (both arms under one hold, same versions).
+- Runner evidence: `summarize.mjs` lists distinct image names, imageVersions, runner versions,
+  runner majors and resolved action SHAs with job counts per arm (all recorded cells), and
+  per-cell/batch evidence and disclosure flags. Legacy endpoint-only records remain marked
+  incomplete; summary does not rewrite historical void decisions.
 - Per arm and N: median and range over reps of wall time, landings per hour, strict and lenient
   correctness, tokens, CI minutes and Convex dollars (`summarize.mjs`). A difference is called
   real only when the ranges do not overlap; otherwise the report says "in this run".
@@ -396,6 +427,11 @@ batch that has a valid attempt or two void ones, and continues at the first that
   sync, compose, queue wait, check, settle.
 
 ## Disclosed differences
+
+- Disclose every mixed/asymmetric runner imageVersion pool, each arm's sets and job counts,
+  exclusive-version shares and missing evidence. Concurrent rollout/rollback exposure
+  below the majority threshold is retained, with no claim that image versions run equally
+  fast. Sequential differing sets are void under Runner fairness.
 
 - Forge agents' `nforge` runs through a relay outside the file sandbox (macOS sandboxes cannot
   exec the setuid `/bin/ps` the CLI needs); the relay streams stdout and stderr as they arrive,

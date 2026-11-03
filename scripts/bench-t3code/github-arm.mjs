@@ -6,6 +6,7 @@ import { promisify } from 'node:util';
 import { writeFileSync, chmodSync } from 'node:fs';
 import { join } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
+import { chronologicalJobs, parseRunnerLog } from './runners.mjs';
 
 const run = promisify(execFile);
 export const repository = 'NanthAI/forge-b15d-t3code';
@@ -344,24 +345,47 @@ export async function projectCheckRuns(repo, projectId, sinceIso, untilIso) {
 }
 
 /** Jobs, job seconds and billed minutes of runs (the same shape for both arms, S2). */
-export async function jobMetrics(repo, runs) {
+export async function jobMetrics(repo, runs, { api: call = api } = {}) {
   let jobs = 0,
     billedMinutes = 0,
     jobSeconds = 0,
     queueSeconds = 0;
-  const jobIds = [];
-  for (const r of runs)
-    for (const job of (await api(`repos/${repo}/actions/runs/${r.id}/jobs?per_page=100`)).jobs) {
-      // Skipped jobs report completed_at before started_at: no runner time.
-      if (!job.started_at || !job.completed_at || job.conclusion === 'skipped') continue;
-      const s = (Date.parse(job.completed_at) - Date.parse(job.started_at)) / 1000;
-      if (s <= 0) continue;
-      jobs++;
-      jobIds.push(job.id);
-      jobSeconds += s;
-      billedMinutes += Math.ceil(s / 60);
-      queueSeconds += Math.max(0, (Date.parse(job.started_at) - Date.parse(job.created_at)) / 1000);
+  const records = new Map();
+  for (const r of runs) {
+    for (let page = 1; ; page++) {
+      const result = await call(
+        `repos/${repo}/actions/runs/${r.id}/jobs?filter=all&per_page=100&page=${page}`,
+      );
+      for (const job of result.jobs) records.set(job.id, { ...job, runId: r.id });
+      if (result.jobs.length < 100) break;
     }
+  }
+  const jobRecords = chronologicalJobs(
+    [...records.values()].map(job => ({
+      jobId: job.id,
+      runId: job.runId,
+      name: job.name,
+      startedAt: job.started_at,
+      completedAt: job.completed_at,
+      conclusion: job.conclusion,
+      status: job.status,
+      createdAt: job.created_at,
+    })),
+  );
+  for (const job of jobRecords) {
+    // Retain skipped/unfinished jobs as evidence, without billing them as completed jobs.
+    if (!job.startedAt || !job.completedAt || job.conclusion === 'skipped') continue;
+    const s = (Date.parse(job.completedAt) - Date.parse(job.startedAt)) / 1000;
+    if (s <= 0) continue;
+    jobs++;
+    jobSeconds += s;
+    billedMinutes += Math.ceil(s / 60);
+    queueSeconds += Math.max(0, (Date.parse(job.startedAt) - Date.parse(job.createdAt)) / 1000);
+  }
+  const jobIds = jobRecords.map(j => j.jobId);
+  const started = jobRecords.filter(
+    j => j.conclusion !== 'skipped' && Number.isFinite(Date.parse(j.startedAt)),
+  );
   const byEvent = {};
   for (const r of runs) byEvent[r.event] = (byEvent[r.event] ?? 0) + 1;
   return {
@@ -372,9 +396,10 @@ export async function jobMetrics(repo, runs) {
     billedMinutes,
     queueSeconds,
     unfinishedRuns: runs.filter(r => r.status !== 'completed').length,
-    firstJob: jobIds[0] ?? null,
-    lastJob: jobIds.at(-1) ?? null,
+    firstJob: started[0]?.jobId ?? null,
+    lastJob: started.at(-1)?.jobId ?? null,
     jobIds,
+    jobRecords,
   };
 }
 
@@ -382,17 +407,8 @@ export async function jobMetrics(repo, runs) {
 export async function runnerInfo(repo, jobId) {
   if (!jobId) return null;
   try {
-    const log = (await gh(['api', `repos/${repo}/actions/jobs/${jobId}/logs`])).slice(0, 20000);
-    const pick = re => log.match(re)?.[1]?.trim() ?? null;
-    return {
-      jobId,
-      image: pick(/Image: (\S+)/),
-      imageVersion: pick(/Version: (\S+)/),
-      runnerVersion: pick(/Current runner version: '([^']+)'/),
-      actions: [...log.matchAll(/Download action repository '([^']+)' \(SHA:([0-9a-f]+)\)/g)]
-        .map(m => `${m[1]}@${m[2]}`)
-        .sort(),
-    };
+    const log = await gh(['api', `repos/${repo}/actions/jobs/${jobId}/logs`]);
+    return { jobId, ...parseRunnerLog(log) };
   } catch (error) {
     return { jobId, error: String(error.message).slice(0, 200) };
   }

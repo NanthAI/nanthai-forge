@@ -34,6 +34,7 @@ import { scriptedForge, dryGroup } from './scripted.mjs';
 import { removeWorkspace } from './evidence.mjs';
 import { gates as cellGates, diskFreeGb } from './gates.mjs';
 import { writeCellResult } from './result.mjs';
+import { collectRunners } from './runners.mjs';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { rm } from 'node:fs/promises';
@@ -431,26 +432,9 @@ const ci = await (
   arm === 'github' ? github.windowMetrics(since, until, branchPrs) : forgeCi(since, until)
 ).catch(e => ({ error: e.message }));
 ci.settled = ciSettled;
-// First and last check job with a readable log (some jobs have none, e.g. 404 after skip).
-async function readableRunner(ids) {
-  for (const id of ids.slice(0, 5)) {
-    const info = await github.runnerInfo(ci.repo ?? github.repository, id);
-    if (info && !info.error && info.imageVersion) return info;
-  }
-  return null;
-}
-const runner = {
-  first: await readableRunner(ci.jobIds ?? []),
-  last: await readableRunner([...(ci.jobIds ?? [])].reverse()),
-};
-// Image and runner version for both arms; actions only where every job is the same job
-// (GitHub's bench-check; Forge's check jobs differ by design).
-const runnerChanged = Boolean(
-  runner.first &&
-  runner.last &&
-  (runner.first.imageVersion !== runner.last.imageVersion ||
-    runner.first.runnerVersion !== runner.last.runnerVersion ||
-    (arm === 'github' && JSON.stringify(runner.first.actions) !== JSON.stringify(runner.last.actions))),
+// Every job, including explicit skipped/unreadable evidence; logs fetched once per job.
+const runner = await collectRunners(ci.jobRecords ?? [], jobId =>
+  github.runnerInfo(ci.repo ?? github.repository, jobId),
 );
 const calls = readCalls(callLog);
 const laneTask = new Map([...records].filter(r => r.laneId).map(r => [r.laneId, r.task]));
@@ -579,7 +563,7 @@ if (versionChanges.length) voided.push(`versions changed during cell: ${versionC
 // A quota or rate-limit stop voids that task (listed in taskVoids), not the cell.
 const quotaTasks = dry ? [] : records.filter(r => r.agent?.quotaHit).map(r => r.task);
 if (convex && !convex.valid) voided.push(`Convex meter under-reported: ${convex.problems.join(', ')}`);
-if (runnerChanged) voided.push('runner image or action versions changed during cell');
+voided.push(...runner.voided);
 // GitHub times are corrected by the probe at the start; a moving offset makes them unreliable.
 if (clockDriftMs === null || clockDriftMs > 5000)
   voided.push(`GitHub clock offset moved during cell (${clockDriftMs ?? 'unreadable'} ms)`);

@@ -38,6 +38,7 @@ import {
 import { snapshot, snapshotProblems, differences, forgeInFlight, FREEZE } from './versions.mjs';
 import { usageGate, usageProblems, diskFreeGb, diskNeed } from './gates.mjs';
 import { agentOf } from './agent.mjs';
+import { runnerFairness } from './runners.mjs';
 
 const B = process.env.BENCH_ROOT || join(homedir(), 'NanthAI/forge-bench/b15d');
 const flags = process.argv.slice(2);
@@ -333,12 +334,15 @@ async function main() {
           key: c.key,
           arm: c.arm,
           cellId,
+          runner: r?.runner ?? null,
           refused: r?.refused ?? null,
           voided: r?.voided ?? ['no result'],
         };
       });
       const changes = batchGuard(start, end, { unpinned: dry && flags.includes('--unpinned') });
+      const runner = runnerFairness(cells, b.mode);
       const voided = [
+        ...runner.voided,
         ...(changes.length ? [`versions changed during batch: ${changes.join('; ')}`] : []),
         ...cells.filter(c => c.refused).map(c => `${c.key} refused at start: ${c.refused}`),
         ...cells
@@ -359,6 +363,7 @@ async function main() {
         endedAt: end.at,
         versions: { start, end, changes, fakeVersionChange: fakeChange || undefined },
         cells,
+        runner,
         voided,
       };
       writeFileSync(join(dir, 'batch.json'), JSON.stringify(result, null, 1) + '\n', { flag: 'wx' });

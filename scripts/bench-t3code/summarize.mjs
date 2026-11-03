@@ -7,6 +7,7 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
+import { summarizeRunners, runnerFairness } from './runners.mjs';
 
 const B = process.env.BENCH_ROOT || join(homedir(), 'NanthAI/forge-bench/b15d');
 const dry = process.argv.includes('--dry');
@@ -105,8 +106,27 @@ console.log(
       batches: batches.map(b => ({
         batchId: b.batchId,
         mode: b.mode,
+        runner: b.runner ?? null,
         cells: (b.cells ?? []).map(c => c.cellId),
         voided: b.voided ?? [],
+      })),
+      runnersByArm: Object.fromEntries(
+        ['forge', 'github'].map(arm => [
+          arm,
+          {
+            ...summarizeRunners(cells.filter(c => c.arm === arm).flatMap(c => c.runner?.jobs ?? [])),
+            cellsWithoutFullEvidence: cells
+              .filter(c => c.arm === arm && !Array.isArray(c.runner?.jobs))
+              .map(c => c.cellId),
+          },
+        ]),
+      ),
+      runnerDisclosures: batches.map(b => ({
+        batchId: b.batchId,
+        ...runnerFairness(
+          (b.cells ?? []).map(c => ({ ...c, runner: cells.find(r => r.cellId === c.cellId)?.runner })),
+          b.mode,
+        ),
       })),
       rep3: Object.fromEntries(
         [1, 3, 5, 10]
@@ -123,6 +143,7 @@ console.log(
         attempt: r.attempt,
         voided: r.voided ?? [],
         taskVoids: r.taskVoids ?? [],
+        runner: r.runner?.jobs ? summarizeRunners(r.runner.jobs) : { fullEvidence: false },
         filesystemEvents: r.gates?.filesystemEvents ?? null,
         convex: r.convex
           ? {
