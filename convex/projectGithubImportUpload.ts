@@ -14,10 +14,17 @@ import { invariant } from '../src/errors';
 import { importPageBytes, importPageFiles } from '../src/github-import-pages';
 import type { ObjectPack } from '../src/object-pack-range';
 export type Completions = { id: Id<'projectObjects'>; storageId?: Id<'_storage'>; key?: string }[];
-export type Recipes = { digest: string; size: number; recipeDigest: string; recipeSize: number }[];
+export type Recipes = {
+  digest: string;
+  size: number;
+  stateGeneration?: number;
+  recipeDigest: string;
+  recipeSize: number;
+}[];
 export type CatalogEntry = {
   digest: string;
   size: number;
+  stateGeneration?: number;
   recipe?: { digest: string; size: number };
   pack?: ObjectPack;
 };
@@ -206,6 +213,7 @@ export class ImportUpload {
       const entry = {
         digest: pin.digest,
         size: pin.size,
+        ...(pin.stateGeneration === undefined ? {} : { stateGeneration: pin.stateGeneration }),
         recipe: { digest: pin.recipeDigest, size: pin.recipeSize },
       };
       if (stored.has(pin.digest)) continue;
@@ -222,12 +230,18 @@ export class ImportUpload {
     this.recipes = [];
     return value;
   }
-  recipe(pin: { blob: string; size: number }, bytes: Buffer) {
+  recipe(pin: { blob: string; size: number }, bytes: Buffer, stateGeneration?: number) {
     const ref = this.put(bytes);
-    this.recipes.push({ digest: pin.blob, size: pin.size, recipeDigest: ref.sha256, recipeSize: ref.size });
+    this.recipes.push({
+      ...(stateGeneration === undefined ? {} : { stateGeneration }),
+      digest: pin.blob,
+      size: pin.size,
+      recipeDigest: ref.sha256,
+      recipeSize: ref.size,
+    });
   }
   /** Stream arbitrarily large logical metadata without a whole-repository buffer. */
-  async stream(parts: AsyncIterable<Buffer>) {
+  async stream(parts: AsyncIterable<Buffer>, stateGeneration?: number) {
     const hash = createHash('sha256');
     let size = 0;
     const builder = new ObjectRecipeBuilder(this.put);
@@ -239,7 +253,7 @@ export class ImportUpload {
     }
     const pin = { blob: hash.digest('hex'), size };
     const recipe = builder.finish({ sha256: pin.blob, size });
-    this.recipe(pin, recipe.bytes);
+    this.recipe(pin, recipe.bytes, stateGeneration);
     await this.drain(true);
     await this.commit();
     return { sha256: pin.blob, size };

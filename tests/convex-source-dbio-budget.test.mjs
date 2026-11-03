@@ -14,14 +14,17 @@ async function saveInput(s) {
       blob: original.sha256,
       mode: 'file',
     }));
-  const baseline = await s.json({
-    schema: 1,
-    kind: 'forge-source-state',
-    parents: [],
-    files,
-    message: 'b',
-    at,
-  });
+  const baseline = await s.json(
+    {
+      schema: 1,
+      kind: 'forge-source-state',
+      parents: [],
+      files,
+      message: 'b',
+      at,
+    },
+    1,
+  );
   const changes = [];
   for (let i = 0; i < changed; i++) {
     const pin = await s.putSpec({ size: 4 * 1024, index: i });
@@ -52,7 +55,11 @@ test('source save at dogfood scale stays inside its document read and write budg
       start = s.counts.length,
       id = await s.enqueue(input),
       report = await s.drain();
-    assert.equal((await s.job(id)).status, 'completed');
+    const completed = await s.job(id);
+    assert.equal(completed.status, 'completed');
+    const result = JSON.parse(await s.bytes(completed.output));
+    const stateRow = [...s.tables.projectObjects.values()].find(row => row.digest === result.state.sha256);
+    assert.equal(stateRow.stateGeneration, 2, 'the existing output record authenticates the generation');
     const by = {};
     for (const c of s.counts.slice(start)) {
       const b = (by[c.name] ??= { calls: 0, documents: 0, readBytes: 0, writes: 0 });

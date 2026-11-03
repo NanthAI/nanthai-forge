@@ -15,7 +15,12 @@ export const completion = v.object({
   storageId: v.optional(v.id('_storage')),
   key: v.optional(v.string()),
 });
-export const recipePin = v.object({ ...objectPin.fields, recipeDigest: v.string(), recipeSize: v.number() });
+export const recipePin = v.object({
+  ...objectPin.fields,
+  recipeDigest: v.string(),
+  recipeSize: v.number(),
+  stateGeneration: v.optional(v.number()),
+});
 const identity = { projectId: v.id('hostedProjects'), actor: v.string() };
 export const prepare = internalMutation({
   args: { ...identity, objects: v.array(objectPin) },
@@ -79,7 +84,13 @@ export async function completeObjects(
   ctx: MutationCtx,
   projectId: Id<'hostedProjects'>,
   objects: { id: Id<'projectObjects'>; storageId?: Id<'_storage'>; key?: string }[],
-  recipes: { digest: string; size: number; recipeDigest: string; recipeSize: number }[],
+  recipes: {
+    digest: string;
+    size: number;
+    recipeDigest: string;
+    recipeSize: number;
+    stateGeneration?: number;
+  }[],
 ) {
   invariant(
     objects.length <= importPageFiles && recipes.length <= importPageFiles,
@@ -129,7 +140,10 @@ export async function completeObjects(
       'Logical binding changed.',
     );
     if (row && isStored(row)) continue;
-    const value = { recipe: { digest: pin.recipeDigest, size: pin.recipeSize } };
+    const value = {
+      ...(pin.stateGeneration === undefined ? {} : { stateGeneration: pin.stateGeneration }),
+      recipe: { digest: pin.recipeDigest, size: pin.recipeSize },
+    };
     if (row) await ctx.db.patch((await objectRow(ctx, row))._id, value);
     else
       await ctx.db.insert('projectObjects', {

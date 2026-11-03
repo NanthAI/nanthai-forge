@@ -107,7 +107,14 @@ export const inspect = internalQuery({
   },
 });
 export const commitPage = internalMutation({
-  args: { ...identity, owner: v.string(), index: v.number(), body: v.string(), previous: v.string() },
+  args: {
+    ...identity,
+    owner: v.string(),
+    index: v.number(),
+    body: v.string(),
+    previous: v.string(),
+    rootStates: v.optional(v.array(v.string())),
+  },
   returns: v.string(),
   handler: async (ctx, input) => {
     await activeOwnedProject(ctx, input.projectId, input.owner);
@@ -158,6 +165,17 @@ export const commitPage = internalMutation({
         'INVALID_WORK_BACKUP',
         'A seed page has missing or mismatched committed bytes.',
       );
+      // The fixed action verified these parentless State bytes on its existing
+      // validation read. Git imports retain original commits in a bundle and
+      // create one such Forge root, without a parent-generation RPC or R2 change.
+      if (pin.kind === 'state' && input.rootStates?.includes(pin.sha256) && stored._id) {
+        invariant(
+          stored.stateGeneration === undefined || stored.stateGeneration === 1,
+          'SOURCE_HASH_MISMATCH',
+          'Immutable State generation differs.',
+        );
+        if (stored.stateGeneration === undefined) await ctx.db.patch(stored._id, { stateGeneration: 1 });
+      }
     }
     const next = {
       nextPage: row.nextPage + 1,

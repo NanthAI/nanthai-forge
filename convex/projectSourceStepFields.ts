@@ -3,6 +3,7 @@ import { defineTable } from 'convex/server';
 import { v } from 'convex/values';
 import { sourceFailureStages, sourceFailureClasses, sourceFailureCodes } from '../src/hosted-source-retry';
 export const sourceOutput = v.object({
+  stateGeneration: v.optional(v.number()),
   sha256: v.string(),
   size: v.number(),
   storageId: v.optional(v.id('_storage')),

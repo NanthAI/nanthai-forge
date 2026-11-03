@@ -30,6 +30,9 @@ function entry(page: Page, digest: string): CatalogObject | null {
         projectId: page.projectId,
         digest,
         size: page.sizes[middle]!,
+        ...(page.stateGenerations?.some(row => row.index === middle)
+          ? { stateGeneration: page.stateGenerations.find(row => row.index === middle)!.generation }
+          : {}),
         nonce: '',
         removed: false,
         sourceReferenced: true,
@@ -89,6 +92,7 @@ export async function objectRow(ctx: MutationCtx, object: ObjectView): Promise<D
     digest: object.digest,
     size: object.size,
     nonce: crypto.randomUUID(),
+    ...(object.stateGeneration === undefined ? {} : { stateGeneration: object.stateGeneration }),
     removed: false,
     sourceReferenced: true,
     ...(object.recipe
@@ -104,7 +108,13 @@ export async function objectRow(ctx: MutationCtx, object: ObjectView): Promise<D
 }
 /** Sorted catalog rows for a set of stored objects; callers write them once. */
 export function catalogPages(
-  objects: { digest: string; size: number; recipe?: { digest: string; size: number }; pack?: ObjectPack }[],
+  objects: {
+    digest: string;
+    size: number;
+    stateGeneration?: number;
+    recipe?: { digest: string; size: number };
+    pack?: ObjectPack;
+  }[],
 ) {
   const sorted = [...objects].sort((a, b) => (a.digest < b.digest ? -1 : a.digest > b.digest ? 1 : 0));
   const pages = [];
@@ -115,6 +125,13 @@ export function catalogPages(
       last: rows.at(-1)!.digest,
       digests: rows.map(row => row.digest).join(''),
       sizes: rows.map(row => row.size),
+      ...(rows.some(row => row.stateGeneration !== undefined)
+        ? {
+            stateGenerations: rows.flatMap((row, index) =>
+              row.stateGeneration === undefined ? [] : [{ index, generation: row.stateGeneration }],
+            ),
+          }
+        : {}),
       recipes: rows.flatMap((row, index) => (row.recipe ? [{ index, ...row.recipe }] : [])),
       ...(rows.some(row => row.pack)
         ? { packs: rows.flatMap((row, index) => (row.pack ? [{ index, ...row.pack }] : [])) }

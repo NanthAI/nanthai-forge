@@ -7,6 +7,8 @@ export const objectFields = {
   projectId: v.id('hostedProjects'),
   digest: v.string(),
   size: v.number(),
+  /** Authenticated State topological level; absent on old rows and non-States. */
+  stateGeneration: v.optional(v.number()),
   nonce: v.string(),
   storageId: v.optional(v.id('_storage')),
   ...backfillFields,
@@ -50,6 +52,7 @@ export const objectTables = {
     /** Concatenated 64-hex digests, ascending. */
     digests: v.string(),
     sizes: v.array(v.number()),
+    stateGenerations: v.optional(v.array(v.object({ index: v.number(), generation: v.number() }))),
     /** Logical objects stored as a recipe (no raw bytes of their own). */
     recipes: v.array(v.object({ index: v.number(), digest: v.string(), size: v.number() })),
     packs: v.optional(

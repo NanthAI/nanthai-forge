@@ -7,7 +7,14 @@ import { at } from './convex-source-scale-fixture.mjs';
 // Retain only a shared file-list string and tiny per-State descriptors. Hash
 // each manifest in pieces and materialize its bytes only when R2 is read. An
 // 800-State fixture must not keep 800 * 9.8 MB in the test runner's heap.
-export async function asymmetricHistory(s, count, depth, reverse, chainLength = 1) {
+export async function asymmetricHistory(
+  s,
+  count,
+  depth,
+  reverse,
+  chainLength = 1,
+  generationMetadata = false,
+) {
   const blob = await s.putSpec(Buffer.from('synthetic\n')),
     small = [{ path: 'root.txt', mode: 'file', blob: blob.sha256 }],
     large = Buffer.from(
@@ -19,7 +26,8 @@ export async function asymmetricHistory(s, count, depth, reverse, chainLength = 
         })),
       ),
     ).toString(),
-    historical = new Set();
+    historical = new Set(),
+    generations = new Map();
   const state = async (parents, message, big = false, files = small) => {
     const fileBytes = big ? large : Buffer.from(saveBytes(files)).toString(),
       // saveBytes sorts object keys; retain that canonical encoding exactly.
@@ -40,7 +48,13 @@ export async function asymmetricHistory(s, count, depth, reverse, chainLength = 
         sha256: createHash('sha256').update(prefix).update(fileBytes).update(suffix).digest('hex'),
         size: Buffer.byteLength(prefix) + Buffer.byteLength(fileBytes) + Buffer.byteLength(suffix),
       };
-    return s.putSpec({ size: pin.size, generate: () => Buffer.from(prefix + fileBytes + suffix) }, pin);
+    const generation = 1 + Math.max(0, ...parents.map(parent => generations.get(parent.sha256)));
+    generations.set(pin.sha256, generation);
+    return s.putSpec(
+      { size: pin.size, generate: () => Buffer.from(prefix + fileBytes + suffix) },
+      pin,
+      generationMetadata ? generation : undefined,
+    );
   };
   let old;
   for (let i = 0; i < depth; i++) {
@@ -89,6 +103,7 @@ export async function asymmetricHistory(s, count, depth, reverse, chainLength = 
   });
   return {
     input,
+    generations,
     historical,
     near: new Set([...chain, b, c, m, d].map(pin => pin.sha256)),
     manifestBytes: a.size,

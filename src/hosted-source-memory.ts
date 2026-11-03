@@ -14,9 +14,12 @@ import { sourceValidation } from './hosted-source-validation.js';
 export class MemoryMergeSource extends LazyMergeSource {
   readonly objects = new Map<string, Buffer>();
   private readonly parsed = new Map<string, NativeState>();
+  private cutList: string[] | undefined;
+  private cutIds = new Set<string>();
   constructor(
     readonly parents: Record<string, string[]>,
     public ancestryBoundary?: string,
+    public ancestryCuts?: string[],
   ) {
     super(null);
   }
@@ -34,7 +37,11 @@ export class MemoryMergeSource extends LazyMergeSource {
   override state(id: string): NativeState {
     // This is an explicit proven graph cut, not a claim about stored parents.
     // File bytes still come from the exact original hash-verified State.
-    const parents = id === this.ancestryBoundary ? [] : this.parents[id];
+    if (this.cutList !== this.ancestryCuts) {
+      this.cutList = this.ancestryCuts;
+      this.cutIds = new Set(this.ancestryCuts);
+    }
+    const parents = id === this.ancestryBoundary || this.cutIds.has(id) ? [] : this.parents[id];
     if (!parents) return this.fullState(id);
     const fullFiles = () => this.fullState(id).files;
     return {

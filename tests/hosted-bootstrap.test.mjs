@@ -66,6 +66,7 @@ test('browser creation publishes an empty retained State, initialized indexed Wo
   const source = JSON.parse((await storedBytes(s, row)).toString());
   assert.deepEqual(source.files, []);
   assert.deepEqual(source.parents, []);
+  assert.equal(row.stateGeneration, 1);
   const generation = s.tables.projectWorkGenerations.get(project.work.generationId);
   assert.equal(generation.status, 'ready');
   const tree = [...s.tables.projectWorkRecords.values()].find(row => row.collection === 'sourceTrees');

@@ -8,13 +8,16 @@ import type { SourceOutput } from './projectConvexSourceOutput';
 import { digest } from '../src/portable-hash';
 import { sourceStorage, sourceR2Pin } from './projectConvexSourceStorage';
 import { r2Key } from './r2';
-import { invariant } from '../src/errors';
+import { ForgeError, invariant } from '../src/errors';
+import { parseNativeState } from '../src/native-state-format';
+import { nextStateGeneration, validStateGeneration } from '../src/state-generation';
 import { SourceIoError, transientSourceStatus } from '../src/hosted-source-io-error';
 import { sourceDomainError } from './projectConvexSourceErrors';
 import { packHeaders, verifyPackRange, type PackRange } from '../src/object-pack-range';
 const reference = (name: string) => makeFunctionReference<'mutation'>(name);
 export type ObjectLocation = {
   descriptor: WorkerObject;
+  stateGeneration?: number;
   storageId: Id<'_storage'> | null;
   url: string | null;
   range?: PackRange;
@@ -29,6 +32,15 @@ export function convexSourceTransport(
   const locations = new Map<string, ObjectLocation>(initial.map(row => [row.descriptor.object.sha256, row])),
     outputs: SourceOutput[] = [];
   const durable = sourceStorage(ctx, projectId);
+  const generations = new Map<string, number>();
+  const remember = (rows: ObjectLocation[]) => {
+    for (const row of rows) {
+      locations.set(row.descriptor.object.sha256, row);
+      if (validStateGeneration(row.stateGeneration))
+        generations.set(row.descriptor.object.sha256, row.stateGeneration);
+    }
+  };
+  remember(initial);
   const resolve = async (
     ids: string[],
     ancestry = false,
@@ -52,7 +64,7 @@ export function convexSourceTransport(
           throw new SourceIoError(error, 'source-descriptors', ids.length === 1 ? ids[0]! : null);
         }),
     );
-    for (const row of rows) locations.set(row.descriptor.object.sha256, row);
+    remember(rows);
     // A byte-bounded response can be a prefix; ordinary descriptor requests
     // continue the remainder without creating per-file RPCs.
     if (!ancestry && rows.length < ids.length) {
@@ -62,6 +74,11 @@ export function convexSourceTransport(
     return rows.map(row => row.descriptor);
   };
   const io: StepTransport = {
+    stateGeneration: id => generations.get(id),
+    rememberStateGenerations: values => {
+      for (const [id, value] of Object.entries(values))
+        if (validStateGeneration(value)) generations.set(id, value);
+    },
     publishRecipe: async (object, recipe) => {
       outputs.push({ ...object, recipe });
     },
@@ -84,7 +101,7 @@ export function convexSourceTransport(
             throw new SourceIoError(error, 'source-descriptors', null);
           }),
       );
-      for (const row of result.rows) locations.set(row.descriptor.object.sha256, row);
+      remember(result.rows);
       const remaining = pending.filter(id => !locations.has(id) && !result.unavailable.includes(id));
       invariant(remaining.length < pending.length, 'SOURCE_UNAVAILABLE', 'Object window made no progress.');
       // As with ordinary resolution, complete the byte-bounded descriptor pages
@@ -171,10 +188,25 @@ export function convexSourceTransport(
         'SOURCE_HASH_MISMATCH',
         'Source output changed.',
       );
+      // These are hash-verified worker outputs. Only the exact State parent
+      // list can select a generation; plans, display hints and uploads cannot.
+      let stateGeneration: number | undefined;
+      const prefix = new TextDecoder().decode(bytes.subarray(0, 256));
+      if (prefix.includes('"kind":"forge-source-state"')) {
+        try {
+          const state = parseNativeState(bytes);
+          stateGeneration = nextStateGeneration(state.parents, id => generations.get(id));
+          if (stateGeneration !== undefined) generations.set(pin.sha256, stateGeneration);
+        } catch (error) {
+          // An ordinary source blob may begin with State-looking JSON.
+          if (!(error instanceof ForgeError) || error.code !== 'INVALID_NATIVE_SOURCE') throw error;
+        }
+      }
       const ref = await durable.store(bytes),
         r2 = sourceR2Pin(ref);
       outputs.push({
         ...pin,
+        ...(stateGeneration === undefined ? {} : { stateGeneration }),
         ...(r2 ? { r2Key: r2Key(projectId, r2.sha256) } : { storageId: ref as Id<'_storage'> }),
       });
     },

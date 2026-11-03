@@ -141,6 +141,7 @@ export const publish = internalMutation({
           projectId: project._id,
           digest: pin.sha256,
           size: pin.size,
+          ...(pin.sha256 === bootstrap.preview.head ? { stateGeneration: 1 } : {}),
           nonce: object.nonce,
           ...(object.r2Key
             ? { location: 'r2' as const, r2Key: object.r2Key, r2Committed: true }

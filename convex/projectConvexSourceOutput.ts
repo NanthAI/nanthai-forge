@@ -4,10 +4,12 @@ import type { Id } from './_generated/dataModel';
 import { invariant } from '../src/errors';
 import { r2Key } from './r2';
 import { isR2Object } from './projectObjectFields';
+import { validStateGeneration } from '../src/state-generation';
 import { findObject, objectRow } from './projectObjectFind';
 export type SourceOutput = {
   sha256: string;
   size: number;
+  stateGeneration?: number;
   storageId?: Id<'_storage'>;
   r2Key?: string;
   recipe?: { sha256: string; size: number };
@@ -55,12 +57,25 @@ export async function storeSourceOutputs(
         ? { storageId: pin.storageId, recipe: undefined }
         : { storageId: undefined, recipe: { digest: pin.recipe!.sha256, size: pin.recipe!.size } };
     const old = await findObject(ctx, projectId, pin.sha256);
+    invariant(
+      pin.stateGeneration === undefined || validStateGeneration(pin.stateGeneration),
+      'SOURCE_JOB_INVALID',
+      'State generation must be an exact positive level.',
+    );
+    invariant(
+      old?.stateGeneration === undefined ||
+        pin.stateGeneration === undefined ||
+        old.stateGeneration === pin.stateGeneration,
+      'SOURCE_HASH_MISMATCH',
+      'Immutable State generation changed.',
+    );
     invariant(!old || old.size === pin.size, 'SOURCE_HASH_MISMATCH', 'Stored source size changed.');
     if (!old)
       await ctx.db.insert('projectObjects', {
         projectId: projectId,
         digest: pin.sha256,
         size: pin.size,
+        ...(pin.stateGeneration === undefined ? {} : { stateGeneration: pin.stateGeneration }),
         ...encoding,
         nonce: executionId,
         removed: false,
@@ -73,12 +88,19 @@ export async function storeSourceOutputs(
     )
       await ctx.db.patch((await objectRow(ctx, old))._id, {
         ...encoding,
+        ...(pin.stateGeneration === undefined ? {} : { stateGeneration: pin.stateGeneration }),
         ...(!pin.r2Key ? { location: undefined, r2Key: undefined, r2Committed: undefined } : {}),
         removed: false,
         sourceReferenced: true,
       });
-    else if (!old.sourceReferenced)
-      await ctx.db.patch((await objectRow(ctx, old))._id, { sourceReferenced: true });
+    else if (
+      !old.sourceReferenced ||
+      (old.stateGeneration === undefined && pin.stateGeneration !== undefined)
+    )
+      await ctx.db.patch((await objectRow(ctx, old))._id, {
+        sourceReferenced: true,
+        ...(pin.stateGeneration === undefined ? {} : { stateGeneration: pin.stateGeneration }),
+      });
     if (!old?.sourceReferenced)
       await ctx.db.insert('projectCheckLogSourcePins', { projectId: projectId, digest: pin.sha256 });
   }

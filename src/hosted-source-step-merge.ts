@@ -21,9 +21,12 @@ import { sourceWindows, stateSummary } from './hosted-source-fanout.js';
 import { ForgeError, invariant } from './errors.js';
 import { sourceValidation } from './hosted-source-validation.js';
 import { sourceAncestryCut, sourceAncestryFrontier } from './hosted-source-ancestry-cut.js';
+import { sourceGenerationWalk } from './hosted-source-generation-cut.js';
 import type { WorkerObject } from './hosted-source-worker-format.js';
 
 export async function prepareMergeStep(c: SourceStepCursor, io: StepTransport, m: StepMeter) {
+  if (!c.generations && Object.keys(c.parents).length) c.generationFallback = true;
+  io.rememberStateGenerations?.(c.generations ?? {});
   const kind = (c.plan as { kind: string }).kind;
   if (c.phase === 'selection') {
     if (kind === 'forge-hosted-compose-input') {
@@ -135,6 +138,9 @@ export async function prepareMergeStep(c: SourceStepCursor, io: StepTransport, m
       const reader = new MemorySourceReader(new MemoryMergeSource({}), io),
         state = parseNativeState(await reader.bytes(c.inventory[id]!));
       c.parents[id] = state.parents;
+      const generation = io.stateGeneration?.(id);
+      if (generation !== undefined) (c.generations ??= {})[id] = generation;
+      else c.generationFallback = true;
       c.states.push(...state.parents);
       files.set(id, state.files);
     }
@@ -163,6 +169,17 @@ export async function prepareMergeStep(c: SourceStepCursor, io: StepTransport, m
           ).map(ref => ref.object.sha256),
         ]
       : await syncRoots(c, io, m);
+  let walk =
+    !c.generationFallback &&
+    io.stateGeneration &&
+    roots.every(id => c.parents[id]) &&
+    !(kind === 'forge-hosted-compose-input' && composeInputSchema.parse(c.plan).restoreBases)
+      ? sourceGenerationWalk(c.parents, c.generations ?? {}, roots)
+      : null;
+  if (walk?.cuts) {
+    c.ancestryCuts = walk.cuts;
+    c.states = [];
+  }
   const boundary = sourceAncestryCut(c.parents, c.states, roots);
   if (boundary) {
     c.ancestryBoundary = boundary;
@@ -178,7 +195,20 @@ export async function prepareMergeStep(c: SourceStepCursor, io: StepTransport, m
     const id = c.states[0]!;
     throw new ForgeError(c.ancestryFailures![id]!, 'Required source State could not be verified.');
   }
-  const frontier = sourceAncestryFrontier(c.parents, readable, roots).slice(0, 100);
+  // A failed probe remains an open edge in both proofs, but is never another
+  // byte-read candidate. If it blocks generation priority, advance independent
+  // readable work until a sound cut retires it or its original error is required.
+  const selectFrontier = () => {
+    const preferred = walk?.frontier.filter(id => !c.ancestryFailures?.[id]);
+    return preferred?.length
+      ? preferred
+      : sourceAncestryFrontier(
+          c.parents,
+          readable.filter(id => !c.ancestryFailures?.[id]),
+          roots,
+        );
+  };
+  const frontier = selectFrontier().slice(0, 100);
   // Descriptors are resolved by page. Deeper derived hints cannot enter a
   // breadth-first byte window or become a dependency before a nearer branch.
   invariant(io.describeBatch, 'SOURCE_WORKER_UNAVAILABLE', 'Resolve ancestry in windows.');
@@ -187,7 +217,10 @@ export async function prepareMergeStep(c: SourceStepCursor, io: StepTransport, m
     const probes = await io.probeStates(
       frontier,
       Object.keys(c.parents).length >= 32
-        ? { known: Object.keys(c.parents), windows: io.fanout && frontier.length > 4 ? 4 : 1 }
+        ? {
+            known: Object.keys(c.parents).filter(id => !frontier.includes(id)),
+            windows: io.fanout && frontier.length > 4 ? 4 : 1,
+          }
         : undefined,
     );
     refs = probes.refs;
@@ -198,7 +231,30 @@ export async function prepareMergeStep(c: SourceStepCursor, io: StepTransport, m
       'Ancestry descriptor page changed its frontier.',
     );
     for (const id of probes.unavailable) (c.ancestryFailures ??= {})[id] = 'SOURCE_UNAVAILABLE';
+    if (walk && probes.unavailable.length) c.generationFallback = true;
   } else refs = await io.describeBatch(frontier);
+  if (walk) {
+    for (const ref of refs) {
+      const id = ref.object.sha256,
+        generation = io.stateGeneration?.(id);
+      if (generation === undefined) c.generationFallback = true;
+      else (c.generations ??= {})[id] = generation;
+    }
+    if (!c.generationFallback) {
+      walk = sourceGenerationWalk(c.parents, c.generations ?? {}, roots);
+      if (walk?.cuts) {
+        c.ancestryCuts = walk.cuts;
+        c.states = [];
+        c.phase = 'compute';
+        return;
+      }
+      if (walk?.metadata && walk.frontier.some(id => !c.ancestryFailures?.[id])) return;
+      if (walk) {
+        const selected = new Set(selectFrontier());
+        refs = refs.filter(ref => selected.has(ref.object.sha256));
+      }
+    }
+  }
   const windows = sourceWindows(refs);
   if (io.fanout && windows.length > 1) {
     io.fanout({
@@ -228,6 +284,8 @@ export async function prepareMergeStep(c: SourceStepCursor, io: StepTransport, m
     if (state.error) (c.ancestryFailures ??= {})[state.id] = state.error;
     else {
       c.parents[state.id] = state.parents;
+      if (state.generation !== undefined) (c.generations ??= {})[state.id] = state.generation;
+      else c.generationFallback = true;
       c.states.push(...state.parents);
     }
   }
@@ -239,8 +297,9 @@ export async function prepareMergeStep(c: SourceStepCursor, io: StepTransport, m
 export async function computeMergeStep(
   c: SourceStepCursor,
   io: StepTransport,
-  source = new MemoryMergeSource(c.parents, c.ancestryBoundary),
+  source = new MemoryMergeSource(c.parents, c.ancestryBoundary, c.ancestryCuts),
 ) {
+  io.rememberStateGenerations?.(c.generations ?? {});
   if ((c.plan as { kind: string }).kind === 'forge-hosted-sync-input') {
     const reader = new MemorySourceReader(source, io);
     const result = await buildHostedSyncState(c.input, c.plan, reader, source, async () => {});

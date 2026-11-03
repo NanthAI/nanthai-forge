@@ -181,32 +181,55 @@ completed creation and retries preserve its bytes. Legacy Convex upload
 receipts written before R2 became the only byte path remain reconcilable.
 
 Merge preparation first verifies nearby parent frontiers. Composition and
-resolution prove their cut relative to immutable selected tips; resolution
-retains the two tips authenticated by its pinned conflict page, including across
-worker continuations. Prefetched ancestors never become additional selected
-roots. It can stop older history only when every selected parent path reaches
-one exact common frontier; multiple unknown frontiers, other roots or cycles
-retain normal traversal. Recursive merge bases above the cut remain intact. The
-operation records that explicit ancestry cut separately from stored parents.
-Native merge-base/file calculations still use exact hash-verified State bytes.
-Graph preparation reads the shallowest pending distance from the selected roots,
-with stable ties, through the existing object and byte windows. Only verified
-parent edges determine distance; deeper derived hints never enter the read
-window. No pending readable node waits while strictly deeper nodes are read.
-Work is independent of history depth for graphs that admit the existing common
-cut. Strict BFS bounds speculative depth, not width: a wide historical layer can
-still require many reads. Closed side branches are a known limitation of the cut
-proof, tracked in Issue `48ba68ed-2690-4b41-967f-c12bf0e23ea0`; they can prevent
-the common cut and require full retained-history traversal. Failed graph probes retain their error
+resolution pin their selected tips; resolution retains the two tips from its
+hash-verified conflict page across continuations. Prefetched ancestors never
+become additional selected roots. Native merge/file calculations still use exact
+State bytes.
+
+New hosted State objects retain an optional `stateGeneration` on their existing
+`projectObjects` record (or sparse catalog entry). A root has level 1; a child has
+1 + the largest authenticated parent level. The fixed source worker derives it
+from the exact output State's parents and current server descriptors, then writes
+it with the ordinary output batch. Bootstrap, verified Git seed roots and GitHub snapshot import derive
+level 1 from their constructed parentless State. The original Git bundle's commits
+are not extra Forge States. No generation enters State manifests, content hashes,
+client plans or ancestry hints; there is no additional healthy-path RPC or object
+write. A missing parent level leaves the new level unknown until the explicit
+operator pass. Generation numbers are unrelated to mutable Work generations or
+worker lease generations.
+
+For verified selected tips with authenticated levels, preparation uses a
+generation-ordered paint walk with one colour per tip, extending Git's two-colour
+walk. Common ancestors mark their parents
+stale. Once one non-stale side is exhausted and exactly one maximal base is
+proven, remaining branches cannot add a base. The cursor records those explicit
+cuts separately from stored parents. This stops closed side branches and wide
+or deep history without requiring every parent path to cross one singleton.
+Equal-generation ties retain the existing object/byte windows. Multiple or differing pairwise bases
+retain BFS and their recursive virtual-base ancestry; selections with additional
+restore roots also retain BFS. Prefetched cycles prevent generation pruning.
+
+States without generation retain the existing shallowest-distance BFS and
+root-relative singleton-cut proof, with stable ties and identical merge results.
+Only verified parent edges determine distance; hints never select byte reads or
+install proof edges. This fallback bounds speculative depth, not width, and can
+still traverse closed-side history. Failed graph probes retain their exact error
 and unresolved edge in the R2 cursor while independent frontier work continues.
-Only an authenticated cut may retire that edge; a failed object still required
-by graph proof or exact merge calculation surfaces its original failure.
-Descriptor failures are returned in the same bounded page, without per-item RPCs.
-After the existing nearby search, bounded parent hints may warm an action's
-physical-descriptor cache. Only the current shallow frontier is returned for byte
-reads; hints never install proof edges or survive as transfer authority between
-actions. Narrow frontiers prefetch one window; wider fan-out uses up to four.
-Save/closure hint traversal, validation, pins and worker concurrency are unchanged.
+Only an authenticated cut may retire that edge; a genuinely required failed State
+surfaces its original error. Descriptor failures remain page-batched.
+
+The dev operator's [generation pass](operations.md#state-generation-pass) previews
+existing publication and imported-State headers, verifies bounded source pages,
+and assigns missing levels parents-first. Discovery retains unresolved dependency
+identities as untrusted scheduling hints instead of repeatedly downloading their
+bodies. Its compressed private continuation contains candidate identities, sizes,
+parent-order hints and scan positions, never authoritative levels or source bytes.
+Assignment re-verifies the exact bodies and current server parent levels; cached
+size hints retain the reader's before/after access and binding checks. A State is
+read at most twice in an uninterrupted pass, independent of candidate order.
+It installs no job or idle scheduler,
+and never changes R2 bytes. Save/closure validation, pins, retry identity and
+worker concurrency are unchanged.
 
 **Lanes and checks.** `materialize` writes a State into a fresh directory of ordinary files. Native Lanes clone one disposable, pinned source-tree cache per owner using APFS `clonefile` (or filesystem reflinks elsewhere). The cloned tree is checked against every manifest path, blob digest and mode before publication; an edited or incomplete cache is rebuilt from the same State. Cache preparation and cloning hold only the cache/Lane locks, outside the owner writer lock. `.forge/materialization.json` records the selected head and clone/copy result, including the reason when the filesystem needs ordinary copying. Check workspaces retain their independent byte-only materialization. Editing a Lane never changes stored objects or other Lanes.
 

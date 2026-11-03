@@ -93,6 +93,16 @@ test('native main and complete record bytes seed through bounded pages without a
     prepared.pages.every(page => page.length <= 100 && Buffer.byteLength(JSON.stringify(page)) <= 128 * 1024),
   );
   const result = await seedHostedProject(f.store, f.input, f.client, f.exchange);
+  for (const row of f.s.tables.projectObjects.values()) {
+    const bytes = await storedBytes(f.s, row);
+    let value;
+    try {
+      value = JSON.parse(bytes.toString());
+    } catch {
+      continue;
+    }
+    if (value.kind === 'forge-source-state' && !value.parents.length) assert.equal(row.stateGeneration, 1);
+  }
   const selected = JSON.parse([...f.s.tables.projectHostedChannels.values()][0].selection);
   assert.equal(selected.head, f.store.load().nativeHead);
   assert.equal(result.mainDigest, digest(new NativeSource(f.root).object(selected.head)));

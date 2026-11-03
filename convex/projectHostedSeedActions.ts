@@ -31,9 +31,10 @@ export const stage = action({
       );
       const reader = exchangeObjectReader(ctx);
       const bodies = states.length ? await reader.read(input.projectId, owner, states) : [];
+      const rootStates: string[] = [];
       for (const [index, pin] of states.entries()) {
         const bytes = bodies[index];
-        if (pin.kind === 'state') parseNativeState(bytes!);
+        if (pin.kind === 'state' && !parseNativeState(bytes!).parents.length) rootStates.push(pin.sha256);
         for (const record of pin.records ?? []) {
           const value = JSON.parse(bytes!.toString('utf8'));
           invariant(
@@ -47,6 +48,7 @@ export const stage = action({
       return await ctx.runMutation(makeFunctionReference<'mutation'>('projectHostedSeed:commitPage'), {
         ...input,
         owner,
+        rootStates,
         body: canonicalPayload(entries),
       });
     } catch (error) {

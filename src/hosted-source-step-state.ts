@@ -4,6 +4,7 @@ import { saveInputSchema } from './hosted-save.js';
 import { workerResultSchema } from './hosted-source-worker-format.js';
 import type { SourceStepCursor, StepTransport } from './hosted-source-step.js';
 export async function publishSourceStepState(c: SourceStepCursor, io: StepTransport) {
+  io.rememberStateGenerations?.(c.generations ?? {});
   const value = c.plan as { kind: string; parents?: string[]; message: string; at: string };
   const source = new MemoryMergeSource(c.parents),
     reader = new MemorySourceReader(source, io);

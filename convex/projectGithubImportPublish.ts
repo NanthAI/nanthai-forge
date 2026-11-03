@@ -68,7 +68,7 @@ export async function publishImport(
       `],"message":${JSON.stringify(`Imported GitHub commit ${job.commit}`)},"at":${JSON.stringify(job.at)}}`,
     );
   }
-  const state = await upload.stream(stateBytes()),
+  const state = await upload.stream(stateBytes(), 1),
     head = state.sha256;
   const data = githubImportedWork(job.operationId, job.at, head);
   const workText = JSON.stringify(data, null, 2),

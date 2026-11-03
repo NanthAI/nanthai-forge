@@ -5,6 +5,7 @@ import { scaleFixture, at } from './convex-source-scale-fixture.mjs';
 import { buildComposePages } from '../dist/hosted-compose.js';
 import { MemoryMergeSource, MemorySourceReader } from '../dist/hosted-source-memory.js';
 import { buildHostedComposeState } from '../dist/hosted-compose-worker.js';
+import { generationFailureGraph } from './source-generation-fixture.mjs';
 
 async function scenario(s, { requiredBase = false, large = false } = {}) {
   const blob = await s.putSpec(Buffer.from('base\n')),
@@ -238,3 +239,71 @@ test('graph descriptor probes retain the active-execution fence', async () => {
     s.restore();
   }
 });
+
+for (const fanout of [false, true])
+  test(`generation frontier settles ${fanout ? 'fan-out' : 'direct'} retained raw/nested acquisition errors`, async t => {
+    for (const fault of ['healthy', 'raw-hash', 'recipe', 'index', 'leaf']) {
+      const h = generationFailureGraph({ fanout }),
+        expected = await h.s.compose(h.initial, { complete: true }),
+        s = await scaleFixture();
+      try {
+        for (const [id, bytes] of h.s.objects) await s.putSpec(bytes, undefined, h.s.generations[id]);
+        const target = h.s.ref(h.failed).object;
+        let failedPin = target;
+        if (['recipe', 'index', 'leaf'].includes(fault)) {
+          const parts = await recipeState(s, target);
+          failedPin = parts[fault];
+          const row = [...s.tables.projectObjects.values()].find(row => row.digest === failedPin.sha256);
+          await s.ctx.db.patch(row._id, { removed: true });
+        } else if (fault === 'raw-hash') s.objects.set(h.failed, Buffer.alloc(target.size, 120));
+        // Bound the faulty read even on a regression: fail this test before a
+        // worker can spend its outer deadline repeatedly downloading the State.
+        const jobId = await s.enqueue(h.initial.input);
+        let actions = 0;
+        while (s.ready.length) {
+          assert(++actions < 50, 'required failures must settle in bounded quanta');
+          const item = s.ready.shift();
+          if (item.state.kind !== 'canceled') await s.execute(item);
+          if (fault !== 'healthy') assert((s.readCounts.get(h.failed) ?? 0) <= 1, 'failed State read once');
+        }
+        const job = await s.job(jobId);
+        if (fault === 'healthy') {
+          assert.equal(job.status, 'completed');
+          assert.deepEqual(await s.bytes(job.output), expected.output);
+        } else {
+          assert.equal(job.status, 'failed');
+          assert.equal(
+            job.control.failureCode,
+            fault === 'raw-hash' ? 'SOURCE_HASH_MISMATCH' : 'SOURCE_UNAVAILABLE',
+          );
+          assert.equal(job.output, null);
+          assert.equal(
+            s.readCounts.get(h.q),
+            1,
+            'readable fallback is not discarded after descriptor re-selection',
+          );
+          assert((s.readCounts.get(failedPin.sha256) ?? 0) <= 1);
+          assert.equal(s.metrics.filter(m => m.failed).length, 0, 'domain error is settled by the worker');
+        }
+        const tasks = [...s.tables.projectSourceTasks.values()].filter(
+          row => JSON.parse(row.input).kind === 'states',
+        );
+        assert.equal(tasks.length > 0, fanout, 'exercise actual child summaries');
+        const idle = s.calls.length;
+        await s.drain();
+        assert.equal(s.calls.length, idle, 'terminal error has no retry or idle calls');
+        t.diagnostic(
+          JSON.stringify({
+            fanout,
+            fault,
+            actions,
+            failedReads: s.readCounts.get(h.failed) ?? 0,
+            qReads: s.readCounts.get(h.q) ?? 0,
+            functions: s.calls.length,
+          }),
+        );
+      } finally {
+        s.restore();
+      }
+    }
+  });

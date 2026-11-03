@@ -25,5 +25,7 @@ export const hostedSaveTables = {
     input: v.string(),
     jobId: v.string(),
     output: v.string(),
-  }).index('by_project_and_head', ['projectId', 'head']),
+  })
+    .index('by_project_and_head', ['projectId', 'head'])
+    .index('by_project', ['projectId']),
 };

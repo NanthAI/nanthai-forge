@@ -11,9 +11,10 @@ import { meter } from '../dist/hosted-source-step-verify.js';
 import { saveSourceProgress, loadSourceProgress } from '../dist/hosted-source-step-progress.js';
 
 export const at = '2026-01-01T00:00:00.000Z';
-export function ancestryFixture() {
+export function ancestryFixture({ generationMetadata = false } = {}) {
   const objects = new Map(),
     parents = {},
+    generations = {},
     reads = [],
     describes = [],
     hints = [];
@@ -28,6 +29,8 @@ export function ancestryFixture() {
   const state = (files, edges = [], message = '') => {
     const pin = json({ schema: 1, kind: 'forge-source-state', files, parents: edges, message, at });
     parents[pin.sha256] = edges;
+    if (edges.every(id => generations[id]))
+      generations[pin.sha256] = 1 + Math.max(0, ...edges.map(id => generations[id]));
     return pin.sha256;
   };
   const ref = id => {
@@ -35,6 +38,7 @@ export function ancestryFixture() {
     return { object: { sha256: id, size: objects.get(id).length }, recipe: null };
   };
   const io = {
+    ...(generationMetadata ? { stateGeneration: id => generations[id] } : {}),
     async describeBatch(ids) {
       assert(ids.length <= 100);
       describes.push([...ids]);
@@ -153,6 +157,7 @@ export function ancestryFixture() {
   return {
     objects,
     parents,
+    generations,
     reads,
     describes,
     hints,

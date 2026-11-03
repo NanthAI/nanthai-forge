@@ -91,7 +91,7 @@ export async function scaleFixture({ parallelism = 4, delay = 0, guardRss = fals
     chain = result.catch(() => {});
     return result;
   };
-  async function putSpec(spec, pin) {
+  async function putSpec(spec, pin, stateGeneration) {
     if (!pin) {
       const b = Buffer.isBuffer(spec) ? spec : generated(spec);
       pin = { sha256: digest(b), size: b.length };
@@ -102,6 +102,7 @@ export async function scaleFixture({ parallelism = 4, delay = 0, guardRss = fals
         projectId,
         digest: pin.sha256,
         size: pin.size,
+        ...(stateGeneration === undefined ? {} : { stateGeneration }),
         removed: false,
         nonce: 'synthetic',
         location: 'r2',
@@ -117,7 +118,7 @@ export async function scaleFixture({ parallelism = 4, delay = 0, guardRss = fals
     if (spec.index !== undefined) b.writeBigUInt64LE(BigInt(spec.index));
     return b;
   }
-  const json = value => putSpec(Buffer.from(saveBytes(value)));
+  const json = (value, stateGeneration) => putSpec(Buffer.from(saveBytes(value)), undefined, stateGeneration);
   const bytes = async pin => {
     const spec = objects.get(pin.sha256);
     return Buffer.isBuffer(spec) ? spec : generated(spec);

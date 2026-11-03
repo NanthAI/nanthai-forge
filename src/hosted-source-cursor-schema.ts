@@ -38,6 +38,9 @@ const cursorSchema = z
     seen: z.record(jobHash, z.boolean()),
     parents: z.record(jobHash, z.array(jobHash)),
     ancestryBoundary: jobHash.optional(),
+    ancestryCuts: z.array(jobHash).optional(),
+    generations: z.record(jobHash, z.number().int().positive().max(Number.MAX_SAFE_INTEGER)).optional(),
+    generationFallback: z.boolean().optional(),
     ancestryFailures: z
       .record(
         jobHash,

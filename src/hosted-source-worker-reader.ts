@@ -14,6 +14,9 @@ import { workerObjectSchema, type WorkerObject, type WorkerPin } from './hosted-
 /** Trusted transport resolves current job-scoped grants; repo bytes supply no URL.
  * upload consumes the stream completely and commits only the supplied exact pin. */
 export interface SourceWorkerTransport {
+  /** Trusted, current descriptor metadata; never a field in client plans. */
+  stateGeneration?(id: string): number | undefined;
+  rememberStateGenerations?(values: Record<string, number>): void;
   publishRecipe?(object: WorkerPin, recipe: WorkerPin): Promise<void>;
   prepareRead?(pins: WorkerPin[]): Promise<void>;
   describe?(sha256: string): Promise<WorkerObject>;

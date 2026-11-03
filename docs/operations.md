@@ -1769,3 +1769,99 @@ The [scheduled import benchmark guard](operations/import-benchmark-guard.md)
 counts observed project executions, cancels scheduled import/index work on the
 approved benchmark stop conditions, runs temporary-project deletion and proves
 a quiet window without idle function polling.
+
+
+## State generation pass
+
+New fixed-worker States and bootstrap/Git/GitHub snapshot roots write topological
+levels on the existing object metadata records. Older States remain readable
+through the same BFS ancestry path. The finite dev operator pass populates their
+missing levels; it is not an automatically scheduled migration. Run it only on
+the explicitly selected dev deployment and existing project. The implementation
+builder does not run this command against hosted data.
+
+From an installed, reviewed checkout with the usual Convex operator credentials,
+preview first (no State bodies, source writes, R2 writes or background work):
+
+```sh
+node scripts/backfill-state-generations.mjs --deployment DEV_NAME --project PROJECT_ID --actor OWNER_ID --cursor PRIVATE_PREVIEW_FILE
+```
+
+The output gives scanned State candidates, missing levels and total logical
+manifest bytes. Publication records are scanned in creation order; the pinned
+imported `sourceStateParents` index supplies additional candidate identities.
+Those derived rows supply no parent facts or generation proof. The selected main
+is included for older projects without a complete import index. A preview can
+count an identity twice across the two header sources; it is an upper estimate
+for those headers, not proof of complete source coverage. Missing intermediate
+parents are discovered and verified by apply. No index repair is triggered.
+
+Apply with a separate private continuation file:
+
+```sh
+node scripts/backfill-state-generations.mjs --deployment DEV_NAME --project PROJECT_ID --actor OWNER_ID --cursor PRIVATE_APPLY_FILE --apply
+```
+
+The command calls `projectStateGenerationActions:step` through the installed
+Convex operator CLI. Each step handles at most 100 State identities and normally
+2 MiB of logical State bodies (one larger State is handled alone). It verifies
+hashes/recipes and parses the actual parent lists, then derives levels from
+persisted parent levels and the authenticated page, parents-first. Discovery
+retains unresolved dependency identities instead of repeatedly reading their
+bodies. After discovery, those untrusted hints order a second verification pass;
+each committed level still comes from exact authenticated State bytes and current
+server parent levels. Only internal fixed actions can submit those parent
+summaries. Cached size hints skip redundant discovery queries, but the source
+reader still checks exact bindings and current access before and after every
+body acquisition. Current project ownership is
+checked on every read and commit. Cycles, changed bindings and unavailable bytes
+surface structured errors instead of guessed levels. Stored levels never change.
+
+An interruption retains the exact operation id, scan, pending ids and compressed
+dependency/size hints. No source bodies or authoritative levels enter that private
+continuation. Rerun the
+same command/file: an unknown committed page reconciles from existing levels,
+without duplicate records or source changes. Completion stops the process; idle
+cost is zero. The output reports confirmed assignments and source bodies verified; a lost response can leave an already committed assignment outside the local confirmed-write counter. This only adds
+recomputable metadata; ignoring it restores BFS. It changes no State hash, parent,
+file, retained history, Work selection, source authority or R2 encoding.
+
+Cost planning (estimates, not observed billing): one double is 8 bytes per State,
+20/40 kB for 2,500/5,000 States, plus the field name/record encoding and a sparse
+catalog index where needed. No healthy save/accept/import function call or R2
+object is added. A synthetic 2,500/5,000-State metadata pass uses 26/51 scan pages,
+2,500/5,000 existing-row writes and about 7,600/15,200 document reads before
+optional replay checks; source-byte verification is separate. Complete
+source-verified synthetic chain measurements at 2,500 States are:
+
+| Candidate discovery | Action quanta | Function executions | Document reads | Existing-row writes | R2 GETs | Logical body bytes |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Creation-ordered headers | 26 | 151 | 12,650 | 2,500 | 2,500 | 446,324 |
+| Child-before-parent headers | 2,451 | 9,780 | 27,253 | 2,500 | 4,999 | 892,538 |
+| Only the tip header; intermediate headers absent | 2,526 | 10,128 | 22,627 | 2,500 | 4,999 | 892,538 |
+
+All three paths make zero R2 writes. The unordered paths read each body at most
+twice (once for discovery, once for parent-ordered assignment), rather than
+re-downloading unresolved dependants on every quantum. Already assignable pages
+need only one read. Transport retries and unknown replies can repeat in-flight reads; recipe trees
+add their own physical reads and resolution calls. Each action retains at most
+100 State bodies / normally 2 MiB (17,900 bytes in these small-manifest fixtures).
+The continuation grows with dependency identities, not file bodies or whole Work.
+Fake-network timings are not live wall-time estimates. A chain without parent
+headers necessarily reveals one new parent per discovery quantum; the
+creation-ordered page count is not an order-independent function-cost estimate.
+
+Preview counts only visible headers; it cannot estimate undiscovered parents.
+For 2,500 unique States averaging 300 kB, uninterrupted logical source reads are
+about 750 MB when already parent-ordered and at most about 1.5 GB with discovery
+and re-verification. Verification alone needs roughly 360–420 byte pages;
+missing-header discovery can additionally need 2,500 sequential quanta. Budget
+from the actual candidate ordering, sizes, fan-in and recipe placement. A 5 MB
+average instead means about 12.5–25 GB of logical source reads and at least
+2,500 verification byte pages. At the benchmark's assumed $2.20/million calls,
+151 / 10,128 executions cost about $0.00033 / $0.0223 for calls alone, before
+DB I/O, R2 operations and action compute. At $0.30/GB-hour, each cumulative minute
+of 0.5 GiB action compute adds $0.0025; the lead must measure runtime rather than
+assuming a 5–15 minute pass from header bytes.
+No current invoice, live migration wall time or deployed byte-placement delta is
+claimed. The lead owns deployment, the dev pass and billed-usage qualification.

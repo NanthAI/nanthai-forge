@@ -63,6 +63,9 @@ export type SourceStepCursor = {
   parents: Record<string, string[]>;
   /** Proven common frontier; older history cannot contain a maximal merge base. */
   ancestryBoundary?: string;
+  ancestryCuts?: string[];
+  generations?: Record<string, number>;
+  generationFallback?: boolean;
   ancestryFailures?: Record<string, string>;
   /** Exact tips from the pinned conflict page, independent of ancestry prefetch. */
   resolutionRoots?: [string, string];
@@ -148,7 +151,7 @@ export function enqueueSourceObject(c: SourceStepCursor, ref: WorkerObject) {
 async function saveStep(c: SourceStepCursor, io: StepTransport, m: StepMeter) {
   const plan = sourceValidation('SOURCE_JOB_INVALID', () => saveInputSchema.parse(c.plan));
   if (c.pages === 0 && c.count === 0 && !c.files.length && !c.changes.length) {
-    const source = new MemoryMergeSource(c.parents, c.ancestryBoundary),
+    const source = new MemoryMergeSource(c.parents, c.ancestryBoundary, c.ancestryCuts),
       reader = new MemorySourceReader(source, io);
     await io.prepareRead?.([plan.baseline.object, plan.pages]);
     const baseline = parseNativeState(await reader.bytes(plan.baseline));
@@ -157,6 +160,8 @@ async function saveStep(c: SourceStepCursor, io: StepTransport, m: StepMeter) {
     // change reuses its verified bytes. Staging checked the exact object recipe.
     for (const file of baseline.files) c.seen[file.blob] = true;
     c.parents[plan.baseline.object.sha256] = baseline.parents;
+    const generation = io.stateGeneration?.(plan.baseline.object.sha256);
+    if (generation !== undefined) (c.generations ??= {})[plan.baseline.object.sha256] = generation;
   }
   if (c.changes.length && !(c.next && c.pages % 8 !== 0)) {
     if (m.treeUpdates) {
@@ -286,6 +291,8 @@ async function closureStep(c: SourceStepCursor, io: StepTransport, m: StepMeter)
       reader = new MemorySourceReader(source, io);
     const state = parseNativeState(await reader.bytes(ref));
     c.parents[id] = state.parents;
+    const generation = io.stateGeneration?.(id);
+    if (generation !== undefined) (c.generations ??= {})[id] = generation;
     c.seen[id] = true;
     c.states.push(...state.parents);
     for (const file of state.files) {
@@ -314,7 +321,8 @@ export async function runSourceStep(cursor: SourceStepCursor, io: StepTransport)
   const c = structuredClone(cursor),
     m = meter(),
     original = io;
-  const mergeSource = new MemoryMergeSource(c.parents, c.ancestryBoundary);
+  io.rememberStateGenerations?.(c.generations ?? {});
+  const mergeSource = new MemoryMergeSource(c.parents, c.ancestryBoundary, c.ancestryCuts);
   io = {
     ...original,
     upload: async (pin, bytes) => {
@@ -364,6 +372,7 @@ export async function runSourceStep(cursor: SourceStepCursor, io: StepTransport)
     else if (c.phase === 'compute') {
       // The graph can establish its cut earlier in this same quantum.
       mergeSource.ancestryBoundary = c.ancestryBoundary;
+      mergeSource.ancestryCuts = c.ancestryCuts;
       const kind = (c.plan as { kind: string }).kind;
       if (kind === 'forge-hosted-save-input' || kind === 'forge-source-worker-state')
         await publishSourceStepState(c, io);

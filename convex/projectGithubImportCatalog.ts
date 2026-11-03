@@ -15,15 +15,23 @@ import type { ObjectPack } from '../src/object-pack-range';
 export const catalogEntry = v.object({
   digest: v.string(),
   size: v.number(),
+  stateGeneration: v.optional(v.number()),
   recipe: v.optional(v.object({ digest: v.string(), size: v.number() })),
   pack: v.optional(objectPack),
 });
-type Entry = { digest: string; size: number; recipe?: { digest: string; size: number }; pack?: ObjectPack };
+type Entry = {
+  digest: string;
+  size: number;
+  stateGeneration?: number;
+  recipe?: { digest: string; size: number };
+  pack?: ObjectPack;
+};
 const catalogRow = v.object({
   first: v.string(),
   last: v.string(),
   digests: v.string(),
   sizes: v.array(v.number()),
+  stateGenerations: v.optional(v.array(v.object({ index: v.number(), generation: v.number() }))),
   recipes: v.array(v.object({ index: v.number(), digest: v.string(), size: v.number() })),
   packs: v.optional(
     v.array(v.object({ index: v.number(), digest: v.string(), size: v.number(), offset: v.number() })),
@@ -34,6 +42,8 @@ const validEntry = (entry: Entry) =>
   pin.test(entry.digest) &&
   Number.isSafeInteger(entry.size) &&
   entry.size >= 0 &&
+  (entry.stateGeneration === undefined ||
+    (Number.isSafeInteger(entry.stateGeneration) && entry.stateGeneration > 0)) &&
   (!entry.recipe || (pin.test(entry.recipe.digest) && Number.isSafeInteger(entry.recipe.size))) &&
   (!entry.pack ||
     (!entry.recipe &&
@@ -57,6 +67,13 @@ export async function recordWindow(ctx: MutationCtx, job: Doc<'projectGithubImpo
   const value = JSON.stringify({
     digests: objects.map(entry => entry.digest).join(''),
     sizes: objects.map(entry => entry.size),
+    ...(objects.some(entry => entry.stateGeneration !== undefined)
+      ? {
+          stateGenerations: objects.flatMap((entry, index) =>
+            entry.stateGeneration === undefined ? [] : [{ index, generation: entry.stateGeneration }],
+          ),
+        }
+      : {}),
     recipes: objects.flatMap((entry, index) => (entry.recipe ? [{ index, ...entry.recipe }] : [])),
     packs: objects.flatMap((entry, index) => (entry.pack ? [{ index, ...entry.pack }] : [])),
   });
@@ -66,6 +83,7 @@ export function windowEntries(value: string): Entry[] {
   const row: {
     digests: string;
     sizes: number[];
+    stateGenerations?: { index: number; generation: number }[];
     recipes: { index: number; digest: string; size: number }[];
     packs?: ({ index: number } & ObjectPack)[];
   } = JSON.parse(value);
@@ -73,6 +91,8 @@ export function windowEntries(value: string): Entry[] {
     digest: row.digests.slice(index * 64, index * 64 + 64),
     size,
   }));
+  for (const { index, generation } of row.stateGenerations ?? [])
+    entries[index]!.stateGeneration = generation;
   for (const { index, digest, size } of row.recipes) entries[index]!.recipe = { digest, size };
   for (const { index, digest, size, offset } of row.packs ?? [])
     entries[index]!.pack = { digest, size, offset };
@@ -110,6 +130,11 @@ export const publish = internalMutation({
           (page.packs ?? []).every(
             row => Number.isSafeInteger(row.index) && row.index >= 0 && row.index < count,
           ) &&
+          (page.stateGenerations ?? []).every(
+            row => Number.isSafeInteger(row.index) && row.index >= 0 && row.index < count,
+          ) &&
+          new Set((page.stateGenerations ?? []).map(row => row.index)).size ===
+            (page.stateGenerations?.length ?? 0) &&
           new Set((page.packs ?? []).map(row => row.index)).size === (page.packs?.length ?? 0),
         'IMPORT_PAGE_CHANGED',
         'Catalog rows are malformed.',
@@ -120,6 +145,9 @@ export const publish = internalMutation({
           validEntry({
             digest: entry,
             size: page.sizes[index]!,
+            ...(page.stateGenerations?.some(row => row.index === index)
+              ? { stateGeneration: page.stateGenerations.find(row => row.index === index)!.generation }
+              : {}),
             recipe: page.recipes.find(row => row.index === index),
             pack: page.packs?.find(row => row.index === index),
           }) &&
@@ -138,7 +166,8 @@ export const publish = internalMutation({
             previous.last === page.last &&
             JSON.stringify(previous.sizes) === JSON.stringify(page.sizes) &&
             JSON.stringify(previous.recipes) === JSON.stringify(page.recipes) &&
-            JSON.stringify(previous.packs ?? []) === JSON.stringify(page.packs ?? []),
+            JSON.stringify(previous.packs ?? []) === JSON.stringify(page.packs ?? []) &&
+            JSON.stringify(previous.stateGenerations ?? []) === JSON.stringify(page.stateGenerations ?? []),
           'IMPORT_PAGE_CHANGED',
           'Immutable catalog changed.',
         );

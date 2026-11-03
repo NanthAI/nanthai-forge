@@ -23,7 +23,13 @@ export type SourceTaskInput =
   | { kind: 'markers'; request: SourceCalculation; refs: WorkerObject[] }
   | { kind: 'calculate'; refs: WorkerObject[]; requests: SourceCalculation[] };
 export type SourceFanout = { kind: 'verify' | 'states' | 'calculate'; end: number; tasks: SourceTaskInput[] };
-export type SourceStateSummary = { id: string; parents: string[]; files: string[]; error: string | null };
+export type SourceStateSummary = {
+  generation?: number;
+  id: string;
+  parents: string[];
+  files: string[];
+  error: string | null;
+};
 export type SourceTaskProgress = {
   index: number;
   verify: VerifyCursor | null;
@@ -57,9 +63,11 @@ export async function stateSummary(
     return invalid(error.code);
   }
   try {
-    const state = parseNativeState(bytes);
+    const state = parseNativeState(bytes),
+      generation = io.stateGeneration?.(ref.object.sha256);
     return {
       id: ref.object.sha256,
+      ...(generation === undefined ? {} : { generation }),
       parents: state.parents,
       files: files
         ? [...new Set([...state.files.map(f => f.blob), ...(state.git ? [state.git.bundle] : [])])]
@@ -254,6 +262,8 @@ export function applySourceFanout(
       'Required source State could not be verified.',
     );
     c.parents[id] = state.parents;
+    if (state.generation !== undefined) (c.generations ??= {})[id] = state.generation;
+    else c.generationFallback = true;
     c.seen[id] = true;
     pending.push(...state.parents);
     for (const digest of state.files) {
