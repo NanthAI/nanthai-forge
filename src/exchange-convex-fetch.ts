@@ -78,7 +78,8 @@ export function exchangeConvexFetch(
     try {
       const request: RequestInit & { dispatcher?: Dispatcher } = {
         ...init,
-        redirect: 'error',
+        // Preserve caller/native redirect behavior; the shared deadline owns
+        // the complete chain rather than silently adding a route restriction.
         ...(signal ? { signal } : {}),
         ...(longAction ? { dispatcher: actionDispatcher } : {}),
       };

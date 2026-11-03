@@ -22,10 +22,11 @@ export async function publishGithubStatus(store: WorkStore, supplied?: Pick<Conv
     let client = supplied;
     if (!client) {
       const credentials = coordinationCredentials(host.deployment, process.env.FORGE_AUTH_TOKEN);
+      const request = exchangeConvexFetch({ totalTimeoutMs: 10_000 });
       const http = deadlineConvexClient(credentials.url, {
         skipConvexDeploymentUrlCheck: true,
         logger: false,
-        fetch: exchangeConvexFetch({ totalTimeoutMs: 10_000 }),
+        fetch: (input, init) => request(input, { ...init, redirect: 'error' }),
       });
       http.setAuth(credentials.token);
       client = http;

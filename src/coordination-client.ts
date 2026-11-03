@@ -46,10 +46,11 @@ export function coordinationClient(
   options?: { signal: AbortSignal },
 ): ConvexHttpClient {
   const credentials = coordinationCredentials(deployment, token);
+  const request = exchangeConvexFetch({}, undefined, options?.signal);
   const client = deadlineConvexClient(credentials.url, {
     skipConvexDeploymentUrlCheck: true,
     logger: false,
-    fetch: exchangeConvexFetch({}, undefined, options?.signal),
+    fetch: (input, init) => request(input, { ...init, redirect: 'error' }),
   });
   client.setAuth(credentials.token);
   return client;

@@ -5,6 +5,7 @@ import { createServer } from 'node:http';
 import { networkFetch, networkDeadline, networkTimeout } from '../dist/network-fetch.js';
 import { deadlineConvexClient } from '../dist/network-convex-client.js';
 import { exchangeConvexFetch } from '../dist/exchange-convex-fetch.js';
+import { coordinationClient } from '../dist/coordination-client.js';
 import { networkContinuation } from '../dist/network-continuation.js';
 import { networkBoundaryFindings } from '../scripts/check-network-boundaries.mjs';
 import { makeFunctionReference } from 'convex/server';
@@ -31,6 +32,116 @@ async function fixture(t, handler) {
   return { url: `http://127.0.0.1:${server.address().port}`, calls };
 }
 const timeout = error => error.code === 'EXCHANGE_REQUEST_TIMEOUT';
+
+test('Convex HTTP redirects preserve the existing method and function arguments', async t => {
+  const methods = [];
+  const f = await fixture(t, (req, res) => {
+    methods.push(req.method);
+    if (req.url === '/api/query') {
+      res.writeHead(307, { location: '/redirected-query' });
+      res.end();
+    } else res.end(JSON.stringify({ status: 'success', value: 42 }));
+  });
+  const client = deadlineConvexClient(
+    f.url,
+    {
+      skipConvexDeploymentUrlCheck: true,
+      logger: false,
+      fetch: exchangeConvexFetch({
+        ...options,
+        headerTimeoutMs: 1000,
+        idleTimeoutMs: 1000,
+        totalTimeoutMs: 2000,
+      }),
+    },
+    3000,
+  );
+  const value = await client.query(makeFunctionReference('test:redirect'), { operationId: 'original' });
+  assert.equal(value, 42);
+  assert.deepEqual(methods, ['POST', 'POST']);
+  assert.equal(f.calls.length, 2);
+  assert.equal(f.calls[0].body, f.calls[1].body);
+});
+
+test('a redirect target that never answers retains the same deadline and continuation', async t => {
+  const f = await fixture(t, (req, res) => {
+    if (req.url === '/api/query') {
+      res.writeHead(307, { location: '/stalled-query' });
+      res.end();
+    }
+  });
+  const client = deadlineConvexClient(
+    f.url,
+    {
+      skipConvexDeploymentUrlCheck: true,
+      logger: false,
+      fetch: exchangeConvexFetch({
+        ...options,
+        headerTimeoutMs: 500,
+        idleTimeoutMs: 500,
+        totalTimeoutMs: 1000,
+      }),
+    },
+    2000,
+  );
+  const command = { operationId: '11111111-1111-4111-8111-111111111111', message: 'original input' };
+  let failure;
+  try {
+    await client.query(makeFunctionReference('test:redirect'), command);
+  } catch (error) {
+    failure = error;
+  }
+  assert(timeout(failure));
+  assert.equal(f.calls.length, 2);
+  assert.equal(f.calls[0].body, f.calls[1].body);
+  const pending = networkContinuation(
+    '/synthetic/lane',
+    { url: f.url, projectId: 'project' },
+    'finish',
+    command,
+    command.operationId,
+    failure,
+  );
+  assert.deepEqual(pending.result.replayParameters, command);
+  assert.equal(pending.result.next.operationId, command.operationId);
+  assert.equal(pending.result.inProgress, true);
+});
+
+test('Convex requests retain an explicitly selected manual redirect policy', async t => {
+  const f = await fixture(t, (_req, res) => {
+    res.writeHead(307, { location: '/caller-selected-target' });
+    res.end('caller selected manual redirect');
+  });
+  const client = deadlineConvexClient(
+    f.url,
+    {
+      skipConvexDeploymentUrlCheck: true,
+      logger: false,
+      fetch: exchangeConvexFetch({ ...options, headerTimeoutMs: 1000, totalTimeoutMs: 2000 }),
+    },
+    3000,
+  );
+  client.setFetchOptions({ redirect: 'manual' });
+  await assert.rejects(
+    client.query(makeFunctionReference('test:redirect'), {}),
+    /caller selected manual redirect/,
+  );
+  assert.equal(f.calls.length, 1);
+});
+
+test('coordination retains its existing redirect rejection without changing general exchange behavior', async t => {
+  const f = await fixture(t, (_req, res) => {
+    res.writeHead(307, { location: '/must-not-forward' });
+    res.end();
+  });
+  const client = coordinationClient(f.url, 'synthetic-owner-token');
+  client.setFetchOptions({ redirect: 'follow' });
+  await assert.rejects(client.query(makeFunctionReference('test:redirect'), {}), {
+    code: 'EXCHANGE_REQUEST_FAILED',
+  });
+  assert.equal(f.calls.length, 4); // One read plus its three bounded transport retries.
+  assert(f.calls.every(call => call.path === '/api/query'));
+});
 
 test('explicit upload deadlines preserve headers beyond the shared default', async t => {
   t.mock.timers.enable({ apis: ['setTimeout'] });

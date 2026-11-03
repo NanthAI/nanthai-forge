@@ -31,10 +31,11 @@ export async function startAgentMcp(deployment: string, token: string | undefine
     'AGENT_UNAVAILABLE',
     'Set FORGE_AGENT_TOKEN to the issued agent token.',
   );
+  const request = exchangeConvexFetch();
   const client = deadlineConvexClient(url.origin, {
     skipConvexDeploymentUrlCheck: true,
     logger: false,
-    fetch: exchangeConvexFetch(),
+    fetch: (input, init) => request(input, { ...init, redirect: 'error' }),
   });
   const describe = makeFunctionReference<'action', { token: string }, string>('agentActions:describe');
   const read = makeFunctionReference<'action', { token: string; endpoint: string }, string>(
