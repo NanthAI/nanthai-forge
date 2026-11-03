@@ -140,6 +140,12 @@ export function startBroker(cli, callLog, { now = () => new Date().toISOString()
       const env = { ...process.env };
       for (const key of PASS) if (agent.env[key]) env[key] = agent.env[key];
       const execStartedAt = now();
+      const callId = randomUUID();
+      // Separate journal keeps completed-call scoring unchanged. Persist before exec:
+      // the caller can die while the relay's CLI continues saving or landing.
+      const progress = entry =>
+        appendFileSync(callLog + '.progress.jsonl', JSON.stringify({ callId, ...entry }) + '\n');
+      progress({ task: agent.task, root: agent.root, startedAt: execStartedAt });
       res.setHeader('Content-Type', 'application/x-ndjson');
       res.flushHeaders();
       const child = execFile(
@@ -193,6 +199,7 @@ export function startBroker(cli, callLog, { now = () => new Date().toISOString()
               ...coordinationOf(args, output),
             }) + '\n',
           );
+          progress({ endedAt });
           // Output already reached the caller; the last frame carries only the exit status.
           reply({ code });
         },
@@ -214,9 +221,9 @@ export function startBroker(cli, callLog, { now = () => new Date().toISOString()
 
 if (process.argv[1] && resolve(process.argv[1]) === resolve(new URL(import.meta.url).pathname)) {
   const [cli, callLog] = process.argv.slice(2);
-  const { admin, port } = await startBroker(cli, callLog);
+  const { server, admin, port } = await startBroker(cli, callLog);
   process.stdout.write(JSON.stringify({ port, admin }) + '\n');
-  // The harness owns this process: exit with it.
+  // Stop admission with the harness, but retain outstanding child callbacks/journals.
   process.stdin.resume();
-  process.stdin.on('end', () => process.exit(0));
+  process.stdin.on('end', () => server.close());
 }

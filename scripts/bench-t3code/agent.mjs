@@ -202,9 +202,9 @@ export function codexUsage(stdout, rollout = '') {
 }
 
 const QUOTA =
-  /usage limit|rate[_ -]limit|hit your (usage )?limit|\b429\b|overloaded_error|usage_limit_reached|insufficient_quota|quota exceeded/i;
+  /usage limit|rate[_ -]limit|hit your (usage )?limit|\b429\b|at capacity|server_overloaded|overloaded|usage_limit_reached|insufficient_quota|quota exceeded/i;
 
-/** Quota or rate-limit stop: CLI errors only (agent prose can mention limits), or a Codex
+/** Usage, rate or provider-capacity stop: CLI errors only (agent prose can mention limits), or a Codex
  * rate-limit window at 100%. */
 export function quotaHit({ provider, stdout, stderr, usage: u }) {
   if (provider === 'codex')
@@ -213,7 +213,15 @@ export function quotaHit({ provider, stdout, stderr, usage: u }) {
       (u?.errors ?? []).some(e => QUOTA.test(e)) ||
       [u?.rateLimits?.primary, u?.rateLimits?.secondary].some(w => (w?.used_percent ?? 0) >= 100)
     );
-  return QUOTA.test(stderr) || (Boolean(u?.isError) && QUOTA.test(stdout));
+  // Claude result errors are structured; never scan assistant prose in stdout.
+  return (
+    QUOTA.test(stderr) ||
+    jsonLines(stdout).some(e =>
+      e.type === 'error' || e.type === 'turn.failed'
+        ? QUOTA.test(String(e.message ?? e.error?.message ?? JSON.stringify(e.error)))
+        : e.type === 'result' && e.is_error && QUOTA.test(JSON.stringify(e.errors ?? e.error ?? '')),
+    )
+  );
 }
 
 /** A fresh CODEX_HOME per task: no owner config, AGENTS.md, skills, plugins or sessions;

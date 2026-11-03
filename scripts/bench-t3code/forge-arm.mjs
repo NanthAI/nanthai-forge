@@ -49,6 +49,16 @@ export const readCalls = file =>
         .map(line => JSON.parse(line))
     : [];
 
+/** Every wrapper call is retained before exec and closed only after its receipt is logged. */
+export function inProgressCalls(callLog) {
+  const active = new Map();
+  for (const call of readCalls(callLog + '.progress.jsonl')) {
+    if (call.endedAt) active.delete(call.callId);
+    else active.set(call.callId, call);
+  }
+  return [...active.values()];
+}
+
 /** Lanes a sync conflict opened for this workspace (<root>.forge-client/lanes/<id>). */
 export function resolveLanes(root) {
   const lanesDir = `${root}.forge-client/lanes`;
@@ -107,13 +117,13 @@ export function forgeArm(config, { callLog, ws, ledger = null, cellDir = dirname
     nf,
     /** Start a Lane on main and materialize it at root (outside agent timing). */
     /** New Lane, then its checkout at root; `phases` gets each step's seconds. */
-    async startLane(root, outcome, phases = {}) {
+    async startLane(root, outcome, phases = {}, task = null) {
       let t = Date.now();
       await mkdir(anchor, { recursive: true });
       const started = await nf(anchor, 'start', { ...X, operationId: randomUUID(), outcome });
       const laneId = JSON.stringify(started).match(/"laneId":"([0-9a-f-]{36})"/)?.[1];
       if (!laneId) throw Error(`BENCH_FORGE_START ${JSON.stringify(started).slice(0, 500)}`);
-      log('open', laneId, { outcome: outcome.slice(0, 80) });
+      log('open', laneId, { outcome: outcome.slice(0, 80), root, callLog, task });
       phases.start = (Date.now() - t) / 1000;
       t = Date.now();
       await nf(root, 'open', { ...X, laneId });
@@ -151,11 +161,27 @@ export function forgeArm(config, { callLog, ws, ledger = null, cellDir = dirname
     ) {
       const until = Date.now() + deadlineMs;
       for (;;) {
+        // No Lane-filtered submission read exists in the hosted CLI. Wait for ALL
+        // task calls (including resolve Lanes/source prep), then re-read server handles.
+        const calls = inProgressCalls(callLog).filter(c => c.task === task);
+        if (calls.length) {
+          if (Date.now() >= until)
+            return {
+              landed: false,
+              state: 'in-flight-at-deadline',
+              laneId,
+              inFlight: calls.map(c => `call:${c.callId}`),
+              operations: [],
+              acceptedAt: null,
+            };
+          await wait(Math.min(pollMs, Math.max(0, until - Date.now())));
+          continue;
+        }
         const seen = [];
         let landed = null;
         for (const operationId of arm.taskOps(task)) {
           const s = await arm.observe(operationId);
-          if (!s || s.error || !s.phase) {
+          if (!s?.phase) {
             seen.push({ operationId, error: s?.error ?? 'NOT_A_SUBMISSION' });
             continue;
           }
@@ -168,7 +194,11 @@ export function forgeArm(config, { callLog, ws, ledger = null, cellDir = dirname
           });
           if (s.phase === 'landed' && !landed) landed = { operationId, s };
         }
-        const inFlight = seen.filter(o => o.phase && !settled(o.phase, o.observation));
+        const inFlight = seen.filter(o =>
+          o.phase
+            ? !settled(o.phase, o.observation)
+            : o.error !== 'NOT_A_SUBMISSION' && o.error?.code !== 'NOT_FOUND',
+        );
         if (landed && !inFlight.length) {
           const at = landed.s.timing?.committedAt ?? landed.s.timing?.settledAt ?? null;
           return {
@@ -184,7 +214,7 @@ export function forgeArm(config, { callLog, ws, ledger = null, cellDir = dirname
             laneId,
           };
         }
-        if (!inFlight.length || Date.now() > until)
+        if (!inFlight.length || Date.now() >= until)
           return {
             landed: false,
             state: inFlight.length ? 'in-flight-at-deadline' : (seen.at(-1)?.phase ?? null),
@@ -193,7 +223,7 @@ export function forgeArm(config, { callLog, ws, ledger = null, cellDir = dirname
             acceptedAt: null,
             laneId,
           };
-        await wait(pollMs);
+        await wait(Math.min(pollMs, Math.max(0, until - Date.now())));
       }
     },
     /** By address from an empty directory (never blocked by unsaved edits or a stale base).
@@ -206,7 +236,10 @@ export function forgeArm(config, { callLog, ws, ledger = null, cellDir = dirname
      * of it is in flight. A landed Lane is closed too: abandoning only ends the Lane (its
      * landed commits stay on main), so no Lane of a finished task can raise notices later. */
     async closeTask(root, laneId, landing) {
-      if (landing?.inFlight?.length) return { skipped: 'landing in flight', inFlight: landing.inFlight };
+      if (!landing) return { skipped: 'landing state unknown' };
+      if (landing.inFlight?.length) return { skipped: 'landing in flight', inFlight: landing.inFlight };
+      const calls = inProgressCalls(callLog).filter(c => c.root === root);
+      if (calls.length) return { skipped: 'calls in flight', inFlight: calls.map(c => `call:${c.callId}`) };
       const ids = [...new Set([laneId, ...resolveLanes(root).map(r => r.laneId)].filter(Boolean))];
       for (const id of ids.slice(1)) log('open', id, { resolveOf: laneId });
       const out = {};
@@ -214,6 +247,10 @@ export function forgeArm(config, { callLog, ws, ledger = null, cellDir = dirname
       return out;
     },
     async abandonById(laneId, reason = 'bench cell cleanup', near = ws) {
+      // A later cell must also preserve calls left running by abnormal cleanup.
+      const opened = openLanes(ledger).find(l => l.laneId === laneId);
+      if (opened?.callLog && inProgressCalls(opened.callLog).some(c => c.root === opened.root))
+        return { error: 'Task CLI call still in flight; Lane kept' };
       const empty = join(near, '.abandon');
       await mkdir(empty, { recursive: true });
       try {
@@ -267,7 +304,8 @@ export function forgeArm(config, { callLog, ws, ledger = null, cellDir = dirname
     },
     stopBroker() {
       broker?.child.stdin.end();
-      broker?.child.kill();
+      // Let outstanding CLI children publish their receipts even after abnormal exit.
+      // Closing stdin stops admission; broker.mjs drains existing requests and children.
     },
     diffFromBase,
     /** Harness-only `land --save` that answers the shipped defaults' refusals the way an

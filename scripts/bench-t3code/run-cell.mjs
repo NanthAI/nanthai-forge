@@ -117,14 +117,15 @@ async function crash(reason) {
   event({ event: 'crash', reason });
   const killed = killAgents();
   writeResult({ crashed: reason, records, killedAgents: killed, voided: [`harness crash: ${reason}`] });
+  let retained = false;
   for (const [laneId, { root, task }] of lanes) {
     const now = await forge?.landing(task, laneId, { deadlineMs: 0 }).catch(() => null);
-    await forge?.closeTask(root, laneId, now).catch(() => {});
+    const closed = await forge?.closeTask(root, laneId, now).catch(() => null);
+    if (!closed || closed.skipped || Object.values(closed).some(r => r.error)) retained = true;
   }
   forge?.stopBroker();
   try {
-    if (forge) await removeWorkspace({ ws, cellDir: dir, reason: 'abnormal-exit' });
-    else rmSync(ws, { recursive: true, force: true });
+    await cleanupWorkspace('abnormal-exit', retained);
   } catch (error) {
     event({ event: 'evidence-incomplete', error: error.message, retainedWorkspace: ws });
   }
@@ -201,7 +202,12 @@ try {
 if (forge) {
   result.leftoverLanes = [];
   for (const l of openLanes(ledger)) {
-    const r = await forge.abandonById(l.laneId, 'bench: Lane left open by an earlier cell');
+    const prior =
+      l.callLog && l.task ? forgeArm(config.forge, { callLog: l.callLog, ws, ledger, cellDir: dir }) : null;
+    const landing = prior ? await prior.landing(l.task, l.laneId, { deadlineMs: 0 }) : null;
+    const r = landing?.inFlight?.length
+      ? { error: 'Earlier task landing still in flight; Lane kept' }
+      : await forge.abandonById(l.laneId, 'bench: Lane left open by an earlier cell');
     result.leftoverLanes.push({
       laneId: l.laneId,
       since: l.at,
@@ -294,7 +300,12 @@ async function dispatch(task, k) {
       record.prep = await github.workspace(hub, root, branch);
       env = { ...env, GH_REPO: github.repository, GIT_TERMINAL_PROMPT: '0' };
     } else {
-      record.laneId = await forge.startLane(root, `${task.id}: ${task.prompt.split('\n')[0]}`, record.prep);
+      record.laneId = await forge.startLane(
+        root,
+        `${task.id}: ${task.prompt.split('\n')[0]}`,
+        record.prep,
+        task.id,
+      );
       lanes.set(record.laneId, { task: task.id, root });
       const t = Date.now();
       env = { ...env, ...(await forge.agentEnv(root, task.id, { ...env, FORGE_OBJECT_CACHE: objectCache })) };
@@ -372,18 +383,30 @@ async function dispatch(task, k) {
         }
         event({ event: 'task-done', ...record });
         record.evidence = await (forge
-          ? forge.removeRoot(root, 'task-done')
+          ? record.landing?.inFlight?.length || record.harnessError || record.abandon?.skipped
+            ? { retainedWorkspace: root }
+            : forge.removeRoot(root, 'task-done')
           : rm(root, { recursive: true, force: true }));
-        if (record.laneId && !record.landing?.inFlight?.length) lanes.delete(record.laneId);
+        if (record.laneId && !record.evidence?.retainedWorkspace) lanes.delete(record.laneId);
       })(),
     );
   } catch (error) {
     record.harnessError = String(error.message).slice(0, 400);
     record.landing = { landed: false, state: 'harness-error' };
     event({ event: 'task-error', task: task.id, error: record.harnessError });
-    if (record.laneId) await forge.closeTask(root, record.laneId, null).catch(() => {});
+    if (record.laneId) {
+      try {
+        const landing = await forge.landing(task.id, record.laneId, { agentExitedAt: Date.now() });
+        Object.assign(record, landingFields(landing, Date.parse(record.dispatchedAt) || prepStart));
+        record.abandon = await forge.closeTask(root, record.laneId, landing);
+      } catch {
+        record.abandon = { skipped: 'landing state unknown' };
+      }
+    }
     record.evidence = await (forge
-      ? forge.removeRoot(root, 'task-error')
+      ? record.landing?.inFlight?.length || record.abandon?.skipped
+        ? { retainedWorkspace: root }
+        : forge.removeRoot(root, 'task-error')
       : rm(root, { recursive: true, force: true }));
   }
   return record;
@@ -560,7 +583,7 @@ const waivedChanges = trial
   : [];
 const voided = [];
 if (versionChanges.length) voided.push(`versions changed during cell: ${versionChanges.join('; ')}`);
-// A quota or rate-limit stop voids that task (listed in taskVoids), not the cell.
+// A usage, rate or provider-capacity stop voids that task (listed in taskVoids), not the cell.
 const quotaTasks = dry ? [] : records.filter(r => r.agent?.quotaHit).map(r => r.task);
 if (convex && !convex.valid) voided.push(`Convex meter under-reported: ${convex.problems.join(', ')}`);
 voided.push(...runner.voided);
@@ -621,8 +644,7 @@ writeResult({
   voided,
 });
 forge?.stopBroker();
-if (forge) await removeWorkspace({ ws, cellDir: dir, reason: 'cell-done' });
-else rmSync(ws, { recursive: true, force: true });
+await cleanupWorkspace('cell-done');
 console.log(
   JSON.stringify({
     cellId,
@@ -633,6 +655,13 @@ console.log(
   }),
 );
 process.exit(0);
+
+/** Keep active CLI working directories through the final sweep, too. */
+async function cleanupWorkspace(reason, retained = records.some(r => r.evidence?.retainedWorkspace)) {
+  if (forge && retained) event({ event: 'cleanup-deferred', retainedWorkspace: ws });
+  else if (forge) await removeWorkspace({ ws, cellDir: dir, reason });
+  else rmSync(ws, { recursive: true, force: true });
+}
 
 /** Every arm of the batch has settled or ended (a sibling that crashed or refused has a
  * result). Bounded: past the deadline grading is refused, not risked. */

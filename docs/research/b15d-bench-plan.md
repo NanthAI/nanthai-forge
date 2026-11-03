@@ -374,8 +374,8 @@ Convex meter
 lost coverage or closed early (Forge); the runner fairness rule below fails within the arm; a
 landing was still in flight at grading; grading failed; any task hit a harness error; or the
 cell was interrupted. A **task** is void (excluded from per-task numbers, cell kept) when the
-contamination audit hits it, it hit a harness error, or its agent stopped on a usage or rate
-limit (a quota error from the CLI, or a usage window at 100%). Before every batch the driver
+contamination audit hits it, it hit a harness error, or its agent stopped on a usage, rate or provider-capacity limit
+(CLI errors only, or a usage window at 100%; owner-approved 2026-11-03). Before every batch the driver
 waits (re-checking every 5 min, never stopping) until the agent's weekly usage is below 85%
 (and a 5h window, where the plan has one, at 40% or less), nanthai-forge is idle and the disk
 has room for both cells.
