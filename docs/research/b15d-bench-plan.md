@@ -307,7 +307,7 @@ union of both upstream changes), strict 10/10, all six suites green, no existing
   then landed clean. Inline answers use the retained receipt's notice IDs; older file-only
   receipts match only those files. A land refused until the
   notice is answered (`OVERLAP_UNANSWERED`) counts as a delivered notice for its files. Per
-  task: sync conflicts, failed checks, gate refusals (overlap, preflight; their time is in time
+  task: conflict episodes (`conflictEpisodes`, also `syncConflicts`), failed checks, gate refusals (overlap, preflight; their time is in time
   to main, but answering one is not rework) and extra land attempts (re-lands after anything
   else). **Metric 4 = delivered and
   acknowledged** (acknowledged ÷ delivered). Forge's own `metrics` read for the cell window is
@@ -325,7 +325,14 @@ union of both upstream changes), strict 10/10, all six suites green, no existing
   after a save), preflight calls and seconds, and the time from each refused land to the next
   land (`preflightLostSeconds`, `overlapLostSeconds`). Any cost left after the
   preflight-survives-save fix shows up here; it is inside time to main.
-- **GitHub, per cell**: per task, merge conflicts, rejected pushes, rebases, queue runs and
+- **Conflict comparison.** Both arms count one episode from the first conflict report until
+  successful resolution or landing, regardless of repeated reports or conflicting files.
+  Forge's landing `COMPOSITION_CONFLICT` followed by sync markers is one episode. Raw
+  observations remain separate: Forge `conflictCalls` counts calls with conflict codes or
+  markers; GitHub `mergeConflictOutputs` counts tool outputs containing Git merge conflicts.
+  These raw counts are diagnostics, not comparable episode counts. The summary leaves episode
+  totals unknown for older results until recomputed from captured calls/transcripts.
+- **GitHub, per cell**: per task, conflict episodes (`conflictEpisodes`, also `mergeConflicts`), rejected pushes, rebases, queue runs and
   failures, queue failures caused by a sibling (the queue run failed while the PR's own latest
   CI had passed), extra PR pushes, and rework because of a sibling.
 - **Per overlap class and arm**: landed-clean rate (landed with no conflict, failed check,

@@ -451,7 +451,7 @@ for i in $(seq 1 160); do
     git fetch -q origin
     if ! git merge -q --no-edit origin/main; then
       git checkout origin/main -- ".bench/dry/group-$group.md" && echo "$task" >> ".bench/dry/group-$group.md"
-      git add .bench/dry && git commit -qm "bench dry run: merge main ($task)"
+      git add .bench/dry && git commit -qm "bench dry run: merge main ($task)" && echo 'bench: conflict resolved'
     fi
     git push -q origin "$branch"; gh pr merge --squash --auto >/dev/null
   fi

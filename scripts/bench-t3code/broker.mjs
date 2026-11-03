@@ -181,6 +181,13 @@ export function startBroker(cli, callLog, { now = () => new Date().toISOString()
                 ),
               ].slice(0, 500),
               conflictMarkers: /<<<<<<< lane/.test(output),
+              // Exit zero can also mean a pending source phase. Retain completion evidence.
+              resolutionComplete: receipts(output).some(r => {
+                const result = r.result?.source ?? r.result;
+                return (
+                  result?.outcome?.status === 'completed' && result.outcome.result?.status === 'resolved'
+                );
+              }),
               // Both streams: a refused land prints its error JSON (and the gate's notices) on
               // stderr; reading stdout only lost every gate notice (n3-r1-dry-a4).
               ...coordinationOf(args, output),

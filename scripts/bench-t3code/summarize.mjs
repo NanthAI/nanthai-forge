@@ -152,6 +152,27 @@ console.log(
       metric4: usable
         .filter(r => r.arm === 'forge' && r.N >= 3)
         .map(r => ({ key: r.key, ...r.coordination?.metric4 })),
+      // Compare episodes in both arms; old per-call results are unknown, never relabeled.
+      conflictEpisodes: usable.map(r => {
+        const tasks = r.coordination?.perTask ?? [];
+        return {
+          key: r.key,
+          arm: r.arm,
+          N: r.N,
+          episodes:
+            tasks.length && tasks.every(t => t.conflictEpisodes != null)
+              ? tasks.reduce((n, t) => n + t.conflictEpisodes, 0)
+              : null,
+          rawConflictCalls:
+            r.arm === 'forge'
+              ? tasks.reduce((n, t) => n + (t.conflictCalls ?? t.syncConflicts ?? 0), 0)
+              : null,
+          rawMergeConflictOutputs:
+            r.arm === 'github'
+              ? tasks.reduce((n, t) => n + (t.mergeConflictOutputs ?? t.mergeConflicts ?? 0), 0)
+              : null,
+        };
+      }),
       // Useful (the notice pointed at a real same-hunk conflict) vs noise, per notice class.
       noticePrecision: usable
         .filter(r => r.arm === 'forge')

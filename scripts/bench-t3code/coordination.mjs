@@ -1,9 +1,24 @@
 // B1.5d coordination section (R3 folded in, PLAN.md): per task, how the arm handled other
 // agents' work on the same code. Forge: overlap notices raised/delivered/acknowledged (metric
-// 4), sync conflicts, failed checks, extra land attempts. GitHub: merge conflicts, rejected
+// 4), conflict episodes, failed checks, extra land attempts. GitHub: conflict episodes, rejected
 // pushes, rebases, queue failures caused by a sibling, extra PR pushes. Then per overlap class.
 const anyText = (seen, re) => seen.filter(s => re.test(s)).length;
 export const overlapClass = overlap => String(overlap).split(' ')[0];
+
+/** Repeated reports remain one episode until a successful resolution/landing. */
+function episodes(events) {
+  let active = false,
+    count = 0;
+  for (const event of events) {
+    if (event.conflict) {
+      if (!active) count++;
+      active = true;
+    } else if (event.resolved) active = false;
+  }
+  return count;
+}
+
+const forgeConflict = c => c.conflictMarkers || (c.errorCodes ?? []).some(e => /CONFLICT/.test(e));
 
 /** Forge task counters from its relay calls. laneTask maps laneId -> task id. */
 export function forgeTask({ task, calls, landing, session, laneTask }) {
@@ -64,12 +79,25 @@ export function forgeTask({ task, calls, landing, session, laneTask }) {
   const gateRefusals = lands.filter(c =>
     (c.errorCodes ?? []).some(e => e === 'OVERLAP_UNANSWERED' || e === 'PREFLIGHT_REQUIRED'),
   ).length;
+  const conflictEpisodes = episodes(
+    [...calls]
+      .sort((a, b) => String(a.endedAt).localeCompare(String(b.endedAt)))
+      .map(c => ({
+        conflict: forgeConflict(c),
+        resolved:
+          c.code === 0 &&
+          !(c.errorCodes ?? []).length &&
+          ((/^agent resolve\b/.test(c.verb) && c.resolutionComplete !== false) ||
+            (isLand(c) && (c.operations ?? []).some(o => o.receiptId))),
+      })),
+  );
   const counters = {
     landAttempts: lands.length,
     gateRefusals,
     extraLandAttempts: Math.max(0, lands.length - 1 - gateRefusals),
-    syncConflicts: calls.filter(c => c.conflictMarkers || (c.errorCodes ?? []).some(e => /CONFLICT/.test(e)))
-      .length,
+    conflictEpisodes,
+    syncConflicts: conflictEpisodes,
+    conflictCalls: calls.filter(forgeConflict).length,
     failedChecks: Math.max(
       failedSubmissions,
       calls.filter(c => (c.errorCodes ?? []).includes('CHECK_FAILED')).length,
@@ -133,10 +161,24 @@ export function githubTask({ task, landing, session, runs }) {
   }).length;
   const seen = session.seen;
   const commands = session.actions.map(a => a.input);
+  const conflictPattern = /CONFLICT \(|Automatic merge failed/;
+  const conflictEpisodes = episodes(
+    seen.flatMap(output =>
+      output.split('\n').map(line => ({
+        conflict: conflictPattern.test(line),
+        resolved:
+          /^\[[^\]\n]+ [0-9a-f]{7,}\]|Successfully rebased|^Merge made by |^bench: conflict resolved$/.test(
+            line,
+          ),
+      })),
+    ),
+  );
   const counters = {
     landAttempts: Math.max(prRuns.length, prs.size),
     extraPrPushes: Math.max(0, prRuns.length - 1),
-    mergeConflicts: anyText(seen, /CONFLICT \(|Automatic merge failed/),
+    conflictEpisodes,
+    mergeConflicts: conflictEpisodes,
+    mergeConflictOutputs: anyText(seen, conflictPattern),
     rejectedPushes: anyText(seen, /! \[rejected\]|non-fast-forward|Updates were rejected/),
     rebases: commands.filter(c => /git\s+(rebase|pull\s+--rebase)/.test(c)).length,
     queueRuns: queueRuns.length,
