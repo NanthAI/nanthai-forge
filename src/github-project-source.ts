@@ -1,4 +1,4 @@
-import { networkFetch } from './network-fetch.js';
+import { networkFetch, networkTimeout } from './network-fetch.js';
 // SPDX-License-Identifier: Apache-2.0
 import { createHash } from 'node:crypto';
 import { assertGithubRateLimit, githubJson, type GithubFetch } from './github.js';
@@ -142,7 +142,7 @@ export async function streamGithubSourceBlob(
   }
   const response = await request(`https://api.github.com/repos/${repository}/git/blobs/${entry.sha}`, {
     redirect: 'error',
-    signal: AbortSignal.timeout(120_000),
+    signal: networkTimeout(120_000),
     headers: {
       Accept: 'application/vnd.github.raw+json',
       'X-GitHub-Api-Version': '2022-11-28',

@@ -1,4 +1,4 @@
-import { networkFetch } from './network-fetch.js';
+import { networkFetch, networkTimeout } from './network-fetch.js';
 // SPDX-License-Identifier: Apache-2.0
 import { createReadStream } from 'node:fs';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
@@ -77,7 +77,7 @@ export async function publishClientSourcePack(input: {
         body: createReadStream(archive),
         duplex: 'half',
         redirect: 'error',
-        signal: AbortSignal.timeout(900_000),
+        signal: networkTimeout(900_000),
       } as unknown as RequestInit);
       invariant(response.ok || response.status === 412, 'R2_UPLOAD_FAILED', 'Pack upload failed.');
       await input.client.action(publish, { ...data, phase: 'commit' });

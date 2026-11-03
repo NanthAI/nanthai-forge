@@ -1,4 +1,4 @@
-import { networkFetch } from './network-fetch.js';
+import { networkFetch, networkTimeout } from './network-fetch.js';
 import { CUTOVER_CLI_VERSION } from './cutover-version.js';
 // SPDX-License-Identifier: Apache-2.0
 import { deliverMacCallback } from './hosted-mac-delivery.js';
@@ -149,7 +149,7 @@ export async function workerCli(args: string[]) {
         headers,
         body: bytes as BodyInit,
         redirect: 'error',
-        signal: AbortSignal.timeout(30_000),
+        signal: networkTimeout(30_000),
       });
       return { status: response.status };
     },

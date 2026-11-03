@@ -2,6 +2,15 @@
 import { currentExchangeProgress } from './exchange-progress-hooks.js';
 import { ForgeError } from './errors.js';
 
+const callerDeadlines = new WeakMap<AbortSignal, number>();
+/** Retain an existing caller-selected HTTP budget without letting the default
+ * header/total deadlines silently shorten it. The native signal still cancels. */
+export function networkTimeout(ms: number): AbortSignal {
+  const signal = AbortSignal.timeout(ms);
+  callerDeadlines.set(signal, performance.now() + ms);
+  return signal;
+}
+
 export type NetworkOptions = {
   headerTimeoutMs?: number | undefined;
   idleTimeoutMs?: number | undefined;
@@ -77,6 +86,7 @@ export async function networkFetch(
     currentExchangeProgress()?.networkRetries ??
     (['GET', 'HEAD'].includes(method) ? 3 : 0);
   const signal = init.signal ?? (input instanceof Request ? input.signal : undefined);
+  const declaredDeadline = signal ? callerDeadlines.get(signal) : undefined;
   const signals = [
     ...new Set([signal, currentExchangeProgress()?.signal].filter((value): value is AbortSignal => !!value)),
   ];
@@ -92,7 +102,10 @@ export async function networkFetch(
       abortBody?.();
     };
     for (const source of signals) source.addEventListener('abort', cancel, { once: true });
-    const end = performance.now() + (options.totalTimeoutMs ?? 120_000);
+    const end =
+      options.totalTimeoutMs === undefined && declaredDeadline !== undefined
+        ? declaredDeadline
+        : performance.now() + (options.totalTimeoutMs ?? 120_000);
     let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let finished = false;
@@ -120,7 +133,10 @@ export async function networkFetch(
             deadlineSignal.removeEventListener('abort', abort),
           );
         },
-        remaining(options.headerTimeoutMs ?? 30_000),
+        remaining(
+          options.headerTimeoutMs ??
+            (declaredDeadline === undefined ? 30_000 : declaredDeadline - performance.now()),
+        ),
         controller.signal,
       );
       if (

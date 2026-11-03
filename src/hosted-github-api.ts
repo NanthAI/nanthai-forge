@@ -1,4 +1,4 @@
-import { networkFetch } from './network-fetch.js';
+import { networkFetch, networkTimeout } from './network-fetch.js';
 // SPDX-License-Identifier: Apache-2.0
 import { ForgeError } from './errors.js';
 export type GithubRequest = <T>(path: string, method?: string, body?: unknown) => Promise<T>;
@@ -36,7 +36,7 @@ export function githubRequest(token: string, request: typeof fetch = networkFetc
     const response = await request(`https://api.github.com${path}`, {
       method,
       redirect: 'error',
-      signal: AbortSignal.timeout(30000),
+      signal: networkTimeout(30000),
       headers: {
         Authorization: `Bearer ${token}`,
         Accept: 'application/vnd.github+json',

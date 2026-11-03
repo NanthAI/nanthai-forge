@@ -1,4 +1,4 @@
-import { networkFetch } from './network-fetch.js';
+import { networkFetch, networkTimeout } from './network-fetch.js';
 // SPDX-License-Identifier: Apache-2.0
 import { childEnv } from '../scripts/child-env.mjs';
 import { authStatus } from './auth-status.js';
@@ -28,7 +28,7 @@ async function request(origin: string, operation: string, input: unknown) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(input),
       redirect: 'error',
-      signal: AbortSignal.timeout(15_000),
+      signal: networkTimeout(15_000),
     });
   } catch {
     throw new ForgeError('AUTH_NETWORK', 'Device login could not reach Forge.');

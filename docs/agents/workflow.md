@@ -104,7 +104,7 @@ Old names keep working for at least one released version and print their new for
 CLI/MCP HTTP and complete Convex RPCs have deadlines and bounded replay-safe retries.
 Exhaustion returns `IN PROGRESS` (exit 3), `inProgress:true`, and exact `next`/`command`
 replay with the original inputs and operation ID (or pre-journal shorthand).
-Observation keeps its cursor/deadline; idle makes no calls. Transfers stream.
+Observation keeps its cursor/deadline; idle makes no calls. Transfers stream and retain explicit caller budgets.
 
 Hosted land waits for canonical acceptance or failure: a passing `ready` Candidate remains pending while acceptance is outstanding. Check-only calls still stop after their check. The existing wake subscription streams submission progress and advisory conflicts as NDJSON; speculative advice never settles a landing. A conflict returns promptly with its retained recovery operation and exact continuation. Following that continuation (or the ordinary sync instruction) reuses the draft; an explicit new sync `operationId` requests an independent draft. If a sync or resolve source phase outlives its client wait, the next land reconciles that exact operation and installs its pinned result before selecting source. No idle polling is added.
 

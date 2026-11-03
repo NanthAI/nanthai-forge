@@ -18,6 +18,12 @@ export function networkBoundaryFindings(path, text) {
         if (['ConvexHttpClient', 'ConvexClient'].includes((item.propertyName ?? item.name).text))
           httpClients.add(item.name.text);
   const visit = node => {
+    if (
+      ts.isCallExpression(node) &&
+      node.expression.getText(source) === 'AbortSignal.timeout' &&
+      path !== 'src/network-fetch.ts'
+    )
+      fail(node, 'Use networkTimeout so explicit request budgets reach the shared transport.');
     if (ts.isIdentifier(node) && node.text === 'fetch' && path !== 'src/network-fetch.ts') {
       const parent = node.parent;
       const property =

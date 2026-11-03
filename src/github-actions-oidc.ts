@@ -1,4 +1,4 @@
-import { networkFetch } from './network-fetch.js';
+import { networkFetch, networkTimeout } from './network-fetch.js';
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
 import { invariant } from './errors.js';
@@ -69,7 +69,7 @@ export async function verifyActionsOidc(
   );
   const response = await request(`${actionsIssuer}/.well-known/jwks`, {
     redirect: 'error',
-    signal: AbortSignal.timeout(10_000),
+    signal: networkTimeout(10_000),
   });
   invariant(
     response.ok,

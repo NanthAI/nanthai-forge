@@ -1,4 +1,4 @@
-import { networkFetch } from './network-fetch.js';
+import { networkFetch, networkTimeout } from './network-fetch.js';
 // SPDX-License-Identifier: Apache-2.0
 import { githubRepository, type GithubFetch, type GithubRepository } from './github.js';
 import { ForgeError, invariant } from './errors.js';
@@ -35,7 +35,7 @@ export async function authorizeGithub(
     `https://api.clerk.com/v1/users/${encodeURIComponent(userId)}/oauth_access_tokens/oauth_github`,
     {
       headers: { Authorization: `Bearer ${config.clerkSecret}` },
-      signal: AbortSignal.timeout(30_000),
+      signal: networkTimeout(30_000),
       redirect: 'error',
     },
   );
@@ -57,7 +57,7 @@ export async function authorizeGithub(
     {
       method: 'POST',
       redirect: 'error',
-      signal: AbortSignal.timeout(30_000),
+      signal: networkTimeout(30_000),
       body: JSON.stringify({ access_token: token }),
       headers: {
         Authorization: `Basic ${Buffer.from(`${config.appClientId}:${config.appClientSecret}`).toString('base64')}`,

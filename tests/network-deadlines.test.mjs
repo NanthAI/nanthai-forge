@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
-import { networkFetch, networkDeadline } from '../dist/network-fetch.js';
+import { networkFetch, networkDeadline, networkTimeout } from '../dist/network-fetch.js';
 import { deadlineConvexClient } from '../dist/network-convex-client.js';
 import { exchangeConvexFetch } from '../dist/exchange-convex-fetch.js';
 import { networkContinuation } from '../dist/network-continuation.js';
@@ -31,6 +31,91 @@ async function fixture(t, handler) {
   return { url: `http://127.0.0.1:${server.address().port}`, calls };
 }
 const timeout = error => error.code === 'EXCHANGE_REQUEST_TIMEOUT';
+
+test('explicit upload deadlines preserve headers beyond the shared default', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  let release,
+    settled = false,
+    failure;
+  const headers = new Promise(resolve => {
+    release = resolve;
+  });
+  const pending = networkFetch(
+    'https://fixture.invalid',
+    {
+      method: 'PUT',
+      signal: networkTimeout(900_000),
+      body: 'pinned bytes',
+    },
+    { request: () => headers },
+  ).then(
+    response => {
+      settled = true;
+      return response;
+    },
+    error => {
+      settled = true;
+      failure = error;
+      return null;
+    },
+  );
+  t.mock.timers.tick(30_001);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(settled, false, 'the existing upload budget must survive the default header deadline');
+  release(new Response('complete'));
+  const response = await pending;
+  assert.equal(failure, undefined);
+  assert.equal(await response.text(), 'complete');
+});
+
+test('explicit archive deadline preserves a progressing body beyond the shared total default', async t => {
+  let now = 0,
+    source,
+    failure;
+  t.mock.method(performance, 'now', () => now);
+  const response = await networkFetch(
+    'https://fixture.invalid',
+    { signal: networkTimeout(480_000) },
+    {
+      retries: 0,
+      request: async () =>
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              source = controller;
+            },
+          }),
+        ),
+    },
+  );
+  const pending = response.text().catch(error => {
+    failure = error;
+    return null;
+  });
+  now = 120_001;
+  source.enqueue(new TextEncoder().encode('pinned archive'));
+  await new Promise(resolve => setTimeout(resolve, 5));
+  if (!failure) source.close();
+  const bytes = await pending;
+  assert.equal(failure, undefined, 'progress inside the original archive budget must remain readable');
+  assert.equal(bytes, 'pinned archive');
+});
+
+test('explicit per-request deadlines override a longer caller budget', async () => {
+  await assert.rejects(
+    networkFetch(
+      'https://fixture.invalid',
+      { signal: networkTimeout(600_000) },
+      {
+        ...options,
+        totalTimeoutMs: 10,
+        headerTimeoutMs: 50,
+        request: () => new Promise(() => {}),
+      },
+    ),
+    timeout,
+  );
+});
 
 test('stream completion, cancellation, failure and timeout release the underlying reader', async () => {
   for (const mode of ['complete', 'cancel', 'error', 'timeout']) {
@@ -224,6 +309,7 @@ test('guard rejects bare, aliased and global fetch and unwrapped Convex SDK cons
     'import * as http from "node:https"; http.request(url)',
     'import http from "node:https"; http.get(url)',
     'await import("node:https")',
+    'networkFetch(url, { signal: AbortSignal.timeout(600000) })',
     'new ConvexHttpClient(url)',
     "import { ConvexHttpClient as Client } from 'convex/browser'; new Client(url)",
   ])

@@ -1,4 +1,4 @@
-import { networkFetch } from './network-fetch.js';
+import { networkFetch, networkTimeout } from './network-fetch.js';
 // SPDX-License-Identifier: Apache-2.0
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -145,7 +145,7 @@ export async function observeDraft(
           new URL(file.path.split('/').map(encodeURIComponent).join('/'), url),
           {
             redirect: 'manual',
-            signal: AbortSignal.timeout(120_000),
+            signal: networkTimeout(120_000),
           },
         );
         observed.httpStatus = response.status;

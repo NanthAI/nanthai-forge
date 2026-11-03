@@ -1,4 +1,4 @@
-import { networkFetch } from './network-fetch.js';
+import { networkFetch, networkTimeout } from './network-fetch.js';
 // SPDX-License-Identifier: Apache-2.0
 import { createHash } from 'node:crypto';
 import { Readable } from 'node:stream';
@@ -36,7 +36,7 @@ export function sourceWorkerHttp(config: {
     const response = await request(new URL(action, base.href.endsWith('/') ? base : base.href + '/'), {
       method: 'POST',
       redirect: 'error',
-      signal: AbortSignal.timeout(config.timeoutMs),
+      signal: networkTimeout(config.timeoutMs),
       headers: { authorization: `Bearer ${config.token}`, 'content-type': 'application/json' },
       body: JSON.stringify(value),
     });
@@ -90,7 +90,7 @@ export function sourceWorkerHttp(config: {
     const response = await request(target.url, {
       headers: target.headers,
       redirect: 'error',
-      signal: AbortSignal.timeout(config.timeoutMs),
+      signal: networkTimeout(config.timeoutMs),
     });
     invariant(response.ok && response.body, 'SOURCE_WORKER_UNAVAILABLE', 'Source transfer is unavailable.');
     yield* Readable.fromWeb(response.body as Parameters<typeof Readable.fromWeb>[0]);
@@ -105,7 +105,7 @@ export function sourceWorkerHttp(config: {
     const response = await request(url, {
       headers: target.headers,
       redirect: 'error',
-      signal: AbortSignal.timeout(config.timeoutMs),
+      signal: networkTimeout(config.timeoutMs),
     });
     invariant(response.ok && response.body, 'SOURCE_WORKER_UNAVAILABLE', 'Source transfer is unavailable.');
     return Readable.fromWeb(response.body as Parameters<typeof Readable.fromWeb>[0]);
@@ -160,7 +160,7 @@ export function sourceWorkerHttp(config: {
           body: Readable.from(verified()) as unknown as BodyInit,
           duplex: 'half',
           redirect: 'error',
-          signal: AbortSignal.timeout(config.timeoutMs),
+          signal: networkTimeout(config.timeoutMs),
           headers: target.headers,
         };
         const response = await request(target.url, init);
@@ -195,7 +195,7 @@ export function sourceWorkerHttp(config: {
       const response = await request(target.url, {
         headers: target.headers,
         redirect: 'error',
-        signal: AbortSignal.timeout(config.timeoutMs),
+        signal: networkTimeout(config.timeoutMs),
       });
       invariant(response.ok && response.body, 'SOURCE_WORKER_UNAVAILABLE', 'Source transfer is unavailable.');
       return Readable.fromWeb(response.body as Parameters<typeof Readable.fromWeb>[0]);
@@ -251,7 +251,7 @@ export function sourceWorkerHttp(config: {
         body: Readable.from(bytes) as unknown as BodyInit,
         duplex: 'half',
         redirect: 'error',
-        signal: AbortSignal.timeout(config.timeoutMs),
+        signal: networkTimeout(config.timeoutMs),
         headers: target.headers,
       };
       const response = await request(target.url, init);

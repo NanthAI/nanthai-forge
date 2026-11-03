@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { networkTimeout } from './network-fetch.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync, renameSync, openSync, fsyncSync, closeSync } from 'node:fs';
 import { join } from 'node:path';
@@ -66,7 +67,7 @@ export async function deleteHostedProject(
     'HOST_DELETE_BOUND_PROJECT',
     'This ROOT is bound to that project. Add --allow-bound-project to explicitly delete it.',
   );
-  const signal = AbortSignal.timeout(90_000);
+  const signal = networkTimeout(90_000);
   const client =
       dependencies?.client ?? coordinationClient(deployment, process.env.FORGE_AUTH_TOKEN, { signal }),
     key = createHash('sha256')

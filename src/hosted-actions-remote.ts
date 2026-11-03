@@ -1,4 +1,4 @@
-import { networkFetch } from './network-fetch.js';
+import { networkFetch, networkTimeout } from './network-fetch.js';
 // SPDX-License-Identifier: Apache-2.0
 import { ActionsApiError, type ActionsApi } from './github-actions-api.js';
 import { actionsAccessMessage, type HostedActionsMapping } from './hosted-actions.js';
@@ -75,7 +75,7 @@ export function hostedActionsRemote(
           response = await request(`https://api.github.com/${endpoint}`, {
             method,
             redirect,
-            signal: AbortSignal.timeout(20_000),
+            signal: networkTimeout(20_000),
             headers: {
               authorization: `Bearer ${token}`,
               accept: 'application/vnd.github+json',
@@ -196,7 +196,7 @@ export function hostedActionsRemote(
       // The signed provider URL receives no installation token or account headers.
       let download: Response;
       try {
-        download = await request(target.href, { redirect: 'error', signal: AbortSignal.timeout(20_000) });
+        download = await request(target.href, { redirect: 'error', signal: networkTimeout(20_000) });
       } catch {
         throw new ActionsApiError();
       }

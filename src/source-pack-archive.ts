@@ -1,4 +1,4 @@
-import { networkFetch } from './network-fetch.js';
+import { networkFetch, networkTimeout } from './network-fetch.js';
 import { checkoutReadStream, checkoutWriteStream } from './checkout-io-streams.js';
 import { checkoutIo } from './checkout-io.js';
 // SPDX-License-Identifier: Apache-2.0
@@ -74,7 +74,7 @@ export async function downloadSourcePack(
   timeoutMs = 600_000,
 ) {
   invariant(pack.size <= sourcePackBytes, 'SOURCE_HASH_MISMATCH', 'Oversized pack.');
-  const response = await request(pack.url, { redirect: 'error', signal: AbortSignal.timeout(timeoutMs) });
+  const response = await request(pack.url, { redirect: 'error', signal: networkTimeout(timeoutMs) });
   invariant(response.ok && response.body, 'SOURCE_UNAVAILABLE', 'Pack unavailable.');
   let size = 0;
   await pipeline(

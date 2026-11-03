@@ -1,4 +1,4 @@
-import { networkFetch } from './network-fetch.js';
+import { networkFetch, networkTimeout } from './network-fetch.js';
 // SPDX-License-Identifier: Apache-2.0
 import { sourceLanguage } from './languages.js';
 import { ignoreLayer, ignoredBy, ignoreNames } from './source-ignore.js';
@@ -97,7 +97,7 @@ export async function githubJson<T>(
     'Invalid GitHub API path.',
   );
   const response = await request(`https://api.github.com${path}`, {
-    signal: AbortSignal.timeout(30_000),
+    signal: networkTimeout(30_000),
     headers: {
       Accept: 'application/vnd.github+json',
       'X-GitHub-Api-Version': '2022-11-28',

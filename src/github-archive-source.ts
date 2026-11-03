@@ -1,4 +1,4 @@
-import { networkFetch } from './network-fetch.js';
+import { networkFetch, networkTimeout } from './network-fetch.js';
 // SPDX-License-Identifier: Apache-2.0
 import { createHash } from 'node:crypto';
 import { assertGithubRateLimit, githubJson, type GithubFetch } from './github.js';
@@ -100,7 +100,7 @@ export async function openGithubArchive(
   const headers = { 'X-GitHub-Api-Version': '2022-11-28', 'User-Agent': 'NanthAi-Forge' };
   let response = await request(`https://api.github.com/repos/${repository}/tarball/${commit}`, {
     redirect: 'manual',
-    signal: AbortSignal.timeout(30_000),
+    signal: networkTimeout(30_000),
     headers: { ...headers, ...(token ? { Authorization: `Bearer ${token}` } : {}) },
   });
   assertGithubRateLimit(response);
@@ -114,7 +114,7 @@ export async function openGithubArchive(
     await response.body?.cancel();
     response = await request(location.href, {
       redirect: 'error',
-      signal: AbortSignal.timeout(480_000),
+      signal: networkTimeout(480_000),
       headers,
     });
   }

@@ -1,4 +1,4 @@
-import { networkFetch } from './network-fetch.js';
+import { networkFetch, networkTimeout } from './network-fetch.js';
 // SPDX-License-Identifier: Apache-2.0
 import { existsSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
@@ -52,7 +52,7 @@ async function answers(runtime: OwnerRuntime) {
   try {
     const response = await networkFetch(`http://127.0.0.1:${runtime.port}/api/owner`, {
       headers: { authorization: `Bearer ${runtime.token}` },
-      signal: AbortSignal.timeout(1000),
+      signal: networkTimeout(1000),
       redirect: 'error',
     });
     return (
