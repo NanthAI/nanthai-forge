@@ -87,27 +87,47 @@ export async function measureSkew(sha, { api: call = api, now = Date.now, pause 
   };
 }
 
-async function setRuleset(enforcement) {
-  const found = (await api(`repos/${repository}/rulesets`)).find(r => r.name === rulesetName);
-  if (!found) throw Error('BENCH_RULESET_MISSING');
-  await gh([
-    'api',
-    '-X',
-    'PUT',
-    `repos/${repository}/rulesets/${found.id}`,
-    '-f',
-    `enforcement=${enforcement}`,
-  ]);
-}
-
 /** Branches of the fork; only main and this harness's agent-* branches may exist. */
 export async function branches() {
   return (await pages(`repos/${repository}/branches?per_page=100`)).map(b => b.name);
 }
 export const foreignBranches = names => names.filter(n => n !== 'main' && !n.startsWith('agent-'));
 
+/** Reset requests have fixed targets and are outside cell timing. Preserve the final error. */
+export async function retryResetRequest(request, pause = wait) {
+  const delays = [1000, 2000, 4000];
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await request();
+    } catch (error) {
+      const text = `${error.stderr ?? ''}\n${error.message ?? ''}`;
+      const transient = /\bHTTP(?:\/\d(?:\.\d)?)?\s+5\d\d\b|\bGraphQL:[^\n]*\b50[0-9]\b/i.test(text);
+      if (!transient || attempt === delays.length) throw error;
+      await pause(delays[attempt]);
+    }
+  }
+}
+
 /** Reset main to the frozen base: close open PRs, drop agent branches, force main. */
-export async function reset(base) {
+export async function reset(base, { request = gh, pause = wait } = {}) {
+  const gh = args => retryResetRequest(() => request(args), pause);
+  const api = async (path, ...rest) => JSON.parse((await gh(['api', ...rest, path])) || 'null');
+  const branches = async () =>
+    JSON.parse(await gh(['api', '--paginate', '--slurp', `repos/${repository}/branches?per_page=100`]))
+      .flat()
+      .map(b => b.name);
+  const setRuleset = async enforcement => {
+    const found = (await api(`repos/${repository}/rulesets`)).find(r => r.name === rulesetName);
+    if (!found) throw Error('BENCH_RULESET_MISSING');
+    await gh([
+      'api',
+      '-X',
+      'PUT',
+      `repos/${repository}/rulesets/${found.id}`,
+      '-f',
+      `enforcement=${enforcement}`,
+    ]);
+  };
   for (const pr of JSON.parse(
     await gh(['pr', 'list', '-R', repository, '--state', 'open', '-L', '200', '--json', 'number']),
   ))
