@@ -649,6 +649,30 @@ or document migration is performed.
 
 ## Local check reliability
 
+### Filesystem event health
+
+`node scripts/filesystem-event-health.mjs TARGET_DIRECTORY` performs a finite local
+watcher diagnostic on macOS and Linux. It creates and removes private temporary
+directories under the target, opens `fs.watch`, writes a signal and measures the
+first matching event after the write. Three isolated child processes bound native
+watcher open/close hangs. No network calls or idle work are added.
+
+The diagnostic fails when two of three attempts miss a 1,000 ms event deadline
+(allocation errors and hung native calls also fail an attempt). Healthy delivery
+is normally milliseconds; one second allows headroom above observed healthy
+delivery of 10–213 ms, while the majority rule tolerates one transient delay.
+The result includes `ok`, median observed `latencyMs` (null when none arrived),
+`fseventsdRssMb`, `fseventsdCpuPercent`, `reason` and per-attempt evidence. macOS
+process metrics use only `ps` RSS, CPU percentage and executable name; unavailable
+metrics are null and do not decide health. Linux has no fseventsd metrics.
+
+Bench preflight and every cell gate refuse unhealthy event delivery with
+`ENVIRONMENT FILESYSTEM_EVENTS_UNHEALTHY`. On macOS the refusal names fseventsd
+and the operator remedy `sudo killall fseventsd`; rerun the diagnostic afterwards.
+The diagnostic never restarts services itself. Linux operators should check local
+watcher resources and event delivery. This bench gate does not change ordinary
+agent preflight or landing fault classification.
+
 ### Check environment contract
 
 Checks, Playbook steps and event automations use the same clean local runner.

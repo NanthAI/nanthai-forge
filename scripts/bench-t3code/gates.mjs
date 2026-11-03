@@ -4,6 +4,14 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { sharedDeps } from './deps.mjs';
 import { agentOf } from './agent.mjs';
+import { probeFilesystemEvents, filesystemEventRefusal } from '../filesystem-event-health.mjs';
+
+/** Shared standalone-preflight and per-cell gate; always probe the workspace volume. */
+export async function filesystemEventGate(targetDirectory, probe = probeFilesystemEvents) {
+  const filesystemEvents = await probe(targetDirectory);
+  const refusal = filesystemEventRefusal(filesystemEvents);
+  return { filesystemEvents, refusals: refusal ? [refusal] : [] };
+}
 
 /** GiB available on the data volume, the same figure `df -g /System/Volumes/Data` prints. */
 export function diskFreeGb() {
@@ -54,21 +62,25 @@ export function usageProblems(u) {
 }
 
 /** Every start rule from PLAN.md, with the readings behind it. */
-export async function gates({
-  arm,
-  N,
-  dry,
-  config,
-  start,
-  flags,
-  B,
-  pinProblems,
-  snapshotProblems,
-  differences,
-  forgeInFlight,
-  pinFile,
-}) {
-  const refusals = [];
+export async function gates(
+  {
+    arm,
+    N,
+    dry,
+    config,
+    start,
+    flags,
+    B,
+    pinProblems,
+    snapshotProblems,
+    differences,
+    forgeInFlight,
+    pinFile,
+  },
+  { filesystemProbe = probeFilesystemEvents } = {},
+) {
+  const { filesystemEvents, refusals } = await filesystemEventGate(join(B, 'ws'), filesystemProbe);
+  if (refusals.length) return { refusals, warnings: [], filesystemEvents };
   const pin = await pinProblems(start.harness);
   if (pin.length && !(dry && flags.includes('--unpinned')))
     refusals.push(`harness not pinned: ${pin.join(', ')}`);
@@ -107,6 +119,7 @@ export async function gates({
   return {
     refusals,
     warnings,
+    filesystemEvents,
     pinProblems: pin,
     runPin: runPin ? { at: runPin.at } : null,
     inFlight,

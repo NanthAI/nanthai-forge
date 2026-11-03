@@ -123,6 +123,7 @@ console.log(
         attempt: r.attempt,
         voided: r.voided ?? [],
         taskVoids: r.taskVoids ?? [],
+        filesystemEvents: r.gates?.filesystemEvents ?? null,
         convex: r.convex
           ? {
               valid: r.convex.valid,

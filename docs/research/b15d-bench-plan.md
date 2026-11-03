@@ -153,6 +153,16 @@ landings per hour, correctness, cost, and how each handles agents touching the s
 
 ## Versions (frozen per run, checked per cell)
 
+**Local event health.** Standalone preflight and every cell (both arms, including
+dry runs) run the shared [filesystem event diagnostic](../operations.md#filesystem-event-health)
+on the benchmark workspace volume. Two of three failures to receive an event within
+1,000 ms refuse the cell before setup or timing. `result.json` retains the readings
+in `gates.filesystemEvents`; the summary exposes them per cell. Legacy results without
+that field have unknown environment health. Earlier dry round 8 N=10 and a8 N=3
+timings may have been inflated on the Forge arm by degrading fseventsd; they are
+not evidence of a healthy watcher environment. The diagnostic and its worker are
+included in the harness content pin.
+
 **Dogfood landing hold.** The driver holds `forge-cli/.freeze` for each batch: from before its
 first cell starts until its last cell is settled and graded (both concurrent cells, or both
 sequential ones). While it exists `lane.sh finish` and the `nforge` wrapper wait, and the CLI

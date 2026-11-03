@@ -193,6 +193,8 @@ test('harness pin: streaming client changes invalidate the previous content pin'
   const bench = join(scripts, 'bench-t3code');
   mkdirSync(bench, { recursive: true });
   writeFileSync(join(scripts, 'benchmark-import-monitor.mjs'), '// fixture\n');
+  for (const name of ['filesystem-event-health.mjs', 'filesystem-event-health-worker.mjs', 'child-env.mjs'])
+    writeFileSync(join(scripts, name), '// fixture\n');
   const client = join(bench, 'relay-client.mjs');
   try {
     writeFileSync(client, '// previous relay\n');
@@ -204,6 +206,12 @@ test('harness pin: streaming client changes invalidate the previous content pin'
       differences({ harness: before }, { harness: after }, { unpinned: true }).some(change =>
         change.startsWith('harness.filesSha256:'),
       ),
+    );
+    writeFileSync(join(scripts, 'filesystem-event-health.mjs'), '// changed probe\n');
+    assert.notEqual(
+      after.filesSha256,
+      (await harness(bench)).filesSha256,
+      'probe changes invalidate the harness pin',
     );
   } finally {
     rmSync(dir, { recursive: true, force: true });

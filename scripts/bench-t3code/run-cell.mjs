@@ -33,6 +33,7 @@ import { captureChanges, realConflicts } from './hunks.mjs';
 import { scriptedForge, dryGroup } from './scripted.mjs';
 import { removeWorkspace } from './evidence.mjs';
 import { gates as cellGates, diskFreeGb } from './gates.mjs';
+import { writeCellResult } from './result.mjs';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { rm } from 'node:fs/promises';
@@ -96,12 +97,7 @@ const result = {
   seed: planned.seed,
   order: tasks.map(t => t.id),
 };
-const writeResult = extra => {
-  if (existsSync(join(dir, 'result.json'))) return;
-  writeFileSync(join(dir, 'result.json'), JSON.stringify({ ...result, ...extra }, null, 1) + '\n', {
-    flag: 'wx',
-  });
-};
+const writeResult = extra => writeCellResult(dir, result, extra);
 const callLog = join(dir, 'nforge-calls.jsonl');
 const ledger = join(B, 'forge-lanes.jsonl');
 const forge = arm === 'forge' ? forgeArm(config.forge, { callLog, ws, ledger, cellDir: dir }) : null;

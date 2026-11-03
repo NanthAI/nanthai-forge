@@ -186,6 +186,9 @@ test('summary exposes compute ranges and per-cell compute, excluding legacy fals
           cellId,
           arm: 'forge',
           N: 3,
+          ...(index
+            ? {}
+            : { gates: { filesystemEvents: { ok: true, latencyMs: 12, fseventsdRssMb: 10, reason: null } } }),
           convex: index ? { valid: true, actionGbHours: 0, costUsd: 1 } : metered([action()]),
         }),
       );
@@ -210,6 +213,9 @@ test('summary exposes compute ranges and per-cell compute, excluding legacy fals
     assert.equal(result.cells[0].convex.actionGbHours, 0.001);
     closeTo(result.cells[0].convex.actionComputeUsd, 0.0003);
     assert.equal(result.cells[1].convex.actionComputeUsd, null);
+    assert.equal(result.cells[0].filesystemEvents.ok, true);
+    assert.equal(result.cells[0].filesystemEvents.latencyMs, 12);
+    assert.equal(result.cells[1].filesystemEvents, null, 'legacy cells have unknown watcher health');
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

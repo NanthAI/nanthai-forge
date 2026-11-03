@@ -32,6 +32,9 @@ export async function harness(dir = HARNESS_DIR) {
       .filter(f => /\.(mjs|sh|md)$/.test(f))
       .map(f => join(dir, f)),
     join(repo, 'scripts/benchmark-import-monitor.mjs'),
+    join(repo, 'scripts/filesystem-event-health.mjs'),
+    join(repo, 'scripts/filesystem-event-health-worker.mjs'),
+    join(repo, 'scripts/child-env.mjs'),
   ].sort();
   const hash = createHash('sha256');
   for (const f of files) hash.update(f.slice(repo.length)).update(readFileSync(f));

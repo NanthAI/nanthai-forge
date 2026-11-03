@@ -1158,8 +1158,8 @@ test('meter: a stream that closes before the project shows up refuses; an early 
   assert.equal(silent.stop().valid, false, 'no log lines is never a zero cost');
 });
 
-test('harness scripts: no top-level const or let is used above its declaration (TDZ crash)', () => {
-  // These scripts run on import, so a use before a top-level `const` only fails mid-cell
+test('harness scripts: script and main bodies never use const or let above its declaration (TDZ crash)', () => {
+  // These scripts run at entry, so a use before a script/main `const` only fails mid-cell
   // (2026-11-01: run-cell crashed at grading on `batchBarrier`). Parse and check statically.
   const isFunction = n =>
     ts.isFunctionDeclaration(n) ||
@@ -1171,27 +1171,35 @@ test('harness scripts: no top-level const or let is used above its declaration (
   for (const name of ['run-cell.mjs', 'drive.mjs', 'preflight.mjs']) {
     const file = join(import.meta.dirname, '../scripts/bench-t3code', name);
     const src = ts.createSourceFile(file, readFileSync(file, 'utf8'), ts.ScriptTarget.Latest, true);
-    const declaredAt = new Map();
-    src.statements.forEach((st, index) => {
-      if (ts.isVariableStatement(st) && st.declarationList.flags & ts.NodeFlags.BlockScoped)
-        for (const d of st.declarationList.declarations)
-          if (ts.isIdentifier(d.name) && !declaredAt.has(d.name.text)) declaredAt.set(d.name.text, index);
-    });
-    src.statements.forEach((st, index) => {
-      const visit = n => {
-        if (isFunction(n) || ts.isImportDeclaration(n)) return; // functions run later, when called
-        const nameOnly =
-          (n.parent?.name === n &&
-            !ts.isShorthandPropertyAssignment(n.parent) &&
-            !ts.isVariableDeclaration(n.parent)) ||
-          n.parent?.propertyName === n;
-        if (ts.isIdentifier(n) && declaredAt.get(n.text) > index && !nameOnly) {
-          const { line } = src.getLineAndCharacterOfPosition(n.getStart());
-          assert.fail(`${name}:${line + 1} uses ${n.text} before its top-level declaration`);
-        }
-        ts.forEachChild(n, visit);
-      };
-      visit(st);
-    });
+    const scopes = [
+      src.statements,
+      ...src.statements
+        .filter(n => ts.isFunctionDeclaration(n) && n.name?.text === 'main' && n.body)
+        .map(n => n.body.statements),
+    ];
+    for (const statements of scopes) {
+      const declaredAt = new Map();
+      statements.forEach((st, index) => {
+        if (ts.isVariableStatement(st) && st.declarationList.flags & ts.NodeFlags.BlockScoped)
+          for (const d of st.declarationList.declarations)
+            if (ts.isIdentifier(d.name) && !declaredAt.has(d.name.text)) declaredAt.set(d.name.text, index);
+      });
+      statements.forEach((st, index) => {
+        const visit = n => {
+          if (isFunction(n) || ts.isImportDeclaration(n)) return; // functions run later, when called
+          const nameOnly =
+            (n.parent?.name === n &&
+              !ts.isShorthandPropertyAssignment(n.parent) &&
+              !ts.isVariableDeclaration(n.parent)) ||
+            n.parent?.propertyName === n;
+          if (ts.isIdentifier(n) && declaredAt.get(n.text) > index && !nameOnly) {
+            const { line } = src.getLineAndCharacterOfPosition(n.getStart());
+            assert.fail(`${name}:${line + 1} uses ${n.text} before its declaration`);
+          }
+          ts.forEachChild(n, visit);
+        };
+        visit(st);
+      });
+    }
   }
 });
