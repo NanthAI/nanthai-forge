@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { clientCacheRoot } from './root-paths.js';
 import {
   openSync,
   writeSync,
@@ -156,7 +157,7 @@ export async function captureHostedSave(root: string, directory: string) {
   const since = Date.now(),
     index = readCheckoutStatIndex(root),
     observedStats = new Map<string, ReturnType<typeof statEntry>>(),
-    cache = `${root}.forge-client`,
+    cache = clientCacheRoot(root),
     bases = overlapBaseBlobs(cache, marker.selection.base.head);
   const baseline = new Map(marker.state.files.map(file => [file.path, file])),
     local = nativePaths(root, [...baseline.keys()]);
@@ -197,10 +198,10 @@ export async function captureHostedSave(root: string, directory: string) {
     }
   // Capture is retry state, never a Work owner or a Lane publication.
   const result = { marker, changes, files };
-  mkdirSync(`${root}.forge-client`, { recursive: true, mode: 0o700 });
-  neverIndex(`${root}.forge-client`);
+  mkdirSync(clientCacheRoot(root), { recursive: true, mode: 0o700 });
+  neverIndex(clientCacheRoot(root));
   writeCheckoutStatIndex(root, since, observedStats);
-  return workLocked(join(`${root}.forge-client`, 'lock'), () => {
+  return workLocked(join(clientCacheRoot(root), 'lock'), () => {
     const path = join(directory, 'capture.json');
     if (checkoutPathExists(path)) return JSON.parse(readFileSync(path, 'utf8')) as typeof result;
     invariant(

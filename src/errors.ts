@@ -5,6 +5,7 @@ export class ForgeError extends Error {
     code: string,
     message: string,
     readonly retryAt?: number,
+    readonly recovery?: Record<string, unknown>,
   ) {
     super(message);
     this.name = 'ForgeError';

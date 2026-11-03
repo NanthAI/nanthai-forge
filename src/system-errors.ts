@@ -17,7 +17,13 @@ const reasons: Record<string, string> = {
   EROFS: 'read-only file system',
   ENOENT: 'no such file or directory',
 };
-export type Failure = { code: string; message: string; hint?: string; diagnostics?: string };
+export type Failure = {
+  code: string;
+  message: string;
+  hint?: string;
+  diagnostics?: string;
+  recovery?: Record<string, unknown>;
+};
 
 const underForge = (path: string) => {
   const queue = process.env.FORGE_CHECK_QUEUE_DIR;
@@ -39,7 +45,12 @@ function hint(code: string, path: string | undefined) {
 
 /** Describe any thrown value without exposing environment or file contents. */
 export function describeFailure(error: unknown): Failure {
-  if (error instanceof ForgeError) return { code: error.code, message: error.message };
+  if (error instanceof ForgeError)
+    return {
+      code: error.code,
+      message: error.message,
+      ...(error.recovery ? { recovery: error.recovery } : {}),
+    };
   const raw = error as { code?: unknown; syscall?: unknown; path?: unknown } | null;
   const code = typeof raw?.code === 'string' ? raw.code : undefined;
   if (code && code in reasons) {

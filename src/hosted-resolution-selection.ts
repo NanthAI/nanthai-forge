@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { clientCacheRoot } from './root-paths.js';
 import { join } from 'node:path';
 import { HostedObjectStore } from './hosted-object-store.js';
 import { hostedRecordSchema } from './hosted-records.js';
@@ -31,7 +32,7 @@ export async function resolutionFinishSelection(session: HostedAgentSession, sou
     'Continue the original conflicted selection.',
   );
   const objects = new HostedObjectStore(
-    join(`${session.root}.forge-client`, 'conflict-objects'),
+    join(clientCacheRoot(session.root), 'conflict-objects'),
     session.exchange,
   );
   const read = async (root: { sha256: string; size: number }) => {

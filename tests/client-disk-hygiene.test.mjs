@@ -176,11 +176,13 @@ test('cache GC never evicts the caller’s Lane, a locked or just-used copy, a l
   writeFileSync(join(`${locked.path}.forge-client`, 'lock'), '{}');
   utimesSync(join(justUsed.path, '.forge', 'cache-use.json'), new Date(), new Date());
   symlinkSync(linked.path, join(directory, 'lane-link'));
+  writeFileSync(join(edited.path, 'local-draft'), 'preserve this draft');
+  age(edited.path, 44);
   const result = gcNestedLanes({
     root,
     keepLaneIds: [own.laneId],
     settings: settings(0.5, 0),
-    isDirty: path => path === edited.path,
+    isDirty: path => existsSync(join(path, 'local-draft')),
   });
   const kept = Object.fromEntries(result.kept.map(item => [item.laneId, item.reason]));
   assert.equal(kept[own.laneId], 'the caller’s Lane');
@@ -332,4 +334,51 @@ test('the peers cache drops entries not written for a day, at most once an hour'
   assert(!existsSync(entry('first')));
   assert.deepEqual(cache.read('second'), { n: 2 });
   assert.deepEqual(cache.read('third'), { n: 3 });
+});
+
+test('GC protects relative sibling links and recent registry use through a symlinked parent', t => {
+  const directory = isolated(t),
+    physical = join(directory, 'physical'),
+    alias = join(directory, 'alias');
+  mkdirSync(physical);
+  symlinkSync(physical, alias);
+  const root = join(alias, 'main'),
+    linked = copy(root, 1e9, 40),
+    active = copy(root, 1e9, 41);
+  symlinkSync(`main.forge-client/lanes/${linked.laneId}`, join(alias, 'linked-lane'));
+  recordLane({ laneId: active.laneId, root: active.path, ...address, lastActionAt: Date.now() });
+  const result = gcNestedLanes({ root, settings: settings(0.5, 0), isDirty: clean });
+  assert.equal(
+    result.kept.find(item => item.laneId === linked.laneId)?.reason,
+    'linked from a sibling directory',
+  );
+  assert.equal(result.kept.find(item => item.laneId === active.laneId)?.reason, 'in use');
+  assert.equal(result.evicted.length, 0);
+  assert(existsSync(linked.path) && existsSync(active.path));
+});
+
+test('prune keeps a checkout excluded through an alias of its physical root', async t => {
+  const directory = isolated(t),
+    physical = join(directory, 'physical'),
+    alias = join(directory, 'alias');
+  mkdirSync(physical);
+  symlinkSync(physical, alias);
+  const root = join(physical, 'checkout'),
+    laneId = randomUUID(),
+    now = Date.now();
+  await realCheckout(root, laneId);
+  ageTree(root, 10);
+  ageTree(`${root}.forge-client`, 10);
+  recordLane({ laneId, root, ...address, lastActionAt: now - 10 * hour }, now);
+  const result = await laneHousekeeping({
+    readStates: async () => new Map([[laneId, 'completed']]),
+    address,
+    apply: true,
+    now,
+    exclude: { roots: [join(alias, 'checkout')] },
+    settings: { autoPruneHours: 3, idleLaneHours: 0 },
+  });
+  assert.equal(result.kept.find(item => item.laneId === laneId)?.reason, 'in use by this command');
+  assert.equal(result.pruned.length, 0);
+  assert(existsSync(join(root, 'src', 'a.txt')));
 });

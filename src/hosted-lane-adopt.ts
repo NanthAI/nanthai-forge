@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
+import { canonicalRoot, clientCacheRoot, rootSibling } from './root-paths.js';
 import { lstatSync, readlinkSync, renameSync, rmSync } from 'node:fs';
-import { join, resolve, sep } from 'node:path';
+import { join, sep } from 'node:path';
 import { readLaneEntry } from './lane-registry.js';
 import { markerIdentity } from './lane-prune.js';
 import { checkoutPathExists } from './hosted-checkout-files.js';
@@ -14,15 +15,15 @@ export function adoptNestedLaneCopy(
   laneId: string,
   address: { url: string; projectId: string },
 ): string | null {
-  root = resolve(root);
+  root = canonicalRoot(root);
   if (checkoutPathExists(root)) return null;
   const entry = readLaneEntry(laneId);
   if (!entry || entry.url !== address.url || entry.projectId !== address.projectId) return null;
-  const copy = resolve(entry.root);
+  const copy = canonicalRoot(entry.root);
   if (copy === root || !copy.endsWith(`.forge-client${sep}lanes${sep}${laneId}`)) return null;
   const identity = markerIdentity(copy);
   if (identity?.laneId !== laneId || identity.projectId !== address.projectId) return null;
-  if (checkoutPathExists(`${copy}.forge-client/lock`)) return null;
+  if (checkoutPathExists(join(clientCacheRoot(copy), `lock`))) return null;
   // `start` linked shared dependencies into the copy; `open` links them again at the new root.
   const modules = join(copy, 'node_modules');
   try {
@@ -36,7 +37,7 @@ export function adoptNestedLaneCopy(
     return null;
   }
   // The copy's own client directory held only its checkout receipts; objects live in the shared store.
-  rmSync(`${copy}.forge-client`, { recursive: true, force: true });
-  rmSync(`${copy}.forge-metrics.jsonl`, { force: true });
+  rmSync(clientCacheRoot(copy), { recursive: true, force: true });
+  rmSync(rootSibling(copy, '.forge-metrics.jsonl'), { force: true });
   return copy;
 }

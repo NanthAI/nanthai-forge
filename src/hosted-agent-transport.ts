@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+import { canonicalRoot, clientCacheRoot, rootSibling } from './root-paths.js';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomUUID } from 'node:crypto';
 import { withExchangeProgress } from './exchange-progress.js';
@@ -42,7 +44,6 @@ import {
   metricRequesterActor,
   recordOwnerMutation,
 } from './self-metrics-journal.js';
-// SPDX-License-Identifier: Apache-2.0
 import { SourceAuthorityStaleError } from './hosted-source-authority.js';
 import { CUTOVER_CLI_VERSION } from './cutover-version.js';
 import { rememberSourceAuthorityError } from './source-authority-client.js';
@@ -177,7 +178,9 @@ export class HostedAgentTransport {
       null,
     ),
     readonly subscribeSource?: () => HostedRunSubscription,
-  ) {}
+  ) {
+    this.root = canonicalRoot(root);
+  }
   async dispatch(
     requestedAction: string,
     input: Record<string, unknown>,
@@ -299,7 +302,7 @@ export class HostedAgentTransport {
       dirname(metricRoot),
       { ...input, action: requestedAction },
       () => this.dispatchRequest(requestedAction, input, signal),
-      `${basename(metricRoot)}.forge-metrics.jsonl`,
+      basename(rootSibling(metricRoot, '.forge-metrics.jsonl')),
     );
   }
   private async dispatchRequest(
@@ -486,7 +489,7 @@ export class HostedAgentTransport {
             client: this.exchange.client as never,
             projectId: this.address.projectId,
             head: main.head,
-            cacheRoot: `${hostedAgentRoot(this.root)}.forge-client`,
+            cacheRoot: clientCacheRoot(hostedAgentRoot(this.root)),
             transport: new HostedCheckoutDownloads(this.exchange),
           }),
         );
@@ -527,7 +530,7 @@ export class HostedAgentTransport {
       if (action === 'start' || action === 'open') hostedRootLanePath(root, this.address);
       const replaying =
         typeof operationId === 'string' &&
-        existsSync(resolve(`${root}.forge-client`, 'agent', `${operationId}.json`));
+        existsSync(resolve(clientCacheRoot(root), 'agent', `${operationId}.json`));
       const pendingSync =
         action === 'finish' && !replaying ? await reconcileHostedSync(root, this.exchange) : null;
       if (pendingSync)
@@ -724,7 +727,7 @@ export class HostedAgentTransport {
       if (owner) rememberSourceAuthorityError(new WorkStore(owner), error, this.address.projectId);
       if (error instanceof z.ZodError) throw protocolMismatchError();
       const safe = hostedActionError(error, `agent ${action}`);
-      if (safe instanceof SourceAuthorityStaleError) throw safe;
+      if (safe instanceof SourceAuthorityStaleError || safe.recovery) throw safe;
       // Version skew needs an upgrade, not a replay.
       if (safe.code === 'HOSTED_ACTION_UNSUPPORTED' || safe.code === 'CLI_UPGRADE_REQUIRED') throw safe;
       throw new ForgeError(
@@ -939,7 +942,11 @@ export class HostedAgentTransport {
     }
     if (pending) clearCallerReceipts(pending.files);
     const metricRoot = resolve(this.root);
-    recordOwnerMutation(dirname(metricRoot), undefined, `${basename(metricRoot)}.forge-metrics.jsonl`);
+    recordOwnerMutation(
+      dirname(metricRoot),
+      undefined,
+      basename(rootSibling(metricRoot, '.forge-metrics.jsonl')),
+    );
     return (typeof value === 'string' ? JSON.parse(value) : value) as T;
   }
   private async observe(command: z.infer<typeof hostedAgentCommandSchemas.status>) {

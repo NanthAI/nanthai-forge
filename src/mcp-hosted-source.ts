@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { clientCacheRoot } from './root-paths.js';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
@@ -112,7 +113,7 @@ async function fileBytes(
     ? { head: main.head, channel: 'main' as const, sourceRevision: main.sourceRevision }
     : await selectHostedSource(transport, input);
   const cache = new HostedCheckoutCache(
-    `${transport.root}.forge-client`,
+    clientCacheRoot(transport.root),
     new ConvexLaneTransport(transport.exchange),
   );
   await cache.ensure([selection.head]);

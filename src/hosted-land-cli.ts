@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { clientCacheRoot } from './root-paths.js';
 import { isNetworkPending } from './network-continuation.js';
 import { normalizeHostedFinishResult } from './hosted-agent-finish-result.js';
 import { spawn } from 'node:child_process';
@@ -99,7 +100,7 @@ async function detachedSubmit(
   root: string,
   command: Record<string, unknown>,
 ): Promise<HostedAgentResponse | null> {
-  const directory = join(`${hostedAgentRoot(root)}.forge-client`, 'agent', 'land');
+  const directory = join(clientCacheRoot(hostedAgentRoot(root)), 'agent', 'land');
   mkdirSync(directory, { recursive: true, mode: 0o700 });
   const base = join(directory, randomUUID()),
     out = openSync(`${base}.out`, 'w', 0o600),

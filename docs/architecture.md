@@ -1581,6 +1581,25 @@ actual delta by the same API. The shared hosted agent transport exposes this sou
 
 ### Hosted agent transport
 
+All checkout-root sibling paths use `root-paths.ts`: the existing filesystem prefix,
+including a symlinked checkout, is resolved before any suffix is appended. Before
+cache eviction, pruning or copy adoption, filesystem identities are compared using
+canonical roots, including relative sibling links and registry aliases. Before
+checkout publication, exact legacy read-cache candidates with verified hash-named
+private regular objects are atomically quarantined outside source and every
+containing disposable cache. Re-verification after the move restores unexpected
+content when possible, or retains it with an obstruction; even verified quarantines
+stay outside GC because open handles can still write to moved directories.
+Tracked source paths retain ordinary obstruction handling. Blocked sync/resolve applies
+retain typed recovery through CLI/MCP; explicit `recover-apply` preserves the full
+checkout before restoring its baseline and resuming the same pinned installation.
+Restoration requires the exact journaled marker and clean materialized baseline;
+a recreated checkout is preserved in another durable round. Recovery uses one
+serialized private baseline stage, cleans it on exit, and never restores a baseline
+over a completed apply. Interrupted local failures retain executable recovery.
+The recovery journal and preserved bytes stay local and add no idle server calls.
+
+
 `HostedAgentTransport` is the shared hosted CLI/agent boundary. `agent-cli` selects
 an explicit deployment/project, a verified Lane marker or a retained client
 address before constructing native owner services. All hosted actions reuse the

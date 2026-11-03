@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { canonicalRoot, clientCacheRoot, rootSibling } from './root-paths.js';
 import { lstatSync, readdirSync, readlinkSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { readClientSettings, type ClientSettings } from './client-settings.js';
@@ -40,7 +41,7 @@ export function touchNestedLane(copy: string, now = Date.now()) {
     /* Cache bookkeeping never fails a command. */
   }
 }
-const lockHeld = (copy: string) => Boolean(exists(`${copy}.forge-client/lock`));
+const lockHeld = (copy: string) => Boolean(exists(join(clientCacheRoot(copy), `lock`)));
 
 export type CacheGcResult = {
   evicted: { laneId: string; bytes: number }[];
@@ -68,7 +69,7 @@ export function gcNestedLanes(input: {
   const maxBytes = settings.clientCacheMaxGB * 1e9,
     maxAgeMs = settings.clientCacheMaxAgeHours * hour;
   if (maxBytes === 0 && maxAgeMs === 0) return result;
-  const directory = join(`${resolve(input.root)}.forge-client`, 'lanes');
+  const directory = join(clientCacheRoot(input.root), 'lanes');
   let names: string[];
   try {
     names = readdirSync(directory).filter(name => uuid.test(name));
@@ -78,16 +79,17 @@ export function gcNestedLanes(input: {
   // Sibling symlinks (conflict checkouts) point into this cache and keep a copy alive.
   const linked = new Set<string>();
   try {
-    const parent = dirname(resolve(input.root));
+    const parent = dirname(canonicalRoot(input.root));
     for (const name of readdirSync(parent)) {
       const stat = exists(join(parent, name));
-      if (stat?.isSymbolicLink()) linked.add(resolve(parent, readlinkSync(join(parent, name))));
+      if (stat?.isSymbolicLink())
+        linked.add(canonicalRoot(resolve(parent, readlinkSync(join(parent, name)))));
     }
   } catch {
     /* Without a parent listing, nothing is protected by link; the other guards still apply. */
   }
   const lanes = listLanes();
-  const registry = new Map(lanes.map(entry => [resolve(entry.root), entry.lastActionAt]));
+  const registry = new Map(lanes.map(entry => [canonicalRoot(entry.root), entry.lastActionAt]));
   // Owner-pinned Lanes (this client's registry mirror of the server flag) are never evicted.
   const pinned = new Set(lanes.filter(entry => entry.pinned).map(entry => entry.laneId));
   const keep = new Set(input.keepLaneIds ?? []);
@@ -137,7 +139,11 @@ export function gcNestedLanes(input: {
       result.kept.push({ laneId: item.laneId, reason });
       continue;
     }
-    for (const path of [item.copy, `${item.copy}.forge-client`, `${item.copy}.forge-metrics.jsonl`])
+    for (const path of [
+      item.copy,
+      clientCacheRoot(item.copy),
+      rootSibling(item.copy, '.forge-metrics.jsonl'),
+    ])
       rmSync(path, { recursive: true, force: true });
     total -= item.bytes ?? 0;
     result.evicted.push({ laneId: item.laneId, bytes: item.bytes ?? 0 });
@@ -147,11 +153,11 @@ export function gcNestedLanes(input: {
 }
 /** Once an hour per client directory, from CLI start. The stamp is written only when the pass finished. */
 export function gcNestedLanesHourly(input: Parameters<typeof gcNestedLanes>[0]): CacheGcResult | null {
-  const stamp = `${resolve(input.root)}.forge-client/gc-stamp`,
+  const stamp = join(clientCacheRoot(resolve(input.root)), `gc-stamp`),
     now = input.now ?? Date.now();
   try {
     if (exists(stamp) && now - lstatSync(stamp).mtimeMs < hour) return null;
-    if (!exists(`${resolve(input.root)}.forge-client/lanes`)) return null;
+    if (!exists(join(clientCacheRoot(resolve(input.root)), `lanes`))) return null;
   } catch {
     return null;
   }

@@ -1,14 +1,16 @@
-import { sourceTree } from './source-tree.js';
 // SPDX-License-Identifier: Apache-2.0
-import { mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, realpathSync } from 'node:fs';
-import { basename, dirname, join, resolve } from 'node:path';
+import { canonicalRoot, clientCacheRoot } from './root-paths.js';
+import { preserveMisplacedReadCaches } from './hosted-legacy-cache.js';
+import { sourceTree } from './source-tree.js';
+import { mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
 import { z } from 'zod';
 import { hostedLaneSelectionSchema, type HostedLaneSelection } from './hosted-lane.js';
 import { parseNativeState } from './native-state-format.js';
 import { canonicalPayload } from './hosted-source-operation.js';
 import { durableReplace, syncDirectory } from './native-durability.js';
 import { digest } from './hash.js';
-import { invariant } from './errors.js';
+import { ForgeError, invariant } from './errors.js';
 import { readSource } from './files.js';
 import { workLocked } from './work-lock.js';
 import { indexInstalledFiles, writeCheckoutStatIndex } from './checkout-stat-index.js';
@@ -51,11 +53,9 @@ async function checkout(
   metrics: CheckoutOpenMetrics,
 ) {
   const request = hostedLaneCheckoutSchema.parse(input);
-  root = resolve(root);
-  mkdirSync(dirname(root), { recursive: true });
-  root = join(realpathSync(dirname(root)), basename(root));
+  root = canonicalRoot(root);
   const cache = new HostedCheckoutCache(
-      `${root}.forge-client`,
+      clientCacheRoot(root),
       transport,
       sharedObjects,
       machineObjectsDirectory(),
@@ -64,6 +64,26 @@ async function checkout(
     lock = join(cache.root, 'lock'),
     previous = join(cache.root, 'previous'),
     receiptPath = join(cache.root, `${request.operationId}.json`);
+  const recoveryPath = join(cache.root, `legacy-cache-recovery-${request.operationId}.json`);
+  const preserveCaches = (files: readonly { path: string }[] = []) => {
+    preserveMisplacedReadCaches(
+      root,
+      files,
+      receipt => {
+        const moved = (checkoutPathExists(recoveryPath) ? json(recoveryPath) : []).filter(
+          (item: { preservedAt: string }) => checkoutPathExists(item.preservedAt),
+        );
+        if (!moved.some((item: { preservedAt: string }) => item.preservedAt === receipt.preservedAt))
+          moved.push(receipt);
+        else
+          moved[
+            moved.findIndex((item: { preservedAt: string }) => item.preservedAt === receipt.preservedAt)
+          ] = receipt;
+        durableReplace(recoveryPath, JSON.stringify(moved));
+      },
+      checkoutPathExists(recoveryPath) ? json(recoveryPath) : [],
+    );
+  };
   const markerDigest = () => {
     const bytes = checkoutPathExists(root)
       ? readSource(root, `.forge/${hostedLaneMarkerName}`, Number.MAX_SAFE_INTEGER)
@@ -85,7 +105,18 @@ async function checkout(
     return marker?.state.files.filter(file => paths.has(file.path)) ?? [];
   };
   const baseline = () => {
-    const marker = checkoutPathExists(root) ? readHostedLaneCheckout(root) : null;
+    let marker;
+    try {
+      marker = checkoutPathExists(root) ? readHostedLaneCheckout(root) : null;
+    } catch (error) {
+      if (!request.previous) throw error;
+      throw new ForgeError(
+        'WORK_STALE',
+        'The local checkout marker changed before pinned apply.',
+        undefined,
+        { obstruction: { kind: 'baseline-mismatch', path: `.forge/${hostedLaneMarkerName}` } },
+      );
+    }
     if (marker) {
       identity(marker.selection);
       invariant(
@@ -127,18 +158,25 @@ async function checkout(
               'The Lane changed from its expected source pins.',
             );
             const marker = baseline();
-            invariant(
-              !request.previous ||
+            if (
+              !(
+                !request.previous ||
                 (marker &&
                   canonicalPayload(request.previous) ===
                     canonicalPayload({
                       head: marker.selection.head,
                       version: marker.selection.version,
                       sourceVersion: marker.selection.sourceVersion,
-                    })),
-              'WORK_STALE',
-              'The client baseline changed before applying the pinned sync result.',
-            );
+                    }))
+              )
+            )
+              throw new ForgeError(
+                'WORK_STALE',
+                'The client baseline changed before applying the pinned sync result.',
+                undefined,
+                { obstruction: { kind: 'baseline-mismatch', path: `.forge/${hostedLaneMarkerName}` } },
+              );
+            preserveCaches(marker?.state.files);
             cleanHostedCheckout(root, materializedFiles(marker), hostedLaneMarkerName, Boolean(marker));
             const next = { request, selection: observed, complete: false, previousMarker: markerDigest() };
             durableReplace(receiptPath, JSON.stringify(next));
@@ -158,6 +196,7 @@ async function checkout(
           : {}),
         ...(cache.machineObjects ? { machineObjects: cache.machineObjects } : {}),
         replayed,
+        ...(checkoutPathExists(recoveryPath) ? { localRecovery: json(recoveryPath) } : {}),
       });
       if (operation.complete) {
         metrics.replayed = true;
@@ -234,12 +273,21 @@ async function checkout(
                     if (operation.complete) return;
                     recover();
                     const current = baseline();
-                    invariant(
-                      markerDigest() === operation.previousMarker ||
-                        current?.operationId === request.operationId,
-                      'WORK_STALE',
-                      'Another checkout updated this client while source was downloading.',
-                    );
+                    if (
+                      !(
+                        markerDigest() === operation.previousMarker ||
+                        current?.operationId === request.operationId
+                      )
+                    )
+                      throw new ForgeError(
+                        'WORK_STALE',
+                        'Another checkout updated this client while source was downloading.',
+                        undefined,
+                        {
+                          obstruction: { kind: 'baseline-mismatch', path: `.forge/${hostedLaneMarkerName}` },
+                        },
+                      );
+                    preserveCaches(current?.state.files);
                     cleanHostedCheckout(
                       root,
                       materializedFiles(current),

@@ -1,5 +1,6 @@
-import { sourceTree } from './source-tree.js';
 // SPDX-License-Identifier: Apache-2.0
+import { rootSibling } from './root-paths.js';
+import { sourceTree } from './source-tree.js';
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { NativeSource } from './native-source.js';
@@ -93,7 +94,7 @@ export async function saveBoundInput(
       );
     }
     const state = source.state(selection.head),
-      temporary = `${root}.preparing`;
+      temporary = rootSibling(root, '.preparing');
     rmSync(temporary, { recursive: true, force: true });
     source.materialize(input.head, temporary, false);
     mkdirSync(join(temporary, '.forge'), { recursive: true });

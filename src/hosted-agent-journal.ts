@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-import { lstatSync, mkdirSync, readFileSync, realpathSync } from 'node:fs';
-import { basename, dirname, join, resolve } from 'node:path';
+import { canonicalRoot, clientCacheRoot } from './root-paths.js';
+import { lstatSync, mkdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { digest } from './hash.js';
@@ -12,12 +13,10 @@ import { invariant } from './errors.js';
 import type { HostedAgentAddress } from './hosted-agent-contract.js';
 import { neverIndex } from './forge-disk.js';
 export function hostedAgentRoot(root: string) {
-  root = resolve(root);
-  mkdirSync(dirname(root), { recursive: true });
-  return join(realpathSync(dirname(root)), basename(root));
+  return canonicalRoot(root);
 }
 export function hostedAgentDirectory(root: string) {
-  const cache = `${hostedAgentRoot(root)}.forge-client`,
+  const cache = clientCacheRoot(hostedAgentRoot(root)),
     directory = join(cache, 'agent');
   for (const path of [cache, directory]) {
     mkdirSync(path, { recursive: true, mode: 0o700 });

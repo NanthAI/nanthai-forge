@@ -1,7 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+import { clientCacheRoot } from './root-paths.js';
 import { summarizeExecutions } from './check-report-summary.js';
 import { portableCheckEvidence } from './check-compact-output.js';
 import { portableRun, portableRunFiles, runLogRecord, checkLogCoverage } from './check-log-policy.js';
-// SPDX-License-Identifier: Apache-2.0
 import { existsSync, mkdirSync, readFileSync, readdirSync, lstatSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
@@ -28,7 +29,7 @@ const journals = ['agent-finish', 'agent-land', 'coordination'];
 function recoveryFiles(store: WorkStore) {
   const files: { path: string; bytes: string }[] = [];
   const sources: [string, string][] = journals.map(folder => [folder, join(store.directory, folder)]);
-  sources.push(['client-agent', join(`${store.root}.forge-client`, 'agent')]);
+  sources.push(['client-agent', join(clientCacheRoot(store.root), 'agent')]);
   for (const [folder, directory] of sources) {
     if (!existsSync(directory)) continue;
     for (const name of readdirSync(directory)

@@ -85,6 +85,7 @@ export const namedReads = [
   'check-settings',
   'capabilities',
   'resolve',
+  'recover-apply',
   'planning',
   'put-planning-item',
   'comment-planning-item',

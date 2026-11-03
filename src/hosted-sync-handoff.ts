@@ -1,14 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
+import { clientCacheRoot } from './root-paths.js';
 import { join } from 'node:path';
 import { readFileSync, rmSync } from 'node:fs';
 import { z } from 'zod';
 import { makeFunctionReference } from 'convex/server';
 import { syncResultSchema } from './hosted-sync.js';
-import { readHostedLaneCheckout } from './hosted-lane-checkout-marker.js';
 import { checkoutPathExists } from './hosted-checkout-files.js';
 import { durableReplace } from './native-durability.js';
 import { workLocked } from './work-lock.js';
 import { applyHostedSync } from './hosted-sync-client.js';
+import { markerAt, retainedLocalApplyBlocked } from './hosted-apply-recovery-records.js';
 import { ConvexLaneTransport } from './hosted-lane-transport.js';
 import { hostedRecoveryCommand } from './hosted-agent-resolution.js';
 import { invariant } from './errors.js';
@@ -20,8 +21,8 @@ const handoffSchema = z.object({
   action: z.enum(['sync', 'resolve']),
   command: z.record(z.string(), z.unknown()),
 });
-const pathFor = (root: string) => join(`${root}.forge-client`, 'sync-handoff.json');
-const lockFor = (root: string) => join(`${root}.forge-client`, 'lock');
+const pathFor = (root: string) => join(clientCacheRoot(root), 'sync-handoff.json');
+const lockFor = (root: string) => join(clientCacheRoot(root), 'lock');
 /** Retain installation ownership before submitting source IO. A deadline or lost
  * reply must not leave the next land using the old checkout pins. */
 export async function retainSyncHandoff(
@@ -79,7 +80,11 @@ export async function reconcileHostedSync(root: string, exchange: HostedAgentExc
   // that exact draft rather than trying to install it into the source Lane.
   if (source.status === 'conflict')
     return { phase: 'conflict', recovery: { ...continuation(), source: progress.terminal } };
-  const marker = readHostedLaneCheckout(root);
+  const marker = markerAt(root);
+  if (!marker) {
+    const blocked = retainedLocalApplyBlocked(root, handoff.applyOperationId);
+    if (blocked) throw blocked;
+  }
   invariant(
     marker?.selection.laneId === source.lane.laneId,
     'WORK_OPERATION_CHANGED',

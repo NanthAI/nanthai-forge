@@ -1,5 +1,6 @@
-import { sourceTree } from './source-tree.js';
 // SPDX-License-Identifier: Apache-2.0
+import { clientCacheRoot } from './root-paths.js';
+import { sourceTree } from './source-tree.js';
 import { lstatSync, mkdirSync, readFileSync, readlinkSync, realpathSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { HostedCheckoutCache } from './hosted-checkout-cache.js';
@@ -22,7 +23,7 @@ const shell = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
 
 /** One retained save per checkout baseline; its reply may be lost while it publishes. */
 export const pendingSavePath = (root: string, marker: unknown) =>
-  join(`${root}.forge-client`, `save-baseline-${digest(canonicalPayload(marker))}.json`);
+  join(clientCacheRoot(root), `save-baseline-${digest(canonicalPayload(marker))}.json`);
 
 /** The one command that always gets an agent unstuck: keep every unsaved edit
  * in a patch next to the checkout, abandon, and re-apply in a fresh Lane. */
@@ -73,7 +74,7 @@ export async function rebaseHostedCheckout(root: string, exchange: Exchange) {
   const install: { path: string; file: NativeFile | undefined; old: NativeFile | undefined }[] = [];
   const materialized = new Set(stale.materialized);
   if (lane.head !== stale.selection.head) {
-    const cache = new HostedCheckoutCache(`${root}.forge-client`, transport);
+    const cache = new HostedCheckoutCache(clientCacheRoot(root), transport);
     await cache.ensure([lane.head]);
     state = parseNativeState(readFileSync(join(cache.objects, lane.head)));
     const before = new Map(stale.state.files.map(file => [file.path, file])),
@@ -109,7 +110,7 @@ export async function rebaseHostedCheckout(root: string, exchange: Exchange) {
     tree: sourceTree(state.files),
     materialized: [...materialized].sort(),
   });
-  workLocked(join(`${root}.forge-client`, 'lock'), () => {
+  workLocked(join(clientCacheRoot(root), 'lock'), () => {
     invariant(
       canonicalPayload(readHostedLaneCheckout(root)) === canonicalPayload(stale),
       'WORK_STALE',

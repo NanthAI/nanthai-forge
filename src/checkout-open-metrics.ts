@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { canonicalRoot, rootSibling } from './root-paths.js';
 import { basename, dirname } from 'node:path';
 import { ForgeError } from './errors.js';
 import { appendSelfMetric } from './self-metrics-journal.js';
@@ -21,6 +22,7 @@ export async function withCheckoutOpenMetrics<T>(
   request: { operationId: string; laneId: string },
   run: (metrics: CheckoutOpenMetrics) => Promise<T>,
 ): Promise<T> {
+  root = canonicalRoot(root);
   const metrics = new CheckoutOpenMetrics(),
     start = performance.now();
   let outcome: CheckoutOpenMeasurement['outcome'] = 'failed',
@@ -55,7 +57,7 @@ export async function withCheckoutOpenMetrics<T>(
           outcome,
         },
       },
-      `${basename(root)}.forge-metrics.jsonl`,
+      basename(rootSibling(root, '.forge-metrics.jsonl')),
     );
   }
 }

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { clientCacheRoot, rootSibling } from './root-paths.js';
 import { copyFileSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { checkoutPathExists } from './hosted-checkout-files.js';
@@ -32,10 +33,10 @@ function lines(value: string, prefix: string) {
  * text patch cannot carry (binary, links, submodule pointers, unknown baseline).
  * Local disk only; the capture already holds the edited bytes. */
 export function keepHostedEditsPatch(root: string, operationId: string, capture: Capture, captured: string) {
-  const name = `${root}.kept-${operationId.slice(0, 8)}`,
+  const name = rootSibling(root, `.kept-${operationId.slice(0, 8)}`),
     patch = `${name}.patch`,
     copies = `${name}-files`,
-    objects = join(`${root}.forge-client`, 'objects');
+    objects = join(clientCacheRoot(root), 'objects');
   const blocks: string[] = [],
     copied: string[] = [];
   const read = (blob: string, path: string) => {

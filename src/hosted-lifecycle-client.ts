@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { clientCacheRoot } from './root-paths.js';
 import { lstatSync, realpathSync, mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -43,7 +44,7 @@ export async function transitionHostedLane(
   );
   invariant(!lstatSync(root).isSymbolicLink(), 'UNSAFE_PATH', 'Checkout directory must be real.');
   root = realpathSync(root);
-  const cache = `${root}.forge-client`,
+  const cache = clientCacheRoot(root),
     directory = join(cache, 'lifecycle');
   for (const path of [cache, directory]) {
     mkdirSync(path, { recursive: true, mode: 0o700 });

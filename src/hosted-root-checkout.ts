@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { clientCacheRoot } from './root-paths.js';
 import { join } from 'node:path';
 import { readSource } from './files.js';
 import { hostedMainSchema } from './hosted-main.js';
@@ -23,7 +24,7 @@ export function hostedRootLanePath(root: string, address: HostedAgentAddress, la
   const bytes = readSource(root, '.forge/hosted-main.json', Number.MAX_SAFE_INTEGER);
   const main = bytes ? hostedMainSchema.parse(JSON.parse(bytes.toString()).selection) : null;
   const lane = main ? null : readHostedLaneCheckout(root);
-  const bindingPath = join(`${root}.forge-client`, 'agent', 'address.json');
+  const bindingPath = join(clientCacheRoot(root), 'agent', 'address.json');
   if (main && checkoutPathExists(bindingPath)) {
     const binding = readAgentJson(bindingPath) as HostedAgentAddress;
     invariant(
@@ -40,8 +41,7 @@ export function hostedRootLanePath(root: string, address: HostedAgentAddress, la
       'Select this checkout’s hosted project.',
     );
   if (!laneId) return Boolean(main || lane);
-  if (main || (lane && lane.selection.laneId !== laneId))
-    return join(`${root}.forge-client`, 'lanes', laneId);
+  if (main || (lane && lane.selection.laneId !== laneId)) return join(clientCacheRoot(root), 'lanes', laneId);
   return root;
 }
 export async function openHostedRootLane(
@@ -72,7 +72,7 @@ export async function openHostedRootLane(
         return hostedLaneSelectionSchema.parse(typeof value === 'string' ? JSON.parse(value) : value);
       },
     },
-    join(`${root}.forge-client`, 'objects'),
+    join(clientCacheRoot(root), 'objects'),
   );
   touchNestedLane(path);
   return opened;

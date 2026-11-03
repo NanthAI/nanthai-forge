@@ -1,5 +1,6 @@
-import { isNetworkPending } from './network-continuation.js';
 // SPDX-License-Identifier: Apache-2.0
+import { canonicalRoot, clientCacheRoot } from './root-paths.js';
+import { isNetworkPending } from './network-continuation.js';
 import { join, resolve } from 'node:path';
 import { hostedAgentAddressSchema, type HostedAgentAddress } from './hosted-agent-contract.js';
 import { hostedAgentDirectory, readAgentJson } from './hosted-agent-journal.js';
@@ -19,6 +20,7 @@ export function hostedAgentAddress(
   root: string,
   selected: Record<string, unknown>,
 ): HostedAgentAddress | null {
+  root = canonicalRoot(root);
   const explicit = selected.url !== undefined || selected.projectId !== undefined;
   const marker = checkoutPathExists(join(root, '.forge', 'hosted-lane.json'))
     ? readHostedLaneCheckout(root)
@@ -30,7 +32,7 @@ export function hostedAgentAddress(
     address = parsed.data;
   } else if (marker) address = { url: marker.url, projectId: marker.selection.projectId };
   else {
-    const path = join(`${resolve(root)}.forge-client`, 'agent', 'address.json');
+    const path = join(clientCacheRoot(resolve(root)), 'agent', 'address.json');
     if (checkoutPathExists(path)) address = hostedAgentAddressSchema.parse(readAgentJson(path));
   }
   if (address && marker)

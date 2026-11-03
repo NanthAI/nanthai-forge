@@ -16,7 +16,7 @@ import { dirname, join, resolve } from 'node:path';
 import { checkoutIo } from './checkout-io.js';
 import { mapExchange } from './exchange-parallel.js';
 import { digest } from './hash.js';
-import { invariant } from './errors.js';
+import { ForgeError, invariant } from './errors.js';
 import type { NativeFile } from './native-state-format.js';
 import { syncDirectory, syncFile } from './native-durability.js';
 import { fingerprintPrivateFile, readSource } from './files.js';
@@ -47,17 +47,21 @@ export function cleanHostedCheckout(root: string, files: NativeFile[], markerNam
       const path = directory ? `${directory}/${entry}` : entry;
       const stat = lstatSync(join(root, path));
       if (path === '.forge') {
-        invariant(
-          marked && stat.isDirectory() && !stat.isSymbolicLink(),
-          'WORK_CONFLICT',
-          'Existing Forge metadata at ".forge" is preserved.',
-        );
-        for (const name of readdirSync(join(root, path)))
-          invariant(
-            name === markerName || (name === 'cache-use.json' && preserveLegacyCacheUse(root)),
+        if (!(marked && stat.isDirectory() && !stat.isSymbolicLink()))
+          throw new ForgeError(
             'WORK_CONFLICT',
-            `Existing Forge metadata at ${JSON.stringify(`${path}/${name}`)} is preserved.`,
+            'Existing Forge metadata at ".forge" is preserved.',
+            undefined,
+            { obstruction: { kind: 'unknown-metadata', path: '.forge' } },
           );
+        for (const name of readdirSync(join(root, path)))
+          if (!(name === markerName || (name === 'cache-use.json' && preserveLegacyCacheUse(root))))
+            throw new ForgeError(
+              'WORK_CONFLICT',
+              `Existing Forge metadata at ${JSON.stringify(`${path}/${name}`)} is preserved.`,
+              undefined,
+              { obstruction: { kind: 'unknown-metadata', path: `${path}/${name}` } },
+            );
         continue;
       }
       const file = allowed.get(path);
@@ -70,25 +74,48 @@ export function cleanHostedCheckout(root: string, files: NativeFile[], markerNam
         : stat.isFile() && stat.nlink === 1
           ? readFileSync(join(root, path))
           : null;
-      invariant(
-        file &&
+      if (
+        !(
+          file &&
           bytes &&
           digest(bytes) === file.blob &&
           (stat.isSymbolicLink()
             ? file.mode === 'symlink'
-            : file.mode !== 'symlink' && Boolean(stat.mode & 0o111) === (file.mode === 'executable')),
-        'WORK_CONFLICT',
-        `Local checkout changes at ${JSON.stringify(path)} are preserved.`,
-      );
+            : file.mode !== 'symlink' && Boolean(stat.mode & 0o111) === (file.mode === 'executable'))
+        )
+      )
+        throw new ForgeError(
+          'WORK_CONFLICT',
+          `Local checkout changes at ${JSON.stringify(path)} are preserved.`,
+          undefined,
+          {
+            obstruction: {
+              path,
+              kind: file ? 'source-edit' : 'extra-source',
+              expectedDigest: file?.blob ?? null,
+              observedDigest: bytes ? digest(bytes) : null,
+              expectedMode: file?.mode ?? null,
+              observedMode: stat.isSymbolicLink()
+                ? 'symlink'
+                : stat.isFile()
+                  ? stat.mode & 0o111
+                    ? 'executable'
+                    : 'file'
+                  : 'other',
+            },
+          },
+        );
       allowed.delete(path);
     }
   }
   visit('');
-  invariant(
-    !allowed.size,
-    'WORK_CONFLICT',
-    `Local checkout deletion at ${JSON.stringify(allowed.keys().next().value)} is preserved.`,
-  );
+  if (allowed.size)
+    throw new ForgeError(
+      'WORK_CONFLICT',
+      `Local checkout deletion at ${JSON.stringify(allowed.keys().next().value)} is preserved.`,
+      undefined,
+      { obstruction: { kind: 'deletion', path: allowed.keys().next().value } },
+    );
 }
 export function installHostedFile(stage: string, objects: string, file: NativeFile) {
   const target = join(stage, file.path),

@@ -25,6 +25,10 @@ Verification bounds each test file to ten minutes by default (configurable), rep
 
 ## Works
 
+- Hosted relative, trailing-slash and symlinked roots keep source-read caches beside
+  the canonical checkout. Sync/resolve preserve verified legacy misplaced caches;
+  blocked local applies expose executable preservation recovery through CLI/MCP.
+
 Home combines projects and imported/shared source with filters; existing source bookmarks are stars. Settings has a grouped sidebar (mobile page selector), General default, policy-backed Autonomy, recorded Checks, owner contributor controls and supported personal preferences. Hosted-project stars are browser-local; imported-source stars use the account's saved locations. Hosted check definitions are edited locally and returned with Work.
 
 | Area | What you can do |

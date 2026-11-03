@@ -1,6 +1,7 @@
+// SPDX-License-Identifier: Apache-2.0
+import { clientCacheRoot } from './root-paths.js';
 import { sourceTree } from './source-tree.js';
 import { hostedActionError } from './hosted-action-error.js';
-// SPDX-License-Identifier: Apache-2.0
 import {
   lstatSync,
   mkdirSync,
@@ -96,8 +97,8 @@ async function saveOnce(
   saveCommandSchema.parse(command);
   invariant(!lstatSync(root).isSymbolicLink(), 'UNSAFE_PATH', 'Checkout directory must be real.');
   root = realpathSync(root);
-  const directory = `${root}.forge-client/saves/${command.operationId}`;
-  for (const path of [`${root}.forge-client`, `${root}.forge-client/saves`, directory]) {
+  const directory = join(clientCacheRoot(root), `saves/${command.operationId}`);
+  for (const path of [clientCacheRoot(root), join(clientCacheRoot(root), `saves`), directory]) {
     mkdirSync(path, { recursive: true, mode: 0o700 });
     invariant(
       lstatSync(path).isDirectory() && !lstatSync(path).isSymbolicLink(),
@@ -105,12 +106,12 @@ async function saveOnce(
       'Save cache directory must be real.',
     );
   }
-  workLocked(join(`${root}.forge-client`, 'lock'), () =>
-    dropAcknowledgedSaves(`${root}.forge-client`, command.operationId),
+  workLocked(join(clientCacheRoot(root), 'lock'), () =>
+    dropAcknowledgedSaves(clientCacheRoot(root), command.operationId),
   );
   const original = join(directory, 'command.json'),
     identity = { root, projectId: exchange.projectId, ...command };
-  workLocked(join(`${root}.forge-client`, 'lock'), () => {
+  workLocked(join(clientCacheRoot(root), 'lock'), () => {
     if (checkoutPathExists(original))
       invariant(
         canonicalPayload(JSON.parse(readFileSync(original, 'utf8'))) === canonicalPayload(identity),
@@ -212,7 +213,7 @@ async function saveOnce(
       pageCount: built.pages.length,
       changeCount: changes.length,
     });
-    request = workLocked(join(`${root}.forge-client`, 'lock'), () => {
+    request = workLocked(join(clientCacheRoot(root), 'lock'), () => {
       if (checkoutPathExists(requestPath))
         return saveRequestSchema.parse(JSON.parse(readFileSync(requestPath, 'utf8')));
       durableReplace(join(directory, 'pages.json'), JSON.stringify(built.pages));
@@ -222,7 +223,7 @@ async function saveOnce(
   }
   markLandStep('uploaded');
   const pending = pendingSavePath(root, capture.marker);
-  workLocked(join(`${root}.forge-client`, 'lock'), () => {
+  workLocked(join(clientCacheRoot(root), 'lock'), () => {
     if (!checkoutPathExists(pending)) durableReplace(pending, canonicalPayload(command));
   });
   const objects = hostedObjectWriter(exchange);
@@ -240,7 +241,7 @@ async function saveOnce(
     // A refusal began no server operation. Drop the retained capture so a later
     // save reads the working files again instead of resuming these stale bytes.
     if (refused.code === 'LANE_FINISH_ACTIVE' || refused.code === 'WORK_STALE') {
-      workLocked(join(`${root}.forge-client`, 'lock'), () => {
+      workLocked(join(clientCacheRoot(root), 'lock'), () => {
         if (
           checkoutPathExists(pending) &&
           JSON.parse(readFileSync(pending, 'utf8')).operationId === command.operationId
@@ -318,7 +319,7 @@ function applyHostedSaveReceipt(
   request: SaveRequest,
   terminal: { outcome: { status: string; result?: unknown } },
 ) {
-  workLocked(join(`${root}.forge-client`, 'lock'), () => {
+  workLocked(join(clientCacheRoot(root), 'lock'), () => {
     const pending = pendingSavePath(root, capture.marker);
     const clearPending = () => {
       if (
@@ -384,7 +385,7 @@ function applyHostedSaveReceipt(
 /** Once its outcome is applied, a save keeps only its command, request and outcome: the capture
  * (a full baseline copy, ~400 KB for 3,000 files) and pages are never read again. */
 function settleSave(root: string, operationId: string, terminal: unknown) {
-  const directory = `${root}.forge-client/saves/${operationId}`;
+  const directory = join(clientCacheRoot(root), `saves/${operationId}`);
   try {
     durableReplace(join(directory, 'terminal.json'), JSON.stringify(terminal));
     for (const name of ['capture.json', 'pages.json']) rmSync(join(directory, name), { force: true });
@@ -403,7 +404,7 @@ export async function reconcileHostedSave(root: string, exchange: Parameters<typ
   const pending = pendingSavePath(root, marker);
   if (!checkoutPathExists(pending)) return null;
   const command = saveCommandSchema.parse(JSON.parse(readFileSync(pending, 'utf8')));
-  const directory = `${root}.forge-client/saves/${command.operationId}`;
+  const directory = join(clientCacheRoot(root), `saves/${command.operationId}`);
   const capture = JSON.parse(readFileSync(join(directory, 'capture.json'), 'utf8'));
   const request = saveRequestSchema.parse(JSON.parse(readFileSync(join(directory, 'request.json'), 'utf8')));
   let progress: { terminal?: { outcome: { status: string; result?: unknown } } };
@@ -453,7 +454,7 @@ export async function settlePriorHostedSave(
   if (!checkoutPathExists(pending)) return;
   const prior = saveCommandSchema.parse(JSON.parse(readFileSync(pending, 'utf8')));
   if (prior.operationId === operationId) return;
-  const directory = `${root}.forge-client/saves/${prior.operationId}`;
+  const directory = join(clientCacheRoot(root), `saves/${prior.operationId}`);
   let progress: { terminal?: { outcome: { status: string; result?: unknown } } | null };
   try {
     progress = JSON.parse(
@@ -464,7 +465,7 @@ export async function settlePriorHostedSave(
     );
   } catch (error) {
     if (hostedActionError(error, 'save reconciliation').code !== 'NOT_FOUND') throw error;
-    workLocked(join(`${root}.forge-client`, 'lock'), () => {
+    workLocked(join(clientCacheRoot(root), 'lock'), () => {
       if (
         checkoutPathExists(pending) &&
         JSON.parse(readFileSync(pending, 'utf8')).operationId === prior.operationId

@@ -1,3 +1,4 @@
+import { recoverLocalApply } from './hosted-apply-recovery.js';
 import { retainSyncHandoff, clearSyncHandoff } from './hosted-sync-handoff.js';
 import { guideHostedSync, resolveHostedAgent } from './hosted-agent-resolution.js';
 import { hostedRecordSchema } from './hosted-records.js';
@@ -27,6 +28,7 @@ import { hostedLandingCancelSchema } from './hosted-landing.js';
 import { canonicalPayload } from './hosted-source-operation.js';
 import { syncRequestSchema, syncResultSchema } from './hosted-sync.js';
 import { applyHostedSync } from './hosted-sync-client.js';
+import { markerAt, retainedLocalApplyBlocked } from './hosted-apply-recovery-records.js';
 import {
   composeAgentSource,
   driveAgentSource,
@@ -333,6 +335,15 @@ export async function executeHostedAgent(
   action: HostedAgentAction,
   input: unknown,
 ): Promise<unknown> {
+  if (action === 'recover-apply') {
+    const command = hostedAgentCommandSchemas['recover-apply'].parse(input);
+    return recoverLocalApply(
+      session.root,
+      command.applyOperationId,
+      new ConvexLaneTransport(session.exchange),
+    );
+  }
+
   if (action === 'metrics') return executeHostedMetrics(session, input);
   const operationId = session.journal.operationId,
     epoch = session.capabilities.authority.epoch;
@@ -448,6 +459,13 @@ export async function executeHostedAgent(
   if (action === 'resolve') return resolveHostedAgent(session, input);
   if (action === 'sync') {
     const command = hostedAgentCommandSchemas.sync.parse(input);
+    if (command.apply && !markerAt(session.root)) {
+      const blocked = retainedLocalApplyBlocked(
+        session.root,
+        session.journal.get<string>('id:sync-handoff-apply') ?? session.journal.get<string>('id:apply'),
+      );
+      if (blocked) throw blocked;
+    }
     const handoff =
       command.apply && !command.candidateId && session.marker()
         ? await retainSyncHandoff(session, 'sync', command)

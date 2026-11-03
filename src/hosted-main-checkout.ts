@@ -1,16 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
+import { canonicalRoot, clientCacheRoot } from './root-paths.js';
+import { preserveMisplacedReadCaches } from './hosted-legacy-cache.js';
 import { recordMetricCache } from './self-metrics-source-observations.js';
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  renameSync,
-  rmSync,
-  lstatSync,
-  realpathSync,
-} from 'node:fs';
-import { basename, dirname, join, resolve } from 'node:path';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, lstatSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { z } from 'zod';
 import { digest } from './hash.js';
 import { invariant } from './errors.js';
@@ -41,10 +34,8 @@ function save(path: string, value: unknown) {
 /** Client source checkout; deliberately creates no Work owner or acceptance authority. */
 export async function checkoutHostedMain(root: string, input: unknown, transport: MainTransport) {
   const request = requestSchema.parse(input);
-  root = resolve(root);
-  mkdirSync(dirname(root), { recursive: true });
-  root = join(realpathSync(dirname(root)), basename(root));
-  const cache = `${root}.forge-client`,
+  root = canonicalRoot(root);
+  const cache = clientCacheRoot(root),
     lock = join(cache, 'lock');
   mkdirSync(cache, { recursive: true, mode: 0o700 });
   invariant(!lstatSync(cache).isSymbolicLink(), 'UNSAFE_PATH', 'Client cache must be real.');
@@ -54,6 +45,27 @@ export async function checkoutHostedMain(root: string, input: unknown, transport
     'UNSAFE_PATH',
     'Client objects must be real.',
   );
+  const recoveryPath = join(cache, `legacy-cache-recovery-${request.operationId}.json`);
+  const localRecovery = () => (existsSync(recoveryPath) ? { localRecovery: json(recoveryPath) } : {});
+  const preserveCaches = (files: readonly { path: string }[]) => {
+    preserveMisplacedReadCaches(
+      root,
+      files,
+      receipt => {
+        const moved = (existsSync(recoveryPath) ? json(recoveryPath) : []).filter(
+          (item: { preservedAt: string }) => existsSync(item.preservedAt),
+        );
+        if (!moved.some((item: { preservedAt: string }) => item.preservedAt === receipt.preservedAt))
+          moved.push(receipt);
+        else
+          moved[
+            moved.findIndex((item: { preservedAt: string }) => item.preservedAt === receipt.preservedAt)
+          ] = receipt;
+        save(recoveryPath, moved);
+      },
+      existsSync(recoveryPath) ? json(recoveryPath) : [],
+    );
+  };
   const receiptPath = join(cache, `${request.operationId}.json`),
     previous = join(cache, 'previous');
   // Recheck current access even on cache hits and completed-operation retries.
@@ -97,7 +109,14 @@ export async function checkoutHostedMain(root: string, input: unknown, transport
   const selection = hostedMainSchema.parse(operation.selection);
   invariant(selection.projectId === request.projectId, 'PROJECT_UNAVAILABLE', 'Select this project.');
   if (operation.complete)
-    return { ...selection, root, downloadedObjects: 0, downloadedBytes: 0, replayed: true };
+    return {
+      ...selection,
+      root,
+      downloadedObjects: 0,
+      downloadedBytes: 0,
+      replayed: true,
+      ...localRecovery(),
+    };
   const objects = new HostedCheckoutCache(cache, transport);
   await objects.ensure([selection.head]);
   const state = parseNativeState(readFileSync(join(objects.objects, selection.head)));
@@ -132,12 +151,9 @@ export async function checkoutHostedMain(root: string, input: unknown, transport
         'CHANNEL_CHANGED',
         'Another pull updated this client while the selected head was downloading.',
       );
-      cleanHostedCheckout(
-        root,
-        marker ? parseNativeState(Buffer.from(JSON.stringify(marker.state))).files : [],
-        'hosted-main.json',
-        Boolean(marker),
-      );
+      const beforeFiles = marker ? parseNativeState(Buffer.from(JSON.stringify(marker.state))).files : [];
+      preserveCaches(beforeFiles);
+      cleanHostedCheckout(root, beforeFiles, 'hosted-main.json', Boolean(marker));
       if (existsSync(previous)) rmSync(previous, { recursive: true });
       if (existsSync(root)) renameSync(root, previous);
       renameSync(stage, root);
@@ -157,5 +173,6 @@ export async function checkoutHostedMain(root: string, input: unknown, transport
     downloadedObjects: objects.downloadedObjects,
     downloadedBytes: objects.downloadedBytes,
     replayed: false,
+    ...localRecovery(),
   };
 }

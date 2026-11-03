@@ -32,6 +32,7 @@ import {
   treeBytes,
 } from '../dist/forge-disk.js';
 import { digest } from '../dist/hash.js';
+import { canonicalRoot } from '../dist/root-paths.js';
 
 const blob = /^[0-9a-f]{64}$/;
 const hour = 3_600_000;
@@ -289,7 +290,7 @@ test('open moves the nested copy start made instead of downloading a second root
   mkdirSync(`${nested}.forge-client/lock`);
   assert.equal(adoptNestedLaneCopy(target, laneId, address), null);
   rmSync(`${nested}.forge-client/lock`, { recursive: true });
-  assert.equal(adoptNestedLaneCopy(target, laneId, address), nested);
+  assert.equal(adoptNestedLaneCopy(target, laneId, address), canonicalRoot(nested));
   assert.equal(existsSync(nested), false);
   assert.equal(existsSync(`${nested}.forge-client`), false);
   assert.equal(readFileSync(join(target, 'kept.txt'), 'utf8'), 'kept');

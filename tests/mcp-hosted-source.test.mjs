@@ -253,3 +253,61 @@ test('selected State decoding and path failures keep the public protocol code', 
     assert.equal(result.results, undefined);
   }
 });
+
+for (const count of [28_883, 57_766])
+  test(`root normalization preserves saved-read call and byte budgets at ${count} files`, async t => {
+    const { HostedAgentTransport } = await import('../dist/hosted-agent-transport.js');
+    const { showHostedSource } = await import('../dist/mcp-hosted-source.js');
+    const s = agentFixture(t),
+      bytes = Buffer.from(`one requested blob at ${count} files\n`),
+      blob = digest(bytes);
+    s.objects.set(blob, bytes);
+    const state = Buffer.from(
+      JSON.stringify({
+        schema: 1,
+        kind: 'forge-source-state',
+        parents: [],
+        files: Array.from({ length: count }, (_, i) => ({
+          path: `src/${String(i).padStart(6, '0')}.txt`,
+          blob,
+          mode: 'file',
+        })),
+        message: 'Synthetic scale fixture',
+        at: '2026-01-01T00:00:00.000Z',
+      }),
+    );
+    s.lane.head = digest(state);
+    s.objects.set(s.lane.head, state);
+    const before = process.memoryUsage().rss,
+      started = performance.now();
+    const transport = new HostedAgentTransport(s.root + '/', s.address, s.exchange);
+    const request = { action: 'show', laneId: s.lane.laneId, path: 'src/000000.txt' };
+    const result = await showHostedSource(transport, request);
+    assert.equal(result.result.content, bytes.toString());
+    assert.equal(
+      s.calls.length,
+      4,
+      'two authorization checks plus two fixed object descriptor reads, never per file',
+    );
+    const firstCalls = s.calls.length;
+    await showHostedSource(transport, request);
+    assert.equal(
+      s.calls.length - firstCalls,
+      2,
+      'warm reads still check authority before and after IO, with no descriptor reads',
+    );
+    const extraRss = Math.max(0, process.memoryUsage().rss - before),
+      elapsedMs = performance.now() - started;
+    assert(extraRss < 256 * 1024 * 1024, `bounded State metadata memory: ${extraRss}`);
+    assert(elapsedMs < 30_000);
+    t.diagnostic(
+      JSON.stringify({
+        files: count,
+        coldCalls: firstCalls,
+        warmCalls: 2,
+        downloadedBytes: state.length + bytes.length,
+        extraRss,
+        elapsedMs,
+      }),
+    );
+  });

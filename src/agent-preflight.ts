@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { clientCacheRoot } from './root-paths.js';
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { join, posix } from 'node:path';
@@ -40,7 +41,7 @@ export type PreflightPlan =
     };
 
 const receiptPath = (root: string, laneId: string) =>
-  join(`${root}.forge-client`, 'agent', 'preflight', `${laneId}.json`);
+  join(clientCacheRoot(root), 'agent', 'preflight', `${laneId}.json`);
 
 export function readPreflightReceipt(root: string, laneId: string): PreflightReceipt | null {
   try {

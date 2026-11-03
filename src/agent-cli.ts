@@ -121,6 +121,7 @@ const examples: Record<string, unknown> = {
   capabilities: { url: 'https://deployment.convex.cloud', projectId: 'PROJECT_ID' },
   open: { laneId: 'LANE_ID', paths: ['src'] },
   save: { laneId: 'LANE_ID', message: 'Save edits' },
+  'recover-apply': { applyOperationId: 'APPLY_OPERATION_ID' },
   resolve: { laneId: 'RESOLUTION_LANE_ID', message: 'Resolve conflict' },
   check: { candidateId: 'CANDIDATE_ID', checkId: 'CHECK_ID' },
   revert: { target: { kind: 'receipt', receiptId: 'RECEIPT_ID' }, message: 'Revert acceptance' },

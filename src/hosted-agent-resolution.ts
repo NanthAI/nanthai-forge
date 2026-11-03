@@ -1,8 +1,9 @@
+// SPDX-License-Identifier: Apache-2.0
+import { clientCacheRoot } from './root-paths.js';
 import { retainSyncHandoff, clearSyncHandoff } from './hosted-sync-handoff.js';
 import { hostedActionError } from './hosted-action-error.js';
 import { HostedAgentJournal } from './hosted-agent-journal.js';
 import { resolutionFinishSelection } from './hosted-resolution-selection.js';
-// SPDX-License-Identifier: Apache-2.0
 import { join } from 'node:path';
 import { TextDecoder } from 'node:util';
 import { z } from 'zod';
@@ -15,6 +16,7 @@ import { saveHostedLane } from './hosted-save-client.js';
 import { driveAgentSource, syncAgentSource } from './hosted-agent-source.js';
 import { openHostedRootLane, hostedRootLanePath } from './hosted-root-checkout.js';
 import { applyHostedSync } from './hosted-sync-client.js';
+import { markerAt, retainedLocalApplyBlocked } from './hosted-apply-recovery-records.js';
 import { ConvexLaneTransport } from './hosted-lane-transport.js';
 import { hostedAgentCommandSchemas } from './hosted-agent-contract.js';
 import { readSource } from './files.js';
@@ -41,7 +43,7 @@ export async function guideHostedSync(session: HostedAgentSession, value: unknow
   // Recheck current access even when every source object is cached.
   await session.query('projectHostedLanes:select', { laneId: source.lane.laneId });
   const objects = new HostedObjectStore(
-    join(`${session.root}.forge-client`, 'conflict-objects'),
+    join(clientCacheRoot(session.root), 'conflict-objects'),
     session.exchange,
   );
   const paths: string[] = [],
@@ -130,7 +132,14 @@ export async function guideHostedSync(session: HostedAgentSession, value: unknow
 }
 export async function resolveHostedAgent(session: HostedAgentSession, input: unknown) {
   const command = hostedAgentCommandSchemas.resolve.parse(input),
-    marker = session.marker();
+    marker = markerAt(session.root);
+  if (!marker) {
+    const blocked = retainedLocalApplyBlocked(
+      session.root,
+      session.journal.get<string>('id:sync-handoff-apply'),
+    );
+    if (blocked) throw blocked;
+  }
   invariant(
     marker && (!command.laneId || command.laneId === marker.selection.laneId),
     'HOSTED_CHECKOUT_REQUIRED',
@@ -273,7 +282,7 @@ export async function hostedConflictAdvice(
   );
   if (candidate.result.status !== 'conflict') return value;
   const objects = new HostedObjectStore(
-    join(`${session.root}.forge-client`, 'conflict-objects'),
+    join(clientCacheRoot(session.root), 'conflict-objects'),
     session.exchange,
   );
   const page = composeConflictPageSchema.parse(

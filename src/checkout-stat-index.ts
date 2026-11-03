@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { clientCacheRoot } from './root-paths.js';
 import { lstatSync, readFileSync, type Stats } from 'node:fs';
 import { join } from 'node:path';
 import { checkoutPathExists } from './hosted-checkout-files.js';
@@ -19,7 +20,7 @@ export function racyMarginMs(stat: Pick<Stats, 'mtimeMs' | 'ctimeMs'>) {
 type Entry = [size: number, mtimeMs: number, ctimeMs: number, ino: number, mode: number, blob: string];
 export type CheckoutStatIndex = { since: number; entries: Map<string, Entry> };
 
-const path = (root: string) => join(`${root}.forge-client`, checkoutStatIndexName);
+const path = (root: string) => join(clientCacheRoot(root), checkoutStatIndexName);
 
 /** The index for this checkout, or an empty one when absent or unreadable (everything hashes). */
 export function readCheckoutStatIndex(root: string): CheckoutStatIndex {

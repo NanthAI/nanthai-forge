@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
+import { rootSibling } from './root-paths.js';
 import { cpSync, existsSync, lstatSync, readFileSync, readlinkSync, readdirSync, renameSync } from 'node:fs';
-import { dirname, join, basename } from 'node:path';
+import { dirname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { digest } from './hash.js';
 import { readSource } from './files.js';
@@ -30,7 +31,7 @@ export function backupRecordsOwner(store: WorkStore, revision: number): Backup {
     'UNSUPPORTED_NATIVE_WORK',
     'Full-directory record collection backups require a native owner.',
   );
-  const path = join(dirname(store.root), `${basename(store.root)}.records-backup-${randomUUID()}`),
+  const path = rootSibling(store.root, `.records-backup-${randomUUID()}`),
     temporary = `${path}.tmp`,
     files: Backup['files'] = [];
   cpSync(store.root, temporary, {

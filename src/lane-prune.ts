@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { canonicalRoot, clientCacheRoot, rootSibling } from './root-paths.js';
 import { lstatSync, readFileSync, readdirSync, readlinkSync, rmSync } from 'node:fs';
 import { join, resolve, sep } from 'node:path';
 import { makeFunctionReference } from 'convex/server';
@@ -64,10 +65,10 @@ function scanTree(paths: string[]) {
   }
   return { newest, bytes };
 }
-const siblings = (root: string) => [root, `${root}.forge-client`, `${root}.forge-metrics.jsonl`];
+const siblings = (root: string) => [root, clientCacheRoot(root), rootSibling(root, '.forge-metrics.jsonl')];
 const nestedLanes = (root: string) => {
   try {
-    return readdirSync(join(`${root}.forge-client`, 'lanes')).length > 0;
+    return readdirSync(join(clientCacheRoot(root), 'lanes')).length > 0;
   } catch {
     return false;
   }
@@ -86,12 +87,12 @@ export function adoptLaneCheckouts(directory: string, now = Date.now()) {
     listed.add(identity.laneId);
   };
   const listed = new Set(listLanes().map(entry => entry.laneId));
-  directory = resolve(directory);
+  directory = canonicalRoot(directory);
   for (const name of readdirSync(directory)) {
     const path = join(directory, name),
       stat = exists(path);
     if (stat?.isSymbolicLink()) {
-      const target = resolve(directory, readlinkSync(path));
+      const target = canonicalRoot(resolve(directory, readlinkSync(path)));
       links.set(target, [...(links.get(target) ?? []), path]);
     } else if (stat?.isDirectory() && name.endsWith('.forge-client')) {
       let lanes: string[] = [];
@@ -127,7 +128,8 @@ export async function laneHousekeeping(input: {
     for (const [target, paths] of links)
       if (!exists(target) && target.includes(`.forge-client${sep}lanes${sep}`))
         for (const path of paths) rmSync(path, { force: true });
-  const excludedRoots = (input.exclude?.roots ?? []).map(root => resolve(root));
+  const excludedRoots = (input.exclude?.roots ?? []).map(root => canonicalRoot(root));
+  const workingRoot = canonicalRoot(process.cwd());
   const excludedLanes = new Set(input.exclude?.laneIds ?? []);
   const result: LaneHousekeeping = { idle: [], pruned: [], kept: [], apply: input.apply };
   const entries: LaneRegistryEntry[] = [];
@@ -200,9 +202,9 @@ export async function laneHousekeeping(input: {
       if (!state) result.kept.push({ laneId: entry.laneId, reason: 'state unknown' });
       continue;
     }
-    const root = resolve(entry.root);
+    const root = canonicalRoot(entry.root);
     let reason =
-      excludedRoots.some(path => inside(path, root) || inside(root, path)) || inside(process.cwd(), root)
+      excludedRoots.some(path => inside(path, root) || inside(root, path)) || inside(workingRoot, root)
         ? 'in use by this command'
         : markerIdentity(root)?.laneId !== entry.laneId
           ? 'not this Lane checkout'

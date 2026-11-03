@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { canonicalRoot, clientCacheRoot } from './root-paths.js';
 import {
   lstatSync,
   mkdirSync,
@@ -9,12 +10,12 @@ import {
   utimesSync,
   writeFileSync,
 } from 'node:fs';
-import { basename, dirname, join, resolve } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { durableReplace } from './native-durability.js';
 import { randomUUID } from 'node:crypto';
 import { invariant } from './errors.js';
 
-export const cacheUsePath = (copy: string) => join(`${copy}.forge-client`, 'cache-use.json');
+export const cacheUsePath = (copy: string) => join(clientCacheRoot(copy), 'cache-use.json');
 const legacyPath = (copy: string) => join(copy, '.forge', 'cache-use.json');
 type CacheUse = { bytes: number | undefined; used: number };
 
@@ -38,7 +39,7 @@ function readUse(path: string): CacheUse | null {
   }
 }
 export function isNestedLaneCopy(copy: string) {
-  copy = resolve(copy);
+  copy = canonicalRoot(copy);
   return (
     /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(basename(copy)) &&
     basename(dirname(copy)) === 'lanes' &&

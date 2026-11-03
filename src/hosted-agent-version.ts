@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { clientCacheRoot } from './root-paths.js';
 import { dirname, join } from 'node:path';
 import { mkdirSync, readFileSync } from 'node:fs';
 import { CUTOVER_CLI_VERSION } from './cutover-version.js';
@@ -21,7 +22,7 @@ export function hostedActionAlternative(action: string) {
   return 'Use capabilities for deployment actions and nforge agent ROOT --help in a hosted checkout for accepted parameters.';
 }
 const known = new Set<string>(hostedAgentActions);
-const newerFile = (root: string) => join(`${root}.forge-client`, 'agent', 'server-actions.json');
+const newerFile = (root: string) => join(clientCacheRoot(root), 'agent', 'server-actions.json');
 
 /** A newer server may advertise actions this CLI does not know. Keep the known ones (the strict
  * contract parse still applies) and remember the rest locally, so a later refusal names the fix. */

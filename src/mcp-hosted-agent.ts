@@ -41,7 +41,11 @@ async function result(action: () => Promise<unknown>) {
         {
           type: 'text' as const,
           text: JSON.stringify({
-            error: { code: safe.code, message: safe.message },
+            error: {
+              code: safe.code,
+              message: safe.message,
+              ...(safe.recovery ? { recovery: safe.recovery } : {}),
+            },
           }),
         },
       ],
@@ -67,6 +71,7 @@ export function registerHostedAgentWorkflow(
         'compose',
         'sync',
         'resolve',
+        'recover-apply',
         'finish',
         'prioritize',
         'pin',
