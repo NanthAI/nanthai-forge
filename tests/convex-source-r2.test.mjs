@@ -41,14 +41,23 @@ test('R2 source outputs, cursor sections and fanout progress use zero Convex byt
   const loaded = await loadSourceProgress(await storage.read(saved.id), storage.read);
   assert.deepEqual(loaded.cursor, cursor);
   const ref = await storeTaskData(
-    { states: Array.from({ length: 3000 }, (_, i) => `state-${i}`) },
+    {
+      index: 3000,
+      verify: null,
+      states: Array.from({ length: 3000 }, (_, i) => ({
+        id: String(i).padStart(64, '0'),
+        parents: [],
+        files: [],
+        error: null,
+      })),
+    },
     storage.store,
   );
   assert(sourceR2Pin(ref.id));
   assert.equal((await loadTaskData(ref, storage.read)).states.length, 3000);
   const bytes = Buffer.from('retry bytes');
   r2.hooks.lostPut = true;
-  await assert.rejects(storage.store(bytes), /lost PUT/);
+  await assert.rejects(storage.store(bytes), { name: 'SourceIoError', stage: 'source-put' });
   const replay = await storage.store(bytes);
   assert.deepEqual(Buffer.from(await storage.read(replay)), bytes);
   r2.hooks.mismatch = true;
@@ -156,4 +165,94 @@ test('3000 source outputs keep RPCs at one stage per 100 objects and prefer R2 o
       rssGrowth: process.memoryUsage().rss - before,
     }),
   );
+});
+
+for (const mode of ['network', 429, 503]) {
+  test(`source HEAD ${mode} is repairable while a verified mismatch stays deterministic`, async t => {
+    fakeSourceR2(t);
+    const storage = sourceStorage({ storage: forbiddenStorage }, 'project');
+    const serve = globalThis.fetch;
+    let failing = true;
+    t.mock.method(globalThis, 'fetch', (url, init) => {
+      if (failing && init?.method === 'HEAD') {
+        if (mode === 'network') throw new TypeError('synthetic connection reset');
+        return new Response(null, { status: mode });
+      }
+      return serve(url, init);
+    });
+    const bytes = Buffer.from('stable output');
+    await assert.rejects(
+      storage.store(bytes),
+      error => error.name === 'SourceIoError' && error.stage === 'source-head' && !('data' in error),
+    );
+    failing = false;
+    const replay = await storage.store(bytes);
+    assert.deepEqual(Buffer.from(await storage.read(replay)), bytes);
+  });
+}
+
+test('durable section reads escape unchanged, while corrupt compressed/JSON bytes retain exact hash errors', async t => {
+  fakeSourceR2(t);
+  const storage = sourceStorage({ storage: forbiddenStorage }, 'project');
+  const cursor = initialSourceStep({ sha256: 'a'.repeat(64), size: 0 });
+  cursor.parents = Object.fromEntries(
+    Array.from({ length: 200 }, (_, i) => [String(i).padStart(64, '0'), []]),
+  );
+  const saved = await saveSourceProgress(cursor, null, storage.store);
+  assert(saved.value.sections.parents);
+  const root = await storage.read(saved.id);
+  const failure = new TypeError('synthetic durable read reset');
+  await assert.rejects(
+    loadSourceProgress(root, async () => {
+      throw failure;
+    }),
+    e => e === failure,
+  );
+  await assert.rejects(
+    loadSourceProgress(root, async () => Buffer.from('bad gzip')),
+    { code: 'SOURCE_HASH_MISMATCH' },
+  );
+  const taskRef = await storeTaskData({ index: 0 }, storage.store);
+  await assert.rejects(
+    loadTaskData(taskRef, async () => {
+      throw failure;
+    }),
+    e => e === failure,
+  );
+  await assert.rejects(
+    loadTaskData(taskRef, async () => Buffer.from('bad gzip')),
+    { code: 'SOURCE_HASH_MISMATCH' },
+  );
+  const { gzipSync } = await import('node:zlib');
+  const invalid = Buffer.from('{');
+  await assert.rejects(
+    loadTaskData({ id: taskRef.id, sha256: digest(invalid) }, async () => gzipSync(invalid)),
+    { code: 'SOURCE_HASH_MISMATCH' },
+  );
+});
+
+test('a padded recipe root above the established 2 MiB metadata bound is rejected before acquisition', async () => {
+  const { MemoryMergeSource, MemorySourceReader } = await import('../dist/hosted-source-memory.js');
+  const object = { sha256: digest('x'), size: 1 };
+  const raw = Buffer.from(
+    JSON.stringify({
+      schema: 1,
+      kind: 'forge-object-recipe',
+      object,
+      tree: { ...object, height: 0, length: 1 },
+    }) + ' '.repeat(2 * 1024 * 1024),
+  );
+  const recipe = { sha256: digest(raw), size: raw.length };
+  let reads = 0;
+  const reader = new MemorySourceReader(new MemoryMergeSource({}), {
+    read: async () => {
+      reads++;
+      return (async function* () {
+        yield raw;
+      })();
+    },
+  });
+  await assert.rejects(reader.bytes({ object, recipe }), { code: 'SOURCE_PAGE_INVALID' });
+  assert.equal(reads, 0);
+  assert.equal(reader.source.objects.size, 0);
 });

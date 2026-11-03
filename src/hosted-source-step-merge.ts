@@ -19,6 +19,7 @@ import { readJson, sourceStepBytes, full, type StepMeter } from './hosted-source
 import type { SourceStepCursor, StepTransport } from './hosted-source-step.js';
 import { sourceWindows } from './hosted-source-fanout.js';
 import { invariant } from './errors.js';
+import { sourceValidation } from './hosted-source-validation.js';
 import { sourceAncestryCut, sourceAncestryFrontier } from './hosted-source-ancestry-cut.js';
 import type { WorkerObject } from './hosted-source-worker-format.js';
 
@@ -26,7 +27,7 @@ export async function prepareMergeStep(c: SourceStepCursor, io: StepTransport, m
   const kind = (c.plan as { kind: string }).kind;
   if (c.phase === 'selection') {
     if (kind === 'forge-hosted-compose-input') {
-      const plan = composeInputSchema.parse(c.plan);
+      const plan = sourceValidation('SOURCE_JOB_INVALID', () => composeInputSchema.parse(c.plan));
       invariant(
         plan.main.object.sha256 === plan.base.head,
         'SOURCE_JOB_INVALID',
@@ -37,7 +38,8 @@ export async function prepareMergeStep(c: SourceStepCursor, io: StepTransport, m
       invariant(!c.seen[c.next.sha256], 'SOURCE_CLOSURE_INVALID', 'Compose pages repeat.');
       c.seen[c.next.sha256] = true;
       const pin = c.next,
-        page = validateComposePage(await readJson(io, pin, m));
+        value = await readJson(io, pin, m),
+        page = sourceValidation('SOURCE_JOB_INVALID', () => validateComposePage(value));
       invariant(
         canonicalPayload(savePin(page)) === canonicalPayload(pin),
         'SOURCE_HASH_MISMATCH',
@@ -51,7 +53,9 @@ export async function prepareMergeStep(c: SourceStepCursor, io: StepTransport, m
         'Compose selection exceeds pinned counts.',
       );
       for (const value of page.entries) {
-        const entry = (c.index === 0 ? composeDependencySchema : composeLaneSchema).parse(value);
+        const entry = sourceValidation('SOURCE_JOB_INVALID', () =>
+          (c.index === 0 ? composeDependencySchema : composeLaneSchema).parse(value),
+        );
         invariant(
           entry.head === entry.state.object.sha256,
           'SOURCE_JOB_INVALID',
@@ -76,7 +80,7 @@ export async function prepareMergeStep(c: SourceStepCursor, io: StepTransport, m
       c.states = [plan.base.head, ...c.selections.map(v => (v as { head: string }).head)];
       c.index = 0;
     } else {
-      const plan = syncInputSchema.parse(c.plan),
+      const plan = sourceValidation('SOURCE_JOB_INVALID', () => syncInputSchema.parse(c.plan)),
         work = plan.work;
       if (work.mode === 'resolution') {
         c.states = await syncRoots(c, io, m);
@@ -113,9 +117,9 @@ export async function prepareMergeStep(c: SourceStepCursor, io: StepTransport, m
   if (
     kind === 'forge-hosted-compose-input' &&
     c.selections.length === 1 &&
-    !composeInputSchema.parse(c.plan).restoreBases
+    !sourceValidation('SOURCE_JOB_INVALID', () => composeInputSchema.parse(c.plan)).restoreBases
   ) {
-    const plan = composeInputSchema.parse(c.plan),
+    const plan = sourceValidation('SOURCE_JOB_INVALID', () => composeInputSchema.parse(c.plan)),
       right = (c.selections[0] as { head: string }).head,
       left = plan.base.head;
     const tips = [...new Set([left, right])].filter(id => !c.parents[id]);
@@ -152,9 +156,11 @@ export async function prepareMergeStep(c: SourceStepCursor, io: StepTransport, m
   const roots =
     kind === 'forge-hosted-compose-input'
       ? [
-          composeInputSchema.parse(c.plan).base.head,
+          sourceValidation('SOURCE_JOB_INVALID', () => composeInputSchema.parse(c.plan)).base.head,
           ...c.selections.map(v => (v as { head: string }).head),
-          ...Object.values(composeInputSchema.parse(c.plan).restoreBases ?? {}).map(ref => ref.object.sha256),
+          ...Object.values(
+            sourceValidation('SOURCE_JOB_INVALID', () => composeInputSchema.parse(c.plan)).restoreBases ?? {},
+          ).map(ref => ref.object.sha256),
         ]
       : await syncRoots(c, io, m);
   const boundary = sourceAncestryCut(c.parents, c.states, roots);
@@ -241,7 +247,7 @@ export async function computeMergeStep(
     c.phase = 'done';
     return;
   }
-  const plan = composeInputSchema.parse(c.plan);
+  const plan = sourceValidation('SOURCE_JOB_INVALID', () => composeInputSchema.parse(c.plan));
   if (c.index >= c.selections.length) {
     invariant(c.head, 'SOURCE_JOB_INVALID', 'Compose has no selected head.');
     let state = c.inventory[c.head]?.object;
@@ -350,12 +356,13 @@ function manifestConflict(result: { output: { sha256: string } }, source: Memory
 
 /** The selected sync roots, not the prefetched frontier, define the proof. */
 async function syncRoots(c: SourceStepCursor, io: StepTransport, m: StepMeter): Promise<string[]> {
-  const work = syncInputSchema.parse(c.plan).work;
+  const work = sourceValidation('SOURCE_JOB_INVALID', () => syncInputSchema.parse(c.plan)).work;
   if (work.mode === 'resolution') {
     if (!c.resolutionRoots) {
       // Older in-flight graph cursors recover from the same immutable page.
       // Derived parent hints cannot select or replace either resolution tip.
-      const page = composeConflictPageSchema.parse(await readJson(io, work.conflicts, m));
+      const value = await readJson(io, work.conflicts, m);
+      const page = sourceValidation('SOURCE_JOB_INVALID', () => composeConflictPageSchema.parse(value));
       invariant(
         canonicalPayload(savePin(page)) === canonicalPayload(work.conflicts),
         'SOURCE_HASH_MISMATCH',

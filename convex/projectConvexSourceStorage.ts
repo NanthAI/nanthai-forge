@@ -5,6 +5,7 @@ import { digest } from '../src/portable-hash';
 import { invariant } from '../src/errors';
 import { r2Config, r2Key, presignGet } from './r2';
 import { storeSourceBytes } from './projectSourceBytes';
+import { SourceIoError, transientSourceStatus } from '../src/hosted-source-io-error';
 
 /** Internal, project-bound content references for durable cursor/task data. The
  * reference carries exact byte pins, so neither storage nor reads need an RPC
@@ -31,13 +32,28 @@ export function sourceStorage(ctx: ActionCtx, projectId: Id<'hostedProjects'>) {
         invariant(blob, 'SOURCE_UNAVAILABLE', 'Durable source data is absent.');
         return new Uint8Array(await blob.arrayBuffer());
       }
-      const response = await fetch(await presignGet(r2Config(), r2Key(projectId, pin.sha256)), {
-        headers: { 'accept-encoding': 'identity' },
-        redirect: 'error',
-        signal: AbortSignal.timeout(20_000),
-      });
+      const url = await presignGet(r2Config(), r2Key(projectId, pin.sha256));
+      let response: Response;
+      try {
+        response = await fetch(url, {
+          headers: { 'accept-encoding': 'identity' },
+          redirect: 'error',
+          signal: AbortSignal.timeout(20_000),
+        });
+      } catch (error) {
+        throw new SourceIoError(error, 'durable-headers', pin.sha256);
+      }
+      if (transientSourceStatus(response.status)) {
+        await response.body?.cancel().catch(() => {});
+        throw new SourceIoError(null, 'durable-headers', pin.sha256, response.status);
+      }
       invariant(response.ok, 'SOURCE_UNAVAILABLE', 'Durable source download failed.');
-      const bytes = new Uint8Array(await response.arrayBuffer());
+      let bytes: Uint8Array;
+      try {
+        bytes = new Uint8Array(await response.arrayBuffer());
+      } catch (error) {
+        throw new SourceIoError(error, 'durable-body', pin.sha256, response.status);
+      }
       invariant(
         bytes.length === pin.size && digest(bytes) === pin.sha256,
         'SOURCE_HASH_MISMATCH',

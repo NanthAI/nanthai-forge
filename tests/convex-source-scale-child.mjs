@@ -29,6 +29,7 @@ process.on('message', async message => {
     return;
   }
   if (!message.run) return;
+  const started = performance.now();
   try {
     globalThis.fetch = async (url, init = {}) => {
       if (init.method === 'PUT') {
@@ -84,14 +85,17 @@ process.on('message', async message => {
         return value;
       };
     }
-    const started = performance.now(),
-      module = await import(message.url);
+    const module = await import(message.url);
     await module[message.method]._handler(ctx, message.args);
     process.send({
       done: true,
       metrics: { elapsedMs: performance.now() - started, maxRssBytes: process.resourceUsage().maxRSS * 1024 },
     });
   } catch (error) {
-    process.send({ done: true, error: { message: error.message, code: error.code, stack: error.stack } });
+    process.send({
+      done: true,
+      error: { message: error.message, code: error.code, stack: error.stack },
+      metrics: { elapsedMs: performance.now() - started, maxRssBytes: process.resourceUsage().maxRSS * 1024 },
+    });
   }
 });

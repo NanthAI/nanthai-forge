@@ -22,7 +22,11 @@ import { wakeLandingQueue, releaseLandingQueue } from './projectHostedLandingWak
 import { landingQueue } from './projectHostedLandingStore';
 import { writeFinish, failFinish } from './projectHostedFinishStore';
 import { scheduleFinish, wakeLandingOrderWaiters } from './projectHostedFinishWake';
-import { hostedFinishBackoff, type HostedFinish } from '../src/hosted-finish';
+import {
+  HOSTED_FINISH_COMPOSE_WATCH_WINDOW_MS,
+  hostedFinishBackoff,
+  type HostedFinish,
+} from '../src/hosted-finish';
 import { hostedRecordSchema } from '../src/hosted-records';
 import { canonicalPayload, hostedPayloadHash } from '../src/hosted-source-operation';
 import { hostedLandingStateSchema, landingObservation } from '../src/hosted-landing';
@@ -216,6 +220,7 @@ export async function prepareFinishCompose(ctx: MutationCtx, input: LandingIdent
   }
   const project = await hostedWriteProject(ctx, input.projectId, state.actor, request.authorityEpoch);
   const stateValue: ComposeState = {
+    retryUntil: Date.parse(pending.at) + HOSTED_FINISH_COMPOSE_WATCH_WINDOW_MS,
     ownerProvenance: 1,
     ...(value.restoreBases ? { restoreBases: value.restoreBases } : {}),
     ownerInputs: Boolean(

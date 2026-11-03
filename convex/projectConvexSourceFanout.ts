@@ -8,13 +8,17 @@ import {
   drainSourcePool,
   releaseSourceTask,
   scheduleSourceTask,
+  retrySourceTask,
   sourcePool,
 } from './projectConvexSourcePool';
 import { receiveConvexSourceJobCallback } from './projectSourceJobCallbacks';
-import { sourceTaskData } from './projectSourceStepFields';
+import { sourceFailure, sourceTaskData } from './projectSourceStepFields';
 import { sourceDispatch } from '../src/hosted-source-job-controller';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { ForgeError, invariant } from '../src/errors';
+import { exhaustSourceExecution, sourceRetryExpired } from './projectConvexSourceFailure';
+import { sourceFailureSchema } from '../src/hosted-source-retry';
+import { sourceStep } from './projectConvexSourceActive';
 import { sourceMutation } from './projectConvexSourceErrors';
 const identity = { projectId: v.id('hostedProjects'), jobId: v.string(), step: v.number() };
 const taskIdentity = { ...identity, index: v.number(), generation: v.number() };
@@ -47,6 +51,7 @@ const taskRow = (ctx: MutationCtx, batchId: Id<'projectSourceBatches'>, index: n
 export const fork = sourceMutation({
   args: {
     ...identity,
+    generation: v.optional(v.number()),
     cursor: v.string(),
     kind: v.string(),
     end: v.number(),
@@ -54,8 +59,12 @@ export const fork = sourceMutation({
   },
   returns: v.null(),
   handler: async (ctx, args) => {
-    const active = await activeStep(ctx, args);
+    const active = await activeStep(ctx, { ...args, generation: args.generation ?? 0 });
     if (!active) return null;
+    if (sourceRetryExpired(active)) {
+      await exhaustSourceExecution(ctx, args, active.row.lastFailure);
+      return null;
+    }
     if (active.row.batchId) {
       const previous = await ctx.db.get(active.row.batchId);
       invariant(previous?.status === 'done', 'SOURCE_JOB_FENCED', 'Join the retained source work first.');
@@ -88,11 +97,22 @@ export const fork = sourceMutation({
         input: args.tasks[index]!,
         status: 'queued',
         generation: 0,
+        ...(active.job.control.retryUntil === undefined ? {} : { retryUntil: active.job.control.retryUntil }),
         progress: null,
         output: null,
         failure: null,
       });
-    await ctx.db.patch(active.row._id, { step, cursor: args.cursor, batchId });
+    await ctx.db.patch(active.row._id, {
+      step,
+      cursor: args.cursor,
+      batchId,
+      generation: undefined,
+      failedAttempts: undefined,
+      failedGeneration: undefined,
+      lastFailure: undefined,
+      lastFailureAt: undefined,
+      retryAt: undefined,
+    });
     await heartbeat(ctx, active);
     await drainSourcePool(ctx, batch => validSourceBatch(ctx, batch));
     return null;
@@ -116,12 +136,21 @@ export const begin = sourceMutation({
     const batch = step?.batchId ? await ctx.db.get(step.batchId) : null;
     if (!batch || batch.step !== args.step) return null;
     const task = await taskRow(ctx, batch._id, args.index);
-    if (!task || task.status !== 'running' || task.generation !== args.generation) return null;
+    if (!task || task.status !== 'running') return null;
+    if (task.generation !== args.generation) {
+      if (!active) await retireSourceTask(ctx, args);
+      return null;
+    }
     if (!active) {
       await ctx.db.patch(batch._id, { status: 'fenced' });
       await ctx.db.patch(task._id, { status: 'done', failure: 'SOURCE_JOB_FENCED' });
       await releaseSourceTask(ctx, task._id);
       await drainSourcePool(ctx, b => validSourceBatch(ctx, b));
+      return null;
+    }
+    if (sourceRetryExpired(active)) {
+      await exhaustSourceExecution(ctx, args, task.lastFailure, task._id);
+      await retireSourceTask(ctx, args);
       return null;
     }
     return canonicalPayload({ input: task.input, progress: task.progress });
@@ -138,15 +167,38 @@ export const complete = sourceMutation({
   returns: v.null(),
   handler: async (ctx, args) => {
     const active = await activeStep(ctx, args);
-    if (!active?.row.batchId) return null;
+    if (!active?.row.batchId) {
+      await retireSourceTask(ctx, args);
+      return null;
+    }
     const batch = await ctx.db.get(active.row.batchId);
     if (!batch || batch.status === 'done' || batch.status === 'fenced') return null;
     const task = await taskRow(ctx, batch._id, args.index);
     if (!task || task.status !== 'running' || task.generation !== args.generation) return null;
+    // Even a finished child needs a later parent join. Only a whole-job
+    // terminal result can commit after the deadline ahead of the watch.
+    if (sourceRetryExpired(active)) {
+      await exhaustSourceExecution(ctx, args, task.lastFailure ?? active.row.lastFailure, task._id);
+      await retireSourceTask(ctx, args);
+      return null;
+    }
     await heartbeat(ctx, active);
     if (!args.done && !args.failure) {
-      await ctx.db.patch(task._id, { generation: task.generation + 1, progress: args.progress });
-      await scheduleSourceTask(ctx, { ...task, generation: task.generation + 1, progress: args.progress });
+      await ctx.db.patch(task._id, {
+        generation: task.generation + 1,
+        progress: args.progress,
+        failedAttempts: undefined,
+        failedGeneration: undefined,
+        lastFailure: undefined,
+        lastFailureAt: undefined,
+        retryAt: undefined,
+      });
+      await scheduleSourceTask(ctx, {
+        ...task,
+        generation: task.generation + 1,
+        progress: args.progress,
+        retryAt: undefined,
+      });
       return null;
     }
     await ctx.db.patch(task._id, {
@@ -175,10 +227,10 @@ export const complete = sourceMutation({
   },
 });
 export const results = sourceMutation({
-  args: identity,
+  args: { ...identity, generation: v.optional(v.number()) },
   returns: v.string(),
   handler: async (ctx, args) => {
-    const active = await activeStep(ctx, args);
+    const active = await activeStep(ctx, { ...args, generation: args.generation ?? 0 });
     invariant(active?.row.batchId, 'SOURCE_JOB_FENCED', 'Source join changed.');
     const batch = await ctx.db.get(active.row.batchId);
     invariant(
@@ -211,6 +263,60 @@ export const drain = internalMutation({
     const pool = await sourcePool(ctx);
     await ctx.db.patch(pool._id, { drainQueued: false });
     await drainSourcePool(ctx, b => validSourceBatch(ctx, b));
+    return null;
+  },
+});
+
+/** A terminal old generation may still own the physical run retained through
+ * lease repair. Match that scheduled run before releasing; a late reply cannot
+ * release a currently running replacement's slot. */
+async function retireSourceTask(
+  ctx: MutationCtx,
+  args: { projectId: Id<'hostedProjects'>; jobId: string; step: number; index: number; generation: number },
+) {
+  const step = await ctx.db
+    .query('projectSourceSteps')
+    .withIndex('by_project_and_job', q => q.eq('projectId', args.projectId).eq('jobId', args.jobId))
+    .unique();
+  if (!step?.batchId || step.step !== args.step) return;
+  const task = await taskRow(ctx, step.batchId, args.index);
+  if (!task || task.status !== 'running') return;
+  if (task.generation !== args.generation) {
+    const scheduled = task.scheduledId ? await ctx.db.system.get(task.scheduledId) : null;
+    const run: unknown = scheduled?.args[0];
+    const ownsRun =
+      run &&
+      typeof run === 'object' &&
+      !Array.isArray(run) &&
+      'projectId' in run &&
+      run.projectId === args.projectId &&
+      'jobId' in run &&
+      run.jobId === args.jobId &&
+      'step' in run &&
+      run.step === args.step &&
+      'index' in run &&
+      run.index === args.index &&
+      'generation' in run &&
+      run.generation === args.generation;
+    if (scheduled && ['pending', 'inProgress'].includes(scheduled.state.kind) && !ownsRun) return;
+  }
+  await ctx.db.patch(task._id, { status: 'done', failure: 'SOURCE_JOB_FENCED' });
+  await releaseSourceTask(ctx, task._id);
+  await drainSourcePool(ctx, b => validSourceBatch(ctx, b));
+}
+export const failed = sourceMutation({
+  args: { ...taskIdentity, cause: sourceFailure },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const active = await sourceStep(ctx, args, false);
+    if (!active?.row.batchId) {
+      await retireSourceTask(ctx, args);
+      return null;
+    }
+    const task = await taskRow(ctx, active.row.batchId, args.index);
+    if (!task || task.status !== 'running' || task.generation !== args.generation) return null;
+    const scheduledId = await retrySourceTask(ctx, task, sourceFailureSchema.parse(args.cause), true);
+    if (!scheduledId) await retireSourceTask(ctx, args);
     return null;
   },
 });

@@ -1,3 +1,4 @@
+import { exhaustFinishCompose } from './projectHostedComposeExhaustion';
 import { loadBatch, writeBatch, wakeBatch } from './projectHostedLandingBatchStore';
 import { batchFinishStep, resumeBatchIO } from './projectHostedLandingBatchFinish';
 import { publishLandingBatch } from './projectHostedLandingBatchPublish';
@@ -110,7 +111,9 @@ export async function finishStep(ctx: MutationCtx, input: FinishIdentity): Promi
           actor: state.actor,
           operationId: value.pending.operations.compose,
         });
-        await watchFinishCompose(ctx, row._id, value.pending.at);
+        await watchFinishCompose(ctx, row._id, value.pending.at, async () =>
+          exhaustFinishCompose(ctx, (await ctx.db.get(row._id))!, value.pending!.operations.compose),
+        );
         return null;
       }
       const plan = canonicalPayload(hostedComposeInput(source.state, source.operation.firstAttempt.at));
@@ -122,7 +125,9 @@ export async function finishStep(ctx: MutationCtx, input: FinishIdentity): Promi
           actor: state.actor,
           operationId: value.pending.operations.compose,
         });
-        await watchFinishCompose(ctx, row._id, value.pending.at);
+        await watchFinishCompose(ctx, row._id, value.pending.at, async () =>
+          exhaustFinishCompose(ctx, (await ctx.db.get(row._id))!, value.pending!.operations.compose),
+        );
         return null;
       }
       r2Config();
@@ -318,7 +323,10 @@ async function resumeFinishIOOnce(
   if (row.wake) await ctx.scheduler.cancel(row.wake.taskId);
   await ctx.db.patch(row._id, { wake: null });
   if (input.command.kind === 'page') await scheduleFinish(ctx, (await ctx.db.get(row._id))!);
-  else await watchFinishCompose(ctx, row._id, value.pending!.at);
+  else
+    await watchFinishCompose(ctx, row._id, value.pending!.at, async () =>
+      exhaustFinishCompose(ctx, (await ctx.db.get(row._id))!, value.pending!.operations.compose),
+    );
 }
 
 /** A controller observing a newer saved head settles the goal rather than

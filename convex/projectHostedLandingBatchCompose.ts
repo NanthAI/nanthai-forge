@@ -1,3 +1,4 @@
+import { HOSTED_FINISH_COMPOSE_WATCH_WINDOW_MS } from '../src/hosted-finish';
 import { candidateOwnerInputs } from './projectHostedProvenance';
 import { activeProject } from './projectAuthority';
 import { loadLanding, loadLandingAttempt } from './projectHostedLandingStore';
@@ -111,7 +112,7 @@ export async function prepareBatchCompose(ctx: MutationCtx, input: BatchIdentity
         operationId: auth.operationId,
         id: crypto.randomUUID(),
         parentAttemptId: null,
-        at: batch.at,
+        at: new Date(Date.now()).toISOString(),
         expected,
         ids: { candidate: crypto.randomUUID(), job: crypto.randomUUID(), jobOperation: crypto.randomUUID() },
       },
@@ -134,6 +135,7 @@ export async function prepareBatchCompose(ctx: MutationCtx, input: BatchIdentity
       dependencies: { next: null, pages: dependencies.manifest.pages, count: batch.members.length },
       candidateId: operation.operation.firstAttempt.ids.candidate!,
       jobOperationId: operation.operation.firstAttempt.ids.jobOperation!,
+      retryUntil: Date.parse(operation.operation.firstAttempt.at) + HOSTED_FINISH_COMPOSE_WATCH_WINDOW_MS,
       status: 'ready',
     };
     await ctx.db.insert('projectHostedComposes', {

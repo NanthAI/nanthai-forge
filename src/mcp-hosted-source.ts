@@ -18,7 +18,11 @@ function sourceProtocol<T>(read: () => T): T {
   try {
     return read();
   } catch (error) {
-    if (error instanceof z.ZodError || error instanceof SyntaxError)
+    if (
+      error instanceof z.ZodError ||
+      error instanceof SyntaxError ||
+      (error instanceof ForgeError && error.code === 'INVALID_NATIVE_SOURCE')
+    )
       throw new ForgeError('HOSTED_PROTOCOL_INVALID', 'Hosted source does not match the supported contract.');
     throw error;
   }

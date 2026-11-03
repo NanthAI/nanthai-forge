@@ -79,8 +79,11 @@ test('source save at dogfood scale stays inside its document read and write budg
     assert(complete.readBytes <= 32 * 1024, `complete bytes/call ${complete.readBytes}`);
     // Filling several pool slots from one batch validates the batch once.
     assert(fork.documents <= 32, `fork documents/call ${fork.documents}`);
-    assert(report.documentsRead <= 3600, `documents read ${report.documentsRead}`);
-    assert(report.functionCalls <= 130, `function calls ${report.functionCalls}`);
+    // Observed unchanged healthy baseline: 123 functions / 3,163 reads /
+    // 2,320 writes. Repair must not add a control read/write to every child.
+    assert(report.documentsRead <= 3163, `documents read ${report.documentsRead}`);
+    assert(report.documentsWritten <= 2320, `documents written ${report.documentsWritten}`);
+    assert(report.functionCalls <= 123, `function calls ${report.functionCalls}`);
   } finally {
     s.restore();
   }

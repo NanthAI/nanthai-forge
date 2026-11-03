@@ -9,6 +9,8 @@ import { digest } from '../src/portable-hash';
 import { sourceStorage, sourceR2Pin } from './projectConvexSourceStorage';
 import { r2Key } from './r2';
 import { invariant } from '../src/errors';
+import { SourceIoError, transientSourceStatus } from '../src/hosted-source-io-error';
+import { sourceDomainError } from './projectConvexSourceErrors';
 import { packHeaders, verifyPackRange, type PackRange } from '../src/object-pack-range';
 const reference = (name: string) => makeFunctionReference<'mutation'>(name);
 export type ObjectLocation = {
@@ -34,13 +36,18 @@ export function convexSourceTransport(
     windows = 1,
   ): Promise<WorkerObject[]> => {
     const rows: ObjectLocation[] = JSON.parse(
-      await ctx.runMutation(reference('projectConvexSourceObjects:resolve'), {
-        ...input,
-        digests: ids,
-        ancestry,
-        known,
-        windows,
-      }),
+      await ctx
+        .runMutation(reference('projectConvexSourceObjects:resolve'), {
+          ...input,
+          digests: ids,
+          ancestry,
+          known,
+          windows,
+        })
+        .catch(error => {
+          if (sourceDomainError(error)) throw error;
+          throw new SourceIoError(error, 'source-descriptors', ids.length === 1 ? ids[0]! : null);
+        }),
     );
     for (const row of rows) locations.set(row.descriptor.object.sha256, row);
     // A byte-bounded response can be a prefix; ordinary descriptor requests
@@ -87,13 +94,28 @@ export function convexSourceTransport(
           }
         })();
       invariant(row.url, 'SOURCE_UNAVAILABLE', 'Exact source bytes are unavailable.');
-      const response = await fetch(row.url, {
-        headers: { 'accept-encoding': 'identity', ...packHeaders(row.range, pin.size) },
-        signal: AbortSignal.timeout(15000),
-      });
+      let response: Response;
+      try {
+        response = await fetch(row.url, {
+          headers: { 'accept-encoding': 'identity', ...packHeaders(row.range, pin.size) },
+          signal: AbortSignal.timeout(15000),
+        });
+      } catch (error) {
+        throw new SourceIoError(error, 'source-headers', pin.sha256);
+      }
+      if (transientSourceStatus(response.status)) {
+        await response.body?.cancel().catch(() => {});
+        throw new SourceIoError(null, 'source-headers', pin.sha256, response.status);
+      }
       invariant(response.ok && response.body, 'SOURCE_UNAVAILABLE', 'Exact source download failed.');
       verifyPackRange(response, row.range, pin.size);
-      return response.body as unknown as AsyncIterable<Uint8Array>;
+      return (async function* () {
+        try {
+          yield* response.body as unknown as AsyncIterable<Uint8Array>;
+        } catch (error) {
+          throw new SourceIoError(error, 'source-body', pin.sha256, response.status);
+        }
+      })();
     },
     upload: async (pin, stream) => {
       const parts: Uint8Array[] = [];

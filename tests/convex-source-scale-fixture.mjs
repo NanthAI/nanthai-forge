@@ -36,7 +36,8 @@ export async function scaleFixture({ parallelism = 4, delay = 0, guardRss = fals
     ready = [],
     metrics = [],
     calls = [],
-    failOnce = [];
+    failOnce = [],
+    failRequestOnce = [];
   await f.ctx.db.patch(projectId, { sourceAuthority: { mode: 'server', epoch: 1 } });
   const config = {
     FORGE_SOURCE_PARALLELISM: String(parallelism),
@@ -187,6 +188,8 @@ export async function scaleFixture({ parallelism = 4, delay = 0, guardRss = fals
       stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
     });
     let stderr = '';
+    let computing = false,
+      injected = false;
     child.stderr.on('data', b => (stderr += b));
     try {
       await new Promise((resolve, reject) => {
@@ -196,9 +199,17 @@ export async function scaleFixture({ parallelism = 4, delay = 0, guardRss = fals
         });
         child.on('message', async message => {
           if (message.done) {
-            if (message.error) reject(Object.assign(Error(message.error.message), message.error));
+            if (message.metrics)
+              metrics.push({ ...message.metrics, name: item.name, failed: !!message.error });
+            if (message.error)
+              reject(
+                Object.assign(
+                  Error(message.error.message),
+                  message.error,
+                  injected ? { synthetic: true } : {},
+                ),
+              );
             else {
-              metrics.push({ ...message.metrics, name: item.name });
               resolve();
             }
             return;
@@ -206,16 +217,24 @@ export async function scaleFixture({ parallelism = 4, delay = 0, guardRss = fals
           try {
             let value;
             const a = message.args;
+            const fault = failRequestOnce.findIndex(match => match(message, item));
+            if (fault >= 0) {
+              failRequestOnce.splice(fault, 1);
+              injected = true;
+              throw new TypeError('synthetic request reset');
+            }
             if (message.kind === 'action-start') {
               calls.push(a.name);
               value = null;
             } else if (message.kind === 'mutation') {
               if (a.name === 'projectConvexSourceFanout:complete') {
                 work--;
+                computing = false;
               }
               value = await invoke(a.name, a.args);
               if (a.name === 'projectConvexSourceFanout:begin' && value) {
                 work++;
+                computing = true;
                 peakWork = Math.max(peakWork, work);
                 assert(work <= parallelism);
               }
@@ -273,6 +292,7 @@ export async function scaleFixture({ parallelism = 4, delay = 0, guardRss = fals
         });
       });
     } finally {
+      if (computing) work--;
       child.kill();
       active--;
     }
@@ -322,6 +342,9 @@ export async function scaleFixture({ parallelism = 4, delay = 0, guardRss = fals
       steps: jobMetrics.length,
       maxStepMs: Math.max(...jobMetrics.map(m => m.elapsedMs)),
       maxRssBytes: Math.max(...jobMetrics.map(m => m.maxRssBytes)),
+      failedActions: jobMetrics.filter(m => m.failed).length,
+      maxFailedRssBytes: Math.max(0, ...jobMetrics.filter(m => m.failed).map(m => m.maxRssBytes)),
+      maxFailedStepMs: Math.max(0, ...jobMetrics.filter(m => m.failed).map(m => m.elapsedMs)),
       actionMs: jobMetrics.reduce((n, m) => n + m.elapsedMs, 0),
       peakActive,
       peakWork,
@@ -347,6 +370,7 @@ export async function scaleFixture({ parallelism = 4, delay = 0, guardRss = fals
     calls,
     metrics,
     failOnce,
+    failRequestOnce,
     putSpec,
     json,
     bytes,

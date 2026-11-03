@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
+import { sourceFailureSchema } from './hosted-source-retry.js';
 import { canonicalPayload } from './hosted-source-operation.js';
 import { digest } from './portable-hash.js';
 
@@ -25,6 +26,8 @@ export const sourceJobControlSchema = z
     callbackDigest: jobHash.nullable(),
     providerReservation: z.object({ input: jobHash, token: z.uuid() }).strict().optional(),
     failureCode: z.string().nullable(),
+    failureCause: sourceFailureSchema.optional(),
+    retryUntil: jobNumber.optional(),
   })
   .strict();
 export type SourceJobControl = z.infer<typeof sourceJobControlSchema>;
@@ -47,7 +50,13 @@ export const sourceJobCallbackSchema = z
     executionId: z.string().min(1),
     result: z.discriminatedUnion('status', [
       z.object({ status: z.literal('completed'), output: jobObject }).strict(),
-      z.object({ status: z.literal('failed'), code: z.string().min(1) }).strict(),
+      z
+        .object({
+          status: z.literal('failed'),
+          code: z.string().min(1),
+          cause: sourceFailureSchema.optional(),
+        })
+        .strict(),
       z.object({ status: z.literal('heartbeat'), sequence: jobNumber }).strict(),
     ]),
   })

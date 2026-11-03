@@ -7,6 +7,7 @@ import { readObjectRecipe, objectRecipeSchema } from './object-chunks.js';
 import { digest } from './hash.js';
 import { invariant } from './errors.js';
 import type { WorkerObject, WorkerPin } from './hosted-source-worker-format.js';
+import { sourceValidation } from './hosted-source-validation.js';
 
 /** Parents are compact, verified metadata. A file tree is loaded only when the
  * native merge actually requests it, rather than for every ancestor visited. */
@@ -84,7 +85,15 @@ export class MemorySourceReader extends SourceWorkerReader {
     }
     let bytes: Buffer;
     if (ref.recipe) {
-      const recipe = objectRecipeSchema.parse(await this.json(ref.recipe));
+      invariant(
+        ref.recipe.size <= 2 * 1024 * 1024,
+        'SOURCE_PAGE_INVALID',
+        'Source metadata exceeds its encoding bound.',
+      );
+      const raw = await this.bytes({ object: ref.recipe, recipe: null });
+      const recipe = sourceValidation('SOURCE_RECIPE_INVALID', () =>
+        objectRecipeSchema.parse(JSON.parse(raw.toString('utf8'))),
+      );
       invariant(
         recipe.object.sha256 === ref.object.sha256 && recipe.object.size === ref.object.size,
         'SOURCE_RECIPE_INVALID',

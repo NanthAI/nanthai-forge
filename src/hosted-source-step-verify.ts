@@ -6,6 +6,7 @@ import { SourceStepHash, type SourceHashState } from './hosted-source-step-hash.
 import type { WorkerObject, WorkerPin } from './hosted-source-worker-format.js';
 import type { SourceWorkerTransport } from './hosted-source-worker-reader.js';
 import { invariant } from './errors.js';
+import { sourceValidation } from './hosted-source-validation.js';
 export const sourceStepBytes = 8 * 1024 * 1024,
   sourceStepObjects = 100;
 export type VerifyCursor = { ref: WorkerObject; pending: TreeRef[]; hash: SourceHashState; length: number };
@@ -53,8 +54,14 @@ export async function readPhysical(
   );
   return Buffer.concat(parts);
 }
-export async function readJson(io: SourceWorkerTransport, pin: WorkerPin, m: StepMeter): Promise<unknown> {
-  return JSON.parse((await readPhysical(io, pin, m)).toString('utf8'));
+export async function readJson(
+  io: SourceWorkerTransport,
+  pin: WorkerPin,
+  m: StepMeter,
+  code = 'SOURCE_JOB_INVALID',
+): Promise<unknown> {
+  const bytes = await readPhysical(io, pin, m);
+  return sourceValidation(code, () => JSON.parse(bytes.toString('utf8')));
 }
 /** Leaves never survive a verification step. Both SHA state and the remaining
  * tree frontier are durable, so a retry never rehashes an acknowledged prefix. */
@@ -83,7 +90,8 @@ export async function verifySourceObject(
   }
   let c = saved;
   if (!c) {
-    const recipe = objectRecipeSchema.parse(await readJson(io, ref.recipe, m));
+    const value = await readJson(io, ref.recipe, m, 'SOURCE_RECIPE_INVALID');
+    const recipe = sourceValidation('SOURCE_RECIPE_INVALID', () => objectRecipeSchema.parse(value));
     invariant(
       recipe.object.sha256 === ref.object.sha256 &&
         recipe.object.size === ref.object.size &&
@@ -121,7 +129,9 @@ export async function verifySourceObject(
       consume?.(bytes);
       c.length += bytes.length;
     } else {
-      const page = objectChunkPageSchema.parse(JSON.parse(bytes.toString('utf8')));
+      const page = sourceValidation('SOURCE_RECIPE_INVALID', () =>
+        objectChunkPageSchema.parse(JSON.parse(bytes.toString('utf8'))),
+      );
       invariant(
         page.children.every(child => child.height < next.height) &&
           page.children.reduce((sum, child) => sum + child.length, 0) === next.length,

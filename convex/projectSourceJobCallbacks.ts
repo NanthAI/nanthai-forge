@@ -16,6 +16,7 @@ export async function receiveConvexSourceJobCallback(
   projectId: Id<'hostedProjects'>,
   value: unknown,
   now = Date.now(),
+  settleExpired = false,
 ) {
   const input = { projectId, callback: value };
   const callback = sourceJobCallbackSchema.parse(input.callback);
@@ -55,7 +56,11 @@ export async function receiveConvexSourceJobCallback(
     return job;
   }
   invariant(
-    control.dispatch !== 'unstarted' && control.workerUntil > now,
+    control.dispatch !== 'unstarted' &&
+      (control.workerUntil > now ||
+        (settleExpired &&
+          callback.result.status === 'failed' &&
+          callback.result.code === 'SOURCE_RETRY_EXHAUSTED')),
     'SOURCE_JOB_FENCED',
     'The source-worker lease is absent or expired.',
   );
@@ -94,6 +99,9 @@ export async function receiveConvexSourceJobCallback(
         dispatch: 'accepted',
         callbackDigest,
         failureCode: callback.result.status === 'failed' ? callback.result.code : null,
+        ...(callback.result.status === 'failed' && callback.result.cause
+          ? { failureCause: callback.result.cause }
+          : {}),
       },
     },
     now,

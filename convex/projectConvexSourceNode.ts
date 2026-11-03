@@ -20,84 +20,108 @@ import {
 } from '../src/hosted-source-step-progress';
 import { invariant } from '../src/errors';
 import { sourceDomainError } from './projectConvexSourceErrors';
+import { logSourceFailure, withSourceFailureLog } from '../src/hosted-source-io-error';
 const identity = { projectId: v.id('hostedProjects'), jobId: v.string() };
 const reference = (name: string) => makeFunctionReference<'mutation'>(name);
 export const step = internalAction({
-  args: { ...identity, step: v.number(), loaded: v.optional(v.string()) },
+  args: { ...identity, step: v.number(), generation: v.optional(v.number()), loaded: v.optional(v.string()) },
   returns: v.null(),
   handler: async (ctx, args): Promise<null> => {
-    const { loaded: supplied, ...input } = args;
-    const loaded: string | null =
-      supplied ?? (await ctx.runMutation(reference('projectConvexSourceStore:begin'), input));
-    if (!loaded) return null;
-    const state = JSON.parse(loaded),
-      { io, outputs } = convexSourceTransport(ctx, input, state.locations),
-      durable = sourceStorage(ctx, input.projectId);
-    let cursor: SourceStepCursor = initialSourceStep(state.input),
-      progress: SourceProgress | null = null;
-    if (state.cursor) {
-      const loaded = await loadSourceProgress(await durable.read(state.cursor), durable.read);
-      cursor = loaded.cursor;
-      progress = loaded.value;
-    }
-    let result,
-      fanout: SourceFanout | null = null;
-    io.fanout = plan => {
-      fanout = plan;
-    };
-    try {
-      if (state.batchId) {
-        const joined = JSON.parse(
-          await ctx.runMutation(reference('projectConvexSourceFanout:results'), input),
-        );
-        invariant(!joined.failure, joined.failure ?? 'SOURCE_WORKER_FAILED', 'A bounded source step failed.');
-        const results: SourceTaskProgress[] = [];
-        for (const ref of joined.outputs) if (ref) results.push(await loadTaskData(ref, durable.read));
-        applySourceFanout(cursor, joined, results, ref => enqueueSourceObject(cursor, ref));
-      }
-      result = await runSourceStep(cursor, io);
-    } catch (error) {
-      // Platform failures stay retryable; a fenced step has nothing to settle.
-      const domain = sourceDomainError(error);
-      if (!domain || domain.code === 'SOURCE_JOB_FENCED') throw error;
-      await ctx.runMutation(reference('projectConvexSourceStore:commit'), {
-        ...input,
-        cursor: state.cursor,
-        objects: [],
-        output: null,
-        failure: domain.code,
-      });
-      return null;
-    }
-    const saved =
-      result.cursor.phase === 'done'
-        ? null
-        : (await saveSourceProgress(result.cursor, progress, durable.store)).id;
-    if (fanout) {
-      const plan = fanout as SourceFanout;
-      // The saved cursor refers to States this step already uploaded; the step
-      // after the join resolves them, so they must be recorded before the fork.
-      while (outputs.length)
-        await ctx.runMutation(reference('projectConvexSourceStore:stage'), {
-          ...input,
-          objects: outputs.splice(0, 100),
-        });
-      await ctx.runMutation(reference('projectConvexSourceFanout:fork'), {
-        ...input,
-        cursor: saved,
-        kind: plan.kind,
-        end: plan.end,
-        tasks: plan.tasks.map(task => JSON.stringify(task)),
-      });
-      return null;
-    }
-    await ctx.runMutation(reference('projectConvexSourceStore:commit'), {
-      ...input,
-      cursor: saved,
-      objects: outputs,
-      output: result.cursor.output,
-      failure: null,
-    });
-    return null;
+    let generation = args.generation ?? 0;
+    return withSourceFailureLog(
+      args,
+      'step',
+      async () => {
+        const started = performance.now();
+        const { loaded: supplied, ...input } = args;
+        const loaded: string | null =
+          supplied ?? (await ctx.runMutation(reference('projectConvexSourceStore:begin'), input));
+        if (!loaded) return null;
+        const state = JSON.parse(loaded);
+        generation = state.generation ?? generation;
+        input.generation = generation;
+        const { io, outputs } = convexSourceTransport(ctx, input, state.locations),
+          durable = sourceStorage(ctx, input.projectId);
+        let cursor: SourceStepCursor = initialSourceStep(state.input),
+          progress: SourceProgress | null = null;
+        let result,
+          fanout: SourceFanout | null = null;
+        io.fanout = plan => {
+          fanout = plan;
+        };
+        try {
+          if (state.cursor) {
+            const loaded = await loadSourceProgress(await durable.read(state.cursor), durable.read);
+            cursor = loaded.cursor;
+            progress = loaded.value;
+          }
+          if (state.batchId) {
+            const joined = JSON.parse(
+              await ctx.runMutation(reference('projectConvexSourceFanout:results'), input),
+            );
+            invariant(
+              !joined.failure,
+              joined.failure ?? 'SOURCE_WORKER_FAILED',
+              'A bounded source step failed.',
+            );
+            const results: SourceTaskProgress[] = [];
+            for (const ref of joined.outputs) if (ref) results.push(await loadTaskData(ref, durable.read));
+            applySourceFanout(cursor, joined, results, ref => enqueueSourceObject(cursor, ref));
+          }
+          result = await runSourceStep(cursor, io);
+          const saved =
+            result.cursor.phase === 'done'
+              ? null
+              : (await saveSourceProgress(result.cursor, progress, durable.store)).id;
+          if (fanout) {
+            const plan = fanout as SourceFanout;
+            // The saved cursor refers to States this step already uploaded; the step
+            // after the join resolves them, so they must be recorded before the fork.
+            while (outputs.length)
+              await ctx.runMutation(reference('projectConvexSourceStore:stage'), {
+                ...input,
+                objects: outputs.splice(0, 100),
+              });
+            await ctx.runMutation(reference('projectConvexSourceFanout:fork'), {
+              ...input,
+              cursor: saved,
+              kind: plan.kind,
+              end: plan.end,
+              tasks: plan.tasks.map(task => JSON.stringify(task)),
+            });
+            return null;
+          }
+          await ctx.runMutation(reference('projectConvexSourceStore:commit'), {
+            ...input,
+            cursor: saved,
+            objects: outputs,
+            output: result.cursor.output,
+            failure: null,
+          });
+          return null;
+        } catch (error) {
+          // Platform failures stay retryable; a fenced step has nothing to settle.
+          const domain = sourceDomainError(error);
+          if (!domain || domain.code === 'SOURCE_JOB_FENCED') throw error;
+          logSourceFailure(error, input, 'step', started);
+          await ctx.runMutation(reference('projectConvexSourceStore:commit'), {
+            ...input,
+            cursor: state.cursor,
+            objects: [],
+            output: null,
+            failure: domain.code,
+          });
+          return null;
+        }
+      },
+      cause =>
+        ctx.runMutation(reference('projectConvexSourceStore:failed'), {
+          projectId: args.projectId,
+          jobId: args.jobId,
+          step: args.step,
+          generation,
+          cause,
+        }),
+    );
   },
 });

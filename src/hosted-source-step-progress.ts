@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
-import { gzipSync, gunzipSync } from 'node:zlib';
+import { gzipSync } from 'node:zlib';
 import { digest } from './hash.js';
 import { ForgeError, invariant } from './errors.js';
+import { parseSourceCursor } from './hosted-source-cursor-schema.js';
 import type { SourceStepCursor } from './hosted-source-step.js';
+import { inflateSourceMetadata } from './hosted-source-task-data.js';
 const fields = [
   'files',
   'inventory',
@@ -42,27 +44,49 @@ export async function loadSourceProgress(bytes: Uint8Array, read: (id: string) =
   let value: SourceProgress;
   try {
     value = JSON.parse(Buffer.from(bytes).toString('utf8')) as SourceProgress;
-  } catch {
+  } catch (error) {
+    if (!(error instanceof SyntaxError)) throw error;
     throw new ForgeError('SOURCE_HASH_MISMATCH', 'Durable source progress changed.');
   }
   invariant(
-    value.kind === 'forge-source-progress-v1',
+    value &&
+      value.kind === 'forge-source-progress-v1' &&
+      value.cursor &&
+      typeof value.cursor === 'object' &&
+      !Array.isArray(value.cursor) &&
+      value.sections &&
+      typeof value.sections === 'object' &&
+      !Array.isArray(value.sections) &&
+      Object.keys(value).every(key => ['kind', 'cursor', 'sections'].includes(key)) &&
+      Object.keys(value.sections).every(key => (fields as readonly string[]).includes(key)),
     'SOURCE_JOB_INVALID',
     'Source progress encoding changed.',
   );
   const cursor = { ...value.cursor };
   for (const field of fields) {
     const section = value.sections[field];
-    if (!section) continue;
-    let bytes: Buffer;
-    try {
-      bytes = gunzipSync(await read(section.id));
-    } catch (error) {
-      if (error instanceof ForgeError) throw error;
-      throw new ForgeError('SOURCE_HASH_MISMATCH', 'Durable source metadata changed.');
-    }
+    if (section === undefined) continue;
+    invariant(
+      !!section &&
+        typeof section === 'object' &&
+        !Array.isArray(section) &&
+        typeof section.id === 'string' &&
+        section.id.length > 0 &&
+        Object.keys(section).every(key => ['id', 'sha256'].includes(key)) &&
+        typeof section.sha256 === 'string' &&
+        /^[a-f0-9]{64}$/.test(section.sha256),
+      'SOURCE_JOB_INVALID',
+      'Source progress section encoding changed.',
+    );
+    const compressed = await read(section.id);
+    const bytes = inflateSourceMetadata(compressed);
     invariant(digest(bytes) === section.sha256, 'SOURCE_HASH_MISMATCH', 'Durable source metadata changed.');
-    Object.assign(cursor, { [field]: JSON.parse(bytes.toString('utf8')) });
+    try {
+      Object.assign(cursor, { [field]: JSON.parse(bytes.toString('utf8')) });
+    } catch (error) {
+      if (!(error instanceof SyntaxError)) throw error;
+      throw new ForgeError('SOURCE_HASH_MISMATCH', 'Durable source metadata encoding changed.');
+    }
   }
-  return { cursor: cursor as SourceStepCursor, value };
+  return { cursor: parseSourceCursor(cursor), value };
 }

@@ -3,6 +3,7 @@ import type { ActionCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import { r2Config, r2Key, presignPut, headObject, checksumOf } from './r2';
 import { invariant } from '../src/errors';
+import { SourceIoError, transientSourceStatus } from '../src/hosted-source-io-error';
 
 /** One byte-write seam for trusted source producers in either Convex runtime. Bytes go
  * to R2 only; the `storageId` result shape remains for callers that still read legacy rows.
@@ -22,21 +23,28 @@ export async function storeSourceBytes(
   const matches = (head: Awaited<ReturnType<typeof headObject>>) =>
     head.status === 'ok' && head.size === pin.size && head.checksum === checksumOf(pin.sha256);
   if (reuse) {
-    const existing = await headObject(config, key);
+    const existing = await headObject(config, key, true);
     if (matches(existing)) return { r2Key: key };
     invariant(existing.status === 'missing', 'R2_VERIFY_FAILED', 'Existing source binding differs.');
   }
   const target = await presignPut(config, key, { digest: pin.sha256, size: pin.size });
-  const response = await fetch(target.url, {
-    method: 'PUT',
-    headers: target.headers,
-    body: new Uint8Array(bytes),
-    redirect: 'error',
-    signal: AbortSignal.timeout(20_000),
-  });
+  let response: Response;
+  try {
+    response = await fetch(target.url, {
+      method: 'PUT',
+      headers: target.headers,
+      body: new Uint8Array(bytes),
+      redirect: 'error',
+      signal: AbortSignal.timeout(20_000),
+    });
+  } catch (error) {
+    throw new SourceIoError(error, 'source-put', pin.sha256);
+  }
+  if (transientSourceStatus(response.status))
+    throw new SourceIoError(null, 'source-put', pin.sha256, response.status);
   invariant(response.ok || response.status === 412, 'R2_UPLOAD_FAILED', 'Source upload failed.');
   invariant(
-    matches(await headObject(config, key)),
+    matches(await headObject(config, key, true)),
     'R2_VERIFY_FAILED',
     'Exact source size and checksum were not confirmed.',
   );

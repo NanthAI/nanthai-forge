@@ -30,6 +30,7 @@ async function fixture() {
     'projectConvexSourceStore:stage': store.stage,
     'projectConvexSourceStore:begin': store.begin,
     'projectConvexSourceStore:commit': store.commit,
+    'projectConvexSourceStore:failed': store.failed,
     'projectConvexSourceObjects:resolve': objects.resolve,
     'projectSourceJobApi:claim': jobApi.claim,
     'projectSourceJobApi:advance': jobApi.advance,
@@ -224,7 +225,7 @@ test('ten-file save has one execution, atomic progress, lost-reply recovery and 
     assert.equal(s.scheduled.length, 1, 'retry start never schedules a second execution');
     const step = s.scheduled.shift();
     s.failures.add('projectConvexSourceStore:commit');
-    await assert.rejects(s.execute(step), /lost reply/);
+    await assert.rejects(s.execute(step), { name: 'SourceIoError' });
     const completed = await s.load();
     assert.equal(completed.status, 'completed');
     assert.equal(completed.executionId, job.executionId);
@@ -374,7 +375,7 @@ test('a step that failed on a platform error is retried after the 60 s lease exp
     const step = s.scheduled.shift(),
       job = await s.load();
     s.hooks.failStore = true;
-    await assert.rejects(s.execute(step), /synthetic platform failure/);
+    await assert.rejects(s.execute(step), { name: 'SourceIoError', stage: 'source-put' });
     offset += 61000;
     assert(job.control.workerUntil <= Date.now(), 'the dead execution expired');
     await assert.rejects(
@@ -403,7 +404,11 @@ test('a step that failed on a platform error is retried after the 60 s lease exp
     assert.equal(renewed.fence, job.fence);
     assert(renewed.control.workerUntil > Date.now(), 'recovery renewed the lease');
     assert.equal(s.scheduled.length, 1);
-    assert.deepEqual(s.scheduled[0].args, step.args, 'the same step resumes');
+    assert.deepEqual(
+      s.scheduled[0].args,
+      { ...step.args, generation: 1 },
+      'the same step resumes with a fenced repair generation',
+    );
     // A second trigger while that step is pending schedules nothing more.
     await s.submit();
     await s.execute(s.scheduled.pop());
@@ -431,7 +436,7 @@ test('a thrown worker failure is public and replayable before and after lease ex
     const step = s.scheduled.shift();
     const job = await s.load();
     s.hooks.failStore = true;
-    await assert.rejects(s.execute(step), /synthetic platform failure/);
+    await assert.rejects(s.execute(step), { name: 'SourceIoError', stage: 'source-put' });
     const args = {
       projectId: s.projectId,
       operationId: [...s.tables.projectHostedSaves.values()][0].operationId,

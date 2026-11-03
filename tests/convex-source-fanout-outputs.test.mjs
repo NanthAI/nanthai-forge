@@ -99,6 +99,11 @@ test('an absent source object fails the job with its code instead of leaving it 
     assert.equal(job.status, 'failed', JSON.stringify(job));
     assert.match(JSON.stringify(job), /SOURCE_UNAVAILABLE/);
     assert.equal(s.ready.length, 0, 'nothing is left to retry');
+    const terminal = JSON.stringify(job);
+    await s.invoke('projectConvexSourceStore:dispatch', { projectId: s.projectId, jobId: id });
+    assert.equal(JSON.stringify(await s.job(id)), terminal, 'terminal job replay is byte-identical');
+    assert.equal(s.tables.projectSourceSteps.size, 1);
+    assert.equal(s.ready.length, 0, 'terminal replay creates no replacement work');
   } finally {
     s.restore();
   }

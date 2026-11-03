@@ -12,6 +12,7 @@ import { jobHash, jobNumber, jobObject, sourceDispatchKey } from '../src/hosted-
 export type SourceJob = Extract<HostedRecord, { kind: 'job' }>;
 export const sourceJobPlanSchema = z
   .object({
+    retryUntil: jobNumber.optional(),
     jobKind: z.enum(['save', 'compose', 'sync', 'register-state']),
     input: jobObject,
     inputDigest: jobHash,
@@ -93,6 +94,7 @@ export async function enqueueSourceJob(
     output: null,
     control: {
       actor: input.actor,
+      ...(plan.retryUntil === undefined ? {} : { retryUntil: plan.retryUntil }),
       provider: plan.provider,
       worker: plan.worker,
       runtime: plan.runtime,

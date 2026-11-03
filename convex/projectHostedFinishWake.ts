@@ -49,9 +49,15 @@ export async function watchFinishCompose(
   ctx: MutationCtx,
   rowId: Id<'projectHostedFinishes'>,
   startedAt: string,
+  settle: () => Promise<void>,
 ) {
-  if (Date.now() - Date.parse(startedAt) >= HOSTED_FINISH_COMPOSE_WATCH_WINDOW_MS) return;
-  await scheduleFinish(ctx, (await ctx.db.get(rowId))!, HOSTED_FINISH_COMPOSE_WATCHDOG_MS);
+  const remaining = Date.parse(startedAt) + HOSTED_FINISH_COMPOSE_WATCH_WINDOW_MS - Date.now();
+  const row = (await ctx.db.get(rowId))!;
+  if (remaining <= 0) {
+    await settle();
+    return;
+  }
+  await scheduleFinish(ctx, row, Math.min(HOSTED_FINISH_COMPOSE_WATCHDOG_MS, remaining));
 }
 export async function notifyFinish(ctx: MutationCtx, state: HostedLandingState) {
   const projectId = state.projectId as Id<'hostedProjects'>;

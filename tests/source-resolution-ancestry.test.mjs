@@ -89,6 +89,10 @@ async function drain(s, initial, { legacy = false, resumeOld = false, retry = fa
       await prepareMergeStep(before, s.io, meter());
       assert.deepEqual(before, c, 'original quantum retry preserves exact selected tips and progress');
     }
+    // The legacy oracle widens roots only to model its old traversal policy.
+    // That version persisted no selected-tip field; never encode this test-only
+    // override as the current cursor's authenticated two-tip tuple.
+    if (legacy) delete c.resolutionRoots;
     const stored = new Map();
     const saved = await saveSourceProgress(c, null, async bytes => {
       const id = digest(bytes);

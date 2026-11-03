@@ -8,6 +8,7 @@ import { workerResultSchema, type WorkerPin } from './hosted-source-worker-forma
 import type { SourceWorkerTransport } from './hosted-source-worker-reader.js';
 import { canonicalPayload } from './hosted-source-operation.js';
 import { invariant } from './errors.js';
+import { sourceValidation } from './hosted-source-validation.js';
 
 // Runtime routing bounds, not source limits: larger/recipe saves use the Node worker.
 export const smallSaveStateBytes = 4 * 1024 * 1024;
@@ -34,7 +35,10 @@ export async function runSmallSourceSave(
   io: SourceWorkerTransport,
 ): Promise<WorkerPin | null> {
   if (input.size > 128 * 1024) return null;
-  const plan = saveInputSchema.parse(JSON.parse(new TextDecoder().decode(await readExact(io, input))));
+  const inputBytes = await readExact(io, input);
+  const plan = sourceValidation('SOURCE_JOB_INVALID', () =>
+    saveInputSchema.parse(JSON.parse(new TextDecoder().decode(inputBytes))),
+  );
   if (
     plan.pages.size > 128 * 1024 ||
     plan.pageCount !== 1 ||
@@ -43,10 +47,11 @@ export async function runSmallSourceSave(
   )
     return null;
   await io.prepareRead?.([plan.baseline.object, plan.pages]);
-  const page = validateSavePage(
-    JSON.parse(new TextDecoder().decode(await readExact(io, plan.pages))),
-    null,
-  ).page;
+  const pageBytes = await readExact(io, plan.pages);
+  const page = sourceValidation(
+    'SOURCE_JOB_INVALID',
+    () => validateSavePage(JSON.parse(new TextDecoder().decode(pageBytes)), null).page,
+  );
   invariant(
     canonicalPayload(savePin(page)) === canonicalPayload(plan.pages),
     'SOURCE_HASH_MISMATCH',

@@ -10,6 +10,8 @@ import {
 import { saveInputSchema, validateSavePage, savePin, type SaveChange } from './hosted-save.js';
 import { canonicalPayload } from './hosted-source-operation.js';
 import { invariant } from './errors.js';
+import { sourceValidation } from './hosted-source-validation.js';
+import { parseSourcePlan } from './hosted-source-cursor-schema.js';
 import type { SourceWorkerTransport } from './hosted-source-worker-reader.js';
 import {
   meter,
@@ -137,7 +139,7 @@ export function enqueueSourceObject(c: SourceStepCursor, ref: WorkerObject) {
   }
 }
 async function saveStep(c: SourceStepCursor, io: StepTransport, m: StepMeter) {
-  const plan = saveInputSchema.parse(c.plan);
+  const plan = sourceValidation('SOURCE_JOB_INVALID', () => saveInputSchema.parse(c.plan));
   if (c.pages === 0 && c.count === 0 && !c.files.length && !c.changes.length) {
     const source = new MemoryMergeSource(c.parents, c.ancestryBoundary),
       reader = new MemorySourceReader(source, io);
@@ -176,7 +178,8 @@ async function saveStep(c: SourceStepCursor, io: StepTransport, m: StepMeter) {
   }
   if (c.next && !full(m)) {
     const pin = c.next,
-      validated = validateSavePage(await readJson(io, pin, m), c.lastPath),
+      value = await readJson(io, pin, m),
+      validated = sourceValidation('SOURCE_JOB_INVALID', () => validateSavePage(value, c.lastPath)),
       page = validated.page;
     invariant(
       canonicalPayload(savePin(page)) === canonicalPayload(pin),
@@ -206,11 +209,12 @@ async function saveStep(c: SourceStepCursor, io: StepTransport, m: StepMeter) {
   }
 }
 async function inventoryStep(c: SourceStepCursor, io: StepTransport, m: StepMeter) {
-  const plan = workerInputSchema.parse(c.plan);
+  const plan = sourceValidation('SOURCE_JOB_INVALID', () => workerInputSchema.parse(c.plan));
   if (c.next) {
     invariant(!c.seen[c.next.sha256], 'SOURCE_CLOSURE_INVALID', 'Inventory pages repeat.');
     c.seen[c.next.sha256] = true;
-    const page = workerPageSchema.parse(await readJson(io, c.next, m));
+    const value = await readJson(io, c.next, m);
+    const page = sourceValidation('SOURCE_JOB_INVALID', () => workerPageSchema.parse(value));
     for (const ref of page.objects) {
       const old = c.inventory[ref.object.sha256];
       invariant(
@@ -333,14 +337,14 @@ export async function runSourceStep(cursor: SourceStepCursor, io: StepTransport)
   };
   while (c.phase !== 'done' && !full(m)) {
     if (c.phase === 'input') {
-      c.plan = await readJson(io, c.input, m);
+      c.plan = parseSourcePlan(await readJson(io, c.input, m));
       const kind = (c.plan as { kind: string }).kind;
       if (kind === 'forge-hosted-save-input') {
-        const p = saveInputSchema.parse(c.plan);
+        const p = sourceValidation('SOURCE_JOB_INVALID', () => saveInputSchema.parse(c.plan));
         c.next = p.pages;
         c.phase = 'save';
       } else if (kind === 'forge-source-worker-state') {
-        const p = workerInputSchema.parse(c.plan);
+        const p = sourceValidation('SOURCE_JOB_INVALID', () => workerInputSchema.parse(c.plan));
         c.next = p.pages;
         c.phase = 'inventory';
       } else {

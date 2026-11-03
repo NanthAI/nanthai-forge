@@ -2,7 +2,7 @@
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { digest } from './hash.js';
-import { invariant } from './errors.js';
+import { ForgeError, invariant } from './errors.js';
 import { treeRefSchema, type TreeRef } from './byte-tree-format.js';
 const pinSchema = z
   .object({ sha256: z.string().regex(/^[0-9a-f]{64}$/), size: z.number().safe().nonnegative() })
@@ -156,7 +156,13 @@ export async function* readObjectRecipe(
       hash.update(bytes);
       yield bytes;
     } else {
-      const page = objectChunkPageSchema.parse(JSON.parse(bytes.toString('utf8')));
+      let page: z.infer<typeof objectChunkPageSchema>;
+      try {
+        page = objectChunkPageSchema.parse(JSON.parse(bytes.toString('utf8')));
+      } catch (error) {
+        if (!(error instanceof SyntaxError || error instanceof z.ZodError)) throw error;
+        throw new ForgeError('INVALID_WORK_BACKUP', 'Chunk page encoding is invalid.');
+      }
       invariant(
         page.children.every(child => child.height < ref.height) &&
           page.children.reduce((sum, child) => sum + child.length, 0) === ref.length,

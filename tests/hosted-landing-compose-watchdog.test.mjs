@@ -95,7 +95,7 @@ test('incident replay 2026-10-30: the solo fallback recompose that died on fetch
   t.diagnostic(JSON.stringify({ recoveryTicks: ticks }));
 });
 
-test('a step that keeps failing re-arms the compose watchdog only inside its bounded window', async t => {
+test('a repeatedly failed step settles terminally instead of losing its last compose wake', async t => {
   const f = await finishFixture(t);
   const state = await f.enqueue(f.request());
   await f.drain();
@@ -122,7 +122,9 @@ test('a step that keeps failing re-arms the compose watchdog only inside its bou
   assert(steps <= budget + 1, `${steps} step retries`);
   assert(Date.now() - startedAt <= HOSTED_FINISH_COMPOSE_WATCH_WINDOW_MS + HOSTED_FINISH_COMPOSE_WATCHDOG_MS);
   const current = await f.current(state.id);
-  assert.notEqual(current.submission.phase, 'landed');
-  assert(current.submission.observation.stall, 'the stall stays visible once the window closes');
+  assert.equal(current.submission.phase, 'terminal-failed');
+  assert.equal(current.submission.error.code, 'SOURCE_RETRY_EXHAUSTED');
+  assert(steps <= 6, 'the stopped-action repair also uses the per-quantum failure cap');
+  assert.equal(f.pending().length, 0);
   t.diagnostic(JSON.stringify({ finishTicks, steps, budget }));
 });

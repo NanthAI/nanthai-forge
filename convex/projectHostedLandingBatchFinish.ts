@@ -1,3 +1,4 @@
+import { exhaustFinishCompose } from './projectHostedComposeExhaustion';
 import { predecessorStatus } from './projectHostedLandingPipeline';
 import { settleBatchConflicts, retainSurvivorTrain } from './projectHostedLandingCohortConflicts';
 import { deferSpeculativeConflict } from './projectHostedLandingSpeculativeConflict';
@@ -11,7 +12,7 @@ import type { MutationCtx } from './_generated/server';
 import type { FinishIdentity } from './projectHostedFinishControl';
 import { settleMemberBatchConflict } from './projectHostedLandingBatchConflict';
 import { batchConflictPeers } from './projectHostedLandingConflictPeers';
-import { loadFinish } from './projectHostedFinishStore';
+import { failFinish, loadFinish } from './projectHostedFinishStore';
 import { loadLanding } from './projectHostedLandingStore';
 import {
   loadBatch,
@@ -105,6 +106,18 @@ export async function batchFinishStep(
   if (source.operation.terminal) {
     const outcome = source.operation.terminal.outcome;
     if (outcome.status === 'failed') {
+      if (outcome.error.code === 'SOURCE_RETRY_EXHAUSTED') {
+        for (const member of batch.members)
+          await failFinish(
+            ctx,
+            { projectId: input.projectId, submissionId: member.submissionId },
+            outcome.error.code,
+            outcome.error.message,
+          );
+        await writeBatch(ctx, key, { ...batch, phase: 'failed', included: [], transition: outcome.error });
+        await wakeLandingQueue(ctx, { projectId: input.projectId, channel: 'main' });
+        return { handled: true, command: null };
+      }
       await splitLandingBatch(ctx, key, batch, undefined, outcome.error);
       return { handled: true, command: null };
     }
@@ -291,7 +304,9 @@ export async function batchFinishStep(
     };
   }
   await submitHostedCompose(ctx, source.auth);
-  await watchFinishCompose(ctx, originalRow._id, batch.at);
+  await watchFinishCompose(ctx, originalRow._id, source.operation.firstAttempt.at, async () =>
+    exhaustFinishCompose(ctx, (await ctx.db.get(originalRow._id))!, source.auth.operationId),
+  );
   return { handled: true, command: null };
 }
 export async function resumeBatchIO(

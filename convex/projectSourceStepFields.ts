@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { defineTable } from 'convex/server';
 import { v } from 'convex/values';
+import { sourceFailureStages, sourceFailureClasses, sourceFailureCodes } from '../src/hosted-source-retry';
 export const sourceOutput = v.object({
   sha256: v.string(),
   size: v.number(),
@@ -9,8 +10,24 @@ export const sourceOutput = v.object({
   recipe: v.optional(v.object({ sha256: v.string(), size: v.number() })),
 });
 export const sourceTaskData = v.object({ id: v.string(), sha256: v.string() });
+export const sourceFailure = v.object({
+  stage: v.union(...sourceFailureStages.map(value => v.literal(value))),
+  exception: v.union(...sourceFailureClasses.map(value => v.literal(value))),
+  code: v.union(...sourceFailureCodes.map(value => v.literal(value)), v.null()),
+  elapsedMs: v.number(),
+  httpStatus: v.union(v.number(), v.null()),
+});
+const retryFields = {
+  failedAttempts: v.optional(v.number()),
+  failedGeneration: v.optional(v.number()),
+  retryAt: v.optional(v.number()),
+  lastFailure: v.optional(sourceFailure),
+  lastFailureAt: v.optional(v.number()),
+};
 export const sourceStepTables = {
   projectSourceSteps: defineTable({
+    ...retryFields,
+    generation: v.optional(v.number()),
     projectId: v.id('hostedProjects'),
     jobId: v.string(),
     dispatch: v.string(),
@@ -29,12 +46,16 @@ export const sourceStepTables = {
     total: v.number(),
     next: v.number(),
     completed: v.number(),
+    // Only lease-fenced recovery needs a sparse queue; completed siblings stay retained.
+    retryIndices: v.optional(v.array(v.number())),
     status: v.union(v.literal('queued'), v.literal('waiting'), v.literal('done'), v.literal('fenced')),
     failure: v.union(v.string(), v.null()),
   })
     .index('by_status', ['status'])
     .index('by_project_and_job_and_step', ['projectId', 'jobId', 'step']),
   projectSourceTasks: defineTable({
+    ...retryFields,
+    retryUntil: v.optional(v.number()),
     projectId: v.id('hostedProjects'),
     jobId: v.string(),
     step: v.number(),

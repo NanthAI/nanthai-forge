@@ -614,3 +614,40 @@ test('priority bypass reads bounded heads with 1150 earlier non-batchable normal
     }),
   );
 });
+
+test('an exhausted shared source job fails its original cohort without allocating fallback compositions', async t => {
+  const { moduleUrl } = await import('./convex-module.mjs');
+  const { exhaustSourceExecution } = await import(moduleUrl('../convex/projectConvexSourceFailure.ts'));
+  const f = await batchesFixture(t);
+  for (let i = 0; !f.tables.projectSourceSteps.size; i++) {
+    assert(i < 40);
+    await f.execute(f.pending()[0]);
+  }
+  const step = [...f.tables.projectSourceSteps.values()][0];
+  const jobs = f.tables.projectSourceSteps.size,
+    composes = f.tables.projectHostedComposes.size;
+  await f.tx(
+    'exhaustSharedSource',
+    {
+      _handler: ctx =>
+        exhaustSourceExecution(ctx, step, {
+          stage: 'source-headers',
+          exception: 'TimeoutError',
+          code: null,
+          elapsedMs: 15000,
+          httpStatus: null,
+        }),
+    },
+    {},
+  );
+  await f.drain();
+  assert(
+    states(f).every(
+      state => state.phase === 'terminal-failed' && state.error.code === 'SOURCE_RETRY_EXHAUSTED',
+    ),
+  );
+  assert.equal(f.tables.projectSourceSteps.size, jobs);
+  assert.equal(f.tables.projectHostedComposes.size, composes);
+  assert.equal(f.runs().length, 0);
+  assert.equal(f.pending().length, 0);
+});

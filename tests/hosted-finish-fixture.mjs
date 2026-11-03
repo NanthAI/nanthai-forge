@@ -54,6 +54,7 @@ export async function finishFixture(
     baselineFiles = [],
     selectedFiles = null,
     mainFiles = null,
+    beforeSourceMutation = null,
   } = {},
 ) {
   let now = Date.now();
@@ -347,10 +348,11 @@ export async function finishFixture(
             metrics.convexSourceCalls.push(name);
             return executeSource(name, args);
           },
-          runMutation: (ref, args) => {
+          runMutation: async (ref, args) => {
             const name = getFunctionName(ref),
               [file, method] = name.split(':');
             metrics.convexSourceCalls.push(name);
+            await beforeSourceMutation?.(name, args);
             return tx(name, convexSourceModules[file][method], args);
           },
         };
@@ -372,11 +374,15 @@ export async function finishFixture(
           { _handler: ctx => sourceJobs.loadSourceJob(ctx, f.projectId, input.jobId) },
           {},
         );
-        await tx('finishSourcePublish', composeJobs.publish, {
-          projectId: f.projectId,
-          jobId: input.jobId,
-          result: c.objects.get(job.output.sha256).toString(),
-        });
+        if (job.status === 'failed' || job.status === 'cancelled') {
+          await tx('finishSourceFailure', composeJobs.resultDownload, input);
+        } else {
+          await tx('finishSourcePublish', composeJobs.publish, {
+            projectId: f.projectId,
+            jobId: input.jobId,
+            result: c.objects.get(job.output.sha256).toString(),
+          });
+        }
         if (stop === 'after-source-publish') throw new Error('synthetic crash after source publication');
       } else assert.fail(`Unexpected task ${task.name}`);
       f.patch('_scheduled_functions', task._id, { state: { kind: 'success' } });

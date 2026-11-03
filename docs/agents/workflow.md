@@ -1,24 +1,40 @@
 # Use Forge as an agent's source repository
 
-The installed package includes `skills/forge-agent/SKILL.md`. Install it in your coding agent's skill directory for recorded Work or graph context. It is optional and self-contained; ordinary local-file questions use normal tools without loading workflow guidance. Use Node 24.22.1+ (24.x). `nforge agent --help` lists the verbs; `nforge agent ROOT VERB [--MODE] --help` gives required parameters. Use `--command-file FILE` for parameters that are awkward to quote.
+Use Node 24.22.1+ (24.x). `nforge agent --help` lists verbs;
+`nforge agent ROOT VERB [--MODE] --help` lists parameters. Use
+`--command-file FILE` for awkward JSON. The package ships optional,
+self-contained `skills/forge-agent/SKILL.md` for recorded Work or graph context;
+install it in your agent's skill directory. Ordinary file questions need no
+workflow guidance.
 
-A hosted finish replays the original outcome when given the same `operationId`. On unchanged saved source after a terminal failure, use a new explicit `operationId`, or `retry:true` with `reason:"flake"`, `"main-moved"`, `"infra"` or `"other"`; the new attempt composes the retained saved inputs on current main, skips another save and records the failed submission it supersedes. A shorthand finish returns the failure and an exact retry command. Accepting after a passed check-only finish reuses its exact Candidate and run while main and source still match. Finish also reconciles a completed asynchronous checkpoint before capturing local changes.
+A hosted finish replays the outcome for the same `operationId`. After a terminal
+failure on unchanged saved source, use a new explicit ID or `retry:true` with
+`reason:"flake"`, `"main-moved"`, `"infra"` or `"other"`. The new attempt
+composes retained inputs on current main, skips saving and records the superseded
+failure. Shorthand finish returns the failure and an exact retry command.
+Acceptance reuses a passed check-only Candidate/run while main and source match.
+Finish reconciles a completed asynchronous checkpoint before capturing changes.
 
-A terminal finish failure returns `next:{action:"finish", ...parameters}` and
-`command`, with matching `retry` and `retryCommand` compatibility fields. The
-parameters retain the complete original selection and set `retry:true` and
-`reason:"other"`; they omit the failed `operationId` so this is a new attempt.
-`replayParameters` still identifies the immutable original operation. CLI stderr
-prints the retry command; CLI and MCP use the same structured envelope. Older
-releases use `next:"retry"` with `retry` and `retryCommand` instead. Consumers may
-follow either documented envelope or record `submission.phase:"terminal-failed"`
-as the actual failure. Conflict-specific sync/resolve recovery takes precedence.
+Terminal failure returns `next:{action:"finish", ...parameters}` and `command`;
+compatibility fields `retry` and `retryCommand` match. Parameters retain the
+complete original selection, set `retry:true` and `reason:"other"`, and omit the
+failed `operationId`. `replayParameters` identifies the immutable original.
+CLI stderr prints the command; CLI and MCP share the envelope. Older releases use
+`next:"retry"` with the same compatibility fields. Consumers may follow either
+or report `submission.phase:"terminal-failed"` as the actual failure.
+Conflict-specific sync/resolve recovery takes precedence.
 
-After a landing wait, the authoritative observation replaces pending source
-advice. A terminal response carries no obsolete pending status, progress or replay
-continuation. This normalization uses the existing response only; it neither
-replays finish nor reads source or server state after the wait. A wait deadline
-retains the exact original-operation continuation.
+After a landing wait, its authoritative observation replaces pending-source
+advice. Terminal responses drop obsolete status, progress and replay advice using
+only that response: no finish replay or source/server read follows the wait.
+A wait deadline retains the exact original-operation continuation.
+
+Transient source I/O retains the operation and bounded work for the existing
+finish wake or direct caller continuation. Terminal invalidity or exhaustion
+retains its receipt and uses the new-attempt retry above. Successful progress
+resets only the next quantum's failure count. See [source-worker recovery and
+bounds](../operations/hosted-source-worker.md), including
+`SOURCE_RETRY_EXHAUSTED`, backoff and the retained compose deadline.
 
 ## Hosted command contract
 

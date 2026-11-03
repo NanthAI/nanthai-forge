@@ -11,6 +11,11 @@ import {
   type SourceCalculation,
   type SourceCalculationResult,
 } from './hosted-source-merge-journal.js';
+import {
+  parseSourceTaskInput,
+  parseSourceTaskProgress,
+  validateSourceTaskProgress,
+} from './hosted-source-task-schema.js';
 import { ForgeError, invariant } from './errors.js';
 export type SourceTaskInput =
   | { kind: 'verify'; refs: WorkerObject[] }
@@ -26,6 +31,46 @@ export type SourceTaskProgress = {
   calculations?: SourceCalculationResult[];
   scan?: { prefix: string; skip: boolean; found: boolean };
 };
+async function stateSummary(
+  ref: WorkerObject,
+  files: boolean,
+  io: StepTransport,
+): Promise<SourceStateSummary> {
+  const invalid = (code: string) => ({ id: ref.object.sha256, parents: [], files: [], error: code });
+  let bytes: Uint8Array;
+  try {
+    bytes = await new MemorySourceReader(new MemoryMergeSource({}), io).bytes(ref);
+  } catch (error) {
+    // Byte acquisition proves invalidity only for exact missing/hash/recipe
+    // failures. Unknown I/O and authority/fencing failures escape the prefetch.
+    if (
+      !(error instanceof ForgeError) ||
+      ![
+        'SOURCE_UNAVAILABLE',
+        'SOURCE_HASH_MISMATCH',
+        'SOURCE_RECIPE_INVALID',
+        'SOURCE_PAGE_INVALID',
+        'INVALID_WORK_BACKUP',
+      ].includes(error.code)
+    )
+      throw error;
+    return invalid(error.code);
+  }
+  try {
+    const state = parseNativeState(bytes);
+    return {
+      id: ref.object.sha256,
+      parents: state.parents,
+      files: files
+        ? [...new Set([...state.files.map(f => f.blob), ...(state.git ? [state.git.bundle] : [])])]
+        : [],
+      error: null,
+    };
+  } catch (error) {
+    if (!(error instanceof ForgeError) || error.code !== 'INVALID_NATIVE_SOURCE') throw error;
+    return invalid(error.code);
+  }
+}
 export function sourceWindows(refs: WorkerObject[]) {
   const groups: WorkerObject[][] = [];
   let group: WorkerObject[] = [],
@@ -62,6 +107,11 @@ export async function runSourceTask(
   previous: SourceTaskProgress | null,
   original: StepTransport,
 ) {
+  input = parseSourceTaskInput(input);
+  if (previous) {
+    previous = parseSourceTaskProgress(previous);
+    validateSourceTaskProgress(input, previous);
+  }
   const progress = structuredClone(previous ?? { index: 0, verify: null, states: [] }),
     m = meter();
   const io: StepTransport = {
@@ -76,6 +126,25 @@ export async function runSourceTask(
         }
       })();
     },
+  };
+  const startIndex = progress.index,
+    startVerify = JSON.stringify(progress.verify);
+  const finish = (done: boolean) => {
+    invariant(
+      done || progress.index !== startIndex || JSON.stringify(progress.verify) !== startVerify,
+      'SOURCE_JOB_INVALID',
+      'A source task continuation made no durable progress.',
+    );
+    return {
+      done,
+      progress,
+      metrics: {
+        objects: m.objects,
+        bytes: m.bytes,
+        elapsedMs: performance.now() - m.started,
+        maxRssBytes: process.resourceUsage().maxRSS * 1024,
+      },
+    };
   };
   if (input.kind === 'markers') {
     const scan = (progress.scan ??= { prefix: '', skip: false, found: false });
@@ -118,31 +187,13 @@ export async function runSourceTask(
         { key: input.request.key, blob: null, kind: 'binary', resolutions: [], markers: scan.found },
       ];
     }
-    return {
-      done: !progress.verify,
-      progress,
-      metrics: {
-        objects: m.objects,
-        bytes: m.bytes,
-        elapsedMs: performance.now() - m.started,
-        maxRssBytes: process.resourceUsage().maxRSS * 1024,
-      },
-    };
+    return finish(!progress.verify);
   }
   if (input.kind === 'calculate') {
     const results = await calculateSourceFiles(input, io, progress.index, () => full(m));
     progress.index += results.length;
     (progress.calculations ??= []).push(...results);
-    return {
-      done: progress.index === input.requests.length,
-      progress,
-      metrics: {
-        objects: m.objects,
-        bytes: m.bytes,
-        elapsedMs: performance.now() - m.started,
-        maxRssBytes: process.resourceUsage().maxRSS * 1024,
-      },
-    };
+    return finish(progress.index === input.requests.length);
   }
   await io.prepareRead?.(input.refs.filter(ref => !ref.recipe).map(ref => ref.object));
   while (progress.index < input.refs.length && !full(m)) {
@@ -154,39 +205,10 @@ export async function runSourceTask(
     if (input.kind === 'verify') {
       progress.verify = await verifySourceObject(io, ref, m, progress.verify);
       if (progress.verify) break;
-    } else {
-      try {
-        const reader = new MemorySourceReader(new MemoryMergeSource({}), io),
-          state = parseNativeState(await reader.bytes(ref));
-        progress.states.push({
-          id: ref.object.sha256,
-          parents: state.parents,
-          files: input.files
-            ? [...new Set([...state.files.map(f => f.blob), ...(state.git ? [state.git.bundle] : [])])]
-            : [],
-          error: null,
-        });
-      } catch (error) {
-        progress.states.push({
-          id: ref.object.sha256,
-          parents: [],
-          files: [],
-          error: error instanceof ForgeError ? error.code : 'SOURCE_WORKER_FAILED',
-        });
-      }
-    }
+    } else progress.states.push(await stateSummary(ref, input.files, io));
     progress.index++;
   }
-  return {
-    done: progress.index === input.refs.length,
-    progress,
-    metrics: {
-      objects: m.objects,
-      bytes: m.bytes,
-      elapsedMs: performance.now() - m.started,
-      maxRssBytes: process.resourceUsage().maxRSS * 1024,
-    },
-  };
+  return finish(progress.index === input.refs.length);
 }
 /** Only actually reachable summaries become closure evidence. Extra prefetch
  * hints, including failures, never decide validity or independence. */

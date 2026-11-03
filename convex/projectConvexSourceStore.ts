@@ -12,27 +12,33 @@ import {
   saveSourceJob,
 } from './projectSourceJobs';
 import { receiveConvexSourceJobCallback } from './projectSourceJobCallbacks';
-import { authorizeSourceTransfer } from './projectHostedSaveTransfers';
 import { sourceDispatch, driveSourceJob } from '../src/hosted-source-job-controller';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { convexSourceWorker, convexSourceRuntime, ConvexSourceProvider } from '../src/convex-source-provider';
 import { invariant } from '../src/errors';
+import { activeStep, sourceStep, rowFor } from './projectConvexSourceActive';
+export { activeStep, sourceStep } from './projectConvexSourceActive';
 import { sourceMutation } from './projectConvexSourceErrors';
 import { hostedWriteProject } from './projectHostedRecords';
 import { saveObject } from './projectHostedSaveStore';
 import { drainSourcePool, requeueSourceBatch } from './projectConvexSourcePool';
 import { ForgeError } from '../src/errors';
-import { sourceOutput } from './projectSourceStepFields';
+import { sourceOutput, sourceFailure } from './projectSourceStepFields';
 import { storeSourceOutputs } from './projectConvexSourceOutput';
+import {
+  exhaustSourceExecution,
+  sourceFailureUpdate,
+  sourceRetryExpired,
+} from './projectConvexSourceFailure';
+import {
+  SOURCE_MAX_FAILED_ATTEMPTS,
+  unknownSourceFailure,
+  sourceFailureSchema,
+} from '../src/hosted-source-retry';
 import { presignGet, r2Config } from './r2';
 import { findObject } from './projectObjectFind';
 import { packRange, packHeaders } from '../src/object-pack-range';
 const identity = { projectId: v.id('hostedProjects'), jobId: v.string() };
-const rowFor = (ctx: MutationCtx, projectId: Id<'hostedProjects'>, jobId: string) =>
-  ctx.db
-    .query('projectSourceSteps')
-    .withIndex('by_project_and_job', q => q.eq('projectId', projectId).eq('jobId', jobId))
-    .unique();
 export const start = internalMutation({
   args: { ...identity, input: v.string() },
   returns: v.string(),
@@ -126,14 +132,27 @@ export async function lookupConvexSource(
       (!scheduled || scheduled.state.kind === 'failed' || scheduled.state.kind === 'canceled') &&
       (await renewConvexSource(ctx, { ...args, step: row.step }))
     ) {
+      const update: Partial<ReturnType<typeof sourceFailureUpdate>> =
+        row.failedGeneration === (row.generation ?? 0)
+          ? {}
+          : sourceFailureUpdate(row, unknownSourceFailure('scheduled-step'), job.control.retryUntil);
+      const failures = update.failedAttempts ?? row.failedAttempts ?? 0;
+      const current = await sourceStep(ctx, { ...args, step: row.step }, false);
+      if (!current) return result;
+      if (failures >= SOURCE_MAX_FAILED_ATTEMPTS || sourceRetryExpired(current)) {
+        if (update.failedAttempts) await ctx.db.patch(row._id, update);
+        await exhaustSourceExecution(ctx, { ...args, step: row.step }, update.lastFailure ?? row.lastFailure);
+        return result;
+      }
+      const generation = (row.generation ?? 0) + 1;
       const scheduledId = await ctx.scheduler.runAfter(
-        0,
+        Math.max(0, (update.retryAt ?? row.retryAt ?? 0) - Date.now()),
         makeFunctionReference<'action'>(
           row.step === 0 ? 'projectConvexSource:step' : 'projectConvexSourceNode:step',
         ),
-        { projectId: args.projectId, jobId: args.jobId, step: row.step },
+        { projectId: args.projectId, jobId: args.jobId, step: row.step, generation },
       );
-      await ctx.db.patch(row._id, { scheduledId });
+      await ctx.db.patch(row._id, { ...update, generation, scheduledId });
     }
   }
   return result;
@@ -170,48 +189,16 @@ export const lookup = internalMutation({
   handler: async (ctx, args) =>
     canonicalPayload(await lookupConvexSource(ctx, { ...args, input: JSON.parse(args.input) })),
 });
-export function activeStep(
-  ctx: MutationCtx,
-  args: { projectId: Id<'hostedProjects'>; jobId: string; step: number },
-) {
-  return sourceStep(ctx, args, true);
-}
-async function sourceStep(
-  ctx: MutationCtx,
-  args: { projectId: Id<'hostedProjects'>; jobId: string; step: number },
-  lease: boolean,
-) {
-  const job = await loadSourceJob(ctx, args.projectId, args.jobId);
-  await hostedWriteProject(ctx, args.projectId, job.control.actor, job.authorityEpoch);
-  const row = await rowFor(ctx, args.projectId, args.jobId);
-  if (!row || sourceJobTerminal(job) || row.step !== args.step) return null;
-  invariant(
-    row.dispatch === canonicalPayload(sourceDispatch(args.projectId, job)),
-    'SOURCE_JOB_FENCED',
-    'Source step pins changed.',
-  );
-  if (job.jobKind !== 'register-state')
-    await authorizeSourceTransfer(
-      ctx,
-      { projectId: args.projectId, input: row.dispatch, executionId: row.executionId },
-      { lease, loaded: job },
-    );
-  else
-    invariant(
-      job.status === 'running' &&
-        job.executionId === row.executionId &&
-        (!lease || job.control.workerUntil > Date.now()),
-      'SOURCE_JOB_FENCED',
-      'Source execution changed or expired.',
-    );
-  return { job, row };
-}
 export const begin = sourceMutation({
-  args: { ...identity, step: v.number() },
+  args: { ...identity, step: v.number(), generation: v.optional(v.number()) },
   returns: v.union(v.string(), v.null()),
   handler: async (ctx, args) => {
-    const active = await activeStep(ctx, args);
+    const active = await activeStep(ctx, { ...args, generation: args.generation ?? 0 });
     if (!active) return null;
+    if (sourceRetryExpired(active)) {
+      await exhaustSourceExecution(ctx, args, active.row.lastFailure);
+      return null;
+    }
     const batch = active.row.batchId ? await ctx.db.get(active.row.batchId) : null;
     if (batch && batch.status !== 'done') return null;
     const locations = [];
@@ -231,6 +218,7 @@ export const begin = sourceMutation({
       });
     }
     return canonicalPayload({
+      generation: active.row.generation ?? 0,
       input: active.job.input,
       jobKind: active.job.jobKind,
       dispatch: active.row.dispatch,
@@ -245,6 +233,7 @@ export const commit = sourceMutation({
   args: {
     ...identity,
     step: v.number(),
+    generation: v.optional(v.number()),
     cursor: v.union(v.string(), v.null()),
     objects: v.array(sourceOutput),
     output: v.union(v.object({ sha256: v.string(), size: v.number() }), v.null()),
@@ -252,11 +241,17 @@ export const commit = sourceMutation({
   },
   returns: v.null(),
   handler: async (ctx, args) => {
-    const active = await activeStep(ctx, args);
+    const active = await activeStep(ctx, { ...args, generation: args.generation ?? 0 });
     if (!active) return null;
+    const terminal = !!args.output || !!args.failure;
+    // A terminal result may win the race with the watch, but expired work must
+    // never schedule another quantum or discard the retained failure context.
+    if (!terminal && sourceRetryExpired(active)) {
+      await exhaustSourceExecution(ctx, args, active.row.lastFailure);
+      return null;
+    }
     invariant(args.objects.length <= 100, 'SOURCE_JOB_INVALID', 'Commit source output in bounded windows.');
     await storeSourceOutputs(ctx, args.projectId, active.row.executionId, args.objects);
-    const terminal = !!args.output || !!args.failure;
     const callback = {
       ...JSON.parse(active.row.dispatch),
       executionId: active.row.executionId,
@@ -271,7 +266,17 @@ export const commit = sourceMutation({
     delete callback.input;
     delete callback.dispatchKey;
     await receiveConvexSourceJobCallback(ctx, args.projectId, callback);
-    await ctx.db.patch(active.row._id, { step: args.step + 1, cursor: args.cursor, batchId: undefined });
+    await ctx.db.patch(active.row._id, {
+      step: args.step + 1,
+      cursor: args.cursor,
+      batchId: undefined,
+      generation: undefined,
+      failedAttempts: undefined,
+      failedGeneration: undefined,
+      lastFailure: undefined,
+      lastFailureAt: undefined,
+      retryAt: undefined,
+    });
     if (terminal) {
       const kind = active.job.jobKind;
       if (kind !== 'register-state')
@@ -345,6 +350,7 @@ export const stage = sourceMutation({
   args: {
     ...identity,
     step: v.number(),
+    generation: v.optional(v.number()),
     objects: v.array(sourceOutput),
   },
   returns: v.null(),
@@ -353,6 +359,34 @@ export const stage = sourceMutation({
     invariant(active, 'SOURCE_JOB_FENCED', 'Source step advanced.');
     invariant(args.objects.length <= 100, 'SOURCE_JOB_INVALID', 'Stage source outputs in windows.');
     await storeSourceOutputs(ctx, args.projectId, active.row.executionId, args.objects);
+    return null;
+  },
+});
+
+export const failed = sourceMutation({
+  args: { ...identity, step: v.number(), generation: v.number(), cause: sourceFailure },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const active = await sourceStep(ctx, args, false);
+    if (
+      !active ||
+      args.generation !== (active.row.generation ?? 0) ||
+      active.row.failedGeneration === args.generation
+    )
+      return null;
+    const update = sourceFailureUpdate(
+      active.row,
+      sourceFailureSchema.parse(args.cause),
+      active.job.control.retryUntil,
+    );
+    await ctx.db.patch(active.row._id, update);
+    if (update.failedAttempts >= SOURCE_MAX_FAILED_ATTEMPTS || sourceRetryExpired(active)) {
+      await exhaustSourceExecution(ctx, args, update.lastFailure);
+      await drainSourcePool(ctx, async batch => {
+        const live = await activeStep(ctx, batch);
+        return !!live && live.row.batchId === batch._id;
+      });
+    }
     return null;
   },
 });

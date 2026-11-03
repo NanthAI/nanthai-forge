@@ -80,7 +80,72 @@ records the result, releases the slot and starts queued work. The last child
 schedules the parent join. A finished child's action can briefly overlap the
 next action while returning its completion reply; it performs no more source
 work. There is no join poll, idle loop or cron. Failed scheduled actions resume
-the same retained task only on an existing explicit recovery trigger.
+the same retained task through the existing pool reschedule; explicit recovery
+also reconciles a stopped action whose failure report never committed.
+
+Source acquisition and validation have separate failure boundaries. Header/body
+timeouts, connection resets, failed progress reads and unknown nested RPC failures
+fail the scheduled action without committing its in-flight cursor or an invalid
+State summary. HTTP 408/425/429 and 5xx source reads/writes, and transient HEAD
+verification of worker output, follow that same path. Proven missing objects,
+wrong hash/size, malformed native States and corrupt compressed metadata retain
+their deterministic codes. A prefetch hint's deterministic error matters only
+if traversal actually requires that State.
+
+Repair renews the original execution only after rechecking its authority and
+dispatch pins. A lease-fenced batch retains completed sibling outputs and
+unfinished durable prefixes; only unfinished children advance generation. Old
+in-progress actions keep their computation slots until the scheduler reports
+them stopped, and their late generations cannot complete the repaired child.
+The existing pending-finish watchdog wakes after 120 seconds to reconcile that
+same source work without a client replay. Direct save/compose/sync callers follow
+the original-operation continuation. No additional timer, poller or execution is
+created, and terminal operation receipts remain immutable.
+
+Each bounded quantum has a persisted failed-attempt count, separate from its
+successful continuation generation and the source job's business `attempt`.
+Failure accounting and pool rescheduling share the task-row write. Replacement
+child actions back off by about 2, 4, 8, 16 and 32 seconds; the backoff function tops out
+at 60 seconds. The sixth failed attempt settles rather than scheduling another
+replacement. A successful committed continuation resets the next quantum's
+failure count. Duplicate or late failure reports cannot consume another attempt
+or replace a current generation. Unrelated pool drains use the same accounting;
+completed sibling outputs and acknowledged prefixes remain retained.
+
+Admitted finish compositions also retain the existing 30-minute watch deadline,
+pinned to that compose operation's first attempt. Replaying a failing quantum
+never extends it. A fresh main-race compose uses its own retained first-attempt
+time, independently of the cohort's creation time or a previous check's age.
+Backoff never schedules a computation beyond the current compose deadline. The
+deadline bounds retries and new work: pool drains cannot start queued work after
+it, and a successful quantum committed at or after
+it cannot fork children, continue a child, or schedule a successor or parent join.
+It instead settles through the existing exhaustion path. A success that completes
+the whole source job uses first-committer-wins semantics: if its terminal result
+commits before the watch settles that job, completion and landing may proceed even
+after the deadline. If the watch settles first, later replies remain fenced and
+cannot replace its outcome. At the deadline the existing watch settles unsettled
+source/compose/finish work, rather than dropping its last wake. Reaching either
+the failed-attempt cap or the watch deadline produces the
+exact terminal code `SOURCE_RETRY_EXHAUSTED`. The source outcome retains the last
+bounded sanitized cause (stage, exception class/code, HTTP status and elapsed
+time), selected by recorded failure time across slots; an already terminal job's
+cause stays fixed. The original pins and execution identity remain. Stopped and pending slots
+are released; an already-running computation keeps its slot until it stops or
+returns its fenced completion. Other queued projects can then use the pool.
+The normal terminal finish response advertises the standard new-attempt retry
+continuation above; replay of the failed operation remains immutable.
+
+Failed actions emit bounded structured context to retained Convex logs: job,
+step, task/generation, stage, exception class/code, available object digest,
+elapsed time and HTTP status. These diagnostics omit source bytes, arbitrary
+exception messages, signed URLs, headers and response payloads. Escaping action
+rejections are opaque too: they carry the approved bounded classification without
+the original message, stack or cause. Proven metadata schema failures settle with
+their established deterministic code, including during progress persistence and
+staging. Permanent output PUT/HEAD failures retain `R2_UPLOAD_FAILED` or
+`R2_VERIFY_FAILED`; transient storage I/O remains repairable. These paths add no
+healthy-path control call or database write.
 
 Compose and sync journal native per-file results in bounded object/byte windows.
 Replaying assembly uses those immutable outcomes, preserving recursive merge

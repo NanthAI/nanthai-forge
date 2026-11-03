@@ -1,3 +1,4 @@
+import { sourceRetryFailureMessage } from '../src/hosted-source-retry';
 import { sourceProgress } from './projectSourceProgress';
 // SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
@@ -59,6 +60,7 @@ export async function submitHostedCompose(
       operationId = state.jobOperationId,
       payload = {
         jobKind: 'compose',
+        ...(state.retryUntil === undefined ? {} : { retryUntil: state.retryUntil }),
         input: inputPin,
         inputDigest: inputPin.sha256,
         ...sourceWorkerPlan(process.env),
@@ -154,7 +156,10 @@ export const resultDownload = internalMutation({
             status: 'failed',
             error: {
               code: job.control.failureCode ?? 'SOURCE_JOB_CANCELLED',
-              message: 'The original source job did not complete; its composition inputs is retained.',
+              message:
+                job.control.failureCode === 'SOURCE_RETRY_EXHAUSTED'
+                  ? sourceRetryFailureMessage(job.control.failureCause)
+                  : 'The original source job did not complete; its composition inputs is retained.',
             },
           },
         },

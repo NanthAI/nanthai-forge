@@ -1,3 +1,4 @@
+import { sourceRetryFailureMessage } from '../src/hosted-source-retry';
 // SPDX-License-Identifier: Apache-2.0
 import type { QueryCtx, MutationCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
@@ -25,7 +26,7 @@ export async function sourceProgress(
     job.status === 'completed'
       ? 'source-publication'
       : step
-        ? `source-step:${job.status === 'failed' ? Math.max(0, step.step - 1) : step.step}`
+        ? `source-step:${job.status === 'failed' && control.failureCode !== 'SOURCE_RETRY_EXHAUSTED' ? Math.max(0, step.step - 1) : step.step}`
         : `source-${job.jobKind}`;
   const deadline =
     job.status === 'completed' ? Date.parse(job.at) + control.workerLeaseMs : control.workerUntil;
@@ -40,7 +41,10 @@ export async function sourceProgress(
         code:
           control.failureCode ??
           (job.status === 'cancelled' ? 'SOURCE_JOB_CANCELLED' : 'SOURCE_WORKER_FAILED'),
-        message: 'The original source job stopped; its inputs and operation are retained.',
+        message:
+          control.failureCode === 'SOURCE_RETRY_EXHAUSTED'
+            ? sourceRetryFailureMessage(control.failureCause)
+            : 'The original source job stopped; its inputs and operation are retained.',
       },
     };
   if (job.status === 'completed')

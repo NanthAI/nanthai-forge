@@ -20,6 +20,7 @@ const progress = z
   .strict();
 export const composeStateSchema = z
   .object({
+    retryUntil: z.number().int().nonnegative().optional(),
     semanticPlan: semanticPlanSchema.optional(),
     ownerInputs: z.boolean().optional(),
     /** Every selected input and speculative prefix contributed authenticated proof. */

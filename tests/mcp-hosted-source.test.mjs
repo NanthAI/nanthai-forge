@@ -231,3 +231,25 @@ test('malformed selected State metadata fails as a protocol error without return
     'HOSTED_PROTOCOL_INVALID',
   );
 });
+
+test('selected State decoding and path failures keep the public protocol code', async t => {
+  for (const content of [
+    '{',
+    JSON.stringify({
+      schema: 1,
+      kind: 'forge-source-state',
+      parents: [],
+      files: [{ path: '.forge/private', blob: 'a'.repeat(64), mode: 'file' }],
+      message: '',
+      at: '2026-01-01T00:00:00.000Z',
+    }),
+  ]) {
+    const s = fixture(t),
+      bytes = Buffer.from(content);
+    s.lane.head = digest(bytes);
+    s.objects.set(s.lane.head, bytes);
+    const result = await s.call('forge_source', { laneId: s.lane.laneId, file: 'a.ts' });
+    assert.equal(result.error.code, 'HOSTED_PROTOCOL_INVALID');
+    assert.equal(result.results, undefined);
+  }
+});

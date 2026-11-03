@@ -2,6 +2,13 @@
 import { makeFunctionReference } from 'convex/server';
 import type { MutationCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
+import {
+  exhaustSourceExecution,
+  sourceFailureUpdate,
+  sourceRetryExpired,
+} from './projectConvexSourceFailure';
+import { sourceStep } from './projectConvexSourceActive';
+import { SOURCE_MAX_FAILED_ATTEMPTS, unknownSourceFailure } from '../src/hosted-source-retry';
 import { invariant } from '../src/errors';
 export type SourceBatchValidator = (batch: Doc<'projectSourceBatches'>) => Promise<boolean>;
 export function sourceParallelism(env: Record<string, string | undefined> = process.env) {
@@ -14,15 +21,30 @@ export function sourceParallelism(env: Record<string, string | undefined> = proc
   return value;
 }
 const taskRef = makeFunctionReference<'action'>('projectConvexSourceTask:run');
-export async function scheduleSourceTask(ctx: MutationCtx, task: Doc<'projectSourceTasks'>) {
-  const scheduledId = await ctx.scheduler.runAfter(0, taskRef, {
-    projectId: task.projectId,
-    jobId: task.jobId,
-    step: task.step,
-    index: task.index,
-    generation: task.generation,
+export async function scheduleSourceTask(
+  ctx: MutationCtx,
+  task: Doc<'projectSourceTasks'>,
+  retry = false,
+  update: Partial<ReturnType<typeof sourceFailureUpdate>> = {},
+) {
+  const generation = task.generation + (retry ? 1 : 0);
+  const scheduledId = await ctx.scheduler.runAfter(
+    Math.max(0, (update.retryAt ?? task.retryAt ?? 0) - Date.now()),
+    taskRef,
+    {
+      projectId: task.projectId,
+      jobId: task.jobId,
+      step: task.step,
+      index: task.index,
+      generation,
+    },
+  );
+  await ctx.db.patch(task._id, {
+    status: 'running',
+    scheduledId,
+    ...(retry ? { generation } : {}),
+    ...update,
   });
-  await ctx.db.patch(task._id, { status: 'running', scheduledId });
   return scheduledId;
 }
 export async function sourcePool(ctx: MutationCtx) {
@@ -51,13 +73,24 @@ const live = (state?: string) => state === 'pending' || state === 'inProgress';
 export async function drainSourcePool(ctx: MutationCtx, check: SourceBatchValidator) {
   const pool = await sourcePool(ctx),
     active: SourceSlot[] = [],
-    // The drain writes no job, project or step row, so one answer per batch holds
-    // for the whole transaction; filling several slots from one batch checks it once.
+    // Healthy drains reuse one authority answer per batch. Exhaustion fences
+    // its batch before further queue selection; other batch answers still hold.
     checked = new Map<Id<'projectSourceBatches'>, Promise<boolean>>();
   const validate: SourceBatchValidator = batch => {
     let answer = checked.get(batch._id);
     if (!answer) checked.set(batch._id, (answer = check(batch)));
     return answer;
+  };
+  // Exhaustion can cancel slots already accumulated earlier in this drain.
+  // Read its bounded pool result only on that terminal path, so the final write
+  // cannot restore cancelled reservations or strand another project's queue.
+  const removeReleased = async (batchId: Id<'projectSourceBatches'>) => {
+    const retained = new Set((await sourcePool(ctx)).active.map(slotTask));
+    for (let i = active.length - 1; i >= 0; i--) {
+      const entry = active[i]!;
+      if (typeof entry !== 'string' && entry.batch === batchId && !retained.has(entry.task))
+        active.splice(i, 1);
+    }
   };
   for (const entry of pool.active) {
     const id = slotTask(entry);
@@ -85,8 +118,13 @@ export async function drainSourcePool(ctx: MutationCtx, check: SourceBatchValida
       active.push(slot(task, task.scheduledId!));
       continue;
     }
-    if (await validate(batch)) active.push(slot(task, await scheduleSourceTask(ctx, task)));
-    else {
+    // A stopped action may have lost a mutation reply. Fence its late completion
+    // before reserving another action for the same durable quantum.
+    if (await validate(batch)) {
+      const scheduledId = await retrySourceTask(ctx, task, unknownSourceFailure('scheduled-task'), true);
+      if (scheduledId) active.push(slot(task, scheduledId));
+      else await removeReleased(batch._id);
+    } else {
       await ctx.db.patch(batch._id, { status: 'fenced' });
       await ctx.db.patch(id, { status: 'done', failure: 'SOURCE_JOB_FENCED' });
     }
@@ -109,14 +147,32 @@ export async function drainSourcePool(ctx: MutationCtx, check: SourceBatchValida
     }
     const task = await ctx.db
       .query('projectSourceTasks')
-      .withIndex('by_batch_and_index', q => q.eq('batchId', batch._id).eq('index', batch.next))
+      .withIndex('by_batch_and_index', q =>
+        q.eq('batchId', batch._id).eq('index', batch.retryIndices?.[0] ?? batch.next),
+      )
       .unique();
     invariant(task?.status === 'queued', 'SOURCE_JOB_INVALID', 'Queued source work changed.');
+    if (
+      (task.failedAttempts ?? 0) >= SOURCE_MAX_FAILED_ATTEMPTS ||
+      sourceRetryExpired({ job: { control: { retryUntil: task.retryUntil } } })
+    ) {
+      await exhaustSourceExecution(ctx, task, task.lastFailure);
+      await removeReleased(batch._id);
+      continue;
+    }
     active.push(slot(task, await scheduleSourceTask(ctx, task)));
-    await ctx.db.patch(batch._id, {
-      next: batch.next + 1,
-      status: batch.next + 1 === batch.total ? 'waiting' : 'queued',
-    });
+    await ctx.db.patch(
+      batch._id,
+      batch.retryIndices
+        ? {
+            retryIndices: batch.retryIndices.slice(1),
+            status: batch.retryIndices.length === 1 ? 'waiting' : 'queued',
+          }
+        : {
+            next: batch.next + 1,
+            status: batch.next + 1 === batch.total ? 'waiting' : 'queued',
+          },
+    );
   }
   await ctx.db.patch(pool._id, { active });
   if (
@@ -138,24 +194,83 @@ export async function releaseSourceTask(ctx: MutationCtx, id: Id<'projectSourceT
   await ctx.db.patch(pool._id, { active: pool.active.filter(value => slotTask(value) !== id) });
 }
 /** Recovery of a batch fenced only by an expired lease, after the caller renewed
- * the same execution. Every child restarts at a new generation, so replies from
- * the fenced attempt are ignored. Unfinished children keep their durable progress
- * (completed ones already cleared it). Bounded by the fork limit of 800. */
+ * the same execution. Only unfinished/fenced children change generation; completed
+ * outputs and durable prefixes survive. Old in-progress runs keep their slots
+ * until the scheduler confirms they stopped. Bounded by the fork limit of 800. */
 export async function requeueSourceBatch(ctx: MutationCtx, batch: Doc<'projectSourceBatches'>) {
   const tasks = await ctx.db
     .query('projectSourceTasks')
     .withIndex('by_batch_and_index', q => q.eq('batchId', batch._id))
     .take(batch.total);
   const ids = new Set(tasks.map(task => task._id)),
-    pool = await sourcePool(ctx);
-  await ctx.db.patch(pool._id, { active: pool.active.filter(value => !ids.has(slotTask(value))) });
-  for (const task of tasks)
+    pool = await sourcePool(ctx),
+    held: SourceSlot[] = [],
+    retryIndices: number[] = [];
+  let completed = 0,
+    failure: string | null = null;
+  for (const task of tasks) {
+    if (task.status === 'done' && task.failure !== 'SOURCE_JOB_FENCED') {
+      completed++;
+      failure ??= task.failure;
+      continue;
+    }
+    const scheduled = task.scheduledId ? await ctx.db.system.get(task.scheduledId) : null;
+    // A fenced begin already released its slot and does no source work while
+    // returning. Do not reclaim that slot from another project's live action.
+    const running = task.status === 'running' && scheduled?.state.kind === 'inProgress';
+    if (running) held.push(slot(task, task.scheduledId!));
+    else {
+      if (scheduled?.state.kind === 'pending') await ctx.scheduler.cancel(task.scheduledId!);
+      retryIndices.push(task.index);
+    }
+    const failed =
+      task.status === 'running' && (!scheduled || ['failed', 'canceled'].includes(scheduled.state.kind));
+    const update: Partial<ReturnType<typeof sourceFailureUpdate>> = failed
+      ? sourceFailureUpdate(task, task.lastFailure ?? unknownSourceFailure('scheduled-task'), task.retryUntil)
+      : {};
+    if (failed && update.failedAttempts! >= SOURCE_MAX_FAILED_ATTEMPTS) {
+      await ctx.db.patch(task._id, update);
+      await exhaustSourceExecution(ctx, task, update.lastFailure);
+      return;
+    }
     await ctx.db.patch(task._id, {
-      status: 'queued',
+      ...update,
+      status: running ? 'running' : 'queued',
       generation: task.generation + 1,
       output: null,
       failure: null,
-      scheduledId: undefined,
+      ...(running ? {} : { scheduledId: undefined }),
     });
-  await ctx.db.patch(batch._id, { status: 'queued', next: 0, completed: 0, failure: null });
+  }
+  await ctx.db.patch(pool._id, {
+    active: [...pool.active.filter(value => !ids.has(slotTask(value))), ...held],
+  });
+  await ctx.db.patch(batch._id, {
+    status: retryIndices.length ? 'queued' : 'waiting',
+    next: batch.total,
+    retryIndices,
+    completed,
+    failure,
+  });
+}
+
+/** The only replacement path for a failed child, including failures discovered
+ * by unrelated pool activity. Scheduling and accounting share one row write. */
+export async function retrySourceTask(
+  ctx: MutationCtx,
+  task: Doc<'projectSourceTasks'>,
+  cause = unknownSourceFailure('scheduled-task'),
+  validated = false,
+) {
+  if (!validated && !(await sourceStep(ctx, task, false))) return null;
+  const update = sourceFailureUpdate(task, cause, task.retryUntil);
+  if (
+    update.failedAttempts >= SOURCE_MAX_FAILED_ATTEMPTS ||
+    sourceRetryExpired({ job: { control: { retryUntil: task.retryUntil } } })
+  ) {
+    await ctx.db.patch(task._id, update);
+    await exhaustSourceExecution(ctx, task, update.lastFailure, task._id);
+    return null;
+  }
+  return scheduleSourceTask(ctx, task, true, update);
 }

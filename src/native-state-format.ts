@@ -2,7 +2,7 @@ import { conversationSchema } from './agent-edit-types.js';
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
 import { safeRelative } from './safe-relative.js';
-import { invariant } from './errors.js';
+import { ForgeError, invariant } from './errors.js';
 export const oid = z.string().regex(/^[0-9a-f]{64}$/);
 export const gitImport = z
   .object({
@@ -45,7 +45,13 @@ export function overlappingPaths(files: NativeFile[]): string[] {
   return [...conflicts].sort();
 }
 export function parseNativeState(bytes: Uint8Array): NativeState {
-  const state = stateSchema.parse(JSON.parse(new TextDecoder('utf-8', { ignoreBOM: true }).decode(bytes)));
+  let state: NativeState;
+  try {
+    state = stateSchema.parse(JSON.parse(new TextDecoder('utf-8', { ignoreBOM: true }).decode(bytes)));
+  } catch (error) {
+    if (!(error instanceof SyntaxError || error instanceof z.ZodError)) throw error;
+    throw new ForgeError('INVALID_NATIVE_SOURCE', 'Native source manifest encoding is invalid.');
+  }
   invariant(
     new Set(state.files.map(file => file.path)).size === state.files.length &&
       state.files.every(

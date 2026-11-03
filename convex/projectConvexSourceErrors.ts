@@ -25,9 +25,13 @@ export const sourceMutation = ((config: { handler: (ctx: unknown, args: unknown)
   } as never)) as unknown as typeof internalMutation;
 /** The domain failure behind `error`, or null for platform failures, which stay retryable. */
 export function sourceDomainError(error: unknown): ForgeError | null {
-  if (error instanceof ForgeError) return error;
+  if (error instanceof ForgeError)
+    return /^EXCHANGE_REQUEST_(FAILED|TIMEOUT)$/.test(error.code) ? null : error;
   const data = error instanceof ConvexError ? (error.data as { code?: unknown; message?: unknown }) : null;
-  return data && typeof data.code === 'string' && typeof data.message === 'string'
+  return data &&
+    typeof data.code === 'string' &&
+    typeof data.message === 'string' &&
+    !/^EXCHANGE_REQUEST_(FAILED|TIMEOUT)$/.test(data.code)
     ? new ForgeError(data.code, data.message)
     : null;
 }
