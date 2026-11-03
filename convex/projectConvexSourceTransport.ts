@@ -45,7 +45,10 @@ export function convexSourceTransport(
           windows,
         })
         .catch(error => {
-          if (sourceDomainError(error)) throw error;
+          // Nested mutations carry domain codes in ConvexError.data. Summary
+          // acquisition needs the reconstructed ForgeError for its narrow allowlist.
+          const domain = sourceDomainError(error);
+          if (domain) throw domain;
           throw new SourceIoError(error, 'source-descriptors', ids.length === 1 ? ids[0]! : null);
         }),
     );
@@ -61,6 +64,38 @@ export function convexSourceTransport(
   const io: StepTransport = {
     publishRecipe: async (object, recipe) => {
       outputs.push({ ...object, recipe });
+    },
+    probeStates: async (ids, hints) => {
+      const pending = ids.filter(id => !locations.has(id));
+      if (!pending.length) return { refs: ids.map(id => locations.get(id)!.descriptor), unavailable: [] };
+      const result: { rows: ObjectLocation[]; unavailable: string[] } = JSON.parse(
+        await ctx
+          .runMutation(reference('projectConvexSourceObjects:resolve'), {
+            ...input,
+            digests: pending,
+            ancestry: !!hints,
+            known: hints?.known ?? [],
+            probe: true,
+            ...(hints ? { windows: hints.windows } : {}),
+          })
+          .catch(error => {
+            const domain = sourceDomainError(error);
+            if (domain) throw domain;
+            throw new SourceIoError(error, 'source-descriptors', null);
+          }),
+      );
+      for (const row of result.rows) locations.set(row.descriptor.object.sha256, row);
+      const remaining = pending.filter(id => !locations.has(id) && !result.unavailable.includes(id));
+      invariant(remaining.length < pending.length, 'SOURCE_UNAVAILABLE', 'Object window made no progress.');
+      // As with ordinary resolution, complete the byte-bounded descriptor pages
+      // before handing the frontier to sourceWindows. Hints warm only this
+      // action's location cache; they never select byte reads or supply edges.
+      const rest = remaining.length ? await io.probeStates!(remaining) : null;
+      const unavailable = [...result.unavailable, ...(rest?.unavailable ?? [])];
+      return {
+        refs: ids.filter(id => !unavailable.includes(id)).map(id => locations.get(id)!.descriptor),
+        unavailable,
+      };
     },
     describeBatch: ids => resolve(ids),
     ancestry: (ids, known, windows = 1) => resolve(ids, true, known, windows),

@@ -6,6 +6,7 @@ import { MemoryMergeSource } from '../dist/hosted-source-memory.js';
 import { parseNativeState } from '../dist/native-state-format.js';
 import { digest } from '../dist/hash.js';
 import { saveBytes } from '../dist/hosted-save.js';
+import { ancestryFixture } from './source-ancestry-fixture.mjs';
 
 // Retained pre-fix reducer, to measure the same source/merge work on both sides.
 function oldCut(parents, pending) {
@@ -138,3 +139,123 @@ test('N=10 composition: verified root-relative cut avoids growing ancestry and p
     }),
   );
 });
+
+test('N=10 asymmetric descendants from different main versions match complete verified ancestry', async t => {
+  const reports = [];
+  for (const depth of [0, 10, 400, 800])
+    for (const reverse of [false, true]) {
+      const s = ancestryFixture(),
+        historical = new Set();
+      let old;
+      for (let i = 0; i < depth; i++) {
+        old = s.state([], old ? [old] : [], `old-${i}`);
+        historical.add(old);
+      }
+      const base = s.state([s.file('root', 'base\n')], old ? [old] : [], 'C');
+      const files = i => [
+        s.file('root', 'base\n'),
+        ...Array.from({ length: i }, (_, j) => s.file(`member-${j}`, `change ${j}\n`)),
+      ];
+      const a = s.state(files(1), [base], 'A'),
+        b = s.state([s.file('root', 'base\n'), s.file('other', 'other\n')], [base], 'B');
+      const main = s.state([...files(1), s.file('other', 'other\n')], reverse ? [b, a] : [a, b], 'M');
+      // Normal Lanes may start from any accepted main, including descendants
+      // of one parent of the two-parent main selected for this composition.
+      const branches = Array.from({ length: 10 }, (_, i) =>
+        s.state([...files(1), s.file(`lane-${i}`, `lane ${i}\n`)], [a], `D${i}`),
+      );
+      const initial = s.plan(main, reverse ? branches.toReversed() : branches),
+        oracle = await s.compose(initial, { complete: true }),
+        selected = await s.compose(initial);
+      assert.deepEqual(selected.output, oracle.output);
+      assert.deepEqual(selected.headBytes, oracle.headBytes);
+      assert.equal(selected.cursor.ancestryBoundary, base);
+      const manifestReads = selected.graphReads.filter(id => s.parents[id]).length;
+      assert.equal(manifestReads, 13, `depth=${depth}`);
+      assert(!selected.graphReads.some(id => historical.has(id) || id === base));
+      reports.push({ depth, reverse, manifestReads, olderReads: 0 });
+    }
+  t.diagnostic(JSON.stringify({ reports }));
+});
+
+test('persisted Q/A-chain composition remains history-independent across cursor and parent orders', async t => {
+  const reports = [];
+  for (const depth of [0, 10, 400, 800])
+    for (const reverse of [false, true])
+      for (const preloaded of [false, true]) {
+        const s = ancestryFixture(),
+          historical = new Set();
+        let old;
+        for (let i = 0; i < depth; i++) {
+          old = s.state([], old ? [old] : [], `old-${i}`);
+          historical.add(old);
+        }
+        const c = s.state([s.file('f', 'base\n')], old ? [old] : [], 'C'),
+          a = s.state([s.file('f', 'A\n')], [c], 'A'),
+          q = s.state([s.file('f', 'Q\n')], [a], 'Q'),
+          b = s.state([s.file('f', 'B\n')], [c], 'B'),
+          m = s.state([s.file('f', 'main\n')], reverse ? [b, q] : [q, b], 'M'),
+          d = s.state([s.file('f', 'lane\n')], [q], 'D'),
+          initial = s.plan(reverse ? d : m, [reverse ? m : d]);
+        if (preloaded) {
+          initial.parents[q] = [a];
+          initial.phase = 'graph';
+          initial.head = initial.plan.base.head;
+          initial.selections = JSON.parse(s.objects.get(initial.plan.inputs.root.sha256)).entries;
+          initial.inventory[m] = s.ref(m);
+          initial.inventory[d] = s.ref(d);
+          initial.states = [m, d, a];
+        }
+        const oracle = await s.compose(initial, { complete: true }),
+          selected = await s.compose(initial);
+        assert.deepEqual(selected.output, oracle.output);
+        assert.deepEqual(selected.headBytes, oracle.headBytes);
+        assert.equal(selected.cursor.ancestryBoundary, c);
+        assert(!selected.graphReads.some(id => historical.has(id)));
+        const manifestReads = selected.graphReads.filter(id => s.parents[id]).length;
+        assert.equal(manifestReads, preloaded ? 5 : 6);
+        reports.push({ depth, reverse, preloaded, manifestReads });
+      }
+  t.diagnostic(JSON.stringify({ reports, historicalReads: 0 }));
+});
+
+for (const kind of ['clean', 'conflict', 'criss-cross', 'closed-roots', 'restore-base'])
+  test(`persisted ${kind} composition matches the complete ancestry oracle with absent/empty/incomplete/misordered hints`, async () => {
+    const s = ancestryFixture(),
+      common = s.state([s.file('f', 'a\nb\nc\nd\ne\nf\ng\n')], [], 'common'),
+      a = s.state([s.file('f', 'A\nb\nc\nd\ne\nf\ng\n')], [common], 'a'),
+      b = s.state([s.file('f', 'a\nb\nc\nd\ne\nf\nG\n')], [common], 'b');
+    const left = s.state(
+      [s.file('f', 'A\nb\nC\nd\ne\nf\nG\n')],
+      kind === 'closed-roots' ? [] : [a, b],
+      'left',
+    );
+    const right = s.state(
+      [s.file('f', kind === 'clean' ? 'A\nb\nc\nd\nE\nf\nG\n' : 'A\nb\nD\nd\ne\nf\nG\n')],
+      kind === 'closed-roots' ? [] : kind === 'criss-cross' ? [b, a] : [a],
+      'right',
+    );
+    const initial = s.plan(left, [right], kind === 'restore-base' ? common : undefined);
+    // Verified unrelated prefetch forces the paged-hint seam without changing
+    // the selected roots. Hints themselves remain untrusted and incomplete.
+    for (let i = 0; i < 32; i++) initial.parents[s.state([], [], `prefetch-${i}`)] = [];
+    if (kind === 'closed-roots') {
+      await assert.rejects(s.compose(initial, { complete: true }), { code: 'NATIVE_MERGE_BASE_UNKNOWN' });
+      for (const hintMode of ['absent', 'empty', 'incomplete', 'misordered'])
+        await assert.rejects(s.compose(initial, { hintMode }), { code: 'NATIVE_MERGE_BASE_UNKNOWN' });
+      return;
+    }
+    const oracle = await s.compose(initial, { complete: true });
+    for (const hintMode of ['absent', 'empty', 'incomplete', 'misordered']) {
+      const before = s.hints.length;
+      const selected = await s.compose(initial, { hintMode });
+      assert.deepEqual(selected.output, oracle.output, hintMode);
+      assert.deepEqual(selected.headBytes, oracle.headBytes, hintMode);
+      assert.deepEqual(JSON.parse(selected.output).result.status, kind === 'clean' ? 'clean' : 'conflict');
+      assert.equal(
+        s.hints.length > before,
+        hintMode !== 'absent',
+        'exercise the actual probe/cache hint seam',
+      );
+    }
+  });

@@ -31,7 +31,7 @@ export type SourceTaskProgress = {
   calculations?: SourceCalculationResult[];
   scan?: { prefix: string; skip: boolean; found: boolean };
 };
-async function stateSummary(
+export async function stateSummary(
   ref: WorkerObject,
   files: boolean,
   io: StepTransport,
@@ -232,12 +232,19 @@ export function applySourceFanout(
       results.flatMap(result => result.states.map(state => [state.id, state] as const)),
     ),
     pending = [...c.states],
-    remaining = new Set<string>();
-  while (pending.length) {
-    const id = pending.pop()!;
+    remaining = new Set<string>(),
+    graph = c.phase === 'graph';
+  let position = 0;
+  while (graph ? position < pending.length : pending.length) {
+    const id = graph ? pending[position++]! : pending.pop()!;
     if (c.parents[id]) continue;
     const state = summaries.get(id);
     if (!state) {
+      remaining.add(id);
+      continue;
+    }
+    if (graph && state.error) {
+      (c.ancestryFailures ??= {})[id] = state.error;
       remaining.add(id);
       continue;
     }

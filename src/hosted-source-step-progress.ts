@@ -11,6 +11,7 @@ const fields = [
   'queue',
   'seen',
   'parents',
+  'ancestryFailures',
   'selections',
   'calculations',
   'composeBases',

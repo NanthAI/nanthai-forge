@@ -17,8 +17,8 @@ import { buildHostedComposeState, changedPaths, type ComposeBases } from './host
 import { buildHostedSyncState } from './hosted-sync-worker.js';
 import { readJson, sourceStepBytes, full, type StepMeter } from './hosted-source-step-verify.js';
 import type { SourceStepCursor, StepTransport } from './hosted-source-step.js';
-import { sourceWindows } from './hosted-source-fanout.js';
-import { invariant } from './errors.js';
+import { sourceWindows, stateSummary } from './hosted-source-fanout.js';
+import { ForgeError, invariant } from './errors.js';
 import { sourceValidation } from './hosted-source-validation.js';
 import { sourceAncestryCut, sourceAncestryFrontier } from './hosted-source-ancestry-cut.js';
 import type { WorkerObject } from './hosted-source-worker-format.js';
@@ -173,31 +173,32 @@ export async function prepareMergeStep(c: SourceStepCursor, io: StepTransport, m
     return;
   }
   if (full(m)) return;
-  // Derived parent rows are prefetch hints only. Every returned manifest is
-  // hash verified and its actual parents extend the frontier, even on gaps.
-  const frontier = sourceAncestryFrontier(c.parents, c.states, roots);
-  const selected = new Set(frontier),
-    deferred = c.states.filter(id => !selected.has(id));
+  const readable = c.states.filter(id => !c.ancestryFailures?.[id]);
+  if (!readable.length) {
+    const id = c.states[0]!;
+    throw new ForgeError(c.ancestryFailures![id]!, 'Required source State could not be verified.');
+  }
+  const frontier = sourceAncestryFrontier(c.parents, readable, roots).slice(0, 100);
+  // Descriptors are resolved by page. Deeper derived hints cannot enter a
+  // breadth-first byte window or become a dependency before a nearer branch.
+  invariant(io.describeBatch, 'SOURCE_WORKER_UNAVAILABLE', 'Resolve ancestry in windows.');
   let refs: WorkerObject[];
-  if (io.ancestry && Object.keys(c.parents).length >= 32)
-    refs = await io.ancestry(
-      frontier.slice(0, 100),
-      [...Object.keys(c.parents), ...deferred],
-      io.fanout ? 4 : 1,
+  if (io.probeStates) {
+    const probes = await io.probeStates(
+      frontier,
+      Object.keys(c.parents).length >= 32
+        ? { known: Object.keys(c.parents), windows: io.fanout && frontier.length > 4 ? 4 : 1 }
+        : undefined,
     );
-  else {
-    // Nearby branches usually meet after a few verified frontiers. Reading a
-    // 400-State hint window first can cross that common cut and transfer the
-    // whole retained history before we can prove it unnecessary. Deep graphs
-    // retain the existing paged hint traversal after this bounded local search.
-    invariant(io.describeBatch, 'SOURCE_WORKER_UNAVAILABLE', 'Resolve ancestry in windows.');
-    refs = await io.describeBatch(frontier.slice(0, 100));
-  }
-  if (deferred.length) refs = refs.filter(ref => !deferred.includes(ref.object.sha256));
-  if (!refs.length) {
-    invariant(io.describeBatch, 'SOURCE_WORKER_UNAVAILABLE', 'Resolve the selected ancestry frontier.');
-    refs = await io.describeBatch(frontier.slice(0, 100));
-  }
+    refs = probes.refs;
+    const ids = [...refs.map(ref => ref.object.sha256), ...probes.unavailable];
+    invariant(
+      ids.length > 0 && new Set(ids).size === ids.length && ids.every(id => frontier.includes(id)),
+      'SOURCE_HASH_MISMATCH',
+      'Ancestry descriptor page changed its frontier.',
+    );
+    for (const id of probes.unavailable) (c.ancestryFailures ??= {})[id] = 'SOURCE_UNAVAILABLE';
+  } else refs = await io.describeBatch(frontier);
   const windows = sourceWindows(refs);
   if (io.fanout && windows.length > 1) {
     io.fanout({
@@ -218,22 +219,23 @@ export async function prepareMergeStep(c: SourceStepCursor, io: StepTransport, m
     bytes += ref.object.size;
   }
   if (!window.length) {
-    m.yielded = true;
+    if (refs.length) m.yielded = true;
     return;
   }
   await io.prepareRead?.(window.filter(r => !r.recipe).map(r => r.object));
-  const source = new MemoryMergeSource({}),
-    reader = new MemorySourceReader(source, io);
   for (const ref of window) {
-    const state = parseNativeState(await reader.bytes(ref));
-    c.parents[ref.object.sha256] = state.parents;
-    c.states.push(...state.parents);
-    // Only the selected tips need their descriptors in later calculations.
-    source.objects.clear();
+    const state = await stateSummary(ref, false, io);
+    if (state.error) (c.ancestryFailures ??= {})[state.id] = state.error;
+    else {
+      c.parents[state.id] = state.parents;
+      c.states.push(...state.parents);
+    }
   }
   c.states = [...new Set(c.states)].filter(id => !c.parents[id]);
-  if (!c.states.length) c.phase = 'compute';
+  // Re-enter the proof even when the last window closed the frontier. A
+  // prefetched closed boundary still belongs in the explicit cut record.
 }
+
 export async function computeMergeStep(
   c: SourceStepCursor,
   io: StepTransport,

@@ -36,6 +36,12 @@ import {
 } from './hosted-source-merge-journal.js';
 import { prepareMergeStep, computeMergeStep } from './hosted-source-step-merge.js';
 export interface StepTransport extends SourceWorkerTransport {
+  /** One descriptor page; unavailable graph probes stay pending until the cut
+   * or the exact merge proves whether their bytes are needed. */
+  probeStates?(
+    ids: string[],
+    hints?: { known: string[]; windows: number },
+  ): Promise<{ refs: WorkerObject[]; unavailable: string[] }>;
   fanout?(plan: SourceFanout): void;
   ancestry?(roots: string[], known: string[], windows?: number): Promise<WorkerObject[]>;
 }
@@ -57,6 +63,7 @@ export type SourceStepCursor = {
   parents: Record<string, string[]>;
   /** Proven common frontier; older history cannot contain a maximal merge base. */
   ancestryBoundary?: string;
+  ancestryFailures?: Record<string, string>;
   /** Exact tips from the pinned conflict page, independent of ancestry prefetch. */
   resolutionRoots?: [string, string];
   verify: VerifyCursor | null;

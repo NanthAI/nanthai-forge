@@ -38,6 +38,20 @@ const cursorSchema = z
     seen: z.record(jobHash, z.boolean()),
     parents: z.record(jobHash, z.array(jobHash)),
     ancestryBoundary: jobHash.optional(),
+    ancestryFailures: z
+      .record(
+        jobHash,
+        z.enum([
+          'SOURCE_UNAVAILABLE',
+          'SOURCE_HASH_MISMATCH',
+          'SOURCE_RECIPE_INVALID',
+          'SOURCE_PAGE_INVALID',
+          'INVALID_WORK_BACKUP',
+          'INVALID_NATIVE_SOURCE',
+          'SOURCE_WORKER_FAILED',
+        ]),
+      )
+      .optional(),
     resolutionRoots: z.tuple([jobHash, jobHash]).optional(),
     verify: sourceVerifyCursorSchema.nullable(),
     selections: z.array(composeEntrySchema),

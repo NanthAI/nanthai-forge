@@ -54,38 +54,28 @@ export function sourceAncestryCut(
   return null;
 }
 
-/** Prefer unresolved branches above a known common ancestor before its older
- * history. This is scheduling only: deferred IDs stay pending, and are read if
- * no other frontier remains. In particular it proves no recursive merge base. */
+/** Read only the shallowest unresolved depth from the selected roots.
+ * Breadth-first distances use authenticated edges, never derived hints. Keeping
+ * a whole depth (in pending order) lets the caller apply its existing object and
+ * byte windows without letting deeper history overtake an unresolved branch. */
 export function sourceAncestryFrontier(
   parents: Record<string, string[]>,
   pending: string[],
   roots: string[],
 ): string[] {
-  const selectedRoots = [...new Set(roots)];
-  // Coverage scheduling is bounded by the normal metadata object window. A
-  // larger selection keeps ordinary traversal and the linear verified proof.
-  if (!selectedRoots.length || selectedRoots.length > 100) return pending;
-  const coverage = new Map<string, number>();
-  for (const root of selectedRoots) {
-    const seen = new Set<string>(),
-      queue = [root];
-    for (let i = 0; i < queue.length; i++) {
-      const id = queue[i]!;
-      if (seen.has(id)) continue;
-      seen.add(id);
-      coverage.set(id, (coverage.get(id) ?? 0) + 1);
-      queue.push(...(parents[id] ?? []));
-    }
-  }
-  const deferred = new Set<string>(),
-    queue = [...coverage].filter(([, count]) => count === selectedRoots.length).map(([id]) => id);
+  const distances = new Map<string, number>(),
+    queue = [...new Set(roots)];
+  for (const root of queue) distances.set(root, 0);
   for (let i = 0; i < queue.length; i++) {
     const id = queue[i]!;
-    if (deferred.has(id)) continue;
-    deferred.add(id);
-    queue.push(...(parents[id] ?? []));
+    for (const parent of parents[id] ?? []) {
+      if (distances.has(parent)) continue;
+      distances.set(parent, distances.get(id)! + 1);
+      queue.push(parent);
+    }
   }
-  const nearer = pending.filter(id => !deferred.has(id));
-  return nearer.length ? nearer : pending;
+  // Preserve orphaned legacy frontier entries conservatively, after all
+  // reachable work. An orphan cannot establish a selected-root cut.
+  const depth = pending.reduce((min, id) => Math.min(min, distances.get(id) ?? Infinity), Infinity);
+  return pending.filter(id => (distances.get(id) ?? Infinity) === depth);
 }

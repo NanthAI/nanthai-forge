@@ -112,6 +112,7 @@ export async function scaleFixture({ parallelism = 4, delay = 0, guardRss = fals
     return pin;
   }
   function generated(spec) {
+    if (spec.generate) return spec.generate();
     const b = Buffer.alloc(spec.size, spec.fill ?? 65);
     if (spec.index !== undefined) b.writeBigUInt64LE(BigInt(spec.index));
     return b;
@@ -259,7 +260,7 @@ export async function scaleFixture({ parallelism = 4, delay = 0, guardRss = fals
               readCounts.set(id, (readCounts.get(id) ?? 0) + 1);
               readObjects++;
               readBytes += Buffer.isBuffer(spec) ? spec.length : spec.size;
-              value = Buffer.isBuffer(spec) ? spec : { ...spec, delay };
+              value = Buffer.isBuffer(spec) ? spec : spec.generate ? generated(spec) : { ...spec, delay };
             } else if (message.kind === 'get') {
               storageCalls++;
               value = blobs.get(a.id) ?? null;

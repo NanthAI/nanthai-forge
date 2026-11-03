@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { scaleFixture, at } from './convex-source-scale-fixture.mjs';
 import { buildComposePages } from '../dist/hosted-compose.js';
+import { asymmetricHistory } from './source-asymmetric-scale-fixture.mjs';
 
 async function history(s, count) {
   const content = await s.putSpec(Buffer.from('synthetic file\n'));
@@ -77,6 +78,68 @@ async function history(s, count) {
     },
   };
 }
+
+for (const count of [29000, 58000])
+  for (const chainLength of [1, 2])
+    test(`${count} files, shared chain ${chainLength}: asymmetric frontier avoids hundreds of historical deferral rounds`, async t => {
+      const reports = [];
+      for (const depth of [0, 400, 800]) {
+        const s = await scaleFixture();
+        try {
+          const h = await asymmetricHistory(s, count, depth, depth === 800, chainLength),
+            id = await s.enqueue(h.input),
+            report = await s.drain(),
+            job = await s.job(id);
+          assert.equal(job.status, 'completed');
+          const result = JSON.parse(await s.bytes(job.output));
+          assert.equal(result.result.status, 'clean');
+          assert.deepEqual(
+            JSON.parse(await s.bytes(result.result.state))
+              .files.map(f => f.path)
+              .sort(),
+            ['main.txt', 'root.txt', 'selected.txt'],
+          );
+          assert.equal([...s.readCounts.keys()].filter(id => h.historical.has(id)).length, 0);
+          const stateReads = [...s.readCounts]
+            .filter(([id]) => h.near.has(id))
+            .reduce((n, [, count]) => n + count, 0);
+          assert.equal(stateReads, chainLength === 1 ? 7 : 9);
+          assert(
+            report.functionCalls <= (chainLength === 1 ? 24 : count === 29000 ? 28 : 38),
+            JSON.stringify(report),
+          );
+          assert(
+            report.documentsRead <= (chainLength === 1 ? 245 : count === 29000 ? 272 : 372),
+            JSON.stringify(report),
+          );
+          assert(
+            report.documentsWritten <= (chainLength === 1 ? 66 : count === 29000 ? 74 : 97),
+            JSON.stringify(report),
+          );
+          assert(report.maxRssBytes < 400 * 1024 * 1024);
+          assert.equal(report.storageCalls, 0);
+          assert.equal(s.tables.projectSourceSteps.size, 1);
+          const idle = s.calls.length;
+          await s.drain();
+          assert.equal(s.calls.length, idle);
+          reports.push({ depth, manifestBytes: h.manifestBytes, stateReads, ...report });
+        } finally {
+          s.restore();
+        }
+      }
+      for (const report of reports.slice(1))
+        for (const key of ['functionCalls', 'documentsRead', 'documentsWritten', 'stateReads'])
+          assert(
+            report[key] <= reports[0][key],
+            `${key} grows with irrelevant history: ${JSON.stringify(reports)}`,
+          );
+      for (const report of reports.slice(1))
+        assert(
+          report.readBytes <= reports[0].readBytes + 1024,
+          'only bounded cursor/receipt encoding may vary',
+        );
+      t.diagnostic(JSON.stringify({ count, chainLength, reports }));
+    });
 for (const count of [29000, 58000]) {
   test(`${count} files: multiple-parent ancestry and repeated main races stay within worker and call budgets`, async t => {
     const reports = [];

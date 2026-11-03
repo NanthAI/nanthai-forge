@@ -19,6 +19,8 @@ test('cuts retain criss-cross bases, unknown side branches and disconnected root
   assert.equal(cut({ L: ['M', 'unknown'], R: ['M'], M: [] }, ['L', 'R']), null);
   assert.equal(cut({ L: ['A'], R: ['B'], A: [], B: [] }, ['L', 'R']), null);
   assert.equal(cut({ L: ['R'], R: ['L', 'M'] }, ['L', 'R']), null);
+  assert.equal(sourceAncestryCut({ L: ['M'], M: [] }, ['R'], ['L', 'R']), null);
+  assert.deepEqual(sourceAncestryFrontier({ L: ['M'], M: [] }, ['R'], ['L', 'R']), ['R']);
 });
 test('recursive-base merge bytes and conflicts are identical with a prefetched root-relative cut', () => {
   for (const conflicting of [false, true]) {
@@ -104,22 +106,61 @@ test('frontier scheduling defers older common history without dropping it or pro
   assert.deepEqual(sourceAncestryFrontier({ L: ['A'], R: ['B'] }, ['A', 'B'], ['L', 'R']), ['A', 'B']);
 });
 
-test('large selections keep the ordinary frontier without a per-root graph scan', () => {
-  const parents = new Proxy(
-    {},
-    {
-      get() {
-        assert.fail('large-selection priority must not scan parents');
-      },
-    },
-  );
-  const pending = ['unresolved'];
-  assert.equal(
-    sourceAncestryFrontier(
-      parents,
-      pending,
-      Array.from({ length: 32000 }, (_, i) => `root-${i}`),
-    ),
-    pending,
-  );
+test('shared chains have breadth-first fairness and history-independent read budgets in every cursor/order variant', t => {
+  const reports = [];
+  let cases = 0;
+  for (const length of [1, 2, 3, 10])
+    for (const depth of [0, 10, 400, 800])
+      for (const reverseRoots of [false, true])
+        for (const reverseParents of [false, true])
+          for (const reversePending of [false, true])
+            for (const preloaded of [...new Set([0, Math.min(1, length - 1), length - 1])]) {
+              const chain = Array.from({ length }, (_, i) => `Q${i}`),
+                graph = {
+                  M: reverseParents ? ['B', chain[0]] : [chain[0], 'B'],
+                  D: [chain[0]],
+                  B: ['C'],
+                  C: depth ? ['H0'] : [],
+                };
+              for (const [i, id] of chain.entries()) graph[id] = [chain[i + 1] ?? 'C'];
+              for (let i = 0; i < depth; i++) graph[`H${i}`] = i + 1 < depth ? [`H${i + 1}`] : [];
+              const roots = reverseRoots ? ['D', 'M'] : ['M', 'D'],
+                parents = Object.fromEntries(
+                  [...roots, ...chain.slice(0, preloaded)].map(id => [id, graph[id]]),
+                ),
+                reads = [];
+              let pending = [chain[preloaded], 'B'],
+                boundary;
+              for (let round = 0; round < length + 3; round++) {
+                boundary = sourceAncestryCut(parents, pending, roots);
+                if (boundary) break;
+                if (reversePending) pending.reverse();
+                const selected = sourceAncestryFrontier(parents, pending, roots);
+                reads.push(...selected);
+                for (const id of selected) parents[id] = graph[id];
+                pending = [...new Set([...pending, ...selected.flatMap(id => graph[id])])].filter(
+                  id => !parents[id],
+                );
+              }
+              assert.equal(boundary, 'C');
+              const historicalReads = reads.filter(id => id.startsWith('H')).length;
+              assert.equal(historicalReads, Math.min(depth, Math.max(0, length - 2)));
+              assert.equal(reads.length, length - preloaded + 1 + Math.min(length - 1, depth + 1));
+              assert(reads.length <= 2 * length - preloaded);
+              if (length <= 2) assert.equal(historicalReads, 0);
+              if (!reverseRoots && !reverseParents && !reversePending && !preloaded)
+                reports.push({ length, depth, reads: reads.length, historicalReads });
+              cases++;
+            }
+  t.diagnostic(JSON.stringify({ cases, windowDepthSlack: 0, reports }));
+});
+
+test('breadth-first ties stay stable and arbitrarily large root selections use one graph scan', () => {
+  const parents = { L: ['A', 'unknown'], R: ['M'], A: ['M'], M: ['P1', 'P2'] };
+  assert.deepEqual(sourceAncestryFrontier(parents, ['P2', 'unknown', 'P1'], ['L', 'R']), ['unknown']);
+  assert.deepEqual(sourceAncestryFrontier(parents, ['P2', 'P1'], ['L', 'R']), ['P2', 'P1']);
+  const roots = Array.from({ length: 32000 }, (_, i) => `root-${i}`);
+  const graph = Object.fromEntries(roots.map(id => [id, ['near']]));
+  graph.near = ['deep'];
+  assert.deepEqual(sourceAncestryFrontier(graph, ['deep', 'near'], roots), ['near']);
 });

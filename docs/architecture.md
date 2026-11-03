@@ -189,7 +189,24 @@ one exact common frontier; multiple unknown frontiers, other roots or cycles
 retain normal traversal. Recursive merge bases above the cut remain intact. The
 operation records that explicit ancestry cut separately from stored parents.
 Native merge-base/file calculations still use exact hash-verified State bytes.
-Deep graphs retain paged hint traversal; hints never prove closure or independence.
+Graph preparation reads the shallowest pending distance from the selected roots,
+with stable ties, through the existing object and byte windows. Only verified
+parent edges determine distance; deeper derived hints never enter the read
+window. No pending readable node waits while strictly deeper nodes are read.
+Work is independent of history depth for graphs that admit the existing common
+cut. Strict BFS bounds speculative depth, not width: a wide historical layer can
+still require many reads. Closed side branches are a known limitation of the cut
+proof, tracked in Issue `48ba68ed-2690-4b41-967f-c12bf0e23ea0`; they can prevent
+the common cut and require full retained-history traversal. Failed graph probes retain their error
+and unresolved edge in the R2 cursor while independent frontier work continues.
+Only an authenticated cut may retire that edge; a failed object still required
+by graph proof or exact merge calculation surfaces its original failure.
+Descriptor failures are returned in the same bounded page, without per-item RPCs.
+After the existing nearby search, bounded parent hints may warm an action's
+physical-descriptor cache. Only the current shallow frontier is returned for byte
+reads; hints never install proof edges or survive as transfer authority between
+actions. Narrow frontiers prefetch one window; wider fan-out uses up to four.
+Save/closure hint traversal, validation, pins and worker concurrency are unchanged.
 
 **Lanes and checks.** `materialize` writes a State into a fresh directory of ordinary files. Native Lanes clone one disposable, pinned source-tree cache per owner using APFS `clonefile` (or filesystem reflinks elsewhere). The cloned tree is checked against every manifest path, blob digest and mode before publication; an edited or incomplete cache is rebuilt from the same State. Cache preparation and cloning hold only the cache/Lane locks, outside the owner writer lock. `.forge/materialization.json` records the selected head and clone/copy result, including the reason when the filesystem needs ordinary copying. Check workspaces retain their independent byte-only materialization. Editing a Lane never changes stored objects or other Lanes.
 

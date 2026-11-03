@@ -18,6 +18,7 @@ export const resolve = sourceMutation({
     ...identity,
     digests: v.array(v.string()),
     ancestry: v.boolean(),
+    probe: v.optional(v.boolean()),
     known: v.array(v.string()),
     windows: v.optional(v.number()),
   },
@@ -33,17 +34,27 @@ export const resolve = sourceMutation({
     invariant(args.digests.length <= 100, 'SOURCE_JOB_INVALID', 'Resolve source in bounded windows.');
     const project = await ctx.db.get(args.projectId),
       generation = project ? await selectedGeneration(ctx, project) : null;
-    const pending = [...args.digests].reverse(),
+    // Graph descriptor hints warm a bounded breadth-first page. Byte ordering
+    // still comes only from authenticated parent edges in the caller.
+    const pending = args.probe ? [...args.digests] : [...args.digests].reverse(),
       seen = new Set(args.known),
-      selected: { row: ObjectView; url: string | null }[] = [];
-    let bytes = 0;
-    while (pending.length && selected.length < 100 * (args.windows ?? 1)) {
-      const id = pending.pop()!;
+      selected: { row: ObjectView; url: string | null }[] = [],
+      unavailable: string[] = [];
+    let bytes = 0,
+      position = 0;
+    while (
+      (args.probe ? position < pending.length : pending.length) &&
+      selected.length < 100 * (args.windows ?? 1)
+    ) {
+      const id = args.probe ? pending[position++]! : pending.pop()!;
       if (seen.has(id)) continue;
       seen.add(id);
       const row = await findObject(ctx, args.projectId, id);
       if (!row || row.removed || !isStored(row)) {
-        invariant(!args.digests.includes(id), 'SOURCE_UNAVAILABLE', 'Exact source object is absent.');
+        if (args.digests.includes(id)) {
+          if (args.probe) unavailable.push(id);
+          else invariant(false, 'SOURCE_UNAVAILABLE', 'Exact source object is absent.');
+        }
         continue;
       }
       if (selected.length && bytes + row.size > 8 * 1024 * 1024 * (args.windows ?? 1)) break;
@@ -75,9 +86,11 @@ export const resolve = sourceMutation({
       ...(row.pack ? { range: packRange(row)! } : {}),
     }));
     return canonicalPayload(
-      args.ancestry
-        ? result
-        : args.digests.flatMap(id => result.filter(row => row.descriptor.object.sha256 === id)),
+      args.probe
+        ? { rows: result, unavailable }
+        : args.ancestry
+          ? result
+          : args.digests.flatMap(id => result.filter(row => row.descriptor.object.sha256 === id)),
     );
   },
 });
