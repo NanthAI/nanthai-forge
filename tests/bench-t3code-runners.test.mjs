@@ -56,30 +56,58 @@ for (const mode of ['concurrent', 'sequential'])
     assert.match(result.flags.join(), /mixed/);
   });
 
-test('concurrent: minority-exclusive versions allowed; majority in either arm or disjoint pools void', () => {
-  const a = [job(1, { imageVersion: 'old' }), job(2), job(3)];
-  assert.deepEqual(compare(a, [job(4)]).voided, []);
-  const majority = [job(1, { imageVersion: 'old' }), job(2, { imageVersion: 'old' }), job(3)];
-  assert.match(compare(majority, [job(4)]).voided.join(), /forge: exclusive.*50%.*2\/3/);
-  assert.match(compare([job(4)], majority).voided.join(), /github: exclusive/);
-  assert.equal(compare([job(1)], [job(2, { imageVersion: 'other' })]).voided.length, 2);
-  // Sum multiple exclusive versions instead of letting each small bucket evade the rule.
-  assert.match(
-    compare([job(1), job(2, { imageVersion: 'a' }), job(3, { imageVersion: 'b' })], [job(4)]).voided.join(),
-    /2\/3/,
-  );
-});
+for (const mode of ['concurrent', 'sequential']) {
+  test(`${mode}: minority-exclusive rollout versions pass with mixed and asymmetric disclosures`, () => {
+    // Synthetic evidence with the recorded N=10 batch's 34/7 job distribution.
+    const github = Array.from({ length: 34 }, (_, i) =>
+      job(i, {
+        imageVersion: i < 29 ? '20261025.179.1' : i < 33 ? '20261101.186.1' : '20261101.64.1',
+      }),
+    );
+    const forge = Array.from({ length: 7 }, (_, i) => job(i, { imageVersion: '20261025.179.1' }));
+    for (const [a, b] of [
+      [forge, github],
+      [github, forge],
+    ]) {
+      const result = compare(a, b, mode);
+      assert.deepEqual(result.voided, []);
+      assert.deepEqual(
+        [result.arms.forge.exclusiveShare, result.arms.github.exclusiveShare],
+        a === forge ? [0, 5 / 34] : [5 / 34, 0],
+      );
+      assert.match(result.flags.join(), /mixed.*asymmetric/s);
+    }
+  });
 
-test('sequential: different sets void even with only a minority-exclusive version', () => {
-  assert.match(
-    compare([job(1)], [job(2, { imageVersion: 'old' })], 'sequential').voided.join(),
-    /sequential/,
-  );
-  assert.match(
-    compare([job(1), job(2, { imageVersion: 'old' })], [job(3)], 'sequential').voided.join(),
-    /sequential/,
-  );
-});
+  test(`${mode}: majority exclusive in either arm or disjoint pools void`, () => {
+    const majority = [job(1, { imageVersion: 'old' }), job(2, { imageVersion: 'old' }), job(3)];
+    assert.match(compare(majority, [job(4)], mode).voided.join(), /forge: exclusive.*50%.*2\/3/);
+    assert.match(compare([job(4)], majority, mode).voided.join(), /github: exclusive.*50%.*2\/3/);
+    assert.equal(compare([job(1)], [job(2, { imageVersion: 'other' })], mode).voided.length, 2);
+    // Sum multiple exclusive versions instead of letting each small bucket evade the rule.
+    assert.match(
+      compare(
+        [job(1), job(2, { imageVersion: 'a' }), job(3, { imageVersion: 'b' })],
+        [job(4)],
+        mode,
+      ).voided.join(),
+      /2\/3/,
+    );
+  });
+
+  test(`${mode}: exactly 50% exclusive in either arm passes with disclosures`, () => {
+    const half = [job(1), job(2, { imageVersion: 'old' })];
+    for (const [a, b] of [
+      [half, [job(3)]],
+      [[job(3)], half],
+    ]) {
+      const result = compare(a, b, mode);
+      assert.deepEqual(result.voided, []);
+      assert.equal(result.arms[a === half ? 'forge' : 'github'].exclusiveShare, 0.5);
+      assert.match(result.flags.join(), /mixed.*asymmetric/s);
+    }
+  });
+}
 
 for (const arm of ['forge', 'github'])
   test(`${arm}: image name, runner major, action SHA drift void in middle jobs too`, () => {

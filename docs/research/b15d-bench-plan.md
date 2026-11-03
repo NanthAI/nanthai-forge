@@ -388,16 +388,15 @@ has room for both cells.
   subsets; an omitted action is not a SHA change. Compare action identities independent of
   their requested ref and order, in **both** arms. Runner minor/patch changes are recorded
   and do not alone void a cell.
-- **Concurrent batches (N = 1, 3, 5):** for each arm, count all executed jobs whose
+- **All batches (concurrent and sequential):** for each arm, count all executed jobs whose
   imageVersion never occurs in the other arm. Sum across all such exclusive versions and
   divide by that arm's executed job count (skipped jobs have no runner and are excluded).
   Void the batch if this share is **strictly greater than 50% in either arm**. Exactly 50%
   is allowed. This majority threshold defines a materially different observed pool: most
   jobs of an arm ran on versions the other never saw. It permits minority rollout/rollback
-  exposure when concurrent jobs sample a shared hosted pool. It does not establish equal
-  performance of versions, nor require their proportions to match.
-- **Sequential batches (N = 10):** void the batch if the arms' distinct imageVersion sets
-  differ, regardless of job counts. Identical sets, including identical mixed sets, pass.
+  exposure without establishing equal performance or requiring matching proportions.
+  **Owner-approved revision, 2026-11-03:** apply this rule to sequential N = 10 too;
+  arms with very different job counts cannot sample the same rollout pool.
 - Mixed imageVersions that pass these rules **do not void** a cell or batch. Flag every
   mixed or asymmetric observed pool for the report's disclosure section, with per-arm
   version sets and job counts. Missing/unreadable logs and missing fields are explicit

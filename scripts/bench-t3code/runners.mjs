@@ -145,13 +145,11 @@ export function runnerFairness(cells, mode) {
       const s = arms[arm];
       s.exclusiveJobs = s.imageVersions.filter(v => !other.includes(v.value)).reduce((n, v) => n + v.jobs, 0);
       s.exclusiveShare = s.runnerJobs ? s.exclusiveJobs / s.runnerJobs : null;
-      if (mode === 'concurrent' && s.exclusiveShare > EXCLUSIVE_VERSION_SHARE)
+      if (s.exclusiveShare > EXCLUSIVE_VERSION_SHARE)
         voided.push(
           `${arm}: exclusive imageVersions exceed 50% of runner jobs (${s.exclusiveJobs}/${s.runnerJobs})`,
         );
     }
-    if (mode === 'sequential' && !same)
-      voided.push('sequential arms used different runner imageVersion sets');
   }
   return { mode, exclusiveVersionShareThreshold: EXCLUSIVE_VERSION_SHARE, arms, voided, flags };
 }
