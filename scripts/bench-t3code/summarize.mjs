@@ -54,6 +54,8 @@ for (const r of usable) {
     lenient: [],
     tokens: [],
     convexUsd: [],
+    convexActionGbHours: [],
+    convexActionComputeUsd: [],
     ciBilledMinutes: [],
     // Per task (PLAN.md, Same workspace-prep rule): prep is outside time to main, shown next to it.
     timeToMainSeconds: [],
@@ -65,7 +67,11 @@ for (const r of usable) {
   s.strict.push(r.oracle?.grade?.strictSuccess ?? null);
   s.lenient.push(r.oracle?.grade?.lenientScore ?? null);
   s.tokens.push(r.tokens ? Object.values(r.tokens).reduce((a, b) => a + b, 0) : null);
-  s.convexUsd.push(r.convex?.costUsd ?? null);
+  s.convexUsd.push(r.convex?.valid === false ? null : (r.convex?.costUsd ?? null));
+  // Older results' zero actionGbHours predate compute coverage; do not score them.
+  const hasCompute = r.convex?.valid !== false && r.convex?.actionComputeUsd != null;
+  s.convexActionGbHours.push(hasCompute ? (r.convex.actionGbHours ?? null) : null);
+  s.convexActionComputeUsd.push(hasCompute ? r.convex.actionComputeUsd : null);
   s.ciBilledMinutes.push(r.ci?.billedMinutes ?? null);
   for (const t of okTasks(r)) {
     s.timeToMainSeconds.push(t.timeToMainSeconds ?? null);
@@ -117,6 +123,15 @@ console.log(
         attempt: r.attempt,
         voided: r.voided ?? [],
         taskVoids: r.taskVoids ?? [],
+        convex: r.convex
+          ? {
+              valid: r.convex.valid,
+              problems: r.convex.problems,
+              actionGbHours: r.convex.actionGbHours,
+              actionComputeUsd: r.convex.actionComputeUsd ?? null,
+              costUsd: r.convex.costUsd,
+            }
+          : null,
       })),
       byArmN: Object.fromEntries(
         Object.entries(byArmN).map(([k, s]) => [

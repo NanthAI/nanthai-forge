@@ -230,7 +230,7 @@ commit.
 - **CI**: runs, jobs, job seconds, billed minutes and queue wait per landing, the same shape for
   both arms; grading runs are excluded from both.
 - **Convex** (Forge): project-attributed executions, DB I/O, egress and action compute from the
-  log stream, at list price. R2 and storage are not metered here.
+  log stream, using the harness rate card below. R2 and storage are not metered here.
 
 ## Dry protocol and pre-cleanup evidence
 
@@ -420,6 +420,36 @@ Rep 3, only for an N the rep-3 rule selects, run in this order (N descending):
 
 ## Cost estimate
 
+The harness rate assumptions are $2.20 per million function executions, $0.22 per
+GB of database I/O, $0.132 per GB of network egress and $0.30 per action GB-hour.
+These are estimates, not a verified current contract or invoice. Completion
+`usageStats.databaseReadDocuments`/`databaseWriteDocuments` are document counts;
+`databaseIoReadBytes`/`databaseIoWriteBytes` and `networkEgressBytes` are bytes
+(decimal GB = 1e9 bytes). Database payload byte fields are not substituted for I/O.
+
+Action and HTTP action compute uses `usageStats.memoryUsedMb / 1024` multiplied
+by `executionTime / 3600` (Completion duration is seconds). The adapter also
+accepts `usageStats.actionMemoryUsedMb` and `executionTimeMs / 3_600_000`,
+independently, for older record shapes. Queries and mutations contribute no action
+compute. Retries and failed executions remain counted; transport replays are
+excluded. The field names and numeric types were cross-checked against a bounded
+provider Completion capture; committed fixtures contain synthetic values only.
+
+`result.json` exposes `convex.actionGbHours`, `actionComputeUsd`, and
+`costBreakdownUsd` (calls, databaseIo, egress, actionCompute), separately from total
+`costUsd`. Missing, negative, nonnumeric or nonfinite required usage is recorded
+in `missingUsageFields` and `problems`, makes the existing meter coverage check
+invalid, and leaves the affected usage/cost component null. It never becomes an
+unflagged zero. Summary cells retain those flags and compute values; per-arm/N
+summaries expose `convexActionGbHours` and `convexActionComputeUsd` ranges. Legacy
+results without separate action cost do not contribute their false zero to these
+compute ranges. No additional provider pulls or Convex calls are introduced.
+
+The historical estimates below predate the action-field correction: their
+reported zero action compute was missing coverage. They are partial call/I/O/egress
+estimates, not measured all-in Convex costs or proof that the whole run fits the
+budget. Re-measure with the corrected, pinned harness before using a new forecast.
+
 From the no-model dry batch n3-r1 (attempt 4, 2026-11-01, both arms at once, 10 tasks each,
 scripted agents that save, sync, resolve and land for real; old four-package check), the
 real-model N = 1 checks, and the part 3 check qualification (new scope, 2026-11-01):
@@ -433,7 +463,7 @@ real-model N = 1 checks, and the part 3 check qualification (new scope, 2026-11-
 
 | Per task | Forge arm | GitHub arm |
 | --- | --- | --- |
-| Convex (metered: function calls, database I/O, egress, action compute) | $0.0056 (dry N = 3: $0.0558 per cell, 627 executions, 6.7k document reads, 9.7 MB database read, 14.2 MB egress); $0.0026 real-model N = 1 | none |
+| Convex (historical partial estimate: function calls, database I/O, egress) | $0.0056 (dry N = 3: $0.0558 per cell, 627 executions, 6.7k document reads, 9.7 MB database read, 14.2 MB egress); $0.0026 real-model N = 1 | none |
 | GitHub Actions billed minutes | ~6.8 (1.5 runs × (2 + 2.5); old check 5.3) | ~8.3 (3.3 runs × 2.5; old check 6.6) |
 
 Whole run, Forge tasks × Convex per task, with a 2× margin for N = 10 contention and real
@@ -445,13 +475,13 @@ agents' extra reads (status, logs, retries) on the dry rate:
 | Plus rep 3 for every N | 120 | $0.67 ($1.34) | ~1,820 |
 | Worst case: every batch re-run once, rep 3 for every N | 240 | $1.34 ($2.69) | ~3,650 |
 
-Every case is under the $5 Convex stop (`drive.mjs` BUDGET_USD, checked before each batch
-from the scored cells' metered spend). Not metered: R2 operations and bytes, and Convex
+These partial projections exclude action compute. The existing $5 Convex stop (`drive.mjs` BUDGET_USD, checked before each batch
+from the scored cells' metered spend) remains unchanged. Not metered: R2 operations and bytes, and Convex
 storage (disclosed in every Forge cell's `convex.notMetered`). GitHub Actions minutes cost $0:
 both repositories are public and the organisation is on the Team plan; they matter for the
 60-concurrent-job limit (N = 10 peaks near 30 jobs). Agent tokens are the owner's Codex plan
-quota, not dollars; the driver waits on its usage windows (Void rules). Each no-model dry run
-cost under $0.10 of Convex ($0.0558 for the N = 3 pair, $0.0026 for N = 1). The final pinned
+quota, not dollars; the driver waits on its usage windows (Void rules). Each historical no-model dry run
+reported under $0.10 of partial Convex cost ($0.0558 for the N = 3 pair, $0.0026 for N = 1). The final pinned
 dry batch on the new base re-measures these rates; its numbers are in the part 3 handoff.
 
 ## Tasks

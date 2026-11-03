@@ -6,6 +6,38 @@ export const benchmarkLimits = Object.freeze({
   total: 5000,
   quietMs: 300_000,
 });
+// Only numeric provider metadata enters the meter. An absent/invalid value is
+// unknown, not a free execution. Field names are fixed; no raw log data is retained.
+export function completionUsage(log, keys) {
+  const missingFields = [];
+  const number = (value, field) => {
+    if (typeof value === 'number' && Number.isFinite(value) && value >= 0) return value;
+    missingFields.push(field);
+    return null;
+  };
+  const usage = Object.fromEntries(
+    keys.map(key => [key, number(log.usageStats?.[key], `usageStats.${key}`)]),
+  );
+  let gbHours = 0;
+  if (/^(?:Http)?Action$/i.test(log.udfType ?? '')) {
+    const memory = number(
+      log.usageStats?.memoryUsedMb ?? log.usageStats?.actionMemoryUsedMb,
+      'usageStats.memoryUsedMb|actionMemoryUsedMb',
+    );
+    // Completion executionTime is seconds; older adapters expose milliseconds.
+    const seconds =
+      log.executionTime != null
+        ? number(log.executionTime, 'executionTime')
+        : number(log.executionTimeMs, 'executionTime|executionTimeMs');
+    const hours = seconds === null ? null : seconds / (log.executionTime != null ? 3600 : 3_600_000);
+    gbHours = memory === null || hours === null ? null : (memory / 1024) * hours;
+  } else if (!/^(?:Query|Mutation)$/i.test(log.udfType ?? '')) {
+    missingFields.push('udfType');
+    gbHours = null;
+  }
+  return { usage, gbHours, missingFields };
+}
+
 export class ImportBenchmarkMonitor {
   constructor({ projectId, name, creationOperationId, since, now = Date.now, capacity = 20_000 }) {
     if (!projectId && !creationOperationId) throw Error('BENCHMARK_PROJECT_REQUIRED');
@@ -15,6 +47,7 @@ export class ImportBenchmarkMonitor {
     this.now = now;
     this.capacity = capacity;
     this.actionGbHours = 0;
+    this.missingUsageFields = {};
     this.requests = new Map();
     this.seen = new Set();
     this.completed = new Set();
@@ -56,8 +89,13 @@ export class ImportBenchmarkMonitor {
     if (this.deletedAt !== null && event.at >= this.deletedAt) this.postDelete++;
     const minute = Math.floor((event.at - this.since) / 60_000);
     this.minutes.set(minute, (this.minutes.get(minute) ?? 0) + 1);
-    for (const key of Object.keys(this.usage)) this.usage[key] += event.usage?.[key] ?? 0;
-    this.actionGbHours += event.gbHours ?? 0;
+    for (const field of event.missingFields)
+      this.missingUsageFields[field] = (this.missingUsageFields[field] ?? 0) + 1;
+    for (const key of Object.keys(this.usage))
+      this.usage[key] =
+        this.usage[key] === null || event.usage[key] === null ? null : this.usage[key] + event.usage[key];
+    this.actionGbHours =
+      this.actionGbHours === null || event.gbHours === null ? null : this.actionGbHours + event.gbHours;
     if (this.total >= benchmarkLimits.total) this.fail('total');
     this.advance(this.now());
   }
@@ -121,11 +159,7 @@ export class ImportBenchmarkMonitor {
       counted: true,
       at: log.timestamp * 1000,
       failed: Boolean(log.error),
-      usage: log.usageStats,
-      // Action compute (GB-hours): memory x execution time, for actions only.
-      gbHours: /action/i.test(log.udfType ?? '')
-        ? ((log.usageStats?.actionMemoryUsedMb ?? 0) / 1024) * ((log.executionTimeMs ?? 0) / 3_600_000)
-        : 0,
+      ...completionUsage(log, Object.keys(this.usage)),
     };
     if (request.own) this.accept(event);
     else request.pending.push(event);
@@ -159,6 +193,7 @@ export class ImportBenchmarkMonitor {
       postDelete: this.postDelete,
       usage: { ...this.usage },
       actionGbHours: this.actionGbHours,
+      missingUsageFields: { ...this.missingUsageFields },
       quiet: this.quiet(),
       retainedExecutions: this.seen.size,
       runningExecutions: this.running.size,

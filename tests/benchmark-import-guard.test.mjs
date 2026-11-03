@@ -16,6 +16,7 @@ const marker = (projectId = 'project') =>
   `FORGE_PROJECT_EXECUTION ${JSON.stringify({ projectId, name: target.name })}`;
 const event = (id, at, error = null, tagged = true) => ({
   kind: 'Completion',
+  udfType: 'Mutation',
   requestId: `request-${id}`,
   executionId: `execution-${id}`,
   timestamp: at / 1000,

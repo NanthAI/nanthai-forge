@@ -1,0 +1,50 @@
+{
+  "action": {
+    "kind": "Completion",
+    "udfType": "Action",
+    "componentPath": null,
+    "identifier": "synthetic:work",
+    "logLines": [{ "messages": ["FORGE_PROJECT_EXECUTION {\"projectId\":\"p\",\"name\":\"n\"}"] }],
+    "timestamp": 100,
+    "cachedResult": false,
+    "parentExecutionId": null,
+    "executionTime": 7.2,
+    "userExecutionTime": null,
+    "success": null,
+    "error": null,
+    "requestId": "request",
+    "executionId": "execution",
+    "usageStats": {
+      "databaseReadBytes": 111,
+      "databaseWriteBytes": 222,
+      "databaseIoReadBytes": 1000,
+      "databaseIoWriteBytes": 2000,
+      "databaseReadDocuments": 3,
+      "databaseWriteDocuments": 2,
+      "networkEgressBytes": 4000,
+      "memoryUsedMb": 512
+    },
+    "returnBytes": null,
+    "occInfo": null,
+    "willRetry": false,
+    "executionTimestamp": 99
+  },
+  "legacyAction": {
+    "kind": "Completion",
+    "udfType": "Action",
+    "requestId": "legacy-request",
+    "executionId": "legacy-execution",
+    "timestamp": 101,
+    "executionTimeMs": 7200,
+    "error": null,
+    "logLines": [{ "messages": ["FORGE_PROJECT_EXECUTION {\"projectId\":\"p\",\"name\":\"n\"}"] }],
+    "usageStats": {
+      "databaseReadDocuments": 3,
+      "databaseWriteDocuments": 2,
+      "databaseIoReadBytes": 1000,
+      "databaseIoWriteBytes": 2000,
+      "networkEgressBytes": 4000,
+      "actionMemoryUsedMb": 512
+    }
+  }
+}

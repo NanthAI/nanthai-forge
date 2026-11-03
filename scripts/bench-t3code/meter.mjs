@@ -5,18 +5,25 @@
 import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { setTimeout as wait } from 'node:timers/promises';
-import { ImportBenchmarkMonitor } from '../benchmark-import-monitor.mjs';
+import { ImportBenchmarkMonitor, completionUsage } from '../benchmark-import-monitor.mjs';
 
 // Convex list rates: calls $2.2/M, DB I/O $0.22/GB, egress $0.132/GB, action compute $0.30/GB-h.
 export const RATES = { perMillionCalls: 2.2, ioPerGb: 0.22, egressPerGb: 0.132, actionPerGbHour: 0.3 };
 
-export function costUsd({ executions, ioBytes, egressBytes, actionGbHours }) {
-  return (
-    (executions * RATES.perMillionCalls) / 1e6 +
-    (ioBytes / 1e9) * RATES.ioPerGb +
-    (egressBytes / 1e9) * RATES.egressPerGb +
-    actionGbHours * RATES.actionPerGbHour
-  );
+export function costBreakdownUsd({ executions, ioBytes, egressBytes, actionGbHours }) {
+  const price = (value, rate) =>
+    typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value * rate : null;
+  return {
+    calls: price(executions, RATES.perMillionCalls / 1e6),
+    databaseIo: price(ioBytes, RATES.ioPerGb / 1e9),
+    egress: price(egressBytes, RATES.egressPerGb / 1e9),
+    actionCompute: price(actionGbHours, RATES.actionPerGbHour),
+  };
+}
+
+export function costUsd(input) {
+  const parts = Object.values(costBreakdownUsd(input));
+  return parts.includes(null) ? null : parts.reduce((sum, part) => sum + part, 0);
 }
 
 /** Live meter. `spawnLogs` is injectable for tests. */
@@ -30,7 +37,13 @@ export function convexMeter({ deployment, projectId, name, cwd, spawnLogs = defa
     databaseIoWriteBytes: 0,
     networkEgressBytes: 0,
   };
-  const deploymentWide = { completions: 0, ioBytes: 0, egressBytes: 0, perMinute: {} };
+  const deploymentWide = {
+    completions: 0,
+    ioBytes: 0,
+    egressBytes: 0,
+    missingUsageFields: {},
+    perMinute: {},
+  };
   const child = spawnLogs({ deployment, cwd });
   let closed = null,
     lines = 0,
@@ -50,9 +63,23 @@ export function convexMeter({ deployment, projectId, name, cwd, spawnLogs = defa
         deploymentWide.completions++;
         const minute = new Date(event.timestamp * 1000).toISOString().slice(0, 16);
         deploymentWide.perMinute[minute] = (deploymentWide.perMinute[minute] ?? 0) + 1;
-        deploymentWide.ioBytes +=
-          (event.usageStats?.databaseIoReadBytes ?? 0) + (event.usageStats?.databaseIoWriteBytes ?? 0);
-        deploymentWide.egressBytes += event.usageStats?.networkEgressBytes ?? 0;
+        const { usage, missingFields } = completionUsage(event, [
+          'databaseIoReadBytes',
+          'databaseIoWriteBytes',
+          'networkEgressBytes',
+        ]);
+        for (const field of missingFields)
+          deploymentWide.missingUsageFields[field] = (deploymentWide.missingUsageFields[field] ?? 0) + 1;
+        const io =
+          usage.databaseIoReadBytes === null || usage.databaseIoWriteBytes === null
+            ? null
+            : usage.databaseIoReadBytes + usage.databaseIoWriteBytes;
+        deploymentWide.ioBytes =
+          deploymentWide.ioBytes === null || io === null ? null : deploymentWide.ioBytes + io;
+        deploymentWide.egressBytes =
+          deploymentWide.egressBytes === null || usage.networkEgressBytes === null
+            ? null
+            : deploymentWide.egressBytes + usage.networkEgressBytes;
       }
       monitor.observe(event);
     } catch {
@@ -87,12 +114,23 @@ export function convexMeter({ deployment, projectId, name, cwd, spawnLogs = defa
       const streamClosedEarly = closed !== null;
       child.kill();
       const r = monitor.report();
-      const ioBytes = monitor.usage.databaseIoReadBytes + monitor.usage.databaseIoWriteBytes;
+      const ioBytes =
+        r.usage.databaseIoReadBytes === null || r.usage.databaseIoWriteBytes === null
+          ? null
+          : r.usage.databaseIoReadBytes + r.usage.databaseIoWriteBytes;
+      const costInput = {
+        executions: r.total,
+        ioBytes,
+        egressBytes: r.usage.networkEgressBytes,
+        actionGbHours: r.actionGbHours,
+      };
+      const breakdown = costBreakdownUsd(costInput);
       const problems = [
         ...(r.reason && r.reason !== 'total' && r.reason !== 'rate' ? [r.reason] : []),
         ...(r.coverageFailure ? [r.coverageFailure] : []),
         ...(streamClosedEarly ? [`stream closed early (${closed.code})`] : []),
         ...(lines === 0 ? ['no log lines'] : []),
+        ...Object.keys(r.missingUsageFields).map(field => `missing or invalid ${field}`),
       ];
       return {
         valid: problems.length === 0,
@@ -105,14 +143,12 @@ export function convexMeter({ deployment, projectId, name, cwd, spawnLogs = defa
         failures: r.failures,
         retainedExecutions: r.retainedExecutions,
         usage: monitor.usage,
-        actionGbHours: monitor.actionGbHours,
+        actionGbHours: r.actionGbHours,
+        missingUsageFields: r.missingUsageFields,
+        actionComputeUsd: breakdown.actionCompute,
+        costBreakdownUsd: breakdown,
         deploymentWide,
-        costUsd: costUsd({
-          executions: r.total,
-          ioBytes,
-          egressBytes: monitor.usage.networkEgressBytes,
-          actionGbHours: monitor.actionGbHours,
-        }),
+        costUsd: costUsd(costInput),
         notMetered: ['R2 operations and bytes', 'Convex storage'],
       };
     },
