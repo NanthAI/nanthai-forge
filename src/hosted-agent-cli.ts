@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { readSource } from './files.js';
 import { canonicalRoot, clientCacheRoot } from './root-paths.js';
 import { isNetworkPending } from './network-continuation.js';
 import { join, resolve } from 'node:path';
@@ -35,6 +36,13 @@ export function hostedAgentAddress(
     const path = join(clientCacheRoot(resolve(root)), 'agent', 'address.json');
     if (checkoutPathExists(path)) address = hostedAgentAddressSchema.parse(readAgentJson(path));
   }
+  const mainBytes = !marker ? readSource(root, '.forge/hosted-main.json', Number.MAX_SAFE_INTEGER) : null;
+  if (address && mainBytes)
+    invariant(
+      JSON.parse(mainBytes.toString()).selection.projectId === address.projectId,
+      'PROJECT_UNAVAILABLE',
+      'The address differs from this hosted main checkout.',
+    );
   if (address && marker)
     invariant(
       address.url === marker.url && address.projectId === marker.selection.projectId,

@@ -15,12 +15,15 @@ try {
 }
 // Hosted clone needs no native owner, graph compiler or local execution services.
 // Keep the established CLI as the entry for every other command and direct caller.
-if (process.argv[2] !== 'clone') await import('./cli.js');
+if (!['clone', 'pull'].includes(process.argv[2]!)) await import('./cli.js');
 else {
   try {
     invariant(supportedNode(), 'UNSUPPORTED_NODE', nodeRequirement);
     const { hostedCloneCli } = await import('./hosted-clone-cli.js');
-    const output = await hostedCloneCli(process.argv.slice(3));
+    const output =
+      process.argv[2] === 'pull'
+        ? await (await import('./hosted-pull-cli.js')).hostedPullCli(process.argv.slice(3))
+        : await hostedCloneCli(process.argv.slice(3));
     if (output !== undefined) process.stdout.write(`${JSON.stringify(output, null, 2)}\n`);
   } catch (error) {
     const failure = error instanceof ForgeError ? describeFailure(error) : recordFailure(error);

@@ -1,5 +1,12 @@
 # Status
 
+Clone roots refresh from accepted main with `nforge pull ROOT`, agent `pull {}`
+and the existing MCP `forge_task`. Root `status` reports freshness and accepted
+source revision distance. Pull refuses local tracked edits, preserves disjoint
+ignored outputs/dependency links, resumes interrupted publication, reuses cached
+and unchanged local bytes, and fetches no source packs. Current pulls cost one
+head query and no R2 GETs; receipts report requests and transferred bytes.
+
 What works today, what is partial, and what is missing. Update this page when a capability changes. What we are doing about the gaps is in the [roadmap](roadmap.md).
 
 Lane saves use message titles, parent-relative file counts when source is available,

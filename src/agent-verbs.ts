@@ -58,6 +58,7 @@ export const operatorActions = [
 /** Named reads keep their names; no notice. `resolve` is the hosted conflict save, kept as-is. The planning
  * actions are the hosted backlog: one read and two writes under their Work names. */
 export const namedReads = [
+  'pull',
   'tests',
   'landing',
   'observe',

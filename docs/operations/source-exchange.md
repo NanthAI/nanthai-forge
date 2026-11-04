@@ -139,6 +139,36 @@ This downloads and validates the proposal, then imports it into a separate Lane 
 
 ## Hosted main client checkout
 
+The normal clone refresh is `nforge pull ROOT`; use `nforge status ROOT` for its
+freshness and the distance in accepted source revisions. Agent `pull {}` uses
+the same implementation (MCP `forge_task`, without a new tool). Root/address
+receipts remain beside the checkout and its installed `.forge/hosted-main.json`
+advances atomically with source. The original clone-operation receipt remains
+pinned to its original selection; it is not the installed-baseline record.
+
+Pull reuses the existing main-checkout clean/stage/preserve/swap engine. It
+refuses tracked edits with a next step to move them into a Lane, preserves
+disjoint ignored artifacts/dependency links, and never merges local source.
+Recovery retains the original operation and repeats safely after either directory
+rename or artifact transfer. Completed retries cannot rewind a newer root.
+The original checkout is removed only after artifact preservation is durable;
+completion is recorded after that cleanup so a crash cannot strand a backup.
+Main clone roots remain outside Lane prune; the sibling Lane cache is untouched.
+
+Pull uses its recorded protocol to select the current-authority head API directly,
+without discovery or fallback: one query, zero GETs when current; otherwise two
+head queries plus 100-object descriptor pages for a missing target manifest and
+changed blobs. Unchanged source is reusable from ROOT even after cache eviction.
+Refresh skips full source packs. Actual request counts and transferred bytes
+are returned as `cost`; recipe metadata and physical chunks add their own bounded
+calls/GETs. Access is checked even for cached/completed retries, then again after
+transfer/staging before publication. All new bytes come from R2. No Work owner,
+background refresh or idle network call is added. Lane sync semantics are unchanged.
+
+The low-level exchange commands below remain available with explicit requests.
+
+Large downloads stream to private files and validate their complete hash; recovery creates independent writable root/Lane files before publishing the new owner. Source bytes are content-addressed objects in R2. A checkout missing 500 or more objects takes the project's latest source pack instead of object pages, and falls back to objects if the pack is unavailable (see [data placement](../data-placement.md)). The owner repair `nforge x ROOT source-pack '{}'` packs the current hosted main from this machine and publishes it to R2, so checks and Lane opens read one pack; run it after seeding, cutover or importing a large repository. Ready indexes keep the same public generation ID, preserving browser query identities. CLI cursors pin the source revision and return WORK_STALE when it changes; multipart payload reads compare revisions before returning a record. Root receipt digest and logical manifest digest are distinct. Original-operation retry uses its pinned payload and asks for the exact existing receipt before rediscovering content; preserve that operation until reconciled. A receipt lookup rechecks current authority and does not rewind a later selected checkpoint or establish fresh storage health.
+
 `projectMain:current` is the client contract for current hosted `main`. Its schema-1
 reply names `projectId`, the selected source `generationId` and `backupId`, the
 native State `head`, and `receipt` (`id`, `kind`, `previousHead`,

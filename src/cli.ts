@@ -50,6 +50,8 @@ Start here: nforge docs quickstart (offline Git adoption).
 Browse packaged documentation: nforge docs
 
 Usage:
+  nforge clone <project-url|project-id> DIR [--deployment URL]
+  nforge pull ROOT             # refresh a clean clone to accepted main
   nforge worker DEPLOYMENT_URL PROJECT_ID MACHINE_UUID
   nforge metrics ROOT [--from DATE] [--to DATE] [--json] [--report FILE.md] [--compare FROM..TO]
   nforge metrics record-bill ROOT --provider P --from DATE --to DATE --billed-usd N [--list-usd N] [--usage unit=qty,...] [--rate unit=usd,...] [--basis TEXT]
@@ -156,6 +158,7 @@ async function main(args: string[]): Promise<unknown> {
     );
     return refreshOwnerRoot(new WorkStore(args[2]));
   }
+  if (args[0] === 'pull') return (await import('./hosted-pull-cli.js')).hostedPullCli(args.slice(1));
   if (args[0] === 'clone') return (await import('./hosted-clone-cli.js')).hostedCloneCli(args.slice(1));
   if (args[0] === 'host') return hostCli(args.slice(1));
   if (args[0] === 'policy' || args[0] === 'set-policy') {

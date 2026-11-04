@@ -48,6 +48,7 @@ export function hostedAgentHelp(action?: string) {
     ...(canonical ? entries.map(entry => JSON.stringify(entry.schema, null, 2)) : []),
     'land --save waits; --no-wait returns after submission. Use --check-only to check without landing.',
     'land --save overlapAnswer:"accept-order" answers the pending notices for this landing and records them like ack, so peers see the answer.',
+    'pull {} refreshes a clean clone root to main; a repeat resumes interruption. Root status {} reports clone freshness.',
     'status accepts laneId; observe/landing select operationId (original landing UUID), submissionId or runId.',
     'peers {laneId?,path?,detail?} reads current saved overlap evidence in one query. Coverage excludes unsaved peer edits and never proves independence. start/save/status retain unacknowledgedOverlaps and behindMain.',
     'diff {laneId?,paths?,byteBudget?,cursor?} compares pinned base to saved head; nextCursor continues that pair. show {state?|candidateId?|laneId?|channel:"main",path} reads exact bytes. forge_review exposes show/diff/peers.',

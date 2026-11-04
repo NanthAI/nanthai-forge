@@ -63,9 +63,8 @@ export const hostedAgentRecordActions = [
  * the server enforces owner authority on set-policy. */
 export const hostedAgentPolicyActions = ['policy', 'set-policy'] as const;
 /** Composed by the client from existing reads and mutations; never advertised in capabilities. */
-export const hostedAgentClientActions = ['ack', 'preflight', 'source-pack', 'recover-apply'] as const;
-export const hostedAgentAddressSchema = z.object({ url: z.url(), projectId: z.string().min(1) }).strict();
-export type HostedAgentAddress = z.infer<typeof hostedAgentAddressSchema>;
+export const hostedAgentClientActions = ['ack', 'preflight', 'source-pack', 'recover-apply', 'pull'] as const;
+export { hostedAgentAddressSchema, type HostedAgentAddress } from './hosted-address.js';
 export const hostedAgentCapabilitiesSchema = z
   .object({
     overlapVersion: z.literal(1).optional(),
@@ -110,6 +109,7 @@ const check = z
   })
   .strict();
 export const hostedAgentCommandSchemas = {
+  pull: z.object({}).strict(),
   ...hostedRecordCommands,
   tests: contractTestsInput.omit({ operationId: true, laneId: true }).extend({ candidateId: uuid }).strict(),
   'confirm-tests': contractTestsInput

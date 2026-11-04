@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+import { readHostedMainMarker } from './hosted-main-marker.js';
+import { reuseMainSource } from './hosted-main-reuse.js';
 import { canonicalRoot, clientCacheRoot } from './root-paths.js';
 import { preserveMisplacedReadCaches } from './hosted-legacy-cache.js';
 import { planCheckoutPreservation, preserveCheckoutArtifacts } from './hosted-checkout-preserve.js';
@@ -11,12 +13,18 @@ import { invariant } from './errors.js';
 import { parseNativeState } from './native-state-format.js';
 import { hostedMainSchema, type HostedMain, type MainExpectation } from './hosted-main.js';
 import { durableReplace, syncDirectory } from './native-durability.js';
-import { cleanHostedCheckout, installHostedFile, flushHostedCheckout } from './hosted-checkout-files.js';
+import {
+  cleanHostedCheckout,
+  installHostedFiles,
+  flushHostedCheckoutFiles,
+} from './hosted-checkout-files.js';
 import { workLocked } from './work-lock.js';
 import { readSource } from './files.js';
 import { HostedCheckoutCache, type CheckoutObjectTransport } from './hosted-checkout-cache.js';
 export interface MainTransport extends CheckoutObjectTransport {
   current(expected?: MainExpectation): Promise<HostedMain>;
+  /** Actual Convex requests, including recipe metadata when available. */
+  calls?(): { queries: number; mutations: number; actions: number };
 }
 const requestSchema = z
   .object({
@@ -24,6 +32,7 @@ const requestSchema = z
     operationId: z.uuid(),
     url: z.url(),
     expected: z.object({ head: z.string(), receiptId: z.string() }).optional(),
+    refresh: z.boolean().optional(),
   })
   .strict();
 const markerSchema = z.object({ selection: hostedMainSchema, state: z.unknown() }).strict();
@@ -98,10 +107,25 @@ export async function checkoutHostedMain(root: string, input: unknown, transport
     const before = existsSync(root)
       ? readSource(root, '.forge/hosted-main.json', Number.MAX_SAFE_INTEGER)
       : null;
+    const marker = readHostedMainMarker(root);
+    if (request.refresh) {
+      invariant(marker, 'WORK_CONFLICT', 'Pull requires a Forge clone root.');
+      invariant(
+        marker.selection.projectId === request.projectId,
+        'PROJECT_UNAVAILABLE',
+        'Select this clone’s project.',
+      );
+      cleanHostedCheckout(root, marker.state.files, 'hosted-main.json', true, { deferExtras: true });
+    }
     const next = {
       request,
       selection: observed,
-      complete: false,
+      complete: Boolean(
+        request.refresh &&
+        !existsSync(previous) &&
+        marker?.selection.head === observed.head &&
+        marker?.selection.receipt.id === observed.receipt.id,
+      ),
       previousMarker: before ? digest(before) : null,
     };
     save(receiptPath, next);
@@ -119,21 +143,27 @@ export async function checkoutHostedMain(root: string, input: unknown, transport
       replayed: true,
       ...localRecovery(),
     };
-  const objects = new HostedCheckoutCache(cache, transport);
+  // Refresh never uses a full source pack, even for a thousand-file delta.
+  const objects = new HostedCheckoutCache(
+    cache,
+    request.refresh ? { ...transport, sourcePack: async () => null } : transport,
+  );
   await objects.ensure([selection.head]);
   const state = parseNativeState(readFileSync(join(objects.objects, selection.head)));
+  if (request.refresh) {
+    const baseline = readHostedMainMarker(root);
+    if (baseline) reuseMainSource(root, objects.objects, baseline.state.files, state.files);
+  }
   await objects.ensure(state.files.map(file => file.blob));
-  // Access can have been revoked during transfer. Cached bytes confer no authority.
-  const authorized = await transport.current();
-  invariant(authorized.projectId === request.projectId, 'PROJECT_UNAVAILABLE', 'Select this project.');
   const stage = mkdtempSync(join(cache, 'checkout-'));
   try {
-    for (const file of state.files) {
-      installHostedFile(stage, join(cache, 'objects'), file);
-    }
+    await installHostedFiles(stage, objects.objects, state.files);
     mkdirSync(join(stage, '.forge'), { mode: 0o700 });
     save(join(stage, '.forge', 'hosted-main.json'), { selection, state });
-    flushHostedCheckout(stage);
+    await flushHostedCheckoutFiles(stage, state.files);
+    // Reauthorize after transfer and staging, immediately before publication.
+    const authorized = await transport.current();
+    invariant(authorized.projectId === request.projectId, 'PROJECT_UNAVAILABLE', 'Select this project.');
     workLocked(lock, () => {
       operation = json(receiptPath);
       if (operation.complete) return;
@@ -186,10 +216,10 @@ export async function checkoutHostedMain(root: string, input: unknown, transport
       }
       syncDirectory(dirname(root));
       syncDirectory(cache);
+      if (existsSync(previous)) rmSync(previous, { recursive: true });
       operation.complete = true;
       save(receiptPath, operation);
       recordMetricCache(cache, selection, 'replica', request.operationId);
-      if (existsSync(previous)) rmSync(previous, { recursive: true });
     });
   } finally {
     rmSync(stage, { recursive: true, force: true });

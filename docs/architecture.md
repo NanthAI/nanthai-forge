@@ -666,6 +666,24 @@ identify the event, revision, action and expected/actual Work digest prefixes.
 
 ### Hosted main read contract
 
+`nforge pull ROOT` (agent `pull {}`, existing MCP `forge_task`) refreshes a clone
+through `checkoutHostedMain`, using the shared clean/stage/artifact-preservation
+engine. Its sibling operation journal automatically resumes an interrupted pull;
+source and the installed baseline marker publish as one directory set. Local
+tracked edits refuse with a Lane next step. Ignored build outputs and dependency
+links survive disjoint changes; occupied incoming paths are refused. Completion
+follows durable artifact transfer and old-tree cleanup. Main clone roots remain
+outside Lane pruning, and sibling editing Lanes are untouched.
+
+The recorded source protocol selects the authorized head endpoint directly:
+no change is one bounded query and no R2 bytes. Changed pulls reuse the machine
+object cache and verified unchanged root files, fetching only a missing target
+manifest and changed blobs in 100-object descriptor pages. They never fetch full
+source packs. A final current-access query follows staging. The result reports
+Convex requests and byte totals; idle is zero. Root `status` compares installed
+and current receipts and reports accepted source revision distance within the
+same authority epoch, without source downloads or Work hydration.
+
 Source clients use the schema-1 `HostedMain` contract (`src/hosted-main.ts`), read
 atomically by `projectMain:current`: project, source generation, backup, native
 main head and its Channel receipt, including previous head/receipt pins. Hosted

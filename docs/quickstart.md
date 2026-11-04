@@ -75,6 +75,21 @@ reply. Resolve any reported conflicts in the Lane and retry. If the project's
 existing policy requests local preflight, save first, then run
 `nforge agent LANE_PATH preflight '{}'` before landing.
 
+## Keep the project folder current
+
+The equivalents of `git pull` and `git status` are:
+
+```sh
+nforge pull /absolute/path/to/project
+nforge status /absolute/path/to/project
+```
+
+Pull refreshes ROOT from Forge main, refuses tracked edits with a Lane next step,
+and preserves disjoint ignored output/dependency links. Re-run after interruption
+to resume. Agent equivalents: `pull {}` and root `status {}`. No GitHub mirror
+read is needed; the installed CLI updater is separate. See the
+[refresh and cost reference](operations/source-exchange.md#hosted-main-client-checkout).
+
 ## Configure the first hosted check
 
 A fresh import has source and Work, but does not infer a check command or install

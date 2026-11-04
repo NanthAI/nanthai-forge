@@ -1,3 +1,5 @@
+import { cloneFreshness, mainCheckoutTransport, pullHostedProject } from './hosted-pull.js';
+import { readHostedMainSelection } from './hosted-main-marker.js';
 import { diffHostedSource, peersHostedSource } from './hosted-agent-reads.js';
 // SPDX-License-Identifier: Apache-2.0
 import { canonicalRoot, clientCacheRoot, rootSibling } from './root-paths.js';
@@ -381,6 +383,21 @@ export class HostedAgentTransport {
         );
         return this.response(action, policy.operationId, policy.result);
       }
+      if (action === 'pull') {
+        const result = await pullHostedProject(
+          this.root,
+          this.address,
+          mainCheckoutTransport(this.root, this.address, this.exchange),
+          operationId as string | undefined,
+        );
+        return this.response(action, result.operationId, result);
+      }
+      if (action === 'status' && Object.keys(input).length === 0 && readHostedMainSelection(this.root))
+        return this.response(
+          action,
+          null,
+          await cloneFreshness(this.root, mainCheckoutTransport(this.root, this.address, this.exchange)),
+        );
       let discovery: unknown;
       try {
         let options: Record<string, 1> = {
