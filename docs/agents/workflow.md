@@ -114,6 +114,9 @@ belongs to 5283a92f-f5c7-4f83-b050-40ad4f649c72. Supported alternatives:
 - `save --preview`, `save --handoff`, `save --report`, `land --resume-ready` and
   `x undo-sync` are native-only. Follow the hosted receipt's recovery command.
 
+The [approved hosted parity table](hosted-parity.md) records each migration, fold
+and approved removal; implementation is pending in its owning Issues.
+
 Remaining examples are native-owner commands unless explicitly marked hosted;
 check the generated contract above before using them in a hosted checkout.
 

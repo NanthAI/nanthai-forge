@@ -1,6 +1,6 @@
 # Private builder wrapper: native replacements
 
-The former `lane.sh` helper is machine glue, not the supported interface. Use the [hosted command contract](workflow.md#hosted-command-contract). This inventory preserves the reason for each workaround without porting its shell parsing, fixed paths or defects. Issue references identify existing owners, not new acceptance gates.
+The former `lane.sh` helper is machine glue, not the supported interface. Use the [hosted command contract](workflow.md#hosted-command-contract). This inventory preserves the reason for each workaround without porting its shell parsing, fixed paths or defects. Issue references identify existing owners, not new acceptance gates. The [approved hosted parity table](hosted-parity.md) assigns native-only commands to migration, folding or removal; implementation remains with the named Issues.
 
 | Workaround | Why it existed | Native replacement or remaining Issue |
 | --- | --- | --- |
