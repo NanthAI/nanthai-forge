@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
+import { landWaitCommand } from '../dist/hosted-land-wait.js';
 import { assertAgentResponseShape } from './agent-response-shape.mjs';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -904,3 +907,91 @@ test('wait preserves embedded recovery from its observation with zero conflict r
   assert.deepEqual(result.result.recovery, recovery);
   assert.equal(s.conflictReads(), 0);
 });
+
+test(
+  'a SIGKILLed hosted wait reattaches with its printed command to the same landed receipt',
+  { timeout: 30000 },
+  async t => {
+    const s = await fixture(),
+      a = await s.start(),
+      operationId = a.request.operationId;
+    const command = landWaitCommand('/synthetic', {
+      operationId,
+      result: { phase: 'finish', submission: a.state },
+    });
+    const input = JSON.parse(command.split(" wait '")[1].slice(0, -1));
+    const child = spawn(
+      process.execPath,
+      [
+        '--input-type=module',
+        '-e',
+        `
+    import { observeHostedSubmissions } from ${JSON.stringify(new URL('../dist/hosted-agent-submission-wait.js', import.meta.url).href)};
+    process.on('disconnect', () => process.exit());
+    let sequence = 0;
+    const pending = new Map();
+    process.on('message', ({ id, value }) => {
+      pending.get(id)(value);
+      pending.delete(id);
+    });
+    const transport = {
+      root: '/synthetic', address: JSON.parse(process.argv[1]),
+      dispatch: async () => ({ schema: 1, transport: 'hosted', action: 'capabilities', operationId: null, result: { actor: 'owner' } }),
+      query: (name, args) => new Promise(resolve => {
+        const id = ++sequence;
+        pending.set(id, resolve);
+        process.send({ id, name, args });
+      }),
+    };
+    await observeHostedSubmissions(transport, JSON.parse(process.argv[2]), undefined, () => {}, () => ({
+      onUpdate() { process.send({ subscribed: true }); return () => {}; },
+      async close() {},
+    }));
+  `,
+        JSON.stringify(s.transport.address),
+        JSON.stringify(input),
+      ],
+      {
+        stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
+      },
+    );
+    let errors = '';
+    child.stderr.on('data', bytes => {
+      errors += bytes;
+    });
+    t.after(async () => {
+      if (child.exitCode === null && child.signalCode === null) {
+        const exited = once(child, 'exit');
+        child.kill('SIGKILL');
+        await exited;
+      }
+    });
+    const subscribed = new Promise((resolve, reject) => {
+      child.on('message', async message => {
+        if (message.subscribed) return resolve();
+        try {
+          const value = await s.transport.query(message.name, message.args);
+          if (child.connected) child.send({ id: message.id, value });
+        } catch (error) {
+          reject(error);
+        }
+      });
+      child.once('exit', () => reject(new Error(errors || 'wait exited before subscribing')));
+    });
+    await subscribed;
+    const exited = once(child, 'exit');
+    child.kill('SIGKILL');
+    assert.deepEqual(await exited, [null, 'SIGKILL']);
+    const acceptance = { receiptId: randomUUID(), head: 'a'.repeat(64) };
+    await s.update(a.state.id, 'landed', { acceptance });
+    const resumed = await s.wait(input);
+    const canonical = (await s.f.status(a.state.id)).request;
+    assert.equal(resumed.result.status, 'terminal');
+    assert.equal(resumed.result.submissions[0].submission.id, a.state.id);
+    assert.equal(resumed.result.submissions[0].submission.operationId, operationId);
+    assert.deepEqual(resumed.result.submissions[0].submission.acceptance, acceptance);
+    assert.deepEqual(resumed.result.submissions[0].submission.acceptance, canonical.acceptance);
+    assert.equal(s.f.tables.projectHostedLandingRequests.size, 1);
+    assert.deepEqual(await s.wait(input), resumed, 'reattachment retains the same terminal receipt');
+  },
+);
