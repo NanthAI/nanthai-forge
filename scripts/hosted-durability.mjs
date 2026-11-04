@@ -8,6 +8,9 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 import { compareSnapshots, failure, readSnapshot } from './lib/hosted-durability-compare.mjs';
 
+import { atStep, durabilityError } from './lib/hosted-durability-errors.mjs';
+import { exportAndVerify } from './lib/hosted-durability-snapshot.mjs';
+
 const root = fileURLToPath(new URL('..', import.meta.url));
 const help = `Usage:
   node scripts/hosted-durability.mjs backup --deployment NAME --state-dir PRIVATE_DIR [--prefix PREFIX/] [--operation-id UUID] [--database-only]
@@ -177,8 +180,8 @@ export async function execute(command, exportSnapshot = convexExport) {
   if (command.command === 'backup' || command.command === 'backup-status') {
     const { backup, readBackupStatus } = await import('./lib/hosted-backup.mjs');
     return command.command === 'backup'
-      ? backup(command, exportSnapshot)
-      : readBackupStatus(command.stateDirectory);
+      ? atStep('backup.prepare', () => backup(command, exportSnapshot))
+      : atStep('backup-status.read', () => readBackupStatus(command.stateDirectory));
   }
   if (command.command === 'export') {
     if (command.dryRun)
@@ -188,24 +191,33 @@ export async function execute(command, exportSnapshot = convexExport) {
         includeFileStorage: !command.databaseOnly,
         contactedDeployment: false,
       };
-    const directory = await mkdtemp(join(dirname(command.path), '.forge-export-'));
+    const directory = await atStep('export.prepare', () =>
+      mkdtemp(join(dirname(command.path), '.forge-export-')),
+    );
     try {
       const path = join(directory, 'snapshot.zip');
-      await exportSnapshot(command.deployment, path, { databaseOnly: !!command.databaseOnly });
+      await atStep('export.snapshot', () =>
+        exportSnapshot(command.deployment, path, { databaseOnly: !!command.databaseOnly }),
+      );
       // link is atomic and refuses an occupied destination; retries never overwrite a backup.
-      await link(path, command.path);
+      await atStep('export.publish', () => link(path, command.path));
       return { operation: 'export', complete: true, includeFileStorage: !command.databaseOnly };
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
   }
-  const directory = await mkdtemp(join(tmpdir(), 'forge-durability-'));
+  const directory = await atStep('verify.prepare', () => mkdtemp(join(tmpdir(), 'forge-durability-')));
   try {
     const read = async (side, name) => {
       const path = side.path ?? join(directory, `${name}.zip`);
       if (side.deployment)
-        await exportSnapshot(side.deployment, path, { databaseOnly: !!command.databaseOnly });
-      return readSnapshot(path, { databaseOnly: !!command.databaseOnly });
+        return exportAndVerify(side.deployment, path, exportSnapshot, {
+          databaseOnly: !!command.databaseOnly,
+          step: `verify.${name}`,
+        });
+      return atStep(`verify.${name}.validate`, () =>
+        readSnapshot(path, { databaseOnly: !!command.databaseOnly }),
+      );
     };
     // Sequential exports limit provider load; each is its own consistent snapshot.
     const left = await read(command.left, 'left');
@@ -218,38 +230,15 @@ export async function execute(command, exportSnapshot = convexExport) {
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   process.umask(0o077);
+  let command;
   try {
-    const result = await execute(parseCommand(process.argv.slice(2)));
+    command = parseCommand(process.argv.slice(2));
+    const result = await execute(command);
     console.log(result.help ?? JSON.stringify(result, null, result.operation?.startsWith('backup') ? 0 : 2));
     if (result.operation === 'backup-status' && result.missedWeek) process.exitCode = 2;
     if (result.equal === false) process.exitCode = 2;
   } catch (error) {
-    const known = new Set([
-      'ARGUMENT_INVALID',
-      'R2_NOT_CONFIGURED',
-      'BACKUP_BUSY',
-      'BACKUP_PENDING',
-      'BACKUP_TARGET_MISMATCH',
-      'BACKUP_STATE_INVALID',
-      'BACKUP_R2_FAILED',
-      'BACKUP_CHECKSUM_MISMATCH',
-      'DEPLOYMENT_CREDENTIAL_MISMATCH',
-      'CONVEX_EXPORT_FAILED',
-      'EXPORT_MISSING',
-      'SNAPSHOT_READ_FAILED',
-      'WORK_INDEX_UNAVAILABLE',
-      'WORK_INDEX_INVALID',
-      'STORAGE_INCOMPLETE',
-      'DATABASE_ONLY_STORAGE_REMAINS',
-    ]);
-    console.error(
-      JSON.stringify({
-        error: {
-          code: known.has(error.code) ? error.code : 'DURABILITY_FAILED',
-          message: 'Durability command failed; credentials and provider output are withheld.',
-        },
-      }),
-    );
+    console.error(JSON.stringify({ error: durabilityError(error, command?.command) }));
     process.exitCode = 1;
   }
 }

@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { childEnv } from '../child-env.mjs';
+import { failure } from './hosted-durability-errors.mjs';
+export { failure } from './hosted-durability-errors.mjs';
 import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
@@ -15,7 +17,16 @@ export function canonical(value) {
   return JSON.stringify(value);
 }
 const hash = value => createHash('sha256').update(canonical(value)).digest('hex');
-export const failure = code => Object.assign(new Error(code), { code });
+function unavailable(reason, project) {
+  const ref = value => createHash('sha256').update(value).digest('hex').slice(0, 12);
+  return Object.assign(failure('WORK_INDEX_UNAVAILABLE'), {
+    diagnostics: {
+      reason,
+      ...(project ? { projectRef: ref(project._id) } : {}),
+      ...(project?.work?.generationId ? { generationRef: ref(project.work.generationId) } : {}),
+    },
+  });
+}
 
 // Full records are hashed, including IDs and creation times (snapshot import preserves both).
 // Only selected Work metadata is retained in memory; private record values are never reported.
@@ -94,15 +105,16 @@ export function snapshotAccumulator({ databaseOnly = false } = {}) {
       .filter(p => p.work && !p.removal)
       .map(project => {
         const generation = generations.get(project.work.generationId);
-        if (
-          !generation ||
-          generation.status !== 'ready' ||
-          generation.projectId !== project._id ||
-          generation.backupId !== project.work.backupId
-        )
-          throw failure('WORK_INDEX_UNAVAILABLE');
+        if (!generation) throw unavailable('generation-missing', project);
+        if (generation.status !== 'ready')
+          throw unavailable(
+            generation.status === 'building' ? 'generation-building' : 'generation-failed',
+            project,
+          );
+        if (generation.projectId !== project._id) throw unavailable('project-mismatch', project);
+        if (generation.backupId !== project.work.backupId) throw unavailable('backup-mismatch', project);
         const partition = partitions.get(generation.recordsGenerationId ?? generation._id);
-        if (!partition) throw failure('WORK_INDEX_UNAVAILABLE');
+        if (!partition) throw unavailable('partition-missing', project);
         const main = partition.channels.get('hostedChannels') ?? partition.channels.get('channels') ?? null;
         if (main !== null && (typeof main !== 'string' || !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(main)))
           throw failure('WORK_INDEX_INVALID');
@@ -113,7 +125,7 @@ export function snapshotAccumulator({ databaseOnly = false } = {}) {
         };
       })
       .sort((a, b) => a.projectId.localeCompare(b.projectId));
-    if (!work.length) throw failure('WORK_INDEX_UNAVAILABLE');
+    if (!work.length) throw unavailable('no-work-projects');
     return {
       format: 1,
       tables: Object.fromEntries(
@@ -147,6 +159,7 @@ export async function readSnapshot(path, options = {}) {
   } catch (error) {
     child.kill();
     await completion;
+    if (error.code?.startsWith('WORK_')) throw error;
     throw failure(
       error.code?.startsWith('WORK_') ||
         error.code === 'STORAGE_INCOMPLETE' ||

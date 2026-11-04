@@ -300,3 +300,52 @@ test('CLI returns mismatch exit 2 and reports hashes without private record valu
     assert.equal(JSON.parse(result.stdout).equal, false);
     assert.equal((result.stdout + result.stderr).includes('SYNTHETIC_PRIVATE_SENTINEL'), false);
   }));
+
+test('offline index failure keeps its exact reason through ZIP parsing and the public CLI', () =>
+  temporary(async directory => {
+    const path = join(directory, 'index-unavailable.zip');
+    const fixture = durabilityFixture();
+    fixture.projectWorkGenerations[0].status = 'building';
+    await zip(path, fixture);
+    await assert.rejects(readSnapshot(path), error => {
+      assert.equal(error.diagnostics.reason, 'generation-building');
+      return true;
+    });
+    const result = spawnSync(
+      process.execPath,
+      ['scripts/hosted-durability.mjs', 'verify', '--left-export', path, '--right-export', path],
+      { encoding: 'utf8' },
+    );
+    assert.equal(result.status, 1);
+    const error = JSON.parse(result.stderr).error;
+    assert.equal(error.step, 'verify.left.validate');
+    assert.equal(error.diagnostics.reason, 'generation-building');
+    assert.ok(error.nextStep);
+    assert(!result.stderr.includes('synthetic-ciphertext'));
+  }));
+
+test('every durability command reports a named sub-step and one next step on failure', () =>
+  temporary(async directory => {
+    await writeFile(join(directory, 'last-run.json'), 'broken');
+    for (const args of [
+      ['export', '--deployment', 'INVALID', '--path', join(directory, 'snapshot.zip')],
+      [
+        'verify',
+        '--left-export',
+        join(directory, 'missing.zip'),
+        '--right-export',
+        join(directory, 'missing.zip'),
+      ],
+      ['backup', '--state-dir', directory],
+      ['backup-status', '--state-dir', directory],
+    ]) {
+      const result = spawnSync(process.execPath, ['scripts/hosted-durability.mjs', ...args], {
+        encoding: 'utf8',
+        env: { PATH: process.env.PATH },
+      });
+      assert.equal(result.status, 1);
+      const error = JSON.parse(result.stderr).error;
+      assert.ok(error.step);
+      assert.ok(error.nextStep);
+    }
+  }));

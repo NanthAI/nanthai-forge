@@ -2,6 +2,7 @@
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { r2Client } from './lib/hosted-backup-r2.mjs';
+import { atStep, durabilityError } from './lib/hosted-durability-errors.mjs';
 import { failure } from './lib/hosted-durability-compare.mjs';
 
 const day = 24 * 60 * 60 * 1000;
@@ -14,14 +15,16 @@ export async function backupFreshness({ client, prefix, deployment, now = new Da
   if (!prefix || !/^[a-zA-Z0-9_-]+(?:\/[a-zA-Z0-9_-]+)*\/$/.test(prefix) || !deployment)
     throw failure('ARGUMENT_INVALID');
   let newest;
-  for await (const page of client.pages(prefix)) {
-    for (const key of page) {
-      if (key.startsWith(prefix) && name.test(key.slice(prefix.length)) && (!newest || key > newest))
-        newest = key;
+  await atStep('freshness.list', async () => {
+    for await (const page of client.pages(prefix)) {
+      for (const key of page) {
+        if (key.startsWith(prefix) && name.test(key.slice(prefix.length)) && (!newest || key > newest))
+          newest = key;
+      }
     }
-  }
+  });
   if (!newest) return { operation: 'backup-freshness', ageDays: null, overdue: true };
-  const manifest = await client.manifest(newest);
+  const manifest = await atStep('freshness.manifest', () => client.manifest(newest));
   const [, time, id] = name.exec(newest.slice(prefix.length));
   const observed = Date.parse(manifest.time);
   if (
@@ -36,7 +39,9 @@ export async function backupFreshness({ client, prefix, deployment, now = new Da
     !/^[a-f0-9]{64}$/.test(manifest.sha256)
   )
     throw failure('BACKUP_STATE_INVALID');
-  const zip = await client.head(newest.replace(/manifest\.json$/, 'snapshot.zip'));
+  const zip = await atStep('freshness.head', () =>
+    client.head(newest.replace(/manifest\.json$/, 'snapshot.zip')),
+  );
   if (!zip || zip.size !== manifest.size || (zip.sha256 && zip.sha256 !== manifest.sha256))
     throw failure('BACKUP_CHECKSUM_MISMATCH');
   const age = now.getTime() - observed;
@@ -53,9 +58,9 @@ export async function main(env = process.env, dependencies = {}) {
     });
     console.log(JSON.stringify(result));
     return result.overdue ? 2 : 0;
-  } catch {
+  } catch (error) {
     // Provider text, keys, signed URLs and derived credential material stay private.
-    console.error(JSON.stringify({ error: { code: 'BACKUP_FRESHNESS_FAILED' } }));
+    console.error(JSON.stringify({ error: durabilityError(error, 'freshness') }));
     return 1;
   }
 }

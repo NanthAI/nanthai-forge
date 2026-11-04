@@ -235,13 +235,39 @@ dropped run creates no failed job and cannot email about its own absence. This
 freshness gate exposes a missed week on the **next** scheduled or manual run;
 it is not an independent dead-man monitor. No additional poller is installed.
 
-A failed step leaves the job red. Under GitHub's normal
+A failed step leaves the job red and immediately starts an independent `alert` job,
+including when install/build failed. The job reuses `src/stall-alerts.ts`, with the
+**ntfy** webhook preset and the existing Cloudflare email transport. It sends the
+failed Actions run link, the next action and the bounded retry policy; no private
+snapshot, provider response, credential or endpoint is logged. Only channel and
+HTTP status are reported. Missing configuration or failed delivery makes the
+alert job fail explicitly. Network delivery uses the existing ten-second deadline
+per configured channel, with no recurring work.
+
+For owner notification, the lead adds **`FORGE_ALERT_WEBHOOK_URL` as a secret in
+the GitHub Actions `hosted-backup` environment**, containing the owner's subscribed
+ntfy topic URL. This workflow does **not** need that secret in Convex. Configuring
+landing stall alerts separately requires the same name in the Convex environment;
+setting either environment does not configure the other. Never paste the URL into
+logs or source. Installation and a real delivery qualification remain owner/lead
+steps; synthetic HTTP tests establish the request/delivery path, not owner receipt.
+
+The optional Cloudflare email channel uses the existing secrets
+`FORGE_ALERT_EMAIL_TOKEN`, `FORGE_ALERT_EMAIL_ACCOUNT_ID` and optionally
+`FORGE_ALERT_EMAIL_FROM` in the same Actions environment (the existing sender
+default applies when FROM is absent). Set environment **secret**
+`FORGE_ALERT_EMAIL_TO` to the comma-separated recipients, so public Actions logs mask the addresses. No email or webhook
+secrets reach the backup job, and no backup credentials reach the alert job.
+One successful channel counts as delivery; rejected channels remain visible.
+
+Under GitHub's normal
 [workflow notification behavior](https://docs.github.com/en/actions/concepts/workflows-and-actions/notifications-for-workflow-runs),
 email depends on the recipient's Actions notification settings. Schedule messages
-go to the schedule actor (initial creator, last cron editor, or re-enabler),
-which is not necessarily the repo owner. The lead has the owner establish that
-actor and confirm Actions failure email delivery during setup; adding a workflow
-alone cannot guarantee owner email.
+go to the schedule actor, which is not necessarily the repo owner. Those settings
+and actual owner receipt are not observable from the workflow, so GitHub's own
+failure email alone does not establish same-day owner delivery. The explicit
+stall-alert channel supplements it. A dropped/disabled scheduled run still cannot
+run its alert job; the schedule caveat above remains.
 
 ### Workflow repository choice and first run
 
@@ -275,9 +301,27 @@ per run including install/build, export, upload and readback; 4–5 Mondays mean
 [free in public repos; private GitHub Free includes 2,000 minutes/month](https://docs.github.com/en/billing/concepts/product-billing/github-actions).
 The private allowance is shared: the lead checks remaining included minutes before
 enabling. No paid runner, recurring poller, cache or artifact is added. Idle compute
-and Convex calls are zero. The exporter still makes one native Convex export per
-run, with its existing CLI-managed provider requests; no new Convex functions or
-application document writes are introduced. Freshness adds three R2 requests for
+and Convex calls are zero. A passing run still makes one native Convex export,
+with its existing CLI-managed provider requests; no new application Convex
+functions or document writes are introduced. Index-unavailable recovery is bounded
+to three exports total, with 15-second then 45-second backoff, not polling. Each
+attempt snapshots all deployment documents and included stored files once. At N
+documents, normal snapshot reads remain N and the retry ceiling is 3N; native
+provider-internal billed I/O and requests are not observable from this script.
+The receipt reports `documentCount`, `storedFiles`, compressed ZIP `size` and
+SHA-256 to make the run's scale visible. All R2 writes follow successful validation;
+retries add no R2 upload/readback bytes. A passing run uploads and reads back one
+ZIP of B bytes plus its small manifest (2B transferred), using 16 MiB multipart
+parts. Four completed copies retain approximately 4B bytes, plus manifests.
+The pre-change successful run held a 2,198,906,965-byte ZIP: about 4.40 GB combined
+upload/readback and 8.80 GB for four equal-size copies; current size comes from
+the new receipt, not that historical estimate. Referenced source/artifact R2 bytes
+remain in their existing bucket, outside the Convex ZIP as described above.
+The validator still retains one hash per exported record and compact Work/file
+metadata; uploads buffer one 16 MiB part, and readback streams. No retry holds
+multiple snapshots or accumulators. Alerting adds no Convex or backup-R2 I/O and
+runs only after failure (one POST per configured destination). Real billing
+coverage must be reported separately from these code-derived counts. Freshness adds three R2 requests for
 a normal one-page prefix (LIST, manifest GET, ZIP HEAD); legacy retention/upload
 requests remain unchanged.
 
@@ -332,8 +376,23 @@ incomplete uploads. Forge's process queue prevents concurrent local writes; `BAC
 the pending operation intact for retry. Changing deployment/bucket/prefix requires its own state directory,
 so a retry cannot switch destinations silently.
 
-Success prints one JSON line including `pruned` and `missedWeek`. Failure prints
-one redacted error line and exits 1; provider text and signed URLs are withheld.
+Success prints one JSON line including `pruned`, `missedWeek` and scale counts.
+Every command failure prints a secret-safe `code`, named `step` and one
+`nextStep`, then exits 1. Provider text and signed URLs remain withheld. Work-index
+failures distinguish a missing/building/failed generation, wrong project/backup,
+missing record partition and no verifiable Work projects. Project/generation
+references are twelve-character SHA-256 prefixes, not raw private identifiers.
+These describe the captured snapshot, not a claim about the later live index.
+The historical bare error cannot identify which branch occurred without its ZIP.
+
+`backup` and `verify` deployment inputs retry only a missing/building generation
+or missing partition. They discard their own failed temporary ZIP, wait 15s then
+45s, and export again (three attempts total), retaining the enclosing backup
+operation ID. The manifest timestamp reflects the successful export attempt.
+Each retry prints its sanitized reason, attempt and backoff; exhausted retries
+retain the pending local operation and never start upload/retention. Failed
+indexes and binding mismatches do not retry. Offline ZIP comparisons do not retry
+unchanging bytes. No automatic index repair, schedule or retention change occurs.
 The offline status reads local last-success/pending state; it does not establish
 remote freshness on a fresh Actions runner. Its backup receipt can therefore say
 `missedWeek:true` on each new runner; use the preceding R2 freshness result for

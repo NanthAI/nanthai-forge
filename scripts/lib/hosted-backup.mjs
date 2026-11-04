@@ -5,6 +5,8 @@ import { mkdir, open, readFile, rename, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { CheckQueue } from '../../dist/check-queue.js';
 import { failure, readSnapshot } from './hosted-durability-compare.mjs';
+import { atStep } from './hosted-durability-errors.mjs';
+import { exportAndVerify } from './hosted-durability-snapshot.mjs';
 import { r2Client } from './hosted-backup-r2.mjs';
 
 const week = 7 * 24 * 60 * 60 * 1000;
@@ -155,59 +157,79 @@ export async function backup(command, exportSnapshot, options = {}) {
       throw failure('BACKUP_TARGET_MISMATCH');
     pending.databaseOnly = databaseOnly;
     const snapshot = join(directory, pending.id + '.zip');
+    let step = 'backup.prepare';
     try {
       if (!pending.manifest) {
         // Publish an export only after the exporter and ZIP/storage/Work verification succeed.
         const temp = snapshot + '.partial.zip';
         await rm(temp, { force: true });
-        await exportSnapshot(command.deployment, temp, { databaseOnly });
-        const summary = await (options.verifySnapshot ?? readSnapshot)(temp, { databaseOnly });
-        const digest = await fileDigest(temp);
+        const summary = await exportAndVerify(command.deployment, temp, exportSnapshot, {
+          databaseOnly,
+          read: options.verifySnapshot ?? readSnapshot,
+          delay: options.delay,
+          report: options.report,
+          now: options.now ? () => options.now : undefined,
+        });
+        const digest = await atStep('backup.hash', () => fileDigest(temp));
         await rename(temp, snapshot);
         Object.assign(pending, digest);
         // No remote write has happened yet. Name a re-export by its actual snapshot
         // observation, so a retry after an export failure sorts by the new data.
-        pending.time = now.toISOString();
+        pending.time = summary.observedAt;
         pending.key = command.prefix + `${pending.time.replaceAll(':', '-')}-${pending.id}/snapshot.zip`;
-        const identity = options.identity ?? (await sourceIdentity());
+        const identity = options.identity ?? (await atStep('backup.identity', sourceIdentity));
         pending.manifest = {
           format: 1,
           operationId: pending.id,
-          time: now.toISOString(),
+          time: summary.observedAt,
           deployment: command.deployment,
           ...digest,
           storedFiles: summary.files,
+          documentCount: Object.entries(summary.tables ?? {})
+            .filter(([name]) => !name.includes('/'))
+            .reduce((total, [, table]) => total + table.count, 0),
           databaseOnly,
           includeFileStorage: !databaseOnly,
           identity,
         };
         await save(path, state);
       }
+      step = 'backup.hash';
       if (
         JSON.stringify(await fileDigest(snapshot)) !==
         JSON.stringify({ size: pending.size, sha256: pending.sha256 })
       )
         throw failure('BACKUP_CHECKSUM_MISMATCH');
-      await upload(client, pending, snapshot, () => save(path, state));
+      await atStep('backup.upload-readback', () =>
+        upload(client, pending, snapshot, () => save(path, state)),
+      );
       const manifest = Buffer.from(JSON.stringify(pending.manifest) + '\n');
       const manifestKey = pending.key.replace(/snapshot\.zip$/, 'manifest.json');
       const manifestDigest = { size: manifest.length, sha256: sha(manifest) };
-      if (!(await confirm(client, manifestKey, manifestDigest))) {
-        await client.put(manifestKey, manifest, manifestDigest.sha256);
-        if (!(await confirm(client, manifestKey, manifestDigest))) throw failure('BACKUP_CHECKSUM_MISMATCH');
-      }
-      const pruned = await pruneBackups(client, command.prefix, pending.key);
+      await atStep('backup.manifest-readback', async () => {
+        if (!(await confirm(client, manifestKey, manifestDigest))) {
+          await client.put(manifestKey, manifest, manifestDigest.sha256);
+          if (!(await confirm(client, manifestKey, manifestDigest)))
+            throw failure('BACKUP_CHECKSUM_MISMATCH');
+        }
+      });
+      const pruned = await atStep('backup.retention', () =>
+        pruneBackups(client, command.prefix, pending.key),
+      );
       const result = {
         operation: 'backup',
         complete: true,
         operationId: pending.id,
         time: pending.manifest.time,
+        documentCount: pending.manifest.documentCount,
+        storedFiles: pending.manifest.storedFiles.count,
         size: pending.size,
         sha256: pending.sha256,
         pruned,
         includeFileStorage: !databaseOnly,
         missedWeek: previous.missedWeek,
       };
+      step = 'backup.record';
       state.lastSuccess = pending.manifest.time;
       state.lastAttempt = { time: now.toISOString(), status: 'passed' };
       state.receipts[pending.id] = result;
@@ -220,6 +242,7 @@ export async function backup(command, exportSnapshot, options = {}) {
       }
       return result;
     } catch (error) {
+      error.step ??= step;
       state.lastAttempt = { time: now.toISOString(), status: 'failed' };
       await save(path, state);
       throw error;
@@ -235,6 +258,8 @@ async function sourceIdentity() {
   const files = [
     'scripts/hosted-durability.mjs',
     'scripts/lib/hosted-backup.mjs',
+    'scripts/lib/hosted-durability-errors.mjs',
+    'scripts/lib/hosted-durability-snapshot.mjs',
     'scripts/lib/hosted-backup-r2.mjs',
     'scripts/lib/hosted-durability-compare.mjs',
     'scripts/lib/hosted-durability-zip.py',

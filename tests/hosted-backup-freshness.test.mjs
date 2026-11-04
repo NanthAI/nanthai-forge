@@ -100,7 +100,12 @@ test('CLI reports age and nonzero outcomes without provider or credential output
     throw new Error('SYNTHETIC_SECRET signed URL');
   };
   assert.equal(await main(env, broken), 1);
-  assert.deepEqual(errors, [JSON.stringify({ error: { code: 'BACKUP_FRESHNESS_FAILED' } })]);
+  assert.equal(errors.length, 1);
+  const error = JSON.parse(errors[0]).error;
+  assert.equal(error.code, 'DURABILITY_FAILED');
+  assert.equal(error.step, 'freshness.list');
+  assert.ok(error.nextStep);
+  assert(!errors[0].includes('SYNTHETIC_SECRET'));
 });
 
 for (const objects of [32000, 64000])

@@ -391,3 +391,56 @@ test('database-only weekly backup excludes files and pins storage mode in its ma
       code: 'BACKUP_TARGET_MISMATCH',
     });
   }));
+
+test('transient index retries retain the operation and publish only the verified export', () =>
+  setup(async x => {
+    let reads = 0;
+    const delays = [],
+      events = [];
+    const options = {
+      ...x.options,
+      verifySnapshot: async () => {
+        assert.equal(x.client.objects.size, 0, 'no R2 write or retention before validation');
+        if (++reads < 3)
+          throw Object.assign(new Error('private row'), {
+            code: 'WORK_INDEX_UNAVAILABLE',
+            diagnostics: { reason: 'generation-building' },
+          });
+        return { files: { count: 1 }, tables: { hostedProjects: { count: 2 } } };
+      },
+      delay: async ms => delays.push(ms),
+      report: event => events.push(event),
+    };
+    const result = await backup(x.command, x.exporter, options);
+    assert.equal(x.exports(), 3);
+    assert.equal(result.operationId, id);
+    assert.equal(result.documentCount, 2);
+    assert.deepEqual(delays, [15000, 45000]);
+    assert.equal(events.length, 2);
+    assert.equal(x.client.objects.size, 2);
+    assert.equal((await readBackupStatus(x.directory)).pending, false);
+  }));
+
+test('exhausted index retries leave pending state intact without uploading or retaining', () =>
+  setup(async x => {
+    seed(x.client);
+    const before = [...x.client.objects];
+    await assert.rejects(
+      backup(x.command, x.exporter, {
+        ...x.options,
+        verifySnapshot: async () => {
+          throw Object.assign(new Error('private row'), {
+            code: 'WORK_INDEX_UNAVAILABLE',
+            diagnostics: { reason: 'partition-missing' },
+          });
+        },
+        delay: async () => {},
+        report: () => {},
+      }),
+      { code: 'WORK_INDEX_UNAVAILABLE', step: 'backup.validate', attempts: 3 },
+    );
+    assert.equal(x.exports(), 3);
+    assert.equal(x.client.creates, 0);
+    assert.deepEqual([...x.client.objects], before);
+    assert.equal((await readBackupStatus(x.directory)).pending, true);
+  }));

@@ -55,3 +55,27 @@ jobs:
           R2_BUCKET: ${{ secrets.R2_BUCKET }}
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+
+  alert:
+    # Independent setup also covers failures before the backup job builds its CLI.
+    needs: backup
+    if: ${{ failure() }}
+    runs-on: ubuntu-latest
+    environment: hosted-backup
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24.22.1'
+      - run: npm ci --ignore-scripts
+      - run: npm run build:core
+      - name: Alert the owner through the existing stall-alert channel
+        run: node scripts/hosted-backup-alert.mjs
+        env:
+          FORGE_ALERT_WEBHOOK_URL: ${{ secrets.FORGE_ALERT_WEBHOOK_URL }}
+          FORGE_ALERT_EMAIL_TOKEN: ${{ secrets.FORGE_ALERT_EMAIL_TOKEN }}
+          FORGE_ALERT_EMAIL_ACCOUNT_ID: ${{ secrets.FORGE_ALERT_EMAIL_ACCOUNT_ID }}
+          FORGE_ALERT_EMAIL_FROM: ${{ secrets.FORGE_ALERT_EMAIL_FROM }}
+          FORGE_ALERT_EMAIL_TO: ${{ secrets.FORGE_ALERT_EMAIL_TO }}

@@ -23,7 +23,7 @@ test('weekly backup YAML has only Monday 03:00 UTC schedule and manual triggers'
   assert.deepEqual(workflow.on.schedule, [{ cron: '0 3 * * 1' }]);
   assert.equal(workflow.on.workflow_dispatch, null);
   assert.deepEqual(workflow.permissions, { contents: 'read' });
-  assert.deepEqual(Object.keys(workflow.jobs), ['backup']);
+  assert.deepEqual(Object.keys(workflow.jobs), ['backup', 'alert']);
   assert.equal(job['runs-on'], 'ubuntu-latest');
   assert.equal(workflow.concurrency['cancel-in-progress'], 'false');
 });
@@ -111,4 +111,23 @@ test('launchd fallback parses and has no automatic schedule', () => {
     { encoding: 'utf8' },
   );
   assert.equal(result.status, 0, result.stderr);
+});
+
+test('every failed backup job immediately runs the existing stall-alert transport in an independent job', () => {
+  const alert = workflow.jobs.alert;
+  assert.equal(alert.needs, 'backup');
+  assert.equal(alert.if, '\u0024{{ failure() }}');
+  assert.equal(alert.environment, 'hosted-backup');
+  const step = alert.steps.at(-1);
+  assert.equal(step.run, 'node scripts/hosted-backup-alert.mjs');
+  assert.equal(step.env.FORGE_ALERT_WEBHOOK_URL, '\u0024{{ secrets.FORGE_ALERT_WEBHOOK_URL }}');
+  for (const name of ['FORGE_ALERT_EMAIL_TOKEN', 'FORGE_ALERT_EMAIL_ACCOUNT_ID', 'FORGE_ALERT_EMAIL_FROM'])
+    assert.equal(step.env[name], `\u0024{{ secrets.${name} }}`);
+  assert.equal(step.env.FORGE_ALERT_EMAIL_TO, '\u0024{{ secrets.FORGE_ALERT_EMAIL_TO }}');
+  for (const step of alert.steps) {
+    if (step.uses) assert.match(step.uses, /^actions\/(checkout|setup-node)@[a-f0-9]{40}$/);
+    assert(!JSON.stringify(step.env ?? {}).includes('R2_'));
+    assert(!JSON.stringify(step.env ?? {}).includes('CONVEX_DEPLOY_KEY'));
+  }
+  assert(alert.steps.some(step => step.run === 'npm run build:core'));
 });
