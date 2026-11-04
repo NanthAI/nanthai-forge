@@ -383,3 +383,22 @@ test('server main unavailable or revoked never falls back to an uploaded native 
   await assert.rejects(current(), { code: 'SOURCE_UNAVAILABLE' });
   assert.deepEqual(calls, ['projectHostedAgent:capabilities', 'projectHostedChannels:current']);
 });
+
+test('main checkout uses the shared ignored-output and dependency-link preservation path', async t => {
+  const { mkdirSync, symlinkSync, readlinkSync } = await import('node:fs');
+  const s = setup(t);
+  await checkoutHostedMain(s.root, s.request(), s.transport);
+  mkdirSync(join(s.root, 'dist'));
+  writeFileSync(join(s.root, 'dist/app.js'), 'local output');
+  symlinkSync('../dependencies', join(s.root, 'node_modules'));
+  const selected = s.selection();
+  selected.head = s.state(s.blob('changed main\n'), [s.head]);
+  selected.receipt.id = 'next-main';
+  s.select(selected);
+  const command = s.request();
+  await checkoutHostedMain(s.root, command, s.transport);
+  assert.equal(readFileSync(join(s.root, 'a.txt'), 'utf8'), 'changed main\n');
+  assert.equal(readFileSync(join(s.root, 'dist/app.js'), 'utf8'), 'local output');
+  assert.equal(readlinkSync(join(s.root, 'node_modules')), '../dependencies');
+  assert((await checkoutHostedMain(s.root, command, s.transport)).replayed);
+});

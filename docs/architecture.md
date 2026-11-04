@@ -1137,7 +1137,17 @@ client-baseline guard under its cache lock. It preserves sparse scope and uses
 verified cached unchanged blobs. Dirty contents, deletions, modes, links and
 untracked obstructions, including changes during transfer, retain the old marker
 and files. Interrupted original-operation retries cannot replace a newer client
-marker, and completed retries never reinstall over later edits. Server source
+marker, and completed retries never reinstall over later edits. Untracked artifacts excluded by the project's layered `.gitignore`/`.forgeignore`
+rules or Forge's source exclusions survive installation in place, including
+external dependency links. The source baseline and incoming manifest take
+precedence over exclusions: changed saved bytes/modes and incoming path or parent
+collisions remain structured conflicts. Matching untracked incoming source is
+safe to install. Ignored directories without source intersections are pruned;
+link targets and ignored output bytes are never scanned. A local artifact-path
+journal precedes the directory swap. Artifacts move from the retained previous
+checkout only after publication, and original-operation replay resumes those
+renames without overwriting an occupied destination. Main checkout uses the same
+validation and preservation functions. Server source
 publication and optional local installation have separate outcomes.
 
 ### Hosted check definitions and provider evidence

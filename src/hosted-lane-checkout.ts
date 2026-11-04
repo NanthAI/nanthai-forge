@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 import { canonicalRoot, clientCacheRoot } from './root-paths.js';
 import { preserveMisplacedReadCaches } from './hosted-legacy-cache.js';
+import { planCheckoutPreservation, preserveCheckoutArtifacts } from './hosted-checkout-preserve.js';
 import { sourceTree } from './source-tree.js';
 import { mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { z } from 'zod';
 import { hostedLaneSelectionSchema, type HostedLaneSelection } from './hosted-lane.js';
+import type { NativeFile } from './native-state-format.js';
 import { parseNativeState } from './native-state-format.js';
 import { canonicalPayload } from './hosted-source-operation.js';
 import { durableReplace, syncDirectory } from './native-durability.js';
@@ -64,6 +66,7 @@ async function checkout(
     lock = join(cache.root, 'lock'),
     previous = join(cache.root, 'previous'),
     receiptPath = join(cache.root, `${request.operationId}.json`);
+  const preservationPath = join(cache.root, `preserve-${request.operationId}.json`);
   const recoveryPath = join(cache.root, `legacy-cache-recovery-${request.operationId}.json`);
   const preserveCaches = (files: readonly { path: string }[] = []) => {
     preserveMisplacedReadCaches(
@@ -104,6 +107,19 @@ async function checkout(
     const paths = new Set(marker?.materialized ?? []);
     return marker?.state.files.filter(file => paths.has(file.path)) ?? [];
   };
+  const preserveArtifacts = (target: NativeFile[]) =>
+    preserveCheckoutArtifacts(root, previous, preservationPath, () => {
+      const old = readHostedLaneCheckout(previous);
+      const bytes = readSource(previous, `.forge/${hostedLaneMarkerName}`, Number.MAX_SAFE_INTEGER);
+      invariant(
+        (bytes ? digest(bytes) : null) === operationSchema.parse(json(receiptPath)).previousMarker,
+        'WORK_CONFLICT',
+        'The prior checkout baseline changed; both copies are preserved.',
+      );
+      return cleanHostedCheckout(previous, materializedFiles(old), hostedLaneMarkerName, Boolean(old), {
+        target,
+      });
+    });
   const baseline = () => {
     let marker;
     try {
@@ -176,8 +192,9 @@ async function checkout(
                 undefined,
                 { obstruction: { kind: 'baseline-mismatch', path: `.forge/${hostedLaneMarkerName}` } },
               );
-            preserveCaches(marker?.state.files);
-            cleanHostedCheckout(root, materializedFiles(marker), hostedLaneMarkerName, Boolean(marker));
+            cleanHostedCheckout(root, materializedFiles(marker), hostedLaneMarkerName, Boolean(marker), {
+              deferExtras: true,
+            });
             const next = { request, selection: observed, complete: false, previousMarker: markerDigest() };
             durableReplace(receiptPath, JSON.stringify(next));
             return next;
@@ -287,12 +304,14 @@ async function checkout(
                           obstruction: { kind: 'baseline-mismatch', path: `.forge/${hostedLaneMarkerName}` },
                         },
                       );
-                    preserveCaches(current?.state.files);
-                    cleanHostedCheckout(
+                    if (current?.operationId === request.operationId) preserveArtifacts(files);
+                    preserveCaches([...(current?.state.files ?? []), ...state.files]);
+                    const artifacts = cleanHostedCheckout(
                       root,
                       materializedFiles(current),
                       hostedLaneMarkerName,
                       Boolean(current),
+                      { target: files },
                     );
                     // An interrupted post-rename install already has the original marker. Reconcile it.
                     if (current?.operationId !== request.operationId) {
@@ -301,10 +320,12 @@ async function checkout(
                         'WORK_CONFLICT',
                         'An earlier checkout backup is preserved.',
                       );
+                      planCheckoutPreservation(preservationPath, artifacts);
                       if (checkoutPathExists(root)) renameSync(root, previous);
                       renameSync(stage, root);
                       syncDirectory(dirname(root));
                       syncDirectory(cache.root);
+                      preserveArtifacts(files);
                       writeCheckoutStatIndex(root, installed.since, installed.entries);
                     }
                     // Nested Lanes share their caller's immutable objects. Retain that local

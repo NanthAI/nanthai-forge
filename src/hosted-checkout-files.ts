@@ -3,8 +3,6 @@ import {
   lstatSync,
   mkdirSync,
   readdirSync,
-  readlinkSync,
-  readFileSync,
   copyFileSync,
   chmodSync,
   symlinkSync,
@@ -16,11 +14,10 @@ import { dirname, join, resolve } from 'node:path';
 import { checkoutIo } from './checkout-io.js';
 import { mapExchange } from './exchange-parallel.js';
 import { digest } from './hash.js';
-import { ForgeError, invariant } from './errors.js';
+import { invariant } from './errors.js';
 import type { NativeFile } from './native-state-format.js';
 import { syncDirectory, syncFile } from './native-durability.js';
 import { fingerprintPrivateFile, readSource } from './files.js';
-import { preserveLegacyCacheUse } from './client-cache-use.js';
 
 /** Unlike existsSync, a dangling symlink still occupies a checkout path. */
 export function checkoutPathExists(path: string) {
@@ -32,91 +29,7 @@ export function checkoutPathExists(path: string) {
     throw error;
   }
 }
-/** Compare link bytes without ever following the target. Preserve every local difference. */
-export function cleanHostedCheckout(root: string, files: NativeFile[], markerName: string, marked: boolean) {
-  if (!checkoutPathExists(root)) return;
-  const rootStat = lstatSync(root);
-  invariant(
-    rootStat.isDirectory() && !rootStat.isSymbolicLink(),
-    'UNSAFE_PATH',
-    'Checkout directory must be real.',
-  );
-  const allowed = new Map(files.map(file => [file.path, file]));
-  function visit(directory: string) {
-    for (const entry of readdirSync(join(root, directory))) {
-      const path = directory ? `${directory}/${entry}` : entry;
-      const stat = lstatSync(join(root, path));
-      if (path === '.forge') {
-        if (!(marked && stat.isDirectory() && !stat.isSymbolicLink()))
-          throw new ForgeError(
-            'WORK_CONFLICT',
-            'Existing Forge metadata at ".forge" is preserved.',
-            undefined,
-            { obstruction: { kind: 'unknown-metadata', path: '.forge' } },
-          );
-        for (const name of readdirSync(join(root, path)))
-          if (!(name === markerName || (name === 'cache-use.json' && preserveLegacyCacheUse(root))))
-            throw new ForgeError(
-              'WORK_CONFLICT',
-              `Existing Forge metadata at ${JSON.stringify(`${path}/${name}`)} is preserved.`,
-              undefined,
-              { obstruction: { kind: 'unknown-metadata', path: `${path}/${name}` } },
-            );
-        continue;
-      }
-      const file = allowed.get(path);
-      if (!file && stat.isDirectory()) {
-        visit(path);
-        continue;
-      }
-      const bytes = stat.isSymbolicLink()
-        ? readlinkSync(join(root, path), { encoding: 'buffer' })
-        : stat.isFile() && stat.nlink === 1
-          ? readFileSync(join(root, path))
-          : null;
-      if (
-        !(
-          file &&
-          bytes &&
-          digest(bytes) === file.blob &&
-          (stat.isSymbolicLink()
-            ? file.mode === 'symlink'
-            : file.mode !== 'symlink' && Boolean(stat.mode & 0o111) === (file.mode === 'executable'))
-        )
-      )
-        throw new ForgeError(
-          'WORK_CONFLICT',
-          `Local checkout changes at ${JSON.stringify(path)} are preserved.`,
-          undefined,
-          {
-            obstruction: {
-              path,
-              kind: file ? 'source-edit' : 'extra-source',
-              expectedDigest: file?.blob ?? null,
-              observedDigest: bytes ? digest(bytes) : null,
-              expectedMode: file?.mode ?? null,
-              observedMode: stat.isSymbolicLink()
-                ? 'symlink'
-                : stat.isFile()
-                  ? stat.mode & 0o111
-                    ? 'executable'
-                    : 'file'
-                  : 'other',
-            },
-          },
-        );
-      allowed.delete(path);
-    }
-  }
-  visit('');
-  if (allowed.size)
-    throw new ForgeError(
-      'WORK_CONFLICT',
-      `Local checkout deletion at ${JSON.stringify(allowed.keys().next().value)} is preserved.`,
-      undefined,
-      { obstruction: { kind: 'deletion', path: allowed.keys().next().value } },
-    );
-}
+export { cleanHostedCheckout } from './hosted-checkout-clean.js';
 export function installHostedFile(stage: string, objects: string, file: NativeFile) {
   const target = join(stage, file.path),
     source = join(objects, file.blob);

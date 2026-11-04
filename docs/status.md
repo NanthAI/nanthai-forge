@@ -23,6 +23,12 @@ Now and Work collapse large lists into Initiative or decision groups with counts
 
 Verification bounds each test file to ten minutes by default (configurable), reports timed-out file names and terminates their process groups. Local presence contention no longer adds hosted-sync deferrals for unbound or opted-out owners.
 
+Hosted sync/resolve local apply preserves ignored build output and dependency
+links using project ignore rules and Forge source exclusions. Saved source and
+incoming path collisions remain protected; interrupted artifact moves resume with
+the original apply operation. Relative checkout roots use a canonical sibling
+client cache.
+
 ## Works
 
 - Hosted relative, trailing-slash and symlinked roots keep source-read caches beside

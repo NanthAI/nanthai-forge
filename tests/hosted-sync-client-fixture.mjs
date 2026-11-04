@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { checkoutHostedLane } from '../dist/hosted-lane-checkout.js';
 import { digest } from '../dist/hash.js';
-export async function fixture(t, paths) {
+export async function fixture(t, paths, extra = []) {
   const directory = realpathSync(mkdtempSync(join(tmpdir(), 'forge-sync-client-')));
   t.after(() => rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const root = join(directory, 'client'),
@@ -21,6 +21,7 @@ export async function fixture(t, paths) {
   const files = [
     { path: 'a', blob: put('before\n'), mode: 'file' },
     { path: 'unaffected', blob: put('unchanged'), mode: 'file' },
+    ...extra.map(({ path, content, mode = 'file' }) => ({ path, blob: put(content), mode })),
   ];
   const state = entries =>
     put(
@@ -28,7 +29,7 @@ export async function fixture(t, paths) {
         schema: 1,
         kind: 'forge-source-state',
         parents: [],
-        files: entries,
+        files: [...entries].sort((a, b) => a.path.localeCompare(b.path)),
         at: '2026-01-01T00:00:00Z',
         message: 'synthetic',
       }),
@@ -76,7 +77,7 @@ export async function fixture(t, paths) {
   const change = () => {
     selection = {
       ...selection,
-      head: state([{ ...files[0], blob: put('after\n') }, files[1]]),
+      head: state([{ ...files[0], blob: put('after\n') }, ...files.slice(1)]),
       version: selection.version + 1,
       sourceVersion: selection.sourceVersion + 1,
     };
@@ -105,6 +106,15 @@ export async function fixture(t, paths) {
     from,
     selection: () => structuredClone(selection),
     change,
+    setFiles: entries => {
+      selection = {
+        ...selection,
+        head: state(entries),
+        version: selection.version + 1,
+        sourceVersion: selection.sourceVersion + 1,
+      };
+    },
+    put,
     onDownload: fn => {
       duringDownload = fn;
     },

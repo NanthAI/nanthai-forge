@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { canonicalRoot, clientCacheRoot } from './root-paths.js';
 import { preserveMisplacedReadCaches } from './hosted-legacy-cache.js';
+import { planCheckoutPreservation, preserveCheckoutArtifacts } from './hosted-checkout-preserve.js';
 import { recordMetricCache } from './self-metrics-source-observations.js';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, lstatSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -66,6 +67,7 @@ export async function checkoutHostedMain(root: string, input: unknown, transport
       existsSync(recoveryPath) ? json(recoveryPath) : [],
     );
   };
+  const preservationPath = join(cache, `preserve-${request.operationId}.json`);
   const receiptPath = join(cache, `${request.operationId}.json`),
     previous = join(cache, 'previous');
   // Recheck current access even on cache hits and completed-operation retries.
@@ -152,11 +154,36 @@ export async function checkoutHostedMain(root: string, input: unknown, transport
         'Another pull updated this client while the selected head was downloading.',
       );
       const beforeFiles = marker ? parseNativeState(Buffer.from(JSON.stringify(marker.state))).files : [];
-      preserveCaches(beforeFiles);
-      cleanHostedCheckout(root, beforeFiles, 'hosted-main.json', Boolean(marker));
-      if (existsSync(previous)) rmSync(previous, { recursive: true });
-      if (existsSync(root)) renameSync(root, previous);
-      renameSync(stage, root);
+      const preserveArtifacts = () =>
+        preserveCheckoutArtifacts(root, previous, preservationPath, () => {
+          const oldBytes = readSource(previous, '.forge/hosted-main.json', Number.MAX_SAFE_INTEGER);
+          invariant(
+            (oldBytes ? digest(oldBytes) : null) === operation.previousMarker,
+            'WORK_CONFLICT',
+            'The prior checkout baseline changed; both copies are preserved.',
+          );
+          const old = oldBytes ? markerSchema.parse(JSON.parse(oldBytes.toString())) : null;
+          return cleanHostedCheckout(
+            previous,
+            old ? parseNativeState(Buffer.from(JSON.stringify(old.state))).files : [],
+            'hosted-main.json',
+            Boolean(old),
+            { target: state.files },
+          );
+        });
+      const installed = marker && JSON.stringify(marker.selection) === JSON.stringify(selection);
+      if (installed) preserveArtifacts();
+      preserveCaches([...beforeFiles, ...state.files]);
+      const artifacts = cleanHostedCheckout(root, beforeFiles, 'hosted-main.json', Boolean(marker), {
+        target: state.files,
+      });
+      if (!installed) {
+        invariant(!existsSync(previous), 'WORK_CONFLICT', 'An earlier checkout backup is preserved.');
+        planCheckoutPreservation(preservationPath, artifacts);
+        if (existsSync(root)) renameSync(root, previous);
+        renameSync(stage, root);
+        preserveArtifacts();
+      }
       syncDirectory(dirname(root));
       syncDirectory(cache);
       operation.complete = true;
