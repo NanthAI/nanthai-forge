@@ -1,3 +1,9 @@
+import {
+  hostedDiffSchema,
+  hostedPeersSchema,
+  diffHostedSource,
+  peersHostedSource,
+} from './hosted-agent-reads.js';
 import { hostedOverlapNotifications } from './mcp-hosted-overlaps.js';
 // SPDX-License-Identifier: Apache-2.0
 import type { McpServer, RegisteredTool } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -21,7 +27,7 @@ import {
   hostedSourceSelectionSchema,
   hostedSourceShowSchema,
   hostedSourceLinesSchema,
-  selectHostedSource,
+  selectExactHostedSource,
   showHostedSource,
   readHostedSourceLines,
 } from './mcp-hosted-source.js';
@@ -99,7 +105,7 @@ export function registerHostedAgentWorkflow(
       name: 'forge_work_overview',
       actions: ['status', 'capabilities', 'metrics', 'decisions'],
       description:
-        'Read hosted metrics or decisions in bounded pages, constant-size capabilities or one selected Lane/run/source operation/submission. Decisions accepts target? and cursor?. No Work hydration, worker wake or idle observer.',
+        'Read paged metrics/decisions, capabilities or one Lane/run/operation/submission. Decisions: target?, cursor?. No Work hydration, wakes or idle observer.',
     },
   ];
   // Project rules: defaults until the first call reads the live policy, then regenerated from it.
@@ -170,12 +176,11 @@ export function registerHostedAgentWorkflow(
   server.registerTool(
     'forge_current',
     {
-      description:
-        'Select one saved hosted Lane with exact source/version/authority pins. No graph, Work history or local working bytes are read.',
+      description: 'Select exact Lane, main, State or Candidate source pins; excludes local drafts.',
       inputSchema: hostedSourceSelectionSchema.shape,
       annotations: read,
     },
-    input => result(async () => ({ sourceContext: await selectHostedSource(transport, input) })),
+    input => result(async () => ({ sourceContext: await selectExactHostedSource(transport, input) })),
   );
   server.registerTool(
     'forge_source',
@@ -191,17 +196,28 @@ export function registerHostedAgentWorkflow(
     'forge_review',
     {
       description:
-        'show reads a saved hosted Lane file with source pins and utf8/base64 encoding. force:true permits binary or over-1-MiB files, as in native show. Uses verified H04 source objects, never local unsaved bytes.',
-      inputSchema: { command: hostedSourceShowSchema },
+        'show: exact Lane/main/state/candidateId file; force permits binary/large bytes. diff: pinned Lane base to saved head, paths/byteBudget/cursor. peers: laneId/path/detail saved overlap evidence; incomplete coverage never proves independence. Unsaved bytes excluded.',
+      inputSchema: {
+        command: z.union([
+          hostedSourceShowSchema,
+          hostedDiffSchema.extend({ action: z.literal('diff') }),
+          hostedPeersSchema.extend({ action: z.literal('peers') }),
+        ]),
+      },
       annotations: read,
     },
-    ({ command }) => result(() => showHostedSource(transport, command)),
+    ({ command }) =>
+      result(() => {
+        if (command.action === 'show') return showHostedSource(transport, command);
+        const { action, ...input } = command;
+        return action === 'diff' ? diffHostedSource(transport, input) : peersHostedSource(transport, input);
+      }),
   );
   server.registerTool(
     'forge_wait',
     {
       description:
-        'Explicitly observe one hosted run or several hosted landing operationIds until terminal, timeout or cancellation. Submission events carry a reconnect cursor scoped to the project, actor and operation selection. Only this active call opens a subscription; it closes on every exit/disconnect. Progress notifications carry run observations when a progressToken is supplied. No polling, metadata hydration or check/worker wake.',
+        'Observe one run or landing operationIds until terminal/timeout/cancellation. Reconnect cursor binds project, actor and operations. Only this active call subscribes; exit/disconnect closes it. progressToken enables progress notifications. No polling, Work hydration or compute wake.',
       inputSchema: hostedWaitSchema.shape,
       annotations: read,
     },

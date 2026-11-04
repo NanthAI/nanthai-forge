@@ -21,7 +21,7 @@ export async function hostedShowCli(
     if (error instanceof z.ZodError)
       throw new ForgeError(
         'BAD_ARGUMENT',
-        `Hosted show takes {"path":"src/file.ts"} plus laneId (default: this Lane), channel:"main" or force:true. ${error.issues
+        `Hosted show takes {"path":"src/file.ts"} plus one selection: laneId (default: this Lane), channel:"main", state or candidateId; force:true allows binary/large files. ${error.issues
           .map(issue => issue.message)
           .join('; ')}`,
       );

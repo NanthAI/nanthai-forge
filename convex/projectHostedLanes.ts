@@ -9,6 +9,8 @@ import { hostedLaneSchema, hostedLaneSelectionSchema, hostedIntentSchema } from 
 import { sourceAuthority } from '../src/hosted-source-authority';
 import { invariant } from '../src/errors';
 import { report } from './errors';
+import { findObject } from './projectObjectFind';
+import { isStored } from './projectObjectFields';
 
 const identity = { projectId: v.id('hostedProjects'), laneId: v.string() };
 async function caller(ctx: QueryCtx, projectId: Id<'hostedProjects'>) {
@@ -181,6 +183,26 @@ export const intent = query({
       });
       invariant(row, 'NOT_FOUND', 'Hosted Intent not found on this project.');
       return JSON.stringify(hostedIntentSchema.parse(JSON.parse(row.value)));
+    } catch (error) {
+      return report(error);
+    }
+  },
+});
+
+/** Exact project object membership, including cache hits. The client verifies State bytes. */
+export const source = query({
+  args: { projectId: v.id('hostedProjects'), state: v.string() },
+  returns: v.object({ head: v.string() }),
+  handler: async (ctx, { projectId, state }) => {
+    try {
+      await caller(ctx, projectId);
+      const object = await findObject(ctx, projectId, state);
+      invariant(
+        object && !object.removed && isStored(object),
+        'SOURCE_UNAVAILABLE',
+        'The exact source object is unavailable on this project.',
+      );
+      return { head: state };
     } catch (error) {
       return report(error);
     }

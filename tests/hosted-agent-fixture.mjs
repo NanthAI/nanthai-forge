@@ -89,7 +89,10 @@ export function agentFixture(t) {
     if (name === 'projectHostedAgent:capabilities') result = caps;
     else if (name === 'projectHostedChannels:current') result = main;
     else if (name === 'projectHostedLanes:select') result = lane;
-    else if (name === 'projectHostedComposeSelection:page')
+    else if (name === 'projectHostedLanes:source') {
+      if (!objects.has(args.state)) throw new ForgeError('SOURCE_UNAVAILABLE', 'Exact State is unavailable.');
+      result = { head: args.state };
+    } else if (name === 'projectHostedComposeSelection:page')
       result = {
         inputs: args.inputs.map(item => {
           if (item.expected)

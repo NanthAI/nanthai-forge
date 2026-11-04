@@ -32,7 +32,7 @@ async function output(call) {
 test('hosted help and packaged docs are generated from every enforced schema', async t => {
   assert.deepEqual(
     hostedAgentHelpEntries.map(e => e.action),
-    [...Object.keys(hostedAgentCommandSchemas), 'wait', 'show'],
+    [...Object.keys(hostedAgentCommandSchemas), 'diff', 'peers', 'wait', 'show'],
   );
   for (const entry of hostedAgentHelpEntries)
     assert.deepEqual(
@@ -66,8 +66,6 @@ test('hosted help and packaged docs are generated from every enforced schema', a
     'records:',
     'candidates:',
     'log:',
-    'diff:',
-    'peers:',
     'brief:',
     'review:',
   ])
@@ -80,16 +78,18 @@ test('hosted coordination entry points retain supported reads and their coverage
     for (const field of ['unacknowledgedOverlaps', 'behindMain'])
       assert(text.includes(field), `${path}: use the supported receipt fields`);
     assert.match(text, /unsaved/i, `${path}: saved-path coverage limit`);
-    assert.match(text, /no hosted|unavailable|HOSTED_ACTION_UNSUPPORTED/, `${path}: hosted boundary`);
+    assert.match(text, /`diff/, `${path}: documented hosted diff`);
+    assert.match(text, /`peers/, `${path}: documented hosted peers`);
     assert.doesNotMatch(text, /Receipts include advisory peers;[^\n]*`peers/);
     assert.doesNotMatch(text, /Source reads: `diff` compares Lane base/);
   }
   const text = hostedAgentHelp();
-  assert.match(text, /Hosted peers and diff are unavailable/);
+  assert.match(text, /peers \{laneId\?,path\?,detail\?\}/);
+  assert.match(text, /diff \{laneId\?,paths\?,byteBudget\?,cursor\?\}/);
   assert.match(text, /unacknowledgedOverlaps and behindMain/);
   assert.match(text, /excludes unsaved peer edits/);
-  assert.match(text, /show \{channel:"main",path\}/);
-  assert.match(text, /no pinned base-to-head diff/);
+  assert.match(text, /compares pinned base to saved head/);
+  assert.match(text, /show \{state\?\|candidateId\?/);
 });
 
 test('unsupported actions give a supported alternative without upgrade advice or network IO', async t => {
@@ -99,9 +99,7 @@ test('unsupported actions give a supported alternative without upgrade advice or
     ['land-ready', 'land --save'],
     ['records', 'status'],
     ['candidates', 'status'],
-    ['diff', 'local Lane'],
     ...[
-      'peers',
       'review',
       'brief',
       'link',

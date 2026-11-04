@@ -32,7 +32,7 @@ Agreed ideas, decisions and builder-found friction go into planning as Issues (`
 
 Before filing an Issue or friction, search planning and comment on an existing match instead of duplicating it; until search (18e28b75-5db5-4137-94e0-8fb889092996) ships, page `planning {"reconcile":false,"limit":100}` and filter titles.
 
-`land --save` saves, updates from main, composes a Candidate, runs the check and accepts under the project policy. Details: [agent workflow](docs/agents/workflow.md). Hosted start/save/status receipts include `unacknowledgedOverlaps` and `behindMain`; their bounded saved-path advice excludes unsaved peer edits and never establishes independence. Installed nforge 0.3.1 has no hosted `peers` or `diff`; `forge_peers` is native-only.
+`land --save` saves, updates from main, composes a Candidate, runs the check and accepts under the project policy. Details: [agent workflow](docs/agents/workflow.md). Hosted start/save/status receipts include `unacknowledgedOverlaps` and `behindMain`; their bounded saved-path advice excludes unsaved peer edits and never establishes independence. Hosted `peers {laneId,path?,detail?}` reads the same saved overlap evidence in one query; `diff {laneId,paths?,byteBudget?}` compares pinned base to saved head. MCP uses `forge_review` for both.
 
 **Working rules for every agent**
 
@@ -43,7 +43,7 @@ Before filing an Issue or friction, search planning and comment on an existing m
 - State Convex calls, DB I/O, memory and wall time at real scale before building. Calls per operation must not rise; idle costs zero calls. Batch by page, with no per-item calls or polling. Runtime and storage work is done only after billed usage and byte placement are checked.
 - Log friction with the action, error code, Lane id, cost and workaround; fix it or link a planned slice. Leads follow the [lead playbook](docs/agents/lead.md).
 
-Hosted source reads: `show {"channel":"main","path":"FILE"}` returns exact accepted bytes; `show {"laneId":"…","path":"FILE"}` returns exact saved Lane bytes, excluding unsaved edits. Compare with local Lane files using ordinary tools; this is not a pinned base-to-head diff. Native owners also support `diff`; see the [command reference](docs/agents/workflow.md).
+Hosted source reads: `show {"channel":"main","path":"FILE"}` returns exact accepted bytes; `show {"laneId":"…","path":"FILE"}` returns exact saved Lane bytes, excluding unsaved edits. `show {state,path}` or `{candidateId,path}` selects exact retained source without substitution. `diff` returns `nextCursor` for the original pair and identifies byte-budget omissions; see the [command reference](docs/agents/workflow.md).
 
 ## Hard rules
 

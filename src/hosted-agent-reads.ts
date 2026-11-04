@@ -1,0 +1,185 @@
+// SPDX-License-Identifier: Apache-2.0
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { z } from 'zod';
+import { clientCacheRoot } from './root-paths.js';
+import { HostedCheckoutCache } from './hosted-checkout-cache.js';
+import { ConvexLaneTransport } from './hosted-lane-transport.js';
+import { parseNativeState } from './native-state-format.js';
+import { reviewPaths } from './source-review-format.js';
+import { contextualHunks } from './review-hunks.js';
+import { safeRelative } from './safe-relative.js';
+import { invariant } from './errors.js';
+import { selectHostedSource } from './mcp-hosted-source.js';
+import { readHostedLaneCheckout } from './hosted-lane-checkout-marker.js';
+import type { HostedAgentTransport } from './hosted-agent-transport.js';
+const hash = z.string().regex(/^[0-9a-f]{64}$/);
+export const hostedPeersSchema = z
+  .object({
+    laneId: z.uuid().optional(),
+    path: z.string().refine(safeRelative).optional(),
+    detail: z.boolean().default(false),
+  })
+  .strict();
+export const hostedDiffSchema = z
+  .object({
+    laneId: z.uuid().optional(),
+    paths: z.array(z.string().refine(safeRelative)).optional(),
+    byteBudget: z.number().int().min(1024).safe().default(48000),
+    cursor: z
+      .object({
+        base: hash,
+        head: hash,
+        offset: z.number().int().nonnegative().safe(),
+        laneId: z.uuid(),
+        paths: z.array(z.string()).optional(),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict();
+export async function peersHostedSource(transport: HostedAgentTransport, input: unknown) {
+  const parsed = hostedPeersSchema.safeParse(input);
+  invariant(parsed.success, 'BAD_ARGUMENT', 'Invalid hosted peers parameters. Use peers --help.');
+  const command = parsed.data;
+  const laneId = command.laneId ?? readHostedLaneCheckout(transport.root)?.selection.laneId;
+  invariant(laneId, 'BAD_ARGUMENT', 'Select laneId or open a hosted Lane.');
+  // Deliberately no capability or select probe: the server authorizes and pins the entire observation.
+  return transport.query('projectHostedOverlaps:read', {
+    ...command,
+    laneId,
+    detail: true,
+    items: command.detail ? 50 : 5,
+  });
+}
+/** Immutable manifests and selected blobs live in R2, never in a Convex response. */
+export async function diffHostedSource(transport: HostedAgentTransport, input: unknown) {
+  const parsed = hostedDiffSchema.safeParse(input);
+  invariant(parsed.success, 'BAD_ARGUMENT', 'Invalid hosted diff parameters. Use diff --help.');
+  const command = parsed.data;
+  const lane = await selectHostedSource(transport, { laneId: command.laneId });
+  const cursor = command.cursor;
+  invariant(
+    !cursor ||
+      (cursor.laneId === lane.laneId && JSON.stringify(cursor.paths) === JSON.stringify(command.paths)),
+    'BAD_ARGUMENT',
+    'Continue with the original Lane and paths.',
+  );
+  const base = cursor?.base ?? lane.base.head,
+    head = cursor?.head ?? lane.head;
+  // Continuations retain the original pair even after a later save. Both must still belong to the project.
+  if (cursor) {
+    await transport.query('projectHostedLanes:source', { state: base });
+    if (head !== base) await transport.query('projectHostedLanes:source', { state: head });
+  }
+  const objects = new ConvexLaneTransport(transport.exchange);
+  const cache = new HostedCheckoutCache(clientCacheRoot(transport.root), objects);
+  await cache.ensure([base, head]);
+  const read = (id: string) => readFileSync(join(cache.objects, id));
+  const requested = command.paths ? new Set(command.paths) : null;
+  const changes = reviewPaths(parseNativeState(read(base)).files, parseNativeState(read(head)).files).filter(
+    item => item.status !== 'unchanged' && (!requested || requested.has(item.path)),
+  );
+  const offset = cursor?.offset ?? 0;
+  invariant(offset <= changes.length, 'BAD_ARGUMENT', 'Diff cursor is beyond the pinned paths.');
+  const window = changes.slice(offset, offset + 50);
+  const ids = [
+    ...new Set(
+      window.flatMap(item => [item.before?.blob, item.after?.blob].filter((id): id is string => !!id)),
+    ),
+  ];
+  const pins = ids.length ? await objects.objects(ids) : [];
+  const sizes = new Map(pins.map(pin => [pin.sha256, pin.size]));
+  let sourceBytes = 0,
+    outputBytes = 0,
+    end = offset;
+  const selected: typeof window = [],
+    omitted: { path: string; requiredByteBudget: number }[] = [];
+  for (const item of window) {
+    const size =
+      (item.before ? sizes.get(item.before.blob)! : 0) + (item.after ? sizes.get(item.after.blob)! : 0);
+    if (sourceBytes + size > command.byteBudget) {
+      if (selected.length) break;
+      omitted.push({ path: item.path, requiredByteBudget: size });
+      end++;
+      continue;
+    }
+    sourceBytes += size;
+    selected.push(item);
+    end++;
+  }
+  const selectedIds = [
+    ...new Set(
+      selected.flatMap(item => [item.before?.blob, item.after?.blob].filter((id): id is string => !!id)),
+    ),
+  ];
+  // Reuse the descriptors/signatures from the one metadata page instead of looking up each file again.
+  const byteCache = new HostedCheckoutCache(clientCacheRoot(transport.root), {
+    objects: async digests => digests.map(id => pins.find(pin => pin.sha256 === id)!),
+    downloadToFile: objects.downloadToFile.bind(objects),
+    downloadFiles: objects.downloadFiles.bind(objects),
+  });
+  await byteCache.ensure(selectedIds);
+  const items = selected.map(item => {
+    const diff = contextualHunks(
+      item.before ? read(item.before.blob) : Buffer.alloc(0),
+      item.after ? read(item.after.blob) : Buffer.alloc(0),
+      3,
+    );
+    const bytes = Buffer.byteLength(JSON.stringify(diff));
+    if (outputBytes + bytes > command.byteBudget) {
+      const bounded: typeof diff = { ...diff, hunks: [], truncated: true };
+      let remaining = command.byteBudget - outputBytes - Buffer.byteLength(JSON.stringify(bounded));
+      for (const hunk of diff.hunks) {
+        const partial = { ...hunk, lines: [] as typeof hunk.lines, beforeLines: 0, afterLines: 0 };
+        // Reserve header/count growth once; accounting is linear in emitted lines.
+        remaining -= Buffer.byteLength(JSON.stringify(partial)) + 64;
+        if (remaining <= 0) break;
+        bounded.hunks.push(partial);
+        for (const line of hunk.lines) {
+          const size = Buffer.byteLength(JSON.stringify(line)) + 1;
+          if (size > remaining) break;
+          remaining -= size;
+          partial.lines.push(line);
+          if (line.kind !== 'added') partial.beforeLines++;
+          if (line.kind !== 'removed') partial.afterLines++;
+        }
+        if (!partial.lines.length) bounded.hunks.pop();
+        if (partial.lines.length !== hunk.lines.length) break;
+      }
+      const size = Buffer.byteLength(JSON.stringify(bounded));
+      if (size <= command.byteBudget - outputBytes) {
+        outputBytes += size;
+        return { ...item, ...bounded };
+      }
+      return { ...item, hunks: [], truncated: true };
+    }
+    outputBytes += bytes;
+    return { ...item, ...diff };
+  });
+  // Cache access and an old cursor never grant current project access.
+  await transport.query('projectHostedLanes:select', { laneId: lane.laneId });
+  const nextCursor =
+    end < changes.length
+      ? { base, head, offset: end, laneId: lane.laneId, ...(command.paths ? { paths: command.paths } : {}) }
+      : null;
+  return {
+    sourceContext: { laneId: lane.laneId, base, head, scope: 'saved' },
+    result: {
+      base,
+      head,
+      items,
+      omitted,
+      total: changes.length,
+      nextCursor,
+      truncated: omitted.length > 0 || items.some(item => item.truncated) || nextCursor !== null,
+      cost: {
+        sourceBytes,
+        outputBytes,
+        downloadedBytes: cache.downloadedBytes + byteCache.downloadedBytes,
+        metadataPages: ids.length ? 1 : 0,
+        manifestBytes: read(base).length + (head === base ? 0 : read(head).length),
+      },
+    },
+  };
+}

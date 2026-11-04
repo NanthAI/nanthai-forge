@@ -102,6 +102,7 @@ export function hostedOverlapAdvice(
   answered: Set<string>,
   complete = true,
   maxItems = 5,
+  requestedPath?: string,
 ) {
   const mineChanges = new Map(
     (JSON.parse(mine.changes) as OverlapChange[]).map(change => [change.path, change]),
@@ -127,8 +128,10 @@ export function hostedOverlapAdvice(
     for (const change of JSON.parse(peer.changes) as OverlapChange[]) {
       const { path } = change,
         mineChange = mineChanges.get(path);
-      if (!mineChange) continue;
-      const classification = classifyOverlap(mineChange, change);
+      if (requestedPath ? path !== requestedPath : !mineChange) continue;
+      const classification = mineChange
+        ? classifyOverlap(mineChange, change)
+        : { class: 'advisory' as const, reason: 'requested-path' };
       const priority = classification.class === 'blocking';
       // Without answers there is no need to hash every omitted display item.
       const noticeId =

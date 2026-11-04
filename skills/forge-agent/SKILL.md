@@ -14,12 +14,16 @@ For work on Forge itself, read [AGENTS.md](../../AGENTS.md), the [lead playbook]
 - Use start/save/status `unacknowledgedOverlaps` and `behindMain` to coordinate.
   Their saved-path windows show five notices and ten behind-main paths; coverage
   and `more` report omissions. Unsaved peer edits are excluded. Missing notices
-  never establish independence. Hosted `peers` and `diff` return
-  `HOSTED_ACTION_UNSUPPORTED`; `forge_peers` is native-only.
-- Use `show {"channel":"main","path":"FILE"}` for exact accepted bytes or
-  `show {"laneId":"LANE_ID","path":"FILE"}` for exact saved Lane bytes. Compare
-  with local files using ordinary tools. Unsaved edits are excluded; current main
-  is not the Lane base, and this supplies no changed-path summary or pinned diff.
+  never establish independence. `peers {laneId,path?,detail?}` reads the same
+  server evidence, including a requested path before its first save. `peerEvidence`
+  includes answered overlaps; `unacknowledgedOverlaps` keeps unanswered notices.
+- `diff {laneId,paths?,byteBudget?,cursor?}` compares pinned base to saved head.
+  Continue with `result.nextCursor` and the same Lane/paths. Source bytes come from
+  R2; oversized files and shortened hunks are explicitly truncated. Increase
+  byteBudget or use exact `show` for omitted source.
+- `show {laneId?,channel?:"main",state?,candidateId?,path}` reads one exact
+  selection (default: this Lane). Unsaved edits are excluded. MCP `forge_review`
+  exposes `show`, `diff` and `peers` with the same inputs.
 - Save, then use `preflight {"laneId":"LANE_ID"}` for local affected checks.
   Hosted `tests` requires `candidateId`, not `laneId`.
 - `brief`, `review`, `candidate`/`candidates`, `provenance`, `records`, `link`,

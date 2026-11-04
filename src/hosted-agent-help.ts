@@ -1,3 +1,4 @@
+import { hostedDiffSchema, hostedPeersSchema } from './hosted-agent-reads.js';
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
 import { hostedAgentCommandSchemas } from './hosted-agent-contract.js';
@@ -10,6 +11,8 @@ import { hostedActionAlternative } from './hosted-agent-version.js';
  * wait/show have their own enforced schemas. No capability request is needed to print help. */
 export const hostedAgentHelpEntries = [
   ...Object.entries(hostedAgentCommandSchemas),
+  ['diff', hostedDiffSchema] as const,
+  ['peers', hostedPeersSchema] as const,
   ['wait', hostedWaitSchema] as const,
   ['show', hostedSourceShowSchema.omit({ action: true })] as const,
 ].map(([action, schema]) => {
@@ -20,7 +23,7 @@ export const hostedAgentHelpEntries = [
     json.properties.path = { type: 'string', minLength: 1 };
     json.properties.open = { type: 'boolean' };
   }
-  if (!['status', 'observe', 'wait', 'show'].includes(action))
+  if (!['status', 'observe', 'wait', 'show', 'diff', 'peers'].includes(action))
     json.properties.operationId = { type: 'string', format: 'uuid' };
   const required = new Set(json.required ?? []);
   const parameters = Object.keys(json.properties ?? {}).map(
@@ -46,8 +49,8 @@ export function hostedAgentHelp(action?: string) {
     'land --save waits; --no-wait returns after submission. Use --check-only to check without landing.',
     'land --save overlapAnswer:"accept-order" answers the pending notices for this landing and records them like ack, so peers see the answer.',
     'status accepts laneId; observe/landing select operationId (original landing UUID), submissionId or runId.',
-    'Hosted peers and diff are unavailable. Read start/save/status unacknowledgedOverlaps and behindMain; bounded saved-path advice excludes unsaved peer edits and never proves independence.',
-    'Use show {channel:"main",path} or show {laneId,path} for exact accepted or saved bytes, then compare local files. This supplies no pinned base-to-head diff. forge_peers and detailed review are native-only.',
+    'peers {laneId?,path?,detail?} reads current saved overlap evidence in one query. Coverage excludes unsaved peer edits and never proves independence. start/save/status retain unacknowledgedOverlaps and behindMain.',
+    'diff {laneId?,paths?,byteBudget?,cursor?} compares pinned base to saved head; nextCursor continues that pair. show {state?|candidateId?|laneId?|channel:"main",path} reads exact bytes. forge_review exposes show/diff/peers.',
     'Keep every original parameter, including message and pins, when replaying an operationId. Use the receipt replay command.',
     'wait {operationIds:[ORIGINAL_UUID]} watches a landing; wait {runId} watches a check. Transient observation failures retry until the deadline; exit 3 means still in progress and prints the exact wait command.',
     '',
@@ -60,8 +63,7 @@ export function hostedAgentHelpMarkdown() {
     '| Hosted command | Accepted parameters (`?` = optional) |',
     '| --- | --- |',
     ...hostedAgentHelpEntries.map(
-      entry =>
-        `| \`${entry.command}\` | ${entry.parameters.map(name => `\`${name}\``).join(', ') || '`{}`'} |`,
+      entry => `| \`${entry.command}\` | ${`\`${entry.parameters.join(', ') || '{}'}\``} |`,
     ),
     '<!-- hosted-agent-contract:end -->',
   ].join('\n');

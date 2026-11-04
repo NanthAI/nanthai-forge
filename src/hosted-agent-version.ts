@@ -17,8 +17,6 @@ export function hostedActionAlternative(action: string) {
     return 'Use observe {runId} for check status and the returned CI provider link for logs.';
   if (['records', 'candidates', 'candidate', 'views', 'view'].includes(action))
     return 'Use status {laneId} for a Lane or planning for the hosted backlog.';
-  if (action === 'diff')
-    return 'Compare files in your local Lane; use show {channel:"main",path} to read accepted bytes.';
   return 'Use capabilities for deployment actions and nforge agent ROOT --help in a hosted checkout for accepted parameters.';
 }
 const known = new Set<string>(hostedAgentActions);

@@ -23,6 +23,7 @@ import { rememberOverlapText } from '../dist/hosted-overlap-text.js';
 import { finishGates } from '../dist/agent-default-gates.js';
 import { effectiveAgentDefaults } from '../dist/agent-parallel-defaults.js';
 import { mergeNativeText } from '../dist/native-text-merge.js';
+import { hostedAgentCli } from '../dist/hosted-agent-cli.js';
 import { overlapBanner } from '../dist/hosted-overlap-notice.js';
 const overlaps = await import(moduleUrl('../convex/projectHostedOverlaps.ts'));
 const records = await import(moduleUrl('../convex/projectHostedRecords.ts'));
@@ -934,4 +935,128 @@ test('range metadata negotiates on existing discovery, and older strict save API
     'one named capability fallback, no per-file probes',
   );
   assert.equal(legacy.discovery.at(-1).overlapVersion, 1, 'independent notice support survives');
+});
+
+test('hosted path peers use the receipt engine before first save, include answered evidence and reject revoked access', async t => {
+  const { s, lane, peer, transport } = await setup(t);
+  await trackChange(s, peer, [delta('src/shared.ts')], 'Peer change');
+  const client = transport(lane);
+  const queriesBefore = s.counts.length;
+  const response = await hostedAgentCli(
+    client.root,
+    'peers',
+    { laneId: lane.id, path: 'src/shared.ts', detail: true },
+    client.address,
+    client,
+  );
+  assert.equal(
+    s.counts.length - queriesBefore,
+    1,
+    'the CLI performs one query including current authorization',
+  );
+  assert.equal(response.result.peerEvidence.items.length, 1);
+  assert.equal(response.result.peerEvidence.items[0].reason, 'requested-path');
+  assert.equal(response.result.peerEvidence.items[0].class, 'advisory');
+  assert.equal(response.result.peerEvidence.unsavedEdits, 'unavailable');
+  assert.equal(response.result.peerEvidence.scope, 'saved-paths');
+  const count = s.counts.at(-1);
+  assert(count.documents < 20, JSON.stringify(count));
+  assert.equal(count.writes, 0);
+  await client.dispatch('overlap-acks', {
+    answers: [
+      {
+        operationId: randomUUID(),
+        laneId: lane.id,
+        noticeId: response.result.peerEvidence.items[0].noticeId,
+        choice: 'accept-order',
+      },
+    ],
+  });
+  const answered = await client.dispatch('peers', { laneId: lane.id, path: 'src/shared.ts' });
+  assert.equal(answered.result.unacknowledgedOverlaps.count, 0);
+  assert.equal(answered.result.peerEvidence.count, 1, 'answered peer evidence remains available to the hook');
+  const user = 'revoked';
+  await assert.rejects(
+    s.transaction(
+      'revoked-peers',
+      overlaps.read,
+      { projectId: s.projectId, laneId: lane.id, path: 'src/shared.ts' },
+      user,
+    ),
+    code('PROJECT_UNAVAILABLE'),
+  );
+  const before = s.counts.length;
+  assert.equal(s.counts.length, before, 'no background observer or idle calls');
+});
+
+for (const files of [3000, 29000])
+  test(`${files} files / 30 Lanes: path peers are one query and three bounded projection windows`, async t => {
+    const { s, lane, peer } = await setup(t);
+    const seed = JSON.parse(
+      [...s.tables.projectHostedRecordBodies.values()].find(row => JSON.parse(row.value).kind === 'lane')
+        .value,
+    );
+    const identity = { projectId: s.projectId, actor: 'owner', authorityEpoch: 1 };
+    // Projection size depends on changed paths, not the repository inventory.
+    const changes = boundOverlapChanges(
+      Array.from({ length: files }, (_, i) => delta(i === 0 ? 'src/shared.ts' : `src/${i}.ts`)),
+    );
+    await trackChange(s, peer, JSON.parse(changes.changes), 'Peer change');
+    for (let i = 0; i < 28; i++) {
+      const entry = { ...seed, id: randomUUID(), intentId: randomUUID() };
+      await s.transaction(
+        'scale-peer',
+        {
+          _handler: ctx =>
+            records.writeHostedRecord(ctx, {
+              ...identity,
+              expectedVersion: null,
+              record: entry,
+              overlap: { baseSequence: 0, intent: 'Scale peer' },
+            }),
+        },
+        {},
+      );
+      const projection = [...s.tables.projectHostedOverlapLanes.values()].find(
+        row => row.laneId === entry.id,
+      );
+      s.patch('projectHostedOverlapLanes', projection._id, { changes: changes.changes, complete: false });
+    }
+    const result = JSON.parse(
+      await s.transaction('scale-path', overlaps.read, {
+        projectId: s.projectId,
+        laneId: lane.id,
+        path: 'src/shared.ts',
+        detail: true,
+      }),
+    );
+    assert.equal(result.peerEvidence.items.length, 29);
+    assert.equal(result.peerEvidence.coverage, 'hosted-incomplete');
+    const meter = s.counts.at(-1);
+    assert(meter.documents <= 80, JSON.stringify(meter));
+    assert(meter.ranges <= 15, JSON.stringify(meter));
+    assert(meter.readBytes < 4.5 * 1024 * 1024, JSON.stringify(meter));
+    assert.equal(meter.writes, 0);
+    assert(!meter.touched.includes('projectWorkRecords'));
+    t.diagnostic(
+      `${files}: 1 query, ${meter.documents} documents, ${meter.ranges} ranges, ${meter.readBytes} DB bytes`,
+    );
+  });
+
+test('exact State membership query rejects foreign objects and revoked current access', async () => {
+  const s = await saveFixture();
+  const api = await import(moduleUrl('../convex/projectHostedLanes.ts'));
+  const lane = JSON.parse(
+    [...s.tables.projectHostedRecordBodies.values()].find(row => JSON.parse(row.value).kind === 'lane').value,
+  );
+  const args = { projectId: s.projectId, state: lane.head };
+  assert.deepEqual(await s.transaction('exact-source', api.source, args), { head: args.state });
+  await assert.rejects(
+    s.transaction('foreign-source', api.source, { ...args, state: 'a'.repeat(64) }),
+    code('SOURCE_UNAVAILABLE'),
+  );
+  await assert.rejects(
+    s.transaction('revoked-source', api.source, args, 'revoked'),
+    code('PROJECT_UNAVAILABLE'),
+  );
 });

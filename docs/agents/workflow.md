@@ -47,64 +47,70 @@ Include `overlapAnswer:"accept-order"` in `land --save` to answer the pending no
 <!-- hosted-agent-contract:start -->
 | Hosted command | Accepted parameters (`?` = optional) |
 | --- | --- |
-| `save --friction` | `laneId?`, `title`, `detail`, `area`, `cost?`, `workaround?`, `evidence?`, `operationId?` |
-| `save --decision` | `conversation?`, `target`, `decidedBy`, `what`, `why`, `decidedAt?`, `overrides?`, `supersedes?`, `delegation?`, `actor?`, `tool?`, `operationId?` |
-| `decisions` | `target?`, `cursor?`, `operationId?` |
-| `save --overlap-answer` | `laneId`, `noticeId`, `choice`, `text?`, `conversation?`, `operationId?` |
-| `save --overlap-answers` | `answers`, `operationId?` |
-| `tests` | `candidateId`, `runId?`, `timingBasis?`, `tests?`, `expectedHead?`, `expectedVersion?`, `operationId?` |
-| `save --contract` | `candidateId`, `runId?`, `timingBasis?`, `tests?`, `expectedHead?`, `expectedVersion?`, `operationId?` |
-| `start` | `outcome?`, `constraints?`, `intentId?`, `initialHead?`, `stackOn?`, `stackEntry?`, `planningItemId?`, `path?`, `open?`, `operationId?` |
-| `start --open` | `laneId`, `expected?`, `paths?`, `operationId?` |
-| `save` | `laneId?`, `message?`, `supersedeFinish?`, `operationId?` |
-| `save --candidate` | `laneId?`, `message?`, `intentId?`, `inputs?`, `dependencies?`, `operationId?` |
-| `save --sync` | `laneId?`, `message?`, `candidateId?`, `target?`, `ontoMain?`, `apply?`, `operationId?` |
-| `recover-apply` | `applyOperationId`, `operationId?` |
-| `resolve` | `laneId?`, `message?`, `operationId?` |
-| `save --check` | `checkId`, `expectedDefinition?`, `expectedConfiguration?`, `expectedEnvironment?`, `candidateId`, `expectedHead?`, `operationId?` |
-| `land --save` | `laneId?`, `message?`, `intentId?`, `inputs?`, `dependencies?`, `check?`, `candidateId?`, `composeOperationId?`, `after?`, `accept?`, `keepOpen?`, `priority?`, `overlapAnswer?`, `retry?`, `reason?`, `operationId?` |
-| `x prioritize` | `submissionId`, `priority`, `asOwner?`, `operationId?` |
-| `ack` | `laneId?`, `choice?`, `text?`, `operationId?` |
-| `preflight` | `laneId?`, `run?`, `operationId?` |
+| `save --friction` | `laneId?, title, detail, area, cost?, workaround?, evidence?, operationId?` |
+| `save --decision` | `conversation?, target, decidedBy, what, why, decidedAt?, overrides?, supersedes?, delegation?, actor?, tool?, operationId?` |
+| `decisions` | `target?, cursor?, operationId?` |
+| `save --overlap-answer` | `laneId, noticeId, choice, text?, conversation?, operationId?` |
+| `save --overlap-answers` | `answers, operationId?` |
+| `tests` | `candidateId, runId?, timingBasis?, tests?, expectedHead?, expectedVersion?, operationId?` |
+| `save --contract` | `candidateId, runId?, timingBasis?, tests?, expectedHead?, expectedVersion?, operationId?` |
+| `start` | `outcome?, constraints?, intentId?, initialHead?, stackOn?, stackEntry?, planningItemId?, path?, open?, operationId?` |
+| `start --open` | `laneId, expected?, paths?, operationId?` |
+| `save` | `laneId?, message?, supersedeFinish?, operationId?` |
+| `save --candidate` | `laneId?, message?, intentId?, inputs?, dependencies?, operationId?` |
+| `save --sync` | `laneId?, message?, candidateId?, target?, ontoMain?, apply?, operationId?` |
+| `recover-apply` | `applyOperationId, operationId?` |
+| `resolve` | `laneId?, message?, operationId?` |
+| `save --check` | `checkId, expectedDefinition?, expectedConfiguration?, expectedEnvironment?, candidateId, expectedHead?, operationId?` |
+| `land --save` | `laneId?, message?, intentId?, inputs?, dependencies?, check?, candidateId?, composeOperationId?, after?, accept?, keepOpen?, priority?, overlapAnswer?, retry?, reason?, operationId?` |
+| `x prioritize` | `submissionId, priority, asOwner?, operationId?` |
+| `ack` | `laneId?, choice?, text?, operationId?` |
+| `preflight` | `laneId?, run?, operationId?` |
 | `x source-pack` | `operationId?` |
-| `x cancel` | `submissionId`, `operationId?` |
-| `x revert` | `message?`, `target`, `operationId?` |
-| `x abandon` | `laneId?`, `reason`, `saveFirst?`, `keepPatch?`, `target?`, `operationId?` |
-| `x complete` | `laneId?`, `operationId?` |
-| `x pin` | `laneId?`, `pinned?`, `operationId?` |
+| `x cancel` | `submissionId, operationId?` |
+| `x revert` | `message?, target, operationId?` |
+| `x abandon` | `laneId?, reason, saveFirst?, keepPatch?, target?, operationId?` |
+| `x complete` | `laneId?, operationId?` |
+| `x pin` | `laneId?, pinned?, operationId?` |
 | `x complete-merged` | `operationId?` |
-| `start --reopen` | `laneId?`, `target?`, `operationId?` |
-| `status` | `laneId?`, `kind?`, `operationId?`, `submissionId?`, `runId?`, `version?` |
-| `observe` | `kind?`, `operationId?`, `submissionId?`, `runId?`, `version?` |
-| `metrics` | `from?`, `to?`, `operationId?` |
+| `start --reopen` | `laneId?, target?, operationId?` |
+| `status` | `laneId?, kind?, operationId?, submissionId?, runId?, version?` |
+| `observe` | `kind?, operationId?, submissionId?, runId?, version?` |
+| `metrics` | `from?, to?, operationId?` |
 | `capabilities` | `operationId?` |
-| `x configure-check` | `name?`, `checkId?`, `command?`, `expected?`, `operationId?` |
-| `x configure-runner` | `provider?`, `runsOn?`, `concurrencyBudget?`, `machineId?`, `labels?`, `repository?`, `configuration?`, `expected?`, `operationId?` |
+| `x configure-check` | `name?, checkId?, command?, expected?, operationId?` |
+| `x configure-runner` | `provider?, runsOn?, concurrencyBudget?, machineId?, labels?, repository?, configuration?, expected?, operationId?` |
 | `check-settings` | `operationId?` |
 | `policy` | `operationId?` |
-| `x set-policy` | `governanceVersion?`, `expectedPolicy?`, `preset?`, `acceptance?`, `checks?`, `integrationPreview?`, `ownerRootUpdates?`, `autoSnapshot?`, `checkLogs?`, `laneUpdates?`, `lifecycle?`, `notify?`, `githubMirror?`, `trust?`, `agentDefaults?`, `autoExchange?`, `operationId?` |
-| `planning` | `id?`, `kind?`, `status?`, `initiativeId?`, `limit?`, `cursor?`, `reconcile?`, `operationId?` |
-| `put-planning-item` | `expectedVersion?`, `kind`, `title`, `body?`, `status?`, `reason?`, `intentIds?`, `initiativeId?`, `itemId?`, `operationId?` |
-| `comment-planning-item` | `itemId`, `authorLabel?`, `text`, `operationId?` |
-| `wait` | `runId?`, `operationIds?`, `cursor?`, `until?`, `timeoutSeconds?` |
-| `show` | `laneId?`, `expected?`, `channel?`, `path`, `force?` |
+| `x set-policy` | `governanceVersion?, expectedPolicy?, preset?, acceptance?, checks?, integrationPreview?, ownerRootUpdates?, autoSnapshot?, checkLogs?, laneUpdates?, lifecycle?, notify?, githubMirror?, trust?, agentDefaults?, autoExchange?, operationId?` |
+| `planning` | `id?, kind?, status?, initiativeId?, limit?, cursor?, reconcile?, operationId?` |
+| `put-planning-item` | `expectedVersion?, kind, title, body?, status?, reason?, intentIds?, initiativeId?, itemId?, operationId?` |
+| `comment-planning-item` | `itemId, authorLabel?, text, operationId?` |
+| `diff` | `laneId?, paths?, byteBudget?, cursor?` |
+| `peers` | `laneId?, path?, detail?` |
+| `wait` | `runId?, operationIds?, cursor?, until?, timeoutSeconds?` |
+| `show` | `laneId?, state?, candidateId?, expected?, channel?, path, force?` |
 <!-- hosted-agent-contract:end -->
 
 ### Hosted reads and coordination limits
 
-nforge 0.3.1 returns `HOSTED_ACTION_UNSUPPORTED` for hosted `peers` and `diff`.
-Hosted MCP has no `forge_peers`; `forge_review` supports `show` only. Implementation
-belongs to 5283a92f-f5c7-4f83-b050-40ad4f649c72. Supported alternatives:
+MCP `forge_review` exposes hosted `show`, `diff` and `peers`.
 
-- Start/save/status return `unacknowledgedOverlaps` and `behindMain`: bounded
-  saved-path advice, excluding unsaved peer edits and full contract analysis.
-  Five notices and ten main paths are shown; coverage/`more` name omissions.
-  Missing notices never prove independence. See [hosted advice](#hosted-overlap-advice).
-- `show {"channel":"main","path":"FILE"}` reads exact accepted bytes;
-  `show {"laneId":"LANE_ID","path":"FILE"}` reads exact saved Lane bytes.
-  `expected` pins bind Lane reads; main reads select current main. Compare locally.
-  Unsaved edits are excluded; no changed-path summary or pinned diff is supplied,
-  and current main is not the Lane base.
+- `peers {laneId,path?,detail?}` uses the receipt overlap engine in one query,
+  including paths before their first save. `peerEvidence` includes answered
+  overlaps; `unacknowledgedOverlaps` excludes them. Detail shows 50 notices
+  instead of five. Count/coverage disclose omissions; unsaved edits remain
+  unavailable and missing notices never prove independence.
+- `diff {laneId,paths?,byteBudget?,cursor?}` pins base/saved-head R2 States.
+  Defaults: 48,000 source/hunk bytes plus path metadata, 50 paths/page. Continue
+  `result.nextCursor` with the same Lane/paths, retaining the pair after saves.
+  `omitted`/`requiredByteBudget` and `truncated` disclose shortened output;
+  increase the budget or use exact show for remaining bytes.
+- `show` selects one exact `{laneId,path}`, `{channel:"main",path}`, `{state,path}`
+  or `{candidateId,path}`. `expected` binds Lane versions. Missing source fails
+  without substitution. All source reads exclude drafts and recheck access on
+  cache hits.
+
 - `review`, `candidate`/`candidates` (`view`/`views`), `provenance`, `records`,
   `brief`, `link`, `log`, `handoff`/`handoff-read`, `report`, `making-of`,
   `pending-status` and `improve` are native-only. Hosted alternatives are Lane
@@ -373,8 +379,7 @@ Autonomy still applies on every attempt. `laneUpdates:"ask"` stops at `sync-requ
 
 ### Local peers and conflict notices
 
-Hosted Lanes use [start/save/status overlap advice](#hosted-overlap-advice);
-`peers` and `forge_peers` below apply only to native owners.
+Hosted Lanes use `peers` through `forge_review` and [start/save/status overlap advice](#hosted-overlap-advice). The wider `forge_peers` analysis below applies only to native owners.
 
 Conflict notices carry optional typed `evidence`: native `text` source conflicts,
 `contract` diagnostics, `combined-static` preview failures with their observed
@@ -1756,7 +1761,7 @@ and metric-compatible delivery IDs are retained; delivery alone never acknowledg
 an overlap. The hosted append records a caller's answer, not independently verified
 hosted peer coverage. Bound roots retain a local answer receipt so existing local
 hooks can observe the hosted acknowledgement without appending native Work.
-Hosted peer selection and hook installation remain separate work; this API adds
+Hosted peer selection uses the existing overlap read; hook installation remains separate work; this API adds
 no network call to the edit hook and no idle timer. Metric readers can page
 `projectHostedOverlapAcks:list`. Hosted briefs read a bounded window of the latest
 100 hosted decisions and state incomplete coverage when more exist. The web

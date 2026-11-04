@@ -1665,3 +1665,12 @@ bindings in bounded pages, then revalidates candidate windows and original strea
 before deletion. Digests with unusually many references continue through the existing paged safety scan.
 Automatic expiry uses the same resumable planner with one project sweep identity;
 finite continuations stop after draining due receipts, with no idle timer. Hosted source staging records object provenance before publication; each bounded save or publication batch marks every newly referenced object and appends one cleanup fence atomically. A new source batch changes the cleanup guard, so a reviewed cleanup cannot delete bytes that became source during the operation. Replaying an already marked batch performs no protection writes.
+
+
+Hosted agent `diff` pins Lane base/head, reads their R2 manifests and at most 100
+blob descriptors per 50-path page. Source/hunk budgets report omissions; cursors
+retain the pair. Exact State `show` checks project membership even on cache hits;
+Candidate `show` uses its clean result. All source reads recheck current access.
+`peers` extends `projectHostedOverlaps:read`, including a path before its first
+save, with the same classifier and honest saved-only coverage. No read adds
+subscriptions, writes or idle work.

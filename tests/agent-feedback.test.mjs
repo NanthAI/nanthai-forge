@@ -170,12 +170,15 @@ test('hosted show reads a main file by channel:main, never an empty stdout on fa
   assert.equal(shown.result.channel, 'main');
   assert.equal(shown.result.state, s.main.head);
   assert.equal(shown.result.size, main.length);
+  written.length = 0;
+  await show({ state: s.main.head, path: 'a.ts' });
+  assert.equal(Buffer.concat(written).toString(), 'main version\n', 'exact State show is supported');
   // Failures are structured errors with nothing written.
   written.length = 0;
   for (const [command, expected] of [
     [{ channel: 'main', path: 'missing.ts' }, 'NOT_FOUND'],
     [{ channel: 'main', laneId: s.lane.laneId, path: 'a.ts' }, 'BAD_ARGUMENT'],
-    [{ state: s.main.head, path: 'a.ts' }, 'BAD_ARGUMENT'],
+    [{ state: 'not-a-state', path: 'a.ts' }, 'BAD_ARGUMENT'],
     [{ channel: 'dev', path: 'a.ts' }, 'BAD_ARGUMENT'],
   ])
     await assert.rejects(show(command), error => error.code === expected, JSON.stringify(command));

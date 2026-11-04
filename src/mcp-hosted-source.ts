@@ -32,6 +32,11 @@ function sourceProtocol<T>(read: () => T): T {
 export const hostedSourceSelectionSchema = z
   .object({
     laneId: z.uuid().optional(),
+    state: z
+      .string()
+      .regex(/^[0-9a-f]{64}$/)
+      .optional(),
+    candidateId: z.uuid().optional(),
     expected: hostedLaneExpectationSchema.optional(),
     /** Read the project's current main instead of a Lane. */
     channel: z.literal('main').optional(),
@@ -98,20 +103,51 @@ async function selectHostedMain(transport: HostedAgentTransport) {
   );
   return main;
 }
+export async function selectExactHostedSource(
+  transport: HostedAgentTransport,
+  input: z.infer<typeof hostedSourceSelectionSchema>,
+) {
+  invariant(
+    [input.laneId, input.state, input.candidateId, input.channel].filter(Boolean).length <= 1,
+    'BAD_ARGUMENT',
+    'Select one Lane, main, Candidate or State.',
+  );
+  invariant(
+    !input.expected || (!input.state && !input.candidateId && !input.channel),
+    'BAD_ARGUMENT',
+    'Expected version pins apply to a Lane.',
+  );
+  if (input.state) {
+    const value = z
+      .object({ head: z.literal(input.state) })
+      .parse(await transport.query('projectHostedLanes:source', { state: input.state }));
+    return value;
+  }
+  if (input.candidateId) {
+    const { hostedRecordSchema } = await import('./hosted-records.js');
+    const record = hostedRecordSchema.options[3].parse(
+      await transport.query('projectHostedCompose:candidate', { candidateId: input.candidateId }),
+    );
+    invariant(record.id === input.candidateId, 'HOSTED_PROTOCOL_INVALID', 'Candidate identity differs.');
+    invariant(
+      record.result.status === 'clean',
+      'VIEW_CONFLICT',
+      'This Candidate has no source State; select a clean Candidate or an exact State.',
+    );
+    return { head: record.result.head, candidateId: record.id };
+  }
+  if (input.channel) {
+    const main = await selectHostedMain(transport);
+    return { head: main.head, channel: 'main' as const, sourceRevision: main.sourceRevision };
+  }
+  return selectHostedSource(transport, input);
+}
 async function fileBytes(
   transport: HostedAgentTransport,
   input: z.infer<typeof hostedSourceSelectionSchema>,
   path: string,
 ) {
-  invariant(
-    input.channel === undefined || (!input.laneId && !input.expected),
-    'BAD_ARGUMENT',
-    'Select channel main or a Lane, not both.',
-  );
-  const main = input.channel === 'main' ? await selectHostedMain(transport) : undefined;
-  const selection = main
-    ? { head: main.head, channel: 'main' as const, sourceRevision: main.sourceRevision }
-    : await selectHostedSource(transport, input);
+  const selection = await selectExactHostedSource(transport, input);
   const cache = new HostedCheckoutCache(
     clientCacheRoot(transport.root),
     new ConvexLaneTransport(transport.exchange),
@@ -123,14 +159,13 @@ async function fileBytes(
   await cache.ensure([entry.blob]);
   const bytes = readFileSync(join(cache.objects, entry.blob));
   // Cache hits do not grant fresh access. Recheck the original selection before returning bytes.
-  if (main) await selectHostedMain(transport);
-  else {
-    const lane = selection as Awaited<ReturnType<typeof selectHostedSource>>;
+  if ('laneId' in selection) {
+    const lane = hostedLaneSelectionSchema.parse(selection);
     await selectHostedSource(transport, {
       laneId: lane.laneId,
       expected: { head: lane.head, version: lane.version, sourceVersion: lane.sourceVersion },
     });
-  }
+  } else await selectExactHostedSource(transport, input);
   return { selection, entry, bytes };
 }
 export async function showHostedSource(transport: HostedAgentTransport, input: unknown) {
@@ -152,7 +187,7 @@ export async function showHostedSource(transport: HostedAgentTransport, input: u
     sourceContext: pins,
     result: {
       state: pins.head,
-      ...('laneId' in pins ? { laneId: pins.laneId } : { channel: pins.channel }),
+      ...('laneId' in pins ? { laneId: pins.laneId } : 'channel' in pins ? { channel: pins.channel } : {}),
       path,
       blob: entry.blob,
       mode: entry.mode,

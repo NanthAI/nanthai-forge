@@ -8,6 +8,7 @@ import { hostedLaneSchema } from '../src/hosted-lane';
 import { hostedOverlapAdvice } from '../src/hosted-overlap';
 import { invariant } from '../src/errors';
 import { report } from './errors';
+import { safeRelative } from '../src/safe-relative';
 
 /** One finite agent read. No source objects, Work hydration, scheduler or subscription. */
 export const read = query({
@@ -15,12 +16,15 @@ export const read = query({
     projectId: v.id('hostedProjects'),
     laneId: v.string(),
     paths: v.optional(v.literal(true)),
+    path: v.optional(v.string()),
+    detail: v.optional(v.boolean()),
     /** Notices to list, 5 by default; ack asks for more so one read answers a large inbox. */
     items: v.optional(v.number()),
   },
   returns: v.string(),
-  handler: async (ctx, { projectId, laneId, paths, items }) => {
+  handler: async (ctx, { projectId, laneId, paths, items, path, detail }) => {
     try {
+      invariant(path === undefined || safeRelative(path), 'BAD_ARGUMENT', 'Select a repository path.');
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to read hosted overlaps.');
       await accessibleProject(ctx, projectId, user.subject);
@@ -73,7 +77,7 @@ export const read = query({
             };
       // A Lane with no saved path changes cannot overlap anything: skip the peer, head and answer
       // reads (the bulk of this query's I/O) instead of scanning every open Lane for nothing.
-      const idle = focus.complete && focus.changes === '[]';
+      const idle = !path && focus.complete && focus.changes === '[]';
       const readPeers = () =>
         Promise.all([
           ctx.db
@@ -143,10 +147,31 @@ export const read = query({
           main,
           answered,
           complete,
-          Math.min(50, Math.max(1, Math.floor(items ?? 5))),
+          Math.min(50, Math.max(1, Math.floor(items ?? (detail ? 50 : 5)))),
+          path,
         );
       let advice = compute();
       // Preflight selection input: free here, the Lane's projection is already loaded.
+      const evidence =
+        detail || path
+          ? {
+              peerEvidence: {
+                ...hostedOverlapAdvice(
+                  focus,
+                  currentPeers.slice(0, 50),
+                  latest,
+                  main,
+                  new Set(),
+                  complete,
+                  Math.min(50, Math.max(1, Math.floor(items ?? (detail ? 50 : 5)))),
+                  path,
+                ).unacknowledgedOverlaps,
+                scope: 'saved-paths',
+                unsavedEdits: 'unavailable',
+                ...(path ? { path } : {}),
+              },
+            }
+          : {};
       const changedPaths = paths
         ? {
             changedPaths: {
@@ -185,6 +210,7 @@ export const read = query({
         return JSON.stringify({
           ...advice,
           ...changedPaths,
+          ...evidence,
           unacknowledgedOverlaps: {
             ...advice.unacknowledgedOverlaps,
             count: null,
@@ -192,7 +218,7 @@ export const read = query({
           },
         });
       }
-      return JSON.stringify({ ...advice, ...changedPaths });
+      return JSON.stringify({ ...advice, ...changedPaths, ...evidence });
     } catch (error) {
       return report(error);
     }

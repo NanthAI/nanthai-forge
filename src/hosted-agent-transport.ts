@@ -1,3 +1,4 @@
+import { diffHostedSource, peersHostedSource } from './hosted-agent-reads.js';
 // SPDX-License-Identifier: Apache-2.0
 import { canonicalRoot, clientCacheRoot, rootSibling } from './root-paths.js';
 import { AsyncLocalStorage } from 'node:async_hooks';
@@ -86,6 +87,8 @@ import {
 } from './hosted-metric-outbox.js';
 /** Reads and checkout creation: they neither show a Lane as working nor count as its activity. */
 const quietActions = new Set([
+  'diff',
+  'peers',
   'capabilities',
   'metrics',
   'check-settings',
@@ -129,7 +132,8 @@ export type HostedAgentExchange = Pick<
 export type HostedAgentResponse = {
   schema: 1;
   transport: 'hosted';
-  action: HostedAgentAction;
+  action: HostedAgentAction | 'diff' | 'peers';
+  sourceContext?: unknown;
   operationId: string | null;
   resolved: { operationId: string } | null;
   result: unknown;
@@ -186,6 +190,24 @@ export class HostedAgentTransport {
     input: Record<string, unknown>,
     signal?: AbortSignal,
   ): Promise<HostedAgentResponse> {
+    if (requestedAction === 'diff')
+      return {
+        schema: 1,
+        transport: 'hosted',
+        action: 'diff',
+        operationId: null,
+        resolved: null,
+        ...(await diffHostedSource(this, input)),
+      };
+    if (requestedAction === 'peers')
+      return {
+        schema: 1,
+        transport: 'hosted',
+        action: 'peers',
+        operationId: null,
+        resolved: null,
+        result: await peersHostedSource(this, input),
+      };
     return this.operationContext.run(
       { id: typeof input.operationId === 'string' ? input.operationId : null },
       () => this.dispatchScoped(requestedAction, input, signal),
