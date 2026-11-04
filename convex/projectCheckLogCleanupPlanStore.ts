@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
 import { protectSourceUnion } from './projectCheckLogCleanupSource';
-import { internalQuery, internalMutation } from './_generated/server';
+import { internalMutation, internalQuery } from './server';
 import type { MutationCtx, QueryCtx } from './_generated/server';
 import { activeOwnedProject } from './projectAuthority';
 import { projectGuard } from './projectCheckLogCleanupGuard';

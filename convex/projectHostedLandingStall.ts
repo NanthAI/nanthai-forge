@@ -2,7 +2,7 @@ import { readQueueStatus } from './projectHostedQueueStatus';
 // SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
 import { makeFunctionReference } from 'convex/server';
-import { internalMutation } from './_generated/server';
+import { internalMutation } from './server';
 import type { MutationCtx } from './_generated/server';
 import type { LandingIdentity, LandingRow } from './projectHostedLandingStore';
 import { landingRow, loadLanding, writeLanding } from './projectHostedLandingStore';

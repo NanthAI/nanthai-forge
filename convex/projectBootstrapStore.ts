@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { v } from 'convex/values';
-import { internalMutation, internalQuery, type QueryCtx } from './_generated/server';
+import { internalMutation, internalQuery, type QueryCtx } from './server';
 import { guard } from './cliServer';
 import { createProject } from './projectCreation';
 import { activeOwnedProject } from './projectAuthority';

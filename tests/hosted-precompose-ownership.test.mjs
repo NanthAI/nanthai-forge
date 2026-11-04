@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { observerProjectionBudget } from './observer-projection-budget.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -92,7 +93,13 @@ for (const history of [575, 1150])
     t.diagnostic(JSON.stringify(budget));
     // Measured on the pre-fix controller with the identical replay, including
     // the blocked claim, advisory completions, exact shared check and publication.
-    assert(budget.calls <= 71 && budget.reads <= 1329 && budget.writes <= 410, JSON.stringify(budget));
+    const source = calls.map(observerProjectionBudget);
+    assert(
+      budget.calls <= 71 &&
+        source.reduce((n, c) => n + c.documents, 0) <= 1329 &&
+        source.reduce((n, c) => n + c.writes, 0) <= 410,
+      JSON.stringify(budget),
+    );
     assert(preparedAtClaim, 'train preparation must not wait for advisory source completion');
     assert.equal(f.runs().length, 1, 'the shared exact check remains mandatory');
     const idle = f.counts.length;

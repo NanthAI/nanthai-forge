@@ -3,7 +3,7 @@ import { indexActivity } from '../src/work-hosted-index';
 import { workProject, generationHead, setWorkHead } from './projectWorkHead';
 import { v } from 'convex/values';
 import { HOSTED_WORK_INDEX_FORMAT } from '../src/work-hosted-summary';
-import { internalMutation, internalQuery, type QueryCtx, type MutationCtx } from './_generated/server';
+import { internalMutation, internalQuery, type QueryCtx, type MutationCtx } from './server';
 import { internal } from './_generated/api';
 import type { Doc, Id } from './_generated/dataModel';
 import { accessibleProject } from './projectAuthority';

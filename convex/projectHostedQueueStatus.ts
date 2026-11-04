@@ -1,4 +1,5 @@
-import { hostedCheckTerminal, hostedCheckRunSchema } from '../src/hosted-check';
+import { finishReadCheck } from './projectFinishReadPins';
+import { hostedCheckTerminal } from '../src/hosted-check';
 import { hostedLandingStall } from '../src/hosted-landing-stall';
 // SPDX-License-Identifier: Apache-2.0
 import type { MutationCtx, QueryCtx } from './_generated/server';
@@ -40,11 +41,7 @@ const finishRow = (
     )
     .unique();
 async function liveCheck(ctx: QueryCtx | MutationCtx, projectId: Id<'hostedProjects'>, runId: string) {
-  const row = await ctx.db
-    .query('projectHostedCheckRuns')
-    .withIndex('by_project_and_run', q => q.eq('projectId', projectId).eq('runId', runId))
-    .unique();
-  return row ? hostedCheckRunSchema.parse(JSON.parse(row.value)) : null;
+  return (await finishReadCheck(ctx, { projectId, runId })).run;
 }
 
 const pageRow = (ctx: QueryCtx | MutationCtx, projectId: Id<'hostedProjects'>, page: number) =>

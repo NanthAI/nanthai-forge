@@ -1,8 +1,7 @@
 import { fixGate } from '../src/culprit-bisect';
 // SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
-import { internalMutation } from './_generated/server';
-import { internalQuery } from './_generated/server';
+import { internalMutation, internalQuery } from './server';
 import { intentTestContext } from './projectIntentTestStore';
 import { hostedWriteProject, writeHostedRecord } from './projectHostedRecords';
 import { loadHostedCheck } from './projectHostedCheckStore';

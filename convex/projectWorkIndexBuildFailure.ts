@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { Doc } from './_generated/dataModel';
 import { v } from 'convex/values';
-import { internalMutation } from './_generated/server';
+import { internalMutation } from './server';
 import { accessibleProject } from './projectAuthority';
 import { workProject } from './projectWorkHead';
 import { generationDocument } from './projectWorkIndexFields';

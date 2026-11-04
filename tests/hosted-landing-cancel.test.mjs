@@ -1,3 +1,4 @@
+import { observerProjectionBudget } from './observer-projection-budget.mjs';
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -20,7 +21,8 @@ async function cancel(f, submissionId, operationId = randomUUID(), actor = 'owne
     );
   } finally {
     for (const c of f.counts.filter(c => c.name === 'landingCancel')) {
-      assert(c.ranges <= 40 && c.documents <= 40, 'constant-size cancellation');
+      const source = observerProjectionBudget(c);
+      assert(source.ranges <= 40 && source.documents <= 40, 'constant-size cancellation');
       assert(!c.touched.some(t => /Pages|Shards|WorkRecords|Backups/.test(t)), 'no history or source fan-in');
     }
   }
@@ -346,7 +348,8 @@ test('last-consumer cancellation stays constant at dogfood size with 1500 checks
   await cancel(f, state.id);
   const meter = f.counts.slice(calls).find(c => c.name === 'landingCancel');
   assert.equal(f.counts.length - calls, 1);
-  assert(meter.documents <= 40 && meter.writes <= 20);
+  const source = observerProjectionBudget(meter);
+  assert(source.documents <= 40 && source.writes <= 20);
   assert.equal((await f.rawChecks.status(check.id)).status, 'cancelled');
   t.diagnostic(
     JSON.stringify({

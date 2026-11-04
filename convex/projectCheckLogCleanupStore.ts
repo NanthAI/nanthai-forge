@@ -3,7 +3,7 @@ import { canonicalPayload } from '../src/hosted-source-operation';
 // SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
 import { query } from './cliServer';
-import { internalQuery, internalMutation } from './_generated/server';
+import { internalMutation, internalQuery } from './server';
 import type { Doc, Id } from './_generated/dataModel';
 import { activeOwnedProject } from './projectAuthority';
 import { removeExclusive } from './projectStorage';

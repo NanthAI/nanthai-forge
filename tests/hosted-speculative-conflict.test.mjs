@@ -6,6 +6,7 @@ import { batchesFixture, states, synthetic } from './hosted-landing-batches-fixt
 import { landingApi } from './hosted-finish-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { queuedConflict } from '../dist/hosted-agent-finish.js';
+import { observerProjectionBudget } from './observer-projection-budget.mjs';
 const observe = await import(moduleUrl('../convex/projectHostedFinishObserve.ts'));
 const conflictStore = await import(moduleUrl('../convex/projectHostedLandingBatchConflict.ts'));
 const sync = await import(moduleUrl('../convex/projectHostedSync.ts'));
@@ -277,8 +278,9 @@ for (const count of [10, 50])
         peakRssBytes: process.resourceUsage().maxRSS * 1024,
       };
     assert(cost.calls / count < 100, JSON.stringify(cost));
-    assert(cost.maxReads < 320, JSON.stringify(cost));
-    assert(cost.maxWrites < 160, JSON.stringify(cost));
+    const source = counts.map(observerProjectionBudget);
+    assert(Math.max(...source.map(count => count.documents)) < 320, JSON.stringify(cost));
+    assert(Math.max(...source.map(count => count.writes)) < 160, JSON.stringify(cost));
     const idle = f.counts.length;
     assert.equal(await drainActive(f), 0);
     assert.equal(f.counts.length, idle);

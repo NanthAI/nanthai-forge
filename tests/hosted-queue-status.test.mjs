@@ -363,8 +363,18 @@ test('10/575/1150-entry queues use constant status reads, bounded projection pag
       {},
     );
     const update = f.counts.at(-1);
-    assert(update.documents <= pages.size + 2);
-    assert(update.writes <= pages.size + 1);
+    assert(update.documents - (update.readDocumentsByTable.projectFinishReadRows ?? 0) <= pages.size + 2);
+    assert(
+      (update.readDocumentsByTable.projectFinishReadRows ?? 0) <= 2,
+      'status and ahead projection lookups',
+    );
+    assert(
+      update.writes - update.written.filter(t => t === 'projectFinishReadRows').length <= pages.size + 1,
+    );
+    assert(
+      update.written.filter(t => t === 'projectFinishReadRows').length <= 2,
+      'status and ahead projection writes',
+    );
     assert.equal((await f.status(last.id)).queue.position, size - 1);
     costs.at(-1).update = { documents: update.documents, writes: update.writes };
     const batchId = randomUUID();
@@ -384,8 +394,16 @@ test('10/575/1150-entry queues use constant status reads, bounded projection pag
       {},
     );
     const batch = f.counts.at(-1);
-    assert(batch.documents <= pages.size + 2, 'eight members reuse one invocation-local directory');
-    assert(batch.writes <= pages.size + 1, 'bulk member events flush each page and summary once');
+    assert(
+      batch.documents - (batch.readDocumentsByTable.projectFinishReadRows ?? 0) <= pages.size + 2,
+      'eight members reuse one invocation-local directory',
+    );
+    assert((batch.readDocumentsByTable.projectFinishReadRows ?? 0) <= 2);
+    assert(
+      batch.writes - batch.written.filter(t => t === 'projectFinishReadRows').length <= pages.size + 1,
+      'bulk member events flush each page and summary once',
+    );
+    assert(batch.written.filter(t => t === 'projectFinishReadRows').length <= 2);
     costs.at(-1).batch = { members: members.length, documents: batch.documents, writes: batch.writes };
   }
   assert.equal(costs[1].documents, costs[2].documents);

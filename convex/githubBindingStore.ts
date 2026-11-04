@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
-import { internalMutation, internalQuery } from './_generated/server';
+import { internalMutation, internalQuery } from './server';
 import { mutation, query, type QueryCtx, type MutationCtx } from './cliServer';
 import { accessibleProject, activeOwnedProject } from './projectAuthority';
 import { bindingInstallation } from './githubBindingAccess';

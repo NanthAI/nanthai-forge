@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
 import { makeFunctionReference } from 'convex/server';
-import { internalMutation, type MutationCtx } from './_generated/server';
+import { internalMutation, type MutationCtx } from './server';
 import type { Doc, Id } from './_generated/dataModel';
 import { activeStep } from './projectConvexSourceStore';
 import {

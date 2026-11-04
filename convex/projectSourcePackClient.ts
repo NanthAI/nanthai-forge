@@ -2,7 +2,7 @@
 import { v } from 'convex/values';
 import { makeFunctionReference } from 'convex/server';
 import { action, mutation } from './cliServer';
-import { internalMutation, type MutationCtx } from './_generated/server';
+import { internalMutation, type MutationCtx } from './server';
 import type { Id } from './_generated/dataModel';
 import { latestSourcePack } from './projectSourcePackStore';
 import { readableProject } from './projectObjectDownloads';

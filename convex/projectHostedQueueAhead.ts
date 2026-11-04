@@ -1,13 +1,16 @@
+import { invariant } from '../src/errors';
+import {
+  finishReadAttempt,
+  finishReadCheck,
+  finishReadMain,
+  finishReadPeer,
+  finishReadAheadQueue,
+} from './projectFinishReadPins';
 import type { LandingOrder } from './projectHostedLandingOrder';
-import { landingQueue } from './projectHostedLandingEvents';
-import { landingRow } from './projectHostedLandingStore';
-import { loadHostedCheck } from './projectHostedCheckStore';
 // SPDX-License-Identifier: Apache-2.0
 import type { QueryCtx, MutationCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
-import { hostedStartMain } from './projectHostedChannels';
-import { loadLandingAttempt } from './projectHostedLandingStore';
-import { hostedLandingStateSchema, type HostedLandingState } from '../src/hosted-landing';
+import { type HostedLandingState } from '../src/hosted-landing';
 import { QUEUE_AHEAD_LIMIT } from '../src/queue-ahead-preview';
 import { queueAheadSelectionSchema } from '../src/queue-ahead-hosted-schema';
 
@@ -27,34 +30,34 @@ async function selectQueueAhead(
   )
     return null;
   const projectId = state.projectId as Id<'hostedProjects'>;
-  const queue = selected ? null : await landingQueue(ctx, { projectId, channel: 'main' });
+  const queue = selected ? null : await finishReadAheadQueue(ctx, { projectId, channel: 'main' });
   const ordered = selected ?? (queue?.status?.horizon ?? []).map(submissionId => ({ submissionId }));
   const position = ordered.findIndex(row => row.submissionId === state.id);
   const aheadKeys = position < 0 ? ordered : ordered.slice(0, position);
   const rows = [];
   for (const key of aheadKeys.slice(0, QUEUE_AHEAD_LIMIT)) {
-    const row = await landingRow(ctx, { projectId, submissionId: key.submissionId });
+    const row = await finishReadPeer(ctx, { projectId, submissionId: key.submissionId });
     if (row && row.submissionId !== state.id && ['queued', 'checking', 'ready'].includes(row.phase))
       rows.push(row);
   }
   if (!rows.length) return null;
-  const mine = await loadLandingAttempt(ctx, { projectId, attemptId: state.attemptId });
+  const mine = await finishReadAttempt(ctx, { projectId, attemptId: state.attemptId });
   if (!mine.candidate.head) return null;
   const ahead = [];
   for (const row of rows.slice(0, QUEUE_AHEAD_LIMIT)) {
-    const peer = hostedLandingStateSchema.parse(JSON.parse(row.value));
+    const peer = JSON.parse(row.value) as Pick<HostedLandingState, 'id' | 'batchId' | 'attemptId'>;
     if (state.batchId && peer.batchId === state.batchId) continue;
-    const attempt = await loadLandingAttempt(ctx, { projectId, attemptId: peer.attemptId });
+    const attempt = await finishReadAttempt(ctx, { projectId, attemptId: peer.attemptId });
     if (!attempt.candidate.head) continue;
-    const status =
-      row.phase === 'queued' &&
-      row.runId &&
-      (await loadHostedCheck(ctx, { projectId, runId: row.runId })).run.status === 'passed'
-        ? 'ready'
-        : row.phase;
+    let status = row.phase;
+    if (row.phase === 'queued' && row.runId) {
+      const { run } = await finishReadCheck(ctx, { projectId, runId: row.runId });
+      invariant(run, 'NOT_FOUND', 'Hosted check run not found.');
+      if (run.status === 'passed') status = 'ready';
+    }
     ahead.push({ id: peer.id, head: attempt.candidate.head, inputs: attempt.candidate.inputs, status });
   }
-  const main = await hostedStartMain(ctx, projectId);
+  const main = await finishReadMain(ctx, projectId);
   return queueAheadSelectionSchema.parse({
     main: main.head,
     mine: mine.candidate.head,

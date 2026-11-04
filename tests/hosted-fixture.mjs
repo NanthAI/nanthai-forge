@@ -198,10 +198,11 @@ export function state(jobs = [job()], { keysetPaging = false } = {}) {
     });
     return entry.id;
   };
+  for (const table of Object.keys(schema.tables)) tables[table] ??= new Map();
   const ctx = validateContext({
     auth: { getUserIdentity: async () => (caller ? { subject: caller } : null) },
     db: {
-      normalizeId: (table, id) => (find(id) && !tables[table].has(id) ? null : id),
+      normalizeId: (table, id) => (find(id) && !tables[table]?.has(id) ? null : id),
       get: async id => structuredClone(find(id)),
       system: {
         get: async id => structuredClone(tasks.get(id) ?? files.get(id)?.metadata ?? null),

@@ -77,6 +77,7 @@ function compile(file, directory, keys) {
   ts ??= require('typescript');
   return ts
     .transpileModule(readFileSync(file, 'utf8'), {
+      fileName: file.pathname,
       compilerOptions: {
         target: ts.ScriptTarget.ES2022,
         module: ts.ModuleKind.ESNext,

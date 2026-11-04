@@ -1,3 +1,4 @@
+import { observerProjectionBudget } from './observer-projection-budget.mjs';
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -108,7 +109,11 @@ test('owner reprioritisation updates the compact read model, retries are inert a
   const changed = await prioritize(f, input);
   assert.equal(changed.priority, 'urgent');
   assert.equal(changed.priorityVersion, 1);
-  assert.equal(f.counts.at(-1).writes, 4, 'priority, receipt, compact status page and channel summary');
+  assert.equal(
+    observerProjectionBudget(f.counts.at(-1)).writes,
+    4,
+    'priority, receipt, compact status page and channel summary',
+  );
   assert.equal(f.metrics.scheduled, beforeTasks);
   assert.deepEqual(await prioritize(f, input), changed);
   assert.equal(f.counts.at(-1).writes, 0);
@@ -134,7 +139,11 @@ test('reprioritising never cancels an already running check or its lease', async
   assert.equal(changed.priority, 'urgent');
   assert.equal(changed.phase, 'checking');
   assert.equal(changed.attemptId, attempt);
-  assert.equal(f.counts.at(-1).writes, 4, 'priority, receipt, compact status page and channel summary');
+  assert.equal(
+    observerProjectionBudget(f.counts.at(-1)).writes,
+    4,
+    'priority, receipt, compact status page and channel summary',
+  );
   assert.deepEqual(await f.rawChecks.status(run.id), before);
   assert.equal(f.metrics.cancelled, cancelled);
 });
@@ -148,7 +157,11 @@ test('urgent priority applies at READY and wins the next free acceptance lease',
   const changed = await prioritize(f, input);
   assert.equal(changed.phase, 'ready');
   assert.equal(changed.priority, 'urgent');
-  assert.equal(f.counts.at(-1).writes, 4, 'priority, receipt, compact status page and channel summary');
+  assert.equal(
+    observerProjectionBudget(f.counts.at(-1)).writes,
+    4,
+    'priority, receipt, compact status page and channel summary',
+  );
   assert.deepEqual(await prioritize(f, input), changed);
   assert.equal(await f.claimAcceptance(normal.state), null);
   const lease = await f.claimAcceptance(urgent.state);
@@ -168,7 +181,11 @@ test('promoted member escapes a composing normal batch', async t => {
   assert.equal(batch.phase, 'composing');
   const selected = f.entries[2].state.id;
   await prioritize(f, command(f, selected));
-  assert.equal(f.counts.at(-1).writes, 4, 'priority, receipt, compact status page and channel summary');
+  assert.equal(
+    observerProjectionBudget(f.counts.at(-1)).writes,
+    4,
+    'priority, receipt, compact status page and channel summary',
+  );
   const status = JSON.parse(
     await f.transaction('priorityFinishStatus', finishApi.status, {
       projectId: f.projectId,
@@ -421,8 +438,14 @@ for (const size of [575, 1150])
     await prioritize(f, command(f, first.id));
     const change = f.counts.at(-1);
     const pages = Math.floor(size / 128) + 1;
-    assert(change.writes <= pages + 3, 'priority/receipt plus compact pages and channel summary');
-    assert(change.documents <= pages + 7, 'bounded compact read-model maintenance, no submission fan-out');
+    assert(
+      observerProjectionBudget(change).writes <= pages + 3,
+      'priority/receipt plus compact pages and channel summary',
+    );
+    assert(
+      observerProjectionBudget(change).documents <= pages + 7,
+      'bounded compact read-model maintenance, no submission fan-out',
+    );
     const selected = await f.transaction(
       'priorityScaleNext',
       { _handler: ctx => order.nextLandingRow(ctx, { projectId: f.projectId, channel: 'main' }) },
@@ -507,7 +530,10 @@ test('an unstarted urgent batch also takes precedence over an unstarted normal b
   );
   assert.equal(f.counts.length - calls, 1);
   const released = f.counts.at(-1);
-  assert(released.documents <= 64, 'fixed-size batch release excludes retained urgent history');
+  assert(
+    observerProjectionBudget(released).documents <= 64,
+    'fixed-size batch release excludes retained urgent history',
+  );
   t.diagnostic(
     JSON.stringify({
       batchReleaseDocuments: released.documents,

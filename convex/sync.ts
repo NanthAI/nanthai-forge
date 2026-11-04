@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
 import { paginationOptsValidator } from 'convex/server';
-import { internalMutation, internalQuery } from './_generated/server';
+import { internalMutation, internalQuery } from './server';
 import { internal } from './_generated/api';
 import { jobDocument, syncResult } from './schema';
 

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
-import { internalMutation } from './_generated/server';
+import { internalMutation } from './server';
 import { activityFields } from '../src/work-hosted-index';
 
 /** Additive, restartable migration. Replay any cursor safely; reads/writes are one bounded page. */

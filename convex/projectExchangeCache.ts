@@ -2,7 +2,7 @@
 // Only verified legacy-reader materialization and server-built artifacts call these.
 // It shares object bindings and explicit project cleanup with ordinary uploads.
 import { v } from 'convex/values';
-import { internalMutation } from './_generated/server';
+import { internalMutation } from './server';
 import { accessibleProject } from './projectAuthority';
 import { isStored } from './projectObjectFields';
 import { r2Config, r2Key } from './r2';

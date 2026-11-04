@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
-import { internalMutation, internalQuery } from './_generated/server';
+import { internalMutation, internalQuery } from './server';
 import { deviceDocument, deviceFields, credentialDocument, credentialFields } from './deviceFields';
 import { invariant } from '../src/errors';
 export const start = internalMutation({

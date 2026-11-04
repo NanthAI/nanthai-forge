@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { observerProjectionBudget } from './observer-projection-budget.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -227,8 +228,11 @@ test('incident replay: B and C pass alone but fail together; both statuses name 
     op.reads += count.documents;
     op.writes += count.writes;
   }
+  const source = counts.map(observerProjectionBudget);
   assert(
-    cost.calls < 180 && cost.reads < 3200 && cost.writes < 1100,
+    cost.calls < 180 &&
+      source.reduce((n, c) => n + c.documents, 0) < 3200 &&
+      source.reduce((n, c) => n + c.writes, 0) < 1100,
     JSON.stringify({ ...cost, operations }),
   );
   assert(cost.peakRssBytes < 512 * 1024 * 1024, JSON.stringify(cost));

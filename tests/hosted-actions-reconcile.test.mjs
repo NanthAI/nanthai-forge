@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { observerProjectionBudget } from './observer-projection-budget.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -412,7 +413,12 @@ test('fake ctx bounds reconciliation reads independently of ten thousand histori
   await s.tick();
   const counts = s.dbCounts.filter(c => c.name.startsWith('actionsReconcile'));
   assert(counts.length > 0);
-  assert(counts.every(c => c.ranges <= 12 && c.documents <= 12 && c.readBytes < 32 * 1024));
+  assert(
+    counts.every(c => {
+      const source = observerProjectionBudget(c);
+      return source.ranges <= 12 && source.documents <= 12 && c.readBytes < 32 * 1024;
+    }),
+  );
   console.log(
     'Actions reconciliation maximum fake ctx counts:',
     JSON.stringify(

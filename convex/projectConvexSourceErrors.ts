@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { ConvexError } from 'convex/values';
 import { ForgeError } from '../src/errors';
-import { internalMutation } from './_generated/server';
+import { internalMutation } from './server';
 /** A ForgeError thrown inside a nested mutation reaches the calling action as a
  * plain `Error` whose code is lost, so a deterministic source failure never
  * settles the job. Source mutations that actions call (`sourceMutation`) throw a ConvexError

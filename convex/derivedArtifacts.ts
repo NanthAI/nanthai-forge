@@ -2,7 +2,7 @@
 import { v } from 'convex/values';
 import { blobStore } from './blobStore';
 import { artifactBlobId } from './artifactBlobFields';
-import { internalMutation, internalQuery, type MutationCtx, type QueryCtx } from './_generated/server';
+import { internalMutation, internalQuery, type MutationCtx, type QueryCtx } from './server';
 import { internal } from './_generated/api';
 import { artifactMetadata } from './artifactStorage';
 import { storageDigest, scanComplete } from './storageDigest';

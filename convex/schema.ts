@@ -1,3 +1,4 @@
+import { finishReadTables } from './projectFinishReadFields';
 // SPDX-License-Identifier: Apache-2.0
 import { hostedOverlapTables } from './projectHostedOverlapFields';
 import { hostedFrictionTables } from './projectHostedFrictionFields';
@@ -417,6 +418,7 @@ export const projectProposalDocument = v.object({
   ...projectProposalFields,
 });
 export default defineSchema({
+  ...finishReadTables,
   ...githubMirrorTables,
   ...githubBindingTables,
   ...sourceStepTables,

@@ -2,7 +2,7 @@
 import { makeFunctionReference } from 'convex/server';
 import { v } from 'convex/values';
 import { z } from 'zod';
-import { internalMutation } from './_generated/server';
+import { internalMutation } from './server';
 import { mutation, query } from './cliServer';
 import {
   mainAuditStatus,

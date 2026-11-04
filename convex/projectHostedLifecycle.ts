@@ -2,7 +2,7 @@
 import { v } from 'convex/values';
 import { makeFunctionReference } from 'convex/server';
 import { mutation, query } from './cliServer';
-import { internalMutation } from './_generated/server';
+import { internalMutation } from './server';
 import { hostedWriteProject } from './projectHostedRecords';
 import { beginHostedOperation, hostedOperationRow } from './projectHostedOperations';
 import { lifecycleGuard } from './projectHostedLifecycleOverlay';

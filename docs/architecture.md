@@ -1516,6 +1516,36 @@ Review waits schedule no idle work. See [public governance](operations/governanc
 for defaults, policy edits, version skew and the owner acceptance API. The API is
 exercised with local metadata/provider/source-worker fakes.
 
+### Finish observation read model
+
+`projectHostedFinishObserve:page` reads selected `projectFinishReadRows`
+projections maintained inside the source mutation. `server` wraps public
+and internal mutations; `cliServer` retains its existing authentication guard.
+The build rejects raw mutation registrations that could bypass projection upkeep.
+A projection is replaced only when its selected fields change. Work revisions,
+request bookkeeping, attempt progress, check output, finish restore bases and
+controller fence changes therefore do not invalidate a waiting observer.
+
+The selected request is read once. Finish pending state and predecessor ownership
+use separate rows, so a selected finish's private wake is not progress. Queue-ahead
+reads select Candidate head/input pins, check status and the current main head.
+History remains an exact, at-most-twenty-version page, and the queue directory
+remains one bounded page with at most eight queue-ahead entries. Reads do not grow
+with retained landing history. Current access, authority changes, scheduled-owner
+state, queue advice, progress and acceptance retain their existing dependencies.
+New journal entries retain the public pending-attempt projection; private
+precompose metadata remains on the canonical finish only. Existing journal entries
+remain readable without a backfill.
+
+Older untouched records use their original selected source row until an ordinary
+write installs the projection. Reads never backfill, schedule a repair or scan
+history. No timer, polling, delivery delay or controller wake rule is added.
+Projection maintenance adds bounded metadata reads/writes to existing transactions,
+not Convex calls; source and log bytes retain their R2 placement. Synthetic budgets
+cover executions and read bytes per landing plus invalidation/delivery parity.
+Live per-function usage, wall time and billed savings require separate deployment
+and matched-load measurement; the synthetic budgets do not establish them.
+
 ### Composed Intent contracts
 
 Native landing prefix Views retain the declared contracts of their selected

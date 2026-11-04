@@ -3,7 +3,7 @@ import { wouldConflictSchema } from '../src/hosted-would-conflict';
 export { wouldConflictSchema, type WouldConflict } from '../src/hosted-would-conflict';
 import { v } from 'convex/values';
 import { makeFunctionReference } from 'convex/server';
-import { internalMutation, type MutationCtx } from './_generated/server';
+import { internalMutation, type MutationCtx } from './server';
 import type { Id } from './_generated/dataModel';
 import { hostedRecordBody, recordHead } from './projectHostedRecords';
 import { hostedRecordSchema } from '../src/hosted-records';

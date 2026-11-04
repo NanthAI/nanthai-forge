@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
-import { internalMutation, internalQuery } from './_generated/server';
+import { internalMutation, internalQuery } from './server';
 import type { MutationCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import { internal } from './_generated/api';

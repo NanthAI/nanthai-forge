@@ -578,7 +578,13 @@ test('speculative conflict advice is delivered by wait without a terminal outcom
 test('a retained preparing submission resnapshots the same older version on reconnect', async () => {
   const s = await fixture(),
     a = await s.start();
-  s.f.tables.projectHostedLandingRequests.clear();
+  await s.f.run(
+    'restorePreparingSubmission',
+    async ctx => {
+      for (const row of s.f.tables.projectHostedLandingRequests.values()) await ctx.db.delete(row._id);
+    },
+    {},
+  );
   s.f.tables.projectHostedLandingDesired.set('desired', {
     projectId: s.f.projectId,
     actor: 'owner',

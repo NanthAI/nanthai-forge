@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { observerProjectionBudget } from './observer-projection-budget.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -84,7 +85,7 @@ test('incident replay 2026-10-30 cost builder: a stale queued Candidate is marke
     cost.documents <= 20 + 3 * 3,
     `one bounded queue read plus three reads per Candidate: ${cost.documents}`,
   );
-  assert.equal(cost.writes, 1);
+  assert.equal(observerProjectionBudget(cost).writes, 1);
   // The stale entry's receipt says so; others do not.
   const status = await f.status(stale.id);
   assert.deepEqual(status.wouldConflict, marked);
@@ -122,9 +123,10 @@ test('dogfood-scale budget: 60 queued entries cost one bounded scan and at most 
   const marked = await mark(f, ['convex/cost.ts'], landed.id);
   assert.equal(marked, wouldConflict.WOULD_CONFLICT_READS);
   const cost = f.counts.slice(before).find(c => c.name === 'wouldConflict');
-  assert(cost.ranges <= 1 + 3 * wouldConflict.WOULD_CONFLICT_READS, `ranges ${cost.ranges}`);
-  assert(cost.documents <= wouldConflict.WOULD_CONFLICT_SCAN + 3 * wouldConflict.WOULD_CONFLICT_READS);
-  assert.equal(cost.writes, marked);
+  const source = observerProjectionBudget(cost);
+  assert(source.ranges <= 1 + 3 * wouldConflict.WOULD_CONFLICT_READS, `ranges ${cost.ranges}`);
+  assert(source.documents <= wouldConflict.WOULD_CONFLICT_SCAN + 3 * wouldConflict.WOULD_CONFLICT_READS);
+  assert.equal(source.writes, marked);
 });
 
 test('a replay of the queued land names its canonical wait; reads only when queued', async () => {

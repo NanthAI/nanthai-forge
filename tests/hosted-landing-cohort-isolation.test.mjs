@@ -1,3 +1,4 @@
+import { observerProjectionBudget } from './observer-projection-budget.mjs';
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -132,8 +133,17 @@ for (const history of [0, 575, 1150])
       wallMs: performance.now() - started,
       peakRssBytes: process.resourceUsage().maxRSS * 1024,
     };
-    assert(budget.calls <= 199 && budget.reads <= 3997 && budget.writes <= 1200, JSON.stringify(budget));
-    assert(budget.maxReads <= 170 && budget.maxWrites <= 55, JSON.stringify(budget));
+    const source = calls.map(observerProjectionBudget);
+    assert(
+      budget.calls <= 199 &&
+        source.reduce((n, c) => n + c.documents, 0) <= 3997 &&
+        source.reduce((n, c) => n + c.writes, 0) <= 1200,
+      JSON.stringify(budget),
+    );
+    assert(
+      Math.max(...source.map(c => c.documents)) <= 170 && Math.max(...source.map(c => c.writes)) <= 55,
+      JSON.stringify(budget),
+    );
     const idle = f.counts.length;
     await drain(f);
     assert.equal(f.counts.length, idle, 'zero idle calls');

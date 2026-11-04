@@ -3,7 +3,7 @@ import { v } from 'convex/values';
 import { paginationOptsValidator, paginationResultValidator } from 'convex/server';
 import { query, coordinationQuery, isDeviceIdentity } from './cliServer';
 // Self-revocation remains retryable after revocation; this endpoint only removes authority.
-import { mutation } from './_generated/server';
+import { mutation } from './server';
 import { deviceScope } from './deviceFields';
 import { invariant } from '../src/errors';
 const item = v.object({

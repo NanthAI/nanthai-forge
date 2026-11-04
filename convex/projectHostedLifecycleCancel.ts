@@ -2,7 +2,7 @@ import { withQueueStatusBatch } from './projectHostedQueueStatusWrite';
 // SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
 import { makeFunctionReference } from 'convex/server';
-import { internalMutation, type MutationCtx } from './_generated/server';
+import { internalMutation, type MutationCtx } from './server';
 import type { Doc } from './_generated/dataModel';
 import { composeRow, composeStateSchema } from './projectHostedComposeStore';
 import { cancelHostedLanding } from './projectHostedLandingCancel';

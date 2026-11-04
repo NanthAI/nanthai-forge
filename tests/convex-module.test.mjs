@@ -61,3 +61,17 @@ test('parallel cold processes share one cache without partial or temporary files
     names.join(),
   );
 });
+
+test('the actual extension selects TypeScript generic arrows versus TSX elements', async t => {
+  const { cache, src, top } = workspace(t);
+  writeFileSync(
+    join(src, 'top.ts'),
+    'const identity = <T>(value: T): T => value;\nexport const top = identity(42);\n',
+  );
+  assert.equal((await load(cache, top)).top, 42, 'formatted .ts generic arrows are not JSX');
+  const jsx = pathToFileURL(join(src, 'top.tsx'));
+  writeFileSync(join(src, 'top.tsx'), 'export const top = <span>42</span>;\n');
+  const element = (await load(cache, jsx)).top;
+  assert.equal(element.type, 'span');
+  assert.equal(element.props.children, '42');
+});

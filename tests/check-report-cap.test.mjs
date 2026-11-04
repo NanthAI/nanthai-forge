@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { observerProjectionBudget } from './observer-projection-budget.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
@@ -103,8 +104,9 @@ test('a complete valid hosted run document stays within 256 KiB for 1,000 failur
     assert(Buffer.byteLength(JSON.stringify(s.tables.projectHostedCheckRuns.get(row._id))) <= 256 * 1024);
   }
   const meter = s.counts.at(-1);
-  assert.equal(meter.documents, 0);
-  assert.equal(meter.writes, 1);
+  const source = observerProjectionBudget(meter);
+  assert.equal(source.documents, 0);
+  assert.equal(source.writes, 1);
   t.diagnostic(
     JSON.stringify({
       failedFiles: 1000,

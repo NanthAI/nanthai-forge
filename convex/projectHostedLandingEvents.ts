@@ -5,6 +5,7 @@ import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
 import { semanticPayload } from '../src/semantic-payload';
 import type { HostedLandingState } from '../src/hosted-landing';
+import { finishPendingForReader, type HostedFinish } from '../src/hosted-finish';
 export type LandingChannel = { projectId: Id<'hostedProjects'>; channel: 'main' };
 export const landingQueue = (ctx: QueryCtx | MutationCtx, input: LandingChannel) =>
   ctx.db
@@ -76,7 +77,9 @@ export async function recordLandingObservation(
     version: state.version,
     value: semanticPayload({
       submission: state,
-      pendingAttempt: pendingAttempt ?? (finish ? JSON.parse(finish.value).pending : null),
+      pendingAttempt: finishPendingForReader(
+        (pendingAttempt ?? (finish ? JSON.parse(finish.value).pending : null)) as HostedFinish['pending'],
+      ),
       ...(wouldConflict ? { wouldConflict } : {}),
     }),
   });

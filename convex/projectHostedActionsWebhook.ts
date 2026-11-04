@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
 import { v } from 'convex/values';
-import { internalMutation, internalAction } from './_generated/server';
+import { internalMutation, internalAction } from './server';
 import { makeFunctionReference } from 'convex/server';
 import { writableHostedCheck, writeHostedCheck } from './projectHostedCheckStore';
 import { directActions, settleDirectActions, requestDirectCancel } from './projectHostedActionsDirect';

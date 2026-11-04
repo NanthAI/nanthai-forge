@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
 import { blobStore } from './blobStore';
-import { internalMutation, internalQuery } from './_generated/server';
+import { internalMutation, internalQuery } from './server';
 import { activeOwnedProject } from './projectAuthority';
 import { storageDigest } from './projectStorage';
 import { isStored } from './projectObjectFields';

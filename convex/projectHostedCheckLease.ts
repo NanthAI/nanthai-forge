@@ -2,7 +2,7 @@ import { isMachineRunner } from '../src/hosted-machine-runner';
 // SPDX-License-Identifier: Apache-2.0
 import { makeFunctionReference } from 'convex/server';
 import { v } from 'convex/values';
-import { internalMutation, type MutationCtx } from './_generated/server';
+import { internalMutation, type MutationCtx } from './server';
 import { loadHostedCheck, writeHostedCheck, type CheckIdentity } from './projectHostedCheckStore';
 import { hostedOperationRow } from './projectHostedOperations';
 import {

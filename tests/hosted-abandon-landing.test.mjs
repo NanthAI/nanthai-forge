@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { observerProjectionBudget } from './observer-projection-budget.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -161,7 +162,8 @@ test('abandon lookup reads only the selected Lane at doubled dogfood history siz
     calls = f.counts.length;
   const args = await abandon(f);
   const meter = f.counts.slice(calls).find(c => c.name === 'abandonLanding');
-  assert(meter.documents <= 80 && meter.writes <= 35);
+  const source = observerProjectionBudget(meter);
+  assert(source.documents <= 80 && source.writes <= 35);
   assert(meter.readBytes < 128 * 1024 && meter.writeBytes < 256 * 1024);
   assert.equal(providerCancels(f).length, 1);
   const scheduled = f.pending().length;
@@ -259,7 +261,10 @@ test('abandon continues all selected composition pages with bounded calls and re
   assert(
     f.counts
       .filter(c => c.name === 'cancelContinuationPage')
-      .every(c => c.documents <= 120 && c.writes <= 40),
+      .every(c => {
+        const source = observerProjectionBudget(c);
+        return source.documents <= 120 && source.writes <= 40;
+      }),
   );
   t.diagnostic(JSON.stringify({ submissions: 13, continuationCalls: ticks }));
 });

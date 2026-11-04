@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
-import { internalMutation } from './_generated/server';
+import { internalMutation } from './server';
 import { bindingInstallation } from './githubBindingAccess';
 import { invariant } from '../src/errors';
 /** HMAC-verified HTTP route only. Uninstall is one tombstone, never a table scan. */

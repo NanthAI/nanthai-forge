@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { invariant } from '../src/errors';
 import { v } from 'convex/values';
-import { internalAction, internalMutation, internalQuery } from './_generated/server';
+import { internalMutation, internalAction, internalQuery } from './server';
 import { internal } from './_generated/api';
 import { ensureAccount, ensureProjectSlug } from './urlIdentity';
 import { personUrlProfile, urlProfilesPage } from './projectPeople';

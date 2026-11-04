@@ -2,7 +2,7 @@ import { projectExecution } from './projectExecution';
 // SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
 import { makeFunctionReference } from 'convex/server';
-import { internalAction, internalQuery, internalMutation } from './_generated/server';
+import { internalMutation, internalAction, internalQuery } from './server';
 import type { Id } from './_generated/dataModel';
 import type { Pin } from './r2BackfillRows';
 import { backfillKind } from './r2BackfillFields';

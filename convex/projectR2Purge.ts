@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
-import { internalMutation, internalQuery } from './_generated/server';
+import { internalMutation, internalQuery } from './server';
 import { backfillKind, backfillPin } from './r2BackfillFields';
 import { current, pinFor, selected, tableFor } from './r2BackfillRows';
 import { checkPass, maintenanceEnabled, maintenancePageSize, purgeable, verifiedPass } from './r2Maintenance';

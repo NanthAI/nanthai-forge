@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
 import { makeFunctionReference } from 'convex/server';
-import { internalMutation, internalAction } from './_generated/server';
+import { internalMutation, internalAction } from './server';
 import { finishStep, resumeFinishIO, type FinishIdentity } from './projectHostedFinishControl';
 import { loadLanding } from './projectHostedLandingStore';
 import { scheduleFinish } from './projectHostedFinishWake';

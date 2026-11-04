@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
 import { v } from 'convex/values';
-import { internalMutation, type MutationCtx } from './_generated/server';
+import { internalMutation, type MutationCtx } from './server';
 import { controlHostedActions } from './projectHostedActions';
 import { writableHostedCheck, type CheckIdentity } from './projectHostedCheckStore';
 import { receiveHostedCheckCallback } from './projectHostedCheckCallbacks';

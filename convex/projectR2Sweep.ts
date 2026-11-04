@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
-import { internalQuery, internalMutation } from './_generated/server';
+import { internalMutation, internalQuery } from './server';
 import { abandonedWindow, maintenanceEnabled, maintenancePageSize } from './r2Maintenance';
 import { projectPrefix } from './r2Operations';
 import { r2Key } from './r2';

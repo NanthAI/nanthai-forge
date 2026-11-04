@@ -5,16 +5,16 @@ import { v } from 'convex/values';
 import type { Id } from './_generated/dataModel';
 import { recordCallerReceipts } from './projectSelfMetricReceiptStore';
 import {
-  query as baseQuery,
   mutation as baseMutation,
+  query as baseQuery,
   action as baseAction,
   type QueryCtx,
   type MutationCtx,
   type ActionCtx,
-} from './_generated/server';
+} from './server';
 import { report } from './errors';
 import { invariant } from '../src/errors';
-export * from './_generated/server';
+export * from './server';
 // Signed credential markers keep scope/revocation enforcement during issuer reconfiguration.
 export function isDeviceIdentity(user: { issuer?: string; forgeCredential?: unknown }) {
   return (

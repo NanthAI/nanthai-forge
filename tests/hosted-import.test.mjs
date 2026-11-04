@@ -20,7 +20,11 @@ const job = {
 
 test('failed or unrestored scheduler status is retryable without changing source, and retry preserves the previous artifact', async () => {
   for (const kind of ['failed', 'canceled', null]) {
-    const db = { get: async () => job, system: { get: async () => (kind ? { state: { kind } } : null) } };
+    const db = {
+      normalizeId: (table, id) => (table === 'imports' && id === job._id ? id : null),
+      get: async () => job,
+      system: { get: async () => (kind ? { state: { kind } } : null) },
+    };
     const result = await get._handler({ db }, { id: job._id });
     assert.equal(result.phase, 'error');
     assert.match(result.error, /worker stopped.*Retry/);

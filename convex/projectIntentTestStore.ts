@@ -2,7 +2,7 @@ import { hostedLandingStateSchema } from '../src/hosted-landing';
 import { report } from './errors';
 // SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
-import { internalQuery, internalMutation, type QueryCtx, type MutationCtx } from './_generated/server';
+import { internalMutation, internalQuery, type QueryCtx, type MutationCtx } from './server';
 import { query } from './cliServer';
 import type { Id } from './_generated/dataModel';
 import { accessibleProject } from './projectAuthority';

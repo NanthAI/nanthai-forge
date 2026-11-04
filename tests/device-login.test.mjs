@@ -323,10 +323,12 @@ test('local store is 0600, deployment-bound, environment-overridable and rejects
 
 test('public backend registrations all use the CLI credential guard; token signing and hash comparison are stable', () => {
   for (const file of readdirSync(new URL('../convex', import.meta.url)).filter(
-    name => name.endsWith('.ts') && !['cliServer.ts', 'deviceCredentials.ts'].includes(name),
+    name => name.endsWith('.ts') && !['cliServer.ts', 'deviceCredentials.ts', 'server.ts'].includes(name),
   )) {
     const source = readFileSync(new URL(`../convex/${file}`, import.meta.url), 'utf8');
-    for (const match of source.matchAll(/import\s*\{([^}]+)\}\s*from\s*['"]\.\/_generated\/server['"]/g))
+    for (const match of source.matchAll(
+      /import\s*\{([^}]+)\}\s*from\s*['"]\.\/(?:_generated\/server|server)['"]/g,
+    ))
       assert.equal(/\b(query|mutation|action)\b/.test(match[1]), false, file);
   }
   assert.equal(equalHash(deviceHash('one'), deviceHash('one')), true);

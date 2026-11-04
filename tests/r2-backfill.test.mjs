@@ -341,14 +341,17 @@ test('flip mutation has a constant read budget below 4096 even with 100 pins', a
   );
   const pins = (await h.transport.page('objects', null, false)).page,
     get = h.s.ctx.db.get;
-  let reads = 0;
+  let reads = 0,
+    projectReads = 0;
   h.s.ctx.db.get = async (...args) => {
     reads++;
+    if (args[0] === 'project') projectReads++;
     return get(...args);
   };
   await h.transport.targets(pins);
   assert.equal(reads, 101);
-  reads = 0;
+  assert.equal(projectReads, 1);
+  reads = projectReads = 0;
   const result = await backend.flip._handler(h.s.ctx, {
     projectId: 'project',
     actor: 'owner',
@@ -356,8 +359,17 @@ test('flip mutation has a constant read budget below 4096 even with 100 pins', a
     pins,
   });
   assert.equal(result.length, 100);
-  assert.equal(reads, 101);
+  assert.equal(projectReads, 2, 'one authority read and one legacy access-view seed');
+  assert.equal(reads - 1, 101, 'the original 100-pin source budget plus one legacy seed');
+  assert.equal(reads - projectReads, 100);
+  assert.equal(
+    [...h.s.tables.projectFinishReadRows.values()].filter(
+      row => row.kind === 'hostedProjects' && row.sourceId === 'project',
+    ).length,
+    1,
+  );
   assert.ok(reads < 4096);
+  reads = projectReads = 0;
   assert.equal(
     (
       await backend.flip._handler(h.s.ctx, {
@@ -369,6 +381,8 @@ test('flip mutation has a constant read budget below 4096 even with 100 pins', a
     ).length,
     100,
   );
+  assert.equal(reads, 101, 'steady-state replay keeps the original get budget');
+  assert.equal(projectReads, 1);
   assert.equal(h.s.deleted.length, 0);
 });
 

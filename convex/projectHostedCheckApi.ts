@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
-import { internalMutation } from './_generated/server';
+import { internalMutation } from './server';
 import { controlHostedCheck } from './projectHostedCheckDispatch';
 import { receiveHostedCheckCallback } from './projectHostedCheckCallbacks';
 import { canonicalPayload } from '../src/hosted-source-operation';

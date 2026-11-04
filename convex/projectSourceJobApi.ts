@@ -4,7 +4,7 @@ import { makeFunctionReference } from 'convex/server';
 import { syncForJob } from './projectHostedSyncStore';
 import { composeForJob } from './projectHostedComposeStore';
 import { saveForJob } from './projectHostedSavePublish';
-import { internalMutation, internalQuery } from './_generated/server';
+import { internalMutation, internalQuery } from './server';
 import { enqueueSourceJob, claimSourceJob, advanceSourceJob, cancelSourceJob } from './projectSourceJobs';
 import { receiveConvexSourceJobCallback } from './projectSourceJobCallbacks';
 import { hostedRecordPage } from './projectHostedRecords';

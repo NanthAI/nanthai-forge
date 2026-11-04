@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { observerProjectionBudget } from './observer-projection-budget.mjs';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { finishFixture, api } from './hosted-finish-fixture.mjs';
@@ -76,6 +77,7 @@ export async function hostedMachineLifecycleDrill(t, interruption, history = fal
   assert.equal(f.tables.projectHostedAcceptances.size, receiptCount);
   assert.equal(f.pending().length, 0, 'no stranded entry or idle repair task');
   const counts = f.counts.slice(begin);
+  const source = counts.map(observerProjectionBudget);
   return {
     synthetic: true,
     interruption,
@@ -85,6 +87,8 @@ export async function hostedMachineLifecycleDrill(t, interruption, history = fal
     functionTransactions: counts.length,
     documentsRead: counts.reduce((sum, count) => sum + count.documents, 0),
     documentsWritten: counts.reduce((sum, count) => sum + count.writes, 0),
+    sourceDocumentsWritten: source.reduce((sum, count) => sum + count.writes, 0),
+    sourceMaxDocumentsPerTransaction: Math.max(...source.map(count => count.documents)),
     maxDocumentsPerTransaction: Math.max(...counts.map(count => count.documents)),
     peakRssMiB: Math.ceil(process.resourceUsage().maxRSS / 1024),
     wallMs: Math.round(performance.now() - start),

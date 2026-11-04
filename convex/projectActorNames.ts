@@ -1,7 +1,7 @@
 import { hostedPaths } from '../src/hosted-paths';
 // SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
-import { internalQuery, internalMutation, type QueryCtx, type MutationCtx } from './_generated/server';
+import { internalMutation, internalQuery, type QueryCtx, type MutationCtx } from './server';
 import type { Doc, Id } from './_generated/dataModel';
 import { selectedGeneration, recordPartition } from './projectWorkIndexStore';
 import { accessibleProject } from './projectAuthority';

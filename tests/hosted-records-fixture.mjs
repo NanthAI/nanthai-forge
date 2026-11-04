@@ -76,6 +76,7 @@ export function recordsFixture() {
   };
   const ctx = validateContext({
     db: {
+      normalizeId: (table, id) => (locations.get(id) === table ? id : null),
       get: async id => {
         range();
         return read([tables[locations.get(id)]?.get(id) ?? null])[0];

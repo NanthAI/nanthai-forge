@@ -2,7 +2,7 @@
 import { noteTrustCulprit } from './projectHostedTrust';
 import { v } from 'convex/values';
 import { makeFunctionReference } from 'convex/server';
-import { internalAction, internalMutation, type MutationCtx, type QueryCtx } from './_generated/server';
+import { internalMutation, internalAction, type MutationCtx, type QueryCtx } from './server';
 import type { Doc, Id } from './_generated/dataModel';
 import { beginHostedOperation, finishHostedOperation, hostedOperationRow } from './projectHostedOperations';
 import { beginCheckOperation, loadHostedCheck } from './projectHostedCheckStore';

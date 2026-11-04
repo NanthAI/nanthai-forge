@@ -1,3 +1,4 @@
+import { finishReadReader } from './projectFinishReadReader';
 import { readWouldConflict } from './projectHostedLandingWouldConflict';
 import { readQueueStatus, queueAwareLandingState } from './projectHostedQueueStatus';
 import { landingStateForReader } from './projectHostedLandingOrder';
@@ -11,7 +12,7 @@ import { ConvexError, v } from 'convex/values';
 import { query } from './cliServer';
 import { accessibleProject } from './projectAuthority';
 import { finishRow } from './projectHostedFinishWake';
-import { landingRow, loadLanding } from './projectHostedLandingStore';
+import { landingRow, landingStateFromRow } from './projectHostedLandingStore';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { sourceAuthority } from '../src/hosted-source-authority';
 import { ForgeError, invariant } from '../src/errors';
@@ -28,7 +29,8 @@ export const page = query({
     priorityInfo: v.optional(v.literal(1)),
   },
   returns: v.string(),
-  handler: async (ctx, input) => {
+  handler: async (rawCtx, input) => {
+    const ctx = finishReadReader(rawCtx);
     let stage = 'authorization',
       phase: string | null = null,
       version: number | null = null;
@@ -94,14 +96,13 @@ export const page = query({
       }
       invariant(rows.length === 1 || alias, 'NOT_FOUND', 'Select one hosted landing operation.');
       stage = 'landing';
-      const { row: selectedRow, state } = await loadLanding(ctx, {
-        projectId: input.projectId,
-        submissionId: rows[0]?.submissionId ?? alias!.submissionId,
-      });
+      const selectedRow = rows[0];
+      invariant(selectedRow, 'NOT_FOUND', 'Hosted landing request not found.');
+      const state = landingStateFromRow(selectedRow);
       phase = state.phase;
       version = state.version;
       stage = 'queue';
-      const queue = await readQueueStatus(ctx, state);
+      const queue = await readQueueStatus(finishReadReader(rawCtx, 'owner'), state);
       const wouldConflict = state.phase === 'queued' ? readWouldConflict(selectedRow) : undefined;
       stage = 'finish';
       const finish = await finishRow(ctx, { projectId: input.projectId, submissionId: state.id });

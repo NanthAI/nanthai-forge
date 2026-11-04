@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { observerProjectionBudget } from './observer-projection-budget.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -326,7 +327,8 @@ test('contributor person authority cannot bypass passing checks or protected pat
   assert.equal(result.reason, 'needs owner approval: protected paths .github/workflows/deploy.yml');
   assert.equal((await f.status(state.id)).request.error.message, result.reason);
   const budget = f.counts.filter(count => count.name === 'acceptanceAccept').at(-1);
-  assert(budget.documents <= 80 && budget.ranges <= 80 && budget.writes <= 10);
+  const source = observerProjectionBudget(budget);
+  assert(source.documents <= 80 && source.ranges <= 80 && source.writes <= 10);
   assert(!budget.touched.includes('projectHostedAcceptancePages'));
   console.log(
     'W8 protected final transaction',

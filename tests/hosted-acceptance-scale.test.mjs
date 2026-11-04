@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { observerProjectionBudget } from './observer-projection-budget.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -38,11 +39,12 @@ test('205 included Lanes and 10,050 retained receipts keep final CAS constant; c
     Buffer.byteLength(JSON.stringify(firstCompletion.precompose)) < 1024,
     'publication retains a small trigger, not source path lists',
   );
-  assert(final.ranges <= 40 && final.documents <= 40 && final.writes <= 15, JSON.stringify(final));
-  assert(final.readBytes < 40 * 1024 && final.writeBytes < 16 * 1024);
+  const source = observerProjectionBudget(final);
+  assert(source.ranges <= 40 && source.documents <= 40 && source.writes <= 15, JSON.stringify(final));
+  assert(source.readBytes < 40 * 1024 && source.writeBytes < 16 * 1024);
   assert(!final.touched.includes('projectHostedAcceptancePages'));
   // 40 = 39 plus the one submission-order read before claiming main (incident e4aee4fe); still constant.
-  assert(!final.touched.includes('projectHostedRecordHeads') || final.documents <= 40);
+  assert(!final.touched.includes('projectHostedRecordHeads') || source.documents <= 40);
   let ticks = 0;
   while (f.pendingTasks().some(t => t.name === 'projectHostedAcceptance:complete')) {
     assert(++ticks < 30, 'only outstanding finite completion work schedules itself');

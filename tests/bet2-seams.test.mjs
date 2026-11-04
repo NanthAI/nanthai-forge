@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { observerProjectionBudget } from './observer-projection-budget.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -182,8 +183,9 @@ test('insertHostedCheckRun preserves the exact old inserted document and dispatc
       status: run.status,
       value: semanticPayload(run, true),
     });
-    assert.equal(s.counts[0].ranges, 0);
-    assert.equal(s.counts[0].writes, 1);
+    const source = observerProjectionBudget(s.counts[0]);
+    assert.equal(source.ranges, 0);
+    assert.equal(source.writes, 1);
     assert.equal(scheduled.length, provider === 'modal' ? 0 : 1);
   }
 });

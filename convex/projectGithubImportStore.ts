@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
 import { blobStore } from './blobStore';
-import { internalMutation, internalQuery, type QueryCtx } from './_generated/server';
+import { internalMutation, internalQuery, type QueryCtx } from './server';
 import { internal } from './_generated/api';
 import { githubImportDocument } from './projectGithubImportFields';
 import { activeOwnedProject } from './projectAuthority';

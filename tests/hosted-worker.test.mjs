@@ -42,6 +42,7 @@ function context(initial = original()) {
     deleted = [],
     scheduled = [];
   const db = {
+    normalizeId: (table, id) => (table === 'imports' && id === job._id ? id : null),
     get: async () => job,
     system: { get: async () => ({ state: { kind: 'pending' } }) },
     patch: async (_, fields) => {
@@ -396,6 +397,10 @@ function syncContext(jobs) {
   const modules = { imports, sync, syncActions };
   const ctx = {
     db: {
+      normalizeId: (table, id) =>
+        (table === 'imports' && rows.has(id)) || (table === 'githubDeliveries' && deliveries.has(id))
+          ? id
+          : null,
       get: async id => rows.get(id) ?? deliveries.get(id) ?? null,
       system: { get: async id => tasks.get(id) ?? null },
       insert: async (table, value) => {
