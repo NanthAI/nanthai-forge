@@ -700,3 +700,26 @@ reconstruction of historical Lane heads or a timing measurement.
 The foundation check (`npm run check`, also part of verification) rejects machine-specific home paths in source text. Use relative paths, `~`, `<workspace>` or environment variables such as `$FORGE_OWNER` in documentation; derive executable paths from the environment or `import.meta.url`. It skips binary files and generated build/runtime directories. Diagnostics report only the file and line, never the matched contents.
 
 Synthetic test cases in `tests/*.test.mjs` or `tests/fixtures/` may exempt exactly one following line with a comment `// forge-path-fixture: synthetic` (`#` and HTML comment forms also work). This marker has no effect in application source or docs. Prefer constructing synthetic home paths from path segments so fixtures contain no literal machine paths.
+
+## Resource-budget measurements
+
+`agent-first-write-budget` and `self-metrics-hosted-inputs` assert work counts
+independently of shared-runner scheduling. First-write checks count actual cached
+header-page lookups (five for 560 Lanes), forbid full Work loads and network calls,
+and exercise both the real hook supervisor and its worker protocol. The 200 ms
+p95 guard measures CPU in the worker entry; supervisor and worker results must
+agree. The supervisor keeps its 128 MiB peak RSS guard. Reader retained allocation
+is measured after explicit GC in a fresh process, with the 64 MiB ceiling.
+
+The 6,000-landing metrics fixture still runs the registered Convex query handlers
+and document validators, enforcing at most 1,500 query/object calls, 200,000
+documents, 100 records per page and zero writes. It records exact requests,
+responses and immutable object batches, then replays them through the client in a
+fresh process without the fake DB or TypeScript compiler. That process enforces
+500 MiB peak and post-GC RSS, 30 seconds of client CPU, and less than 64 MiB of
+retained allocation or growth across repeated reports. Wall time remains a
+diagnostic: twelve CI shards share a runner, so descheduling is not reader work.
+Planted doubled reads and an 80 MiB retained buffer must fail the same guards.
+Large synthetic transcripts use private temporary files, with stdin ignored; a 32 MiB
+transfer guard covers that boundary. These tests change no hook or reader behavior
+and add no retries or timeouts.

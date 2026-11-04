@@ -7,6 +7,7 @@ import { buildComposePages } from '../dist/hosted-compose.js';
 import { readHostedMetricPages } from '../dist/self-metrics-hosted-pages.js';
 import { metricsSurface } from '../dist/self-metrics-surface.js';
 import { calculateSelfMetrics } from '../dist/self-metrics.js';
+import { runResourceWorker, assertMetricResources } from './resource-budget.mjs';
 import { calculateWaste } from '../dist/self-metrics-waste.js';
 import { fixture, period, at } from './self-metrics-hosted-fixture.mjs';
 const head = char => char.repeat(64);
@@ -239,32 +240,42 @@ test('30-day 6000-landing demand-driven reader has bounded page and object calls
     e.landing(`landing-${i}`, stamp, at(i * 7.2 + 3), pin);
     f.run(`landing-${i}`, stamp, at(i * 7.2 + 3), 120);
   }
-  const start = performance.now();
-  const { records } = await readHostedMetricPages(f.query, report);
-  const surface = metricsSurface(records, report);
-  const result = calculateSelfMetrics(records, report, { headline: true });
-  assert.equal(surface.totals['5.1'].landings, 6000);
-  const elapsedMs = performance.now() - start;
-  const measured = {
-    calls: f.meter.calls,
-    objectCalls: e.objectCalls,
-    documents: f.meter.documents,
-    writes: f.meter.writes,
-    rssMiB: process.resourceUsage().maxRSS / 1024,
-    elapsedMs,
+  // Record the actual registered query responses and verified immutable objects.
+  // Replay only the client in a fresh process: the fake DB and TS compiler are
+  // server/test infrastructure, not allocations owned by the metrics reader.
+  const pages = [],
+    objects = [];
+  const query = async (name, args) => {
+    const value = await f.query(name, args);
+    pages.push({ name, args, value });
+    return value;
   };
-  t.diagnostic(JSON.stringify(measured));
-  assert.equal(result.landings, 6000);
-  assert.equal(
-    result.metric1.days.reduce((n, day) => n + day.firstTry, 0),
-    6000,
-  );
-  assert(measured.calls + measured.objectCalls <= 1500);
-  assert(measured.documents <= 200000);
-  assert.equal(measured.writes, 0);
+  query.objects = async pins => {
+    const values = await f.query.objects(pins);
+    objects.push({ pins, values: values.map(value => Buffer.from(value).toString('base64')) });
+    return values;
+  };
+  const start = performance.now();
+  const { records } = await readHostedMetricPages(query, report);
+  assert.equal(metricsSurface(records, report).totals['5.1'].landings, 6000);
+  const input = { pages, objects, report };
+  const client = runResourceWorker('./self-metrics-input-budget-worker.mjs', input);
+  assert.equal(client.calls, f.meter.calls);
+  assert.equal(client.objectCalls, e.objectCalls);
+  const measured = { ...client, documents: f.meter.documents, writes: f.meter.writes };
+  t.diagnostic(JSON.stringify({ ...measured, fixtureWallMs: performance.now() - start }));
+  assertMetricResources(measured);
   assert.equal(f.meter.maxPage, 100);
-  assert(measured.rssMiB <= 500);
-  assert(elapsedMs <= 30000);
+  for (const [plant, error] of [
+    ['double-work', /query\/object work budget/],
+    ['leak', /retained allocation/],
+  ]) {
+    await t.test(`resource guard rejects planted ${plant}`, () => {
+      const regression = runResourceWorker('./self-metrics-input-budget-worker.mjs', { ...input, plant });
+      t.diagnostic(JSON.stringify({ plant, ...regression }));
+      assert.throws(() => assertMetricResources({ ...measured, ...regression }), error);
+    });
+  }
 });
 
 test('waste separates explicit flakes, conflicts, cancellations, supersession and stalls without duplicating shared runs', () => {
