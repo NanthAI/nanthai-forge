@@ -17,3 +17,57 @@ The historical inventory totals **2.50 GiB** of legacy file storage; a dashboard
 Keep the existing copies and receipts when a precondition fails; report the failing structured code and owning Issue. Use original operation IDs to reconcile unknown outcomes. After approved maintenance, clear maintenance mode and verify absence without printing values; measure idle usage and billed/byte-placement deltas before claiming completion.
 
 The local pre-cutover snapshot is deleted **only after a good backup and B1.9 land, with owner approval**. Until then it remains the rollback point. There is no automatic undo for deleted fallback bytes, and no deletion command is included here. Raw evidence is private, held off-repo by the owner; ask before relying on it.
+
+## Read-only audit and disposition planner
+
+Build core with the pinned Node and lockfile, then use the installed Convex CLI's
+sandboxed read-only inline queries. No backend deployment is needed. Output must
+be private and outside the source tree:
+
+```sh
+nforge heavy node scripts/legacy-storage-audit.mjs inventory --deployment dev:NAME --with-r2-list --out /private/audit.json
+# Continue that same pass after an interrupted metadata page:
+nforge heavy node scripts/legacy-storage-audit.mjs inventory --deployment dev:NAME --with-r2-list --out /private/audit.json --resume
+# Offline migration/deletion proposal; always dry-run, zero provider calls:
+node scripts/legacy-storage-audit.mjs plan --out /private/audit.json --dry-run
+```
+
+The inventory discovers every deployment table, including retired tables, and
+pages each plus `_storage` to completion. Each query reads at most 1,024 documents
+or 4 MB and returns counts, serialized JSON sizes and reference pins. It checks
+all nested fields and JSON-encoded source cursors for storage IDs, including
+imports, artifacts, source tasks/steps and Work generation cursors. ID-length
+candidates come from the complete storage inventory, avoiding normalization of
+large Work/source strings without assuming an ID format. No per-file
+Convex lookup or file download runs. Syntactically valid IDs are joined to the complete storage inventory; unmatched
+strings remain unresolved candidates, not proven dangling references. Physical
+file totals count each storage ID once; reference/document totals and table/project JSON sizes are separate.
+Serialized JSON sizes exclude binary encoding and index overhead and are not
+billed database storage. Unreferenced files retain content type, date and digest
+for investigation; lack of references does not establish deletion permission.
+
+`--with-r2-list` reads the four existing R2 settings through private captured
+CLI config reads, retaining no credentials in evidence. One bounded LIST request
+per R2 page checks content-addressed key presence and size; no per-file HEAD/GET
+runs. A size match is audit evidence, not the full-digest purge prerequisite.
+An omitted R2 listing leaves verification unknown. Inventory is a sequential
+observation window, not an atomic deployment snapshot; every live cleanup must
+recheck current references. Private state retains completed pages for continuation.
+
+Before running, estimate document reads, bandwidth and marginal cost. The task's
+operator budget stops before about $1 estimated usage or 50,000 metadata
+calls; a stop retains partial evidence and cannot produce a completed plan.
+There is no separate document or listing-page cap. Typical planning: 2 GB JSON reads, 4,500 query calls and
+1,000 R2 LISTs is about $0.46 before included usage (Starter marginal rates:
+$0.22/GB DB I/O, $2.20/million calls, $0.132/GB response egress;
+R2 Standard LIST $4.50/million). Binary/index overhead and actual billed usage
+must be reported separately. A completed report records observed pages,
+documents, JSON/response bytes, R2 operations and the rate-based estimate.
+
+Both commands are dry-run only. There is no `--execute` or `--apply`, no database
+mutation and no maintenance-mode toggle. The plan groups physical files by
+project, purpose, copy verification and proposed disposition. Owner approval,
+current full-digest verification, qualifying backup and the existing runbook's
+live checks remain required. Restore from the qualifying file-inclusive backup
+retained with the audit to an approved fresh target with matching source/configuration
+and retained R2 bytes; deleting fallback copies has no automatic undo.
