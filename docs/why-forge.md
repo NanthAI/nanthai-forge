@@ -1,32 +1,14 @@
 # Why Forge for agentic development?
 
-Forge is a source host and workspace for people and coding agents changing one
-codebase at the same time. Agents keep their editors and tools. Forge records
-what each agent intends to do, gives it an isolated Lane, composes concurrent
-changes, checks the combined code and moves accepted source to main.
-
-Our [principles](principles.md) put continuous study and improvement at the heart of Forge.
+Forge gives people and agents isolated Lanes, combines their changes, checks the result and moves accepted source to main. Agents keep their normal editors and tools. Our [principles](principles.md) guide continuous improvement.
 
 ## What changes from GitHub?
 
-On GitHub, agents commonly work in branches and pull requests, then wait for CI
-and a merge queue. In Forge, start a Lane for an Intent, edit its returned path,
-run affected tests and finish. With a configured native runner, concurrent code
-changes share a landing check on their combined Candidate instead of each agent
-running the full suite on almost the same tree. See the
-[agent workflow](agents/workflow.md) and [landing batches](operations/landing-batches.md).
+Start a Lane for an Intent, edit its returned path, run affected tests and finish. With a configured native runner, concurrent changes share a landing check on their combined Candidate. See the [agent workflow](agents/workflow.md) and [landing batches](operations/landing-batches.md).
 
-Forge handles updating from main, composition and check scheduling. If a batch
-fails, it checks prefixes, lands the longest passing prefix, attributes the next
-Lane's failure and requeues the remaining Lanes. Conflicts remain explicit;
-failed Candidates are never accepted. Agents do not need to rebase or babysit a
-merge queue. Supervised review and protected-path policies still apply; Git and
-docs-only changes retain the ordinary finish path.
+Forge updates from main and schedules composition/checks. Failed batches are isolated by checking prefixes: the longest passing prefix lands and remaining Lanes are requeued. Conflicts stay explicit; failed Candidates are never accepted. Supervised review and protected-path policies apply; Git and docs-only changes retain their ordinary finish path.
 
-Peers and presence show other agents' announced or observed files and work.
-Agents can spot overlap, exchange messages and hand work off before a conflict.
-These observations are advisory and can be incomplete. Alert delivery has been
-measured (below); whether alerts make agents' work better has not.
+Peers and presence let agents see announced work, exchange messages and hand work off. These observations can be incomplete. Alert delivery has been measured below; whether alerts improve agents' work has not.
 
 ## Measured landing throughput
 
@@ -83,8 +65,7 @@ On the current build every overlapping agent pair and file raised an alert at sa
 time (90 / 90), and 84 / 90 reached both agents' transcripts. Alerts arrive with an
 agent's next Forge call, so a fast second save can come first: only 2 / 5 replays
 delivered the first alert to both agents before the second save. Delivery at first
-write has since landed (B3.1); it has not been re-measured. Sources: the forge-bench results `E1-2026-10-24.md`,
-`E1-2026-10-25.md` and `E3-2026-10-24.md`.
+write has since landed (B3.1); it has not been re-measured. These are the on-main E1/E3 summaries (raw evidence private); full-method extraction is tracked in the [Phase 6 plan](phase6-plan.md).
 
 **Coordination (R3, measured in B1.5d on 2026-11-04).** Across the scored Forge cells at N ≥ 3,
 Forge raised 45 blocking overlap notices; 13 matched a real conflict and agents acknowledged 42.
@@ -100,23 +81,11 @@ the coordination evaluation. Do not infer them from burst landing.
 
 ## What stays familiar and portable?
 
-Use normal files, editors, agents and test commands inside a Lane. Git repositories
-work with Forge, and Forge can export accepted source to GitHub. Your repository
-stays portable; adopting Forge does not require giving up GitHub distribution.
-Native source also works without Git. See [workflows](workflows.md) and
-[GitHub sync](workflows.md#github-sync-mvp).
+Use normal tools and tests inside a Lane. Git repositories work with Forge; accepted source exports to GitHub. Native source also works without Git. See [workflows](workflows.md) and [GitHub sync](workflows.md#github-sync-mvp).
 
 ## Documentation for agents and LLMs
 
-The web build generates `/llms.txt` as a linked guide: a summary, the rules agents
-should follow, the dated measurements on this page (including the E3 bar Forge
-failed) and links to every document in `scripts/package-documents.mjs`, served
-under `/docs/`. It generates `/llms-full.txt` from a fixed list in
-`scripts/llm-documents.mjs`: the README and the user and agent guides, in that
-list's order and within a 400 KB budget. A missing listed source or an oversize
-file fails the build. Plans, status, backlog, roadmap, research, license
-disclosures and the architecture reference stay linked from `/llms.txt`, not
-concatenated. The installed agent skill ships separately and is linked on GitHub.
+The web build generates `/llms.txt` with agent rules, dated measurements (including the failed E3 bar) and links to every packaged document. `/llms-full.txt` concatenates the README and guides selected in `scripts/llm-documents.mjs`, in order, within 400 KB. Missing or oversize sources fail the build. Plans, research, status and other references remain linked. The installed agent skill is linked on GitHub.
 
 `robots.txt` permits the public landing and static documentation for all crawlers,
 including AI crawlers. App and project URLs, including legacy query routes, are

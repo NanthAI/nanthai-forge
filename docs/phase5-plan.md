@@ -1,5 +1,7 @@
 # Phase 5 plan
 
+The [public close](phase5-close.md) records the final verdict and carried acceptance.
+
 Phase 5 is three bets, measured by Forge itself. Bet 1 is the critical path and starts on day one. Outside users come after the bets, not before. The [roadmap](roadmap.md) links here; what works today is in [status](status.md).
 
 ## Goal
@@ -41,10 +43,9 @@ These landed in Phase 4 (closed 2026-10-25). Phase 5 assumes them.
 
 ## How we work
 
-- GPT/Codex builders take bulk slices; Claude takes design judgement and UI direction only.
+- Current builder/reviewer routing follows the [lead profile](agents/lead.md#current-forge-project-builder-profile); earlier Phase 5 routing is superseded.
 - One task per agent, with a handoff for any follow-up.
 - Agents run targeted tests. The landing check is the one full run.
-- Keep Claude use steady per five-hour window.
 - Never print environment values.
 - Sizes: **S** ≤ 1 agent-day, **M** 1–3, **L** 3–5. Every L is split below before building.
 
@@ -521,7 +522,7 @@ Split by group; all depend on B1.5b. SP1 is decided; P5-SG lands alongside B1.6�
 
 ### Bet 2 re-measure after admission D and E (2026-10-31)
 
-Issue 4a686b9a. Same reader (`nforge metrics`) and same method as the baseline. Baseline window: 2026-10-29 11:00Z to 2026-10-30 11:00Z (59 landings). After window: 2026-10-30 23:40:26Z (just after E, `248c9950`, landed) to 2026-10-31 19:44:10Z (20.1 h, 14 landings). Full report: `forge-phase5/reports/2026-10-31/bet2-metrics.md` (not in this repo).
+Issue 4a686b9a. Same reader (`nforge metrics`) and same method as the baseline. Baseline window: 2026-10-29 11:00Z to 2026-10-30 11:00Z (59 landings). After window: 2026-10-30 23:40:26Z (just after E, `248c9950`, landed) to 2026-10-31 19:44:10Z (20.1 h, 14 landings). The table below is the on-main summary; the full method is tracked by the Phase 6 move-unit inventory (raw evidence private).
 
 | Metric | Baseline | After E |
 | --- | ---: | ---: |
@@ -541,11 +542,11 @@ Not met or unknown: the Bet 2 target of finish-to-main p50 under 3 minutes (12.5
 
 ## Experiments
 
-Each result is published next to the 2.36× burst-4 figure in [why-forge](why-forge.md) and in the forge-bench results, whichever way it goes. Method and bars follow the review's evidence audit, §4.2.
+Each result is published next to the 2.36× burst-4 figure in [why-forge](why-forge.md) with raw evidence private, whichever way it goes. Method and bars follow the review's evidence audit, §4.2.
 
 ### E1. Live overlap-alert replay ×5
 
-- **Status:** published. Run 1 (2026-10-24, d57) passed all three bars, but only 37 of 90 overlapping agent-pair×file combinations reached both agents. Run 2 (2026-10-25, d59, after overlap ranking) reached 90 of 90 at save time and 84 of 90 in both transcripts, but only 2 of 5 replays delivered the first alert to both agents before the second save: alerts arrive with an agent's next Forge call, and in three replays that call was the second save, 1–3.5 s later. Delivery at first write (B3.1) is the fix. Results: forge-bench `results/E1-2026-10-24.md` and `results/E1-2026-10-25.md`. **Cost:** about $10.
+- **Status:** published. Run 1 (2026-10-24, d57) passed all three bars, but only 37 of 90 overlapping agent-pair×file combinations reached both agents. Run 2 (2026-10-25, d59, after overlap ranking) reached 90 of 90 at save time and 84 of 90 in both transcripts, but only 2 of 5 replays delivered the first alert to both agents before the second save: alerts arrive with an agent's next Forge call, and in three replays that call was the second save, 1–3.5 s later. Delivery at first write (B3.1) is the fix. Results: [on-main E1 summary](why-forge.md#overlap-alerts-between-live-agents) (raw evidence private). **Cost:** about $10.
 - **Method:** on a scratch owner seeded from main, four Codex agents edit the same three docs, plus eight concurrent finishes, five repetitions. Record alerts per overlapping save, time from the first overlapping save to an alert in the agent's transcript, `WORK_STALE` and `WORK_BUSY` counts, and dropped landings.
 - **Bar:** at least 4 of 5 replays deliver an alert to both agents before the second save; 0 of 40 finishes dropped; 0 `WORK_STALE` visible to agents.
 
@@ -557,7 +558,7 @@ Each result is published next to the 2.36× burst-4 figure in [why-forge](why-fo
 
 ### E3. Failing-change burst-4 vs a tuned merge queue
 
-- **Status:** published 2026-10-24: **the bar failed**. The tuned GitHub merge queue landed the three good changes in a median 189 s; Forge took 989 s (about 5.2× slower; about 2.4× even if every Forge check had been as fast as a GitHub PR check). Neither side landed the bad change or turned main red. The landing work that answers it is in [Landing without an operator](#landing-without-an-operator-q) and Bet 2. Result: forge-bench `results/E3-2026-10-24.md`. **Cost:** about $5.
+- **Status:** published 2026-10-24: **the bar failed**. The tuned GitHub merge queue landed the three good changes in a median 189 s; Forge took 989 s (about 5.2× slower; about 2.4× even if every Forge check had been as fast as a GitHub PR check). Neither side landed the bad change or turned main red. The landing work that answers it is in [Landing without an operator](#landing-without-an-operator-q) and Bet 2. Result: [on-main E3 summary](why-forge.md#when-one-change-in-the-burst-fails) (raw evidence private). **Cost:** about $5.
 - **Method:** P2 burst-4 on Blacksmith with one of four changes failing a test, three runs each side. GitHub's merge queue is tuned (batching and `max_entries_to_build`), not default.
 - **Bar:** Forge lands the three good changes faster than the tuned queue and never lands the bad one.
 

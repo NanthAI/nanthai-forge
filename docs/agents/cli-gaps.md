@@ -1,0 +1,21 @@
+# Private builder wrapper: native replacements
+
+The former `lane.sh` helper is machine glue, not the supported interface. Use the [hosted command contract](workflow.md#hosted-command-contract). This inventory preserves the reason for each workaround without porting its shell parsing, fixed paths or defects. Issue references identify existing owners, not new acceptance gates.
+
+| Workaround | Why it existed | Native replacement or remaining Issue |
+| --- | --- | --- |
+| One installed CLI, updater and fixed addressing | Stale private builds and inconsistent bindings | Bound checkout/address and patched Node already exist. Portable update/revert/freeze: 7af26482. Machine bindings are configuration. |
+| Expand short Lane IDs | Full UUID errors lacked a useful field name | ee7e3057 covers unambiguous prefixes and planning IDs. Never guess directories or treat a short Issue as an outcome. |
+| Decode and print overlap envelopes | JSON/pipelines hid useful notices | Native stderr delivery exists; fidelity: aaaf5a63. Only blocking notices need answers; the wrapper's blanket gate is obsolete. |
+| Inspect roots, lifecycle, pins, checks, journals, age and bytes before optional prune | Terminal checkouts accumulated; local state alone was insufficient | Native `nforge prune --scan` and pins/settings exist. Hygiene: 015bfc34, 995c8da9, 4784f3b1, 75170a57. Keep in-use/nested/unknown safeguards and bounded pages; dry-scan purity remains a separate friction Issue linked in the Phase 6 plan. |
+| Machine-wide build slots and stale-process cleanup | Concurrent builds exhausted a shared machine | Native `nforge heavy` and configurable `localHeavySlots`; no new fixed global limit. |
+| Issue/outcome start, second open, sleep, shared dependency link and status | Receipt/materialization reliability and repeated installs | Planning-linked start and shared installs exist. Durable id/path before advisory work: d41bb6e5. Remove redundant glue under 2a770ab3. |
+| Exact-save replay and pending/completed head output | Durable saves could outlive local metadata | Retry-safe native save owns this. Continuations: 905309cd, da4badf0. Settle the original operation before preflight. Do not copy the wrapper's fresh-id rerun or truncated error output. |
+| Answer every pending notice | Manual envelope decoding was cumbersome | Native `ack` rereads the inbox. Use structured output/current blocking semantics; 2a770ab3, aaaf5a63. |
+| Local diff and affected-test selection | Hosted `tests` took a Candidate rather than a Lane | Saved-head `preflight`/impact selection is native. 2a770ab3, 5dcfce75 own remaining alignment. Moving-main comparison and whitespace parsing are not equivalent. |
+| Wait on a local measurement freeze | Keep benchmark versions stable | 7af26482 owns version freeze; 97c7a123 owns already-admitted submissions. A local hold cannot stop server work already admitted; no broader block is selected here. |
+| Stream finish, wait for canonical acceptance, replay and summarize failures | Clients hid receipts or stopped at ready | Native `land --save` subscribes and prints exact continuations. Receipt/ready gaps: 96882643, 58236de6, aaaf5a63; wrapper removal: eb8a5d3d. Do not port repeated shell polling, a fixed wait cap or hand-built JSON. |
+| Fixed coauthor trailer | Historical attribution convention | Use actual recorded/requested identity. Preservation: b30284de, 924e86df, d1ca4dbc, 5fdd87f9, c15c93a7. A fixed model identity misattributes work. |
+| Explicit CLI refresh | Recovery from a stale release | Product update/revert: 7af26482; no alternate private CLI. |
+
+The portable updater specification is: honor the measurement pin, discover selected main/release, serialize updates, fetch the exact commit, reuse dependencies only for matching lockfiles (otherwise install without scripts), build and smoke-check before atomic selection, keep in-flight processes on their immutable runtime, and support explicit rollback. Retirement needs an agreed grace/in-use rule; the old machine's grace is not a new public retention default. B02 remains on 7af26482; this document adds no updater or deletion implementation.

@@ -1,7 +1,7 @@
 # Leading work on Forge
 
 Read [AGENTS.md](../../AGENTS.md), [principles](../principles.md),
-[status](../status.md), [roadmap](../roadmap.md), the current phase plan and its
+[status](../status.md), [roadmap](../roadmap.md), the [Phase 6 plan](../phase6-plan.md) and its
 Forge planning Issues before leading a new stage or resuming after a context reset.
 Read [architecture](../architecture.md) before changing internals. Fetch current
 hosted main; a local Git mirror can lag.
@@ -41,6 +41,14 @@ product settings, not permission to introduce a new policy.
 
 When the owner repeats or corrects a rule, update the shared repo page the next
 agent reads. Memory alone does not carry it to another harness or lead.
+
+## Current Forge project builder profile
+
+For this project's current work, builders and independent reviewers use GPT through Codex, model `gpt-6.1-sol`, reasoning effort `high`. There is no Claude fallback. This is the current project instruction, not a generic Forge product default; capacity does not authorize a silent provider switch.
+
+The approval design on Issue 7f085ec9 treats AI and human approvals equally, binds approval to exact heads and classifies the change rather than its author. Mandatory human or multiple-human approval is not the selected design. Implementation/enablement remains tracked there; this instruction does not change an existing gate.
+
+Now has no user-facing money or ledger; operator Convex costs stay internal (Issue 50f2e809). Public mirroring follows [Sync identity](../workflows.md#sync-identity), preserving personal Git identity.
 
 ## Delegate finite slices
 

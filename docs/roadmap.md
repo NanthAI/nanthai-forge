@@ -75,7 +75,7 @@ Closed on 2026-10-25. Experiments E1 and E3 are published in [why-forge](why-for
 
 Goal: Forge runs itself for the Forge team, with numbers to show it, before outside users arrive. The full plan with slices, acceptance criteria, metrics and the stage-by-stage critical path is in the [Phase 5 plan](phase5-plan.md), which marks each row done, partial or not started. Reads that never write and automatic Lane snapshots are Phase 4 prerequisites. Phase 5 ran from 2026-10-25 to 2026-11-04.
 
-**Both owner-set exit criteria are met** (owner decision, 2026-10-31): the benchmark is published (exit criterion 2: E1–E3 and R3, with the Forge-versus-GitHub benchmark on a real repository, B1.5d, which carries R3 as its coordination section), and an import works with no Mac in 5 minutes or less (exit criterion 5: 2 min 31 s and 2 min 37 s in two runs, until the project is agent-writable on t3code). Phase 5 closed on 2026-11-04; open work was moved to named Phase 6 and Phase 7 stages.
+**Both owner-set exit criteria are met** (owner decision, 2026-10-31): the benchmark is published (exit criterion 2: E1–E3 and R3, with the Forge-versus-GitHub benchmark on a real repository, B1.5d, which carries R3 as its coordination section), and an import works with no Mac in 5 minutes or less (exit criterion 5: 2 min 31 s and 2 min 37 s in two runs, until the project is agent-writable on t3code). See the [public close](phase5-close.md). Phase 5 closed on 2026-11-04; open work was moved to named Phase 6 and Phase 7 stages.
 
 Where each item stands:
 
@@ -93,6 +93,8 @@ Where each item stands:
 **After the bets:** a trial with outside users, a polished first project through GitHub import, and newcomer docs. Not started.
 
 ## Phase 6: make it solid (planned)
+
+Start with the [Phase 6 lead plan](phase6-plan.md) for the agreed order, pending inputs and planning handover.
 
 Goal: every known friction and bug fixed, and the landing loop robust under contention, before anyone outside the team uses Forge. Re-cut by the owner on 2026-11-04 after the [B1.5d benchmark](research/b15d-report.md).
 
