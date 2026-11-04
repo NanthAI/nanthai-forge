@@ -722,3 +722,8 @@ Planted doubled reads and an 80 MiB retained buffer must fail the same guards.
 Large synthetic transcripts use private temporary files, with stdin ignored; a 32 MiB
 transfer guard covers that boundary. These tests change no hook or reader behavior
 and add no retries or timeouts.
+
+Pure recovery preparation in `ui-now-recovery` counts exactly one indexed read of
+each of 600 Intents and 600 notices. Its unchanged 5 ms budget measures main-thread
+CPU in a fresh child after warm-up and GC, excluding descheduling and background
+compiler work. A planted doubled preparation must fail the same work-count guard.

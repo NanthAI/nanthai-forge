@@ -2,9 +2,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import { runResourceWorker } from './resource-budget.mjs';
 import { moduleUrl } from './convex-module.mjs';
 const { FixAnswers } = await import(moduleUrl('../web/src/cockpit/fix-answers.ts'));
-const { needsFixDecisions } = await import(moduleUrl('../web/src/cockpit/needs-fix.ts'));
 const intentId = randomUUID(),
   laneId = randomUUID();
 const main = { head: 'a'.repeat(64), receipt: { id: randomUUID() }, authority: { mode: 'server', epoch: 1 } };
@@ -97,33 +97,6 @@ test('Close is one mutation and an unknown result retains its operation id witho
   assert.equal(calls[0].intentId, intentId);
 });
 
-test('600-Intent recovery render preparation has zero IO and bounded linear work', t => {
-  const intents = Array.from({ length: 600 }, (_, i) => ({ id: String(i), outcome: `Intent ${i}` }));
-  const notices = intents.map(intent => ({
-    intentId: intent.id,
-    state: 'reverted',
-    auditRunId: 'audit',
-    head: main.head,
-    summary: 'Reverted receipt r: a.test.mjs failed on h',
-    undo: 'undo',
-  }));
-  // Warm the same pure path before measuring it on the shared machine.
-  needsFixDecisions(notices, intents);
-  const start = performance.now();
-  const items = needsFixDecisions(notices, intents);
-  const elapsed = performance.now() - start;
-  assert.equal(items.length, 600);
-  assert.equal(items[599].title, 'Intent 599');
-  assert.ok(elapsed < 5, `${elapsed} ms exceeds the 5 ms preparation budget`);
-  t.diagnostic(
-    JSON.stringify({
-      intents: 600,
-      notices: 600,
-      calls: 0,
-      documentsRead: 0,
-      documentsWritten: 0,
-      elapsedMs: elapsed,
-      peakRSS: process.resourceUsage().maxRSS,
-    }),
-  );
+test('600-Intent recovery render preparation has zero IO, one linear pass and CPU under 5 ms', t => {
+  t.diagnostic(JSON.stringify(runResourceWorker('./ui-now-recovery-budget-worker.mjs')));
 });
