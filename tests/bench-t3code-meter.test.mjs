@@ -36,8 +36,8 @@ function metered(events) {
       return child;
     },
   });
-  for (const event of events)
-    child.stdout.write(JSON.stringify({ ...event, timestamp: Date.now() / 1000 + 1 }) + '\n');
+  const timestamp = Date.now() / 1000 + 1;
+  for (const event of events) child.stdout.write(JSON.stringify({ ...event, timestamp }) + '\n');
   return { ...meter.stop(), spawns };
 }
 
@@ -151,14 +151,78 @@ test('meter flags missing usage instead of silently pricing zero; null costs can
   assert.equal(costUsd({ executions: 1, ioBytes: 0, egressBytes: 0, actionGbHours: null }), null);
 });
 
+test('per-function costs reconcile to the project total through delayed attribution and retries', () => {
+  const parent = { ...action(), identifier: 'synthetic:parent' };
+  const child = {
+    ...action(),
+    identifier: 'synthetic:child',
+    executionId: 'child',
+    udfType: 'Mutation',
+    error: 'synthetic failure',
+    logLines: [],
+  };
+  const cached = { ...parent, executionId: 'cached', cachedResult: true };
+  const r = metered([
+    child,
+    parent,
+    parent, // transport replay
+    { ...child, occInfo: { retryCount: 1 } },
+    cached,
+    { ...parent, requestId: 'foreign', logLines: [] },
+  ]);
+  assert.equal(r.spawns, 1);
+  assert.equal(r.perFunction.length, 2);
+  const byName = Object.fromEntries(r.perFunction.map(fn => [fn.identifier, fn]));
+  assert.equal(byName['synthetic:child'].executions, 2);
+  assert.equal(byName['synthetic:child'].failures, 2);
+  assert.equal(byName['synthetic:child'].actionGbSeconds, 0);
+  assert.equal(byName['synthetic:parent'].cachedExecutions, 1);
+  closeTo(byName['synthetic:parent'].actionGbSeconds, 7.2);
+  assert.equal(r.projectExecutions, 4);
+  closeTo(
+    r.perFunction.reduce((n, fn) => n + fn.costUsd, 0),
+    r.costUsd,
+  );
+  for (const part of Object.keys(r.costBreakdownUsd))
+    closeTo(
+      r.perFunction.reduce((n, fn) => n + fn.costBreakdownUsd[part], 0),
+      r.costBreakdownUsd[part],
+    );
+  for (const field of Object.keys(r.usage))
+    assert.equal(
+      r.perFunction.reduce((n, fn) => n + fn.usage[field], 0),
+      r.usage[field],
+    );
+});
+
+test('per-function missing usage stays unknown without poisoning another function', () => {
+  const bad = { ...action(), identifier: 'synthetic:bad', usageStats: {} };
+  const good = { ...action(), identifier: 'synthetic:good', requestId: 'good', executionId: 'good' };
+  const r = metered([bad, good]);
+  const byName = Object.fromEntries(r.perFunction.map(fn => [fn.identifier, fn]));
+  assert.equal(byName['synthetic:bad'].costUsd, null);
+  assert.equal(byName['synthetic:bad'].actionGbSeconds, null);
+  assert.ok(byName['synthetic:bad'].missingUsageFields['usageStats.databaseIoReadBytes']);
+  assert.ok(byName['synthetic:good'].costUsd > 0);
+  const unknown = metered([{ ...action(), identifier: undefined }]).perFunction[0];
+  assert.equal(unknown.identifier, '(unknown function)');
+  assert.equal(unknown.missingUsageFields.identifier, 1);
+});
+
 test('dogfood-size stream is local and bounded, with zero extra provider calls', t => {
   const before = process.memoryUsage().heapUsed;
   const start = performance.now();
   const m = monitor();
-  for (let i = 0; i < 18000; i++) m.observe({ ...action(), requestId: `r${i}`, executionId: `e${i}` });
+  for (let i = 0; i < 18000; i++)
+    m.observe({ ...action(), identifier: `synthetic:f${i % 100}`, requestId: `r${i}`, executionId: `e${i}` });
   closeTo(m.actionGbHours, 18);
   assert.equal(m.report().retainedExecutions, 18000);
   assert.ok(m.requests.size <= m.capacity);
+  assert.equal(m.report().perFunction.length, 100);
+  assert.equal(
+    m.report().perFunction.reduce((n, fn) => n + fn.executions, 0),
+    18000,
+  );
   const heapGrowth = process.memoryUsage().heapUsed - before;
   assert.ok(heapGrowth < 128 * 1024 * 1024, `heap growth ${heapGrowth}`);
   t.diagnostic(

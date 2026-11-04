@@ -48,6 +48,7 @@ export class ImportBenchmarkMonitor {
     this.capacity = capacity;
     this.actionGbHours = 0;
     this.missingUsageFields = {};
+    this.functions = new Map();
     this.requests = new Map();
     this.seen = new Set();
     this.completed = new Set();
@@ -83,6 +84,32 @@ export class ImportBenchmarkMonitor {
   }
   count(event) {
     if (event.at < this.since) return;
+    const identifier = event.identifier ?? '(unknown function)';
+    const key = JSON.stringify([identifier, event.udfType]);
+    let fn = this.functions.get(key);
+    if (!fn) {
+      fn = {
+        identifier,
+        udfType: event.udfType,
+        executions: 0,
+        cachedExecutions: 0,
+        failures: 0,
+        usage: Object.fromEntries(Object.keys(this.usage).map(key => [key, 0])),
+        actionGbHours: 0,
+        missingUsageFields: {},
+      };
+      this.functions.set(key, fn);
+    }
+    fn.executions++;
+    fn.cachedExecutions += event.cached ? 1 : 0;
+    fn.failures += event.failed ? 1 : 0;
+    for (const field of [...event.missingFields, ...(event.identifier ? [] : ['identifier'])])
+      fn.missingUsageFields[field] = (fn.missingUsageFields[field] ?? 0) + 1;
+    for (const field of Object.keys(this.usage))
+      fn.usage[field] =
+        fn.usage[field] === null || event.usage[field] === null ? null : fn.usage[field] + event.usage[field];
+    fn.actionGbHours =
+      fn.actionGbHours === null || event.gbHours === null ? null : fn.actionGbHours + event.gbHours;
     this.total++;
     this.failures += event.failed ? 1 : 0;
     this.lastExecution = Math.max(this.lastExecution, event.at);
@@ -159,6 +186,9 @@ export class ImportBenchmarkMonitor {
       counted: true,
       at: log.timestamp * 1000,
       failed: Boolean(log.error),
+      identifier: typeof log.identifier === 'string' && log.identifier.length ? log.identifier : null,
+      udfType: typeof log.udfType === 'string' ? log.udfType : null,
+      cached: log.cachedResult === true,
       ...completionUsage(log, Object.keys(this.usage)),
     };
     if (request.own) this.accept(event);
@@ -194,6 +224,11 @@ export class ImportBenchmarkMonitor {
       usage: { ...this.usage },
       actionGbHours: this.actionGbHours,
       missingUsageFields: { ...this.missingUsageFields },
+      perFunction: [...this.functions.values()].map(fn => ({
+        ...fn,
+        usage: { ...fn.usage },
+        missingUsageFields: { ...fn.missingUsageFields },
+      })),
       quiet: this.quiet(),
       retainedExecutions: this.seen.size,
       runningExecutions: this.running.size,

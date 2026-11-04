@@ -497,6 +497,17 @@ summaries expose `convexActionGbHours` and `convexActionComputeUsd` ranges. Lega
 results without separate action cost do not contribute their false zero to these
 compute ranges. No additional provider pulls or Convex calls are introduced.
 
+The same result also retains `convex.perFunction`, grouped by provider function
+identifier and type: executions, cached executions, failures, DB read/write and
+egress bytes, action GB-hours/GB-seconds, missing fields and the same dollar
+components. Its components sum to the project meter, using the same request-tree
+attribution, retry counting and transport replay exclusion. Cached invocations
+remain in the existing execution estimate and are identified separately for
+provider-bill reconciliation. Unknown identifiers have an explicit bucket;
+missing usage stays null per function. These are usage-based estimates, not bills.
+The extra counters consume local memory only, bounded by the existing retained
+execution capacity; they add no provider pull, Convex call or database work.
+
 The historical estimates below predate the action-field correction: their
 reported zero action compute was missing coverage. They are partial call/I/O/egress
 estimates, not measured all-in Convex costs or proof that the whole run fits the

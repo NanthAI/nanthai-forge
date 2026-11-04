@@ -125,6 +125,23 @@ export function convexMeter({ deployment, projectId, name, cwd, spawnLogs = defa
         actionGbHours: r.actionGbHours,
       };
       const breakdown = costBreakdownUsd(costInput);
+      const perFunction = r.perFunction.map(fn => {
+        const input = {
+          executions: fn.executions,
+          ioBytes:
+            fn.usage.databaseIoReadBytes === null || fn.usage.databaseIoWriteBytes === null
+              ? null
+              : fn.usage.databaseIoReadBytes + fn.usage.databaseIoWriteBytes,
+          egressBytes: fn.usage.networkEgressBytes,
+          actionGbHours: fn.actionGbHours,
+        };
+        return {
+          ...fn,
+          actionGbSeconds: fn.actionGbHours === null ? null : fn.actionGbHours * 3600,
+          costBreakdownUsd: costBreakdownUsd(input),
+          costUsd: costUsd(input),
+        };
+      });
       const problems = [
         ...(r.reason && r.reason !== 'total' && r.reason !== 'rate' ? [r.reason] : []),
         ...(r.coverageFailure ? [r.coverageFailure] : []),
@@ -147,6 +164,7 @@ export function convexMeter({ deployment, projectId, name, cwd, spawnLogs = defa
         missingUsageFields: r.missingUsageFields,
         actionComputeUsd: breakdown.actionCompute,
         costBreakdownUsd: breakdown,
+        perFunction,
         deploymentWide,
         costUsd: costUsd(costInput),
         notMetered: ['R2 operations and bytes', 'Convex storage'],
