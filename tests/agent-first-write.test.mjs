@@ -116,10 +116,10 @@ test('unacknowledged response payload survives delivery, caps at five, and clear
   for (let i = 0; i < 8; i++) await f.start({ scope: { paths: ['docs/status.md'] } });
   const blocked = preEdit(f.root, mine.laneId, ['docs/status.md'], context());
   assert.equal(blocked.count, 8);
-  assert.equal(
+  assert.deepEqual(
     readEditContext(f.store.directory, mine.laneId),
-    undefined,
-    'a blocked edit must not become source provenance',
+    context(),
+    'an advisory overlap still retains the producing edit context',
   );
   let response = await f.agent.dispatch({ action: 'policy', laneId: mine.laneId });
   assert.equal(response.unacknowledgedOverlaps.count, 8);

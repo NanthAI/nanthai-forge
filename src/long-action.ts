@@ -1,6 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 import { ForgeError } from './errors.js';
 
+const longActions = new Set([
+  'projectExchangeActions:manifest',
+  'projectObjectRecipes:complete',
+  'projectWorkActions:initialize',
+  'projectExchangeMigration:migrate',
+  'projectWorkActions:exportJournal',
+  'projectWorkIndexActions:ensure',
+]);
+export const longConvexAction = (name: string) => longActions.has(name);
+
 // Scheduling windows, never limits on retained Work or the operation's total work.
 export const LONG_ACTION_BUDGET_MS = 4 * 60_000;
 export const LONG_ACTION_DEADLINE_MS = 7 * 60_000;

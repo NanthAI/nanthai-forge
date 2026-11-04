@@ -26,6 +26,15 @@ This builds and links your source checkout; it does not install a published npm
 release. Keep that checkout to update it from GitHub. `nforge docs quickstart`
 opens this guide from the installed source.
 
+The first `nforge` run installs advisory Claude Code/Codex hooks for every Lane
+and prints changed files plus the exact undo command. To remove Forge hooks and
+persist user off: `nforge x . uninstall-hooks '{}'`; `install-hooks` reverses it.
+`nforge settings firstWriteHooks false` disables installed hooks too. For one
+project on this machine, use `nforge x ROOT uninstall-hooks '{"scope":"project"}'`.
+Hooks never deny edits, fail open within one second and cache each path/session.
+Hosted notices use one bounded saved-path query; unsaved edits and shell writes
+remain outside coverage. See [hook settings and coverage](agents/workflow.md#overlap-before-the-first-write).
+
 ## Import from GitHub in the app
 
 1. Sign in to the development app and open **Projects → New project**.

@@ -22,7 +22,7 @@ async function fixture(t) {
     .result;
   return { root, agent, a, b };
 }
-test('Claude Edit, Write, MultiEdit, NotebookEdit and Codex patch hooks deny overlaps before writing', async t => {
+test('Claude Edit, Write, MultiEdit, NotebookEdit and Codex patch hooks report advisory overlaps before writing', async t => {
   const f = await fixture(t);
   for (const [tool_name, tool_input] of [
     ['Edit', { file_path: join(f.a.path, 'shared.txt') }],
@@ -34,7 +34,7 @@ test('Claude Edit, Write, MultiEdit, NotebookEdit and Codex patch hooks deny ove
       { command: '*** Begin Patch\n*** Update File: shared.txt\n@@\n-Original\n+Edited\n*** End Patch' },
     ],
   ]) {
-    const result = runEditHook(f.root, f.a.laneId, {
+    const result = runEditHook('--auto', '', {
       tool_name,
       tool_input,
       cwd: f.a.path,
@@ -42,8 +42,8 @@ test('Claude Edit, Write, MultiEdit, NotebookEdit and Codex patch hooks deny ove
       turn_id: 'turn-42',
       tool_use_id: 'call-42',
     });
-    assert.equal(result.hookSpecificOutput.permissionDecision, 'deny', JSON.stringify(result));
-    assert.match(result.hookSpecificOutput.permissionDecisionReason, /peer-ack/);
+    assert.equal(result.hookSpecificOutput.permissionDecision, undefined, JSON.stringify(result));
+    assert.match(result.hookSpecificOutput.additionalContext, /overlap/);
     assert.equal(readFileSync(join(f.a.path, 'shared.txt'), 'utf8'), 'Original\n');
   }
   const context = readAgentTurn(f.agent.work.store.directory, f.a.laneId);
@@ -141,4 +141,43 @@ test('install/uninstall are idempotent and preserve existing Claude and Codex co
   for (let i = 0; i < 2; i++) installEditHooks(f.root, f.a.laneId, true, home);
   for (const path of ['.claude/settings.json', '.codex/hooks.json'])
     assert.deepEqual(JSON.parse(readFileSync(join(home, path), 'utf8')), original);
+});
+
+test('malformed config preserves both clients and unrelated hooks sharing a Forge group survive migration', async t => {
+  const f = await fixture(t),
+    home = join(f.root, 'fake-home');
+  mkdirSync(join(home, '.claude'), { recursive: true });
+  mkdirSync(join(home, '.codex'), { recursive: true });
+  const claude = join(home, '.claude/settings.json'),
+    codex = join(home, '.codex/hooks.json');
+  const runner = fileURLToPath(new URL('../dist/agent-edit-hook.js', import.meta.url));
+  const legacy = [process.execPath, runner, f.root, f.a.laneId].map(s => `'${s}'`).join(' ');
+  const other = { type: 'command', command: 'other-hook', custom: 'keep' };
+  const original = {
+    custom: true,
+    hooks: {
+      PreToolUse: [{ matcher: 'Write', custom: true, hooks: [{ type: 'command', command: legacy }, other] }],
+    },
+  };
+  writeFileSync(claude, JSON.stringify(original));
+  writeFileSync(codex, 'invalid');
+  const before = readFileSync(claude, 'utf8');
+  assert.throws(() => installEditHooks(f.root, undefined, false, home));
+  assert.equal(readFileSync(claude, 'utf8'), before);
+  assert.equal(readFileSync(codex, 'utf8'), 'invalid');
+  writeFileSync(codex, '{}');
+  installEditHooks(f.root, undefined, false, home);
+  const installed = JSON.parse(readFileSync(claude, 'utf8'));
+  assert.deepEqual(installed.hooks.PreToolUse[0], { matcher: 'Write', custom: true, hooks: [other] });
+  assert.equal(
+    installed.hooks.PreToolUse.length,
+    2,
+    'legacy command replaced by one Lane-independent command',
+  );
+  assert.match(installed.hooks.PreToolUse[1].hooks[0].command, /--auto/);
+  installEditHooks(f.root, undefined, true, home);
+  assert.deepEqual(JSON.parse(readFileSync(claude, 'utf8')), {
+    ...original,
+    hooks: { PreToolUse: [{ matcher: 'Write', custom: true, hooks: [other] }] },
+  });
 });

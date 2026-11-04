@@ -2,7 +2,7 @@ import { indexProgressReporter } from './work-index-client.js';
 // SPDX-License-Identifier: Apache-2.0
 import { exchangeFetch, type ExchangeRequestOptions } from './exchange-request.js';
 import { ForgeError } from './errors.js';
-import { LONG_ACTION_DEADLINE_MS, pendingProgressGuard } from './long-action.js';
+import { LONG_ACTION_DEADLINE_MS, pendingProgressGuard, longConvexAction } from './long-action.js';
 import { Agent, type Dispatcher } from 'undici';
 
 // Node fetch otherwise inherits Undici's five-minute header deadline. Override
@@ -42,15 +42,7 @@ const replaySafe = new Set([
   'projectWorkActions:exportJournal',
   'projectWorkIndexActions:ensure',
 ]);
-const longActions = new Set([
-  'projectExchangeActions:manifest',
-  'projectObjectRecipes:complete',
-  'projectWorkActions:initialize',
-  'projectExchangeMigration:migrate',
-  'projectWorkActions:exportJournal',
-  'projectWorkIndexActions:ensure',
-]);
-export const longConvexAction = (name: string) => longActions.has(name);
+export { longConvexAction } from './long-action.js';
 const receiptCalls = new Set(['projectExchangeMigration:migrate']);
 
 /** The HTTP client uses this for every exchange query, mutation and action,
@@ -69,7 +61,7 @@ export function exchangeConvexFetch(
         replaySafe.has(name) ||
         replayableOperation(name, payload.args?.[0]) ||
         (receiptCalls.has(name) && typeof payload.args?.[0]?.operationId === 'string'),
-      longAction = String(url).endsWith('/api/action') && longActions.has(name);
+      longAction = String(url).endsWith('/api/action') && longConvexAction(name);
     const continuable = longAction && name === 'projectWorkIndexActions:ensure';
     const guard = pendingProgressGuard(name, payload.args?.[0]?.operationId ?? name);
     let progressName: string | undefined;

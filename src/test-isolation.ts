@@ -23,7 +23,12 @@ export function refuseRealUserState(path: string, what: string) {
   const home = accountHome();
   if (!home) return;
   const target = resolve(path);
-  for (const real of [join(home, '.config', 'forge'), join(home, '.forge')])
+  for (const real of [
+    join(home, '.config', 'forge'),
+    join(home, '.forge'),
+    join(home, '.claude'),
+    join(home, '.codex'),
+  ])
     if (target === real || target.startsWith(real + sep))
       throw new ForgeError(
         'TEST_REAL_USER_STATE',

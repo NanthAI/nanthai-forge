@@ -3,7 +3,7 @@ import { readAgentTurn } from './agent-edit-context.js';
 import { unacknowledgedOverlaps } from './agent-edit-notices.js';
 import { preEdit } from './agent-pre-edit.js';
 import { acknowledgeOverlap } from './agent-overlap-ack.js';
-import { installEditHooks } from './agent-install-hooks.js';
+import { configureEditHooks } from './agent-install-hooks.js';
 import { checkQuarantine } from './check-quarantine.js';
 import { queueAheadStackSync } from './queue-ahead-stack-sync.js';
 import { settleFinish } from './landing-journal-settle.js';
@@ -368,7 +368,7 @@ export class AgentWorkflow {
     if (command.action === 'install-hooks' || command.action === 'uninstall-hooks')
       return {
         revision: store.revision(),
-        result: installEditHooks(store.root, command.laneId, command.action === 'uninstall-hooks'),
+        result: configureEditHooks(store.root, command, command.action === 'uninstall-hooks'),
       };
     if (command.action === 'handoff')
       return recordHandoff(store, { ...command, operationId: command.operationId! });

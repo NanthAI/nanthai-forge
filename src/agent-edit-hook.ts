@@ -1,3 +1,4 @@
+import { canonicalEditPath, editTarget } from './agent-edit-target.js';
 import { mkdirBelow } from './mkdir-below.js';
 import { Worker, MessageChannel, receiveMessageOnPort, isMainThread, workerData } from 'node:worker_threads';
 import { recordEditDelivery } from './agent-edit-metrics.js';
@@ -6,7 +7,7 @@ import { childEnv } from '../scripts/child-env.mjs';
 // SPDX-License-Identifier: Apache-2.0
 import { spawnSync } from 'node:child_process';
 import { readFileSync, appendFileSync, realpathSync } from 'node:fs';
-import { join, relative, resolve, isAbsolute, sep, dirname, basename } from 'node:path';
+import { join, relative, resolve, isAbsolute, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID, createHash } from 'node:crypto';
 
@@ -23,7 +24,7 @@ export function runEditHook(
     const thread = new Worker(new URL(import.meta.url), {
       workerData: { kind: 'forge-edit-hook', owner, laneId, input, signal, port: port2 },
       transferList: [port2],
-      env: childEnv(),
+      env: childEnv({ allow: ['FORGE_AUTH_TOKEN', 'XDG_CONFIG_HOME', 'FORGE_CLIENT_SETTINGS'] }),
       execArgv: [],
     });
     thread.on('error', () => {
@@ -35,13 +36,13 @@ export function runEditHook(
     port1.close();
     void thread.terminate();
     if (message?.kind === 'forge-edit-hook-result') {
-      for (const event of message.deliveries) recordEditDelivery(join(owner, '.forge', 'work'), event);
+      for (const delivery of message.deliveries ?? []) recordEditDelivery(delivery.directory, delivery.event);
       return message.output;
     }
     return failOpen(owner, laneId, wait === 'timed-out' ? 'timeout' : 'unreachable');
   }
   const child = spawnSync(process.execPath, [worker, '--worker', owner, laneId], {
-    env: childEnv(),
+    env: childEnv({ allow: ['FORGE_AUTH_TOKEN', 'XDG_CONFIG_HOME', 'FORGE_CLIENT_SETTINGS'] }),
     input: JSON.stringify(input),
     encoding: 'utf8',
     timeout: 1000,
@@ -52,7 +53,8 @@ export function runEditHook(
     try {
       const result = JSON.parse(child.stdout);
       if (result.kind === 'forge-edit-hook-result') {
-        for (const event of result.deliveries) recordEditDelivery(join(owner, '.forge', 'work'), event);
+        for (const delivery of result.deliveries ?? [])
+          recordEditDelivery(delivery.directory, delivery.event);
         return result.output;
       }
       return result;
@@ -74,6 +76,7 @@ function failOpen(owner: string, laneId: string, reason: string) {
     reason,
   };
   try {
+    if (owner === '--auto') throw new Error('No native log');
     const directory = join(owner, '.forge', 'work', 'edit-hook');
     mkdirBelow(join(owner, '.forge', 'work'), directory);
     appendFileSync(join(directory, 'fail-open.jsonl'), JSON.stringify(event) + '\n', { mode: 0o600 });
@@ -84,22 +87,17 @@ function failOpen(owner: string, laneId: string, reason: string) {
   return {
     hookSpecificOutput: {
       hookEventName: 'PreToolUse',
-      additionalContext: 'Forge first-write check unavailable; continued (fail-open event recorded).',
+      additionalContext: 'Forge first-write coverage incomplete (timeout or unavailable); edit continued.',
     },
   };
 }
 
-function canonicalPath(path: string): string {
-  try {
-    return realpathSync(path);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT' || dirname(path) === path) throw error;
-    return join(canonicalPath(dirname(path)), basename(path));
-  }
-}
-
-const hookDeliveries: Extract<MetricObservation, { type: 'overlap-delivery' }>[] = [];
+const hookDeliveries: {
+  directory: string;
+  event: Extract<MetricObservation, { type: 'overlap-delivery' }>;
+}[] = [];
 async function worker(owner: string, laneId: string, input: Record<string, unknown>) {
+  if (owner === '--auto') return autoWorker(input);
   owner = realpathSync(owner);
   const { preEdit } = await import('./agent-pre-edit.js');
   const { readAgentTurn, recordAgentTurn } = await import('./agent-edit-context.js');
@@ -111,8 +109,8 @@ async function worker(owner: string, laneId: string, input: Record<string, unkno
     const lane = join(directory, `lane-${laneId}`);
     if (
       typeof input.cwd === 'string' &&
-      canonicalPath(input.cwd) !== lane &&
-      !canonicalPath(input.cwd).startsWith(lane + sep)
+      canonicalEditPath(input.cwd) !== lane &&
+      !canonicalEditPath(input.cwd).startsWith(lane + sep)
     )
       return {};
     recordAgentTurn(directory, laneId, { agent, sessionId, turnId: String(input.turn_id ?? randomUUID()) });
@@ -144,20 +142,22 @@ async function worker(owner: string, laneId: string, input: Record<string, unkno
   }
   const paths = raw
     .map(path =>
-      relative(lane, canonicalPath(resolve(cwd, path)))
+      relative(lane, canonicalEditPath(resolve(cwd, path)))
         .split(sep)
         .join('/'),
     )
     .filter(path => path && path !== '..' && !path.startsWith('../') && !isAbsolute(path));
   if (!paths.length) return {};
-  const result = preEdit(owner, laneId, paths, conversation, event => hookDeliveries.push(event));
+  const result = preEdit(owner, laneId, paths, conversation, event =>
+    hookDeliveries.push({ directory, event }),
+  );
   if (result.status === 'overlap')
     return {
       hookSpecificOutput: {
         hookEventName: 'PreToolUse',
-        permissionDecision: 'deny',
-        permissionDecisionReason:
-          `${result.count} unacknowledged overlap(s). ` + result.overlaps.map(item => item.text).join('\n'),
+        additionalContext:
+          `Forge first-write: ${result.count} overlap(s), coverage=${result.coverage}. ` +
+          result.overlaps.map(item => `${item.file.slice(0, 160)} (${item.noticeId})`).join('\n'),
       },
     };
   // Hash is an opaque local conversation reference, never transcript content.
@@ -167,6 +167,58 @@ async function worker(owner: string, laneId: string, input: Record<string, unkno
       additionalContext: `Forge first-write check: ${result.status} (${result.coverage}); session ${sessionId}, turn ${conversation.turnId}; reference ${createHash('sha256').update(JSON.stringify(conversation)).digest('hex')}.`,
     },
   };
+}
+async function autoWorker(input: Record<string, unknown>) {
+  const { editHooksEnabled } = await import('./agent-hook-settings.js');
+  if (!editHooksEnabled()) return {};
+  const { preEditHosted, hostedEditContext } = await import('./agent-edit-hosted.js');
+  const tool = input.tool_input as Record<string, unknown> | undefined;
+  const cwd = typeof input.cwd === 'string' ? input.cwd : process.cwd();
+  const raw = [
+    tool?.file_path,
+    tool?.notebook_path,
+    ...(Array.isArray(input.paths) ? input.paths : []),
+  ].filter((path): path is string => typeof path === 'string');
+  if (Array.isArray(tool?.edits))
+    for (const edit of tool.edits) if (typeof edit?.file_path === 'string') raw.push(edit.file_path);
+  if (input.tool_name === 'apply_patch') {
+    const patch = tool?.command ?? tool?.patch ?? input.tool_input;
+    if (typeof patch === 'string')
+      for (const match of patch.matchAll(/^\*\*\* (?:Add File|Update File|Delete File|Move to): (.+)$/gm))
+        raw.push(match[1]!);
+  }
+  // Prompt attribution for native Lanes still uses the established local turn store.
+  if (input.hook_event_name === 'UserPromptSubmit') raw.push(join(cwd, '.forge-hook-target'));
+  const contexts: string[] = [];
+  const seen = new Set<string>();
+  for (const path of raw) {
+    const target = editTarget(resolve(cwd, path));
+    if (!target || !editHooksEnabled(target.project)) continue;
+    const key = JSON.stringify([target.root, target.path]);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    if (target.url) {
+      if (input.hook_event_name === 'UserPromptSubmit') continue;
+      const result = await preEditHosted(
+        target,
+        String(input.session_id ?? input.tool_use_id ?? randomUUID()),
+      );
+      const context = hostedEditContext(result);
+      if (context) contexts.push(context);
+    } else {
+      const result = await worker(target.root, target.laneId, { ...input, paths: [path] });
+      if (result.hookSpecificOutput?.additionalContext)
+        contexts.push(result.hookSpecificOutput.additionalContext);
+    }
+  }
+  return contexts.length
+    ? {
+        hookSpecificOutput: {
+          hookEventName: 'PreToolUse',
+          additionalContext: contexts.join('\n').slice(0, 1800),
+        },
+      }
+    : {};
 }
 if (!isMainThread && workerData?.kind === 'forge-edit-hook') {
   try {

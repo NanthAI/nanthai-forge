@@ -703,9 +703,12 @@ Synthetic test cases in `tests/*.test.mjs` or `tests/fixtures/` may exempt exact
 ## Resource-budget measurements
 
 `agent-first-write-budget` and `self-metrics-hosted-inputs` assert work counts
-independently of shared-runner scheduling. First-write checks count actual cached
-header-page lookups (five for 560 Lanes), forbid full Work loads and network calls,
-and exercise both the real hook supervisor and its worker protocol. The 200 ms
+independently of shared-runner scheduling. First-write checks exercise the hosted path against a synthetic HTTP server: one
+bounded query per uncached path/session and zero cached or idle calls, with a
+29,000-file marker whose identity prefix is read without loading its manifest.
+Server-handler fixtures assert bounded projection windows at 30 and 560 Lanes,
+zero writes and no full Work loads. Tests exercise both the real hook supervisor
+and its worker protocol. The 200 ms
 p95 guard measures CPU in the worker entry; supervisor and worker results must
 agree. The supervisor keeps its 128 MiB peak RSS guard. Reader retained allocation
 is measured after explicit GC in a fresh process, with the 64 MiB ceiling.

@@ -46,6 +46,7 @@ export function hostedAgentHelp(action?: string) {
     'Parameters (? = optional; nested fields and constraints follow the command schema):',
     ...entries.map(entry => `  ${entry.command}: ${entry.parameters.join(', ') || '{}'}`),
     ...(canonical ? entries.map(entry => JSON.stringify(entry.schema, null, 2)) : []),
+    'First CLI run installs advisory Claude Code/Codex first-write hooks for every Lane. nforge x ROOT install-hooks|uninstall-hooks {scope?:"user"|"project"} controls local setup; uninstall defaults to user and persists off. nforge settings firstWriteHooks false disables them. Hooks never deny edits; hosted coverage excludes unsaved edits, uses one query per uncached path/session and fails open within one second.',
     'land --save waits; --no-wait returns after submission. Use --check-only to check without landing.',
     'land --save overlapAnswer:"accept-order" answers the pending notices for this landing and records them like ack, so peers see the answer.',
     'pull {} refreshes a clean clone root to main; a repeat resumes interruption. Root status {} reports clone freshness.',

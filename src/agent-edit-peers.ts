@@ -73,7 +73,7 @@ export function readEditPeers(root: string, laneId: string, path: string) {
         file: path,
         regions: [],
         proposedOrder: lanes,
-        text: `Overlap before first write: ${path}; Lane ${peer.id} (${peer.owner?.actor ?? peer.startedBy?.name ?? peer.name}). Acknowledge with peer-ack, or edit another path.`,
+        text: `Overlap before first write: ${path}; Lane ${peer.id} (${peer.owner?.actor ?? peer.startedBy?.name ?? peer.name}). Saved/claimed paths only; unsaved peer edits may be unavailable.`,
       });
     }
   }

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { getFunctionName } from 'convex/server';
-import { longConvexAction } from './exchange-convex-fetch.js';
+import { longConvexAction } from './long-action.js';
 import { LONG_ACTION_DEADLINE_MS } from './long-action.js';
 import { ConvexClient, ConvexHttpClient } from 'convex/browser';
 import { withExchangeProgress } from './exchange-progress.js';

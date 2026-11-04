@@ -61,9 +61,9 @@ export function preEdit(
         text: `${notice.text} nforge agent ${quote(root)} peer-ack '{"laneId":"${laneId}","noticeId":"${notice.noticeId}","choice":"accept-order"}'`,
       });
     }
-    if (!blocked.some(item => item.file === path)) cache.write(key, { checked: true });
+    cache.write(key, { checked: true });
   }
-  if (!blocked.length) recordEditContext(directory, laneId, conversation);
+  recordEditContext(directory, laneId, conversation);
   const visible = blocked.slice(0, 5);
   for (const item of visible) {
     const event = receipts.get(item.noticeId)!;

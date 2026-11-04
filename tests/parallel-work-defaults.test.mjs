@@ -76,6 +76,7 @@ test('client settings default on, persist per machine and explain their source',
     clientCacheMaxGB: 2,
     clientCacheMaxAgeHours: 24,
     landWait: true,
+    firstWriteHooks: true,
   });
   assert.equal(clientSettingsCli([]).settings.landWait.source, 'default');
   assert.equal(clientSettingsCli(['landWait', 'false']).settings.landWait.value, false);

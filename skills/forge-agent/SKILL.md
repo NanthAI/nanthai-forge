@@ -5,7 +5,17 @@ description: Concise recorded Forge Intent/Lane/check/acceptance workflow and op
 
 For hosted checkouts, use `nforge agent ROOT --help` and `nforge docs agents/hosted`: both are generated from the enforced hosted contract. The examples after the hosted section below describe a native owner. Hosted replay requires the full original parameters, including message; use the receipt replay command. Hosted land accepts `overlapAnswer:"accept-order"` in the same request.
 
-Use ordinary search/read/edit tools on the selected source. For recorded delivery use the installed `nforge` command; `nforge agent ROOT VERB [--MODE] --help` gives parameters (`--command-file FILE` avoids JSON quoting). Three verbs: `start`, `save` and `land`; reads keep their names; operator actions run as `nforge x ROOT ACTION`. Old names (`finish`, `checkpoint`, `sync`, `run`, …) still work and print their new form on stderr.
+Use ordinary search/read/edit tools on the selected source. For recorded delivery use the installed `nforge` command; `nforge agent ROOT VERB [--MODE] --help` gives parameters (`--command-file FILE` avoids JSON quoting). On the first CLI run Forge installs advisory Claude Code/Codex first-write hooks,
+resolving the Lane from each edited path. Hosted hooks reuse one bounded `peers`
+query before first save, cache per path/session, never deny edits and fail open
+within one second with incomplete coverage. Unsaved edits and shell writes are
+outside coverage. The install prints changed files and its exact undo command.
+`nforge x ROOT uninstall-hooks '{}'` removes Forge hooks and persists user off;
+`nforge settings firstWriteHooks false` disables installed hooks too.
+`nforge x ROOT uninstall-hooks '{"scope":"project"}'` disables one project on this
+machine, across its Lanes; the corresponding `install-hooks` reverses it.
+
+Three verbs: `start`, `save` and `land`; reads keep their names; operator actions run as `nforge x ROOT ACTION`. Old names (`finish`, `checkpoint`, `sync`, `run`, …) still work and print their new form on stderr.
 
 For work on Forge itself, read [AGENTS.md](../../AGENTS.md), the [lead playbook](../../docs/agents/lead.md) and [builder rules](../../docs/agents/briefings.md#building-forge). They carry durable working rules; generated defaults below still describe the current project settings.
 

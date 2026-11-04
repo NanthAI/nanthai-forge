@@ -23,6 +23,7 @@ import { rememberOverlapText } from '../dist/hosted-overlap-text.js';
 import { finishGates } from '../dist/agent-default-gates.js';
 import { effectiveAgentDefaults } from '../dist/agent-parallel-defaults.js';
 import { mergeNativeText } from '../dist/native-text-merge.js';
+import { preEditHosted } from '../dist/agent-edit-hosted.js';
 import { hostedAgentCli } from '../dist/hosted-agent-cli.js';
 import { overlapBanner } from '../dist/hosted-overlap-notice.js';
 const overlaps = await import(moduleUrl('../convex/projectHostedOverlaps.ts'));
@@ -989,8 +990,12 @@ test('hosted path peers use the receipt engine before first save, include answer
   assert.equal(s.counts.length, before, 'no background observer or idle calls');
 });
 
-for (const files of [3000, 29000])
-  test(`${files} files / 30 Lanes: path peers are one query and three bounded projection windows`, async t => {
+for (const [files, laneCount] of [
+  [3000, 30],
+  [29000, 30],
+  [29000, 560],
+])
+  test(`${files} files / ${laneCount} Lanes: path peers are one query and three bounded projection windows`, async t => {
     const { s, lane, peer } = await setup(t);
     const seed = JSON.parse(
       [...s.tables.projectHostedRecordBodies.values()].find(row => JSON.parse(row.value).kind === 'lane')
@@ -1002,7 +1007,7 @@ for (const files of [3000, 29000])
       Array.from({ length: files }, (_, i) => delta(i === 0 ? 'src/shared.ts' : `src/${i}.ts`)),
     );
     await trackChange(s, peer, JSON.parse(changes.changes), 'Peer change');
-    for (let i = 0; i < 28; i++) {
+    for (let i = 0; i < laneCount - 2; i++) {
       const entry = { ...seed, id: randomUUID(), intentId: randomUUID() };
       await s.transaction(
         'scale-peer',
@@ -1030,16 +1035,35 @@ for (const files of [3000, 29000])
         detail: true,
       }),
     );
-    assert.equal(result.peerEvidence.items.length, 29);
+    assert.equal(result.peerEvidence.items.length, Math.min(laneCount - 1, 50));
     assert.equal(result.peerEvidence.coverage, 'hosted-incomplete');
     const meter = s.counts.at(-1);
-    assert(meter.documents <= 80, JSON.stringify(meter));
+    assert(meter.documents <= (laneCount > 50 ? 180 : 80), JSON.stringify(meter));
     assert(meter.ranges <= 15, JSON.stringify(meter));
-    assert(meter.readBytes < 4.5 * 1024 * 1024, JSON.stringify(meter));
+    // Thirty Lanes fit below 4.5 MiB; the new 560-Lane case saturates the
+    // existing 51-row projection window (each row is at most 128 KiB).
+    assert(meter.readBytes < (laneCount > 50 ? 8 : 4.5) * 1024 * 1024, JSON.stringify(meter));
     assert.equal(meter.writes, 0);
     assert(!meter.touched.includes('projectWorkRecords'));
+    const beforeHook = s.counts.length;
+    const hook = await preEditHosted(
+      {
+        root: join(tmpdir(), `synthetic-hook-${randomUUID()}`),
+        url: 'https://synthetic.test',
+        project: s.projectId,
+        laneId: lane.id,
+        path: 'src/shared.ts',
+      },
+      'budget',
+      (_name, args) => s.transaction('hook-scale', overlaps.read, args),
+    );
+    assert.equal(s.counts.length - beforeHook, 1);
+    assert.equal(hook.overlaps.length, 5);
+    assert.equal(hook.coverage, 'hosted-incomplete');
+    assert.equal(s.counts.at(-1).writes, 0);
+    assert(s.counts.at(-1).documents <= (laneCount > 50 ? 180 : 80));
     t.diagnostic(
-      `${files}: 1 query, ${meter.documents} documents, ${meter.ranges} ranges, ${meter.readBytes} DB bytes`,
+      `${files} files/${laneCount} Lanes: 1 query, exactly 5 hook notices, ${meter.documents} documents, ${meter.ranges} ranges, ${meter.readBytes} DB bytes`,
     );
   });
 

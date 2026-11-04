@@ -233,3 +233,7 @@ These have no setting: they fix failures and have no sensible alternative.
 
 The agent skill, MCP tool descriptions, `capabilities` (`rules`) and `llms.txt` carry one line per
 active rule, generated from the effective settings. A rule that is off adds nothing.
+
+First-write hooks default on (`nforge settings firstWriteHooks false` disables
+them). [Hook settings](agents/workflow.md#overlap-before-the-first-write) describe
+reversible removal, per-project switches and advisory coverage.

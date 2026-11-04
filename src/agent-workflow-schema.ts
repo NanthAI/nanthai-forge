@@ -40,8 +40,16 @@ export const agentActionSchema = z.discriminatedUnion('action', [
     paths: z.array(z.string()).min(1),
     conversation: conversationSchema,
   }),
-  z.object({ action: z.literal('install-hooks'), laneId: id }),
-  z.object({ action: z.literal('uninstall-hooks'), laneId: id }),
+  z.object({
+    action: z.literal('install-hooks'),
+    laneId: id.optional(),
+    scope: z.enum(['project', 'user']).optional(),
+  }),
+  z.object({
+    action: z.literal('uninstall-hooks'),
+    laneId: id.optional(),
+    scope: z.enum(['project', 'user']).optional(),
+  }),
   decideInputSchema.extend({ action: z.literal('decide') }),
   decisionsInputSchema.extend({ action: z.literal('decisions'), cursor: z.string().nullable().optional() }),
   frictionInputSchema.extend({ action: z.literal('friction') }),

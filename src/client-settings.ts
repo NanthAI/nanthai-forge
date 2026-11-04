@@ -22,6 +22,8 @@ export const clientSettingsSchema = z
     clientCacheMaxGB: z.number().nonnegative().finite().default(2),
     /** Evict nested Lane copies unused for this many hours (0 = no age limit). */
     clientCacheMaxAgeHours: z.number().nonnegative().finite().default(24),
+    /** Install advisory first-write hooks on first CLI run. */
+    firstWriteHooks: z.boolean().default(true),
     /** land --save waits for the outcome and prints a compact failure summary. */
     landWait: z.boolean().default(true),
   })
@@ -66,7 +68,7 @@ export function heavySlots(
   return Math.max(1, Math.min(Math.floor(memory / (5 * 2 ** 30)), Math.floor(cores / 2)));
 }
 function parseValue(key: keyof ClientSettings, value: string): unknown {
-  if (key === 'shareDependencies' || key === 'landWait') {
+  if (key === 'shareDependencies' || key === 'landWait' || key === 'firstWriteHooks') {
     invariant(value === 'true' || value === 'false', 'BAD_ARGUMENT', `${key} is true or false.`);
     return value === 'true';
   }

@@ -459,50 +459,46 @@ Hosted overlap records and answers use the separate [hosted advice](#hosted-over
 
 ## Overlap before the first write
 
-These local hooks and peer reads are not hosted checkout commands. Hosted
-builders use [start/save/status advice](#hosted-overlap-advice) with incomplete
-saved-path coverage; no equivalent hosted first-write inspection is available.
-
-Install or remove hooks explicitly on a native owner (never during start/save/MCP):
+The first CLI run installs Claude Code and Codex hooks, even with
+`--ignore-scripts`. It prints changed files and the exact undo
+command. Installation is idempotent, preserves other hooks/settings and resolves
+the Lane from each edited path, covering every hosted/native Lane.
 
 ```sh
-nforge x ROOT install-hooks '{"laneId":"LANE_ID"}'
-nforge x ROOT uninstall-hooks '{"laneId":"LANE_ID"}'
+nforge x ROOT uninstall-hooks '{}'                  # remove; persist user off
+nforge x ROOT install-hooks '{}'                    # reinstall; user on
+nforge settings firstWriteHooks false               # user off; true reverses
+nforge x ROOT uninstall-hooks '{"scope":"project"}' # project off on this machine
+nforge x ROOT install-hooks '{"scope":"project"}'   # reverse project off
 ```
 
-Installation preserves other settings, idempotently adds its command to Claude
-Code's settings and Codex's hooks configuration, and uninstall removes only it.
-The client may require its normal trust review. `PreToolUse` covers Claude
-`Edit`, `Write`, `MultiEdit`, `NotebookEdit` and Codex `apply_patch` (including move
-destinations). Shell writes and other tools are outside coverage. Clients without
-hooks can call native `forge_task {action:"pre-edit",laneId,paths,conversation}`.
+Project switches use hosted project ID or native owner path, across its Lanes
+on this machine. Both switches apply; preferences use `~/.config/forge/edit-hooks.json`.
+`PreToolUse` covers Claude `Edit`, `Write`, `MultiEdit`, `NotebookEdit` and Codex
+`apply_patch`, including move destinations. Shell writes and clients without
+hooks remain outside coverage; clients may require their normal trust review.
 
-Before each path's first edit per Lane/session, the hook records a local claim
-and reads native `peers {laneId,path}`. It reads Lane headers, saved path summaries
-and hook claims, never complete Work, source trees, Views, hosted functions or
-transcripts. Missing summaries mean incomplete coverage. Overlap returns a
-model-visible `deny` naming the peer/path/notice and `peer-ack` command. Record
-`accept-order`, `swap` or `split` to retry, or edit another path. Only the agent
-call pauses: source stays writable, with no source lock or landing gate. Later
-edits of a checked path use a local cache.
+Before first save, each uncached hosted path/session makes exactly one bounded
+`projectHostedOverlaps:read({projectId,laneId,path,detail:true,items:5})` query
+using the existing login. `peerEvidence` and its coverage fields describe saved
+paths only; unsaved peer edits remain unavailable. Native hooks read selected
+Lane headers, saved summaries and local claims. Neither path loads full Work or
+source bytes. Lane identity reads only the local marker prefix.
 
-Local CLI/MCP results also carry `unacknowledgedOverlaps:{count,items}` (five
-items plus full count), including errors. Caller selection uses `laneId`, cwd,
-`FORGE_LANE_ID` or the connection's last Lane. Array results put overlap JSON on
-stderr/a second MCP block; exact-byte `show` keeps stdout unchanged. Reads write
-no Work, presence, receipts or source. Delivery never acknowledges. Unavailable
-inbox reads report unknown coverage. The hook fails open after one second;
-failures go to stderr and `.forge/work/edit-hook/fail-open.jsonl` (stderr survives
-an unreachable owner).
+The hook never denies edits or requires acknowledgement. Context is capped at
+five notices/path and 1,800 characters/tool call. Overlaps and failures are cached
+per Lane/path/session; repeats make zero calls and emit no cached private evidence.
+A new session checks again. Idle calls, polling, per-item calls and hosted writes
+are zero. Unreachable servers, invalid responses and deadlines report incomplete
+coverage and continue. The supervisor fails open after one second, below the
+client's two-second timeout; hosted RPCs abort after 650 ms. Failures go to stderr;
+native owners also retain the existing local fail-open log. Hosted first-write
+delivery telemetry remains incomplete.
 
-Only agent/session/turn references are retained. Codex supplies `turn_id`;
-Claude's `UserPromptSubmit` creates the prompt's opaque turn ID, with a tool-call
-reference for mid-turn attachment. Optional `conversation.link` points to the
-conversation without uploading transcripts. MCP/save, States, saves, snapshots,
-making-of and review pins carry these references; restores retain the producing
-reference. D1 `decide` and overlap answers accept/inherit the same context.
-Metric 4 joins first-write alerts/answers to saves through parent heads; metric 2
-command/error and landing accounting stay unchanged.
+Native source retains opaque session/turn attribution; hosted hook observations
+add no save attribution. No transcripts or prompts are read. Delivery never
+acknowledges; missing evidence never proves independence.
+See [hosted advice](#hosted-overlap-advice) for start/save/status notices.
 
 Client contracts: [Claude hooks](https://code.claude.com/docs/en/hooks) and
 [Codex hooks](https://learn.chatgpt.com/docs/hooks).

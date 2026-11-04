@@ -1,3 +1,4 @@
+import { resolve } from 'node:path';
 import { hostedAgentHelp } from './hosted-agent-help.js';
 import { callerOverlaps } from './agent-caller-overlaps.js';
 import { hostedAgentAddress, hostedAgentCli } from './hosted-agent-cli.js';
@@ -165,8 +166,8 @@ const examples: Record<string, unknown> = {
     paths: ['src/file.ts'],
     conversation: { agent: 'codex', sessionId: 'SESSION', turnId: 'TURN' },
   },
-  'install-hooks': { laneId: 'LANE_ID' },
-  'uninstall-hooks': { laneId: 'LANE_ID' },
+  'install-hooks': { scope: 'user' },
+  'uninstall-hooks': { scope: 'user' },
   peers: { laneId: 'LANE_ID', detail: true },
   'peer-ack': { laneId: 'LANE_ID', noticeId: 'NOTICE_ID', choice: 'accept-order' },
   take: { laneId: 'LANE_ID', takeover: true },
@@ -444,6 +445,12 @@ async function runAgentCli(args: string[], options: AgentCliOptions, notices: st
     'Use agent ROOT ACTION [JSON | --command-file FILE].',
   );
   if (option === '--help') {
+    if (action === 'install-hooks' || action === 'uninstall-hooks') {
+      process.stdout.write(
+        'Local first-write hooks: {scope?:"user"|"project",laneId?:"legacy ignored"}. Lane-independent; first CLI run installs by default. Uninstall persists off; undo with install-hooks. User switch: nforge settings firstWriteHooks false.\n',
+      );
+      return undefined;
+    }
     process.stdout.write(
       hostedAgentAddress(root, {})
         ? hostedAgentHelp(lowerVerb(form!, true))
@@ -472,6 +479,10 @@ async function runAgentCli(args: string[], options: AgentCliOptions, notices: st
   if (client.messageFile !== undefined)
     selected = { ...selected, message: readInput(client.messageFile, 'Message file').replace(/\r?\n$/, '') };
   if (typeof selected.action === 'string') noticeViewAlias(selected.action);
+  if (action === 'install-hooks' || action === 'uninstall-hooks') {
+    const { configureEditHooks } = await import('./agent-install-hooks.js');
+    return configureEditHooks(resolve(root), selected, action === 'uninstall-hooks');
+  }
   const hosted = hostedAgentAddress(root, selected);
   action = canonical(lowerVerb(form!, Boolean(hosted)));
   invariant(
