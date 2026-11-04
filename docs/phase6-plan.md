@@ -4,14 +4,14 @@ Read this plan, the [lead rules](agents/lead.md), [Phase 5 close](phase5-close.m
 
 ## Stage map
 
-**Exit:** no open bug or core-claim Issue; every friction item fixed or dropped by the owner, none silently deferred; a repeat of the B1.5d benchmark shows the conflict-recovery loss fixed and no regression; idle Convex stays at 0 calls; Convex cost per landing meets the agreed target.
+**Exit:** bugs and friction filed before the exit-bench plan (8c9b84fc) is frozen are fixed or dropped by the owner, none silently deferred. After that freeze, only core-claim or severe bugs block exit. A repeat of the B1.5d benchmark shows the conflict-recovery loss fixed and no regression; idle Convex stays at 0 calls. Billed Convex dollars per accepted landing over at least 200 dogfood landings are about $0.002 or less, with a $0.001 stretch target (9db58ca6); attribution comes before optimization.
 
 - **6.1 Close the Phase 5 tail**: the B1.9 table purge (with the local owner HTTP server and native-owner code), the one-authority watch, the legacy Convex storage move and delete (Issue 40dad5e0), the stuck import cleanup, the R2 guard follow-up, idle polling, cache-path gaps and the benchmark harness findings (including the contamination rule that voided 34 tasks on false positives).
 - **6.2 The landing loop under contention.** B1.5d showed Forge 24-35% faster to `main` per task, but a few tasks in conflict or overtake loops set whole-batch wall time. The work:
   - conflict recovery agents cannot fumble: landing refuses while conflict markers remain, resolve works from the Lane root, and every conflict ends with one clear next step;
   - overtakes and CI bundling, a per-Lane local lock and faster Lane open (Forge prep is 15 s against 4.5 s for a local clone);
   - overlap notices that fire only for real collisions (13 of 45 blocking notices were useful, and 22 test-file conflicts had none), then earlier detection, with push delivery to agent sessions after that;
-  - no dead ends: every failed check names its cause and next step, a supervisor, and rollback notices;
+  - sync-apply recovery for ignored build outputs (1ad05526-bc33-4b17-a90d-7f31e94b7164), and no dead ends (d910db6b): every failed check names its cause and next step, a supervisor, and rollback notices;
   - flake containment, failed-test lists, train qualification, shortest-check-first and queue reordering (after measuring), a symbol-level selector and declaration merge.
 - **Landing safety beyond text conflicts.** A clean text merge can still break: today's real cases are a database test that failed after another change moved columns, two release changes that merged cleanly and then looped, and two readers that needed a hand merge. The landing queue already checks the exact composed result on current `main` and re-checks when `main` moves; these make the failures earlier, rarer and cheaper. Phase 5 Bets 2 and 3 cover contract checks, flake-aware culprit finding and overlap at first write; this list is the rest.
   - **Order-sensitive paths**: migrations, schema, lockfiles, generated files and configuration form classes. When an entry ahead touches the same class, the queue-ahead preview is actionable even without a text overlap.
@@ -25,28 +25,28 @@ Read this plan, the [lead rules](agents/lead.md), [Phase 5 close](phase5-close.m
   - **Breakage after landing**: a failing `main` audit finds the culprit, reverts it while keeping its Lane, and tells queued entries.
   - **Long-lived drift**: a Lane far behind `main` on paths others keep changing gets a nudge naming those landings.
   - **Queue order**: priority and reordering, with fairness between agents.
-- **6.3 Every friction and bug.** All open friction rows and bugs, ordered in one owner triage at the start of the phase, then fixed by builders in parallel batches, or dropped by the owner.
-- **6.4 Cost and agent surface.** Convex cost per landing about 10x lower (about $0.01 today), in-Convex first; any hosted worker or vendor comes with a monthly cost estimate and owner approval first. The agent context budget, CLI verbs V2b and V3 (alias removal, CLI generated from the MCP surface), Lane undo, and enforced trust per path per actor.
+- **6.3 Every friction and bug.** Cluster triage sets the work, then builders fix it in parallel batches or the owner drops it, under the exit freeze rule above. It replaces the pending owner friction-triage session. Issues are measured or tested now, or dropped; none wait for an arbitrary count. 82e8ddb8 is reshaped on that basis.
+- **6.4 Cost and agent surface.** Attribute billed Convex cost before optimizing toward the agreed exit target above, in-Convex first; any hosted worker or vendor comes with a monthly cost estimate and owner approval first. The agent context budget, CLI verbs V2b and V3 (alias removal, CLI generated from the MCP surface), Lane undo (e7812d8f), and enforced trust per path per actor. Lane undo and clone refresh (73ed4d28) stay in Phase 6 as core source-host behaviour.
 - **6.5 Engineering health**: a codebase health pass, mechanical guards for repeat bug classes, a TLA+ model of the landing queue and a real-user scenario matrix.
 - **In parallel, no product changes**: art direction, the design system and mockups for the Phase 7 design pass.
 
 ## Agreed start order
 
-Only **6.1 is ordered**. Triage decides everything after it; the later sequence below names the pending owner inputs and first contention work, not a fixed order for all remaining Issues.
+Only **6.1 is ordered**. Cluster triage sets the later sequence, not a fixed order for all remaining Issues. Bench-harness fixes d8cf81b4, 02ee5788, 108a4883 and 97c7a123 land before the exit-bench plan (8c9b84fc) is frozen.
 
 1. Fix weekly backup `WORK_INDEX_UNAVAILABLE`: 13402039-0e4c-44dd-915a-e4e03827f285.
 2. P1 legacy storage: 40dad5e0-24e4-4dbb-82b3-58ce83fde1ee with 8678148e-d246-4f05-aaca-6edc8fcddc14. About 2.5 GB remains in legacy Convex file storage; 1.93 GB is R2 duplicates, the remainder unclassified. A read-only audit comes first. Follow [backup and cleanup preconditions](operations/legacy-storage-cleanup.md).
 3. Clone refresh from Forge main: 73ed4d28-8340-4a65-b363-a946da9b8105; portable CLI updater: 7af26482-1e7c-49ef-875e-6deb430df8c7. These remove the last GitHub-mirror and off-repo tool dependencies; the docs handover alone does not remove them.
-4. Authority watch 02bcad74-09fe-4f46-ae86-c17b06baf0d1, idle polling 59bb75f3-8964-4377-969d-116e58b18030, then B1.9 64d7192b-4de7-4da8-9f4c-3c7231d2eae9.
-5. Owner friction triage (30–45 minutes).
-6. Agree the exact Convex cost-per-landing target: 9db58ca6-1bc3-4cac-8786-2c6f5e515c21. Attribution comes before optimization; about 10× lower is direction, not the numeric acceptance target.
-7. Then 6.2: conflict recovery 36a087ea-e1df-4120-8fac-08a8f85b7bdb, notice precision ee9d5738-0272-4cb4-b03c-ca35b34966ee before push delivery 11ba7bb9-bca1-4251-ad5a-cca9243b6add, and the remaining contention work.
+4. Authority watch 02bcad74-09fe-4f46-ae86-c17b06baf0d1, idle polling 59bb75f3-8964-4377-969d-116e58b18030, then B1.9 64d7192b-4de7-4da8-9f4c-3c7231d2eae9. Its gate is backup fix 13402039 with failure notification proven, plus one manually verified backup; the two-weekly-backups wait is dropped.
+5. Use the cluster triage held on 2026-11-04 in place of the pending owner friction triage. Merge duplicate groups in planning, retaining abandoned records that point to their merge target.
+6. Attribute Convex cost under 9db58ca6-1bc3-4cac-8786-2c6f5e515c21 before optimization, using the agreed billed-dollar target and at least 200 accepted dogfood landings.
+7. Then 6.2: conflict recovery 36a087ea-e1df-4120-8fac-08a8f85b7bdb, notice precision ee9d5738-0272-4cb4-b03c-ca35b34966ee before push delivery 11ba7bb9-bca1-4251-ad5a-cca9243b6add, sync apply blocked by ignored build outputs 1ad05526-bc33-4b17-a90d-7f31e94b7164, no-dead-ends d910db6b and the remaining contention work.
 
-**Owner inputs still pending:** the friction triage and the numeric cost target. Phase 7 production, publication, spend and outside-user decisions remain separately owner-gated.
+The cluster triage and numeric cost target are agreed. Phase 7 production, publication, spend and outside-user decisions remain separately owner-gated.
 
-## Duplicate merge candidates for triage
+## Duplicate groups in planning
 
-These groups are cross-linked in planning. They are candidates, not a decision to merge, close or discard any acceptance. Different symptoms may need distinct fixes.
+These cross-linked groups are being merged in planning. Merged items remain as abandoned records pointing to their target, with acceptance evidence preserved. The lead updates this table with final targets after reconciliation; it does not yet select targets. Different symptoms may still need distinct fixes.
 
 | Group | Full Issue ids |
 | --- | --- |

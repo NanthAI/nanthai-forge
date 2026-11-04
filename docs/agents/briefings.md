@@ -1,6 +1,6 @@
 # Agent briefings
 
-`nforge agent ROOT brief '{"situation":"resolve-conflict","laneId":"LANE_ID","agent":"codex"}'`
+For native owners, `nforge agent ROOT brief '{"situation":"resolve-conflict","laneId":"LANE_ID","agent":"codex"}'`
 (or `forge_brief`) returns `copyText`, Markdown and structured context. Use the
 linked Intent, Lane, Candidate, run or message id; fetch fresh context before
 acting. `brief --help` lists situations and agents. Templates make no model calls
@@ -25,7 +25,11 @@ local brief supplies paths. Budget-limited notes/events/claims report partial
 coverage. Claims are advisory; Candidate context pins input Lanes. Resolve sync
 markers in the Lane and composed conflicts through Candidate resolution, then check.
 
-CLI/MCP hosted context needs private `FORGE_DEPLOYMENT`, `FORGE_PROJECT_ID` and
+The hosted checkout CLI does not expose `brief` or `forge_brief`; the hosted API
+described above is a separate surface. Use `planning {"id":"ISSUE_ID","reconcile":false}`,
+`status {"laneId":"LANE_ID"}` and the repo brief/rules for builder context.
+
+Native CLI/MCP access to hosted context needs private `FORGE_DEPLOYMENT`, `FORGE_PROJECT_ID` and
 `FORGE_AUTH_TOKEN`. Missing binding reports unavailable coordination; failure never
 falls back silently. Message/handoff ids need it. `forge_task` exposes guidance;
 `forge_brief` exposes briefings. Failed checks retain bounded summaries; older ones
@@ -66,7 +70,9 @@ budget, time box, acceptance bar and metrics that must not regress.
 6. Save at milestones/~30 minutes; read the head and capture coverage. Use `mktemp`
    logs, never shared fixed paths. Keep a private handoff with observation time,
    saved head, operation id and next action for interruption recovery.
-7. Read peers and coordinate shared scope before editing. Answer blocking notices
+7. Read hosted start/save/status overlap advice before editing and coordinate shared
+   scope; native owners can use `peers`. Saved-path windows exclude unsaved peer
+   edits; missing notices never prove independence. Answer blocking notices
    before landing; advisory notices need no answer. Record order/split, notice
    counts and conflicts. Missing alerts mean friction, not independence.
 8. Save then `preflight {laneId}`. Run all affected tests: added tests, direct and
@@ -84,7 +90,10 @@ budget, time box, acceptance bar and metrics that must not regress.
     killed wait with its complete original request/id, not a shell poller.
 11. Fix failures in the same Lane and land again; never cancel and recreate.
     Follow exact conflict/stale/stalled continuations; replay unknown outcomes.
-    Log friction with action/code/Lane/cost/workaround, then fix or link a slice.
+    Before filing an Issue or friction, search planning and comment on an existing
+    match instead. Until search (18e28b75) ships, page
+    `planning {"reconcile":false,"limit":100}` through `nextCursor` and filter
+    titles. Log action/code/Lane/cost/workaround, then fix or link a slice.
 12. Match your receipt to your Lane/operation and verify files on accepted main.
     Convex changes also need deployment success at that commit; the lead deploys.
     Comment evidence per acceptance line; unmet lines stay open or name their next

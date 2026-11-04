@@ -53,6 +53,8 @@ test('the hosted Vite build emits linked LLM files, every packaged doc and crawl
   const full = readFileSync(join(output, 'llms-full.txt'), 'utf8');
   const robots = readFileSync(join(output, 'robots.txt'), 'utf8');
   assert.match(llms, /^# NanthAi:Forge\n\n> Forge/);
+  assert.match(llms, /Hosted peers and diff are unavailable/);
+  assert.match(llms, /saved-path windows exclude unsaved peer edits/);
   for (const section of [
     'Start here',
     'For agents',

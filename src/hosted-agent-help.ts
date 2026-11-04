@@ -46,6 +46,8 @@ export function hostedAgentHelp(action?: string) {
     'land --save waits; --no-wait returns after submission. Use --check-only to check without landing.',
     'land --save overlapAnswer:"accept-order" answers the pending notices for this landing and records them like ack, so peers see the answer.',
     'status accepts laneId; observe/landing select operationId (original landing UUID), submissionId or runId.',
+    'Hosted peers and diff are unavailable. Read start/save/status unacknowledgedOverlaps and behindMain; bounded saved-path advice excludes unsaved peer edits and never proves independence.',
+    'Use show {channel:"main",path} or show {laneId,path} for exact accepted or saved bytes, then compare local files. This supplies no pinned base-to-head diff. forge_peers and detailed review are native-only.',
     'Keep every original parameter, including message and pins, when replaying an operationId. Use the receipt replay command.',
     'wait {operationIds:[ORIGINAL_UUID]} watches a landing; wait {runId} watches a check. Transient observation failures retry until the deadline; exit 3 means still in progress and prints the exact wait command.',
     '',

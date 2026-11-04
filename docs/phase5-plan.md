@@ -22,7 +22,7 @@ Two supporting tracks run alongside: **landing without an operator** (Q) and, af
 
 These landed in Phase 4 (closed 2026-10-25). Phase 5 assumes them.
 
-- **Reads never write.** `nforge agent peers` previews and every other read return without writing owner or hosted state.
+- **Reads never write.** Native `nforge agent peers` previews and every other read return without writing owner or hosted state.
 - **Automatic Lane snapshots.** Lanes are snapshotted automatically, so a lost process or machine never loses unsaved work beyond the last snapshot.
 - **No-op landings finish themselves.** A landing whose head equals main finishes without a queue entry or an empty GitHub commit.
 - **Minimal child environments.** Background and detached children start from an explicit allow-list of environment variable names; credentials pass only to the child that uses them (review risk #14).
@@ -569,7 +569,7 @@ Each result is published next to the 2.36× burst-4 figure in [why-forge](why-fo
 ### B3.1. Overlap at first write, in the agent's loop
 
 - **Size:** M. **Depends on:** E1, M2. **Must land before the R3 benchmark.**
-- **Changes:** a pre-edit hook for Claude Code and Codex calls `nforge agent peers --path` (a read, which never writes) before the first edit of a path and blocks until the overlap is acknowledged or routed around. Every nforge CLI and MCP response also carries the caller's unacknowledged overlaps. Acknowledgements are records, so metric 4 gains its acknowledgement rate. Never a lock on source. The same hook records the agent session and turn behind each save, so a saved State, its automatic snapshots and later each hunk link back to the conversation that produced them; making-of, review and decision records (D1) show that link, and a snapshot can be restored to the turn it came from.
+- **Changes:** a pre-edit hook for Claude Code and Codex calls native `nforge agent peers --path` (a read, which never writes; unavailable on hosted checkouts) before the first edit of a path and blocks until the overlap is acknowledged or routed around. Every nforge CLI and MCP response also carries the caller's unacknowledged overlaps. Acknowledgements are records, so metric 4 gains its acknowledgement rate. Never a lock on source. The same hook records the agent session and turn behind each save, so a saved State, its automatic snapshots and later each hunk link back to the conversation that produced them; making-of, review and decision records (D1) show that link, and a snapshot can be restored to the turn it came from.
 - **Acceptance:** incident replay of the 2026-10-21 four Lanes editing the same docs: both agents see the alert before their first overlapping write, and each acknowledgement is recorded. The hook adds under 200 ms p95 to an edit and fails open with a recorded event if Forge is unreachable. A save made through the hook names its agent session and turn; transcript text stays with the agent unless the owner opts in. **Metrics:** moves 4. Must not regress 2.
 
 ### B3.2. Intent semantic conflict

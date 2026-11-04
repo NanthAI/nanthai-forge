@@ -60,8 +60,36 @@ test('hosted help and packaged docs are generated from every enforced schema', a
   );
   assert.equal(s.calls.length, before, 'help and docs make zero Convex calls');
   const text = hostedAgentHelp();
-  for (const unsupported of ['--resume-ready', 'waitMs', 'records:', 'candidates:', 'log:', 'diff:'])
+  for (const unsupported of [
+    '--resume-ready',
+    'waitMs',
+    'records:',
+    'candidates:',
+    'log:',
+    'diff:',
+    'peers:',
+    'brief:',
+    'review:',
+  ])
     assert(!text.includes(unsupported), unsupported);
+});
+
+test('hosted coordination entry points retain supported reads and their coverage limits', () => {
+  for (const path of ['AGENTS.md', 'skills/forge-agent/SKILL.md', 'docs/agents/workflow.md']) {
+    const text = readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
+    for (const field of ['unacknowledgedOverlaps', 'behindMain'])
+      assert(text.includes(field), `${path}: use the supported receipt fields`);
+    assert.match(text, /unsaved/i, `${path}: saved-path coverage limit`);
+    assert.match(text, /no hosted|unavailable|HOSTED_ACTION_UNSUPPORTED/, `${path}: hosted boundary`);
+    assert.doesNotMatch(text, /Receipts include advisory peers;[^\n]*`peers/);
+    assert.doesNotMatch(text, /Source reads: `diff` compares Lane base/);
+  }
+  const text = hostedAgentHelp();
+  assert.match(text, /Hosted peers and diff are unavailable/);
+  assert.match(text, /unacknowledgedOverlaps and behindMain/);
+  assert.match(text, /excludes unsaved peer edits/);
+  assert.match(text, /show \{channel:"main",path\}/);
+  assert.match(text, /no pinned base-to-head diff/);
 });
 
 test('unsupported actions give a supported alternative without upgrade advice or network IO', async t => {
@@ -72,6 +100,21 @@ test('unsupported actions give a supported alternative without upgrade advice or
     ['records', 'status'],
     ['candidates', 'status'],
     ['diff', 'local Lane'],
+    ...[
+      'peers',
+      'review',
+      'brief',
+      'link',
+      'handoff',
+      'handoff-read',
+      'report',
+      'provenance',
+      'making-of',
+      'pending-status',
+      'improve',
+      'integrate',
+      'undo-sync',
+    ].map(action => [action, '--help']),
   ]) {
     await assert.rejects(s.transport().dispatch(action, { secret: 'do-not-echo' }), error => {
       assert.equal(error.code, 'HOSTED_ACTION_UNSUPPORTED');

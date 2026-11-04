@@ -22,7 +22,8 @@ Merge the printed `mcpServers.forge` entry into your client's configuration. It 
 | --- | --- | --- |
 | `nforge mcp ROOT` | Eight read-only source tools (`forge_current`, `forge_context`, `forge_inspect`, `forge_references`, `forge_trace`, `forge_impact`, `forge_source`, `forge_reindex`) | Your OS account |
 | `nforge mcp ROOT --work` | Source tools plus `forge_work_status` and `forge_work_command` for the full Work contract | Your OS account, plus `gh` login for GitHub steps |
-| `nforge mcp ROOT --agent` | Source tools plus `forge_task`, `forge_check`, `forge_review`, `forge_work_overview`, `forge_brief` | Your OS account |
+| `nforge mcp ROOT --agent` (native owner) | Source tools plus `forge_task`, `forge_check`, `forge_review`, `forge_work_overview`, `forge_brief` | Your OS account |
+| `nforge mcp ROOT --agent` (hosted checkout) | Hosted task/check/overview, saved-source reads (`forge_review` supports `show` only) and explicit `forge_wait`; no `forge_brief` or `forge_peers` | Your signed-in account |
 | `--agent` after `nforge login` or with `FORGE_AUTH_TOKEN` set | Also `forge_exchange` and `forge_migrate_archive` | Your signed-in account |
 | `nforge mcp-coordination URL PROJECT_ID` | Coordination tools below | Your account token |
 | `nforge mcp-agent URL` | Only the read tools a source grant allows | `FORGE_AGENT_TOKEN` |
@@ -39,9 +40,11 @@ Credentials are stored per deployment in `$XDG_CONFIG_HOME/forge/auth.json` (def
 
 ## Copy prompts and briefings
 
-`nforge agent ROOT brief` and `forge_brief` return fresh copy prompts, Markdown
+For native owners, `nforge agent ROOT brief` and `forge_brief` return fresh copy prompts, Markdown
 and structured context for work, conflicts, checks, review and handoffs. Repository
 instructions take precedence over project/personal guidance and Forge steps.
+Hosted checkout commands omit `brief`; read the linked Issue with
+`planning {id,reconcile:false}`, Lane `status` and repo instructions instead.
 See [briefings](agents/briefings.md) for guidance, preparation and coverage.
 
 Local `start` records `startedBy {kind,name,tool?}`; `start`, `finish` and `accept`

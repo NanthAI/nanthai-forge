@@ -46,7 +46,7 @@ const agentRules = [
   'Hosted automatic-accept projects group landings by default and pipeline six exact-source groups (checks.concurrency overrides); acceptance.landing: serial opts out. No separate solo check is required before grouping; failed groups split to isolate failing changes.',
   'Run only the tests your change affects (`nforge agent ROOT tests`), plus typecheck, lint and format checks on touched files. Do not run the full suite locally.',
   'Let `finish` compose concurrent Lanes into one check on the project runner. A failing Lane is dropped from the batch and the others still land after passing. Do not rebase or babysit a merge queue.',
-  'Read peers and presence before editing; announce your paths and resolve overlap early. These observations are advisory and can be incomplete.',
+  'For hosted Lanes, read start/save/status unacknowledgedOverlaps and behindMain before editing; saved-path windows exclude unsaved peer edits and never prove independence. Hosted peers and diff are unavailable; show {channel:"main",path} or show {laneId,path} reads exact accepted or saved bytes for local comparison. Native owners can read peers and presence. Announce paths and resolve overlap early.',
   'Governance: contributors propose and cannot write source or Channels directly; the owner accepts. Protected paths and review-required policy stop at `awaiting-review` for a person.',
   // Default project rules (docs/parallel-work-defaults.md); a project's `policy` read shows its own.
   ...agentDefaultLines(AGENT_DEFAULTS),

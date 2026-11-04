@@ -2,7 +2,7 @@
 
 What we are doing, in what order, and why. Eight phases. Phases 1–5 are done (Phase 5 closed on 2026-11-04). Phase 6 makes Forge solid, Phase 7 is the public beta, Phase 8 is growth. Open work items live in Forge planning (see the [backlog](backlog.md) page); what works today is in [status](status.md). Keep this page current: update the status lines when a stage changes.
 
-Last updated: 2026-10-31.
+Last updated: 2026-11-04.
 
 ## Direction
 
@@ -80,7 +80,7 @@ Goal: Forge runs itself for the Forge team, with numbers to show it, before outs
 Where each item stands:
 
 1. **Stage 5.1: self-metrics and decision records — done.** Forge records its own numbers (landings by path, interventions, check minutes and reuse, bills) and owner decisions are records. Several metric rows are still partly unknown; the baseline table in the plan is the Phase 5 start, not today's values.
-2. **Bet 1: one authority — cutover applied on 2026-10-28; one step left.** Hosted main is the only accept path for the dogfood project. The Mac no longer accepts, runs checks or pushes; checks run on free GitHub-hosted runners. The push, source-return, relay, format-ladder, reconcile and legacy-accept code is deleted (B1.6–B1.8). Still to do: purging the retired tables (B1.9, gated on backups, dated about 2026-11-09). Owner decision 2026-10-31: the local owner HTTP server and the native-owner code are deleted with B1.9. A GitHub import is now fast enough (criterion 5 above).
+2. **Bet 1: one authority — cutover applied on 2026-10-28; one step left.** Hosted main is the only accept path for the dogfood project. The Mac no longer accepts, runs checks or pushes; checks run on free GitHub-hosted runners. The push, source-return, relay, format-ladder, reconcile and legacy-accept code is deleted (B1.6–B1.8). Still to do: purging the retired tables (B1.9, gated on backup fix 13402039 with failure notification proven and one manually verified backup; no two-weekly-backups wait). Owner decision 2026-10-31: the local owner HTTP server and the native-owner code are deleted with B1.9. A GitHub import is now fast enough (criterion 5 above).
 3. **R2 for bytes — done for new bytes.** Owner decision 2026-10-31: R2 is required everywhere. The per-project opt-in and the `FORGE_BLOBS` flag are gone, every deployment and project writes bytes to R2, and a guard in `npm run verify` fails any new Convex file-storage use ([data placement](data-placement.md)). Still to do: move and delete the legacy Convex copies (Issue 40dad5e0), each step with an owner decision.
 4. **Landing without an operator — done.** A server controller drives landings, entries finish themselves, a stall alarm exists, and check reuse is keyed on content. On 2026-10-31 two entries were found queued for about a day after their stall alarm fired. In the current code a queued entry that nothing live is driving is re-driven and, failing that, ended after 60 minutes as `terminal-failed` with a stated reason, and stall alerts by email or webhook are on by default. Whether an alert reaches a human depends on the recipients and webhook configured for the deployment; that is not recorded here (Issue 7e38bf5e).
 5. **Bet 2: contract checks — mostly done.** The contract gate has been on for the dogfood project since 2026-10-30; the continuous main audit, flake classification and culprit bisection are live; batch demotion (B2.5) has landed, but its acceptance (trusted landings pass without a batch) is not yet evidenced. Trust per path per actor (B2.6) has landed disabled and waits for the owner to approve defaults.
@@ -94,18 +94,20 @@ Where each item stands:
 
 ## Phase 6: make it solid (planned)
 
-Start with the [Phase 6 lead plan](phase6-plan.md) for the agreed order, pending inputs and planning handover.
+Start with the [Phase 6 lead plan](phase6-plan.md) for the agreed order, exit criteria and planning handover.
 
-Goal: every known friction and bug fixed, and the landing loop robust under contention, before anyone outside the team uses Forge. Re-cut by the owner on 2026-11-04 after the [B1.5d benchmark](research/b15d-report.md).
+Goal: fix known friction and bugs under the exit freeze rule below, and make the landing loop robust under contention before anyone outside the team uses Forge. Re-cut by the owner on 2026-11-04 after the [B1.5d benchmark](research/b15d-report.md).
 
-**Exit:** no open bug or core-claim Issue; every friction item fixed or dropped by the owner, none silently deferred; a repeat of the B1.5d benchmark shows the conflict-recovery loss fixed and no regression; idle Convex stays at 0 calls; Convex cost per landing meets the agreed target.
+**Exit:** bugs and friction filed before the exit-bench plan (8c9b84fc) is frozen are fixed or dropped by the owner, none silently deferred. After that freeze, only core-claim or severe bugs block exit. A repeat of the B1.5d benchmark shows the conflict-recovery loss fixed and no regression; idle Convex stays at 0 calls. Billed Convex dollars per accepted landing over at least 200 dogfood landings are about $0.002 or less, with a $0.001 stretch target (9db58ca6); attribution comes before optimization.
+
+Bench-harness fixes d8cf81b4, 02ee5788, 108a4883 and 97c7a123 land before the exit-bench plan (8c9b84fc) is frozen.
 
 - **6.1 Close the Phase 5 tail**: the B1.9 table purge (with the local owner HTTP server and native-owner code), the one-authority watch, the legacy Convex storage move and delete (Issue 40dad5e0), the stuck import cleanup, the R2 guard follow-up, idle polling, cache-path gaps and the benchmark harness findings (including the contamination rule that voided 34 tasks on false positives).
 - **6.2 The landing loop under contention.** B1.5d showed Forge 24-35% faster to `main` per task, but a few tasks in conflict or overtake loops set whole-batch wall time. The work:
   - conflict recovery agents cannot fumble: landing refuses while conflict markers remain, resolve works from the Lane root, and every conflict ends with one clear next step;
   - overtakes and CI bundling, a per-Lane local lock and faster Lane open (Forge prep is 15 s against 4.5 s for a local clone);
   - overlap notices that fire only for real collisions (13 of 45 blocking notices were useful, and 22 test-file conflicts had none), then earlier detection, with push delivery to agent sessions after that;
-  - no dead ends: every failed check names its cause and next step, a supervisor, and rollback notices;
+  - sync-apply recovery for ignored build outputs (1ad05526-bc33-4b17-a90d-7f31e94b7164), and no dead ends (d910db6b): every failed check names its cause and next step, a supervisor, and rollback notices;
   - flake containment, failed-test lists, train qualification, shortest-check-first and queue reordering (after measuring), a symbol-level selector and declaration merge.
 - **Landing safety beyond text conflicts.** A clean text merge can still break: today's real cases are a database test that failed after another change moved columns, two release changes that merged cleanly and then looped, and two readers that needed a hand merge. The landing queue already checks the exact composed result on current `main` and re-checks when `main` moves; these make the failures earlier, rarer and cheaper. Phase 5 Bets 2 and 3 cover contract checks, flake-aware culprit finding and overlap at first write; this list is the rest.
   - **Order-sensitive paths**: migrations, schema, lockfiles, generated files and configuration form classes. When an entry ahead touches the same class, the queue-ahead preview is actionable even without a text overlap.
@@ -119,8 +121,8 @@ Goal: every known friction and bug fixed, and the landing loop robust under cont
   - **Breakage after landing**: a failing `main` audit finds the culprit, reverts it while keeping its Lane, and tells queued entries.
   - **Long-lived drift**: a Lane far behind `main` on paths others keep changing gets a nudge naming those landings.
   - **Queue order**: priority and reordering, with fairness between agents.
-- **6.3 Every friction and bug.** All open friction rows and bugs, ordered in one owner triage at the start of the phase, then fixed by builders in parallel batches, or dropped by the owner.
-- **6.4 Cost and agent surface.** Convex cost per landing about 10x lower (about $0.01 today), in-Convex first; any hosted worker or vendor comes with a monthly cost estimate and owner approval first. The agent context budget, CLI verbs V2b and V3 (alias removal, CLI generated from the MCP surface), Lane undo, and enforced trust per path per actor.
+- **6.3 Every friction and bug.** Cluster triage sets the work, then builders fix it in parallel batches or the owner drops it, under the exit freeze rule above. It replaces the pending owner friction-triage session. Issues are measured or tested now, or dropped; none wait for an arbitrary count. 82e8ddb8 is reshaped on that basis.
+- **6.4 Cost and agent surface.** Attribute billed Convex cost before optimizing toward the agreed exit target above, in-Convex first; any hosted worker or vendor comes with a monthly cost estimate and owner approval first. The agent context budget, CLI verbs V2b and V3 (alias removal, CLI generated from the MCP surface), Lane undo (e7812d8f), and enforced trust per path per actor. Lane undo and clone refresh (73ed4d28) stay in Phase 6 as core source-host behaviour.
 - **6.5 Engineering health**: a codebase health pass, mechanical guards for repeat bug classes, a TLA+ model of the landing queue and a real-user scenario matrix.
 - **In parallel, no product changes**: art direction, the design system and mockups for the Phase 7 design pass.
 

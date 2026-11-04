@@ -90,7 +90,32 @@ Include `overlapAnswer:"accept-order"` in `land --save` to answer the pending no
 | `show` | `laneId?`, `expected?`, `channel?`, `path`, `force?` |
 <!-- hosted-agent-contract:end -->
 
-The remaining sections document the native owner surface unless explicitly marked hosted. Native-only reads and modes do not apply to hosted checkouts; consult the generated contract above.
+### Hosted reads and coordination limits
+
+nforge 0.3.1 returns `HOSTED_ACTION_UNSUPPORTED` for hosted `peers` and `diff`.
+Hosted MCP has no `forge_peers`; `forge_review` supports `show` only. Implementation
+belongs to 5283a92f-f5c7-4f83-b050-40ad4f649c72. Supported alternatives:
+
+- Start/save/status return `unacknowledgedOverlaps` and `behindMain`: bounded
+  saved-path advice, excluding unsaved peer edits and full contract analysis.
+  Five notices and ten main paths are shown; coverage/`more` name omissions.
+  Missing notices never prove independence. See [hosted advice](#hosted-overlap-advice).
+- `show {"channel":"main","path":"FILE"}` reads exact accepted bytes;
+  `show {"laneId":"LANE_ID","path":"FILE"}` reads exact saved Lane bytes.
+  `expected` pins bind Lane reads; main reads select current main. Compare locally.
+  Unsaved edits are excluded; no changed-path summary or pinned diff is supplied,
+  and current main is not the Lane base.
+- `review`, `candidate`/`candidates` (`view`/`views`), `provenance`, `records`,
+  `brief`, `link`, `log`, `handoff`/`handoff-read`, `report`, `making-of`,
+  `pending-status` and `improve` are native-only. Hosted alternatives are Lane
+  `status`, `planning {reconcile:false}`, `observe {runId}` with its provider link,
+  and `comment-planning-item` for delivery evidence. They do not reproduce native
+  review/provenance/portable-handoff coverage.
+- `save --preview`, `save --handoff`, `save --report`, `land --resume-ready` and
+  `x undo-sync` are native-only. Follow the hosted receipt's recovery command.
+
+Remaining examples are native-owner commands unless explicitly marked hosted;
+check the generated contract above before using them in a hosted checkout.
 
 ## Verbs
 
@@ -137,6 +162,11 @@ nforge agent ROOT comment-planning-item '{"itemId":"ITEM_ID","text":"Decision: u
 nforge agent ROOT start '{"planningItemId":"ISSUE_ID"}'                  # Lane on the Issue; Issue becomes in-progress
 ```
 
+Before filing an Issue or friction, search for an existing planning item and
+comment on it instead of creating a duplicate. Until search (18e28b75) ships,
+page `planning {"reconcile":false,"limit":100}` through `nextCursor` and filter
+titles; an empty filtered page is not the end of the backlog.
+
 `put-planning-item` and `comment-planning-item` take the schemas of `src/work-planning-types.ts` and the usual hosted `operationId` replay rules (identical parameters replay; a new `operationId` or changed parameters start new work). A put replaces the whole item at `expectedVersion` (0 creates; omit `itemId` to create one); a stale version fails with `PLANNING_CHANGED`. Writes need the project owner. `planning` reads indexed pages of the current Work records: `limit` is the page size, filters apply within a page, and an empty page continues up to five pages per call. Idle projects make no calls.
 
 `start {planningItemId}` starts an Intent with the Issue's id, title and body and moves the Issue to `in-progress`; another start on an in-progress Issue adds a Lane. When the Intent completes or is abandoned, the next `planning` read closes (or abandons) the Issue, naming what it changed and how to undo it; pass `reconcile:false` to read without changing anything. Older deployments return `HOSTED_ACTION_UNSUPPORTED` with an upgrade message. MCP: `forge_planning`.
@@ -147,7 +177,7 @@ The planned hosted Intent uses the Issue UUID as its identity; an empty legacy `
 
 - Run only the tests your change affects, plus typecheck, lint and format checks on touched files. Never run the full suite locally: `land --save` runs the project's check on the project's runner for the combined work of concurrent Lanes.
 - Use `land --save --check-only` to check your saved work, then `land` to combine ready Lanes. Batching requires a passed full solo gate for the exact saved head or the same Q3 reuse key on the same base main. An unchecked entry runs alone first; a solo failure returns directly to its author with failing test files, without batch prefix diagnosis. Configured native runners batch code changes; other paths retain ordinary checks and project acceptance policy.
-- Read peers and presence before editing to see who is working on which files. Announce your paths, hand off related work and resolve overlap before it becomes a conflict. Missing observations do not prove independence.
+- Read hosted start/save/status overlap advice before editing; native owners can read peers and presence to see who is working on which files. Announce your paths, hand off related work and resolve overlap before it becomes a conflict. Missing observations do not prove independence.
 - Hosted concurrent finishes: eligible owner agents in automatic-accept projects defer their check reservation until queue selection, then group by default (`acceptance.landing: "serial"` opts out). Existing automatic-accept projects need no policy edit: queued finishes share one dependency-first stacked Candidate and one full check. `acceptance.batchMaxSize` fixes the cohort size; absent, it follows the recent shared-check failure rate, at most eight. With `acceptance.admissionCheck: true` (GitHub Actions runners), each arrival first runs its own affected set; a failing test ends that finish alone and only admitted finishes join a cohort. The Channel pipelines up to six groups by default (`checks.concurrency` overrides, 1–16). Once a group has fixed its checked head and final receipt, the next eligible group composes and checks on top of that exact predicted main while the first check runs. Passing successors wait for publication order and keep their checks when the predecessor lands unchanged. Failure, cancellation or a changed predecessor generation discards dependent stacks and requeues their original selections; unrelated checks remain intact. The width bounds runner work, never the number of finishes users may submit. A retained entry or cohort with no member checking holds them for at most 5 minutes after its newest compose started; then the queue drops it and moves on, so a dead compose never stops other landings. Ordinary non-batchable work, including owner review and full-gated recovery, retains its existing queue path while the cohort waits. Existing priority can replace an unstarted cohort; reserved checks continue. Non-batchable work retains the same priority and fairness ordering. Stored metadata pages are reused across recipes and R2; new bytes go only to R2. Supervised, contributor, explicit dependency and review-required selections retain individual acceptance. A conflicting member gets its own retained conflict Candidate while the others continue. A passing batch publishes exactly its checked head with one main move and an ordered receipt per member pointing at the shared run. Each member keeps its own Lane completion inputs. Reverting any batch receipt reverses the shared main transition, including every batch member; the original Lanes and source remain available. If only main changes, the intact cohort recomposes together on current main and requests one new exact shared check; its previous pass never authorizes different bytes. A stale composition detected before check reservation also recomposes without starting a check. If the shared check fails a test, or the cohort cannot compose, it splits into groups that check at once: members the failing files name check alone and the rest recheck together (two halves when nothing is named); a single lands on its admission run when that is still exact, and several singles share one serial line, likely members last. A shared check that ends without a failing test (runner unavailable, Actions error, cancelled, timeout) checks the same cohort again, at most twice, then ends its members with `CHECK_NOT_PASSED` without marking them solo, so a resubmit can batch again. If governance or membership changes before publication, members return to serial exact single-Candidate checks. Before a split or fallback, retained per-file failures and member changed paths or declared contracts name likely members; suspects run after clean members and every status names its current wait. All overlapping batch contract pairs are considered, including pairs without the leader. Both members retain likely "fails together with" evidence, including when one passes alone; shared-batch evidence does not isolate a pair. Over-budget pairs and missing contract coverage are explicit. No additional diagnostic checks run. Batch fallback or settlement releases every unlanded member as solo in the same transaction and clears its live batch ID. The retained batch origin preserves serial order without depending on the leader: any member completion can select the next member. Cancelling a leader or member releases its peers atomically. Abandoning a selected Lane or Intent finds affected batch proposals through bounded indexed continuations, cancels those proposals and releases their peers; shared source and check execution is retained. A queued stall alarm repairs retained stale batch membership and reselects work automatically, without a resume command. Check/source completion events drive progress; an idle queue schedules nothing.
 - Governance: contributors propose and cannot write source or Channels directly; the owner accepts. Protected paths and review-required policy stop at `awaiting-review` for a person; never change policy to bypass review. `policy` and `set-policy` (`nforge x ROOT set-policy`) work on hosted projects, one Convex call each; the server enforces owner authority on `set-policy`. See [security](../security.md).
 - Parallel-work defaults: hosted `land --save` can refuse with `PREFLIGHT_REQUIRED` until `preflight '{"laneId":"…"}'` has passed the saved source tree's affected tests here (a save with identical paths, modes and blobs preserves the pass), and with `OVERLAP_UNANSWERED` until `ack '{"laneId":"…"}'` answers open blocking overlap notices. Advisory notices remain visible without requiring an answer. Both follow the project's `agentDefaults` (`preflight`, `overlapGate`); see [parallel-work defaults](../parallel-work-defaults.md).
@@ -155,7 +185,20 @@ The planned hosted Intent uses the Issue UUID as its identity; an empty legacy `
 
 For a known-file question, search and read the selected directory normally. Do not create Work or index simply to read source. For symbol/dependency investigation, `nforge mcp ROOT --agent` supplies the eight existing source tools and four concise workflow tools. It awaits the existing index worker when a source query needs missing/stale analysis. CLI graph queries still use explicit `nforge index ROOT`. Partial analysis never establishes complete independence.
 
-For a change, run `nforge agent ROOT start '{"outcome":"Describe the change"}'`. The receipt gives the Lane `laneId` and `path`; edit only that path. Start uses accepted main when present; `channel:null` uses workspace source. Start and checkpoint return their source/Work receipt as soon as the Lane activation or save is durable. Their responses include queued hosted activity, start warnings, friction and peers from existing indexes and planned claims, plus pending overlap delivery, without taking the owner writer lock. Peer coverage is `local-incomplete` because live source is not rescanned. CLI and MCP schedule a finite detached refresh of source indexes, overlap analysis and enabled integration previews; failure or delay of that refresh cannot hold or invalidate the receipt. Embedders may skip that refresh. Existing `peers`, `status` and `link` reads provide current optional observations. Original-operation replay retains saved source and the returned local observations without recapturing newer edits; new start receipts retain their original source metadata in portable Work, with local paths derived on read. Stacked start replay preserves its original head and base, while `currentHead` names the Lane’s latest saved head.
+For a change, run `nforge agent ROOT start '{"outcome":"Describe the change"}'`
+and edit only its returned Lane path. Hosted start returns authoritative Lane
+pins; `path` selects checkout placement. Native start uses accepted main when
+present (`channel:null` uses workspace source).
+
+Native start/save return durable source/Work receipts before optional advisory
+refresh. Existing indexes and claims supply peers with `local-incomplete`
+coverage. Detached source/overlap/preview refresh cannot hold or invalidate the
+receipt; embedders may skip it. Native `peers`, `status` and `link` supply optional
+observations; hosted Lanes use [start/save/status advice](#hosted-reads-and-coordination-limits).
+Replay retains original source and observations, never newer unsaved edits.
+Portable native Work retains original start metadata, deriving local paths on
+read. Stacked replay preserves its original head/base; `currentHead` names the
+Lane's latest saved head.
 
 Then run `nforge agent ROOT land --save '{"laneId":"LANE_ID","message":"Describe the change"}'`. `land --save` saves, updates from main when policy permits, composes a Candidate, runs the `verify` check (or the only check) and requests acceptance under the project policy. New supervised projects return `awaiting-review`, `terminal:false`, `complete:false`, `readyToReview:true` and “Waiting for review by a person; not in main yet”. The Intent is ready; the Candidate and passing run remain available for a person to accept. Read `policy` and the policy section of `brief` before delivery. Use `land --save --check-only` for check-only work. With no new edits (for example right after `save --sync`) it reuses the Lane head. From inside a Lane directory the CLI fills `laneId`.
 
@@ -314,6 +357,8 @@ Configured native runners can check queued code candidates as ordered prefixes; 
 
 ### Contract changes
 
+This contract analysis applies to native owners, not hosted overlap receipts.
+
 Sync, finish and Lane status receipts carry a compact `peers` block (see `forge_peers`). Forge compares exported functions, types, interfaces, classes, values and schema/validators (TS/JS; Convex tables and endpoint `args`/`returns`) syntactically, without running code or a type checker, and also whole files named under `interfaces` in an optional committed `.forge/contracts.json` (`{"interfaces":["api/**"]}`; `numbers` and `generated` are not interpreted). A delta is `{file,export,kind:"added"|"removed"|"changed"}`; bodies, comments and formatting are not contracts.
 
 - A Lane that changes a contract sees `dependents`: open Lanes whose edited or claimed code imports it (named, namespace, dynamic or one barrel hop). Unsaved edits count. `peers` with `detail:true` adds `changes`.
@@ -324,6 +369,9 @@ Sync, finish and Lane status receipts carry a compact `peers` block (see `forge_
 Autonomy still applies on every attempt. `laneUpdates:"ask"` stops at `sync-required`. A supervised/protected-path finish stops at `awaiting-review` with its checked Candidate. A person accepting a Candidate whose Channel has moved receives **“main moved; re-check needed”** (using the selected Channel's name): sync, check a new Candidate, then review and accept it. Forge does not transfer that person's approval to a newly composed or rechecked Candidate. A queued finish that now requires review reports the same requirement without automatically retrying into acceptance.
 
 ### Local peers and conflict notices
+
+Hosted Lanes use [start/save/status overlap advice](#hosted-overlap-advice);
+`peers` and `forge_peers` below apply only to native owners.
 
 Conflict notices carry optional typed `evidence`: native `text` source conflicts,
 `contract` diagnostics, `combined-static` preview failures with their observed
@@ -352,76 +400,92 @@ an explicit sync decision. Ordinary undo refuses newer dirty work. An explicitly
 forced undo retains those bytes before restoring the working copy. Original
 base/left/right objects and old check evidence remain available as history.
 
-Start, checkpoint, sync, finish and Lane-specific status include an advisory local `peers` digest. Start and checkpoint use existing peer indexes and planned claims, reporting incomplete coverage rather than waiting for a source refresh. `scope.paths` declares relevance for the call; start also retains planned path claims until the Lane closes. Use `peers {"laneId":"…","detail":true}` or `forge_peers` for detailed observations. A clean checkpoint returns its unchanged retained head, including after an up-to-date sync. Save edits before sync; the sync receipt itself identifies the resulting saved head.
+Native start/save/sync/finish/status receipts include an advisory `peers` digest.
+`scope.paths` adds call relevance; start retains planned claims until closure.
+Receipts use existing indexes, so skipped source/dependency work reports
+`coverage:"local-incomplete"` and `more`. For complete selected observations use
+native `peers {"laneId":"…","detail":true}` or `forge_peers`. Save before sync;
+a clean save retains its head, and sync identifies its resulting saved head.
 
-`peers.predictive` compares this Lane's live changed regions against peer checkpoints. Explicit `peers` reads compare every open peer's latest saved checkpoint. Each entry names the peer Lane, checkpoint head, Intent outcome, file, base ranges and suggested first Lane (`first`, with `orderReason`: ready, smaller change, then earlier start). Ranges are one-based `{start,lines}`; zero lines denotes an insertion before `start`. Overlapping ranges, ranges within three lines, shared changed exported contracts and structural path changes are high risk. Exact renames appear as deletion at the old path and addition at the destination. Same-file disjoint changes are low risk and appear only with `detail:true`. Changed base blobs are aligned before comparison; `alignedPeer` gives peer ranges in this Lane's base coordinates. Unsupported text or expensive alignment is explicitly unknown and makes coverage incomplete. Contract scanning retains its syntactic limitations described above; implementation-only shared exports may be missed.
+`peers.predictive` compares live changed regions with peer saves; explicit reads
+compare every open peer's latest saved regions. Entries pin the peer head,
+Intent, file and one-based `{start,lines}` base ranges (zero lines is an insertion
+before `start`). Risk is high for overlapping/nearby ranges (within three lines),
+shared changed exports and structural path changes; exact renames are delete/add.
+Disjoint same-file regions require `detail:true`. `alignedPeer` maps differing
+bases into this Lane's coordinates. Unsupported text, costly alignment and the
+syntactic contract scanner's blind spots remain unknown. Suggested order is
+ready, smaller change, then earlier start: land that Lane, then sync the other.
+This is advice, never a source lock or landing gate.
 
-Checkpoint refresh workers and sync prime disposable summaries keyed by exact base/head; reads reuse them and rebuild missing entries once. Lifecycle receipts rank all open Lanes by shared saved/claimed paths, then latest save time and Lane ID. The path index reuses changed-path summaries or saved manifests without extra live-tree hashing. Every path candidate receives saved-region analysis and bilateral journal alerts; unrelated Lanes cannot displace overlapping Lanes. Full live contract-dependent analysis remains bounded to three peer Lanes; deferred advice uses `coverage:"local-incomplete"`, `more` and a pointer to `peers {laneId,detail:true}`. Each receipt advice pass reads at most sixteen additional source States for ancestry; deeper history is reported as incomplete and stays available through explicit `peers` reads. Live path claims still cover all open peers, and up to three overlapping peers still receive conflict previews with ordering advice. Detailed `peers` reads compare every peer's saved regions. Peer predictions use saved bytes even if that peer has newer unsaved edits; existing path/conflict observations still include live files. CLI prints at most three compact high-overlap lines on stderr and keeps stdout JSON; when bases differ it shows the aligned peer ranges. Omitted entries are counted by the existing compact digest's `more`, with full observations available through `detail:true`. The suggested order is advice: land the suggested Lane first, then sync the other after it lands. Predictions never block or change landing and add no polling; hosted Lanes receive server-computed overlaps and behind-main paths at save, start and status.
+Saved summaries are keyed by base/head and refreshed off the mutation path.
+Receipts rank shared saved/claimed paths, recency and Lane ID; unrelated Lanes
+cannot displace overlaps. Live contract analysis and pre-compose previews cover
+up to three peers, with at most sixteen extra ancestry States per receipt.
+Compact JSON shows ten overlapping Lanes within 12,000 bytes; stderr shows three
+high-overlap lines. `more` counts omitted Lanes, not extra regions for one pair.
+Native detailed reads rebuild missing/corrupt summaries and finish selected reads,
+returning hunks/object pins, Intent, save message, actor/workspace and known
+sessions (empty means unknown). Predictions use saved peer bytes even when newer
+unsaved edits exist; separate native path observations may include live files.
 
-Lifecycle observations pre-compose main and up to three overlapping open Lanes. Notices include a proposed order and `granularity` (`file` today). Detailed reads return exact hunks/object pins, Intent, checkpoint message, actor/workspace and known owner sessions. Empty sessions mean unknown. Compact receipts list up to ten overlapping Lanes with paths, actors and Intent outcomes, within a 12,000-byte JSON budget, and point to detailed reads for additional context. Compact inbox and prediction examples cover distinct Lane pairs; additional regions for the same pair stay in detailed reads rather than inflating the omitted-Lane count. Existing journal alerts remain available to both participants through peers and Lane status, even if fresh source analysis is unavailable. A detached refresh does not mark an alert as delivered; only notices returned in a mutating receipt count as delivered. Known landed conflicts name the accepted Lane and Intent; unrelated later acceptances do not change that attribution. Explicit `peers` observations finish their selected reads regardless of elapsed time, rebuilding missing or corrupt disposable indexes in the same call. Lifecycle receipts bound expensive peer analysis before computing it; deferred work is not evidence of independence. Unavailable source, unsupported analysis and skipped composition or dependency work still report incomplete coverage; missing overlaps never establish independence.
-
-`peer-ack {"operationId":"UUID","laneId":"…","noticeId":"…","choice":"accept-order|swap|split","text":"optional explanation"}` records overlap acknowledgements as indexed decision notes in portable Work. Older pre-compose conflict answers retain their local journal format. Reuse the operation ID and inputs after an unknown reply. `accept-order` keeps the order, `swap` proposes this Lane first, and `split` proposes splitting source. Both participants see answers in subsequent observations. Current source is re-composed; resolved or changed notices clear. The receiving agent resolves source using its own model; no resolver model is invoked. Hosted relay remains future work.
+Bilateral journal alerts survive unavailable fresh analysis. Only mutating
+receipts mark returned notices delivered; detached refreshes do not. Known landed
+conflicts retain their accepted Lane/Intent attribution across later acceptances.
+Source failures and omitted evidence never establish independence. Native
+`peer-ack {operationId,laneId,noticeId,choice,text?}` records `accept-order`, `swap`
+or `split` as advisory decision notes; both participants see them. Replay the
+same ID/inputs after an unknown reply. Recomposition clears changed/resolved
+notices; the receiving agent resolves source without an invoked resolver model.
+Hosted overlap records and answers use the separate [hosted advice](#hosted-overlap-advice).
 
 
 ## Overlap before the first write
 
-Install the local edit hooks for one Lane explicitly:
+These local hooks and peer reads are not hosted checkout commands. Hosted
+builders use [start/save/status advice](#hosted-overlap-advice) with incomplete
+saved-path coverage; no equivalent hosted first-write inspection is available.
+
+Install or remove hooks explicitly on a native owner (never during start/save/MCP):
 
 ```sh
 nforge x ROOT install-hooks '{"laneId":"LANE_ID"}'
 nforge x ROOT uninstall-hooks '{"laneId":"LANE_ID"}'
 ```
 
-The installer adds its own command to Claude Code's `~/.claude/settings.json` and
-Codex's `~/.codex/hooks.json`; repeated installation is idempotent and uninstall
-removes only that command. Existing hooks and other settings are preserved.
-The client may require its normal trust review before enabling a new hook.
-Forge never installs these during start, save, or MCP startup.
+Installation preserves other settings, idempotently adds its command to Claude
+Code's settings and Codex's hooks configuration, and uninstall removes only it.
+The client may require its normal trust review. `PreToolUse` covers Claude
+`Edit`, `Write`, `MultiEdit`, `NotebookEdit` and Codex `apply_patch` (including move
+destinations). Shell writes and other tools are outside coverage. Clients without
+hooks can call native `forge_task {action:"pre-edit",laneId,paths,conversation}`.
 
-The `PreToolUse` matcher covers Claude `Edit`, `Write`, `MultiEdit`, and
-`NotebookEdit`, and Codex `apply_patch` (including move destinations). The hook
-uses the same local read as `nforge agent ROOT peers --path src/file.ts` from a
-Lane directory, or `peers {"laneId":"…","path":"src/file.ts"}` through CLI/MCP.
-That read does not write Work, presence, receipts, or source. It reads Lane header
-pages, saved path summaries, and current hook path claims. Missing summaries are
-incomplete coverage, never proof that paths are independent. No Views, complete
-Work archive, source trees, hosted functions, or transcripts are loaded.
+Before each path's first edit per Lane/session, the hook records a local claim
+and reads native `peers {laneId,path}`. It reads Lane headers, saved path summaries
+and hook claims, never complete Work, source trees, Views, hosted functions or
+transcripts. Missing summaries mean incomplete coverage. Overlap returns a
+model-visible `deny` naming the peer/path/notice and `peer-ack` command. Record
+`accept-order`, `swap` or `split` to retry, or edit another path. Only the agent
+call pauses: source stays writable, with no source lock or landing gate. Later
+edits of a checked path use a local cache.
 
-Before the first edit of each path in a Lane/session, the hook records a local
-path claim and calls that read. An overlapping edit returns a model-visible
-`deny` with the peer Lane, path, notice ID, and `peer-ack` command. Answer each
-notice using `accept-order` (acknowledge), `swap` (acknowledge and propose the
-other order), or `split` (record a route around). Acknowledgement permits the
-retry; editing another path also proceeds. This pauses only the agent tool call:
-source remains writable and no source lock or landing gate is introduced.
-Subsequent edits of a checked path use a local cache lookup. Shell-script writes
-and tools outside the matcher are not intercepted; Codex clients without hook
-support can call `forge_task` with `action:"pre-edit"`, `laneId`, `paths`, and
-`conversation:{agent:"codex",sessionId:"…",turnId:"…"}` before writing.
+Local CLI/MCP results also carry `unacknowledgedOverlaps:{count,items}` (five
+items plus full count), including errors. Caller selection uses `laneId`, cwd,
+`FORGE_LANE_ID` or the connection's last Lane. Array results put overlap JSON on
+stderr/a second MCP block; exact-byte `show` keeps stdout unchanged. Reads write
+no Work, presence, receipts or source. Delivery never acknowledges. Unavailable
+inbox reads report unknown coverage. The hook fails open after one second;
+failures go to stderr and `.forge/work/edit-hook/fail-open.jsonl` (stderr survives
+an unreachable owner).
 
-Known callers receive `unacknowledgedOverlaps:{count,items}` in local CLI/MCP
-responses, including reads: at most five items plus the full count. Delivery
-never acknowledges an item. The caller is selected by `laneId`, the Lane working
-directory, `FORGE_LANE_ID`, or the last selected Lane on a workflow connection.
-Error responses carry the same caller context. Array responses preserve their
-existing value and add overlap JSON on CLI stderr or in a second MCP text block.
-Exact-byte `show` keeps source on stdout and reports overlap JSON on stderr. Unavailable inbox reads explicitly report unknown coverage. The hook
-supervisor kills a slow peer read after one second and fails open. Failure events
-are appended to `.forge/work/edit-hook/fail-open.jsonl` and emitted on stderr;
-when the owner is unreachable, stderr is the surviving record.
-
-The hook stores agent/session/turn references, never prompt or transcript text.
-Codex supplies `turn_id`; Claude's `UserPromptSubmit` hook creates an opaque local
-turn ID reused by that prompt's edit calls. A session first attached mid-turn uses
-its tool-call ID as the initial reference. An optional `conversation.link` supplied
-through MCP/save points to the agent's conversation. Saved States, checkpoint
-receipts, automatic snapshots, making-of saves, and review pins expose this
-reference. `decide` accepts the same optional `conversation` reference for D1
-records; overlap answer notes inherit the current edit reference. Snapshot restore
-retains the source State's producing reference. No transcript upload is added.
-Metric 4 reports first-write alert and acknowledgement counts/rate, and joins
-pre-write delivery to the subsequent save through its parent head. Metric 2's
-command/error accounting and landing behavior are unchanged.
+Only agent/session/turn references are retained. Codex supplies `turn_id`;
+Claude's `UserPromptSubmit` creates the prompt's opaque turn ID, with a tool-call
+reference for mid-turn attachment. Optional `conversation.link` points to the
+conversation without uploading transcripts. MCP/save, States, saves, snapshots,
+making-of and review pins carry these references; restores retain the producing
+reference. D1 `decide` and overlap answers accept/inherit the same context.
+Metric 4 joins first-write alerts/answers to saves through parent heads; metric 2
+command/error and landing accounting stay unchanged.
 
 Client contracts: [Claude hooks](https://code.claude.com/docs/en/hooks) and
 [Codex hooks](https://learn.chatgpt.com/docs/hooks).
@@ -430,25 +494,21 @@ Checkpoint, compose, run and accept also exist as separate actions. Checkpoint t
 
 Validation errors identify invalid field paths; use full source digests rather than abbreviated heads. Review only the needed detail. Lane parameters are `{"kind":"lane","id":"LANE_ID","expectedHead":"HEAD","paths":["src/file.ts"]}`. Candidate parameters also include `expectedBase` and `expectedStatus`. Omit paths for changed-path summaries. Review bodies default to `maxBytes:12000` (1024–48000); `context` accepts 0–10 lines and `limit` accepts 1–100 files. Continue with returned `nextOffset` and `reviewTree`; a changed live selection is detectable with `expectedReviewTree`. Git live review and staged checkpoint selection have separate pins. Legacy full review remains available.
 
-`nforge agent ROOT diff '{"laneId":"LANE_ID"}'` reuses compact review to compare
-Lane base to live source. For immutable snapshots, use
-`diff '{"from":"BASE_STATE","to":"HEAD_STATE"}'` with full source digests.
-Omit `paths` for a changed-path summary, or set `paths:["src/file.ts"]` to filter
-exact relative paths and include contextual hunks. Budgets, `offset`, `limit`,
-`context`, `nextOffset` and `expectedReviewTree` work as in `review`.
-Lane diffs return `base` and `head`; send `expectedHead` to detect a moved saved
-head, and `expectedReviewTree` to detect changes during live pagination.
-State comparisons return their exact `base` and `head` without reading live files.
+Native-only `diff {laneId}` compares base to live source; `diff {from,to}`
+compares full immutable State digests. `paths` filters exact relative paths for
+contextual hunks; omit it for summaries. Review budgets, `offset`, `limit`,
+`context` and `nextOffset` apply. Results pin `base`/`head`; `expectedHead` detects
+saved-head movement and `expectedReviewTree` detects live pagination changes.
+State comparisons read no live files.
 
-`nforge agent ROOT show '{"state":"STATE","path":"src/file.ts"}'` writes the
-file's exact bytes to stdout, without JSON wrapping or a trailing newline.
-Use `laneId` instead of `state` to resolve the Lane's saved head; unsaved edits
-are excluded. `state` must be a full digest. Symlinks return the retained link
-bytes, never their target. Missing files fail explicitly. Binary/invalid UTF-8
-files and files over 1 MiB fail unless `force:true` is supplied. Nothing is clipped.
-MCP `forge_review` supports both actions; `show` returns `{revision,result}` with
-`state`, optional `laneId`, `path`, `blob`, `mode`, `size`, `encoding` and `content`.
-Text uses `encoding:"utf8"`; binary bytes use `encoding:"base64"` for lossless transport.
+Hosted `show` uses `channel` or `laneId`, as described [above](#hosted-reads-and-coordination-limits).
+Native `show {state,path}` uses a full State digest, or `laneId` for its saved
+head; unsaved edits are excluded. CLI writes exact bytes without JSON/newline.
+Symlinks return retained link bytes, never targets; missing files fail. Binary,
+invalid UTF-8 and over-1-MiB files require `force:true`; nothing is clipped.
+Native MCP `forge_review` supports both actions; `show` returns `{revision,result}`
+with `state`, optional `laneId`, `path`, `blob`, `mode`, `size`, `encoding`, `content`.
+Encoding is `utf8` or lossless `base64`.
 
 Local source exclusions use nested `.gitignore` and `.forgeignore` files; Forge rules follow Git rules in each directory. `nforge status ROOT --ignored`, or `pending-status` with `ignored:true`, reports local excluded paths and matching rules without their contents or remote calls. Ignored working files are not stored, backed up or shared; historical States remain intact. See [source exclusions](../operations.md#source-exclusions).
 
@@ -498,7 +558,7 @@ so a dead job is not reported as merely submitted after sixty seconds.
 
 For native MCP source queries after start, pass the returned `laneId` on every selected call. Omission uses startup source. `nforge mcp-config ROOT --agent` emits an optional configuration fragment without editing client settings. Autonomy and reversible-action records use Work format 11; keep a capable reader for recovery. Local tools operate under your OS account, without a sandbox claim. See [milestone qualification](../status.md) for actual measurements, package/source pins and remaining acceptance.
 
-When given a Forge prompt, run `nforge agent ROOT brief` (or `forge_brief`) for the linked situation and fresh context before working.
+On native owners, a Forge prompt can use `nforge agent ROOT brief` (or `forge_brief`) for fresh context. On hosted checkouts, read the linked Issue with `planning {id,reconcile:false}`, Lane `status` and the repo instructions; `brief` is unavailable.
 
 ## Reproduce a small installed delivery
 
@@ -645,6 +705,10 @@ records remain readable for recovery and are never replayed by a background work
 `report` records advisory, self-declared harness, model and cumulative token totals for one Lane session: `{"laneId":"…","harness":"claude-code","model":"…","tokens":{"input":1200,"output":340}}`, with optional `actor` and `sessionId`. Token keys are `input`, `output`, `cacheRead`, `cacheWrite` and `total`; only keys you send are summed. A later report for the same Lane, actor and session replaces earlier totals. Replaying any applied `operationId` returns the current report unchanged. Reports live in the owner's local transport state beside presence, not in Work or the hosted project. Forge does not verify them.
 
 ## Links in agent reports
+
+Hosted `link` is unavailable in nforge 0.3.1. Retain receipt/head/operation IDs
+and any URLs already returned by the hosted receipt; do not claim generated
+save-pinned links when none were returned.
 
 When you cite files, saves, Candidates or Lanes, give Forge URLs (from `link`), not local paths.
 
@@ -1126,6 +1190,10 @@ the next durable change or explicit lifecycle wake.
 
 ## Handoffs
 
+Hosted `handoff` and `handoff-read` are unavailable. Use
+`comment-planning-item {itemId,text}` for delivery evidence on the existing Issue;
+it is a planning comment, not the portable native handoff described below.
+
 Record an optional delivery handoff before stopping so the lead or next agent can
 read what changed, the verification performed, unrun work and next steps:
 
@@ -1217,6 +1285,9 @@ The same projection decorates lifecycle peers, MCP peers and status peers withou
 joining the owner writer queue. A later save never borrows a prior head's green run.
 
 ## Overlap alerts and landing order
+
+This section describes native owners; hosted advice has the bounded coverage
+described [below](#hosted-overlap-advice).
 
 Checkpoint preparation indexes exact saved regions outside the owner writer lock.
 Start/checkpoint receipts compare existing saved summaries and committed contract

@@ -198,7 +198,7 @@ Forge uses your CI provider’s log storage and retention. Status, exit code, ti
 provider run/execution IDs, bounded failure summaries (4096 characters), failing
 names, compact per-file test counts/timings and evidence hashes, and reuse evidence remain in Forge. Full per-run CI test reports (`test-reports.json`) are discarded after extraction and never exported, seeded, exchanged or uploaded. The compact `test-evidence.json` retains completion, counts, failing names, file durations, bounded diagnostics and a hash of each original report; passing test inventories and coverage traces are omitted. Full
 GitHub Actions output does not enter Work exports, hosting seeds or
-exchange. The Run view and agent log command return the provider link instead.
+exchange. The Run view, native agent `log` and hosted `observe {runId}` return the provider link instead; hosted `log` is unavailable.
 Older archives with full logs still restore; deliberately omitted provider logs
 are provider-held, not missing check evidence. Results and source validation stay
 strict, and removing log bytes does not change a passed run’s evidence hash.

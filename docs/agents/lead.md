@@ -85,7 +85,8 @@ change. Do not invent a benchmark or live run to supply irrelevant numbers.
 
 Check shared concepts as well as files before parallel launches or resumes:
 caches, stores, eviction, metrics and guards each have one owning slice. Name that
-owner in every related brief. Compare open Lane diffs while builders run; two new
+owner in every related brief. Compare saved Lane bytes (`show {laneId,path}`) and local files while builders run;
+hosted `diff` is unavailable. Two new
 modules doing the same job are duplicate scope even without a file overlap.
 
 For UI, provide approved direction, a spec and mockups first. Builders follow

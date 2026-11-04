@@ -675,7 +675,9 @@ check definition. Cancel reports the returned outcome, including a run that fini
 request arrived. Hosted Review keeps connected-runner requests alongside the retained check
 record. Hosted output reads the selected object checkpoint; when the log is only on the runner
 (or in a legacy archive), the log reader provides `nforge agent ROOT log` with the exact run ID.
-Replace `ROOT` with that computer's Work owner. Source return makes retained output available;
+Replace `ROOT` with that computer's native Work owner; this is not a hosted checkout
+command. For hosted checks, use `observe {runId}` and its CI provider link; hosted
+`log` is unavailable. Source return makes retained output available;
 it does not stream remote machine bytes. Scope labels appear only when recorded scope is available.
 
 

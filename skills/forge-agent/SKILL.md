@@ -3,13 +3,33 @@ name: forge-agent
 description: Concise recorded Forge Intent/Lane/check/acceptance workflow and optional graph context. Ordinary local-file questions need no skill, index, or Work setup.
 ---
 
-For hosted checkouts, use `nforge agent ROOT --help` and `nforge docs agents/hosted`: both are generated from the enforced hosted contract. The pinned native examples below describe a native owner. Hosted replay requires the full original parameters, including message; use the receipt replay command. Hosted land accepts `overlapAnswer:"accept-order"` in the same request.
+For hosted checkouts, use `nforge agent ROOT --help` and `nforge docs agents/hosted`: both are generated from the enforced hosted contract. The examples after the hosted section below describe a native owner. Hosted replay requires the full original parameters, including message; use the receipt replay command. Hosted land accepts `overlapAnswer:"accept-order"` in the same request.
 
 Use ordinary search/read/edit tools on the selected source. For recorded delivery use the installed `nforge` command; `nforge agent ROOT VERB [--MODE] --help` gives parameters (`--command-file FILE` avoids JSON quoting). Three verbs: `start`, `save` and `land`; reads keep their names; operator actions run as `nforge x ROOT ACTION`. Old names (`finish`, `checkpoint`, `sync`, `run`, …) still work and print their new form on stderr.
 
 For work on Forge itself, read [AGENTS.md](../../AGENTS.md), the [lead playbook](../../docs/agents/lead.md) and [builder rules](../../docs/agents/briefings.md#building-forge). They carry durable working rules; generated defaults below still describe the current project settings.
 
-## Working on Forge, not GitHub
+## Hosted checkouts
+
+- Use start/save/status `unacknowledgedOverlaps` and `behindMain` to coordinate.
+  Their saved-path windows show five notices and ten behind-main paths; coverage
+  and `more` report omissions. Unsaved peer edits are excluded. Missing notices
+  never establish independence. Hosted `peers` and `diff` return
+  `HOSTED_ACTION_UNSUPPORTED`; `forge_peers` is native-only.
+- Use `show {"channel":"main","path":"FILE"}` for exact accepted bytes or
+  `show {"laneId":"LANE_ID","path":"FILE"}` for exact saved Lane bytes. Compare
+  with local files using ordinary tools. Unsaved edits are excluded; current main
+  is not the Lane base, and this supplies no changed-path summary or pinned diff.
+- Save, then use `preflight {"laneId":"LANE_ID"}` for local affected checks.
+  Hosted `tests` requires `candidateId`, not `laneId`.
+- `brief`, `review`, `candidate`/`candidates`, `provenance`, `records`, `link`,
+  `log`, `handoff`/`handoff-read`, `report`, `making-of`, `pending-status`,
+  `improve`, `save --preview` and `x undo-sync` below are native-only. Use hosted
+  Lane `status`, `planning {reconcile:false}`, `observe {runId}` and its provider
+  link, and `comment-planning-item` for delivery evidence. These do not reproduce
+  native review/provenance/handoff coverage. Follow exact receipt continuations.
+
+## Native owners: working on Forge, not GitHub
 
 - Run the set from `nforge agent <owner> tests '{"laneId":"…"}'` (plus typecheck/lint/Oxfmt). Save edits first: selection compares the saved head to current main, using the landing check’s shared scoped selector; full audits and combined Lanes may widen it. Run the returned `command` in the Lane after building; `command:null` means no test files (documentation checks still apply). Ask again after `save --sync` or main advances. Never run the full suite locally: `land --save` runs the project's check on the project's runner for the combined work of concurrent Lanes.
 - Let `land --save` compose concurrent Lanes into one check. If a Lane fails, Forge drops it from the batch and the others still land after passing; a failed candidate never turns main red. Do not rebase, babysit a merge queue or rerun CI per PR. Configured native runners batch code changes; other paths retain ordinary checks and project acceptance policy.
@@ -33,7 +53,7 @@ Defaults; a project can change them. `nforge agent ROOT capabilities` returns yo
 - A LANDING_STALLED receipt names its repair command; run that, do not resubmit.
 <!-- agent-defaults:end -->
 
-## Short forms
+## Short forms (native owners)
 
 ```sh
 nforge agent ROOT start '{"outcome":"CHANGE"}'                          # laneId + path; edit only that path
@@ -61,7 +81,7 @@ Other agents may accept first. After a passing optimistic check, `land --save` j
 - A failed run receipt includes `failureSummary` (last stderr lines and `✖`/`not ok`/`Error` lines, about 4 KB). Read more with `log` `tail`, or page with `offset`/`nextOffset`.
 - Omitted `operationId`, `expectedHead`, `checkId`, `expectedDefinition` and `accept.expectedPrevious` are filled from current state and returned under `resolved`. After an unknown reply, resend your request plus `resolved`; it reconciles without rerunning anything. Failed, cancelled and conflicted outcomes are kept and never accept.
 
-## Reading Work
+## Reading Work (native owners)
 
 Read a pinned Candidate with `candidate {viewId}` or Lane participation with
 `candidates {laneId}` (`forge_review` in MCP). `view` and `views` are deprecated
