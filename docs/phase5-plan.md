@@ -65,7 +65,7 @@ The critical path is Bet 1: **B1.2a → B1.2b–d → B1.2e → B1.5a → B1.5b 
 
 ## Where the plan stands
 
-Phase 5 started on 2026-10-25 and is in its last stage (5.8). **Phase 5 stays open until exit criteria 2 and 5 are met** (owner decision, 2026-10-31); see [Exit criteria](#exit-criteria). Status key: **done** = on main with the plan's acceptance met; **partial** = on main but the acceptance, a flag or a measurement is missing; **not started**; **replaced** or **retired**. Open work lives in Forge planning; Issue ids are the first eight characters.
+Phase 5 ran from 2026-10-25 to 2026-11-04 and is **closed**: every exit criterion holds (see [Exit criteria](#exit-criteria)). Remaining work moved to named Phase 6 and Phase 7 stages ([roadmap](roadmap.md)). Status key: **done** = on main with the plan's acceptance met; **partial** = on main but the acceptance, a flag or a measurement is missing; **not started**; **replaced** or **retired**. Open work lives in Forge planning; Issue ids are the first eight characters.
 
 | Rows | Status | Notes |
 | --- | --- | --- |
@@ -690,11 +690,11 @@ Phase 5 closes when all of these hold:
 4. The Q4 lifecycle drill passes.
 5. A GitHub import works with no Mac in 5 minutes or less, and the docs are true. (Owner, 2026-11-01: the outside-user trial and any publishing, including npm and prod, wait for an owner decision and are not exit gates.)
 
-Where each stands (2026-10-31):
+Where each stands at the close (2026-11-04):
 
-1. **Partly met.** Metrics slices 1–3 are live; several rows are still partly unknown (see the baseline note).
-2. **Met.** E1 and E3 are published; E2 was replaced by B1.5d, published on 2026-11-04 in [b15d-report](research/b15d-report.md); R3 (B3.5) is its coordination section.
-3. **Mostly met.** Cutover applied 2026-10-28 and B1.6–B1.8 landed; B1.9 (the table purge, with the local owner HTTP server and the native-owner code) is dated about 2026-11-09. LOC removed is in the builders' handoffs; no summary is published.
+1. **Met as honest reporting.** Metrics slices 1–3 are live. Rows 5.4, 5.7, 5.8 and R are still partly unknown and named as such. The comparable-load Bet 2 re-measure and billed cost move to Phase 6.
+2. **Met.** E1 and E3 are published; E2 was replaced by B1.5d, published on 2026-11-04 in [b15d-report](research/b15d-report.md); R3 (B3.5) is its coordination section, summarised in [why-forge](why-forge.md).
+3. **Met.** Cutover applied 2026-10-28 and B1.6–B1.8 landed. Net lines removed in the accepted commits: Modal retirement 5,635, B1.6a 9,863, B1.6b 14,535, B1.6c 4,397, B1.7 1,583, B1.8 4,095 (about 40,100 in all). B1.9 (the table purge, with the local owner HTTP server and the native-owner code) moves to Phase 6: it waits for a qualifying backup, and the 2026-11-02 weekly backup failed.
 4. **Met.** The Q4 lifecycle drill passed on GitHub runners.
 5. **Met.** An import works with no Mac in 5 minutes or less: on t3code it takes 2 min 31 s and 2 min 37 s in two runs, until the project is agent-writable. The docs describe the hosted path; a stranger trial is not required (owner, 2026-11-01).
 

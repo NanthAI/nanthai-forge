@@ -1,6 +1,6 @@
 # Roadmap
 
-What we are doing, in what order, and why. Six phases. Phases 1–4 are done. Phase 5 is in progress and stays open until its exit criteria 2 and 5 are met (see below). Phase 5 is private alpha; Phase 6 is public beta. Open work items live in Forge planning (see the [backlog](backlog.md) page); what works today is in [status](status.md). Keep this page current: update the status lines when a stage changes.
+What we are doing, in what order, and why. Eight phases. Phases 1–5 are done (Phase 5 closed on 2026-11-04). Phase 6 makes Forge solid, Phase 7 is the public beta, Phase 8 is growth. Open work items live in Forge planning (see the [backlog](backlog.md) page); what works today is in [status](status.md). Keep this page current: update the status lines when a stage changes.
 
 Last updated: 2026-10-31.
 
@@ -71,11 +71,11 @@ Moved to Phase 5: the agent-coordination benchmark (forge-bench R3), which now r
 
 Closed on 2026-10-25. Experiments E1 and E3 are published in [why-forge](why-forge.md#when-one-change-in-the-burst-fails): overlap alerts now reach every overlapping pair at save time, but not always before the next save; with one failing change, a tuned GitHub merge queue landed about 5.2× faster. Both feed Phase 5. Closing also fixed two idle Convex cost leaks: a sync drainer that retried a failing publish, and a project-delete purge that rescheduled itself forever.
 
-## Phase 5: one authority, three bets, then private alpha (in progress)
+## Phase 5: one authority, three bets, then private alpha (done)
 
-Goal: Forge runs itself for the Forge team, with numbers to show it, before outside users arrive. The full plan with slices, acceptance criteria, metrics and the stage-by-stage critical path is in the [Phase 5 plan](phase5-plan.md), which marks each row done, partial or not started. Reads that never write and automatic Lane snapshots are Phase 4 prerequisites. Phase 5 started on 2026-10-25 and is in its last stage (5.8).
+Goal: Forge runs itself for the Forge team, with numbers to show it, before outside users arrive. The full plan with slices, acceptance criteria, metrics and the stage-by-stage critical path is in the [Phase 5 plan](phase5-plan.md), which marks each row done, partial or not started. Reads that never write and automatic Lane snapshots are Phase 4 prerequisites. Phase 5 ran from 2026-10-25 to 2026-11-04.
 
-**Both owner-set exit criteria are met** (owner decision, 2026-10-31): the benchmark is published (exit criterion 2: E1–E3 and R3, with the Forge-versus-GitHub benchmark on a real repository, B1.5d, which carries R3 as its coordination section), and an import works with no Mac in 5 minutes or less (exit criterion 5: 2 min 31 s and 2 min 37 s in two runs, until the project is agent-writable on t3code). The Phase 5 close report is still to come.
+**Both owner-set exit criteria are met** (owner decision, 2026-10-31): the benchmark is published (exit criterion 2: E1–E3 and R3, with the Forge-versus-GitHub benchmark on a real repository, B1.5d, which carries R3 as its coordination section), and an import works with no Mac in 5 minutes or less (exit criterion 5: 2 min 31 s and 2 min 37 s in two runs, until the project is agent-writable on t3code). Phase 5 closed on 2026-11-04; open work was moved to named Phase 6 and Phase 7 stages.
 
 Where each item stands:
 
@@ -92,16 +92,19 @@ Where each item stands:
 
 **After the bets:** a trial with outside users, a polished first project through GitHub import, and newcomer docs. Not started.
 
-## Phase 6: public beta (planned)
+## Phase 6: make it solid (planned)
 
-Goal: open Forge to public use with a free core and sustainable hosting.
+Goal: every known friction and bug fixed, and the landing loop robust under contention, before anyone outside the team uses Forge. Re-cut by the owner on 2026-11-04 after the [B1.5d benchmark](research/b15d-report.md).
 
-- **Public Worker and custom domain**: serve public project bytes through the edge cache.
-- **Open-source mode**: configurable proposal limits, anonymous visibility and an optional CLA.
-- **Monetisation with a free core**: use the Phase 5 usage counters to inform decisions. Any limit or price needs an owner decision.
-- **Cross-repo coordination** with shared usage pools.
-- **Git serving** from hosted Forge, with Lane refs.
-- **Product depth**: making-of, timeline and flow views, discussions, Markdown and images, a dependency graph, an extension model and Lane-scoped undo.
+**Exit:** no open bug or core-claim Issue; every friction item fixed or dropped by the owner, none silently deferred; a repeat of the B1.5d benchmark shows the conflict-recovery loss fixed and no regression; idle Convex stays at 0 calls; Convex cost per landing meets the agreed target.
+
+- **6.1 Close the Phase 5 tail**: the B1.9 table purge (with the local owner HTTP server and native-owner code), the one-authority watch, the legacy Convex storage move and delete (Issue 40dad5e0), the stuck import cleanup, the R2 guard follow-up, idle polling, cache-path gaps and the benchmark harness findings (including the contamination rule that voided 34 tasks on false positives).
+- **6.2 The landing loop under contention.** B1.5d showed Forge 24-35% faster to `main` per task, but a few tasks in conflict or overtake loops set whole-batch wall time. The work:
+  - conflict recovery agents cannot fumble: landing refuses while conflict markers remain, resolve works from the Lane root, and every conflict ends with one clear next step;
+  - overtakes and CI bundling, a per-Lane local lock and faster Lane open (Forge prep is 15 s against 4.5 s for a local clone);
+  - overlap notices that fire only for real collisions (13 of 45 blocking notices were useful, and 22 test-file conflicts had none), then earlier detection, with push delivery to agent sessions after that;
+  - no dead ends: every failed check names its cause and next step, a supervisor, and rollback notices;
+  - flake containment, failed-test lists, train qualification, shortest-check-first and queue reordering (after measuring), a symbol-level selector and declaration merge.
 - **Landing safety beyond text conflicts.** A clean text merge can still break: today's real cases are a database test that failed after another change moved columns, two release changes that merged cleanly and then looped, and two readers that needed a hand merge. The landing queue already checks the exact composed result on current `main` and re-checks when `main` moves; these make the failures earlier, rarer and cheaper. Phase 5 Bets 2 and 3 cover contract checks, flake-aware culprit finding and overlap at first write; this list is the rest.
   - **Order-sensitive paths**: migrations, schema, lockfiles, generated files and configuration form classes. When an entry ahead touches the same class, the queue-ahead preview is actionable even without a text overlap.
   - **Migration collisions**: two Lanes adding the same migration number, or a migration that uses a column another entry removes, are reported at compose time with the fix.
@@ -114,8 +117,27 @@ Goal: open Forge to public use with a free core and sustainable hosting.
   - **Breakage after landing**: a failing `main` audit finds the culprit, reverts it while keeping its Lane, and tells queued entries.
   - **Long-lived drift**: a Lane far behind `main` on paths others keep changing gets a nudge naming those landings.
   - **Queue order**: priority and reordering, with fairness between agents.
-- **Landing page redesign (tentative)**: the 2026-10-27 landing-page-skill trial produced a mockup with on-page proof, how it works, a FAQ, a final call to action and corrected title, description and repository links. Accept it as a tentative direction only. Before public beta, assess critically whether it is better overall than today's page, and make the page striking, not only complete. Aim for something unique to Forge rather than a template: the owner's style references are [daoho.dev](https://www.daoho.dev), whose strength is one living element tied to its metaphor, an editorial type voice and restraint, and [nusretuzman.com](https://nusretuzman.com/), with a personal voice, a simple stacked layout and work shown as real product screens rather than described. Find Forge's own signature (for example Lanes flowing into `main`), animated on the client only, paused when hidden and never costing Convex calls. Keep `DESIGN.md` as the visual authority and never invent testimonials or logos.
-- **Later R2 slices**: the public Worker with edge cache, and moving and deleting the remaining legacy Convex copies (Issue 40dad5e0). The [R2 storage plan](r2-storage-plan.md) lists each slice. Retention or deletion changes still need an owner decision.
+- **6.3 Every friction and bug.** All open friction rows and bugs, ordered in one owner triage at the start of the phase, then fixed by builders in parallel batches, or dropped by the owner.
+- **6.4 Cost and agent surface.** Convex cost per landing about 10x lower (about $0.01 today), in-Convex first; any hosted worker or vendor comes with a monthly cost estimate and owner approval first. The agent context budget, CLI verbs V2b and V3 (alias removal, CLI generated from the MCP surface), Lane undo, and enforced trust per path per actor.
+- **6.5 Engineering health**: a codebase health pass, mechanical guards for repeat bug classes, a TLA+ model of the landing queue and a real-user scenario matrix.
+- **In parallel, no product changes**: art direction, the design system and mockups for the Phase 7 design pass.
+
+## Phase 7: public beta (planned)
+
+Goal: Forge live as a beta on a proper domain and on production, usable by a stranger with only the setup link.
+
+**Exit:** Forge runs as a beta on its own domain, on production; onboarding works for a stranger with only the setup link; nothing is published that the owner has not approved.
+
+- **7.1 Product people see**: a design pass (fast highlighted diffs, Lane change speed, onboarding and project navigation), planning for agents and humans, the Now view, a dependency graph and rich discussions with Markdown and images.
+- **7.2 Fresh-user path and GitHub**: install prerequisites stated plainly, an agent-followable setup page, no background process for normal users, two-way GitHub sync, and the CLI as a package (owner-gated).
+- **7.3 Production, domain and the move of Forge itself**: production setup with a spend limit first, the domain, then moving Forge's own project from Convex dev and R2 dev to production (dry run on a copy, a rollback point, idle at 0 after, and a billed-cost check). Forge's repository becomes a public project on Forge from then on. Every secret is rotated at the move; protected `main`; an internal cost view; Convex preview deployments in checks (spend approval).
+- **7.4 Sharing and permissions**: project visibility (private, public read), members and roles, invites by link or GitHub account, what agents may do with each role, and public reads served from R2 through the edge cache. GitHub norms: frictionless but secure.
+- **7.5 Launch**: LLM discoverability (`llms.txt`), the landing page and marketing, the gate-time and cost figures (G8), and inviting people when the owner decides who and when.
+- **Landing page redesign (tentative)**: the 2026-10-27 landing-page-skill trial produced a mockup with on-page proof, how it works, a FAQ, a final call to action and corrected title, description and repository links. Accept it as a tentative direction only. Before the public beta, assess critically whether it is better overall than today's page, and make the page striking, not only complete. Aim for something unique to Forge rather than a template: the owner's style references are [daoho.dev](https://www.daoho.dev), whose strength is one living element tied to its metaphor, an editorial type voice and restraint, and [nusretuzman.com](https://nusretuzman.com/), with a personal voice, a simple stacked layout and work shown as real product screens rather than described. Find Forge's own signature (for example Lanes flowing into `main`), animated on the client only, paused when hidden and never costing Convex calls. Keep `DESIGN.md` as the visual authority and never invent testimonials or logos.
+
+## Phase 8: grow (planned)
+
+Moves up only if the public beta needs it: open-source mode (proposal limits, anonymous visibility, an optional CLA), monetisation with a free core (any limit or price needs an owner decision), cross-repo coordination with shared usage pools, Git serving from hosted Forge with Lane refs, deploy after landing, per-path visibility, bring-your-own CI, the making-of view, a compute pool view and an extension framework.
 
 ## Workflow friction
 

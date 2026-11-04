@@ -146,6 +146,10 @@ These go to Phase 6 stage 6.2 (landing loop under contention): 36a087ea (conflic
 
 ## Coordination (R3)
 
+Method note: overlap notices have been delivered since d43863b7 (2026-10-30). Before that fix, the
+overlap read checked only the 51 oldest of 125 active heads, so no notice was delivered that day.
+Every scored cell ran on a build with the fix.
+
 Notices across the scored Forge cells at N ≥ 3, before the extra attempt:
 
 | Class | Notices | Useful (real conflict) | Noise | Acknowledged |

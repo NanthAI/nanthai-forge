@@ -86,6 +86,13 @@ delivered the first alert to both agents before the second save. Delivery at fir
 write has since landed (B3.1); it has not been re-measured. Sources: the forge-bench results `E1-2026-10-24.md`,
 `E1-2026-10-25.md` and `E3-2026-10-24.md`.
 
+**Coordination (R3, measured in B1.5d on 2026-11-04).** Across the scored Forge cells at N ≥ 3,
+Forge raised 45 blocking overlap notices; 13 matched a real conflict and agents acknowledged 42.
+All 21 advisory notices were noise, and 22 real conflicts in test files had no notice. On the
+overlapping tasks, Forge landed without a conflict, failed check or extra attempt more often than
+GitHub (preview cluster 0.88-1.00 against 0.50-0.67). The samples are small. Notice precision is
+Phase 6 work. Details: [B1.5d report](research/b15d-report.md#coordination-r3).
+
 This measures landing throughput of completed changes. It does not measure agent
 coding time, total development time, token use or coordination quality. Those are
 measured with real agents in [B1.5d](research/b15d-report.md), which also carries R3,
