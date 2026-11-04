@@ -29,6 +29,7 @@
     "format:check": "node scripts/oxc.mjs format:check",
     "typecheck:tsc": "node scripts/prepare-convex-api.mjs && node node_modules/typescript/bin/tsc --noEmit && node node_modules/typescript/bin/tsc -p web/tsconfig.json && node node_modules/typescript/bin/tsc -p convex/tsconfig.json --noEmit && node node_modules/typescript/bin/tsc -p netlify/tsconfig.json",
     "build:core:tsc": "node scripts/prepare-convex-api.mjs && node node_modules/typescript/bin/tsc && node scripts/build-edit-hook.mjs",
+    "model:landing-queue": "nforge heavy node models/landing-queue/run.mjs",
     "check:schema": "node scripts/check-schema-compat.mjs",
     "schema:snapshot": "node scripts/refresh-schema-snapshot.mjs"
   },

@@ -5,6 +5,7 @@ import { resolve, dirname, relative, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { renderDependencyLicenses } from './render-dependency-licenses.mjs';
 import { localPathFindings } from './check-local-paths.mjs';
+import { landingModelFindings } from './check-landing-model.mjs';
 import { idleQueryFindings } from './check-idle-queries.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
@@ -34,6 +35,7 @@ function walk(dir) {
   });
 }
 
+errors.push(...landingModelFindings(read));
 const files = walk(root);
 for (const file of files) {
   errors.push(...localPathFindings(relative(root, file), readFileSync(file)));
