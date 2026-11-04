@@ -151,10 +151,8 @@ const tests = coreBuild.then(ok => {
   if (!ok) return false;
   // Longest files first so the slowest ones never start last and set the tail. Order only; every file runs.
   const slowest = [
-    'git-http',
     'native-git-contributions',
     'native-pr',
-    'native-git-http',
     'mirrors',
     'hosted-work',
     'playbooks',

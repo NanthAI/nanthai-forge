@@ -221,7 +221,7 @@ loaded or swapping machine does not provide a usable idle-machine floor. Git com
 use local projected bundles instead of repeating transport setup; the dedicated
 clone/fetch suites and the three contribution wire cases retain protocol coverage.
 
-`tests/native-git-http.test.mjs` failed intermittently (about 1 run in 25, even on an idle machine, and far more often under load). Root cause: `workGit` passed large stdin (a 1 MiB blob for `git hash-object -w --stdin`) through `spawnSync`'s pipe, which sometimes stalled until the 20 s command limit and surfaced as a 400 from the Git endpoint. `workGit` now gives Git inputs over 32 KiB as a private temporary file descriptor (same bytes, removed afterwards); 0 of 48 concurrent runs failed afterwards, against 2 of 48 before. The history fixture also supplies synthetic commit bytes through a file descriptor so its multi-megabyte commit tests avoid the same synchronous pipe stall. The Git client and test time limits were also raised (600 s and 900 s) because they are hang guards; no assertion changed.
+`workGit` gives Git inputs over 32 KiB through a private temporary file descriptor, preserving the exact bytes and removing the file afterwards. This avoids synchronous child-process pipe stalls for large inputs. History fixtures use the same file-descriptor approach for multi-megabyte synthetic commits.
 
 ```sh
 nforge x ROOT define-check '{"name":"verify","executable":"/abs/node","args":["scripts/forge-check.mjs"]}'

@@ -1330,12 +1330,12 @@ Live source-return computation, callers, progress probes and return-only tests a
 | `web/src/lane/OwnerLifecycle.tsx`      |       163 | C7                     |
 | **Whole-file scope**                   | **1,871** |                        |
 
-- **C1:** `src/host-command.ts`, `src/http.ts`.
+- **C1:** `src/host-command.ts`.
 - **C2:** `src/native-work.ts`.
-- **C3:** `src/host-command.ts`, `src/http.ts`, `web/src/PlanningIntents.tsx`, `web/src/intents/HostedIntents.tsx`, `web/src/lane/HostedLane.tsx`.
-- **C4:** `src/agent-workflow.ts`, `src/github-sync-status.ts`, `src/host-command.ts`, `src/http.ts`, `src/mcp.ts`, `src/presence-worker.ts`.
+- **C3:** `src/host-command.ts`, `web/src/PlanningIntents.tsx`, `web/src/intents/HostedIntents.tsx`, `web/src/lane/HostedLane.tsx`.
+- **C4:** `src/agent-workflow.ts`, `src/github-sync-status.ts`, `src/host-command.ts`, `src/mcp.ts`, `src/presence-worker.ts`.
 - **C5:** `src/agent-workflow.ts`, `src/host-command.ts`, `src/mcp.ts`, `src/presence-worker.ts`.
-- **C6:** `convex/projectWorkActions.ts`, `src/host-command.ts`, `src/http.ts`, `web/src/HostedWork.tsx`, `web/src/PlanningIntents.tsx`, `web/src/intents/HostedIntents.tsx`, `web/src/lane/HostedLane.tsx`.
+- **C6:** `convex/projectWorkActions.ts`, `src/host-command.ts`, `web/src/HostedWork.tsx`, `web/src/PlanningIntents.tsx`, `web/src/intents/HostedIntents.tsx`, `web/src/lane/HostedLane.tsx`.
 - **C7:** `web/src/PlanningIntents.tsx`, `web/src/intents/HostedIntents.tsx`, `web/src/lane/HostedLane.tsx`.
 - **C8:** `web/src/HostedWork.tsx`.
 
