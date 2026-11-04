@@ -8,7 +8,6 @@ import { randomUUID } from 'node:crypto';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { WorkService } from '../dist/work.js';
-import { serveRepository } from '../dist/http.js';
 import { git, write, code } from './helpers.mjs';
 
 import { setup } from './publication-fixture.mjs';
@@ -85,24 +84,17 @@ test('upstream conflict is visible without altering the selected candidate; draf
   assert.equal(state().creates, 1);
 });
 
-test('local HTTP and CLI publish through the shared owner, with normal PR default and retry reconciliation', async t => {
+test('local WorkService and CLI publish through the shared owner, with normal PR default and retry reconciliation', async t => {
   const { root, command, state, work } = setup(t);
-  const server = await serveRepository(root, 0);
-  t.after(() => server.close());
-  const url = `http://127.0.0.1:${server.port}/api/work`;
-  const headers = { Authorization: `Bearer ${server.token}`, 'Content-Type': 'application/json' };
+
   const input = { ...command };
   delete input.draft;
   const body = JSON.stringify({ command: input, revision: work.status().revision });
-  assert.equal(
-    (await fetch(url, { method: 'POST', headers: { ...headers, Origin: 'https://other.invalid' }, body }))
-      .status,
-    403,
-  );
+
   assert.equal(state().creates, 0);
-  const response = await fetch(url, { method: 'POST', headers, body });
-  assert.equal(response.status, 200);
-  assert.equal((await response.json()).result.number, 7);
+  const response = await new WorkService(root).dispatch(JSON.parse(body).command, JSON.parse(body).revision);
+
+  assert.equal((await response).result.number, 7);
   assert.equal(state().pulls[0].draft, false);
   const retry = JSON.parse(
     execFileSync(process.execPath, ['dist/cli.js', 'work', root, JSON.stringify(input), '0'], {
@@ -286,22 +278,16 @@ test('a delayed GitHub check cannot overwrite a later observation or concurrent 
   assert.equal(work.status().intents[0].notes.length, 1);
 });
 
-test('PR import/check share the protected local HTTP and CLI boundary; invalid input and unknown outcomes preserve work', async t => {
+test('PR import/check share the protected local WorkService and CLI boundary; invalid input and unknown outcomes preserve work', async t => {
   const { root, work, state, change, publish, command, remote } = setup(t);
   await publish();
-  const server = await serveRepository(root, 0);
-  t.after(() => server.close());
-  const url = `http://127.0.0.1:${server.port}/api/work`;
-  const headers = { Authorization: `Bearer ${server.token}`, 'Content-Type': 'application/json' };
+
   const input = { action: 'import-pr', url: 'https://github.com/tests/example/pull/7' };
   const body = JSON.stringify({ command: input, revision: work.status().revision });
-  assert.equal(
-    (await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body })).status,
-    401,
-  );
-  const response = await fetch(url, { method: 'POST', headers, body });
-  assert.equal(response.status, 200);
-  const imported = (await response.json()).result;
+
+  const response = await new WorkService(root).dispatch(JSON.parse(body).command, JSON.parse(body).revision);
+
+  const imported = (await response).result;
   const checked = JSON.parse(
     execFileSync(
       process.execPath,

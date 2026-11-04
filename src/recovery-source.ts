@@ -30,7 +30,6 @@ export interface RecoveryTransport extends ExchangeTransport {
   ): Promise<HostedRecoveryPage>;
   objects?(ids: string[]): Promise<ContentPin[]>;
   journal(): Promise<string>;
-  reconnect(selection: RecoverySelection, requestHash: string, role: 'owner' | 'client'): Promise<unknown>;
   archive(selection: RecoverySelection, path: string): Promise<void>;
 }
 

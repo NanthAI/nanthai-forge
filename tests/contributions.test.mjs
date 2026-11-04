@@ -9,7 +9,6 @@ import { execFileSync } from 'node:child_process';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { WorkService } from '../dist/work.js';
-import { serveRepository } from '../dist/http.js';
 import { fixture, git, write, code } from './helpers.mjs';
 
 async function setup(t, format = 'sha1') {
@@ -201,25 +200,17 @@ test('invalid/partial/foreign bundles and stale requests preserve existing work;
   assert.equal(git(concurrent.root, ['rev-parse', 'refs/forge/channels/main']).trim(), concurrent.view.head);
 });
 
-test('existing protected HTTP, CLI and opt-in SDK MCP import full source through the same native owner', async t => {
-  const s = await setup(t),
-    server = await serveRepository(s.root, 0);
-  t.after(() => server.close());
-  const body = JSON.stringify({ command: s.command, revision: s.w.status().revision }),
-    url = `http://127.0.0.1:${server.port}/api/work`,
-    headers = { Authorization: `Bearer ${server.token}`, 'Content-Type': 'application/json' };
-  assert.equal(
-    (await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body })).status,
-    401,
+test('existing direct WorkService, CLI and opt-in SDK MCP import full source through the same native owner', async t => {
+  const s = await setup(t);
+
+  const body = JSON.stringify({ command: s.command, revision: s.w.status().revision });
+
+  const response = await new WorkService(s.root).dispatch(
+    JSON.parse(body).command,
+    JSON.parse(body).revision,
   );
-  assert.equal(
-    (await fetch(url, { method: 'POST', headers: { ...headers, Origin: 'https://outside.invalid' }, body }))
-      .status,
-    403,
-  );
-  const response = await fetch(url, { method: 'POST', headers, body });
-  assert.equal(response.status, 200);
-  assert.equal((await response.json()).result.contribution.head, s.head);
+
+  assert.equal((await response).result.contribution.head, s.head);
   const cli = JSON.parse(
     execFileSync(process.execPath, [resolve('dist/cli.js'), 'work', s.root, JSON.stringify(s.command), '0'], {
       encoding: 'utf8',

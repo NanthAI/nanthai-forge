@@ -7,7 +7,6 @@ import { join, resolve } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { randomUUID, createHash } from 'node:crypto';
 import { WorkService } from '../dist/work.js';
-import { serveRepository } from '../dist/http.js';
 import { fixture, git, write, code } from './helpers.mjs';
 
 function setup(t, format = 'sha1') {
@@ -258,27 +257,20 @@ test('Channel journals reconcile lost replies and preserve later pointers, notes
   assert.equal(work.status().intents[0].notes.length, 2);
 });
 
-test('real HTTP and CLI Channel commands share existing capability protection and reject changed View pins', async t => {
+test('real WorkService and CLI Channel commands share existing capability protection and reject changed View pins', async t => {
   const { root, work, first, second, command, dispatch } = setup(t);
   git(root, ['update-ref', `refs/forge/views/${first.id}`, second.head]);
   await assert.rejects(dispatch(command(first)), code('VIEW_STALE'));
   assert.equal(work.status().channelMoves.length, 0);
-  const server = await serveRepository(root, 0);
-  t.after(() => server.close());
-  const url = `http://127.0.0.1:${server.port}/api/work`,
-    input = command(second);
-  const headers = { Authorization: `Bearer ${server.token}`, 'Content-Type': 'application/json' };
+
+  const input = command(second);
+
   const body = JSON.stringify({ command: input, revision: work.status().revision });
-  assert.equal(
-    (await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body })).status,
-    401,
+
+  const accepted = await await new WorkService(root).dispatch(
+    JSON.parse(body).command,
+    JSON.parse(body).revision,
   );
-  assert.equal(
-    (await fetch(url, { method: 'POST', headers: { ...headers, Origin: 'https://outside.invalid' }, body }))
-      .status,
-    403,
-  );
-  const accepted = await (await fetch(url, { method: 'POST', headers, body })).json();
   assert.equal(accepted.result.head, second.head);
   const result = JSON.parse(
     execFileSync(

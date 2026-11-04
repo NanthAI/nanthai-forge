@@ -101,18 +101,6 @@ test('derived credential masks escape workflow commands and stay silent outside 
   }
 });
 
-test('launchd fallback parses and has no automatic schedule', () => {
-  const result = spawnSync(
-    'python3',
-    [
-      '-c',
-      'import plistlib; p=plistlib.load(open("scripts/launchd/com.nanthai.forge-hosted-backup.plist", "rb")); assert not any(k in p for k in ["StartCalendarInterval", "StartInterval", "RunAtLoad", "KeepAlive"])',
-    ],
-    { encoding: 'utf8' },
-  );
-  assert.equal(result.status, 0, result.stderr);
-});
-
 test('every failed backup job immediately runs the existing stall-alert transport in an independent job', () => {
   const alert = workflow.jobs.alert;
   assert.equal(alert.needs, 'backup');

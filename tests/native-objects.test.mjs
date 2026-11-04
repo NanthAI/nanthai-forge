@@ -19,7 +19,6 @@ import { setup as publicationFixture } from './publication-fixture.mjs';
 import { fixture, git, code } from './helpers.mjs';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
-import { serveRepository } from '../dist/http.js';
 
 function setup(t) {
   const dir = fs.mkdtempSync(join(tmpdir(), 'forge-objects-')),
@@ -312,23 +311,11 @@ test('prepared projection survives collection before registration and publicatio
   }
 });
 
-test('HTTP and CLI expose explicit collection while schema1/2 owners remain unchanged until collect', async t => {
-  const f = setup(t),
-    server = await serveRepository(f.root, 0);
-  t.after(() => server.close());
-  const url = new URL(server.url),
-    token = new URLSearchParams(url.hash.slice(1)).get('token');
+test('WorkService and CLI expose explicit collection while schema1/2 owners remain unchanged until collect', async t => {
+  const f = setup(t);
+
   const body = JSON.stringify({ revision: 0, command: { action: 'collect-native-objects' } });
-  assert.equal(
-    (
-      await fetch(url.origin + '/api/work', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body,
-      })
-    ).status,
-    401,
-  );
+
   assert.equal(f.w.store.load().schema, 24);
   const cli = JSON.parse(
     execFileSync(
@@ -338,13 +325,12 @@ test('HTTP and CLI expose explicit collection while schema1/2 owners remain unch
     ),
   );
   assert.equal(cli.result.format, 24);
-  const response = await fetch(url.origin + '/api/work', {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body,
-  });
-  assert.equal(response.status, 200);
-  assert.equal((await response.json()).result.format, 24);
+  const response = await new WorkService(f.root).dispatch(
+    JSON.parse(body).command,
+    JSON.parse(body).revision,
+  );
+
+  assert.equal((await response).result.format, 24);
   const client = new Client({ name: 'native-object-acceptance', version: '1' }),
     transport = new StdioClientTransport({
       command: process.execPath,

@@ -32,15 +32,6 @@ export function recoveryTransport(request: RecoveryRequest): RecoveryTransport {
           }),
         ),
       ),
-    reconnect: async (selection: RecoverySelection, requestHash: string, role: 'owner' | 'client') =>
-      JSON.parse(
-        await exchange.client.mutation(makeFunctionReference<'mutation'>('projectRecovery:reconnect'), {
-          ...scope,
-          selection: JSON.stringify(selection),
-          requestHash,
-          role,
-        }),
-      ),
     archive: async (selection: RecoverySelection, path: string) => {
       const signed = await exchange.client.mutation(
         makeFunctionReference<'mutation'>('backupTransfer:sign'),

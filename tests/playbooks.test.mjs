@@ -9,7 +9,6 @@ import { once } from 'node:events';
 import { WorkService } from '../dist/work.js';
 import { processAlive } from '../dist/local-process.js';
 import { pollUntil } from './mcp-runtime.mjs';
-import { serveRepository } from '../dist/http.js';
 import { fixture, git, write, code } from './helpers.mjs';
 
 function setup(t) {
@@ -156,24 +155,20 @@ test('stop/continue choices affect only the sequence; changing a definition neve
   await assert.rejects(dispatch({ ...command(playbook), expectedHead: '0'.repeat(40) }), code('VIEW_STALE'));
 });
 
-test('HTTP cancellation stops a live step and later launches, protects exports and reserved step IDs', async t => {
+test('WorkService cancellation stops a live step and later launches, protects exports and reserved step IDs', async t => {
   const { root, work, dispatch, define, book, command, marker, append } = setup(t);
   const playbook = await book([
     define('console.log("live"); setInterval(()=>{},1000)'),
     define(append('not launched')),
   ]);
-  const server = await serveRepository(root, 0);
-  t.after(() => server.close());
-  const url = `http://127.0.0.1:${server.port}/api/work`,
-    headers = { Authorization: `Bearer ${server.token}`, 'Content-Type': 'application/json' };
+
   const input = command(playbook);
-  const started = await fetch(url, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({ command: input, revision: work.status().revision }),
-  });
-  assert.equal(started.status, 200);
-  const run = (await started.json()).result;
+  const started = await new WorkService(root).dispatch(
+    { command: input, revision: work.status().revision }.command,
+    { command: input, revision: work.status().revision }.revision,
+  );
+
+  const run = (await started).result;
   const reserved = run.steps[1];
   await assert.rejects(
     dispatch({
@@ -187,10 +182,8 @@ test('HTTP cancellation stops a live step and later launches, protects exports a
     }),
     code('EVIDENCE_CHANGED'),
   );
-  const cancelled = await fetch(url, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({
+  const cancelled = await new WorkService(root).dispatch(
+    {
       command: {
         action: 'cancel-playbook',
         operationId: run.id,
@@ -198,9 +191,18 @@ test('HTTP cancellation stops a live step and later launches, protects exports a
         reason: 'Stop synthetic sequence',
       },
       revision: 0,
-    }),
-  });
-  assert.equal(cancelled.status, 200);
+    }.command,
+    {
+      command: {
+        action: 'cancel-playbook',
+        operationId: run.id,
+        actor: { kind: 'person', name: 'synthetic-canceller' },
+        reason: 'Stop synthetic sequence',
+      },
+      revision: 0,
+    }.revision,
+  );
+
   const stopped = await wait(work, run.id);
   assert.equal(stopped.status, 'cancelled');
   assert.equal(stopped.cancellation.actor.name, 'synthetic-canceller');
@@ -212,14 +214,13 @@ test('HTTP cancellation stops a live step and later launches, protects exports a
     command: { action: 'export-playbook', kind: 'run', id: run.id },
     revision: 0,
   });
-  assert.equal(
-    (await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: exportBody }))
-      .status,
-    401,
+
+  const exported = await new WorkService(root).dispatch(
+    JSON.parse(exportBody).command,
+    JSON.parse(exportBody).revision,
   );
-  const exported = await fetch(url, { method: 'POST', headers, body: exportBody });
-  assert.equal(exported.status, 200);
-  assert.equal((await exported.json()).result.steps[1].outcome, null);
+
+  assert.equal((await exported).result.steps[1].outcome, null);
   await dispatch(input, 0);
   assert.equal(work.status().runs.length, 1);
 });
@@ -381,19 +382,7 @@ test('opt-in clean-View automations share exact Playbook execution and original 
   const playbook = await book([define(append('A')), define(append('B'))]);
   const input = automationInput(work, playbook, lane.intentId),
     rule = local(input);
-  const server = await serveRepository(root, 0);
-  t.after(() => server.close());
-  const url = `http://127.0.0.1:${server.port}/api/work`;
-  assert.equal(
-    (
-      await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ command: input, revision: 0 }),
-      })
-    ).status,
-    401,
-  );
+
   const compose = () => ({
     action: 'compose',
     operationId: randomUUID(),
@@ -411,13 +400,12 @@ test('opt-in clean-View automations share exact Playbook execution and original 
   });
   write(work.store.path(lane.id), 'a.ts', 'unfinished source');
   const selected = compose(),
-    response = await fetch(url, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${server.token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ command: selected, revision: work.status().revision }),
-    });
-  assert.equal(response.status, 200);
-  const candidate = (await response.json()).result,
+    response = await new WorkService(root).dispatch(
+      { command: selected, revision: work.status().revision }.command,
+      { command: selected, revision: work.status().revision }.revision,
+    );
+
+  const candidate = (await response).result,
     run = work.status().playbookRuns[0];
   assert.equal((await wait(work, run.id)).status, 'passed');
   assert.equal(readFileSync(marker, 'utf8'), 'AB');
@@ -600,7 +588,7 @@ test('lost automatic registration never executes on reconciliation and conflicti
   assert.equal(existsSync(marker), false);
 });
 
-test('selected delivery events execute the original accepted/released source once through private HTTP and keep default clean-View rules independent', async t => {
+test('selected delivery events execute the original accepted/released source once through direct WorkService and keep default clean-View rules independent', async t => {
   const { root, work, local, dispatch, lane, view, define, book, marker, append } = setup(t);
   const channelRule = local(
     automationInput(work, await book([define(append('C'))]), lane.intentId, {
@@ -627,22 +615,13 @@ test('selected delivery events execute the original accepted/released source onc
     expectedHead: view.head,
     expectedPrevious: null,
   };
-  const server = await serveRepository(root, 0);
-  t.after(() => server.close());
-  const url = `http://127.0.0.1:${server.port}/api/work`;
+
   const body = JSON.stringify({ command: accept, revision: work.status().revision });
-  assert.equal(
-    (await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body })).status,
-    401,
-  );
+
   assert.equal(work.status().playbookRuns.length, 0);
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${server.token}`, 'Content-Type': 'application/json' },
-    body,
-  });
-  assert.equal(response.status, 200);
-  assert.equal((await response.json()).result.id, accept.operationId);
+  const response = await new WorkService(root).dispatch(JSON.parse(body).command, JSON.parse(body).revision);
+
+  assert.equal((await response).result.id, accept.operationId);
   let run = work.status().playbookRuns.at(-1);
   assert.equal((await wait(work, run.id)).status, 'passed');
   assert.equal(run.automation.id, channelRule.id);

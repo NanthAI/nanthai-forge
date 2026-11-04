@@ -450,10 +450,10 @@ Split by group; all depend on B1.5b. SP1 is decided; P5-SG lands alongside B1.6â
 
 ### B1.9. Purge retired tables
 
-- **Size:** S. **Depends on:** B1.6â€“B1.8 landed for two weekly backups. **Owner approves** (retention change).
-- **Changes:** export, then purge and remove definitions for `ownerAcceptanceTables`, `publicationTables`, `metadataPublication`, `ownerDerived`, `intentMigration`, `projectReturnSupersessions` and `exchangeCleanup*`.
-- **Acceptance:** the export restores into a scratch deployment; schema push passes; Route A on the newest backup still passes.
-- **Also (owner decision 2026-10-31):** the local owner HTTP server and the native-owner recovery and release-owner code are deleted with this slice.
+- **Size:** S. **Gate:** retired writers deployed, backup fix 13402039 closed, a real failure alert received and one successful file-inclusive backup with verified R2 bytes. The owner dropped the two-weekly-backups wait.
+- **Approved scope:** export and purge the six retired authority/publication/return tables, then delete the verified local export. Live optional fields (`metadataPublication`, `ownerDerived`, `intentMigration`, `exchangeCleanup*`) are report-only. Definitions and recovery readers remain for older backups; their removal is a separate schema/recovery change.
+- **Acceptance:** the exact export matches live rows before deletion; the purge receipt and independent after inventory show all six tables empty. The local pre-cutover snapshot remains until the purge lands and the owner approves its deletion.
+- **Code:** remove the local owner HTTP server, native-owner recovery/reconnect and supervised owner release selection. Hosted main is the only acceptance writer for server authority; standalone native agent commands await their separate disposition (657d63ee).
 
 ## Landing without an operator (Q)
 

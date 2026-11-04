@@ -9,7 +9,6 @@ import { randomUUID, createHash } from 'node:crypto';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { WorkService } from '../dist/work.js';
-import { serveRepository } from '../dist/http.js';
 import { fixture, git, write, code } from './helpers.mjs';
 
 function setup(t) {
@@ -296,8 +295,7 @@ test('pagination uncertainty and transport boundaries preserve original policy, 
   };
   assert.equal(legacy.definition, createHash('sha256').update(JSON.stringify(expected)).digest('hex'));
   assert.equal(legacy.githubReview, undefined);
-  const server = await serveRepository(s.root, 0);
-  t.after(() => server.close());
+
   const command = {
       action: 'assess-invariant',
       id: policy.id,
@@ -306,20 +304,13 @@ test('pagination uncertainty and transport boundaries preserve original policy, 
       expectedHead: s.view.head,
     },
     body = JSON.stringify({ command, revision: 0 });
-  const url = `http://127.0.0.1:${server.port}/api/work`,
-    headers = { Authorization: `Bearer ${server.token}`, 'Content-Type': 'application/json' };
-  assert.equal(
-    (await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body })).status,
-    401,
+
+  const response = await new WorkService(s.root).dispatch(
+    JSON.parse(body).command,
+    JSON.parse(body).revision,
   );
-  assert.equal(
-    (await fetch(url, { method: 'POST', headers: { ...headers, Origin: 'https://outside.invalid' }, body }))
-      .status,
-    403,
-  );
-  const response = await fetch(url, { method: 'POST', headers, body });
-  assert.equal(response.status, 200);
-  assert.equal((await response.json()).result.satisfied, true);
+
+  assert.equal((await response).result.satisfied, true);
   const cli = JSON.parse(
     execFileSync(process.execPath, [resolve('dist/cli.js'), 'work', s.root, JSON.stringify(command), '0'], {
       encoding: 'utf8',

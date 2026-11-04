@@ -7,7 +7,6 @@ import { join, resolve } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { WorkService } from '../dist/work.js';
-import { serveRepository } from '../dist/http.js';
 import { fixture, git, write, code } from './helpers.mjs';
 
 function setup(t) {
@@ -324,24 +323,15 @@ test('explicit Channel policy blocks only selected acceptance, rechecks pending 
   assert.throws(() => git(root, ['rev-parse', 'refs/forge/channels/policy-race']));
 });
 
-test('HTTP capability and CLI expose the same optional policy commands without a second metadata owner', async t => {
+test('WorkService and CLI expose the same optional policy commands without a second metadata owner', async t => {
   const { root, work, view, define } = setup(t);
-  const server = await serveRepository(root, 0);
-  t.after(() => server.close());
-  const url = `http://127.0.0.1:${server.port}/api/work`,
-    headers = { Authorization: `Bearer ${server.token}`, 'Content-Type': 'application/json' };
+
   const command = define(),
     body = JSON.stringify({ command, revision: work.status().revision });
-  assert.equal(
-    (await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body })).status,
-    401,
-  );
-  assert.equal(
-    (await fetch(url, { method: 'POST', headers: { ...headers, Origin: 'https://outside.invalid' }, body }))
-      .status,
-    403,
-  );
-  const policy = (await (await fetch(url, { method: 'POST', headers, body })).json()).result;
+
+  const policy = (
+    await await new WorkService(root).dispatch(JSON.parse(body).command, JSON.parse(body).revision)
+  ).result;
   const assessment = JSON.parse(
     execFileSync(
       process.execPath,

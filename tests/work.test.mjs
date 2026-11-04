@@ -8,7 +8,6 @@ import { randomUUID } from 'node:crypto';
 import { WorkService } from '../dist/work.js';
 import { branchFor, commitTree, workGit } from '../dist/work-git.js';
 import { fixture, git, write, code } from './helpers.mjs';
-import { serveRepository } from '../dist/http.js';
 
 function setup(t) {
   const root = fixture(t, { 'a.ts': 'export const a = 1;\n', 'b.ts': 'export const b = 1;\n' });
@@ -185,29 +184,6 @@ test('dead process locks recover and interrupted Lane creation resumes without d
   assert.equal(resumed.state, 'active');
   assert.equal(work.status().lanes.length, 1);
   assert.equal(readFileSync(join(work.store.path(id), 'a.ts'), 'utf8'), 'export const a = 1;\n');
-});
-
-test('work HTTP is capability protected, bounds input and rejects stale revisions', async t => {
-  const { root } = setup(t);
-  const server = await serveRepository(root, 0);
-  t.after(() => server.close());
-  const url = `http://127.0.0.1:${server.port}/api/work`;
-  const headers = { Authorization: `Bearer ${server.token}`, 'Content-Type': 'application/json' };
-  assert.equal((await fetch(url)).status, 401);
-  const data = await (await fetch(url, { headers })).json();
-  const body = JSON.stringify({
-    command: { action: 'intent', outcome: 'From HTTP' },
-    revision: data.revision,
-  });
-  assert.equal(
-    (await fetch(url, { method: 'POST', headers: { ...headers, Origin: 'https://other.invalid' }, body }))
-      .status,
-    403,
-  );
-  assert.equal((await fetch(url, { method: 'POST', headers, body })).status, 200);
-  assert.equal((await fetch(url, { method: 'POST', headers, body })).status, 409);
-  assert.equal((await fetch(url, { method: 'POST', headers, body: 'x'.repeat(17000) })).status, 400);
-  assert.equal((await fetch(url, { method: 'POST', headers, body: 'null' })).status, 400);
 });
 
 test('dependency updates create exact new Views, retain decisions and old Views, and expose conflicts without moving inputs', t => {

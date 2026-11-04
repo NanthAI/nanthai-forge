@@ -9,7 +9,6 @@ import { randomUUID, createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { WorkService } from '../dist/work.js';
 import { initNative } from '../dist/native-work.js';
-import { serveRepository } from '../dist/http.js';
 import { fixture, git, write, code } from './helpers.mjs';
 import { moduleUrl } from './convex-module.mjs';
 
@@ -157,24 +156,15 @@ test('planning links validate local identities and private exports preserve comp
   assert.deepEqual(readWorkBytes(join(work.store.directory, 'work.json')), before);
 });
 
-test('private HTTP, CLI and independent WorkService instances share planning and enforce existing capability protection', async t => {
+test('direct WorkService, CLI and independent WorkService instances share planning and enforce existing capability protection', async t => {
   const { root, work, dispatch, item } = setup(t);
-  const server = await serveRepository(root, 0);
-  t.after(() => server.close());
-  const url = `http://127.0.0.1:${server.port}/api/work`,
-    headers = { Authorization: `Bearer ${server.token}`, 'Content-Type': 'application/json' };
+
   const command = item(),
     body = JSON.stringify({ command, revision: work.status().revision });
-  assert.equal(
-    (await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body })).status,
-    401,
-  );
-  assert.equal(
-    (await fetch(url, { method: 'POST', headers: { ...headers, Origin: 'https://outside.invalid' }, body }))
-      .status,
-    403,
-  );
-  const created = (await (await fetch(url, { method: 'POST', headers, body })).json()).result;
+
+  const created = (
+    await await new WorkService(root).dispatch(JSON.parse(body).command, JSON.parse(body).revision)
+  ).result;
   const other = new WorkService(root);
   assert.equal((await other.dispatch(command, 0)).result.id, created.id);
   const result = JSON.parse(
@@ -206,9 +196,9 @@ test('new work responses advertise actual capabilities', async t => {
     bundleContributions: true,
     netlifyDrafts: true,
     previewEnvironments: true,
-    nativeGitHttp: true,
-    nativeGitChannels: true,
-    nativeGitContributions: process.platform !== 'win32',
+    nativeGitHttp: false,
+    nativeGitChannels: false,
+    nativeGitContributions: false,
     githubMirrors: true,
     intentChannels: true,
     workBackups: true,

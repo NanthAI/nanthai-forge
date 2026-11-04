@@ -14,7 +14,6 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { WorkService } from '../dist/work.js';
-import { serveRepository } from '../dist/http.js';
 import { fixture, git, write, code } from './helpers.mjs';
 
 function setup(t) {
@@ -213,7 +212,7 @@ test('unknown publication and concurrent replies reconcile durable pages after r
   assert.equal((await s.read(recovered.id)).result.record.id, recovered.id);
 });
 
-test('invalid/provider-denied reads preserve history; receipts and exports share CLI/HTTP capability boundaries without GitHub writes', async t => {
+test('invalid/provider-denied reads preserve history; receipts and exports share CLI/WorkService capability boundaries without GitHub writes', async t => {
   const s = setup(t),
     input = s.command();
   for (const patch of [{ page: 0 }, { page: 1.5 }, { feed: 'execute' }, { operationId: '../unsafe' }])
@@ -231,21 +230,13 @@ test('invalid/provider-denied reads preserve history; receipts and exports share
   s.change({ malformed: false, empty: true });
   const saved = (await s.dispatch(input)).result;
   assert.equal(saved.count, 0);
-  const server = await serveRepository(s.root, 0);
-  t.after(() => server.close());
-  const body = JSON.stringify({ revision: 0, command: { action: 'export-discussion', id: saved.id } }),
-    url = `http://127.0.0.1:${server.port}/api/work`;
-  const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${server.token}` };
-  assert.equal(
-    (await fetch(url, { method: 'POST', body, headers: { 'Content-Type': 'application/json' } })).status,
-    401,
+
+  const body = JSON.stringify({ revision: 0, command: { action: 'export-discussion', id: saved.id } });
+
+  const result = await await new WorkService(s.root).dispatch(
+    JSON.parse(body).command,
+    JSON.parse(body).revision,
   );
-  assert.equal(
-    (await fetch(url, { method: 'POST', body, headers: { ...headers, Origin: 'https://other.invalid' } }))
-      .status,
-    403,
-  );
-  const result = await (await fetch(url, { method: 'POST', body, headers })).json();
   assert.equal(result.result.record.id, saved.id);
   const cli = JSON.parse(
     execFileSync(

@@ -10,7 +10,6 @@ import { importNativeGit } from '../dist/native-git.js';
 import { NativeSource } from '../dist/native-source.js';
 import { WorkService } from '../dist/work.js';
 import { restoreNativeWork } from '../dist/native-backup.js';
-import { serveRepository } from '../dist/http.js';
 
 async function native(t, options) {
   const fixture = setup(t, options),
@@ -134,27 +133,14 @@ test(
     );
     assert.deepEqual(readFileSync(join(root, 'a.ts')), original);
     assert.equal(existsSync(join(root, '.git')), false);
-    const server = await serveRepository(work.store.path(lane.id), 0);
+
     try {
-      const url = new URL(server.url),
-        token = new URLSearchParams(url.hash.slice(1)).get('token');
-      assert.equal(
-        (
-          await fetch(url.origin + '/api/work', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ command, revision: 0 }),
-          })
-        ).status,
-        401,
+      const retry = await new WorkService(work.store.path(lane.id)).dispatch(
+        { command, revision: 0 }.command,
+        { command, revision: 0 }.revision,
       );
-      const retry = await fetch(url.origin + '/api/work', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ command, revision: 0 }),
-      });
-      assert.equal(retry.status, 200);
-      assert.equal((await retry.json()).result.projection.head, projected);
+
+      assert.equal((await retry).result.projection.head, projected);
       const bin = join(root, '.forge/no-git'),
         called = join(bin, 'called');
       mkdirSync(bin);
@@ -197,7 +183,6 @@ test(
         process.env.PATH = previous;
       }
     } finally {
-      await server.close();
     }
   },
 );

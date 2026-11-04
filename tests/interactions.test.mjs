@@ -7,7 +7,6 @@ import { join, resolve } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { WorkService } from '../dist/work.js';
-import { serveRepository } from '../dist/http.js';
 import { fixture, git, write, code } from './helpers.mjs';
 
 function setup(t, files = { 'a.ts': 'export const a = 1;\n', 'b.ts': 'export const b = 1;\n' }) {
@@ -226,7 +225,7 @@ test('non-UTF-8 and control-character paths match exact bytes, while missing pro
   }
 });
 
-test('real CLI/HTTP comparison shares private exact-pin validation and leaves work unchanged on invalid or unauthorized input', async t => {
+test('real CLI/WorkService comparison shares private exact-pin validation and leaves work unchanged on invalid or unauthorized input', async t => {
   const { root, work, candidate, command, compare } = setup(t);
   const left = candidate('CLI left', path => write(path, 'a.ts', 'left')),
     right = candidate('CLI right', path => write(path, 'a.ts', 'right'));
@@ -240,21 +239,12 @@ test('real CLI/HTTP comparison shares private exact-pin validation and leaves wo
   assert.equal(result.private, true);
   assert.equal(result.sharedPaths[0].display, 'a.ts');
   assert.deepEqual(result.left.inputs, left.view.inputs);
-  const server = await serveRepository(root, 0);
-  t.after(() => server.close());
-  const url = `http://127.0.0.1:${server.port}/api/work`,
-    body = JSON.stringify({ command: input, revision: 0 });
-  assert.equal(
-    (await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body })).status,
-    401,
-  );
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${server.token}` },
-    body,
-  });
-  assert.equal(response.status, 200);
-  assert.equal((await response.json()).result.commonPathCount, 1);
+
+  const body = JSON.stringify({ command: input, revision: 0 });
+
+  const response = await new WorkService(root).dispatch(JSON.parse(body).command, JSON.parse(body).revision);
+
+  assert.equal((await response).result.commonPathCount, 1);
   for (const patch of [{ offset: -1 }, { limit: 101 }, { expectedHead: '--help' }])
     await assert.rejects(compare(left.view, right.view, patch), code('BAD_ARGUMENT'));
   for (const patch of [{ otherViewId: randomUUID() }, { otherHead: '0'.repeat(40) }])

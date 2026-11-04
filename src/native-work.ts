@@ -1,10 +1,10 @@
+import { ForgeError } from './errors.js';
 import { PreparedWorkSource } from './native-work-preparation.js';
 import { editWork } from './work-edit.js';
 import { postAcceptMoves } from './post-accept-coverage.js';
 import { optimisticLanding } from './autonomy-policy.js';
 import { ownerRootNotice, refreshAcceptedOwnerRoot } from './owner-root.js';
-import { sourceAuthority } from './hosted-source-authority.js';
-import { requireLocalAcceptance } from './local-acceptance.js';
+import { requireSourceAuthority, sourceAuthority } from './hosted-source-authority.js';
 import { readHostState } from './host-binding.js';
 import { pendingStatus } from './pending-status.js';
 import { decorateRepair } from './agent-repair-lineage.js';
@@ -197,9 +197,9 @@ export function nativeStatus(store: WorkStore, data: WorkData, options: { compac
       bundleContributions: false,
       netlifyDrafts: true,
       previewEnvironments: true,
-      nativeGitHttp: true,
-      nativeGitChannels: true,
-      nativeGitContributions: process.platform !== 'win32',
+      nativeGitHttp: false,
+      nativeGitChannels: false,
+      nativeGitContributions: false,
       githubMirrors: false,
       intentChannels: true,
       workBackups: true,
@@ -267,7 +267,7 @@ export function nativeExecute(
     command.action === 'accept-channel'
       ? (command.authorityEpoch ?? (binding ? sourceAuthority(binding).epoch : 0))
       : 0;
-  if (command.action === 'accept-channel') requireLocalAcceptance(store, authorityEpoch);
+  if (command.action === 'accept-channel') requireNativeAcceptance(store, authorityEpoch);
   let composition: ReturnType<typeof prepareNativeComposition> | undefined;
   if (parsed.success && parsed.data.action === 'compose') {
     const snapshot = store.load(),
@@ -290,7 +290,7 @@ export function nativeExecute(
       edit,
       () => {
         options.beforePublish?.();
-        if (command.action === 'accept-channel') requireLocalAcceptance(store, authorityEpoch);
+        if (command.action === 'accept-channel') requireNativeAcceptance(store, authorityEpoch);
       },
       () => verifySource?.(),
     );
@@ -313,7 +313,7 @@ export function nativeExecute(
           }
         }
         if (command.action === 'accept-channel') {
-          requireLocalAcceptance(store, authorityEpoch);
+          requireNativeAcceptance(store, authorityEpoch);
           const existing = data.channelMoves.find(move => move.id === command.operationId);
           if (existing) {
             invariant(
@@ -597,4 +597,24 @@ export function nativeExecute(
     ...(ownerRoot ? { ownerRoot } : {}),
     ...(started.length ? { revision: store.revision() } : {}),
   };
+}
+
+function requireNativeAcceptance(store: WorkStore, epoch: number): void {
+  const state = readHostState(store),
+    binding = state.binding;
+  if (!binding) return;
+  if (sourceAuthority(binding).mode !== 'server' && state.authorityTransition?.mode !== 'server') {
+    requireSourceAuthority(binding, { mode: 'native-owner', epoch });
+    return;
+  }
+  const command = `nforge agent ROOT finish '${JSON.stringify({
+    url: binding.deployment,
+    projectId: binding.projectId,
+    laneId: 'HOSTED_LANE_ID',
+    accept: true,
+  })}'`;
+  throw new ForgeError(
+    'HOSTED_AUTHORITY',
+    `This project accepts only through hosted landing (projectHostedLanding / projectHostedAcceptance). Open ${binding.projectUrl} to review and accept, or submit with ${command}. If hosted is unavailable, landing pauses; editing can continue.`,
+  );
 }

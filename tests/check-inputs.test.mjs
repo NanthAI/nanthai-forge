@@ -13,7 +13,6 @@ import { LegacyWorkService as WorkService } from './autonomy-fixture.mjs';
 import { NativeSource } from '../dist/native-source.js';
 import { initLegacyNative as initNative } from './autonomy-fixture.mjs';
 import { restoreNativeWork } from '../dist/native-backup.js';
-import { serveRepository } from '../dist/http.js';
 import { fixture as gitFixture, git, write } from './helpers.mjs';
 
 const sha = bytes => createHash('sha256').update(bytes).digest('hex');
@@ -400,7 +399,7 @@ test('Git compatibility observes exact committed bytes/mode rather than dirty fi
   assert.equal(readFileSync(join(w.store.path(lane.id), 'a.ts'), 'utf8'), 'dirty file remains separate');
 });
 
-test('CLI/protected HTTP/real SDK MCP retain declarations and expose same read-only assessment without repeated execution', async t => {
+test('CLI/direct WorkService/real SDK MCP retain declarations and expose same read-only assessment without repeated execution', async t => {
   const f = setup(t),
     cli = resolve('dist/cli.js');
   const definition = {
@@ -435,21 +434,15 @@ test('CLI/protected HTTP/real SDK MCP retain declarations and expose same read-o
     ).result,
     local,
   );
-  const server = await serveRepository(f.root, 0);
-  t.after(() => server.close());
-  const url = `http://127.0.0.1:${server.port}/api/work`,
-    body = JSON.stringify({ command, revision: 0 });
-  assert.equal(
-    (await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body })).status,
-    401,
+
+  const body = JSON.stringify({ command, revision: 0 });
+
+  const response = await new WorkService(f.root).dispatch(
+    JSON.parse(body).command,
+    JSON.parse(body).revision,
   );
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${server.token}`, 'Content-Type': 'application/json' },
-    body,
-  });
-  assert.equal(response.status, 200);
-  assert.deepEqual((await response.json()).result, local);
+
+  assert.deepEqual((await response).result, local);
   const transport = new StdioClientTransport({
       command: process.execPath,
       args: [cli, 'mcp', f.root, '--work'],

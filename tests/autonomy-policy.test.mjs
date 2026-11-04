@@ -26,7 +26,6 @@ import { NativeSource } from '../dist/native-source.js';
 import { currentChannelHead } from '../dist/agent-defaults.js';
 import { editedPolicy, policyPreset, protectedMatches } from '../dist/autonomy-policy.js';
 import { syncTestHooks } from '../dist/agent-sync.js';
-import { serveRepository } from '../dist/http.js';
 import { execFileSync } from 'node:child_process';
 import { localAgent } from '../dist/work-autonomy.js';
 import { agentClean } from '../dist/agent-clean.js';
@@ -312,14 +311,12 @@ test('autonomous cleanup only touches eligible copies and records regeneration i
   assert.equal(readFileSync(join(lane.path, 'a.txt'), 'utf8'), 'uncaptured\n');
 });
 
-test('HTTP server token accepts a supervised View and exposes policy; unauthenticated writes fail', async t => {
+test('WorkService accepts a supervised View and exposes policy', async t => {
   const p = await project(t),
-    lane = await p.start('HTTP review');
-  p.edit(lane, 'a.txt', 'HTTP\n');
-  const waiting = await p.finish(lane),
-    server = await serveRepository(p.root, 0);
-  t.after(() => server.close());
-  const endpoint = `http://127.0.0.1:${server.port}/api/work`;
+    lane = await p.start('Direct review');
+  p.edit(lane, 'a.txt', 'Review\n');
+  const waiting = await p.finish(lane);
+
   const command = {
     action: 'accept-channel',
     operationId: randomUUID(),
@@ -328,18 +325,9 @@ test('HTTP server token accepts a supervised View and exposes policy; unauthenti
     expectedHead: waiting.view.head,
     expectedPrevious: null,
   };
-  const post = headers =>
-    fetch(endpoint, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...headers },
-      body: JSON.stringify({ command, revision: p.store.revision() }),
-    });
-  assert.equal((await post({})).status, 401);
-  const headers = { Authorization: `Bearer ${server.token}` };
-  assert.equal((await (await fetch(endpoint, { headers })).json()).autonomyPolicy.preset, 'supervised');
-  const accepted = await post(headers);
-  assert.equal(accepted.status, 200);
-  assert.equal((await accepted.json()).result.status, 'accepted');
+  assert.equal(new WorkService(p.root).status().autonomyPolicy.preset, 'supervised');
+  const accepted = await new WorkService(p.root).dispatch(command, p.store.revision());
+  assert.equal(accepted.result.status, 'accepted');
   const policy = JSON.parse(
     execFileSync(process.execPath, ['dist/cli.js', 'policy', p.root], { encoding: 'utf8' }),
   );

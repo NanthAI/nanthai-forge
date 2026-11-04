@@ -8,7 +8,7 @@ import { restoreRecoverySource } from '../dist/recovery-source.js';
 import { mkdirSync, renameSync } from 'node:fs';
 
 // Portable archive/fold tests exercise independent snapshot restoration. Route B
-// itself is covered by recovery-owner and recovery-runner and creates no owner.
+// itself is covered by recovery-runner and creates no owner.
 async function recoverSnapshot(target, request, transport) {
   const directory = `${target}-snapshot-stage`,
     stage = join(directory, 'snapshot');

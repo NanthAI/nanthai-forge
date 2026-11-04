@@ -16,7 +16,6 @@ import { withWorkArchive } from '../dist/work-backup-archive.js';
 import { parseWork } from '../dist/work-unified-types.js';
 import { parseWorkBytes, workBytes } from '../dist/work-metadata.js';
 import { digest } from '../dist/hash.js';
-import { serveRepository } from '../dist/http.js';
 import { fixture, git, code } from './helpers.mjs';
 import { z } from 'zod';
 import { execFileSync } from 'node:child_process';
@@ -360,39 +359,26 @@ test('fresh Git-free native restore reads original records/evidence and exports 
   assert.deepEqual(readWorkBytes(join(original.store.directory, 'work.json')), f.originalWork);
 });
 
-test('historical Work remains absent from ordinary current-format serialization and protected HTTP reads use the same owner', async t => {
+test('historical Work remains absent from ordinary current-format serialization and direct WorkService reads use the same owner', async t => {
   const f = await setup(t, false),
     legacy = workBytes(parseWorkBytes(f.originalWork));
   assert.equal('historicalWork' in JSON.parse(legacy), false);
   assert.equal(parseWork(JSON.parse(legacy)).schema, 24);
-  const record = (await f.call(f.command)).result,
-    server = await serveRepository(f.root, 0);
-  t.after(() => server.close());
-  const url = new URL(server.url),
-    token = new URLSearchParams(url.hash.slice(1)).get('token'),
-    command = {
-      action: 'read-work-history-record',
-      id: record.id,
-      collection: 'intents',
-      recordId: f.intent.id,
-    };
-  assert.equal(
-    (
-      await fetch(url.origin + '/api/work', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ revision: 0, command }),
-      })
-    ).status,
-    401,
+  const record = (await f.call(f.command)).result;
+
+  const command = {
+    action: 'read-work-history-record',
+    id: record.id,
+    collection: 'intents',
+    recordId: f.intent.id,
+  };
+
+  const response = await new WorkService(f.root).dispatch(
+    { revision: 0, command }.command,
+    { revision: 0, command }.revision,
   );
-  const response = await fetch(url.origin + '/api/work', {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ revision: 0, command }),
-  });
-  assert.equal(response.status, 200);
-  const expected = await response.json();
+
+  const expected = await response;
   assert.equal(expected.result.record.id, f.intent.id);
   assert.deepEqual(
     JSON.parse(

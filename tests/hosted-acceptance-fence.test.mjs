@@ -43,7 +43,7 @@ function hosted(error) {
   return true;
 }
 function fixture(t) {
-  const root = mkdtempSync(join(tmpdir(), 'forge-local-acceptance-'));
+  const root = mkdtempSync(join(tmpdir(), 'forge-hosted-acceptance-fence-'));
   t.after(() => cleanupOwner(root));
   writeFileSync(join(root, 'source.txt'), 'synthetic\n');
   initNative(root);

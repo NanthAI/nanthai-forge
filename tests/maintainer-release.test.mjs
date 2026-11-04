@@ -153,7 +153,8 @@ test('a failed release deletes nothing; a completed one retires old releases and
   };
   f.request.retainReleases = 2;
   assert.equal(
-    maintainerRelease(f.store, f.request, { execute: (j, n, d) => execute(j, n, d, n === 'owner') }).complete,
+    maintainerRelease(f.store, f.request, { execute: (j, n, d) => execute(j, n, d, n === 'select') })
+      .complete,
     false,
   );
   for (const id of old) assert.ok(existsSync(join(releases, id)));
@@ -441,7 +442,7 @@ test('resume adopts an original child receipt when the driver lost its reply', t
   });
   assert.equal(result.complete, true);
   assert.equal(result.stages.find(stage => stage.name === 'build').attempts.length, 1);
-  assert.deepEqual(calls, ['build', 'backend', 'web', 'package', 'install', 'select', 'owner']);
+  assert.deepEqual(calls, ['build', 'backend', 'web', 'package', 'install', 'select']);
 });
 
 test('packaging uses the existing tool and requires exactly one archive', async t => {
@@ -539,4 +540,19 @@ test('an npm-style CLI symlink is retained without modifying its prior target', 
     f.cli,
   );
   assert.equal(readlinkSync(f.cli), target);
+});
+
+test('historical owner-stage receipts remain readable without executing the removed stage', t => {
+  const f = fixture(t);
+  maintainerRelease(f.store, f.request, { execute: (j, n) => receipt(j, n, 'succeeded') });
+  const journal = readMaintainerRelease(f.store, f.request.operationId);
+  const historic = { name: 'owner', id: randomUUID(), attempts: [] };
+  journal.stages.push(historic);
+  releaseSave(join(releaseDirectory(f.store, f.request.operationId), 'release.json'), journal);
+  const result = maintainerRelease(f.store, f.request.operationId, {
+    execute: () => assert.fail('historical stage executed'),
+  });
+  assert.equal(result.complete, true);
+  assert.deepEqual(result.stages.at(-1), historic);
+  assert.throws(() => releaseChild(journal, 'owner', '/unused'), { code: 'BAD_ARGUMENT' });
 });

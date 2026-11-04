@@ -18,7 +18,6 @@ import { randomUUID, createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { WorkService } from '../dist/work.js';
 import { readSource } from '../dist/files.js';
-import { serveRepository } from '../dist/http.js';
 import { fixture, git, write, code } from './helpers.mjs';
 
 function setup(t) {
@@ -196,21 +195,12 @@ test('private check manifests bind original runs and native log digests without 
     );
   }
   assert.equal((await dispatch(exportCommand)).result.json, result.json);
-  const server = await serveRepository(root, 0);
-  t.after(() => server.close());
-  const url = `http://127.0.0.1:${server.port}/api/work`,
-    body = JSON.stringify({ command: exportCommand, revision: 0 });
-  assert.equal(
-    (await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body })).status,
-    401,
-  );
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${server.token}`, 'Content-Type': 'application/json' },
-    body,
-  });
-  assert.equal(response.status, 200);
-  assert.equal((await response.json()).result.json, result.json);
+
+  const body = JSON.stringify({ command: exportCommand, revision: 0 });
+
+  const response = await new WorkService(root).dispatch(JSON.parse(body).command, JSON.parse(body).revision);
+
+  assert.equal((await response).result.json, result.json);
   const cli = JSON.parse(
     execFileSync(
       process.execPath,
@@ -279,21 +269,12 @@ test('selected build outputs survive cleanup, bind releases, report capture fail
   assert.equal(JSON.parse(exported.result.json).artifacts[0].filename, `check-${run.id}-artifact-0.bin`);
   assert.deepEqual(JSON.parse(exported.result.json).run.artifacts, run.artifacts);
   assert.deepEqual(readWorkBytes(join(work.store.directory, 'work.json')), original);
-  const server = await serveRepository(root, 0);
-  t.after(() => server.close());
-  const url = `http://127.0.0.1:${server.port}/api/work`,
-    body = JSON.stringify({ revision: 0, command: { action: 'export-check', id: run.id } });
-  assert.equal(
-    (await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body })).status,
-    401,
-  );
-  const http = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${server.token}` },
-    body,
-  });
-  assert.equal(http.status, 200);
-  assert.deepEqual((await http.json()).result.artifacts, exported.result.artifacts);
+
+  const body = JSON.stringify({ revision: 0, command: { action: 'export-check', id: run.id } });
+
+  const http = await new WorkService(root).dispatch(JSON.parse(body).command, JSON.parse(body).revision);
+
+  assert.deepEqual((await http).result.artifacts, exported.result.artifacts);
   const cli = JSON.parse(
     execFileSync(
       process.execPath,
@@ -481,21 +462,10 @@ test('HTTP starts promptly, paged output is capability protected and another Wor
       `const cp=require('node:child_process'); console.log('running'); const child=cp.spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore'}); console.log('descendant='+child.pid); process.on('SIGTERM',()=>child.once('close',()=>process.exit(0))); setInterval(()=>{},1000);`,
     ),
   );
-  const server = await serveRepository(root, 0);
-  t.after(() => server.close());
-  const url = `http://127.0.0.1:${server.port}/api/work`,
-    headers = { Authorization: `Bearer ${server.token}`, 'Content-Type': 'application/json' };
+
   const body = JSON.stringify({ command: selected, revision: work.status().revision });
-  assert.equal(
-    (await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body })).status,
-    401,
-  );
-  assert.equal(
-    (await fetch(url, { method: 'POST', headers: { ...headers, Origin: 'https://other.invalid' }, body }))
-      .status,
-    403,
-  );
-  assert.equal((await fetch(url, { method: 'POST', headers, body })).status, 200);
+
+  await new WorkService(root).dispatch(JSON.parse(body).command, JSON.parse(body).revision);
   let text = '';
   for (let i = 0; i < 100 && !text.includes('descendant='); i++) {
     await new Promise(r => setTimeout(r, 20));
@@ -519,16 +489,6 @@ test('HTTP starts promptly, paged output is capability protected and another Wor
     command: { action: 'read-check-output', operationId: selected.operationId, stream: 'stdout' },
     revision: 0,
   });
-  assert.equal(
-    (
-      await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: protectedBody,
-      })
-    ).status,
-    401,
-  );
 });
 
 test('runner death never repeats a command; a durable completion receipt reconciles once', async t => {

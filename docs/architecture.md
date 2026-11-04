@@ -5,7 +5,7 @@ Forge has five parts. Each owns one kind of data, and no part quietly takes over
 ```text
   Coding agent / human
         |
-   nforge CLI, MCP, local Git/Work HTTP    Hosted browser (Netlify)
+   nforge CLI, MCP    Hosted browser (Netlify)
         |                                         |
   Native store + Work store  <-- pull/open -->  Convex + R2 (hosted)
   (your machine; canonical only              (records and journal in Convex,
@@ -27,11 +27,10 @@ For the vocabulary used below (Intent, Lane, Candidate, Channel, State), see [co
 | Agent interface   | Short commands over the same owners                                                                  | `src/agent-workflow.ts`, `src/mcp-agent-workflow.ts`      |
 | Convex            | Hosted records, the Work event journal, sessions, messages, current access (bytes live in R2)        | `convex/`                                                 |
 | Web               | Hosted browser UI (the only browser UI)                                                              | `web/src/`                                                |
-| Retired local server | Native-owner HTTP implementation retained until B1.9; not used by hosted import or landing | `src/http.ts`, `src/work-git-http.ts`, `src/work-http.ts` |
 | Netlify worker    | Public-repository analysis in the background                                                         | `netlify/functions/`                                      |
 | Git compatibility | Import, export, projections and publication                                                          | `src/native-git*.ts`, `src/work-git*.ts`                  |
 
-A project has one source authority (`sourceAuthority.mode`, see [hosted source authority](#hosted-source-authority-and-operation-contracts)). Forge's own project has been under server authority since 2026-10-28: hosted main, Lanes and the landing queue are canonical, and the Mac holds regenerable caches and cannot accept. A native-owner project still keeps source and Work in its local owner; the native-owner code and local HTTP server are assigned to B1.9 removal (owner decision, 2026-10-31). Exchange push, source return and the `autoExchange` policy are retired. `nforge exchange` only pulls, opens, restores and migrates, and old push commands return `CLI_UPGRADE_REQUIRED`. Local activity updates presence only and starts no hosted metadata sender. See [source exchange](operations/source-exchange.md).
+A project has one source authority (`sourceAuthority.mode`, see [hosted source authority](#hosted-source-authority-and-operation-contracts)). Forge's own project has been under server authority since 2026-10-28: hosted main, Lanes and the landing queue are canonical, and the Mac holds regenerable caches and cannot accept. Standalone native compatibility still keeps local source and Work. Its agent commands await the separate disposition on Issue 657d63ee; native-owner recovery/reconnect and the local HTTP server are removed. Exchange push, source return and the `autoExchange` policy are retired. `nforge exchange` only pulls, opens, restores and migrates, and old push commands return `CLI_UPGRADE_REQUIRED`. Local activity updates presence only and starts no hosted metadata sender. See [source exchange](operations/source-exchange.md).
 
 For a server-authoritative binding, hosted Channel and Lane records select
 source. Bound start materialises verified hosted/R2 objects into the existing
@@ -42,8 +41,8 @@ in that path. The two-method source object interface keeps content identity
 separate from current R2 storage keys. Reads and cache-lag observations occur on
 commands, with no additional idle polling. See the [cutover procedure](operations.md#one-authority-cutover).
 
-This paragraph mostly describes the native-owner landing driver, which is deleted with B1.9;
-server-authority projects land through the [hosted landing queue](#hosted-landing-request-queue).
+Standalone native compatibility retains its landing driver. Server-authority projects
+land exclusively through the [hosted landing queue](#hosted-landing-request-queue).
 Landing clients submit a durable goal and observe its handle. Native `land`
 returns by default; only the owner controller composes, checks and settles it.
 The read-only `landing` action reconciles no work and starts no service. Native
@@ -419,9 +418,9 @@ Designed, not built: an opt-in OpenTelemetry intake. Claude Code and Codex can e
 
 ## Acceptance from the hosted browser
 
-**Status.** The owner-request relay is retired. Since the cutover on 2026-10-28, a project with server authority accepts only through hosted landing (see the last paragraph of this section), and nothing waits for a local owner receipt. The former `ownerAcceptance`, `ownerLifecycle` and `projectOwnerSync:publish` RPC addresses return `CLI_UPGRADE_REQUIRED`, and `nforge host` refuses `--listen`, `--sync-agent`, `--auto-sync` and `--no-auto-sync` with the same error, so no owner process polls for requests. Their stored request and machine tables remain for backup recovery until B1.9. Hosted Review accepts, requests changes and reverts through the hosted landing client and queue (`web/src/review/`). The browser no longer offers owner-listener actions such as Requested / Waiting for the named machine or Re-check on latest main. The retained native Git/Work server is outside the hosted workflow and assigned to B1.9 removal (owner decision, 2026-10-31).
+**Status.** The owner-request relay is retired. Since the cutover on 2026-10-28, a project with server authority accepts only through hosted landing (see the last paragraph of this section), and nothing waits for a local owner receipt. The former `ownerAcceptance`, `ownerLifecycle` and `projectOwnerSync:publish` RPC addresses return `CLI_UPGRADE_REQUIRED`, and `nforge host` refuses `--listen`, `--sync-agent`, `--auto-sync` and `--no-auto-sync` with the same error, so no owner process polls for requests. Their retired table definitions remain readable for older backups; there are no active writers. Hosted Review accepts, requests changes and reverts through the hosted landing client and queue (`web/src/review/`). The browser no longer offers owner-listener actions such as Requested / Waiting for the named machine or Re-check on latest main. The local Git/Work HTTP server and owner recovery/reconnect are removed.
 
-A native project created by `nforge host` keeps the `acceptanceOwner:true` role in its `hosted-binding.json`, and `nforge host ROOT --status` reports a legacy binding with no recorded role. That role only says which local directory is the native owner for recovery and cutover; it no longer consumes hosted requests. A bound local owner that is not under server authority accepts through its own native `accept-channel`.
+A native project created by `nforge host` keeps the `acceptanceOwner:true` role in its `hosted-binding.json`, and `nforge host ROOT --status` reports a legacy binding with no recorded role. That legacy field grants no recovery/reconnect or hosted acceptance capability. A bound local owner that is not under server authority accepts through its own native `accept-channel`.
 
 Revert creates a compensating-change Intent and a hand-to-agent prompt. The agent
 must create a reverse-diff Lane on current main, preserve later work, then check
@@ -431,9 +430,9 @@ Main is never rewound by this action.
 Once hosted holds source authority (`sourceAuthority.mode` is `server`, or a
 switch to it is pending), hosted landing is the only acceptance writer
 (`projectHostedLanding` / `projectHostedAcceptance`). The native `accept-channel`
-writer, shared by CLI, MCP, HTTP, agent accept and landing batches, then
+writer, shared by CLI, MCP, agent accept and landing batches, then
 rejects with `HOSTED_AUTHORITY`, naming the hosted project URL and
-an explicitly addressed hosted `finish` command. It checks at entry and again
+an explicitly addressed hosted landing command. It checks at entry and again
 under the publication lock. There is no local override: hosted downtime pauses
 landing while editing continues. Before the switch and after a rollback to
 `native-owner`, the local owner accepts through that writer at its pinned epoch.

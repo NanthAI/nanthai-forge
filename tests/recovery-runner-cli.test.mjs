@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { recoverOwner } from '../dist/recovery-owner.js';
+import { recoverRunner } from '../dist/recovery-runner.js';
 import { nativeOwner, NativeSource } from '../dist/native-source.js';
 import { runnerRecoveryFixture } from './recovery-runner-fixture.mjs';
 import { hostedRecoveryRows } from '../dist/recovery-hosted.js';
@@ -12,7 +12,7 @@ import { RECOVERY_HELP } from '../dist/recovery-cli.js';
 // The former owner entry point now has exactly the runner/cache behavior.
 test('clean Route B preserves hosted-only acceptance and exact queue receipts without an accepting owner', async t => {
   const f = await runnerRecoveryFixture(t),
-    result = await recoverOwner(f.target, f.request, f.transport);
+    result = await recoverRunner(f.target, f.request, f.transport);
   assert.equal(result.role, 'runner-cache');
   assert.equal(result.coverage.main.head, f.head);
   assert.equal(readFileSync(join(f.target, 'source.ts'), 'utf8'), 'accepted only on hosted\n');
@@ -46,29 +46,29 @@ test('interrupted page resumes its cursor and registration lost reply replays on
     }
     return page(selection, table, cursor);
   };
-  await assert.rejects(recoverOwner(f.target, f.request, f.transport), { code: 'EXCHANGE_REQUEST_FAILED' });
+  await assert.rejects(recoverRunner(f.target, f.request, f.transport), { code: 'EXCHANGE_REQUEST_FAILED' });
   assert(!existsSync(f.target));
   assert.equal(f.registrations.size, 0);
   f.calls.length = 0;
   f.loseRegistrationReply();
-  await assert.rejects(recoverOwner(f.target, f.request, f.transport), { code: 'HOSTED_ACTION_FAILED' });
+  await assert.rejects(recoverRunner(f.target, f.request, f.transport), { code: 'HOSTED_ACTION_FAILED' });
   assert.equal(f.calls[0].table, 'projectHostedAcceptances');
   assert(f.calls[0].cursor);
   assert.equal(f.registrations.size, 1);
-  const result = await recoverOwner(f.target, f.request, f.transport);
+  const result = await recoverRunner(f.target, f.request, f.transport);
   assert.equal(f.registrations.size, 1);
   assert.equal(result.coverage.hosted.counts.projectHostedAcceptances, 150);
 });
 
 test('completed retry checks access and preserves local edits as hosted advances', async t => {
   const f = await runnerRecoveryFixture(t);
-  await recoverOwner(f.target, f.request, f.transport);
+  await recoverRunner(f.target, f.request, f.transport);
   writeFileSync(join(f.target, 'source.ts'), 'local edits');
   f.selection.revision++;
-  await recoverOwner(f.target, f.request, f.transport);
+  await recoverRunner(f.target, f.request, f.transport);
   assert.equal(readFileSync(join(f.target, 'source.ts'), 'utf8'), 'local edits');
   f.revoke();
-  await assert.rejects(recoverOwner(f.target, f.request, f.transport), { code: 'AUTH_REVOKED' });
+  await assert.rejects(recoverRunner(f.target, f.request, f.transport), { code: 'AUTH_REVOKED' });
   assert.equal(f.registrations.size, 1);
 });
 
@@ -76,19 +76,19 @@ test('unrelated destination and changed operation input never cause hosted mutat
   const f = await runnerRecoveryFixture(t);
   mkdirSync(f.target);
   writeFileSync(join(f.target, 'keep'), 'keep');
-  await assert.rejects(recoverOwner(f.target, f.request, f.transport), { code: 'RESTORE_TARGET_EXISTS' });
+  await assert.rejects(recoverRunner(f.target, f.request, f.transport), { code: 'RESTORE_TARGET_EXISTS' });
   assert.equal(f.counters().prepares, 0);
   const target = join(f.directory, 'other');
   f.revoke();
-  await assert.rejects(recoverOwner(target, f.request, f.transport), { code: 'AUTH_REVOKED' });
+  await assert.rejects(recoverRunner(target, f.request, f.transport), { code: 'AUTH_REVOKED' });
   f.allow();
   const page = f.transport.hostedPage;
   f.transport.hostedPage = async () => {
     throw new Error('interrupted');
   };
-  await assert.rejects(recoverOwner(target, f.request, f.transport));
+  await assert.rejects(recoverRunner(target, f.request, f.transport));
   f.transport.hostedPage = page;
-  await assert.rejects(recoverOwner(target, { ...f.request, projectId: 'another' }, f.transport), {
+  await assert.rejects(recoverRunner(target, { ...f.request, projectId: 'another' }, f.transport), {
     code: 'WORK_OPERATION_CHANGED',
   });
   assert.equal(f.registrations.size, 0);
@@ -103,23 +103,23 @@ for (const fault of ['revoked', 'corrupt', 'main-changed', 'unconfigured'])
     if (fault === 'main-changed')
       f.transport.current = async () => ({ ...f.selection.hostedMain, head: 'a'.repeat(64) });
     if (fault === 'unconfigured') f.transport.configuration = async () => null;
-    await assert.rejects(recoverOwner(f.target, f.request, f.transport));
+    await assert.rejects(recoverRunner(f.target, f.request, f.transport));
     assert(!existsSync(f.target));
     assert.equal(f.registrations.size, 0);
   });
 
-test('recover help preserves native-owner recovery and scopes cache-only behavior to server authority', () => {
-  assert.match(RECOVERY_HELP, /Native-owner and server-shadow projects retain full owner recovery/);
-  assert.match(RECOVERY_HELP, /Server authority/);
-  assert.match(RECOVERY_HELP, /reconnect\|client/);
+test('recover help exposes runner/cache recovery only', () => {
+  assert.match(RECOVERY_HELP, /runner\/cache/);
+  assert.match(RECOVERY_HELP, /hosted authority/);
+  assert.doesNotMatch(RECOVERY_HELP, /reconnect\|client/);
 });
 
 test('lost registration reply reconciles the original snapshot after hosted advances', async t => {
   const f = await runnerRecoveryFixture(t);
   f.loseRegistrationReply();
-  await assert.rejects(recoverOwner(f.target, f.request, f.transport), { code: 'HOSTED_ACTION_FAILED' });
+  await assert.rejects(recoverRunner(f.target, f.request, f.transport), { code: 'HOSTED_ACTION_FAILED' });
   f.selection.revision++;
-  const result = await recoverOwner(f.target, f.request, f.transport);
+  const result = await recoverRunner(f.target, f.request, f.transport);
   assert.equal(result.coverage.main.head, f.head);
   assert.equal(f.registrations.size, 1);
 });
@@ -133,11 +133,11 @@ test('retry after final rename preserves new local edits and registration identi
   recoveryRunnerTestHooks.afterPublish = () => {
     throw new Error('Synthetic interruption after rename');
   };
-  await assert.rejects(recoverOwner(f.target, f.request, f.transport), /after rename/);
+  await assert.rejects(recoverRunner(f.target, f.request, f.transport), /after rename/);
   delete recoveryRunnerTestHooks.afterPublish;
   writeFileSync(join(f.target, 'source.ts'), 'new local edit');
   f.selection.revision++;
-  await recoverOwner(f.target, f.request, f.transport);
+  await recoverRunner(f.target, f.request, f.transport);
   assert.equal(readFileSync(join(f.target, 'source.ts'), 'utf8'), 'new local edit');
   assert.equal(f.registrations.size, 1);
 });
@@ -145,14 +145,14 @@ test('retry after final rename preserves new local edits and registration identi
 test('staged source corruption cannot be published using a registration retry', async t => {
   const f = await runnerRecoveryFixture(t);
   f.loseRegistrationReply();
-  await assert.rejects(recoverOwner(f.target, f.request, f.transport), { code: 'HOSTED_ACTION_FAILED' });
+  await assert.rejects(recoverRunner(f.target, f.request, f.transport), { code: 'HOSTED_ACTION_FAILED' });
   const { readdirSync } = await import('node:fs');
   const staging = join(
     f.directory,
     readdirSync(f.directory).find(name => name.startsWith('.forge-recovery-')),
   );
   writeFileSync(join(staging, 'cache/.forge/work/objects', f.blob), 'corrupt cached blob');
-  await assert.rejects(recoverOwner(f.target, f.request, f.transport), { code: 'INVALID_WORK_BACKUP' });
+  await assert.rejects(recoverRunner(f.target, f.request, f.transport), { code: 'INVALID_WORK_BACKUP' });
   assert(!existsSync(f.target));
 });
 
@@ -168,11 +168,11 @@ test('the direct runner/cache entry point cannot replace native-owner recovery',
 
 test('a completed runner recovery replays its original cache after rollback without becoming an owner', async t => {
   const f = await runnerRecoveryFixture(t);
-  const before = await recoverOwner(f.target, f.request, f.transport);
+  const before = await recoverRunner(f.target, f.request, f.transport);
   f.selection.authority = { mode: 'native-owner', epoch: 4 };
   delete f.selection.hostedMain;
   writeFileSync(join(f.target, 'source.ts'), 'preserve after rollback');
-  const replay = await recoverOwner(f.target, f.request, f.transport);
+  const replay = await recoverRunner(f.target, f.request, f.transport);
   assert.equal(replay.role, 'runner-cache');
   assert.deepEqual(replay.coverage, before.coverage);
   assert.equal(nativeOwner(f.target), null);

@@ -22,7 +22,6 @@ import {
   definitionBlockers,
   eligibility,
   purgePlan,
-  weeklyBackupRuns,
 } from '../scripts/lib/retired-tables-purge.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
@@ -174,17 +173,6 @@ test('restore refuses the source deployment, a non-empty target and a lossy impo
   });
 });
 
-test('weekly backup windows follow cron 0 3 * * 1 UTC', () => {
-  assert.deepEqual(weeklyBackupRuns(deployedAt), ['2026-11-02T03:00:00.000Z', '2026-11-09T03:00:00.000Z']);
-  // Exactly at a run time that run does not count: the data it saw predates the deploy.
-  assert.deepEqual(weeklyBackupRuns(new Date('2026-11-02T03:00:00Z')), [
-    '2026-11-09T03:00:00.000Z',
-    '2026-11-16T03:00:00.000Z',
-  ]);
-  assert.equal(eligibility(deployedAt).eligibleAfter, '2026-11-09T03:00:00.000Z');
-  assert.equal(eligibility(undefined).known, false);
-});
-
 test('purge dry run reports tables, calls and I/O, measures the call budget and deletes nothing', async () => {
   const source = fake(dogfoodShape());
   await temporary(async directory => {
@@ -203,7 +191,7 @@ test('purge dry run reports tables, calls and I/O, measures the call budget and 
     assert.equal(plan.cost.documentsDeleted, plan.totals.rows);
     assert.equal(plan.cost.indexEntriesDeleted, 12 * 2 + 19 * 4 + 2 * 2);
     assert.equal(plan.cost.basis, 'estimate');
-    assert.equal(plan.eligibility.eligibleAfter, '2026-11-09T03:00:00.000Z');
+    assert.equal(plan.eligibility.known, true);
     assert.deepEqual(source.calls.imports, []);
   });
 });
@@ -216,15 +204,19 @@ function approvalFor(plan, patch = {}) {
     deploymentDigest: plan.deploymentDigest,
     manifestSha256: plan.manifestSha256,
     tables: Object.keys(RETIRED_TABLES),
-    coveringBackups: [
-      { id: 'backup-1', completedAt: '2026-11-02T03:40:00Z' },
-      { id: 'backup-2', completedAt: '2026-11-09T03:40:00Z' },
-    ],
+    backupFixClosed: true,
+    alertReceived: true,
+    verifiedBackup: {
+      id: 'verified',
+      completedAt: '2026-11-04T18:35:17Z',
+      r2Bytes: 1000,
+      sha256: 'a'.repeat(64),
+    },
     ...patch,
   };
 }
 
-test('purge --execute is refused without a matching approval record, then still not enabled', async () => {
+test('purge --execute is refused without a matching approval record, then executes and reconciles the same operation', async () => {
   const source = fake(dogfoodShape());
   await temporary(async directory => {
     const out = directory + '/out';
@@ -241,26 +233,9 @@ test('purge --execute is refused without a matching approval record, then still 
     rejects({ manifestSha256: 'f'.repeat(64) }, 'APPROVAL_MISMATCH');
     rejects({ deploymentDigest: sha256('other') }, 'APPROVAL_MISMATCH');
     rejects({ tables: ['projectPublications'] }, 'APPROVAL_MISMATCH');
-    rejects({ coveringBackups: [] }, 'APPROVAL_BACKUPS_INSUFFICIENT');
-    // Both backups in the same week, or one that predates the deploy, do not count.
-    rejects(
-      {
-        coveringBackups: [
-          { id: 'a', completedAt: '2026-11-09T03:40:00Z' },
-          { id: 'b', completedAt: '2026-11-09T04:00:00Z' },
-        ],
-      },
-      'APPROVAL_BACKUPS_INSUFFICIENT',
-    );
-    rejects(
-      {
-        coveringBackups: [
-          { id: 'a', completedAt: '2026-10-26T03:40:00Z' },
-          { id: 'b', completedAt: '2026-11-09T03:40:00Z' },
-        ],
-      },
-      'APPROVAL_BACKUPS_INSUFFICIENT',
-    );
+    rejects({ verifiedBackup: null }, 'APPROVAL_BACKUPS_INSUFFICIENT');
+    rejects({ alertReceived: false }, 'APPROVAL_BACKUPS_INSUFFICIENT');
+    rejects({ backupFixClosed: false }, 'APPROVAL_BACKUPS_INSUFFICIENT');
     assert.throws(
       () => checkApproval(approvalFor(plan), plan, { deployedAt: undefined, now }),
       error => error.code === 'DEPLOY_TIME_REQUIRED',
@@ -272,6 +247,7 @@ test('purge --execute is refused without a matching approval record, then still 
     const command = {
       command: 'purge',
       deployment: 'dev-a',
+      operationId: '16ec05bd-25e1-4bd5-8a01-9bae82b0da38',
       directory: out,
       deployedAt,
       execute: true,
@@ -281,11 +257,102 @@ test('purge --execute is refused without a matching approval record, then still 
       execute({ ...command, now: new Date('2026-11-01T00:00:00Z') }, source),
       error => error.code === 'APPROVAL_INVALID',
     );
-    await assert.rejects(execute({ ...command, now }, source), error => error.code === 'PURGE_NOT_ENABLED');
+    source.calls.data = 0;
+    const result = await execute({ ...command, now }, source);
+    assert.deepEqual(result.after, { rows: 0, bytes: 0 });
+    assert.equal(source.calls.data, 9); // Six plan reads, three populated-table verification reads.
+    assert.equal(source.calls.imports.length, 3);
+    assert.deepEqual((await execute({ ...command, now }, source)).after, result.after);
+    assert.equal(source.calls.imports.length, 3); // A replay adds no writes.
+
     await writeFile(file, '{');
     await assert.rejects(execute({ ...command, now }, source), error => error.code === 'APPROVAL_INVALID');
-    assert.deepEqual(source.calls.imports, []);
-    assert.equal(JSON.stringify([...source.store]), before);
+    assert.notEqual(JSON.stringify([...source.store]), before);
+  });
+});
+
+test('purge rejects changed rows, wrong deployment and changed replay inputs before writes', async () => {
+  await temporary(async directory => {
+    const source = fake(dogfoodShape()),
+      out = join(directory, 'export');
+    await exportTables(source, out, { deployment: 'dev-a' });
+    const plan = await purgePlan(source, out, { deployedAt });
+    const approval = join(directory, 'approval.json');
+    await writeFile(approval, JSON.stringify(approvalFor(plan)));
+    const command = {
+      command: 'purge',
+      directory: out,
+      deployment: 'dev-a',
+      deployedAt,
+      execute: true,
+      approval,
+      operationId: '21bcc0e4-d507-490f-8dc6-6fc063befc46',
+      now: new Date('2026-11-10T13:00:00Z'),
+    };
+    await assert.rejects(execute({ ...command, deployment: 'other' }, source), { code: 'APPROVAL_MISMATCH' });
+    source.store.get('ownerAcceptanceRequests')[0].body = 'changed same ID';
+    await assert.rejects(execute(command, source), { code: 'PURGE_INVENTORY_CHANGED' });
+    assert.equal(source.calls.imports.length, 0);
+  });
+});
+
+test('unknown replacement outcome replays the same operation without repeating that deletion', async () => {
+  await temporary(async directory => {
+    const source = fake(dogfoodShape()),
+      out = join(directory, 'export');
+    await exportTables(source, out, { deployment: 'dev-a' });
+    const plan = await purgePlan(source, out, { deployedAt });
+    const approval = join(directory, 'approval.json');
+    await writeFile(approval, JSON.stringify(approvalFor(plan)));
+    const command = {
+      command: 'purge',
+      directory: out,
+      deployment: 'dev-a',
+      deployedAt,
+      execute: true,
+      approval,
+      operationId: '94597fd3-e338-46e7-90c1-d2b3ebf4609e',
+      now: new Date('2026-11-10T13:00:00Z'),
+    };
+    const original = source.importTable;
+    let lost = true;
+    source.importTable = async (...args) => {
+      await original(...args);
+      if (lost) {
+        lost = false;
+        throw Object.assign(new Error('lost'), { code: 'CONVEX_CLI_FAILED' });
+      }
+    };
+    await assert.rejects(execute(command, source), { code: 'CONVEX_CLI_FAILED' });
+    assert.deepEqual((await execute(command, source)).after, { rows: 0, bytes: 0 });
+    assert.equal(source.calls.imports.length, 3);
+    await writeFile(approval, JSON.stringify(approvalFor(plan, { approvedBy: 'another' })));
+    await assert.rejects(execute(command, source), { code: 'PURGE_OPERATION_CHANGED' });
+    assert.equal(source.calls.imports.length, 3);
+  });
+});
+
+test('concurrent identical purge requests serialize before reading live data', async () => {
+  await temporary(async directory => {
+    const source = fake(dogfoodShape()),
+      out = join(directory, 'export');
+    await exportTables(source, out, { deployment: 'dev-a' });
+    const plan = await purgePlan(source, out, { deployedAt });
+    const approval = join(directory, 'approval.json');
+    await writeFile(approval, JSON.stringify(approvalFor(plan)));
+    const command = {
+      command: 'purge',
+      directory: out,
+      deployment: 'dev-a',
+      deployedAt,
+      execute: true,
+      approval,
+      operationId: 'b2fc6400-2d68-4f34-8969-4b963f5a8f0e',
+      now: new Date('2026-11-10T13:00:00Z'),
+    };
+    const [a, b] = await Promise.all([execute(command, source), execute(command, source)]);
+    assert.deepEqual(a.after, b.after);
+    assert.equal(source.calls.imports.length, 3);
   });
 });
 
@@ -330,5 +397,5 @@ test('the command line help runs without a deployment', () => {
     encoding: 'utf8',
   });
   assert.equal(result.status, 0);
-  assert.match(result.stdout, /nothing here deletes data/);
+  assert.match(result.stdout, /dry run unless --execute/);
 });

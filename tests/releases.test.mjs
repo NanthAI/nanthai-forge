@@ -7,7 +7,6 @@ import { join, resolve } from 'node:path';
 import { randomUUID, createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { WorkService } from '../dist/work.js';
-import { serveRepository } from '../dist/http.js';
 import { fixture, git, write, code } from './helpers.mjs';
 
 function setup(t, format = 'sha1') {
@@ -157,26 +156,17 @@ test('release request reconciliation survives lost saves, rejects changed pins a
   await assert.rejects(dispatch({ action: 'export-release', id: randomUUID() }), code('NOT_FOUND'));
 });
 
-test('private HTTP, CLI and actual current capabilities share local release owner and leave unauthorized writes unchanged', async t => {
+test('direct WorkService, CLI and actual current capabilities share local release owner and leave unauthorized writes unchanged', async t => {
   const { root, work, dispatch, accept, release } = setup(t);
   await dispatch(accept);
-  const server = await serveRepository(root, 0);
-  t.after(() => server.close());
-  const url = `http://127.0.0.1:${server.port}/api/work`;
-  const body = JSON.stringify({ command: release, revision: work.status().revision }),
-    headers = { Authorization: `Bearer ${server.token}`, 'Content-Type': 'application/json' };
-  assert.equal(
-    (await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body })).status,
-    401,
-  );
-  assert.equal(
-    (await fetch(url, { method: 'POST', headers: { ...headers, Origin: 'https://outside.invalid' }, body }))
-      .status,
-    403,
-  );
+
+  const body = JSON.stringify({ command: release, revision: work.status().revision });
+
   assert.equal(work.status().releases.length, 0);
   assert.equal(work.status().capabilities.releases, true);
-  const created = (await (await fetch(url, { method: 'POST', headers, body })).json()).result;
+  const created = (
+    await await new WorkService(root).dispatch(JSON.parse(body).command, JSON.parse(body).revision)
+  ).result;
   assert.equal(created.id, release.operationId);
   const exported = JSON.parse(
     execFileSync(

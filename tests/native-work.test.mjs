@@ -24,7 +24,6 @@ import { restoreNativeWork } from '../dist/native-backup.js';
 import { WorkStore } from '../dist/work-store.js';
 import { WorkService } from '../dist/work.js';
 import { capture } from '../dist/snapshot.js';
-import { serveRepository } from '../dist/http.js';
 
 function fixture(t) {
   const dir = mkdtempSync(join(tmpdir(), 'forge-native-test-')),
@@ -229,14 +228,11 @@ test(
       join(f.dir, 'missing-artifact-restored'),
     );
     assert.equal(incompleteRestore.unavailable.length, 1);
-    const server = await serveRepository(restored.store.path(lane.id), 0);
-    t.after(() => server.close());
-    const url = new URL(server.url),
-      token = new URLSearchParams(url.hash.slice(1)).get('token');
-    const response = await fetch(url.origin + '/api/work', { headers: { Authorization: `Bearer ${token}` } });
-    assert.equal(response.status, 200);
-    assert.equal((await response.json()).capabilities.nativeSource, true);
-    assert.equal((await fetch(url.origin + '/api/work')).status, 401);
+
+    const response = await new WorkService(restored.store.path(lane.id)).status({ compact: false });
+
+    assert.equal((await response).capabilities.nativeSource, true);
+
     const cli = JSON.parse(
       execFileSync(process.execPath, ['dist/cli.js', 'work', target], { encoding: 'utf8' }),
     );
@@ -416,27 +412,13 @@ test('native linked planning reconciles versions and survives private export/res
   assert.equal(after.nativeHead, before.nativeHead);
   assert.equal(after.lanes[0].head, lane.head);
   assert.equal(readFileSync(join(path, 'a.ts'), 'utf8'), 'unfinished native Lane');
-  const server = await serveRepository(root, 0);
-  t.after(() => server.close());
-  const url = new URL(server.url),
-    token = new URLSearchParams(url.hash.slice(1)).get('token');
-  assert.equal(
-    (
-      await fetch(url.origin + '/api/work', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ command: { action: 'export-planning' }, revision: 0 }),
-      })
-    ).status,
-    401,
+
+  const response = await new WorkService(root).dispatch(
+    { command: { action: 'export-planning' }, revision: 0 }.command,
+    { command: { action: 'export-planning' }, revision: 0 }.revision,
   );
-  const response = await fetch(url.origin + '/api/work', {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ command: { action: 'export-planning' }, revision: 0 }),
-  });
-  assert.equal(response.status, 200);
-  assert.equal((await response.json()).result.sha256, exported.sha256);
+
+  assert.equal((await response).result.sha256, exported.sha256);
   const archive = (await dispatch({ action: 'export-work', archive: true })).result,
     target = join(dir, 'planning-restored');
   await restoreNativeWork(archive.archive.path, target);

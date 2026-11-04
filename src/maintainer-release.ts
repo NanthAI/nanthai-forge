@@ -90,6 +90,7 @@ function createRelease(store: WorkStore, input: ReleaseRequest): ReleaseJournal 
 }
 export function releaseSummary(journal: ReleaseJournal) {
   const pending = journal.stages.find(stage => {
+    if (stage.name === 'owner') return false;
     const attempt = stage.attempts.at(-1);
     return (attempt?.reconciliation?.outcome ?? attempt?.receipt?.status) !== 'succeeded';
   });
@@ -138,6 +139,7 @@ export function maintainerRelease(
       if (options.reconcile) {
         // Refresh a surviving child's own receipt before applying an external observation.
         for (const stage of journal.stages) {
+          if (stage.name === 'owner') continue;
           const attempt = stage.attempts.at(-1);
           if (
             attempt &&
@@ -154,6 +156,7 @@ export function maintainerRelease(
           }
         }
         const observation = releaseReconciliationSchema.parse(options.reconcile);
+        invariant(observation.stage !== 'owner', 'BAD_ARGUMENT', 'Owner runtime selection is removed.');
         const stage = journal.stages.find(stage => stage.name === observation.stage)!;
         const attempt = stage.attempts.find(attempt => attempt.id === observation.attemptId);
         invariant(
@@ -180,6 +183,7 @@ export function maintainerRelease(
         save();
       }
       for (const stage of journal.stages) {
+        if (stage.name === 'owner') continue;
         let attempt = stage.attempts.at(-1);
         if (
           attempt &&

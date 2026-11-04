@@ -2,7 +2,7 @@
 
 `nforge release` explicitly releases accepted native `main`: native Git export
 (with optional reuse), build, development backend, matching web, CLI package,
-local install, atomic CLI wrapper selection, and supervised owner runtime selection. It never lands a Lane, changes
+local install and atomic CLI wrapper selection. It never lands a Lane, changes
 acceptance policy, pushes source recovery, or publishes a GitHub mirror. A failed
 release does not undo a successful landing or establish recovery coverage.
 
@@ -91,7 +91,7 @@ success, known child failure, pending stages, and unknown outcomes. An incomplet
 release exits nonzero. CLI installation is selected only after all previous stages
 succeed. Per-stage IDs remain stable; each explicit retry of a failed stage gets
 a new attempt ID and fresh output directory. Earlier successful stages are skipped.
-Completed operations replay their retained receipt without selecting the CLI or restarting the owner again.
+Completed operations replay their retained receipt without selecting the CLI again. Historical owner-stage receipts remain readable, but are never executed.
 `installedHead` is the release's successful selection observation, not a current
 probe of a wrapper somebody may have changed later. Remote provider versions are
 observed only through the successful child exit; no independent live compatibility
@@ -136,75 +136,6 @@ retry into fresh directories; local success needs the original child receipt
 because later stages require its exact output paths. Keep the original UUID,
 attempt ID, source and observation. No additional confirmation is part of the
 successful release path.
-
-## Select and verify the owner runtime
-
-After CLI selection, the `owner` stage discovers the current user's launchd
-`com.nanthai.forge-owner` service and checks that its `serve` owner matches this
-release. A missing service (including platforms without this supervisor adapter)
-is a successful skip with an explicit receipt note; it does not install a service.
-The supervisor interface keeps discovery, restart and PID observation separate
-from selection and retirement.
-
-The service's configured CLI entry point must be inside `runtimeDirectory`.
-Release selects the whole install directory containing `node_modules/@nanthai/forge`.
-For an existing symlink it publishes a new symlink with atomic rename. On the
-first upgrade from a real `installed-owner` directory, it records the plan,
-renames that entire directory to a unique sibling rollback path, then publishes
-the symlink. That one-time migration has a recoverable gap: resume completes it
-from the retained plan if interrupted between renames. The service restarts only
-after publication; no package files are patched or copied over. The launchd
-ProgramArguments path stays the same and resolves wholly into the new package.
-`owner-install-selection.json` records both installs before mutation; the receipt
-names `selectionPath`, `installedDirectory`, `previousInstall` and `rollbackCommand`.
-A custom standalone CLI alias retains file-level atomic symlink selection into
-the new canonical package; its previous entry point is kept for rollback.
-Forge worker launchers pin the parent's package directory identity when loaded,
-resolve worker paths from that directory, and reject a different or rebound install
-with `WORKER_INSTALL_MISMATCH`. Restarting the owner loads the selected package.
-
-The stage restarts through launchd and verifies its reported PID, kernel start
-time, exact installed CLI path and authenticated local response. `serve` retains
-private discovery in `OWNER/.forge/work/owner-runtime.json` (mode 0600), including
-its existing local bearer token. If discovery cannot be retained, existing serve
-APIs remain available and release reports an unverified owner. `/api/owner` uses the existing bearer/host/origin
-checks and returns only owner, port and process identity. Tokens, environment
-values, supervisor output and process arguments never enter release receipts.
-
-The release-owned `owner-selection.json` retains the original service and process
-identity before selection and restart. Resume first observes a requested restart;
-a responding new process is adopted without another restart. A replacement
-process that has not verified is preserved and reported as
-`RELEASE_OWNER_UNVERIFIED`; resume can verify it later. An owner already answering
-from the selected install needs no restart. Failed attempts share this plan, and
-a dead stage child can resume it after a lost reply. Historical release receipts
-created before this stage remain historical receipts.
-
-After verification, release retires detached `local-watcher-worker.js`,
-`auto-exchange.js`, `presence-worker.js` and `post-accept-main.js` processes, plus advisory,
-GitHub push, integration preview and weekly metrics workers in previous runtime
-installations. It snapshots old worker identities before switching an install alias (process
-arguments keep their original spelling), then matches the install path and kernel start
-identity, rechecks both before each signal, and excludes the current install,
-paths outside the runtime directory and all agent MCP `cli.js` processes. Each
-worker gets SIGTERM, up to ten seconds to exit, then SIGKILL only if that same
-process remains. The receipt records each PID, start time, script path, attempted signals
-and observed exit. Resume can repeat an interrupted signal attempt after rechecking
-identity; it never applies that attempt to a reused PID. Presence and main-audit workers use nonblocking Work-lock
-admission so signal delivery cannot be trapped in a synchronous lock wait;
-shutdown aborts their observers and has a one-second exit backstop.
-Physical check controllers keep their pinned runtime until their checks finish;
-release never signals them. Queued and checking landings survive owner replacement.
-If a remote controller dies, startup adopts its original run and provider pins.
-
-To undo owner selection, run the receipt's `rollbackCommand`. It first checks
-that the selection still resolves to this release, atomically replaces it with
-a symlink to `previousInstall`, then restarts the same supervisor. Both installs
-remain intact, including a legacy directory retained by migration. Verification
-failures also include this command in the failed stage receipt's message. A
-responsive process reporting the previous install fails the owner stage; a successful
-restart alone is insufficient. Retired advisory workers are recreated by ordinary
-owner activity. Owner rollback does not roll back backend/web or the CLI wrapper.
 
 ## Restore the prior CLI selection
 

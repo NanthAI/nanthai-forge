@@ -197,7 +197,7 @@ references: [SWC compilation](https://swc.rs/docs/configuration/compilation),
 
 ### Targeted test preparation
 
-Run `npm ci --ignore-scripts` and `npm run build:core` before focused core tests. Run `npm run build:web` as well before browser asset inspection or hosted UI checks; assets build into `hosted-web-dist`. The companion HTTP fixtures no longer require the retired local explorer build. Run focused tests with the private queue preload:
+Run `npm ci --ignore-scripts` and `npm run build:core` before focused core tests. Run `npm run build:web` as well before browser asset inspection or hosted UI checks; assets build into `hosted-web-dist`. Run focused tests with the private queue preload:
 
 ```sh
 node --import ./tests/check-runtime.mjs --test tests/agent-action-parse.test.mjs
@@ -217,8 +217,7 @@ For new prose under `docs/`, add a matching JSON manifest under `scripts/package
 
 Compare performance with the same Node version, source pins and machine load.
 Per-file wall times include real Git subprocesses and filesystem work; a heavily
-loaded or swapping machine does not provide a usable idle-machine floor. Git HTTP
-coverage uses local servers and real clients. Contribution import/recovery fixtures
+loaded or swapping machine does not provide a usable idle-machine floor. Git compatibility coverage uses local bundles and real clients. Contribution import/recovery fixtures
 use local projected bundles instead of repeating transport setup; the dedicated
 clone/fetch suites and the three contribution wire cases retain protocol coverage.
 

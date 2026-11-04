@@ -248,57 +248,17 @@ plan file. Structured server error codes and messages are shown by the CLI.
 A lost deletion reply resumes the same recorded operation; R2 keys rotate before deletion so replay cannot delete a replacement
 upload.
 
-### Hosted backups and return
+### Hosted backup recovery
 
-`nforge recover NEW_DIRECTORY --command-file recovery.json` discovers the
-project's current source authority before selecting recovery. Being bound is not
-itself a cutover. In `native-owner` mode, including a rollback at a higher epoch,
-the command retains full owner recovery/reconnect and local acceptance. The
-existing native archive/object, saved-Lane, journal and evidence behavior stays
-available; requests accept `{operationId,url,projectId,archivePath?,cacheRoot?}`.
-`recover OWNER reconnect` and `recover OLD_OWNER client` remain native-mode
-commands. Shadow mode also retains native recovery and its existing authority
-rules.
-
-Only server authority, or a local pending switch to server, selects the new
-runner/cache behavior. The gate is
-`sourceAuthority(binding).mode === 'server' || state.authorityTransition?.mode === 'server'`.
-Fresh-machine recovery obtains the binding authority from its authenticated
-hosted selection. A native reconnect is not admitted while the local switch to
-server is pending. Server recovery takes `{operationId,url,projectId}` without
-credentials, reads selected main through hosted APIs, folds exact records and
-receipts, and registers the existing configured Mac runner. It creates no native
-owner marker, accepting Work store or owner binding. Its only hosted mutation is
-normal idempotent runner registration; no commands restart.
-
-The B1.5a1 fold pins hosted main's head, receipt, snapshot and revision alongside
-the seed checkpoint. It reads record versions/bodies/heads, operations, source
-registrations, finish/landing queues and observations, H14 acceptance snapshot
-deltas and completion pages, lifecycle overlays, check outcomes and stale
-source-return supersessions. Project-indexed pages use at most 64 rows and a
-128 KiB provider read window (an existing oversized document remains readable).
-A second pass compares exact row hashes. This is a verified paged export, not a
-database-wide transactional snapshot. Every page rechecks current owner access
-and pins; observed changes preserve staging and return `WORK_STALE`.
-
-Canonical document strings and their referenced source/object closure remain in
-immutable content-addressed pages. The runner cache roots them in its recovery
-marker without constructing native Work. The independent archive/fold machinery
-also retains this overlay at `Work.hostedRecovery`; existing `export-work` and
-native restore preserve it for backup and an explicitly qualified rollback.
-`hostedRecoveryRows` streams the retained table documents. H14 lineage and ordered
-completion roots are validated without applying pending completions or replaying
-acceptance. Large opaque source blobs stream to disk and final cache validation
-hashes them from disk, with visited identities in disposable disk scratch.
-
-Route A and Route B retain check outcomes, summaries, test evidence and provider
-links. Neither route requires full CI-provider log bytes. Opted-in local logs are
-recoverable only within their finite retention.
+Hosted source and Work recover from verified deployment snapshots and retained R2
+objects. [Hosted durability](operations/hosted-durability.md) describes Route A,
+manifest validation and snapshot retention. Restoring a portable native archive
+creates an independent local copy; it does not grant hosted acceptance authority.
+Native-owner recovery/reconnect and return-to-owner authority are removed.
 
 ### Route B: recover a runner and cache from hosted
 
-This section applies to server authority. Bound projects that remain
-`native-owner` use the native recovery path above, including after rollback.
+This section applies to server authority; native-owner recovery/reconnect is removed.
 
 On a clean machine, install the compatible Forge package and sign in with the
 existing owner account. Restore the existing runner configuration and private
@@ -353,17 +313,16 @@ The fixture retained two landing requests (one accepted, one pending), one exact
 acceptance/completion receipt and hosted-only source. Dropped accepted receipts:
 0; pending landing/completion rows missing after recovery: 0. For server authority,
 the previous Route B restored a native owner; the new path produces no native
-owner marker or accepting Work store. Native-owner recovery and local acceptance
-remain available. No live before/after dropped-landing rate is claimed.
+owner marker or accepting Work store. Standalone native compatibility retains its existing local commands; native-owner
+recovery/reconnect is removed. No live before/after dropped-landing rate is claimed.
 
 The pending landing and partial completion receipts are compared byte for byte;
 metric 5.3's live dropped-landings count remains unmeasured by this fixture.
 
 See the [recovery drill](operations/recovery-drill.md) for Route A's weekly
 Convex ZIP restore, configuration inputs and reporting. A native portable archive
-remains an independent backup and input to an explicitly qualified rollback;
-it remains available for native-owner recovery and rollback, and does not grant
-local acceptance for server authority.
+remains an independent local copy and does not grant local acceptance for
+server authority.
 
 For whole-deployment Convex snapshots, fresh-target restore and offline/live
 comparison tooling, see [hosted deployment durability](operations/hosted-durability.md).
@@ -969,7 +928,7 @@ check run and changes no check reuse key or runner configuration (metrics 6/8).
    relay. Keep transport/cache/upload and historic replay dependencies listed
    below. B1.7's hosted converter needs B1.6b plus journal compaction; B1.8 needs
    the replacement browser path. Retired Convex table definitions remain until
-   B1.9's separately approved export/purge after two weekly backups.
+   B1.9's separately approved export/purge after its verified-backup and alert gate.
 
 For old CLIs, server mode's source-contract schema 2 is the upgrade boundary:
 `requireSourceContract` returns `CLI_UPGRADE_REQUIRED` for schema-1 readers;
@@ -1448,80 +1407,79 @@ retained functions still have normal callers. Re-run impact selection at deletio
 
 | Module                                |   LOC | Retiring portion and last caller/boundary                                                                                                                                                                                                                        |
 | ------------------------------------- | ----: | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `src/native-exchange.ts`              |   821 | Push prepare/push halves; keep pullNativeExchange and shared ContentPin/manifest/transport types for recovery-source and checkouts. Last push callers: host-cli, exchange-cli, bound-exchange.                                                                   |
-| `src/exchange-client.ts`              |   698 | Publication/migration/journal/returnSource halves; keep current/objects/missing/upload/manifest/download for saves and cache. Last push/return callers: host-cli, native-exchange and exchange-convex-fetch; recovery-transport still needs journal until B1.5a. |
-| `convex/projectExchangeActions.ts`    |   524 | Publication/published/publish/completeHistory entry points; keep checkpoint/manifest/downloadBatch/downloadPart/objectBytes/exchangeMetadata. Last callers: exchange-client and host-cli (via client).                                                           |
-| `src/host-binding.ts`                 |   212 | Push, autoExchange and acceptanceOwner configuration; last consumers: host-command, bound-exchange, auto-exchange-wake, owner-acceptance-consumer.                                                                                                               |
-| `src/host-command.ts`                 |   190 | Listen/sync-agent/auto-sync/spend flags, flush consumer and status wiring; last caller: host-cli.                                                                                                                                                                |
-| `src/host-cli.ts`                     |   277 | Creation prepare/push/completeHistory replaced by B1.2c seed; entry: CLI host.                                                                                                                                                                                   |
-| `src/cli.ts`                          |   442 | Exchange/migrate-archive dispatch; top-level executable.                                                                                                                                                                                                         |
-| `src/mcp.ts`                          |   302 | Owner activity/reconcile command exposure; entry: MCP.                                                                                                                                                                                                           |
-| `src/mcp-agent-workflow.ts`           |   269 | forge_exchange and forge_migrate_archive exposure; entry: MCP agent mode.                                                                                                                                                                                        |
-| `src/native-work.ts`                  |   609 | Owner-request compose/accept branch and creation/promotion ladder; callers: WorkService and init-native CLI; unbound acceptance stays.                                                                                                                           |
-| `src/work.ts`                         |   963 | Retained Work dispatch; callers: CLI/MCP/HTTP Work service.                                                                                                                                                                          |
-| `src/work-records.ts`                 |   389 | recordPendingExchange on writes; WorkStore and record transactions still need record storage.                                                                                                                                                                    |
-| `src/work-store.ts`                   |   283 | Auto-exchange wakes and creation/format promotion; WorkService/record transactions retain storage.                                                                                                                                                               |
-| `src/landing-worker.ts`               |   238 | notifyAutoExchange after landing; native unbound landing controller survives.                                                                                                                                                                                    |
-| `src/landing-worker-wake.ts`          |    28 | notifyAutoExchange wake; native Work writers retain landing wakes.                                                                                                                                                                                               |
-| `src/presence-worker.ts`              |   294 | queueAgentSync; Lane presence callers remain.                                                                                                                                                                                                                    |
-| `src/agent-workflow.ts`               |   884 | B5 relay scheduling; agent CLI/MCP lifecycle remains.                                                                                                                                                                                                            |
-| `src/http.ts`                         |   128 | startOwnerAcceptanceListener; CLI serve remains Git/Work transport.                                                                                                                                                                                              |
-| `src/github-sync-status.ts`           |    81 | projectOwnerSync display publication; GitHub mirror/status callers remain.                                                                                                                                                                                       |
-| `src/pending-status.ts`               |   374 | Auto-exchange projection; agent status callers remain.                                                                                                                                                                                                           |
-| `src/pending-status-read.ts`          |   102 | Auto-exchange projection; pending-status callers remain.                                                                                                                                                                                                         |
-| `src/exchange-convex-fetch.ts`        |   124 | Source-return/supersede RPC routing; exchange-client retains object transport.                                                                                                                                                                                   |
-| `convex/projectWork.ts`               |   602 | detachReturnMetadata/requireActiveReturn and retirePartition scheduling; projectWorkActions retains legacy replay until folded.                                                                                                                                  |
-| `convex/projectWorkLoad.ts`           |   195 | publicationSnapshot and migration replay; projectWork query/action callers need a replacement before deletion.                                                                                                                                                   |
-| `convex/projectWorkIndex.ts`          |   227 | projectFreshness projection; hosted Work reads remain.                                                                                                                                                                                                           |
-| `convex/projectWorkActions.ts`        |   249 | acceptChannel native owner relay and legacy selection branch; hosted-work-client/legacy browser accept must route to hosted landing.                                                                                                                             |
-| `convex/projectSourceProjection.ts`   |   165 | Owner projection dependency; caller: projectWorkIndexActions. Verify projectHostedProjection parity before deleting G.                                                                                                                                         |
-| `convex/projectWorkCommand.ts`        |   177 | hostedChannelMoves hydration; projectWorkActions uses legacy Work command replay until folded.                                                                                                                                                                   |
-| `convex/projectWorkIndexedCommand.ts` |   182 | hostedChannelMoves hydration; projectWorkActions indexed command path.                                                                                                                                                                                           |
-| `convex/projectWorkProjection.ts`     |   250 | hostedChannelMoves read/write; projectWork command/index paths.                                                                                                                                                                                                  |
-| `convex/projectMain.ts`               |   112 | Legacy selected-main read; hosted-main-checkout must use projectHostedChannels current in server mode.                                                                                                                                                           |
-| `web/src/HostedWork.tsx`              |   823 | Exchange/source-return and legacy IntentDelivery wiring; hosted project shell remains.                                                                                                                                                                           |
-| `web/src/ProjectBackups.tsx`          |   556 | Publish UI; project backup settings remain.                                                                                                                                                                                                                      |
-| `web/src/hosted-handoff.ts`           |   144 | Pinned source/Work recovery pair; reconciliation command removed.                                                                                                                                                                                              |
-| `src/work-types.ts`                   | 1,329 | Legacy workSchema union and refine gates; shared WorkData imports remain across src/convex/web.                                                                                                                                                                  |
-| `src/work-unified-types.ts`           |   104 | Dual isUnifiedWork/safeParseWork paths; WorkStore and hosted readers retain current-format parsing.                                                                                                                                                              |
-| `src/work-hosted-intents.ts`          |    70 | Hosted journal converter; projectWorkLoad, work-backup, work-metadata and source-return journal need original replay until compaction. Keep restore-only conversion.                                      |
-| `src/work-intent-local.ts`            |    58 | noteId imported from work-intent-converter; ordinary unified Intent/note writes survive: extract noteId before making converter restore-only.                                                                                                                    |
-| `src/work-format.ts`                  |    13 | B1.7 creation/current-format gate or lazy-promotion site; retain its ordinary native/Work callers, remove the legacy branch after migration. Historic replay keeps its original representation.                                                                  |
-| `src/native-git.ts`                   |   422 | B1.7 creation/current-format gate or lazy-promotion site; retain its ordinary native/Work callers, remove the legacy branch after migration. Historic replay keeps its original representation.                                                                  |
-| `src/hosted-bootstrap.ts`             |    78 | B1.7 creation/current-format gate or lazy-promotion site; retain its ordinary native/Work callers, remove the legacy branch after migration. Historic replay keeps its original representation.                                                                  |
-| `src/hosted-github-bootstrap.ts`      |   117 | B1.7 creation/current-format gate or lazy-promotion site; retain its ordinary native/Work callers, remove the legacy branch after migration. Historic replay keeps its original representation.                                                                  |
-| `src/work-autonomy.ts`                |   135 | B1.7 creation/current-format gate or lazy-promotion site; retain its ordinary native/Work callers, remove the legacy branch after migration. Historic replay keeps its original representation.                                                                  |
-| `src/landing-batch-store.ts`          |   466 | B1.7 creation/current-format gate or lazy-promotion site; retain its ordinary native/Work callers, remove the legacy branch after migration. Historic replay keeps its original representation.                                                                  |
-| `src/work-channel.ts`                 |   512 | B1.7 creation/current-format gate or lazy-promotion site; retain its ordinary native/Work callers, remove the legacy branch after migration. Historic replay keeps its original representation.                                                                  |
-| `src/post-accept-selection.ts`        |    83 | B1.7 creation/current-format gate or lazy-promotion site; retain its ordinary native/Work callers, remove the legacy branch after migration. Historic replay keeps its original representation.                                                                  |
-| `src/native-contribution-register.ts` |   138 | B1.7 creation/current-format gate or lazy-promotion site; retain its ordinary native/Work callers, remove the legacy branch after migration. Historic replay keeps its original representation.                                                                  |
-| `src/work-record-transaction.ts`      |   434 | B1.7 creation/current-format gate or lazy-promotion site; retain its ordinary native/Work callers, remove the legacy branch after migration. Historic replay keeps its original representation.                                                                  |
-| `src/work-lifecycle.ts`               |    29 | B1.7 creation/current-format gate or lazy-promotion site; retain its ordinary native/Work callers, remove the legacy branch after migration. Historic replay keeps its original representation.                                                                  |
-| `src/work-metadata.ts`                |   268 | B1.7 creation/current-format gate or lazy-promotion site; retain its ordinary native/Work callers, remove the legacy branch after migration. Historic replay keeps its original representation.                                                                  |
-| `src/native-pr.ts`                    |   259 | B1.7 creation/current-format gate or lazy-promotion site; retain its ordinary native/Work callers, remove the legacy branch after migration. Historic replay keeps its original representation.                                                                  |
-| `src/work-evidence.ts`                |   208 | B1.7 creation/current-format gate or lazy-promotion site; retain its ordinary native/Work callers, remove the legacy branch after migration. Historic replay keeps its original representation.                                                                  |
-| `src/native-objects.ts`               |   102 | B1.7 creation/current-format gate or lazy-promotion site; retain its ordinary native/Work callers, remove the legacy branch after migration. Historic replay keeps its original representation.                                                                  |
-| `src/native-work-history.ts`          |   229 | B1.7 creation/current-format gate or lazy-promotion site; retain its ordinary native/Work callers, remove the legacy branch after migration. Historic replay keeps its original representation.                                                                  |
-| `src/landing-replay-planner.ts`       |   217 | B1.7 creation/current-format gate or lazy-promotion site; retain its ordinary native/Work callers, remove the legacy branch after migration. Historic replay keeps its original representation.                                                                  |
-| `web/src/hosted-work-index.ts`        |   304 | B1.8 freshness/unsynced status or projection consumer; retain the page/component and its route/parent, remove only owner-lag display logic.                                                                                                                      |
-| `web/src/HostedLanes.tsx`             |   298 | B1.8 freshness/unsynced status or projection consumer; retain the page/component and its route/parent, remove only owner-lag display logic.                                                                                                                      |
-| `web/src/cockpit/HostedNow.tsx`       |   407 | B1.8 freshness/unsynced status or projection consumer; retain the page/component and its route/parent, remove only owner-lag display logic.                                                                                                                      |
-| `web/src/cockpit/LaneRow.tsx`         |   161 | B1.8 freshness/unsynced status or projection consumer; retain the page/component and its route/parent, remove only owner-lag display logic.                                                                                                                      |
-| `web/src/intents/IntentBoard.tsx`     |   285 | B1.8 freshness/unsynced status or projection consumer; retain the page/component and its route/parent, remove only owner-lag display logic.                                                                                                                      |
-| `web/src/intents/IntentDetail.tsx`    |   479 | B1.8 freshness/unsynced status or projection consumer; retain the page/component and its route/parent, remove only owner-lag display logic.                                                                                                                      |
-| `web/src/intents/IntentParts.tsx`     |   452 | B1.8 freshness/unsynced status or projection consumer; retain the page/component and its route/parent, remove only owner-lag display logic.                                                                                                                      |
-| `web/src/lane/HostedLane.tsx`         |   591 | B1.8 freshness/unsynced status or projection consumer; retain the page/component and its route/parent, remove only owner-lag display logic.                                                                                                                      |
-| `web/src/lane/LaneParts.tsx`          |   176 | B1.8 freshness/unsynced status or projection consumer; retain the page/component and its route/parent, remove only owner-lag display logic.                                                                                                                      |
-| `web/src/shell/Attention.tsx`         |   223 | B1.8 freshness/unsynced status or projection consumer; retain the page/component and its route/parent, remove only owner-lag display logic.                                                                                                                      |
-| `web/src/shell/HostedStrip.tsx`       |    64 | B1.8 freshness/unsynced status or projection consumer; retain the page/component and its route/parent, remove only owner-lag display logic.                                                                                                                      |
-| `web/src/ui/Rail.tsx`                 |    70 | B1.8 freshness/unsynced status or projection consumer; retain the page/component and its route/parent, remove only owner-lag display logic.                                                                                                                      |
-| `web/src/ui/primitives.tsx`           |   334 | B1.8 freshness/unsynced status or projection consumer; retain the page/component and its route/parent, remove only owner-lag display logic.                                                                                                                      |
-| `web/src/views/LaneViews.tsx`         |   114 | B1.8 freshness/unsynced status or projection consumer; retain the page/component and its route/parent, remove only owner-lag display logic.                                                                                                                      |
-| `web/src/views/ViewPage.tsx`          |   332 | B1.8 freshness/unsynced status or projection consumer; retain the page/component and its route/parent, remove only owner-lag display logic.                                                                                                                      |
-| `web/src/views/WorkMap.tsx`           |   325 | B1.8 freshness/unsynced status or projection consumer; retain the page/component and its route/parent, remove only owner-lag display logic.                                                                                                                      |
-| `web/src/views/intent-views.ts`       |    86 | B1.8 freshness/unsynced status or projection consumer; retain the page/component and its route/parent, remove only owner-lag display logic.                                                                                                                      |
-| `web/src/intents/HostedIntents.tsx`   |   487 | B1.6c OwnerLifecycle/owner-request call site; retain the page and re-parent lifecycle onto hosted records.                                                                                                                                                       |
-| `web/src/PlanningIntents.tsx`         |   361 | B1.6c OwnerLifecycle/owner-request call site; retain the page and re-parent lifecycle onto hosted records.                                                                                                                                                       |
+| `src/native-exchange.ts`              | 237 | Push prepare/push halves; keep pullNativeExchange and shared ContentPin/manifest/transport types for recovery-source and checkouts. Last push callers: host-cli, exchange-cli, bound-exchange.                                                                   |
+| `src/exchange-client.ts`              | 511 | Publication/migration/journal/returnSource halves; keep current/objects/missing/upload/manifest/download for saves and cache. Last push/return callers: host-cli, native-exchange and exchange-convex-fetch; recovery-transport still needs journal until B1.5a. |
+| `convex/projectExchangeActions.ts`    | 273 | Publication/published/publish/completeHistory entry points; keep checkpoint/manifest/downloadBatch/downloadPart/objectBytes/exchangeMetadata. Last callers: exchange-client and host-cli (via client).                                                           |
+| `src/host-binding.ts`                 | 300 | Push, autoExchange and acceptanceOwner configuration; last consumers: host-command, bound-exchange, auto-exchange-wake, owner-acceptance-consumer.                                                                                                               |
+| `src/host-command.ts`                 | 162 | Listen/sync-agent/auto-sync/spend flags, flush consumer and status wiring; last caller: host-cli.                                                                                                                                                                |
+| `src/host-cli.ts`                     | 246 | Creation prepare/push/completeHistory replaced by B1.2c seed; entry: CLI host.                                                                                                                                                                                   |
+| `src/cli.ts`                          | 513 | Exchange/migrate-archive dispatch; top-level executable.                                                                                                                                                                                                         |
+| `src/mcp.ts`                          | 329 | Owner activity/reconcile command exposure; entry: MCP.                                                                                                                                                                                                           |
+| `src/mcp-agent-workflow.ts`           | 343 | forge_exchange and forge_migrate_archive exposure; entry: MCP agent mode.                                                                                                                                                                                        |
+| `src/native-work.ts`                  | 620 | Owner-request compose/accept branch and creation/promotion ladder; callers: WorkService and init-native CLI; unbound acceptance stays.                                                                                                                           |
+| `src/work.ts`                         | 995 | Retained Work dispatch; callers: CLI/MCP Work service.                                                                                                                                                                          |
+| `src/work-records.ts`                 | 439 | recordPendingExchange on writes; WorkStore and record transactions still need record storage.                                                                                                                                                                    |
+| `src/work-store.ts`                   | 356 | Auto-exchange wakes and creation/format promotion; WorkService/record transactions retain storage.                                                                                                                                                               |
+| `src/landing-worker.ts`               | 339 | notifyAutoExchange after landing; native unbound landing controller survives.                                                                                                                                                                                    |
+| `src/landing-worker-wake.ts`          | 27 | notifyAutoExchange wake; native Work writers retain landing wakes.                                                                                                                                                                                               |
+| `src/presence-worker.ts`              | 295 | queueAgentSync; Lane presence callers remain.                                                                                                                                                                                                                    |
+| `src/agent-workflow.ts`               | 908 | B5 relay scheduling; agent CLI/MCP lifecycle remains.                                                                                                                                                                                                            |
+| `src/github-sync-status.ts`           | 83 | projectOwnerSync display publication; GitHub mirror/status callers remain.                                                                                                                                                                                       |
+| `src/pending-status.ts`               | 381 | Auto-exchange projection; agent status callers remain.                                                                                                                                                                                                           |
+| `src/pending-status-read.ts`          | 244 | Auto-exchange projection; pending-status callers remain.                                                                                                                                                                                                         |
+| `src/exchange-convex-fetch.ts`        | 145 | Source-return/supersede RPC routing; exchange-client retains object transport.                                                                                                                                                                                   |
+| `convex/projectWork.ts`               | 409 | detachReturnMetadata/requireActiveReturn and retirePartition scheduling; projectWorkActions retains legacy replay until folded.                                                                                                                                  |
+| `convex/projectWorkLoad.ts`           | 211 | publicationSnapshot and migration replay; projectWork query/action callers need a replacement before deletion.                                                                                                                                                   |
+| `convex/projectWorkIndex.ts`          | 228 | projectFreshness projection; hosted Work reads remain.                                                                                                                                                                                                           |
+| `convex/projectWorkActions.ts`        | 173 | acceptChannel native owner relay and legacy selection branch; hosted-work-client/legacy browser accept must route to hosted landing.                                                                                                                             |
+| `convex/projectSourceProjection.ts`   | 193 | Owner projection dependency; caller: projectWorkIndexActions. Verify projectHostedProjection parity before deleting G.                                                                                                                                         |
+| `convex/projectWorkCommand.ts`        | 203 | hostedChannelMoves hydration; projectWorkActions uses legacy Work command replay until folded.                                                                                                                                                                   |
+| `convex/projectWorkIndexedCommand.ts` | 184 | hostedChannelMoves hydration; projectWorkActions indexed command path.                                                                                                                                                                                           |
+| `convex/projectWorkProjection.ts`     | 252 | hostedChannelMoves read/write; projectWork command/index paths.                                                                                                                                                                                                  |
+| `convex/projectMain.ts`               | 110 | Legacy selected-main read; hosted-main-checkout must use projectHostedChannels current in server mode.                                                                                                                                                           |
+| `web/src/HostedWork.tsx`              | 816 | Exchange/source-return and legacy IntentDelivery wiring; hosted project shell remains.                                                                                                                                                                           |
+| `web/src/ProjectBackups.tsx`          | 553 | Publish UI; project backup settings remain.                                                                                                                                                                                                                      |
+| `web/src/hosted-handoff.ts`           | 127 | Pinned source/Work recovery pair; reconciliation command removed.                                                                                                                                                                                              |
+| `src/work-types.ts`                   | 1,352 | Legacy workSchema union and refine gates; shared WorkData imports remain across src/convex/web.                                                                                                                                                                  |
+| `src/work-unified-types.ts`           | 108 | Dual isUnifiedWork/safeParseWork paths; WorkStore and hosted readers retain current-format parsing.                                                                                                                                                              |
+| `src/work-hosted-intents.ts`          | 71 | Hosted journal converter; projectWorkLoad, work-backup, work-metadata and source-return journal need original replay until compaction. Keep restore-only conversion.                                      |
+| `src/work-intent-local.ts`            | 70 | noteId imported from work-intent-converter; ordinary unified Intent/note writes survive: extract noteId before making converter restore-only.                                                                                                                    |
+| `src/work-format.ts`                  | 30 | B1.7 creation/current-format gate or lazy-promotion site; retain its ordinary native/Work callers, remove the legacy branch after migration. Historic replay keeps its original representation.                                                                  |
+| `src/native-git.ts`                   | 414 | B1.7 creation/current-format gate or lazy-promotion site; retain its ordinary native/Work callers, remove the legacy branch after migration. Historic replay keeps its original representation.                                                                  |
+| `src/hosted-bootstrap.ts`             | 69 | B1.7 creation/current-format gate or lazy-promotion site; retain its ordinary native/Work callers, remove the legacy branch after migration. Historic replay keeps its original representation.                                                                  |
+| `src/hosted-github-bootstrap.ts`      | 113 | B1.7 creation/current-format gate or lazy-promotion site; retain its ordinary native/Work callers, remove the legacy branch after migration. Historic replay keeps its original representation.                                                                  |
+| `src/work-autonomy.ts`                | 137 | B1.7 creation/current-format gate or lazy-promotion site; retain its ordinary native/Work callers, remove the legacy branch after migration. Historic replay keeps its original representation.                                                                  |
+| `src/landing-batch-store.ts`          | 625 | B1.7 creation/current-format gate or lazy-promotion site; retain its ordinary native/Work callers, remove the legacy branch after migration. Historic replay keeps its original representation.                                                                  |
+| `src/work-channel.ts`                 | 512 | B1.7 creation/current-format gate or lazy-promotion site; retain its ordinary native/Work callers, remove the legacy branch after migration. Historic replay keeps its original representation.                                                                  |
+| `src/post-accept-selection.ts`        | 82 | B1.7 creation/current-format gate or lazy-promotion site; retain its ordinary native/Work callers, remove the legacy branch after migration. Historic replay keeps its original representation.                                                                  |
+| `src/native-contribution-register.ts` | 134 | B1.7 creation/current-format gate or lazy-promotion site; retain its ordinary native/Work callers, remove the legacy branch after migration. Historic replay keeps its original representation.                                                                  |
+| `src/work-record-transaction.ts`      | 554 | B1.7 creation/current-format gate or lazy-promotion site; retain its ordinary native/Work callers, remove the legacy branch after migration. Historic replay keeps its original representation.                                                                  |
+| `src/work-lifecycle.ts`               | 29 | B1.7 creation/current-format gate or lazy-promotion site; retain its ordinary native/Work callers, remove the legacy branch after migration. Historic replay keeps its original representation.                                                                  |
+| `src/work-metadata.ts`                | 268 | B1.7 creation/current-format gate or lazy-promotion site; retain its ordinary native/Work callers, remove the legacy branch after migration. Historic replay keeps its original representation.                                                                  |
+| `src/native-pr.ts`                    | 260 | B1.7 creation/current-format gate or lazy-promotion site; retain its ordinary native/Work callers, remove the legacy branch after migration. Historic replay keeps its original representation.                                                                  |
+| `src/work-evidence.ts`                | 210 | B1.7 creation/current-format gate or lazy-promotion site; retain its ordinary native/Work callers, remove the legacy branch after migration. Historic replay keeps its original representation.                                                                  |
+| `src/native-objects.ts`               | 112 | B1.7 creation/current-format gate or lazy-promotion site; retain its ordinary native/Work callers, remove the legacy branch after migration. Historic replay keeps its original representation.                                                                  |
+| `src/native-work-history.ts`          | 252 | B1.7 creation/current-format gate or lazy-promotion site; retain its ordinary native/Work callers, remove the legacy branch after migration. Historic replay keeps its original representation.                                                                  |
+| `src/landing-replay-planner.ts`       | 216 | B1.7 creation/current-format gate or lazy-promotion site; retain its ordinary native/Work callers, remove the legacy branch after migration. Historic replay keeps its original representation.                                                                  |
+| `web/src/hosted-work-index.ts`        | 347 | B1.8 freshness/unsynced status or projection consumer; retain the page/component and its route/parent, remove only owner-lag display logic.                                                                                                                      |
+| `web/src/HostedLanes.tsx`             | 296 | B1.8 freshness/unsynced status or projection consumer; retain the page/component and its route/parent, remove only owner-lag display logic.                                                                                                                      |
+| `web/src/cockpit/HostedNow.tsx`       | 448 | B1.8 freshness/unsynced status or projection consumer; retain the page/component and its route/parent, remove only owner-lag display logic.                                                                                                                      |
+| `web/src/cockpit/LaneRow.tsx`         | 154 | B1.8 freshness/unsynced status or projection consumer; retain the page/component and its route/parent, remove only owner-lag display logic.                                                                                                                      |
+| `web/src/intents/IntentBoard.tsx`     | 283 | B1.8 freshness/unsynced status or projection consumer; retain the page/component and its route/parent, remove only owner-lag display logic.                                                                                                                      |
+| `web/src/intents/IntentDetail.tsx`    | 480 | B1.8 freshness/unsynced status or projection consumer; retain the page/component and its route/parent, remove only owner-lag display logic.                                                                                                                      |
+| `web/src/intents/IntentParts.tsx`     | 446 | B1.8 freshness/unsynced status or projection consumer; retain the page/component and its route/parent, remove only owner-lag display logic.                                                                                                                      |
+| `web/src/lane/HostedLane.tsx`         | 581 | B1.8 freshness/unsynced status or projection consumer; retain the page/component and its route/parent, remove only owner-lag display logic.                                                                                                                      |
+| `web/src/lane/LaneParts.tsx`          | 173 | B1.8 freshness/unsynced status or projection consumer; retain the page/component and its route/parent, remove only owner-lag display logic.                                                                                                                      |
+| `web/src/shell/Attention.tsx`         | 307 | B1.8 freshness/unsynced status or projection consumer; retain the page/component and its route/parent, remove only owner-lag display logic.                                                                                                                      |
+| `web/src/shell/HostedStrip.tsx`       | 59 | B1.8 freshness/unsynced status or projection consumer; retain the page/component and its route/parent, remove only owner-lag display logic.                                                                                                                      |
+| `web/src/ui/Rail.tsx`                 | 65 | B1.8 freshness/unsynced status or projection consumer; retain the page/component and its route/parent, remove only owner-lag display logic.                                                                                                                      |
+| `web/src/ui/primitives.tsx`           | 322 | B1.8 freshness/unsynced status or projection consumer; retain the page/component and its route/parent, remove only owner-lag display logic.                                                                                                                      |
+| `web/src/views/LaneViews.tsx`         | 112 | B1.8 freshness/unsynced status or projection consumer; retain the page/component and its route/parent, remove only owner-lag display logic.                                                                                                                      |
+| `web/src/views/ViewPage.tsx`          | 346 | B1.8 freshness/unsynced status or projection consumer; retain the page/component and its route/parent, remove only owner-lag display logic.                                                                                                                      |
+| `web/src/views/WorkMap.tsx`           | 322 | B1.8 freshness/unsynced status or projection consumer; retain the page/component and its route/parent, remove only owner-lag display logic.                                                                                                                      |
+| `web/src/views/intent-views.ts`       | 65 | B1.8 freshness/unsynced status or projection consumer; retain the page/component and its route/parent, remove only owner-lag display logic.                                                                                                                      |
+| `web/src/intents/HostedIntents.tsx`   | 483 | B1.6c OwnerLifecycle/owner-request call site; retain the page and re-parent lifecycle onto hosted records.                                                                                                                                                       |
+| `web/src/PlanningIntents.tsx`         | 361 | B1.6c OwnerLifecycle/owner-request call site; retain the page and re-parent lifecycle onto hosted records.                                                                                                                                                       |
 
 The B group has a live retained dependency that the input inventory understated:
 `src/work-source-return-chunks.ts` (69 LOC) imports **and calls**
@@ -1543,6 +1501,7 @@ reader/cache/validation modules. Saved-state recovery, cache, checkpoint upload
 or historic replay still calls them. `src/native-checkpoint-publication.ts` is
 native checkpoint lock preparation, **not** hosted push publication; keep it.
 Unbound native Work and its landing worker also stay.
+
 
 #### Tests, fixtures and benchmark scripts
 
@@ -1773,11 +1732,10 @@ vector requires a further record capability and reader/export compatibility work
 
 ## Maintainer release selection
 
-The [maintainer release](operations/release.md#select-and-verify-the-owner-runtime)
-selects the whole launchd owner install, retains the previous install and an exact
-rollback command, and verifies the restarted owner's authenticated install identity.
-Legacy directory copies migrate to a retained rollback directory and a selected
-symlink. Worker launches reject a different install from their loaded parent.
+The [maintainer release](operations/release.md) retains atomic CLI wrapper selection
+and its previous bytes for explicit recovery. Supervised owner runtime selection,
+restart and worker retirement are removed. Worker launches still reject a different
+install from their loaded parent.
 
 After a release succeeds it cleans up on a best-effort basis. The build source copy
 drops `node_modules`, `.netlify/plugins`, `.git` and every top-level `.env*` file (the

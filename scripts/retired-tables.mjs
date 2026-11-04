@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { withQueueSlot } from '../dist/landing-queue.js';
 import { spawn } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
@@ -7,18 +8,19 @@ import { parseArgs } from 'node:util';
 import { deploymentOptions } from './hosted-durability.mjs';
 import { failure } from './lib/hosted-durability-compare.mjs';
 import { exportTables, inventory, restoreTables } from './lib/retired-tables.mjs';
+import { purgeTables } from './lib/retired-tables-execute.mjs';
 import { checkApproval, definitionBlockers, purgePlan } from './lib/retired-tables-purge.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
-const help = `Usage (B1.9 retired Convex tables; nothing here deletes data):
+const help = `Usage (B1.9 retired Convex tables; dry run unless --execute):
   node scripts/retired-tables.mjs inventory --deployment NAME
   node scripts/retired-tables.mjs export --deployment NAME --dir NEW_PRIVATE_DIR
   node scripts/retired-tables.mjs restore --deployment SCRATCH_NAME --dir EXPORT_DIR
-  node scripts/retired-tables.mjs purge --deployment NAME --dir EXPORT_DIR --deployed-at ISO [--execute --approval FILE]
+  node scripts/retired-tables.mjs purge --deployment NAME --dir EXPORT_DIR --deployed-at ISO [--execute --approval FILE --operation-id UUID]
 
 Reads and imports go through the lockfile-pinned Convex CLI with the existing login or process credentials.
 purge is a dry run. --execute needs an approval record that names the deployment, the export manifest digest
-and two completed weekly backups after --deployed-at; the deletion step itself is not enabled in this slice.
+and one verified post-deploy backup after the backup fix and owner alert qualification.
 Exit: 0 = done, 1 = failed.`;
 
 export function parseCommand(args) {
@@ -32,6 +34,7 @@ export function parseCommand(args) {
       'deployed-at': { type: 'string' },
       execute: { type: 'boolean' },
       approval: { type: 'string' },
+      'operation-id': { type: 'string' },
     },
   });
   if (values.help) return { command: 'help' };
@@ -56,6 +59,7 @@ export function parseCommand(args) {
     ...(values.dir ? { directory: resolve(values.dir) } : {}),
     ...(deployedAt ? { deployedAt } : {}),
     execute: values.execute ?? false,
+    ...(values['operation-id'] ? { operationId: values['operation-id'] } : {}),
     ...(values.approval ? { approval: resolve(values.approval) } : {}),
   };
 }
@@ -113,27 +117,36 @@ export async function execute(
   }
   if (command.command === 'restore')
     return { operation: 'restore', ...(await restoreTables(runner, command.directory, command)) };
-  const plan = await purgePlan(runner, command.directory, command);
-  const blockers = await definitionBlockers(root);
-  if (command.execute) {
-    let record;
-    try {
-      record = JSON.parse(await readFile(command.approval, 'utf8'));
-    } catch {
-      throw failure('APPROVAL_INVALID');
+  const run = async () => {
+    const plan = await purgePlan(runner, command.directory, command);
+
+    if (command.execute) {
+      let record;
+      try {
+        record = JSON.parse(await readFile(command.approval, 'utf8'));
+      } catch {
+        throw failure('APPROVAL_INVALID');
+      }
+      checkApproval(record, plan, command);
+      return purgeTables(runner, command, plan);
     }
-    checkApproval(record, plan, command);
-    // A valid approval is necessary, not sufficient: this slice ships no deletion step.
-    throw failure('PURGE_NOT_ENABLED');
-  }
-  return {
-    operation: 'purge',
-    dryRun: true,
-    wouldDelete: false,
-    deletion: 'not performed; --execute needs the approval record and a later owner-approved slice',
-    ...plan,
-    definitionRemovalBlockers: blockers,
+    return {
+      operation: 'purge',
+      dryRun: true,
+      wouldDelete: false,
+      deletion: 'not performed; --execute needs the owner approval record and operation ID',
+      ...plan,
+      definitionRemovalBlockers: await definitionBlockers(root),
+    };
   };
+  if (!command.execute) return run();
+  const result = await withQueueSlot(
+    join(command.directory, '..', `purge-${command.operationId}-queue`),
+    run,
+    { anchor: resolve(command.directory, '..') },
+  );
+  if (!('value' in result)) throw failure('PURGE_BUSY');
+  return result.value;
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
@@ -143,7 +156,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
     console.log(result.help ?? JSON.stringify(result, null, 2));
   } catch (error) {
     const known =
-      /^(?:ARGUMENT_INVALID|APPROVAL_[A-Z_]+|DEPLOY_TIME_REQUIRED|PURGE_NOT_ENABLED|TABLE_[A-Z_]+|EXPORT_[A-Z_]+|RESTORE_[A-Z_]+|CONVEX_CLI_FAILED|DEPLOYMENT_CREDENTIAL_MISMATCH)$/;
+      /^(?:ARGUMENT_INVALID|APPROVAL_[A-Z_]+|DEPLOY_TIME_REQUIRED|PURGE_[A-Z_]+|TABLE_[A-Z_]+|EXPORT_[A-Z_]+|RESTORE_[A-Z_]+|CONVEX_CLI_FAILED|DEPLOYMENT_CREDENTIAL_MISMATCH)$/;
     console.error(
       JSON.stringify({
         error: {

@@ -7,7 +7,6 @@ import { join, resolve } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { WorkService } from '../dist/work.js';
-import { serveRepository } from '../dist/http.js';
 import { fixture, git, write, code } from './helpers.mjs';
 
 function graph(t) {
@@ -180,21 +179,12 @@ test('actual CLI and HTTP privately export pinned history without changing work 
   );
   assert.equal(cli.result.head, head);
   assert.deepEqual(Buffer.from(cli.result.entries[0].raw.data, 'base64'), originals.get(head));
-  const server = await serveRepository(root, 0);
-  t.after(() => server.close());
-  const url = `http://127.0.0.1:${server.port}/api/work`,
-    body = JSON.stringify({ revision: 0, command: command({ action: 'export-history', limit: 1 }) });
-  assert.equal(
-    (await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body })).status,
-    401,
-  );
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${server.token}` },
-    body,
-  });
-  assert.equal(response.status, 200);
-  const exported = (await response.json()).result;
+
+  const body = JSON.stringify({ revision: 0, command: command({ action: 'export-history', limit: 1 }) });
+
+  const response = await new WorkService(root).dispatch(JSON.parse(body).command, JSON.parse(body).revision);
+
+  const exported = (await response).result;
   assert.equal(exported.private, true);
   assert.equal(exported.entries[0].id, head);
   assert.equal(exported.nextOffset, 1);

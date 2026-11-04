@@ -1,19 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
-import { v } from 'convex/values';
+import { v, ConvexError } from 'convex/values';
+import { CUTOVER_UPGRADE } from '../src/cutover-version';
 import { serverRecoveryAuthority } from '../src/recovery-authority';
 import { query, mutation, type QueryCtx, type MutationCtx } from './cliServer';
 import type { Id, Doc } from './_generated/dataModel';
 import { activeOwnedProject } from './projectAuthority';
 import { workProject } from './projectWorkHead';
 import { sourceAuthority } from '../src/hosted-source-authority';
-import {
-  recoverySelectionSchema,
-  recoveryConnectionSchema,
-  sameRecoveryPins,
-} from '../src/recovery-protocol';
-import { hostedProjectRoot } from '../src/project-routes';
+import { recoverySelectionSchema, recoveryConnectionSchema } from '../src/recovery-protocol';
 import { hostedStartMain } from './projectHostedChannels';
-import { accountFor } from './urlIdentity';
 import { invariant } from '../src/errors';
 import { report } from './errors';
 
@@ -92,7 +87,7 @@ export const prepare = query({
   },
 });
 
-/** Records an explicit reconnect, without changing project identity, source, authority or access. */
+// Retain the old address for installed clients; native owner/client reconnect is removed.
 export const reconnect = mutation({
   args: {
     ...scope,
@@ -101,67 +96,7 @@ export const reconnect = mutation({
     role: v.union(v.literal('owner'), v.literal('client')),
   },
   returns: v.string(),
-  handler: async (ctx, input) => {
-    try {
-      const project = await recoveryOwned(ctx, input.projectId),
-        expected = recoverySelectionSchema.parse(JSON.parse(input.selection)),
-        request = JSON.stringify({ selection: expected, requestHash: input.requestHash, role: input.role }),
-        old = await find(ctx, input.projectId, input.operationId);
-      invariant(
-        !serverRecoveryAuthority({ binding: project }),
-        'SOURCE_AUTHORITY_STALE',
-        'Server-authority projects recover a runner and cache, never a native accepting owner.',
-      );
-      if (old) {
-        invariant(
-          old.request === request,
-          'WORK_OPERATION_CHANGED',
-          'Replay the original recovery operation and pins.',
-        );
-        return old.receipt;
-      }
-      const current = await recoverySelection(ctx, project);
-      invariant(
-        sameRecoveryPins(current, expected),
-        'WORK_STALE',
-        'Hosted source, Work or authority changed during recovery. The recovered files remain private and preserved.',
-      );
-      const web = process.env.FORGE_WEB_URL ?? process.env.SITE_URL,
-        account = await accountFor(ctx, project.owner);
-      invariant(
-        web && account && project.slug,
-        'HOST_CONFIGURATION',
-        'Configure the existing hosted project URL.',
-      );
-      const url = new URL(web);
-      url.pathname = hostedProjectRoot(account.handle, project.slug);
-      url.search = '';
-      url.hash = '';
-      const receipt = JSON.stringify(
-        recoveryConnectionSchema.parse({
-          operationId: input.operationId,
-          requestHash: input.requestHash,
-          role: input.role,
-          selection: current,
-          binding: {
-            projectId: project._id,
-            operationId: project.key,
-            projectUrl: url.href,
-            name: project.name,
-            visibility: project.visibility ?? 'private',
-            backupId: current.backupId,
-          },
-        }),
-      );
-      await ctx.db.insert('projectRecoveryConnections', {
-        projectId: input.projectId,
-        operationId: input.operationId,
-        request,
-        receipt,
-      });
-      return receipt;
-    } catch (error) {
-      return report(error);
-    }
+  handler: async () => {
+    throw new ConvexError({ code: 'CLI_UPGRADE_REQUIRED', message: CUTOVER_UPGRADE });
   },
 });

@@ -256,34 +256,6 @@ test('Intent abandon preflights cascade, preserves all children and can reopen a
   assert.equal(readFileSync(join(b.path, 'dirty.txt'), 'utf8'), 'retained\n');
 });
 
-test('local HTTP Work surface uses abandon semantics and rejects stale Lane pins', async () => {
-  const { agent, root } = await setup(true);
-  const lane = (await dispatch(agent, 'start', { outcome: 'HTTP candidate' })).result;
-  const { workRequest } = await import('../dist/work-http.js');
-  const { Readable } = await import('node:stream');
-  const request = command =>
-    Object.assign(Readable.from([JSON.stringify({ revision: agent.work.store.revision(), command })]), {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-    });
-  await assert.rejects(
-    workRequest(
-      root,
-      request({ action: 'abandon', laneId: lane.laneId, reason: 'Superseded', expectedHead: '0'.repeat(64) }),
-    ),
-    e => e.code === 'LANE_STALE',
-  );
-  const result = await workRequest(
-    root,
-    request({ action: 'abandon', laneId: lane.laneId, reason: 'Superseded' }),
-  );
-  assert.equal(result.result.state, 'abandoned');
-  await assert.rejects(
-    dispatch(agent, 'abandon', { reason: 'Missing target' }),
-    e => e.code === 'BAD_ARGUMENT',
-  );
-});
-
 test('abandon leaves a concurrent later save open, including on retry without expectedHead', async () => {
   const { agent } = await setup(true);
   const lane = (await dispatch(agent, 'start', { outcome: 'Concurrent saves' })).result;

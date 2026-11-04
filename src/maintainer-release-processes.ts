@@ -1,48 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 import { execFileSync } from 'node:child_process';
-import { readFileSync, readdirSync, realpathSync, existsSync } from 'node:fs';
+import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
 import { childEnv } from '../scripts/child-env.mjs';
 import { processStartTime } from './local-process.js';
 import { invariant } from './errors.js';
 
 export type ReleaseProcess = { pid: number; startTime: string; executablePath: string };
-export const sameReleaseProcess = (a: ReleaseProcess, b: ReleaseProcess) =>
-  a.pid === b.pid && a.startTime === b.startTime && a.executablePath === b.executablePath;
 export function belowRuntime(root: string, path: string) {
   const part = relative(resolve(root), resolve(path));
   return !!part && part !== '..' && !part.startsWith(`..${sep}`) && !isAbsolute(part);
-}
-// Physical check controllers retain their pinned runtime until completion.
-const workerNames = new Set([
-  'local-watcher-worker.js',
-  'auto-exchange.js',
-  'presence-worker.js',
-  'post-accept-main.js',
-  'agent-advisory-worker.js',
-  'github-auto-push.js',
-  'integration-preview-worker.js',
-  'self-metrics-weekly-worker.js',
-]);
-export function oldReleaseWorker(root: string, installed: string, process: ReleaseProcess) {
-  const path = process.executablePath;
-  if (belowRuntime(installed, path)) return false;
-  if (!workerNames.has(path.split('/').at(-1)!)) return false;
-  // Follow aliases too: a current-install alias must never be retired.
-  try {
-    if (!belowRuntime(root, path) && !belowRuntime(realpathSync(root), path)) return false;
-    const actual = realpathSync(path);
-    const location = relative(realpathSync(root), actual).split(sep).join('/');
-    const install =
-      /^(?:installed-owner(?:[.-][^/]*)?|installed-main[^/]*|releases\/[^/]+\/install-[^/]+)\/node_modules\/@nanthai\/forge\/dist\/[^/]+$/.test(
-        location,
-      );
-    return (
-      install && belowRuntime(realpathSync(root), actual) && !belowRuntime(realpathSync(installed), actual)
-    );
-  } catch {
-    return false; // Deleted/unobservable paths do not establish ownership.
-  }
 }
 const options = {
   encoding: 'utf8' as const,
@@ -86,15 +53,4 @@ export function releaseProcesses(): ReleaseProcess[] {
       const value = releaseProcessRow(row);
       return value ? [value] : [];
     });
-}
-/** Re-read both path and kernel start identity immediately before signalling. */
-export function signalReleaseProcess(target: ReleaseProcess, signal: 'SIGTERM' | 'SIGKILL') {
-  if (!releaseProcesses().some(current => sameReleaseProcess(current, target))) return false;
-  try {
-    process.kill(target.pid, signal);
-    return true;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ESRCH') return false;
-    throw error;
-  }
 }

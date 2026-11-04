@@ -2,7 +2,7 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, realpathSync, rmSync, statSync } from 'node:fs';
 import { isAbsolute, join, relative, sep } from 'node:path';
-import { releaseProcesses, belowRuntime } from './release-owner-processes.js';
+import { releaseProcesses, belowRuntime } from './maintainer-release-processes.js';
 import type { ReleaseJournal } from './maintainer-release-schema.js';
 
 /** Current release, the one it replaced, and the one before that: a rollback chain of depth 3. */

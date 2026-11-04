@@ -10,7 +10,6 @@ import { WorkService } from '../dist/work.js';
 import { NativeSource } from '../dist/native-source.js';
 import { initNative } from '../dist/native-work.js';
 import { restoreNativeWork } from '../dist/native-backup.js';
-import { serveRepository } from '../dist/http.js';
 
 function fixture(t) {
   const dir = mkdtempSync(join(tmpdir(), 'forge-native-policy-')),
@@ -417,15 +416,9 @@ test('native lost event registration and dead sequence recovery never restart co
     readWorkBytes(join(restored.store.directory, 'work.json')),
     readWorkBytes(join(f.w.store.directory, 'work.json')),
   );
-  const server = await serveRepository(target, 0);
-  t.after(() => server.close());
-  const url = new URL(server.url),
-    token = new URLSearchParams(url.hash.slice(1)).get('token');
-  assert.equal((await fetch(url.origin + '/api/work')).status, 401);
-  const response = await fetch(url.origin + '/api/work', {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
+
+  const response = await new WorkService(target).dispatch(
+    {
       revision: 0,
       command: {
         action: 'assess-invariant',
@@ -434,8 +427,18 @@ test('native lost event registration and dead sequence recovery never restart co
         viewId: f.view.id,
         expectedHead: f.view.head,
       },
-    }),
-  });
-  assert.equal(response.status, 200);
-  assert.equal((await response.json()).result.satisfied, false);
+    }.command,
+    {
+      revision: 0,
+      command: {
+        action: 'assess-invariant',
+        id: policy.id,
+        definition: policy.definition,
+        viewId: f.view.id,
+        expectedHead: f.view.head,
+      },
+    }.revision,
+  );
+
+  assert.equal((await response).result.satisfied, false);
 });

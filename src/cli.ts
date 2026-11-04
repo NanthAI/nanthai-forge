@@ -82,7 +82,7 @@ Usage:
   nforge agent <root> <read> [json | --command-file FILE]
   nforge x <root> <operator-action> [json | --command-file FILE]
   nforge owner refresh <root>
-  nforge recover NEW_OWNER [reconnect|client] --command-file REQUEST.json
+  nforge recover NEW_RUNNER --command-file REQUEST.json
   nforge policy <root>
   nforge set-policy <root> JSON
   nforge import-native-git <git-root> <exact-commit> <new-directory>
@@ -92,7 +92,6 @@ Usage:
   nforge work <git-worktree-root> [command-json expected-revision]
   nforge work <git-worktree-root> --command-file <json-file> <expected-revision>
   nforge restore-work <backup-directory-or-archive> <new-directory> [--journal HOSTED_WORK.json]
-  nforge serve <root> [--port N]
   nforge mcp <root> [--work | --agent]
   nforge mcp-agent <forge-convex-deployment-url>
   nforge mcp-config <root> [--agent]
@@ -108,7 +107,7 @@ Usage:
   nforge imports <git-worktree-root> <relative-file> [--limit N]
   nforge source <git-worktree-root> <relative-file> [start-line] [end-line]
 
-Query results are JSON; serve runs a token-protected local Git smart-HTTP and Work API (no browser UI; use the hosted app) and mcp speaks stdio. Queries refuse stale source; run index again after edits.
+Query results are JSON; mcp speaks stdio. Queries refuse stale source; run index again after edits.
 Artifacts stay in <root>/.forge/index.json. Optional work publication/PR import/check uses GitHub through local gh credentials.
 MCP defaults to source tools. --work explicitly adds local work commands and GitHub import/publish/check. --agent exposes concise recorded workflow and selected source tools; login or configured FORGE_AUTH_TOKEN also enables native exchange and scoped hosted Work reads. Use mcp-coordination for hosted activity/messages and scoped Work reads.
 MCP-agent uses FORGE_AGENT_TOKEN from the process environment for explicitly delegated hosted source reads only.
@@ -296,25 +295,6 @@ async function main(args: string[]): Promise<unknown> {
       noticeViewAlias(command.action);
     return work.dispatch(command, Number(args.at(-1)));
   }
-  if (args[0] === 'serve') {
-    invariant(
-      args[1] && (args.length === 2 || (args.length === 4 && args[2] === '--port' && /^\d+$/.test(args[3]!))),
-      'BAD_ARGUMENT',
-      'Use serve <root> [--port N].',
-    );
-    const server = await (
-      await import('./http.js')
-    ).serveRepository(args[1], args[3] === undefined ? 4173 : Number(args[3]));
-    process.stdout.write(
-      `N:Forge local server: ${server.url}\nGit (/api/git/) and Work (/api/work) accept Authorization: Bearer <token>. Keep it private. Stop with Ctrl+C.\n`,
-    );
-    const close = () => {
-      void server.close();
-    };
-    process.once('SIGINT', close);
-    process.once('SIGTERM', close);
-    return undefined;
-  }
   if (args[0] === 'mcp') {
     const explicitHosted =
       args.length === 7 && args[2] === '--agent' && args[3] === '--url' && args[5] === '--project-id';
@@ -455,9 +435,6 @@ async function main(args: string[]): Promise<unknown> {
       );
   }
 }
-function shellQuote(value: string) {
-  return "'" + value.replaceAll("'", "'\\''") + "'";
-}
 // A closed reader (`| head`) must not crash the process with EPIPE mid-action; output is dropped.
 for (const stream of [process.stdout, process.stderr])
   stream.on('error', error => {
@@ -516,7 +493,7 @@ try {
       const result = (output as { result?: { status?: string } }).result;
       if (result?.status === 'awaiting-review')
         process.stderr.write(
-          `Next: nforge serve ${shellQuote(process.argv[3]!)} — open Review and accept the checked Candidate as a person.\n`,
+          `Next: review and accept the checked Candidate through the project's configured acceptance authority.\n`,
         );
     }
   }

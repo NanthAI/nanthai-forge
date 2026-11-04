@@ -2,14 +2,12 @@
 // Standard code verification: installs and exercises the actual local npm archive.
 import assert from 'node:assert/strict';
 import { cleanupOwner } from '../tests/owner-cleanup.mjs';
-import { spawn, spawnSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import {
-  closeSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
-  openSync,
   readFileSync,
   realpathSync,
   rmSync,
@@ -31,13 +29,10 @@ const option = name => {
   return i < 0 ? undefined : args[i + 1];
 };
 assert.ok(
-  args.length === 0 ||
-    (args.length === 2 && args[0] === '--artifact-dir') ||
-    (args.length === 4 && args[0] === '--artifact-dir' && args[2] === '--browser-session'),
-  'Use --artifact-dir NEW_DIRECTORY [--browser-session PRIVATE_JSON].',
+  args.length === 0 || (args.length === 2 && args[0] === '--artifact-dir'),
+  'Use --artifact-dir NEW_DIRECTORY.',
 );
 const kept = option('--artifact-dir');
-const sessionPath = option('--browser-session');
 let directory = kept ? resolve(kept) : mkdtempSync(join(tmpdir(), 'forge-package-'));
 if (kept) {
   assert.equal(existsSync(directory), false, 'Artifact directory must be new.');
@@ -47,12 +42,8 @@ directory = realpathSync(directory);
 const npm = process.env.npm_execpath || createRequire(import.meta.url).resolve('npm/bin/npm-cli.js');
 const buildEnv = { ...process.env, PATH: `${dirname(process.execPath)}:${process.env.PATH ?? ''}` };
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
-const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 const originalPath = process.env.PATH;
-let server,
-  serverClosed,
-  client,
-  success = false;
+let client;
 const run = (executable, argv, options = {}) => {
   const reply = spawnSync(executable, argv, {
     cwd: directory,
@@ -517,38 +508,6 @@ try {
     ...finished,
     checkpoint: { ...finished.checkpoint, path: join(agentRestored, '.forge/work/lane-' + nextTask.laneId) },
   });
-  const output = join(directory, 'browser.stdout'),
-    errors = join(directory, 'browser.stderr');
-  const out = openSync(output, 'wx', 0o600),
-    err = openSync(errors, 'wx', 0o600);
-  server = spawn(process.execPath, [cli, 'serve', restoredLane.path, '--port', '0'], {
-    cwd: directory,
-    env,
-    detached: true,
-    stdio: ['ignore', out, err],
-  });
-  serverClosed = new Promise(resolve => server.once('close', resolve));
-  closeSync(out);
-  closeSync(err);
-  server.unref();
-  let url;
-  for (let attempt = 0; attempt < 300; attempt++) {
-    url = readFileSync(output, 'utf8').match(/http:\/\/127\.0\.0\.1:\d+\/#token=[0-9a-f]+/)?.[0];
-    if (url) break;
-    assert.equal(server.exitCode, null, readFileSync(errors, 'utf8'));
-    await pause(50);
-  }
-  assert.ok(url, 'Installed local server did not start.');
-  const address = new URL(url),
-    token = new URLSearchParams(address.hash.slice(1)).get('token');
-  const headers = { Authorization: `Bearer ${token}` };
-  assert.equal((await fetch(`${address.origin}/api/work`)).status, 401);
-  const webWork = await fetch(`${address.origin}/api/work?compact=true`, { headers }).then(response =>
-    response.json(),
-  );
-  assert.equal(webWork.channels[0].head, view.head);
-  for (const path of ['/', '/api/source?file=a.ts'])
-    assert.equal((await fetch(`${address.origin}${path}`, { headers })).status, 404, `${path} is not served`);
   assert.equal(existsSync(gitCalled), false, 'Native installed workflow invoked Git.');
   const result = {
     package: manifest.name,
@@ -601,19 +560,10 @@ try {
       viewId: agentView.viewId,
       head: agentView.head,
     },
-    browserAssetsAndApi: 'passed',
-    browserRendering: 'unrun',
     registryPublication: 'unrun',
     retained: !!kept,
   };
   writeFileSync(join(directory, 'acceptance.json'), `${JSON.stringify(result, null, 2)}\n`, { mode: 0o600 });
-  if (sessionPath)
-    writeFileSync(
-      resolve(sessionPath),
-      `${JSON.stringify({ url, pid: server.pid, directory, installed, sourceRoot: restoredLane.path, acceptance: join(directory, 'acceptance.json') }, null, 2)}\n`,
-      { mode: 0o600 },
-    );
-  success = true;
   const { files: packageFiles, ...summary } = result;
   console.log(JSON.stringify({ ...summary, fileCount: packageFiles.length }, null, 2));
 } finally {
@@ -621,14 +571,5 @@ try {
   else process.env.PATH = originalPath;
   delete process.env.FORGE_PACKAGE_GIT_CALLED;
   await client?.close();
-  if (server && (!success || !sessionPath)) {
-    server.ref();
-    try {
-      process.kill(server.pid, 'SIGTERM');
-    } catch {
-      /* Already exited. */
-    }
-    await serverClosed;
-  }
   if (!kept) await cleanupOwner(directory, join(directory, 'installed/node_modules/@nanthai/forge/dist'));
 }

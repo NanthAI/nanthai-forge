@@ -21,7 +21,6 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { WorkService } from '../dist/work.js';
 import { NativeSource } from '../dist/native-source.js';
 import { initNative } from '../dist/native-work.js';
-import { serveRepository } from '../dist/http.js';
 import { fixture, git, code } from './helpers.mjs';
 
 function setup(t, native) {
@@ -286,7 +285,7 @@ test('compact external PR review preserves original observation pins without new
   await assert.rejects(f.w.dispatch({ ...command, observation: 1 }, 0), code('NOT_FOUND'));
 });
 
-test('compact Work and detail retain protected HTTP and actual CLI/MCP parity', async t => {
+test('compact Work and detail retain direct WorkService and actual CLI/MCP parity', async t => {
   const f = setup(t, true);
   f.edit('export const a=2;\n');
   f.checkpoint();
@@ -299,32 +298,15 @@ test('compact Work and detail retain protected HTTP and actual CLI/MCP parity', 
       expectedBase: view.base,
       expectedStatus: view.status,
     };
-  const server = await serveRepository(f.root, 0);
-  f.resources.push(server);
-  const url = new URL(server.url),
-    token = new URLSearchParams(url.hash.slice(1)).get('token'),
-    headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
-  assert.equal((await fetch(url.origin + '/api/work?compact=true')).status, 401);
-  assert.equal(
-    (
-      await fetch(url.origin + '/api/work', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ revision: 0, command }),
-      })
-    ).status,
-    401,
-  );
-  const get = await fetch(url.origin + '/api/work?compact=true', { headers }),
-    compact = await get.json();
+
+  const compact = JSON.parse(JSON.stringify(new WorkService(f.root).status({ compact: true })));
   assert.equal(compact.views[0].detailDeferred, true);
-  const posted = await fetch(url.origin + '/api/work', {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({ revision: 0, command }),
-  });
-  assert.equal(posted.status, 200);
-  const expected = await posted.json();
+  const posted = await new WorkService(f.root).dispatch(
+    { revision: 0, command }.command,
+    { revision: 0, command }.revision,
+  );
+
+  const expected = JSON.parse(JSON.stringify(posted));
   const cli = JSON.parse(
     execFileSync(process.execPath, [resolve('dist/cli.js'), 'work', f.root, '--compact'], {
       encoding: 'utf8',

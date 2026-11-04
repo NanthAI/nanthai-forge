@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { invariant } from './errors.js';
 import { workerPath } from './worker-install.js';
 import { childEnv } from '../scripts/child-env.mjs';
 import { ownerEnvNames } from './worker-environment.js';
@@ -11,6 +12,7 @@ import { processAlive } from './local-process.js';
 
 /** The stage process writes its own terminal receipt, even if its caller disappears. */
 export function releaseChild(journal: ReleaseJournal, name: ReleaseStage, directory: string) {
+  invariant(name !== 'owner', 'BAD_ARGUMENT', 'Owner runtime selection is removed.');
   const stage = journal.stages.find(stage => stage.name === name)!;
   const attempt = stage.attempts.at(-1)!;
   const receiptPath = join(directory, 'receipt.json');
@@ -21,8 +23,7 @@ export function releaseChild(journal: ReleaseJournal, name: ReleaseStage, direct
   }
   if (stage.attempts.at(-1)!.directory !== directory) throw new Error('Release attempt differs.');
   const input = join(directory, 'input.json');
-  // A persisted input means the child may have started. Only the owner stage
-  // has a serialized, resumable plan; other stages must never launch twice.
+  // A persisted input means the child may have started. Stages must never launch twice.
   try {
     releaseJson(input);
     let running = false;
@@ -33,15 +34,14 @@ export function releaseChild(journal: ReleaseJournal, name: ReleaseStage, direct
     } catch {
       /* Unknown process. */
     }
-    if (name !== 'owner' || running)
-      return {
-        attemptId: attempt.id,
-        status: 'unknown' as const,
-        exitCode: null,
-        signal: null,
-        result: {},
-        code: running ? 'RELEASE_RUNNING' : 'RELEASE_OUTCOME_UNKNOWN',
-      };
+    return {
+      attemptId: attempt.id,
+      status: 'unknown' as const,
+      exitCode: null,
+      signal: null,
+      result: {},
+      code: running ? 'RELEASE_RUNNING' : 'RELEASE_OUTCOME_UNKNOWN',
+    };
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
   }

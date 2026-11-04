@@ -16,7 +16,7 @@ Owner goal: "a useful/usable website with a nice design, without clutter and AI-
 Forge never surprises you and never loses anything. It is a calm shift lead, not a dashboard: it states who is on, what is moving and what is yours to decide, then gets out of the way. Trust comes from behaviour (the journey rail that never lies, Undo next to every automatic action, agents quoted in their own words), not from reassurance copy.
 
 ## Operating Context
-- Execution stays on the user's machines (`nforge host .`; local `nforge serve` only carries Git and Work transport); hosted projects store source and Work. No managed runtime or agent-efficiency gain is claimed.
+- Execution stays on the user's machines (`nforge host .`); hosted projects store source and Work. No managed runtime or agent-efficiency gain is claimed.
 - Coding agents receive briefings/prompts copied from Forge ("Hand to an agent") and report back through presence and saves.
 - GitHub import and publication are compatibility boundaries, not the core.
 - Surfaces (signed in): Home (projects across the account), then per project Now (with Now › Activity), Work (Intents · Lanes · Views · Planning), Code (files, graph secondary), Settings (left nav: Project / Admin / You). Public: landing with a dry-run preview of a public repo.

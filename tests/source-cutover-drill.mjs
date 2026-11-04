@@ -8,7 +8,7 @@ import { recoveryFixture } from './recovery-fixture.mjs';
 import { cutoverFixture, discovery } from './source-cutover-fixture.mjs';
 import { NativeSource, nativeOwner } from '../dist/native-source.js';
 import { WorkStore } from '../dist/work-store.js';
-import { recoverOwner } from '../dist/recovery-owner.js';
+import { recoverRunner } from '../dist/recovery-runner.js';
 import { hostedMacRuntime } from '../dist/hosted-mac-lease.js';
 import { canonicalPayload } from '../dist/hosted-source-operation.js';
 import { hostedRecoveryRows } from '../dist/recovery-hosted.js';
@@ -130,7 +130,7 @@ export async function sourceCutoverDrill(t) {
   });
   assert(!existsSync(r.target));
   const recovered = await timed('Route B; clean machine', () =>
-    recoverOwner(r.target, r.request, r.transport),
+    recoverRunner(r.target, r.request, r.transport),
   );
   assert.equal(recovered.coverage.main.head, head);
   assert.equal(

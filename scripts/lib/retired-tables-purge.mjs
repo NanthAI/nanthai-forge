@@ -5,27 +5,11 @@ import { failure } from './hosted-durability-compare.mjs';
 import { READ_CAP, RETIRED_TABLES, readTable, verifyExport } from './retired-tables.mjs';
 
 export const APPROVAL_DECISION = 'approve-retired-table-purge';
-const DAY = 86_400_000;
-
-/** The next `count` weekly backup runs (Mondays 03:00 UTC, cron `0 3 * * 1`) strictly after `after`. */
-export function weeklyBackupRuns(after, count = 2) {
-  const runs = [];
-  const at = new Date(after);
-  at.setUTCHours(3, 0, 0, 0);
-  for (let time = at.getTime(); runs.length < count; time += DAY)
-    if (new Date(time).getUTCDay() === 1 && time > after.getTime()) runs.push(new Date(time).toISOString());
-  return runs;
-}
-
 export function eligibility(deployedAt) {
-  if (!deployedAt) return { known: false };
-  const runs = weeklyBackupRuns(deployedAt);
   return {
-    known: true,
-    retiredCodeDeployedAt: deployedAt.toISOString(),
-    coveringBackupRuns: runs,
-    eligibleAfter: runs[1],
-    note: 'Eligible only once the second run has completed (backup-status) and the owner has approved.',
+    known: Boolean(deployedAt),
+    retiredCodeDeployedAt: deployedAt?.toISOString(),
+    note: 'Owner-approved gate: backup fix closed, real alert received, one verified post-deploy backup.',
   };
 }
 
@@ -33,11 +17,13 @@ export function eligibility(deployedAt) {
 export async function purgePlan(runner, directory, { deployedAt, cap = READ_CAP } = {}) {
   const { manifest, manifestSha256, rows: exported } = await verifyExport(directory);
   const tables = {};
+  const liveRows = {};
   let rows = 0,
     bytes = 0,
     entries = 0;
   for (const [table, { indexes }] of Object.entries(RETIRED_TABLES)) {
     const live = await readTable(runner, table, cap);
+    liveRows[table] = live;
     const known = new Set(exported[table].map(row => row._id));
     const unexported = live.rows.filter(row => !known.has(row._id)).length;
     tables[table] = {
@@ -51,7 +37,7 @@ export async function purgePlan(runner, directory, { deployedAt, cap = READ_CAP 
     entries += live.rows.length * (indexes + 1);
   }
   const populated = Object.values(tables).filter(entry => entry.rows).length;
-  return {
+  const plan = {
     tables,
     totals: { rows, bytes },
     // Estimate: rows and bytes are measured; the I/O model (one verify read, one replace scan,
@@ -70,9 +56,11 @@ export async function purgePlan(runner, directory, { deployedAt, cap = READ_CAP 
     deploymentDigest: manifest.deploymentDigest,
     eligibility: eligibility(deployedAt),
   };
+  Object.defineProperty(plan, 'liveRows', { value: liveRows });
+  return plan;
 }
 
-/** Throws unless the approval record names this deployment, this export and two post-deploy weekly backups. */
+/** Throws unless the approval record names this deployment, this export and the qualified post-deploy backup and alert. */
 export function checkApproval(record, plan, { deployedAt, now = new Date() }) {
   const text = value => typeof value === 'string' && value.length > 0;
   const at = value => (text(value) && !Number.isNaN(Date.parse(value)) ? new Date(value) : null);
@@ -89,13 +77,18 @@ export function checkApproval(record, plan, { deployedAt, now = new Date() }) {
   )
     throw failure('APPROVAL_MISMATCH');
   if (!deployedAt) throw failure('DEPLOY_TIME_REQUIRED');
-  const [first, second] = weeklyBackupRuns(deployedAt).map(value => new Date(value));
-  const done = (Array.isArray(record.coveringBackups) ? record.coveringBackups : [])
-    .map(entry => (text(entry?.id) ? at(entry.completedAt) : null))
-    .filter(Boolean)
-    .sort((a, b) => a - b);
-  // One completed backup in each of the first two weekly windows after the retired code deployed.
-  if (!done.some(time => time >= first && time < second) || !done.some(time => time >= second && time <= now))
+  const backup = record.verifiedBackup;
+  const completedAt = at(backup?.completedAt);
+  if (
+    !record.backupFixClosed ||
+    !record.alertReceived ||
+    !text(backup?.id) ||
+    !completedAt ||
+    completedAt < deployedAt ||
+    completedAt > now ||
+    !(backup.r2Bytes > 0) ||
+    !/^[a-f0-9]{64}$/.test(backup.sha256 ?? '')
+  )
     throw failure('APPROVAL_BACKUPS_INSUFFICIENT');
 }
 

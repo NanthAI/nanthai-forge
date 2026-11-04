@@ -3,7 +3,7 @@
 This is the lead's off-machine drill runbook. Fixture tests support the commands;
 they are not evidence of a recovery on another machine. Record measured results
 in the drill's private report. Under server authority the recovered machine
-becomes a runner and cache; native-owner projects retain owner recovery and local acceptance. The old Mac
+becomes a runner and cache; native-owner recovery/reconnect is removed. The old Mac
 retains its original directory and edits for reconciliation.
 No lease, account transfer, new project or new access condition is involved.
 
@@ -89,15 +89,8 @@ console.log(JSON.stringify(await client.action(makeFunctionReference('projectWor
 JS
 ```
 
-Copy the native archive and `fixture.json` off-machine. The native archive route
-below uses its matching hosted archive checkpoint; newly hosted projects use
-objects, so use the surviving-hosted route for this newly seeded object project.
-A local portable archive can still be restored independently with
-`nforge restore-native ARCHIVE.tar.gz INDEPENDENT_COPY`. It is a backup copy,
-not server Route B and not authority to accept for a server-authority project.
-Native-owner projects can also use `nforge recover NEW_OWNER` and explicit
-`recover OWNER reconnect`; native-owner rollback preserves those paths. Returning
-from server to owner authority requires the explicit higher-epoch rollback in operations.
+Native-owner recovery/reconnect is removed. Use hosted runner/cache recovery
+or restore a verified deployment snapshot; hosted main remains authoritative.
 
 ## Route A: weekly deployment backup archive
 
@@ -131,7 +124,7 @@ Intent/Lane/Candidate detail and retained evidence; exercise current access unde
 the recovered auth configuration. Confirm encrypted Secret Objects can be used
 through their existing capabilities without exposing values. Set
 `DEPLOYMENT_URL` to this restored backend, retain its imported `PROJECT_ID`, then
-run the guided recover command. Native-owner mode retains full owner recovery;
+run the hosted runner/cache recovery command. Native-owner recovery is removed;
 server mode follows Route B below. This recovers the ZIP's captured project, not newer
 work that never reached that weekly snapshot. No index backfill is part of recovery.
 
@@ -141,8 +134,7 @@ Follow [Route B in operations](../operations.md#route-b-recover-a-runner-and-cac
 Use the replacement machine's compatible package, existing account, deployment
 URL and project ID. This Route B applies to server authority or a pending local
 switch to server. The recovered machine is a runner/cache and cannot become an
-accepting native owner. A bound native-owner project, including rollback to
-native-owner, instead retains full native recovery and local acceptance. The original Mac's files and unsent edits remain
+accepting native owner. A bound project does not gain native accepting recovery through this command. The original Mac's files and unsent edits remain
 available for reconciliation through hosted saves; starting an owner listener
 or reconnecting an archive does not grant local acceptance under server authority.
 

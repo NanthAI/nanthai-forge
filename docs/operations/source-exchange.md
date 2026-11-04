@@ -236,13 +236,8 @@ failure returns `RECOVERY_INVENTORY_UNAVAILABLE` without changing publication
 success; missing/corrupt inventory never establishes coverage.
 ## Guided existing-project recovery
 
-`nforge recover NEW_DIRECTORY --command-file REQUEST.json` selects recovery by
-current source authority. A binding alone never selects the server behavior.
-Native-owner projects, including a rollback to native-owner at a higher epoch,
-retain full native owner recovery and local acceptance. Their request is
-`{operationId,url,projectId,archivePath?,cacheRoot?}` without credentials;
-`recover OWNER reconnect` and `recover OLD_OWNER client` remain available.
-Shadow mode retains native recovery and its existing authority rules.
+Native-owner recovery/reconnect is removed. Use hosted runner/cache recovery
+or restore a verified deployment snapshot; hosted main remains authoritative.
 
 The server gate is `sourceAuthority(binding).mode === 'server' ||
 state.authorityTransition?.mode === 'server'`. Under server authority, recovery
@@ -250,8 +245,7 @@ creates a runner/cache from selected hosted main and exact paged Work, queue,
 acceptance, completion and source-return receipts. It creates no native accepting
 owner, and its only hosted mutation is ordinary runner registration. This path
 takes `{operationId,url,projectId}`; native archive options do not select an
-accepting server owner. Pending local server transitions also prevent native
-reconnect. Keep the operation ID and destination across interruption.
+accepting server owner. The retired native reconnect RPC returns `CLI_UPGRADE_REQUIRED` without writing. Keep the operation ID and destination across interruption.
 
 Hosted source recovery seeds an iterative queue from exact State registration
 pins before walking ancestry. Missing registrations are resolved explicitly;

@@ -91,7 +91,7 @@ test('start records explicit and environment actor names; supervised finish ends
   assert.equal(JSON.parse(finished.stdout).result.status, 'awaiting-review');
   assert.equal(
     finished.stderr.trim().split('\n').at(-1),
-    `Next: nforge serve '${root}' — open Review and accept the checked Candidate as a person.`,
+    `Next: review and accept the checked Candidate through the project's configured acceptance authority.`,
   );
 });
 test('lock diagnostics appear once, followed by throttled progress', () => {

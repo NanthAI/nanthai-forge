@@ -16,7 +16,6 @@ import { NativeSource } from '../dist/native-source.js';
 import { importNativeGit, exportNativeGit } from '../dist/native-git.js';
 import { initLegacyNative as initNative } from './autonomy-fixture.mjs';
 import { exportNativeSource, restoreNativeWork } from '../dist/native-backup.js';
-import { serveRepository } from '../dist/http.js';
 
 const input = { action: 'import-pr', url: 'https://github.com/tests/example/pull/7' };
 async function native(t, { format = 'sha1', pure = false } = {}) {
@@ -486,29 +485,19 @@ test(
 );
 
 test(
-  'native incoming HTTP/CLI/real opt-in MCP share exact import/check/pin behavior and current read authorization',
+  'native incoming WorkService/CLI/real opt-in MCP share exact import/check/pin behavior and current read authorization',
   { timeout: 120000 },
   async t => {
-    const f = await native(t),
-      server = await serveRepository(f.root, 0);
-    t.after(() => server.close());
-    const url = new URL(server.url),
-      token = new URLSearchParams(url.hash.slice(1)).get('token'),
-      headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
+    const f = await native(t);
+
     const body = JSON.stringify({ command: input, revision: f.data().revision });
-    assert.equal(
-      (
-        await fetch(url.origin + '/api/work', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body,
-        })
-      ).status,
-      401,
+
+    const response = await new WorkService(f.root).dispatch(
+      JSON.parse(body).command,
+      JSON.parse(body).revision,
     );
-    const response = await fetch(url.origin + '/api/work', { method: 'POST', headers, body });
-    assert.equal(response.status, 200);
-    const incoming = (await response.json()).result;
+
+    const incoming = (await response).result;
     const cli = JSON.parse(
       execFileSync(process.execPath, ['dist/cli.js', 'work', f.root, JSON.stringify(input), '0'], {
         encoding: 'utf8',

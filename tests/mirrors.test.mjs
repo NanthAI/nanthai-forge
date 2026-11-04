@@ -1,3 +1,4 @@
+import { WorkService } from '../dist/work.js';
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -6,7 +7,6 @@ import { readdirSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
-import { serveRepository } from '../dist/http.js';
 import { git, code } from './helpers.mjs';
 import { setup } from './publication-fixture.mjs';
 
@@ -117,23 +117,17 @@ test('native mirror journal recovery, current destination authority and immutabl
   assert.equal(s.state().creates, 0);
 });
 
-test('mirrors use the existing protected local HTTP, native CLI and opt-in SDK MCP transport', async t => {
-  const s = await mirrorSetup(t),
-    server = await serveRepository(s.root, 0);
-  t.after(() => server.close());
-  const url = `http://127.0.0.1:${server.port}/api/work`,
-    body = JSON.stringify({ command: s.mirrorCommand, revision: s.work.status().revision });
-  assert.equal(
-    (await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body })).status,
-    401,
+test('mirrors use the existing protected local WorkService, native CLI and opt-in SDK MCP transport', async t => {
+  const s = await mirrorSetup(t);
+
+  const body = JSON.stringify({ command: s.mirrorCommand, revision: s.work.status().revision });
+
+  const response = await new WorkService(s.root).dispatch(
+    JSON.parse(body).command,
+    JSON.parse(body).revision,
   );
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${server.token}`, 'Content-Type': 'application/json' },
-    body,
-  });
-  assert.equal(response.status, 200);
-  const mirrored = (await response.json()).result;
+
+  const mirrored = (await response).result;
   assert.equal(mirrored.observation.status, 'matching');
   const check = { action: 'check-mirror', id: mirrored.id };
   const read = JSON.parse(

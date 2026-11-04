@@ -398,49 +398,6 @@ remote freshness on a fresh Actions runner. Its backup receipt can therefore say
 `missedWeek:true` on each new runner; use the preceding R2 freshness result for
 schedule health. The local manual fallback retains its original retry semantics.
 
-### Manual macOS fallback (lead only)
-
-The [launchd template](../../scripts/launchd/com.nanthai.forge-hosted-backup.plist)
-is retained **only as a manual fallback**. It has no calendar interval and does
-not run at load or wake. An already-installed copy still has its old calendar:
-retire it with the final `bootout`/remove commands below before enabling Actions.
-For a one-off run, prefer the direct command above. If using launchd manually,
-render these nonsecret paths/settings, bootstrap, then explicitly kickstart it.
-Use an accepted stable source with dependencies/core built, absolute Node path,
-Python 3 on PATH and the existing private environment-file path. File contents
-are never copied into the plist. Nothing installs this template automatically.
-
-```sh
-# Set SOURCE, NODE, EXISTING_ENV_FILE, DEPLOYMENT, BACKUP_PREFIX and BACKUP_STATE_DIR
-# to your existing paths/settings; export them for this renderer.
-mkdir -p "$BACKUP_STATE_DIR" "$HOME/Library/LaunchAgents"
-python3 - <<'PYTHON'
-import os, pathlib, plistlib
-source = pathlib.Path(os.environ["SOURCE"])
-text = (source / "scripts/launchd/com.nanthai.forge-hosted-backup.plist").read_text()
-settings = dict(SOURCE=str(source), NODE=os.environ["NODE"],
-    NODE_BIN=str(pathlib.Path(os.environ["NODE"]).parent),
-    EXISTING_ENV_FILE=os.environ["EXISTING_ENV_FILE"],
-    DEPLOYMENT=os.environ["DEPLOYMENT"], PREFIX=os.environ["BACKUP_PREFIX"],
-    STATE_DIR=os.environ["BACKUP_STATE_DIR"])
-from xml.sax.saxutils import escape
-for key, value in settings.items():
-    text = text.replace("__" + key + "__", escape(value))
-plistlib.loads(text.encode())
-target = pathlib.Path.home() / "Library/LaunchAgents/com.nanthai.forge-hosted-backup.plist"
-target.write_text(text)
-target.chmod(0o600)
-PYTHON
-chmod 700 "$BACKUP_STATE_DIR"
-launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/com.nanthai.forge-hosted-backup.plist"
-launchctl kickstart "gui/$(id -u)/com.nanthai.forge-hosted-backup"
-
-# Retire an old calendar agent, or remove the manual fallback; keep private retry state.
-launchctl bootout "gui/$(id -u)" "$HOME/Library/LaunchAgents/com.nanthai.forge-hosted-backup.plist"
-rm "$HOME/Library/LaunchAgents/com.nanthai.forge-hosted-backup.plist"
-```
-
-Logs are `launchd.log` and `launchd-error.log` in the chosen private state directory.
 To restore, download a retained ZIP and its manifest using the existing R2 operator
 tooling, verify the ZIP size/SHA-256 against the manifest, then follow
 [Restore into a fresh deployment](#restore-into-a-fresh-deployment) and
@@ -511,15 +468,26 @@ node scripts/retired-tables.mjs purge --deployment NAME --dir NEW_PRIVATE_DIR --
 - `restore` imports only into an empty deployment other than the source and then proves
   every row came back. The weekly backup also holds these tables, so a restore of any
   retained backup is a second copy.
-- `purge` is a dry run. It reports rows, bytes, rows created since the export, and an
-  estimate of CLI requests and database I/O (rows and bytes are measured, the I/O model is
-  assumed), plus the source files that block removing each definition. `--execute` needs
-  `--approval FILE`: a record with `decision: "approve-retired-table-purge"`, the
-  deployment and manifest digests, every table, and two completed weekly backups
-  after `--deployed-at`. This version has no deletion step, so a valid record ends in
-  `PURGE_NOT_ENABLED`.
+- `purge` is a dry run. It reports the six retired tables, their live rows and JSON
+  bytes, export coverage, estimated calls/I/O and source readers that still require
+  the table definitions. The optional live fields above remain report-only.
+- `--execute --approval FILE --operation-id UUID` replaces only populated retired
+  tables with empty JSON Lines data and reads them back. The private approval pins
+  the deployment digest, exact export manifest and table set. The current owner gate
+  is a closed backup fix, a received real failure alert and one verified post-deploy
+  backup (`verifiedBackup: {id, completedAt, r2Bytes, sha256}`, `backupFixClosed: true`,
+  `alertReceived: true`); the two-weekly-backups wait is removed.
+- Every live row must exactly match its exported row before any deletion. A retained
+  private operation receipt next to the approval reconciles an unknown import outcome;
+  replay the same operation ID and original inputs. A changed export, deployment or
+  live row stops the operation. There is no automatic retry or automatic undo.
+- At 32 rows / 31,466 JSON bytes across three populated tables, execution uses 12
+  Convex CLI requests (six reads, three replacements, three readbacks), zero
+  application function calls, and deletes 32 documents / 102 index entries. Provider
+  internal requests and billed I/O are not exposed; the estimated DB reads are
+  62,932 JSON bytes. Idle costs zero calls. Peak retained row memory is O(export +
+  one bounded table page); a full 20,000-row page remains explicitly incomplete.
 
-Eligibility: the retired writers must be deployed, then two Monday 03:00 UTC runs of the
-weekly backup workflow must complete and the owner must approve. Removing the definitions
-is a separate schema slice, after the remaining readers (see `definitionRemovalBlockers`)
-are deleted.
+Keep the operation receipt and qualifying R2 backup after deleting the approved
+local export. Table definitions and restore readers remain for older backups;
+removing them is a separate schema/recovery change.

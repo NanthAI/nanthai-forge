@@ -24,7 +24,6 @@ import { initLegacyNative as initNative } from './autonomy-fixture.mjs';
 import { NativeSource } from '../dist/native-source.js';
 import { restoreNativeWork, exportNativeSource } from '../dist/native-backup.js';
 import { withWorkArchive, packWorkArchive } from '../dist/work-backup-archive.js';
-import { serveRepository } from '../dist/http.js';
 import { digest } from '../dist/hash.js';
 import { applyHostedEvent, parseWorkBytes, workBytes, metadataRequest } from '../dist/work-metadata.js';
 import { code } from './helpers.mjs';
@@ -400,7 +399,7 @@ test('concurrent raw Work changes during validation cannot be overwritten and or
   assert.equal(f.data().schema, 24);
 });
 
-test('CLI, protected HTTP and actual SDK MCP share import and original-operation retry with Git unavailable', async t => {
+test('CLI, direct WorkService and actual SDK MCP share import and original-operation retry with Git unavailable', async t => {
   const f = await setup(t),
     revision = f.data().revision;
   const expected = JSON.parse(
@@ -410,28 +409,15 @@ test('CLI, protected HTTP and actual SDK MCP share import and original-operation
       { encoding: 'utf8' },
     ),
   );
-  const server = await serveRepository(f.w.store.root, 0);
-  t.after(() => server.close());
-  const url = new URL(server.url),
-    token = new URLSearchParams(url.hash.slice(1)).get('token'),
-    body = JSON.stringify({ command: f.command, revision: 0 });
-  assert.equal(
-    (
-      await fetch(url.origin + '/api/work', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body,
-      })
-    ).status,
-    401,
+
+  const body = JSON.stringify({ command: f.command, revision: 0 });
+
+  const response = await new WorkService(f.w.store.root).dispatch(
+    JSON.parse(body).command,
+    JSON.parse(body).revision,
   );
-  const response = await fetch(url.origin + '/api/work', {
-    method: 'POST',
-    headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
-    body,
-  });
-  assert.equal(response.status, 200);
-  assert.deepEqual(await response.json(), expected);
+
+  assert.deepEqual(await response, expected);
   const client = new Client({ name: 'native-contribution', version: '1' }),
     transport = new StdioClientTransport({
       command: process.execPath,

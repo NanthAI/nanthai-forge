@@ -59,11 +59,7 @@ test('Route B uses authority-selected hosted reads and only ordinary runner regi
   const request = { operationId, authorityEpoch: 3, configuration };
   await transport.register(request);
   assert.deepEqual(JSON.parse(calls.at(-1).args.request), request);
-  assert.equal(
-    typeof transport.reconnect,
-    'function',
-    'Native mode keeps the legacy transport; Route B never invokes its reconnect mutation.',
-  );
+  assert.equal(transport.reconnect, undefined, 'Recovery exposes no native reconnect mutation');
   assert(!calls.some(call => call.name.startsWith('projectMain:')));
 });
 

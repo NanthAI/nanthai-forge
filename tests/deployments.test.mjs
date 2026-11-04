@@ -20,7 +20,6 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { WorkService } from '../dist/work.js';
 import { initNative } from '../dist/native-work.js';
 import { NativeSource } from '../dist/native-source.js';
-import { serveRepository } from '../dist/http.js';
 import { fixture, git, write, code } from './helpers.mjs';
 
 async function setup(t, { native = false } = {}) {
@@ -369,48 +368,22 @@ test('lost and concurrent deployment replies reconcile the same provider marker;
   assert.equal(get().uploads, 1);
 });
 
-test('local protected HTTP and CLI delivery commands share WorkStore and reject unauthorized provider writes', async t => {
-  const { root, work, input, get, set, originalFetch } = await setup(t),
-    server = await serveRepository(root, 0);
-  t.after(() => server.close());
-  const url = `http://127.0.0.1:${server.port}/api/work`,
-    body = JSON.stringify({ revision: work.status().revision, command: input });
-  assert.equal(
-    (await originalFetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body }))
-      .status,
-    401,
-  );
-  assert.equal(
-    (
-      await originalFetch(url, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${server.token}`,
-          Origin: 'https://outside.invalid',
-          'Content-Type': 'application/json',
-        },
-        body,
-      })
-    ).status,
-    403,
-  );
+test('local protected WorkService and CLI delivery commands share WorkStore and reject unauthorized provider writes', async t => {
+  const { root, work, input, get, set } = await setup(t);
+
+  const body = JSON.stringify({ revision: work.status().revision, command: input });
+
   assert.equal(get().uploads, 0);
   set({ duplicates: true });
-  const ambiguous = await originalFetch(url, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${server.token}`, 'Content-Type': 'application/json' },
-    body,
-  });
-  assert.equal((await ambiguous.json()).error.code, 'DEPLOYMENT_CHANGED');
+  await assert.rejects(
+    new WorkService(root).dispatch(input, work.status().revision),
+    code('DEPLOYMENT_CHANGED'),
+  );
   assert.equal(get().uploads, 1);
   set({ duplicates: false });
-  const response = await originalFetch(url, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${server.token}`, 'Content-Type': 'application/json' },
-    body,
-  });
-  assert.equal(response.status, 200);
-  const created = await response.json();
+  const response = await new WorkService(root).dispatch(JSON.parse(body).command, JSON.parse(body).revision);
+
+  const created = await response;
   set({ state: 'processing' });
   const checked = JSON.parse(
     execFileSync(
@@ -446,7 +419,7 @@ test('local protected HTTP and CLI delivery commands share WorkStore and reject 
 });
 
 test('preview selections and rollback retain exact draft pins, survive lost replies and reject stale concurrent pointers without uploads', async t => {
-  const { root, work, dispatch, input, get, set, lane, originalFetch } = await setup(t);
+  const { root, work, dispatch, input, get, set, lane } = await setup(t);
   const first = (await dispatch(input)).result;
   set({ providerId: 'b'.repeat(24), state: 'processing', wrongBytes: true });
   const second = (await dispatch({ ...input, operationId: randomUUID() })).result;
@@ -502,36 +475,12 @@ test('preview selections and rollback retain exact draft pins, survive lost repl
     code('DEPLOYMENT_UNCONFIRMED'),
   );
   await assert.rejects(dispatch({ ...command, name: ' ' }), code('BAD_ARGUMENT'));
-  const server = await serveRepository(root, 0);
-  t.after(() => server.close());
-  const url = `http://127.0.0.1:${server.port}/api/work`,
-    third = { ...next, operationId: randomUUID(), expectedPrevious: rollback.operationId };
+
+  const third = { ...next, operationId: randomUUID(), expectedPrevious: rollback.operationId };
   const body = JSON.stringify({ command: third, revision: work.status().revision });
-  assert.equal(
-    (await originalFetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body }))
-      .status,
-    401,
-  );
-  assert.equal(
-    (
-      await originalFetch(url, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${server.token}`,
-          Origin: 'https://outside.invalid',
-          'Content-Type': 'application/json',
-        },
-        body,
-      })
-    ).status,
-    403,
-  );
-  const response = await originalFetch(url, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${server.token}`, 'Content-Type': 'application/json' },
-    body,
-  });
-  assert.equal(response.status, 200);
+
+  const response = await new WorkService(root).dispatch(JSON.parse(body).command, JSON.parse(body).revision);
+
   const cli = JSON.parse(
     execFileSync(process.execPath, [resolve('dist/cli.js'), 'work', root, JSON.stringify(third), '0'], {
       encoding: 'utf8',

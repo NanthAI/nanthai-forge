@@ -8,7 +8,6 @@ import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { WorkService } from '../dist/work.js';
 import { restoreWork } from '../dist/work-backup.js';
-import { serveRepository } from '../dist/http.js';
 import { fixture, git, write, code } from './helpers.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { gunzipSync, gzipSync } from 'node:zlib';
@@ -281,23 +280,12 @@ test('protected web export and restore never restart unfinished commands or over
   data.revision++;
   work.store.save(data);
   const before = readWorkBytes(join(work.store.directory, 'work.json'));
-  const server = await serveRepository(root, 0);
-  t.after(() => server.close());
-  const url = new URL(server.url),
-    token = new URLSearchParams(url.hash.slice(1)).get('token');
-  const endpoint = new URL('/api/work', url),
-    body = JSON.stringify({ command: { action: 'export-work' }, revision: data.revision });
-  assert.equal(
-    (await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body })).status,
-    401,
-  );
-  const response = await fetch(endpoint, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-    body,
-  });
-  assert.equal(response.status, 200);
-  const backup = (await response.json()).result;
+
+  const body = JSON.stringify({ command: { action: 'export-work' }, revision: data.revision });
+
+  const response = await new WorkService(root).dispatch(JSON.parse(body).command, JSON.parse(body).revision);
+
+  const backup = (await response).result;
   const target = join(root, 'independent');
   await restoreWork(backup.path, target);
   const restored = new WorkService(target);

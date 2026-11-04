@@ -23,7 +23,6 @@ import { NativeSource } from '../dist/native-source.js';
 import { snapshotLane } from '../dist/lane-auto-snapshot.js';
 import { importNativeGit, exportNativeGit } from '../dist/native-git.js';
 import { restoreNativeWork } from '../dist/native-backup.js';
-import { serveRepository } from '../dist/http.js';
 import { workGit } from '../dist/work-git.js';
 import { importNativeGitContribution } from '../dist/native-git-contribution.js';
 import { nativeGitContributionRequest } from '../dist/native-git-contribution.js';
@@ -67,7 +66,7 @@ function git(root, args, { input, fail = false } = {}) {
     child.stdin.end(input);
   });
 }
-async function fixture(t, kind = 'plain', { wireClone = false, snapshotDirty = false } = {}) {
+async function fixture(t, kind = 'plain', { snapshotDirty = false } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'forge-native-git-return-'));
   t.after(() => rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const root = join(dir, 'owner');
@@ -121,28 +120,16 @@ async function fixture(t, kind = 'plain', { wireClone = false, snapshotDirty = f
   // The rejection test compares the complete object set. Establish the dirty
   // Lane's legitimate recovery objects before the owner observer can race it.
   if (snapshotDirty) assert.equal(snapshotLane(w.store, dirty.id).status, 'snapshot');
-  const server = await serveRepository(root, 0);
-  t.after(() => server.close());
-  const u = new URL(server.url),
-    token = new URLSearchParams(u.hash.slice(1)).get('token');
-  const auth = ['-c', `http.extraHeader=Authorization: Bearer ${token}`];
-  const url = (id, selected = intent) =>
-    u.origin + `/api/git/contribute/${selected.id}/${id}/${selected.base}/`;
   const client = join(dir, 'client');
-  // Keep contribution-clone transport coverage in the three wire cases. Other
-  // import/recovery cases use a local bundle instead of repeating that handshake.
-  if (wireClone) await git(dir, [...auth, 'clone', '--template=', url(randomUUID()), client]);
-  else {
-    const projected = await exportNativeGit(root, intent.base, join(dir, 'fixture-projection'));
-    await git(dir, [
-      'clone',
-      '--template=',
-      `--branch=forge-native/${intent.base}`,
-      '--',
-      projected.bundle.path,
-      client,
-    ]);
-  }
+  const projected = await exportNativeGit(root, intent.base, join(dir, 'fixture-projection'));
+  await git(dir, [
+    'clone',
+    '--template=',
+    `--branch=forge-native/${intent.base}`,
+    '--',
+    projected.bundle.path,
+    client,
+  ]);
   return {
     dir,
     root,
@@ -152,133 +139,11 @@ async function fixture(t, kind = 'plain', { wireClone = false, snapshotDirty = f
     source,
     intent,
     dirty,
-    server,
-    u,
-    token,
-    auth,
-    url,
     client,
     acceptance,
     rawBase,
   };
 }
-for (const kind of ['plain', 'sha1', 'sha256'])
-  test(
-    `true-native ${kind} Git push preserves claims, exact ancestry and a second accepted return without ref collision`,
-    { timeout: 120000 },
-    async t => {
-      const f = await fixture(t, kind, { wireClone: true }),
-        original = f.data(),
-        ownerBytes = readFileSync(join(f.w.store.path(f.dirty.id), 'a.ts')),
-        operation = randomUUID();
-      assert.equal(existsSync(join(f.root, '.git')), false);
-      writeFileSync(join(f.client, 'a.ts'), 'export const a=2;\n');
-      writeFileSync(join(f.client, 'payload.bin'), Buffer.from([255, 0, 250]));
-      await git(f.client, ['add', '.']);
-      await git(f.client, ['commit', '-m', 'First contributor claim']);
-      const head = (await git(f.client, ['rev-parse', 'HEAD'])).trim(),
-        raw = await git(f.client, ['cat-file', 'commit', head]);
-      await git(f.client, [...f.auth, 'push', f.url(operation), 'HEAD:refs/heads/contribution']);
-      let data = f.data(),
-        receipt = data.nativeContributionReceipts.find(r => r.id === operation),
-        lane = data.lanes.find(l => l.id === operation);
-      assert.equal(data.schema, 24);
-      assert.equal(receipt.provenance, 'unverified-git-bundle');
-      assert.equal(receipt.gitHead, head);
-      assert.equal(receipt.base, f.intent.base);
-      assert.equal(receipt.retainedRef, `refs/forge/contributions/${operation}/head`);
-      assert.equal(receipt.wireRef, 'refs/heads/contribution');
-      assert.equal(f.source.state(lane.head).git.commit, head);
-      assert.ok(f.source.ancestors(lane.head).has(f.intent.base));
-      assert.equal(readFileSync(join(f.w.store.path(lane.id), 'a.ts'), 'utf8'), 'export const a=2;\n');
-      assert.deepEqual(
-        readFileSync(join(f.w.store.path(lane.id), 'payload.bin')),
-        Buffer.from([255, 0, 250]),
-      );
-      assert.deepEqual(data.channelMoves, original.channelMoves);
-      assert.deepEqual(data.views, original.views);
-      assert.deepEqual(data.runs, original.runs);
-      assert.deepEqual(data.intents, original.intents);
-      assert.deepEqual(readFileSync(join(f.w.store.path(f.dirty.id), 'a.ts')), ownerBytes);
-      assert.equal(existsSync(join(f.w.store.directory, `native-git-return-${operation}.bundle`)), false);
-      const retryBytes = readWorkBytes(join(f.w.store.directory, 'work.json'));
-      await git(f.client, [...f.auth, 'push', f.url(operation), 'HEAD:refs/heads/contribution']);
-      assert.deepEqual(readWorkBytes(join(f.w.store.directory, 'work.json')), retryBytes);
-      const view = f.act({
-        action: 'compose',
-        operationId: randomUUID(),
-        intentId: f.intent.id,
-        inputs: [{ laneId: lane.id, head: lane.head }],
-      });
-      assert.equal(view.status, 'clean');
-      const accepted = f.act({
-        action: 'accept-channel',
-        operationId: randomUUID(),
-        viewId: view.id,
-        expectedHead: view.head,
-        expectedPrevious: f.intent.base,
-        channel: 'main',
-      });
-      const nextIntent = f.act({
-        action: 'intent',
-        outcome: 'Second native Git return',
-        baseChannel: { name: 'main', head: accepted.head, acceptanceId: accepted.id },
-      });
-      const nextClient = join(f.dir, 'next-client');
-      await git(f.dir, [
-        ...f.auth,
-        'clone',
-        '--template=',
-        f.u.origin + '/api/git/channel/main/',
-        nextClient,
-      ]);
-      assert.equal((await git(nextClient, ['rev-parse', 'HEAD'])).trim(), head);
-      assert.equal(await git(nextClient, ['cat-file', 'commit', head]), raw);
-      if (f.rawBase) assert.equal(await git(nextClient, ['cat-file', 'commit', receipt.gitBase]), f.rawBase);
-      writeFileSync(join(nextClient, 'a.ts'), 'export const a=3;\n');
-      await git(nextClient, ['add', '.']);
-      await git(nextClient, ['commit', '-m', 'Second contributor claim']);
-      const secondHead = (await git(nextClient, ['rev-parse', 'HEAD'])).trim(),
-        second = randomUUID();
-      await git(nextClient, [...f.auth, 'push', f.url(second, nextIntent), 'HEAD:refs/heads/contribution']);
-      const secondLane = f.data().lanes.find(l => l.id === second),
-        secondView = f.act({
-          action: 'compose',
-          operationId: randomUUID(),
-          intentId: nextIntent.id,
-          inputs: [{ laneId: second, head: secondLane.head }],
-        });
-      f.act({
-        action: 'accept-channel',
-        operationId: randomUUID(),
-        viewId: secondView.id,
-        expectedHead: secondView.head,
-        expectedPrevious: accepted.head,
-        channel: 'main',
-      });
-      const finalClient = join(f.dir, 'final-client');
-      await git(f.dir, [
-        ...f.auth,
-        'clone',
-        '--template=',
-        f.u.origin + '/api/git/channel/main/',
-        finalClient,
-      ]);
-      assert.equal((await git(finalClient, ['rev-parse', 'HEAD'])).trim(), secondHead);
-      assert.equal(await git(finalClient, ['cat-file', 'commit', head]), raw);
-      const exported = await exportNativeGit(f.root, secondView.head, join(f.dir, 'final-projection'));
-      assert.match(
-        await git(join(exported.path, 'repository.git'), ['for-each-ref', '--format=%(refname)']),
-        new RegExp(`refs/forge/contributions/${operation}/head`),
-      );
-      assert.equal(f.data().nativeContributionReceipts.length, 2);
-      const beforeCollection = f.data();
-      await f.w.dispatch({ action: 'collect-native-objects' }, beforeCollection.revision);
-      for (const r of f.data().nativeContributionReceipts)
-        for (const id of [r.inputSha256, r.bundleSha256, r.projection.bundle, r.projection.mapping])
-          assert.equal(existsSync(join(f.source.directory, id)), true);
-    },
-  );
 
 async function candidate(
   f,
@@ -467,232 +332,6 @@ test(
 );
 
 test(
-  'unknown actual Git push reply reconciles one original native Lane without source acceptance',
-  { timeout: 120000 },
-  async t => {
-    const f = await fixture(t),
-      operation = randomUUID();
-    writeFileSync(join(f.client, 'a.ts'), 'export const a=4;\n');
-    await git(f.client, ['add', '.']);
-    await git(f.client, ['commit', '-m', 'Unknown reply']);
-    let dropped = false;
-    const proxy = createServer((req, res) => {
-      const outbound = httpRequest(
-        f.u.origin + req.url,
-        { method: req.method, headers: { ...req.headers, host: f.u.host } },
-        incoming => {
-          res.writeHead(incoming.statusCode, incoming.headers);
-          let received = '';
-          incoming.on('data', chunk => {
-            received += chunk.toString('binary');
-            if (req.url.endsWith('/git-receive-pack') && received.includes('Original source retained')) {
-              dropped = true;
-              res.destroy();
-              incoming.destroy();
-            } else res.write(chunk);
-          });
-          incoming.on('end', () => res.end());
-          incoming.on('error', () => res.destroy());
-        },
-      );
-      outbound.on('error', () => res.destroy());
-      req.pipe(outbound);
-    });
-    await new Promise(done => proxy.listen(0, '127.0.0.1', done));
-    t.after(() => proxy.close());
-    const url = f.url(operation).replace(f.u.origin, `http://127.0.0.1:${proxy.address().port}`);
-    const response = await git(f.client, [...f.auth, 'push', url, 'HEAD:refs/heads/contribution'], {
-      fail: true,
-    });
-    assert.equal(dropped, true);
-    assert.equal(response.failed, true);
-    const data = f.data(),
-      receipt = data.nativeContributionReceipts.find(r => r.id === operation);
-    assert.ok(receipt);
-    assert.equal(data.lanes.find(l => l.id === operation).state, 'active');
-    const work = readWorkBytes(join(f.w.store.directory, 'work.json'));
-    await git(f.client, [...f.auth, 'push', f.url(operation), 'HEAD:refs/heads/contribution']);
-    assert.deepEqual(readWorkBytes(join(f.w.store.directory, 'work.json')), work);
-    assert.equal(f.data().nativeContributionReceipts.length, 1);
-    assert.equal(f.data().channelMoves.length, 1);
-  },
-);
-
-test(
-  'native contribution ingress rejects unrelated scope, altered input, incompatible ancestry/formats and unsupported source without changing owner work',
-  { timeout: 120000 },
-  async t => {
-    const f = await fixture(t, 'plain', { snapshotDirty: true }),
-      command = await candidate(f),
-      originalWork = readWorkBytes(join(f.w.store.directory, 'work.json'));
-    const originalObjects = readdirSync(f.source.directory).sort(),
-      headers = { Authorization: `Bearer ${f.token}` },
-      endpoint = f.url(randomUUID()) + 'info/refs?service=git-receive-pack';
-    assert.equal((await fetch(endpoint)).status, 401);
-    assert.equal((await fetch(endpoint, { headers: { Authorization: 'Bearer unrelated' } })).status, 401);
-    assert.equal(
-      (await fetch(endpoint, { headers: { ...headers, Origin: 'https://unrelated.example' } })).status,
-      403,
-    );
-    assert.equal((await fetch(endpoint, { method: 'POST', headers })).status, 400);
-    const unknown =
-      f.url(randomUUID(), { ...f.intent, id: randomUUID() }) + 'info/refs?service=git-receive-pack';
-    assert.equal((await fetch(unknown, { headers })).status, 400);
-    assert.equal(
-      (await fetch(f.url(f.dirty.id) + 'info/refs?service=git-receive-pack', { headers })).status,
-      400,
-    );
-    await assert.rejects(
-      f.w.dispatch({ ...command, operationId: f.dirty.id }, f.data().revision),
-      code('WORK_OPERATION_CHANGED'),
-    );
-    await assert.rejects(
-      f.w.dispatch({ ...command, expectedBase: '0'.repeat(64) }, f.data().revision),
-      code('CONTRIBUTION_CHANGED'),
-    );
-    await assert.rejects(
-      f.w.dispatch({ ...command, sha256: '0'.repeat(64) }, f.data().revision),
-      code('INVALID_CONTRIBUTION'),
-    );
-    await assert.rejects(
-      f.w.dispatch({ ...command, ref: 'refs/heads/another' }, f.data().revision),
-      code('CONTRIBUTION_CHANGED'),
-    );
-    const tree = (await git(f.client, ['rev-parse', 'HEAD^{tree}'])).trim(),
-      unrelated = (await git(f.client, ['commit-tree', tree, '-m', 'Unrelated root'])).trim();
-    await git(f.client, ['update-ref', 'refs/heads/unrelated', unrelated]);
-    const path = join(f.dir, 'unrelated.bundle');
-    await git(f.client, ['bundle', 'create', path, 'refs/heads/unrelated']);
-    chmodSync(path, 0o600);
-    await assert.rejects(
-      f.w.dispatch(
-        {
-          ...command,
-          operationId: randomUUID(),
-          path,
-          expectedHead: unrelated,
-          ref: 'refs/heads/unrelated',
-          sha256: hash(readFileSync(path)),
-        },
-        f.data().revision,
-      ),
-      code('CONTRIBUTION_CHANGED'),
-    );
-    await git(f.client, [
-      'update-index',
-      '--add',
-      '--cacheinfo',
-      `160000,${(await git(f.client, ['rev-parse', 'HEAD'])).trim()},unsupported-gitlink`,
-    ]);
-    await git(f.client, ['commit', '-m', 'Unsupported linked source']);
-    const unsupportedHead = (await git(f.client, ['rev-parse', 'HEAD'])).trim(),
-      unsupportedPath = join(f.dir, 'unsupported.bundle');
-    await git(f.client, ['bundle', 'create', unsupportedPath, 'HEAD']);
-    chmodSync(unsupportedPath, 0o600);
-    await assert.rejects(
-      f.w.dispatch(
-        {
-          ...command,
-          operationId: randomUUID(),
-          path: unsupportedPath,
-          expectedHead: unsupportedHead,
-          ref: 'HEAD',
-          sha256: hash(readFileSync(unsupportedPath)),
-        },
-        f.data().revision,
-      ),
-      code('UNSUPPORTED_NATIVE_GIT_FILE'),
-    );
-    const other = join(f.dir, 'other-format');
-    mkdirSync(other);
-    await git(other, ['init', '--template=', '--object-format=sha256', '--initial-branch=main']);
-    writeFileSync(join(other, 'a.ts'), 'unrelated sha256');
-    await git(other, ['add', '.']);
-    await git(other, ['commit', '-m', 'Other original format']);
-    const otherHead = (await git(other, ['rev-parse', 'HEAD'])).trim(),
-      otherPath = join(f.dir, 'other-format.bundle');
-    await git(other, ['bundle', 'create', otherPath, 'HEAD']);
-    chmodSync(otherPath, 0o600);
-    await assert.rejects(
-      f.w.dispatch(
-        {
-          ...command,
-          operationId: randomUUID(),
-          path: otherPath,
-          expectedHead: otherHead,
-          ref: 'HEAD',
-          sha256: hash(readFileSync(otherPath)),
-        },
-        f.data().revision,
-      ),
-      code('WORK_GIT_FAILED'),
-    );
-    assert.deepEqual(readWorkBytes(join(f.w.store.directory, 'work.json')), originalWork);
-    assert.deepEqual(readdirSync(f.source.directory).sort(), originalObjects);
-    assert.equal(
-      readdirSync(f.w.store.directory).some(p => p.startsWith('native-git-receive-')),
-      false,
-    );
-  },
-);
-
-test(
-  'native wire rejects other refs, deletion and an altered original candidate; retained raw pins cannot become authority',
-  { timeout: 120000 },
-  async t => {
-    const f = await fixture(t),
-      command = await candidate(f),
-      operation = randomUUID(),
-      before = readWorkBytes(join(f.w.store.directory, 'work.json'));
-    const wrongRef = await git(f.client, [...f.auth, 'push', f.url(operation), 'HEAD:refs/heads/another'], {
-      fail: true,
-    });
-    assert.equal(wrongRef.failed, true);
-    assert.match(wrongRef.stderr, /CONTRIBUTION_CHANGED/);
-    assert.deepEqual(readWorkBytes(join(f.w.store.directory, 'work.json')), before);
-    const multi = await git(
-      f.client,
-      [...f.auth, 'push', f.url(operation), 'HEAD:refs/heads/contribution', 'HEAD:refs/heads/another'],
-      { fail: true },
-    );
-    assert.equal(multi.failed, true);
-    assert.deepEqual(readWorkBytes(join(f.w.store.directory, 'work.json')), before);
-    await git(f.client, [...f.auth, 'push', f.url(operation), 'HEAD:refs/heads/contribution']);
-    const retained = readWorkBytes(join(f.w.store.directory, 'work.json')),
-      receipt = f.data().nativeContributionReceipts.find(r => r.id === operation);
-    const deletion = await git(f.client, [...f.auth, 'push', f.url(operation), ':refs/heads/contribution'], {
-      fail: true,
-    });
-    assert.equal(deletion.failed, true);
-    assert.match(deletion.stderr, /CONTRIBUTION_CHANGED/);
-    writeFileSync(join(f.client, 'a.ts'), 'altered same operation');
-    await git(f.client, ['add', '.']);
-    await git(f.client, ['commit', '-m', 'Different candidate']);
-    const changed = await git(
-      f.client,
-      [...f.auth, 'push', f.url(operation), 'HEAD:refs/heads/contribution'],
-      { fail: true },
-    );
-    assert.equal(changed.failed, true);
-    assert.match(changed.stderr, /WORK_OPERATION_CHANGED/);
-    assert.deepEqual(readWorkBytes(join(f.w.store.directory, 'work.json')), retained);
-    assert.equal(existsSync(join(f.w.store.directory, `native-git-return-${operation}.bundle`)), false);
-    const body = f.source.object(receipt.inputSha256);
-    writeFileSync(join(f.source.directory, receipt.inputSha256), Buffer.from('corrupt original input'));
-    await assert.rejects(f.w.dispatch({ action: 'collect-native-objects' }, f.data().revision), error =>
-      ['INVALID_NATIVE_SOURCE', 'INVALID_NATIVE_GIT'].includes(error.code),
-    );
-    assert.deepEqual(readWorkBytes(join(f.w.store.directory, 'work.json')), retained);
-    writeFileSync(join(f.source.directory, receipt.inputSha256), body);
-    const forged = f.data();
-    forged.nativeContributionReceipts.find(r => r.id === operation).bundleSha256 = receipt.projection.bundle;
-    const { validateNativeContributions } = await import('../dist/native-contribution-objects.js');
-    assert.throws(() => validateNativeContributions(f.source, forged), code('INVALID_NATIVE_GIT'));
-    assert.equal(command.expectedBase, receipt.base);
-  },
-);
-
-test(
   'real local MCP and CLI select native Git return and reconcile its original source after losing the input path',
   { timeout: 120000 },
   async t => {
@@ -724,35 +363,5 @@ test(
     assert.equal(output.result.id, command.operationId);
     assert.equal(f.data().nativeContributionReceipts.length, 1);
     assert.equal(f.data().channelMoves.length, 1);
-  },
-);
-
-test(
-  'unchanged projected Git base can return through plain, SHA1 and SHA256 native owners without corrupting receipt closure',
-  { timeout: 120000 },
-  async t => {
-    for (const kind of ['plain', 'sha1', 'sha256']) {
-      const f = await fixture(t, kind),
-        operation = randomUUID(),
-        head = (await git(f.client, ['rev-parse', 'HEAD'])).trim(),
-        before = f.data();
-      await git(f.client, [...f.auth, 'push', f.url(operation), 'HEAD:refs/heads/contribution']);
-      const receipt = f.data().nativeContributionReceipts.find(r => r.id === operation);
-      assert.equal(receipt.gitHead, head);
-      assert.equal(receipt.gitBase, head);
-      if (kind !== 'plain') {
-        assert.equal(receipt.head, receipt.base);
-        assert.notEqual(f.source.state(receipt.head).git.bundle, receipt.bundleSha256);
-      }
-      assert.deepEqual(f.data().channelMoves, before.channelMoves);
-      await f.w.dispatch({ action: 'collect-native-objects' }, f.data().revision);
-      const archive = (await f.w.dispatch({ action: 'export-work', archive: true }, f.data().revision))
-          .result,
-        target = join(f.dir, 'unchanged-recovery');
-      await restoreNativeWork(archive.archive.path, target);
-      const restored = new WorkService(target);
-      assert.deepEqual(restored.store.load().nativeContributionReceipts, [receipt]);
-      assert.equal(readFileSync(join(restored.store.path(operation), 'a.ts'), 'utf8'), 'export const a=1;\n');
-    }
   },
 );
