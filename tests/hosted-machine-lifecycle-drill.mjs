@@ -67,7 +67,9 @@ export async function hostedMachineLifecycleDrill(t, interruption, history = fal
   const main = f.currentMain();
   // A fresh process/root can reconnect with the original public operation pins.
   // Repeated delivery must preserve the actual acceptance, even after completion.
-  assert.deepEqual(await f.enqueue(request), landed);
+  const { message, ...replayed } = await f.enqueue(request);
+  assert.equal(message, JSON.parse(f.row(submission.id).value).source.message);
+  assert.deepEqual(replayed, landed);
   await f.tx('machineReconnectResume', api.resume, { projectId: f.projectId, submissionId: submission.id });
   await f.drain();
   assert.deepEqual(f.currentMain(), main);

@@ -10,6 +10,7 @@ import {
   type LandingIdentity,
 } from './projectHostedLandingStore';
 import { finishRow, scheduleFinish } from './projectHostedFinishWake';
+import { landingMessage } from '../src/landing-message';
 import { hostedFinishSchema, type HostedFinish } from '../src/hosted-finish';
 import { landingObservation, type HostedLandingState } from '../src/hosted-landing';
 import { canonicalPayload } from '../src/hosted-source-operation';
@@ -35,13 +36,13 @@ export async function writeFinish(ctx: MutationCtx, row: Doc<'projectHostedFinis
     ...(!value.pending ? { reuseLease: undefined } : {}),
   });
 }
-export async function initializeFinish(ctx: MutationCtx, state: HostedLandingState) {
+export async function initializeFinish(ctx: MutationCtx, state: HostedLandingState, deferWake = false) {
   if (!state.request.finish) return;
   const input = { projectId: state.projectId as LandingIdentity['projectId'], submissionId: state.id };
   const old = await finishRow(ctx, input);
   if (old) {
-    if (!['terminal-failed', 'landed'].includes(state.phase)) await scheduleFinish(ctx, old);
-    return;
+    if (!deferWake && !['terminal-failed', 'landed'].includes(state.phase)) await scheduleFinish(ctx, old);
+    return old;
   }
   const attempt = await loadLandingAttempt(ctx, {
     projectId: input.projectId,
@@ -126,6 +127,10 @@ export async function initializeFinish(ctx: MutationCtx, state: HostedLandingSta
       'Reverse Candidate must name the actual original receipt.',
     );
   }
+  // Legacy CLIs serialized this default even when no message was supplied.
+  // Negotiated requests use null for omission, retaining an explicit identical subject.
+  if (state.request.message === undefined && !state.request.finish.reviewedSource)
+    state.message = source.message === 'Agent change' ? null : landingMessage(source.message);
   const after = state.request.finish.after;
   if (after) await loadLanding(ctx, { projectId: input.projectId, submissionId: after });
   const check = attempt.deferredCheck
@@ -155,7 +160,9 @@ export async function initializeFinish(ctx: MutationCtx, state: HostedLandingSta
       }),
     ),
   });
-  await scheduleFinish(ctx, (await ctx.db.get(id))!);
+  const row = (await ctx.db.get(id))!;
+  if (!deferWake) await scheduleFinish(ctx, row);
+  return row;
 }
 export async function failFinish(ctx: MutationCtx, input: LandingIdentity, code: string, message: string) {
   const { row, state } = await loadLanding(ctx, input);

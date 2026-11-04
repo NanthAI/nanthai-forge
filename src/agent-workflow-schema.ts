@@ -11,6 +11,7 @@ import { policyWriteSchema } from './autonomy-policy.js';
 import { briefInputSchema } from './agent-brief-types.js';
 import { guidanceInputSchema } from './agent-guidance.js';
 import { z } from 'zod';
+import { landingMessageSchema } from './landing-message.js';
 import { peersInputSchema, peersScopeSchema } from './agent-peers.js';
 import { afterSchema, explicitTestsSchema } from './work-types.js';
 import { dependencySchema, invariantPinSchema, defineCheckCommandSchema } from './work-types.js';
@@ -123,7 +124,7 @@ export const agentActionSchema = z.discriminatedUnion('action', [
     laneId: id,
     expectedHead: oid.optional(),
     expectedTree: oid.optional(),
-    message: z.string().trim().min(1).max(500),
+    message: landingMessageSchema,
   }),
   z.object({
     action: z.literal('finish'),
@@ -142,7 +143,7 @@ export const agentActionSchema = z.discriminatedUnion('action', [
     laneId: id,
     expectedHead: oid.optional(),
     expectedTree: oid.optional(),
-    message: z.string().trim().min(1).max(500),
+    message: landingMessageSchema,
     dependencies: z.array(dependencySchema).default([]),
     checkId: id.optional(),
     expectedDefinition: oid.optional(),

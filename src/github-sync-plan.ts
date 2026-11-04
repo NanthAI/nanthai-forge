@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { mirrorMessage } from './landing-message.js';
 import { sourceExclusion } from './files.js';
 import { invariant } from './errors.js';
 import { NativeSource } from './native-source.js';
@@ -89,14 +90,14 @@ export function appendCommits(
     invariant(view, 'GITHUB_SYNC_HISTORY', 'An accepted Candidate is unavailable.');
     const intent = data.intents.find(intent => intent.id === view.intentId);
     invariant(intent, 'GITHUB_SYNC_HISTORY', 'The accepted Intent is unavailable.');
-    const message = [
-      binding ? intent.outcome : `Adopt Forge native main ${move.head}`,
-      '',
-      `Forge-State: ${move.head}`,
-      `Forge-Acceptance: ${move.id}`,
-      `Forge-View: ${move.viewId}`,
-      ...trailers(data, move, identity.coAuthor),
-    ].join('\n');
+    const message = mirrorMessage({
+      ...move,
+      fallback: binding ? intent.outcome : `Adopt Forge native main ${move.head}`,
+      state: move.head,
+      acceptanceId: move.id,
+      viewId: move.viewId,
+      trailers: trailers(data, move, identity.coAuthor),
+    });
     const author = {
       ...identity.identity,
       name: binding && move.acceptedBy ? label(move.acceptedBy.name) : identity.identity.name,

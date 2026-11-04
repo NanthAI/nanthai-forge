@@ -136,6 +136,9 @@ function accept(
               move.viewId === command.viewId &&
               move.head === command.expectedHead &&
               move.previous === command.expectedPrevious &&
+              (command.message === undefined || move.message === command.message) &&
+              (command.cohortMessages === undefined ||
+                JSON.stringify(move.cohortMessages) === JSON.stringify(command.cohortMessages)) &&
               move.invariant?.policy.id === command.invariant?.id &&
               move.invariant?.policy.definition === command.invariant?.definition,
             'CHANNEL_CHANGED',
@@ -205,6 +208,8 @@ function accept(
             previous: command.expectedPrevious,
             at: new Date().toISOString(),
             status: 'pending',
+            ...(command.message === undefined ? {} : { message: command.message }),
+            ...(command.cohortMessages ? { cohortMessages: command.cohortMessages } : {}),
             ...(scopedPostAccept(data, view) ? { postAccept: scopedPostAccept(data, view) } : {}),
             provenance: 'user-declared-local',
             acceptedBy: attribution ?? localActor(actor.kind),

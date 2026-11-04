@@ -263,7 +263,10 @@ for (const { files, gitlinks = false } of [
         githubMirror: { repo: 'synthetic/mirror', autoPush: true, laneRefs: false },
       },
     });
-    const { state, item } = await f.ready();
+    const supplied = files
+      ? 'Keep the supplied subject\n\nKeep the body.\n\nReviewed-by: Synthetic Reviewer <review@example.invalid>\nCo-Authored-By: Synthetic Sol <noreply@openai.com>'
+      : undefined;
+    const { state, item } = await f.ready(null, supplied === undefined ? {} : { message: supplied });
     const records = await import(moduleUrl('../convex/projectHostedRecords.ts'));
     await f.runAcceptance('mirrorSeedIntent', records.writeHostedRecord, {
       ...f.auth,
@@ -282,6 +285,7 @@ for (const { files, gitlinks = false } of [
       },
     });
     const accepted = await f.accept(state);
+    assert.equal(accepted.receipt.message, supplied);
     const input = [...f.tables._scheduled_functions.values()].find(t => t.name === 'projectGithubMirror:step')
       .args[0];
     const before = {},
@@ -411,6 +415,11 @@ for (const { files, gitlinks = false } of [
     assert.equal(JSON.parse(job.mapping).committer.name, 'Forge Sync');
     if (files === 0) assert.equal(JSON.parse(job.mapping).committer.email, 'noreply@forge.example');
     assert.equal(JSON.parse(job.mapping).message, JSON.parse(job.seed).message);
+    assert.equal(
+      JSON.parse(job.seed).message,
+      `${supplied ?? 'An accepted outcome'}\n\nForge-State: ${github.head}\nForge-Acceptance: ${accepted.receipt.id}\nForge-View: ${accepted.receipt.candidate.id}`,
+    );
+    if (files) assert.equal(github.commits.get(github.remote()).message, JSON.parse(job.seed).message);
     const steps = Math.max(1, Math.ceil(files / 100));
     assert.equal(calls.length, 2 * steps + 1 + (files ? steps : 0) + (files === 2 ? 1 : 0));
     assert.equal(authCalls.length, 2 * steps);

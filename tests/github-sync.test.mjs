@@ -47,7 +47,7 @@ after(() => {
 
 function acceptor(work) {
   const local = command => work.execute(command, work.store.load().revision).result;
-  return (outcome, files = {}, acceptedBy, earlierFiles = []) => {
+  return (outcome, files = {}, acceptedBy, earlierFiles = [], message, cohortMessages) => {
     const base = work.store
       .load()
       .channelMoves.filter(move => move.channel === 'main' && move.status === 'accepted')
@@ -101,6 +101,8 @@ function acceptor(work) {
         .at(-1)?.head ?? null;
     const move = local({
       action: 'accept-channel',
+      ...(message === undefined ? {} : { message }),
+      ...(cohortMessages === undefined ? {} : { cohortMessages }),
       operationId: randomUUID(),
       channel: 'main',
       viewId: view.id,
@@ -1616,3 +1618,36 @@ function noop2(f, accepted) {
     f.work.store.revision(),
   ).result;
 }
+
+for (const cohort of [false, true])
+  test(`supplied landing message and trailer order survive native sync and unknown push outcome (${cohort ? 'cohort' : 'single'})`, async t => {
+    const f = fixture(t);
+    await f.sync({ push: true });
+    const previous = f.head();
+    const supplied =
+      'Supplied native subject\n\nNative body.\n\nReviewed-by: Reviewer <review@example.invalid>\nCo-Authored-By: Synthetic Sol <noreply@openai.com>';
+    const messages = [
+      supplied,
+      'Supplied peer subject\n\nPeer body.\n\nCo-Authored-By: Synthetic Peer <peer@example.invalid>',
+    ];
+    const accepted = f.accept(
+      'Different Intent outcome',
+      { 'native-message.txt': 'new bytes' },
+      undefined,
+      [],
+      cohort ? undefined : supplied,
+      cohort ? messages : undefined,
+    );
+    const move = f.work.store.select('channelMoves', accepted.move.id);
+    if (cohort) assert.deepEqual(move.cohortMessages, messages);
+    else assert.equal(move.message, supplied);
+    f.change({ lostReply: true });
+    await assert.rejects(f.sync({ push: true }), code('GITHUB_SYNC_GIT_FAILED'));
+    const result = await f.sync({ push: true });
+    const message = git(f.remote, ['log', '-1', '--format=%B']);
+    assert(message.startsWith((cohort ? messages.join('\n\n') : supplied) + '\n\n'));
+    assert.equal(message.match(/^Forge-State:/gm).length, 1);
+    assert(message.includes(`Forge-Acceptance: ${accepted.move.id}`));
+    assert.equal(git(f.remote, ['rev-parse', 'main^']).trim(), previous);
+    assert.equal(result.alreadyPushed, true);
+  });

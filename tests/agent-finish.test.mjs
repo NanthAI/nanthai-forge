@@ -101,7 +101,8 @@ for (const native of [true, false])
   test(`finish ${native ? 'native' : 'Git'} complete exact check, explicit acceptance, original replay`, async () => {
     const { root, agent, lane, check, command } = await setup(native);
     try {
-      const request = { ...command, accept: { expectedPrevious: null } },
+      const message = `Supplied finish subject\n\n${'Body. '.repeat(100)}\n\nCo-Authored-By: Synthetic Sol <noreply@openai.com>`;
+      const request = { ...command, message, accept: { expectedPrevious: null } },
         receipt = (await agent.dispatch(request)).result;
       assert.equal(receipt.complete, true);
       assert.equal(receipt.phase, 'accept');
@@ -113,6 +114,22 @@ for (const native of [true, false])
       assert.equal(receipt.acceptance.acceptanceId, receipt.acceptance.operationId);
       assert.equal(receipt.acceptance.head, receipt.view.head);
       assert.equal(receipt.acceptance.channel, 'main');
+      assert.equal(agent.work.store.select('channelMoves', receipt.acceptance.acceptanceId).message, message);
+      const acceptance = {
+        action: 'accept-channel',
+        operationId: receipt.acceptance.operationId,
+        channel: 'main',
+        viewId: receipt.view.viewId,
+        expectedHead: receipt.view.head,
+        expectedPrevious: null,
+      };
+      const retained = (await agent.work.dispatch(acceptance, agent.work.store.revision())).result;
+      assert.equal(retained.message, message, 'omitted replay metadata reconciles the original value');
+      await assert.rejects(
+        agent.work.dispatch({ ...acceptance, message: 'Changed attribution' }, agent.work.store.revision()),
+        e => ['WORK_OPERATION_CHANGED', 'CHANNEL_CHANGED'].includes(e.code),
+      );
+      assert.equal(agent.work.store.select('channelMoves', receipt.acceptance.acceptanceId).message, message);
       const originalPins = pins(agent.work.store.load());
       writeFileSync(join(lane.path, 'file.txt'), 'later live bytes\n');
       if (!native) git(lane.path, ['add', 'file.txt']);

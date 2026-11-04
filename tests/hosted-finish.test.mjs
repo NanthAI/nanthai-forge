@@ -52,7 +52,9 @@ test('finish lands through ordinary H13/H14 evidence and original operation retr
   const landed = await f.current(state.id);
   assert.equal(landed.submission.phase, 'landed');
   assert.equal(f.tables.projectHostedAcceptances.size, 1);
-  assert.deepEqual(await f.enqueue(request), landed.submission);
+  const { message, ...replayed } = await f.enqueue(request);
+  assert.equal(message, JSON.parse(f.row(state.id).value).source.message);
+  assert.deepEqual(replayed, landed.submission);
   await assert.rejects(f.enqueue({ ...request, check: null }), code('WORK_OPERATION_CHANGED'));
   assert.equal(f.tables.projectHostedCheckRuns.size, 1);
   assert.equal(f.pending().length, 0);
@@ -214,7 +216,9 @@ test('crash after plan upload and after source publication does not create anoth
   await complete(f);
   const accepted = await f.current(state.id),
     main = f.currentMain();
-  assert.deepEqual(await f.enqueue(request), accepted.submission);
+  const { message, ...replayed } = await f.enqueue(request);
+  assert.equal(message, JSON.parse(f.row(state.id).value).source.message);
+  assert.deepEqual(replayed, accepted.submission);
   assert.deepEqual(f.currentMain(), main);
   assert.equal(f.tables.projectHostedCheckRuns.size, 2);
   assert.equal(f.tables.projectHostedLandingAttempts.size, 2);

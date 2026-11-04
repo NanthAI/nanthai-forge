@@ -42,7 +42,7 @@ import { canonicalPayload, hostedPayloadHash } from '../src/hosted-source-operat
 import { invariant } from '../src/errors';
 import { report } from './errors';
 import { loadHostedCheck } from './projectHostedCheckStore';
-import { finishRow } from './projectHostedFinishWake';
+import { finishRow, scheduleFinish } from './projectHostedFinishWake';
 import { acceptanceRow } from './projectHostedAcceptanceStore';
 import { cancelHostedLanding } from './projectHostedLandingCancel';
 
@@ -310,6 +310,9 @@ export async function enqueueHostedLanding(
     error: null,
   });
   await insertLandingAttempt(ctx, attempt);
+  // Freeze the message before serializing the existing request row, while
+  // preserving the original queue/finish wake order and transaction IO count.
+  const finish = await initializeFinish(ctx, state, true);
   await ctx.db.insert('projectHostedLandingRequests', {
     projectId: input.projectId,
     channel: request.channel,
@@ -335,7 +338,7 @@ export async function enqueueHostedLanding(
   });
   await ctx.db.patch(queue._id, { sequence });
   await wakeLandingQueue(ctx, { projectId: input.projectId, channel: request.channel });
-  await initializeFinish(ctx, state);
+  if (finish) await scheduleFinish(ctx, finish);
   await retainLandingProgress(ctx, state);
   await recordLandingObservation(ctx, state);
   await scheduleLandingAlarm(ctx, state);

@@ -30,6 +30,7 @@ export const capabilities = query({
     metricReceiptVersion: v.optional(v.literal(1)),
     planningVersion: v.optional(v.literal(1)),
     defaultsVersion: v.optional(v.literal(1)),
+    landingMessageVersion: v.optional(v.literal(1)),
   },
   returns: v.string(),
   handler: async (
@@ -45,6 +46,7 @@ export const capabilities = query({
       metricReceiptVersion,
       planningVersion,
       defaultsVersion,
+      landingMessageVersion,
     },
   ) => {
     try {
@@ -55,6 +57,7 @@ export const capabilities = query({
       if (project.sourceCutover && authority.mode === 'server') requireCutoverVersion(clientVersion);
       return canonicalPayload(
         hostedAgentCapabilitiesSchema.parse({
+          ...(landingMessageVersion === 1 ? { landingMessageVersion: 1 } : {}),
           ...(overlapVersion === 1 ? { overlapVersion: 1 } : {}),
           ...(overlapEvidenceVersion === 1 ? { overlapEvidenceVersion: 1 } : {}),
           ...(metricReceiptVersion === 1 ? { metricReceiptVersion: 1 } : {}),

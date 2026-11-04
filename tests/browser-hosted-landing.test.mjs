@@ -59,6 +59,11 @@ test('browser person accept lands through hosted queue with no owner machine or 
   await f.drain();
   assert.equal((await f.current(submitted.id)).submission.phase, 'landed');
   assert.equal(f.tables.projectHostedAcceptances.size, 1);
+  assert.equal(
+    JSON.parse([...f.tables.projectHostedAcceptances.values()][0].value).message,
+    undefined,
+    'a generated browser approval message keeps the Intent-outcome fallback',
+  );
   assert.deepEqual(await client.accept(id, f.candidate.id), (await f.current(submitted.id)).submission);
   assert.equal(calls.filter(x => x === 'projectHostedCompose:candidate').length, 1);
   assert.equal(f.pending().length, 0);

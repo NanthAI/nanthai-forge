@@ -194,7 +194,7 @@ async function executeFinishWork(session: HostedAgentSession, input: unknown) {
       markLandStep('saveStarted');
       const saved = await saveHostedLane(
         session.root,
-        { operationId: saveOperationId, message: command.message },
+        { operationId: saveOperationId, message: command.message ?? 'Agent change' },
         session.exchange,
         session.capabilities.overlapEvidenceVersion === 1,
       );
@@ -241,7 +241,7 @@ async function executeFinishWork(session: HostedAgentSession, input: unknown) {
         ...(command.intentId ? { intentId: command.intentId } : {}),
         ...(command.inputs ? { inputs: command.inputs } : {}),
         dependencies: command.dependencies,
-        message: command.message,
+        message: command.message ?? 'Agent change',
       }),
       composeOperationId,
     );
@@ -258,6 +258,7 @@ async function executeFinishWork(session: HostedAgentSession, input: unknown) {
           operationId,
           authorityEpoch: epoch,
           composeOperationId,
+          ...(session.capabilities.landingMessageVersion === 1 ? { message: command.message ?? null } : {}),
           after: command.after,
           ...(command.priority ? { priority: command.priority } : {}),
           check: await checkSelection(session, command.check),
@@ -315,6 +316,7 @@ async function executeFinishWork(session: HostedAgentSession, input: unknown) {
       operationId,
       authorityEpoch: epoch,
       channel: 'main',
+      ...(session.capabilities.landingMessageVersion === 1 ? { message: command.message ?? null } : {}),
       expectedMain: candidate.base,
       candidateId,
       expectedHead: candidate.result.status === 'clean' ? candidate.result.head : null,

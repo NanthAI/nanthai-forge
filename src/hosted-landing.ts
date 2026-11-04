@@ -3,6 +3,7 @@ import { checkFileSummarySchema } from './check-file-summary.js';
 import { semanticConflictsSchema, semanticPlanSchema } from './intent-semantic-conflict.js';
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
+import { landingMessageSchema } from './landing-message.js';
 import { landingStallSchema } from './landing-stall.js';
 import { mainExpectationSchema } from './hosted-main.js';
 import { hostedCheckRequestSchema, checkNumber } from './hosted-check.js';
@@ -33,6 +34,7 @@ export const hostedLandingRequestSchema = z
     expectedHead: hash.nullable(),
     agent: z.boolean().default(false),
     keepOpen: z.boolean().optional(),
+    message: landingMessageSchema.nullable().optional(),
     priority: z.enum(['urgent', 'normal']).optional(),
     revertOf: z.uuid().optional(),
     retryReason: finishRetryReasonSchema.optional(),
@@ -123,6 +125,7 @@ export const landingObservationSchema = z
   .strict();
 export const hostedLandingStateSchema = z
   .object({
+    message: landingMessageSchema.nullable().optional(),
     schema: z.literal(1),
     projectId: z.string().min(1),
     id: z.uuid(),

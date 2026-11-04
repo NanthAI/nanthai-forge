@@ -95,6 +95,7 @@ async function landSingleOnce(
     const move = (
       await phase({
         action: 'accept-channel',
+        message: entry.command.message,
         ...(entry.command.accept?.invariant ? { invariant: entry.command.accept.invariant } : {}),
         operationId: child('accept'),
         viewId: view.id,

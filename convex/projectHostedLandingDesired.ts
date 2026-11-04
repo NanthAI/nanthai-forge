@@ -78,6 +78,7 @@ export const submit = receiptMutation({
       const selectionKey = digest(
         canonicalPayload({
           channel: 'main',
+          message: command.message ?? null,
           ...(command.priority === 'urgent' ? { priority: 'urgent' } : {}),
           agent: true,
           check: command.check,
@@ -154,6 +155,7 @@ export const submit = receiptMutation({
           operationId: command.operationId,
           authorityEpoch: command.authorityEpoch,
           channel: 'main',
+          ...(command.message === undefined ? {} : { message: command.message }),
           expectedMain: source.state.request.expectedMain,
           candidateId: source.state.candidateId,
           expectedHead: null,

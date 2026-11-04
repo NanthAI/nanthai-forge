@@ -10,6 +10,7 @@ import { hostedAcceptanceSchema } from '../src/hosted-acceptance';
 import { githubSyncCommitSchema, githubSyncSchema } from '../src/github-sync-types';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { invariant } from '../src/errors';
+import { mirrorMessage } from '../src/landing-message';
 const identity = { jobId: v.id('projectGithubMirrorJobs'), step: v.number() };
 async function seed(ctx: MutationCtx, input: { jobId: Id<'projectGithubMirrorJobs'>; step: number }) {
   const active = await mirrorJob(ctx, input);
@@ -39,26 +40,30 @@ async function seed(ctx: MutationCtx, input: { jobId: Id<'projectGithubMirrorJob
       binding = value.commits[value.pushed - 1] ?? null;
     }
   }
-  const candidate = await readHostedRecord(ctx, {
-    projectId: job.projectId,
-    actor: project.owner,
-    kind: 'candidate',
-    key: receipt.candidate.id,
-  });
-  const intentId = candidate && JSON.parse(candidate.value).intentId;
-  const intent = intentId
-    ? await readHostedRecord(ctx, {
-        projectId: job.projectId,
-        actor: project.owner,
-        kind: 'intent',
-        key: intentId,
-      })
-    : null;
-  invariant(
-    intent,
-    'SOURCE_UNAVAILABLE',
-    'The accepted Intent is unavailable for the mirror commit message.',
-  );
+  let fallback = '';
+  if (receipt.message === undefined && !receipt.cohortMessages?.length) {
+    const candidate = await readHostedRecord(ctx, {
+      projectId: job.projectId,
+      actor: project.owner,
+      kind: 'candidate',
+      key: receipt.candidate.id,
+    });
+    const intentId = candidate && JSON.parse(candidate.value).intentId;
+    const intent = intentId
+      ? await readHostedRecord(ctx, {
+          projectId: job.projectId,
+          actor: project.owner,
+          kind: 'intent',
+          key: intentId,
+        })
+      : null;
+    invariant(
+      intent,
+      'SOURCE_UNAVAILABLE',
+      'The accepted Intent is unavailable for the mirror commit message.',
+    );
+    fallback = JSON.parse(intent.value).outcome;
+  }
   const name = process.env.FORGE_GITHUB_SYNC_NAME?.trim() || binding?.committer.name;
   const email = process.env.FORGE_GITHUB_SYNC_EMAIL?.trim() || binding?.committer.email;
   invariant(
@@ -66,13 +71,13 @@ async function seed(ctx: MutationCtx, input: { jobId: Id<'projectGithubMirrorJob
     'GITHUB_SYNC_IDENTITY',
     'Configure the existing noreply sync identity with FORGE_GITHUB_SYNC_NAME and FORGE_GITHUB_SYNC_EMAIL, or retain it in githubSync.',
   );
-  const message = [
-    JSON.parse(intent.value).outcome,
-    '',
-    `Forge-State: ${receipt.candidate.head}`,
-    `Forge-Acceptance: ${receipt.id}`,
-    `Forge-View: ${receipt.candidate.id}`,
-  ].join('\n');
+  const message = mirrorMessage({
+    ...receipt,
+    fallback,
+    state: receipt.candidate.head,
+    acceptanceId: receipt.id,
+    viewId: receipt.candidate.id,
+  });
   const value = {
     cursor: null,
     repository: job.repository,

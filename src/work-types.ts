@@ -10,6 +10,7 @@ import { landingEntrySchema, landingBatchSchema } from './landing-batch-types.js
 import { checkBackendSchema } from './check-backend.js';
 import { hostedRecoverySchema } from './recovery-hosted-protocol.js';
 import { z } from 'zod';
+import { landingMessageSchema, cohortMessagesSchema } from './landing-message.js';
 import { deliveryHandoffSchema } from './agent-handoff-types.js';
 import { githubSyncSchema, githubSyncHistorySchema, githubAutoPushSchema } from './github-sync-types.js';
 import { workActorSchema } from './work-actor-types.js';
@@ -798,6 +799,8 @@ export const fastPathEvidenceSchema = z.object({
   postAccept: z.object({ checkId: id, mode: z.literal('full'), required: z.literal(true) }),
 });
 export const channelMoveSchema = z.object({
+  message: landingMessageSchema.optional(),
+  cohortMessages: cohortMessagesSchema.optional(),
   ownerRequest: ownerAcceptanceEvidenceSchema.optional(),
   id,
   acceptedBy: workActorSchema.optional(),
@@ -843,6 +846,8 @@ export type HostedChannelMove = z.infer<typeof hostedChannelMoveSchema>;
 export const channelCommandSchema = z.discriminatedUnion('action', [
   z.object({
     action: z.literal('accept-channel'),
+    message: landingMessageSchema.optional(),
+    cohortMessages: cohortMessagesSchema.optional(),
     operationId: id,
     authorityEpoch: z.number().safe().nonnegative().optional(),
     reuseRunId: id.optional(),
@@ -1232,7 +1237,7 @@ export const commandSchema = z.discriminatedUnion('action', [
     laneId: id,
     expectedHead: oid,
     expectedTree: oid,
-    message: z.string().trim().min(1).max(500),
+    message: landingMessageSchema,
   }),
   z.object({ action: z.literal('undo'), laneId: id, expectedHead: oid }),
   z.object({ action: z.literal('resume'), laneId: id }),

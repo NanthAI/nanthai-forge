@@ -5,6 +5,7 @@ import { hostedMirrorStatusSchema } from './hosted-github-mirror-status.js';
 import { contractTestsInput } from './intent-test-contract.js';
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
+import { landingMessageSchema } from './landing-message.js';
 import { githubActionsRunsOnSchema } from './github-actions-runner-label.js';
 import { sourceAuthoritySchema } from './hosted-source-authority.js';
 import { revertTargetSchema } from './hosted-sync.js';
@@ -67,6 +68,7 @@ export const hostedAgentClientActions = ['ack', 'preflight', 'source-pack', 'rec
 export { hostedAgentAddressSchema, type HostedAgentAddress } from './hosted-address.js';
 export const hostedAgentCapabilitiesSchema = z
   .object({
+    landingMessageVersion: z.literal(1).optional(),
     overlapVersion: z.literal(1).optional(),
     overlapEvidenceVersion: z.literal(1).optional(),
     /** Deferred caller outcome/delivery receipts may ride on CLI mutations. */
@@ -158,6 +160,7 @@ export const hostedAgentCommandSchemas = {
   finish: z
     .object({
       ...selection,
+      message: landingMessageSchema.optional(),
       check: check.optional(),
       candidateId: uuid.optional(),
       composeOperationId: uuid.optional(),

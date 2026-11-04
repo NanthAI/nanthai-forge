@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
+import { landingMessageSchema, cohortMessagesSchema } from './landing-message.js';
 import { hostedMacEvidenceSchema } from './hosted-check.js';
 import { hostedLandingAttemptSchema } from './hosted-landing.js';
 import { canonicalPayload } from './hosted-source-operation.js';
@@ -22,6 +23,8 @@ export const hostedAcceptanceSchema = z
     authorityEpoch: count,
     previous: hostedLandingAttemptSchema.shape.main,
     candidate: hostedLandingAttemptSchema.shape.candidate.extend({ head: hash }),
+    message: landingMessageSchema.optional(),
+    cohortMessages: cohortMessagesSchema.optional(),
     memberCandidate: hostedLandingAttemptSchema.shape.candidate.optional(),
     batchId: z.uuid().optional(),
     crossHeadProof: crossHeadProofSchema.optional(),

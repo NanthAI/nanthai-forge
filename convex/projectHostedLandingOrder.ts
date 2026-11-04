@@ -213,11 +213,14 @@ export async function landingQueuePosition(ctx: QueryCtx | MutationCtx, state: H
 export function landingStateForReader(state: HostedLandingState, priorityInfo?: 1): HostedLandingState {
   // Retry links remain in canonical records and admission receipts. Selected
   // read DTOs keep the released strict shape, including priority-aware readers.
-  const { supersedes: _supersedes, retryReason: _retryReason, ...publicState } = state;
-  const { retryReason: _requestedRetry, ...publicRequest } = state.request;
+  const { supersedes: _supersedes, retryReason: _retryReason, message: _message, ...publicState } = state;
+  const { retryReason: _requestedRetry, message: _requestedMessage, ...publicRequest } = state.request;
   void _supersedes;
   void _retryReason;
   void _requestedRetry;
+  // Message provenance stays in canonical records, not released strict wait DTOs.
+  void _message;
+  void _requestedMessage;
   const readable = { ...publicState, request: publicRequest };
   if (priorityInfo === 1) return readable;
   const { priority: _priority, priorityReason: _reason, priorityVersion: _version, ...legacy } = readable;

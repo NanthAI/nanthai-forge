@@ -1488,7 +1488,10 @@ source but cannot publish a competing main.
 Publication atomically writes the immutable acceptance, journal event, selected
 source-snapshot delta, main CAS, landed request/original operation settlement and
 queue release. The receipt retains input/dependency roots, previous head/receipt,
-actor, policy, exact run and terminal evidence, authority epoch and attempt. Automatic
+actor, policy, exact run and terminal evidence, authority epoch and attempt. It also
+retains the supplied landing message by value; the first shared-cohort receipt
+retains the ordered member messages for their one mirrored commit. These bounded
+fields travel through existing records and calls (see [mirror messages](workflows.md#automatic-main-mirror)). Automatic
 acceptance records its revert target; compensation remains the ordinary revert
 path. Original authorized retries return that receipt after later main/policy/epoch
 changes without repeating publication. H15 owns named recomposition/recheck on races;
@@ -1691,3 +1694,30 @@ Candidate `show` uses its clean result. All source reads recheck current access.
 `peers` extends `projectHostedOverlaps:read`, including a path before its first
 save, with the same classifier and honest saved-only coverage. No read adds
 subscriptions, writes or idle work.
+
+### Landing message metadata
+
+Acceptance freezes supplied subject, body and trailers by value. Messages are
+limited to 1 KiB UTF-8; controls are stripped, CRLF normalized, and reserved
+Forge-State/Acceptance/View lines escaped with `> `. Other trailers retain their
+order; authoritative Forge trailers follow. A cohort's first receipt carries
+all supplied messages in member order for its shared commit. Native batches do
+the same. Raw State exports keep State messages; published history is unchanged.
+Legacy CLI `Agent change` defaults mean omission; negotiated requests distinguish
+an explicit identical subject. Pre-upgrade pending finishes recover their saved
+message at acceptance. Released status/wait projections omit this internal
+provenance so strict older clients keep working; canonical records retain it.
+
+Metadata uses existing calls and records, with zero idle calls. Each message adds
+at most 2,061 JSON bytes; the first cohort receipt adds at most 16,427 more for
+eight messages. Only legacy pending finishes need an indexed finish-record read.
+Source and cursor artifact bytes remain in R2.
+
+
+### GitHub containment and adoption
+
+When GitHub advances, sync checks that its net changes are contained in accepted Forge main. A three-way merge uses the recorded GitHub tree as base, current GitHub as theirs and the accepted export as ours. Every path must merge without conflicts and leave Forge bytes and modes unchanged, including additions, deletions, binary files and symlinks. Line merges allow later Forge edits beside already-contained external hunks.
+
+An exact historical version (including mode or absence) can supply a per-path base. Sync reads the pinned acceptance interval after the mapped base in pages, plus saved checkpoints ancestral to accepted Lane inputs; it excludes unaccepted saves, older versions and older branches. Dry-run records State/acceptance/Candidate pins in `reconciliation.historyProofs`, plus Lane/checkpoint pins for saves. Squash merges, merge commits and empty changes use this same check.
+
+Containment proposes one new adoption commit with current GitHub as parent and the exact exported main tree. Earlier mappings and history remain intact; subsequent syncs continue from this adoption. Dry-run reports `reconciliation.status: "contained"`, external commit IDs/paths and the proposal. Only `--push` changes Work metadata.

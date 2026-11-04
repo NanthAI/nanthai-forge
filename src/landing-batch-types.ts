@@ -1,6 +1,7 @@
 import { semanticConflictsSchema } from './intent-semantic-conflict.js';
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
+import { landingMessageSchema } from './landing-message.js';
 import { landingStallSchema } from './landing-stall.js';
 import { landingRuntimeSchema } from './landing-environment-schema.js';
 import { checkEnvironmentSchema } from './check-environment-schema.js';
@@ -14,6 +15,7 @@ export const landingWaitingSchema = z.object({
   runIds: z.array(id).optional(),
 });
 export const landingEntrySchema = z.object({
+  message: landingMessageSchema.optional(),
   semanticConflicts: semanticConflictsSchema.optional(),
   id,
   request: head,

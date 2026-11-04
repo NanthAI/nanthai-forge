@@ -34,6 +34,7 @@ import { canonicalPayload } from '../src/hosted-source-operation';
 import { acceptancePolicyDigest } from '../src/policy-digest';
 import { landingObservation } from '../src/hosted-landing';
 import { invariant } from '../src/errors';
+import { acceptedLandingMessage } from './projectHostedLandingMessage';
 
 /** At most eight independently authorized members, one checked head, one main
  * CAS. All receipts, request settlements and completion activations commit with
@@ -223,7 +224,10 @@ export async function publishLandingBatch(ctx: MutationCtx, claim: LandingClaim,
   let previousSnapshot = main.snapshotId;
   const receipts = [];
   const completions: ReceiptIdentity[] = [];
+  const messages = [];
+  for (const member of members) messages.push(await acceptedLandingMessage(ctx, member.state));
   for (const [index, member] of members.entries()) {
+    const message = messages[index];
     const receipt = hostedAcceptanceSchema.parse({
       schema: 1,
       id: member.attempt.operations.accept,
@@ -237,6 +241,12 @@ export async function publishLandingBatch(ctx: MutationCtx, claim: LandingClaim,
       previous: candidate.base,
       candidate: member.attempt.candidate,
       memberCandidate: member.original.candidate,
+      ...(message === undefined ? {} : { message }),
+      ...(index === 0
+        ? {
+            cohortMessages: messages.filter((m): m is string => m !== undefined),
+          }
+        : {}),
       batchId: batch.id,
       actor: member.attempt.actor,
       policyDigest,

@@ -14,6 +14,7 @@ export async function batchesFixture(
   t,
   {
     count = 4,
+    memberMessages,
     fileCount = 3,
     conflict = false,
     governanceVersion = 1,
@@ -111,6 +112,7 @@ export async function batchesFixture(
     const lane = await f.c.lane(pin, { intentId }),
       selection = f.c.selection([lane]);
     selection.request.intentId = intentId;
+    if (memberMessages?.[i] !== undefined) selection.request.message = memberMessages[i];
     // Seed the trusted owner provenance normally produced by start/save. The
     // generic compose fixture deliberately creates unverified arbitrary Lanes.
     for (const table of requestCheck ? [] : ['projectHostedRecords', 'projectHostedRecordHeads'])

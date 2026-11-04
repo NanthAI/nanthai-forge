@@ -42,7 +42,13 @@ async function fixture(t, options) {
 
 test('four ready entries land with one exact combined check and one Channel move', async t => {
   const f = await fixture(t);
-  for (let i = 0; i < 4; i++) await f.candidate(`${i}.txt`);
+  const messages = [];
+  for (let i = 0; i < 4; i++) {
+    const item = await f.candidate(`${i}.txt`, undefined, false);
+    item.command.message = `Native cohort ${i}\n\nCo-Authored-By: Synthetic ${i} <noreply@openai.com>`;
+    messages.push(item.command.message);
+    await enqueueLanding(f.work, item.command, item.view);
+  }
   await f.checkCandidates();
   await drainLandingBatches(f.work, 'main');
   const data = f.store.load();
@@ -50,6 +56,25 @@ test('four ready entries land with one exact combined check and one Channel move
   assert.equal(data.landingBatches.length, 1);
   assert.equal(data.runs.filter(run => !run.mainCheck && !f.soloRuns.has(run.id)).length, 1);
   assert.equal(data.channelMoves.length, 1);
+  assert.deepEqual(data.channelMoves[0].cohortMessages, messages);
+  const move = data.channelMoves[0];
+  const replay = {
+    action: 'accept-channel',
+    operationId: move.id,
+    channel: move.channel,
+    viewId: move.viewId,
+    expectedHead: move.head,
+    expectedPrevious: move.previous,
+  };
+  assert.deepEqual(
+    (await f.work.dispatch(replay, f.store.revision())).result.cohortMessages,
+    messages,
+    'cohort retry with omitted provenance keeps its accepted ordered messages',
+  );
+  await assert.rejects(
+    f.work.dispatch({ ...replay, cohortMessages: messages.slice(1) }, f.store.revision()),
+    error => error.code === 'WORK_OPERATION_CHANGED',
+  );
   assert.equal(data.views.find(view => view.id === f.main().viewId).inputs.length, 4);
   assert.ok(data.landingEntries.every(entry => entry.status === 'accepted'));
   assert.ok(

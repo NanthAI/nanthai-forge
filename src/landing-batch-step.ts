@@ -118,6 +118,10 @@ export async function advanceLandingBatch(
           return work.dispatch(
             {
               action: 'accept-channel',
+              cohortMessages: passing.entryIds.flatMap(id => {
+                const message = work.store.select('landingEntries', id)?.message;
+                return message === undefined ? [] : [message];
+              }),
               operationId: batchAcceptanceId(batch, passing.viewId),
               channel: batch.channel,
               viewId: passing.viewId,

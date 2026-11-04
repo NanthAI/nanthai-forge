@@ -316,12 +316,22 @@ export function nativeExecute(
           requireNativeAcceptance(store, authorityEpoch);
           const existing = data.channelMoves.find(move => move.id === command.operationId);
           if (existing) {
+            // A released caller may omit the new optional provenance fields on
+            // replay. Reconcile with the frozen values, never replace them.
+            const replay = channelCommandSchema.parse({
+              ...command,
+              message: command.message ?? existing.message,
+              cohortMessages: command.cohortMessages ?? existing.cohortMessages,
+            });
             invariant(
               (existing.acceptanceRequest
-                ? existing.acceptanceRequest === digest(JSON.stringify(command))
+                ? existing.acceptanceRequest === digest(JSON.stringify(replay))
                 : existing.viewId === command.viewId &&
                   existing.head === command.expectedHead &&
-                  existing.previous === command.expectedPrevious) &&
+                  existing.previous === command.expectedPrevious &&
+                  (command.message === undefined || existing.message === command.message) &&
+                  (command.cohortMessages === undefined ||
+                    JSON.stringify(existing.cohortMessages) === JSON.stringify(command.cohortMessages))) &&
                 existing.channel === command.channel &&
                 existing.invariant?.policy.id === command.invariant?.id &&
                 existing.invariant?.policy.definition === command.invariant?.definition,
@@ -545,6 +555,8 @@ export function nativeExecute(
               head: fast?.head ?? acceptedHead,
               previous,
               acceptanceRequest: digest(JSON.stringify(command)),
+              ...(command.message === undefined ? {} : { message: command.message }),
+              ...(command.cohortMessages ? { cohortMessages: command.cohortMessages } : {}),
               ...(fast ? { fastPath: fast.evidence } : {}),
               ...(postAccept ? { postAccept } : {}),
               at,

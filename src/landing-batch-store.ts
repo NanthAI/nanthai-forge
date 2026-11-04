@@ -155,6 +155,7 @@ export async function enqueueLanding(
       const entry: LandingEntry = {
         id: command.operationId,
         request,
+        message: command.message,
         channel: command.accept!.channel,
         viewId: view.id,
         head: view.head!,

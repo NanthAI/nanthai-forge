@@ -26,7 +26,10 @@ export async function acceptanceFixture(source = null) {
           c.ranges <= (final ? 100 : 1600) && c.documents <= (final ? 100 : 1600),
           `${name}: bounded reads`,
         );
-        assert(c.readBytes < 2 * 1024 * 1024 && c.writeBytes < 512 * 1024, `${name}: bounded metadata`);
+        assert(
+          c.readBytes < 2 * 1024 * 1024 && c.writeBytes < 512 * 1024,
+          `${name}: bounded metadata ${JSON.stringify({ readBytes: c.readBytes, writeBytes: c.writeBytes, documents: c.documents, writes: c.writes })}`,
+        );
         assert(
           !c.touched.some(t =>
             [

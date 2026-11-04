@@ -45,6 +45,7 @@ export function agentFixture(t) {
   };
   const caps = {
     schema: 1,
+    landingMessageVersion: 1,
     projectId: 'project',
     actor: 'owner',
     authority: main.authority,

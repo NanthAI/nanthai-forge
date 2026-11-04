@@ -891,3 +891,27 @@ test('cancelled same-head landing admits a fresh operation while the cancelled r
     { code: 'LANDING_CANCELLED' },
   );
 });
+
+for (const native of [true, false])
+  test(`single saved-head ${native ? 'native' : 'Git'} landing keeps the supplied trailer after an unknown acceptance outcome`, async t => {
+    const f = await fixture(t, { native, batching: false });
+    const lane = await f.lane('single-message.txt');
+    const message =
+      'Supplied saved-head landing\n\nBody.\n\nCo-Authored-By: Synthetic Sol <noreply@openai.com>';
+    const operationId = randomUUID();
+    const dispatch = f.agent.work.dispatch.bind(f.agent.work);
+    let lost = false;
+    f.agent.work.dispatch = async (...args) => {
+      const response = await dispatch(...args);
+      if (args[0].action === 'accept-channel' && !lost) {
+        lost = true;
+        throw new Error('Synthetic lost acceptance reply');
+      }
+      return response;
+    };
+    await assert.rejects(f.land([lane], { operationId, message }), /Synthetic lost acceptance reply/);
+    const result = (await f.land([lane], { operationId, message })).result;
+    assert.equal(result.complete, true);
+    assert.equal(f.store.load().channelMoves.length, 1);
+    assert.equal(f.store.load().channelMoves[0].message, message);
+  });

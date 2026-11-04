@@ -71,6 +71,7 @@ export async function reuseHostedLanding(
   const selectionKey = digest(
     canonicalPayload({
       channel: input.request.channel,
+      message: input.request.message ?? null,
       ...(input.request.priority === 'urgent' ? { priority: 'urgent' } : {}),
       inputs: candidate.inputs,
       dependencies: candidate.dependencies,

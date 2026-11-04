@@ -579,6 +579,7 @@ class FinishRunner {
               return this.phases.phase(
                 {
                   action: 'accept-channel',
+                  message: command.message,
                   operationId: attempt.operations.accept,
                   viewId: attempt.view!.viewId,
                   expectedHead: attempt.view!.head,

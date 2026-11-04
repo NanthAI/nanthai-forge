@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { batchesFixture, states, synthetic } from './hosted-landing-batches-fixture.mjs';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { LANDING_MESSAGE_BYTES } from '../dist/landing-message.js';
 import { initialSourceStep } from '../dist/hosted-source-step.js';
 import { buildComposePages } from '../dist/hosted-compose.js';
 import { saveBytes } from '../dist/hosted-save.js';
@@ -19,7 +20,11 @@ test.after(() => {
 });
 
 test('600 Intents and 575 retained receipts do not change bounded eight-member landing costs', async t => {
-  const f = await batchesFixture(t, { count: 8 });
+  const memberMessages = Array.from({ length: 8 }, (_, i) => {
+    const footer = `\n\nCo-Authored-By: Synthetic ${i} <noreply@openai.com>`;
+    return '\\'.repeat(LANDING_MESSAGE_BYTES - Buffer.byteLength(footer)) + footer;
+  });
+  const f = await batchesFixture(t, { count: 8, memberMessages });
   const template = [...f.tables.projectHostedRecords.values()].find(r => r.kind === 'intent');
   for (let i = 0; i < 600; i++) {
     const key = randomUUID();
@@ -83,7 +88,13 @@ test('600 Intents and 575 retained receipts do not change bounded eight-member l
     };
   assert(f.entries.every(entry => states(f).find(s => s.id === entry.state.id)?.phase === 'landed'));
   assert.equal(f.runs().length, 1);
-  assert(costs.transactions < 150, JSON.stringify(costs));
+  const receipts = [...f.tables.projectHostedAcceptances.values()]
+    .filter(r => r.value !== '{"synthetic":"unrelated history must not be read"}')
+    .map(r => JSON.parse(r.value));
+  assert.deepEqual(receipts[0].cohortMessages, memberMessages);
+  assert(receipts.every(r => Buffer.byteLength(r.message) === LANDING_MESSAGE_BYTES));
+  assert(Buffer.byteLength(JSON.stringify(receipts[0])) < 300 * 1024);
+  assert(costs.transactions <= 100, 'Message retention must not add Convex calls: ' + JSON.stringify(costs));
   assert(costs.documentsRead < 4000, JSON.stringify(costs));
   assert(costs.documentsWritten < 1300, JSON.stringify(costs));
   assert(costs.peakRssBytes < 768 * 1024 * 1024, JSON.stringify(costs));

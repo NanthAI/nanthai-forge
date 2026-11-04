@@ -90,7 +90,10 @@ for (const [action, api] of [
       compose: { laneId: s.lane.laneId },
       sync: { laneId: s.lane.laneId, apply: false },
       check: { candidateId: s.candidate.id, checkId: randomUUID() },
-      finish: { laneId: s.lane.laneId },
+      finish: {
+        laneId: s.lane.laneId,
+        message: 'Supplied subject\n\nCo-Authored-By: Synthetic Sol <noreply@openai.com>',
+      },
       cancel: { submissionId: randomUUID() },
       revert: { target: { kind: 'receipt', receiptId: randomUUID() } },
       abandon: { reason: 'Superseded' },
@@ -109,7 +112,10 @@ for (const [action, api] of [
     }
     assert(!existsSync(join(s.root, '.forge', 'native')));
     assert(!existsSync(join(s.root, '.forge', 'work.json')));
-    if (action === 'finish') assert.equal(first.result.submission.request.agent, true);
+    if (action === 'finish') {
+      assert.equal(first.result.submission.request.agent, true);
+      assert.equal(first.result.submission.request.message, command.message);
+    }
   });
 
 test('capability discovery and status observations perform finite reads and never wake a worker', async t => {
@@ -131,12 +137,17 @@ test('capability discovery and status observations perform finite reads and neve
 
 test('pending source and finish steps return promptly and retain all child operations across reconnect', async t => {
   const s = agentFixture(t),
-    command = { laneId: s.lane.laneId };
+    command = {
+      laneId: s.lane.laneId,
+      message: 'Pending subject\n\nCo-Authored-By: Synthetic Sol <noreply@openai.com>',
+    };
   s.pending(true);
   const first = await s.transport().dispatch('finish', command);
   assert.equal(first.result.phase, 'finish');
   assert.equal(first.result.submission.phase, 'composing');
   assert.equal(first.result.submission.preparing, true);
+  const desired = s.calls.find(c => c.name === 'projectHostedLandingDesired:submit');
+  assert.equal(JSON.parse(desired.args.request).message, command.message);
   const count = s.calls.length;
   assert(!s.calls.some(call => call.name === 'projectHostedLanding:enqueue'));
   s.pending(false);
@@ -405,4 +416,23 @@ test('hosted finish preserves a passing preflight for an equivalent source tree 
   assert.notEqual(receipt.head, marker.selection.head);
   const result = await s.transport().dispatch('finish', { laneId: s.lane.laneId });
   assert.equal(result.result.defaults.preflight.status, 'passed');
+});
+
+test('landing-message negotiation reuses discovery and retains legacy request shapes on older deployments', async t => {
+  const s = agentFixture(t);
+  delete s.caps.landingMessageVersion;
+  const command = {
+    laneId: s.lane.laneId,
+    message: 'Legacy-compatible subject\n\nCo-Authored-By: Synthetic Sol <noreply@openai.com>',
+  };
+  const first = await s.transport().dispatch('finish', command);
+  assert.equal(s.calls.filter(c => c.name === 'projectHostedAgent:capabilities').length, 1);
+  const queued = s.calls.find(c => c.name === 'projectHostedLanding:enqueue');
+  assert.equal('message' in JSON.parse(queued.args.request), false);
+  const original = s.requests.get(first.result.composeOperationId);
+  assert.equal(
+    original.message,
+    command.message,
+    'legacy finish still carries the message through its original composition',
+  );
 });

@@ -30,6 +30,7 @@ import { governanceReason, requiresGovernedCheck } from '../src/public-governanc
 import { invariant } from '../src/errors';
 import { validCrossHeadProof } from '../src/hosted-cross-head-proof';
 import { requireReuseAudit } from './projectHostedReuseAudit';
+import { acceptedLandingMessage } from './projectHostedLandingMessage';
 /** One constant-size publication transaction. A completed replay authorizes the
  * reader first, then returns the original receipt without rechecking old policy,
  * acquiring another lease or rewinding any later main/saved Lane. */
@@ -259,6 +260,7 @@ export async function publishAcceptance(
     await releaseLandingQueue(ctx, queue, now);
     return { status: 'pending' as const, reason, request: next };
   }
+  const message = await acceptedLandingMessage(ctx, state);
   const receipt = hostedAcceptanceSchema.parse({
     schema: 1,
     id: identity.receiptId,
@@ -267,6 +269,7 @@ export async function publishAcceptance(
     submissionId: state.id,
     operationId: state.operationId,
     attemptId: attempt.id,
+    ...(message === undefined ? {} : { message }),
     at: new Date(now).toISOString(),
     authorityEpoch: attempt.authorityEpoch,
     previous: attempt.main,
