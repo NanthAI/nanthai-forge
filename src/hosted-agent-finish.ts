@@ -92,21 +92,16 @@ export async function queuedConflict(session: HostedAgentSession, submission: Ho
       ...(read.queueAheadSelection ? { queueAheadSelection: read.queueAheadSelection } : {}),
     };
     if (!wouldConflict || current.submission.phase !== 'queued') return current;
-    if ('predecessor' in wouldConflict)
-      return {
-        ...current,
-        wouldConflict,
-        next: 'wait-for-predecessor',
-        nextCommand: `nforge agent ${shellQuote(session.root)} wait ${shellQuote(JSON.stringify({ operationIds: [current.submission.operationId] }))}`,
-      };
-    const laneId = session.marker()?.selection.laneId;
+    // A queue prediction cannot settle or replace the live submission. Follow
+    // its canonical wait; an actual conflict then returns the rejected attempt.
+    const parameters = { operationIds: [current.submission.operationId] };
+    const command = `nforge agent ${shellQuote(session.root)} wait ${shellQuote(JSON.stringify(parameters))}`;
     return {
       ...current,
       wouldConflict,
-      next: 'sync-and-land',
-      nextCommand: `nforge agent ${shellQuote(session.root)} land --save ${shellQuote(
-        JSON.stringify(laneId ? { laneId } : {}),
-      )}`,
+      next: { action: 'wait', ...parameters },
+      command,
+      nextCommand: command,
     };
   } catch {
     return {}; /* Advisory read; the replay result stands. */
@@ -197,6 +192,14 @@ async function executeFinishWork(session: HostedAgentSession, input: unknown) {
         { operationId: saveOperationId, message: command.message ?? 'Agent change' },
         session.exchange,
         session.capabilities.overlapEvidenceVersion === 1,
+        false,
+        {
+          action: 'finish',
+          parameters: {
+            ...(context?.command ?? hostedAgentCommandSchemas.finish.parse(input)),
+            operationId: session.journal.operationId,
+          },
+        },
       );
       if (agentSourceOutcome(saved)?.status !== 'completed') {
         if (agentSourceOutcome(saved)?.status === 'failed')

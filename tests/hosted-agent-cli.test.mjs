@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, writeFileSync, mkdirSync, symlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { hostedAgentAddress, hostedAgentCli } from '../dist/hosted-agent-cli.js';
+import { canonicalRoot } from '../dist/root-paths.js';
 import { ForgeError } from '../dist/errors.js';
 import { agentCli } from '../dist/agent-cli.js';
 import { agentFixture } from './hosted-agent-fixture.mjs';
@@ -136,7 +137,11 @@ test('hosted wait CLI reports a persistent observe 502 as IN PROGRESS with an ex
   assert.equal(process.exitCode, 3);
   assert(err.join('').includes('IN PROGRESS; wait deadline reached'));
   assert(
-    err.join('').includes(`nforge agent '${s.root}' wait '${JSON.stringify({ ...command, ...s.address })}'`),
+    err
+      .join('')
+      .includes(
+        `nforge agent '${canonicalRoot(s.root)}' wait '${JSON.stringify({ ...command, ...s.address })}'`,
+      ),
   );
   assert(!err.join('').includes('FAILED'));
   assert(output.every(line => JSON.parse(line).type === 'observation-retry'));

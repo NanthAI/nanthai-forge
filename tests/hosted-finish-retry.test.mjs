@@ -102,7 +102,9 @@ test('current conflict recovery survives retry integration and unchanged-source 
   const command = { laneId: f.lane.laneId, accept: true };
   const first = await s.transport().dispatch('finish', command);
   assert.equal(first.result.phase, 'conflict');
-  assert.equal(first.result.next, 'retry');
+  assert.equal(first.result.next, undefined, 'conflict recovery owns the continuation');
+  assert.equal(first.result.retryCommand, undefined);
+  assert.equal(first.result.recovery.conflict.next.action, 'resolve');
   assert.deepEqual(first.result.recovery.conflict.paths, ['a.txt']);
   const replay = await s.transport().dispatch('finish', { ...command, operationId: first.operationId });
   assert.equal(replay.result.candidateId, first.result.candidateId);

@@ -452,6 +452,8 @@ export async function executeHostedAgent(
       },
       session.exchange,
       session.capabilities.overlapEvidenceVersion === 1,
+      false,
+      { action: 'save', parameters: { ...command, operationId: session.journal.operationId } },
     );
   }
   if (action === 'compose')

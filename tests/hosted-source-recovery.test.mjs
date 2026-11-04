@@ -6,6 +6,7 @@ import { getFunctionName } from 'convex/server';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { agentFixture } from './hosted-agent-fixture.mjs';
+import { registerHostedAgentWorkflow } from '../dist/mcp-hosted-agent.js';
 import { waitHostedAgentSource, sourceWaitSnapshot } from '../dist/hosted-agent-source-wait.js';
 
 const dead = (jobId, status = 'retryable') => ({
@@ -93,6 +94,23 @@ for (const status of ['submitted', 'retryable', 'failed'])
     assert.match(result.result.replay.command, /nforge agent .* compose /);
     assert(result.result.replay.command.includes(operationId));
     assert.equal(result.result.failedPhase, 'source-step:17');
+    const tools = new Map();
+    t.after(
+      registerHostedAgentWorkflow(
+        {
+          registerTool(name, config, call) {
+            tools.set(name, { config, call });
+          },
+        },
+        s.transport(),
+      ),
+    );
+    const task = tools.get('forge_task');
+    // Parse through the actual registered MCP schema before invoking its handler.
+    const next = task.config.inputSchema.command.parse(result.result.next);
+    const response = await task.call({ command: next }, { signal: new AbortController().signal });
+    assert(!response.isError, response.content[0].text);
+    assert.equal(JSON.parse(response.content[0].text).operationId, result.result.next.operationId);
     if (status !== 'failed') assert.equal(result.result.next.operationId, operationId);
     else assert.notEqual(result.result.next.operationId, operationId);
     const again = await s.transport().dispatch('compose', command);

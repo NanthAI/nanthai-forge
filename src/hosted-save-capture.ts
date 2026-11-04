@@ -1,4 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
+import { conflictMarkerScan, scanConflictMarkers, conflictMarkersFound } from './conflict-markers.js';
+import {
+  assertNoConflictMarkers,
+  pendingConflictPaths,
+  type ConflictContinuation,
+} from './hosted-conflict-precheck.js';
 import { clientCacheRoot } from './root-paths.js';
 import {
   openSync,
@@ -77,10 +83,12 @@ function captureFile(
       pin: { sha256: previous.blob, size: stat.size },
       changed: false,
       sketch: null,
+      markers: false,
       stat,
     };
   let pin: { sha256: string; size: number },
     bytes: Buffer | null = null;
+  const markerScan = conflictMarkerScan();
   if (stat.isSymbolicLink()) {
     invariant(
       realpathSync(dirname(absolute)) === dirname(absolute),
@@ -111,6 +119,7 @@ function captureFile(
       target = source.size > memoryLimit ? openSync(temporary, 'wx', 0o600) : null;
     try {
       pin = source.scan(chunk => {
+        scanConflictMarkers(markerScan, chunk);
         if (target === null) chunks.push(Buffer.from(chunk));
         else {
           let offset = 0;
@@ -137,7 +146,7 @@ function captureFile(
     );
     gitlinkCommit(bytes ?? readFileSync(temporary));
   }
-  const observed = { file: { blob: pin.sha256, mode }, pin };
+  const observed = { file: { blob: pin.sha256, mode }, pin, markers: conflictMarkersFound(markerScan) };
   if (previous && previous.blob === pin.sha256 && previous.mode === mode) {
     if (!bytes) rmSync(temporary, { force: true });
     return { ...observed, changed: false, stat, sketch: null };
@@ -149,7 +158,12 @@ function captureFile(
   syncFile(final);
   return { ...observed, changed: true, stat, sketch: bytes ? overlapTextSketch(bytes) : null };
 }
-export async function captureHostedSave(root: string, directory: string) {
+export async function captureHostedSave(
+  root: string,
+  directory: string,
+  preserveConflicts = false,
+  continuation?: ConflictContinuation,
+) {
   root = realpathSync(root);
   const marker = readHostedLaneCheckout(root);
   invariant(marker, 'NOT_FOUND', 'Open a hosted Lane before preparing a save.');
@@ -161,6 +175,8 @@ export async function captureHostedSave(root: string, directory: string) {
     bases = overlapBaseBlobs(cache, marker.selection.base.head);
   const baseline = new Map(marker.state.files.map(file => [file.path, file])),
     local = nativePaths(root, [...baseline.keys()]);
+  const marked: string[] = [];
+  const resolving = pendingConflictPaths(root, marker.selection.laneId).length > 0;
   const changes: SaveChange[] = [],
     files: { pin: { sha256: string; size: number }; path: string }[] = [];
   for (const path of local.sort()) {
@@ -168,6 +184,7 @@ export async function captureHostedSave(root: string, directory: string) {
       observed = captureFile(root, path, directory, old, index);
     observedStats.set(path, statEntry(observed.stat, observed.file.blob));
     if (observed.changed) {
+      if (observed.markers) marked.push(path);
       const baseBlob = bases[path] ?? old?.blob ?? digest('');
       bases[path] = baseBlob;
       const evidence = overlapTextEvidence(
@@ -187,6 +204,8 @@ export async function captureHostedSave(root: string, directory: string) {
       if (observed.sketch) rememberOverlapSketch(cache, observed.pin.sha256, observed.sketch);
     }
   }
+  if (!preserveConflicts)
+    assertNoConflictMarkers(root, marker.selection.laneId, marked, resolving, continuation);
   if (changes.length) rememberOverlapBases(cache, marker.selection.base.head, bases);
   const machine = machineObjectsDirectory();
   for (const file of files) await rememberObject(machine, join(directory, file.path), file.pin.sha256);

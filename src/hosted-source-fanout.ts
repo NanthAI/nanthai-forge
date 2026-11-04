@@ -1,3 +1,9 @@
+import {
+  conflictMarkerScan,
+  scanConflictMarkers,
+  conflictMarkersFound,
+  type ConflictMarkerScan,
+} from './conflict-markers.js';
 // SPDX-License-Identifier: Apache-2.0
 import type { WorkerObject } from './hosted-source-worker-format.js';
 import type { SourceStepCursor, StepTransport } from './hosted-source-step.js';
@@ -35,7 +41,7 @@ export type SourceTaskProgress = {
   verify: VerifyCursor | null;
   states: SourceStateSummary[];
   calculations?: SourceCalculationResult[];
-  scan?: { prefix: string; skip: boolean; found: boolean };
+  scan?: ConflictMarkerScan;
 };
 export async function stateSummary(
   ref: WorkerObject,
@@ -155,44 +161,13 @@ export async function runSourceTask(
     };
   };
   if (input.kind === 'markers') {
-    const scan = (progress.scan ??= { prefix: '', skip: false, found: false });
-    const consume = (bytes: Uint8Array) => {
-      for (const byte of bytes) {
-        if (scan.skip) {
-          if (byte === 10) {
-            scan.skip = false;
-            scan.prefix = '';
-          }
-          continue;
-        }
-        scan.prefix += String.fromCharCode(byte);
-        if (
-          scan.prefix === '<<<<<<< ' ||
-          scan.prefix === '>>>>>>> ' ||
-          scan.prefix === '=======\n' ||
-          scan.prefix === '=======\r\n'
-        ) {
-          scan.found = true;
-          scan.skip = true;
-        }
-        if (byte === 10) {
-          scan.skip = false;
-          scan.prefix = '';
-        } else if (
-          !['<<<<<<< ', '>>>>>>> ', '=======\n', '=======\r\n'].some(pattern =>
-            pattern.startsWith(scan.prefix),
-          )
-        ) {
-          scan.skip = true;
-          scan.prefix = '';
-        }
-      }
-    };
+    const scan = (progress.scan ??= conflictMarkerScan());
+    const consume = (bytes: Uint8Array) => scanConflictMarkers(scan, bytes);
     progress.verify = await verifySourceObject(io, input.refs[0]!, m, progress.verify, consume);
     if (!progress.verify) {
-      scan.found ||= scan.prefix === '=======' || scan.prefix === '=======\r';
+      const found = conflictMarkersFound(scan);
       progress.calculations = [
-        { key: input.request.key, blob: null, kind: 'binary', resolutions: [], markers: scan.found },
+        { key: input.request.key, blob: null, kind: 'binary', resolutions: [], markers: found },
       ];
     }
     return finish(!progress.verify);

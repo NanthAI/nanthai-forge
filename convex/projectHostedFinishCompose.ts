@@ -375,7 +375,7 @@ export async function installFinishCompose(
         ctx,
         input,
         'COMPOSITION_CONFLICT',
-        `Candidate ${candidate.id} conflicts in ${paths.join(', ')}${more ? ` (and ${more} more files in its retained conflict pages)` : ''} against main ${pending.main.head}${pending.precompose.peerLanes.length ? ` (accepted Lane(s) ${pending.precompose.peerLanes.join(', ')})` : ''}. Run nforge agent . sync '${JSON.stringify({ candidateId: candidate.id })}', resolve the files, then land again.`,
+        `Candidate ${candidate.id} conflicts in ${paths.join(', ')}${more ? ` (and ${more} more files in its retained conflict pages)` : ''} against main ${pending.main.head}${pending.precompose.peerLanes.length ? ` (accepted Lane(s) ${pending.precompose.peerLanes.join(', ')})` : ''}. Continue with the receipt recovery command.`,
       );
       await wakeAfterPrecompose(ctx, row.projectId, state.id, true);
     } else {

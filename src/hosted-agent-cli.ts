@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 import { readSource } from './files.js';
-import { canonicalRoot, clientCacheRoot } from './root-paths.js';
+import { clientCacheRoot } from './root-paths.js';
 import { isNetworkPending } from './network-continuation.js';
 import { join, resolve } from 'node:path';
 import { hostedAgentAddressSchema, type HostedAgentAddress } from './hosted-agent-contract.js';
-import { hostedAgentDirectory, readAgentJson } from './hosted-agent-journal.js';
+import { hostedAgentRoot, hostedAgentDirectory, readAgentJson } from './hosted-agent-journal.js';
 import { checkoutPathExists } from './hosted-checkout-files.js';
 import { readHostedLaneCheckout } from './hosted-lane-checkout-marker.js';
 import { durableReplace } from './native-durability.js';
@@ -21,7 +21,7 @@ export function hostedAgentAddress(
   root: string,
   selected: Record<string, unknown>,
 ): HostedAgentAddress | null {
-  root = canonicalRoot(root);
+  root = hostedAgentRoot(root);
   const explicit = selected.url !== undefined || selected.projectId !== undefined;
   const marker = checkoutPathExists(join(root, '.forge', 'hosted-lane.json'))
     ? readHostedLaneCheckout(root)
@@ -59,6 +59,7 @@ export async function hostedAgentCli(
   transport = new HostedAgentTransport(root, address),
   signal?: AbortSignal,
 ) {
+  root = hostedAgentRoot(root);
   const command = Object.fromEntries(
     Object.entries(selected).filter(([key]) => !['url', 'projectId', 'action'].includes(key)),
   );

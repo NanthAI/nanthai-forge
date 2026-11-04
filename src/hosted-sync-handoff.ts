@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { completeConflictRecovery } from './hosted-conflict-precheck.js';
 import { clientCacheRoot } from './root-paths.js';
 import { join } from 'node:path';
 import { readFileSync, rmSync } from 'node:fs';
@@ -22,6 +23,7 @@ const handoffSchema = z.object({
   command: z.record(z.string(), z.unknown()),
 });
 const pathFor = (root: string) => join(clientCacheRoot(root), 'sync-handoff.json');
+export const hasHostedSyncHandoff = (root: string) => checkoutPathExists(pathFor(root));
 const lockFor = (root: string) => join(clientCacheRoot(root), 'lock');
 /** Retain installation ownership before submitting source IO. A deadline or lost
  * reply must not leave the next land using the old checkout pins. */
@@ -103,5 +105,6 @@ export async function reconcileHostedSync(root: string, exchange: HostedAgentExc
       new ConvexLaneTransport(exchange),
     );
   clearSyncHandoff(root, handoff.operationId);
+  if (source.status === 'resolved') completeConflictRecovery(root);
   return null;
 }

@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+import { conflictMarkerScan, scanConflictMarkers, conflictMarkersFound } from './conflict-markers.js';
+import { assertNoConflictMarkers, pendingConflictPaths } from './hosted-conflict-precheck.js';
 import { normalizeHostedFinishResult } from './hosted-agent-finish-result.js';
 import { lstatSync, readlinkSync } from 'node:fs';
 import { join } from 'node:path';
@@ -34,7 +36,7 @@ export type FinishContext = {
 /** Only one Lane's metadata and a 1 MiB scan buffer. Source is reread on every new
  * shorthand selection, except files whose lstat the checkout stat index ties to their baseline
  * blob; a cached fingerprint is never source authority. */
-export function finishSourceFingerprint(root: string, command: Command) {
+export function finishSourceFingerprint(root: string, command: Command, operationId?: string) {
   const marker = readHostedLaneCheckout(root);
   if (
     !marker ||
@@ -53,6 +55,7 @@ export function finishSourceFingerprint(root: string, command: Command) {
   for (const path of marker.materialized) if (!forgeCachePath(path) && !present.has(path)) files.delete(path);
   const scratch = Buffer.allocUnsafe(1024 * 1024),
     index = readCheckoutStatIndex(root);
+  const marked: string[] = [];
   for (const path of local) {
     const stat = lstatSync(join(root, path));
     const mode = stat.isSymbolicLink() ? 'symlink' : stat.mode & 0o111 ? 'executable' : 'file';
@@ -65,13 +68,22 @@ export function finishSourceFingerprint(root: string, command: Command) {
     else {
       const reader = new SourceFileReader(root, path, 'SOURCE_CHANGED');
       try {
-        blob = reader.scan(() => {}, undefined, scratch).sha256;
+        const scan = conflictMarkerScan();
+        blob = reader.scan(bytes => scanConflictMarkers(scan, bytes), undefined, scratch).sha256;
+        if (blob !== baseline && conflictMarkersFound(scan)) marked.push(path);
       } finally {
         reader.close();
       }
     }
     files.set(path, { path, blob, mode });
   }
+  assertNoConflictMarkers(
+    root,
+    marker.selection.laneId,
+    marked,
+    pendingConflictPaths(root, marker.selection.laneId).length > 0,
+    { action: 'finish', parameters: { ...command, ...(operationId ? { operationId } : {}) } },
+  );
   return digest(
     canonicalPayload({
       laneId: marker.selection.laneId,
@@ -102,7 +114,7 @@ export async function selectHostedFinish(
   const index = join(directory, `finish-${digest(canonicalPayload({ root, address, actor, source }))}.json`);
   const explicitReplay = operationId && checkoutPathExists(join(directory, `${operationId}.json`));
   if (explicitReplay) return new HostedAgentJournal(root, address, actor, 'finish', command, operationId);
-  const fingerprint = finishSourceFingerprint(root, command);
+  const fingerprint = finishSourceFingerprint(root, command, operationId);
   const marker = readHostedLaneCheckout(root);
   const clean =
     marker &&
@@ -176,14 +188,5 @@ export async function selectHostedFinish(
 }
 
 export function finishRetryHint(root: string, command: Command, result: Record<string, unknown>) {
-  // Keep the established direct-conflict envelope; its nested recovery is authoritative.
-  if (result.phase !== 'conflict') return normalizeHostedFinishResult(root, command, result);
-  const retry = { ...command, retry: true, reason: 'other' };
-  const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
-  return {
-    ...result,
-    next: 'retry',
-    retry,
-    retryCommand: `nforge agent ${quote(root)} finish ${quote(JSON.stringify(retry))}`,
-  };
+  return normalizeHostedFinishResult(root, command, result);
 }

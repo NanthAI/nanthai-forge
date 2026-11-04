@@ -1,3 +1,4 @@
+import { hasConflictMarkers } from './conflict-markers.js';
 import { composeStack } from './native-stack-compose.js';
 // SPDX-License-Identifier: Apache-2.0
 import { NativeSource, overlappingPaths, type NativeFile } from './native-source.js';
@@ -86,7 +87,7 @@ export async function buildHostedSyncState(
         }
         const bytes = await resolveCalculate(() => source.object(file.blob));
         invariant(
-          !/^(<<<<<<< |>>>>>>> |=======\r?$)/m.test(bytes.toString('utf8')),
+          !hasConflictMarkers(bytes),
           'CONFLICT_MARKERS',
           `Resolve the conflict markers before completing resolution: ${file.path}.`,
         );

@@ -127,7 +127,7 @@ test('dogfood-scale budget: 60 queued entries cost one bounded scan and at most 
   assert.equal(cost.writes, marked);
 });
 
-test('a replay of the queued land names the in-place re-land; reads only when queued', async () => {
+test('a replay of the queued land names its canonical wait; reads only when queued', async () => {
   const reads = [];
   const session = {
     root: '/work/lane',
@@ -137,9 +137,10 @@ test('a replay of the queued land names the in-place re-land; reads only when qu
       return { wouldConflict: { paths: ['convex/cost.ts'], next: 'Sync and land this Lane again' } };
     },
   };
-  const replay = await queuedConflict(session, { id: 'sub-1', phase: 'queued' });
-  assert.equal(replay.next, 'sync-and-land');
-  assert.equal(replay.nextCommand, `nforge agent '/work/lane' land --save '{"laneId":"lane-1"}'`);
+  const replay = await queuedConflict(session, { id: 'sub-1', operationId: 'op-1', phase: 'queued' });
+  assert.deepEqual(replay.next, { action: 'wait', operationIds: ['op-1'] });
+  assert.equal(replay.nextCommand, `nforge agent '/work/lane' wait '{"operationIds":["op-1"]}'`);
+  assert.equal(replay.command, replay.nextCommand);
   assert.deepEqual(reads, [['projectHostedLanding:status', { submissionId: 'sub-1' }]]);
   assert.deepEqual(await queuedConflict(session, { id: 'sub-1', phase: 'checking' }), {});
   assert.equal(reads.length, 1, 'no read past the queue');

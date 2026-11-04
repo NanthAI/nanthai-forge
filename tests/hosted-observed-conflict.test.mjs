@@ -45,6 +45,11 @@ test('observed conflicts read the rejected attempt once and advertise its sync w
   const next = printedCommand(conflict.command, s.transport.root);
   assert.equal(next.action, 'sync');
   assert.deepEqual(next.body, { ...s.transport.address, candidateId: s.candidate.id });
+  assert.deepEqual(
+    conflict.next,
+    { action: 'sync', candidateId: s.candidate.id },
+    'MCP next contains only action parameters',
+  );
   assert.equal(s.reads(), 1);
 });
 

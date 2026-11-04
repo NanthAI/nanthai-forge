@@ -471,10 +471,12 @@ test('pending CLI and MCP transport replies replay the actual journal after a lo
   assert(stderr.join('').includes('IN PROGRESS'));
   assert.equal(pending.result.next.operationId, pending.operationId);
   const first = s.calls.find(call => call.name === 'projectHostedLanding:enqueue');
-  const { action, url, projectId, ...next } = pending.result.next;
+  const { action, ...next } = pending.result.next;
   assert.equal(action, 'finish');
-  assert.equal(url, s.address.url);
-  assert.equal(projectId, s.address.projectId);
+  assert.equal(next.url, undefined, 'MCP next is an action, with routing pinned by its transport');
+  assert.equal(next.projectId, undefined);
+  assert(pending.result.command.includes(s.address.url), 'CLI replay retains explicit routing');
+  assert(pending.result.command.includes(s.address.projectId));
   const resumed = await transport.dispatch(action, next);
   assert.equal(resumed.operationId, pending.operationId);
   const calls = s.calls.filter(call => call.name === 'projectHostedLanding:enqueue');
@@ -568,11 +570,13 @@ test('registered MCP task exposes the same pending envelope and exact original o
   const { ForgeError } = await import('../dist/errors.js');
   const s = agentFixture(t),
     transport = s.transport(),
-    tools = new Map();
+    tools = new Map(),
+    schemas = new Map();
   const close = registerAgentWorkflow(
     {
-      registerTool(name, _config, call) {
+      registerTool(name, config, call) {
         tools.set(name, call);
+        schemas.set(name, config.inputSchema.command);
       },
     },
     s.root,
@@ -596,6 +600,10 @@ test('registered MCP task exposes the same pending envelope and exact original o
   assert.equal(pending.result.inProgress, true);
   assert.equal(pending.result.next.operationId, operationId);
   assert.equal(pending.result.next.message, 'same MCP input');
+  assert(
+    schemas.get('forge_task').safeParse(pending.result.next).success,
+    'literal next passes the registered MCP schema',
+  );
 });
 
 test('record actions preserve the operation chosen before an unknown mutation response', async t => {

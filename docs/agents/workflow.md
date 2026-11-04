@@ -22,7 +22,9 @@ failed `operationId`. `replayParameters` identifies the immutable original.
 CLI stderr prints the command; CLI and MCP share the envelope. Older releases use
 `next:"retry"` with the same compatibility fields. Consumers may follow either
 or report `submission.phase:"terminal-failed"` as the actual failure.
-Conflict-specific sync/resolve recovery takes precedence.
+Conflict receipts supply one recovery continuation. Edit the named hunks first;
+land/save reject them locally before compose/check, with zero added Convex calls.
+Resolve accepts the Lane root or a subdirectory; separator-only text is valid. Recovery preserves check-only intent and check pins.
 
 After a landing wait, its authoritative observation replaces pending-source
 advice. Terminal responses drop obsolete status, progress and replay advice using
@@ -166,7 +168,7 @@ Exhaustion returns `IN PROGRESS` (exit 3), `inProgress:true`, and exact `next`/`
 replay with the original inputs and operation ID (or pre-journal shorthand).
 Observation keeps its cursor/deadline; idle makes no calls. Transfers stream and retain explicit caller budgets.
 
-Hosted land waits for canonical acceptance or failure: a passing `ready` Candidate remains pending while acceptance is outstanding. Check-only calls still stop after their check. The existing wake subscription streams submission progress and advisory conflicts as NDJSON; speculative advice never settles a landing. A conflict returns promptly with its retained recovery operation and exact continuation. Following that continuation (or the ordinary sync instruction) reuses the draft; an explicit new sync `operationId` requests an independent draft. If a sync or resolve source phase outlives its client wait, the next land reconciles that exact operation and installs its pinned result before selecting source. No idle polling is added.
+Hosted land waits for acceptance; check-only stops after its check. NDJSON wake events carry progress and advisory conflicts; speculative advice never settles a landing. A conflict returns its retained sync/resolve command. Following it or ordinary sync reuses the draft; a new sync `operationId` creates a new draft. Before a new land selects source, it installs any pinned sync/resolve result that outlived the client wait. Idle adds no calls.
 
 
 Hosted projects keep their backlog as planning: Initiatives group Issues, and an Issue is the work an agent starts. The same records show in the web app under Work > Planning. Read, write and start from them without leaving the agent command surface:

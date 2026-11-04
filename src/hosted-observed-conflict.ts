@@ -29,7 +29,7 @@ export async function observedConflictRecovery<
   const candidate = status.attempt.candidate;
   // Bound native roots have no hosted checkout marker; keep routing explicit.
   const command = { ...transport.address, candidateId: candidate.id };
-  const next = { action: 'sync', ...command };
+  const next = { action: 'sync', candidateId: candidate.id };
   return {
     ...entry,
     recovery: {

@@ -15,7 +15,7 @@ export function networkContinuation(
   error: Pick<ForgeError, 'code' | 'message'>,
 ): HostedAgentResponse {
   const parameters = { ...input, ...(operationId ? { operationId } : {}) };
-  const next = { ...address, ...parameters, action };
+  const next = { ...parameters, action };
   return {
     schema: 1,
     transport: 'hosted',

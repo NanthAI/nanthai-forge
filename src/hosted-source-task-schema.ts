@@ -90,7 +90,14 @@ const progressSchema = z
     ),
     calculations: z.array(sourceCalculationResultSchema).optional(),
     scan: z
-      .object({ prefix: z.string().max(8), skip: z.boolean(), found: z.boolean() })
+      .object({
+        prefix: z.string().max(9),
+        skip: z.boolean(),
+        found: z.boolean(),
+        stage: z.number().int().min(0).max(2).optional(),
+        binary: z.boolean().optional(),
+        utf8Tail: z.string().max(3).optional(),
+      })
       .strict()
       .optional(),
   })

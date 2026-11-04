@@ -57,7 +57,12 @@ test('batch-member conflict advice names the rejected current Candidate and path
   assert(result.conflict.paths.length > 0 && result.conflict.paths.length <= 100);
   assert.equal(result.conflict.next.candidateId, result.conflict.candidateId);
   assert(result.conflict.command.includes(JSON.stringify({ candidateId: result.conflict.candidateId })));
-  assert(failed.error.message.includes(JSON.stringify({ candidateId: result.conflict.candidateId })));
+  assert(failed.error.message.includes(result.conflict.candidateId));
+  assert.doesNotMatch(
+    failed.error.message,
+    /nforge agent/,
+    'server evidence must not compete with the one exact-root recovery command',
+  );
   assert(f.counts.slice(before).every(call => call.writes === 0));
   f.patch('hostedProjects', f.projectId, { removal: 'deleted' });
   await assert.rejects(

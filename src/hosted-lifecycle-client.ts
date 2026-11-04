@@ -109,6 +109,8 @@ export async function transitionHostedLane(
         supersedeFinish: true,
       },
       exchange,
+      false,
+      true,
     );
   if (!original.request) {
     const marker = readHostedLaneCheckout(root);
@@ -128,7 +130,7 @@ export async function transitionHostedLane(
       selected: HostedLaneCheckoutMarker['selection'] | undefined;
     if (parsed.action === 'abandon') {
       const captured = join(cache, 'saves', original.saveOperationId),
-        capture = await captureHostedSave(root, captured);
+        capture = await captureHostedSave(root, captured, parsed.action === 'abandon');
       invariant(
         canonicalPayload(capture.marker.selection) === canonicalPayload(original.selection),
         'WORK_STALE',
@@ -163,6 +165,8 @@ export async function transitionHostedLane(
             supersedeFinish: true,
           },
           exchange,
+          false,
+          true,
         );
         if ('outcome' in childProgress && childProgress.outcome.status === 'failed')
           return {

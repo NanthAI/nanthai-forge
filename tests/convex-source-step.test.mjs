@@ -614,7 +614,7 @@ test('hosted resolve completes a saved deletion through fresh resumable source s
   assert.deepEqual(state.parents, [saved.sha256, right.sha256]);
 });
 
-test('streamed resolution-marker scans match native regex across chunks and recipe continuations', async () => {
+test('streamed resolution-marker scans require complete hunks across recipe continuations', async () => {
   const { runSourceTask } = await import('../dist/hosted-source-fanout.js');
   for (const text of [
     'clean\n',
@@ -625,6 +625,7 @@ test('streamed resolution-marker scans match native regex across chunks and reci
     'x\n<<<<<<< lane\n',
     'x>>>>>>> no',
     'x\n>>>>>>> target',
+    '<<<<<<< lane\nleft\n=======\nright\n>>>>>>> main\n',
   ]) {
     const x = fixture(),
       pin = x.put(text),
@@ -646,13 +647,13 @@ test('streamed resolution-marker scans match native regex across chunks and reci
     );
     assert.equal(
       result.progress.calculations[0].markers,
-      /^(<<<<<<< |>>>>>>> |=======\r?$)/m.test(text),
+      text === '<<<<<<< lane\nleft\n=======\nright\n>>>>>>> main\n',
       JSON.stringify(text),
     );
   }
   const x = fixture(),
     bytes = Buffer.alloc(12 * 1024 * 1024, 10);
-  Buffer.from('<<<<<<< lane\n').copy(bytes, 8 * 1024 * 1024 - 4);
+  Buffer.from('<<<<<<< lane\nleft\n=======\nright\n>>>>>>> main\n').copy(bytes, 8 * 1024 * 1024 - 4);
   const { buildObjectRecipe } = await import('../dist/object-chunks.js'),
     built = buildObjectRecipe(bytes);
   for (const [id, b] of built.objects) x.objects.set(id, b);

@@ -21,8 +21,8 @@ type Result = {
   retryCommand?: string;
   status?: string;
   terminal?: boolean;
-  recovery?: { command?: string; conflict?: { command?: string } };
-  conflict?: { command?: string };
+  recovery?: { command?: string; conflict?: { command?: string; instruction?: string } };
+  conflict?: { command?: string; instruction?: string };
 };
 export const resultOf = (response: HostedAgentResponse) => (response.result ?? {}) as Result;
 export function landPhase(response: HostedAgentResponse): string | undefined {
@@ -42,7 +42,12 @@ export function landSummary(response: HostedAgentResponse): string[] {
   if (result.phase === 'check' && result.run?.status === 'passed') return ['CHECK PASSED (not landed)'];
   const lines: string[] = [];
   const error = submission?.error;
-  const recovery = result.recovery?.conflict?.command ?? result.recovery?.command ?? result.conflict?.command;
+  const recovery =
+    result.recovery?.conflict?.instruction ??
+    result.recovery?.conflict?.command ??
+    result.recovery?.command ??
+    result.conflict?.instruction ??
+    result.conflict?.command;
   if (
     phase === 'terminal-failed' ||
     error ||

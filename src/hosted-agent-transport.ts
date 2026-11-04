@@ -1,14 +1,22 @@
 import { cloneFreshness, mainCheckoutTransport, pullHostedProject } from './hosted-pull.js';
 import { readHostedMainSelection } from './hosted-main-marker.js';
 import { diffHostedSource, peersHostedSource } from './hosted-agent-reads.js';
+import { hostedObservationContinuation } from './hosted-agent-finish-result.js';
 // SPDX-License-Identifier: Apache-2.0
-import { canonicalRoot, clientCacheRoot, rootSibling } from './root-paths.js';
+import {
+  precheckPendingConflicts,
+  pendingConflictLane,
+  requireResolution,
+  pendingConflictPaths,
+  resolutionContinuation,
+} from './hosted-conflict-precheck.js';
+import { clientCacheRoot, rootSibling } from './root-paths.js';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomUUID } from 'node:crypto';
 import { withExchangeProgress } from './exchange-progress.js';
 import { networkFailure } from './network-fetch.js';
 import { networkContinuation } from './network-continuation.js';
-import { reconcileHostedSync } from './hosted-sync-handoff.js';
+import { reconcileHostedSync, hasHostedSyncHandoff } from './hosted-sync-handoff.js';
 import { sourceTree } from './source-tree.js';
 import { withSourceRecovery } from './hosted-agent-source-recovery.js';
 import { readHostedOverlapAdvice, recordHostedOverlapDelivery } from './hosted-overlap-client.js';
@@ -185,7 +193,7 @@ export class HostedAgentTransport {
     ),
     readonly subscribeSource?: () => HostedRunSubscription,
   ) {
-    this.root = canonicalRoot(root);
+    this.root = hostedAgentRoot(root);
   }
   async dispatch(
     requestedAction: string,
@@ -220,6 +228,34 @@ export class HostedAgentTransport {
     input: Record<string, unknown>,
     signal?: AbortSignal,
   ): Promise<HostedAgentResponse> {
+    const replay =
+      typeof input.operationId === 'string' &&
+      z.uuid().safeParse(input.operationId).success &&
+      existsSync(resolve(clientCacheRoot(this.root), 'agent', `${input.operationId}.json`));
+    const remoteSelection =
+      requestedAction === 'finish' && (input.candidateId !== undefined || input.inputs !== undefined);
+    const recoverySync = requestedAction === 'sync' && input.candidateId !== undefined;
+    const pendingInstall = requestedAction === 'finish' && hasHostedSyncHandoff(this.root);
+    if (
+      !replay &&
+      !remoteSelection &&
+      !recoverySync &&
+      !pendingInstall &&
+      ['finish', 'save', 'checkpoint', 'resolve', 'sync', 'compose'].includes(requestedAction)
+    ) {
+      const laneId = pendingConflictLane(this.root);
+      if (laneId && (!input.laneId || input.laneId === laneId)) {
+        const marker = markerIdentity(this.root);
+        if (
+          marker?.laneId === laneId &&
+          marker.url === this.address.url &&
+          marker.projectId === this.address.projectId
+        ) {
+          precheckPendingConflicts(this.root, laneId);
+          if (['finish', 'sync', 'compose'].includes(requestedAction)) requireResolution(this.root, laneId);
+        }
+      }
+    }
     const running = quietActions.has(requestedAction)
       ? undefined
       : typeof input.laneId === 'string'
@@ -728,6 +764,10 @@ export class HostedAgentTransport {
           projectId: this.address.projectId,
         });
         result = { ...(result as object), dependencies: await this.shareDependencies(path) };
+        const laneId = (command.data as { laneId: string }).laneId;
+        const paths = pendingConflictPaths(path, laneId);
+        if (paths.length)
+          result = { ...(result as object), conflict: resolutionContinuation(path, laneId, paths) };
       }
       // A replayed finish poll adds no read; the first call and the terminal answer carry the notice.
       const finishDone =
@@ -835,6 +875,8 @@ export class HostedAgentTransport {
     // Delivered means returned on a Lane-changing action; a bare status read is not a delivery.
     if (advice && notice && overlapLaneId && ['start', 'save', 'sync', 'compose', 'finish'].includes(action))
       await recordHostedOverlapDelivery(this, overlapLaneId, action, advice);
+    if (result && typeof result === 'object')
+      result = hostedObservationContinuation(this.root, result as Record<string, unknown>);
     return {
       schema: 1,
       transport: 'hosted',

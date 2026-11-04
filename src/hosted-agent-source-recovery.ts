@@ -33,16 +33,20 @@ export async function withSourceRecovery(
   const source = sourceReply(value);
   if (!source) return value;
   const replay = { action, ...session.address, ...command, operationId: session.journal.operationId };
-  const next =
-    source.status === 'failed'
-      ? { ...replay, operationId: await session.journal.id('source-failure-next') }
-      : replay;
+  const next = {
+    action,
+    ...command,
+    operationId:
+      source.status === 'failed'
+        ? await session.journal.id('source-failure-next')
+        : session.journal.operationId,
+  };
   return {
     ...(value as object),
     status: source.status,
     ...(source.error ? { error: source.error, failedPhase: source.failedPhase ?? `source-${action}` } : {}),
     replay: { ...replay, command: hostedRecoveryCommand(session.root, action, replay) },
     next,
-    command: hostedRecoveryCommand(session.root, action, next),
+    command: hostedRecoveryCommand(session.root, action, { ...replay, operationId: next.operationId }),
   };
 }

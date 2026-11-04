@@ -1,3 +1,4 @@
+import type { ConflictContinuation } from './hosted-conflict-precheck.js';
 // SPDX-License-Identifier: Apache-2.0
 import { clientCacheRoot } from './root-paths.js';
 import { sourceTree } from './source-tree.js';
@@ -82,9 +83,21 @@ export async function saveHostedLane(
   command: { operationId: string; message: string; supersedeFinish?: boolean },
   exchange: SaveExchange,
   overlapEvidence = false,
+  preserveConflicts = false,
+  continuation: ConflictContinuation = { action: 'save', parameters: command },
 ) {
-  const first = await saveOnce(root, command, exchange, true, overlapEvidence);
-  return first === rebased ? saveOnce(root, command, exchange, false, overlapEvidence) : first;
+  const first = await saveOnce(
+    root,
+    command,
+    exchange,
+    true,
+    overlapEvidence,
+    preserveConflicts,
+    continuation,
+  );
+  return first === rebased
+    ? saveOnce(root, command, exchange, false, overlapEvidence, preserveConflicts, continuation)
+    : first;
 }
 const rebased = Symbol('rebased');
 async function saveOnce(
@@ -93,6 +106,8 @@ async function saveOnce(
   exchange: SaveExchange,
   repair: boolean,
   overlapEvidence: boolean,
+  preserveConflicts: boolean,
+  continuation: ConflictContinuation,
 ) {
   saveCommandSchema.parse(command);
   invariant(!lstatSync(root).isSymbolicLink(), 'UNSAFE_PATH', 'Checkout directory must be real.');
@@ -129,7 +144,7 @@ async function saveOnce(
   if (!checkoutPathExists(capturePath)) await settlePriorHostedSave(root, command.operationId, exchange);
   const capture: Awaited<ReturnType<typeof captureHostedSave>> = checkoutPathExists(capturePath)
     ? JSON.parse(readFileSync(capturePath, 'utf8'))
-    : await captureHostedSave(root, directory);
+    : await captureHostedSave(root, directory, preserveConflicts, continuation);
   markLandStep('captured');
   invariant(
     capture.marker.selection.projectId === exchange.projectId,

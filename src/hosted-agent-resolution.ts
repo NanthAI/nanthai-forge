@@ -1,4 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
+import {
+  rememberConflictPaths,
+  pendingConflictPaths,
+  completeConflictRecovery,
+  resolutionContinuation,
+  rememberConflictFinishOptions,
+  resolutionFinishOptions,
+} from './hosted-conflict-precheck.js';
+import { conflictFinishOptions } from './hosted-conflict-finish-options.js';
 import { clientCacheRoot } from './root-paths.js';
 import { retainSyncHandoff, clearSyncHandoff } from './hosted-sync-handoff.js';
 import { hostedActionError } from './hosted-action-error.js';
@@ -21,6 +30,7 @@ import { ConvexLaneTransport } from './hosted-lane-transport.js';
 import { hostedAgentCommandSchemas } from './hosted-agent-contract.js';
 import { readSource } from './files.js';
 import { safeRelative } from './safe-relative.js';
+import { readLaneEntry, recordLane } from './lane-registry.js';
 import { ForgeError, invariant } from './errors.js';
 import type { HostedAgentSession } from './hosted-agent-transport.js';
 const quote = (text: string) => `'${text.replaceAll("'", "'\\''")}'`;
@@ -67,6 +77,9 @@ export async function guideHostedSync(session: HostedAgentSession, value: unknow
     pin = page.next;
   }
   if (!apply) {
+    const root = hostedRootLanePath(session.root, session.address, source.lane.laneId);
+    rememberConflictPaths(root, source.lane.laneId, paths);
+    rememberConflictFinishOptions(root, source.lane.laneId, session.journal.get('resolution-finish-options'));
     const next = { laneId: source.lane.laneId };
     return {
       source: value,
@@ -76,11 +89,6 @@ export async function guideHostedSync(session: HostedAgentSession, value: unknow
         more: Math.max(0, paths.length - 100),
         next: { action: 'open', ...next },
         command: hostedRecoveryCommand(session.root, 'open', next),
-        resolveCommand: hostedRecoveryCommand(
-          hostedRootLanePath(session.root, session.address, source.lane.laneId),
-          'resolve',
-          next,
-        ),
       },
     };
   }
@@ -94,6 +102,7 @@ export async function guideHostedSync(session: HostedAgentSession, value: unknow
     },
     paths,
   });
+  recordLane({ laneId: source.lane.laneId, root: opened.root, ...session.address });
   let remaining = 128 * 1024;
   const files = paths.slice(0, 100).map(path => {
     let bytes: Buffer | null;
@@ -112,17 +121,21 @@ export async function guideHostedSync(session: HostedAgentSession, value: unknow
     }
   });
   const command = { laneId: source.lane.laneId, operationId: await session.journal.id('next-resolve') };
+  rememberConflictPaths(opened.root, source.lane.laneId, paths, command);
+  rememberConflictFinishOptions(
+    opened.root,
+    source.lane.laneId,
+    session.journal.get('resolution-finish-options'),
+  );
   return {
     source: value,
     conflict: {
+      ...resolutionContinuation(opened.root, source.lane.laneId, paths.slice(0, 100), command.operationId),
       laneId: source.lane.laneId,
-      root: opened.root,
       head: source.lane.head,
       paths: paths.slice(0, 100),
       more: Math.max(0, paths.length - 100),
       files,
-      next: { action: 'resolve', ...command },
-      command: hostedRecoveryCommand(opened.root, 'resolve', command),
       automatic: {
         summary: 'Opened a sibling Lane containing the conflict files.',
         undo: 'The original Lane and accepted main are unchanged; continue in the original Lane to discard this draft.',
@@ -133,6 +146,11 @@ export async function guideHostedSync(session: HostedAgentSession, value: unknow
 export async function resolveHostedAgent(session: HostedAgentSession, input: unknown) {
   const command = hostedAgentCommandSchemas.resolve.parse(input),
     marker = markerAt(session.root);
+  const parameters = { ...command, operationId: session.journal.operationId };
+  const continuation = {
+    next: { action: 'resolve', ...parameters },
+    command: hostedRecoveryCommand(session.root, 'resolve', parameters),
+  };
   if (!marker) {
     const blocked = retainedLocalApplyBlocked(
       session.root,
@@ -140,11 +158,41 @@ export async function resolveHostedAgent(session: HostedAgentSession, input: unk
     );
     if (blocked) throw blocked;
   }
-  invariant(
-    marker && (!command.laneId || command.laneId === marker.selection.laneId),
-    'HOSTED_CHECKOUT_REQUIRED',
-    'Run resolve in the returned resolution Lane directory.',
-  );
+  if (!marker || (command.laneId && command.laneId !== marker.selection.laneId)) {
+    invariant(
+      command.laneId,
+      'BAD_ARGUMENT',
+      `Select the resolution laneId, or run resolve in its returned Lane root; ${session.root} is not a Lane checkout.`,
+    );
+    const known = readLaneEntry(command.laneId);
+    let root = join(clientCacheRoot(session.root), 'lanes', command.laneId);
+    const matches = (local: ReturnType<typeof markerAt>) =>
+      !!local &&
+      local.selection.laneId === command.laneId &&
+      local.url === session.address.url &&
+      local.selection.projectId === session.address.projectId;
+    if (known && matches(markerAt(known.root))) root = known.root;
+    const validLocal = matches(markerAt(root));
+    const next = validLocal
+      ? { action: 'resolve', ...command, operationId: session.journal.operationId }
+      : { action: 'open', laneId: command.laneId };
+    const instruction = validLocal ? `Run resolve in ${root}:` : `Open the resolution Lane in ${root}:`;
+    const shell = hostedRecoveryCommand(root, next.action, { ...session.address, ...next });
+    throw new ForgeError('HOSTED_CHECKOUT_REQUIRED', `${instruction} ${shell}`, undefined, {
+      root,
+      next,
+      command: shell,
+    });
+  }
+  const conflictPaths = pendingConflictPaths(session.root, marker.selection.laneId);
+  if (conflictPaths.length)
+    rememberConflictPaths(
+      session.root,
+      marker.selection.laneId,
+      conflictPaths,
+      { ...command, operationId: session.journal.operationId },
+      true,
+    );
   const saveOperationId = await session.journal.id('resolution-save');
   const save = () =>
     saveHostedLane(
@@ -152,11 +200,13 @@ export async function resolveHostedAgent(session: HostedAgentSession, input: unk
       { operationId: saveOperationId, message: command.message },
       session.exchange,
       session.capabilities.overlapEvidenceVersion === 1,
+      false,
+      { action: 'resolve', parameters: { ...command, operationId: session.journal.operationId } },
     );
   let saved = await save();
   if (!completed(saved)) {
     saved = await session.waitSource(saveOperationId, saved, 'Saves');
-    if (!completed(saved)) return { phase: 'save', saveOperationId, progress: saved };
+    if (!completed(saved)) return { phase: 'save', saveOperationId, progress: saved, ...continuation };
     // Reconcile the marker from the original capture before resolving its exact head.
     saved = await save();
   }
@@ -177,10 +227,26 @@ export async function resolveHostedAgent(session: HostedAgentSession, input: unk
     });
   });
   const handoff = await retainSyncHandoff(session, 'resolve', command);
-  let progress = await driveAgentSource(session, 'Sync', session.journal.operationId, request);
-  progress = await session.waitSource(session.journal.operationId, progress);
+  let progress;
+  try {
+    progress = await driveAgentSource(session, 'Sync', session.journal.operationId, request);
+    progress = await session.waitSource(session.journal.operationId, progress);
+  } catch (error) {
+    const safe = hostedActionError(error, 'resolution');
+    if (safe.code !== 'HOSTED_ACTION_FAILED' || safe.recovery) throw safe;
+    throw new ForgeError(
+      safe.code,
+      `Resolution outcome is unknown. Continue: ${continuation.command}`,
+      undefined,
+      {
+        root: session.root,
+        ...continuation,
+      },
+    );
+  }
   const parsed = syncResultSchema.safeParse(completed(progress));
-  if (!parsed.success || parsed.data.status !== 'resolved' || !parsed.data.from) return progress;
+  if (!parsed.success || parsed.data.status !== 'resolved' || !parsed.data.from)
+    return { ...(progress as object), ...continuation };
   const source = parsed.data;
   const applied = await applyHostedSync(
     session.root,
@@ -194,9 +260,16 @@ export async function resolveHostedAgent(session: HostedAgentSession, input: unk
     new ConvexLaneTransport(session.exchange),
   );
   clearSyncHandoff(session.root, session.journal.operationId);
+  completeConflictRecovery(session.root);
   const selection = await resolutionFinishSelection(session, source);
-  if ('pending' in selection) return { source: progress, applied, ...selection.pending };
-  const next = { ...selection, operationId: await session.journal.id('next-finish'), accept: true };
+  if ('pending' in selection) return { source: progress, applied, ...selection.pending, ...continuation };
+  const options = resolutionFinishOptions(session.root, source.lane.laneId);
+  const next = {
+    ...options,
+    ...selection,
+    operationId: await session.journal.id('next-finish'),
+    accept: options?.accept ?? true,
+  };
   return {
     source: progress,
     applied,
@@ -233,6 +306,9 @@ export async function recoverHostedCandidate(session: HostedAgentSession, candid
     command,
   );
   const recovery = { ...session, journal };
+  const original = session.journal.get<{ command: unknown }>('finish-context')?.command;
+  const options = conflictFinishOptions(original);
+  if (options) await journal.retain('resolution-finish-options', () => options);
   const operationId = journal.operationId;
   const next = { action: 'sync', ...command, operationId };
   let progress;

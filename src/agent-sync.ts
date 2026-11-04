@@ -1,3 +1,4 @@
+import { hasConflictMarkers } from './conflict-markers.js';
 import { composeStack } from './native-stack-compose.js';
 import {
   checkpointPreparationChanged,
@@ -40,7 +41,6 @@ export type SyncCommand = {
 type Conflict = NonNullable<Lane['pendingMerge']>['conflicts'][number];
 
 const RESOLVED = 'resolved Markdown conflicts in';
-const MARKERS = /^(<<<<<<< |>>>>>>> |=======\r?$)/m;
 /** Checkpoints after a conflicted sync must not record unresolved marker lines. */
 export function assertMergeResolved(path: string, lane: Lane) {
   invariant(
@@ -52,7 +52,7 @@ export function assertMergeResolved(path: string, lane: Lane) {
     .filter(item => item.kind === 'text')
     .filter(item => {
       const bytes = readSource(path, item.path, Number.MAX_SAFE_INTEGER);
-      return !!bytes && MARKERS.test(bytes.toString('utf8'));
+      return !!bytes && hasConflictMarkers(bytes);
     })
     .map(item => item.path);
   invariant(

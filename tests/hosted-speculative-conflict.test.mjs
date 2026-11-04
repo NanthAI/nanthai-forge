@@ -136,7 +136,7 @@ test('predecessor landing rechecks a speculative rejection on real main and repo
     },
     state,
   );
-  assert.equal(replay.next, 'wait-for-predecessor');
+  assert.deepEqual(replay.next, { action: 'wait', operationIds: [state.operationId] });
   assert.match(replay.nextCommand, /wait /);
   assert.doesNotMatch(replay.nextCommand, /sync|land --save/);
   const fresh = { ...state, version: state.version + 1 },
@@ -151,7 +151,7 @@ test('predecessor landing rechecks a speculative rejection on real main and repo
   assert.deepEqual(canonicalReplay.submission, fresh, 'advice retains the fresh canonical submission');
   assert.deepEqual(canonicalReplay.queue, queue);
   assert.equal(canonicalReplay.queuePosition, 2);
-  assert.equal(canonicalReplay.next, 'wait-for-predecessor');
+  assert.deepEqual(canonicalReplay.next, { action: 'wait', operationIds: [state.operationId] });
   const checking = { ...fresh, phase: 'checking' },
     settled = await queuedConflict(
       { query: async () => ({ request: checking, wouldConflict: advice }) },

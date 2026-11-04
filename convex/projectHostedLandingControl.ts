@@ -188,7 +188,7 @@ export async function advanceLandingQueue(ctx: MutationCtx, claim: LandingClaim,
       observation = landingObservation('conflict');
       error = {
         code: 'COMPOSITION_CONFLICT',
-        message: `Candidate ${attempt.candidate.id} has retained source conflicts. Run nforge agent . sync '${JSON.stringify({ candidateId: attempt.candidate.id })}', edit the returned conflict files, then run its resolve command.`,
+        message: `Candidate ${attempt.candidate.id} has retained source conflicts. Continue with the receipt recovery command.`,
       };
     } else if (attempt.check) {
       const check = attempt.check;

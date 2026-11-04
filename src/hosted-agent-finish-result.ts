@@ -17,6 +17,24 @@ export function finishRetryContinuation(root: string, selection: Reply) {
   return { next: { action: 'finish', ...retry }, command, retry, retryCommand: command };
 }
 
+/** Wait on a retained alarm or a finite conflict read lacking attempt details.
+ * The existing wait returns exact recovery for the rejected attempt, without
+ * adding source/metadata reads to status. */
+export function hostedObservationContinuation(root: string, result: Reply): Reply {
+  const submission = result.submission as
+    | { operationId?: string; error?: { code?: string }; observation?: { state?: string; stall?: unknown } }
+    | undefined;
+  const stalled = submission?.observation?.state === 'pending' && !!submission.observation.stall;
+  const conflict = submission?.error?.code === 'COMPOSITION_CONFLICT' && !result.recovery && !result.conflict;
+  if ((!stalled && !conflict) || !submission?.operationId) return result;
+  const parameters = { operationIds: [submission.operationId] };
+  return {
+    ...result,
+    next: { action: 'wait', ...parameters },
+    command: `nforge agent ${shellQuote(root)} wait ${shellQuote(JSON.stringify(parameters))}`,
+  };
+}
+
 /** Normalize only already-observed outcomes. No source, journal, transport or clock access. */
 export function normalizeHostedFinishResult(root: string, selection: Reply, result: Reply): Reply {
   const submission = result.submission as
@@ -30,8 +48,13 @@ export function normalizeHostedFinishResult(root: string, selection: Reply, resu
     : run
       ? failedRuns.has(run.status ?? '')
       : progress?.status === 'failed' || progress?.outcome?.status === 'failed';
-  const settled = state === 'landed' || state === 'superseded' || failed || run?.status === 'passed';
-  if (!settled) return result;
+  const settled =
+    result.phase === 'conflict' ||
+    state === 'landed' ||
+    state === 'superseded' ||
+    failed ||
+    run?.status === 'passed';
+  if (!settled) return hostedObservationContinuation(root, result);
   // These fields described the pre-wait source/queue snapshot. Keep the immutable
   // submission, run and replayParameters as evidence, without advertising replay as recovery.
   const clean = Object.fromEntries(

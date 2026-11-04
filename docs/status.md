@@ -43,6 +43,8 @@ client cache.
   before its first save. Exact State/Candidate show and the existing MCP
   `forge_review` expose these reads with current access and explicit omissions.
 
+Hosted land/save reject complete conflict hunks locally before compose/check; resolve accepts Lane subdirectories. Receipts retain one recovery step.
+
 - Hosted relative, trailing-slash and symlinked roots keep source-read caches beside
   the canonical checkout. Sync/resolve preserve verified legacy misplaced caches;
   blocked local applies expose executable preservation recovery through CLI/MCP.

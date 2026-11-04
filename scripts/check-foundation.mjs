@@ -7,6 +7,7 @@ import { renderDependencyLicenses } from './render-dependency-licenses.mjs';
 import { localPathFindings } from './check-local-paths.mjs';
 import { landingModelFindings } from './check-landing-model.mjs';
 import { idleQueryFindings } from './check-idle-queries.mjs';
+import { recoveryAdviceFindings } from './check-recovery-advice.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const errors = [];
@@ -39,10 +40,13 @@ errors.push(...landingModelFindings(read));
 const files = walk(root);
 for (const file of files) {
   errors.push(...localPathFindings(relative(root, file), readFileSync(file)));
-  if (['.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs'].includes(extname(file)))
-    errors.push(...networkBoundaryFindings(relative(root, file), readFileSync(file, 'utf8')));
-  if (['.ts', '.tsx'].includes(extname(file)))
-    errors.push(...idleQueryFindings(relative(root, file), readFileSync(file, 'utf8')));
+  if (['.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs'].includes(extname(file))) {
+    const path = relative(root, file),
+      source = readFileSync(file, 'utf8');
+    errors.push(...networkBoundaryFindings(path, source));
+    if (['.ts', '.tsx'].includes(extname(file))) errors.push(...idleQueryFindings(path, source));
+    errors.push(...recoveryAdviceFindings(path, source));
+  }
   if (extname(file) === '.json') {
     try {
       JSON.parse(readFileSync(file, 'utf8'));
