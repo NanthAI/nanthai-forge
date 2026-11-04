@@ -592,8 +592,8 @@ archive omits or rewrites (export-ignore, export-subst, LFS) are fetched by Git
 blob. Convex sees one prepare and one completion per page of up to 1,000 objects
 and no per-file inventory; once every window is stored, the import publishes one
 sorted object catalog and selects hosted `main`. No Mac or local owner takes part.
-On the t3code repository (about 29,000 files) this takes 16 min 56 s today against a
-target of 5 minutes or less, so Phase 5 stays open. A truncated listing (very large trees) uses
+On the t3code repository (about 29,000 files) this takes 2 min 31 s and 2 min 37 s in two runs, until the project is agent-writable
+(target: 5 minutes or less). A truncated listing (very large trees) uses
 directory-by-directory discovery and per-blob reads instead. Reads use the GitHub
 App's installation token when the App is installed on the repository, otherwise
 the importer's existing credential.

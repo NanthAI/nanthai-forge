@@ -30,7 +30,7 @@ measured (below); whether alerts make agents' work better has not.
 
 ## Measured landing throughput
 
-**These numbers are historical.** Every figure on this page was measured between 2026-10-20 and 2026-10-25, before Forge landed its own work on the hosted path (cutover on 2026-10-28). The first table ran on GitHub-hosted runners; the P2 repeat and E3 below ran on Blacksmith runners, which Forge stopped using on 2026-10-25. None of it has been re-measured on today's path. The benchmark on a real repository (B1.5d) and the re-run of E3 (G8) are not yet published.
+**These numbers are historical.** Every figure on this page was measured between 2026-10-20 and 2026-10-25, before Forge landed its own work on the hosted path (cutover on 2026-10-28). The first table ran on GitHub-hosted runners; the P2 repeat and E3 below ran on Blacksmith runners, which Forge stopped using on 2026-10-25. None of it has been re-measured on today's path. The benchmark with real agents on a real repository ([B1.5d](research/b15d-report.md), 2026-11-04) is the current result: time to main per task 24-35% lower than Git + GitHub at every N tested, with about a third of the CI minutes. The re-run of E3 (G8) is not yet published.
 
 Measured on **2026-10-20**, P1c attempt 9 (01:40–07:50 UTC), using the same seed
 (one squashed Forge main tree, `9db0122d`) on both sides. Both Forge's check runner
@@ -87,9 +87,9 @@ write has since landed (B3.1); it has not been re-measured. Sources: the forge-b
 `E1-2026-10-25.md` and `E3-2026-10-24.md`.
 
 This measures landing throughput of completed changes. It does not measure agent
-coding time, total development time, token use or coordination quality. R3, the
-coordination evaluation, is pending. No single-agent token or time advantage over
-plain Git has been established. Do not infer those benefits from burst landing.
+coding time, total development time, token use or coordination quality. Those are
+measured with real agents in [B1.5d](research/b15d-report.md), which also carries R3,
+the coordination evaluation. Do not infer them from burst landing.
 
 ## What stays familiar and portable?
 

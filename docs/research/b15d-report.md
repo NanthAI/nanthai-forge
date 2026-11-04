@@ -28,8 +28,10 @@ agents, run on the final main.
   10 the ranges overlap. At N = 5 Forge won all three paired reps. **GitHub's median is lower at
   N = 10, and at N = 3 under the pre-registered count.** A few Forge tasks stuck in long
   conflict or overtake loops set the wall time. That loop is the Phase 6 work.
-- **Correctness is identical.** Strict and lenient scores match in every pair. All the
-  strict variation comes from one task, t26770, which passes 4/10 in both arms. Three tasks
+- **Correctness: no difference overall.** Strict medians per N and the strict total match.
+  Single cells differ by one task either way (n5-r2: Forge 6, GitHub 7; n5-r3: 7 against 6).
+  Lenient medians differ slightly at N = 3 and 5. The task that varies most, t26770, passes
+  4/10 strict in both arms. Three tasks
   (t19456, t23938, t27514) never pass strict in either arm. These are model limits, not tool
   effects.
 - **CI: Forge uses about a third of the minutes:** 331 billed minutes against 910, and 116
@@ -139,7 +141,7 @@ In n10-r1 this one task set Forge's wall time (1264 s, against 540 s on GitHub).
 15.3 s, GitHub 4.5 s; p90: 33.8 s against 17.3 s. Forge's Lane `start` + `open` is slower
 than a shared local clone.
 
-These go to Phase 6 stage 6.2 (landing loop under contention): a new conflict-recovery Issue,
+These go to Phase 6 stage 6.2 (landing loop under contention): 36a087ea (conflict recovery),
 1ef05eea (overtakes and CI bundling), d910db6b (no dead ends) and 11ba7bb9 (push events).
 
 ## Coordination (R3)
@@ -190,17 +192,23 @@ save or land call. Forge can only know of an overlap once both changes have reac
 
 ## Task voids: the contamination audit (disclosed; bench finding d8cf81b4)
 
-The pre-registered contamination audit voided 30 scored tasks: 24 GitHub, 6 Forge. The lead
-read all 43 hits. Every one is a false positive:
+The pre-registered contamination audit voided 34 tasks in the registered cells: 26 GitHub,
+8 Forge, from 53 hits. The extra N = 3 attempt adds 3 GitHub voids and 5 hits (37 voids, 58
+hits in all). The lead read all 58. Every one is a false positive:
 
-- **github-history-api (24 hits).** Agents read their own fork's merge rules or their own PR
+- **github-history-api (28 hits).** Agents read their own fork's merge rules or their own PR
   (`rules/branches/main`, `branches/main/protection`, own `pulls/<n>` and `issues/<n>/events`).
   The pattern matches `/branches` anywhere on the line.
-- **bench-data (13 hits).** Forge agents read their own `nforge` CLI or the toolchain cache,
-  which sit under the bench folder.
-- **upstream (5 hits).** Agents wrote "Closes https://github.com/pingdotgg/t3code/issues/<n>"
-  into their own PR body, using the issue link from their task.
-- **git-history-all (1 hit).** `git ls-remote` of the agent's own branch.
+- **bench-data (21 hits: 19 Forge, 2 GitHub).** The pattern matches `forge-bench`, which is in
+  every workspace path. Agents read their own `nforge` CLI or the shared toolchain cache, or
+  used their own workspace's absolute path. One GitHub agent searched the whole bench folder
+  for a file name and found nothing.
+- **upstream (6 hits).** Agents wrote "Closes https://github.com/pingdotgg/t3code/issues/<n>"
+  or "Refs pingdotgg/t3code#<n>" into their own PR body, using the issue link from their task.
+- **git-history-all (3 hits).** `git ls-remote` of the agent's own branch or merge-queue refs.
+
+A scan of every tool call in the scored cells found no read of another cell's workspace, the
+harness or the oracle.
 
 The rule is pre-registered, so the official numbers above drop these tasks. All-tasks
 sensitivity (cell time to main median, every landed task counted):
@@ -215,8 +223,11 @@ sensitivity (cell time to main median, every landed task counted):
 N = 3 here uses the pre-registered count. With the extra attempt it is 355 [349-757] against
 550 [489-651].
 
-Forge's median is lower in every valid cell under both counts. The fix (own-fork endpoints, own
-CLI path, mentions against reads) is for the next harness, with these 43 excerpts as tests.
+Forge's median is lower at every N under both counts. Under the all-tasks count one cell goes
+the other way: n3-r3 attempt 1 (Forge 757 s, GitHub 651 s). The registered N = 3 gap is small
+without the voids, and its ranges overlap. Read the 24-35% headline next to this table. The fix
+(own-fork endpoints, own paths, mentions against reads) is for the next harness, with these 58
+excerpts as tests.
 
 ## Cost
 
@@ -276,7 +287,7 @@ run only, not scored. There was no intervention in any real cell.
 Agents in both arms could see it fail locally. It was kept in scope.
 
 **Workspace prep gap.** Forge prep is 15 s against GitHub's 4.5 s (median), inside wall time
-and outside time to main, as above.
+and outside time to main, as above. Phase 6 Issues a245bcf0 and 766eced8 own it.
 
 **Task swap (2026-11-01, before any scored cell).**
 - Five no-contact tasks were replaced by five that really conflict, because the first set had
@@ -288,15 +299,16 @@ and outside time to main, as above.
   failed). It was restarted.
 - No scored cell ran while it was wedged.
 
-**Forge serialisation.** Per-branch serialisation (69bcb285) and generation numbers (48ba68ed)
-were not in this build. The overtake results reflect that.
+**Forge serialisation.** Generation-based ancestry cuts (48ba68ed, commit 3f3fbc11) were in
+this build. Per-Lane local locking (69bcb285) did not qualify and was not. The overtake results
+reflect that.
 
 **Driver behaviour.** The driver's rep-3 logic reads "the last valid attempt". For N = 3 this
 report counts attempts as stated above, not by that rule.
 
 ## What this means
 
-1. **Agents land each change about a third faster through Forge**, with the same correctness,
+1. **Agents land each change 24-35% faster through Forge**, with no overall correctness difference,
    a third of the CI minutes and fewer model tokens. This is real at N = 1, 3 and 10 by the
    plan's test, and held in every N = 5 rep.
 2. **Whole-batch throughput is not yet a clear win at high contention.** A few tasks in

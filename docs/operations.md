@@ -1720,7 +1720,7 @@ summaries. Any page may be replayed, or the process restarted at null. New index
 writes populate the same field. Imported-history activity counts are incomplete
 until the backfill finishes; source and retained Work history remain intact.
 
-Lossless hosted source acquisition uses the [GitHub project import](operations/github-project-import.md) API, separate from the derived analysis tour. An import needs no Mac: it becomes an agent-writable hosted project once ready. Large imports are slow: the t3code import (about 29,000 files) took 16 min 56 s against a goal of 5 minutes or less ([status](status.md)); Phase 5 stays open until that goal is met. Archive-style imports store a sorted object catalog instead of one `projectObjects` row per object (`convex/projectGithubImportCatalog.ts`).
+Lossless hosted source acquisition uses the [GitHub project import](operations/github-project-import.md) API, separate from the derived analysis tour. An import needs no Mac: it becomes an agent-writable hosted project once ready. The t3code import (about 29,000 files) takes 2 min 31 s and 2 min 37 s in two runs, until the project is agent-writable, within the 5-minute goal ([status](status.md)). Archive-style imports store a sorted object catalog instead of one `projectObjects` row per object (`convex/projectGithubImportCatalog.ts`).
 
 ## Work record collection
 
