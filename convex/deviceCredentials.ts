@@ -58,6 +58,31 @@ export const revoke = mutation({
     return null;
   },
 });
+export const rename = mutation({
+  args: { credentialId: v.string(), name: v.string(), operationId: v.string() },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const user = await ctx.auth.getUserIdentity();
+    const row = await ctx.db
+      .query('cliCredentials')
+      .withIndex('by_credentialId', q => q.eq('credentialId', args.credentialId))
+      .unique();
+    invariant(user && row?.owner === user.subject, 'AUTH_REQUIRED', 'Select your own device credential.');
+    invariant(
+      !isDeviceIdentity(user) || user.forgeCredential === row.credentialId,
+      'AUTH_SCOPE_DENIED',
+      'A CLI device can rename itself.',
+    );
+    const name = args.name.trim();
+    invariant(
+      name.length > 0 && name.length <= 80,
+      'BAD_ARGUMENT',
+      'Use a device name of 1 to 80 characters.',
+    );
+    if (row.name !== name) await ctx.db.patch(row._id, { name });
+    return null;
+  },
+});
 export const status = coordinationQuery({
   args: {},
   // The account is named by its Forge handle; the auth subject never leaves the deployment.

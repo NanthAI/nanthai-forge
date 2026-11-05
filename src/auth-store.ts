@@ -19,6 +19,8 @@ export type SavedCredential = {
   expiresAt: number;
   name: string;
   scope: 'cli' | 'coordination';
+  /** The one-time hint about renaming an older hostname-named device was shown. */
+  renameHinted?: true;
 };
 type Store = { defaultDeployment?: string; deployments: Record<string, SavedCredential> };
 export function authFile() {

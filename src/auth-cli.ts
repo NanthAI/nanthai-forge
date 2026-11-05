@@ -3,7 +3,7 @@ import { networkFetch, networkTimeout } from './network-fetch.js';
 import { childEnv } from '../scripts/child-env.mjs';
 import { authStatus } from './auth-status.js';
 import { randomBytes, randomUUID } from 'node:crypto';
-import { hostname } from 'node:os';
+import { neutralDeviceName } from './neutral-names.js';
 import { spawn } from 'node:child_process';
 import { makeFunctionReference } from 'convex/server';
 import { coordinationClient } from './coordination-client.js';
@@ -11,9 +11,10 @@ import { deploymentUrl, readAuth, resolveAuthToken, writeAuth, type SavedCredent
 import { ForgeError, invariant } from './errors.js';
 const help = `nforge login [DEPLOYMENT_URL] [--name NAME] [--scope cli|coordination] [--no-browser]
 nforge logout [DEPLOYMENT_URL]
+nforge auth rename NAME [DEPLOYMENT_URL]
 nforge auth status [DEPLOYMENT_URL] [--hostname HOST] [--json [fields]]
 nforge auth handle (NAME | --keep) [DEPLOYMENT_URL]
-Deployment defaults to FORGE_DEPLOYMENT_URL or your most recent login. Login uses a signed-in Forge browser approval and stores a revocable 30-day credential. Collaborators and agents see you by your Forge handle; \`auth handle\` picks it (or keeps the current one). FORGE_AUTH_TOKEN overrides stored credentials for hosted commands.\n`;
+Deployment defaults to FORGE_DEPLOYMENT_URL or your most recent login. A device is named device-xxxx unless you pass --name; auth rename changes it later. Login uses a signed-in Forge browser approval and stores a revocable 30-day credential. Collaborators and agents see you by your Forge handle; \`auth handle\` picks it (or keeps the current one). FORGE_AUTH_TOKEN overrides stored credentials for hosted commands.\n`;
 export function httpOrigin(deployment: string) {
   if (process.env.FORGE_HTTP_URL) return deploymentUrl(process.env.FORGE_HTTP_URL);
   const url = new URL(deployment);
@@ -81,17 +82,21 @@ export async function authCli(command: string, args: string[]): Promise<unknown>
   if (command === 'auth') {
     const sub = args.shift();
     if (sub === 'handle') return pickHandle(args);
+    if (sub === 'rename') return renameDevice(args);
     invariant(sub === 'status', 'BAD_ARGUMENT', help);
     return authStatus(args);
   }
   let selected: string | undefined,
-    name = `nforge on ${hostname()}`,
+    name = neutralDeviceName(),
+    named = false,
     scope: 'cli' | 'coordination' = 'cli',
     browser = true;
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]!;
-    if (arg === '--name' && args[i + 1]) name = args[++i]!;
-    else if (arg === '--scope' && args[i + 1]) {
+    if (arg === '--name' && args[i + 1]) {
+      name = args[++i]!;
+      named = true;
+    } else if (arg === '--scope' && args[i + 1]) {
       const value = args[++i];
       invariant(value === 'cli' || value === 'coordination', 'BAD_ARGUMENT', help);
       scope = value;
@@ -167,7 +172,7 @@ export async function authCli(command: string, args: string[]): Promise<unknown>
     'Forge returned an invalid verification URL.',
   );
   process.stderr.write(
-    `Open ${verification.href}\nCode: ${flow.user_code}\nApprove ${name} (${scope}) in Forge.\n`,
+    `Open ${verification.href}\nCode: ${flow.user_code}\nApprove ${name} (${scope}) in Forge.\n${named ? '' : `This device is named ${name}. Rename it any time: nforge auth rename NAME\n`}`,
   );
   if (browser) openBrowser(verification.href);
   const deadline = Date.now() + flow.expires_in * 1000,
@@ -266,4 +271,32 @@ async function pickHandle(args: string[]) {
     operationId: randomUUID(),
   });
   return { deployment, handle: handle.trim().toLowerCase() };
+}
+/** Renames this saved device; the name is a label the owner sees in Account settings. */
+async function renameDevice(args: string[]) {
+  const positional = args.filter(arg => !arg.startsWith('-'));
+  invariant(
+    positional.length >= 1 && positional.length <= 2 && args.length === positional.length,
+    'BAD_ARGUMENT',
+    help,
+  );
+  const name = positional[0]!.trim();
+  invariant(name.length > 0 && name.length <= 80, 'BAD_ARGUMENT', 'Use a device name of 1 to 80 characters.');
+  const store = readAuth();
+  const selected = positional[1] ?? process.env.FORGE_DEPLOYMENT_URL ?? store.defaultDeployment;
+  invariant(selected, 'BAD_ARGUMENT', 'Provide a deployment URL or set FORGE_DEPLOYMENT_URL.');
+  const deployment = deploymentUrl(selected),
+    saved = store.deployments[deployment];
+  invariant(saved, 'AUTH_REQUIRED', 'Run nforge login first; only a saved login device can be renamed.');
+  // Renaming to the same name again is harmless, so a fresh operation id per run is safe.
+  await coordinationClient(deployment, saved.token).mutation(
+    makeFunctionReference<'mutation'>('deviceCredentials:rename'),
+    { credentialId: saved.credentialId, name, operationId: randomUUID() },
+  );
+  const latest = readAuth();
+  if (latest.deployments[deployment]) {
+    latest.deployments[deployment].name = name;
+    writeAuth(latest);
+  }
+  return { deployment, renamed: true, name };
 }

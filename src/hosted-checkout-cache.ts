@@ -61,34 +61,13 @@ export class HostedCheckoutCache {
       ...(this.machine ? [this.machine] : []),
     ];
   }
-  async ensure(ids: string[]) {
+  /** `installVerifies`: the caller clones each object and checks its digest before
+   * use (Lane install), so a direct machine hit needs only a safe-file check here,
+   * not a second read and hash. Damage found at install goes through `repair`. */
+  async ensure(ids: string[], options: { installVerifies?: boolean } = {}) {
     const unique = [...new Set(ids)];
-    // Parallel file reads: per-file latency, not bandwidth, bounds large trees.
-    const cached = await mapCheckoutIo(unique, async id => {
-      const path = join(this.objects, id);
-      if (!checkoutPathExists(path)) return false;
-      const stat = lstatSync(path);
-      // A machine entry is disposable, including one with unsafe permissions or
-      // links. Refetch it instead of turning cache damage into a denied open.
-      if (
-        this.objects === this.machine &&
-        (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1 || Boolean(stat.mode & 0o077))
-      )
-        return false;
-      invariant(
-        stat.isFile() && !stat.isSymbolicLink() && stat.nlink === 1,
-        'UNSAFE_PATH',
-        'Client object path must be a private regular file.',
-      );
-      const actual =
-        this.objects === this.machine
-          ? await fingerprintPrivateFile(path).catch(() => null)
-          : await fingerprintPrivateFile(path);
-      const valid = actual?.sha256 === id;
-      if (valid && this.objects === this.machine) this.machineObjects++;
-      return valid;
-    });
-    let missing = unique.filter((_, index) => !cached[index]);
+    const deferred = options.installVerifies === true && this.objects === this.machine;
+    let missing = await this.present(unique, deferred);
     if (missing.length && this.fallbackObjects) missing = await this.fromCache(missing);
     if (missing.length >= checkoutPackMinimum && this.transport.sourcePack && this.sourcePack === null)
       missing = await this.fromPack(missing);
@@ -118,6 +97,52 @@ export class HostedCheckoutCache {
       }
       if (group.length) await this.download(group);
     }
+  }
+  /** Ids absent or invalid in `objects`. Parallel file reads: per-file latency, not
+   * bandwidth, bounds large trees. */
+  private async present(ids: string[], deferred: boolean) {
+    const cached = await mapCheckoutIo(ids, async id => {
+      const path = join(this.objects, id);
+      if (!checkoutPathExists(path)) return false;
+      const stat = lstatSync(path);
+      // A machine entry is disposable, including one with unsafe permissions or
+      // links. Refetch it instead of turning cache damage into a denied open.
+      if (
+        this.objects === this.machine &&
+        (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1 || Boolean(stat.mode & 0o077))
+      )
+        return false;
+      invariant(
+        stat.isFile() && !stat.isSymbolicLink() && stat.nlink === 1,
+        'UNSAFE_PATH',
+        'Client object path must be a private regular file.',
+      );
+      if (deferred) {
+        this.machineObjects++;
+        return true;
+      }
+      const actual =
+        this.objects === this.machine
+          ? await fingerprintPrivateFile(path).catch(() => null)
+          : await fingerprintPrivateFile(path);
+      const valid = actual?.sha256 === id;
+      if (valid && this.objects === this.machine) this.machineObjects++;
+      return valid;
+    });
+    return ids.filter((_, index) => !cached[index]);
+  }
+  /** Only direct machine-store hits defer verification to install, so only they repair. */
+  get repairable() {
+    return this.objects === this.machine;
+  }
+  /** Install verification found these machine entries damaged or gone: drop them and
+   * fetch verified bytes again. Only the shared machine store is ever repaired. */
+  async repair(ids: string[]) {
+    invariant(this.repairable, 'INVALID_NATIVE_SOURCE', 'Cloned source differs from the selected content.');
+    const unique = [...new Set(ids)];
+    await mapCheckoutIo(unique, id => rm(join(this.objects, id), { force: true }));
+    this.machineObjects -= unique.length;
+    await this.ensure(unique);
   }
   private async download(pins: ContentPin[]) {
     const temporary = await checkoutIo(async () => mkdtempSync(join(this.root, 'download-')));

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { makeFunctionReference } from 'convex/server';
 import { coordinationClient } from './coordination-client.js';
-import { deploymentUrl, readAuth, resolveAuthToken } from './auth-store.js';
+import { deploymentUrl, readAuth, resolveAuthToken, writeAuth } from './auth-store.js';
 import { ForgeError, invariant } from './errors.js';
 import { parseGhOptions, projectGh } from './gh-cli-options.js';
 
@@ -70,6 +70,7 @@ export async function authStatus(args: string[]): Promise<unknown> {
       'Forge authentication could not be verified. Check connectivity or run nforge login.',
     );
   }
+  if (process.env.FORGE_AUTH_TOKEN === undefined) hintLegacyDeviceName(deployment!);
   const environment = process.env.FORGE_AUTH_TOKEN !== undefined,
     tokenSource = environment ? 'FORGE_AUTH_TOKEN' : 'saved',
     account = identity.handle ?? 'no handle yet';
@@ -89,4 +90,21 @@ export async function authStatus(args: string[]): Promise<unknown> {
     },
     options.fields,
   );
+}
+
+/** Devices logged in before neutral names carry "nforge on <hostname>". They keep it until the owner
+ * renames them; say how, once, on stderr so JSON output is unchanged. */
+function hintLegacyDeviceName(deployment: string) {
+  try {
+    const store = readAuth(),
+      saved = store.deployments[deployment];
+    if (!saved || saved.renameHinted || !/^nforge on /.test(saved.name)) return;
+    process.stderr.write(
+      'This device is still named after your computer. Pick a neutral name any time: nforge auth rename NAME\n',
+    );
+    saved.renameHinted = true;
+    writeAuth(store);
+  } catch {
+    /* The hint is advice only. */
+  }
 }

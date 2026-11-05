@@ -221,8 +221,15 @@ async function checkout(
         metrics.replayed = true;
         return result(true);
       }
-      await metrics.measure('cacheVerify', () => cache.ensure([selection.head]));
-      const stateBytes = await checkoutIo(async () => readFileSync(join(cache.objects, selection.head)));
+      // Direct machine hits are verified once, where they are used: the State bytes
+      // here, and every installed file as it is cloned into the stage.
+      const readState = () => checkoutIo(async () => readFileSync(join(cache.objects, selection.head)));
+      await metrics.measure('cacheVerify', () => cache.ensure([selection.head], { installVerifies: true }));
+      let stateBytes = await readState();
+      if (digest(stateBytes) !== selection.head && cache.repairable) {
+        await metrics.measure('cacheVerify', () => cache.repair([selection.head]));
+        stateBytes = await readState();
+      }
       invariant(
         digest(stateBytes) === selection.head,
         'INVALID_NATIVE_SOURCE',
@@ -247,7 +254,12 @@ async function checkout(
           scope.some(path => file.path === path || file.path.startsWith(`${path}/`)),
       );
       metrics.files = files.length;
-      await metrics.measure('cacheVerify', () => cache.ensure(files.map(file => file.blob)));
+      await metrics.measure('cacheVerify', () =>
+        cache.ensure(
+          files.map(file => file.blob),
+          { installVerifies: true },
+        ),
+      );
       cooperative = !(await checkoutIo(async () => smallCheckout(files, cache.objects)));
       identity(hostedLaneSelectionSchema.parse(await transport.select(request.laneId)));
       await withCheckoutWritePass(
@@ -256,7 +268,14 @@ async function checkout(
           const stage = await checkoutIo(async () => mkdtempSync(join(cache.root, 'checkout-')));
           try {
             const installed = await (async () => {
-              await metrics.measure('copyHash', () => stageHostedFiles(stage, cache.objects, files));
+              const damaged: NativeFile[] = [];
+              await metrics.measure('copyHash', () =>
+                stageHostedFiles(stage, cache.objects, files, cache.repairable ? damaged : undefined),
+              );
+              if (damaged.length) {
+                await metrics.measure('cacheVerify', () => cache.repair(damaged.map(file => file.blob)));
+                await metrics.measure('copyHash', () => stageHostedFiles(stage, cache.objects, damaged));
+              }
               await checkoutIo(async () => mkdirSync(join(stage, '.forge'), { mode: 0o700 }));
               const marker: HostedLaneCheckoutMarker = {
                 schema: 1,

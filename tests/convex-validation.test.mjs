@@ -9,8 +9,8 @@ import { recordsFixture } from './hosted-records-fixture.mjs';
 import { lanesFixture } from './hosted-lanes-fixture.mjs';
 
 const project = { owner: 'owner', key: 'test', name: 'Test', currentBackup: null, revision: 0 };
-const ref = makeFunctionReference('projectActorNames:remember');
-const args = { projectId: 'project', reader: 'owner', labels: [] };
+const ref = makeFunctionReference('projectActorNames:purgeDisplayNames');
+const args = { cursor: null };
 
 test('exported argument validators are cached and enforce all Convex value kinds', () => {
   const validator = v.object({
@@ -75,11 +75,7 @@ test('exported argument validators are cached and enforce all Convex value kinds
 test('dispatchers and schedulers reject invalid args before executing or enqueueing', async () => {
   const s = state([]);
   for (const method of ['runMutation', 'runQuery', 'runAction']) {
-    for (const input of [
-      { ...args, index: 0, generation: 1 },
-      { ...args, labels: [{}] },
-      { reader: 'owner' },
-    ])
+    for (const input of [{ ...args, index: 0, generation: 1 }, { cursor: 1 }, {}])
       await assert.rejects(s.ctx[method](ref, input), /ArgumentValidationError/);
   }
   for (const method of ['runAfter', 'runAt']) {

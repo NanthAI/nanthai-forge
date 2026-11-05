@@ -2,6 +2,7 @@
 import { deadlineConvexSubscription } from './network-convex-client.js';
 import { createHash } from 'node:crypto';
 import { hostname } from 'node:os';
+import { neutralRunnerName } from './neutral-names.js';
 import { WorkStore } from './work-store.js';
 import { coordinationCredentials } from './coordination-client.js';
 import { checkReference, executeLocalCheck, localCheckRequest } from './local-checks.js';
@@ -24,7 +25,8 @@ export async function localChecksCli(args: string[]): Promise<void> {
   );
   const credentials = coordinationCredentials(deployment, process.env.FORGE_AUTH_TOKEN),
     store = new WorkStore(root);
-  const name = args[4]?.trim() ?? hostname(),
+  // The hostname only separates runner ids on different machines; it is hashed and never shown.
+  const name = args[4]?.trim() ?? neutralRunnerName(credentials.url, projectId, store.root),
     runnerId = createHash('sha256')
       .update(JSON.stringify([credentials.url, projectId, store.root, hostname()]))
       .digest('hex');

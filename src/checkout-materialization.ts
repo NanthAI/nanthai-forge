@@ -182,7 +182,7 @@ export async function withCheckoutWritePass<T>(
   const start = performance.now(),
     directory = options.directory ?? `${materializationDirectory(stage)}.writes`;
   mkdirSync(directory, { recursive: true, mode: 0o700 });
-  const queue = new CheckQueue(directory, { limit: 1, serializeAdmission: false });
+  const queue = new CheckQueue(directory, { limit: checkoutWritePasses(), serializeAdmission: false });
   try {
     await acquire(queue, directory);
     options.waited?.(performance.now() - start);
@@ -190,4 +190,11 @@ export async function withCheckoutWritePass<T>(
   } finally {
     queue.release();
   }
+}
+/** Editing write passes per device. One: qualification on APFS (28,881 files, N=10)
+ * measured ~3.5 s serial passes, versus 15-75 s each when three overlapped.
+ * FORGE_CHECKOUT_WRITE_PASSES overrides it for qualification runs only. */
+export function checkoutWritePasses() {
+  const configured = Number(process.env.FORGE_CHECKOUT_WRITE_PASSES);
+  return Number.isInteger(configured) && configured > 0 ? configured : 1;
 }

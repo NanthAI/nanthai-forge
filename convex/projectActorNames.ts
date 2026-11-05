@@ -87,30 +87,32 @@ export const authorize = internalQuery({
     return result;
   },
 });
-export const remember = internalMutation({
-  args: {
-    projectId: v.id('hostedProjects'),
-    reader: v.string(),
-    labels: v.array(v.object({ actor: v.string(), displayName: v.string() })),
-  },
-  returns: v.null(),
+/** One-time cleanup of stored provider display names (personal data we must not hold). Retry the
+ * returned cursor until `isDone`. Former-member provenance (`wasMember`) is kept; every other row
+ * existed only for its name and is deleted. Each call touches at most 100 rows. */
+export const purgeDisplayNames = internalMutation({
+  args: { cursor: v.union(v.string(), v.null()) },
+  returns: v.object({
+    cursor: v.string(),
+    isDone: v.boolean(),
+    deleted: v.number(),
+    cleared: v.number(),
+  }),
   handler: async (ctx, input) => {
-    const project = await accessibleProject(ctx, input.projectId, input.reader);
-    for (const label of input.labels) {
-      invariant(
-        (await membership(ctx, project._id, label.actor)) &&
-          (await known(ctx, project, label.actor, input.reader)),
-        'PROJECT_UNAVAILABLE',
-        'Select an actor already visible in this project.',
-      );
-      const row = await ctx.db
-        .query('projectActorNames')
-        .withIndex('by_project_and_actor', q => q.eq('projectId', project._id).eq('actor', label.actor))
-        .unique();
-      if (row) await ctx.db.patch(row._id, { displayName: label.displayName });
-      else await ctx.db.insert('projectActorNames', { projectId: project._id, ...label });
+    const page = await ctx.db.query('projectActorNames').paginate({ cursor: input.cursor, numItems: 100 });
+    let deleted = 0,
+      cleared = 0;
+    for (const row of page.page) {
+      if (row.displayName === undefined) continue;
+      if (row.wasMember) {
+        await ctx.db.patch(row._id, { displayName: undefined });
+        cleared++;
+      } else {
+        await ctx.db.delete(row._id);
+        deleted++;
+      }
     }
-    return null;
+    return { cursor: page.continueCursor, isDone: page.isDone, deleted, cleared };
   },
 });
 /** Only call after current project read authority has been established. People are named
@@ -149,14 +151,14 @@ export async function withActorName<T extends { actor: string }>(
   return hostedPaths({ ...result, ...(former ? { actorFormerMember: true } : {}) });
 }
 
-/** Preserve membership provenance before deleting a live grant, even without a name. */
+/** Preserve membership provenance before deleting a live grant. No name is stored. */
 export async function retainMembership(ctx: MutationCtx, projectId: Id<'hostedProjects'>, actor: string) {
   const row = await ctx.db
     .query('projectActorNames')
     .withIndex('by_project_and_actor', q => q.eq('projectId', projectId).eq('actor', actor))
     .unique();
   if (row) await ctx.db.patch(row._id, { wasMember: true });
-  else await ctx.db.insert('projectActorNames', { projectId, actor, displayName: '', wasMember: true });
+  else await ctx.db.insert('projectActorNames', { projectId, actor, wasMember: true });
 }
 
 async function membership(ctx: QueryCtx | MutationCtx, projectId: Id<'hostedProjects'>, actor: string) {

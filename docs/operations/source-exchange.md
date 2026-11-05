@@ -340,9 +340,10 @@ independent copies; executable modes, binary bytes and symlink target bytes are
 preserved, including dangling links. The same symlink handling applies to hosted
 main checkout.
 
-Warm checkouts use hash-verified machine objects directly, avoiding another
-per-Lane object-store copy before cloning the independent editing files. Older
-per-checkout object stores are still reusable when a machine object is missing.
+Warm checkouts use machine objects directly, avoiding another per-Lane
+object-store copy before cloning the independent editing files. Each object is
+hashed once, as its clone enters the stage; a mismatch drops that machine entry
+and fetches it again. Older per-checkout object stores are still reusable when a machine object is missing.
 Copies are staged and hash-verified before a separate bounded durability pass
 fsyncs every regular file; directory flushes still precede the atomic install.
 Local clients for the same OS user share one I/O worker budget per volume.

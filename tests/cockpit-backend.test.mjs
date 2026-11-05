@@ -4,7 +4,6 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { writeFileSync, mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { hostname } from 'node:os';
 import { setup } from './hosted-planning-fixture.mjs';
 import { state } from './hosted-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
@@ -217,7 +216,7 @@ test('brief machine/config observations stay local to the Lane host and live MCP
       .result;
   assert.deepEqual(lane.startedBy, { kind: 'agent', name: 'codex-8', tool: 'codex' });
   const input = { situation: 'continue-lane', laneId: lane.laneId };
-  assert.equal(localBrief(agent.work.store, input).setup.machine, process.env.FORGE_MACHINE ?? hostname());
+  assert.equal(localBrief(agent.work.store, input).setup.machine, process.env.FORGE_MACHINE ?? 'local');
   writeFileSync(
     join(root, '.mcp.json'),
     JSON.stringify({

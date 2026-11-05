@@ -9,12 +9,12 @@ import {
   constants,
   realpathSync,
 } from 'node:fs';
-import { chmod, copyFile, open } from 'node:fs/promises';
+import { chmod, copyFile, open, rm } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { checkoutIo } from './checkout-io.js';
 import { mapExchange } from './exchange-parallel.js';
 import { digest } from './hash.js';
-import { invariant } from './errors.js';
+import { ForgeError, invariant } from './errors.js';
 import type { NativeFile } from './native-state-format.js';
 import { syncDirectory, syncFile } from './native-durability.js';
 import { fingerprintPrivateFile, readSource } from './files.js';
@@ -57,8 +57,15 @@ export async function installHostedFiles(stage: string, objects: string, files: 
   await flushHostedFiles(stage, files);
 }
 
-/** Build independent, verified files while the whole staging tree stays private. */
-export async function stageHostedFiles(stage: string, objects: string, files: NativeFile[]) {
+/** Build independent, verified files while the whole staging tree stays private.
+ * With `damaged`, a source that is missing or fails its digest is collected for
+ * repair instead of failing the open; nothing unverified stays in the stage. */
+export async function stageHostedFiles(
+  stage: string,
+  objects: string,
+  files: NativeFile[],
+  damaged?: NativeFile[],
+) {
   await checkoutIo(async () => {
     for (const directory of new Set(files.map(file => dirname(join(stage, file.path)))))
       mkdirSync(directory, { recursive: true });
@@ -66,15 +73,25 @@ export async function stageHostedFiles(stage: string, objects: string, files: Na
   await mapExchange(files, 16, async file => {
     const target = join(stage, file.path),
       source = join(objects, file.blob);
-    if (file.mode === 'symlink') return checkoutIo(async () => installHostedFile(stage, objects, file));
-    await checkoutIo(() => copyFile(source, target, constants.COPYFILE_FICLONE));
-    // The shared machine cache can change between discovery and this clone.
-    // Authenticate the independent installed inode before exposing it writable.
-    invariant(
-      (await checkoutIo(() => fingerprintPrivateFile(target, 'INVALID_NATIVE_SOURCE'))).sha256 === file.blob,
-      'INVALID_NATIVE_SOURCE',
-      'Cloned source differs from the selected content.',
-    );
+    try {
+      if (file.mode === 'symlink')
+        return await checkoutIo(async () => installHostedFile(stage, objects, file));
+      await checkoutIo(() => copyFile(source, target, constants.COPYFILE_FICLONE));
+      // The shared machine cache can change between discovery and this clone.
+      // Authenticate the independent installed inode before exposing it writable.
+      invariant(
+        (await checkoutIo(() => fingerprintPrivateFile(target, 'INVALID_NATIVE_SOURCE'))).sha256 ===
+          file.blob,
+        'INVALID_NATIVE_SOURCE',
+        'Cloned source differs from the selected content.',
+      );
+    } catch (error) {
+      const code = error instanceof ForgeError ? error.code : (error as NodeJS.ErrnoException).code;
+      if (!damaged || !['INVALID_NATIVE_SOURCE', 'ENOENT'].includes(code ?? '')) throw error;
+      await checkoutIo(() => rm(target, { force: true }));
+      damaged.push(file);
+      return;
+    }
     await checkoutIo(() => chmod(target, file.mode === 'executable' ? 0o755 : 0o644));
   });
 }

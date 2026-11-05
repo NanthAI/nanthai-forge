@@ -6,8 +6,8 @@ import assert from 'node:assert/strict';
 import { makeFunctionReference } from 'convex/server';
 import { state } from './hosted-fixture.mjs';
 
-const scheduledRef = makeFunctionReference('projectActorNames:remember');
-const scheduledArgs = { projectId: 'project', reader: 'owner', labels: [] };
+const scheduledRef = makeFunctionReference('projectActorNames:purgeDisplayNames');
+const scheduledArgs = { cursor: null };
 
 const project = (owner, key) => ({ owner, key, name: key, currentBackup: null, revision: 0 });
 
@@ -106,22 +106,21 @@ test('a successful nested mutation is undone when the outer transaction fails', 
 
 test('runMutation rolls back a real handler that writes before rejecting', async () => {
   const s = state([]),
-    projectId = await s.ctx.db.insert('hostedProjects', project('owner', 'example')),
-    remember = makeFunctionReference('projectActorNames:remember'),
-    input = labels => ({ projectId, reader: 'owner', labels });
-  await assert.rejects(
-    s.ctx.runMutation(
-      remember,
-      input([
-        { actor: 'owner', displayName: 'Changed before failure' },
-        { actor: 'unknown', displayName: 'Not visible' },
-      ]),
-    ),
-    error => error.code === 'PROJECT_UNAVAILABLE',
-  );
+    purge = makeFunctionReference('projectActorNames:purgeDisplayNames');
+  for (const actor of ['a', 'b'])
+    await s.ctx.db.insert('projectActorNames', { projectId: 'project', actor, displayName: actor });
+  const remove = s.ctx.db.delete;
+  let deletes = 0;
+  s.ctx.db.delete = async id => {
+    if (++deletes === 2) throw new Error('second delete failed');
+    return remove.call(s.ctx.db, id);
+  };
+  await assert.rejects(s.ctx.runMutation(purge, { cursor: null }), /second delete failed/);
+  assert.equal(s.tables.projectActorNames.size, 2, 'the first delete rolled back');
+  s.ctx.db.delete = remove;
+  const result = await s.ctx.runMutation(purge, { cursor: null });
+  assert.equal(result.deleted, 2);
   assert.equal(s.tables.projectActorNames.size, 0);
-  await s.ctx.runMutation(remember, input([{ actor: 'owner', displayName: 'Committed' }]));
-  assert.equal([...s.tables.projectActorNames.values()][0].displayName, 'Committed');
 });
 
 test('query results stay ordered and detached when only returned pages are cloned', async () => {

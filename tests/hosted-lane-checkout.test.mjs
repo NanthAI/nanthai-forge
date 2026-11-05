@@ -165,7 +165,7 @@ test('a nested checkout lazily builds exact overlap evidence from its shared bas
 });
 
 for (const mode of ['file', 'symlink'])
-  test(`machine ${mode} replacement after cache verification cannot install different source`, async t => {
+  test(`machine ${mode} replacement after cache discovery is repaired, never installed`, async t => {
     const s = setup(t),
       machine = join(s.directory, 'machine');
     const previous = process.env.FORGE_OBJECT_CACHE;
@@ -182,9 +182,10 @@ for (const mode of ['file', 'symlink'])
       return selection;
     };
     const request = s.request();
-    await assert.rejects(checkoutHostedLane(s.root, request, s.transport), { code: 'INVALID_NATIVE_SOURCE' });
-    assert.equal(existsSync(s.root), false);
+    // Install verification finds the replaced entry and fetches it again: the open
+    // completes with the selected bytes instead of installing the replacement.
     const recovered = await checkoutHostedLane(s.root, request, s.transport);
+    assert.equal(s.calls.downloads.filter(id => id === file.blob).length, 2);
     assert.deepEqual(readFileSync(join(machine, file.blob)), s.objects.get(file.blob));
     assert.deepEqual(nativeFile(recovered.root, file.path).bytes, s.objects.get(file.blob));
     writeFileSync(join(s.root, 'src/a.txt'), 'local edit\n');
@@ -220,6 +221,30 @@ for (const damage of ['permissions', 'symlink', 'hardlink'])
     assert.equal(lstatSync(path).mode & 0o077, 0);
   });
 
+// Direct machine hits are hashed once, at install; damage found there is repaired.
+for (const damage of ['file', 'symlink', 'state'])
+  test(`changed machine bytes for a ${damage} are found at install and fetched again`, async t => {
+    const s = setup(t),
+      machine = join(s.directory, 'machine'),
+      previous = process.env.FORGE_OBJECT_CACHE;
+    process.env.FORGE_OBJECT_CACHE = machine;
+    t.after(() => {
+      if (previous === undefined) delete process.env.FORGE_OBJECT_CACHE;
+      else process.env.FORGE_OBJECT_CACHE = previous;
+    });
+    mkdirSync(machine);
+    for (const [id, bytes] of s.objects) writeFileSync(join(machine, id), bytes, { mode: 0o600 });
+    const blob = damage === 'state' ? s.selection().head : s.files[damage === 'file' ? 0 : 3].blob;
+    writeFileSync(join(machine, blob), 'tampered private bytes', { mode: 0o600 });
+    const result = await checkoutHostedLane(s.root, s.request(), s.transport);
+    assert.deepEqual(s.calls.downloads, [blob], 'only the damaged entry is fetched');
+    assert.deepEqual(readFileSync(join(machine, blob)), s.objects.get(blob));
+    for (const file of s.files)
+      if (file.mode === 'symlink')
+        assert.equal(readlinkSync(join(result.root, file.path)), String(s.objects.get(file.blob)));
+      else assert.deepEqual(nativeFile(result.root, file.path).bytes, s.objects.get(file.blob));
+    assert.equal(result.machineObjects, s.files.length, 'repaired entries are not counted as machine hits');
+  });
 test('sparse marker retains omitted paths and exact baselines; expansion and full checkout are additive', async t => {
   const s = setup(t);
   await checkoutHostedLane(s.root, s.request({ paths: ['src'] }), s.transport);

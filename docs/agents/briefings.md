@@ -33,7 +33,7 @@ Native CLI/MCP access to hosted context needs private `FORGE_DEPLOYMENT`, `FORGE
 `FORGE_AUTH_TOKEN`. Missing binding reports unavailable coordination; failure never
 falls back silently. Message/handoff ids need it. `forge_task` exposes guidance;
 `forge_brief` exposes briefings. Failed checks retain bounded summaries; older ones
-may lack them. `setup.machine` and `setup.mcpConfigured` report observed setup,
+may lack them. `setup.machine` (the `FORGE_MACHINE` label you set, otherwise `local`; never the hostname) and `setup.mcpConfigured` report observed setup,
 not liveness; unobserved values are null/false. Inspection reveals no credentials
 or client file contents.
 

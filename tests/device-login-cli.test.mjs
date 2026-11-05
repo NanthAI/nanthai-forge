@@ -11,7 +11,9 @@ test('real CLI login, saved authentication, env override, denial, logout and sta
   const directory = mkdtempSync(join(tmpdir(), 'forge-device-cli-'));
   let decision = 'approved',
     revoked = false,
-    seenAuth = '';
+    seenAuth = '',
+    startName = '',
+    renamed;
   const token = 'synthetic-forge-issued-token',
     envToken = 'synthetic-ci-override';
   const server = createServer(async (request, response) => {
@@ -22,6 +24,7 @@ test('real CLI login, saved authentication, env override, denial, logout and sta
     if (request.url === '/auth/device/start') {
       assert.match(input.clientNonce, /^[0-9a-f]{64}$/);
       assert.equal(input.scope, 'cli');
+      startName = input.name;
       response.end(
         JSON.stringify({
           device_code: 'a'.repeat(64),
@@ -44,6 +47,8 @@ test('real CLI login, saved authentication, env override, denial, logout and sta
     } else {
       seenAuth = request.headers.authorization;
       if (input.path === 'deviceCredentials:revoke') revoked = true;
+      if (input.path === 'deviceCredentials:rename')
+        renamed = Array.isArray(input.args) ? input.args[0] : input.args;
       response.end(
         JSON.stringify({
           status: 'success',
@@ -99,9 +104,27 @@ test('real CLI login, saved authentication, env override, denial, logout and sta
   assert.equal(ci.code, 0);
   assert.equal(seenAuth, `Bearer ${envToken}`);
   assert.equal(ci.stdout.includes(envToken), false);
+  // Older devices were named after the computer: keep the name, say how to change it once.
+  const legacy = JSON.parse(readFileSync(file, 'utf8'));
+  legacy.deployments[deployment].name = 'nforge on legacy-host';
+  writeFileSync(file, JSON.stringify(legacy), { mode: 0o600 });
+  const hinted = await run(['auth', 'status']);
+  assert.match(hinted.stderr, /nforge auth rename NAME/);
+  assert.equal(JSON.parse(readFileSync(file, 'utf8')).deployments[deployment].name, 'nforge on legacy-host');
+  assert.doesNotMatch((await run(['auth', 'status'])).stderr, /rename/, 'the hint is shown once');
+  const rename = await run(['auth', 'rename', 'Desk', deployment]);
+  assert.equal(rename.code, 0);
+  assert.deepEqual(
+    { credentialId: renamed.credentialId, name: renamed.name },
+    { credentialId: 'synthetic-device', name: 'Desk' },
+  );
+  assert.equal(JSON.parse(readFileSync(file, 'utf8')).deployments[deployment].name, 'Desk');
   decision = 'denied';
   const denied = await run(['login', deployment, '--no-browser']);
   assert.equal(denied.code, 1);
+  // No --name: the default is a neutral label, never the computer's name, and the rename command is shown.
+  assert.match(startName, /^device-[0-9a-f]{4}$/);
+  assert.match(denied.stderr, /nforge auth rename NAME/);
   assert.match(denied.stderr, /denied/);
   assert.equal(JSON.parse(readFileSync(file, 'utf8')).deployments[deployment].token, token);
   const cached = JSON.parse(readFileSync(file, 'utf8'));

@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 import { readFileSync, realpathSync } from 'node:fs';
-import { hostname, homedir } from 'node:os';
+import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { NEUTRAL_MACHINE } from './neutral-names.js';
 export type BriefSetup = { machine: string | null; mcpConfigured: boolean };
 /** Observe configuration without returning config contents, credentials, or running clients. */
 export function localAgentSetup(root: string, liveMcp = false): BriefSetup {
-  const machine = process.env.FORGE_MACHINE ?? hostname();
+  const machine = process.env.FORGE_MACHINE ?? NEUTRAL_MACHINE;
   const configured = (value: unknown): boolean => {
     if (!value || typeof value !== 'object') return false;
     const servers = (value as { mcpServers?: Record<string, { args?: unknown }> }).mcpServers;
