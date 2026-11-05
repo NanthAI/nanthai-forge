@@ -93,10 +93,9 @@ for (const count of [2538, 5076])
     // The brief applies the RSS ceiling to the dogfood-size clone; doubled-size
     // and start RSS are measured, while their specified call budgets stay enforced.
     // Measured 2026-11-05 (12 runs, default V8 flags, busy 16 GB Mac): min 219, median ~261, max 312 MiB.
-    // The spread is V8 young-generation slack, not live data: downloads stream to disk, live heap peaks
-    // near 75 MiB, and capping the semi-space at 1 MiB gives 156-160 MiB. The old 300 MiB bound failed
-    // 2 of 12 runs; 380 MiB keeps ~20% headroom over the observed max and still catches buffering the
-    // 24 MiB source set (>= +24 MiB per retained copy) together with the other budgets.
+    // The spread is V8 young-generation slack, not live data (downloads stream to disk, live heap peaks
+    // near 75 MiB), so this default-flag ceiling is only a crash guard against gross buffering. The
+    // deterministic live-data bound is the semi-space-1 test below.
     if (count === 2538) assert(metrics.clonePeakRssMiB <= 380, `${metrics.clonePeakRssMiB} MiB RSS`);
     assert.equal(metrics.cloneDocuments.written, 0);
     assert(
@@ -106,6 +105,28 @@ for (const count of [2538, 5076])
     );
     assert(!f.calls.some(c => /downloadPart|downloadBatch|signDownloads|projectMain:objects/.test(c.name)));
   });
+
+// Deterministic live-data guard: with the young generation pinned to 1 MiB the V8 slack that spreads
+// default-flag RSS from 219 to 312 MiB disappears, so peak RSS reflects retained memory. The flag is
+// passed only to the child node process of this test; the product sets no V8 flags.
+// RSS is allocator- and platform-dependent, so the bound is per platform; both are ~20% above the observed max.
+// macOS, 2026-11-05, 8 runs under `nforge heavy` on a busy 16 GB Mac: 159.4, 154.3, 154.8, 156.9, 156.1,
+// 157.6, 158.2, 153.8 MiB (max 159.4; the earlier builder saw 156-160) -> 190 MiB (+19%).
+// Linux (ubuntu-latest hosted check, same day): 196.4 MiB in the first failing attempt of the landing check
+// (a single sample; the Mac bound of 190 failed there) -> 235 MiB (+20%). Re-tighten once more hosted
+// samples exist (each run prints the semi-space-1 RSS diagnostic).
+// A retained 60 MiB fails the macOS bound (measured 232 MiB); the 380 MiB default-flag check above cannot
+// see it (338 MiB). Retention under ~30 MiB (one extra copy of the 24 MiB source set) stays within the bound.
+const SEMI_SPACE_1_RSS_BOUND_MIB = process.platform === 'darwin' ? 190 : 235;
+test('2538-file clone peak RSS stays bounded with a 1 MiB semi-space (live-data guard)', async t => {
+  const f = await rootFixture(t, 2538, 24 * 1024 * 1024, 10);
+  const metrics = await measureRootBudget(t, f, { nodeArgs: ['--max-semi-space-size=1'] });
+  t.diagnostic(`semi-space-1 clone RSS ${metrics.clonePeakRssMiB} MiB`);
+  assert(
+    metrics.clonePeakRssMiB <= SEMI_SPACE_1_RSS_BOUND_MIB,
+    `${metrics.clonePeakRssMiB} MiB RSS with --max-semi-space-size=1 (bound ${SEMI_SPACE_1_RSS_BOUND_MIB})`,
+  );
+});
 
 test('combined signed pages recheck access and bindings; expired signatures refresh once and corrupt bytes fail', async t => {
   const f = await rootFixture(t),

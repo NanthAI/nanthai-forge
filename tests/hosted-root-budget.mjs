@@ -8,7 +8,7 @@ import { mkdirSync } from 'node:fs';
 import { makeFunctionReference } from 'convex/server';
 import { convexToJson, jsonToConvex } from 'convex/values';
 import { childEnv } from '../scripts/child-env.mjs';
-export async function measureRootBudget(t, f) {
+export async function measureRootBudget(t, f, { nodeArgs = [] } = {}) {
   const server = createServer(async (request, response) => {
     try {
       const url = new URL(request.url, 'http://fixture');
@@ -46,7 +46,7 @@ export async function measureRootBudget(t, f) {
     const started = performance.now();
     const output = await promisify(execFile)(
       process.execPath,
-      [resolve('tests/hosted-root-cli-process.mjs'), ...args],
+      [...nodeArgs, resolve('tests/hosted-root-cli-process.mjs'), ...args],
       {
         env: childEnv({
           extra: {
