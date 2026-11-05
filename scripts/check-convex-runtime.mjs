@@ -7,6 +7,7 @@ import { builtinModules } from 'node:module';
 import { join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
+import { checkConvexBundles } from './check-convex-bundle.mjs';
 
 const builtins = new Set(builtinModules.flatMap(name => [name, `node:${name}`]));
 const nodeDirective = /^\s*(?:(?:\/\/[^\n]*\n|\/\*[\s\S]*?\*\/)\s*)*['"]use node['"]/;
@@ -84,5 +85,8 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       `CONVEX_RUNTIME_IMPORT ${module} runs in V8 (no "use node") but reaches ${chain.at(-1)}: ${chain.join(' -> ')}. Use a portable module (src/portable-hash instead of src/hash) or split the helper out.`,
     );
   if (violations.length) process.exit(1);
-  console.log('Convex V8 modules bundle without node: builtins.');
+  const bundled = await checkConvexBundles(root, { registeredOnly: true });
+  console.log(
+    `Convex V8 modules bundle without node: builtins; ${bundled.entries} entries and ${bundled.modules} reachable modules resolve in isolated bundles.`,
+  );
 }

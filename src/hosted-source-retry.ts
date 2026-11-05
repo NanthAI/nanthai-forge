@@ -51,12 +51,39 @@ export const sourceFailureCodes = [
   'R2_VERIFY_FAILED',
   'R2_NOT_CONFIGURED',
   'SOURCE_RETRY_EXHAUSTED',
+  'MODULE_NOT_FOUND',
+  'ERR_MODULE_NOT_FOUND',
+  'ERR_PACKAGE_PATH_NOT_EXPORTED',
+  'ERR_REQUIRE_ESM',
+  'SOURCE_RUNTIME_ERROR',
+] as const;
+export const sourceFailureCalls = [
+  'task-begin',
+  'task-input',
+  'task-progress-read',
+  'task-run',
+  'task-stage',
+  'task-progress-store',
+  'task-complete',
+  'import-declarations',
+  'merge-read',
+  'merge-text',
+  'merge-markers',
+  'merge-publish',
 ] as const;
 export const sourceFailureSchema = z
   .object({
     stage: z.enum(sourceFailureStages),
     exception: z.enum(sourceFailureClasses),
     code: z.enum(sourceFailureCodes).nullable(),
+    step: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
+    call: z.enum(sourceFailureCalls).optional(),
+    object: z
+      .string()
+      .regex(/^[a-f0-9]{64}$/)
+      .optional(),
+    size: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
+    objects: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
     elapsedMs: z.number().int().min(0).max(600000),
     httpStatus: z.number().int().min(100).max(599).nullable(),
   })
@@ -67,7 +94,13 @@ export const sourceRetryBackoff = (failures: number) =>
   Math.min(60000, 2000 * 2 ** Math.min(Math.max(0, failures - 1), 5));
 export const unknownSourceFailure = (
   stage: 'scheduled-task' | 'scheduled-step' | 'compose-watch',
-): SourceFailure => ({ stage, exception: 'UnknownError', code: null, elapsedMs: 0, httpStatus: null });
+): SourceFailure => ({
+  stage,
+  exception: 'UnknownError',
+  code: 'SOURCE_RUNTIME_ERROR',
+  elapsedMs: 0,
+  httpStatus: null,
+});
 export function sourceRetryFailureMessage(cause?: SourceFailure) {
   return (
     'Source repair exhausted; the original inputs and identity are retained. Use the advertised continuation to start a new attempt.' +

@@ -388,7 +388,7 @@ for (const wrapper of ['task', 'node', 'small'])
       await assert.rejects(f.run(), error => {
         assert.equal(error.name, 'SourceIoError');
         assert.equal(error.exception, known ? 'TimeoutError' : 'UnknownError');
-        assert.equal(error.code, known ? 'EXCHANGE_REQUEST_TIMEOUT' : null);
+        assert.equal(error.code, known ? 'EXCHANGE_REQUEST_TIMEOUT' : 'SOURCE_RUNTIME_ERROR');
         assert.equal(error.cause, undefined);
         const visible = [error.message, error.stack, JSON.stringify(error), JSON.stringify(f.logs)].join(' ');
         assert(sentinels.every(s => !visible.includes(s)));

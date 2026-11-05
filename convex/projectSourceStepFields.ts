@@ -1,7 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 import { defineTable } from 'convex/server';
 import { v } from 'convex/values';
-import { sourceFailureStages, sourceFailureClasses, sourceFailureCodes } from '../src/hosted-source-retry';
+import {
+  sourceFailureStages,
+  sourceFailureClasses,
+  sourceFailureCodes,
+  sourceFailureCalls,
+} from '../src/hosted-source-retry';
 export const sourceOutput = v.object({
   stateGeneration: v.optional(v.number()),
   sha256: v.string(),
@@ -15,6 +20,11 @@ export const sourceFailure = v.object({
   stage: v.union(...sourceFailureStages.map(value => v.literal(value))),
   exception: v.union(...sourceFailureClasses.map(value => v.literal(value))),
   code: v.union(...sourceFailureCodes.map(value => v.literal(value)), v.null()),
+  step: v.optional(v.number()),
+  call: v.optional(v.union(...sourceFailureCalls.map(value => v.literal(value)))),
+  object: v.optional(v.string()),
+  size: v.optional(v.number()),
+  objects: v.optional(v.number()),
   elapsedMs: v.number(),
   httpStatus: v.union(v.number(), v.null()),
 });

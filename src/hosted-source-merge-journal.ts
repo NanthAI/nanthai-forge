@@ -7,6 +7,7 @@ import type { SourceStepCursor, StepTransport } from './hosted-source-step.js';
 import { MemoryMergeSource, MemorySourceReader } from './hosted-source-memory.js';
 import type { WorkerObject } from './hosted-source-worker-format.js';
 import { canonicalPayload } from './hosted-source-operation.js';
+import { SourceIoError, sourceCall } from './hosted-source-io-error.js';
 import { invariant } from './errors.js';
 /** Bounds for the native whole-file text/import parser. Its memory grows with
  * bytes and with line count, so a file over either bound that both sides changed
@@ -159,7 +160,19 @@ export async function calculateSourceFiles(
       continue;
     }
     await io.prepareRead?.(required.filter(ref => !ref.recipe).map(ref => ref.object));
-    const read = async (file?: NativeFile) => (file ? reader.bytes(refs.get(file.blob)!) : Buffer.alloc(0));
+    const read = async (file?: NativeFile) => {
+      if (!file) return Buffer.alloc(0);
+      const ref = refs.get(file.blob)!;
+      try {
+        return await reader.bytes(ref);
+      } catch (error) {
+        if (error instanceof Error && error.name === 'ForgeError') throw error;
+        throw new SourceIoError(error, 'task', file.blob, null, {
+          call: 'merge-read',
+          size: ref.object.size,
+        });
+      }
+    };
     const [base, left, right] = await Promise.all([
         read(request.item.base),
         read(request.item.left),
@@ -174,13 +187,22 @@ export async function calculateSourceFiles(
       kind: 'text' | 'binary' = 'binary';
     if (request.kind === 'merge') {
       const notes: import('./native-text-merge.js').NativeTextResolution[] = [];
-      bytes = mergeNativeText(base, left, right, request.item.path, {
-        insertionOrder: request.order,
-        resolutions: notes,
-      });
+      bytes = await sourceCall(
+        'merge-text',
+        async () =>
+          mergeNativeText(base, left, right, request.item.path, {
+            insertionOrder: request.order,
+            resolutions: notes,
+          }),
+        { size: base.length + left.length + right.length, objects: required.length },
+      );
       resolutions.push(...notes.map(item => ({ ...item, path: request.item.path })));
     } else {
-      const marked = markNativeTextConflicts(base, left, right, ['lane', request.channel], request.order);
+      const marked = await sourceCall(
+        'merge-markers',
+        async () => markNativeTextConflicts(base, left, right, ['lane', request.channel], request.order),
+        { size: base.length + left.length + right.length, objects: required.length },
+      );
       if (marked) {
         kind = 'text';
         const line = (b: Buffer) => (b.length && b.at(-1) !== 10 ? Buffer.concat([b, Buffer.from('\n')]) : b);
@@ -195,7 +217,9 @@ export async function calculateSourceFiles(
             ]);
       }
     }
-    const pin = bytes ? await reader.publish(bytes) : null;
+    const pin = bytes
+      ? await sourceCall('merge-publish', () => reader.publish(bytes!), { size: bytes.length })
+      : null;
     results.push({ key: request.key, blob: pin?.sha256 ?? null, kind, resolutions });
   }
   return results;

@@ -138,7 +138,12 @@ continuation above; replay of the failed operation remains immutable.
 
 Failed actions emit bounded structured context to retained Convex logs: job,
 step, task/generation, stage, exception class/code, available object digest,
-elapsed time and HTTP status. These diagnostics omit source bytes, arbitrary
+elapsed time and HTTP status. Failure receipts also retain the source step,
+allowlisted call label, digest pin and numeric byte/object counts when known.
+Dependency resolution failures retain `MODULE_NOT_FOUND`, `ERR_MODULE_NOT_FOUND`,
+`ERR_PACKAGE_PATH_NOT_EXPORTED` or `ERR_REQUIRE_ESM`; other unclassified runtime
+failures use `SOURCE_RUNTIME_ERROR`. Existing retained code-null receipts remain
+readable. Nested wrappers preserve the innermost safe context. These diagnostics omit source bytes, arbitrary
 exception messages, signed URLs, headers and response payloads. Escaping action
 rejections are opaque too: they carry the approved bounded classification without
 the original message, stack or cause. Proven metadata schema failures settle with
@@ -215,3 +220,10 @@ and execution pins and remain readable. They are never silently rerouted.
 The worker uses bounded source-object windows and verifies exact hash/size pins.
 Source-operation reducers own publication; no repository commands execute during
 source construction. No idle poller or external source-service credential is needed.
+
+The landing Convex runtime check bundles registered functions and their reachable
+modules, imports their emitted bundles from a private directory without checkout
+`node_modules`, and rejects first-party runtime package discovery, including lazy loader
+aliases and nonliteral imports. Import reconciliation uses the pinned portable
+Lezer parser through a static import so the parser ships inside the source-worker
+bundle. Tests never execute repository source as part of parsing.

@@ -1,38 +1,55 @@
 // SPDX-License-Identifier: Apache-2.0
-import { createRequire } from 'node:module';
-import type { Node } from 'typescript';
+import { parser } from '@lezer/javascript';
+import { SourceIoError } from './hosted-source-io-error.js';
+import type { SyntaxNode } from '@lezer/common';
 
-const loadParser = createRequire(import.meta.url);
+const importsParser = parser.configure({ dialect: 'ts jsx' });
 const statementKey = (text: string) => text.replace(/\r?\n$/, '');
 
 /** Only top-level declarations are candidates. Matching text inside functions,
  * comments or template literals is never deduplicated. */
-function declarations(text: string, path: string) {
-  const ts = loadParser('typescript') as typeof import('typescript');
-  const source = ts.createSourceFile(path, text, ts.ScriptTarget.Latest, true),
+function declarations(text: string) {
+  try {
+    return parseDeclarations(text);
+  } catch (error) {
+    throw new SourceIoError(error, 'task', null, null, {
+      call: 'import-declarations',
+      size: new TextEncoder().encode(text).length,
+    });
+  }
+}
+function parseDeclarations(text: string) {
+  const source = importsParser.parse(text),
     result = new Map<string, { lines: number[]; safe: boolean }>();
-  const requires = (node: Node): boolean =>
-    (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === 'require') ||
-    Boolean(ts.forEachChild(node, child => requires(child) || undefined));
-  for (const statement of source.statements) {
-    const imported = ts.isImportDeclaration(statement),
+  const requires = (node: SyntaxNode): boolean => {
+    if (node.name === 'CallExpression') {
+      const callee = node.firstChild;
+      if (callee?.name === 'VariableName' && text.slice(callee.from, callee.to) === 'require') return true;
+    }
+    for (let child = node.firstChild; child; child = child.nextSibling) if (requires(child)) return true;
+    return false;
+  };
+  for (let statement = source.topNode.firstChild; statement; statement = statement.nextSibling) {
+    const imported = statement.name === 'ImportDeclaration',
+      candidate =
+        statement.name === 'ExportDeclaration' ? statement.getChild('VariableDeclaration') : statement,
       required =
-        ts.isImportEqualsDeclaration(statement) ||
-        (ts.isExpressionStatement(statement) && requires(statement.expression)) ||
-        (ts.isVariableStatement(statement) &&
-          statement.declarationList.declarations.some(d => d.initializer && requires(d.initializer)));
+        !!candidate &&
+        ['ExpressionStatement', 'VariableDeclaration'].includes(candidate.name) &&
+        requires(candidate);
     if (!imported && !required) continue;
-    const start = source.getLineAndCharacterOfPosition(statement.getStart(source)),
-      end = source.getLineAndCharacterOfPosition(statement.end),
-      from = source.getPositionOfLineAndCharacter(start.line, 0),
-      to = text.indexOf('\n', statement.end),
+    const from = text.lastIndexOf('\n', statement.from - 1) + 1,
+      to = text.indexOf('\n', statement.to),
       declaration = text.slice(from, to === -1 ? undefined : to + 1),
       current = result.get(statementKey(declaration)) ?? { lines: [], safe: true };
-    current.lines.push(start.line);
-    // Multiline declarations, require evaluation order and attached comments need
-    // an explicit resolution; only whole single-line static imports can be removed.
+    current.lines.push(text.slice(0, from).split('\n').length - 1);
+    // Error recovery, multiline declarations, require evaluation order and attached
+    // comments need explicit resolution. Only whole static imports can be removed.
     current.safe &&=
-      imported && start.line === end.line && declaration.trim() === statement.getText(source).trim();
+      imported &&
+      !statement.toString().includes('⚠') &&
+      !text.slice(statement.from, statement.to).includes('\n') &&
+      declaration.trim() === text.slice(statement.from, statement.to).trim();
     result.set(statementKey(declaration), current);
   }
   return result;
@@ -71,10 +88,10 @@ export function reconcileNativeImports(
   // The diff uses LF-delimited lines; other JS line separators have ambiguous offsets.
   if ([base, left, right, merged].some(rows => rows.some(line => /\r(?!\n)|[\u2028\u2029]/.test(line))))
     return null;
-  const original = declarations(base.join(''), path),
-    a = declarations(left.join(''), path),
-    b = declarations(right.join(''), path),
-    combined = declarations(merged.join(''), path),
+  const original = declarations(base.join('')),
+    a = declarations(left.join('')),
+    b = declarations(right.join('')),
+    combined = declarations(merged.join('')),
     remove = new Set<number>();
   for (const [declaration, x] of a) {
     const y = b.get(declaration),

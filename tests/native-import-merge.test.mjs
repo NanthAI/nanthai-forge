@@ -24,6 +24,9 @@ test('different-position static import merge retains valid JavaScript syntax', (
 test('wrapped requires and multiline imports become explicit conflicts', () => {
   for (const added of [
     "const fs = require('node:fs').promises;\n",
+    "export const fs = require('node:fs');\n",
+    "export let fs = require('node:fs');\n",
+    "export var fs = require('node:fs');\n",
     "const fs = (require('node:fs'));\n",
     "const fs = await require('node:fs');\n",
     "globalThis.fs = require('node:fs');\n",
