@@ -85,6 +85,7 @@ export function importBenchmarkGuard({
           projectId: target().projectId,
           operationId: deletionOperationId,
           expectedRevision: current.revision,
+          confirm: current.confirm,
         };
         journal.deleteRequest = deleteRequest;
         await saveJournal(journal);

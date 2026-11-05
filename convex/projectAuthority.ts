@@ -8,7 +8,8 @@ export async function ownedProject(ctx: QueryCtx | MutationCtx, id: Id<'hostedPr
   let authorized = false;
   try {
     invariant(
-      project?.owner === owner && !['deleting', 'deleted'].includes(project.removal ?? ''),
+      // A deleted project is hidden from everyone, its owner included, until restored.
+      project?.owner === owner && !project.removal,
       'PROJECT_UNAVAILABLE',
       'This Forge project is unavailable with the current account.',
     );
@@ -40,12 +41,7 @@ export async function accessibleProject(
   let authorized = false;
   try {
     invariant(
-      project && !['deleting', 'deleted'].includes(project.removal ?? ''),
-      'PROJECT_UNAVAILABLE',
-      'This Forge project is unavailable with the current account.',
-    );
-    invariant(
-      project.owner === actor || !project.removal,
+      project && !project.removal,
       'PROJECT_UNAVAILABLE',
       'This Forge project is unavailable with the current account.',
     );

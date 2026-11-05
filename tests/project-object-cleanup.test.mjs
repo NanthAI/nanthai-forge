@@ -6,8 +6,10 @@ import { moduleUrl } from './convex-module.mjs';
 import { state } from './hosted-fixture.mjs';
 import { settleR2Purge } from './default-r2.mjs';
 const lifecycle = await import(moduleUrl('../convex/projectLifecycle.ts'));
+const { purgeSettleMs } = await import(moduleUrl('../convex/projectRetention.ts'));
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
-async function removedProject() {
+/** A permanently deleted project whose purge is still waiting for issued uploads to expire. */
+async function deletingProject() {
   const s = state([]),
     nonce = randomUUID(),
     bytes = 'original private bytes';
@@ -38,37 +40,40 @@ async function removedProject() {
     projectId: 'project',
     operationId: randomUUID(),
     expectedRevision: 0,
+    confirm: 'Remove',
   });
-  for (let i = 0; i < 20 && s.tables.hostedProjects.get('project').removal !== 'deleted'; i++) {
+  // The purge first waits for every upload URL issued before deletion to expire.
+  await lifecycle.purge._handler(s.ctx, { projectId: 'project' });
+  assert.equal(s.tables.hostedProjects.get('project').removal, 'deleting');
+  assert.ok(s.tables.projectObjects.has('object'), 'nothing is purged before uploads settle');
+  return { ...s, bytes, contentType: `application/x-forge-object-${nonce}` };
+}
+async function purge(s) {
+  const project = s.tables.hostedProjects.get('project');
+  project.removedAt -= purgeSettleMs;
+  for (let i = 0; i < 40 && project.removal !== 'deleted'; i++) {
     settleR2Purge(s.tables.hostedProjects.get('project'));
     await lifecycle.purge._handler(s.ctx, { projectId: 'project' });
   }
   assert.equal(s.tables.hostedProjects.get('project').removal, 'deleted');
   for (const table of ['projectCoordinationSessions', 'projectCoordinationEvents'])
     assert.deepEqual([...s.tables[table].keys()], ['foreign']);
-  return { ...s, bytes, contentType: `application/x-forge-object-${nonce}` };
+  assert.deepEqual(
+    [...s.tables.projectObjects.values()].filter(row => row.projectId === 'project'),
+    [],
+    'object receipts are purged too',
+  );
 }
-async function reconcile(s) {
-  let cursor = null;
-  for (let i = 0; i < 20; i++) {
-    const page = await lifecycle.reconcile._handler(s.ctx, { projectId: 'project', cursor });
-    if (page.isDone) return;
-    cursor = page.cursor;
-  }
-  throw Error('Cleanup did not complete');
-}
-test('deleted-project reconciliation removes nonce-bound uploads arriving after purge with unknown storage IDs and is retryable', async () => {
-  const s = await removedProject();
+test('nonce-bound uploads that finish during the settle wait are removed by the purge itself', async () => {
+  const s = await deletingProject();
   const late = await s.ctx.storage.store(new Blob([s.bytes], { type: s.contentType }));
-  await reconcile(s);
-  assert.equal(s.files.has(late), false);
-  await reconcile(s);
   const later = await s.ctx.storage.store(new Blob([s.bytes], { type: s.contentType }));
-  await reconcile(s);
+  await purge(s);
+  assert.equal(s.files.has(late), false);
   assert.equal(s.files.has(later), false);
 });
-test('late-object cleanup preserves foreign, differently bound and referenced content and remains owner authorized', async () => {
-  const s = await removedProject();
+test('the purge keeps foreign, differently bound and referenced content', async () => {
+  const s = await deletingProject();
   const late = await s.ctx.storage.store(new Blob([s.bytes], { type: s.contentType }));
   const referenced = await s.ctx.storage.store(new Blob([s.bytes], { type: s.contentType }));
   s.tables.projectBackups.set('foreign-backup', {
@@ -90,55 +95,8 @@ test('late-object cleanup preserves foreign, differently bound and referenced co
     size: s.bytes.length,
     removed: true,
   });
-  s.caller('stranger');
-  await assert.rejects(reconcile(s));
-  assert.equal(s.files.has(late), true);
-  s.caller('owner');
-  await reconcile(s);
+  await purge(s);
+  assert.ok(s.tables.projectObjects.has('other-object'));
   assert.equal(s.files.has(late), false);
   for (const id of [referenced, changed, foreign]) assert.equal(s.files.has(id), true);
-});
-test('archive cleanup receipt continuation reaches the late-object sweep', async () => {
-  const s = await removedProject();
-  s.tables.projectUploadCleanup.set('binding', {
-    _id: 'binding',
-    _creationTime: 1,
-    projectId: 'project',
-    owner: 'owner',
-    actor: 'owner',
-    uploadId: 'old-backup',
-    operationId: randomUUID(),
-    kind: 'backup',
-    nonce: 'archive-nonce',
-    digest: hash('archive'),
-    size: 7,
-    pending: false,
-  });
-  const late = await s.ctx.storage.store(new Blob([s.bytes], { type: s.contentType }));
-  await reconcile(s);
-  assert.equal(s.files.has(late), false);
-});
-test('late-object sweep resumes provider cursors with one storage pagination per transaction', async () => {
-  const s = await removedProject(),
-    late = await s.ctx.storage.store(new Blob([s.bytes], { type: s.contentType }));
-  const metadata = s.files.get(late).metadata;
-  let calls = 0;
-  s.ctx.db.system.query = () => ({
-    order: () => ({
-      paginate: async ({ cursor }) => {
-        assert.equal(++calls, 1);
-        return cursor === null
-          ? { page: [], isDone: false, continueCursor: 'provider-second-page' }
-          : (assert.equal(cursor, 'provider-second-page'),
-            { page: [metadata], isDone: true, continueCursor: 'provider-end' });
-      },
-    }),
-  });
-  const first = await lifecycle.reconcile._handler(s.ctx, { projectId: 'project', cursor: null });
-  assert.equal(first.isDone, false);
-  assert.equal(s.files.has(late), true);
-  calls = 0;
-  const last = await lifecycle.reconcile._handler(s.ctx, { projectId: 'project', cursor: first.cursor });
-  assert.equal(last.isDone, true);
-  assert.equal(s.files.has(late), false);
 });

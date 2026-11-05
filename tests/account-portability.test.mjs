@@ -358,8 +358,11 @@ test('selected native project and SecretObject retain exact child receipts throu
   await advance(f, r);
   const children = [...f.tables.accountItems.values()].map(x => x.operationId);
   assert.equal(new Set(children).size, 2);
+  const { purgeSettleMs } = await import(moduleUrl('../convex/projectRetention.ts'));
   const { purge: projectPurge } = await import(moduleUrl('../convex/projectLifecycle.ts')),
     { purge: secretPurge } = await import(moduleUrl('../convex/secretLifecycle.ts'));
+  // Time passes beyond the project purge's upload-expiry settle wait.
+  f.tables.hostedProjects.get('project').removedAt -= purgeSettleMs;
   for (let n = 0; n < 5; n++) {
     settleR2Purge(f.tables.hostedProjects.get('project'));
     await projectPurge._handler(f.ctx, { projectId: 'project' });

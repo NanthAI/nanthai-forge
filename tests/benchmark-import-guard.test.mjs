@@ -11,6 +11,7 @@ const benchmark = await import(moduleUrl('../convex/projectBenchmark.ts'));
 const lifecycle = await import(moduleUrl('../convex/projectLifecycle.ts'));
 const imports = await import(moduleUrl('../convex/projectGithubImportStore.ts'));
 const trace = await import(moduleUrl('../convex/projectExecution.ts'));
+const { purgeSettleMs } = await import(moduleUrl('../convex/projectRetention.ts'));
 const target = { projectId: 'project', name: 'Synthetic import benchmark' };
 const marker = (projectId = 'project') =>
   `FORGE_PROJECT_EXECUTION ${JSON.stringify({ projectId, name: target.name })}`;
@@ -248,6 +249,8 @@ test('synthetic runaway reaches 5000 including failures, cancels running/pending
     }),
     error => error.code === 'PROJECT_UNAVAILABLE',
   );
+  // The synthetic clock skips the post-delete settle wait for late signed uploads.
+  s.tables.hostedProjects.get('project').removedAt -= purgeSettleMs;
   for (let page = 0; s.tables.hostedProjects.get('project').removal !== 'deleted'; page++) {
     assert(page < 100, 'ordinary deletion converges');
     const task = s.scheduled.find(

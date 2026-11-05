@@ -21,5 +21,6 @@ export const finishReadTables = {
     .index('by_kind_and_project_and_actor_and_operation', ['kind', 'projectId', 'actor', 'operationId'])
     .index('by_kind_and_project_and_attempt', ['kind', 'projectId', 'attemptId'])
     .index('by_kind_and_project_and_run', ['kind', 'projectId', 'runId'])
-    .index('by_kind_and_project_and_channel', ['kind', 'projectId', 'channel']),
+    .index('by_kind_and_project_and_channel', ['kind', 'projectId', 'channel'])
+    .index('by_project', ['projectId']),
 };

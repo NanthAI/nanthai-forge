@@ -172,6 +172,7 @@ export async function deleteHostedProject(
         projectId: options.projectId,
         operationId: request.operationId,
         expectedRevision: request.expectedRevision,
+        confirm: request.slug,
       });
     } catch (error) {
       const code =

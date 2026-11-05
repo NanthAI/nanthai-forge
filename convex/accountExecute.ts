@@ -118,6 +118,7 @@ export const step = internalMutation({
             expectedRevision: e.revision!,
           },
           'delete',
+          { confirmed: true },
         );
         if ((await ctx.db.get(item.resourceId as Id<'hostedProjects'>))?.removal === 'deleted')
           await finish(ctx, account, item, 'completed');

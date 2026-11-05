@@ -159,6 +159,7 @@ test('project object storage puts bytes in R2, deduplicates and preserves projec
 test('explicit project deletion removes every object row, including unresolved uploads, and preserves foreign files', async () => {
   const s = fixture(),
     lifecycle = await import(moduleUrl('../convex/projectLifecycle.ts')),
+    { purgeSettleMs } = await import(moduleUrl('../convex/projectRetention.ts')),
     t = transport(s);
   const pin = { sha256: digest('retained'), size: 8 };
   await t.upload(pin, Buffer.from('retained'));
@@ -168,7 +169,10 @@ test('explicit project deletion removes every object row, including unresolved u
     projectId: 'project',
     operationId: randomUUID(),
     expectedRevision: 0,
+    confirm: 'Synthetic exchange',
   });
+  // Skip the settle wait for signed uploads issued before deletion.
+  s.tables.hostedProjects.get('project').removedAt -= purgeSettleMs;
   for (let n = 0; n < 20 && s.tables.hostedProjects.get('project').removal !== 'deleted'; n++) {
     await lifecycle.purge._handler(s.ctx, { projectId: 'project' });
     // The scheduled R2 prefix purge (tests/r2-maintenance.test.mjs) finishes before the tombstone.
@@ -179,8 +183,9 @@ test('explicit project deletion removes every object row, including unresolved u
   assert.ok(s.tables.hostedProjects.get('project').r2Purge, 'every deletion purges its R2 prefix');
   assert.ok(s.files.has(foreignId));
   assert.equal(
-    [...s.tables.projectObjects.values()].every(row => row.removed && !row.storageId),
-    true,
+    [...s.tables.projectObjects.values()].filter(row => row.projectId === 'project').length,
+    0,
+    'the purge removes every object row of the project',
   );
   await assert.rejects(
     objects.prepare._handler(s.ctx, { projectId: 'project', digest: pin.sha256, size: pin.size }),

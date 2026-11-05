@@ -151,7 +151,8 @@ test('trash prevents new coordination and existing project purge removes retaine
   const f = fixture();
   await f.publish(activity(sessionA));
   f.tables.hostedProjects.get('project').removal = 'trash';
-  await assert.rejects(f.publish(activity(sessionA, 2)), /Restore/);
+  // A deleted project is hidden from everyone, so coordination sees it as unavailable.
+  await assert.rejects(f.publish(activity(sessionA, 2)), /unavailable/);
   f.tables.hostedProjects.get('project').removal = 'deleting';
   await lifecycle.purge._handler(f.ctx, { projectId: 'project' });
   assert.equal(f.tables.projectCoordinationSessions.size, 0);

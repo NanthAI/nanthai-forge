@@ -385,9 +385,11 @@ then fifteen-minute intervals, stopping after eight failed attempts per page wit
 `R2_PURGE_RETRY_EXHAUSTED`. An owner retry resets that page's retry budget.
 Completion remains gated on successful R2 deletes. Prefix actions stop for every
 state other than `deleting`, including retained `deleted` tombstones; old unfenced
-scheduled deliveries stop as well. Already-issued PUTs can complete late; retained
-upload cleanup receipts and explicit reconciliation remain separate from this
-finite deletion chain. No new project or source-history expiry is introduced.
+scheduled deliveries stop as well. Already-issued PUTs can complete late, so the purge waits
+for the PUT expiry plus five minutes before it lists the prefix. Deleted projects
+expire 90 days after deletion through one scheduled call; see
+[project retention](operations.md#project-retention-and-restore). No source-history
+expiry is introduced.
 
 The weekly backup supports database-only snapshots after deployment-wide source
 bytes are in R2; see [database-only backup and restore](operations/hosted-durability.md#database-only-backup-and-restore).

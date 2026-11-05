@@ -50,7 +50,9 @@ export const hostedSnapshotTables = {
     root: v.string(),
     previousRoot: v.string(),
     refs: v.array(hostedRef),
-  }).index('by_snapshot_and_page', ['snapshotId', 'page']),
+  })
+    .index('by_snapshot_and_page', ['snapshotId', 'page'])
+    .index('by_project', ['projectId']),
   // Recovery/export selection only. This never selects a Channel or a Lane head.
   projectHostedSnapshotHeads: defineTable({
     projectId: v.id('hostedProjects'),

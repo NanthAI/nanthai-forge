@@ -4,7 +4,6 @@ import { ensureProjectSlug, slugTaken } from './urlIdentity';
 import { blobStore } from './blobStore';
 import { invariant as check } from '../src/errors';
 import { purgeExchangeObjects } from './projectObjectLifecycle';
-import { reconcileRemovedObjectUploads } from './projectObjectCleanup';
 import { v } from 'convex/values';
 import { mutation } from './cliServer';
 import { internalMutation, type MutationCtx } from './server';
@@ -14,6 +13,8 @@ import { matchesUpload, scanComplete, removeDuplicate, removeExclusive } from '.
 import { invariant } from '../src/errors';
 import { report } from './errors';
 import { projectExecution } from './projectExecution';
+import { startRetention, stopRetention, purgeSettleMs } from './projectRetention';
+import { purgeProjectRowsPage } from './projectPurgeRows';
 
 const args = { projectId: v.id('hostedProjects'), operationId: v.string(), expectedRevision: v.number() };
 async function schedule(ctx: MutationCtx, project: Doc<'hostedProjects'>) {
@@ -27,8 +28,10 @@ async function schedule(ctx: MutationCtx, project: Doc<'hostedProjects'>) {
 }
 export async function transition(
   ctx: MutationCtx,
-  input: { projectId: Id<'hostedProjects'>; operationId: string; expectedRevision: number },
+  input: { projectId: Id<'hostedProjects'>; operationId: string; expectedRevision: number; confirm?: string },
   action: 'trash' | 'restore' | 'delete',
+  /** Account deletion carries its own reviewed plan as the confirmation. */
+  options: { confirmed?: boolean } = {},
 ) {
   const user = await ctx.auth.getUserIdentity(),
     project = await ctx.db.get(input.projectId);
@@ -74,6 +77,26 @@ export async function transition(
     'PROJECT_UNAVAILABLE',
     'Permanent project removal is already underway.',
   );
+  if (action === 'delete')
+    invariant(
+      options.confirmed ||
+        (!!input.confirm?.trim() && input.confirm.trim() === (project.slug ?? project.name)),
+      'BAD_ARGUMENT',
+      'Type the project slug to confirm permanent deletion.',
+    );
+  if (action === 'restore') {
+    invariant(
+      !project.retention || Date.now() < project.retention.purgeAt,
+      'PROJECT_UNAVAILABLE',
+      'The 90-day restore window for this project has ended.',
+    );
+    invariant(
+      !project.retention?.revoking,
+      'WORK_STALE',
+      'Access revocation for this deletion is still finishing. Retry restore shortly.',
+    );
+  }
+  await stopRetention(ctx, project);
   const removal =
     action === 'restore' ? undefined : action === 'trash' ? ('trash' as const) : ('deleting' as const);
   await ctx.db.patch(project._id, {
@@ -81,7 +104,21 @@ export async function transition(
     removedAt: removal ? (project.removedAt ?? Date.now()) : undefined,
     revision: project.revision + 1,
     lifecycle: { operationId: input.operationId, action, expectedRevision: input.expectedRevision },
+    retention: undefined,
+    ...(action === 'delete'
+      ? {
+          purge: {
+            operationId: input.operationId,
+            reason: 'owner' as const,
+            startedAt: Date.now(),
+            rows: 0,
+            bytes: 0,
+            pages: 0,
+          },
+        }
+      : {}),
   });
+  if (action === 'trash') await startRetention(ctx, project._id);
   if (action === 'delete') await schedule(ctx, (await ctx.db.get(project._id))!);
   return null;
 }
@@ -184,7 +221,7 @@ export const restore = mutation({
   },
 });
 export const permanentlyDelete = mutation({
-  args,
+  args: { ...args, confirm: v.optional(v.string()) },
   returns: v.null(),
   handler: async (ctx, input) => {
     try {
@@ -271,6 +308,14 @@ export const purge = internalMutation({
     const project = await ctx.db.get(projectId);
     projectExecution(ctx, projectId, project?.name, project?.key);
     if (project?.removal !== 'deleting' || (project.r2Purge && !project.r2PrefixPurged)) return null;
+    // Access is already revoked. Signed uploads issued before deletion can still finish
+    // until they expire; purging after that means no bytes or receipts can arrive later.
+    const settleAt = (project.removedAt ?? 0) + purgeSettleMs;
+    if (Date.now() < settleAt) {
+      const task = await ctx.scheduler.runAt(settleAt, internal.projectLifecycle.purge, { projectId });
+      await ctx.db.patch(projectId, { task });
+      return null;
+    }
     const imports = await ctx.db
       .query('projectGithubImports')
       .withIndex('by_project', q => q.eq('projectId', projectId))
@@ -289,138 +334,8 @@ export const purge = internalMutation({
       return null;
     }
 
-    for (const table of [
-      'projectGithubImportInventory',
-      'projectObjectCatalog',
-      'projectPublicationPages',
-      'projectPublicationAttempts',
-      'projectReturnPages',
-      'projectPublications',
-      'projectCheckRequests',
-      'projectCheckRunners',
-      'projectWorkRecords',
-      'projectWorkGenerations',
-      'projectWorkDetailMigrations',
-      'projectHostedFrictionHints',
-    ] as const) {
-      const pageSize = table === 'projectGithubImportInventory' ? 1000 : 50;
-      const rows = await ctx.db
-        .query(table)
-        .withIndex('by_project', q => q.eq('projectId', projectId))
-        .take(pageSize);
-      for (const row of rows) await ctx.db.delete(row._id);
-      if (rows.length === pageSize) {
-        await ctx.db.patch(projectId, { task: undefined });
-        await schedule(ctx, (await ctx.db.get(projectId))!);
-        return null;
-      }
-    }
-    // Personal operations may carry an incidental projectId; scope remains authoritative.
-    // Existing compound indexes also bound briefing and policy scans by project.
-    for (const readBatch of [
-      () =>
-        ctx.db
-          .query('projectBriefingSources')
-          .withIndex('by_projectId_and_backupId_and_head_and_part', q => q.eq('projectId', projectId))
-          .take(50),
-      () =>
-        ctx.db
-          .query('agentGuidanceOperations')
-          .withIndex('by_project_and_scope', q => q.eq('projectId', projectId).eq('scope', 'project'))
-          .take(50),
-      () =>
-        ctx.db
-          .query('agentGuidanceMaintainerOperations')
-          .withIndex('by_project', q => q.eq('projectId', projectId))
-          .take(50),
-      () =>
-        ctx.db
-          .query('projectPolicyChanges')
-          .withIndex('by_project_and_operation', q => q.eq('projectId', projectId))
-          .take(50),
-    ]) {
-      const rows = await readBatch();
-      for (const row of rows) await ctx.db.delete(row._id);
-      if (rows.length === 50) {
-        await ctx.db.patch(projectId, { task: undefined });
-        await schedule(ctx, (await ctx.db.get(projectId))!);
-        return null;
-      }
-    }
-    for (const table of [
-      'projectActorNames',
-      'projectCoordinationSessions',
-      'projectCoordinationEvents',
-      'projectCoordinationReceipts',
-      'projectCoordinationClaims',
-    ] as const) {
-      const rows =
-        table === 'projectCoordinationSessions'
-          ? await ctx.db
-              .query(table)
-              .withIndex('by_project_and_session', q => q.eq('projectId', projectId))
-              .take(50)
-          : table === 'projectCoordinationClaims'
-            ? await ctx.db
-                .query(table)
-                .withIndex('by_project_and_claim', q => q.eq('projectId', projectId))
-                .take(50)
-            : await ctx.db
-                .query(table)
-                .withIndex('by_project', q => q.eq('projectId', projectId))
-                .take(50);
-      for (const row of rows) await ctx.db.delete(row._id);
-      if (rows.length === 50) {
-        await ctx.db.patch(projectId, { task: undefined });
-        await schedule(ctx, (await ctx.db.get(projectId))!);
-        return null;
-      }
-    }
-    for (const table of [
-      'projectReaders',
-      'projectReaderOperations',
-      'projectContributors',
-      'projectWorkHeads',
-      'projectWorkEvents',
-      'projectRecoveryConnections',
-    ] as const) {
-      const rows =
-        table === 'projectReaders'
-          ? await ctx.db
-              .query('projectReaders')
-              .withIndex('by_project_and_reader', q => q.eq('projectId', projectId))
-              .take(50)
-          : table === 'projectReaderOperations'
-            ? await ctx.db
-                .query('projectReaderOperations')
-                .withIndex('by_project_and_operation', q => q.eq('projectId', projectId))
-                .take(50)
-            : table === 'projectContributors'
-              ? await ctx.db
-                  .query('projectContributors')
-                  .withIndex('by_project_and_contributor', q => q.eq('projectId', projectId))
-                  .take(50)
-              : table === 'projectRecoveryConnections'
-                ? await ctx.db
-                    .query('projectRecoveryConnections')
-                    .withIndex('by_project_and_operation', q => q.eq('projectId', projectId))
-                    .take(50)
-                : table === 'projectWorkHeads'
-                  ? await ctx.db
-                      .query('projectWorkHeads')
-                      .withIndex('by_project', q => q.eq('projectId', projectId))
-                      .take(50)
-                  : await ctx.db
-                      .query('projectWorkEvents')
-                      .withIndex('by_project_and_revision', q => q.eq('projectId', projectId))
-                      .take(50);
-      for (const row of rows) await ctx.db.delete(row._id);
-      if (rows.length === 50) {
-        await ctx.db.patch(projectId, { task: undefined });
-        await schedule(ctx, (await ctx.db.get(projectId))!);
-        return null;
-      }
-    }
+    // Plain project rows (grants, Work, journals, settings) go in the inventory-guarded
+    // row stage below, which also cancels their scheduled functions and frees their files.
     for (const table of ['projectProposals', 'projectBackups'] as const) {
       const rows = await ctx.db
         .query(table)
@@ -462,14 +377,23 @@ export const purge = internalMutation({
       await schedule(ctx, (await ctx.db.get(projectId))!);
       return null;
     }
+    // Every remaining project-owned row (inventory-guarded), one bounded page per call.
+    if (!(await purgeProjectRowsPage(ctx, project))) {
+      await ctx.db.patch(projectId, { task: undefined });
+      await schedule(ctx, (await ctx.db.get(projectId))!);
+      return null;
+    }
     // Every project writes R2, so every deletion purges its R2 prefix once.
     if (!project.r2PrefixPurged) {
       await scheduleR2Purge(ctx, project);
       return null;
     }
     // The owner/key tombstone prevents an old initial-upload retry from silently recreating this project.
+    const finished = (await ctx.db.get(projectId))!;
     await ctx.db.patch(projectId, {
       name: '',
+      slug: undefined,
+      ...(finished.purge ? { purge: { ...finished.purge, completedAt: Date.now() } } : {}),
       nameChange: undefined,
       hostingRequest: undefined,
       agentGuidance: undefined,
@@ -511,46 +435,5 @@ export const sweepUpload = internalMutation({
       await scheduleUploadSweep(ctx, (await ctx.db.get(id))!);
     }
     return null;
-  },
-});
-export const reconcile = mutation({
-  args: { projectId: v.id('hostedProjects'), cursor: v.union(v.string(), v.null()) },
-  returns: v.object({ cursor: v.union(v.string(), v.null()), isDone: v.boolean() }),
-  handler: async (ctx, { projectId, cursor }) => {
-    try {
-      const user = await ctx.auth.getUserIdentity(),
-        project = await ctx.db.get(projectId);
-      invariant(
-        user && project?.owner === user.subject && project.removal === 'deleted',
-        'PROJECT_UNAVAILABLE',
-        'Select your removed project’s cleanup metadata.',
-      );
-      const objectPrefix = 'forge-object-after:';
-      if (cursor?.startsWith(objectPrefix))
-        return reconcileRemovedObjectUploads(ctx, projectId, cursor.slice(objectPrefix.length) || null);
-      // Convex allows one paginated query per transaction; reserve it for the storage sweep.
-      // An old receipt-page cursor can resume by a harmless full replay, after validating it.
-      const prefix = 'forge-upload-after:';
-      if (cursor !== null && !cursor.startsWith(prefix)) {
-        await ctx.db
-          .query('projectUploadCleanup')
-          .withIndex('by_project', q => q.eq('projectId', projectId))
-          .paginate({ cursor, numItems: 1 });
-        return { cursor: null, isDone: false };
-      }
-      const after = cursor?.slice(prefix.length) ?? '';
-      const rows = await ctx.db
-        .query('projectUploadCleanup')
-        .withIndex('by_project_and_upload', q => q.eq('projectId', projectId).gt('uploadId', after))
-        .take(2);
-      const binding = rows[0];
-      if (!binding) return reconcileRemovedObjectUploads(ctx, projectId, null);
-      if (!(await sweep(ctx, binding))) return { cursor, isDone: false };
-      // The final archive/proposal receipt is followed by the object sweep. Late
-      // signed uploads can finish after the original permanent-removal sweep.
-      return { cursor: prefix + binding.uploadId, isDone: false };
-    } catch (error) {
-      return report(error);
-    }
   },
 });

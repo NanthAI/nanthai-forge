@@ -79,7 +79,9 @@ export const sourceStepTables = {
     progress: v.union(sourceTaskData, v.null()),
     output: v.union(sourceTaskData, v.null()),
     failure: v.union(v.string(), v.null()),
-  }).index('by_batch_and_index', ['batchId', 'index']),
+  })
+    .index('by_batch_and_index', ['batchId', 'index'])
+    .index('by_project', ['projectId']),
   projectSourcePools: defineTable({
     key: v.literal('source'),
     // Slots carry the batch and scheduled run so a drain can skip reading full

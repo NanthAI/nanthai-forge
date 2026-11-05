@@ -12,12 +12,16 @@ type Operation = {
   projectId: Project['id'];
   operationId: string;
   expectedRevision: number;
+  confirm?: string;
 };
+const day = (at: number) => new Date(at).toLocaleDateString(undefined, { dateStyle: 'medium' });
+const mib = (bytes: number) => `${(bytes / 1024 / 1024).toFixed(2)} MiB`;
 export default function ProjectLifecycle({ project }: { project: Project }) {
   const client = useConvex(),
     dialog = useRef<HTMLDialogElement>(null),
     cancel = useRef<HTMLButtonElement>(null);
   const [confirm, setConfirm] = useState(false),
+    [typed, setTyped] = useState(''),
     [busy, setBusy] = useState(false),
     [attempt, setAttempt] = useState<Operation | null>(null);
   const [slug, setSlug] = useState(project.slug ?? '');
@@ -54,12 +58,13 @@ export default function ProjectLifecycle({ project }: { project: Project }) {
       );
       setAttempt(null);
       setConfirm(false);
+      setTyped('');
       setMessage(
         kind === 'trash'
-          ? 'Project moved to Trash. Your backups remain available to download.'
+          ? 'Project deleted. You can restore it here for 90 days.'
           : kind === 'restore'
-            ? 'Project restored with its original source and Work.'
-            : 'Permanent removal started. Its status updates here.',
+            ? 'Project restored with its source and Work. Grant access and register runners again.'
+            : 'Permanent removal started. Its progress updates here.',
       );
     } catch (e) {
       setError(`${hostedError(e)} Retry the original operation to reconcile its outcome.`);
@@ -94,31 +99,12 @@ export default function ProjectLifecycle({ project }: { project: Project }) {
       projectId: project.id,
       operationId: crypto.randomUUID(),
       expectedRevision: project.revision,
+      ...(kind === 'delete' ? { confirm: typed.trim() } : {}),
     });
   }
-  async function reconcile() {
-    setBusy(true);
-    setError('');
-    setMessage('');
-    try {
-      let cursor: string | null = null;
-      while (true) {
-        const result: { cursor: string | null; isDone: boolean } = await client.mutation(
-          api.projectLifecycle.reconcile,
-          { projectId: project.id, cursor },
-        );
-        if (result.isDone) break;
-        cursor = result.cursor;
-      }
-      setMessage(
-        'Known original upload bindings reconciled. Unrelated files and downloaded copies remain unchanged.',
-      );
-    } catch (e) {
-      setError(hostedError(e));
-    } finally {
-      setBusy(false);
-    }
-  }
+  const confirmation = project.slug ?? project.name,
+    retention = project.retention,
+    purge = project.purge;
   return (
     <section className="project-settings">
       <h2>Project settings</h2>
@@ -174,39 +160,43 @@ export default function ProjectLifecycle({ project }: { project: Project }) {
           )}
         </form>
       )}
-      <p>
-        {project.removal === 'deleted'
-          ? 'Project removed. Minimal owner and upload cleanup receipts remain for late outcomes.'
-          : project.removal === 'deleting'
-            ? 'Removing source, Work, backups and contributor access. Retry if cleanup was interrupted.'
-            : project.removal === 'trash'
-              ? 'In Trash. You can download retained backups. Contributors cannot access this project until you restore it.'
-              : 'Trash keeps your source and Work for you to restore. It stops contributor access and source changes.'}
-      </p>
+      {project.removal === 'trash' && (
+        <p>
+          Deleted{project.removedAt ? ` ${day(project.removedAt)}` : ''}. Nobody can read or change it.
+          {retention && ` Restorable until ${day(retention.purgeAt)}, then purged.`}
+          {retention &&
+            ` Retained: ${mib(retention.retainedBytes)} in ${retention.retainedObjects} objects${retention.measured ? '' : ' so far'}.`}
+        </p>
+      )}
+      {project.removal === 'deleting' && (
+        <p>
+          Purging
+          {purge
+            ? `: ${purge.rows} records removed in ${purge.pages} pages (operation ${purge.operationId})`
+            : ''}
+          .{project.purgeBlocked ? ` Stopped: ${project.purgeBlocked}. Retry after it is resolved.` : ''}
+        </p>
+      )}
+      {project.removal === 'deleted' && <p>Project permanently deleted.</p>}
       <div className="import-actions">
         {!project.removal && (
-          <button disabled={busy || !!attempt} onClick={() => start('trash')}>
-            Move to Trash
+          <button disabled={busy || !!attempt} onClick={() => setConfirm(true)}>
+            Delete project
           </button>
         )}
         {project.removal === 'trash' && (
-          <button disabled={busy || !!attempt} onClick={() => start('restore')}>
-            Restore project
-          </button>
-        )}
-        {!['deleting', 'deleted'].includes(project.removal ?? '') && (
-          <button disabled={busy || !!attempt} onClick={() => setConfirm(true)}>
-            Permanently delete project
-          </button>
+          <>
+            <button disabled={busy || !!attempt} onClick={() => start('restore')}>
+              Restore project
+            </button>
+            <button disabled={busy || !!attempt} onClick={() => setConfirm(true)}>
+              Delete permanently now
+            </button>
+          </>
         )}
         {project.removal === 'deleting' && !attempt && (
           <button disabled={busy} onClick={() => start('delete')}>
             Retry removal
-          </button>
-        )}
-        {project.removal === 'deleted' && (
-          <button disabled={busy} onClick={() => void reconcile()}>
-            Reconcile late uploads
           </button>
         )}
         {attempt && (
@@ -238,18 +228,23 @@ export default function ProjectLifecycle({ project }: { project: Project }) {
         aria-labelledby="delete-project-title"
         onCancel={() => setConfirm(false)}
       >
-        <h3 id="delete-project-title">Permanently delete {project.name || 'this project'}?</h3>
+        <h3 id="delete-project-title">Delete {project.name || 'this project'}?</h3>
         <p>
-          This removes hosted source, Work, retained backups, proposals and contributor grants. Your local
-          projects, downloaded copies, GitHub and unrelated shared files remain unchanged. It cannot be
-          restored.
+          The project is hidden at once. Reads, changes, Lanes, landings, runners and every grant stop. You
+          can restore it for 90 days; grants and runner registrations are not restored. After 90 days its
+          source, Work, backups and stored objects are purged. Local copies and GitHub are unchanged.
         </p>
-        <p>
-          Minimal upload cleanup receipts remain. Previously issued provider upload URLs cannot be revoked;
-          known late outcomes can be reconciled here.
-        </p>
-        <button disabled={busy || !!attempt} onClick={() => start('delete')}>
-          Delete project permanently
+        {!project.removal && (
+          <button disabled={busy || !!attempt} onClick={() => start('trash')}>
+            Delete project
+          </button>
+        )}
+        <label>
+          To delete permanently now, with no restore, type <strong>{confirmation}</strong>
+          <input disabled={busy || !!attempt} value={typed} onChange={e => setTyped(e.target.value)} />
+        </label>
+        <button disabled={busy || !!attempt || typed.trim() !== confirmation} onClick={() => start('delete')}>
+          Delete permanently now
         </button>
         <button disabled={busy} ref={cancel} onClick={() => setConfirm(false)}>
           Cancel

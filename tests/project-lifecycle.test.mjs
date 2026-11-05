@@ -16,6 +16,7 @@ for (const name of [
   'projectLifecycle',
 ])
   modules[name] = await import(moduleUrl(`../convex/${name}.ts`));
+const { purgeSettleMs } = await import(moduleUrl('../convex/projectRetention.ts'));
 const backups = historicalArchiveActions(await import(moduleUrl('../convex/projectBackupActions.ts')));
 const proposals = historicalArchiveActions(await import(moduleUrl('../convex/projectProposalActions.ts')));
 const sha = b => createHash('sha256').update(b).digest('hex'),
@@ -96,11 +97,15 @@ function fixture() {
     projectId: 'project',
     operationId: randomUUID(),
     expectedRevision: s.tables.hostedProjects.get('project').revision,
+    // Typed confirmation for permanent deletion; trash and restore ignore it.
+    confirm: 'Synthetic Forge',
   });
   s.drain = async () => {
     for (let count = 0; s.tables.hostedProjects.get('project').removal === 'deleting'; count++) {
       assert.ok(count < 250, 'cleanup converges');
       const project = s.tables.hostedProjects.get('project');
+      // Time passes beyond the upload-expiry settle wait before the purge proceeds.
+      project.removedAt = Math.min(project.removedAt, Date.now() - purgeSettleMs);
       // The scheduled R2 prefix purge is an action; its effect is the purged mark.
       if (project.r2Purge && !project.r2PrefixPurged) project.r2PrefixPurged = true;
       await modules.projectLifecycle.purge._handler(s.ctx, { projectId: 'project' });
@@ -108,7 +113,7 @@ function fixture() {
   };
   return s;
 }
-test('optional project Trash stops contributor access and all source/Work changes, preserves owner download, and Restore retains original pins', async () => {
+test('deleting a project hides it from everyone (owner included), stops all changes, and Restore keeps original pins without restoring grants', async () => {
   const s = fixture(),
     original = structuredClone(s.tables.hostedProjects.get('project')),
     op = s.operation();
@@ -124,12 +129,11 @@ test('optional project Trash stops contributor access and all source/Work change
   ])
     await assert.rejects(run(), unavailable);
   s.caller('owner');
-  const download = await backups.downloadPart._handler(s.ctx, {
-    id: 'backup',
-    offset: 0,
-    digest: sha(bytes),
-  });
-  assert.deepEqual(Buffer.from(download.data), bytes);
+  for (const run of [
+    () => modules.projectWork.state._handler(s.ctx, { projectId: 'project' }),
+    () => backups.downloadPart._handler(s.ctx, { id: 'backup', offset: 0, digest: sha(bytes) }),
+  ])
+    await assert.rejects(run(), unavailable);
   await assert.rejects(
     modules.projectWork.append._handler(s.ctx, {
       projectId: 'project',
@@ -150,9 +154,15 @@ test('optional project Trash stops contributor access and all source/Work change
   assert.equal(s.tables.hostedProjects.get('project').currentBackup, original.currentBackup);
   assert.deepEqual(s.tables.hostedProjects.get('project').work, original.work);
   await assert.rejects(modules.projectLifecycle.trash._handler(s.ctx, op), e => e.data.code === 'WORK_STALE');
-  s.caller('contributor');
   assert.equal((await modules.projectWork.state._handler(s.ctx, { projectId: 'project' }))._id, 'project');
-  assert.deepEqual(s.scheduled, []);
+  // Grants revoked by the deletion stay revoked; the owner grants access again.
+  s.caller('contributor');
+  await assert.rejects(modules.projectWork.state._handler(s.ctx, { projectId: 'project' }), unavailable);
+  // The retention expiry and size measurement were cancelled by the restore.
+  assert.deepEqual(
+    s.scheduled.filter(task => s.tasks.get(task.id).state.kind === 'pending'),
+    [],
+  );
 });
 test('permanent project removal batches journals/grants/archives, resumes failure, preserves shared objects and leaves no downloadable project', async () => {
   const s = fixture();
@@ -234,7 +244,7 @@ test('permanent project removal batches journals/grants/archives, resumes failur
   assert.ok(!s.files.has('duplicate'));
   assert.ok(!s.files.has('proposal-file'));
   assert.equal([...s.files.keys()].filter(x => x.startsWith('unrelated-')).length, 105);
-  assert.equal(s.tables.projectUploadCleanup.size, 2);
+  assert.equal(s.tables.projectUploadCleanup.size, 0, 'cleanup receipts are purged with the project');
   await modules.projectLifecycle.permanentlyDelete._handler(s.ctx, op);
   await assert.rejects(modules.projectLifecycle.restore._handler(s.ctx, s.operation()), unavailable);
   await assert.rejects(
@@ -263,12 +273,9 @@ test('permanent removal prevents original initial prepare resurrection and valid
     };
   const original = s.tables.projectBackups.get('backup');
   await modules.projectLifecycle.permanentlyDelete._handler(s.ctx, s.operation());
-  await s.drain();
-  await assert.rejects(backups.prepare._handler(s.ctx, request), unavailable);
-  assert.equal(s.tables.hostedProjects.size, 1);
+  // Late completions arrive while the purge waits for issued uploads to expire.
   s.put('late', `application/x-forge-backup-${original.nonce}`);
   await assert.rejects(backups.complete._handler(s.ctx, { id: 'backup', storageId: 'late' }), unavailable);
-  assert.ok(!s.files.has('late'));
   s.put('foreign', 'application/gzip');
   await assert.rejects(backups.complete._handler(s.ctx, { id: 'backup', storageId: 'foreign' }), unavailable);
   assert.ok(s.files.has('foreign'));
@@ -286,12 +293,12 @@ test('permanent removal prevents original initial prepare resurrection and valid
   );
   assert.ok(s.files.has('actor-denied'));
   s.caller('owner');
-  let cursor = null;
-  do {
-    const r = await modules.projectLifecycle.reconcile._handler(s.ctx, { projectId: 'project', cursor });
-    cursor = r.cursor;
-    if (r.isDone) break;
-  } while (true);
+  // The purge runs after every issued upload has expired, so its own exact-binding
+  // sweep removes late bytes; nothing can arrive after it.
+  await s.drain();
+  await assert.rejects(backups.prepare._handler(s.ctx, request), unavailable);
+  assert.equal(s.tables.hostedProjects.size, 1);
+  assert.ok(!s.files.has('late'));
   assert.ok(!s.files.has('actor-denied'));
   assert.ok(s.files.has('foreign'));
   assert.ok(s.files.has('mismatch'));
@@ -394,13 +401,14 @@ test('stored proposal duplicate outcomes recheck current grant; removal receipts
   assert.ok(s.files.has('revoked-extra'));
   s.caller('owner');
   await modules.projectLifecycle.permanentlyDelete._handler(s.ctx, s.operation());
-  await s.drain();
+  // A late proposal upload lands while the purge waits for issued uploads to expire.
   s.put('late-proposal', 'application/x-forge-proposal-original-proposal');
   s.caller('contributor');
   await assert.rejects(
     proposals.complete._handler(s.ctx, { id: 'proposal', storageId: 'late-proposal' }),
     unavailable,
   );
+  await s.drain();
   assert.ok(!s.files.has('late-proposal'));
   await assert.rejects(
     proposals.downloadPart._handler(s.ctx, { id: 'proposal', offset: 0, digest: sha(bytes) }),
@@ -444,7 +452,7 @@ test('Trash during a contributor byte transfer rejects the final response withou
   );
   assert.ok(s.files.has('original'));
   assert.equal(s.tables.hostedProjects.get('project').currentBackup, 'backup');
-  assert.equal(s.tables.projectContributors.size, 1);
+  assert.equal(s.tables.projectContributors.size, 0, 'deletion revokes contributor grants at once');
 });
 test('individual proposal removal retains late cleanup facts and retries a failed original scheduled sweep without recreating source', async () => {
   const s = fixture(),
@@ -478,139 +486,6 @@ test('individual proposal removal retains late cleanup facts and retries a faile
   );
   assert.ok(!s.files.has('late-extra'));
 });
-test('removed upload reconciliation uses one provider pagination per transaction across storage pages, old cursors, failure and original retries', async () => {
-  const s = fixture(),
-    original = s.tables.projectBackups.get('backup');
-  const proposal = {
-    ...original,
-    _id: 'proposal',
-    actor: 'contributor',
-    nonce: 'proposal-nonce',
-    storageId: 'proposal-file',
-  };
-  s.tables.projectProposals.set('proposal', proposal);
-  s.put('proposal-file', 'application/x-forge-proposal-proposal-nonce');
-  await modules.projectLifecycle.permanentlyDelete._handler(s.ctx, s.operation());
-  await s.drain();
-  const projectBefore = structuredClone(s.tables.hostedProjects.get('project'));
-  const receiptsBefore = [...s.tables.projectUploadCleanup.values()].map(
-    ({ cursor, pending, ...receipt }) => receipt,
-  );
-  // Equal creation timestamps must not omit a receipt; original upload IDs provide total order.
-  for (const receipt of s.tables.projectUploadCleanup.values()) receipt._creationTime = 1;
-  for (const id of ['late-a', 'late-b']) s.put(id, `application/x-forge-backup-${original.nonce}`);
-  s.put('late-proposal', 'application/x-forge-proposal-proposal-nonce');
-  s.put('unrelated', 'application/gzip');
-  s.put('wrong-digest', `application/x-forge-backup-${original.nonce}`, Buffer.from('changed source'));
-  s.put('shared', `application/x-forge-backup-${original.nonce}`);
-  s.tables.projectBackups.set('other-binding', {
-    ...original,
-    _id: 'other-binding',
-    projectId: 'other-project',
-    storageId: 'shared',
-  });
-  let paginations = 0,
-    storagePages = 0;
-  const counted = () => {
-    assert.ok(++paginations <= 1, 'Convex permits only one paginated query per transaction');
-  };
-  const query = s.ctx.db.query;
-  s.ctx.db.query = table => {
-    const q = query(table),
-      paginate = q.paginate,
-      take = q.take,
-      withIndex = q.withIndex;
-    let selected;
-    q.withIndex = (index, build) => {
-      selected = index;
-      return withIndex(index, build);
-    };
-    q.take = async n =>
-      selected === 'by_project_and_upload'
-        ? (await take(Number.MAX_SAFE_INTEGER))
-            .sort((a, b) => a.uploadId.localeCompare(b.uploadId))
-            .slice(0, n)
-        : take(n);
-    q.paginate = async args => {
-      counted();
-      return paginate(args);
-    };
-    return q;
-  };
-  const system = s.ctx.db.system.query;
-  s.ctx.db.system.query = table => {
-    const ordered = system(table).order('desc');
-    return {
-      order: () => ({
-        paginate: async args => {
-          counted();
-          storagePages++;
-          return ordered.paginate({ ...args, numItems: 2 });
-        },
-      }),
-    };
-  };
-  const transact = async input => {
-    paginations = 0;
-    return modules.projectLifecycle.reconcile._handler(s.ctx, input);
-  };
-  // Legacy receipt pagination uses its sole query only to validate progress, then restarts idempotently.
-  const old = await transact({ projectId: 'project', cursor: '0' });
-  assert.deepEqual(old, { cursor: null, isDone: false });
-  assert.equal(storagePages, 0);
-  const remove = s.ctx.storage.delete;
-  let interrupted = true;
-  s.ctx.storage.delete = async id => {
-    if (id === 'late-b' && interrupted) {
-      interrupted = false;
-      throw Error('provider interruption');
-    }
-    return remove(id);
-  };
-  let cursor = old.cursor,
-    failed = false,
-    iterations = 0;
-  while (true) {
-    assert.ok(++iterations < 20, 'bounded original receipt traversal converges');
-    let page;
-    try {
-      page = await transact({ projectId: 'project', cursor });
-    } catch (error) {
-      assert.equal(error.data.code, 'HOSTED_REQUEST_FAILED');
-      failed = true;
-      continue;
-    }
-    assert.equal(s.tables.hostedProjects.get('project').revision, projectBefore.revision);
-    if (page.isDone) break;
-    cursor = page.cursor;
-  }
-  assert.equal(failed, true);
-  assert.ok(storagePages > 2, 'storage metadata crossed multiple pages');
-  for (const id of ['late-a', 'late-b', 'late-proposal']) assert.equal(s.files.has(id), false);
-  for (const id of ['unrelated', 'wrong-digest', 'shared']) assert.equal(s.files.has(id), true);
-  assert.deepEqual(s.tables.hostedProjects.get('project'), projectBefore);
-  assert.deepEqual(
-    [...s.tables.projectUploadCleanup.values()].map(({ cursor, pending, ...receipt }) => receipt),
-    receiptsBefore.map(x => ({ ...x, _creationTime: 1 })),
-  );
-  // A lost successful reply can repeat its original cursor without rewriting pins or losing late bytes.
-  s.put('late-after-reply', `application/x-forge-backup-${original.nonce}`);
-  cursor = null;
-  for (let n = 0; n < 20; n++) {
-    const page = await transact({ projectId: 'project', cursor });
-    if (page.isDone) break;
-    const retry = await transact({ projectId: 'project', cursor });
-    cursor = retry.cursor;
-    assert.ok(n < 19);
-  }
-  assert.equal(s.files.has('late-after-reply'), false);
-  assert.deepEqual(s.tables.hostedProjects.get('project'), projectBefore);
-  s.caller('other');
-  paginations = 0;
-  await assert.rejects(transact({ projectId: 'project', cursor: null }), unavailable);
-  assert.equal(paginations, 0);
-});
-
 test('project rename preserves source and Work and reconciles retries without overwriting concurrent edits', async () => {
   const s = fixture(),
     before = structuredClone(s.tables.hostedProjects.get('project'));
@@ -687,7 +562,7 @@ test('permanent removal purges project briefing/guidance/policy in resumable bat
     if (table in values) {
       const take = query.take;
       query.take = n => {
-        assert.equal(n, 50, `${table} purge is bounded`);
+        assert.ok(n <= 50, `${table} purge is bounded`);
         return take(n);
       };
     }
@@ -696,7 +571,7 @@ test('permanent removal purges project briefing/guidance/policy in resumable bat
   const op = s.operation();
   await modules.projectLifecycle.permanentlyDelete._handler(s.ctx, op);
   await modules.projectLifecycle.purge._handler(s.ctx, { projectId: 'project' });
-  assert.equal(s.tables.projectBriefingSources.size, 72, 'first batch removes only 50 project rows');
+  assert.equal(s.tables.projectBriefingSources.size, 122, 'nothing is purged before issued uploads expire');
   assert.equal(project.removal, 'deleting');
   const task = project.task;
   s.tasks.set(task, { state: { kind: 'failed' } });
@@ -720,7 +595,7 @@ test('permanent removal purges project briefing/guidance/policy in resumable bat
     action: 'delete',
     expectedRevision: op.expectedRevision,
   });
-  assert.equal(s.tables.projectUploadCleanup.size, 1, 'minimal original upload receipt survives');
+  assert.equal(s.tables.projectUploadCleanup.size, 0, 'upload receipts are purged with the project');
   const tombstone = structuredClone(project),
     receipts = structuredClone([...s.tables.projectUploadCleanup]);
   await modules.projectLifecycle.purge._handler(s.ctx, { projectId: 'project' });
@@ -734,6 +609,7 @@ test('delete retries coalesce the tracked R2 chain and owner-only list exposes r
     op = s.operation();
   await s.ctx.db.patch('project', { r2Writes: true });
   await modules.projectLifecycle.permanentlyDelete._handler(s.ctx, op);
+  s.tables.hostedProjects.get('project').removedAt -= purgeSettleMs;
   for (let i = 0; !s.tables.hostedProjects.get('project').r2Purge; i++) {
     assert.ok(i < 10);
     await modules.projectLifecycle.purge._handler(s.ctx, { projectId: 'project' });

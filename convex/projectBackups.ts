@@ -11,6 +11,7 @@ import {
   projectBackupDocument,
   projectRemoval,
   projectPurgeBlocked,
+  projectPurge,
 } from './schema';
 import { invariant } from '../src/errors';
 import { report } from './errors';
@@ -67,6 +68,16 @@ export const list = query({
       revision: v.number(),
       removal: v.optional(projectRemoval),
       purgeBlocked: v.optional(projectPurgeBlocked),
+      removedAt: v.optional(v.number()),
+      retention: v.optional(
+        v.object({
+          purgeAt: v.number(),
+          retainedBytes: v.number(),
+          retainedObjects: v.number(),
+          measured: v.boolean(),
+        }),
+      ),
+      purge: v.optional(projectPurge),
     }),
   ),
   handler: async (ctx, { paginationOpts }) => {
@@ -90,6 +101,18 @@ export const list = query({
         revision: project.revision,
         ...(project.removal ? { removal: project.removal } : {}),
         ...(project.purgeBlocked ? { purgeBlocked: project.purgeBlocked } : {}),
+        ...(project.removal && project.removedAt ? { removedAt: project.removedAt } : {}),
+        ...(project.retention
+          ? {
+              retention: {
+                purgeAt: project.retention.purgeAt,
+                retainedBytes: project.retention.retainedBytes,
+                retainedObjects: project.retention.retainedObjects,
+                measured: project.retention.measured,
+              },
+            }
+          : {}),
+        ...(project.removal && project.purge ? { purge: project.purge } : {}),
       })),
     };
   },

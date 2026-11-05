@@ -337,10 +337,11 @@ test('initialization interruption resumes, public reads do not grant writes, and
     workIndex.workspace._handler(f.s.ctx, { projectId: result.projectId }),
     error => error.data?.code === 'PROJECT_UNAVAILABLE',
   );
+  // Deleted projects are hidden from their owner too until restored.
   f.identity({ subject: 'owner' });
-  assert(
-    JSON.parse(await workIndex.workspace._handler(f.s.ctx, { projectId: result.projectId })).capabilities
-      .owner,
+  await assert.rejects(
+    workIndex.workspace._handler(f.s.ctx, { projectId: result.projectId }),
+    error => error.data?.code === 'PROJECT_UNAVAILABLE',
   );
   f.identity({ subject: 'reader' });
   delete f.s.tables.hostedProjects.get(result.projectId).removal;

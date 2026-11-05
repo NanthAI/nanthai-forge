@@ -440,14 +440,46 @@ from one minute to a fifteen-minute cap. Exhaustion records
 `R2_PURGE_RETRY_EXHAUSTED`; resolve the storage error and retry the command. Retries
 reuse one tracked chain per project, and completed tombstones schedule no purge.
 
-Permanent removal deletes the project's hosted source, Work, backups, grants and
-project settings through the existing scheduled purge. Its minimal tombstone and
-cleanup receipts remain. Deletion is permanent; local recovery copies remain
+Permanent removal deletes every project-owned record, Convex file and R2 object
+through the scheduled purge. Only a nameless tombstone remains (owner, key,
+`removal: "deleted"` and the purge progress); the slug and all cleanup receipts are
+removed. Deletion is permanent; local recovery copies remain
 separate. The command retains the local owner, source and hosting binding. When the confirmed
 tombstone matches a pending hosting operation's project **and deployment**, it
 clears that pending resume state under the binding lock and retains its original
 pins and deletion-operation receipt. A pending operation for another project or
 deployment remains intact.
+
+### Project retention and restore
+
+Deleting a project from Settings (or `projectLifecycle:trash`) tombstones it at
+once. Everyone loses access, the owner included: reads, writes, Lanes, landings,
+runners and tokens stop, and reader, contributor, invitation, maintainer, runner
+and worker grants are revoked in 100-row pages. The slug stays reserved. Deletion
+schedules exactly one expiry at `removedAt + 90 days` (no polling cron) and a
+bounded size count: live objects, backups and proposals, 1,000 rows per call.
+Settings shows the deleted date, the restore deadline and the retained size.
+
+The owner can restore the project until the deadline. Restore brings back source,
+Work and settings but **not** grants, invitations, runners or tokens; re-share
+and re-register them. Restore is refused after the deadline and while revocation
+is still paging.
+
+At the deadline, or when the owner chooses **Delete permanently now** and types the
+project slug (`confirm` on `projectLifecycle:permanentlyDelete`; `nforge host
+--delete` sends it), the project moves to `deleting`. The purge first waits for
+signed uploads issued before deletion to expire (R2 PUT expiry plus five
+minutes), then runs bounded pages: special stages (imports, backups, proposals,
+exchange objects), then every project-owned table in the
+`convex/projectPurgeInventory.ts` inventory, then the R2 prefix. A row page stops at
+1,000 rows or 4 MiB read and also removes the rows' exclusive Convex files and
+cancels their pending scheduled functions. Progress (operation id, rows, bytes,
+pages) is visible in Settings. A build test fails when a schema table with a
+`projectId` is missing from the inventory.
+
+Projects deleted before the retention window existed have no expiry. The lead arms
+them with the internal `projectRetention:armLegacyTrash` (one owner, 50 projects
+per page); projects removed more than 90 days earlier purge immediately.
 
 To discard a pending host operation without deleting a hosted project:
 

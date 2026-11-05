@@ -500,7 +500,12 @@ export default function ProjectBackups({ explore }: { explore?: () => void }) {
                 .filter(project => project.removal)
                 .map(project => (
                   <button key={project.id} onClick={() => chooseProject(project.id)}>
-                    {project.name || 'Removed project'} · {project.removal}
+                    {project.name || 'Removed project'} ·{' '}
+                    {project.removal === 'trash'
+                      ? 'deleted, restorable'
+                      : project.removal === 'deleting'
+                        ? 'purging'
+                        : 'purged'}
                   </button>
                 ))}
             </details>
@@ -536,12 +541,7 @@ export default function ProjectBackups({ explore }: { explore?: () => void }) {
           settings={project && <ProjectLifecycle key={`lifecycle-${project.id}`} project={project} />}
         />
       )}
-      {removal && (
-        <>
-          {project && <ProjectLifecycle project={project} />}{' '}
-          {!['deleting', 'deleted'].includes(removal) && backupTools}
-        </>
-      )}
+      {removal && <>{project && <ProjectLifecycle project={project} />}</>}
       {message && (
         <p className="operation-result" role="status">
           {message}

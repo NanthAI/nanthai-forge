@@ -32,7 +32,6 @@ function Fixture() {
         input: { operationId: string; expectedRevision: number },
       ) => {
         const name = getFunctionName(fn);
-        if (name === 'projectLifecycle:reconcile') return { cursor: '', isDone: true };
         if (!operations.has(input.operationId)) {
           if (input.expectedRevision !== current.revision) throw Error('Synthetic stale project revision');
           operations.add(input.operationId);

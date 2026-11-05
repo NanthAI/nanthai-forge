@@ -294,6 +294,32 @@ export const projectPurgeBlocked = v.union(
   v.literal('R2_MAINTENANCE_DISABLED'),
   v.literal('R2_PURGE_RETRY_EXHAUSTED'),
 );
+export const projectRetention = v.object({
+  purgeAt: v.number(),
+  task: v.optional(v.id('_scheduled_functions')),
+  /** Grant/runner revocation still has pages left; restore waits for it. */
+  revoking: v.optional(v.boolean()),
+  measure: v.optional(
+    v.object({
+      stage: v.number(),
+      cursor: v.union(v.string(), v.null()),
+      task: v.id('_scheduled_functions'),
+    }),
+  ),
+  retainedBytes: v.number(),
+  retainedObjects: v.number(),
+  measured: v.boolean(),
+});
+export const projectPurge = v.object({
+  operationId: v.string(),
+  reason: v.union(v.literal('retention'), v.literal('owner')),
+  startedAt: v.number(),
+  table: v.optional(v.number()),
+  rows: v.number(),
+  bytes: v.number(),
+  pages: v.number(),
+  completedAt: v.optional(v.number()),
+});
 const projectFields = {
   needsFix: v.optional(v.record(v.string(), v.string())),
   checkLogSweep: v.optional(
@@ -308,6 +334,10 @@ const projectFields = {
   ),
   checkLogSweptAt: v.optional(v.number()),
   purgeBlocked: v.optional(projectPurgeBlocked),
+  /** Owner-restorable deletion window; one scheduled expiry, never a polling cron. */
+  retention: v.optional(projectRetention),
+  /** Paged permanent purge receipt: operation id and progress for the owner. */
+  purge: v.optional(projectPurge),
   r2Purge: v.optional(
     v.object({ generation: v.number(), cursor: v.union(v.string(), v.null()), failures: v.number() }),
   ),
@@ -489,10 +519,9 @@ export default defineSchema({
     'by_owner_and_operation',
     ['owner', 'operationId'],
   ),
-  projectSlugs: defineTable({ owner: v.string(), slug: v.string(), projectId: v.id('hostedProjects') }).index(
-    'by_owner_and_slug',
-    ['owner', 'slug'],
-  ),
+  projectSlugs: defineTable({ owner: v.string(), slug: v.string(), projectId: v.id('hostedProjects') })
+    .index('by_owner_and_slug', ['owner', 'slug'])
+    .index('by_project', ['projectId']),
   ...ownerAcceptanceTables,
   ...sourceAuthorityTables,
   ...autonomyTables,

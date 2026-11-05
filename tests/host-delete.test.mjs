@@ -22,6 +22,7 @@ import { state } from './hosted-fixture.mjs';
 import { settleR2Purge } from './default-r2.mjs';
 const backups = await import(moduleUrl('../convex/projectBackups.ts'));
 const lifecycle = await import(moduleUrl('../convex/projectLifecycle.ts'));
+const { purgeSettleMs } = await import(moduleUrl('../convex/projectRetention.ts'));
 const deployment = 'https://fixture.convex.cloud';
 function setup(t, { bound = false } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'forge-delete-'));
@@ -125,6 +126,7 @@ test('unbound owner sends the public mutation exact revision and saved operation
     projectId: 'project',
     operationId: result.operationId,
     expectedRevision: 7,
+    confirm: 'synthetic',
   });
   const journal = join(
     f.store.directory,
@@ -266,6 +268,8 @@ test('real public handlers accept a CLI owner identity and scheduled purge reach
       if (submitted && ++reads === 2) {
         for (let i = 0; s.tables.hostedProjects.get('project').removal === 'deleting'; i++) {
           assert.ok(i < 250);
+          // Time passes beyond the upload-expiry settle wait.
+          s.tables.hostedProjects.get('project').removedAt -= purgeSettleMs;
           settleR2Purge(s.tables.hostedProjects.get('project'));
           await lifecycle.purge._handler(s.ctx, { projectId: 'project' });
         }
@@ -374,6 +378,7 @@ test('real CLI uses saved device authentication and emits progress plus the tomb
     projectId: 'project',
     operationId: lines.at(-1).operationId,
     expectedRevision: 7,
+    confirm: 'synthetic',
   });
   assert.equal((stdout + stderr).includes('synthetic-delete-device'), false);
 });

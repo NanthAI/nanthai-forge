@@ -22,10 +22,13 @@ export const project = internalQuery({
     revision: v.number(),
     removal: v.string(),
     purgeBlocked: v.union(v.string(), v.null()),
+    /** The typed confirmation permanent deletion requires (slug, else name). */
+    confirm: v.string(),
   }),
   handler: async (ctx, input) => {
     const row = await selected(ctx, input);
     return {
+      confirm: row.slug ?? row.name,
       revision: row.revision,
       removal: row.removal ?? 'active',
       purgeBlocked: row.purgeBlocked ?? null,

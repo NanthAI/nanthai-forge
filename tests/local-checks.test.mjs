@@ -188,7 +188,9 @@ test('current project and runner authority, changed local definitions and deleti
   s.tables.hostedProjects.get(s.projectId).removal = 'trash';
   await assert.rejects(s.queue(), code('PROJECT_UNAVAILABLE'));
   s.tables.hostedProjects.get(s.projectId).removal = 'deleting';
-  await lifecycle.purge._handler(s.ctx, { projectId: s.projectId });
+  // The paged purge removes these rows in its inventory-guarded row stage.
+  for (let i = 0; i < 20 && s.tables.projectCheckRequests.size + s.tables.projectCheckRunners.size; i++)
+    await lifecycle.purge._handler(s.ctx, { projectId: s.projectId });
   assert.equal(s.tables.projectCheckRequests.size, 0);
   assert.equal(s.tables.projectCheckRunners.size, 0);
 });
