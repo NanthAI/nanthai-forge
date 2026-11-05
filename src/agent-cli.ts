@@ -341,7 +341,7 @@ function actionHelp(action: string): string {
       'Select laneId for base-to-live changes, or from/to full State digests for an immutable comparison. Omit paths for a summary; paths selects exact relative files and contextual hunks. Same budgets and pagination as review: maxBytes 1024..48000 (default 12000), context 0..10, limit 1..100, offset; continue with returned head/base and expectedReviewTree. Lane comparisons accept expectedHead.\n';
   if (action === 'show')
     result +=
-      'Select exactly one state (full digest), laneId (saved head) or channel ("main": its current head), plus a relative file path. Hosted checkouts default to the opened Lane and accept channel:"main". Writes exact bytes to stdout without JSON or an added newline. Binary/invalid UTF-8 or files over 1 MiB require force:true. MCP returns source pins and content with encoding utf8 or base64.\n';
+      'Select exactly one state (full digest), laneId (saved head) or channel ("main": its current head), plus a relative file path. Hosted checkouts default to the opened Lane and accept channel:"main"; at:"main" is the same, and at:"base" reads the Lane\'s pinned base (the main it started from, not later landings) so a file can be compared without the project clone. Writes exact bytes to stdout without JSON or an added newline. Binary/invalid UTF-8 or files over 1 MiB require force:true. MCP returns source pins and content with encoding utf8 or base64.\n';
   if (action === 'link')
     result +=
       'Select exactly one laneId, viewId or save (full source digest). path is an optional relative source file; line requires path. Links target the hosted app; an unpublished head may be unavailable until source is pushed.\n';

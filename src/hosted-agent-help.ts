@@ -1,10 +1,7 @@
-import { liveLanesInput } from './hosted-live-lanes.js';
-import { hostedDiffSchema, hostedPeersSchema, hostedQueueSchema } from './hosted-agent-reads.js';
+import { hostedClientReadSchemas } from './hosted-agent-reads.js';
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
 import { hostedAgentCommandSchemas } from './hosted-agent-contract.js';
-import { hostedWaitSchema } from './hosted-agent-observe.js';
-import { hostedSourceShowSchema } from './mcp-hosted-source.js';
 import { newForm } from './agent-verbs.js';
 import { hostedActionAlternative } from './hosted-agent-version.js';
 
@@ -12,12 +9,7 @@ import { hostedActionAlternative } from './hosted-agent-version.js';
  * wait/show have their own enforced schemas. No capability request is needed to print help. */
 export const hostedAgentHelpEntries = [
   ...Object.entries(hostedAgentCommandSchemas),
-  ['lanes', liveLanesInput] as const,
-  ['diff', hostedDiffSchema] as const,
-  ['peers', hostedPeersSchema] as const,
-  ['queue', hostedQueueSchema] as const,
-  ['wait', hostedWaitSchema] as const,
-  ['show', hostedSourceShowSchema.omit({ action: true })] as const,
+  ...Object.entries(hostedClientReadSchemas),
 ].map(([action, schema]) => {
   const json = z.toJSONSchema(schema, { io: 'input', unrepresentable: 'any' });
   // Client envelope fields are accepted outside the action schema by dispatch.
@@ -26,7 +18,7 @@ export const hostedAgentHelpEntries = [
     json.properties.path = { type: 'string', minLength: 1 };
     json.properties.open = { type: 'boolean' };
   }
-  if (!['status', 'observe', 'wait', 'show', 'diff', 'peers', 'lanes', 'queue'].includes(action))
+  if (!['status', 'observe', ...Object.keys(hostedClientReadSchemas)].includes(action))
     json.properties.operationId = { type: 'string', format: 'uuid' };
   const required = new Set(json.required ?? []);
   const parameters = Object.keys(json.properties ?? {}).map(
@@ -56,8 +48,8 @@ export function hostedAgentHelp(action?: string) {
     'lanes {limit?,cursor?} lists open hosted Lanes with Intent, actor, last save and latest Intent landing context in one bounded query. Follow continueCursor; idle makes zero calls.',
     'status accepts laneId; observe/landing select operationId (original landing UUID), submissionId or runId.',
     'peers {laneId?,path?,detail?} reads current saved overlap evidence in one query. Coverage excludes unsaved peer edits and never proves independence. start/save/status retain unacknowledgedOverlaps and behindMain.',
-    'queue {limit?} lists the landing queue in dispatch order: Lane, Intent title, phase, suspect, last failing test files and recompose count per entry. One bounded read, no idle cost.',
-    'diff {laneId?,paths?,byteBudget?,cursor?} compares pinned base to saved head; nextCursor continues that pair. show {state?|candidateId?|laneId?|channel:"main",path} reads exact bytes. forge_review exposes show/diff/peers/queue.',
+    "queue {limit?,laneId?} lists the landing queue in dispatch order: Lane, Intent title, phase, suspect, last failing test files and recompose count per entry; yourLane names this checkout's (or laneId's) position when it is in the page. One bounded read, no idle cost.",
+    'diff {laneId?,paths?,byteBudget?,cursor?} compares pinned base to saved head; nextCursor continues that pair. show {state?|candidateId?|laneId?|channel:"main"|at:"base"|"main",path} reads exact bytes; at:"base" is this Lane\'s pinned base, at:"main" is current main. forge_review exposes show/diff/peers/queue.',
     'Keep every original parameter, including message and pins, when replaying an operationId. Use the receipt replay command.',
     'Keep this turn active while your work is unfinished. Resume with the receipt command: wait {operationIds:[ORIGINAL_UUID],until:"acceptance"}; check-only work uses wait {runId}. wait blocks up to 540 s (--budget SECONDS); transient observation failures retry within it. Exit 3 is IN PROGRESS: run the same wait again. Terminal failure follows its recovery command; LANDED is acceptance, CHECK PASSED alone is not.',
     '',

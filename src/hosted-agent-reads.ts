@@ -10,10 +10,12 @@ import { reviewPaths } from './source-review-format.js';
 import { contextualHunks } from './review-hunks.js';
 import { safeRelative } from './safe-relative.js';
 import { invariant } from './errors.js';
-import { selectHostedSource } from './mcp-hosted-source.js';
+import { selectHostedSource, hostedSourceShowSchema } from './mcp-hosted-source.js';
+import { hostedWaitSchema } from './hosted-agent-observe.js';
 import { readHostedLaneCheckout } from './hosted-lane-checkout-marker.js';
 import type { HostedAgentTransport } from './hosted-agent-transport.js';
 import { QUEUE_VIEW_LIMIT } from './hosted-queue-view.js';
+import { liveLanesInput } from './hosted-live-lanes.js';
 const hash = z.string().regex(/^[0-9a-f]{64}$/);
 export const hostedPeersSchema = z
   .object({
@@ -54,15 +56,55 @@ export async function peersHostedSource(transport: HostedAgentTransport, input: 
   });
 }
 export const hostedQueueSchema = z
-  .object({ limit: z.number().int().min(1).max(QUEUE_VIEW_LIMIT).optional() })
+  .object({
+    limit: z.number().int().min(1).max(QUEUE_VIEW_LIMIT).optional(),
+    /** Mark this Lane's entries in the answer (default: this checkout's Lane). Never sent to the server. */
+    laneId: z.uuid().optional(),
+  })
   .strict();
 /** One bounded read of the landing queue (09e637f7): Lane, Intent title, phase,
  * last failing test files and recompose count per entry, in dispatch order. */
 export async function queueHostedSource(transport: HostedAgentTransport, input: unknown) {
   const parsed = hostedQueueSchema.safeParse(input);
   invariant(parsed.success, 'BAD_ARGUMENT', 'Invalid hosted queue parameters. Use queue --help.');
-  return transport.query('projectHostedQueueView:read', parsed.data);
+  const { laneId: selected, ...query } = parsed.data;
+  const view = await transport.query('projectHostedQueueView:read', query);
+  return markQueueLane(view, selected ?? readHostedLaneCheckout(transport.root)?.selection.laneId);
 }
+/** Local, no extra call: say where the caller's Lane stands in the page that was read. */
+export function markQueueLane(view: unknown, laneId: string | undefined) {
+  if (!laneId || !view || typeof view !== 'object' || !Array.isArray((view as { entries?: unknown }).entries))
+    return view;
+  const page = view as { entries: { laneId?: string | null; position?: number | null }[]; more?: boolean };
+  const yours = page.entries
+    .filter(entry => entry.laneId === laneId)
+    .map(entry => ({
+      position: entry.position ?? null,
+      submissionId: (entry as { submissionId?: string }).submissionId,
+    }));
+  return {
+    ...page,
+    yourLane: {
+      laneId,
+      listed: yours.length > 0,
+      entries: yours,
+      ...(yours.length || !page.more
+        ? {}
+        : { note: 'Not in this page; raise limit (max 20) or read status {laneId}.' }),
+    },
+  };
+}
+
+/** Client-side reads: validated, helped and dispatched by name before any hosted-action lookup.
+ * Add a read here once; validation and help derive from it, and a test drives each through dispatch. */
+export const hostedClientReadSchemas = {
+  lanes: liveLanesInput,
+  diff: hostedDiffSchema,
+  peers: hostedPeersSchema,
+  queue: hostedQueueSchema,
+  wait: hostedWaitSchema,
+  show: hostedSourceShowSchema.omit({ action: true }),
+} as const;
 /** Immutable manifests and selected blobs live in R2, never in a Convex response. */
 export async function diffHostedSource(transport: HostedAgentTransport, input: unknown) {
   const parsed = hostedDiffSchema.safeParse(input);

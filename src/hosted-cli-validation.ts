@@ -1,10 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
 import { hostedAgentAction, hostedAgentCommandSchemas } from './hosted-agent-contract.js';
-import { hostedDiffSchema, hostedPeersSchema } from './hosted-agent-reads.js';
-import { hostedWaitSchema } from './hosted-agent-observe.js';
-import { hostedSourceShowSchema } from './mcp-hosted-source.js';
-import { liveLanesInput } from './hosted-live-lanes.js';
+import { hostedClientReadSchemas } from './hosted-agent-reads.js';
 import { unknownActionError } from './hosted-agent-version.js';
 import { ForgeError, invariant } from './errors.js';
 import { frictionInputSchema } from './friction-types.js';
@@ -29,17 +26,11 @@ export function validateHostedCliCommand(
   const input = Object.fromEntries(
     Object.entries(selected).filter(([key]) => !['url', 'projectId', 'action'].includes(key)),
   );
-  const local = {
-    lanes: liveLanesInput,
-    diff: hostedDiffSchema,
-    peers: hostedPeersSchema,
-    wait: hostedWaitSchema,
-    show: hostedSourceShowSchema.omit({ action: true }),
-  };
+  const local: Record<string, z.ZodType> = hostedClientReadSchemas;
   let schema: z.ZodType;
   let parameters = input;
   if (Object.hasOwn(local, requestedAction)) {
-    schema = local[requestedAction as keyof typeof local];
+    schema = local[requestedAction]!;
   } else {
     let action: keyof typeof hostedAgentCommandSchemas;
     try {

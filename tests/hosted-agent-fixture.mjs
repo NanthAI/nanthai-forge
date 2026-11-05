@@ -72,6 +72,7 @@ export function agentFixture(t) {
     operations = new Map(),
     requests = new Map(),
     completed = new Set();
+  const queueView = { total: 0, listed: 0, more: false, train: 0, entries: [] };
   let fail = null,
     pending = false,
     allowed = true;
@@ -328,6 +329,7 @@ export function agentFixture(t) {
       name === 'projectHostedLifecycle:progress'
     )
       result = { pending: true, version: args.version ?? 0 };
+    else if (name === 'projectHostedQueueView:read') result = queueView;
     else assert.fail(`Unexpected API call ${name}`);
     if (fail === name) {
       fail = null;
@@ -383,6 +385,7 @@ export function agentFixture(t) {
     exchange,
     objects,
     transport,
+    queueView,
     lose(name) {
       fail = name;
     },

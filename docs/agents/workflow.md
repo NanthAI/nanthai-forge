@@ -100,9 +100,9 @@ Include `overlapAnswer:"accept-order"` in `land --save` to answer the pending no
 | `lanes` | `cursor?, limit?` |
 | `diff` | `laneId?, paths?, byteBudget?, cursor?` |
 | `peers` | `laneId?, path?, detail?` |
-| `queue` | `limit?` |
+| `queue` | `limit?, laneId?` |
 | `wait` | `runId?, operationIds?, cursor?, until?, timeoutSeconds?` |
-| `show` | `laneId?, state?, candidateId?, expected?, channel?, path, force?` |
+| `show` | `laneId?, state?, candidateId?, expected?, channel?, at?, path, force?` |
 <!-- hosted-agent-contract:end -->
 
 ### Hosted reads and coordination limits
@@ -120,7 +120,9 @@ MCP `forge_review` exposes hosted `show`, `diff` and `peers`.
   `omitted`/`requiredByteBudget` and `truncated` disclose shortened output;
   increase the budget or use exact show for remaining bytes.
 - `show` selects one exact `{laneId,path}`, `{channel:"main",path}`, `{state,path}`
-  or `{candidateId,path}`. `expected` binds Lane versions. Missing source fails
+  or `{candidateId,path}`. `at:"base"` reads the file at this Lane's pinned base (the
+  main it started from; use it instead of the project clone to compare with what
+  other landings changed) and `at:"main"` is `channel:"main"`. `expected` binds Lane versions. Missing source fails
   without substitution. All source reads exclude drafts and recheck access on
   cache hits.
 
@@ -472,7 +474,10 @@ Lane, temp or dev build (`node dist/cli-entry.js`) never writes them, not even
 installed CLI also leaves hooks that point at another valid install alone and only
 repairs a missing target; the explicit `install-hooks` from the installed `nforge` takes
 over. `nforge status ROOT` and `nforge doctor ROOT` show `hooks` and, for a missing,
-unreadable or non-installed hook path, print the one repair command.
+unreadable or non-installed hook path, print the one repair command. `nforge doctor ROOT`
+also takes a Forge clone or Lane checkout (no Git): it reports the CLI version, build
+and Node, `hooks`, the checkout marker (project, head, Lane and base) and the recorded
+address from local files only, with no network call or write.
 
 ```sh
 nforge x ROOT uninstall-hooks '{}'                  # remove; persist user off

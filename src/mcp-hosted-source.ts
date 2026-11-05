@@ -40,6 +40,9 @@ export const hostedSourceSelectionSchema = z
     expected: hostedLaneExpectationSchema.optional(),
     /** Read the project's current main instead of a Lane. */
     channel: z.literal('main').optional(),
+    /** "main" is channel:"main". "base" is the selected Lane's pinned base State (the main it started from),
+     * so a builder reads a file as the Lane saw it without the project clone. */
+    at: z.enum(['base', 'main']).optional(),
   })
   .strict();
 export const hostedSourceShowSchema = hostedSourceSelectionSchema
@@ -105,8 +108,26 @@ async function selectHostedMain(transport: HostedAgentTransport) {
 }
 export async function selectExactHostedSource(
   transport: HostedAgentTransport,
-  input: z.infer<typeof hostedSourceSelectionSchema>,
+  selected: z.infer<typeof hostedSourceSelectionSchema>,
 ) {
+  const { at, ...input } = selected;
+  if (at === 'main') {
+    invariant(
+      !input.state && !input.candidateId && !input.laneId && !input.expected,
+      'BAD_ARGUMENT',
+      'at:"main" reads current main; drop laneId, state or candidateId.',
+    );
+    input.channel = 'main';
+  }
+  if (at === 'base') {
+    invariant(
+      !input.state && !input.candidateId && !input.channel,
+      'BAD_ARGUMENT',
+      'at:"base" reads a Lane base; select a Lane (default: this checkout\'s Lane), not a State, Candidate or main.',
+    );
+    const lane = await selectHostedSource(transport, input);
+    return { head: lane.base.head, laneId: lane.laneId, at: 'base' as const };
+  }
   invariant(
     [input.laneId, input.state, input.candidateId, input.channel].filter(Boolean).length <= 1,
     'BAD_ARGUMENT',
@@ -159,7 +180,10 @@ async function fileBytes(
   await cache.ensure([entry.blob]);
   const bytes = readFileSync(join(cache.objects, entry.blob));
   // Cache hits do not grant fresh access. Recheck the original selection before returning bytes.
-  if ('laneId' in selection) {
+  if ('at' in selection) {
+    // The base is immutable; only the caller's access to the Lane can have changed.
+    await selectHostedSource(transport, { laneId: selection.laneId });
+  } else if ('laneId' in selection) {
     const lane = hostedLaneSelectionSchema.parse(selection);
     await selectHostedSource(transport, {
       laneId: lane.laneId,
@@ -188,6 +212,7 @@ export async function showHostedSource(transport: HostedAgentTransport, input: u
     result: {
       state: pins.head,
       ...('laneId' in pins ? { laneId: pins.laneId } : 'channel' in pins ? { channel: pins.channel } : {}),
+      ...('at' in pins ? { at: pins.at } : {}),
       path,
       blob: entry.blob,
       mode: entry.mode,

@@ -7,6 +7,7 @@ import { filesystemEventHealth, filesystemEnvironment } from './filesystem-event
 
 import { shellQuote } from './shell-quote.js';
 import { hookHealth } from './agent-hook-health.js';
+import { hostedDoctor } from './hosted-doctor.js';
 
 export const diagnosticRuntime = { filesystemEventHealth };
 export function mcpConfig(root: string, options: { agent?: boolean } = {}) {
@@ -26,6 +27,8 @@ export function mcpConfig(root: string, options: { agent?: boolean } = {}) {
   };
 }
 export async function doctor(root: string): Promise<object> {
+  const hosted = hostedDoctor(root);
+  if (hosted) return hosted;
   const workspace = new Workspace(root);
   const watching = await probeLocalWatching();
   const health = diagnosticRuntime.filesystemEventHealth(root);

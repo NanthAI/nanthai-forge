@@ -101,7 +101,7 @@ Usage:
   nforge mcp-config <root> [--agent]
   nforge plugin-config <root> <new-directory>
   nforge local-checks ROOT DEPLOYMENT PROJECT_ID [--name NAME]
-  nforge doctor <git-worktree-root>
+  nforge doctor <git-worktree-root | forge-clone-or-lane-root>
   nforge index <git-worktree-root>
   nforge status ROOT [--pending] [--detail] [--ignored] [--offset N] [--limit N] [--json]
   nforge status <git-worktree-root>   # existing graph JSON; --pending selects owner summary
