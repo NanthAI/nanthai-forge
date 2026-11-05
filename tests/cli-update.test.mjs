@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { hostname } from 'node:os';
 import { childEnv } from '../scripts/child-env.mjs';
@@ -21,6 +21,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { withCliRuntimeLock, cliProcessIdentity } from '../dist/cli-launcher.js';
+import { cliUpdateRun } from '../dist/cli-update.js';
 import { cliStartup, cliVersionCheck } from '../dist/cli-version.js';
 import { updateCli } from '../dist/cli-update.js';
 import {
@@ -778,4 +779,226 @@ test('an already-installed main repairs an older controller without rebuilding o
   assert.equal(result.status, 'current');
   assert.equal(realpathSync(join(f.installation, 'manager')), main);
   assert.ok(existsSync(f.old), 'no-op repair never collects a retired build');
+});
+
+// --- Forced update is cheap and invisible (Issue 458a476b) -------------------------------------
+
+/** Run the stable launcher asynchronously; resolves with status, stdout and stderr. */
+function launch(f, args = ['--version'], onStderr = () => {}) {
+  return new Promise((done, reject) => {
+    const child = spawn(process.execPath, [join(f.installation, 'launcher.mjs'), ...args], {
+      env: launcherEnv(f),
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let stdout = '',
+      stderr = '';
+    child.stdout.on('data', chunk => (stdout += chunk));
+    child.stderr.on('data', chunk => {
+      stderr += chunk;
+      onStderr(stderr);
+    });
+    child.once('error', reject);
+    child.once('exit', status => done({ status, stdout, stderr }));
+  });
+}
+/** Old installed controller `a`, prestaged main `b` whose entry prints one JSON document. */
+async function pendingUpdate(t, f) {
+  const calls = await releaseFixture(t, f, b);
+  controllerEntry(f.old, 'old-ran');
+  installLauncher(f, f.old);
+  const main = f.build(b);
+  const startup = pathToFileURL(fileURLToPath(new URL('../dist/cli-version.js', import.meta.url))).href;
+  writeFileSync(
+    join(main, 'dist', 'cli-entry.js'),
+    `import { cliStartup } from ${JSON.stringify(startup)};
+if (await cliStartup(process.argv.slice(2), ${JSON.stringify(main)})) process.stdout.write(JSON.stringify({ ok: true, ran: process.argv.slice(2) }) + '\\n');
+`,
+  );
+  return { calls, main };
+}
+const refusals = /CLI_UPDATE_REQUIRED|CLI_UPDATE_SOURCE_REQUIRED|CLI_UPDATE_BUSY|CLI_RUNTIME_BUSY/;
+
+test('a JSON action while an update is pending keeps stdout one JSON document and runs once', async t => {
+  const f = fixture(t),
+    { main } = await pendingUpdate(t, f);
+  const reply = await launch(f, ['status', '--json']);
+  assert.equal(reply.status, 0, reply.stderr);
+  assert.deepEqual(JSON.parse(reply.stdout), { ok: true, ran: ['status', '--json'] });
+  assert.equal(reply.stdout.trim().split('\n').length, 1);
+  assert.match(reply.stderr, /behind main bbbbbbbb; installing it, then running your command/);
+  assert.match(reply.stderr, /Forge CLI selected b{64}\./);
+  assert.doesNotMatch(reply.stderr, /Usage|usage:|nforge \w+ <git-worktree-root>|vite|tsc/);
+  assert.doesNotMatch(reply.stderr, refusals);
+  assert.equal(cliBuildCommit(join(f.installation, 'current')), b);
+  assert.ok(existsSync(main));
+});
+
+test('two parallel commands during an update both run; the second waits instead of being refused', async t => {
+  const f = fixture(t);
+  await pendingUpdate(t, f);
+  // A live updater (this process) holds the update lock while both commands start.
+  const held = join(f.installation, 'update-lock', '1');
+  mkdirSync(held, { recursive: true });
+  writeFileSync(join(held, 'pid'), String(process.pid));
+  // Release the held update only once both commands are provably waiting on it (no timing guess).
+  let waiting = 0;
+  let release;
+  const bothWaiting = new Promise(done => (release = done));
+  const seen = new Set();
+  const watch = name => stderr => {
+    if (!seen.has(name) && /update is installing; waiting for it/.test(stderr)) {
+      seen.add(name);
+      if (++waiting === 2) release();
+    }
+  };
+  const replies = Promise.all([
+    launch(f, ['status', '--one'], watch('one')),
+    launch(f, ['status', '--two'], watch('two')),
+  ]);
+  await bothWaiting;
+  rmSync(join(f.installation, 'update-lock'), { recursive: true, force: true });
+  const [one, two] = await replies;
+  for (const [reply, flag] of [
+    [one, '--one'],
+    [two, '--two'],
+  ]) {
+    assert.equal(reply.status, 0, reply.stderr);
+    assert.deepEqual(JSON.parse(reply.stdout), { ok: true, ran: ['status', flag] });
+    assert.doesNotMatch(reply.stderr, refusals);
+  }
+  assert.match(one.stderr, /Another Forge CLI update is installing; waiting for it\./);
+  assert.match(two.stderr, /Another Forge CLI update is installing; waiting for it\./);
+  assert.equal(cliBuildCommit(join(f.installation, 'current')), b);
+});
+
+test('a runtime-lock holder is waited for by commands and the updater, but never by hooks', async t => {
+  const f = fixture(t);
+  mkdirSync(f.installation, { recursive: true });
+  const module = pathToFileURL(fileURLToPath(new URL('../dist/cli-launcher.js', import.meta.url))).href;
+  const holder = spawn(
+    process.execPath,
+    [
+      '--input-type=module',
+      '-e',
+      `import { withCliRuntimeLock } from ${JSON.stringify(module)};
+withCliRuntimeLock(${JSON.stringify(f.installation)}, () => { process.stdout.write('held\\n'); Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 600); });`,
+    ],
+    { stdio: ['ignore', 'pipe', 'inherit'] },
+  );
+  t.after(() => holder.kill());
+  await new Promise(done => holder.stdout.once('data', done));
+  assert.throws(() => withCliRuntimeLock(f.installation, () => assert.fail()), { code: 'CLI_RUNTIME_BUSY' });
+  assert.equal(
+    withCliRuntimeLock(f.installation, () => 'ran after the holder finished', 10_000),
+    'ran after the holder finished',
+  );
+  assert.equal(existsSync(join(f.installation, 'runtime.lock')), false);
+});
+
+test('a concurrent updater is waited for and the waiter continues from what it installed', async t => {
+  const f = fixture(t),
+    newest = f.build(b);
+  const held = join(f.installation, 'update-lock', '1');
+  mkdirSync(held, { recursive: true });
+  writeFileSync(join(held, 'pid'), String(process.pid));
+  const dependencies = {
+    source: { current: async () => ({ head: b, projectId: address.projectId }) },
+    migrate: () => {},
+  };
+  const waiting = updateCli(
+    f.installation,
+    address,
+    { head: b, projectId: address.projectId },
+    dependencies,
+    {
+      lockWaitMs: 10_000,
+    },
+  );
+  setTimeout(() => {
+    selectCliBuild(f.installation, newest);
+    rmSync(join(f.installation, 'update-lock'), { recursive: true, force: true });
+  }, 300);
+  const result = await waiting;
+  assert.equal(result.status, 'current');
+  assert.equal(result.cliCommit, b);
+  // Without a wait budget the same situation still refuses explicitly.
+  mkdirSync(held, { recursive: true });
+  writeFileSync(join(held, 'pid'), String(process.pid));
+  await assert.rejects(updateCli(f.installation, address, undefined, dependencies), {
+    code: 'CLI_UPDATE_BUSY',
+  });
+});
+
+test('update build output never reaches stdout and appears on stderr only when a step fails', t => {
+  const f = fixture(t);
+  const module = pathToFileURL(fileURLToPath(new URL('../dist/cli-update.js', import.meta.url))).href;
+  const noisy =
+    'process.stdout.write("tsc listing\\n"); process.stderr.write("vite chunk\\n"); process.stdout.write("Usage: nforge help\\n");';
+  const run = body =>
+    spawnSync(
+      process.execPath,
+      [
+        '--input-type=module',
+        '-e',
+        `import { cliUpdateRun } from ${JSON.stringify(module)};
+try { await cliUpdateRun(${JSON.stringify(f.directory)}, [process.execPath, '-e', ${JSON.stringify(body)}]); } catch (error) { process.exitCode = 7; process.stderr.write('code=' + error.code + '\\n'); }`,
+      ],
+      { env: launcherEnv(f), encoding: 'utf8' },
+    );
+  const ok = run(noisy);
+  assert.equal(ok.status, 0, ok.stderr);
+  assert.equal(ok.stdout, '');
+  assert.equal(ok.stderr, '');
+  const failed = run(`${noisy} process.exit(3)`);
+  assert.equal(failed.status, 7);
+  assert.equal(failed.stdout, '');
+  assert.match(failed.stderr, /vite chunk/);
+  assert.match(failed.stderr, /code=CLI_UPDATE_BUILD_FAILED/);
+});
+
+test('a forced update is never queued behind machine-wide heavy slots', async t => {
+  const f = fixture(t),
+    slots = join(f.directory, 'slots'),
+    cache = join(f.directory, 'cache');
+  writeFileSync(join(f.directory, 'client.json'), JSON.stringify({ localHeavySlots: 1 }));
+  mkdirSync(join(slots, '1'), { recursive: true });
+  writeFileSync(join(slots, '1', 'pid'), String(process.pid));
+  const previous = { slots: process.env.FORGE_HEAVY_DIR, cache: process.env.XDG_CACHE_HOME };
+  process.env.FORGE_HEAVY_DIR = slots;
+  process.env.XDG_CACHE_HOME = cache;
+  t.after(() => {
+    for (const [name, value] of [
+      ['FORGE_HEAVY_DIR', previous.slots],
+      ['XDG_CACHE_HOME', previous.cache],
+    ])
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+  });
+  const dependencies = {
+    source: {
+      current: async () => ({ head: b, projectId: address.projectId }),
+      checkout: async stage => {
+        writeFileSync(
+          join(stage, 'package.json'),
+          JSON.stringify({ name: '@nanthai/forge', testIdentity: f.directory }),
+        );
+        writeFileSync(join(stage, 'package-lock.json'), '{}');
+      },
+    },
+    run: async (cwd, args) => {
+      if (args[1] === 'ci') mkdirSync(join(cwd, 'node_modules'));
+      else if (args[1] === 'run') {
+        mkdirSync(join(cwd, 'dist'));
+        for (const name of ['cli-version.js', 'cli-launcher.js', 'cli-entry.js', 'agent-edit-hook.js'])
+          writeFileSync(join(cwd, 'dist', name), '// synthetic');
+      }
+    },
+    migrate: () => {},
+  };
+  const result = await Promise.race([
+    updateCli(f.installation, address, undefined, dependencies),
+    new Promise((_, reject) => setTimeout(() => reject(new Error('queued behind heavy slots')), 20_000)),
+  ]);
+  assert.equal(result.status, 'updated');
+  assert.equal(readFileSync(join(slots, '1', 'pid'), 'utf8'), String(process.pid), 'foreign slot untouched');
 });

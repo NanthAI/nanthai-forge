@@ -75,7 +75,7 @@ export const npmInstaller: DependencyInstaller = directory =>
  * Leaves an existing node_modules alone. Concurrent opens of the same lockfile install once. */
 export async function shareDependencies(
   root: string,
-  options: { install?: DependencyInstaller; enabled?: boolean; cache?: string } = {},
+  options: { install?: DependencyInstaller; enabled?: boolean; cache?: string; heavy?: boolean } = {},
 ): Promise<SharedDependencies> {
   if (!(options.enabled ?? readClientSettings().shareDependencies)) return { status: 'off' };
   const key = dependencyKey(root);
@@ -98,7 +98,7 @@ export async function shareDependencies(
         copyFileSync(join(root, 'package.json'), join(stage, 'package.json'));
         copyFileSync(join(root, 'package-lock.json'), join(stage, 'package-lock.json'));
         const settings = readClientSettings(),
-          slots = heavySlots(settings.localHeavySlots);
+          slots = options.heavy === false ? 0 : heavySlots(settings.localHeavySlots);
         const slot = slots ? await acquireHeavySlot(heavySlotDirectory(), slots) : null;
         try {
           await (options.install ?? npmInstaller)(stage);

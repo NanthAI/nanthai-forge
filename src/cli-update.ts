@@ -8,8 +8,7 @@ import { childEnv } from '../scripts/child-env.mjs';
 import { ForgeError, invariant } from './errors.js';
 import { durableReplace } from './native-durability.js';
 import { hostedAgentAddress } from './hosted-agent-cli.js';
-import { acquireHeavySlot, heavySlotDirectory, tryHeavySlot } from './heavy-slots.js';
-import { heavySlots, readClientSettings } from './client-settings.js';
+import { tryHeavySlot } from './heavy-slots.js';
 import { shareDependencies } from './shared-dependencies.js';
 import { cliReleaseSource, type CliSource } from './cli-update-source.js';
 import { cliBuildCommit, cliInstallation, withCliLock } from './cli-installation.js';
@@ -21,6 +20,8 @@ import { cliPackageRoot } from './cli-installation.js';
 import { shellQuote } from './agent-brief-render.js';
 
 const sourceSchema = z.object({ url: z.url(), projectId: z.string().min(1) }).strict();
+/** How long an update waits for a concurrent updater before refusing with CLI_UPDATE_BUSY. */
+export const CLI_UPDATE_WAIT_MS = 180_000;
 export const defaultCliInstallation = () => join(homedir(), '.local', 'share', 'forge-cli');
 export const cliUpdateCommand = (installation: string) =>
   `nforge update --directory ${shellQuote(installation)}`;
@@ -37,23 +38,45 @@ export function readCliSource(installation: string): CliSource {
   }
   return sourceSchema.parse(JSON.parse(readFileSync(path, 'utf8')));
 }
+/** Build and install output is diagnostic only: stdout and stderr are buffered and shown (on stderr)
+ * when a step fails. A successful update prints nothing, so the caller's stdout stays one result. */
+const OUTPUT_TAIL = 64 * 1024;
 export async function cliUpdateRun(cwd: string, args: string[], home?: string) {
   await new Promise<void>((done, reject) => {
     const child = spawn(args[0]!, args.slice(1), {
       cwd,
-      stdio: ['ignore', 2, 2],
+      stdio: ['ignore', 'pipe', 'pipe'],
       env: childEnv({
         allow: ['XDG_CACHE_HOME'],
         ...(home ? { extra: { HOME: home, USERPROFILE: home, XDG_CONFIG_HOME: join(home, '.config') } } : {}),
       }),
     });
+    let output = '';
+    const collect = (chunk: Buffer) => {
+      output = (output + chunk.toString('utf8')).slice(-OUTPUT_TAIL);
+    };
+    child.stdout?.on('data', collect);
+    child.stderr?.on('data', collect);
     child.once('error', reject);
-    child.once('exit', code =>
-      code === 0
-        ? done()
-        : reject(new ForgeError('CLI_UPDATE_BUILD_FAILED', `CLI update command failed (${code}).`)),
-    );
+    child.once('exit', code => {
+      if (code === 0) return done();
+      process.stderr.write(output.endsWith('\n') || !output ? output : `${output}\n`);
+      reject(new ForgeError('CLI_UPDATE_BUILD_FAILED', `CLI update command failed (${code}).`));
+    });
   });
+}
+/** Wait for another updater (same installation) instead of refusing; null when still busy. */
+async function updateLock(installation: string, waitMs: number, onWait?: () => void) {
+  const path = join(installation, 'update-lock');
+  let lock = tryHeavySlot(path, 1);
+  if (lock || waitMs <= 0) return { lock, waited: false };
+  onWait?.();
+  const deadline = Date.now() + waitMs;
+  for (let delay = 50; !lock && Date.now() < deadline; delay = Math.min(delay * 2, 500)) {
+    await new Promise<void>(done => setTimeout(done, delay));
+    lock = tryHeavySlot(path, 1);
+  }
+  return { lock, waited: true };
 }
 export async function updateCli(
   installation: string,
@@ -64,9 +87,15 @@ export async function updateCli(
     run: cliUpdateRun,
     migrate: (runner: string) => migrateEditHookRunner(runner),
   },
-  options: { expectedCurrent?: string | null; rollback?: boolean } = {},
+  options: {
+    expectedCurrent?: string | null;
+    rollback?: boolean;
+    /** Wait this long for a concurrent updater, then continue from whatever it installed. */
+    lockWaitMs?: number;
+    onWait?: () => void;
+  } = {},
 ) {
-  const expectedCurrent =
+  let expectedCurrent =
     options.expectedCurrent !== undefined ? options.expectedCurrent : cliCurrentCommit(installation);
   address = sourceSchema.parse(address);
   mkdirSync(join(installation, 'builds'), { recursive: true, mode: 0o700 });
@@ -75,7 +104,7 @@ export async function updateCli(
     'CLI_UPDATE_FROZEN',
     `CLI update is held by ${join(installation, '.freeze')}. Remove that measurement hold, then run ${cliUpdateCommand(installation)}.`,
   );
-  const lock = tryHeavySlot(join(installation, 'update-lock'), 1);
+  const { lock, waited } = await updateLock(installation, options.lockWaitMs ?? 0, options.onWait);
   invariant(
     lock,
     'CLI_UPDATE_BUSY',
@@ -90,6 +119,11 @@ export async function updateCli(
         'CLI_UPDATE_SOURCE_CHANGED',
         'Keep the configured Forge CLI source.',
       );
+    // After waiting, the other updater moved current: read the release and current again.
+    if (waited && !options.rollback) {
+      selected = undefined;
+      expectedCurrent = cliCurrentCommit(installation);
+    }
     const release = selected ?? (await dependencies.source.current());
     invariant(
       release.projectId === address.projectId && /^[a-f0-9]{64}$/.test(release.head),
@@ -152,24 +186,22 @@ export async function updateCli(
       enabled: true,
       install: directory =>
         dependencies.run(directory, ['npm', 'ci', '--ignore-scripts', '--no-audit', '--no-fund']),
+      // The updater is already serialized by update-lock; machine-wide test slots must not stall it.
+      heavy: false,
     });
     invariant(
       deps.status === 'linked' || deps.status === 'installed',
       'CLI_UPDATE_DEPENDENCIES_FAILED',
       'Could not provision locked CLI dependencies.',
     );
-    const slots = heavySlots(readClientSettings().localHeavySlots);
-    const slot = slots ? await acquireHeavySlot(heavySlotDirectory(), slots) : null;
+    // Not a heavy-slot job: ~2 s of tsc, one at a time per installation through update-lock. Queueing
+    // behind long test batches is what turned a forced update into a multi-minute stall.
+    await dependencies.run(stage, ['npm', 'run', 'build:core']);
+    const smokeHome = mkdtempSync(join(stage, '.smoke-home-'));
     try {
-      await dependencies.run(stage, ['npm', 'run', 'build:core']);
-      const smokeHome = mkdtempSync(join(stage, '.smoke-home-'));
-      try {
-        await dependencies.run(stage, [process.execPath, 'dist/cli.js', '--help'], smokeHome);
-      } finally {
-        rmSync(smokeHome, { recursive: true, force: true });
-      }
+      await dependencies.run(stage, [process.execPath, 'dist/cli.js', '--help'], smokeHome);
     } finally {
-      if (slot) rmSync(slot, { recursive: true, force: true });
+      rmSync(smokeHome, { recursive: true, force: true });
     }
     invariant(
       existsSync(join(stage, 'dist', 'cli-entry.js')) &&
@@ -243,7 +275,10 @@ export async function cliUpdateCli(args: string[]) {
   let expectedCurrent = cliCurrentCommit(installation);
   const selected = await source.current();
   if (state && !existsSync(join(installation, 'manager'))) {
-    const initialized = await updateCli(installation, address, selected, undefined, { expectedCurrent });
+    const initialized = await updateCli(installation, address, selected, undefined, {
+      expectedCurrent,
+      lockWaitMs: CLI_UPDATE_WAIT_MS,
+    });
     expectedCurrent = cliCurrentCommit(installation);
     process.stderr.write(
       `Forge initialized the update controller at ${initialized.cliCommit}; selecting requested State ${state}.\n`,
@@ -254,7 +289,7 @@ export async function cliUpdateCli(args: string[]) {
     address,
     state ? { ...selected, head: state } : selected,
     undefined,
-    { expectedCurrent, rollback: !!state },
+    { expectedCurrent, rollback: !!state, lockWaitMs: CLI_UPDATE_WAIT_MS },
   );
   mkdirSync(resolve(bin, '..'), { recursive: true, mode: 0o700 });
   durableReplace(

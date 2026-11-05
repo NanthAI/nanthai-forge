@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { spawn } from 'node:child_process';
 import { cliBuildCommit, cliInstallation, cliPackageRoot, retainCliRuntime } from './cli-installation.js';
 import { cliLandingCommand, waitForCliMeasurement } from './cli-measurement-hold.js';
+import { CLI_RUNTIME_WAIT_MS } from './cli-launcher.js';
 import { ForgeError } from './errors.js';
 
 /** Cache the promise, including failures, so concurrent callers never repeat discovery. */
@@ -27,7 +28,8 @@ export async function cliStartup(
   options: { validated?: boolean; stdin?: string } = {},
 ): Promise<boolean> {
   // Claim the pinned runtime before any command modules can lazy-load from it.
-  retainCliRuntime(root);
+  // Parallel commands and an update's publication hold the lock for milliseconds: wait, never refuse.
+  retainCliRuntime(root, CLI_RUNTIME_WAIT_MS);
   // Local diagnostics must remain available without discovery. These handlers
   // call back after their local argument checks and before valid work begins.
   if (!options.validated && cliLocalArgumentsFirst(args)) return true;
@@ -46,7 +48,7 @@ export async function cliStartup(
     );
   if (cliLandingCommand(args)) await waitForCliMeasurement(installation);
   const { cliReleaseSource } = await import('./cli-update-source.js');
-  const { readCliSource, updateCli, cliUpdateCommand } = await import('./cli-update.js');
+  const { readCliSource, updateCli, cliUpdateCommand, CLI_UPDATE_WAIT_MS } = await import('./cli-update.js');
   const next = cliUpdateCommand(installation);
   try {
     const address = readCliSource(installation),
@@ -69,7 +71,15 @@ export async function cliStartup(
       );
     if (!selected)
       throw new ForgeError('CLI_UPDATE_REQUIRED', `CLI is behind main ${released}. Next: ${next}`);
-    const result = await updateCli(installation, address, selected, undefined, { expectedCurrent });
+    // stdout belongs to the command's result: every update line below goes to stderr.
+    process.stderr.write(
+      `Forge CLI is behind main ${released.slice(0, 8)}; installing it, then running your command.\n`,
+    );
+    const result = await updateCli(installation, address, selected, undefined, {
+      expectedCurrent,
+      lockWaitMs: CLI_UPDATE_WAIT_MS,
+      onWait: () => process.stderr.write('Another Forge CLI update is installing; waiting for it.\n'),
+    });
     process.stderr.write(
       `Forge CLI selected ${result.cliCommit}.${result.undo ? ` Revert: ${result.undo}` : ''}\n`,
     );

@@ -21,8 +21,18 @@ Help, heavy status and local agent/heavy/pull/clone argument errors make zero
 network calls. Valid commands make one authorized metadata query, cached
 for that process in addition to its action calls. There is no timer,
 background check or idle network activity. A CLI behind main installs that exact
-State, then starts the completed current runtime. Failed discovery, unavailable
-authentication, a busy updater, or a failed build refuses command execution with
+State, then re-runs the same command in the completed current runtime, so the
+caller gets one result and never runs `nforge update` by hand. The enforcement
+stays: no command runs on an older build. The update is cheap and invisible:
+stdout holds only the command's result; the one progress line, the selected/revert
+line and any step failure output go to stderr; successful build and smoke output is
+discarded and no help text is printed. The build is not a heavy-slot job, so it never
+queues behind test batches (about 4 s warm; one updater per installation through
+`update-lock`). Parallel commands during an update wait for the runtime lock (up to
+30 s) and for the running updater (up to 3 min), then continue from what it installed;
+only first-write hooks keep the zero-wait fail-open lock. Failed discovery, unavailable
+authentication, an updater still busy after the wait, or a failed build refuses
+command execution with
 `CLI_UPDATE_REQUIRED` and the exact `nforge update --directory DIR` recovery
 command. When sign-in is missing or expired, that command includes `--login`,
 which runs the existing device sign-in flow inside the updater before its release

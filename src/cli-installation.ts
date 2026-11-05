@@ -14,7 +14,7 @@ import { cliRuntimePaths, type CliRuntimeUser } from './cli-runtime-processes.js
 import { randomUUID } from 'node:crypto';
 import { durableReplace, syncDirectory } from './native-durability.js';
 import { processAlive, processStartTime } from './local-process.js';
-import { claimCliRuntime, withCliRuntimeLock } from './cli-launcher.js';
+import { CLI_RUNTIME_WAIT_MS, claimCliRuntime, withCliRuntimeLock } from './cli-launcher.js';
 import { canonicalRoot } from './root-paths.js';
 import { ForgeError } from './errors.js';
 
@@ -39,9 +39,9 @@ export function stableCliRunner(runner: string) {
     : runner;
 }
 /** Same lock fences new runtime users, selection, and retirement. No timers or server calls. */
-export function withCliLock<T>(installation: string, run: () => T): T {
+export function withCliLock<T>(installation: string, run: () => T, waitMs = CLI_RUNTIME_WAIT_MS): T {
   try {
-    return withCliRuntimeLock(installation, run);
+    return withCliRuntimeLock(installation, run, waitMs);
   } catch (error) {
     if (error instanceof Error && 'code' in error && !(error instanceof ForgeError))
       throw new ForgeError(String(error.code), error.message);
@@ -127,12 +127,13 @@ export function pruneCliBuilds(
   }
   return removed;
 }
-export function retainCliRuntime(root = cliPackageRoot()) {
+/** `waitMs` > 0 lets a user command ride out a concurrent update; hooks keep 0 and fail open. */
+export function retainCliRuntime(root = cliPackageRoot(), waitMs = 0) {
   root = canonicalRoot(root);
   const installation = cliInstallation(root);
   if (!installation) return;
   try {
-    claimCliRuntime(installation, root);
+    claimCliRuntime(installation, root, waitMs);
   } catch (error) {
     if (error instanceof Error && 'code' in error) throw new ForgeError(String(error.code), error.message);
     throw error;

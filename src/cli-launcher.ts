@@ -77,8 +77,13 @@ function dead(owner: { pid?: number; host?: string; startTime?: string }) {
   const observed = kernelStart(owner.pid!);
   return !!owner.startTime && !!observed && observed !== owner.startTime;
 }
-/** Publish complete lock-owner bytes atomically; a killed claimant never leaves an empty lock. */
-export function withCliRuntimeLock<T>(installation: string, run: () => T): T {
+/** How long a user command, the launcher or the updater waits for a live runtime-lock holder. */
+export const CLI_RUNTIME_WAIT_MS = 30_000;
+const sleepSync = (ms: number) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+/** Publish complete lock-owner bytes atomically; a killed claimant never leaves an empty lock.
+ * The lock is held for milliseconds, so contention (parallel commands, an update publishing) is
+ * absorbed by a bounded backoff wait instead of refusing. Hooks keep waitMs = 0 and fail open. */
+export function withCliRuntimeLock<T>(installation: string, run: () => T, waitMs = 0): T {
   mkdirSync(installation, { recursive: true, mode: 0o700 });
   const path = join(installation, 'runtime.lock'),
     pending = `${path}-${process.pid}-${randomUUID()}.pending`;
@@ -92,7 +97,14 @@ export function withCliRuntimeLock<T>(installation: string, run: () => T): T {
   }
   let acquired = false;
   try {
-    for (let attempt = 0; attempt < 2 && !acquired; attempt++) {
+    const deadline = Date.now() + waitMs;
+    let delay = 10;
+    for (let attempt = 0; !acquired; attempt++) {
+      if (attempt >= 2) {
+        if (Date.now() >= deadline) break;
+        sleepSync(Math.min(delay, Math.max(1, deadline - Date.now())));
+        delay = Math.min(delay * 2, 200);
+      }
       try {
         linkSync(pending, path);
         acquired = true;
@@ -123,7 +135,7 @@ export function withCliRuntimeLock<T>(installation: string, run: () => T): T {
     rmSync(pending, { force: true });
   }
 }
-export function claimCliRuntime(installation: string, root: string) {
+export function claimCliRuntime(installation: string, root: string, waitMs = 0) {
   const value = cliProcessIdentity(),
     users = join(root, '.users'),
     file = join(users, String(value.pid));
@@ -132,18 +144,22 @@ export function claimCliRuntime(installation: string, root: string) {
   } catch {
     /* Claim under the fence below. */
   }
-  withCliRuntimeLock(installation, () => {
-    if (!existsSync(root))
-      throw failure('CLI_RUNTIME_RETIRED', `CLI runtime was retired. Next: ${recovery(installation)}`);
-    mkdirSync(users, { recursive: true, mode: 0o700 });
-    const fd = openSync(file, 'w', 0o600);
-    try {
-      writeFileSync(fd, JSON.stringify(value));
-      fsyncSync(fd);
-    } finally {
-      closeSync(fd);
-    }
-  });
+  withCliRuntimeLock(
+    installation,
+    () => {
+      if (!existsSync(root))
+        throw failure('CLI_RUNTIME_RETIRED', `CLI runtime was retired. Next: ${recovery(installation)}`);
+      mkdirSync(users, { recursive: true, mode: 0o700 });
+      const fd = openSync(file, 'w', 0o600);
+      try {
+        writeFileSync(fd, JSON.stringify(value));
+        fsyncSync(fd);
+      } finally {
+        closeSync(fd);
+      }
+    },
+    waitMs,
+  );
 }
 async function launch() {
   try {
@@ -155,20 +171,24 @@ async function launch() {
     );
   }
   const installation = dirname(fileURLToPath(import.meta.url));
-  const manager = withCliRuntimeLock(installation, () => {
-    const selected = realpathSync(join(installation, 'manager'));
-    const value = cliProcessIdentity(),
-      users = join(selected, '.users');
-    mkdirSync(users, { recursive: true, mode: 0o700 });
-    const fd = openSync(join(users, String(value.pid)), 'w', 0o600);
-    try {
-      writeFileSync(fd, JSON.stringify(value));
-      fsyncSync(fd);
-    } finally {
-      closeSync(fd);
-    }
-    return selected;
-  });
+  const manager = withCliRuntimeLock(
+    installation,
+    () => {
+      const selected = realpathSync(join(installation, 'manager'));
+      const value = cliProcessIdentity(),
+        users = join(selected, '.users');
+      mkdirSync(users, { recursive: true, mode: 0o700 });
+      const fd = openSync(join(users, String(value.pid)), 'w', 0o600);
+      try {
+        writeFileSync(fd, JSON.stringify(value));
+        fsyncSync(fd);
+      } finally {
+        closeSync(fd);
+      }
+      return selected;
+    },
+    CLI_RUNTIME_WAIT_MS,
+  );
   await import(/* @vite-ignore */ pathToFileURL(join(manager, 'dist', 'cli-entry.js')).href);
 }
 // The filename check also prevents this entry from running inside the bundled edit hook.
