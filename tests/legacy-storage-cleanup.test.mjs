@@ -1751,3 +1751,66 @@ test('backfill repair CLI re-hashes every R2 copy before patching and writes not
     await rm(dir, { recursive: true, force: true });
   }
 });
+test('a cleanup receipt that lists a refused file is no reference, so a later run can still classify and delete it', async () => {
+  const { storageClass } = await import('../scripts/lib/legacy-storage-verify.mjs');
+  const hash = 'a'.repeat(64),
+    key = 'v1/p/project/o/' + hash;
+  const owner = {
+    storageId: 'f1',
+    table: 'projectObjects',
+    field: 'storageId',
+    document: 'obj1',
+    digest: hash,
+    size: 7,
+    key,
+    location: 'r2',
+    committed: true,
+  };
+  const receipt = {
+    storageId: 'f1',
+    table: 'legacyStorageCleanupPages',
+    field: 'result#json.excluded.0.storageId',
+    digest: null,
+    size: null,
+  };
+  const file = {
+    storageId: 'f1',
+    bytes: 7,
+    sha256: hash,
+    references: [owner, receipt],
+    matchingCopies: [{ key, size: 7 }],
+  };
+  assert.equal(storageClass(file), 1);
+  assert.equal(storageClass({ ...file, references: [receipt], matchingCopies: [] }), 4);
+  // Any other field of the receipt table, or the same path elsewhere, still counts.
+  assert.equal(
+    storageClass({ ...file, references: [owner, { ...receipt, field: 'result#json.deleted.0' }] }),
+    null,
+  );
+  assert.equal(
+    storageClass({ ...file, references: [owner, { ...receipt, table: 'projectSourceTasks' }] }),
+    null,
+  );
+  const audit = { deployment: 'dev:fixture', coverage: { fullyPaged: true }, files: [file] };
+  const verification = {
+    complete: true,
+    deployment: 'dev:fixture',
+    results: [
+      {
+        storageId: 'f1',
+        bytes: 7,
+        sha256: hash,
+        keys: [key],
+        verifiedAt: new Date().toISOString(),
+        fullDigest: true,
+      },
+    ],
+  };
+  // In-pause frozen scan references carry the receipt too; the plan keeps only the owner.
+  const plan = deletionPlan(audit, verification, {
+    references: [owner, receipt],
+    bodyCoverage: { complete: true },
+  });
+  assert.deepEqual(plan.excluded, []);
+  assert.deepEqual(plan.pins[0].owners, [{ table: 'projectObjects', id: 'obj1' }]);
+});

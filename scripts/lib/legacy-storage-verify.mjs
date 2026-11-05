@@ -2,10 +2,17 @@
 import { createHash } from 'node:crypto';
 import { presign } from '../../dist/r2-presign.js';
 
+/** The cleanup's own page receipts list refused storage ids. That records a
+ * decision, not a dependency: counting it would make every refused file
+ * unclassifiable, so undeletable, on every later run. */
+export const cleanupReceiptReference = r =>
+  r.table === 'legacyStorageCleanupPages' && /^result#json\.excluded\.\d+\.storageId$/.test(r.field ?? '');
+export const liveReferences = references => references.filter(r => !cleanupReceiptReference(r));
 export function storageClass(file) {
-  if (!file.references.length) return file.matchingCopies.length ? 3 : 4;
+  const references = liveReferences(file.references);
+  if (!references.length) return file.matchingCopies.length ? 3 : 4;
   if (
-    file.references.every(
+    references.every(
       r =>
         ['projectObjects', 'projectBackups'].includes(r.table) &&
         r.field === 'storageId' &&
@@ -14,7 +21,7 @@ export function storageClass(file) {
     )
   )
     return 1;
-  if (file.references.every(r => r.table === 'projectSourceSteps' && r.field === 'cursor')) return 2;
+  if (references.every(r => r.table === 'projectSourceSteps' && r.field === 'cursor')) return 2;
   return null;
 }
 export function digestHex(value) {

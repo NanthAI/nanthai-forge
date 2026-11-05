@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { privateJson } from '../legacy-storage-audit.mjs';
 import { auditPage } from './legacy-storage-query.mjs';
 import { catalogDigest } from './legacy-storage-closure.mjs';
-import { storageClass, digestHex } from './legacy-storage-verify.mjs';
+import { storageClass, digestHex, liveReferences } from './legacy-storage-verify.mjs';
 import { headPins, MAX_SKIPPED_PAGES } from './legacy-storage-heads.mjs';
 import { errorEvidence } from './legacy-storage-window.mjs';
 export const sha = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -14,7 +14,7 @@ export function deletionPlan(audit, verification, scan, approval = null) {
     throw new Error('CLEANUP_VERIFICATION_REQUIRED');
   const verified = new Map(verification.results.map(r => [r.storageId, r]));
   const refs = new Map();
-  for (const ref of scan?.references ?? audit.files.flatMap(f => f.references)) {
+  for (const ref of liveReferences(scan?.references ?? audit.files.flatMap(f => f.references))) {
     const list = refs.get(ref.storageId) ?? [];
     list.push(ref);
     refs.set(ref.storageId, list);

@@ -243,7 +243,10 @@ It is written to a private `excluded-page-N.json`, and the other approved pages
 continue. More than 100 refused files (one page) stop further dispatch with
 `CLEANUP_EXCLUSION_LIMIT`, because then the dry run no longer describes the
 deployment. `window.json` keeps the first page failure's own code under
-`workFailure.pageFailure`.
+`workFailure.pageFailure`. Those receipts (`legacyStorageCleanupPages`,
+`result.excluded[].storageId`) record a decision, not a dependency. Classification
+and the plan ignore them, so a later remaining-only run can still delete a
+refused file once its guard passes.
 The 26-minute deadline, page size and four-page bound are unchanged. Deletion retains the six existing indexed reference probes, qualifies every
 joint object/backup owner against current R2 pins, and rejects other references.
 No derived-file deletion cascade runs. The existing purge functions and their
