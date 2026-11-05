@@ -96,6 +96,9 @@ const alive = (pid: number) => {
     return (error as NodeJS.ErrnoException).code === 'EPERM';
   }
 };
+/** True while a Forge command of this machine runs in the Lane (a dead pid is stale). */
+export const laneCommandRunning = (entry: LaneRegistryEntry) =>
+  Boolean(entry.running && alive(entry.running.pid));
 /** Mark a Forge command as running in the Lane: one local file write, no network, no timer. */
 export function beginLaneCommand(laneId: string, action: string, now = Date.now()) {
   recordLane({ laneId, running: { action, pid: process.pid, since: now } }, now);

@@ -132,7 +132,30 @@ CohortHold == /\ Scenario = "cohorthold"
        [] pc = 5 /\ owner /\ b = "queued" -> /\ b' = "cohort" /\ pc' = 6
                      /\ UNCHANGED <<canonical, observed, inputsDone, returned, a, main, checked, applied, owner>>
        [] OTHER -> FALSE
-Step == Wait \/ CohortConflict \/ LostWake \/ MovingMain \/ CrossHead \/ OrderWake \/ Outage \/ CohortHold
+\* Incident a7de3a93 (2026-11-05): b is the queue head, checking. Each dispatch
+\* either reaches a runner (owner = TRUE: a result will arrive) or is lost: the
+\* call failed after `unknown`, no execution exists and nothing reports (owner =
+\* FALSE). LandingQueue's `Check` assumes every check reports pass/test/infra, so
+\* it cannot express this. checked = 1: an acknowledgement deadline is armed
+\* (fixed: the dispatch reconcile at 5 min, backed by the checking stall alarm).
+\* Unfixed, only the 12 h execution watchdog remains; it lies beyond the stall
+\* window and is not modelled, as in `outage`. applied = platform retries used
+\* (cap 2); after the cap b ends with a stated outcome, never silently.
+LostDispatch == /\ Scenario = "lostdispatch"
+  /\ CASE pc = 0 -> /\ b' = "checking" /\ owner' \in BOOLEAN
+                     /\ checked' = (IF Fixed THEN 1 ELSE 0) /\ pc' = 1
+                     /\ UNCHANGED <<canonical, observed, inputsDone, returned, a, main, applied>>
+       [] pc = 1 /\ owner -> /\ b' = "ready" /\ pc' = 2
+                     /\ UNCHANGED <<canonical, observed, inputsDone, returned, a, main, checked, applied, owner>>
+       [] pc = 1 /\ ~owner /\ checked = 1 /\ applied < 2 ->
+                     /\ applied' = applied + 1 /\ owner' \in BOOLEAN
+                     /\ UNCHANGED <<canonical, observed, inputsDone, returned, a, b, main, checked, pc>>
+       [] pc = 1 /\ ~owner /\ checked = 1 /\ applied = 2 -> /\ b' = "failed" /\ pc' = 2
+                     /\ UNCHANGED <<canonical, observed, inputsDone, returned, a, main, checked, applied, owner>>
+       [] pc = 2 /\ b = "ready" -> /\ b' = "landed" /\ pc' = 3
+                     /\ UNCHANGED <<canonical, observed, inputsDone, returned, a, main, checked, applied, owner>>
+       [] OTHER -> FALSE
+Step == Wait \/ CohortConflict \/ LostWake \/ MovingMain \/ CrossHead \/ OrderWake \/ Outage \/ CohortHold \/ LostDispatch
 Spec == Init /\ [][Step]_vars /\ WF_vars(Step)
 FreshTerminal == returned => observed = canonical
 NoOrphanConflict == ~(a \in {"failed", "cancelled"} /\ b = "conflict" /\ main = 0 /\ checked = 0)
@@ -143,4 +166,5 @@ ExactCheckedHead == applied # 0 => applied = checked
 EventuallyTerminal == <>(a = "landed" \/ a = "failed")
 HeadLands == <>(b = "landed")
 CohortForms == <>(b = "cohort")
+HeadSettles == <>(b \in {"landed", "failed"})
 =============================================================================

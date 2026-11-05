@@ -184,6 +184,8 @@ export const hostedCheckRunSchema = z
         outcome: z.enum(['accepted', 'unknown', 'rejected']),
         cancelScheduled: z.boolean().optional(),
         workflowSha: z.string().optional(),
+        /** Why the dispatch call failed: HTTP status or error class, never a body or credential. */
+        failure: z.string().max(80).optional(),
       })
       .strict()
       .optional(),

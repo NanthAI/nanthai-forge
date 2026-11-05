@@ -100,7 +100,11 @@ test('incident replay 2026-10-30 403 stall: tier 1 at 15 min and tier 2 at 30 mi
   const [first, second] = alerts.map(row => JSON.parse(row.value));
   assert.match(first.text, /^Landing stalled: .* min without progress at checking\./);
   assert.match(first.text, /\nWhy: .+/);
-  assert.match(first.text, /\nAlready tried: stall alarm re-woke the landing queue at 15 min/);
+  assert.match(
+    first.text,
+    /\nAlready tried: stall alarm re-woke the landing and reconciled an unacknowledged check dispatch at 15 min/,
+  );
+  assert.match(first.text, /replaying the land does not restart a check/);
   assert.match(
     first.text,
     new RegExp(`Repair: nforge agent ROOT landing '\\{"operationId":"${command.operationId}"\\}'`),

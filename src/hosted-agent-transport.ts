@@ -88,6 +88,7 @@ import {
   type HostedAgentCapabilities,
 } from './hosted-agent-contract.js';
 import { executeHostedAgent, hostedCheckSettings } from './hosted-agent-actions.js';
+import { savedChangedPaths } from './hosted-changed-paths.js';
 import { publishClientSourcePack } from './source-pack-client.js';
 import { HostedCheckoutDownloads } from './hosted-checkout-downloads.js';
 import { selectHostedFinish } from './hosted-agent-finish-identity.js';
@@ -694,7 +695,19 @@ export class HostedAgentTransport {
         waitSource: (operationId, initial, kind) =>
           waitHostedAgentSource(this.address, operationId, initial, signal, this.subscribeSource, kind),
         finishGates: async (laneId: string, head: string, tree?: string, overlapAnswer?: 'accept-order') => {
-          const advice = await this.overlapAdvice(laneId, capabilities.agentDefaults?.preflight !== 'off');
+          const read = await this.overlapAdvice(laneId, capabilities.agentDefaults?.preflight !== 'off');
+          const selected = readHostedLaneCheckout(root)?.selection;
+          const advice =
+            capabilities.agentDefaults?.preflight !== 'off' && selected?.laneId === laneId
+              ? {
+                  ...read,
+                  changedPaths: await savedChangedPaths(
+                    this,
+                    { base: selected.base.head, head },
+                    read.changedPaths,
+                  ),
+                }
+              : read;
           const gates = finishGates(
             root,
             capabilities.agentDefaults,
@@ -1036,7 +1049,11 @@ export class HostedAgentTransport {
     const advice = await readHostedOverlapAdvice(this, laneId, true);
     const plan = preflightPlan(
       root,
-      advice.changedPaths,
+      await savedChangedPaths(
+        this,
+        { base: marker.selection.base.head, head: marker.selection.head },
+        advice.changedPaths,
+      ),
       { laneId, files: marker.state.files },
       { budgetSeconds: command.budgetSeconds },
     );

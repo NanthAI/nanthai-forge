@@ -121,6 +121,8 @@ export type PreflightPlan =
       reusedFrom?: z.infer<typeof reusedFromSchema>;
       deltaPaths?: string[];
       totalEstimateMinutes?: number;
+      /** Set when the server projection lacked this head's paths and the pinned State manifests supplied them. */
+      changedPathsFrom?: 'manifests';
     };
 
 const preparedEvidence = new WeakMap<PreflightPlan, PreflightEvidence>();
@@ -224,7 +226,7 @@ const testArgs = (root: string, tests: string[]) => [
  * no plan: missing observations never block a landing. */
 export function preflightPlan(
   root: string,
-  changed: { paths: string[]; complete: boolean } | undefined,
+  changed: { paths: string[]; complete: boolean; source?: 'projection' | 'manifests' } | undefined,
   context?: { laneId: string; files: NativeFile[] },
   options?: { budgetSeconds?: number | undefined },
 ): PreflightPlan {
@@ -328,6 +330,7 @@ export function preflightPlan(
       reusedTests,
       ...(reusedFrom ? { reusedFrom } : {}),
       ...(delta ? { deltaPaths: delta } : {}),
+      ...(changed.source === 'manifests' ? { changedPathsFrom: 'manifests' as const } : {}),
       estimateMinutes: estimatePreflightMinutes(root, tests.length),
       totalEstimateMinutes: estimatePreflightMinutes(root, complete),
       command: tests.length

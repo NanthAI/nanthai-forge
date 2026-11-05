@@ -12,7 +12,68 @@ import { hostedCheckTerminal, checkPin, type HostedCheckRun } from '../src/hoste
 import { installationToken, githubAppRequest, actionsPermissions } from './githubAppToken';
 import { invariant } from '../src/errors';
 export const directActionsWatchdogMs = 12 * 60 * 60_000;
+/** Incident a7de3a93: a dispatch whose reply was lost has no executionId until the
+ * workflow_run webhook binds it. GitHub lists a dispatched run within about a
+ * minute, so after this bound one lookup by run-name decides: adopt or re-check. */
+export const directActionsAckMs = 5 * 60_000;
+const rateLimitMs = { min: 60_000, max: 15 * 60_000 };
+const repositoryOf = (run: HostedCheckRun) =>
+  run.configuration.provider === 'github-actions' ? run.configuration.repository : 'the repository';
 const identity = { projectId: v.id('hostedProjects'), runId: v.string() };
+type DispatchFailure = { outcome: 'unknown' | 'rejected'; failure: string; retryAfterMs?: number };
+/** A 4xx reply proves GitHub created no run; 5xx, timeout and network loss do not.
+ * Records only the status or error class. Rate limits keep Retry-After. */
+export function classifyDispatchFailure(
+  response: Response | undefined,
+  error: unknown,
+  stage: 'setup' | 'dispatch',
+  now = Date.now(),
+): DispatchFailure {
+  if (stage === 'setup') return { outcome: 'rejected', failure: 'setup' };
+  if (!response) {
+    const name = (error as { name?: unknown })?.name;
+    return {
+      outcome: 'unknown',
+      failure: name === 'TimeoutError' || name === 'AbortError' ? 'timeout' : 'network',
+    };
+  }
+  const status = response.status;
+  if (status >= 500) return { outcome: 'unknown', failure: `http ${status}` };
+  const retryAfter = Number(response.headers.get('retry-after'));
+  const reset = Number(response.headers.get('x-ratelimit-reset'));
+  const limited =
+    status === 429 ||
+    (status === 403 &&
+      (response.headers.get('x-ratelimit-remaining') === '0' || response.headers.has('retry-after')));
+  if (limited) {
+    const wait =
+      Number.isFinite(retryAfter) && retryAfter > 0
+        ? retryAfter * 1000
+        : Number.isFinite(reset) && reset > 0
+          ? reset * 1000 - now
+          : rateLimitMs.min;
+    return {
+      outcome: 'rejected',
+      failure: `rate-limited http ${status}`,
+      retryAfterMs: Math.min(rateLimitMs.max, Math.max(rateLimitMs.min, wait)),
+    };
+  }
+  return {
+    outcome: 'rejected',
+    failure: status === 401 || status === 403 ? `auth http ${status}` : `http ${status}`,
+  };
+}
+/** The followable reason a refused dispatch settles with; it reaches the landing error. */
+export function dispatchFailureReason(failure: string | undefined, repository: string) {
+  if (failure?.startsWith('auth'))
+    return (
+      `GitHub App dispatch was refused (${failure.slice(5)}). Check that the Forge GitHub App is installed on ` +
+      `${repository} with Actions write permission, then finish the same Lane again.`
+    );
+  if (failure?.startsWith('rate-limited'))
+    return `GitHub rate-limited the dispatch (${failure.slice(13)}); Forge waited for Retry-After.`;
+  return `GitHub App dispatch was refused${failure ? ` (${failure})` : ''}.`;
+}
 export const directActions = (run: HostedCheckRun) =>
   run.configuration.provider === 'github-actions' && !run.configuration.credential;
 export async function scheduleDirectActions(ctx: MutationCtx, run: HostedCheckRun) {
@@ -96,6 +157,8 @@ export const observe = internalMutation({
     fence: v.number(),
     outcome: v.union(v.literal('accepted'), v.literal('unknown'), v.literal('rejected')),
     executionId: v.optional(v.string()),
+    failure: v.optional(v.string()),
+    retryAfterMs: v.optional(v.number()),
   },
   returns: v.null(),
   handler: async (ctx, input) => {
@@ -108,6 +171,27 @@ export const observe = internalMutation({
     );
     if (hostedCheckTerminal(run) && run.status !== 'cancelled') return null;
     run.actions.outcome = input.outcome;
+    if (input.failure) run.actions.failure = input.failure.slice(0, 80);
+    if (
+      run.status !== 'cancelled' &&
+      !input.executionId &&
+      !run.executionId &&
+      input.outcome !== 'accepted'
+    ) {
+      // Unknown: one lookup after the acknowledgement bound. Rate-limited: wait
+      // for Retry-After, then settle; the platform retry re-dispatches and counts.
+      const unknown = input.outcome === 'unknown';
+      if (unknown || input.retryAfterMs !== undefined) {
+        run.status = 'unknown';
+        await writeHostedCheck(ctx, row._id, run);
+        await ctx.scheduler.runAfter(
+          unknown ? directActionsAckMs : input.retryAfterMs!,
+          makeFunctionReference<'action'>('projectHostedActionsDirect:reconcile'),
+          { projectId: input.projectId, runId: input.runId, fence: input.fence },
+        );
+        return null;
+      }
+    }
     if (input.executionId) {
       invariant(
         !run.executionId || run.executionId === input.executionId,
@@ -120,7 +204,12 @@ export const observe = internalMutation({
       await writeHostedCheck(ctx, row._id, run);
       await requestDirectCancel(ctx, run);
     } else if (input.outcome === 'rejected' && !run.executionId)
-      await settleDirectActions(ctx, selected, 'runner-unavailable', 'GitHub App dispatch was refused.');
+      await settleDirectActions(
+        ctx,
+        selected,
+        'runner-unavailable',
+        dispatchFailureReason(run.actions.failure, repositoryOf(run)),
+      );
     else {
       if (!run.plan) run.status = run.executionId ? 'preparing' : 'unknown';
       await writeHostedCheck(ctx, row._id, run);
@@ -162,7 +251,10 @@ export const dispatch = internalAction({
     if (!run) return null;
     invariant(run.configuration.provider === 'github-actions', 'RUNNER_UNAVAILABLE', 'Select Actions.');
     let outcome: 'accepted' | 'unknown' | 'rejected' = 'rejected',
-      executionId: string | undefined;
+      executionId: string | undefined,
+      failed: DispatchFailure | undefined,
+      seen: Response | undefined,
+      stage: 'setup' | 'dispatch' = 'setup';
     try {
       const site = process.env.CONVEX_SITE_URL;
       invariant(
@@ -178,10 +270,11 @@ export const dispatch = internalAction({
       );
       // Mark unknown before the non-idempotent call. Never retry a lost response.
       outcome = 'unknown';
+      stage = 'dispatch';
       const response = await githubAppRequest(
         `repos/${run.configuration.repository}/actions/workflows/forge-check.yml/dispatches`,
         token,
-        fetch,
+        async (url, init) => (seen = await fetch(url, init)),
         {
           ref: 'main',
           return_run_details: true,
@@ -199,13 +292,127 @@ export const dispatch = internalAction({
           executionId = String(result.workflow_run_id);
       }
       outcome = 'accepted';
-    } catch {
-      // Do not include provider bodies, credentials or network errors in records.
+    } catch (error) {
+      // Status or error class only: never provider bodies, credentials or messages.
+      failed = classifyDispatchFailure(seen, error, stage);
+      outcome = failed.outcome;
+      console.warn(
+        'FORGE_ACTIONS_DISPATCH_FAILED',
+        JSON.stringify({ runId: run.id, failure: failed.failure }),
+      );
     }
     await ctx.runMutation(makeFunctionReference<'mutation'>('projectHostedActionsDirect:observe'), {
       ...input,
       fence: run.fence,
       outcome,
+      ...(executionId ? { executionId } : {}),
+      ...(failed ? { failure: failed.failure } : {}),
+      ...(failed?.retryAfterMs !== undefined ? { retryAfterMs: failed.retryAfterMs } : {}),
+    });
+    return null;
+  },
+});
+/** Still unacknowledged at this fence: what reconciliation needs, else null. */
+function unacknowledged(run: HostedCheckRun, fence: number) {
+  return !hostedCheckTerminal(run) &&
+    !run.cancelRequested &&
+    run.actions?.fence === fence &&
+    run.fence === fence &&
+    run.dispatchStarted &&
+    !run.executionId
+    ? run.actions
+    : null;
+}
+export const pendingReconcile = internalMutation({
+  args: { ...identity, fence: v.number() },
+  returns: v.union(
+    v.null(),
+    v.object({ lookup: v.boolean(), repository: v.string(), reservedAt: v.number() }),
+  ),
+  handler: async (ctx, input) => {
+    const { run } = await writableHostedCheck(ctx, input);
+    const actions = unacknowledged(run, input.fence);
+    if (!actions || run.configuration.provider !== 'github-actions') return null;
+    // A refused (rate-limited) dispatch created no run: nothing to look up.
+    return {
+      lookup: actions.outcome === 'unknown',
+      repository: run.configuration.repository,
+      reservedAt: actions.reservedAt,
+    };
+  },
+});
+/** Adopts the run the lookup found, or settles `interrupted` so the landing's
+ * platform retry re-dispatches (bounded). Late reports for that settled run are
+ * then refused by run id: no session, result or webhook binds it. */
+export async function reconcileDirectActions(
+  ctx: MutationCtx,
+  input: CheckIdentity & { fence: number; executionId?: string; lookup: string },
+) {
+  const selected = await writableHostedCheck(ctx, input),
+    { row, run } = selected;
+  const actions = unacknowledged(run, input.fence);
+  if (!actions) return null;
+  if (input.executionId) {
+    run.executionId = input.executionId;
+    actions.outcome = 'accepted';
+    if (!run.plan) run.status = 'preparing';
+    await writeHostedCheck(ctx, row._id, run);
+    return null;
+  }
+  const failure = actions.failure;
+  if (actions.outcome === 'rejected')
+    return settleDirectActions(
+      ctx,
+      selected,
+      'runner-unavailable',
+      dispatchFailureReason(failure, repositoryOf(run)),
+    );
+  return settleDirectActions(
+    ctx,
+    selected,
+    'interrupted',
+    `The Actions dispatch was never acknowledged (${failure ?? 'no reply'}; lookup ${input.lookup}); Forge checks again.`,
+  );
+}
+export const reconciled = internalMutation({
+  args: { ...identity, fence: v.number(), executionId: v.optional(v.string()), lookup: v.string() },
+  returns: v.null(),
+  handler: async (ctx, input) => {
+    await reconcileDirectActions(ctx, input);
+    return null;
+  },
+});
+/** One provider lookup per unacknowledged dispatch, by the run-name the workflow
+ * declares (`forge-check/<runId>`). No loop, timer or retry of the dispatch here. */
+export const reconcile = internalAction({
+  args: { ...identity, fence: v.number() },
+  returns: v.null(),
+  handler: async (ctx, input): Promise<null> => {
+    const pending: { lookup: boolean; repository: string; reservedAt: number } | null = await ctx.runMutation(
+      makeFunctionReference<'mutation'>('projectHostedActionsDirect:pendingReconcile'),
+      input,
+    );
+    if (!pending) return null;
+    let executionId: string | undefined,
+      lookup = 'skipped';
+    if (pending.lookup)
+      try {
+        const token = await installationToken(ctx, input.projectId, pending.repository, actionsPermissions);
+        const since = new Date(Math.floor(pending.reservedAt / 1000) * 1000 - 60_000).toISOString();
+        const response = await githubAppRequest(
+          `repos/${pending.repository}/actions/workflows/forge-check.yml/runs?event=workflow_dispatch&per_page=100&created=${encodeURIComponent(`>=${since}`)}`,
+          token,
+        );
+        const body = (await response.json()) as { workflow_runs?: { id?: number; display_title?: string }[] };
+        const found = body.workflow_runs?.find(item => item.display_title === `forge-check/${input.runId}`);
+        lookup = found ? 'found' : 'absent';
+        if (found && Number.isSafeInteger(found.id) && found.id! > 0) executionId = String(found.id);
+      } catch (error) {
+        lookup = `failed ${(error as { name?: unknown })?.name === 'TimeoutError' ? 'timeout' : 'error'}`;
+      }
+    await ctx.runMutation(makeFunctionReference<'mutation'>('projectHostedActionsDirect:reconciled'), {
+      ...input,
+      lookup,
       ...(executionId ? { executionId } : {}),
     });
     return null;

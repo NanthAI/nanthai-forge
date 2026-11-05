@@ -121,7 +121,13 @@ export async function settleLandingAdmission(ctx: MutationCtx, original: Landing
       await writeLanding(
         ctx,
         { ...row, admission },
-        { ...state, version: state.version + 1, observation: landingObservation('checking') },
+        {
+          ...state,
+          version: state.version + 1,
+          observation: landingObservation('checking'),
+          // A re-dispatched admission is progress: no false still-stalled alert (a7de3a93).
+          timing: { submittedAt: state.at, ...state.timing, ciProgressAt: new Date().toISOString() },
+        },
         false,
       );
       return;

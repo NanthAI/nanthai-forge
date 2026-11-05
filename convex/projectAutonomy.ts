@@ -21,6 +21,8 @@ import {
   type AcceptanceActor,
 } from '../src/autonomy-policy';
 import { invariant } from '../src/errors';
+import { acceptancePolicyDigest } from '../src/policy-digest';
+import { landingQueue } from './projectHostedLandingEvents';
 import { report } from './errors';
 import { recordMutationReceipt } from './projectSelfMetricReceiptStore';
 /** Device identity always uses agent authority; callers may explicitly downscope to it. */
@@ -48,7 +50,12 @@ export const read = query({
 });
 export const set = mutation({
   args: { projectId: v.id('hostedProjects'), command: v.string() },
-  returns: v.object({ operationId: v.string(), policy: autonomyPolicy }),
+  returns: v.object({
+    operationId: v.string(),
+    policy: autonomyPolicy,
+    /** Queued or checking landings this edit invalidated (their pinned policy no longer matches); 0 when it changed nothing a landing depends on. Absent on a replay. */
+    invalidatedLandings: v.optional(v.number()),
+  }),
   handler: async (ctx, input) => {
     try {
       const user = await ctx.auth.getUserIdentity();
@@ -81,7 +88,13 @@ export const set = mutation({
           'WORK_OPERATION_CHANGED',
           'Retry policy with its original values.',
         );
-        return { operationId: command.operationId, policy: original.policy };
+        return {
+          operationId: command.operationId,
+          policy: original.policy,
+          ...(original.invalidatedLandings === undefined
+            ? {}
+            : { invalidatedLandings: original.invalidatedLandings }),
+        };
       }
       const previous = effectivePolicy(project);
       invariant(
@@ -92,6 +105,11 @@ export const set = mutation({
       const policy = editedPolicy(previous, command);
       if (command.githubMirror && policy.githubMirror?.autoPush)
         await requireStoredRepositoryBinding(ctx, input.projectId, policy.githubMirror.repo);
+      // One queue-row read, only on an edit that changes what landings are pinned to.
+      const invalidatedLandings =
+        acceptancePolicyDigest(previous) === acceptancePolicyDigest(policy)
+          ? 0
+          : ((await landingQueue(ctx, { projectId: input.projectId, channel: 'main' }))?.status?.total ?? 0);
       await ctx.db.patch(project._id, { autonomyPolicy: policy });
       await ctx.db.insert('projectPolicyChanges', {
         projectId: input.projectId,
@@ -100,6 +118,7 @@ export const set = mutation({
         request,
         previous,
         policy,
+        invalidatedLandings,
         at: new Date().toISOString(),
       });
       await recordMutationReceipt(ctx, {
@@ -108,7 +127,7 @@ export const set = mutation({
         operationId: command.operationId,
         action: 'set-policy',
       });
-      return { operationId: command.operationId, policy };
+      return { operationId: command.operationId, policy, invalidatedLandings };
     } catch (error) {
       return report(error);
     }

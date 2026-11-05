@@ -225,7 +225,12 @@ export async function advanceLandingQueue(ctx: MutationCtx, claim: LandingClaim,
         observation = landingObservation(run.status);
         error = {
           code: run.status === 'failed' ? 'CHECK_FAILED' : 'CHECK_NOT_PASSED',
-          message: `The original exact check settled as ${run.status}. ${await describeCheckFailure(ctx, claim.projectId, run)} ${CHECK_FAILED_NEXT}`,
+          // A platform settlement carries its own followable reason (a7de3a93:
+          // e.g. the GitHub App permission step), not "fix it in this Lane".
+          message:
+            run.status !== 'failed' && run.failureReason
+              ? `The original exact check settled as ${run.status}. ${run.failureReason}`
+              : `The original exact check settled as ${run.status}. ${await describeCheckFailure(ctx, claim.projectId, run)} ${CHECK_FAILED_NEXT}`,
         };
       } else {
         await requireHostedCheckEvidence(ctx, {

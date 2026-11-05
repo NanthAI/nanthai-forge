@@ -12,6 +12,8 @@ export const clientSettingsSchema = z
   .object({
     /** Remove local roots of landed/abandoned Lanes idle this long, on start. 0 = off. */
     autoPruneHours: z.number().nonnegative().finite().default(3),
+    /** An open (active) Lane's root is removed only after this long with no Forge action and no unsaved edits. 0 = never. */
+    activeLanePruneHours: z.number().nonnegative().finite().default(168),
     /** start lists your open Lanes with no Forge action for this long. 0 = off. */
     idleLaneHours: z.number().nonnegative().finite().default(1),
     /** Machine-wide slots for `nforge heavy`; auto derives from RAM and cores. 0 = off. */

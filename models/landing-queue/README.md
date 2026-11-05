@@ -49,6 +49,8 @@ npm run model:landing-queue -- prequeue-cohort-before # expected: a cohort forms
 npm run model:landing-queue -- prequeue-hold-order    # expected: a hold that keeps its order deadlocks
 npm run model:landing-queue -- cohorthold             # expected: lost release wake (10b0a94b)
 npm run model:landing-queue -- cohorthold-fixed
+npm run model:landing-queue -- lostdispatch           # expected: a lost check dispatch strands the head (a7de3a93)
+npm run model:landing-queue -- lostdispatch-fixed
 ```
 
 An installed JDK is a **development-only** prerequisite. On the development Mac, `java`

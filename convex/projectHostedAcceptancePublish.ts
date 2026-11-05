@@ -24,7 +24,7 @@ import { hostedRecordSchema } from '../src/hosted-records';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { effectivePolicy, type AcceptanceActor } from '../src/autonomy-policy';
 import { landingObservation } from '../src/hosted-landing';
-import { acceptancePolicyDigest } from '../src/policy-digest';
+import { policyDigestCurrent } from '../src/policy-digest';
 import { scheduleWouldConflict } from './projectHostedLandingWouldConflict';
 import { governanceReason, requiresGovernedCheck } from '../src/public-governance';
 import { invariant } from '../src/errors';
@@ -95,7 +95,7 @@ export async function publishAcceptance(
   const actor = ownerApproval ?? attempt.actor;
   const policy = effectivePolicy(project);
   invariant(
-    acceptancePolicyDigest(policy) === attempt.policyDigest,
+    policyDigestCurrent(policy, attempt.policyDigest),
     'POLICY_CHANGED',
     'Current landing policy differs from the pinned attempt.',
   );

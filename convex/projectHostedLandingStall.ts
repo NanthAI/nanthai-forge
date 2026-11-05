@@ -19,6 +19,7 @@ import { wakeLandingQueue } from './projectHostedLandingWake';
 import { finishRow, scheduleFinish } from './projectHostedFinishWake';
 import { cancelHostedLanding } from './projectHostedLandingCancel';
 import { holdsLandingOrder } from './projectHostedLandingOrder';
+import { reconcileUnacknowledgedCheck } from './projectHostedCheckReconcile';
 
 type Stalled = LandingIdentity & { lastProgressAt: string };
 const identity = { projectId: v.id('hostedProjects'), submissionId: v.string(), lastProgressAt: v.string() };
@@ -57,6 +58,10 @@ export async function raiseLandingAlarm(ctx: MutationCtx, input: Stalled, now = 
     return null;
   }
   if (!stall || state.observation.stall?.lastProgressAt === stall.lastProgressAt) return null;
+  // Incident a7de3a93: a checking entry whose dispatch no runner acknowledged
+  // has no other owner for 12 h. Act on it, not only flag it (one read otherwise).
+  if (canonical?.phase === 'checking' && canonical.runId)
+    await reconcileUnacknowledgedCheck(ctx, { projectId: input.projectId, runId: canonical.runId }, now);
   if (canonical?.orderWait && canonical.phase === 'ready') {
     // A passed entry waiting for an older submission is not stalled: the older
     // one owns progress and its own alarm. If it no longer holds its place, re-drive.

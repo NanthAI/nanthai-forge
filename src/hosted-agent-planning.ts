@@ -198,11 +198,23 @@ async function reconcile(
   );
   const changed: unknown[] = [];
   const failed: unknown[] = [];
+  const held: unknown[] = [];
   for (const entry of due.slice(0, maxReconcile)) {
     const status = states[entry.id] === 'completed' ? 'closed' : 'abandoned';
     try {
       const item = await fullItem(port, ws, entry.id);
       if (!item || !open.includes(item.status)) continue;
+      // A finished Intent closes its Issue only when every Done-when line is ticked (GitHub's Closes
+      // semantics): otherwise the Issue stays open and the read says how many lines are left.
+      const unmet = status === 'closed' ? unmetDoneWhen(item.body) : 0;
+      if (unmet) {
+        held.push({
+          id: item.id,
+          openLines: unmet,
+          reason: `Intent completed; ${unmet} Done-when line(s) are not ticked. Tick them with put-planning-item (the next read closes the Issue) or keep working.`,
+        });
+        continue;
+      }
       const reason = `Intent ${states[entry.id]}`;
       await writePlanning(
         port,
@@ -221,10 +233,14 @@ async function reconcile(
   }
   return {
     changed,
+    ...(held.length ? { held } : {}),
     ...(failed.length ? { failed } : {}),
     ...(due.length > maxReconcile ? { remaining: due.length - maxReconcile } : {}),
   };
 }
+
+/** Unticked checklist lines (`- [ ]`) in the Issue body: acceptance not yet met. */
+export const unmetDoneWhen = (body: string) => (body.match(/^\s*[-*]\s+\[ \]/gm) ?? []).length;
 
 async function readPlanning(
   port: PlanningPort,
@@ -270,7 +286,7 @@ async function readPlanning(
       item: { ...item, ...(states[item.id] ? { intent: states[item.id] } : {}) },
       comments: comments.page.map(row => JSON.parse(row.value)).reverse(),
       ...(comments.isDone ? {} : { commentsMore: true }),
-      ...(sync?.changed.length || sync?.failed ? { reconciled: sync } : {}),
+      ...(sync?.changed.length || sync?.failed || sync?.held?.length ? { reconciled: sync } : {}),
     };
   }
   let cursor = decode(input.cursor, ws);
@@ -310,7 +326,7 @@ async function readPlanning(
     ),
     scanned,
     nextCursor: done ? null : encode(ws, cursor!),
-    ...(sync?.changed.length || sync?.failed ? { reconciled: sync } : {}),
+    ...(sync?.changed.length || sync?.failed || sync?.held?.length ? { reconciled: sync } : {}),
   };
 }
 

@@ -1472,3 +1472,149 @@ test('failed shard evidence still fails the check when a later infrastructure jo
   await s.call(webhooks, 'receive', { payload: JSON.stringify(webhook(s, 'completed', 'failure')) });
   assert.equal((await s.status(s.run.id)).status, 'failed');
 });
+
+const reconcileModule = await import(moduleUrl('../convex/projectHostedCheckReconcile.ts'));
+/** One GitHub App fake: dispatch answers `dispatch`, the run listing answers `runs`. */
+function github(t, s, { dispatch, runs = [] }) {
+  variables(t, {
+    GITHUB_APP_ID: '12345',
+    GITHUB_APP_PRIVATE_KEY: privateKey.export({ type: 'pkcs8', format: 'pem' }),
+  });
+  const calls = { dispatch: 0, list: 0 };
+  t.mock.method(globalThis, 'fetch', async url => {
+    if (url.endsWith('/installation')) return Response.json({ id: 9 });
+    if (url.endsWith('/access_tokens')) return Response.json({ token: 'synthetic-token' });
+    if (url.endsWith('/forge-check.yml/dispatches')) {
+      calls.dispatch++;
+      return dispatch();
+    }
+    assert.match(
+      url,
+      /\/actions\/workflows\/forge-check\.yml\/runs\?event=workflow_dispatch&per_page=100&created=/,
+    );
+    calls.list++;
+    return Response.json({ workflow_runs: runs });
+  });
+  const ctx = { runMutation: (ref, input) => s.call(direct, getFunctionName(ref).split(':')[1], input) };
+  return { calls, ctx };
+}
+const reconcileTasks = s => s.scheduled.filter(item => item.name === 'projectHostedActionsDirect:reconcile');
+
+test('incident a7de3a93 replay: a dispatch that throws is reconciled by run-name at 5 min instead of waiting 12 h', async t => {
+  // 2026-11-05 16:04/16:07Z: the dispatch call threw after `unknown`; GitHub created no
+  // run, so the run stayed unknown, no executionId, and the queue head never moved.
+  const s = await fixture(t);
+  const { calls, ctx } = github(t, s, {
+    dispatch: () => {
+      throw new TypeError('Synthetic network failure');
+    },
+    runs: [{ id: 77, display_title: `forge-check/${randomUUID()}` }],
+  });
+  await direct.dispatch._handler(ctx, s.id);
+  let run = await s.status(s.run.id);
+  assert.equal(run.status, 'unknown');
+  assert.equal(run.executionId, null);
+  assert.equal(run.actions.failure, 'network', 'the error class is recorded, never its message');
+  const [task] = reconcileTasks(s);
+  assert(task, 'an unacknowledged dispatch schedules one reconciliation');
+  assert.equal(task.delay, direct.directActionsAckMs);
+  assert.equal(direct.directActionsAckMs, 5 * 60_000);
+  assert.equal(reconcileTasks(s).length, 1);
+  await direct.reconcile._handler(ctx, task.input);
+  assert.deepEqual(calls, { dispatch: 1, list: 1 }, 'one lookup; the dispatch itself is never resent');
+  run = await s.status(s.run.id);
+  assert.equal(run.status, 'interrupted', 'terminal, so the landing platform retry re-dispatches');
+  assert.match(run.failureReason, /never acknowledged \(network; lookup absent\)/);
+  // Late reports for the settled run are refused by run id: nothing binds it.
+  await s.call(webhooks, 'receive', { payload: JSON.stringify(webhook(s, 'requested', null)) });
+  assert.equal((await s.status(s.run.id)).executionId, null);
+  await assert.rejects(s.call(sessions, 'session', s.input()), code('EVIDENCE_CHANGED'));
+  // A replayed reconciliation is a one-read no-op.
+  await direct.reconcile._handler(ctx, task.input);
+  assert.equal(calls.list, 1);
+});
+
+test('incident a7de3a93: a slow (not lost) dispatch found by run-name is adopted, never dispatched twice', async t => {
+  const s = await fixture(t);
+  const { calls, ctx } = github(t, s, {
+    dispatch: () => new Response('synthetic', { status: 502 }),
+    runs: [{ id: 555, display_title: `forge-check/${s.run.id}` }],
+  });
+  await direct.dispatch._handler(ctx, s.id);
+  assert.equal((await s.status(s.run.id)).actions.failure, 'http 502');
+  await direct.reconcile._handler(ctx, reconcileTasks(s)[0].input);
+  const run = await s.status(s.run.id);
+  assert.equal(run.executionId, '555');
+  assert.equal(run.status, 'preparing');
+  assert.equal(calls.dispatch, 1);
+  // The workflow then binds the same execution through the existing webhook.
+  await s.call(webhooks, 'receive', {
+    payload: JSON.stringify(webhook(s, 'requested', null, { id: 555 })),
+  });
+  assert.equal((await s.status(s.run.id)).executionId, '555');
+});
+
+test('dispatch refusals: 4xx settles at once with its status, 429 waits for Retry-After, 401/403 name the next step', async t => {
+  const refused = await fixture(t);
+  let gh = github(t, refused, { dispatch: () => new Response('no', { status: 422 }) });
+  await direct.dispatch._handler(gh.ctx, refused.id);
+  let run = await refused.status(refused.run.id);
+  assert.equal(run.status, 'runner-unavailable');
+  assert.equal(run.failureReason, 'GitHub App dispatch was refused (http 422).');
+  assert.equal(reconcileTasks(refused).length, 0, 'a refusal proves no run exists: no lookup');
+
+  t.mock.restoreAll();
+  const limited = await fixture(t);
+  gh = github(t, limited, {
+    dispatch: () => new Response('slow down', { status: 429, headers: { 'retry-after': '120' } }),
+  });
+  await direct.dispatch._handler(gh.ctx, limited.id);
+  run = await limited.status(limited.run.id);
+  assert.equal(run.status, 'unknown', 'waits for Retry-After before the platform retry');
+  const [wait] = reconcileTasks(limited);
+  assert.equal(wait.delay, 120_000);
+  await direct.reconcile._handler(gh.ctx, wait.input);
+  assert.equal(gh.calls.list, 0, 'a rate-limited dispatch created no run: no lookup');
+  run = await limited.status(limited.run.id);
+  assert.equal(run.status, 'runner-unavailable');
+  assert.match(run.failureReason, /rate-limited the dispatch \(http 429\)/);
+  assert.equal(
+    direct.classifyDispatchFailure(
+      new Response(null, { status: 429, headers: { 'retry-after': '99999' } }),
+      null,
+      'dispatch',
+    ).retryAfterMs,
+    15 * 60_000,
+    'Retry-After is bounded',
+  );
+
+  t.mock.restoreAll();
+  const denied = await fixture(t);
+  gh = github(t, denied, { dispatch: () => new Response('no', { status: 403 }) });
+  await direct.dispatch._handler(gh.ctx, denied.id);
+  run = await denied.status(denied.run.id);
+  assert.equal(run.status, 'runner-unavailable');
+  assert.match(
+    run.failureReason,
+    /refused \(http 403\)\. Check that the Forge GitHub App is installed on synthetic\/project with Actions write permission/,
+  );
+});
+
+test('runner contract: the checking stall alarm reconciles only an unacknowledged dispatch past its bound', async t => {
+  const s = await fixture(t);
+  await s.reserve();
+  const run = await s.status(s.run.id);
+  const call = now =>
+    s.transaction(
+      'reconcile',
+      { _handler: (ctx, input) => reconcileModule.reconcileUnacknowledgedCheck(ctx, input, now) },
+      s.id,
+    );
+  assert.equal(await call(run.actions.reservedAt + 60_000), 'none', 'inside the bound the adapter owns it');
+  assert.equal(await call(run.actions.reservedAt + direct.directActionsAckMs), 'lookup');
+  assert.equal(reconcileTasks(s).at(-1).delay, 0);
+  await s.call(direct, 'observe', { ...s.id, fence: 1, outcome: 'accepted', executionId: '123' });
+  const size = s.scheduled.length;
+  assert.equal(await call(run.actions.reservedAt + 60 * 60_000), 'none', 'acknowledged: one read, no work');
+  assert.equal(s.scheduled.length, size);
+});

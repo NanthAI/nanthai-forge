@@ -9,7 +9,11 @@ const RETIRE_LIMIT = 100;
  * completion ledger skips it (keepOpen, or its record pins moved after finish). Patches only advisory
  * rows whose head is exactly the landed head; a Lane saved again afterwards is tracked open again by
  * its next record write. Replay-safe: an already retired row is skipped. */
-export async function retireLandedOverlapLanes(ctx: MutationCtx, identity: ReceiptIdentity) {
+export async function retireLandedOverlapLanes(
+  ctx: MutationCtx,
+  identity: ReceiptIdentity,
+  landed?: { commit: string; at: string },
+) {
   const page = await acceptancePage(ctx, { ...identity, kind: 'inputs', index: 0 });
   if (!page) return 0;
   let retired = 0;
@@ -24,8 +28,14 @@ export async function retireLandedOverlapLanes(ctx: MutationCtx, identity: Recei
         q.eq('projectId', identity.projectId).eq('laneId', lane.data.laneId),
       )
       .unique();
-    if (!row?.open || row.head !== lane.data.head) continue;
-    await ctx.db.patch(row._id, { open: false });
+    if (!row || row.head !== lane.data.head) continue;
+    // Landing evidence rides on the same row patch: Lane status reads it with no extra call.
+    const stamp = landed
+      ? { receiptId: identity.receiptId, commit: landed.commit, laneHead: row.head, at: landed.at }
+      : undefined;
+    const stamped = !stamp || row.landed?.receiptId === stamp.receiptId;
+    if (!row.open && stamped) continue;
+    await ctx.db.patch(row._id, { open: false, ...(stamped ? {} : { landed: stamp }) });
     retired++;
   }
   return retired;

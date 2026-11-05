@@ -136,11 +136,17 @@ for (const history of [0, 575, 1150])
     const source = calls.map(observerProjectionBudget);
     // Reads 3997 -> 3999 (incident c329d191): each of the two order-woken heads
     // cancels the stall alarm armed with its wake when it lands.
+    // Reads 3999 -> 4107 (0b12fcfe): the completion tick reads each landed Lane's Intent head (and its
+    // sibling Lane heads) to complete the Intent with its last Lane. Calls and writes are unchanged.
     assert(
       budget.calls <= 199 &&
-        source.reduce((n, c) => n + c.documents, 0) <= 3999 &&
+        source.reduce((n, c) => n + c.documents, 0) <= 4107 &&
         source.reduce((n, c) => n + c.writes, 0) <= 1200,
-      JSON.stringify(budget),
+      JSON.stringify({
+        ...budget,
+        sourceReads: source.reduce((n, c) => n + c.documents, 0),
+        sourceWrites: source.reduce((n, c) => n + c.writes, 0),
+      }),
     );
     assert(
       Math.max(...source.map(c => c.documents)) <= 170 && Math.max(...source.map(c => c.writes)) <= 55,

@@ -119,5 +119,7 @@ export const autonomyTables = {
     at: v.string(),
     previous: autonomyPolicy,
     policy: autonomyPolicy,
+    /** Queued landings this edit invalidated, kept so a replay returns the same reply. */
+    invalidatedLandings: v.optional(v.number()),
   }).index('by_project_and_operation', ['projectId', 'operationId']),
 };

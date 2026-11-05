@@ -163,6 +163,36 @@ test('a repeated operation replays, a lost reply reconciles, and a stale Work re
   );
 });
 
+test('a completed Intent closes its Issue only when every Done-when line is ticked; otherwise it holds and says how many are left', async t => {
+  const s = await setup(t),
+    p = port(s);
+  const body = ticks => `Why\n\nDone when:\n${ticks.map(tick => `- [${tick}] line`).join('\n')}`;
+  const unmet = (await put(p, { kind: 'issue', title: 'Unmet', body: body(['x', ' ', ' ']) })).result;
+  const met = (await put(p, { kind: 'issue', title: 'Met', body: body(['x', 'x']) })).result;
+  const plain = (await put(p, { kind: 'issue', title: 'No checklist', body: 'Just words' })).result;
+  for (const id of [unmet.itemId, met.itemId, plain.itemId]) p.states.set(id, 'completed');
+  const read = await list(p);
+  const status = Object.fromEntries(read.items.map(item => [item.id, item.status]));
+  assert.deepEqual(status, { [unmet.itemId]: 'open', [met.itemId]: 'closed', [plain.itemId]: 'closed' });
+  assert.deepEqual(
+    read.reconciled.held.map(held => [held.id, held.openLines]),
+    [[unmet.itemId, 2]],
+  );
+  assert.equal(read.reconciled.changed.length, 2);
+  // Ticking the lines is the explicit step; the next read closes the Issue (no further Intent change).
+  await put(p, {
+    kind: 'issue',
+    itemId: unmet.itemId,
+    expectedVersion: unmet.version,
+    title: 'Unmet',
+    body: body(['x', 'x', 'x']),
+    status: 'open',
+  });
+  const after = await list(p);
+  assert.equal(after.items.find(item => item.id === unmet.itemId).status, 'closed');
+  assert.equal(after.reconciled.held, undefined);
+});
+
 test('an Issue whose Intent completed is closed by the next read, with undo named; reconcile:false changes nothing', async t => {
   const s = await setup(t),
     p = port(s);

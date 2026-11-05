@@ -209,6 +209,36 @@ test('reopen Intent does not reopen independently abandoned or completed childre
   assert.equal((await f.read(f.laneId)).state, 'abandoned');
   assert.equal((await f.history('intent', f.intentId)).page.at(-1).to, 'active');
 });
+test('completing a Lane completes its Intent only when no sibling Lane is still open', async () => {
+  const f = await lifecycleFixture();
+  const sibling = await f.addLane({ intentId: f.intentId });
+  const intentStatus = async () =>
+    JSON.parse(
+      (
+        await f.lifeRun('lifecycleIntentRead', records.readHostedRecord, {
+          ...f.auth,
+          kind: 'intent',
+          key: f.intentId,
+        })
+      ).value,
+    ).status;
+  const complete = async laneId =>
+    f.begin(
+      f.request(
+        { kind: 'lane', laneId, expected: pins(await f.read(laneId)) },
+        { action: 'complete', reason: '' },
+      ),
+    );
+  assert.equal((await complete(f.laneId)).status, 'applied');
+  assert.equal((await f.read(f.laneId)).state, 'completed');
+  assert.equal(await intentStatus(), 'active', 'an open sibling Lane keeps the Intent open');
+  assert.equal((await complete(sibling.id)).status, 'applied');
+  assert.equal(await intentStatus(), 'completed', 'the last Lane completes the Intent');
+  // Reopening a Lane never rewrites a completed Intent, and a repeat is a no-op.
+  const versions = f.tables.projectHostedRecords.size;
+  await complete(sibling.id).catch(() => {});
+  assert.equal(f.tables.projectHostedRecords.size, versions);
+});
 test('current write authority and epoch are checked per page/final; readers can read retained lifecycle events', async () => {
   const f = await lifecycleFixture(),
     grant = f.insert('projectContributors', { projectId: f.projectId, contributor: 'contributor' });

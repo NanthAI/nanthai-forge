@@ -6,6 +6,7 @@ import { activeOwnedProject } from './projectAuthority';
 import { acceptancePlan, acceptancePage } from './projectHostedAcceptanceStore';
 import { hostedWriteProject, readHostedRecord, writeHostedRecord } from './projectHostedRecords';
 import { sameSaveLane } from './projectHostedSaveStore';
+import { completeIntentWhenLanesDone } from './projectHostedIntentCompletion';
 import { validateComposePage, composeLaneSchema } from '../src/hosted-compose';
 import { hostedLaneSchema } from '../src/hosted-lane';
 import { canonicalPayload } from '../src/hosted-source-operation';
@@ -43,6 +44,7 @@ export const completeMerged = mutation({
         )
         .take(RECEIPTS);
       const completed: string[] = [];
+      const intents = new Set<string>();
       let sequence = input.sequence,
         page = input.page,
         inspected = 0;
@@ -88,11 +90,20 @@ export const completeMerged = mutation({
               },
             });
             completed.push(lane.id);
+            intents.add(lane.intentId);
           }
         }
         sequence = row.sequence + 1;
         page = 0;
       }
+      for (const intentId of intents)
+        await completeIntentWhenLanesDone(ctx, {
+          projectId: input.projectId,
+          actor: project.owner,
+          authorityEpoch: input.authorityEpoch,
+          intentId,
+          at: new Date().toISOString(),
+        });
       return canonicalPayload({
         completed,
         next: { sequence, page },

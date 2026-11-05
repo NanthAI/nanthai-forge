@@ -42,12 +42,43 @@ export const head = query({
     lifecycleVersion: v.number(),
     /** When the Lane's record last changed (save, sync or lifecycle): no extra reads. */
     lastActivityAt: v.string(),
+    /** Present once an accepted landing carried this Lane's saved head: receipt, accepted commit (State id), time,
+     * and whether the Lane's current head is still that head. Absent while nothing has landed. */
+    landing: v.optional(
+      v.object({
+        state: v.literal('landed'),
+        receiptId: v.string(),
+        commit: v.string(),
+        at: v.string(),
+        current: v.boolean(),
+      }),
+    ),
   }),
   handler: async (ctx, input) => {
     try {
       const { lane } = await laneRecord(ctx, input);
+      // Same query, one indexed read: the overlap row carries the landing stamp.
+      const landed = (
+        await ctx.db
+          .query('projectHostedOverlapLanes')
+          .withIndex('by_project_and_lane', q =>
+            q.eq('projectId', input.projectId).eq('laneId', input.laneId),
+          )
+          .unique()
+      )?.landed;
       return {
         lastActivityAt: lane.at,
+        ...(landed
+          ? {
+              landing: {
+                state: 'landed' as const,
+                receiptId: landed.receiptId,
+                commit: landed.commit,
+                at: landed.at,
+                current: landed.laneHead === lane.head,
+              },
+            }
+          : {}),
         head: lane.head,
         version: lane.version,
         sourceVersion: lane.sourceVersion,

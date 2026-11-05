@@ -159,3 +159,33 @@ test('the expectedPolicy compare ignores key order, so a policy copied from a re
   assert(samePolicy(reordered, stored));
   assert(!samePolicy({ ...reordered, preset: 'custom' }, stored));
 });
+
+test('set-policy reports how many queued landings an edit invalidated', async t => {
+  const { s, run } = cli(t);
+  const projectId = [...s.tables.hostedProjects.keys()][0];
+  s.insert('projectHostedLandingQueues', {
+    projectId,
+    channel: 'main',
+    sequence: 3,
+    fence: 0,
+    wake: null,
+    lease: null,
+    status: { total: 4, groups: 2, horizon: [], lastProgressAt: new Date().toISOString() },
+  });
+  const edit = fields => run('set-policy', { operationId: randomUUID(), ...fields });
+  // Edits no landing depends on invalidate nothing.
+  for (const fields of [
+    { notify: { awaySummary: false } },
+    { trust: { enabled: false } },
+    { agentDefaults: { preflight: 'advise' } },
+  ])
+    assert.equal((await edit(fields)).result.invalidatedLandings, 0, JSON.stringify(fields));
+  // A gate edit invalidates every pinned landing in the queue.
+  const gate = await edit({ acceptance: { gate: 'contract' } });
+  assert.equal(gate.result.invalidatedLandings, 4);
+  // A replay returns the original reply, count included.
+  const first = (await run('set-policy', { operationId: randomUUID(), acceptance: { gate: 'contract' } }))
+    .result;
+  const again = await run('set-policy', { operationId: first.operationId, acceptance: { gate: 'contract' } });
+  assert.equal(again.result.invalidatedLandings, first.invalidatedLandings);
+});

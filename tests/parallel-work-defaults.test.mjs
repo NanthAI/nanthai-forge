@@ -70,6 +70,7 @@ test('client settings default on, persist per machine and explain their source',
   isolated(t);
   assert.deepEqual(readClientSettings(), {
     autoPruneHours: 3,
+    activeLanePruneHours: 168,
     idleLaneHours: 1,
     localHeavySlots: 'auto',
     shareDependencies: true,

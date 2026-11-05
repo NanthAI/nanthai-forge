@@ -251,7 +251,7 @@ const examples: Record<string, unknown> = {
   log: { operationId: 'ORIGINAL_UUID', stream: 'stderr', tail: 4096 },
   prioritize: { submissionId: 'SUBMISSION_ID', priority: 'urgent' },
   ack: { laneId: 'LANE_ID', choice: 'accept-order' },
-  preflight: { laneId: 'LANE_ID' },
+  preflight: { laneId: 'LANE_ID', run: false },
   'source-pack': {},
   cancel: { operationId: 'ORIGINAL_UUID' },
   accept: { viewId: 'CANDIDATE_ID' },
@@ -381,7 +381,7 @@ function actionHelp(action: string): string {
       'Hosted: ack {laneId?,choice?:"accept-order"|"swap"|"split",text?} answers every pending overlap notice on the Lane (stable answer ids, so a repeat replays). accept-order keeps your change and lands in order; split records that you routed around.\n';
   if (action === 'preflight')
     result +=
-      "Hosted: preflight {laneId?,run?:true,budgetSeconds?} selects the saved head's affected tests with the landing check's selector, builds (build:core) and runs them here, and records the result in ROOT.forge-client. Local order is changed tests, explicit coverage and smoke, then direct consumers, then distance-2 consumers; a time budget (default 180 s, budgetSeconds) trims the farthest tier; plan and receipt name the cut. Cut tests run in the pre-queue Lane check. The receipt reports wall time and peak RSS. run:false only plans (tests, estimateMinutes, command, local). Save first; land --save accepts a passing record for the same saved head.\n";
+      "Hosted: preflight {laneId?,run?:true,budgetSeconds?} defaults to run:true, which builds and runs tests at once; look first with run:false (plan only: no build, no tests, no record) and read scope, tests, deferredTests and estimateMinutes. When the scope is full or near-full, run only your targeted test files and leave the rest to land --save, whose hosted check is the full run. It selects the saved head's affected tests with the landing check's selector, builds (build:core) and runs them here, and records the result in ROOT.forge-client. Local order is changed tests, explicit coverage and smoke, then direct consumers, then distance-2 consumers; a time budget (default 180 s, budgetSeconds) trims the farthest tier; plan and receipt name the cut. Cut tests run in the pre-queue Lane check. The receipt reports wall time and peak RSS. run:false only plans (tests, estimateMinutes, command, local). After a sync or resolve the server has no saved path list for the head: the plan then compares the base and head States, drops paths already equal to current main, and reports changedPathsFrom manifests. Save first; land --save accepts a passing record for the same saved head.\n";
   if (action === 'source-pack')
     result +=
       'Hosted operator repair: x ROOT source-pack {} packs the current hosted main from this machine (objects come from the pack, the machine cache or object downloads) and publishes it to R2, so checks and Lane opens read one pack instead of every object. status current means the latest pack is already main; seed, cutover or import of a large repo should be followed by this.\n';

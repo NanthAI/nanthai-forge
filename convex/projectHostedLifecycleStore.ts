@@ -1,5 +1,6 @@
 import { scheduleAbandonedBatchReselection } from './projectHostedBatchAbandon';
 // SPDX-License-Identifier: Apache-2.0
+import { completeIntentWhenLanesDone } from './projectHostedIntentCompletion';
 import { cancelAbandonedLaneLandings } from './projectHostedLifecycleCancel';
 import { landingQueue } from './projectHostedLandingEvents';
 import type { MutationCtx, QueryCtx } from './_generated/server';
@@ -196,6 +197,15 @@ export async function applyLifecycleRecord(
       version: before.version + 1,
     });
   await writeLifecycleEvent(ctx, plan, before, -1);
+  // Completing a Lane that was its Intent's last open one completes the Intent (and so closes its Issue).
+  if (request.action === 'complete' && before.kind === 'lane')
+    await completeIntentWhenLanesDone(ctx, {
+      projectId: plan.projectId,
+      actor: plan.actor,
+      authorityEpoch: plan.authorityEpoch,
+      intentId: before.intentId,
+      at: plan.at,
+    });
   if (request.action === 'abandon') {
     // Freeze the queue at application, after any save or cascade staging.
     // Enqueue writes this same row, so concurrent admissions serialize here.

@@ -20,6 +20,7 @@ import { ownedProject, accessibleProject, activeOwnedProject, activeProject } fr
 import { intentAuthority } from './projectContributors';
 import { metadataCommandSchema } from '../src/work-intent-types';
 import { invariant } from '../src/errors';
+import { acceptancePolicyDigest } from '../src/policy-digest';
 import { indexEntry } from './projectWorkIndexFields';
 import { record, recordPartition, selectedGeneration } from './projectWorkIndexStore';
 import { internal } from './_generated/api';
@@ -272,7 +273,7 @@ export async function appendWork(
         'Channel acceptance requires the current signed-in project owner.',
       );
       invariant(
-        evidence && JSON.stringify(evidence.policy) === JSON.stringify(policy),
+        evidence && acceptancePolicyDigest(evidence.policy) === acceptancePolicyDigest(policy),
         'POLICY_CHANGED',
         'Project policy changed during acceptance. Refresh before accepting.',
       );

@@ -52,6 +52,8 @@ if (config === 'all') {
     'prequeue-hold-order',
     'cohorthold',
     'cohorthold-fixed',
+    'lostdispatch',
+    'lostdispatch-fixed',
   ]) {
     const code = await new Promise((resolve, reject) => {
       const child = spawn(process.execPath, [fileURLToPath(import.meta.url), name], { stdio: 'inherit' });

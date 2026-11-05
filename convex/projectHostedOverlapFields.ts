@@ -16,6 +16,10 @@ export const hostedOverlapTables = {
     lifecyclePlanId: v.optional(v.id('projectHostedLifecyclePlans')),
     recordVersion: v.number(),
     open: v.boolean(),
+    /** Set when an accepted receipt landed this exact saved head: Lane status reads it (no extra call). */
+    landed: v.optional(
+      v.object({ receiptId: v.string(), commit: v.string(), laneHead: v.string(), at: v.string() }),
+    ),
     changes: v.string(),
     complete: v.boolean(),
   })

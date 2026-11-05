@@ -94,11 +94,17 @@ for (const history of [575, 1150])
     // Measured on the pre-fix controller with the identical replay, including
     // the blocked claim, advisory completions, exact shared check and publication.
     const source = calls.map(observerProjectionBudget);
+    // Reads 1329 -> 1334 (0b12fcfe): the completion tick reads the landed Lane's Intent head to complete
+    // the Intent with its last Lane. Calls and writes are unchanged.
     assert(
       budget.calls <= 71 &&
-        source.reduce((n, c) => n + c.documents, 0) <= 1329 &&
+        source.reduce((n, c) => n + c.documents, 0) <= 1334 &&
         source.reduce((n, c) => n + c.writes, 0) <= 410,
-      JSON.stringify(budget),
+      JSON.stringify({
+        ...budget,
+        sourceReads: source.reduce((n, c) => n + c.documents, 0),
+        sourceWrites: source.reduce((n, c) => n + c.writes, 0),
+      }),
     );
     assert(preparedAtClaim, 'train preparation must not wait for advisory source completion');
     assert.equal(f.runs().length, 1, 'the shared exact check remains mandatory');

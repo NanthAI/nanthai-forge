@@ -12,6 +12,7 @@ import {
   rmSync,
   symlinkSync,
   utimesSync,
+  readFileSync,
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
@@ -20,6 +21,7 @@ import { checkoutHostedLane } from '../dist/hosted-lane-checkout.js';
 import { gcNestedLanes, gcNestedLanesHourly, touchNestedLane } from '../dist/client-cache-gc.js';
 import { hostedLaneDirty } from '../dist/hosted-lane-dirty.js';
 import { laneHousekeeping } from '../dist/lane-prune.js';
+import { lanePruneLogFile } from '../dist/lane-prune-log.js';
 import { recordLane } from '../dist/lane-registry.js';
 import { digest } from '../dist/hash.js';
 import { createServer } from 'node:net';
@@ -225,8 +227,9 @@ test('cache GC runs at most once an hour and only stamps a finished pass', t => 
   assert(!existsSync(`${root}.forge-client/gc-stamp`));
 });
 
-test('prune removes a clean active Lane idle past the age, and keeps an edited one listed', async t => {
+test('prune removes a clean active Lane idle past the active age, and keeps an edited one listed', async t => {
   const directory = isolated(t);
+  const settings = { autoPruneHours: 3, idleLaneHours: 1, activeLanePruneHours: 3 };
   const now = Date.now(),
     cleanRoot = join(directory, 'clean'),
     editedRoot = join(directory, 'edited'),
@@ -256,10 +259,10 @@ test('prune removes a clean active Lane idle past the age, and keeps an edited o
   age(join(editedRoot, 'src', 'a.txt'), 10);
   const states = { [ids.clean]: 'active', [ids.edited]: 'active', [ids.done]: 'completed' };
   const readStates = async (_address, laneIds) => new Map(laneIds.map(id => [id, states[id]]));
-  const dry = await laneHousekeeping({ readStates, address, apply: false, now });
+  const dry = await laneHousekeeping({ readStates, address, apply: false, now, settings });
   assert.equal(dry.pruned.length, 2);
   assert(existsSync(cleanRoot), 'dry run removes nothing');
-  const result = await laneHousekeeping({ readStates, address, apply: true, now });
+  const result = await laneHousekeeping({ readStates, address, apply: true, now, settings });
   assert.deepEqual(new Set(result.pruned.map(item => item.laneId)), new Set([ids.clean, ids.done]));
   assert(!existsSync(cleanRoot) && !existsSync(doneRoot));
   assert(existsSync(join(editedRoot, 'src', 'a.txt')), 'a root with unsaved edits is never removed');
@@ -290,10 +293,110 @@ test('prune removes a clean active Lane idle past the age, and keeps an edited o
     address,
     apply: true,
     now,
+    settings,
     isDirty: () => (checks++, false),
   });
   assert.equal(checks, 8);
   assert.equal(bounded.pruned.length, 8);
+});
+
+test('an idle active Lane root survives housekeeping by default and a removal is logged', async t => {
+  const directory = isolated(t);
+  const now = Date.now();
+  const old = {},
+    waiting = {};
+  const prepare = async (name, hours) => {
+    const root = join(directory, name),
+      laneId = await realCheckout(root);
+    ageTree(root, hours);
+    ageTree(`${root}.forge-client`, hours);
+    if (existsSync(`${root}.forge-metrics.jsonl`)) age(`${root}.forge-metrics.jsonl`, hours);
+    recordLane({ laneId, root, ...address, outcome: name, lastActionAt: now - hours * hour }, now);
+    return { laneId, root };
+  };
+  Object.assign(waiting, await prepare('waiting', 24 * 3));
+  Object.assign(old, await prepare('abandoned-long-ago', 24 * 9));
+  const done = await prepare('done', 5);
+  const states = { [waiting.laneId]: 'active', [old.laneId]: 'active', [done.laneId]: 'completed' };
+  const readStates = async (_address, laneIds) => new Map(laneIds.map(id => [id, states[id]]));
+  // Default settings: 3 h for finished Lanes, 7 days for an open one.
+  const settings = { autoPruneHours: 3, idleLaneHours: 1 };
+  const result = await laneHousekeeping({
+    readStates,
+    address,
+    apply: true,
+    now,
+    settings,
+    isDirty: () => false,
+  });
+  assert(
+    existsSync(waiting.root),
+    'an open Lane idle for 3 days (waiting on a landing or review) keeps its root',
+  );
+  assert.deepEqual(
+    result.idle.map(item => item.laneId),
+    [waiting.laneId],
+    'it is still listed as idle',
+  );
+  assert(!existsSync(done.root) && !existsSync(old.root), 'finished and week-old unsaved-clean roots go');
+  assert.deepEqual(new Set(result.pruned.map(item => item.laneId)), new Set([done.laneId, old.laneId]));
+  const lines = readFileSync(lanePruneLogFile(), 'utf8').trim().split('\n').map(JSON.parse);
+  assert.deepEqual(new Set(lines.map(line => line.laneId)), new Set([done.laneId, old.laneId]));
+  for (const line of lines) {
+    assert.deepEqual(Object.keys(line).sort(), [
+      'at',
+      'bytes',
+      'idleHours',
+      'laneId',
+      'reason',
+      'root',
+      'state',
+    ]);
+    assert.match(line.reason, /idle .*h, threshold \d+h/);
+  }
+  assert.equal(lines.find(line => line.laneId === old.laneId).state, 'active');
+  // activeLanePruneHours 0 means an open Lane is never removed.
+  const never = await prepare('never', 24 * 30);
+  const kept = await laneHousekeeping({
+    readStates: async (_address, laneIds) => new Map(laneIds.map(id => [id, 'active'])),
+    address,
+    apply: true,
+    now,
+    settings: { ...settings, activeLanePruneHours: 0 },
+    isDirty: () => false,
+  });
+  assert(existsSync(never.root));
+  assert.deepEqual(kept.pruned, []);
+});
+
+test('incident replay: a builder waiting on a long landing loses no Lane folder to housekeeping', async t => {
+  // lane-0a94a093 vanished while its builder waited: the server still said active, the root had no
+  // unsaved edits (everything saved before the landing) and 3 h without a Forge action elapsed.
+  const directory = isolated(t);
+  const now = Date.now(),
+    root = join(directory, 'lane-0a94a093'),
+    laneId = await realCheckout(root);
+  ageTree(root, 4);
+  ageTree(`${root}.forge-client`, 4);
+  if (existsSync(`${root}.forge-metrics.jsonl`)) age(`${root}.forge-metrics.jsonl`, 4);
+  recordLane({ laneId, root, ...address, lastActionAt: now - 4 * hour }, now);
+  const readStates = async (_address, laneIds) => new Map(laneIds.map(id => [id, 'active']));
+  const input = { readStates, address, apply: true, now, settings: { autoPruneHours: 3, idleLaneHours: 1 } };
+  const result = await laneHousekeeping(input);
+  assert(existsSync(root));
+  assert.deepEqual(result.pruned, []);
+  // Even past the active age, a command still running in the Lane (a landing wait) protects the root.
+  recordLane(
+    {
+      laneId,
+      running: { action: 'wait', pid: process.pid, since: now - hour },
+      lastActionAt: now - 30 * 24 * hour,
+    },
+    now,
+  );
+  const running = await laneHousekeeping({ ...input, isDirty: () => false });
+  assert(existsSync(root));
+  assert.equal(running.kept.find(item => item.laneId === laneId)?.reason, 'command running');
 });
 
 test('a killed driver’s wake directory is swept; live and young ones stay', async t => {

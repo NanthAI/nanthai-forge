@@ -3,12 +3,21 @@ import { canonicalRoot, clientCacheRoot, rootSibling } from './root-paths.js';
 import { lstatSync, readFileSync, readdirSync, readlinkSync, rmSync } from 'node:fs';
 import { join, resolve, sep } from 'node:path';
 import { makeFunctionReference } from 'convex/server';
-import { forgetLane, listLanes, recordLane, type LaneRegistryEntry } from './lane-registry.js';
+import {
+  forgetLane,
+  laneCommandRunning,
+  listLanes,
+  recordLane,
+  type LaneRegistryEntry,
+} from './lane-registry.js';
+import { logLanePrune } from './lane-prune-log.js';
 import { readClientSettings, type ClientSettings } from './client-settings.js';
 import { hostedLaneDirty } from './hosted-lane-dirty.js';
 import { invariant } from './errors.js';
 
 const hour = 3_600_000;
+/** An open Lane may be waiting on a long landing or review; its root outlives a week by default. */
+const DEFAULT_ACTIVE_PRUNE_HOURS = 168;
 /** Unsaved-edit checks hash a whole checkout; bound them per pass. */
 const DIRTY_CHECKS = 8;
 const terminal = new Set(['completed', 'abandoned']);
@@ -110,7 +119,8 @@ export async function laneHousekeeping(input: {
   readStates: LaneStateReader;
   address?: LaneAddress;
   apply: boolean;
-  settings?: Pick<ClientSettings, 'autoPruneHours' | 'idleLaneHours'>;
+  settings?: Pick<ClientSettings, 'autoPruneHours' | 'idleLaneHours'> &
+    Partial<Pick<ClientSettings, 'activeLanePruneHours'>>;
   /** Never removed: the caller's own root and Lane. */
   exclude?: { roots?: string[]; laneIds?: string[] };
   scan?: string;
@@ -121,7 +131,8 @@ export async function laneHousekeeping(input: {
   const now = input.now ?? Date.now(),
     settings = input.settings ?? readClientSettings();
   const pruneMs = settings.autoPruneHours * hour,
-    idleMs = settings.idleLaneHours * hour;
+    idleMs = settings.idleLaneHours * hour,
+    activeMs = (settings.activeLanePruneHours ?? DEFAULT_ACTIVE_PRUNE_HOURS) * hour;
   const links = input.scan ? adoptLaneCheckouts(input.scan, now).links : new Map<string, string[]>();
   // A link whose Lane copy is gone (removed by GC or by hand) is only clutter; remove it with its target.
   if (input.apply)
@@ -141,6 +152,8 @@ export async function laneHousekeeping(input: {
     else if (!excludedLanes.has(entry.laneId)) entries.push(entry);
   }
   const thresholds = [pruneMs, idleMs].filter(value => value > 0);
+  // An open Lane's root is removed only past its own, longer age, and never when pruning is off.
+  const activeLimit = pruneMs > 0 && activeMs > 0 ? Math.max(pruneMs, activeMs) : 0;
   if (!thresholds.length) return result;
   const due = entries.filter(entry => now - entry.lastActionAt >= Math.min(...thresholds));
   const states = new Map<string, string | null>();
@@ -191,14 +204,15 @@ export async function laneHousekeeping(input: {
         idleHours: Math.round((idleFor / hour) * 10) / 10,
         root: entry.root,
       });
-    // An active Lane idle past the prune age loses its root only when nothing in it is unsaved;
-    // `open` restores it from the saved head.
-    const activeIdle = state === 'active' && pruneMs > 0 && idleFor >= pruneMs;
+    // An active Lane idle past the active prune age loses its root only when nothing in it is unsaved
+    // and no command runs in it; `open` restores it from the saved head.
+    const activeIdle = state === 'active' && activeLimit > 0 && idleFor >= activeLimit;
+    const limit = activeIdle ? activeLimit : pruneMs;
     if (state === 'active' && !activeIdle) {
       if (idleMs > 0 && idleFor >= idleMs) listIdle();
       continue;
     }
-    if (!state || (!activeIdle && !terminal.has(state)) || pruneMs === 0 || idleFor < pruneMs) {
+    if (!state || (!activeIdle && !terminal.has(state)) || limit === 0 || idleFor < limit) {
       if (!state) result.kept.push({ laneId: entry.laneId, reason: 'state unknown' });
       continue;
     }
@@ -208,9 +222,11 @@ export async function laneHousekeeping(input: {
         ? 'in use by this command'
         : markerIdentity(root)?.laneId !== entry.laneId
           ? 'not this Lane checkout'
-          : nestedLanes(root)
-            ? 'contains other Lane roots'
-            : null;
+          : laneCommandRunning(entry)
+            ? 'command running'
+            : nestedLanes(root)
+              ? 'contains other Lane roots'
+              : null;
     if (!reason && activeIdle)
       reason =
         dirtyChecks++ >= DIRTY_CHECKS
@@ -224,11 +240,22 @@ export async function laneHousekeeping(input: {
       continue;
     }
     const tree = scanTree(siblings(root));
-    if (now - tree.newest < pruneMs) {
-      result.kept.push({ laneId: entry.laneId, reason: `modified within ${settings.autoPruneHours}h` });
+    if (now - tree.newest < limit) {
+      result.kept.push({ laneId: entry.laneId, reason: `modified within ${limit / hour}h` });
       continue;
     }
     if (input.apply) {
+      logLanePrune(
+        {
+          laneId: entry.laneId,
+          root,
+          state,
+          reason: `${state} Lane idle ${Math.round((idleFor / hour) * 10) / 10}h, threshold ${limit / hour}h`,
+          idleHours: Math.round((idleFor / hour) * 10) / 10,
+          bytes: tree.bytes,
+        },
+        now,
+      );
       for (const path of siblings(root)) rmSync(path, { recursive: true, force: true });
       for (const link of links.get(root) ?? []) rmSync(link, { force: true });
       forgetLane(entry.laneId);
@@ -306,7 +333,11 @@ export async function pruneCli(args: string[], readStates: LaneStateReader) {
   const result = await laneHousekeeping({
     readStates,
     apply,
-    settings: { autoPruneHours: hours, idleLaneHours: settings.idleLaneHours },
+    settings: {
+      autoPruneHours: hours,
+      idleLaneHours: settings.idleLaneHours,
+      activeLanePruneHours: settings.activeLanePruneHours,
+    },
     ...(scan ? { scan } : {}),
   });
   return { ...result, olderThanHours: hours };

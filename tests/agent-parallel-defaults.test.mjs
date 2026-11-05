@@ -17,7 +17,7 @@ import {
   policyReadView,
   samePolicy,
 } from '../dist/autonomy-policy.js';
-import { acceptancePolicyDigest } from '../dist/policy-digest.js';
+import { acceptancePolicyDigest, policyDigestCurrent } from '../dist/policy-digest.js';
 import { digest } from '../dist/portable-hash.js';
 import { canonicalPayload } from '../dist/hosted-source-operation.js';
 import { llmDocuments } from '../scripts/llm-documents.mjs';
@@ -67,12 +67,25 @@ test('compare-and-swap accepts the read view; landing pins ignore agent defaults
   assert(samePolicy(policyReadView(stored), stored));
   assert(samePolicy(stored, stored));
   assert(!samePolicy({ ...stored, laneUpdates: 'ask' }, stored));
-  // Existing policies keep their digests, so a deploy never invalidates a queued landing.
-  assert.equal(acceptancePolicyDigest(stored), digest(canonicalPayload(stored)));
+  // Landings pinned under the earlier digest (the whole policy) stay valid after a deploy.
+  assert(policyDigestCurrent(stored, digest(canonicalPayload(stored))));
   assert.equal(
     acceptancePolicyDigest(edit(stored, { preflight: 'off' })),
     acceptancePolicyDigest({ ...stored, preset: 'custom' }),
   );
+});
+
+test('incident replay: a shadow-trust set-policy keeps queued landings pinned; a gate edit does not', () => {
+  // 2026-10-31: the lead set trust {enabled:false}; the edit turned the preset into `custom`, which
+  // changed the digest and cancelled three in-flight finishes with POLICY_CHANGED.
+  const stored = policyPreset('trusted'),
+    pinned = acceptancePolicyDigest(stored);
+  const operationId = crypto.randomUUID();
+  const shadow = editedPolicy(stored, { action: 'set-policy', operationId, trust: { enabled: false } });
+  assert.equal(shadow.preset, 'custom');
+  assert(policyDigestCurrent(shadow, pinned));
+  const gated = editedPolicy(stored, { action: 'set-policy', operationId, acceptance: { gate: 'full' } });
+  assert(!policyDigestCurrent(gated, pinned));
 });
 
 test('urgent roles: owner in person or asOwner; agents only when allowed; never another account', () => {

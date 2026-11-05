@@ -31,7 +31,7 @@ import { hostedAcceptanceSchema } from '../src/hosted-acceptance';
 import { effectivePolicy } from '../src/autonomy-policy';
 import { batchEligible } from '../src/hosted-landing-batch';
 import { canonicalPayload } from '../src/hosted-source-operation';
-import { acceptancePolicyDigest } from '../src/policy-digest';
+import { policyDigestCurrent } from '../src/policy-digest';
 import { landingObservation } from '../src/hosted-landing';
 import { invariant } from '../src/errors';
 import { acceptedLandingMessage } from './projectHostedLandingMessage';
@@ -112,8 +112,7 @@ export async function publishLandingBatch(ctx: MutationCtx, claim: LandingClaim,
     'SOURCE_AUTHORITY_CHANGED',
     'Current main source authority differs.',
   );
-  const policy = effectivePolicy(project),
-    policyDigest = acceptancePolicyDigest(policy);
+  const policy = effectivePolicy(project);
   const candidateRow = await readHostedRecord(ctx, {
     projectId: claim.projectId,
     actor: attempt.actor.id,
@@ -152,7 +151,7 @@ export async function publishLandingBatch(ctx: MutationCtx, claim: LandingClaim,
     );
     const originalCandidate = hostedRecordSchema.options[3].parse(JSON.parse(own.value));
     retry ||=
-      member.attempt.policyDigest !== policyDigest ||
+      !policyDigestCurrent(policy, member.attempt.policyDigest) ||
       !batchEligible(project, policy, member.attempt.actor, originalCandidate);
   }
   if (mainChanged && !retry && members.length === batch.members.length) {
@@ -249,7 +248,7 @@ export async function publishLandingBatch(ctx: MutationCtx, claim: LandingClaim,
         : {}),
       batchId: batch.id,
       actor: member.attempt.actor,
-      policyDigest,
+      policyDigest: member.attempt.policyDigest,
       check,
       snapshot: {
         id: member.attempt.operations.accept,

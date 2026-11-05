@@ -6,7 +6,11 @@ import { acceptanceFixture, api, store, records, control, maxima } from './hoste
 import { code } from './hosted-landing-fixture.mjs';
 import { canonicalPayload } from '../dist/hosted-source-operation.js';
 import { policyPreset } from '../dist/autonomy-policy.js';
+import { acceptancePolicyDigest, policyDigestCurrent } from '../dist/policy-digest.js';
+import { digest } from '../dist/portable-hash.js';
 import { hostedAcceptanceSchema } from '../dist/hosted-acceptance.js';
+import { moduleUrl } from './convex-module.mjs';
+const lanes = await import(moduleUrl('../convex/projectHostedLanes.ts'));
 const keyId = process.env.FORGE_HOSTED_CHECK_KEY_ID;
 test.before(() => {
   process.env.FORGE_HOSTED_CHECK_KEY_ID = 'SYNTHETIC';
@@ -145,6 +149,57 @@ test('a policy change between ready/claim and publication is rejected at final u
   assert.equal(f.tables.projectHostedAcceptances.size, 0);
 });
 
+// Policy edits that cannot change what a landing may accept leave a pinned attempt valid.
+for (const [name, edit] of [
+  ['shadow trust', policy => ({ ...policy, trust: { enabled: false, trustedAt: 5 } })],
+  ['notify', policy => ({ ...policy, notify: { awaySummary: false } })],
+  [
+    'githubMirror',
+    policy => ({ ...policy, githubMirror: { repo: 'synthetic/mirror', autoPush: false, laneRefs: false } }),
+  ],
+  ['agentDefaults', policy => ({ ...policy, agentDefaults: { preflight: 'advise' } })],
+])
+  test(`a ${name} policy edit leaves a pinned landing valid`, async () => {
+    const f = await acceptanceFixture(),
+      { state } = await checked(f),
+      claim = await f.claimAcceptance(state);
+    f.patch('hostedProjects', f.projectId, { autonomyPolicy: edit(policyPreset('trusted')) });
+    assert.equal((await f.commit(claim)).status, 'landed');
+  });
+// The fields that decide a landing still invalidate it.
+for (const [name, edit] of [
+  ['gate', policy => ({ ...policy, acceptance: { ...policy.acceptance, gate: 'full' } })],
+  ['mode', policy => ({ ...policy, acceptance: { ...policy.acceptance, mode: 'review' } })],
+  [
+    'protectedPaths',
+    policy => ({ ...policy, acceptance: { ...policy.acceptance, protectedPaths: ['src/**'] } }),
+  ],
+  ['autoActors', policy => ({ ...policy, acceptance: { ...policy.acceptance, autoActors: ['someone'] } })],
+  ['enforced trust', policy => ({ ...policy, trust: { enabled: true } })],
+])
+  test(`a ${name} policy edit still invalidates a pinned landing`, async () => {
+    const f = await acceptanceFixture(),
+      { state } = await checked(f),
+      claim = await f.claimAcceptance(state);
+    f.patch('hostedProjects', f.projectId, { autonomyPolicy: edit(policyPreset('trusted')) });
+    await assert.rejects(f.commit(claim), code('POLICY_CHANGED'));
+    assert.equal(f.tables.projectHostedAcceptances.size, 0);
+  });
+test('an attempt pinned with the earlier digest stays valid until a gate field changes', () => {
+  const trusted = policyPreset('trusted'),
+    legacy = { ...trusted };
+  delete legacy.agentDefaults;
+  assert.equal(policyDigestCurrent(trusted, digest(canonicalPayload(legacy))), true);
+  assert.equal(
+    policyDigestCurrent({ ...trusted, notify: { awaySummary: false } }, acceptancePolicyDigest(trusted)),
+    true,
+  );
+  assert.equal(
+    policyDigestCurrent({ ...trusted, laneUpdates: 'ask' }, acceptancePolicyDigest(trusted)),
+    false,
+  );
+});
+
 for (const kind of [
   'definition',
   'configuration',
@@ -262,6 +317,107 @@ test('only landed exact saved heads complete; newer saves, lifecycle changes, si
       .some(c => c.written.includes('projectHostedChannels')),
     false,
   );
+});
+
+const seedIntent = async f => {
+  const intentId = randomUUID();
+  await f.runAcceptance('acceptanceSeed', records.writeHostedRecord, {
+    ...f.auth,
+    expectedVersion: null,
+    record: {
+      kind: 'intent',
+      id: intentId,
+      version: 0,
+      at: '2026-01-01T00:00:00.000Z',
+      outcome: 'Planned Issue',
+      constraints: '',
+      creatorAccountId: 'owner',
+      assigneeAccountIds: [],
+      base: { head: f.main.head, receiptId: f.main.receipt.id },
+      status: 'active',
+    },
+  });
+  return intentId;
+};
+const intentStatus = async (f, intentId) =>
+  JSON.parse(
+    (
+      await f.runAcceptance('acceptanceIntentRead', records.readHostedRecord, {
+        ...f.auth,
+        kind: 'intent',
+        key: intentId,
+      })
+    ).value,
+  ).status;
+const laneHead = (f, laneId) => f.transaction('laneHead', lanes.head, { projectId: f.projectId, laneId });
+
+test('the landing that completes an Intent’s last Lane completes the Intent, in the same completion step', async () => {
+  const f = await acceptanceFixture(),
+    intentId = await seedIntent(f);
+  const lanes = [await f.lane({ intentId }), await f.lane({ intentId })];
+  const item = await f.makeCandidate(lanes, [], {
+    governance: { version: 1, paths: ['src/leaf.ts'], ownerInputs: false },
+  });
+  const { state } = await checked(f, item);
+  const { receipt } = await f.accept(state);
+  assert.equal(await intentStatus(f, intentId), 'active', 'acceptance itself writes no Intent');
+  await f.materialize(receipt.id);
+  assert.equal(await intentStatus(f, intentId), 'completed');
+  // Replay changes nothing.
+  const versions = f.tables.projectHostedRecords.size;
+  await f.materialize(receipt.id);
+  assert.equal(f.tables.projectHostedRecords.size, versions);
+});
+
+test('with completeOnAccept off the Intent stays open at landing, and an explicit last Lane completion completes it', async () => {
+  const f = await acceptanceFixture(),
+    intentId = await seedIntent(f);
+  const lane = await f.lane({ intentId });
+  const policy = policyPreset('supervised');
+  f.patch('hostedProjects', f.projectId, {
+    autonomyPolicy: { ...policy, lifecycle: { ...policy.lifecycle, completeOnAccept: false } },
+  });
+  const item = await f.makeCandidate([lane]);
+  const { state } = await f.ready(item);
+  const { receipt } = await f.accept(state);
+  await f.materialize(receipt.id);
+  assert.equal(await intentStatus(f, intentId), 'active');
+  assert.equal((await f.readLane(lane.laneId)).state, 'active');
+});
+
+test('Lane status carries the landing state, receipt and accepted commit from the same read, with completion on or off', async () => {
+  for (const completeOnAccept of [true, false]) {
+    const f = await acceptanceFixture(),
+      lane = await f.lane(),
+      other = await f.lane();
+    const policy = policyPreset('supervised');
+    f.patch('hostedProjects', f.projectId, {
+      autonomyPolicy: { ...policy, lifecycle: { ...policy.lifecycle, completeOnAccept } },
+    });
+    const before = await laneHead(f, lane.laneId);
+    assert.equal(before.landing, undefined, 'nothing landed yet');
+    const item = await f.makeCandidate([lane]);
+    const { state } = await f.ready(item);
+    const { receipt } = await f.accept(state);
+    await f.materialize(receipt.id);
+    const status = await laneHead(f, lane.laneId);
+    assert.deepEqual(status.landing, {
+      state: 'landed',
+      receiptId: receipt.id,
+      commit: receipt.candidate.head,
+      at: receipt.at,
+      current: true,
+    });
+    assert.equal((await laneHead(f, other.laneId)).landing, undefined, 'a Lane that did not land has none');
+    // The status read is the same single query: head plus one indexed row, no write.
+    assert.equal(f.counts.at(-1).writes, 0);
+    // A later save moves the Lane head; the landing stays, and says it is no longer current.
+    if (!completeOnAccept) {
+      await f.changeLane(lane.laneId, { head: 'e'.repeat(64) });
+      assert.equal((await laneHead(f, lane.laneId)).landing.current, false);
+      assert.equal((await laneHead(f, lane.laneId)).landing.receiptId, receipt.id);
+    }
+  }
 });
 
 test('completeOnAccept skips a pinned Lane and still completes its unpinned sibling', async () => {

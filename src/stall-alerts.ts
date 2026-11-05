@@ -35,11 +35,19 @@ export function stallAlert(
     stall = state.observation.stall;
   const step = stall?.step ?? state.phase,
     since = stall?.lastProgressAt ?? state.at;
+  const read = `nforge agent ROOT landing '{"operationId":"${state.operationId}"}' to read it; `;
+  // A replay only re-sends a wake; it cannot restart a check (incident a7de3a93).
   const repair =
-    `nforge agent ROOT landing '{"operationId":"${state.operationId}"}' to read it; ` +
-    `replay the same land operationId to resume. If ${stall?.missingOwner ?? 'the controller'} is down, fix that first.`;
+    step === 'checking'
+      ? read +
+        'Forge re-checks a dispatch no runner acknowledged (up to 2 retries) and the runner watchdog ends a silent run. ' +
+        `If ${stall?.missingOwner ?? 'the check runner'} is down, fix that first; replaying the land does not restart a check.`
+      : read +
+        `replay the same land operationId to resume. If ${stall?.missingOwner ?? 'the controller'} is down, fix that first.`;
   const retried = [
-    'stall alarm re-woke the landing queue at 15 min',
+    step === 'checking'
+      ? 'stall alarm re-woke the landing and reconciled an unacknowledged check dispatch at 15 min'
+      : 'stall alarm re-woke the landing queue at 15 min',
     ...(state.supersedes ? [`resubmission of ${state.supersedes} (${state.retryReason ?? 'retry'})`] : []),
   ];
   const lines = [
