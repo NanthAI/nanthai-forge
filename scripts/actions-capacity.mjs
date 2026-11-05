@@ -2,9 +2,18 @@
 import { retryActionsInfrastructure, actionsInfrastructureResponse } from '../dist/hosted-actions-retry.js';
 const pageSize = 20;
 const maxBytes = 1024 * 1024;
+const freeJobCap = 20;
+
+/** The organization's concurrent-job limit, set by the pipeline that knows its plan
+ * (Free 20, Team 60, ...). Absent or invalid keeps the conservative Free limit. */
+export function actionsJobCap(env = process.env) {
+  const value = env.FORGE_ACTIONS_JOB_CAP;
+  const cap = /^[1-9]\d{0,2}$/.test(value ?? '') ? Number(value) : freeJobCap;
+  return cap >= 3 ? cap : freeJobCap;
+}
 
 /** One bounded observation, not a poller or an admission rule. Repo demand is a
- * lower bound on org demand; twenty observations already saturate the Free cap.
+ * lower bound on org demand; enough observations to saturate the job cap are already read.
  * The token is sent only to GitHub, never logged or forwarded to Candidate code. */
 export async function readActionsCapacity({
   repository,
@@ -12,6 +21,7 @@ export async function readActionsCapacity({
   runId,
   token,
   request = fetch,
+  jobCap = actionsJobCap(),
 }) {
   if (
     !token ||
@@ -70,7 +80,7 @@ export async function readActionsCapacity({
       if (!/^\d+$/.test(String(run.id))) throw new Error('Invalid run identity');
       active.add(String(run.id));
     }
-    return { activeChecks: Math.min(20, active.size), jobCap: 20 };
+    return { activeChecks: Math.min(jobCap, active.size), jobCap };
   } catch {
     return undefined;
   } // An unavailable optimization never blocks a check.

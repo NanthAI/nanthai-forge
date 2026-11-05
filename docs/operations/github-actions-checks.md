@@ -632,8 +632,12 @@ nforge agent ROOT configure-runner '{"provider":"github-actions","repository":"O
 
 On standard GitHub-hosted runners, planning samples this workflow's queued and
 running checks once: two Actions read requests, at most twenty records and 1 MiB
-per response, with a five-second deadline and no pagination or polling. The Free
-organization job cap is twenty. Repo demand is a lower bound on organization
+per response, with a five-second deadline and no pagination or polling. The job cap
+is `FORGE_ACTIONS_JOB_CAP`, set by the pipeline that knows its plan (this repository's
+workflow sets 60 for the Team plan); unset or invalid keeps the Free-plan twenty. A
+stale low cap makes concurrent checks shrink their shard counts: on 2026-11-05 checks
+planned with 3 to 7 shards took 14 to 31 minutes, against about 9.5 minutes with 10 or 11.
+Repo demand is a lower bound on organization
 demand; unrelated workflows/repos can also occupy those slots. The automatic
 workflow token receives Actions read permission only in planning and never enters
 Candidate code. Unavailable or malformed samples retain timing-only planning;

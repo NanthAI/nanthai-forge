@@ -4,6 +4,7 @@ import { childEnv } from './child-env.mjs';
 import { existsSync, readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { runDocumentationChecks } from './check-documentation.mjs';
+import { checkPhases } from './check-phases.mjs';
 export function runActionsCheck(execute = execFileSync, { install = true, build = true } = {}) {
   const plan = JSON.parse(readFileSync(process.env.FORGE_ACTIONS_PLAN, 'utf8'));
   const shard = process.env.FORGE_ACTIONS_SHARD;
@@ -33,38 +34,45 @@ export function runActionsCheck(execute = execFileSync, { install = true, build 
     FORGE_GIT_TIMEOUT_MS: '240000',
     NODE_OPTIONS: '--max-old-space-size=3072',
   };
+  const phases = checkPhases();
   const run = (executable, args) => execute(executable, args, { env, stdio: 'inherit' });
   const npm = (...args) => run('npm', args);
   // A project's own check command owns its setup (pnpm, Vite+, ...); only Forge's
   // recipe and npm-locked projects get the npm install.
   const npmLocked = existsSync('package-lock.json') || existsSync('npm-shrinkwrap.json');
-  if (install && (plan.standard || npmLocked)) npm('ci', '--ignore-scripts');
-  if (!plan.standard) {
-    if (shard !== 'static') throw new Error('Arbitrary commands have only a static job.');
-    run(plan.command[0], plan.command.slice(1));
-  } else if (shard === 'static') {
-    // verify reads only scope and tests. Selection reasons can exceed Linux's 128 KiB
-    // per-variable limit, which makes the child spawn fail with E2BIG.
-    const { scope, domain, reason } = plan.selection;
-    env.FORGE_SELECTED_TESTS = JSON.stringify({ scope, domain, reason, tests: [] });
-    if (plan.selection.scope === 'docs')
-      runDocumentationChecks({ npm, node: script => run('node', [script]), interaction: plan.interaction });
-    else run('node', ['scripts/verify.mjs']);
-  } else {
-    const index = Number(shard);
-    if (!Number.isInteger(index) || !plan.groups[index]) throw new Error('Unselected Actions shard.');
-    if (build) {
-      npm('run', 'build:core');
-      npm('run', 'build:web');
+  try {
+    if (install && (plan.standard || npmLocked)) phases.time('install', () => npm('ci', '--ignore-scripts'));
+    if (!plan.standard) {
+      if (shard !== 'static') throw new Error('Arbitrary commands have only a static job.');
+      phases.time('command', () => run(plan.command[0], plan.command.slice(1)));
+    } else if (shard === 'static') {
+      // verify reads only scope and tests. Selection reasons can exceed Linux's 128 KiB
+      // per-variable limit, which makes the child spawn fail with E2BIG.
+      const { scope, domain, reason } = plan.selection;
+      env.FORGE_SELECTED_TESTS = JSON.stringify({ scope, domain, reason, tests: [] });
+      if (plan.selection.scope === 'docs')
+        runDocumentationChecks({ npm, node: script => run('node', [script]), interaction: plan.interaction });
+      else phases.time('verify', () => run('node', ['scripts/verify.mjs']));
     } else {
-      // Shared build artifacts omit ignored declarations; restore the API types
-      // before tests invoke the deployment compiler directly.
-      run('node', ['scripts/prepare-convex-api.mjs']);
+      const index = Number(shard);
+      if (!Number.isInteger(index) || !plan.groups[index]) throw new Error('Unselected Actions shard.');
+      if (build) {
+        phases.time('build', () => {
+          npm('run', 'build:core');
+          npm('run', 'build:web');
+        });
+      } else {
+        // Shared build artifacts omit ignored declarations; restore the API types
+        // before tests invoke the deployment compiler directly.
+        run('node', ['scripts/prepare-convex-api.mjs']);
+      }
+      // Partial runs never claim coverage, even when the job inherits a coverage head.
+      if (plan.selection.scope === 'full') env.FORGE_TEST_COVERAGE_HEAD = plan.head;
+      else delete env.FORGE_TEST_COVERAGE_HEAD;
+      env.FORGE_TEST_RETRY_FILES = JSON.stringify(plan.retryFiles ?? []);
+      phases.time('tests', () => run('node', ['scripts/test-files.mjs', ...plan.groups[index]]));
     }
-    // Partial runs never claim coverage, even when the job inherits a coverage head.
-    if (plan.selection.scope === 'full') env.FORGE_TEST_COVERAGE_HEAD = plan.head;
-    else delete env.FORGE_TEST_COVERAGE_HEAD;
-    env.FORGE_TEST_RETRY_FILES = JSON.stringify(plan.retryFiles ?? []);
-    run('node', ['scripts/test-files.mjs', ...plan.groups[index]]);
+  } finally {
+    phases.report();
   }
 }

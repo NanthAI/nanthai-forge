@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readActionsCapacity } from '../scripts/actions-capacity.mjs';
+import { actionsJobCap, readActionsCapacity } from '../scripts/actions-capacity.mjs';
 
 const input = { repository: 'example/fixture', runId: '1', token: 'synthetic', workflow: 'forge-check.yml' };
 test('capacity reads two bounded pages, deduplicates transitions and includes its own run', async () => {
@@ -107,4 +107,23 @@ test('capacity page infrastructure timeout retries without extra successful-page
   });
   assert.deepEqual(result, { activeChecks: 1, jobCap: 20 });
   assert.deepEqual(calls, { queued: 2, in_progress: 1 });
+});
+
+test('job cap comes from FORGE_ACTIONS_JOB_CAP, keeps Free 20 when unset or invalid, and bounds demand', async () => {
+  assert.equal(actionsJobCap({}), 20);
+  assert.equal(actionsJobCap({ FORGE_ACTIONS_JOB_CAP: '60' }), 60);
+  for (const bad of ['', '0', '2', '-5', '60.5', 'sixty', '1000', ' 60'])
+    assert.equal(actionsJobCap({ FORGE_ACTIONS_JOB_CAP: bad }), 20, bad);
+  const result = await readActionsCapacity({
+    ...input,
+    jobCap: 60,
+    request: async url =>
+      Response.json({
+        workflow_runs: Array.from({ length: 20 }, (_, i) => ({
+          id: i + (url.includes('queued') ? 2 : 100),
+          status: new URL(url).searchParams.get('status'),
+        })),
+      }),
+  });
+  assert.deepEqual(result, { activeChecks: 41, jobCap: 60 });
 });

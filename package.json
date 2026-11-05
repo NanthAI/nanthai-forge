@@ -92,6 +92,7 @@
     "scripts/check-documentation.mjs",
     "scripts/github-actions-check.mjs",
     "scripts/actions-capacity.mjs",
+    "scripts/check-phases.mjs",
     "scripts/hosted-actions-execute.mjs",
     "scripts/hosted-actions-job.mjs",
     "scripts/test-impact.mjs",
