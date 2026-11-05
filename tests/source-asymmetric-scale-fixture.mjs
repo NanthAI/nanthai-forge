@@ -26,6 +26,11 @@ export async function asymmetricHistory(
         })),
       ),
     ).toString(),
+    largeSize = Buffer.byteLength(large),
+    // Canonical key order puts the same `at` and file list before every per-State field, so the
+    // digest of that prefix is shared by all large States: hash it once and finish each State
+    // with its own suffix instead of rehashing megabytes per State.
+    midstates = new Map(),
     historical = new Set(),
     generations = new Map();
   const state = async (parents, message, big = false, files = small) => {
@@ -45,8 +50,19 @@ export async function asymmetricHistory(
       prefix = value.slice(0, split),
       suffix = value.slice(split + 2),
       pin = {
-        sha256: createHash('sha256').update(prefix).update(fileBytes).update(suffix).digest('hex'),
-        size: Buffer.byteLength(prefix) + Buffer.byteLength(fileBytes) + Buffer.byteLength(suffix),
+        sha256: (big
+          ? (
+              midstates.get(prefix) ??
+              midstates.set(prefix, createHash('sha256').update(prefix).update(large)).get(prefix)
+            ).copy()
+          : createHash('sha256').update(prefix).update(fileBytes)
+        )
+          .update(suffix)
+          .digest('hex'),
+        size:
+          Buffer.byteLength(prefix) +
+          (big ? largeSize : Buffer.byteLength(fileBytes)) +
+          Buffer.byteLength(suffix),
       };
     const generation = 1 + Math.max(0, ...parents.map(parent => generations.get(parent.sha256)));
     generations.set(pin.sha256, generation);

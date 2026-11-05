@@ -1102,13 +1102,21 @@ test('hosted workflow restores trusted dependencies and exact control build, fal
     }
   }
   const plan = jobs('hosted-plan');
-  const buildCache = plan.slice(plan.indexOf('# Exact trusted checkout'), plan.indexOf('# Candidate code'));
+  const buildCache = plan.slice(
+    plan.indexOf('# Content hash of the lockfile'),
+    plan.indexOf('# Candidate code'),
+  );
   const keys = [...buildCache.matchAll(/key: (.+)/g)].map(match => match[1]);
   assert.equal(keys.length, 2);
   assert.equal(keys[0], keys[1]);
   assert.match(
     keys[0],
-    /forge-control-dist-v1-.*runner.os.*runner.arch.*node-24\.22\.1-.*github.sha.*hashFiles\('control\/package-lock.json'\)/,
+    /forge-control-dist-v2-.*runner.os.*runner.arch.*node-24\.22\.1-\$\{\{ steps\.build-key\.outputs\.hash \}\}$/,
+  );
+  assert.doesNotMatch(keys[0], /github\.sha/, 'a content hash, not the commit, keys the control build');
+  assert.match(
+    buildCache,
+    /id: build-key\n\s+run: echo "hash=\$\(node scripts\/control-build-key.mjs\)" >> "\$GITHUB_OUTPUT"/,
   );
   assert.match(plan, /path: control\n\s+ref: \$\{\{ github.sha \}\}/);
   assert.match(buildCache, /id: control-build/);

@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 import assert from 'node:assert/strict';
 import { fork } from 'node:child_process';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { randomUUID, createHash } from 'node:crypto';
 import { ConvexError } from 'convex/values';
 import { getFunctionName, makeFunctionReference } from 'convex/server';
@@ -27,6 +30,13 @@ const actionUrls = Object.fromEntries(
   ]),
 );
 export const at = '2026-10-28T00:00:00.000Z';
+const compileCache = join(
+  tmpdir(),
+  `forge-test-compile-cache-${createHash('sha256')
+    .update(fileURLToPath(import.meta.url))
+    .digest('hex')
+    .slice(0, 16)}`,
+);
 export async function scaleFixture({ parallelism = 4, delay = 0, guardRss = false, afterAction } = {}) {
   const f = recordsFixture(),
     { projectId } = await f.setup(),
@@ -185,9 +195,12 @@ export async function scaleFixture({ parallelism = 4, delay = 0, guardRss = fals
     calls.push(item.name);
     active++;
     peakActive = Math.max(peakActive, active);
+    // Every action is a fresh process (its memory is measured), and each re-parses the same module
+    // graph. The V8 compile cache is keyed by file content, so sharing it only skips recompiling.
     const child = fork(new URL('./convex-source-scale-child.mjs', import.meta.url), [], {
       serialization: 'advanced',
       stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
+      env: { ...process.env, NODE_COMPILE_CACHE: compileCache },
     });
     let stderr = '';
     let computing = false,

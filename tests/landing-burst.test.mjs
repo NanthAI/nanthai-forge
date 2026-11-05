@@ -171,12 +171,16 @@ async function burst(f, arrivals, { admitBeforeDrain = false, green = false } = 
     ready.push({ ...arrival, ...(await f.candidate(arrival.path, `${arrival.path}\n`, false)) });
   // These timing/stacking cases measure the already-green queue. Singleton
   // preparation uses the real runner and is excluded from that measured phase.
+  // The singleton runs are independent Views of one store, so they overlap instead of paying
+  // N sequential synthetic check delays before the measured phase starts.
   if (green)
-    for (const item of ready) {
-      const run = (await f.agent.dispatch({ action: 'run', viewId: item.view.id })).result;
-      assert.equal(run.status, 'passed');
-      f.soloRuns.add(run.runId);
-    }
+    await Promise.all(
+      ready.map(async item => {
+        const run = (await f.agent.dispatch({ action: 'run', viewId: item.view.id })).result;
+        assert.equal(run.status, 'passed');
+        f.soloRuns.add(run.runId);
+      }),
+    );
   const started = performance.now();
   if (admitBeforeDrain) {
     // The batch-count contract applies to a durable queued wave. Filesystem

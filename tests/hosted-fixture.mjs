@@ -160,10 +160,18 @@ export function state(jobs = [job()], { keysetPaging = false } = {}) {
     reads = 0,
     count = 0,
     creationClock = Date.now();
-  const find = id =>
-    Object.values(tables)
-      .map(table => table.get(id))
-      .find(Boolean) ?? null;
+  // Lookups run on every call; scan the tables without allocating a per-call array.
+  const tableNameOf = id => {
+    for (const name in tables) if (tables[name].has(id)) return name;
+    return undefined;
+  };
+  const find = id => {
+    for (const name in tables) {
+      const row = tables[name].get(id);
+      if (row) return row;
+    }
+    return null;
+  };
   // A mutation's writes and scheduled work are undone when it throws, like a provider
   // transaction. Interleaved async mutations are not isolated from each other (no OCC).
   const transactions = new AsyncLocalStorage();
@@ -239,7 +247,7 @@ export function state(jobs = [job()], { keysetPaging = false } = {}) {
         return id;
       },
       replace: async (id, values) => {
-        const table = Object.keys(tables).find(table => tables[table].has(id));
+        const table = tableNameOf(id);
         const row = checkDocument(schema, table, updatedDocument(find(id), values, true));
         restorable(id);
         const current = find(id);
@@ -247,7 +255,7 @@ export function state(jobs = [job()], { keysetPaging = false } = {}) {
         Object.assign(current, row);
       },
       patch: async (id, values) => {
-        const table = Object.keys(tables).find(table => tables[table].has(id));
+        const table = tableNameOf(id);
         const row = checkDocument(schema, table, updatedDocument(find(id), values));
         restorable(id);
         const current = find(id);

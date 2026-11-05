@@ -38,17 +38,25 @@ export async function measureResolutionAncestry(count, shape, width = 2048) {
     const stable = await s.putSpec(Buffer.from('unchanged\n')),
       file = (path, pin) => ({ path, mode: 'file', blob: pin.sha256 }),
       files = Array.from({ length: width }, (_, i) => file(`src/${String(i).padStart(6, '0')}.ts`, stable));
+    // Canonical encoding sorts keys (at, files, kind, message, parents, schema), so every State
+    // sharing the same file list differs only in its message and parents. Encode that list once
+    // instead of validating and re-encoding thousands of entries for each of thousands of States.
+    const sharedFiles = Buffer.from(saveBytes(files)).toString();
+    const encodedState = (edges, content, message) => {
+      const body = content === files ? sharedFiles : Buffer.from(saveBytes(content)).toString();
+      return Buffer.from(
+        `{"at":${JSON.stringify(at)},"files":${body},"kind":"forge-source-state","message":${JSON.stringify(message)},"parents":${JSON.stringify(edges)},"schema":1}`,
+      );
+    };
+    assert.deepEqual(
+      encodedState(['p'], files, 'check'),
+      Buffer.from(
+        saveBytes({ schema: 1, kind: 'forge-source-state', files, parents: ['p'], message: 'check', at }),
+      ),
+      'the shared encoding is the canonical one',
+    );
     async function state(edges = [], content = files) {
-      const bytes = Buffer.from(
-          saveBytes({
-            schema: 1,
-            kind: 'forge-source-state',
-            files: content,
-            parents: edges,
-            message: `state-${parents.size}`,
-            at,
-          }),
-        ),
+      const bytes = encodedState(edges, content, `state-${parents.size}`),
         pin = { sha256: digest(bytes), size: bytes.length },
         path = join(root, pin.sha256);
       writeFileSync(path, bytes);

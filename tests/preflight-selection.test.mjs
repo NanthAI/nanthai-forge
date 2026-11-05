@@ -10,8 +10,10 @@ import {
 } from '../scripts/test-impact.mjs';
 
 const partition = (files, paths) => {
-  const complete = selectTests({ files, paths });
-  const plan = selectPreflightTests({ files, paths });
+  // Both selections read one inventory and path list, so they share a single parsed import graph.
+  const graphCache = {};
+  const complete = selectTests({ files, paths }, graphCache);
+  const plan = selectPreflightTests({ files, paths }, graphCache);
   assert.deepEqual([...plan.tests, ...plan.deferredTests].sort(), complete.tests);
   assert.equal(new Set([...plan.tests, ...plan.deferredTests]).size, complete.tests.length);
   return plan;

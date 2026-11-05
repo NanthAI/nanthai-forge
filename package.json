@@ -93,6 +93,7 @@
     "scripts/github-actions-check.mjs",
     "scripts/actions-capacity.mjs",
     "scripts/check-phases.mjs",
+    "scripts/control-build-key.mjs",
     "scripts/hosted-actions-execute.mjs",
     "scripts/hosted-actions-job.mjs",
     "scripts/test-impact.mjs",

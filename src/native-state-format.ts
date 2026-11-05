@@ -32,16 +32,21 @@ export const stateSchema = z
   .strict();
 export type NativeFile = z.infer<typeof entry>;
 export type NativeState = z.infer<typeof stateSchema>;
+// A '.forge' or '.git' segment in any case (the names contain only ASCII letters).
+const reservedSegment = /(?:^|\/)\.(?:forge|git)(?:\/|$)/i;
 export function overlappingPaths(files: NativeFile[]): string[] {
   const paths = new Set(files.map(file => file.path)),
+    seen = new Set<string>(),
     conflicts = new Set<string>();
-  for (const path of paths) {
-    const parts = path.split('/');
-    for (let index = 1; index < parts.length; index++) {
-      const parent = parts.slice(0, index).join('/');
+  // Check each distinct ancestor once: climbing from a path stops at the first ancestor an
+  // earlier path already climbed, because all of that ancestor's own parents were checked then.
+  for (const path of paths)
+    for (let slash = path.lastIndexOf('/'); slash !== -1; slash = path.lastIndexOf('/', slash - 1)) {
+      const parent = path.slice(0, slash);
+      if (seen.has(parent)) break;
+      seen.add(parent);
       if (paths.has(parent)) conflicts.add(parent);
     }
-  }
   return [...conflicts].sort();
 }
 export function parseNativeState(bytes: Uint8Array): NativeState {
@@ -65,11 +70,7 @@ export function parseNativeStateValue(value: unknown): NativeState {
   }
   invariant(
     new Set(state.files.map(file => file.path)).size === state.files.length &&
-      state.files.every(
-        file =>
-          !file.path.toLowerCase().split('/').includes('.forge') &&
-          !file.path.toLowerCase().split('/').includes('.git'),
-      ),
+      state.files.every(file => !reservedSegment.test(file.path)),
     'INVALID_NATIVE_SOURCE',
     'Native source manifest paths are invalid.',
   );

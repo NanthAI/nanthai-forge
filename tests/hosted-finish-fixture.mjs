@@ -171,11 +171,22 @@ export async function finishFixture(
       },
     };
   });
+  // Each call's meter and each committed row are validated once: meters are final when pushed and
+  // rows are replaced, never edited, so re-checking all history after every call only made a
+  // queue run quadratic in its call count.
+  const countsSeen = new Map(),
+    rowsValid = new WeakSet(),
+    finishFields = schema.tables.projectHostedFinishes.export().documentType.value;
+  const newCounts = name => {
+    const from = Math.min(countsSeen.get(name) ?? 0, f.counts.length);
+    countsSeen.set(name, f.counts.length);
+    return f.counts.slice(from).filter(r => r.name === name);
+  };
   const tx = async (name, fn, args, actor = 'owner') => {
     try {
       return await f.transaction(name, fn, args, actor);
     } finally {
-      for (const count of f.counts.filter(r => r.name === name)) {
+      for (const count of newCounts(name)) {
         assert(count.ranges <= 1600 && count.documents <= 1600, `${name}: bounded reads`);
         assert(
           count.readBytes < 2 * 1024 * 1024 && count.writeBytes < 512 * 1024,
@@ -205,9 +216,10 @@ export async function finishFixture(
         for (const key of Object.keys(max)) max[key] = Math.max(max[key], count[key]);
       }
       for (const row of f.tables.projectHostedFinishes.values()) {
-        const fields = schema.tables.projectHostedFinishes.export().documentType.value;
-        assert(Object.keys(row).every(k => ['_id', '_creationTime'].includes(k) || k in fields));
-        for (const [key, field] of Object.entries(fields)) assert(field.optional || key in row, key);
+        if (rowsValid.has(row)) continue;
+        assert(Object.keys(row).every(k => ['_id', '_creationTime'].includes(k) || k in finishFields));
+        for (const [key, field] of Object.entries(finishFields)) assert(field.optional || key in row, key);
+        rowsValid.add(row);
       }
     }
   };

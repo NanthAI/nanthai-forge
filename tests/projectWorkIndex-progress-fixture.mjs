@@ -27,7 +27,20 @@ export function progressFixture(scale = 1, saved, ensure = actions.ensure._handl
   const generators = new Map(),
     sizes = new Map();
   const getObject = objects.get.bind(objects);
-  objects.get = key => getObject(key) ?? generators.get(key)?.();
+  // States are regenerated on demand to keep the fixture small; a short recent window serves the
+  // repeated reads of one State (about 10 MB) without retaining all of them.
+  const recent = new Map();
+  objects.get = key => {
+    const stored = getObject(key);
+    if (stored !== undefined || !generators.has(key)) return stored;
+    let bytes = recent.get(key);
+    if (bytes === undefined) {
+      bytes = generators.get(key)();
+      if (recent.size >= 24) recent.delete(recent.keys().next().value);
+    } else recent.delete(key);
+    recent.set(key, bytes);
+    return bytes;
+  };
   const hasObject = objects.has.bind(objects);
   objects.has = key => hasObject(key) || generators.has(key);
   const put = bytes => {

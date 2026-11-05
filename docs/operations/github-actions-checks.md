@@ -607,9 +607,11 @@ optional source-pack refresh need them. Refresh artifacts are published before t
 single execution can change its workspace. Multi-job plans retain their existing
 matrix, artifact handoff and shard evidence.
 
-Planning restores trusted control `dist` from an exact cache key containing the
-control checkout commit (`github.sha`), OS, architecture, Node 24.22.1 and control
-lockfile hash. There are no prefix restores. A miss runs the current
+Planning restores trusted control `dist` from an exact cache key containing OS,
+architecture, Node 24.22.1 and a content hash of the control lockfile and every file
+`build:core` reads (`node scripts/control-build-key.mjs`, plain Node, so any CI can
+compute the same key; it never uses the commit sha, so commits that leave the build
+inputs alone share one cached build). There are no prefix restores. A miss runs the current
 `npm run build:core` in the pinned control checkout, then explicitly saves only
 `control/dist` before the planning supervisor or any Candidate code executes.
 Candidate-produced files, builds, plans and results never populate this cache;
@@ -623,7 +625,7 @@ Shards and the optional source-pack job unpack that build beside the exact
 and its lockfile; the shared control build is not evidence for Candidate tests.
 There is no additional serial build job. Dependency and exact-control-build
 archives are separate; monitor Actions cache storage across old lockfile and
-control-commit keys when comparing the roughly 1 GiB cache budget. This workflow does not introduce a cache deletion policy.
+control-build keys when comparing the roughly 1 GiB cache budget. This workflow does not introduce a cache deletion policy.
 
 Hosted test shard counts use the existing per-file timing history and two-worker
 LPT estimates. When capacity is idle the planner picks the smallest count predicted to

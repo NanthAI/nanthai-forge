@@ -9,6 +9,8 @@ import { prepareConvexApi } from '../scripts/prepare-convex-api.mjs';
 
 // A real source copy preserves JSX, Convex generics and cross-scope imports.
 // The seeded errors never touch the checkout or shared dependencies.
+// Each compiler keeps its own incremental state in the copy, so the seeded pass re-checks only the
+// probe file and what it affects instead of the whole web project again. Diagnostics are the same.
 test('web native and fallback diagnostics agree on clean source and seeded strict/JSX errors', t => {
   const root = mkdtempSync(join(tmpdir(), 'forge-native-web-'));
   t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
@@ -34,6 +36,9 @@ test('web native and fallback diagnostics agree on clean source and seeded stric
         'web/tsconfig.json',
         '--pretty',
         'false',
+        '--incremental',
+        '--tsBuildInfoFile',
+        join(root, native ? 'native.tsbuildinfo' : 'fallback.tsbuildinfo'),
       ],
       { cwd: root, encoding: 'utf8' },
     );

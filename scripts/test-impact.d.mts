@@ -28,16 +28,23 @@ export function standardSelection(input: {
 
 export function selectionSourcePath(path: string): boolean;
 
-export function selectTests(input: { files: Map<string, string>; paths: string[] }): TestSelection;
+/** `graphCache`: a caller-owned `{}` shared by calls on one immutable inventory and path list. */
+export function selectTests(
+  input: { files: Map<string, string>; paths: string[] },
+  graphCache?: object,
+): TestSelection;
 export type PreflightTier = {
   tier: 'mandatory' | 'direct' | 'near';
   tests: string[];
 };
 export const preflightTierRule: string;
-export function selectPreflightTests(input: {
-  files: Map<string, string>;
-  paths: string[];
-}): TestSelection & { deferredTests: string[]; tiers: PreflightTier[] };
+export function selectPreflightTests(
+  input: {
+    files: Map<string, string>;
+    paths: string[];
+  },
+  graphCache?: object,
+): TestSelection & { deferredTests: string[]; tiers: PreflightTier[] };
 export function fitPreflightBudget(input: {
   tiers: PreflightTier[];
   budgetSeconds: number;

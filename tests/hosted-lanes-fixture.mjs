@@ -35,10 +35,16 @@ export function lanesFixture() {
     if (fn.exportArgs) checkArgs(fn, input, name);
     let retries = 0;
     for (;;) {
-      const baseline = structuredClone(tables),
-        // Reads return clones and writes replace rows. Share immutable snapshot
-        // rows instead of cloning every unrelated document a second time.
-        local = Object.fromEntries(Object.entries(baseline).map(([table, rows]) => [table, new Map(rows)])),
+      // Rows are immutable once committed: reads return clones and writes replace the row
+      // object, so a snapshot copies the row index, never the documents. Deep-cloning every
+      // table per transaction made each call cost the whole database (quadratic in a queue run).
+      // The transaction's own writes copy a table's index on first write only.
+      const baseline = Object.fromEntries(
+          Object.entries(tables).map(([table, rows]) => [table, new Map(rows)]),
+        ),
+        written = {},
+        view = table => written[table] ?? baseline[table],
+        writable = table => (written[table] ??= new Map(baseline[table])),
         reads = [],
         writes = [];
       // A Convex query function may run one paginate(); a second fails in production only (mutations are exempt).
@@ -60,7 +66,7 @@ export function lanesFixture() {
       };
       const read = (table, select) => {
         meter.touched.push(table);
-        const rows = select(local[table]);
+        const rows = select(view(table));
         const original = encoded(select(baseline[table]));
         reads.push(() => encoded(select(tables[table])) === original);
         meter.ranges++;
@@ -78,7 +84,7 @@ export function lanesFixture() {
       const put = (table, id, row) => {
         row = checkDocument(schema, table, row);
         assert(bytes(row) < 1024 * 1024, `${name}: document size`);
-        local[table].set(id, structuredClone(row));
+        writable(table).set(id, structuredClone(row));
         writes.push([table, id, structuredClone(row)]);
         meter.written.push(table);
         meter.writes++;
@@ -86,7 +92,7 @@ export function lanesFixture() {
         meter.writeBytesByTable[table] = (meter.writeBytesByTable[table] ?? 0) + bytes(row);
         assert(meter.writes <= 8192 && meter.writeBytes < 16 * 1024 * 1024, `${name}: Convex writes`);
       };
-      const locate = id => Object.keys(local).find(table => local[table].has(id));
+      const locate = id => Object.keys(baseline).find(table => view(table).has(id));
       const ctx = validateContext({
         auth: {
           getUserIdentity: async () =>
@@ -106,7 +112,7 @@ export function lanesFixture() {
           delete: async id => {
             const table = locate(id);
             if (!table) return;
-            local[table].delete(id);
+            writable(table).delete(id);
             writes.push([table, id, null]);
             meter.written.push(table);
             meter.writes++;
@@ -118,12 +124,12 @@ export function lanesFixture() {
           },
           replace: async (id, value) => {
             const table = locate(id),
-              old = local[table].get(id);
+              old = view(table).get(id);
             put(table, id, updatedDocument(old, value, true));
           },
           patch: async (id, value) => {
             const table = locate(id);
-            put(table, id, updatedDocument(local[table].get(id), value));
+            put(table, id, updatedDocument(view(table).get(id), value));
           },
           query: table => {
             let match,
@@ -203,7 +209,7 @@ export function lanesFixture() {
               },
               [Symbol.asyncIterator]: async function* () {
                 assert(match, 'indexed reads only');
-                const ordered = match(local[table]);
+                const ordered = match(view(table));
                 if (descending) ordered.reverse();
                 let consumed = 0;
                 try {
@@ -240,7 +246,7 @@ export function lanesFixture() {
                   }
                   return result;
                 });
-                const length = match(local[table]).length;
+                const length = match(view(table)).length;
                 return {
                   page: rows,
                   isDone: start + rows.length >= length,

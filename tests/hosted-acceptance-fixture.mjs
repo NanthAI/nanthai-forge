@@ -16,11 +16,21 @@ export const maxima = {};
 export async function acceptanceFixture(source = null) {
   const f = await landingFixture(source);
   await f.bindRepository(f.projectId, { repository: 'synthetic/checks', repoId: 43 });
+  // Meters are final when pushed and rows are replaced, never edited: validate each once
+  // instead of re-checking all history after every call (quadratic in a queue run).
+  const countsSeen = new Map(),
+    rowsValid = new WeakSet(),
+    tableFields = new Map();
+  const newCounts = name => {
+    const from = Math.min(countsSeen.get(name) ?? 0, f.counts.length);
+    countsSeen.set(name, f.counts.length);
+    return f.counts.slice(from).filter(c => c.name === name);
+  };
   const transaction = async (name, fn, args, actor = 'owner') => {
     try {
       return await f.transaction(name, fn, args, actor);
     } finally {
-      for (const c of f.counts.filter(c => c.name === name)) {
+      for (const c of newCounts(name)) {
         const final = name === 'acceptancePublish' || name === 'acceptanceAccept';
         assert(
           c.ranges <= (final ? 100 : 1600) && c.documents <= (final ? 100 : 1600),
@@ -47,14 +57,17 @@ export async function acceptanceFixture(source = null) {
       }
       for (const [table, rows] of Object.entries(f.tables)) {
         if (!table.startsWith('projectHostedAcceptance')) continue;
-        const fields = schema.tables[table].export().documentType.value;
+        if (!tableFields.has(table)) tableFields.set(table, schema.tables[table].export().documentType.value);
+        const fields = tableFields.get(table);
         for (const row of rows.values()) {
+          if (rowsValid.has(row)) continue;
           assert(
             Object.keys(row).every(k => ['_id', '_creationTime'].includes(k) || k in fields),
             `${table}: fields`,
           );
           for (const [key, field] of Object.entries(fields))
             assert(field.optional || key in row, `${table}.${key}`);
+          rowsValid.add(row);
         }
       }
     }

@@ -43,8 +43,8 @@ export function sourceFiles(root = '.') {
 
 /** Static imports plus literal runtime source paths used by moduleUrl/readFile/CLI tests.
  * Nonliteral paths widen to their entire source domain, never prove independence. */
-export function selectTests(input) {
-  return selectWithGraph(input);
+export function selectTests(input, graphCache) {
+  return selectWithGraph(input, undefined, graphCache);
 }
 /** Paired independence analysis parses one graph per immutable inventory.
  * Changed-script uncertainty is widened across both comparisons. */
@@ -71,11 +71,14 @@ export function selectImpactPair(files, comparisons) {
  * (dynamic, domain, three or more edges) stay explicit pre-queue/landing work. */
 export const preflightTierRule =
   'changed tests, explicit coverage and smoke; then direct consumers; then distance-2 consumers, nearest first';
-export function selectPreflightTests(input) {
-  const selection = selectTests(input);
+export function selectPreflightTests(input, graphCache = {}) {
+  // The consumers-only pass reads the same inventory, so it reuses the graph the first pass built.
+  const selection = selectTests(input, graphCache);
   if (selection.scope === 'docs') return { ...selection, deferredTests: [], tiers: [] };
   const consumers =
-    selection.scope === 'full' ? selectWithGraph({ ...input, consumersOnly: true }) : selection;
+    selection.scope === 'full'
+      ? selectWithGraph({ ...input, consumersOnly: true }, undefined, graphCache)
+      : selection;
   const changed = new Set(input.paths);
   const kind = test => consumers.reasons?.[test]?.kind;
   const distance = test => consumers.reasons?.[test]?.edges?.length ?? Infinity;
@@ -145,7 +148,13 @@ export function fitPreflightBudget({ tiers, budgetSeconds, secondsPerFile, free 
   };
 }
 
-function selectWithGraph({ paths, files, forceFull = false, consumersOnly = false }, suppliedGraph) {
+/** `graphCache` is an optional caller-owned `{}`: calls for one immutable inventory and one path
+ * list may share it so the import graph is parsed once. Never reuse it across inventories or paths. */
+function selectWithGraph(
+  { paths, files, forceFull = false, consumersOnly = false },
+  suppliedGraph,
+  graphCache = {},
+) {
   const tests = [...files.keys()].filter(path => /^tests\/[^/]+\.test\.mjs$/.test(path)).sort();
   const full = reason => explainAll({ scope: 'full', reason, tests });
   if (forceFull) return full('FORGE_CHECK_FULL=1');
@@ -169,7 +178,7 @@ function selectWithGraph({ paths, files, forceFull = false, consumersOnly = fals
     });
   }
   const scriptsChanged = classifications.filter(item => scriptPath(item.path) && files.has(item.path));
-  const graph = suppliedGraph ?? testImportGraph(files, scriptsChanged);
+  const graph = suppliedGraph ?? (graphCache.graph ||= testImportGraph(files, scriptsChanged));
   if (graph.error) return full(graph.error);
   const { reverse, evidence, packageGraph, workspaceUsers } = graph;
   // Product source is data to the static tools (build, typecheck, lint, format,
