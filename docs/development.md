@@ -15,7 +15,7 @@ npm run format               # oxfmt --write; run before committing
 | Command | What it does |
 | --- | --- |
 | `npm run check` | Validates JSON, Markdown links, license inventory freshness and required root files; rejects machine-specific home paths and live-query arguments or `refreshKey` values driven by the clock (idle tabs must cost nothing) |
-| `npm run typecheck` | Native TypeScript for core, Convex and Netlify; tsc 5.9.3 for web |
+| `npm run typecheck` | Native TypeScript for all four scopes, including web JSX |
 | `npm run typecheck:tsc` | Explicit tsc 5.9.3 fallback for all four projects |
 | `npm run build:core` | Native TypeScript JavaScript and published declarations |
 | `npm run build:core:tsc` | Explicit tsc 5.9.3 build fallback |
@@ -70,16 +70,27 @@ cannot accidentally select the other compiler. No installation lifecycle scripts
 are needed. The generated [dependency license inventory](dependency-licenses.md)
 includes the compiler and its optional platform binaries (Apache-2.0).
 
-Core, Convex and Netlify checks use the native compiler. Web remains on tsc 5.9.3:
-with ambient types restored, native 7.0.2 reports TS2345 at the generic action call
-in `web/src/useInventory.ts` that the existing checker accepts. Application code
-is unchanged. Native core/Convex commands pass `--types "*"` to preserve tsc 5's
-automatic ambient types; Netlify retains its explicit types list. Native commands
-also pass `--noUncheckedSideEffectImports false` to preserve the old side-effect
-import behavior. Convex's config explicitly includes Node ambient types and sets
+All four scopes use the native compiler, including the landing verifier's web
+step. Web keeps the same strict, unused and indexed-access checks in
+`web/tsconfig.json`. Its Convex inventory action supplies the reconstructed
+reference's generic type explicitly: native 7.0.2 otherwise infers the enclosing
+`F` and reports TS2345 where tsc 5.9.3 accepts the call. This type-only change
+preserves the reference, arguments and result without a cast or suppression.
+Native core/web/Convex commands pass `--types "*"` to preserve tsc 5's automatic
+ambient types; Netlify retains its explicit types list. Native commands also pass
+`--noUncheckedSideEffectImports false` to preserve the old side-effect import
+behavior. Convex's config explicitly includes Node ambient types and sets
 `noUncheckedSideEffectImports: false`, so direct compiler invocations have the
-same compatibility settings. The verification runner uses this routing, plus a
-tsc 5.9.3 Convex compatibility check after `build:core`.
+same compatibility settings. Verification retains a tsc 5.9.3 Convex compatibility
+check after `build:core`.
+
+`tests/native-web-typecheck.test.mjs` checks a scratch copy of the real web source
+with both compilers, then seeds assignment, argument, property, nullable,
+indexed-access, unused-local, unused-parameter, implicit-any and JSX-prop errors.
+It requires identical diagnostic codes and locations; unresolved side-effect
+imports retain their existing behavior. This covers the known disagreement and
+representative strict/JSX errors, not every possible compiler diagnostic. Native
+returns exit code 1 for these errors while tsc returns 2; both fail the check.
 
 The installed Convex CLI prefers `@typescript/native/bin/tsc` over
 `typescript/bin/tsc` when the native alias is present. Its `typecheck` and deploy
@@ -90,11 +101,32 @@ core build. This offline coverage runs in the landing check; the credentialed
 native self-host smoke remains a separate GitHub Actions job.
 
 `npm run typecheck:tsc` and `npm run build:core:tsc` select the original compiler
-explicitly. There is no automatic fallback after an error. The archived
+explicitly. Keep these commands while parity across every scope remains under
+qualification. Use them to reproduce suspected native compiler regressions or
+compare diagnostics after a compiler/configuration change. There is no automatic
+fallback after an error. The archived
 `@typescript/native-preview@7.0.0-dev.20260707.2` package was measured, but is not a
 project dependency. Microsoft now ships the maintained native compiler in the
 standard TypeScript package; see the [TypeScript 7 announcement](https://devblogs.microsoft.com/typescript/announcing-typescript-7-0/)
 and the [preview staging repository](https://github.com/microsoft/typescript-go).
+
+### Repeatable web compiler comparison
+
+Run `nforge heavy node scripts/measure-web-typecheck.mjs` locally, or select that
+script as an optional hosted check with locked dependencies installed. It measures
+both the isolated landing `typecheck:web` command and the complete sequential
+`npm run typecheck` body, before/after replacing only the web compiler. Both use
+the same current source and compatibility options. No dependencies are added.
+
+The script performs an unscored warmup per route, then eight interleaved pairs,
+alternating AB/BA order. It emits every wall-time/peak-RSS sample and median ratios
+with a paired percentile bootstrap 95% interval (10,000 resamples, fixed seed).
+OS caches stay warm; checks are non-incremental. RSS comes from the platform's
+`/usr/bin/time` and is the maximum child-process high-water mark, not concurrent
+process-tree memory. Node/platform/CPU, lockfile and web-config pins accompany the
+results. This is an opt-in benchmark and does not slow ordinary verification.
+The isolated web measurement excludes concurrent build/test contention; the
+landing verifier's timing table measures that contention separately.
 
 ### Toolchain measurements
 

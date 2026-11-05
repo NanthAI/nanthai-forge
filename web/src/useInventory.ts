@@ -44,7 +44,7 @@ export function useInventory<F extends FunctionReference<'action', 'public', Rec
       paginationOpts: { numItems: count, cursor: null },
     } as FunctionArgs<F>;
     void client
-      .action(
+      .action<FunctionReference<'action', 'public', Record<string, unknown>, FunctionReturnType<F>>>(
         makeFunctionReference<'action', Record<string, unknown>, FunctionReturnType<F>>(actionName),
         input,
       )

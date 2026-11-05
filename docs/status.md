@@ -1,5 +1,9 @@
 # Status
 
+Web typechecking uses the existing native TypeScript compiler in both npm and
+the landing verifier. The JavaScript compiler remains an explicit all-scope
+fallback; scratch-copy checks cover strict and JSX diagnostic parity.
+
 Clone roots refresh from accepted main with `nforge pull ROOT`, agent `pull {}`
 and the existing MCP `forge_task`. Root `status` reports freshness and accepted
 source revision distance. Pull refuses local tracked edits, preserves disjoint

@@ -53,7 +53,7 @@ for (const failure of [
       `import assert from 'node:assert/strict';
       import { existsSync, readFileSync, writeFileSync } from 'node:fs';
       for (const path of ['core-built', 'tests-ran', 'documents-checked']) assert.ok(existsSync(path), path);
-      for (const [name, count] of [['native', 3], ['legacy', 2], ['oxc', 2]])
+      for (const [name, count] of [['native', 4], ['legacy', 1], ['oxc', 2]])
         assert.equal(readFileSync(name + '.jsonl', 'utf8').trim().split('\\n').length, count);
       writeFileSync('package-checked', '');
       process.exit(${failure === 'package' ? 7 : 0});`,
@@ -133,10 +133,7 @@ for (const failure of [
         .split('\n')
         .map(JSON.parse);
     assert.deepEqual(calls('oxc').sort(), [['format:check'], ['lint']]);
-    assert.deepEqual(calls('legacy'), [
-      ['-p', 'web/tsconfig.json'],
-      ['-p', 'convex/tsconfig.json', '--noEmit'],
-    ]);
+    assert.deepEqual(calls('legacy'), [['-p', 'convex/tsconfig.json', '--noEmit']]);
     assert.match(
       result.stdout,
       new RegExp(
@@ -145,8 +142,8 @@ for (const failure of [
     );
     assert.deepEqual(
       calls('native').map(args => args.slice(0, 2)),
-      Array(3).fill(['--noUncheckedSideEffectImports', 'false']),
+      Array(4).fill(['--noUncheckedSideEffectImports', 'false']),
     );
-    assert.equal(calls('native').filter(args => args.includes('*')).length, 2);
+    assert.equal(calls('native').filter(args => args.includes('*')).length, 3);
   });
 }

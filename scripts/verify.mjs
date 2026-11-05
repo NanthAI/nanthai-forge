@@ -131,8 +131,8 @@ function runCommand(name, command, args) {
 }
 const npm = (name, ...args) => run(name, process.execPath, [npmCli, 'run', '--silent', ...args]);
 const tsc = (name, ...args) => {
-  // Web retains tsc 5; Convex also checks compatibility with the runtime TypeScript dependency.
-  const legacy = name === 'typecheck:web' || name === 'typecheck:convex:tsc';
+  // Convex also checks compatibility with the runtime TypeScript dependency.
+  const legacy = name === 'typecheck:convex:tsc';
   return run(name, process.execPath, [
     join('node_modules', legacy ? 'typescript' : '@typescript/native', 'bin', 'tsc'),
     ...(legacy ? [] : ['--noUncheckedSideEffectImports', 'false']),
@@ -191,7 +191,7 @@ const results = await Promise.all([
   run('convex runtime imports', process.execPath, ['scripts/check-convex-runtime.mjs']),
   run('format:check (oxfmt)', process.execPath, ['scripts/oxc.mjs', 'format:check']),
   tsc('typecheck:core', '--types', '*', '--noEmit'),
-  tsc('typecheck:web', '-p', 'web/tsconfig.json'),
+  tsc('typecheck:web', '--types', '*', '-p', 'web/tsconfig.json'),
   tsc('typecheck:convex', '--types', '*', '-p', 'convex/tsconfig.json', '--noEmit'),
   tsc('typecheck:netlify', '-p', 'netlify/tsconfig.json'),
   convexCompatibility,
