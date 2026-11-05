@@ -108,7 +108,9 @@ handoffs include observation time, current operation, saved head and next action
 They stay outside public source. Stay with work you depend on until it settles.
 Use the CLI's live wait or printed continuation, not shell polling or a background
 driver with a timeout shorter than its expected operation. After a killed wait,
-replay the full original request and operation id; do not create another landing.
+run the receipt's `waitCommand` on the original operation id; keep the turn active
+and repeat it on IN PROGRESS. Before admission, replay the full original request
+and operation id. Do not create another landing to resume waiting.
 
 Review the invariant and search for remaining instances, not only the builder's
 handoff. Check scale cost before correctness review, then failure paths and

@@ -23,6 +23,7 @@ import { observeHostedRun, hostedWaitSchema, type HostedRunSubscription } from '
 import { observeHostedSubmissions } from './hosted-agent-submission-wait.js';
 import { ForgeError, invariant } from './errors.js';
 import { hostedActionError } from './hosted-action-error.js';
+import { operationWait } from './agent-operation-wait.js';
 import {
   hostedSourceSelectionSchema,
   hostedSourceShowSchema,
@@ -94,7 +95,7 @@ export function registerHostedAgentWorkflow(
         'preflight',
       ],
       description:
-        "pull {} refreshes the clone root to main (refuses local edits); Lane sync is unchanged. Hosted Lane actions over the same CLI transport and recovery journal. Verbs: {action:start|save|land, mode?, ...fields of the old action}: start open|reopen; save sync|candidate|overlap-answer|overlap-answers|friction|decision; land save (checkOnly:true checks without landing). Old names still work; checkpoint aliases save. Retain original parameters/operationId after unknown replies; a new UUID starts new work. Finish always requests agent acceptance under current project policy, including with account credentials. Pending is not accepted. finish priority:urgent is owner-only (other submitters retain normal with a reason). prioritize changes a queued Candidate submission priority:urgent|normal; it never cancels a running check. pin {laneId?,pinned?:true|false} is an owner command: a pinned Lane is skipped by complete-merged, completeOnAccept, Intent cascade, prune and cache GC, and an explicit complete or abandon refuses it until unpinned. ack answers every pending overlap notice on a Lane; preflight runs the saved head's affected tests here and records the result for land.",
+        "Hosted actions use CLI transport/journal. pull {} refreshes clone root to main, refusing local edits; Lane sync unchanged. {action:start|save|land,mode?,...legacy fields}: start open|reopen; save sync|candidate|overlap-answer|overlap-answers|friction|decision; land save (checkOnly:true checks without landing). Legacy names work; checkpoint=save. Replay original parameters/operationId after unknown replies; new UUID=new work. Finish requests agent acceptance under project policy, also with account credentials. Pending is not accepted: keep the turn active, use next/command on the original operation, repeat IN PROGRESS, then terminal recovery. finish priority:urgent is owner-only; others retain normal with a reason. prioritize updates queued priority:urgent|normal, never running checks. Owner pin {laneId?,pinned?:true|false} skips complete-merged, completeOnAccept, Intent cascade, prune and cache GC; explicit complete/abandon refuses until unpinned. ack answers all pending Lane overlaps. preflight runs the saved head's affected tests here and records the result for land.",
     },
     {
       name: 'forge_check',
@@ -218,7 +219,7 @@ export function registerHostedAgentWorkflow(
     'forge_wait',
     {
       description:
-        'Observe one run or landing operationIds until terminal/timeout/cancellation. Reconnect cursor binds project, actor and operations. Only this active call subscribes; exit/disconnect closes it. progressToken enables progress notifications. No polling, Work hydration or compute wake.',
+        'Block on original run/landing operationIds; keep the turn active. Timeout/cancellation returns same-target next/command; repeat IN PROGRESS, then terminal recovery. Cursor binds project, actor, operations. Only this call subscribes; disconnect closes it. progressToken enables progress notifications. No polling or compute wake.',
       inputSchema: hostedWaitSchema.shape,
       annotations: read,
     },
@@ -236,8 +237,8 @@ export function registerHostedAgentWorkflow(
           'BAD_ARGUMENT',
           'Choose one run or hosted landing operationIds.',
         );
-        const response = await result(() =>
-          (input.runId ? observeHostedRun : observeHostedSubmissions)(
+        const response = await result(async () => {
+          const observed = await (input.runId ? observeHostedRun : observeHostedSubmissions)(
             transport,
             input,
             controller.signal,
@@ -256,8 +257,20 @@ export function registerHostedAgentWorkflow(
               }
             },
             subscribe,
-          ),
-        );
+          );
+          return {
+            ...observed,
+            result: {
+              ...observed.result,
+              ...('submissions' in observed.result && observed.result.submissions.length === 1
+                ? observed.result.submissions[0]
+                : {}),
+              ...(['timeout', 'cancelled'].includes(observed.result.status)
+                ? operationWait(transport.root, { ...input, ...transport.address })
+                : {}),
+            },
+          };
+        });
         await notifications;
         return response;
       } finally {

@@ -272,7 +272,7 @@ function actionHelp(action: string): string {
       'Optional tests:["tests/example.test.mjs"] replaces only the standard check test selection. Static checks still run. Explicit lists (including []) are partial evidence and cannot satisfy a landing gate or check reuse.\n';
   if (action === 'observe' || action === 'log' || action === 'cancel')
     result +=
-      'operationId is the nested check run operation ID, not the finish operation ID. Resume a finish by replaying its original finish request plus resolved pins.\n';
+      'operationId is the nested check run operation ID, not the finish operation ID. Resume an admitted finish with wait {operationIds:[ORIGINAL_UUID],until:"terminal",timeoutSeconds:3600}. Replay its full original request plus resolved pins only when admission is unknown.\n';
   if (action === 'cancel')
     result +=
       'Hosted cancel takes {submissionId,operationId?}: submissionId selects a landing request and operationId identifies this cancellation. An already accepted request returns its receipt; Lane lifecycle stays independent; an unneeded hosted check is cancelled when its last live submission leaves.\n';
@@ -409,6 +409,9 @@ export async function agentCli(args: string[], options: AgentCliOptions = {}): P
   const notices: string[] = [];
   const result = await runAgentCli(args, options, notices);
   for (const notice of notices) process.stderr.write(notice);
+  const pending = (result as { result?: { inProgress?: boolean; waitCommand?: string } } | undefined)?.result;
+  if (options.process && args[1] !== 'wait' && pending?.inProgress && pending.waitCommand)
+    process.stderr.write(`Forge work is unfinished; keep this turn active and run: ${pending.waitCommand}\n`);
   return result;
 }
 

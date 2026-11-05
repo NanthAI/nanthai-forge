@@ -1,8 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
 import { shellQuote } from './agent-brief-render.js';
+import { operationWait } from './agent-operation-wait.js';
 
 type Reply = Record<string, unknown>;
 const failedRuns = new Set(['failed', 'cancelled', 'runner-unavailable', 'interrupted']);
+
+/** A stopped compose child needs the retained public finish replay, not observation. */
+export function stoppedFinishSource(result: Reply) {
+  const submission = result.submission as { phase?: string } | undefined;
+  const progress = result.progress as { status?: string; outcome?: { status?: string } } | undefined;
+  return (
+    submission?.phase === 'composing' &&
+    (progress?.status === 'retryable' ||
+      progress?.status === 'failed' ||
+      progress?.outcome?.status === 'failed')
+  );
+}
 
 /** A new attempt retains the complete selection, never the failed operation identity. */
 export function finishRetryContinuation(root: string, selection: Reply) {
@@ -17,21 +30,29 @@ export function finishRetryContinuation(root: string, selection: Reply) {
   return { next: { action: 'finish', ...retry }, command, retry, retryCommand: command };
 }
 
-/** Wait on a retained alarm or a finite conflict read lacking attempt details.
- * The existing wait returns exact recovery for the rejected attempt, without
- * adding source/metadata reads to status. */
-export function hostedObservationContinuation(root: string, result: Reply): Reply {
+/** Admitted work has one blocking continuation, shared by CLI and MCP.
+ * Preparation before admission and stopped source jobs keep their original replay. */
+export function hostedObservationContinuation(root: string, result: Reply, operationId?: string): Reply {
+  if (stoppedFinishSource(result)) return result;
   const submission = result.submission as
-    | { operationId?: string; error?: { code?: string }; observation?: { state?: string; stall?: unknown } }
+    | { operationId?: string; error?: { code?: string }; observation?: { state?: string }; phase?: string }
     | undefined;
-  const stalled = submission?.observation?.state === 'pending' && !!submission.observation.stall;
+  const run = result.run as { id?: string; status?: string } | undefined;
+  if (result.phase === 'check' && run?.id && !['passed', ...failedRuns].includes(run.status ?? ''))
+    return { ...result, ...operationWait(root, { runId: run.id }) };
+  const state = submission?.observation?.state ?? submission?.phase;
+  const pending = submission && !['landed', 'terminal-failed', 'superseded'].includes(state ?? '');
   const conflict = submission?.error?.code === 'COMPOSITION_CONFLICT' && !result.recovery && !result.conflict;
-  if ((!stalled && !conflict) || !submission?.operationId) return result;
-  const parameters = { operationIds: [submission.operationId] };
+  const replayOperation = (result.replayParameters as Reply | undefined)?.operationId;
+  const original =
+    operationId ?? (typeof replayOperation === 'string' ? replayOperation : submission?.operationId);
+  if ((!pending && !conflict) || !original) return result;
+  const continuation = operationWait(root, { operationIds: [original], until: 'acceptance' });
+  if (!pending) return { ...result, next: continuation.next, command: continuation.command };
   return {
     ...result,
-    next: { action: 'wait', ...parameters },
-    command: `nforge agent ${shellQuote(root)} wait ${shellQuote(JSON.stringify(parameters))}`,
+    ...continuation,
+    ...(result.nextCommand ? { nextCommand: continuation.command } : {}),
   };
 }
 
@@ -53,8 +74,13 @@ export function normalizeHostedFinishResult(root: string, selection: Reply, resu
     state === 'landed' ||
     state === 'superseded' ||
     failed ||
-    run?.status === 'passed';
-  if (!settled) return hostedObservationContinuation(root, result);
+    (!submission && run?.status === 'passed');
+  if (!settled)
+    return hostedObservationContinuation(
+      root,
+      result,
+      typeof selection.operationId === 'string' ? selection.operationId : undefined,
+    );
   // These fields described the pre-wait source/queue snapshot. Keep the immutable
   // submission, run and replayParameters as evidence, without advertising replay as recovery.
   const clean = Object.fromEntries(
@@ -70,6 +96,7 @@ export function normalizeHostedFinishResult(root: string, selection: Reply, resu
           'nextCommand',
           'waitStatus',
           'inProgress',
+          'instruction',
           'retry',
           'retryCommand',
         ].includes(key),

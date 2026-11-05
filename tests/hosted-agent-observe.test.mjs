@@ -186,6 +186,10 @@ test('MCP progress and disconnect are scoped to the requested live run only', as
   close();
   const result = JSON.parse((await waiting).content[0].text);
   assert.equal(result.result.status, 'cancelled');
+  assert.equal(result.result.next.action, 'wait');
+  assert.equal(result.result.next.runId, s.runId);
+  assert.equal(result.result.command, result.result.waitCommand);
+  assert.match(result.result.instruction, /Keep this turn active/);
   assert.equal(notifications[0].params.progressToken, 'watch');
   assert.equal(JSON.parse(notifications[0].params.message).id, s.runId);
   assert.deepEqual(s.counts(), { opens: 1, closes: 1, unsubscribes: 1 });

@@ -59,7 +59,10 @@ async function landOnce(
     wakeLandingWorker(store);
     return {
       ...response,
-      result: { ...response.result, ...landingAdmission(store, command.operationId, command.laneIds) },
+      result: {
+        ...response.result,
+        ...landingAdmission(store, command.operationId, command.laneIds, response.result.terminal),
+      },
     };
   };
   // Replays read the atomically published journal without waiting for its driver.

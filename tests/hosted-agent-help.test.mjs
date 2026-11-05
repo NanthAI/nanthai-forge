@@ -10,6 +10,7 @@ import {
   hostedAgentHelpMarkdown,
 } from '../dist/hosted-agent-help.js';
 import { landAnnouncement } from '../dist/hosted-land-wait.js';
+import { canonicalRoot } from '../dist/root-paths.js';
 import { agentCli } from '../dist/agent-cli.js';
 import { docsCli } from '../dist/docs-cli.js';
 import { agentFixture } from './hosted-agent-fixture.mjs';
@@ -159,8 +160,10 @@ test('receipt replay preserves the normalized full original parameters and journ
     ),
     hostedAgentCommandSchemas.finish.parse(command),
   );
-  const line = landAnnouncement(s.root, {}, first)[0];
-  assert(line.includes(JSON.stringify(first.result.replayParameters)), line);
+  const announcement = landAnnouncement(canonicalRoot(s.root), {}, first).join('\n');
+  assert(announcement.includes(first.result.waitCommand), announcement);
+  assert.deepEqual(first.result.next.operationIds, [first.operationId]);
+  assert.equal(first.result.next.action, 'wait');
   const again = await s.transport().dispatch('finish', first.result.replayParameters);
   assert.equal(again.operationId, first.operationId);
   assert.equal(again.result.submission.id, first.result.submission.id);
@@ -233,15 +236,18 @@ test('inline accept-order on 600 notices records the same answers as ack in boun
   );
 });
 
-test('pending source replay announcements exclude recovery helper metadata', async t => {
+test('admitted pending source waits while retaining a helper-free original replay selection', async t => {
   const s = agentFixture(t);
   s.pending(true);
   const command = { laneId: s.lane.laneId, message: 'Retain async source message', keepOpen: true };
   const first = await s.transport().dispatch('finish', command);
-  assert.equal(typeof first.result.replay.command, 'string', 'source recovery has a separate helper command');
+  assert.equal(first.result.submission.preparing, true, 'the desired landing is already admitted');
+  assert.equal(first.result.next.action, 'wait');
+  assert.equal(first.result.command, first.result.waitCommand);
   assert.equal(first.result.replayParameters.message, command.message);
-  const line = landAnnouncement(s.root, {}, first)[0];
-  assert(line.includes(JSON.stringify(first.result.replayParameters)));
+  const line = landAnnouncement(canonicalRoot(s.root), {}, first).join('\n');
+  assert(line.includes(first.result.waitCommand));
+  assert.equal(first.result.replayParameters.command, undefined);
   assert(!line.includes('"command":'));
   const again = await s.transport().dispatch('finish', first.result.replayParameters);
   assert.equal(again.operationId, first.operationId);

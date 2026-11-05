@@ -64,6 +64,11 @@ for (const action of ['finish', 'land']) {
     assert.equal(admitted.durable, true);
     if (action === 'land') assert.equal(admitted.replay.command.wait, false);
     assert.equal(admitted.terminal, false);
+    assert.equal(admitted.next.action, 'wait');
+    assert.deepEqual(admitted.next.operationIds, [command.operationId]);
+    assert.equal(admitted.next.laneIds, undefined, 'wait follows the operation, not later Lane work');
+    assert.equal(admitted.waitCommand, admitted.command);
+    assert.deepEqual(admitted.observe.wait, admitted.next);
     assert.equal(admitted.complete, false);
     assert.equal(admitted.landingWorker.workers, 0);
     assert.match(admitted.message, /not running.*remains queued/);
@@ -79,6 +84,9 @@ for (const action of ['finish', 'land']) {
     await drive(f, () => f.store.load().channelMoves.find(move => move.channel === 'main'));
     const terminal = (await f.agent.dispatch(command)).result;
     assert.equal(terminal.terminal, true);
+    assert.match(terminal.message, /terminal outcome/);
+    assert.equal(terminal.waitCommand, undefined);
+    assert.equal(terminal.inProgress, undefined);
     assert.equal(terminal.complete, true);
     assert.equal(runs(f).length, 1);
     assert.equal(f.content('async.txt'), 'durable source\n');

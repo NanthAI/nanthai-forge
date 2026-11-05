@@ -54,7 +54,7 @@ export function hostedAgentHelp(action?: string) {
     'peers {laneId?,path?,detail?} reads current saved overlap evidence in one query. Coverage excludes unsaved peer edits and never proves independence. start/save/status retain unacknowledgedOverlaps and behindMain.',
     'diff {laneId?,paths?,byteBudget?,cursor?} compares pinned base to saved head; nextCursor continues that pair. show {state?|candidateId?|laneId?|channel:"main",path} reads exact bytes. forge_review exposes show/diff/peers.',
     'Keep every original parameter, including message and pins, when replaying an operationId. Use the receipt replay command.',
-    'wait {operationIds:[ORIGINAL_UUID]} watches a landing; wait {runId} watches a check. Transient observation failures retry until the deadline; exit 3 means still in progress and prints the exact wait command.',
+    'Keep this turn active while your work is unfinished. Resume with the receipt command: wait {operationIds:[ORIGINAL_UUID],until:"acceptance",timeoutSeconds:3600}; check-only work uses wait {runId,timeoutSeconds:3600}. Transient observation failures retry until the deadline. Exit 3 is IN PROGRESS: run the same wait again. Terminal failure follows its recovery command; LANDED is acceptance, CHECK PASSED alone is not.',
     '',
   ].join('\n');
 }

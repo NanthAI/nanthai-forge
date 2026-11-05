@@ -86,8 +86,12 @@ budget, time box, acceptance bar and metrics that must not regress.
    usage and byte-placement evidence; otherwise that acceptance stays open.
 10. Finish your own Lane unless review is required first. Check the benchmark hold
     before each submission; wait without touching it. No routine urgent priority.
-    Freeze edits/saves/sync until terminal. Stay with all dependent work. Resume a
-    killed wait with its complete original request/id, not a shell poller.
+    Freeze edits/saves/sync until terminal. Stay with all dependent work and keep
+    this turn active. Resume a killed shell with the receipt's blocking `waitCommand`:
+    `nforge agent ROOT wait '{"operationIds":["ORIGINAL_UUID"],"until":"acceptance","timeoutSeconds":3600}'`
+    (native: `until:"terminal"`; check-only: `{"runId":"RUN_ID","timeoutSeconds":3600}`).
+    Repeat on IN PROGRESS; follow terminal recovery on failure/conflict. A passed
+    check alone is not a landing. Before admission or for stopped source work, replay the full original request.
 11. Fix failures in the same Lane and land again; never cancel and recreate.
     Follow exact conflict/stale/stalled continuations; replay unknown outcomes.
     Before filing an Issue or friction, search planning and comment on an existing

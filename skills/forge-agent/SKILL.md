@@ -17,6 +17,13 @@ machine, across its Lanes; the corresponding `install-hooks` reverses it.
 
 Three verbs: `start`, `save` and `land`; reads keep their names; operator actions run as `nforge x ROOT ACTION`. Old names (`finish`, `checkpoint`, `sync`, `run`, …) still work and print their new form on stderr.
 
+`land --save` / `finish` blocks by default. Keep this turn active while your work is
+unfinished. After a killed shell or deadline, run the receipt's `command` / `waitCommand`:
+`nforge agent ROOT wait '{"operationIds":["ORIGINAL_UUID"],"until":"acceptance","timeoutSeconds":3600}'`
+(native: `until:"terminal"`; check-only: `{"runId":"RUN_ID","timeoutSeconds":3600}`).
+Repeat that wait on IN PROGRESS. LANDED is acceptance; CHECK PASSED alone is not.
+On failure or conflict, follow the returned recovery; report the terminal evidence.
+
 For work on Forge itself, read [AGENTS.md](../../AGENTS.md), the [lead playbook](../../docs/agents/lead.md) and [builder rules](../../docs/agents/briefings.md#building-forge). They carry durable working rules; generated defaults below still describe the current project settings.
 
 ## Hosted checkouts

@@ -161,7 +161,7 @@ Old names keep working for at least one released version and print their new for
 
 ## The backlog is Forge planning
 
-`land --save` waits by default; `--no-wait` returns after submission. Killing the client never stops the landing. Stderr prints progress, the operation ID, replay command and overlap notice at admission. A long queue returns one `waitCommand`, resuming by subscription without polling. Overlaps exclude completed/landed work. `status {laneId}` reports `lastActivityAt` (last Lane-record change) and `local` (this machine's last command and whether one is running). Idle adds no server reads.
+`land --save` waits by default; `--no-wait` returns after submission. Killing the client never stops the landing. Stderr prints progress, the operation ID, canonical blocking wait and overlap notice at admission. Source preparation before admission retains its replay command. A long queue returns one `waitCommand`, resuming by subscription without polling. Overlaps exclude completed/landed work. `status {laneId}` reports `lastActivityAt` (last Lane-record change) and `local` (this machine's last command and whether one is running). Idle adds no server reads.
 
 CLI/MCP network requests and complete Convex RPCs have deadlines and bounded replay-safe retries.
 Exhaustion returns `IN PROGRESS` (exit 3), `inProgress:true`, and exact `next`/`command`
@@ -531,7 +531,7 @@ Pinned Lanes (hosted, owner only). `nforge x ROOT pin '{"laneId":"…"}'` (or `f
 
 Lifecycle. When the project policy has `lifecycle.completeOnAccept:true`, accepting a Candidate (through `finish` or `accept`) marks its input Lanes `completed`, and their Intent when all its Lanes are completed, unless the request has `keepOpen:true`; the receipt lists them under `completed`. A Lane is `merged` (shown as `merged:true` and `mergedInto` in detailed `status`/`records` Lane items) when it has its own work and its head is an ancestor-or-equal of an accepted Channel head. Reading never changes records. `complete-merged` (`{"channel":"main"}`) explicitly completes every open merged Lane and the Intents whose Lanes are all completed, returns what it changed and does nothing on repeat. `complete` and `reopen` take `{"laneId"}` or `{"intentId"}` and need no revision. Hosted projects: `complete {laneId}` closes one active Lane (a repeat is a no-op and a Lane that is not active is refused with `WORK_STALE`); `complete-merged {}` (project owner) completes every active Lane whose exact saved head an accepted receipt landed and that `completeOnAccept` did not already complete. It pages through accepted receipts, about 10 receipts or 100 Lane entries per call, and prints `{completed, calls}`; it is safe to repeat. `completeOnAccept` is on by default for new projects; an existing project turns it on with `set-policy`. Older deployments return `HOSTED_ACTION_UNSUPPORTED`. Completion keeps all source and evidence and does not stop further edits. `clean` (dry run unless `{"apply":true}`) reclaims disk from finished check workspaces and completed Lanes' build dirs or fully captured directories; `reopen` restores a removed Lane (see [operations](../operations.md#local-cleanup)). With `lifecycle.cleanRegenerableCopies:true`, completion and abandonment automatically remove eligible reconstructable native Lane folders and report removals, skipped copies and restore instructions. Terminal remote checks also remove eligible `github-actions-source` copies (and legacy `modal-source` ones) immediately under this policy; receipts, logs, selection, plans and artifacts remain. Terminal native check workspace cleanup retains its existing behavior; when the cleanup policy is enabled it records a separate automatic-action outcome after evidence is durable, without changing the run receipt. Policy-off cleanup preserves the Work format. `DISK_LOW` refusals retain materialized workspace and runtime files even during later automatic sweeps.
 
-`records` returns the same page as `status` sections (`items`, `total`, `more`, `nextOffset`, plus the older `records`). Filters: `state` or `status` (for example `{"collection":"lanes","state":"active"}`) and `merged:false|true` for Lanes; filtered offsets index the filtered list. `observe`, `log` and `cancel` take the nested check run operation ID, not the finish ID. Resume a finish by replaying its original request plus `resolved` pins. A failed `run`, `observe` or `finish` receipt carries `failureSummary`, and `log` accepts `tail:BYTES` (up to 65536) to read the end of a stream. `run` accepts `{"laneId"}` instead of `viewId` (the Lane's latest clean Candidate) and defaults the check as `finish` does, so repeating a flaky check is one short command.
+`records` returns the same page as `status` sections (`items`, `total`, `more`, `nextOffset`, plus the older `records`). Filters: `state` or `status` (for example `{"collection":"lanes","state":"active"}`) and `merged:false|true` for Lanes; filtered offsets index the filtered list. `observe`, `log` and `cancel` take the nested check run operation ID, not the finish ID. Resume an admitted finish with the receipt's `waitCommand` on the original parent operation id. Before admission, replay its original request plus `resolved` pins. A failed `run`, `observe` or `finish` receipt carries `failureSummary`, and `log` accepts `tail:BYTES` (up to 65536) to read the end of a stream. `run` accepts `{"laneId"}` instead of `viewId` (the Lane's latest clean Candidate) and defaults the check as `finish` does, so repeating a flaky check is one short command.
 
 Select a check from `status`, or `define-check` with the local executable and args. Checks run in a fresh exact-Candidate directory, so the command must prepare its dependencies. `run` takes `viewId` or `laneId` (and optional pins) and waits by default; `observe`, `log` and `cancel` address that run. For the standard Forge check, `run {"laneId":"…","tests":["tests/a.test.mjs"]}` (or `viewId`) replaces only the selected test files; static checks still run. An explicit list, including `[]`, is retained as `checkSelection.scope:"partial"` and uses at least Work format 15 so readers without selection evidence refuse it. It cannot satisfy an automatic acceptance gate, an Invariant check requirement or check reuse; use ordinary `finish` for landing evidence. Retry with the same operation ID and the original list to observe the existing execution.
 
@@ -1105,68 +1105,73 @@ recovery summary; this command does not add a hosted UI.
 
 ## Waiting for outcomes
 
-Wait on local Lanes, check run IDs, or parent finish/land operation IDs with one command:
+`land --save` / `finish` blocks by default. Keep the turn active while your work
+is unfinished. A progressing hosted landing's `next`, `command` and `waitCommand`
+name one blocking continuation on the original operation:
+
+```sh
+nforge agent ROOT wait '{"operationIds":["ORIGINAL_UUID"],"until":"acceptance","timeoutSeconds":3600}'
+```
+
+After a killed shell or IN PROGRESS deadline, repeat that wait; do not resubmit.
+Native operations use `until:"terminal"`. Hosted check-only and harness checks use
+`{"runId":"RUN_ID","timeoutSeconds":3600}`; native checks use their run operation
+id. Source preparation before admission and stopped source jobs keep the full original replay command.
+`--no-wait` returns with an unfinished-work warning and the blocking continuation.
+
+LANDED reports acceptance; CHECK PASSED alone does not. Follow failure/conflict
+recovery in the same Lane; inspect current Lane status after supersession.
+Single-target hosted CLI/MCP waits expose `submission` alongside `submissions`.
+CLI/MCP has no external turn-end callback or authoritative turn-to-operation map,
+so it cannot refuse a harness ending its turn. External drivers without Forge run
+IDs need their harness's original wait/recovery. Hosted peer waits require a
+submitted operation ID; an unsubmitted Lane is not a hosted wait target.
+
+Native waits can also select latest Lane work or several operations:
 
 ```sh
 nforge agent OWNER wait '{"laneIds":["LANE_ID"],"operationIds":["OPERATION_ID"],"until":"terminal","timeoutSeconds":600}'
 ```
 
-The command prints newline-delimited JSON: an initial observation, then each observed
-change in Lane, operation, submission, check, shard progress or recorded conflict/overlap notice,
-and a final summary. Add `--text` for one human-readable line per event. Duplicate
-observations are suppressed; a settled target emits no later updates. Fast changes
-between snapshots can be coalesced; this is a live observer, not a historical replay.
+NDJSON contains initial observations, changed source/check/shard/overlap states
+and a final summary; `--text` prints readable lines. Duplicates are suppressed,
+settled targets stop emitting, and snapshots can coalesce fast changes.
+`until:"any-change"` waits for a change from the baseline. Default `terminal`
+waits for every target; unknown IDs, review and dependency waits remain pending.
+Completed Lanes and landed/passed operations succeed; failed/interrupted checks,
+conflicts, abandonment and supersession do not. A kept-open Lane can report its
+saved head landed. Operations follow their original head and historical outcome;
+a later save can report superseded without crediting newer work or cancelling
+that original request. A passed Lane check alone never establishes landing.
 
-`until:"any-change"` waits for a change after the initial observation. The default
-`terminal` waits until every selected target has an outcome. Completed Lanes and
-landed/passed operations succeed; failed/interrupted checks, conflicts, abandoned
-Lanes and superseded submissions are unsuccessful. Review and dependency waits remain
-pending until the submitted Candidate lands or the request fails. Passing a Lane's check alone
-does not mean the Lane landed. Unknown IDs remain pending until they appear or the
-wait expires. A kept-open Lane can report its current saved head landed without
-completing the Lane. An operation always follows its original submitted head,
-including historical acceptance; a newer save reports `superseded` without crediting
-the newer head or cancelling the original work.
+Exit 0 means terminal (including failure), or an observed `any-change`; native
+timeout is 2, cancellation 130. Hosted timeout is 3 / IN PROGRESS with its exact
+continuation; transient observation failures retry until that deadline. Invalid
+input/unreadable metadata exits nonzero. Inspect summary `successful` and target
+`ok` for success. Failures retain reasons, infrastructure/check classification and
+available log paths. Composition conflicts return exact `sync`/`resolve` recovery,
+without a finish replay to discover it.
 
-Exit codes are 0 when all targets reach a terminal outcome (including failed checks),
-or any change is observed in `any-change` mode, 2 for native timeout, and 130 for cancellation.
-Hosted `wait` and `land --save` use exit 3 for an in-progress deadline, print the exact
-wait command, and keep waiting through transient observation failures until that deadline.
-Observed composition conflicts include the rejected Candidate details and a `sync`
-recovery command; follow its returned conflict files and `resolve` continuation.
-There is no intermediate `finish` replay to discover recovery.
-Invalid input or unreadable metadata exits nonzero. `successful` in the summary and
-`ok` on each target distinguish successful outcomes from failed/interrupted ones. The summary names every target and
-its latest state. Failures include the reason, infrastructure versus check failure
-classification, combined output paths and available failing shard log paths.
+Submission events retain `submissionId`, `attemptId`, immutable `head`,
+`attemptHead`, `state`, `outcome`, `pendingReason` and `cause`. Pending reasons:
+`queued`, `checking`, `waiting-for-review`, `waiting-for-dependency`. Failure causes:
+`conflict`, `check-failed`, `infra`, `stale-head`, `rejected`. Failed/interrupted
+runs retain run/log pins before the final receipt. Operations settle independently;
+batch cumulative/diagnostic prefix runs remain observable while diagnosis decides
+which submissions land or fail.
 
-Submission events retain S01's `submissionId`, `attemptId`, immutable `head`,
-`attemptHead`, `state`, `outcome`, `pendingReason` and `cause`. Pending reasons are
-`queued`, `checking`, `waiting-for-review` and `waiting-for-dependency`; failures
-retain `conflict`, `check-failed`, `infra`, `stale-head` or `rejected`. Failed and
-interrupted runs include their original run and log pins, even before the driver
-publishes its final receipt. Multiple selected operations settle independently.
-While a batch is checking, wait follows its recorded cumulative and diagnostic
-prefix runs, including shared runs whose entries do not yet have settled run IDs.
-A failed combination emits its check outcome while its submissions remain pending
-until diagnosis and settlement determine which inputs land or fail.
+Every JSON event/summary has a `cursor`. Reconnect with the last cursor and same
+owner/targets to suppress unchanged observations; terminal states remain in the
+summary. `any-change` detects disconnected changes too. Cursors deduplicate
+snapshots; they are neither durable event logs nor authority to drive work.
 
-Every JSON event and summary includes an opaque `cursor`. Retain the last received
-cursor and pass it back as `cursor:"…"` with the same owner and target selection
-after timeout, restart or disconnect. Reconnect rereads current records and emits
-only observations changed since that cursor; unchanged terminal outcomes still
-appear in the summary. With a cursor, `any-change` also detects changes made while
-disconnected. The cursor is client-carried deduplication data, not a durable event
-log or authority to drive work. Changes between observations may still coalesce.
-
-`forge_wait` exposes the same inputs through agent MCP, returning JSON lines. Clients
-that supply a progress token also receive live event messages as progress notifications.
-Timeout, cancellation and transport disconnect stop observation only; they never
-cancel a submitted landing or its check. Waiting takes no Work/Lane locks, starts no
-checks or drivers, performs no remote calls and writes no metadata. Filesystem signals
-wake the observer; a two-second local fallback covers missed signals and local runner
-death. Durable completion receipts can be observed before Work metadata catches up;
-remote controller loss stays pending for the existing recovery owner to resolve.
+MCP `forge_wait` has the same inputs; a progress token enables live notifications.
+Timeout/cancellation/disconnect closes observation without cancelling work. Native
+waits take no Work/Lane locks, start no drivers/checks, make no remote calls and
+write no metadata. Filesystem signals plus a two-second fallback cover missed
+signals/local runner death. Durable receipts can precede Work metadata; remote
+controller loss remains pending for its recovery owner. Hosted waits use the
+existing selected-target live queries.
 
 Indexed native landing queues read and publish the selected queue records rather
 than hydrating unrelated Lane and run history. A failed sole Candidate in a

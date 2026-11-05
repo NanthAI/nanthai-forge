@@ -37,6 +37,10 @@ export function landSummary(response: HostedAgentResponse): string[] {
   const phase = landPhase(response);
   if (phase === 'landed')
     return [`LANDED${submission?.acceptance ? ` receipt ${submission.acceptance.receiptId}` : ''}`];
+  if (submission?.observation?.state === 'superseded' || phase === 'superseded')
+    return [
+      'SUPERSEDED; this operation does not land the newer saved head. Use its current Lane status before continuing.',
+    ];
   if (phase === 'ready')
     return [submission ? 'CHECK PASSED; waiting for acceptance' : 'CHECK PASSED (not landed)'];
   if (result.phase === 'check' && result.run?.status === 'passed') return ['CHECK PASSED (not landed)'];

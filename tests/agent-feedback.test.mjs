@@ -75,7 +75,7 @@ const noticeFor = (root, laneId) =>
     },
   });
 
-test('finish prints operation id, replay and wait commands, and the overlap banner at once, before the save wait ends', async t => {
+test('finish prints the original operation wait and overlap banner before waiting', async t => {
   const lines = captureStderr(t);
   const root = '/tmp/lane-root';
   const operationId = randomUUID();
@@ -103,10 +103,14 @@ test('finish prints operation id, replay and wait commands, and the overlap bann
   assert.equal(response.result.phase, 'finish');
   const text = lines.join('');
   assert.match(text, new RegExp(`land: operationId ${operationId}`));
-  assert.match(text, /finish '\{"laneId":"[0-9a-f-]+","message":"m","operationId":"[0-9a-f-]+"\}'/);
+  assert.doesNotMatch(text, / finish /);
+  assert.match(text, /keep this turn active/);
+  assert.equal((text.match(/nforge agent '\/tmp\/lane-root' wait /g) ?? []).length, 1);
   assert.match(
     text,
-    /to keep waiting, run: nforge agent '\/tmp\/lane-root' wait '\{"operationIds":\["[0-9a-f-]+"\],"until":"acceptance","timeoutSeconds":3600\}'/,
+    new RegExp(
+      `Resume after interruption with: nforge agent '/tmp/lane-root' wait '\\{"operationIds":\\["${operationId}"\\],"until":"acceptance","timeoutSeconds":3600\\}'`,
+    ),
   );
   assert.match(text, /OVERLAP NOTICE: ACTION REQUIRED/);
   assert.match(text, /efa2859d/);

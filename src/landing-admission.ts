@@ -12,23 +12,29 @@ import { withQueueSlot } from './landing-queue.js';
 import { ForgeError } from './errors.js';
 import type { FinishAction } from './agent-workflow-schema.js';
 import type { WorkStore } from './work-store.js';
+import { operationWait } from './agent-operation-wait.js';
 
 /** Transport observation only. The durable journal and canonical Work own progress. */
-export function landingAdmission(store: WorkStore, operationId: string, laneIds: string[]) {
+export function landingAdmission(store: WorkStore, operationId: string, laneIds: string[], terminal = false) {
   const worker = readLandingWorkerStatus(store);
-  const message = worker.workers
-    ? 'Request is durable. The owner worker drives pending work; disconnecting does not cancel it.'
-    : 'Request is durable. The owner worker is not running; pending work remains queued until the owner service starts.';
+  const continuation = !terminal
+    ? operationWait(store.root, { operationIds: [operationId], until: 'terminal' })
+    : undefined;
+  const message = terminal
+    ? 'Request has a terminal outcome. Report the recorded result; use its recovery if it failed.'
+    : worker.workers
+      ? 'Request is durable. The owner worker drives pending work; disconnecting does not cancel it.'
+      : 'Request is durable. The owner worker is not running; pending work remains queued until the owner service starts.';
   return {
     durable: true,
     landingWorker: worker,
     message,
-    next: message,
+    ...continuation,
     observe: {
       landing: { action: 'landing', operationId },
       status: { action: 'status', laneId: laneIds[0] },
       pending: { action: 'pending-status' },
-      wait: { action: 'wait', laneIds, operationIds: [operationId], until: 'terminal' },
+      ...(continuation ? { wait: continuation.next } : {}),
     },
   };
 }
@@ -61,7 +67,13 @@ export async function admitFinish(
     const submissions = command.accept
       ? finishSubmissions(store, command, journal.state.attempts, fields)
       : undefined;
-    const admission = landingAdmission(store, command.operationId, [command.laneId, ...(command.with ?? [])]);
+    const terminal = submissions ? submissions.every(item => item.terminal) : fields.terminal === true;
+    const admission = landingAdmission(
+      store,
+      command.operationId,
+      [command.laneId, ...(command.with ?? [])],
+      terminal,
+    );
     const dependencies =
       !command.accept && !fields.terminal
         ? waitingDependencies(store, [command.laneId, ...(command.with ?? [])])

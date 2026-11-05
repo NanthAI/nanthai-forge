@@ -16,6 +16,7 @@ import type { LandEntry } from './land-journal.js';
 import type { LandJournal } from './land-journal.js';
 import type { LandCommand } from './land-schema.js';
 import type { WorkStore } from './work-store.js';
+import { operationWait } from './agent-operation-wait.js';
 /** Work can publish acceptance before its parent journal observes settlement.
  * Never combine a terminal submission with stale queue/check diagnostics. */
 function entryOutcome(store: WorkStore, entry: LandEntry): Record<string, unknown> {
@@ -119,6 +120,9 @@ function landingSnapshot(
             'queued'),
       complete: entries.every(complete),
       terminal: entries.every(terminal),
+      ...(!entries.every(terminal)
+        ? operationWait(store.root, { operationIds: [command.operationId], until: 'terminal' })
+        : {}),
       summary: entries.flatMap(entry =>
         entry.submissions.map(
           submission => `${submission.laneId.slice(0, 8)}: ${submissionLine(submission)}`,
@@ -212,6 +216,9 @@ export function readLandingHandle(store: WorkStore, operationId: string) {
   const response = landReceipt(store, state.command, { state }, false);
   return {
     ...response,
-    result: { ...response.result, ...landingAdmission(store, operationId, state.command.laneIds) },
+    result: {
+      ...response.result,
+      ...landingAdmission(store, operationId, state.command.laneIds, response.result.terminal),
+    },
   };
 }

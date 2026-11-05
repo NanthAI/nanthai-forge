@@ -134,6 +134,10 @@ test('hosted wait CLI reports a persistent observe 502 as IN PROGRESS with an ex
   const result = await hostedAgentCli(s.root, 'wait', command, s.address, transport);
   assert.equal(result.result.status, 'timeout');
   assert.equal(result.result.inProgress, true);
+  assert.equal(result.result.command, result.result.waitCommand);
+  assert.equal(result.result.next.action, 'wait');
+  assert.deepEqual(result.result.next.operationIds, [operationId]);
+  assert.match(result.result.instruction, /Keep this turn active/);
   assert.equal(process.exitCode, 3);
   assert(err.join('').includes('IN PROGRESS; wait deadline reached'));
   assert(
@@ -189,6 +193,8 @@ test('hosted wait CLI returns and prints direct conflict recovery without finish
     transport,
   );
   assert.equal(result.result.recovery.conflict.candidateId, candidateId);
+  assert.equal(result.result.submission.phase, 'terminal-failed');
+  assert.deepEqual(result.result.submission, result.result.submissions[0].submission);
   assert.equal(result.result.recovery.conflict.next.action, 'sync');
   assert.equal(conflictReads, 1);
   assert(err.join('').includes('Continue recovery: ' + result.result.recovery.conflict.command));
@@ -282,9 +288,23 @@ for (const wrapper of ['cli', 'mcp'])
         assert.equal(first.result.progress.outcome.error.code, 'SYNTHETIC_INVALID_SOURCE');
         assert.equal(firstNext.body.operationId, undefined);
         assert.equal(firstNext.body.retry, true);
-      } else {
-        assert.equal(firstNext.body.operationId, command.operationId);
+      } else if (outcome === 'retryable') {
+        assert.equal(first.result.status, 'retryable');
         assert.equal(firstNext.action, 'finish');
+        assert.deepEqual(firstNext.body, {
+          action: 'finish',
+          ...s.address,
+          ...first.result.replayParameters,
+        });
+        assert.equal(firstNext.body.operationId, command.operationId);
+        assert.equal(first.result.waitCommand, undefined);
+        assert.equal(first.result.inProgress, undefined);
+      } else {
+        assert.deepEqual(firstNext.body.operationIds, [command.operationId]);
+        assert.equal(firstNext.action, 'wait');
+        assert.equal(firstNext.body.until, 'acceptance');
+        assert.equal(first.result.command, first.result.waitCommand);
+        assert.match(first.result.instruction, /Keep this turn active/);
       }
     });
 

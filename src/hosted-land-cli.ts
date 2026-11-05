@@ -242,7 +242,10 @@ export async function hostedLandCli(
     ...submitted,
     result: normalizeHostedFinishResult(
       root,
-      (submitted.result as { replayParameters?: Record<string, unknown> }).replayParameters ?? command,
+      (submitted.result as { replayParameters?: Record<string, unknown> }).replayParameters ?? {
+        ...command,
+        operationId: submitted.operationId,
+      },
       {
         ...(submitted.result as Record<string, unknown>),
         ...(observation?.run ? { run: observation.run } : {}),

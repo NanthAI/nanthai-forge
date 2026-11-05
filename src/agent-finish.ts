@@ -22,6 +22,7 @@ import { gitIsAncestor } from './work-git.js';
 import { reusableFinish, adoptLaneFinish } from './agent-finish-reuse.js';
 import { checkEnvironment } from './work-run.js';
 import { readPolicy, acceptancePaths } from './work-autonomy.js';
+import { operationWait } from './agent-operation-wait.js';
 import { reviewReason } from './autonomy-policy.js';
 import { currentChannelHead } from './agent-defaults.js';
 import { completeAccepted } from './agent-lifecycle.js';
@@ -143,7 +144,12 @@ class FinishRunner {
     }
     return {
       revision: await this.observedRevision(),
-      result: canonical,
+      result: {
+        ...canonical,
+        ...(canonical.terminal === false
+          ? operationWait(this.store.root, { operationIds: [this.command.operationId], until: 'terminal' })
+          : {}),
+      },
     };
   }
   private observedRevision() {

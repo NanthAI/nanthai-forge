@@ -88,6 +88,12 @@ Home combines projects and imported/shared source with filters; existing source 
 
 GitHub analysis owners can remove public or private analyses from Projects with shared-access confirmation. Removal hides source and lists immediately, invalidates workers, and drains dependent records and unshared storage in bounded batches.
 
+- Pending finish/land receipts provide one blocking wait on the original operation;
+  CLI exits with unfinished work warn agents to continue. Killed waits resume from
+  that command; native waits use `until:"terminal"`, hosted landings `until:"acceptance"`.
+  Forge has no external agent-turn-end hook; arbitrary harness runs without a
+  Forge run identity remain outside this wait contract.
+
 ## Partial
 
 - **Hosted queue model.** An opt-in [TLA+ model](../models/landing-queue/README.md) checks bounded queue safety/liveness and incident shapes. It records fairness assumptions and implementation gaps, including cross-head reuse versus exact-check equality. A source phase-name guard runs with foundation checks. This is not a proof of the implementation or live provider recovery. Same-group prefix conflicts stay advisory until the included group settles, then retry on accepted main without agent action. Conflicts independently proven against main still report promptly; both source workers and deterministic cohort regressions guard the distinction.

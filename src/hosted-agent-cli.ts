@@ -13,8 +13,8 @@ import { observeHostedSubmissions } from './hosted-agent-submission-wait.js';
 import { invariant } from './errors.js';
 import { withLaneCommand } from './lane-registry.js';
 import { markerIdentity } from './lane-prune.js';
-import { shellQuote } from './agent-brief-render.js';
 import { landSummary } from './hosted-land-summary.js';
+import { operationWait } from './agent-operation-wait.js';
 import { HostedAgentTransport } from './hosted-agent-transport.js';
 /** Address selection precedes construction of native WorkStore/owner services. */
 export function hostedAgentAddress(
@@ -75,6 +75,10 @@ export async function hostedAgentCli(
     process.once('SIGINT', stop);
     process.once('SIGTERM', stop);
     try {
+      const continuation = operationWait(root, { ...selectedWait, ...address });
+      process.stderr.write(
+        `wait: keep this turn active; resume after a killed shell with: ${continuation.command}\n`,
+      );
       // A waiting agent is alive: show it as running in its Lane (local file write, no network).
       const emit = (event: unknown) => process.stdout.write(`${JSON.stringify(event)}\n`);
       const response = await withLaneCommand(markerIdentity(root)?.laneId ?? undefined, 'wait', async () =>
@@ -85,9 +89,8 @@ export async function hostedAgentCli(
       process.exitCode =
         response.result.status === 'timeout' ? 3 : response.result.status === 'cancelled' ? 130 : 0;
       if (response.result.status === 'timeout' || response.result.status === 'cancelled') {
-        const resume = `nforge agent ${shellQuote(root)} wait ${shellQuote(JSON.stringify({ ...selectedWait, ...address }))}`;
         process.stderr.write(
-          `wait: IN PROGRESS; ${response.result.status === 'timeout' ? 'wait deadline reached' : 'stopped waiting'}; keep waiting with: ${resume}\n`,
+          `wait: IN PROGRESS; ${response.result.status === 'timeout' ? 'wait deadline reached' : 'stopped waiting'}; keep this turn active and keep waiting with: ${continuation.command}\n`,
         );
       }
       // The NDJSON stream stays machine-readable; the outcome also prints as plain stderr lines.
@@ -95,13 +98,24 @@ export async function hostedAgentCli(
         submissions?: { submission: unknown; recovery?: unknown; conflict?: unknown }[];
         status: string;
       };
+      // A single-target wait exposes the same observed outcome as finish, while
+      // retaining the complete selection below. Continuation consumers can follow
+      // finish -> wait -> outcome without another read or a finish replay.
+      const selected = submissions?.length === 1 ? submissions[0] : undefined;
       if (!selectedWait.runId && status === 'terminal')
         for (const entry of submissions ?? [])
           for (const line of landSummary({
             result: { phase: 'finish', ...entry },
           } as never))
             process.stderr.write(`${line}\n`);
-      return response;
+      return {
+        ...response,
+        result: {
+          ...response.result,
+          ...selected,
+          ...(['timeout', 'cancelled'].includes(status) ? continuation : {}),
+        },
+      };
     } finally {
       process.removeListener('SIGINT', stop);
       process.removeListener('SIGTERM', stop);

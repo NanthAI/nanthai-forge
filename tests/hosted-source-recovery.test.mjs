@@ -125,14 +125,20 @@ for (const status of ['submitted', 'retryable', 'failed'])
     await assert.rejects(s.transport().dispatch('compose', command), { code: 'PROJECT_UNAVAILABLE' });
   });
 
-test('pending finish source child returns the public finish replay, never a child compose command', async t => {
+test('an admitted pending finish source child waits on the public operation, never a child compose', async t => {
   const s = agentFixture(t);
   s.pending(true);
   const operationId = randomUUID();
   const result = await s.transport().dispatch('finish', { operationId, laneId: s.lane.laneId });
-  assert.equal(result.result.replay.action, 'finish');
-  assert.equal(result.result.replay.operationId, operationId);
-  assert.match(result.result.command, / finish /);
+  assert.deepEqual(result.result.next, {
+    action: 'wait',
+    operationIds: [operationId],
+    until: 'acceptance',
+    timeoutSeconds: 3600,
+  });
+  assert.equal(result.result.replayParameters.operationId, operationId);
+  assert.equal(result.result.command, result.result.waitCommand);
+  assert(!result.result.command.includes(result.result.composeOperationId));
 });
 
 test('replaying a preparing finish reconciles its stalled compose child and exposes the same public operation', async t => {
@@ -165,6 +171,8 @@ test('replaying a preparing finish reconciles its stalled compose child and expo
   assert.equal(replay.result.failedPhase, 'source-step:17');
   assert.equal(replay.result.next.operationId, operationId);
   assert.equal(replay.result.next.action, 'finish');
+  assert.equal(replay.result.waitCommand, undefined);
+  assert.equal(replay.result.inProgress, undefined);
   assert.equal(replay.result.composeOperationId, first.result.composeOperationId);
   assert.deepEqual(
     s.calls.slice(count).map(call => call.name),
