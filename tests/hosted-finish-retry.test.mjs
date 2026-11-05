@@ -11,6 +11,7 @@ import { resolutionFixture } from './hosted-agent-resolution-fixture.mjs';
 import { synthetic } from './hosted-revert-fixture.mjs';
 import { finishFixture, desired, compose } from './hosted-finish-fixture.mjs';
 import { saveHostedLane } from '../dist/hosted-save-client.js';
+import { hostedAgentCli } from '../dist/hosted-agent-cli.js';
 import { hostedLandingStateSchema, hostedLandingRequestSchema } from '../dist/hosted-landing.js';
 import { finishSourceFingerprint } from '../dist/hosted-agent-finish-identity.js';
 import { digest } from '../dist/hash.js';
@@ -269,6 +270,165 @@ test('finish reconciles a completed async checkpoint before capturing and never 
   assert.equal(JSON.parse(readFileSync(join(s.root, '.forge/hosted-lane.json'))).selection.head, head);
   assert(!s.calls.slice(before).some(c => /Saves:prepare|SaveJobs/.test(c.name)));
   assert.equal(readFileSync(join(s.root, 'saved.txt'), 'utf8'), bytes.toString());
+});
+
+// Issue 2df1031c: preflight pinned the old marker head while a completed save was still pending.
+async function pendingCheckpoint(t) {
+  const s = agentFixture(t);
+  await s.transport().dispatch('open', { laneId: s.lane.laneId });
+  rawSaveDescriptions(s);
+  const operationId = randomUUID(),
+    at = '2026-01-01T00:00:00.000Z';
+  const bytes = Buffer.from('Checkpointed while the client was gone\n');
+  writeFileSync(join(s.root, 'saved.txt'), bytes);
+  const blob = digest(bytes);
+  s.objects.set(blob, bytes);
+  const oldHead = s.lane.head;
+  const state = {
+    schema: 1,
+    kind: 'forge-source-state',
+    parents: [oldHead],
+    files: [{ path: 'saved.txt', blob, mode: 'file' }],
+    message: 'Async checkpoint',
+    at,
+  };
+  const head = digest(JSON.stringify(state));
+  const mutation = s.exchange.client.mutation,
+    query = s.exchange.client.query;
+  const pending = (ref, args) => {
+    const name = getFunctionName(ref);
+    if (name === 'projectHostedSaves:prepare') return JSON.stringify({ terminal: null, input: {} });
+    if (name === 'projectHostedSaves:stage') return JSON.stringify({});
+    if (name === 'projectHostedSaveJobs:submit') return JSON.stringify({ status: 'submitted' });
+    return mutation(ref, args);
+  };
+  s.exchange.client.mutation = pending;
+  s.exchange.client.query = (ref, args) =>
+    getFunctionName(ref) === 'projectHostedSaves:progress'
+      ? JSON.stringify({ terminal: null, input: {} })
+      : query(ref, args);
+  await saveHostedLane(s.root, { operationId, message: 'Async checkpoint' }, s.exchange);
+  const marker = () => JSON.parse(readFileSync(join(s.root, '.forge/hosted-lane.json')));
+  assert.equal(marker().selection.head, oldHead, 'the client still holds the earlier marker');
+  s.lane.head = head;
+  s.lane.sourceVersion = 1;
+  s.lane.version = 1;
+  const progress = { mode: 'completed' };
+  // A still-publishing save replays through the same pending stubs; a completed one needs no mutation.
+  s.exchange.client.mutation = (ref, args) =>
+    progress.mode === 'running' ? pending(ref, args) : mutation(ref, args);
+  const completed = {
+    terminal: {
+      outcome: {
+        status: 'completed',
+        result: {
+          schema: 1,
+          operationId,
+          laneId: s.lane.laneId,
+          saveId: randomUUID(),
+          head,
+          version: 1,
+          sourceVersion: 1,
+          unchanged: false,
+          at,
+        },
+      },
+    },
+  };
+  s.exchange.client.query = (ref, args) => {
+    if (getFunctionName(ref) === 'projectHostedSaves:progress') {
+      s.calls.push({ name: getFunctionName(ref), args });
+      return JSON.stringify(progress.mode === 'completed' ? completed : { terminal: null, input: {} });
+    }
+    // No saved changes: the plan is empty, so a receipt records the pinned head/tree without a test run.
+    if (getFunctionName(ref) === 'projectHostedOverlaps:read')
+      return JSON.stringify({
+        unacknowledgedOverlaps: { count: 0, items: [], coverage: 'hosted' },
+        behindMain: { commits: 0, conflictingPaths: [], more: 0, coverage: 'hosted' },
+        changedPaths: { paths: [], complete: true },
+      });
+    return query(ref, args);
+  };
+  return { s, head, oldHead, marker, progress, bytes, operationId };
+}
+
+test('preflight settles a completed pending checkpoint by its original operation before pinning head and tree', async t => {
+  const { s, head, oldHead, marker, bytes } = await pendingCheckpoint(t);
+  let uploads = 0;
+  s.exchange.uploadFile = async () => {
+    uploads++;
+  };
+  const before = s.calls.length;
+  const planned = await s.transport().dispatch('preflight', { laneId: s.lane.laneId });
+  assert.equal(planned.result.head, head, 'preflight pins the saved head, not the stale marker head');
+  assert.notEqual(planned.result.head, oldHead);
+  assert.equal(marker().selection.head, head);
+  assert.equal(uploads, 0, 'the original save is settled, not repeated');
+  assert(!s.calls.slice(before).some(c => /Saves:prepare|SaveJobs/.test(c.name)));
+  assert.equal(s.calls.slice(before).filter(c => c.name === 'projectHostedSaves:progress').length, 1);
+  assert.equal(readFileSync(join(s.root, 'saved.txt'), 'utf8'), bytes.toString());
+  // The receipt names the tree of the bytes actually tested, and a second preflight adds no save read.
+  const receipt = await s.transport().dispatch('preflight', { laneId: s.lane.laneId, run: true });
+  assert.equal(receipt.result.head, head);
+  assert.equal(receipt.result.receipt.head, head);
+  assert.equal(receipt.result.receipt.tree, marker().tree ?? receipt.result.receipt.tree);
+  assert.equal(s.calls.filter(c => c.name === 'projectHostedSaves:progress').length, 1);
+});
+
+test('preflight keeps current edits and refuses a receipt when the files differ from the settled head', async t => {
+  const { s, head, marker } = await pendingCheckpoint(t);
+  // An edit made after the checkpoint was captured survives reconciliation and blocks a receipt.
+  writeFileSync(join(s.root, 'saved.txt'), 'edited after the capture\n');
+  await assert.rejects(
+    s.transport().dispatch('preflight', { laneId: s.lane.laneId, run: true }),
+    error => error.code === 'LANE_DIRTY',
+  );
+  assert.equal(marker().selection.head, head, 'the pending save was still settled');
+  assert.equal(readFileSync(join(s.root, 'saved.txt'), 'utf8'), 'edited after the capture\n');
+});
+
+test('preflight reports a still-running pending checkpoint with its original operation and does not pin it', async t => {
+  const { s, oldHead, marker, progress } = await pendingCheckpoint(t);
+  progress.mode = 'running';
+  const result = await s.transport().dispatch('preflight', { laneId: s.lane.laneId, run: true });
+  assert.equal(result.result.phase, 'save');
+  assert.equal(result.result.receipt, undefined);
+  assert.equal(marker().selection.head, oldHead);
+});
+
+test('wait follows a save operation id: terminal when the save completed, in progress while it publishes', async t => {
+  const { s, head, progress, operationId } = await pendingCheckpoint(t);
+  const transport = s.transport(),
+    query = transport.query.bind(transport);
+  transport.query = async (name, args) => {
+    if (name === 'projectHostedFinishObserve:page')
+      throw new ForgeError('NOT_FOUND', 'Select one hosted landing operation.');
+    return query(name, args);
+  };
+  const oldExit = process.exitCode;
+  t.after(() => {
+    process.exitCode = oldExit;
+  });
+  const wait = () =>
+    hostedAgentCli(
+      s.root,
+      'wait',
+      { operationIds: [operationId], until: 'acceptance', timeoutSeconds: 0 },
+      s.address,
+      transport,
+    );
+  progress.mode = 'running';
+  const running = await wait();
+  assert.equal(running.result.status, 'IN_PROGRESS');
+  assert.deepEqual(running.result.next.operationIds, [operationId]);
+  assert.equal(process.exitCode, 3);
+  progress.mode = 'completed';
+  const done = await wait();
+  assert.equal(done.result.status, 'terminal');
+  assert.equal(done.result.successful, true);
+  assert.equal(done.result.phase, 'save');
+  assert.equal(done.result.head, head);
+  assert.equal(process.exitCode, 0);
 });
 
 test('server new-op retry links a failed submission, preserves original replay and lands without another save', async t => {

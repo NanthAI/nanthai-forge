@@ -14,7 +14,7 @@ import { checkoutPathExists } from './hosted-checkout-files.js';
 import { readHostedLaneCheckout } from './hosted-lane-checkout-marker.js';
 import { durableReplace } from './native-durability.js';
 import { observeHostedRun, hostedWaitSchema } from './hosted-agent-observe.js';
-import { observeHostedSubmissions } from './hosted-agent-submission-wait.js';
+import { observeOperations } from './hosted-agent-wait-local.js';
 import { invariant } from './errors.js';
 import { withLaneCommand } from './lane-registry.js';
 import { markerIdentity } from './lane-prune.js';
@@ -144,7 +144,12 @@ export async function hostedAgentCli(
       const response = await withLaneCommand(markerIdentity(root)?.laneId ?? undefined, 'wait', async () =>
         selectedWait.runId
           ? await observeHostedRun(transport, observed, controller.signal)
-          : await observeHostedSubmissions(transport, observed, controller.signal),
+          : await observeOperations(
+              transport,
+              root,
+              observed as Parameters<typeof observeOperations>[2],
+              controller.signal,
+            ),
       );
       const { submissions, status, run } = response.result as {
         submissions?: { submission: { phase?: string }; recovery?: unknown; conflict?: unknown }[];

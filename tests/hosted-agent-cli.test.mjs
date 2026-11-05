@@ -150,6 +150,97 @@ test('hosted wait CLI reports a persistent observe 502 as IN PROGRESS with an ex
   assert.deepEqual(output, [], 'observation retries stay internal');
 });
 
+// Issue 75d316dd: check-only operation ids are not landings, so the server's landing page says NOT_FOUND.
+async function checkOnlyWait(t, forget = false) {
+  const s = agentFixture(t),
+    transport = s.transport();
+  await transport.dispatch('open', { laneId: s.lane.laneId });
+  const submitted = await transport.dispatch('finish', { laneId: s.lane.laneId, accept: false });
+  assert.equal(submitted.result.phase, 'check');
+  if (forget) {
+    // A check-only whose finish never produced a run: only the request was retained.
+    const { hostedAgentDirectory } = await import('../dist/hosted-agent-journal.js');
+    const { readFileSync, writeFileSync } = await import('node:fs');
+    const file = join(hostedAgentDirectory(s.root), `${submitted.operationId}.json`);
+    const journal = JSON.parse(readFileSync(file, 'utf8'));
+    delete journal.values['finish-check-run'];
+    writeFileSync(file, JSON.stringify(journal));
+  }
+  const query = transport.query.bind(transport),
+    dispatch = transport.dispatch.bind(transport);
+  // The generic fixture run is not a full check record; observe it as an already passed one.
+  transport.dispatch = async (action, input) =>
+    action === 'observe' && input.runId
+      ? {
+          schema: 1,
+          transport: 'hosted',
+          action: 'observe',
+          operationId: null,
+          resolved: null,
+          result: { id: input.runId, projectId: s.address.projectId, status: 'passed' },
+        }
+      : dispatch(action, input);
+  let landingReads = 0;
+  transport.query = async (name, args) => {
+    if (name === 'projectHostedFinishObserve:page') {
+      landingReads++;
+      throw new ForgeError('NOT_FOUND', 'Select one hosted landing operation.');
+    }
+    return query(name, args);
+  };
+  const oldExit = process.exitCode;
+  t.after(() => {
+    process.exitCode = oldExit;
+  });
+  const wait = () =>
+    hostedAgentCli(
+      s.root,
+      'wait',
+      { operationIds: [submitted.operationId], until: 'acceptance', timeoutSeconds: 0 },
+      s.address,
+      transport,
+    );
+  return { s, submitted, wait, landingReads: () => landingReads };
+}
+
+test('wait on a check-only operation id follows its run instead of failing NOT_FOUND', async t => {
+  const { submitted, wait } = await checkOnlyWait(t);
+  const result = await wait();
+  assert.equal(result.result.status, 'terminal');
+  assert.equal(result.result.run.id, submitted.result.run.id);
+  assert.equal(result.result.run.status, 'passed');
+});
+
+test('wait on a check-only operation that produced no run ends in a clear terminal state', async t => {
+  const { wait } = await checkOnlyWait(t, true);
+  const result = await wait();
+  assert.equal(result.result.status, 'terminal');
+  assert.equal(result.result.successful, false);
+  assert.equal(result.result.phase, 'check-only');
+  assert.match(result.result.reason, /no check run/);
+  assert.equal(process.exitCode, 0);
+  // Repeating it is the same terminal answer, not a different error.
+  assert.equal((await wait()).result.status, 'terminal');
+});
+
+test('wait on an operation this client never recorded still reports NOT_FOUND', async t => {
+  const s = agentFixture(t),
+    transport = s.transport();
+  const query = transport.query.bind(transport);
+  transport.query = async (name, args) => {
+    if (name === 'projectHostedFinishObserve:page')
+      throw new ForgeError('NOT_FOUND', 'Select one hosted landing operation.');
+    return query(name, args);
+  };
+  await assert.rejects(
+    hostedAgentCli(s.root, 'wait', { operationIds: [randomUUID()], timeoutSeconds: 0 }, s.address, transport),
+    error => {
+      assert.equal(error.code, 'NOT_FOUND', String(error.message));
+      return true;
+    },
+  );
+});
+
 test('hosted wait CLI returns and prints direct conflict recovery without finish', async t => {
   const s = agentFixture(t),
     transport = s.transport();

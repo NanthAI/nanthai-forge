@@ -405,6 +405,93 @@ test('start {planningItemId} starts the Issue as a planned Intent and links it o
   });
 });
 
+// Issue 75d316dd: `start {planningItemId}` replayed the finished Lane of an Issue that already landed.
+function plannedStartFixture(t) {
+  const s = agentFixture(t),
+    item = {
+      id: randomUUID(),
+      operationId: randomUUID(),
+      request: 'a'.repeat(40),
+      version: 1,
+      previousVersion: 0,
+      kind: 'issue',
+      title: 'Follow-up outcome',
+      body: 'Done-when lines still open',
+      status: 'open',
+      intentIds: [],
+      at: '2026-01-01T00:00:00.000Z',
+      provenance: 'user-declared-local',
+    },
+    query = s.exchange.client.query;
+  s.exchange.client.query = async (ref, args) => {
+    const name = getFunctionName(ref);
+    if (name === 'projectWorkIndex:workspace')
+      return JSON.stringify({ generationId: 'g', revision: 5, sourceRevision: 1 });
+    if (name === 'projectWorkIndex:detail')
+      return { generationId: 'g', revision: 1, value: JSON.stringify(item), editable: true, intentPin: null };
+    return query(ref, args);
+  };
+  s.exchange.client.action = async () => ({ revision: 6 });
+  const starts = () => s.calls.filter(call => call.name === 'projectHostedStart:start');
+  const reads = () => s.calls.filter(call => call.name === 'projectHostedLanes:select');
+  return { s, item, starts, reads };
+}
+
+test('a follow-up start after the Issue landed opens a new Lane; a first start and an open Lane add no calls', async t => {
+  const { s, item, starts, reads } = plannedStartFixture(t);
+  const first = await s.transport().dispatch('start', { planningItemId: item.id });
+  assert.equal(reads().length, 0, 'a first start reads no Lane');
+  assert.equal(first.result.previousLane, undefined);
+  // The Lane is still open: the identical start is the idempotent retry and replays it.
+  const retry = await s.transport().dispatch('start', { planningItemId: item.id });
+  assert.equal(retry.operationId, first.operationId);
+  assert.equal(starts().length, 2);
+  assert.equal(starts()[0].args.operationId, starts()[1].args.operationId);
+  assert.equal(reads().length, 1, 'one Lane read decides the replay');
+  assert.equal(retry.result.previousLane, undefined);
+  // The Lane landed: the same start now opens a new Lane linked to the same Issue, and says so.
+  s.lane.state = 'completed';
+  const followUp = await s.transport().dispatch('start', { planningItemId: item.id });
+  assert.notEqual(followUp.operationId, first.operationId);
+  assert.notEqual(starts()[2].args.operationId, starts()[0].args.operationId);
+  assert.deepEqual(starts()[2].args.intent, starts()[0].args.intent, 'same Issue Intent');
+  assert.equal(followUp.result.previousLane.laneId, s.lane.laneId);
+  assert.equal(followUp.result.previousLane.state, 'completed');
+  assert.match(followUp.result.previousLane.note, /completed; this opened a new Lane/);
+  // Replaying the original operation explicitly still returns the original result.
+  const replay = await s.transport().dispatch('start', {
+    planningItemId: item.id,
+    operationId: first.operationId,
+  });
+  assert.equal(replay.operationId, first.operationId);
+  assert.equal(starts().at(-1).args.operationId, first.operationId);
+  // The new Lane is itself replayable only while open.
+  s.lane.state = 'active';
+  const again = await s.transport().dispatch('start', { planningItemId: item.id });
+  assert.equal(again.operationId, followUp.operationId);
+});
+
+test('start reads the local registry first and skips the Lane read when this machine saw the Lane end', async t => {
+  const { mkdtempSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { recordLane } = await import('../dist/lane-registry.js');
+  const state = mkdtempSync(join(tmpdir(), 'forge-registry-')),
+    prior = process.env.XDG_STATE_HOME;
+  process.env.XDG_STATE_HOME = state;
+  t.after(() => {
+    if (prior === undefined) delete process.env.XDG_STATE_HOME;
+    else process.env.XDG_STATE_HOME = prior;
+    rmSync(state, { recursive: true, force: true });
+  });
+  const { s, item, reads } = plannedStartFixture(t);
+  const first = await s.transport().dispatch('start', { planningItemId: item.id });
+  recordLane({ laneId: s.lane.laneId, root: s.root, state: 'abandoned' });
+  const followUp = await s.transport().dispatch('start', { planningItemId: item.id });
+  assert.notEqual(followUp.operationId, first.operationId);
+  assert.equal(followUp.result.previousLane.state, 'abandoned');
+  assert.equal(reads().length, 0);
+});
+
 test('Issue filing returns candidates without another call and retries retain the original candidate page', async t => {
   const s = await setup(t),
     p = port(s);

@@ -12,6 +12,7 @@ import { hostedAgentRoot } from './hosted-agent-journal.js';
 import { HostedAgentTransport, type HostedAgentResponse } from './hosted-agent-transport.js';
 import { hostedAgentCli } from './hosted-agent-cli.js';
 import { observeHostedSubmissions } from './hosted-agent-submission-wait.js';
+import { followLocalOperation } from './hosted-agent-wait-local.js';
 import { observeHostedRun } from './hosted-agent-observe.js';
 import { waitHostedAgentSource } from './hosted-agent-source-wait.js';
 import { readClientSettings } from './client-settings.js';
@@ -159,6 +160,7 @@ async function detachedSubmit(
 
 /** Event-driven wait on the submission (or check-only run); Ctrl-C stops waiting, never the landing. */
 async function waitLanding(
+  root: string,
   transport: HostedAgentTransport,
   response: HostedAgentResponse,
   timeoutSeconds: number,
@@ -183,13 +185,24 @@ async function waitLanding(
         controller.signal,
         emit,
       );
-    else if (response.operationId)
-      return await observeHostedSubmissions(
-        transport,
-        { operationIds: [response.operationId], timeoutSeconds, until: 'acceptance' },
-        controller.signal,
-        emit,
-      );
+    else if (response.operationId) {
+      const selection = { operationIds: [response.operationId], timeoutSeconds, until: 'acceptance' };
+      try {
+        return await observeHostedSubmissions(transport, selection, controller.signal, emit);
+      } catch (error) {
+        // A check-only or save operation id is not a landing: follow what this client recorded for it.
+        const followed = await followLocalOperation(
+          transport,
+          root,
+          selection,
+          error,
+          controller.signal,
+          emit,
+        );
+        if (followed) return followed;
+        throw error;
+      }
+    }
   } finally {
     process.removeListener('SIGINT', stop);
     process.removeListener('SIGTERM', stop);
@@ -244,7 +257,7 @@ export async function hostedLandCli(
     process.pid,
   );
   const finished = await withLaneCommand(markerIdentity(root)?.laneId ?? undefined, 'land', () =>
-    waitLanding(transport, submitted, options.timeoutSeconds ?? 5400),
+    waitLanding(transport.root ?? root, transport, submitted, options.timeoutSeconds ?? 5400),
   );
   // The authoritative read already contains the outcome. Replaying finish here
   // could fail after acceptance or at the deadline, misreporting the landing.

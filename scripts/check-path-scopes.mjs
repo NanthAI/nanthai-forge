@@ -139,6 +139,24 @@ export function classifyCheckPath(path, files) {
       ],
       reason: 'Planning note and the tests and scripts that read plans',
     };
+  // The TLA+ queue model and its run configurations are read only by the model runner and by the
+  // guard scripts naming the folder. The model itself runs as `npm run model:landing-queue`
+  // (a TLC run that needs the pinned JAR), not as a node test: preflight reports that command and
+  // runs the tests that read the model. The package manifest only names the run script.
+  if (/^models\/landing-queue\/[^/]+\.(?:tla|cfg|md|mjs)$/.test(path))
+    return {
+      domain: 'models',
+      seeds: [
+        path,
+        ...[...files.keys()].filter(
+          file =>
+            /^(?:tests|scripts|src)\//.test(file) &&
+            file !== path &&
+            files.get(file).includes('models/landing-queue'),
+        ),
+      ],
+      reason: 'Landing queue model and the guards reading it; run the model with npm run model:landing-queue',
+    };
   const asset = scriptAsset(path, files);
   if (asset !== undefined) return asset;
   if (!files.has(path)) return null;

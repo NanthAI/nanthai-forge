@@ -36,7 +36,7 @@ import {
 import { executeHostedPolicy } from './hosted-agent-policy.js';
 import { executeHostedPlanning, markPlanningStarted } from './hosted-agent-planning.js';
 import { executeHostedMetrics } from './hosted-agent-metrics.js';
-import { laneLiveness, recordLane, withLaneCommand } from './lane-registry.js';
+import { laneLiveness, readLaneEntry, recordLane, withLaneCommand } from './lane-registry.js';
 import { convexLaneStates, laneHousekeeping, markerIdentity } from './lane-prune.js';
 import { shareDependencies } from './shared-dependencies.js';
 import { readClientSettings } from './client-settings.js';
@@ -49,6 +49,7 @@ import {
 import { enrichHostedQueueAhead } from './queue-ahead-hosted.js';
 import { ackAnswers, checkpointNudge, finishGates, unsavedMinutes } from './agent-default-gates.js';
 import { preflightPlan, runPreflight } from './agent-preflight.js';
+import { hostedLaneDirty } from './hosted-lane-dirty.js';
 import { agentDefaultLines, type EffectiveAgentDefaults } from './agent-parallel-defaults.js';
 import { dirname, basename, resolve } from 'node:path';
 import { existsSync, realpathSync } from 'node:fs';
@@ -638,6 +639,10 @@ export class HostedAgentTransport {
         action === 'finish' && !replaying ? await reconcileHostedSave(root, this.exchange) : null;
       if (pendingSave)
         return this.response(action, typeof operationId === 'string' ? operationId : null, pendingSave);
+      const previousStart =
+        action === 'start' && !operationId
+          ? await this.closedStart(root, capabilities.actor, command.data)
+          : null;
       const journal =
         action === 'finish'
           ? await selectHostedFinish(
@@ -661,6 +666,7 @@ export class HostedAgentTransport {
               action,
               command.data,
               operationId as string | undefined,
+              previousStart !== null,
             );
       metricOperationId(journal.operationId);
       this.callerOperationId = journal.operationId;
@@ -754,6 +760,8 @@ export class HostedAgentTransport {
                   ? hostedRootLanePath(root, this.address, started.lane.laneId)
                   : null;
           if (started.lane) {
+            // Later identical starts replay this Lane only while it is open (closedStart).
+            await journal.retain('started-lane', () => started.lane!.laneId);
             // Report the Lane before its checkout downloads, so a slow or interrupted open never hides it.
             recordLane({
               laneId: started.lane.laneId,
@@ -789,6 +797,14 @@ export class HostedAgentTransport {
           }
         }
         if (planning) result = { ...(result as object), planning };
+        if (action === 'start' && previousStart)
+          result = {
+            ...(result as object),
+            previousLane: {
+              ...previousStart,
+              note: `The Lane from your earlier identical start is ${previousStart.state}; this opened a new Lane.`,
+            },
+          };
       }
       if (action === 'open') {
         const opened = result as { root?: unknown; laneId?: unknown };
@@ -957,8 +973,31 @@ export class HostedAgentTransport {
     const laneId = readHostedLaneCheckout(root)?.selection.laneId;
     return laneId ? checkpointNudge(root, laneId, this.defaults, unsavedMinutes(root)) : {};
   }
+  /** The finished Lane of an earlier identical `start`, so a follow-up start opens a new Lane instead of
+   * replaying it. null while there is no earlier start, it never produced a Lane, or its Lane is still
+   * open (that replay is the idempotent retry). Local registry first; one Lane read only when an
+   * earlier start exists, so a first start makes no extra call. */
+  private async closedStart(root: string, actor: string, command: unknown) {
+    const previous = HostedAgentJournal.previous(root, this.address, actor, 'start', command);
+    const laneId = previous?.values['started-lane'];
+    if (typeof laneId !== 'string') return null;
+    const local = readLaneEntry(laneId)?.state;
+    if (local) return { laneId, state: local };
+    try {
+      const lane = await this.query<{ state?: string }>('projectHostedLanes:select', { laneId });
+      return lane.state === 'completed' || lane.state === 'abandoned' ? { laneId, state: lane.state } : null;
+    } catch (error) {
+      if (hostedActionError(error, 'start').code === 'NOT_FOUND') return { laneId, state: 'missing' };
+      throw error;
+    }
+  }
   private async clientAction(action: 'ack' | 'preflight', input: Record<string, unknown>) {
     const root = hostedAgentRoot(this.root);
+    // A save the client returned as pending may have completed on the server while the marker still
+    // names the earlier head. Settle that original operation (no new save) before anything pins the
+    // marker's head/tree. No pending file means no call.
+    const pendingSave = action === 'preflight' ? await reconcileHostedSave(root, this.exchange) : null;
+    if (pendingSave) return this.response(action, null, pendingSave);
     const marker = readHostedLaneCheckout(root);
     const laneId = (input.laneId as string | undefined) ?? marker?.selection.laneId;
     invariant(laneId, 'BAD_ARGUMENT', `Select laneId, or run ${action} inside the Lane directory.`);
@@ -1005,6 +1044,14 @@ export class HostedAgentTransport {
       minutes === null,
       'LANE_DIRTY',
       'Save first: preflight records a result for the saved head, and these files have unsaved edits.',
+    );
+    // File times can miss an edit made while a save was uploading (the marker is rewritten after it).
+    // The receipt must name the bytes under test, so confirm them against the saved baseline: a local,
+    // read-only digest pass that skips files the stat index vouches for.
+    invariant(
+      !hostedLaneDirty(root),
+      'LANE_DIRTY',
+      'Save first: preflight records a result for the saved head, and the files here differ from it.',
     );
     return this.response(action, null, {
       laneId,

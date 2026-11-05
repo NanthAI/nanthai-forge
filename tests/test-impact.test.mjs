@@ -781,3 +781,31 @@ test('package.json, lockfile and the check-selection code itself always run full
   ])
     assert.equal(narrow(path).scope, 'full', path);
 });
+
+test('landing queue model files select the guards that read them, not the full suite', () => {
+  const guard = {
+    'scripts/check-landing-model.mjs': "read('models/landing-queue/LandingQueue.tla')",
+    'tests/landing-model-contract.test.mjs': "import '../scripts/check-landing-model.mjs'",
+  };
+  for (const path of [
+    'models/landing-queue/LandingQueue.tla',
+    'models/landing-queue/small.cfg',
+    'models/landing-queue/Incidents.tla',
+    'models/landing-queue/README.md',
+    'models/landing-queue/run.mjs',
+  ]) {
+    const result = narrow(path, guard);
+    assert.equal(result.scope, 'scoped', path);
+    assert.ok(result.tests.includes('tests/landing-model-contract.test.mjs'), path);
+    assert.ok(!result.tests.includes('tests/unrelated.test.mjs'), path);
+    assert.match(result.reason, /npm run model:landing-queue/, path);
+  }
+  // A deleted model file is still the model's own path, and the manifest only names the script.
+  const deleted = narrow('models/landing-queue/old.cfg', {
+    ...guard,
+  });
+  assert.equal(deleted.scope, 'scoped');
+  // Other model folders and nested unknown files stay unclassified (full coverage).
+  assert.equal(narrow('models/other/Model.tla', guard).scope, 'full');
+  assert.equal(narrow('models/landing-queue/deep/x.cfg', guard).scope, 'full');
+});

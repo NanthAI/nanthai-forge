@@ -70,6 +70,8 @@ export class HostedAgentJournal {
     action: string,
     command: unknown,
     operationId?: string,
+    /** Start a new operation for this identity even though an earlier one is indexed (its work ended). */
+    fresh = false,
   ) {
     const directory = hostedAgentDirectory(root);
     this.lock = join(directory, 'lock');
@@ -79,7 +81,7 @@ export class HostedAgentJournal {
     this.operationId = workLocked(this.lock, () => {
       const index = join(directory, `auto-${digest(identity)}.json`);
       if (operationId) return z.uuid().parse(operationId);
-      if (checkoutPathExists(index)) return z.uuid().parse(readAgentJson(index));
+      if (!fresh && checkoutPathExists(index)) return z.uuid().parse(readAgentJson(index));
       const id = randomUUID();
       durableReplace(index, JSON.stringify(id));
       return id;
@@ -98,6 +100,23 @@ export class HostedAgentJournal {
           canonicalPayload({ schema: 1, operationId: this.operationId, identity, values: {} }),
         );
     });
+  }
+  /** The operation an identical auto-addressed request would replay, with its retained values (read-only). */
+  static previous(
+    root: string,
+    address: HostedAgentAddress,
+    actor: string,
+    action: string,
+    command: unknown,
+  ): { operationId: string; values: Record<string, unknown> } | undefined {
+    const directory = hostedAgentDirectory(root);
+    const identity = canonicalPayload({ root: hostedAgentRoot(root), address, actor, action, command });
+    const index = join(directory, `auto-${digest(identity)}.json`);
+    if (!checkoutPathExists(index)) return undefined;
+    const operationId = z.uuid().parse(readAgentJson(index)),
+      path = join(directory, `${operationId}.json`);
+    if (!checkoutPathExists(path)) return undefined;
+    return { operationId, values: schema.parse(readAgentJson(path)).values };
   }
   private read() {
     return schema.parse(readAgentJson(this.path));
