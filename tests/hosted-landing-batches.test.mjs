@@ -191,6 +191,42 @@ test('a main receipt race recomposes the whole cohort without transferring evide
   assert(JSON.parse(f.c.objects.get(f.currentMain().head)).files.some(f => f.path === 'accepted.txt'));
 });
 
+test('a replaced check attempt starts with empty progress, not the previous attempt test counts (9f94c28a)', async t => {
+  const f = await batchesFixture(t, { count: 4 });
+  await f.drain();
+  const first = f.runs()[0];
+  const before = states(f).map(s => s.attemptId);
+  f.moveMain();
+  const active = await f.rawChecks.activate(first.id);
+  for (let i = 0; i < active.plan.shardCount; i++) await f.rawChecks.callback(f.rawChecks.shard(active, i));
+  await f.rawChecks.callback(
+    f.rawChecks.complete(active, 'passed', {
+      contractReports: {
+        'tests/a.test.mjs': { failed: false, durationMs: 1 },
+        'tests/b.test.mjs': { failed: false, durationMs: 1 },
+      },
+    }),
+  );
+  // Step the queue: the old attempt reports its counts, then main replaces it.
+  let counted = false;
+  for (let steps = 0; f.pending().length; steps++) {
+    assert(steps < 100, 'bounded');
+    await f.execute(f.pending()[0]);
+    const now = states(f);
+    if (now.every((s, i) => s.attemptId === before[i])) counted ||= now.some(s => s.testFiles);
+  }
+  assert(counted, 'the replaced attempt reported test counts to its members');
+  const now = states(f);
+  assert(
+    now.every((s, i) => s.attemptId !== before[i]),
+    'main moved: every member got a new attempt',
+  );
+  for (const state of now) {
+    assert.equal(state.testFiles, undefined, 'a new attempt carries no counts from the replaced one');
+    assert.equal(state.checkProgress, undefined, 'a new attempt carries no progress digest');
+  }
+});
+
 test('a changed supervised policy returns every passing member to individual review', async t => {
   const f = await batchesFixture(t);
   await f.drain();

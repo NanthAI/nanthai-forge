@@ -6,10 +6,14 @@ import { join, resolve } from 'node:path';
 import { childEnv } from '../scripts/child-env.mjs';
 import { ForgeError } from './errors.js';
 import { durableReplace } from './native-durability.js';
+import { cliBuildCommit } from './cli-installation.js';
+import { landedOperations } from './landed-operations.js';
 import { deliverStallAlert, STALL_ALERT_ENV } from './stall-alerts.js';
 
 /** Hard total limit for one canary run (all steps together). */
 export const CLI_CANARY_TIMEOUT_MS = 20_000;
+/** The wait step's own cap inside that limit (it is a non-blocking read). */
+export const CLI_CANARY_WAIT_STEP_MS = 10_000;
 /** After a refusal the same build is retried no sooner than this, doubling per attempt. */
 export const CLI_CANARY_BACKOFF_MS = 10 * 60_000;
 export const CLI_CANARY_BACKOFF_MAX_MS = 6 * 60 * 60_000;
@@ -41,7 +45,7 @@ export type CanaryRefusal = {
   alerted?: boolean;
   noticed?: boolean;
 };
-type CloneRecord = { root: string; operationId?: string };
+type CloneRecord = { root: string; operationId?: string; operationKind?: 'landing' };
 /** The canary step name of a hold for a server that is behind the build (not a broken build). */
 export const SERVER_BEHIND_STEP = 'server-capabilities';
 
@@ -77,6 +81,8 @@ class CanaryFailure extends Error {
     readonly step: string,
     message: string,
     readonly detail = '',
+    /** The wait found its operation still running: says nothing about the build (edcb0fc8). */
+    readonly inProgress = false,
   ) {
     super(message);
   }
@@ -181,49 +187,126 @@ export type CanaryInput = {
   /** Test seam: replaces the real home for private state. */
   home?: string;
 };
-export type CanaryResult = { steps: CanaryStep[]; skipped: string[]; operationId?: string };
+export type CanaryResult = {
+  steps: CanaryStep[];
+  skipped: string[];
+  operationId?: string;
+  /** Steps that failed on the new build and on the current one alike (not a regression). */
+  compared?: { step: string; build: string; current: string }[];
+};
+/** Wait outcomes that say nothing about the build: the operation is gone, belongs to another
+ * request on this machine, or expired (edcb0fc8). The operation is skipped, never a refusal. */
+const UNUSABLE_OPERATION = new Set(['NOT_FOUND', 'WORK_OPERATION_CHANGED', 'OPERATION_EXPIRED']);
+/** Only a structured error code ever leaves a child: never its output. */
+const failureCode = (failure: CanaryFailure) =>
+  /"code"\s*:\s*"([A-Z][A-Z0-9_]{1,63})"/.exec(failure.detail)?.[1];
+const describe = (failure: CanaryFailure) => {
+  const code = failureCode(failure);
+  return `${failure.message}${code ? ` (${code})` : ''}`;
+};
+const cloneProject = (root: string) =>
+  readJson<{ selection?: { projectId?: unknown } }>(join(root, '.forge', 'hosted-main.json'))?.selection
+    ?.projectId;
 
 /** Run the NEW (installed, not active) build against the real project for reads only.
  * The child runs with a private HOME, so the real agent hook files are unreachable by
- * construction; credentials and caches come from the real XDG directories. */
+ * construction; credentials and caches come from the real XDG directories. A failing step is run
+ * again on the current build (differential, edcb0fc8): only a step the current build passes
+ * refuses the new one; a step both fail is logged with both results and skipped. */
 export async function runCliCanary(input: CanaryInput): Promise<CanaryResult> {
   const { installation, build, head } = input;
   const entry = join(build, 'dist', 'cli-entry.js');
-  const deadline = Date.now() + (input.timeoutMs ?? CLI_CANARY_TIMEOUT_MS);
+  const timeoutMs = input.timeoutMs ?? CLI_CANARY_TIMEOUT_MS;
+  const deadline = Date.now() + timeoutMs;
   const realHome = input.home ?? homedir();
   const privateHome = mkdtempSync(join(tmpdir(), 'forge-canary-'));
   const xdg = (name: string, fallback: string[]) => process.env[name] || join(realHome, ...fallback);
-  const env = childEnv({
-    allow: CHILD_ENV,
-    extra: {
-      HOME: privateHome,
-      USERPROFILE: privateHome,
-      XDG_CONFIG_HOME: xdg('XDG_CONFIG_HOME', ['.config']),
-      XDG_CACHE_HOME: xdg('XDG_CACHE_HOME', ['.cache']),
-      XDG_STATE_HOME: xdg('XDG_STATE_HOME', ['.local', 'state']),
-      FORGE_CLI_CANARY: head,
-    },
-  }) as Record<string, string>;
-  const steps: CanaryStep[] = [],
-    skipped: string[] = [];
-  const step = async <T>(name: string, args: string[], check: (run: Run) => T) => {
-    const started = Date.now();
-    const run = await runChild(entry, args, env, deadline, name);
-    const value = check(run);
-    steps.push({ name, ms: Date.now() - started });
-    return value;
+  const stateHome = xdg('XDG_STATE_HOME', ['.local', 'state']);
+  const environment = (pinned: string) =>
+    childEnv({
+      allow: CHILD_ENV,
+      extra: {
+        HOME: privateHome,
+        USERPROFILE: privateHome,
+        XDG_CONFIG_HOME: xdg('XDG_CONFIG_HOME', ['.config']),
+        XDG_CACHE_HOME: xdg('XDG_CACHE_HOME', ['.cache']),
+        XDG_STATE_HOME: stateHome,
+        // Honored only by the build with that exact commit: no freshness read, no update.
+        FORGE_CLI_CANARY: pinned,
+      },
+    }) as Record<string, string>;
+  const env = environment(head);
+  const current = join(installation, 'current');
+  const currentEntry = join(current, 'dist', 'cli-entry.js');
+  const currentHead = existsSync(currentEntry) ? cliBuildCommit(current) : undefined;
+  let baselineDeadline: number | undefined;
+  // The wait is one non-blocking status read (timeoutSeconds 0) with its own short cap, so a slow
+  // or still-running operation can never use up the whole canary.
+  const stepDeadline = (name: string, limit: number) =>
+    name === 'wait' ? Math.min(limit, Date.now() + CLI_CANARY_WAIT_STEP_MS) : limit;
+  const waitJson = (run: Run, expected: string) => {
+    if (run.code === 3 && /"status"\s*:\s*"IN_PROGRESS"/.test(run.stdout))
+      throw new CanaryFailure('wait', 'canary step wait found the operation still running', '', true);
+    return agentJson('wait')(run, expected);
   };
-  const agentJson = (name: string) => (run: Run) => {
+  const steps: CanaryStep[] = [],
+    skipped: string[] = [],
+    compared: NonNullable<CanaryResult['compared']> = [];
+  type Check<T> = (run: Run, expected: string) => T;
+  /** One step on the new build; on a failure, the same step on the current build (only then). */
+  const step = async <T>(name: string, args: string[], check: Check<T>): Promise<T | undefined> => {
+    const started = Date.now();
+    try {
+      const value = check(await runChild(entry, args, env, stepDeadline(name, deadline), name), head);
+      steps.push({ name, ms: Date.now() - started });
+      return value;
+    } catch (error) {
+      if (!(error instanceof CanaryFailure) || error.step === SERVER_BEHIND_STEP) throw error;
+      if (name === 'wait' && (error.inProgress || UNUSABLE_OPERATION.has(failureCode(error) ?? '')))
+        throw error;
+      if (!currentHead || currentHead === head) throw error;
+      baselineDeadline ??= Date.now() + timeoutMs;
+      let baseline: CanaryFailure | undefined;
+      try {
+        check(
+          await runChild(
+            currentEntry,
+            args,
+            environment(currentHead),
+            stepDeadline(name, baselineDeadline),
+            name,
+          ),
+          currentHead,
+        );
+      } catch (other) {
+        if (!(other instanceof CanaryFailure)) throw error;
+        baseline = other;
+      }
+      const label = `current build ${currentHead.slice(0, 8)}`;
+      if (!baseline)
+        throw new CanaryFailure(
+          error.step,
+          `${error.message}; the ${label} passes the same step`,
+          error.detail,
+        );
+      compared.push({ step: name, build: describe(error), current: describe(baseline) });
+      skipped.push(
+        `step ${name} fails on both builds, not a regression (new: ${describe(error)}; ${label}: ${describe(baseline)})`,
+      );
+      return undefined;
+    }
+  };
+  const agentJson = (name: string) => (run: Run, expected: string) => {
     ok(name, run);
     const json = lastJson(name, run.stdout);
     if (!json || typeof json !== 'object' || json.error)
       throw new CanaryFailure(name, `canary step ${name} returned an error document`);
-    if (json.cliCommit !== undefined && json.cliCommit !== head)
-      throw new CanaryFailure(name, `canary step ${name} ran a different build than ${head.slice(0, 8)}`);
+    if (json.cliCommit !== undefined && json.cliCommit !== expected)
+      throw new CanaryFailure(name, `canary step ${name} ran a different build than ${expected.slice(0, 8)}`);
     // The new build names server contract features it cannot do without (a83b6fd5): hold the switch
     // until the server it talks to advertises them, typically until its Convex deploy finishes.
     const missing = json.serverContract?.missing;
-    if (Array.isArray(missing) && missing.length)
+    if (expected === head && Array.isArray(missing) && missing.length)
       throw new CanaryFailure(
         SERVER_BEHIND_STEP,
         `the server does not yet advertise ${missing
@@ -249,62 +332,66 @@ export async function runCliCanary(input: CanaryInput): Promise<CanaryResult> {
         if (!json || typeof json !== 'object' || json.error || !json.clone)
           throw new CanaryFailure('status', 'canary step status returned an unusable document');
       });
-      const listing = await step(
+      await step(
         'planning',
         ['agent', root, 'planning', JSON.stringify({ limit: 50, reconcile: false })],
-        agentJson('planning'),
+        (run, expected) => {
+          const listing = agentJson('planning')(run, expected);
+          if (!Array.isArray(listing.result?.items))
+            throw new CanaryFailure('planning', 'canary step planning returned no item list');
+        },
       );
-      const items = listing.result?.items;
-      if (!Array.isArray(items))
-        throw new CanaryFailure('planning', 'canary step planning returned no item list');
-      // A wait on an operation the project no longer knows (NOT_FOUND) says nothing about the new
-      // build; any other failure does. Such an operation is dropped and derived again next time.
-      const waitOn = async (id: string) => {
+      // The wait reads only landing operations: the vetted one, then the ones this machine saw land
+      // (edcb0fc8). A planning put's operation id is never waitable and never used.
+      const project = cloneProject(root);
+      const candidates = [
+        ...new Set([
+          ...(clone.operationId && clone.operationKind === 'landing' ? [clone.operationId] : []),
+          ...(typeof project === 'string' ? landedOperations(project, stateHome) : []),
+        ]),
+      ].slice(0, 2);
+      let known: string | undefined;
+      for (const id of candidates) {
         try {
           await step(
             'wait',
-            ['agent', root, 'wait', JSON.stringify({ operationIds: [id] })],
-            agentJson('wait'),
+            ['agent', root, 'wait', JSON.stringify({ operationIds: [id], timeoutSeconds: 0 })],
+            waitJson,
           );
-          return true;
+          known = id;
+          break;
         } catch (error) {
-          if (error instanceof CanaryFailure && /NOT_FOUND/.test(error.detail)) return false;
-          throw error;
-        }
-      };
-      let known: string | undefined;
-      if (clone.operationId && (await waitOn(clone.operationId))) known = clone.operationId;
-      else {
-        // Operation records are kept for a limited time: the most recently written Issues carry
-        // the freshest ones, so try the two newest.
-        const newest = items
-          .filter(item => typeof item?.id === 'string' && (item.kind === undefined || item.kind === 'issue'))
-          .sort((x, y) => (Date.parse(String(y.at)) || 0) - (Date.parse(String(x.at)) || 0))
-          .slice(0, 2);
-        for (const item of newest) {
-          if (known) break;
-          const detail = await step(
-            'planning-item',
-            ['agent', root, 'planning', JSON.stringify({ id: item.id, reconcile: false })],
-            agentJson('planning-item'),
+          if (
+            !(error instanceof CanaryFailure) ||
+            !(error.inProgress || UNUSABLE_OPERATION.has(failureCode(error) ?? ''))
+          )
+            throw error;
+          skipped.push(
+            `wait on operation ${id.slice(0, 8)} skipped: ${error.inProgress ? 'still running' : failureCode(error)}`,
           );
-          const candidate = detail.result?.item?.operationId;
-          if (typeof candidate === 'string' && /^[0-9a-f-]{36}$/.test(candidate) && (await waitOn(candidate)))
-            known = candidate;
         }
       }
-      if (!known) skipped.push('no finished operation known to the project for the wait');
-      if (known !== clone.operationId)
+      if (!known && !candidates.length)
+        skipped.push('no landed operation recorded on this machine for the wait');
+      if (known !== clone.operationId || (known && clone.operationKind !== 'landing'))
         durableReplace(
           clonePath(installation),
-          JSON.stringify({ root, ...(known ? { operationId: known } : {}) } satisfies CloneRecord),
+          JSON.stringify({
+            root,
+            ...(known ? { operationId: known, operationKind: 'landing' as const } : {}),
+          } satisfies CloneRecord),
         );
       operationId = known;
     }
   } finally {
     rmSync(privateHome, { recursive: true, force: true });
   }
-  return { steps, skipped, ...(operationId ? { operationId } : {}) };
+  return {
+    steps,
+    skipped,
+    ...(operationId ? { operationId } : {}),
+    ...(compared.length ? { compared } : {}),
+  };
 }
 
 export const cliCanaryBackoffMs = (attempts: number) =>

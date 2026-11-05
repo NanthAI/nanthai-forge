@@ -14,6 +14,7 @@ import { hostedActionError } from './hosted-action-error.js';
 import { hostedRunSubscription, type HostedRunSubscription } from './hosted-agent-observe.js';
 import type { HostedAgentTransport } from './hosted-agent-transport.js';
 import { landingRedriver } from './hosted-landing-redrive.js';
+import { rememberLandedOperations } from './landed-operations.js';
 
 export const hostedSubmissionWaitSchema = z
   .object({
@@ -378,12 +379,19 @@ async function observeHostedSubmissionsOnce(
       );
     }
   };
-  const result = (status: 'terminal' | 'changed' | 'timeout' | 'cancelled') => ({
+  const result = (status: 'terminal' | 'changed' | 'timeout' | 'cancelled') => {
+    const successful =
+      terminal() && [...current.values()].every(e => e.submission.observation.state === 'landed');
+    // A landed operation is the canary's waitable read (edcb0fc8): one local write, no call.
+    if (successful) rememberLandedOperations(transport.address.projectId, operations);
+    return resultOf(status, successful);
+  };
+  const resultOf = (status: 'terminal' | 'changed' | 'timeout' | 'cancelled', successful: boolean) => ({
     ...discovery,
     action: 'observe' as const,
     result: {
       status,
-      successful: terminal() && [...current.values()].every(e => e.submission.observation.state === 'landed'),
+      successful,
       submissions: [...current.values()],
       resnapshot,
       cursor: cursor.encode() as string | null,

@@ -52,7 +52,8 @@ const args = process.argv.slice(2);
 const step = args[0] === '--version' ? 'version' : args[0] === 'status' ? 'status'
   : args[2] === 'wait' ? 'wait' : args[2] === 'planning' ? (JSON.parse(args[3]).id ? 'planning-item' : 'planning') : 'other';
 appendFileSync(join(installation, 'canary-calls.log'), step + '\\n');
-writeFileSync(join(installation, 'canary-env.json'), JSON.stringify({ home: process.env.HOME, xdg: process.env.XDG_CONFIG_HOME, canary: process.env.FORGE_CLI_CANARY }));
+if (step === 'wait') writeFileSync(join(installation, 'canary-wait-args.json'), args[3]);
+writeFileSync(join(installation, 'canary-env-' + head.slice(0, 8) + '.json'), JSON.stringify({ home: process.env.HOME, xdg: process.env.XDG_CONFIG_HOME, canary: process.env.FORGE_CLI_CANARY }));
 // A build that tried to write the user's hook files would hit this private HOME instead.
 mkdirSync(join(process.env.HOME, '.claude'), { recursive: true });
 writeFileSync(join(process.env.HOME, '.claude', 'settings.json'), '{"tripwire":true}');
@@ -60,6 +61,10 @@ const [kind, target] = readFileSync(join(build, 'mode'), 'utf8').trim().split(':
 if (target === step) {
   if (kind === 'exit') process.exit(3);
   if (kind === 'notfound') { process.stderr.write('{"error":{"code":"NOT_FOUND"}}\\n'); process.exit(1); }
+  // The 7a16c630 case: the id belongs to another request on this machine (a planning put).
+  if (kind === 'changed') { process.stderr.write('{"error":{"code":"WORK_OPERATION_CHANGED"}}\\n'); process.exit(1); }
+  if (kind === 'running') { process.stdout.write('{"schema":1,"result":{"status":"IN_PROGRESS","reason":"budget"}}\\n'); process.exit(3); }
+  if (kind === 'fail') { process.stderr.write('{"error":{"code":"HOSTED_ACTION_FAILED"}}\\n'); process.exit(1); }
   if (kind === 'badjson') { process.stdout.write('{not json\\n'); process.exit(0); }
   if (kind === 'hang') { writeFileSync(join(installation, 'hang.pid'), String(process.pid)); setInterval(() => {}, 1000); await new Promise(() => {}); }
 }
@@ -95,7 +100,18 @@ function fixture(t) {
     home = join(directory, 'home'),
     clone = join(directory, 'clone');
   mkdirSync(join(clone, '.forge'), { recursive: true });
-  writeFileSync(join(clone, '.forge', 'hosted-main.json'), '{}');
+  writeFileSync(
+    join(clone, '.forge', 'hosted-main.json'),
+    JSON.stringify({ selection: { projectId: address.projectId } }),
+  );
+  // A landing this machine saw land (written by wait, edcb0fc8): the only waitable source.
+  const landed = (ids = [OPERATION]) => {
+    mkdirSync(join(home, '.local', 'state', 'forge'), { recursive: true });
+    writeFileSync(
+      join(home, '.local', 'state', 'forge', 'landed-operations.json'),
+      JSON.stringify({ [address.projectId]: ids }),
+    );
+  };
   const build = (head, mode = 'ok') => {
     const path = join(installation, 'builds', head);
     mkdirSync(join(path, 'dist'), { recursive: true });
@@ -133,7 +149,8 @@ function fixture(t) {
     );
   }
   rememberCanaryClone(installation, clone);
-  return { directory, installation, home, clone, old, build, hooks };
+  landed();
+  return { directory, installation, home, clone, old, build, hooks, landed };
 }
 const dependencies = (f, head, canary) => ({
   source: { current: async () => ({ head, projectId: address.projectId }) },
@@ -220,7 +237,7 @@ test('a broken new build (exits non-zero, hangs, prints bad JSON) is refused; th
       }, 'the hung child to be killed');
     }
     // The canary ran on a private HOME: the user's hook files were unreachable and are unchanged.
-    const env = JSON.parse(readFileSync(join(f.installation, 'canary-env.json'), 'utf8'));
+    const env = JSON.parse(readFileSync(join(f.installation, `canary-env-${b.slice(0, 8)}.json`), 'utf8'));
     assert.notEqual(env.home, f.home);
     assert.ok(env.home.startsWith(realpathSync(tmpdir())) || env.home.startsWith(tmpdir()));
     assert.equal(existsSync(env.home), false, 'private home removed');
@@ -243,17 +260,18 @@ test('a good build passes every step once, switches, keeps one previous build an
   const result = await run(f, b, canary);
   assert.equal(result.status, 'updated');
   assert.equal(current(f), b);
-  assert.deepEqual(calls(f), ['version', 'status', 'planning', 'planning-item', 'wait']);
+  assert.deepEqual(calls(f), ['version', 'status', 'planning', 'wait']);
   assert.match(
     lines.join('\n'),
-    /Forge CLI canary passed for bbbbbbbb in [\d.]+s: version \d+ms, status \d+ms, planning \d+ms, planning-item \d+ms, wait \d+ms\./,
+    /Forge CLI canary passed for bbbbbbbb in [\d.]+s: version \d+ms, status \d+ms, planning \d+ms, wait \d+ms\./,
   );
   // Exactly one previous build is kept, outside the pruning grace.
   assert.equal(realpathSync(join(f.installation, 'previous')), f.old);
   assert.equal(readCliCanaryRefusal(f.installation), null);
-  // The vetted operation is remembered: the next canary reads one item less.
+  // The vetted landing operation is remembered: the next canary waits on it first.
   const record = JSON.parse(readFileSync(join(f.installation, 'canary-clone.json'), 'utf8'));
   assert.equal(record.operationId, OPERATION);
+  assert.equal(record.operationKind, 'landing');
   writeFileSync(join(f.installation, 'canary-calls.log'), '');
   f.build(c);
   await run(f, c, canary);
@@ -310,25 +328,148 @@ test('with no Forge clone recorded the canary still runs the version step and sa
   assert.equal(current(f), b);
 });
 
-test('a wait that fails refuses the build; an operation the project no longer knows does not', async t => {
+test('a wait that fails where the current build passes refuses; an unusable operation is skipped and dropped', async t => {
   const f = fixture(t);
   const stored = () => JSON.parse(readFileSync(join(f.installation, 'canary-clone.json'), 'utf8'));
-  writeFileSync(
-    join(f.installation, 'canary-clone.json'),
-    JSON.stringify({ root: f.clone, operationId: OPERATION }),
-  );
   f.build(b, 'exit:wait');
-  const quiet = { home: f.home, log: () => {}, alert: async () => {} };
+  const lines = [];
+  const quiet = { home: f.home, log: line => lines.push(line), alert: async () => {} };
   await assert.rejects(run(f, b, cliCanaryPreSwitch(f.installation, quiet)), { code: 'CLI_CANARY_FAILED' });
   assert.equal(current(f), a);
-  assert.equal(stored().operationId, OPERATION, 'a refusal keeps the vetted operation');
-  // NOT_FOUND on the stored and the derived operation: skipped, and the stored one is dropped.
+  // Both results are in the log: the new build failed, the current one passed the same step.
+  assert.match(
+    lines.join('\n'),
+    /canary refused bbbbbbbb: canary step wait exited 3; the current build aaaaaaaa passes the same step/,
+  );
+  assert.deepEqual(calls(f), ['version', 'status', 'planning', 'wait', 'wait']);
+  // NOT_FOUND: skipped with a log line, never a refusal, and nothing is remembered.
   writeFileSync(join(f.build(b, 'notfound:wait'), 'mode'), 'notfound:wait');
-  const lines = [];
-  await run(f, b, cliCanaryPreSwitch(f.installation, { ...quiet, log: line => lines.push(line) }));
+  lines.length = 0;
+  await run(f, b, cliCanaryPreSwitch(f.installation, quiet));
   assert.equal(current(f), b);
-  assert.match(lines.join('\n'), /skipped: no finished operation known to the project/);
+  assert.match(lines.join('\n'), /skipped: wait on operation 11111111 skipped: NOT_FOUND/);
   assert.equal(stored().operationId, undefined);
+});
+
+// Issue edcb0fc8 replay: the old canary took the newest Issue's operation id (7a16c630, a planning
+// put written on this machine); wait on it says WORK_OPERATION_CHANGED on both builds, so every
+// build was refused.
+test('incident replay 7a16c630: a non-waitable operation never refuses an identical build; a real wait failure still does', async t => {
+  const PUT = '7a16c630-0000-4000-8000-000000000000';
+  const f = fixture(t);
+  writeFileSync(join(f.old, 'mode'), 'changed:wait');
+  // The record the old canary left: the planning put's id, no landing kind.
+  writeFileSync(
+    join(f.installation, 'canary-clone.json'),
+    JSON.stringify({ root: f.clone, operationId: PUT }),
+  );
+  f.landed([]);
+  f.build(b, 'changed:wait');
+  const lines = [],
+    alerts = [];
+  const canary = cliCanaryPreSwitch(f.installation, {
+    home: f.home,
+    log: line => lines.push(line),
+    alert: async record => alerts.push(record),
+  });
+  assert.equal((await run(f, b, canary)).status, 'updated');
+  assert.deepEqual(calls(f), ['version', 'status', 'planning'], 'the put id is never waited on');
+  assert.match(lines.join('\n'), /skipped: no landed operation recorded on this machine for the wait/);
+  assert.equal(
+    JSON.parse(readFileSync(join(f.installation, 'canary-clone.json'), 'utf8')).operationId,
+    undefined,
+  );
+  // A landed operation that turns out unusable on this machine is skipped the same way.
+  f.landed([PUT, OPERATION]);
+  writeFileSync(join(f.installation, 'canary-calls.log'), '');
+  lines.length = 0;
+  writeFileSync(join(f.build(c, 'changed:wait'), 'mode'), 'changed:wait');
+  assert.equal((await run(f, c, canary)).status, 'updated');
+  assert.match(
+    lines.join('\n'),
+    /wait on operation 7a16c630 skipped: WORK_OPERATION_CHANGED.*wait on operation 11111111 skipped: WORK_OPERATION_CHANGED/,
+  );
+  assert.equal(alerts.length, 0);
+  // A build whose wait truly fails, while the current build's wait passes, is still refused.
+  writeFileSync(join(f.installation, 'builds', c, 'mode'), 'ok');
+  const d = 'd'.repeat(64);
+  f.build(d, 'fail:wait');
+  f.landed([OPERATION]);
+  lines.length = 0;
+  await assert.rejects(run(f, d, canary), { code: 'CLI_CANARY_FAILED' });
+  assert.equal(current(f), c);
+  assert.match(
+    lines.join('\n'),
+    /canary refused dddddddd: canary step wait exited 1; the current build cccccccc passes the same step/,
+  );
+});
+
+// e28539cf replay: refused on "canary step wait timed out" while its server deploy finished; the
+// build was fine. The wait is now one non-blocking read; running or blocking never refuses alone.
+test('incident replay e28539cf: a still-running or blocking wait never refuses; a build that alone blocks still does', async t => {
+  const f = fixture(t);
+  const lines = [],
+    alerts = [];
+  const canary = cliCanaryPreSwitch(f.installation, {
+    home: f.home,
+    timeoutMs: 3_000,
+    log: line => lines.push(line),
+    alert: async record => alerts.push(record),
+  });
+  f.build(b, 'running:wait');
+  assert.equal((await run(f, b, canary)).status, 'updated');
+  assert.deepEqual(JSON.parse(readFileSync(join(f.installation, 'canary-wait-args.json'), 'utf8')), {
+    operationIds: [OPERATION],
+    timeoutSeconds: 0,
+  });
+  assert.match(lines.join('\n'), /wait on operation 11111111 skipped: still running/);
+  // Both builds block on the wait (the server is mid-deploy): compared, skipped, switched.
+  writeFileSync(join(f.installation, 'builds', b, 'mode'), 'hang:wait');
+  f.build(c, 'hang:wait');
+  lines.length = 0;
+  const started = Date.now();
+  assert.equal((await run(f, c, canary)).status, 'updated');
+  assert.ok(Date.now() - started < 10_000, 'both runs stay inside their limits');
+  assert.match(
+    lines.join('\n'),
+    /step wait fails on both builds, not a regression \(new: canary step wait timed out .*; current build bbbbbbbb: canary step wait timed out/,
+  );
+  assert.equal(alerts.length, 0);
+  // Only the new build blocks: refused, with both results in the log.
+  writeFileSync(join(f.installation, 'builds', c, 'mode'), 'ok');
+  const d = 'd'.repeat(64);
+  f.build(d, 'hang:wait');
+  lines.length = 0;
+  await assert.rejects(run(f, d, canary), { code: 'CLI_CANARY_FAILED' });
+  assert.match(
+    lines.join('\n'),
+    /canary refused dddddddd: canary step wait timed out .*; the current build cccccccc passes the same step/,
+  );
+});
+
+test('differential canary: a step both builds fail is logged with both results and does not refuse (edcb0fc8)', async t => {
+  const f = fixture(t);
+  writeFileSync(join(f.old, 'mode'), 'exit:planning');
+  f.build(b, 'exit:planning');
+  const lines = [];
+  const canary = cliCanaryPreSwitch(f.installation, {
+    home: f.home,
+    log: line => lines.push(line),
+    alert: async () => {},
+  });
+  assert.equal((await run(f, b, canary)).status, 'updated');
+  assert.match(
+    lines.join('\n'),
+    /Forge CLI canary passed for bbbbbbbb .*skipped: step planning fails on both builds, not a regression \(new: canary step planning exited 3; current build aaaaaaaa: canary step planning exited 3\)/,
+  );
+  // The re-run happens only on failure: one extra planning call, the other steps once each.
+  assert.deepEqual(calls(f), ['version', 'status', 'planning', 'planning', 'wait']);
+  // The current build ran pinned to its own commit like a canary child (no freshness read, no
+  // update) on the same private HOME and real XDG directories.
+  const env = JSON.parse(readFileSync(join(f.installation, `canary-env-${a.slice(0, 8)}.json`), 'utf8'));
+  assert.equal(env.canary, a);
+  assert.notEqual(env.home, f.home);
+  assert.equal(env.xdg, join(f.home, '.config'));
 });
 
 test('the alert text names the step and exit class only, never output, paths or tokens', async t => {
@@ -412,6 +553,11 @@ function controller(f, root, name) {
     `import { existsSync, appendFileSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 const installation = ${JSON.stringify(f.installation)};
+if (process.env.FORGE_CLI_CANARY && ${JSON.stringify(name)} === 'old') {
+  // The working current build, when the differential canary re-runs a failed step on it.
+  process.stdout.write('nforge version fake\\n');
+  process.exit(0);
+}
 if (process.env.FORGE_CLI_CANARY) {
   appendFileSync(join(installation, 'canary-runs.log'), 'run\\n');
   while (!existsSync(join(installation, 'canary-gate'))) await new Promise(done => setTimeout(done, 20));

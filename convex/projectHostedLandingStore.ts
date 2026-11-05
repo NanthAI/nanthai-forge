@@ -124,6 +124,14 @@ export async function writeLanding(
   );
   const state = landingPriorityState(row, hostedLandingStateSchema.parse(input)),
     previous = hostedLandingStateSchema.parse(JSON.parse(row.value));
+  // A new attempt starts with empty check progress: counts and the progress
+  // digest belong to the attempt that observed them (9f94c28a). Fresh values
+  // written with this transition differ from the previous attempt's and stay.
+  if (state.attemptId !== previous.attemptId) {
+    if (state.checkProgress === previous.checkProgress) delete state.checkProgress;
+    if (state.testFiles && canonicalPayload(state.testFiles) === canonicalPayload(previous.testFiles))
+      delete state.testFiles;
+  }
   if (state.phase === 'landed' || state.phase === 'terminal-failed') {
     const at = new Date().toISOString();
     state.timing = {

@@ -131,23 +131,37 @@ A broken build must never strand every agent at once, so each auto-update
 smoke-tests the new build before the switch. The canary runs in `preSwitch`: the build
 is installed but not active, and every caller keeps using `current`. It runs the new
 build's own entry with a hard 20 s limit for all steps together: `--version`, `status ROOT
---json` on a Forge clone, a `planning` read, and a `wait` on a known finished operation.
+--json` on a Forge clone, a `planning` read, and a `wait` on a landed operation.
 Each step needs exit 0 and a JSON document (agent receipts must name the build under test).
 The clone is the one `nforge update ROOT` or the first update-starting command named
 (`DIR/canary-clone.json`); with none recorded, only the version step runs and the log says
-so. The finished operation comes from the two most recently written Issues (hosted operation
-records expire, so it is re-derived when the stored one is gone). A wait on an operation the
-project no longer knows is skipped and logged, never a refusal; any other wait failure refuses.
+so. The wait uses only landing operations, whose wait is a pure read: the last vetted one, then
+the newest this machine saw land (`wait` records each landed operation in
+`$XDG_STATE_HOME/forge/landed-operations.json`, five per project, one local write per landing).
+A planning put's operation id is never used. The wait is one non-blocking status read
+(`timeoutSeconds:0`, its own 10 s cap inside the 20 s): an operation still running
+(`IN_PROGRESS`) is skipped, and so is a wait that says `NOT_FOUND`,
+`WORK_OPERATION_CHANGED` or `OPERATION_EXPIRED`; each skip is a log line and drops the
+operation. With none recorded the log says the wait was skipped. A wait that times out goes
+through the differential rule below like any other failed step.
+
+The canary is differential: only when a step fails on the new build, the same step runs on the
+current build (pinned with `FORGE_CLI_CANARY` to its own commit, so it makes no freshness read
+and starts no update; its own 20 s limit). The switch is refused only when the current build
+passes that step, and the log names both results (`...; the current build HEAD passes the same
+step`). A step both builds fail is not a regression: the pass line lists it as skipped with
+both results, so a server-side or data problem never strands the fleet on an old build.
 
 The canary adds no hosted call to a normal call: its children skip the freshness read
 (`FORGE_CLI_CANARY=HEAD`, honored only by that exact build), and its own reads (status,
-a 50-item planning page of about 40 KB, one or two planning items, one or two waits) happen once per attempted build. It never writes
+a 50-item planning page of about 40 KB, one or two waits; a failed step once more on the
+current build) happen once per attempted build. It never writes
 hooks and never writes hosted state: children run with a private `HOME` that is deleted
 afterwards, so the real `~/.claude` and `~/.codex` are unreachable by construction; credentials
 and caches come from the real XDG directories. One log line reports a pass with per-step
 timings.
 
-On any failure (non-zero exit, timeout, bad JSON) the switch is refused, the previous
+On a failure the current build does not share (non-zero exit, timeout, bad JSON) the switch is refused, the previous
 build keeps serving every call, and the reason goes to `DIR/canary-refused.json`. The
 refused build is not retried in a loop: the same head waits 10 min, then 20, 40, ... up to
 6 h; a new main is tried at once; a waiter never repeats a canary that just failed. While a
