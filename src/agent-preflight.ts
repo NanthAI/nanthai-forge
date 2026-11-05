@@ -15,7 +15,14 @@ import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, posix } from 'node:path';
 import { z } from 'zod';
-import { selectTests, selectPreflightTests, selectionSourcePath } from '../scripts/test-impact.mjs';
+import {
+  fitPreflightBudget,
+  preflightTierRule,
+  selectTests,
+  selectPreflightTests,
+  selectionSourcePath,
+} from '../scripts/test-impact.mjs';
+import { spawnMeasured } from './agent-preflight-measure.js';
 import type { NativeFile } from './native-state-format.js';
 import { sourceTree } from './source-tree.js';
 import {
@@ -37,6 +44,12 @@ export const preflightRuntime = { filesystemEventHealth };
 
 /** Default local cost per selected test file at concurrency 1, used for the time estimate. */
 export const PREFLIGHT_SECONDS_PER_FILE = 4;
+/** Local time budget (seconds) for tests beyond the mandatory set. It trims by estimated time, never
+ * by file count; whatever it cuts is named in the plan and runs in the pre-queue Lane check. */
+export const PREFLIGHT_LOCAL_BUDGET_SECONDS = 180;
+/** Tests per process after the mandatory group. The run re-checks the budget between groups, so
+ * this is only how finely it can stop, never how many tests may run. */
+const PREFLIGHT_GROUP_FILES = 10;
 const SOURCE_DIRS = ['src', 'web', 'convex', 'netlify', 'tests', 'scripts'];
 
 const reusedFromSchema = z.object({ head: z.string(), tree: z.string(), evidence: z.string() }).strict();
@@ -63,9 +76,36 @@ export const preflightReceiptSchema = z
     reusedTests: z.number().int().nonnegative().optional(),
     reusedFrom: reusedFromSchema.optional(),
     deferredTests: z.number().int().nonnegative().optional(),
+    /** Selection rule, budget and cut, so a receipt says what was left for the pre-queue check. */
+    rule: z.string().optional(),
+    budgetSeconds: z.number().nonnegative().optional(),
+    trimmedTiers: z.array(z.string()).optional(),
+    deferredTo: z.literal('pre-queue').optional(),
+    buildMs: z.number().nonnegative().optional(),
+    testMs: z.number().nonnegative().optional(),
+    /** Largest resident set of any test process; absent where the platform cannot report it. */
+    peakRssMb: z.number().nonnegative().optional(),
+    /** Tests that were planned to run here but not started because the time budget was spent. */
+    stoppedForTime: z.number().int().nonnegative().optional(),
   })
   .strict();
 export type PreflightReceipt = z.infer<typeof preflightReceiptSchema>;
+export type LocalSelection = {
+  rule: string;
+  budgetSeconds: number;
+  secondsPerFile: number;
+  basis: 'measured' | 'default';
+  estimateSeconds: number;
+  /** Per local tier: how many of its tests run here. Reused passes count as run. */
+  tiers: { tier: string; total: number; local: number }[];
+  trimmed: { tier: string; kept: number; total: number }[];
+  mandatoryOverBudget: boolean;
+  /** Leading tests that always run: changed tests, explicit coverage and smoke not already passed. */
+  mandatory: number;
+  deferred: number;
+  deferredTo: 'pre-queue';
+  summary: string;
+};
 export type PreflightPlan =
   | { status: 'unavailable'; reason: string }
   | {
@@ -76,6 +116,7 @@ export type PreflightPlan =
       estimateMinutes: number;
       command: string | null;
       deferredTests?: string[];
+      local?: LocalSelection;
       reusedTests?: string[];
       reusedFrom?: z.infer<typeof reusedFromSchema>;
       deltaPaths?: string[];
@@ -102,8 +143,24 @@ function writePreflightReceipt(root: string, receipt: PreflightReceipt) {
 
 /** Learn from completed local runs, including build time and this machine's load.
  * Sibling Lanes share this clone-local disposable record. It is never uploaded. */
-export function estimatePreflightMinutes(root: string, files: number) {
-  let secondsPerFile = PREFLIGHT_SECONDS_PER_FILE;
+const timingsPath = (root: string) =>
+  join(retainedRootSibling(root, '.forge-client'), 'agent', 'preflight-timings.json');
+const timingsSchema = z
+  .array(z.object({ tests: z.number().int().positive(), ms: z.number().positive() }).strict())
+  .max(8);
+export function preflightSecondsPerFile(root: string) {
+  // One run is a noisy sample (test mix, machine load), so prefer the last few completed runs.
+  try {
+    const runs = timingsSchema.parse(JSON.parse(readFileSync(timingsPath(root), 'utf8')));
+    const tests = runs.reduce((sum, run) => sum + run.tests, 0);
+    if (tests > 0)
+      return {
+        secondsPerFile: runs.reduce((sum, run) => sum + run.ms, 0) / tests / 1000,
+        basis: 'measured' as const,
+      };
+  } catch {
+    /* No rolling window yet: fall back to the latest completed run. */
+  }
   try {
     const sample = preflightReceiptSchema.parse(
       JSON.parse(
@@ -113,11 +170,30 @@ export function estimatePreflightMinutes(root: string, files: number) {
         ),
       ),
     );
-    if (sample.passed && sample.tests > 0) secondsPerFile = sample.durationMs / sample.tests / 1000;
+    if (sample.passed && sample.tests > 0)
+      return { secondsPerFile: sample.durationMs / sample.tests / 1000, basis: 'measured' as const };
   } catch {
     /* A cold or corrupt model uses the documented fallback. */
   }
-  return Math.ceil((files * secondsPerFile) / 60);
+  return { secondsPerFile: PREFLIGHT_SECONDS_PER_FILE, basis: 'default' as const };
+}
+function recordTiming(root: string, receipt: PreflightReceipt) {
+  try {
+    let runs: z.infer<typeof timingsSchema> = [];
+    try {
+      runs = timingsSchema.parse(JSON.parse(readFileSync(timingsPath(root), 'utf8')));
+    } catch {
+      /* Start a fresh window. */
+    }
+    runs = [...runs, { tests: receipt.tests, ms: Math.max(1, receipt.durationMs) }].slice(-8);
+    mkdirSync(join(timingsPath(root), '..'), { recursive: true, mode: 0o700 });
+    durableReplace(timingsPath(root), JSON.stringify(runs));
+  } catch {
+    /* Estimates never invalidate a completed run. */
+  }
+}
+export function estimatePreflightMinutes(root: string, files: number) {
+  return Math.ceil((files * preflightSecondsPerFile(root).secondsPerFile) / 60);
 }
 
 /** Selector input from the Lane checkout; absent directories are simply absent. */
@@ -150,8 +226,13 @@ export function preflightPlan(
   root: string,
   changed: { paths: string[]; complete: boolean } | undefined,
   context?: { laneId: string; files: NativeFile[] },
+  options?: { budgetSeconds?: number | undefined },
 ): PreflightPlan {
-  if (!changed?.complete) return { status: 'unavailable', reason: 'saved changed paths are unavailable' };
+  if (!changed?.complete)
+    return {
+      status: 'unavailable',
+      reason: 'saved changed paths are unavailable',
+    };
   if (!changed.paths.length)
     return {
       status: 'planned',
@@ -164,7 +245,7 @@ export function preflightPlan(
   try {
     const files = laneFiles(root);
     const selection = selectPreflightTests({ files, paths: changed.paths });
-    let tests = [...new Set(selection.tests)].sort();
+    let tests = [...new Set(selection.tests)];
     let reusedTests: string[] = [];
     let delta: string[] | undefined;
     let reusedFrom: z.infer<typeof reusedFromSchema> | undefined;
@@ -207,23 +288,48 @@ export function preflightPlan(
         reusedTests = tests.filter(test => covered.has(test) && !impacted.has(test));
         tests = tests.filter(test => !reusedTests.includes(test));
         if (reusedTests.length && receipt?.tree && receipt.evidence)
-          reusedFrom = { head: receipt.head, tree: receipt.tree, evidence: receipt.evidence };
+          reusedFrom = {
+            head: receipt.head,
+            tree: receipt.tree,
+            evidence: receipt.evidence,
+          };
       }
     }
+    // Tiers still hold reused passes: those cost nothing here, so they never consume the budget.
+    const budgetSeconds = options?.budgetSeconds ?? PREFLIGHT_LOCAL_BUDGET_SECONDS;
+    const timing = preflightSecondsPerFile(root);
+    const fit = fitPreflightBudget({
+      tiers: selection.tiers,
+      budgetSeconds,
+      secondsPerFile: timing.secondsPerFile,
+      free: new Set(reusedTests),
+    });
+    const kept = new Set(fit.tests);
+    const cut = fit.trimmed.flatMap(item => item.deferred);
+    tests = tests.filter(test => kept.has(test));
+    const deferredTests = [...selection.deferredTests, ...cut].sort();
+    const complete = tests.length + reusedTests.length + deferredTests.length;
+    const local = localSelection({
+      selection,
+      fit,
+      timing,
+      budgetSeconds,
+      kept,
+      mandatory: tests.filter(test => selection.tiers[0]?.tests.includes(test)).length,
+      deferred: deferredTests.length,
+    });
     const plan: PreflightPlan = {
       status: 'planned',
       scope: selection.scope,
       reason: selection.reason,
       tests,
-      deferredTests: selection.deferredTests,
+      deferredTests,
+      ...(selection.tiers.length ? { local } : {}),
       reusedTests,
       ...(reusedFrom ? { reusedFrom } : {}),
       ...(delta ? { deltaPaths: delta } : {}),
       estimateMinutes: estimatePreflightMinutes(root, tests.length),
-      totalEstimateMinutes: estimatePreflightMinutes(
-        root,
-        selection.tests.length + selection.deferredTests.length,
-      ),
+      totalEstimateMinutes: estimatePreflightMinutes(root, complete),
       command: tests.length
         ? ['node', ...testArgs(root, tests)]
             .map(arg => (/^[\w./=-]+$/.test(arg) ? arg : shellQuote(arg)))
@@ -246,6 +352,58 @@ export function preflightPlan(
   }
 }
 
+function localSelection(input: {
+  selection: {
+    tiers: { tier: string; tests: string[] }[];
+    deferredTests: string[];
+  };
+  fit: ReturnType<typeof fitPreflightBudget>;
+  timing: ReturnType<typeof preflightSecondsPerFile>;
+  budgetSeconds: number;
+  kept: Set<string>;
+  mandatory: number;
+  deferred: number;
+}): LocalSelection {
+  const { fit, timing, budgetSeconds } = input;
+  const tiers = input.selection.tiers.map(item => ({
+    tier: item.tier,
+    total: item.tests.length,
+    local: item.tests.filter(test => input.kept.has(test)).length,
+  }));
+  const trimmed = fit.trimmed.map(({ tier, kept, total }) => ({
+    tier,
+    kept,
+    total,
+  }));
+  const cutNote = trimmed.length
+    ? ` Trimmed ${trimmed.map(item => `${item.tier} ${item.kept} of ${item.total}`).join(', ')}: ` +
+      `about ${Math.ceil(fit.estimateSeconds)} s fills the ${budgetSeconds} s local budget at ` +
+      `${timing.secondsPerFile.toFixed(1)} s per file (${timing.basis === 'measured' ? 'measured on this machine' : 'default estimate, no run measured yet'}).`
+    : '';
+  const over = fit.mandatoryOverBudget
+    ? ` Changed tests, explicit coverage and smoke alone exceed the ${budgetSeconds} s budget; they still all run.`
+    : '';
+  return {
+    rule: preflightTierRule,
+    budgetSeconds,
+    secondsPerFile: timing.secondsPerFile,
+    basis: timing.basis,
+    estimateSeconds: fit.estimateSeconds,
+    tiers,
+    trimmed,
+    mandatoryOverBudget: fit.mandatoryOverBudget,
+    mandatory: input.mandatory,
+    deferred: input.deferred,
+    deferredTo: 'pre-queue',
+    summary:
+      `Local rule: ${preflightTierRule}.${cutNote}${over} ` +
+      (input.deferred
+        ? `${input.deferred} test file(s) deferred; they run in the pre-queue Lane check (on by default; ` +
+          'acceptance.admissionCheck:false opts out, then the queue check runs them first).'
+        : 'No test file deferred.'),
+  };
+}
+
 /** Builds (when the project has build:core) and runs the selected tests here, output to stderr, then
  * records the result for this saved head. stdout stays one JSON receipt. */
 export function runPreflight(
@@ -259,20 +417,31 @@ export function runPreflight(
   let exitCode: number | null = 0;
   let environment: PreflightReceipt['environment'];
   const environmentNext = `nforge agent ${shellQuote(root)} land --save ${shellQuote(JSON.stringify({ laneId }))}`;
-  let passedTests: string[] = [];
+  const passedTests: string[] = [];
+  const notRun: string[] = [];
+  let buildMs: number | undefined;
+  let testMs: number | undefined;
+  let peakRssMb: number | null = null;
   if (plan.tests.length) {
     const scripts = (() => {
       try {
         return (
-          JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as { scripts?: Record<string, string> }
+          JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as {
+            scripts?: Record<string, string>;
+          }
         ).scripts;
       } catch {
         return undefined;
       }
     })();
     if (scripts?.['build:core']) {
-      const build = spawnSync('npm', ['run', '-s', 'build:core'], { cwd: root, stdio: ['ignore', 2, 2] });
+      const buildStarted = Date.now();
+      const build = spawnSync('npm', ['run', '-s', 'build:core'], {
+        cwd: root,
+        stdio: ['ignore', 2, 2],
+      });
       exitCode = build.status;
+      buildMs = Date.now() - buildStarted;
     }
     if (exitCode === 0) {
       const health = preflightRuntime.filesystemEventHealth(root);
@@ -283,29 +452,49 @@ export function runPreflight(
       const env = { ...process.env };
       delete env.NODE_TEST_CONTEXT;
       const directory = mkdtempSync(join(tmpdir(), 'forge-preflight-'));
-      const report = join(directory, 'passed.json');
+      const testStarted = Date.now();
+      const budgetMs = plan.local ? plan.local.budgetSeconds * 1000 : Infinity;
+      // Mandatory tests always run. Later tests run in proximity order, in small groups, and the
+      // budget is re-checked between groups: a slow machine stops early and says so, it never
+      // overruns silently on an estimate that was wrong.
+      const mandatory = plan.local?.mandatory ?? plan.tests.length;
+      const groups = [plan.tests.slice(0, mandatory)];
+      for (let i = mandatory; i < plan.tests.length; i += PREFLIGHT_GROUP_FILES)
+        groups.push(plan.tests.slice(i, i + PREFLIGHT_GROUP_FILES));
+      let index = 0;
       try {
-        exitCode = spawnSync(
-          process.execPath,
-          [
-            '--test-reporter=tap',
-            '--test-reporter-destination=stderr',
-            `--test-reporter=${new URL('./agent-preflight-reporter.js', import.meta.url).href}`,
-            '--test-reporter-destination=stdout',
-            ...testArgs(root, plan.tests),
-          ],
-          {
-            cwd: root,
-            env: { ...env, FORGE_PREFLIGHT_REPORT: report },
-            stdio: ['ignore', 2, 2],
-          },
-        ).status;
-        try {
-          const observed = z.array(z.string()).parse(JSON.parse(readFileSync(report, 'utf8')));
-          passedTests = plan.tests.filter(test => observed.includes(test));
-        } catch {
-          /* Missing report: no per-file pass is reusable. */
+        for (const group of groups) {
+          if (!group.length) continue;
+          if (group !== groups[0] && Date.now() - started >= budgetMs) {
+            notRun.push(...group);
+            continue;
+          }
+          const report = join(directory, `passed-${index++}.json`);
+          const run = spawnMeasured(
+            process.execPath,
+            [
+              '--test-reporter=tap',
+              '--test-reporter-destination=stderr',
+              `--test-reporter=${new URL('./agent-preflight-reporter.js', import.meta.url).href}`,
+              '--test-reporter-destination=stdout',
+              ...testArgs(root, group),
+            ],
+            {
+              cwd: root,
+              env: { ...env, FORGE_PREFLIGHT_REPORT: report },
+              stdio: ['ignore', 2, 2],
+            },
+          );
+          if (run.status !== 0 && exitCode === 0) exitCode = run.status;
+          if (run.peakRssMb !== null) peakRssMb = Math.max(peakRssMb ?? 0, run.peakRssMb);
+          try {
+            const observed = z.array(z.string()).parse(JSON.parse(readFileSync(report, 'utf8')));
+            passedTests.push(...group.filter(test => observed.includes(test)));
+          } catch {
+            /* Missing report: no per-file pass is reusable. */
+          }
         }
+        testMs = Date.now() - testStarted;
       } finally {
         rmSync(directory, { recursive: true, force: true });
       }
@@ -321,7 +510,7 @@ export function runPreflight(
     laneId,
     head,
     ...(tree ? { tree } : {}),
-    tests: plan.tests.length,
+    tests: plan.tests.length - notRun.length,
     ...(evidence && tree === sourceTree(evidence.files)
       ? {
           evidence: writePreflightEvidence(root, {
@@ -333,8 +522,22 @@ export function runPreflight(
     ...(plan.reusedTests?.length
       ? { reusedTests: plan.reusedTests.length, reusedFrom: plan.reusedFrom }
       : {}),
-    ...(plan.deferredTests?.length ? { deferredTests: plan.deferredTests.length } : {}),
-    selection: plan.deferredTests?.length ? 'local' : plan.scope,
+    ...(plan.deferredTests?.length || notRun.length
+      ? { deferredTests: (plan.deferredTests?.length ?? 0) + notRun.length }
+      : {}),
+    ...(notRun.length ? { stoppedForTime: notRun.length } : {}),
+    ...(plan.local
+      ? {
+          rule: plan.local.rule,
+          budgetSeconds: plan.local.budgetSeconds,
+          ...(plan.local.trimmed.length ? { trimmedTiers: plan.local.trimmed.map(item => item.tier) } : {}),
+          ...(plan.deferredTests?.length || notRun.length ? { deferredTo: plan.local.deferredTo } : {}),
+        }
+      : {}),
+    ...(buildMs !== undefined ? { buildMs } : {}),
+    ...(testMs !== undefined ? { testMs } : {}),
+    ...(peakRssMb !== null ? { peakRssMb } : {}),
+    selection: plan.deferredTests?.length || notRun.length ? 'local' : plan.scope,
     exitCode,
     passed: exitCode === 0 && !environment,
     ...(environment ? { environment, exitCode: exitCode || null } : {}),
@@ -342,7 +545,9 @@ export function runPreflight(
     at: new Date().toISOString(),
   };
   writePreflightReceipt(root, receipt);
+  process.stderr.write(`${runSummary(receipt, plan)}\n`);
   if (receipt.passed && receipt.tests > 0) {
+    recordTiming(root, receipt);
     const path = join(retainedRootSibling(root, '.forge-client'), 'agent', 'preflight-estimate.json');
     try {
       mkdirSync(join(path, '..'), { recursive: true, mode: 0o700 });
@@ -352,4 +557,27 @@ export function runPreflight(
     }
   }
   return receipt;
+}
+
+/** The builder's closing line: what ran, how long it took, and what waits for the pre-queue check. */
+function runSummary(receipt: PreflightReceipt, plan: PreflightPlan & { status: 'planned' }) {
+  const seconds = (ms: number) => `${(ms / 1000).toFixed(1)} s`;
+  const timing = [
+    receipt.buildMs !== undefined ? `build ${seconds(receipt.buildMs)}` : '',
+    receipt.testMs !== undefined ? `tests ${seconds(receipt.testMs)}` : '',
+    receipt.peakRssMb !== undefined ? `peak RSS ${receipt.peakRssMb} MB` : 'peak RSS unmeasured',
+  ].filter(Boolean);
+  const deferred = receipt.deferredTests ?? 0;
+  const stopped = receipt.stoppedForTime
+    ? ` The ${receipt.budgetSeconds} s local budget ran out, so ${receipt.stoppedForTime} planned test file(s) were not started.`
+    : '';
+  return (
+    `preflight: ${receipt.passed ? 'passed' : 'FAILED'}, ${receipt.tests} test file(s) in ${seconds(receipt.durationMs)} (${timing.join(', ')}).` +
+    stopped +
+    ` Rule: ${receipt.rule ?? plan.scope}.` +
+    (receipt.trimmedTiers?.length ? ` Trimmed tier(s): ${receipt.trimmedTiers.join(', ')}.` : '') +
+    (deferred
+      ? ` ${deferred} test file(s) deferred; they run in the pre-queue Lane check (on by default).`
+      : ' No test file deferred.')
+  );
 }

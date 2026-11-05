@@ -126,8 +126,20 @@ acceptance-policy pins exclude these settings.
 ### preflight
 
 - `nforge agent ROOT preflight '{"laneId":"…"}'` always runs changed tests, explicit coverage
-  and smoke. Certain consumers within two import edges fill a 25-file local budget; others
-  remain in `deferredTests` for landing.
+  and smoke, then all direct consumers, then distance-2 consumers, nearest first. There is no
+  file count. A time budget (180 s by default; `"budgetSeconds":N` overrides) is filled in that
+  order using the measured seconds per file (the mean of the last 8 completed runs on this
+  machine; 4 s until one is measured). A wrong estimate cannot overrun: after the mandatory
+  group the run goes on in groups of 10, checks the budget between groups, and stops with
+  `stoppedForTime` tests unstarted, which join the deferred set. A cut trims the farthest
+  tier first, never leaves a nearer consumer out while a farther one runs, and never touches
+  changed tests, explicit coverage or smoke. The plan's `local.summary` and the receipt
+  (`rule`, `budgetSeconds`, `trimmedTiers`, `deferredTests`, `deferredTo: "pre-queue"`) say what
+  was trimmed and why. Trimmed and farther consumers (three or more edges, dynamic) are
+  `deferredTests`: they run in the pre-queue Lane check (`acceptance.admissionCheck`, on by
+  default; with `false` they run first in the queue check). The receipt also reports build and
+  test wall time (`buildMs`, `testMs`) and the largest test process's `peakRssMb` where
+  `/usr/bin/time` can report it (macOS, Linux).
 - Private gzip receipts retain per-file passes, even from failed runs. Delta selection checks
   both inventories; invalid evidence or changed runtime prevents reuse. Plans name `reusedTests`
   and `deltaPaths`. No server calls or uploads are added.

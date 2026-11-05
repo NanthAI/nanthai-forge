@@ -123,17 +123,30 @@ Read the packaged agent skill: nforge docs agent.
 `;
 
 const examples: Record<string, unknown> = {
-  capabilities: { url: 'https://deployment.convex.cloud', projectId: 'PROJECT_ID' },
+  capabilities: {
+    url: 'https://deployment.convex.cloud',
+    projectId: 'PROJECT_ID',
+  },
   open: { laneId: 'LANE_ID', paths: ['src'] },
   save: { laneId: 'LANE_ID', message: 'Save edits' },
   'recover-apply': { applyOperationId: 'APPLY_OPERATION_ID' },
   resolve: { laneId: 'RESOLUTION_LANE_ID', message: 'Resolve conflict' },
   check: { candidateId: 'CANDIDATE_ID', checkId: 'CHECK_ID' },
-  revert: { target: { kind: 'receipt', receiptId: 'RECEIPT_ID' }, message: 'Revert acceptance' },
+  revert: {
+    target: { kind: 'receipt', receiptId: 'RECEIPT_ID' },
+    message: 'Revert acceptance',
+  },
   handoff: {
     laneId: 'LANE_ID',
     summary: 'What changed and why',
-    tests: [{ command: 'node --test tests/example.test.mjs', passed: 3, failed: 0, skipped: 0 }],
+    tests: [
+      {
+        command: 'node --test tests/example.test.mjs',
+        passed: 3,
+        failed: 0,
+        skipped: 0,
+      },
+    ],
     unrun: ['Full suite'],
     next: ['Lead reviews and lands'],
   },
@@ -144,7 +157,11 @@ const examples: Record<string, unknown> = {
     area: 'checks',
     cost: { minutes: 5, retries: 1 },
   },
-  'friction-triage': { frictionIds: ['FRICTION_ID'], status: 'planned', reason: 'Next check-runner slice' },
+  'friction-triage': {
+    frictionIds: ['FRICTION_ID'],
+    status: 'planned',
+    reason: 'Next check-runner slice',
+  },
   improve: {},
   metrics: { from: '2026-10-14', to: '2026-10-26' },
   decide: {
@@ -152,10 +169,19 @@ const examples: Record<string, unknown> = {
     decidedBy: 'Owner',
     what: 'Use the contract check',
     why: 'Keep the landing loop short',
-    overrides: { kind: 'default', description: 'Full-suite landing gate', link: 'docs/workflows.md' },
+    overrides: {
+      kind: 'default',
+      description: 'Full-suite landing gate',
+      link: 'docs/workflows.md',
+    },
   },
   decisions: { target: { kind: 'project' } },
-  wait: { laneIds: ['LANE_ID'], operationIds: [], until: 'terminal', timeoutSeconds: 600 },
+  wait: {
+    laneIds: ['LANE_ID'],
+    operationIds: [],
+    until: 'terminal',
+    timeoutSeconds: 600,
+  },
   integrate: { laneIds: ['LANE_ID', 'OTHER_LANE_ID'] },
   tests: { laneId: 'LANE_ID' },
   'confirm-tests': {
@@ -173,24 +199,42 @@ const examples: Record<string, unknown> = {
   'install-hooks': { scope: 'user' },
   'uninstall-hooks': { scope: 'user' },
   peers: { laneId: 'LANE_ID', detail: true },
-  'peer-ack': { laneId: 'LANE_ID', noticeId: 'NOTICE_ID', choice: 'accept-order' },
+  'peer-ack': {
+    laneId: 'LANE_ID',
+    noticeId: 'NOTICE_ID',
+    choice: 'accept-order',
+  },
   take: { laneId: 'LANE_ID', takeover: true },
   link: { laneId: 'LANE_ID', path: 'src/file.ts', line: 42 },
   candidate: { viewId: 'CANDIDATE_ID', offset: 0, limit: 20 },
-  provenance: { viewId: 'CANDIDATE_ID', file: 'src/file.ts', lines: true, offset: 0, limit: 20 },
+  provenance: {
+    viewId: 'CANDIDATE_ID',
+    file: 'src/file.ts',
+    lines: true,
+    offset: 0,
+    limit: 20,
+  },
   candidates: { laneId: 'LANE_ID', offset: 0, limit: 20 },
   brief: { situation: 'continue-lane', laneId: 'LANE_ID', agent: 'generic' },
   policy: {},
   'set-policy': { operationId: 'UUID', preset: 'trusted' },
   'undo-sync': { laneId: 'LANE_ID', syncOperationId: 'SYNC_UUID' },
-  guidance: { operationId: 'UUID', scope: 'project', agentGuidance: 'How agents should work' },
+  guidance: {
+    operationId: 'UUID',
+    scope: 'project',
+    agentGuidance: 'How agents should work',
+  },
   'land-ready': {},
   start: { outcome: 'Describe the intended change' },
   landing: { operationId: 'UUID' },
   land: { operationId: 'UUID', laneIds: ['LANE_ID', 'OTHER_LANE_ID'] },
   checkpoint: { laneId: 'LANE_ID', message: 'Describe the save' },
   sync: { laneId: 'LANE_ID' },
-  compose: { operationId: 'UUID', intentId: 'INTENT_ID', inputs: [{ laneId: 'LANE_ID', head: 'HEAD' }] },
+  compose: {
+    operationId: 'UUID',
+    intentId: 'INTENT_ID',
+    inputs: [{ laneId: 'LANE_ID', head: 'HEAD' }],
+  },
   finish: { laneId: 'LANE_ID', message: 'Describe the change', accept: true },
   'define-check': {
     name: 'verify',
@@ -208,21 +252,46 @@ const examples: Record<string, unknown> = {
   cancel: { operationId: 'ORIGINAL_UUID' },
   accept: { viewId: 'CANDIDATE_ID' },
   complete: { laneId: 'LANE_ID' },
-  abandon: { laneId: 'LANE_ID', reason: 'Superseded by accepted work', saveFirst: true },
+  abandon: {
+    laneId: 'LANE_ID',
+    reason: 'Superseded by accepted work',
+    saveFirst: true,
+  },
   reopen: { laneId: 'LANE_ID' },
   'complete-merged': { channel: 'main' },
   pin: { laneId: 'LANE_ID', pinned: true },
   clean: { apply: false, kinds: ['check-workspaces', 'lane-deps', 'lanes'] },
   status: { laneId: 'LANE_ID' },
-  records: { collection: 'lanes', state: 'active', merged: false, offset: 0, limit: 50 },
+  records: {
+    collection: 'lanes',
+    state: 'active',
+    merged: false,
+    offset: 0,
+    limit: 50,
+  },
   'making-of': { intentId: 'INTENT_ID' },
   planning: { status: 'open', limit: 50 },
-  'put-planning-item': { kind: 'issue', title: 'Outcome', body: 'Why and acceptance', status: 'open' },
+  'put-planning-item': {
+    kind: 'issue',
+    title: 'Outcome',
+    body: 'Why and acceptance',
+    status: 'open',
+  },
   'comment-planning-item': { itemId: 'ITEM_ID', text: 'Decision and why' },
-  report: { laneId: 'LANE_ID', harness: 'claude-code', model: 'MODEL', tokens: { input: 1200, output: 340 } },
+  report: {
+    laneId: 'LANE_ID',
+    harness: 'claude-code',
+    model: 'MODEL',
+    tokens: { input: 1200, output: 340 },
+  },
   diff: { laneId: 'LANE_ID', paths: ['src/file.ts'] },
   show: { state: 'STATE', path: 'src/file.ts' },
-  review: { kind: 'lane', id: 'LANE_ID', expectedHead: 'HEAD', paths: ['src/file.ts'] },
+  review: {
+    kind: 'lane',
+    id: 'LANE_ID',
+    expectedHead: 'HEAD',
+    paths: ['src/file.ts'],
+  },
 };
 const strict: Record<string, unknown> = {
   finish: {
@@ -234,7 +303,12 @@ const strict: Record<string, unknown> = {
     expectedDefinition: 'DEFINITION',
     accept: { expectedPrevious: 'CURRENT_CHANNEL_HEAD' },
   },
-  accept: { operationId: 'UUID', viewId: 'CANDIDATE_ID', expectedHead: 'HEAD', expectedPrevious: null },
+  accept: {
+    operationId: 'UUID',
+    viewId: 'CANDIDATE_ID',
+    expectedHead: 'HEAD',
+    expectedPrevious: null,
+  },
   'configure-check': { name: 'verify' },
   'configure-runner': { provider: 'self-hosted' },
   'check-settings': {},
@@ -303,7 +377,7 @@ function actionHelp(action: string): string {
       'Hosted: ack {laneId?,choice?:"accept-order"|"swap"|"split",text?} answers every pending overlap notice on the Lane (stable answer ids, so a repeat replays). accept-order keeps your change and lands in order; split records that you routed around.\n';
   if (action === 'preflight')
     result +=
-      "Hosted: preflight {laneId?,run?:true} selects the saved head's affected tests with the landing check's selector, builds (build:core) and runs them here, and records the result in ROOT.forge-client. run:false only plans (tests, estimateMinutes, command). Save first; land --save accepts a passing record for the same saved head.\n";
+      "Hosted: preflight {laneId?,run?:true,budgetSeconds?} selects the saved head's affected tests with the landing check's selector, builds (build:core) and runs them here, and records the result in ROOT.forge-client. Local order is changed tests, explicit coverage and smoke, then direct consumers, then distance-2 consumers; a time budget (default 180 s, budgetSeconds) trims the farthest tier; plan and receipt name the cut. Cut tests run in the pre-queue Lane check. The receipt reports wall time and peak RSS. run:false only plans (tests, estimateMinutes, command, local). Save first; land --save accepts a passing record for the same saved head.\n";
   if (action === 'source-pack')
     result +=
       'Hosted operator repair: x ROOT source-pack {} packs the current hosted main from this machine (objects come from the pack, the machine cache or object downloads) and publishes it to R2, so checks and Lane opens read one pack instead of every object. status current means the latest pack is already main; seed, cutover or import of a large repo should be followed by this.\n';
@@ -518,7 +592,10 @@ async function runAgentCli(args: string[], options: AgentCliOptions, notices: st
   }
   // Any message text (apostrophes, newlines) arrives verbatim from a file or stdin, never through shell quoting.
   if (client.messageFile !== undefined)
-    selected = { ...selected, message: read(client.messageFile, 'Message file').replace(/\r?\n$/, '') };
+    selected = {
+      ...selected,
+      message: read(client.messageFile, 'Message file').replace(/\r?\n$/, ''),
+    };
   if (typeof selected.action === 'string') noticeViewAlias(selected.action);
   if (action === 'install-hooks' || action === 'uninstall-hooks') {
     if (
@@ -571,7 +648,10 @@ async function runAgentCli(args: string[], options: AgentCliOptions, notices: st
     // The Lane id and path print before the checkout downloads, so a slow open never hides them.
     transport.onStarted = lane => process.stderr.write(`${JSON.stringify({ started: lane })}\n`);
     const response = (await hostedAgentCli(root, action, command, hosted, transport)) as {
-      localLanes?: { idle: IdleLane[]; pruned: { count: number; bytes: number } };
+      localLanes?: {
+        idle: IdleLane[];
+        pruned: { count: number; bytes: number };
+      };
     };
     if (response.localLanes)
       for (const line of housekeepingLines(root, response.localLanes.idle, response.localLanes.pruned))

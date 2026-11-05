@@ -146,8 +146,20 @@ export const hostedAgentCommandSchemas = {
       candidateId: uuid.optional(),
       target: z
         .union([
-          z.object({ kind: z.literal('main'), head: hash, receiptId: z.string() }).strict(),
-          z.object({ kind: z.literal('candidate'), candidateId: uuid, head: hash }).strict(),
+          z
+            .object({
+              kind: z.literal('main'),
+              head: hash,
+              receiptId: z.string(),
+            })
+            .strict(),
+          z
+            .object({
+              kind: z.literal('candidate'),
+              candidateId: uuid,
+              head: hash,
+            })
+            .strict(),
         ])
         .optional(),
       ontoMain: z.boolean().optional(),
@@ -191,7 +203,13 @@ export const hostedAgentCommandSchemas = {
     })
     .strict(),
   /** Client-composed: select the saved head's affected tests, run them here and record the result. */
-  preflight: z.object({ ...lane, run: z.boolean().default(true) }).strict(),
+  preflight: z
+    .object({
+      ...lane,
+      run: z.boolean().default(true),
+      budgetSeconds: z.number().int().min(1).max(3600).optional(),
+    })
+    .strict(),
   /** Client-composed operator repair: pack the current hosted main and publish it to R2. */
   'source-pack': z.object({}).strict(),
   cancel: z.object({ submissionId: uuid }).strict(),

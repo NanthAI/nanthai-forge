@@ -171,12 +171,17 @@ export class HostedAgentTransport {
     return this.defaults;
   }
   private cachedAdvice:
-    | { laneId: string; value: Awaited<ReturnType<typeof readHostedOverlapAdvice>> }
+    | {
+        laneId: string;
+        value: Awaited<ReturnType<typeof readHostedOverlapAdvice>>;
+      }
     | undefined;
   /** Requester whose deferred receipts this deployment accepts; unset until negotiated. */
   private receiptActor: string | undefined;
   private callerActor: string | null = null;
-  private readonly operationContext = new AsyncLocalStorage<{ id: string | null }>();
+  private readonly operationContext = new AsyncLocalStorage<{
+    id: string | null;
+  }>();
   private get callerOperationId() {
     return this.operationContext.getStore()?.id ?? null;
   }
@@ -611,7 +616,9 @@ export class HostedAgentTransport {
             ...(capabilities.githubMirror !== undefined ? { githubMirror: capabilities.githubMirror } : {}),
             // Liveness: lastActivityAt above is the server record; this is the command this machine runs now.
             ...(typeof (command.data as { laneId?: string }).laneId === 'string'
-              ? { local: laneLiveness((command.data as { laneId: string }).laneId) }
+              ? {
+                  local: laneLiveness((command.data as { laneId: string }).laneId),
+                }
               : {}),
           },
           capabilities.overlapVersion === 1 ? (command.data as { laneId?: string }).laneId : undefined,
@@ -641,7 +648,10 @@ export class HostedAgentTransport {
               (operationId, runId) =>
                 runId
                   ? this.query('projectHostedCheckRead:status', { runId })
-                  : this.query('projectHostedFinishObserve:page', { operationId, nextVersion: 0 }),
+                  : this.query('projectHostedFinishObserve:page', {
+                      operationId,
+                      nextVersion: 0,
+                    }),
             )
           : new HostedAgentJournal(
               root,
@@ -688,7 +698,9 @@ export class HostedAgentTransport {
           // An inline answer records the same idempotent answers as ack, so peers and the inbox see it.
           const answers = overlapAnswer && advice ? ackAnswers(laneId, advice, overlapAnswer) : [];
           for (let at = 0; at < answers.length; at += 100)
-            await executeHostedRecords(this, 'overlap-acks', { answers: answers.slice(at, at + 100) });
+            await executeHostedRecords(this, 'overlap-acks', {
+              answers: answers.slice(at, at + 100),
+            });
           return gates;
         },
         marker: () => {
@@ -719,7 +731,12 @@ export class HostedAgentTransport {
           action === 'start' && (command.data as { planningItemId?: string }).planningItemId;
         const planning = planningItemId
           ? await markPlanningStarted(
-              { root, address: this.address, exchange: this.exchange, query: this.query.bind(this) },
+              {
+                root,
+                address: this.address,
+                exchange: this.exchange,
+                query: this.query.bind(this),
+              },
               planningItemId,
               journal.operationId,
             )
@@ -755,7 +772,10 @@ export class HostedAgentTransport {
               hostedRootLanePath(root, this.address) ? root : into,
               this.address,
               this.exchange,
-              { laneId: started.lane.laneId, operationId: await journal.id('checkout') },
+              {
+                laneId: started.lane.laneId,
+                operationId: await journal.id('checkout'),
+              },
               into,
             );
             recordLane({ laneId: started.lane.laneId, root: opened.root });
@@ -778,11 +798,17 @@ export class HostedAgentTransport {
           url: this.address.url,
           projectId: this.address.projectId,
         });
-        result = { ...(result as object), dependencies: await this.shareDependencies(path) };
+        result = {
+          ...(result as object),
+          dependencies: await this.shareDependencies(path),
+        };
         const laneId = (command.data as { laneId: string }).laneId;
         const paths = pendingConflictPaths(path, laneId);
         if (paths.length)
-          result = { ...(result as object), conflict: resolutionContinuation(path, laneId, paths) };
+          result = {
+            ...(result as object),
+            conflict: resolutionContinuation(path, laneId, paths),
+          };
       }
       // A replayed finish poll adds no read; the first call and the terminal answer carry the notice.
       const finishDone =
@@ -809,7 +835,10 @@ export class HostedAgentTransport {
         overlapLane,
       );
       if (action === 'start') {
-        const started = result as { lane?: { laneId?: string } | null; path?: string };
+        const started = result as {
+          lane?: { laneId?: string } | null;
+          path?: string;
+        };
         const localLanes = await this.housekeeping(
           [root, ...(started.path ? [started.path] : [])],
           [...(started.lane?.laneId ? [started.lane.laneId] : [])],
@@ -838,7 +867,10 @@ export class HostedAgentTransport {
     try {
       return await shareDependencies(path);
     } catch (error) {
-      return { status: 'failed', message: error instanceof Error ? error.message : String(error) };
+      return {
+        status: 'failed',
+        message: error instanceof Error ? error.message : String(error),
+      };
     }
   }
   /** Nested Lane copies are a cache: at most one bounded local pass an hour, never a failure. */
@@ -938,7 +970,9 @@ export class HostedAgentTransport {
         const advice = await readHostedOverlapAdvice(this, laneId, false, 50);
         const answers = ackAnswers(laneId, advice, choice, text);
         if (!answers.length) break;
-        const recorded = await executeHostedRecords(this, 'overlap-acks', { answers });
+        const recorded = await executeHostedRecords(this, 'overlap-acks', {
+          answers,
+        });
         answered.push(...((recorded.result as { answers?: unknown[] }).answers ?? []));
       }
       return this.response(action, null, {
@@ -956,7 +990,12 @@ export class HostedAgentTransport {
       'Run preflight in the Lane checkout; it tests the saved files here.',
     );
     const advice = await readHostedOverlapAdvice(this, laneId, true);
-    const plan = preflightPlan(root, advice.changedPaths, { laneId, files: marker.state.files });
+    const plan = preflightPlan(
+      root,
+      advice.changedPaths,
+      { laneId, files: marker.state.files },
+      { budgetSeconds: command.budgetSeconds },
+    );
     const head = marker.selection.head;
     if (plan.status === 'unavailable' || !command.run)
       return this.response(action, null, { laneId, head, plan });
@@ -1063,10 +1102,18 @@ export class HostedAgentTransport {
       });
     if (runId) return this.query('projectHostedCheckRead:status', { runId });
     if (laneId) return this.query('projectHostedLanes:head', { laneId });
-    if (!kind) return this.query('projectHostedFinishObserve:page', { operationId, nextVersion: 0 });
-    const api = { save: 'Saves', compose: 'Compose', sync: 'Sync', revert: 'Sync', lifecycle: 'Lifecycle' }[
-      kind
-    ];
+    if (!kind)
+      return this.query('projectHostedFinishObserve:page', {
+        operationId,
+        nextVersion: 0,
+      });
+    const api = {
+      save: 'Saves',
+      compose: 'Compose',
+      sync: 'Sync',
+      revert: 'Sync',
+      lifecycle: 'Lifecycle',
+    }[kind];
     return this.query(`projectHosted${api}:progress`, { operationId });
   }
 }

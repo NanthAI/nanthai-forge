@@ -41,7 +41,11 @@ export function finishGates(
             notices: pending.map(item => item.noticeId),
             files: pending.map(item => item.file),
           }
-        : { status: 'unanswered', files: pending.map(item => item.file), acknowledge: ack };
+        : {
+            status: 'unanswered',
+            files: pending.map(item => item.file),
+            acknowledge: ack,
+          };
   }
   if (defaults.preflight !== 'off') {
     const receipt = readPreflightReceipt(root, lane.laneId);
@@ -62,6 +66,11 @@ export function finishGates(
         at: receipt.at,
         deferredTests: receipt.deferredTests ?? 0,
         reusedTests: receipt.reusedTests ?? 0,
+        ...(receipt.rule ? { rule: receipt.rule } : {}),
+        ...(receipt.trimmedTiers ? { trimmedTiers: receipt.trimmedTiers } : {}),
+        ...(receipt.deferredTo ? { deferredTo: receipt.deferredTo } : {}),
+        ...(receipt.testMs !== undefined ? { testSeconds: Math.round(receipt.testMs / 1000) } : {}),
+        ...(receipt.peakRssMb !== undefined ? { peakRssMb: receipt.peakRssMb } : {}),
       };
     else {
       const plan = preflightPlan(root, advice?.changedPaths);
@@ -75,6 +84,7 @@ export function finishGates(
           totalEstimateMinutes: plan.totalEstimateMinutes ?? plan.estimateMinutes,
           selected: plan.tests.slice(0, 20),
           estimateMinutes: plan.estimateMinutes,
+          ...(plan.local ? { local: plan.local.summary } : {}),
           run,
         };
         const failed = sameSource ? ' Its last run failed.' : '';
@@ -103,7 +113,8 @@ export function finishGates(
           status: 'advised',
           tests: 0,
           deferredTests: plan.deferredTests.length,
-          reason: 'landing runner coverage',
+          ...(plan.local ? { local: plan.local.summary } : {}),
+          reason: 'pre-queue Lane check coverage',
         };
       }
     }

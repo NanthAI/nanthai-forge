@@ -6,8 +6,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { digest } from '../dist/portable-hash.js';
 import { sourceTree } from '../dist/source-tree.js';
-import { preflightPlan, runPreflight, preflightRuntime } from '../dist/agent-preflight.js';
+import {
+  preflightPlan,
+  runPreflight,
+  preflightRuntime,
+  preflightSecondsPerFile,
+} from '../dist/agent-preflight.js';
 import { clientCacheRoot } from '../dist/root-paths.js';
+import { parsePeakRssMb } from '../dist/agent-preflight-measure.js';
 import { deltaPaths, savedInventory } from '../dist/agent-preflight-evidence.js';
 const laneId = '11111111-1111-4111-8111-111111111111';
 const healthy = {
@@ -40,12 +46,18 @@ function fixture(t, fail = false) {
     bytes.set(path, body);
   };
   for (const [path, body] of bytes) put(path, body);
-  const files = () => [...bytes].map(([path, body]) => ({ path, blob: digest(body), mode: 'file' }));
-  const plan = (extraPaths = []) =>
+  const files = () =>
+    [...bytes].map(([path, body]) => ({
+      path,
+      blob: digest(body),
+      mode: 'file',
+    }));
+  const plan = (extraPaths = [], options) =>
     preflightPlan(
       root,
       { paths: ['src/a.ts', 'src/b.ts', ...extraPaths], complete: true },
       { laneId, files: files() },
+      options,
     );
   const run = p => runPreflight(root, laneId, digest(JSON.stringify(files())), p, sourceTree(files()));
   return { root, files, bytes, put, plan, run };
@@ -200,4 +212,72 @@ test('environment classification after a failed run preserves only the reporter 
   f.put('src/a.ts', 'export const n = 1;');
   t.mock.method(preflightRuntime, 'filesystemEventHealth', () => healthy);
   assert.equal(f.run(f.plan()).passed, true);
+});
+
+test('a real run records the rule, deferral target and measured wall time; peak RSS parses BSD and GNU reports', t => {
+  const f = fixture(t);
+  const plan = f.plan();
+  assert.match(
+    plan.local.summary,
+    /Local rule: changed tests, explicit coverage and smoke; then direct consumers/,
+  );
+  assert.equal(plan.local.budgetSeconds, 180);
+  const receipt = f.run(plan);
+  assert.equal(receipt.passed, true);
+  assert.match(receipt.rule, /direct consumers/);
+  assert.equal(receipt.budgetSeconds, 180);
+  assert.equal(typeof receipt.testMs, 'number');
+  assert.ok(receipt.peakRssMb === undefined || receipt.peakRssMb > 0);
+  assert.equal(parsePeakRssMb('  1048576  maximum resident set size\n'), 1);
+  assert.equal(parsePeakRssMb('Maximum resident set size (kbytes): 2048\n'), 2);
+  assert.equal(parsePeakRssMb('nothing'), null);
+});
+
+test('a tiny budget trims by time, names the trimmed tier and defers the rest to the pre-queue check', t => {
+  const f = fixture(t);
+  const plan = f.plan([], { budgetSeconds: 5 });
+  // Cold default is 4 s per file: one direct consumer fits, the other is scheduled, not dropped.
+  assert.deepEqual(plan.tests, ['tests/a.test.mjs']);
+  assert.deepEqual(plan.deferredTests, ['tests/b.test.mjs']);
+  assert.deepEqual(plan.local.trimmed, [{ tier: 'direct', kept: 1, total: 2 }]);
+  assert.match(plan.local.summary, /Trimmed direct 1 of 2/);
+  assert.match(plan.local.summary, /1 test file\(s\) deferred; they run in the pre-queue Lane check/);
+  const receipt = f.run(plan);
+  assert.equal(receipt.deferredTests, 1);
+  assert.equal(receipt.deferredTo, 'pre-queue');
+  assert.deepEqual(receipt.trimmedTiers, ['direct']);
+  assert.equal(receipt.budgetSeconds, 5);
+});
+
+test('the run stops between groups when the local budget is spent and reports what it did not start', t => {
+  const f = fixture(t);
+  const plan = f.plan([], { budgetSeconds: 100 });
+  assert.deepEqual(plan.tests, ['tests/a.test.mjs', 'tests/b.test.mjs']);
+  // A wrong estimate must not overrun: pretend the budget is already gone after the mandatory group.
+  plan.local.budgetSeconds = 0;
+  plan.local.mandatory = 1;
+  const receipt = f.run(plan);
+  assert.equal(receipt.passed, true);
+  assert.equal(receipt.tests, 1);
+  assert.equal(receipt.stoppedForTime, 1);
+  assert.equal(receipt.deferredTests, 1);
+  assert.equal(receipt.deferredTo, 'pre-queue');
+  assert.equal(f.plan().reusedTests.includes('tests/b.test.mjs'), false);
+});
+
+test('timing estimates average the last runs instead of trusting one sample', t => {
+  const f = fixture(t);
+  assert.deepEqual(preflightSecondsPerFile(f.root), { secondsPerFile: 4, basis: 'default' });
+  const agent = join(f.root + '.forge-client', 'agent');
+  mkdirSync(agent, { recursive: true });
+  writeFileSync(
+    join(agent, 'preflight-timings.json'),
+    JSON.stringify([
+      { tests: 10, ms: 6_000 },
+      { tests: 30, ms: 90_000 },
+    ]),
+  );
+  assert.deepEqual(preflightSecondsPerFile(f.root), { secondsPerFile: 2.4, basis: 'measured' });
+  writeFileSync(join(agent, 'preflight-timings.json'), 'not json');
+  assert.equal(preflightSecondsPerFile(f.root).basis, 'default');
 });

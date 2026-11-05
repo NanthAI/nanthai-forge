@@ -24,9 +24,16 @@ const healthy = {
 };
 test.beforeEach(t => t.mock.method(preflightRuntime, 'filesystemEventHealth', () => healthy));
 
-const lane = { laneId: '11111111-1111-4111-8111-111111111111', head: 'a'.repeat(64) };
+const lane = {
+  laneId: '11111111-1111-4111-8111-111111111111',
+  head: 'a'.repeat(64),
+};
 const defaults = overrides => effectiveAgentDefaults(overrides);
-const notice = (file, noticeId = `n-${file}`) => ({ noticeId, file, class: 'blocking' });
+const notice = (file, noticeId = `n-${file}`) => ({
+  noticeId,
+  file,
+  class: 'blocking',
+});
 const advice = ({ notices = [], paths = ['tests/b.test.mjs'], complete = true } = {}) => ({
   unacknowledgedOverlaps: { items: notices },
   changedPaths: { paths, complete },
@@ -118,7 +125,9 @@ test('preflight: a failing run is recorded, and finish says the last run failed'
 });
 
 test('ack answers every pending notice with ids that replay exactly', () => {
-  const pending = advice({ notices: [notice('a.ts', 'n1'), notice('b.ts', 'n2')] });
+  const pending = advice({
+    notices: [notice('a.ts', 'n1'), notice('b.ts', 'n2')],
+  });
   const first = ackAnswers(lane.laneId, pending, 'accept-order');
   assert.deepEqual(
     first.map(answer => [answer.noticeId, answer.choice]),
@@ -136,7 +145,10 @@ test('ack answers every pending notice with ids that replay exactly', () => {
 });
 
 test('checkpoint nudge: unsavedFor from local file times, nudge past the threshold, none when off', t => {
-  const root = repo(t, { '.forge/hosted-lane.json': '{}', 'node_modules/x/index.js': '' });
+  const root = repo(t, {
+    '.forge/hosted-lane.json': '{}',
+    'node_modules/x/index.js': '',
+  });
   const saved = Date.parse('2026-10-30T20:00:00.000Z') / 1000;
   utimesSync(join(root, '.forge/hosted-lane.json'), saved, saved);
   for (const path of ['package.json', 'tests/b.test.mjs'])
@@ -150,7 +162,9 @@ test('checkpoint nudge: unsavedFor from local file times, nudge past the thresho
   const nudged = checkpointNudge(root, lane.laneId, defaults({}), minutes);
   assert.equal(nudged.unsavedFor, 40);
   assert.match(nudged.nudge, /^Unsaved edits for 40 min; save now: nforge agent .* save '\{"laneId":/);
-  assert.deepEqual(checkpointNudge(root, lane.laneId, defaults({}), 10), { unsavedFor: 10 });
+  assert.deepEqual(checkpointNudge(root, lane.laneId, defaults({}), 10), {
+    unsavedFor: 10,
+  });
   assert.deepEqual(checkpointNudge(root, lane.laneId, defaults({ checkpointNudgeMinutes: 0 }), 400), {
     unsavedFor: 400,
   });
@@ -172,7 +186,11 @@ test('preflight survives a different saved head with identical content; content,
     preflightPlan(root, advice().changedPaths),
     tree,
   );
-  const saved = { ...lane, head: 'b'.repeat(64), tree: sourceTree([...files].reverse()) };
+  const saved = {
+    ...lane,
+    head: 'b'.repeat(64),
+    tree: sourceTree([...files].reverse()),
+  };
   assert.equal(readPreflightReceipt(root, lane.laneId).tree, tree);
   assert.equal(finishGates(root, defaults({}), saved, advice()).preflight.status, 'passed');
   assert.equal(receipt.passed, true);
@@ -212,7 +230,9 @@ test('failed preflight still refuses after a same-content save', t => {
 
 test('land accepts the overlap answer in the same call and retains observed notices', t => {
   const root = repo(t);
-  const pending = advice({ notices: [{ noticeId: 'f'.repeat(64), file: 'src/a.ts', class: 'blocking' }] });
+  const pending = advice({
+    notices: [{ noticeId: 'f'.repeat(64), file: 'src/a.ts', class: 'blocking' }],
+  });
   const result = finishGates(root, defaults({ preflight: 'off' }), lane, pending, 'accept-order');
   assert.equal(result.overlap.status, 'answered');
   assert.equal(result.overlap.choice, 'accept-order');
@@ -254,7 +274,7 @@ test('faster learned estimates never turn an advisory test set into a new mandat
   assert(result.preflight.tests >= 80);
 });
 
-test('learned timings preserve advisory coverage when the selector defers most consumers', t => {
+test('fast learned timings fit every direct consumer in the local budget; the gate stays advisory', t => {
   const files = {
     'src/hub.ts': 'export const n = 1;',
     ...Object.fromEntries(
@@ -285,10 +305,54 @@ test('learned timings preserve advisory coverage when the selector defers most c
     advice({ paths: ['src/hub.ts'] }),
   );
   assert.equal(result.preflight.status, 'advised');
-  assert.equal(result.preflight.tests, 25);
-  assert.equal(result.preflight.deferredTests, 55);
+  assert.equal(result.preflight.tests, 80);
+  assert.equal(result.preflight.deferredTests, 0);
   assert.equal(result.preflight.estimateMinutes, 1);
   assert.equal(result.preflight.totalEstimateMinutes, 1);
+});
+
+test('slow learned timings trim by time, and the advisory names the rule, the cut and the pre-queue check', t => {
+  const files = {
+    'src/hub.ts': 'export const n = 1;',
+    ...Object.fromEntries(
+      Array.from({ length: 80 }, (_, i) => [`tests/consumer-${i}.test.mjs`, "import '../dist/hub.js';\n"]),
+    ),
+  };
+  const root = repo(t, files),
+    cache = root + '.forge-client';
+  mkdirSync(join(cache, 'agent'), { recursive: true });
+  writeFileSync(
+    join(cache, 'agent/preflight-estimate.json'),
+    JSON.stringify({
+      schema: 1,
+      laneId: lane.laneId,
+      head: lane.head,
+      tests: 80,
+      selection: 'test-only',
+      exitCode: 0,
+      passed: true,
+      durationMs: 800000,
+      at: new Date(0).toISOString(),
+    }),
+  );
+  const result = finishGates(
+    root,
+    defaults({ preflightMaxMinutes: 5 }),
+    lane,
+    advice({ paths: ['src/hub.ts'] }),
+  );
+  assert.equal(result.preflight.status, 'advised');
+  // 10 s per file against the 180 s local budget: 18 files run here, the rest are scheduled.
+  assert.equal(result.preflight.tests, 18);
+  assert.equal(result.preflight.deferredTests, 62);
+  assert.equal(result.preflight.estimateMinutes, 3);
+  assert.equal(result.preflight.totalEstimateMinutes, 14);
+  assert.match(result.preflight.local, /direct consumers/);
+  assert.match(result.preflight.local, /Trimmed direct 18 of 80/);
+  assert.match(
+    result.preflight.local,
+    /62 test file\(s\) deferred; they run in the pre-queue Lane check \(on by default/,
+  );
 });
 
 for (const reason of [
@@ -300,7 +364,11 @@ for (const reason of [
     const root = repo(t, {
       'tests/b.test.mjs': "throw Error('local test must not run while environment is unavailable');",
     });
-    t.mock.method(preflightRuntime, 'filesystemEventHealth', () => ({ ...healthy, ok: false, reason }));
+    t.mock.method(preflightRuntime, 'filesystemEventHealth', () => ({
+      ...healthy,
+      ok: false,
+      reason,
+    }));
     const receipt = runPreflight(root, lane.laneId, lane.head, preflightPlan(root, advice().changedPaths));
     assert.equal(receipt.passed, false);
     assert.equal(receipt.exitCode, null);
@@ -327,7 +395,9 @@ for (const reason of [
   });
 
 test('event delivery lost during a failed local run is classified separately from healthy-environment test failures', t => {
-  const root = repo(t, { 'tests/b.test.mjs': "throw Error('synthetic watcher failure');" });
+  const root = repo(t, {
+    'tests/b.test.mjs': "throw Error('synthetic watcher failure');",
+  });
   let probes = 0;
   t.mock.method(preflightRuntime, 'filesystemEventHealth', () =>
     ++probes === 1 ? healthy : { ...healthy, ok: false, reason: 'no events' },

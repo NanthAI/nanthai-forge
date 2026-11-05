@@ -1,7 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { selectTests, selectPreflightTests, sourceFiles } from '../scripts/test-impact.mjs';
+import { readFileSync } from 'node:fs';
+import {
+  fitPreflightBudget,
+  selectTests,
+  selectPreflightTests,
+  sourceFiles,
+} from '../scripts/test-impact.mjs';
 
 const partition = (files, paths) => {
   const complete = selectTests({ files, paths });
@@ -38,7 +44,7 @@ test('local selection follows import distance; every distant and uncertain consu
   assert.deepEqual(grown.tests, plan.tests);
   assert.equal(grown.deferredTests.length, 10002);
 });
-test('wide direct-consumer hubs rank local work without discarding overflow or changed tests', () => {
+test('wide direct-consumer hubs stay whole in the ranked set; the time budget, not a count, trims them', () => {
   const files = new Map([
     ['package.json', '{"scripts":{}}'],
     ['src/hub.ts', 'export {};'],
@@ -46,12 +52,84 @@ test('wide direct-consumer hubs rank local work without discarding overflow or c
   for (let i = 0; i < 300; i++) files.set(`tests/consumer-${i}.test.mjs`, "import '../dist/hub.js';");
   const changed = ['src/hub.ts', 'tests/consumer-299.test.mjs'];
   const plan = partition(files, changed);
-  assert.equal(plan.tests.length, 25);
+  // Every direct consumer is in the ranked local set: no count drops one silently.
+  assert.equal(plan.tiers.find(item => item.tier === 'direct').tests.length, 299);
   assert.ok(plan.tests.includes('tests/consumer-299.test.mjs'));
-  assert.equal(plan.deferredTests.length, 275);
-  // More than 25 changed tests all execute: the budget cannot hide new/edited regressions.
-  const many = partition(files, ['src/hub.ts', ...plan.deferredTests.slice(0, 40)]);
-  assert.equal(many.tests.length, 40);
+  const fit = fitPreflightBudget({
+    tiers: plan.tiers,
+    budgetSeconds: 180,
+    secondsPerFile: 4,
+  });
+  // 180 s at 4 s per file is 45 files in total, mandatory first.
+  assert.equal(fit.tests.length, 45);
+  assert.deepEqual(
+    fit.trimmed.map(item => item.tier),
+    ['direct'],
+  );
+  const [direct] = fit.trimmed;
+  assert.equal(direct.kept + direct.deferred.length, direct.total);
+  assert.equal(new Set([...fit.tests, ...direct.deferred, ...plan.deferredTests]).size, plan.tests.length);
+  // A faster machine runs more of the same ranking; the order is unchanged.
+  const fast = fitPreflightBudget({
+    tiers: plan.tiers,
+    budgetSeconds: 180,
+    secondsPerFile: 1,
+  });
+  assert.equal(fast.tests.length, 180);
+  assert.deepEqual(fast.tests.slice(0, 45), fit.tests);
+  // Mandatory tests never trim, even over budget, and the report says so.
+  const many = partition(files, ['src/hub.ts', ...plan.tiers[1].tests.slice(0, 60)]);
+  const over = fitPreflightBudget({
+    tiers: many.tiers,
+    budgetSeconds: 180,
+    secondsPerFile: 4,
+  });
+  assert.equal(over.mandatoryOverBudget, true);
+  assert.equal(over.tests.length, many.tiers[0].tests.length);
+  assert.deepEqual(
+    over.trimmed.map(item => item.tier),
+    ['direct'],
+  );
+  assert.equal(over.trimmed[0].kept, 0);
+});
+test('a farther tier never runs while a nearer consumer is deferred; reused passes cost nothing', () => {
+  const tiers = [
+    { tier: 'mandatory', tests: ['m'] },
+    { tier: 'direct', tests: ['d1', 'd2', 'd3'] },
+    { tier: 'near', tests: ['n1', 'n2'] },
+  ];
+  const fit = fitPreflightBudget({
+    tiers,
+    budgetSeconds: 8,
+    secondsPerFile: 4,
+  });
+  assert.deepEqual(fit.tests, ['m', 'd1']);
+  assert.deepEqual(
+    fit.trimmed.map(item => [item.tier, item.kept, item.deferred.length]),
+    [
+      ['direct', 1, 2],
+      ['near', 0, 2],
+    ],
+  );
+  const free = fitPreflightBudget({
+    tiers,
+    budgetSeconds: 8,
+    secondsPerFile: 4,
+    free: new Set(['d1', 'd2', 'n1']),
+  });
+  assert.deepEqual(free.tests, ['m', 'd1', 'd2', 'd3', 'n1']);
+  assert.deepEqual(
+    free.trimmed.map(item => item.tier),
+    ['near'],
+  );
+});
+test('no hardcoded local file count remains in the selector or the preflight planner', () => {
+  for (const file of ['../scripts/test-impact.mjs', '../src/agent-preflight.ts'])
+    assert.doesNotMatch(
+      readFileSync(new URL(file, import.meta.url), 'utf8'),
+      /\b25\b|slice\(0, *Math\.max/,
+      `${file}: local selection is by time, never a file count`,
+    );
 });
 test('unknown and infrastructure changes retain complete landing coverage and changed tests locally', () => {
   const files = new Map([
@@ -131,10 +209,23 @@ test('real bench, incident and pull slices cannot regress into near-full local r
   ];
   for (const { name, paths, consumer } of cases) {
     const plan = partition(files, paths);
-    assert.ok(plan.tests.includes(consumer), `${consumer} must run locally`);
-    assert.ok(plan.tests.length <= 25, `${name}: ${plan.tests.length} local test files`);
+    assert.ok(plan.tests.includes(consumer), `${consumer} must be in the ranked local set`);
+    // Replay: every direct consumer is in the ranked local set or the named deferred set,
+    // and the budget cut (if any) names the tier it trimmed.
+    const direct = plan.tiers.find(item => item.tier === 'direct').tests;
+    const fit = fitPreflightBudget({
+      tiers: plan.tiers,
+      budgetSeconds: 180,
+      secondsPerFile: 4,
+    });
+    const cut = fit.trimmed.flatMap(item => item.deferred);
+    for (const test of direct)
+      assert.ok(
+        fit.tests.includes(test) || cut.includes(test),
+        `${name}: ${test} neither local nor scheduled`,
+      );
     t.diagnostic(
-      `${name}: ${plan.tests.length + plan.deferredTests.length} complete -> ${plan.tests.length} local + ${plan.deferredTests.length} deferred`,
+      `${name}: ${plan.tests.length + plan.deferredTests.length} complete -> ${fit.tests.length} local + ${cut.length + plan.deferredTests.length} pre-queue (${direct.length} direct; trimmed: ${fit.trimmed.map(item => `${item.tier} ${item.kept}/${item.total}`).join(', ') || 'none'})`,
     );
   }
 });

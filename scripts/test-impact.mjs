@@ -56,36 +56,92 @@ export function selectImpactPair(files, comparisons) {
   return comparisons.map(paths =>
     paths.length
       ? selectWithGraph({ paths, files }, graph)
-      : { scope: 'docs', reason: 'No paths in this inventory', tests: [], affectedTests: [] },
+      : {
+          scope: 'docs',
+          reason: 'No paths in this inventory',
+          tests: [],
+          affectedTests: [],
+        },
   );
 }
 /** Local execution is a partition of complete landing coverage, never an independence proof.
- * Distance bounds work by the changed module's neighbourhood rather than suite size.
- * Uncertain and distant consumers remain explicit landing-runner work. */
+ * Tiers, nearest first: mandatory (changed tests, explicit coverage, smoke), direct consumers
+ * (one import edge), distance-2 consumers. Nothing here counts files: the whole neighbourhood is
+ * returned, and `fitPreflightBudget` trims it by time. Uncertain and distant consumers
+ * (dynamic, domain, three or more edges) stay explicit pre-queue/landing work. */
+export const preflightTierRule =
+  'changed tests, explicit coverage and smoke; then direct consumers; then distance-2 consumers, nearest first';
 export function selectPreflightTests(input) {
   const selection = selectTests(input);
-  if (selection.scope === 'docs') return { ...selection, deferredTests: [] };
+  if (selection.scope === 'docs') return { ...selection, deferredTests: [], tiers: [] };
   const consumers =
     selection.scope === 'full' ? selectWithGraph({ ...input, consumersOnly: true }) : selection;
   const changed = new Set(input.paths);
-  const mandatory = test =>
-    changed.has(test) || smokeTests.includes(test) || consumers.reasons?.[test]?.kind === 'explicit';
-  const selected = new Set(selection.tests.filter(mandatory));
+  const kind = test => consumers.reasons?.[test]?.kind;
   const distance = test => consumers.reasons?.[test]?.edges?.length ?? Infinity;
-  const nearby = selection.tests
-    .filter(
-      test => !selected.has(test) && consumers.reasons?.[test]?.kind === 'dependency' && distance(test) <= 2,
-    )
-    .sort((a, b) => distance(a) - distance(b) || (a < b ? -1 : a > b ? 1 : 0));
-  // A shared hub can have hundreds of real direct consumers. Keep their complete
-  // coverage on the runner; the local budget ranks by distance, never proves absence.
-  // Mandatory changed/explicit/smoke tests are never capped.
-  for (const test of nearby.slice(0, Math.max(0, 25 - selected.size))) selected.add(test);
+  const tierOf = test =>
+    changed.has(test) || smokeTests.includes(test) || kind(test) === 'explicit'
+      ? 'mandatory'
+      : kind(test) === 'dependency' && distance(test) === 1
+        ? 'direct'
+        : kind(test) === 'dependency' && distance(test) === 2
+          ? 'near'
+          : null;
+  const tiers = ['mandatory', 'direct', 'near'].map(tier => ({
+    tier,
+    tests: selection.tests.filter(test => tierOf(test) === tier),
+  }));
+  const local = new Set(tiers.flatMap(item => item.tests));
   return {
     ...selection,
-    tests: selection.tests.filter(test => selected.has(test)),
-    deferredTests: selection.tests.filter(test => !selected.has(test)),
-    reason: `${selection.reason}; local: changed tests, explicit coverage and smoke, then nearest certain consumers within two edges (25-file budget); remaining consumers run on the landing runner`,
+    tests: tiers.flatMap(item => item.tests),
+    tiers,
+    deferredTests: selection.tests.filter(test => !local.has(test)),
+    reason: `${selection.reason}; local: ${preflightTierRule}; the rest runs in the pre-queue check`,
+  };
+}
+
+/** Time-budget trim of ranked tiers. Mandatory tests always run. Each later tier keeps a prefix
+ * that fits; once a tier is cut, every farther tier is deferred whole, so a distance-2 test never
+ * runs while a direct consumer waits. `free` tests (already passed for this source) cost nothing.
+ * Returns what was cut and why; a cut is never silent. */
+export function fitPreflightBudget({ tiers, budgetSeconds, secondsPerFile, free = new Set() }) {
+  const cost = tests => tests.filter(test => !free.has(test)).length * secondsPerFile;
+  const kept = [];
+  const trimmed = [];
+  let used = 0;
+  let cut = false;
+  for (const { tier, tests } of tiers) {
+    if (tier === 'mandatory') {
+      kept.push(...tests);
+      used += cost(tests);
+      continue;
+    }
+    const deferred = [];
+    for (const test of tests) {
+      if (free.has(test)) kept.push(test);
+      else if (!cut && used + secondsPerFile <= budgetSeconds) {
+        kept.push(test);
+        used += secondsPerFile;
+      } else {
+        cut = true;
+        deferred.push(test);
+      }
+    }
+    if (deferred.length)
+      trimmed.push({
+        tier,
+        kept: tests.length - deferred.length,
+        total: tests.length,
+        deferred,
+      });
+  }
+  const mandatory = tiers.find(item => item.tier === 'mandatory')?.tests ?? [];
+  return {
+    tests: kept,
+    trimmed,
+    estimateSeconds: Math.ceil(used),
+    mandatoryOverBudget: cost(mandatory) > budgetSeconds,
   };
 }
 
@@ -106,7 +162,11 @@ function selectWithGraph({ paths, files, forceFull = false, consumersOnly = fals
     if (documentation(path)) continue;
     const classification = classifyCheckPath(path, files);
     if (!classification) return full(`Unclassified or deleted path: ${path}`);
-    classifications.push({ path, ...classification, seeds: classification.seeds.sort() });
+    classifications.push({
+      path,
+      ...classification,
+      seeds: classification.seeds.sort(),
+    });
   }
   const scriptsChanged = classifications.filter(item => scriptPath(item.path) && files.has(item.path));
   const graph = suppliedGraph ?? testImportGraph(files, scriptsChanged);
@@ -227,8 +287,15 @@ function selectWithGraph({ paths, files, forceFull = false, consumersOnly = fals
           test,
           affected.get(test) ??
             (item
-              ? { kind: 'explicit', changedPath: item.path, detail: item.reason }
-              : { kind: 'domain', detail: 'Web change: UI regression coverage' }),
+              ? {
+                  kind: 'explicit',
+                  changedPath: item.path,
+                  detail: item.reason,
+                }
+              : {
+                  kind: 'domain',
+                  detail: 'Web change: UI regression coverage',
+                }),
         ];
       }),
     ),
@@ -342,7 +409,10 @@ function baseStandardSelection({
     recovery.tests.every(test => /^tests\/[A-Za-z0-9_.-]+\.test\.mjs$/.test(test) && files.has(test))
   ) {
     for (const test of recovery.tests)
-      selection.reasons[test] ??= { kind: 'recovery', detail: 'Failed audit shard' };
+      selection.reasons[test] ??= {
+        kind: 'recovery',
+        detail: 'Failed audit shard',
+      };
     selection.tests = [...new Set([...selection.tests, ...recovery.tests])].sort();
     selection.reason += '; failed audit shards plus newly affected tests';
   }
@@ -389,14 +459,25 @@ export function validInteraction(value, comparison) {
 }
 export function interactionSelection({ paths, files, mainCheck, interaction, env = process.env }) {
   const full = reason =>
-    explainAll({ scope: 'full', reason, tests: selectTests({ files, forceFull: true }).tests });
+    explainAll({
+      scope: 'full',
+      reason,
+      tests: selectTests({ files, forceFull: true }).tests,
+    });
   if (mainCheck) return full(`Pinned main audit View for ${mainCheck.channel}`);
   if (env.FORGE_CHECK_FULL === '1') return full('FORGE_CHECK_FULL=1');
   if (env.FORGE_CHECK_SCOPED !== '1') return full('Scoped mode is OFF for interaction retry');
   if (!validInteraction(interaction)) return full('Missing or malformed interaction pins');
   if (!interaction.eligible) {
-    const selection = standardSelection({ paths, files, env: { ...env, FORGE_CHECK_INTERACTION: '0' } });
-    return { ...selection, reason: `Interaction ineligible: ${interaction.reason}; ${selection.reason}` };
+    const selection = standardSelection({
+      paths,
+      files,
+      env: { ...env, FORGE_CHECK_INTERACTION: '0' },
+    });
+    return {
+      ...selection,
+      reason: `Interaction ineligible: ${interaction.reason}; ${selection.reason}`,
+    };
   }
   const left = selectTests({ files, paths: interaction.lanePaths });
   const right = selectTests({ files, paths: interaction.mainPaths });
