@@ -18,6 +18,7 @@ export function errorEvidence(error) {
     ...(error.head ? { head: error.head } : {}),
     ...(error.provider ? { provider: error.provider } : {}),
     ...(error.workFailure ? { workFailure: error.workFailure } : {}),
+    ...(error.pageFailure ? { pageFailure: error.pageFailure, page: error.page ?? null } : {}),
   };
 }
 /** Name-only present flags; null when the proof itself failed. */

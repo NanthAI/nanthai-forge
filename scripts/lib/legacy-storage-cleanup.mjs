@@ -5,6 +5,7 @@ import { auditPage } from './legacy-storage-query.mjs';
 import { catalogDigest } from './legacy-storage-closure.mjs';
 import { storageClass, digestHex } from './legacy-storage-verify.mjs';
 import { headPins, MAX_SKIPPED_PAGES } from './legacy-storage-heads.mjs';
+import { errorEvidence } from './legacy-storage-window.mjs';
 export const sha = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 /** Class 4 (no R2 copy) is deleted only from an explicit owner-approved,
  * audit-pinned manifest, and only when current coverage finds no reference. */
@@ -184,7 +185,8 @@ export async function frozenScan(reader, operationId, directory, idLengths, prog
  * on failure. The first failure prevents additional page dispatch. */
 export async function boundedPages(pages, apply, concurrency = 4) {
   let next = 0,
-    failed = false;
+    failed = false,
+    first = null;
   const results = [];
   const settled = await Promise.allSettled(
     Array.from({ length: concurrency }, async () => {
@@ -195,12 +197,18 @@ export async function boundedPages(pages, apply, concurrency = 4) {
           results[index] = await apply(pages[index], index);
         } catch (e) {
           failed = true;
+          first ??= { page: index, error: e };
           throw e;
         }
       }
     }),
   );
-  if (settled.some(s => s.status === 'rejected')) throw new Error('CLEANUP_PAGE_FAILED');
+  // Keep the first page's own code (e.g. CLEANUP_EXCLUSION_LIMIT) in window.json evidence.
+  if (settled.some(s => s.status === 'rejected'))
+    throw Object.assign(new Error('CLEANUP_PAGE_FAILED'), {
+      pageFailure: errorEvidence(first?.error),
+      page: first?.page,
+    });
   return results;
 }
 
@@ -312,7 +320,10 @@ function pageClasses(pins) {
 /** Each 100-file page is HEAD-rechecked with page-scoped bounded retry. An
  * exhausted page is skipped and reported (no mutation); other approved pages
  * continue within the original window, deadline and page bounds. More than
- * maxSkippedPages skipped pages stop further dispatch. */
+ * maxSkippedPages skipped pages stop further dispatch. A file the backend
+ * refuses is kept, reported in excluded-page-N.json, and dispatch continues;
+ * more than maxExcludedFiles refusals (one page) stop it, since that many
+ * means the dry run no longer describes the deployment. */
 export async function applyFilePages({
   pages,
   heads,
@@ -322,8 +333,11 @@ export async function applyFilePages({
   backup,
   retry = {},
   maxSkippedPages = MAX_SKIPPED_PAGES,
+  maxExcludedFiles = MAX_EXCLUDED_FILES,
 }) {
-  const skipped = [];
+  const skipped = [],
+    refused = [];
+  let refusedFiles = 0;
   let current = backup;
   const results = await boundedPages(pages, async (pins, index) => {
     const headed = pins.some(p => p.keys.length)
@@ -376,10 +390,37 @@ export async function applyFilePages({
       bytes: result.bytes,
       excluded: result.excluded.length,
     });
-    if (result.excluded.length) throw new Error('CLEANUP_FILE_EXCLUDED');
+    if (result.excluded.length) {
+      // A refused file keeps its bytes; report it and let the other approved pages continue.
+      const report = { page: index, excluded: result.excluded, reportedAt: new Date().toISOString() };
+      await privateJson(`${out}/excluded-page-${index}.json`, report);
+      refused.push(report);
+      refusedFiles += result.excluded.length;
+      io.progress?.({ phase: 'delete-page-excluded', page: index, files: result.excluded.length });
+      if (refusedFiles > maxExcludedFiles) throw new Error('CLEANUP_EXCLUSION_LIMIT');
+    }
     return result;
   });
-  return { results, skipped };
+  return { results, skipped, excluded: refused };
+}
+export const MAX_EXCLUDED_FILES = 100;
+/** Dry run only: the backend's own per-file delete guard (planPage), read-only,
+ * one query per 100-pin page. Its exclusions join the plan exactly as apply
+ * would see them, so the plan and the delete cannot disagree. */
+export async function guardPlan(plan, io, progress = () => {}) {
+  const excluded = [];
+  let calls = 0;
+  for (let offset = 0; offset < plan.pins.length; offset += 100) {
+    // Every pin here passed its HEAD recheck in this dry run.
+    const at = new Date().toISOString();
+    const pins = plan.pins.slice(offset, offset + 100).map(p => ({ ...p, recheckedAt: at }));
+    const byId = new Map(pins.map(p => [p.storageId, p]));
+    calls++;
+    for (const row of await io.call('projectLegacyStorageCleanup:planPage', { pins }))
+      excluded.push({ storageId: row.storageId, class: byId.get(row.storageId).class, code: row.code });
+  }
+  progress({ phase: 'dry-run-guards', checked: plan.pins.length, excluded: excluded.length, calls });
+  return { complete: true, checked: plan.pins.length, calls, excluded };
 }
 export function excludeHeadFailures(plan, failures) {
   const failed = new Map(failures.map(r => [r.storageId, r]));

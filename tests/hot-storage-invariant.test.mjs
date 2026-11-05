@@ -30,6 +30,11 @@ const storageAllowlist = {
     'Approved source cursor migration pins for Issue 40dad5e0.',
     '2027-01-31',
   ],
+  'projectLegacyStorageRepair.ts field': [
+    1,
+    'Backfill-time repair pins a legacy storageId to its R2 copy for Issue 1323a44c; moves no bytes.',
+    '2027-01-31',
+  ],
   'blobStore.ts handle': [
     1,
     'Blob reader: legacy ids read Convex storage; every write goes to R2.',

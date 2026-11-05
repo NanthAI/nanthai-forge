@@ -238,6 +238,12 @@ missing object or a size/checksum mismatch is never retried. An exhausted page
 sends no mutation; it is written to a private `skipped-page-N.json` with each
 failure's code, status class, HTTP status and timeout/network code, and the
 other approved pages continue. More than five skipped pages stop further dispatch.
+A file the delete mutation refuses (for example `OWNER_CHANGED`) keeps its bytes.
+It is written to a private `excluded-page-N.json`, and the other approved pages
+continue. More than 100 refused files (one page) stop further dispatch with
+`CLEANUP_EXCLUSION_LIMIT`, because then the dry run no longer describes the
+deployment. `window.json` keeps the first page failure's own code under
+`workFailure.pageFailure`.
 The 26-minute deadline, page size and four-page bound are unchanged. Deletion retains the six existing indexed reference probes, qualifies every
 joint object/backup owner against current R2 pins, and rejects other references.
 No derived-file deletion cascade runs. The existing purge functions and their
@@ -255,10 +261,31 @@ backup run is rechecked successful immediately before the deletion stage.
 nforge heavy node scripts/legacy-storage-closure.mjs --deployment dev:NAME --audit /private/audit.json --out /private/body-coverage.json
 # Separately approved deleted-project row preparation:
 nforge heavy node scripts/legacy-storage-bench.mjs --deployment dev:NAME --audit /private/audit.json --candidate /private/deleted-project-candidate.json --scan /private/body-coverage.json.scan/scan.json --body-coverage /private/body-coverage.json --out /private/bench-manifest.json
-# Records exact scope, protected nested references, HEAD exclusions and coverage status:
+# Records exact scope, protected nested references, HEAD and delete-guard exclusions and coverage status:
 nforge heavy node scripts/legacy-storage-cleanup.mjs dry-run --deployment dev:NAME --audit /private/audit.json --verification /private/verification.json --body-coverage /private/body-coverage.json --bench-manifest /private/bench-manifest.json --out /private/cleanup
 # Only after the lead separately says go for the quiet window:
 nforge heavy node scripts/legacy-storage-cleanup.mjs apply --deployment dev:NAME --audit /private/audit.json --verification /private/verification.json --body-coverage /private/body-coverage.json --bench-manifest /private/bench-manifest.json --out /private/cleanup --operation-id UUID --lead-go 'Exact lead go and quiet-window reference'
+```
+
+The dry run also runs the backend's own per-file delete guard on live rows
+(`projectLegacyStorageCleanup:planPage`, read-only, one query per 100 files). It
+is the same code `deletePage` runs inside the pause: file digest and size, digest
+age, R2 key shape, the six indexed reference probes and every owner row's R2
+fields. Only the pause, scan, backup and recheck times stand in for the pause
+start. Its exclusions are recorded under `guards` and are never sent at apply, so
+the plan and the delete agree. A dry run without `guards` cannot qualify apply.
+
+An owner row inserted already committed to R2 never got `r2BackfilledAt`, and the
+guard reports it as `OWNER_BACKFILL_UNSET`. Repair it with a bounded, owner-scoped
+tool, then make a fresh verification and dry run (the backfill time must not be
+later than the verification). `plan` writes nothing. `apply` re-hashes each full
+R2 copy against the row digest first and patches only rows that match, at most
+100 `projectObjects` rows of one project owned by `--actor`. It is an ordinary
+write, so a cleanup pause refuses it.
+
+```sh
+node scripts/legacy-storage-backfill-repair.mjs plan --deployment dev:NAME --dry-run /private/remaining/dry-run.json --project PROJECT_ID --actor OWNER_SUBJECT --out /private/repair-plan.json
+node scripts/legacy-storage-backfill-repair.mjs apply --deployment dev:NAME --dry-run /private/remaining/dry-run.json --project PROJECT_ID --actor OWNER_SUBJECT --out /private/repair-apply.json --operation-id UUID
 ```
 
 The closure command pages all application tables in four streams, with at most

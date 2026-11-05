@@ -742,7 +742,7 @@ test('complete synthetic dry-run / pause / full scan / delete / resume deletes c
     assert.equal(result.summary.classes[3].deleted, 1);
     assert.equal(result.summary.classes[3].excluded, 0);
     assert.equal(result.summary.changedRows, 2);
-    assert.equal(rpc, 3);
+    assert.equal(rpc, 4); // dry-run planPage, status twice, one deletePage
     assert.equal(await io.flagsAbsent(), true);
     const original = JSON.parse(await readFile(join(dir, 'run', 'request-0.json')));
     assert.equal((await backend.deletePage._handler(s.ctx, original)).deleted, 2);
@@ -780,10 +780,40 @@ test('remaining-only run from fresh inputs skips bench/migration stages, deletes
       ['orphan', 7, hash],
       ['approved4', 9, 'b'.repeat(64)],
       ['kept4', 11, 'c'.repeat(64)],
+      ['live1', 7, hash],
     ];
     for (const [id, size, sha256] of storage) s.files.set(id, { _id: id, size, sha256 });
+    // A live R2-native class 1 owner without r2BackfilledAt: deletePage refuses it, so the dry run must too.
+    s.tables.projectObjects.set('obj1', {
+      _id: 'obj1',
+      projectId: 'project',
+      storageId: 'live1',
+      digest: hash,
+      size: 7,
+      location: 'r2',
+      r2Committed: true,
+      r2Key: key,
+    });
+    const liveRef = {
+      storageId: 'live1',
+      table: 'projectObjects',
+      field: 'storageId',
+      document: 'obj1',
+      digest: hash,
+      size: 7,
+      key,
+      location: 'r2',
+      committed: true,
+    };
     const files = [
       { storageId: 'orphan', bytes: 7, sha256: hash, references: [], matchingCopies: [{ key, size: 7 }] },
+      {
+        storageId: 'live1',
+        bytes: 7,
+        sha256: hash,
+        references: [liveRef],
+        matchingCopies: [{ key, size: 7 }],
+      },
       { storageId: 'approved4', bytes: 9, sha256: 'b'.repeat(64), references: [], matchingCopies: [] },
       { storageId: 'kept4', bytes: 11, sha256: 'c'.repeat(64), references: [], matchingCopies: [] },
     ];
@@ -800,6 +830,14 @@ test('remaining-only run from fresh inputs skips bench/migration stages, deletes
         results: [
           {
             storageId: 'orphan',
+            bytes: 7,
+            sha256: hash,
+            keys: [key],
+            verifiedAt: new Date().toISOString(),
+            fullDigest: true,
+          },
+          {
+            storageId: 'live1',
             bytes: 7,
             sha256: hash,
             keys: [key],
@@ -904,22 +942,39 @@ test('remaining-only run from fresh inputs skips bench/migration stages, deletes
     assert.equal(dry.remainingOnly, true);
     assert.equal(dry.counts[4].eligible, 1);
     assert.equal(dry.counts[3].eligible, 1);
+    // The dry run ran the backend's own delete guard and found the refusal deletePage would make.
+    assert.equal(dry.guards.complete, true);
+    assert.equal(dry.guards.calls, 1);
+    assert.deepEqual(dry.guards.excluded, [{ storageId: 'live1', class: 1, code: 'OWNER_BACKFILL_UNSET' }]);
+    assert.deepEqual(dry.counts[1], { files: 1, bytes: 7, eligible: 0, excluded: 1 });
     // A dry run without remaining-only cannot qualify a remaining-only apply.
     await assert.rejects(
       cleanup({ ...command, mode: 'apply', remainingOnly: false, class4Approval: null }, io),
       /CLEANUP_DRY_RUN_REQUIRED/,
     );
+    // A dry run written before the backend guard existed cannot qualify an apply.
+    const dryPath = join(dir, 'run', 'dry-run.json'),
+      dryRaw = await readFile(dryPath, 'utf8');
+    await writeFile(dryPath, JSON.stringify({ ...JSON.parse(dryRaw), guards: undefined }));
+    await assert.rejects(cleanup({ ...command, mode: 'apply' }, io), /CLEANUP_DRY_RUN_REQUIRED/);
+    await writeFile(dryPath, dryRaw);
     const result = await cleanup({ ...command, mode: 'apply' }, io);
     assert.deepEqual(rpcs, [
+      'projectLegacyStorageCleanup:planPage',
       'projectLegacyStorageCleanup:status',
       'projectLegacyStorageCleanup:status',
       'projectLegacyStorageCleanup:deletePage',
     ]);
+    // Plan and delete agree: the refused file is never sent, so no page is refused at delete time.
+    assert.deepEqual(result.excludedPages, []);
+    assert.equal(result.summary.classes[1].deleted, 0);
+    assert.equal(result.summary.classes[1].excluded, 1);
     assert.equal(result.summary.classes[3].deleted, 1);
     assert.equal(result.summary.classes[4].deleted, 1);
     assert.equal(result.summary.classes[4].bytesFreed, 9);
     assert.deepEqual(result.skippedPages, []);
-    assert.deepEqual([...s.files.keys()], ['kept4']);
+    assert.deepEqual([...s.files.keys()].sort(), ['kept4', 'live1']);
+    assert.equal(s.tables.projectObjects.get('obj1').r2ConvexPurged, undefined);
     assert.equal(result.after.retainedClass4Verified, 1);
     assert.equal(await io.flagsAbsent(), true);
     const receipt = JSON.parse(await readFile(join(dir, 'run', 'window.json')));
@@ -929,6 +984,10 @@ test('remaining-only run from fresh inputs skips bench/migration stages, deletes
     const request = JSON.parse(await readFile(join(dir, 'run', 'request-0.json')));
     assert.ok(request.class4Sha256);
     assert.ok(request.pins.some(p => p.class === 4 && p.keys.length === 0 && p.owners.length === 0));
+    assert.equal(
+      request.pins.some(p => p.storageId === 'live1'),
+      false,
+    );
   } finally {
     globalThis.fetch = fetcher;
     for (const k of ['CONVEX_CLOUD_URL', 'FORGE_LEGACY_STORAGE_PAUSE', 'FORGE_R2_MAINTENANCE']) {
@@ -1398,5 +1457,297 @@ test('a maximum file page keeps all six indexed guards within the read budget; o
       if (v === undefined) delete process.env[k];
       else process.env[k] = v;
     }
+  }
+});
+function restoreEnv(before) {
+  for (const k of ['CONVEX_CLOUD_URL', 'FORGE_LEGACY_STORAGE_PAUSE', 'FORGE_R2_MAINTENANCE']) {
+    if (before[k] === undefined) delete process.env[k];
+    else process.env[k] = before[k];
+  }
+}
+test('dry-run planPage and deletePage share one per-file guard, including an unset backfill time', async () => {
+  const before = { ...process.env };
+  try {
+    enable();
+    process.env.FORGE_R2_MAINTENANCE = '1';
+    const object = s => s.tables.projectObjects.get('object');
+    for (const [name, change, code] of [
+      ['ok', () => {}, null],
+      ['unset', s => delete object(s).r2BackfilledAt, 'OWNER_BACKFILL_UNSET'],
+      [
+        'unset and changed',
+        s => {
+          delete object(s).r2BackfilledAt;
+          s.tables.projectBackups.get('backup').r2Committed = false;
+        },
+        'OWNER_CHANGED',
+      ],
+      [
+        'backfilled after verification',
+        s => (object(s).r2BackfilledAt = Date.now() + 60_000),
+        'OWNER_CHANGED',
+      ],
+      ['purged', s => (object(s).r2ConvexPurged = true), 'OWNER_CHANGED'],
+      [
+        'foreign reference',
+        s => s.tables.imports.set('foreign', { _id: 'foreign', artifactKey: 'file' }),
+        'REFERENCE_CHANGED',
+      ],
+      ['file changed', s => (s.files.get('file').sha256 = 'f'.repeat(64)), 'FILE_CHANGED'],
+      [
+        'stale verification',
+        s => {
+          s.args.pins[0].verifiedAt = new Date(Date.now() - 90000_000).toISOString();
+          object(s).r2BackfilledAt = Date.now() - 100000_000;
+          s.tables.projectBackups.get('backup').r2BackfilledAt = Date.now() - 100000_000;
+        },
+        'FULL_DIGEST_REQUIRED',
+      ],
+    ]) {
+      const s = backendFixture();
+      change(s);
+      const planned = await backend.planPage._handler(s.ctx, { pins: s.args.pins });
+      const deleted = await backend.deletePage._handler(s.ctx, { ...s.args, part: name });
+      assert.deepEqual(planned, code ? [{ storageId: 'file', code }] : [], name);
+      assert.deepEqual(deleted.excluded, planned, name);
+      assert.equal(s.deletes(), code ? 0 : 1, name);
+    }
+    // planPage is read-only and bounded like a page.
+    const s = backendFixture();
+    const pins = Array.from({ length: 101 }, (_, i) => ({ ...s.args.pins[0], storageId: 'f' + i }));
+    await assert.rejects(backend.planPage._handler(s.ctx, { pins }), e => e.code === 'BAD_ARGUMENT');
+    const source = readFileSync(new URL('../convex/projectLegacyStorageCleanup.ts', import.meta.url), 'utf8');
+    assert.match(source, /export const planPage = internalQuery\(/);
+    assert.equal((source.match(/await pinExclusion\(ctx, pin,/g) ?? []).length, 2);
+  } finally {
+    restoreEnv(before);
+  }
+});
+test('a refused file is kept and reported while the remaining pages continue; more than one page of refusals stops', async () => {
+  const { applyFilePages } = await import('../scripts/lib/legacy-storage-cleanup.mjs');
+  const dir = await mkdtemp(join(tmpdir(), 'forge-refused-file-'));
+  try {
+    const pages = Array.from({ length: 8 }, (_, i) => [
+      { storageId: 'f' + i, class: 4, size: 1, keys: [] },
+      { storageId: 'g' + i, class: 4, size: 1, keys: [] },
+    ]);
+    const events = [];
+    const run = (refuse, maxExcludedFiles) => {
+      const parts = [];
+      return applyFilePages({
+        pages,
+        heads: {},
+        out: dir,
+        maxExcludedFiles,
+        backup: { checkedAt: new Date().toISOString() },
+        request: index => ({ part: 'delete-' + index }),
+        io: {
+          progress: e => events.push(e),
+          backup: async () => ({ checkedAt: new Date().toISOString() }),
+          call: async (_, args) => {
+            parts.push(args.part);
+            const excluded = args.pins
+              .filter(refuse)
+              .map(p => ({ storageId: p.storageId, code: 'OWNER_CHANGED' }));
+            return { deleted: 2 - excluded.length, bytes: 2 - excluded.length, changedRows: 0, excluded };
+          },
+        },
+      }).then(result => ({ ...result, parts }));
+    };
+    const one = await run(p => p.storageId === 'f2');
+    assert.equal(one.parts.length, 8);
+    assert.equal(one.results.length, 8);
+    assert.deepEqual(
+      one.excluded.map(r => r.page),
+      [2],
+    );
+    const report = JSON.parse(await readFile(join(dir, 'excluded-page-2.json')));
+    assert.deepEqual(report.excluded, [{ storageId: 'f2', code: 'OWNER_CHANGED' }]);
+    assert.ok(events.some(e => e.phase === 'delete-page-excluded' && e.page === 2 && e.files === 1));
+    // Refusing every file: the limit stops dispatch and keeps its own code for window.json.
+    const error = await run(() => true, 3).catch(e => e);
+    assert.equal(error.message, 'CLEANUP_PAGE_FAILED');
+    assert.equal(error.pageFailure.code, 'CLEANUP_EXCLUSION_LIMIT');
+    const { errorEvidence } = await import('../scripts/lib/legacy-storage-window.mjs');
+    assert.equal(errorEvidence(error).pageFailure.code, 'CLEANUP_EXCLUSION_LIMIT');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+const repair = await import(moduleUrl('../convex/projectLegacyStorageRepair.ts'));
+function repairFixture() {
+  const s = backendFixture();
+  s.tables.hostedProjects.set('project', { _id: 'project', owner: 'owner-1', name: 'p', key: 'p' });
+  s.tables.projectBackups.delete('backup');
+  const object = s.tables.projectObjects.get('object');
+  object._creationTime = Date.now() - 60_000;
+  delete object.r2BackfilledAt;
+  const row = {
+    id: 'object',
+    storageId: 'file',
+    digest: object.digest,
+    size: 7,
+    r2VerifiedAt: new Date().toISOString(),
+  };
+  return { ...s, object, scope: { projectId: 'project', actor: 'owner-1', rows: [row] } };
+}
+test('backfill repair is owner-scoped, bounded, needs a fresh R2 hash, has a dry run, and is idempotent', async () => {
+  const before = { ...process.env };
+  try {
+    delete process.env.FORGE_LEGACY_STORAGE_PAUSE;
+    const s = repairFixture();
+    assert.deepEqual(await repair.plan._handler(s.ctx, s.scope), [{ id: 'object', code: null }]);
+    assert.equal(s.object.r2BackfilledAt, undefined, 'plan writes nothing');
+    await assert.rejects(
+      repair.plan._handler(s.ctx, { ...s.scope, actor: 'someone-else' }),
+      e => e.code === 'PROJECT_UNAVAILABLE',
+    );
+    const many = Array.from({ length: 101 }, (_, i) => ({ ...s.scope.rows[0], id: 'o' + i }));
+    await assert.rejects(
+      repair.plan._handler(s.ctx, { ...s.scope, rows: many }),
+      e => e.code === 'BAD_ARGUMENT',
+    );
+    for (const [name, change, code] of [
+      ['other project', x => (x.object.projectId = 'other'), 'OUT_OF_SCOPE'],
+      ['not committed', x => (x.object.r2Committed = false), 'ROW_CHANGED'],
+      ['bad key', x => (x.object.r2Key = 'v1/p/other/o/' + x.object.digest), 'ROW_CHANGED'],
+      ['purged', x => (x.object.r2ConvexPurged = true), 'ROW_CHANGED'],
+      ['file changed', x => (x.files.get('file').size = 8), 'FILE_CHANGED'],
+      [
+        'stale R2 hash',
+        x => (x.scope.rows[0].r2VerifiedAt = new Date(Date.now() - 11 * 60_000).toISOString()),
+        'R2_VERIFY_REQUIRED',
+      ],
+      ['hash before row', x => (x.object._creationTime = Date.now() + 1000), 'R2_VERIFY_REQUIRED'],
+    ]) {
+      const x = repairFixture();
+      change(x);
+      assert.deepEqual(
+        await repair.apply._handler(x.ctx, { ...x.scope, operationId: 'op' }),
+        [{ id: 'object', code }],
+        name,
+      );
+      assert.equal(x.object.r2BackfilledAt, undefined, name);
+    }
+    const applied = await repair.apply._handler(s.ctx, { ...s.scope, operationId: 'op-1' });
+    assert.deepEqual(applied, [{ id: 'object', code: null }]);
+    assert.equal(s.object.r2BackfilledAt, Date.parse(s.scope.rows[0].r2VerifiedAt));
+    assert.equal(s.object.r2BackfillOperationId, 'op-1');
+    assert.deepEqual(await repair.apply._handler(s.ctx, { ...s.scope, operationId: 'op-2' }), [
+      { id: 'object', code: 'ALREADY_SET' },
+    ]);
+    assert.equal(s.object.r2BackfillOperationId, 'op-1');
+    // After the repair the cleanup guard accepts the row (fresh verification after the hash).
+    const pin = {
+      ...s.args.pins[0],
+      owners: [{ table: 'projectObjects', id: 'object' }],
+      verifiedAt: new Date(Date.now() + 1).toISOString(),
+    };
+    await new Promise(r => setTimeout(r, 2));
+    assert.deepEqual(await backend.planPage._handler(s.ctx, { pins: [pin] }), []);
+    // It is an ordinary write: a cleanup pause refuses it.
+    enable();
+    const p = repairFixture();
+    await assert.rejects(repair.apply._handler(p.ctx, { ...p.scope, operationId: 'op' }));
+    assert.equal(p.object.r2BackfilledAt, undefined);
+  } finally {
+    restoreEnv(before);
+  }
+});
+test('backfill repair CLI re-hashes every R2 copy before patching and writes nothing in plan mode', async () => {
+  const { repairBackfill, parseRepair } = await import('../scripts/legacy-storage-backfill-repair.mjs');
+  const { createHash } = await import('node:crypto');
+  const { writeFile } = await import('node:fs/promises');
+  const dir = await mkdtemp(join(tmpdir(), 'forge-backfill-repair-'));
+  const before = { ...process.env },
+    fetcher = globalThis.fetch;
+  try {
+    delete process.env.FORGE_LEGACY_STORAGE_PAUSE;
+    const body = Buffer.from('content'),
+      digest = createHash('sha256').update(body).digest('hex');
+    const s = repairFixture();
+    Object.assign(s.object, { digest, r2Key: 'v1/p/project/o/' + digest });
+    s.files.get('file').sha256 = digest;
+    await writeFile(
+      join(dir, 'dry-run.json'),
+      JSON.stringify({
+        dryRun: true,
+        guards: { complete: true, excluded: [{ storageId: 'file', class: 1, code: 'OWNER_BACKFILL_UNSET' }] },
+      }),
+    );
+    let served = body;
+    globalThis.fetch = async (_, init) => {
+      assert.equal(init.method, undefined, 'full GET, not HEAD');
+      return new Response(served);
+    };
+    const calls = [];
+    const io = {
+      reader: {
+        r2Config: async () => ({
+          R2_ACCOUNT_ID: 'x',
+          R2_BUCKET: 'b',
+          R2_ACCESS_KEY_ID: 'x',
+          R2_SECRET_ACCESS_KEY: 'x',
+        }),
+        page: async source =>
+          new (Object.getPrototypeOf(async function () {}).constructor)('ctx', source)(s.ctx),
+      },
+      call: async (name, args) => {
+        calls.push(name);
+        return repair[name.split(':')[1]]._handler(s.ctx, args);
+      },
+    };
+    const command = mode =>
+      parseRepair([
+        mode,
+        '--deployment',
+        'dev:fixture',
+        '--dry-run',
+        join(dir, 'dry-run.json'),
+        '--project',
+        'project',
+        '--actor',
+        'owner-1',
+        '--out',
+        join(dir, mode + '.json'),
+        ...(mode === 'apply' ? ['--operation-id', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'] : []),
+      ]);
+    assert.throws(
+      () =>
+        parseRepair([
+          'apply',
+          '--deployment',
+          'dev:x',
+          '--dry-run',
+          'd',
+          '--project',
+          'p',
+          '--actor',
+          'a',
+          '--out',
+          join(dir, 'x'),
+        ]),
+      /REPAIR_ARGUMENT_INVALID/,
+    );
+    const planned = await repairBackfill(command('plan'), io);
+    assert.deepEqual(planned.plan, [{ id: 'object', code: null }]);
+    assert.equal(s.object.r2BackfilledAt, undefined);
+    assert.deepEqual(calls, ['projectLegacyStorageRepair:plan']);
+    // A mismatching R2 copy is skipped and never patched.
+    served = Buffer.from('CONTENT');
+    const bad = await repairBackfill(command('apply'), io);
+    assert.deepEqual(bad.skipped, [{ storageId: 'file', code: 'VERIFY_DIGEST_MISMATCH' }]);
+    assert.equal(bad.applied, undefined);
+    assert.equal(s.object.r2BackfilledAt, undefined);
+    served = body;
+    const good = await repairBackfill(command('apply'), io);
+    assert.deepEqual(good.applied, [{ id: 'object', code: null }]);
+    assert.deepEqual(good.confirmed, [{ id: 'object', code: 'ALREADY_SET' }]);
+    assert.equal(good.metrics.r2Gets, 1);
+    assert.equal(typeof s.object.r2BackfilledAt, 'number');
+  } finally {
+    globalThis.fetch = fetcher;
+    restoreEnv(before);
+    await rm(dir, { recursive: true, force: true });
   }
 });

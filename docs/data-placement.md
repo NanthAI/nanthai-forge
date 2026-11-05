@@ -29,8 +29,9 @@ Every entry has an owner reason and expires on 2027-01-31; an expired entry fail
 | `convex/projectBootstrapStore.ts`, `convex/projectGithubImportBatch.ts`, `convex/projectGithubImportObjects.ts` | field | Legacy `storageId` receipts beside the R2 key; nothing new writes them. |
 
 The approved dev cleanup also uses legacy `_storage` pins in
-`convex/legacyStorageCleanupFields.ts` and `convex/projectLegacyStorageCleanup.ts` (field
-allowlist, expires 2027-01-31). It deletes only verified frozen-manifest files.
+`convex/legacyStorageCleanupFields.ts`, `convex/projectLegacyStorageCleanup.ts` and
+`convex/projectLegacyStorageRepair.ts` (field allowlist, expires 2027-01-31). It deletes
+only verified frozen-manifest files; the repair records a backfill time and moves no bytes.
 
 ## Convex tables
 

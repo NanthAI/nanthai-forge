@@ -2,8 +2,8 @@
 // The only pause-exempt mutations. Every write below requires the exact active
 // dev pause, pinned bodies, complete frozen reference coverage and retry identity.
 import { maintenanceInternalMutation as internalMutation, internalQuery } from './server';
-import { v } from 'convex/values';
-import type { MutationCtx } from './server';
+import { v, type Infer } from 'convex/values';
+import type { QueryCtx } from './server';
 import type { Id } from './_generated/dataModel';
 import { cleanupPin, cleanupResult } from './legacyStorageCleanupFields';
 import { requireCleanupWindow, activeStoragePause } from './legacyStoragePause';
@@ -42,7 +42,7 @@ const backup = v.object({
 });
 /** Keep every existing indexed guard, including the original archive alias path.
  * Frozen all-table coverage handles unindexed/nested source/task/Work references. */
-async function indexedReferences(ctx: MutationCtx, storageId: Id<'_storage'>) {
+async function indexedReferences(ctx: QueryCtx, storageId: Id<'_storage'>) {
   return (
     await Promise.all([
       ctx.db
@@ -71,6 +71,57 @@ async function indexedReferences(ctx: MutationCtx, storageId: Id<'_storage'>) {
         .take(3),
     ])
   ).flat();
+}
+type Pin = Infer<typeof cleanupPin>;
+/** The single per-file delete guard. deletePage evaluates it inside the pause;
+ * planPage evaluates the same code read-only in the dry run, so plan and delete
+ * cannot disagree on any data check. Last failing check wins (stable codes). */
+async function pinExclusion(ctx: QueryCtx, pin: Pin, recheckSince: number) {
+  const file = await ctx.db.system.get(pin.storageId);
+  // No absent-file success without an original committed page receipt.
+  let code: string | null = !file
+    ? 'FILE_ABSENT'
+    : file.size !== pin.size || storageDigest(file.sha256) !== pin.digest
+      ? 'FILE_CHANGED'
+      : null;
+  // Class 4 has no R2 copy to recheck; its approved manifest pins Convex metadata only.
+  if (
+    !recent(pin.verifiedAt, 0, 86400_000) ||
+    (pin.class !== 4 &&
+      (!pin.keys.length || pin.keys.some(k => !k.startsWith('v1/') || k.split('/').at(-1) !== pin.digest)))
+  )
+    code = 'FULL_DIGEST_REQUIRED';
+  if (pin.class !== 1 && pin.owners.length) code = 'REFERENCE_REMAINS';
+  if (!recent(pin.recheckedAt, recheckSince, 5 * 60_000)) code = 'R2_HEAD_REQUIRED';
+  const refs = await indexedReferences(ctx, pin.storageId);
+  if (refs.length !== pin.owners.length || refs.some(r => !pin.owners.some(o => o.id === r._id)))
+    code = 'REFERENCE_CHANGED';
+  const owners = [];
+  let unset = false;
+  for (const owner of pin.owners) {
+    const id = ctx.db.normalizeId(owner.table, owner.id),
+      row = id ? await ctx.db.get(id) : null;
+    if (
+      !row ||
+      row.storageId !== pin.storageId ||
+      row.digest !== pin.digest ||
+      row.size !== pin.size ||
+      row.location !== 'r2' ||
+      !row.r2Committed ||
+      row.r2ConvexPurged ||
+      !pin.keys.includes(row.r2Key ?? '') ||
+      row.r2Key !== `v1/p/${row.projectId}/o/${pin.digest}`
+    )
+      code = 'OWNER_CHANGED';
+    else if (row.r2BackfilledAt === undefined) unset = true;
+    else if (row.r2BackfilledAt > Date.parse(pin.verifiedAt)) code = 'OWNER_CHANGED';
+    if (row) owners.push(row);
+  }
+  // R2-native rows (inserted already committed) never got a backfill time. Report
+  // it apart only when nothing else fails, so the bounded owner-scoped repair
+  // (projectLegacyStorageRepair) can record it after a fresh R2 digest check.
+  if (unset) code ??= 'OWNER_BACKFILL_UNSET';
+  return { code, owners };
 }
 export const deletePage = internalMutation({
   args: {
@@ -137,46 +188,7 @@ export const deletePage = internalMutation({
       excluded: [] as { storageId: string; code: string }[],
     };
     for (const pin of args.pins) {
-      const file = await ctx.db.system.get(pin.storageId);
-      // No absent-file success without an original committed page receipt.
-      let code = !file
-        ? 'FILE_ABSENT'
-        : file.size !== pin.size || storageDigest(file.sha256) !== pin.digest
-          ? 'FILE_CHANGED'
-          : null;
-      // Class 4 has no R2 copy to recheck; its approved manifest pins Convex metadata only.
-      if (
-        !recent(pin.verifiedAt, 0, 86400_000) ||
-        (pin.class !== 4 &&
-          (!pin.keys.length ||
-            pin.keys.some(k => !k.startsWith('v1/') || k.split('/').at(-1) !== pin.digest)))
-      )
-        code = 'FULL_DIGEST_REQUIRED';
-      if (pin.class !== 1 && pin.owners.length) code = 'REFERENCE_REMAINS';
-      if (!recent(pin.recheckedAt, pause.startedAt, 5 * 60_000)) code = 'R2_HEAD_REQUIRED';
-      const refs = await indexedReferences(ctx, pin.storageId);
-      if (refs.length !== pin.owners.length || refs.some(r => !pin.owners.some(o => o.id === r._id)))
-        code = 'REFERENCE_CHANGED';
-      const owners = [];
-      for (const owner of pin.owners) {
-        const id = ctx.db.normalizeId(owner.table, owner.id),
-          row = id ? await ctx.db.get(id) : null;
-        if (
-          !row ||
-          row.storageId !== pin.storageId ||
-          row.digest !== pin.digest ||
-          row.size !== pin.size ||
-          row.location !== 'r2' ||
-          !row.r2Committed ||
-          row.r2ConvexPurged ||
-          !pin.keys.includes(row.r2Key ?? '') ||
-          row.r2Key !== `v1/p/${row.projectId}/o/${pin.digest}` ||
-          row.r2BackfilledAt === undefined ||
-          row.r2BackfilledAt > Date.parse(pin.verifiedAt)
-        )
-          code = 'OWNER_CHANGED';
-        if (row) owners.push(row);
-      }
+      const { code, owners } = await pinExclusion(ctx, pin, pause.startedAt);
       if (code) {
         result.excluded.push({ storageId: pin.storageId, code });
         continue;
@@ -192,6 +204,28 @@ export const deletePage = internalMutation({
     }
     await record(ctx, args.operationId, args.part, request, result);
     return result;
+  },
+});
+/** Read-only dry-run twin of deletePage: the same per-file guard on live rows,
+ * with the call time standing in for the pause start. No window, scan or backup
+ * checks (those exist only inside the pause). At most 100 pins, like a page. */
+export const planPage = internalQuery({
+  args: { pins: v.array(cleanupPin) },
+  returns: v.array(v.object({ storageId: v.string(), code: v.string() })),
+  handler: async (ctx, args) => {
+    invariant(
+      args.pins.length > 0 &&
+        args.pins.length <= 100 &&
+        new Set(args.pins.map(p => p.storageId)).size === args.pins.length,
+      'BAD_ARGUMENT',
+      'Use a unique bounded file page.',
+    );
+    const excluded = [];
+    for (const pin of args.pins) {
+      const { code } = await pinExclusion(ctx, pin, Date.now() - 5 * 60_000);
+      if (code) excluded.push({ storageId: pin.storageId, code });
+    }
+    return excluded;
   },
 });
 export const migrateCursors = internalMutation({

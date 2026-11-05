@@ -28,6 +28,7 @@ import {
   storageTotals,
   preflightHeads,
   excludeHeadFailures,
+  guardPlan,
 } from './lib/legacy-storage-cleanup.mjs';
 export async function cleanup(command, io = operatorIo(command)) {
   if (command.mode === 'resume-writes') {
@@ -95,6 +96,8 @@ export async function cleanup(command, io = operatorIo(command)) {
       command.headRetry,
     );
     excludeHeadFailures(planned, heads.excluded);
+    const guards = await guardPlan(planned, io, io.progress);
+    excludeHeadFailures(planned, guards.excluded);
     const result = {
       dryRun: true,
       remainingOnly: command.remainingOnly === true,
@@ -112,6 +115,7 @@ export async function cleanup(command, io = operatorIo(command)) {
       bodyCoverageFailures: bodyProof.failures.length,
       deleted: 0,
       heads,
+      guards,
       headMetrics,
       cursorsToMigrate: migrations,
       counts: planned.counts,
@@ -129,6 +133,7 @@ export async function cleanup(command, io = operatorIo(command)) {
     (dry.remainingOnly === true) !== (command.remainingOnly === true) ||
     (dry.class4ApprovalSha256 ?? null) !== (approval?.sha256 ?? null) ||
     (!dry.bodyCoverageComplete && !dry.benchRemoval) ||
+    dry.guards?.complete !== true ||
     dry.benchRemoval?.sha256 !== bench?.sha256 ||
     dry.bodyCoverageSha256 !== bodyProof.sha256
   )
@@ -180,7 +185,11 @@ export async function cleanup(command, io = operatorIo(command)) {
         io.progress,
       );
       await privateJson(command.out + '/covered-scan.json', scan);
-      const plan = excludeHeadFailures(deletionPlan(audit, verification, scan, approval), dry.heads.excluded),
+      // The dry run's HEAD and backend-guard exclusions stay excluded, so apply never sends them.
+      const plan = excludeHeadFailures(deletionPlan(audit, verification, scan, approval), [
+          ...dry.heads.excluded,
+          ...dry.guards.excluded,
+        ]),
         pages = [];
       for (let offset = 0; offset < plan.pins.length; offset += 100)
         pages.push(plan.pins.slice(offset, offset + 100));
@@ -195,7 +204,11 @@ export async function cleanup(command, io = operatorIo(command)) {
         sha256: scan.sha256,
         bodyCoverage: scan.bodyCoverage,
       };
-      const { results, skipped } = await applyFilePages({
+      const {
+        results,
+        skipped,
+        excluded: refused,
+      } = await applyFilePages({
         pages,
         heads,
         io,
@@ -215,6 +228,7 @@ export async function cleanup(command, io = operatorIo(command)) {
         benchDeletion,
         summary: deletionSummary(plan, pages, results),
         skippedPages: skipped,
+        excludedPages: refused,
         counts: plan.counts,
         excluded: plan.excluded,
         results,
@@ -249,6 +263,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
         dryRun: result.dryRun ?? false,
         summary: result.summary,
         skippedPages: result.skippedPages?.map(p => ({ page: p.page, files: p.files, attempts: p.attempts })),
+        excludedPages: result.excludedPages?.map(p => ({ page: p.page, files: p.excluded.length })),
+        guardExcluded: result.guards?.excluded.length,
         before: result.before,
         after: result.after,
         cursorsToMigrate: result.cursorsToMigrate,
