@@ -19,7 +19,8 @@ async function fixture(t, checkOnly = false) {
     timeout = false,
     conflictRecovery,
     terminalFailure,
-    stalePending;
+    stalePending,
+    sourceStatus;
   const gate = new Promise(resolve => {
     release = resolve;
   });
@@ -38,16 +39,29 @@ async function fixture(t, checkOnly = false) {
             phase: 'finish',
             ...(stalePending ?? {}),
             submission: {
-              phase: conflictRecovery || terminalFailure ? 'terminal-failed' : accepted ? 'landed' : 'ready',
+              phase:
+                conflictRecovery || terminalFailure
+                  ? 'terminal-failed'
+                  : sourceStatus
+                    ? 'composing'
+                    : accepted
+                      ? 'landed'
+                      : 'ready',
               observation: {
                 state:
-                  conflictRecovery || terminalFailure ? 'terminal-failed' : accepted ? 'landed' : 'pending',
+                  conflictRecovery || terminalFailure
+                    ? 'terminal-failed'
+                    : sourceStatus
+                      ? 'pending'
+                      : accepted
+                        ? 'landed'
+                        : 'pending',
               },
               ...(terminalFailure ? { error: terminalFailure } : {}),
               ...(conflictRecovery
                 ? { error: { code: 'COMPOSITION_CONFLICT', message: 'shared.txt has conflicting edits' } }
                 : {}),
-              ...(accepted && !conflictRecovery && !terminalFailure
+              ...(accepted && !sourceStatus && !conflictRecovery && !terminalFailure
                 ? { acceptance: { receiptId: 'accepted', head: 'head' } }
                 : {}),
             },
@@ -175,6 +189,18 @@ async function fixture(t, checkOnly = false) {
     pendingSource: () => {
       sourcePending = true;
     },
+    sourceStatus: status => {
+      sourceStatus = status;
+      const nextId = status === 'retryable' ? operationId : randomUUID();
+      const parameters = { message: 'Land', operationId: nextId };
+      stalePending = {
+        status,
+        progress: { status, jobId: 'retained' },
+        next: { action: 'finish', ...parameters },
+        command: `nforge agent '/synthetic' finish '${JSON.stringify(parameters)}'`,
+        replayParameters: { message: 'Land', operationId },
+      };
+    },
   };
 }
 
@@ -229,6 +255,50 @@ test('land exposes an unfinished source handoff and returns a pending exit statu
   assert.equal(s.calls.length, 1);
   assert(s.err.join('').includes('SOURCE PENDING'));
   assert(s.err.join('').includes('exact source continuation'));
+});
+
+test('retryable source returns its same-operation recovery without opening an observer', async t => {
+  const s = await fixture(t);
+  s.sourceStatus('retryable');
+  const pending = s.run();
+  await turn();
+  const observed = [...s.events];
+  s.release();
+  const response = await pending;
+  assert.deepEqual(observed, []);
+  assert.equal(s.calls.length, 1);
+  assert.equal(process.exitCode, 3);
+  assert.equal(response.result.next.operationId, s.operationId);
+  assert.equal(response.result.waitCommand, undefined);
+  assert(s.err.join('').includes('SOURCE NEEDS RECOVERY'));
+  assert(s.err.join('').includes('Continue recovery: ' + response.result.command));
+});
+
+test('failed source child remains waiting until its canonical parent fails', async t => {
+  const s = await fixture(t);
+  s.sourceStatus('failed');
+  let complete = false;
+  const pending = s.run().then(value => {
+    complete = true;
+    return value;
+  });
+  await turn();
+  const early = complete,
+    observed = [...s.events],
+    command = landWaitCommand('/synthetic', s.response());
+  s.fail();
+  s.release();
+  const response = await pending;
+  assert.equal(early, false);
+  assert.deepEqual(observed, ['subscription']);
+  assert.equal(typeof command, 'string');
+  assert(s.err.join('').includes(command));
+  assert.equal(s.calls.length, 1);
+  assert.equal(process.exitCode, 2);
+  assert.equal(response.result.submission.observation.state, 'terminal-failed');
+  assert.equal(response.result.next.operationId, undefined);
+  assert.equal(response.result.next.retry, true);
+  assert.equal(response.result.waitCommand, undefined);
 });
 
 test('land observation deadline returns IN PROGRESS with the exact wait command and no finish replay', async t => {

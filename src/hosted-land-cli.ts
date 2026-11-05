@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { clientCacheRoot } from './root-paths.js';
 import { isNetworkPending } from './network-continuation.js';
-import { normalizeHostedFinishResult } from './hosted-agent-finish-result.js';
+import { normalizeHostedFinishResult, retryableFinishSource } from './hosted-agent-finish-result.js';
 import { spawn } from 'node:child_process';
 import { closeSync, fstatSync, mkdirSync, openSync, readFileSync, readSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
@@ -47,7 +47,7 @@ export async function submitHostedLand(
   startLandTiming(Number(process.env[LAND_INVOKED_ENV]));
   let response = (await hostedAgentCli(root, 'finish', command, address, transport)) as HostedAgentResponse;
   // The first receipt already carries the operation id and any overlap notice: show them now, not at exit.
-  announce(root, command, response);
+  announce(transport.root ?? root, command, response);
   for (let round = 0; round < rounds; round++) {
     const result = resultOf(response);
     if (result.phase !== 'save' || !result.saveOperationId || result.progress?.status === 'failed') break;
@@ -210,15 +210,20 @@ export async function hostedLandCli(
   if (!submitted) return undefined;
   if (isNetworkPending(submitted)) return submitted;
   const wait = options.wait ?? readClientSettings().landWait;
+  const sourceNeedsRecovery = retryableFinishSource(resultOf(submitted));
   if (
     !wait ||
     landTerminal(submitted) ||
+    sourceNeedsRecovery ||
     ['conflict', 'save', 'compose', 'sync'].includes(String(resultOf(submitted).phase))
   ) {
     const lines = landSummary(submitted);
     for (const line of lines) process.stderr.write(`${line}\n`);
     if (lines[0]?.startsWith('FAILED')) process.exitCode = 2;
-    else if (wait && ['save', 'compose', 'sync'].includes(resultOf(submitted).phase ?? ''))
+    else if (
+      wait &&
+      (sourceNeedsRecovery || ['save', 'compose', 'sync'].includes(resultOf(submitted).phase ?? ''))
+    )
       process.exitCode = 3;
     return submitted;
   }
@@ -241,7 +246,7 @@ export async function hostedLandCli(
   const final: HostedAgentResponse = {
     ...submitted,
     result: normalizeHostedFinishResult(
-      root,
+      transport.root ?? root,
       (submitted.result as { replayParameters?: Record<string, unknown> }).replayParameters ?? {
         ...command,
         operationId: submitted.operationId,
@@ -262,7 +267,7 @@ export async function hostedLandCli(
   if (outcome === 'terminal-failed' || lines[0]?.startsWith('FAILED')) process.exitCode = 2;
   else if (!landTerminal(final)) {
     if (!(resultOf(final).phase === 'check' && resultOf(final).run?.status === 'passed')) {
-      const resume = landWaitCommand(root, final);
+      const resume = landWaitCommand(transport.root ?? root, final);
       process.stderr.write(
         `land: IN PROGRESS; ${observation?.status === 'timeout' ? 'wait deadline reached; ' : ''}${resume ? `keep waiting with: ${resume}` : 'run the same command again to keep waiting.'}\n`,
       );

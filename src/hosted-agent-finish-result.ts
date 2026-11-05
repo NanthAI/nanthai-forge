@@ -5,16 +5,11 @@ import { operationWait } from './agent-operation-wait.js';
 type Reply = Record<string, unknown>;
 const failedRuns = new Set(['failed', 'cancelled', 'runner-unavailable', 'interrupted']);
 
-/** A stopped compose child needs the retained public finish replay, not observation. */
-export function stoppedFinishSource(result: Reply) {
+/** A retryable compose child needs the retained public finish recovery. */
+export function retryableFinishSource(result: Reply) {
   const submission = result.submission as { phase?: string } | undefined;
-  const progress = result.progress as { status?: string; outcome?: { status?: string } } | undefined;
-  return (
-    submission?.phase === 'composing' &&
-    (progress?.status === 'retryable' ||
-      progress?.status === 'failed' ||
-      progress?.outcome?.status === 'failed')
-  );
+  const progress = result.progress as { status?: string } | undefined;
+  return submission?.phase === 'composing' && progress?.status === 'retryable';
 }
 
 /** A new attempt retains the complete selection, never the failed operation identity. */
@@ -30,10 +25,10 @@ export function finishRetryContinuation(root: string, selection: Reply) {
   return { next: { action: 'finish', ...retry }, command, retry, retryCommand: command };
 }
 
-/** Admitted work has one blocking continuation, shared by CLI and MCP.
- * Preparation before admission and stopped source jobs keep their original replay. */
+/** Pending admitted work waits for its canonical parent outcome.
+ * Preparation before admission and retryable source children retain their recovery. */
 export function hostedObservationContinuation(root: string, result: Reply, operationId?: string): Reply {
-  if (stoppedFinishSource(result)) return result;
+  if (retryableFinishSource(result)) return result;
   const submission = result.submission as
     | { operationId?: string; error?: { code?: string }; observation?: { state?: string }; phase?: string }
     | undefined;

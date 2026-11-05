@@ -91,7 +91,7 @@ budget, time box, acceptance bar and metrics that must not regress.
     `nforge agent ROOT wait '{"operationIds":["ORIGINAL_UUID"],"until":"acceptance","timeoutSeconds":3600}'`
     (native: `until:"terminal"`; check-only: `{"runId":"RUN_ID","timeoutSeconds":3600}`).
     Repeat on IN PROGRESS; follow terminal recovery on failure/conflict. A passed
-    check alone is not a landing. Before admission or for stopped source work, replay the full original request.
+    check alone is not a landing. Before admission, replay the full original request. Retryable source work follows its returned recovery.
 11. Fix failures in the same Lane and land again; never cancel and recreate.
     Follow exact conflict/stale/stalled continuations; replay unknown outcomes.
     Before filing an Issue or friction, search planning and comment on an existing

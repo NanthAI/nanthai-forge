@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { HostedAgentResponse } from './hosted-agent-transport.js';
+import { retryableFinishSource } from './hosted-agent-finish-result.js';
 
 export const terminalPhases = new Set(['landed', 'terminal-failed']);
 type Result = {
@@ -44,6 +45,8 @@ export function landSummary(response: HostedAgentResponse): string[] {
   if (phase === 'ready')
     return [submission ? 'CHECK PASSED; waiting for acceptance' : 'CHECK PASSED (not landed)'];
   if (result.phase === 'check' && result.run?.status === 'passed') return ['CHECK PASSED (not landed)'];
+  if (retryableFinishSource(result) && result.command)
+    return ['SOURCE NEEDS RECOVERY', `Continue recovery: ${result.command}`];
   const lines: string[] = [];
   const error = submission?.error;
   const recovery =

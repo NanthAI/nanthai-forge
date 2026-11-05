@@ -100,7 +100,7 @@ for (const status of ['submitted', 'retryable', 'failed', 'failed-outcome'])
         ? { outcome: { status: 'failed', error: { code: 'SYNTHETIC_SOURCE_FAILED' } } }
         : { status, jobId: randomUUID() };
     const result = normalizeHostedFinishResult(root, {}, response.result);
-    if (status === 'submitted') {
+    if (status !== 'retryable') {
       assert.deepEqual(result.next.operationIds, [response.operationId]);
       assert.equal(result.next.action, 'wait');
       assert.equal(result.command, landWaitCommand(root, response));
@@ -117,14 +117,13 @@ test('source work without admission retains its replay, without inventing a land
   const original = { operationId: randomUUID(), message: 'Original source message', keepOpen: true };
   const source = {
     phase: 'save',
-    next: { action: 'finish', operationId: original.operationId },
-    command: 'exact replay',
+    next: { action: 'finish', ...original },
     replay: { command: 'private recovery helper' },
     replayParameters: original,
   };
   assert.equal(normalizeHostedFinishResult(root, {}, source), source);
   const announcement = landAnnouncement(root, {}, { operationId: source.next.operationId, result: source });
-  assert.match(announcement.join('\n'), /source preparation is unfinished; replay:/);
+  assert.match(announcement.join('\n'), /source preparation is unfinished; keep this turn active; replay:/);
   assert(announcement.join('\n').includes(JSON.stringify(original)));
   assert(!announcement.join('\n').includes('private recovery helper'));
 });

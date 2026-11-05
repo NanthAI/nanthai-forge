@@ -8,6 +8,8 @@ import { join } from 'node:path';
 import { agentFixture } from './hosted-agent-fixture.mjs';
 import { registerHostedAgentWorkflow } from '../dist/mcp-hosted-agent.js';
 import { waitHostedAgentSource, sourceWaitSnapshot } from '../dist/hosted-agent-source-wait.js';
+import { landAnnouncement } from '../dist/hosted-land-wait.js';
+import { submitHostedLand } from '../dist/hosted-land-cli.js';
 
 const dead = (jobId, status = 'retryable') => ({
   status,
@@ -173,6 +175,7 @@ test('replaying a preparing finish reconciles its stalled compose child and expo
   assert.equal(replay.result.next.action, 'finish');
   assert.equal(replay.result.waitCommand, undefined);
   assert.equal(replay.result.inProgress, undefined);
+  assert(landAnnouncement(s.root, {}, replay).join('\n').includes(replay.result.command));
   assert.equal(replay.result.composeOperationId, first.result.composeOperationId);
   assert.deepEqual(
     s.calls.slice(count).map(call => call.name),
@@ -183,6 +186,63 @@ test('replaying a preparing finish reconciles its stalled compose child and expo
       'projectHostedComposeJobs:submit',
     ],
   );
+});
+
+test('failed source waits for canonical parent failure before offering a fresh retry', async t => {
+  const s = agentFixture(t),
+    operationId = randomUUID(),
+    jobId = randomUUID();
+  s.pending(true);
+  const mutation = s.exchange.client.mutation;
+  s.exchange.client.mutation = async (ref, args) =>
+    getFunctionName(ref) === 'projectHostedComposeJobs:submit'
+      ? JSON.stringify(dead(jobId, 'failed'))
+      : mutation(ref, args);
+  const transport = s.transport();
+  const err = [],
+    write = process.stderr.write;
+  process.stderr.write = chunk => {
+    err.push(String(chunk));
+    return true;
+  };
+  t.after(() => {
+    process.stderr.write = write;
+  });
+  const first = await submitHostedLand(
+    s.root,
+    { operationId, laneId: s.lane.laneId },
+    s.address,
+    transport,
+    0,
+  );
+  assert.equal(first.result.submission.observation.state, 'pending');
+  assert.equal(first.result.progress.status, 'failed');
+  assert.equal(first.result.next.action, 'wait');
+  assert.deepEqual(first.result.next.operationIds, [operationId]);
+  assert.equal(first.result.next.operationId, undefined);
+  assert.equal(first.result.command, first.result.waitCommand);
+  assert(err.join('').includes(first.result.command), 'the announcement reuses the selected canonical root');
+
+  s.exchange.client.mutation = async (ref, args) => {
+    const name = getFunctionName(ref);
+    if (name !== 'projectHostedLandingDesired:submit') return mutation(ref, args);
+    s.calls.push({ name, args });
+    return JSON.stringify({
+      ...first.result.submission,
+      phase: 'terminal-failed',
+      observation: { state: 'terminal-failed' },
+      error: { code: 'SOURCE_WORKER_FAILED', message: 'Synthetic source failure' },
+    });
+  };
+  const before = s.calls.length;
+  const terminal = await transport.dispatch('finish', first.result.replayParameters);
+  assert.equal(terminal.result.terminal, true);
+  assert.equal(terminal.result.next.action, 'finish');
+  assert.equal(terminal.result.next.retry, true);
+  assert.equal(terminal.result.next.operationId, undefined);
+  assert.equal(terminal.result.waitCommand, undefined);
+  assert.equal(terminal.result.progress, undefined);
+  assert.equal(s.calls.length - before, 2, 'discovery and original admission only; no old source read');
 });
 
 test('source observation reconnects after a transient network error without resubmitting source work', async t => {

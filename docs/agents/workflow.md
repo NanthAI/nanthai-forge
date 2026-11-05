@@ -1116,7 +1116,8 @@ nforge agent ROOT wait '{"operationIds":["ORIGINAL_UUID"],"until":"acceptance","
 After a killed shell or IN PROGRESS deadline, repeat that wait; do not resubmit.
 Native operations use `until:"terminal"`. Hosted check-only and harness checks use
 `{"runId":"RUN_ID","timeoutSeconds":3600}`; native checks use their run operation
-id. Source preparation before admission and stopped source jobs keep the full original replay command.
+id. Before admission, source preparation keeps the full original replay command.
+Retryable source work follows its returned recovery; a child failure does not settle a pending landing.
 `--no-wait` returns with an unfinished-work warning and the blocking continuation.
 
 LANDED reports acceptance; CHECK PASSED alone does not. Follow failure/conflict

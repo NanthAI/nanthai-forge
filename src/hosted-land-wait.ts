@@ -3,7 +3,7 @@ import { shellQuote } from './agent-brief-render.js';
 import { resultOf, landTerminal } from './hosted-land-summary.js';
 import type { HostedAgentResponse } from './hosted-agent-transport.js';
 import { operationWait } from './agent-operation-wait.js';
-import { stoppedFinishSource } from './hosted-agent-finish-result.js';
+import { retryableFinishSource } from './hosted-agent-finish-result.js';
 export { WAIT_COMMAND_SECONDS } from './agent-operation-wait.js';
 
 const runDone = new Set(['passed', 'failed', 'cancelled', 'runner-unavailable', 'interrupted']);
@@ -24,7 +24,7 @@ export function landWaitContinuation(root: string, response: HostedAgentResponse
       : result.phase === 'finish' &&
           response.operationId &&
           !landTerminal(response) &&
-          !stoppedFinishSource(result)
+          !retryableFinishSource(result)
         ? { operationIds: [response.operationId], until: 'acceptance' }
         : null;
   return wait ? operationWait(root, wait) : undefined;
@@ -38,13 +38,14 @@ export function landAnnouncement(
 ) {
   if (!response.operationId) return [];
   const wait = landWaitCommand(root, response);
+  const recoveryCommand = resultOf(response).command;
   return [
     `land: operationId ${response.operationId}`,
     ...(wait
       ? [`land: work is unfinished; keep this turn active. Resume after interruption with: ${wait}`]
       : !landTerminal(response)
         ? [
-            `land: source preparation is unfinished; replay: nforge agent ${shellQuote(root)} finish ${shellQuote(JSON.stringify((resultOf(response) as { replayParameters?: Record<string, unknown> }).replayParameters ?? { ...command, operationId: response.operationId }))}`,
+            `land: source preparation is unfinished; keep this turn active; ${recoveryCommand ? `continue: ${recoveryCommand}` : `replay: nforge agent ${shellQuote(root)} finish ${shellQuote(JSON.stringify((resultOf(response) as { replayParameters?: Record<string, unknown> }).replayParameters ?? { ...command, operationId: response.operationId }))}`}`,
           ]
         : []),
   ];
