@@ -522,7 +522,7 @@ Split by group; all depend on B1.5b. SP1 is decided; P5-SG lands alongside B1.6â
 
 ### Bet 2 re-measure after admission D and E (2026-10-31)
 
-Issue 4a686b9a. Same reader (`nforge metrics`) and same method as the baseline. Baseline window: 2026-10-29 11:00Z to 2026-10-30 11:00Z (59 landings). After window: 2026-10-30 23:40:26Z (just after E, `248c9950`, landed) to 2026-10-31 19:44:10Z (20.1 h, 14 landings). The table below is the on-main summary; the full method is tracked by the Phase 6 move-unit inventory (raw evidence private).
+Issue 4a686b9a. Same reader (`nforge metrics`) and same method as the baseline. Baseline window: 2026-10-29 11:00Z to 2026-10-30 11:00Z (59 landings). After window: 2026-10-30 23:40:26Z (just after E, `248c9950`, landed) to 2026-10-31 19:44:10Z (20.1 h, 14 landings). The table below is the on-main summary; the full method, windows and denominators are in [bet2-metrics](research/bet2-metrics.md) (raw evidence private).
 
 | Metric | Baseline | After E |
 | --- | ---: | ---: |

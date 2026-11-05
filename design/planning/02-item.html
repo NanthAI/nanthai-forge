@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<!-- Design mockup with synthetic example data (project, people, Items and numbers are invented). It shows intended layout and wording only; it does not describe behavior that ships. See docs/design/planning/README.md. -->
+<meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Item · Disk hygiene: the cache stops growing · demo-project</title>
+<link rel="stylesheet" href="p6.css" /><script src="p6.js"></script>
+</head>
+<body>
+<header class="fx-topbar">
+  <span class="fx-mark">F</span><span class="fx-brandname">Forge</span><span class="fx-proj">demo-project ▾</span>
+  <nav class="fx-nav"><a href="#">Now</a><a href="#" aria-current="page">Work</a><a href="#">Code</a><a href="#">Settings</a></nav>
+  <div class="fx-topbar-right"><div class="fx-search-ghost">Search <kbd>/</kbd></div><span class="fx-count hot">1</span><span class="fx-avatar">A</span></div>
+</header>
+<div class="fx-strip">main · accepted 24 min ago by agent-a · <span class="fx-st fx-tone-passed">✓ passing</span><span class="fx-live"><i></i>Live</span></div>
+
+<main class="fx-page">
+  <div class="fx-page-head">
+    <div style="min-width:0">
+      <div class="fx-crumbs"><a href="01-backlog.html">Planning</a><span>›</span><a href="04-initiative.html">Release 1 close</a><span>›</span><span>Item</span></div>
+      <h1>Disk hygiene: the cache stops growing <span class="fx-st fx-tone-active">● Working</span></h1>
+      <div class="fx-meta"><span class="fx-tag">bug</span><span>#3 in Release 1 close</span><span>added 1 h ago by lead</span><span>2 of 5 sub-items landed</span></div>
+      <p class="fx-situation"><b>2 Lanes open.</b> <a href="#">cache-gc</a> saved 12 min ago · <a href="#">retention</a> checking, queue position 2 · nothing waiting on you.</p>
+    </div>
+    <div class="fx-page-actions">
+      <button class="fx-btn">Edit</button>
+      <button class="fx-btn">Move to…</button>
+      <button class="fx-btn ghost">More ▾</button>
+      <button class="fx-btn primary">Start a Lane</button>
+    </div>
+  </div>
+
+  <div class="pl-detail">
+    <div>
+      <section class="fx-panel">
+        <header class="fx-panel-h"><h2>What and why</h2><span class="act"><a href="#">Edit</a></span></header>
+        <div class="pl-body"><p>Free disk space shrinks steadily. Causes: copies of finished Lanes are never evicted; landed Lanes never complete (no completeOnAccept); test temp dirs are never removed.</p><p><b style="color:var(--fx-text)">Done when</b> a week of normal dogfood use holds free disk within 5 GB of its start, with no manual pass.</p></div>
+      </section>
+
+      <section class="fx-panel">
+        <header class="fx-panel-h"><h2>Sub-items</h2><span class="fx-count">5</span><span class="act"><a href="#">Add</a> · <a href="#">Reorder</a></span></header>
+        <ol class="pl-rows">
+          <li class="pl-row t-active"><span class="pl-handle">⋮⋮</span><span class="fx-st fx-tone-active">● Working</span><div class="pl-main"><div class="pl-title"><a href="#">Cache GC for nested Lane copies</a></div><div class="pl-fact">Lane cache-gc · 5 saves · last save 12 min ago</div></div><span class="pl-who"><span class="fx-avatar sm agent">Ag</span><span>agent-a</span></span><span class="pl-age num">58 m</span></li>
+          <li class="pl-row t-active"><span class="pl-handle">⋮⋮</span><span class="fx-st fx-tone-active">◐ Checking</span><div class="pl-main"><div class="pl-title"><a href="#">Merged-Lane completion and retention</a></div><div class="pl-fact">Lane retention · check running 3 min · queue position 2</div></div><span class="pl-who"><span class="fx-avatar sm agent">Ag</span><span>agent-b</span></span><span class="pl-age num">58 m</span></li>
+          <li class="pl-row"><span class="pl-handle">⋮⋮</span><span class="fx-st fx-tone-plain">Planned</span><div class="pl-main"><div class="pl-title"><a href="#">completeOnAccept on by default</a></div><div class="pl-fact">no Lane yet</div></div><span class="pl-who"></span><span class="pl-age num">58 m</span></li>
+          <li class="pl-row"><span class="pl-handle">⋮⋮</span><span class="fx-st fx-tone-plain">Planned</span><div class="pl-main"><div class="pl-title"><a href="#">Tests remove their temp dirs on exit</a></div><div class="pl-fact">no Lane yet · friction logged 00:06</div></div><span class="pl-who"></span><span class="pl-age num">58 m</span></li>
+          <li class="pl-row t-passed done"><span class="pl-handle">⋮⋮</span><span class="fx-st fx-tone-passed">✓ Done</span><div class="pl-main"><div class="pl-title"><a href="#">One-time cleanup pass on the demo project</a></div><div class="pl-fact">closed by hand · lead · “free space restored after approved deletes”</div></div><span class="pl-who"><span class="fx-avatar sm">L</span><span>lead</span></span><span class="pl-age num">45 m</span></li>
+        </ol>
+      </section>
+
+      <section class="fx-panel">
+        <header class="fx-panel-h"><h2>Conversation</h2><span class="fx-count">4</span><span class="act"><label style="display:inline-flex;gap:5px;align-items:center"><input type="checkbox" /> decisions only</label></span></header>
+        <div class="pl-msg decision"><div class="pl-msg-h"><span class="fx-eyebrow">Decision</span><span class="fx-avatar sm">A</span><b>alex</b><time title="2026-10-31 09:55">45 min ago</time></div><p>Approved the deletes: unreferenced releases (keep current, previous and its rollback target), stale checkouts, old peers, abandoned Lanes idle more than 3 h.</p></div>
+        <div class="pl-msg auto"><div class="pl-msg-h"><span class="fx-avatar sm agent">Ag</span><b>agent-a · cache-gc</b><span class="fx-tag">auto</span><time>31 min ago</time></div><p>Started Lane cache-gc from this Item.</p></div>
+        <div class="pl-msg"><div class="pl-msg-h"><span class="fx-avatar sm">L</span><b>lead</b><time>50 min ago</time></div><p>Root causes split into sub-items; the one-time pass is done by hand and closed. The product fixes stay open until a week of dogfood holds.</p></div>
+        <div class="pl-msg auto"><div class="pl-msg-h"><span class="fx-avatar sm">L</span><b>lead</b><span class="fx-tag">auto</span><time>1 h ago</time></div><p>Created under Release 1 close.</p></div>
+        <form class="pl-compose"><input class="fx-input" placeholder="Add to the conversation…" aria-label="Add to the conversation" /><label><input type="checkbox" /> decision</label><button class="fx-btn sm" type="submit">Send</button></form>
+      </section>
+    </div>
+
+    <aside>
+      <section class="fx-panel">
+        <header class="fx-panel-h"><h2>Work</h2><span class="act"><a href="#">Intent</a></span></header>
+        <ul class="pl-chain">
+          <li><span class="g">◇</span><span><span class="k">Intent</span><a href="#">Forge stops leaking disk</a></span><span class="fx-st fx-tone-active">● Working</span></li>
+          <li><span class="g">│</span><span class="ind"><span class="k">Lane</span><a href="#">cache-gc</a> · 5 saves</span><span class="fx-st fx-tone-active">● Working</span></li>
+          <li><span class="g">│</span><span class="ind"><span class="k">Lane</span><a href="#">retention</a> · 3 saves</span><span class="fx-st fx-tone-active">◐ Checking</span></li>
+          <li><span class="g">│</span><span class="ind" style="padding-left:36px"><span class="k">Check</span><a href="#">verify</a> · 3 min · queue 2</span><span class="fx-rail" title="edited · saved · checked · accepted"><i class="on"></i><i class="on"></i><i class="on"></i><i></i></span></li>
+          <li><span class="g">◆</span><span><span class="k">Landed</span>nothing yet</span><span></span></li>
+        </ul>
+        <div class="fx-panel-f">Status comes from these records. Closing happens when a linked Lane lands.</div>
+      </section>
+
+      <section class="fx-panel">
+        <header class="fx-panel-h"><h2>Fields</h2></header>
+        <dl class="pl-fields">
+          <dt>Initiative</dt><dd>Release 1 close <span class="edit">change</span></dd>
+          <dt>Type</dt><dd>bug <span class="edit">change</span></dd>
+          <dt>Order</dt><dd>#3 of 9 <span class="edit">move</span></dd>
+          <dt>Not before</dt><dd>— <span class="edit">set</span></dd>
+          <dt>Area</dt><dd>runtime <span class="edit">change</span></dd>
+          <dt>Linked</dt><dd>1 Intent · 2 Lanes · 0 landings</dd>
+        </dl>
+      </section>
+
+      <section class="fx-panel">
+        <header class="fx-panel-h"><h2>Refine</h2></header>
+        <div style="padding:10px 14px;display:flex;flex-wrap:wrap;gap:8px">
+          <button class="fx-btn sm">Split into sub-items</button>
+          <button class="fx-btn sm">Merge into…</button>
+          <button class="fx-btn sm">Hand to an agent</button>
+          <button class="fx-btn sm ghost">Close by hand</button>
+          <button class="fx-btn sm ghost">Abandon…</button>
+        </div>
+        <div class="fx-panel-f">Hand to an agent copies a prompt with this Item’s id; the agent refines through the CLI or MCP.</div>
+      </section>
+
+      <section class="fx-panel">
+        <header class="fx-panel-h"><h2>History</h2><span class="fx-count">3</span><span class="act"><a href="#">Exact record</a></span></header>
+        <div class="pl-hist">
+          <time>45 m</time><span>sub-item “One-time cleanup pass” closed by lead</span>
+          <time>50 m</time><span>split into 5 sub-items by lead · v2</span>
+          <time>1 h</time><span>created by lead under Release 1 close · v1</span>
+        </div>
+      </section>
+    </aside>
+  </div>
+</main>
+</body>
+</html>

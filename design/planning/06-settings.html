@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<!-- Design mockup with synthetic example data (project, people, Items and numbers are invented). It shows intended layout and wording only; it does not describe behavior that ships. See docs/design/planning/README.md. -->
+<meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Settings · Planning · demo-project</title>
+<link rel="stylesheet" href="p6.css" /><script src="p6.js"></script>
+</head>
+<body>
+<header class="fx-topbar">
+  <span class="fx-mark">F</span><span class="fx-brandname">Forge</span><span class="fx-proj">demo-project ▾</span>
+  <nav class="fx-nav"><a href="#">Now</a><a href="#">Work</a><a href="#">Code</a><a href="#" aria-current="page">Settings</a></nav>
+  <div class="fx-topbar-right"><div class="fx-search-ghost">Search <kbd>/</kbd></div><span class="fx-count hot">1</span><span class="fx-avatar">A</span></div>
+</header>
+
+<main class="fx-page" style="display:grid;grid-template-columns:220px 820px;gap:24px;max-width:1100px;margin:0 auto">
+  <nav aria-label="Settings" style="font-size:13px;color:var(--fx-text-2)">
+    <div class="fx-eyebrow" style="margin:8px 0">Project</div>
+    <div style="display:grid;gap:6px"><a href="#">General</a><a href="#">Checks</a><a href="#">Landing</a><a href="#" style="color:var(--fx-text);font-weight:600">Planning</a><a href="#">Agents</a><a href="#">GitHub</a></div>
+    <div class="fx-eyebrow" style="margin:18px 0 8px">Admin</div>
+    <div style="display:grid;gap:6px"><a href="#">Members</a><a href="#">Secrets</a></div>
+  </nav>
+
+  <div class="pl-settings">
+    <h1 style="font:700 20px/1.25 var(--fx-font-head);letter-spacing:-.015em;margin-bottom:14px">Planning</h1>
+
+    <section class="fx-panel">
+      <header class="fx-panel-h"><h2>Track work in planning</h2></header>
+      <div class="pl-setting">
+        <div><div style="font-weight:600">Link work to Items</div><div class="d">A Lane started without an Item gets one, titled from its Intent, under the Initiative the agent names or none. Landing closes the Item with the commit and check as evidence. <i>Server-side; no agent tokens.</i></div></div>
+        <button class="pl-switch" role="switch" aria-checked="true" aria-label="Link work to Items"></button>
+      </div>
+      <div class="pl-setting pl-sub-settings">
+        <div><div style="font-weight:600">Agents write Item text</div><div class="d">Agents may be asked to fill in why, done-when and a close summary. <i>Costs the agent's tokens; off unless the project manages work here.</i></div></div>
+        <button class="pl-switch" role="switch" aria-checked="false" aria-label="Agents write Item text"></button>
+      </div>
+      <div class="pl-setting">
+        <div><div style="font-weight:600">Who can reorder</div><div class="d">Same shape as queue reordering.</div></div>
+        <button class="fx-sel">People, and agents on <b>their own Items</b></button>
+      </div>
+    </section>
+
+    <section class="fx-panel">
+      <header class="fx-panel-h"><h2>Types</h2><span class="act">labels, not a hierarchy</span></header>
+      <div style="padding:12px 14px" class="pl-chips">
+        <span class="pl-chip">feature <i>×</i></span><span class="pl-chip">bug <i>×</i></span><span class="pl-chip">friction <i>×</i></span><span class="pl-chip">decision <i>×</i></span><span class="pl-chip">idea <i>×</i></span><span class="pl-chip">chore <i>×</i></span><span class="pl-chip">docs <i>×</i></span><span class="pl-chip">measure <i>×</i></span><span class="pl-chip">watch <i>×</i></span>
+        <button class="fx-btn sm ghost">Add type</button>
+      </div>
+    </section>
+
+    <section class="fx-panel">
+      <header class="fx-panel-h"><h2>Fields</h2><span class="act">up to 6 · group and filter by any</span></header>
+      <div class="pl-setting"><div><div style="font-weight:600">Area</div><div class="d">text · runtime, web, cli, backend, docs</div></div><button class="fx-btn sm ghost">Edit</button></div>
+      <div class="pl-setting"><div><div style="font-weight:600">Stage</div><div class="d">text · 1.1 … 1.8</div></div><button class="fx-btn sm ghost">Edit</button></div>
+      <div class="pl-setting"><div><div class="d">Built in and always present: Initiative, Type, Order, Not before.</div></div><button class="fx-btn sm">Add field</button></div>
+    </section>
+
+    <section class="fx-panel">
+      <header class="fx-panel-h"><h2>Quiet Initiatives</h2></header>
+      <div class="pl-setting"><div><div style="font-weight:600">Collapse an Initiative after</div><div class="d">days without a save, landing, comment or edit. Nothing in flight and nothing waiting on anyone.</div></div><button class="fx-sel"><b>14 days</b></button></div>
+    </section>
+  </div>
+</main>
+</body>
+</html>

@@ -85,16 +85,16 @@ This Lane extracts B01, B03, B04, B10, B16 and B17's recovery steps. B02 is alre
 
 | Unit | Issue | Destination | Stage |
 | --- | --- | --- | --- |
-| B05 | 3feb02c5-6399-433e-99db-4c8eb56f78f1 — Planning design pack and owner-vision extract | `docs/design/planning/` | 7.1 prep |
-| B06 | 271884c2-ab7d-47bd-9cdc-8ffc83b8c3c9 — Landing study: tentative mockup, critique and verdict | `docs/design/landing-study/` | 7.1 prep |
-| B07 | 6f9ec5d8-6705-43b7-a800-c871a445be9f — Visual reference catalog and Forge translation | `docs/design/references.md` | 7.1 prep |
-| B08 | 56662beb-5918-4d87-a0a7-90249ac80a0f — Marketing scenarios with evidence annotations | `docs/marketing/scenarios.md` | 6.3 repo hygiene |
-| B09 | d8a3d743-c3f7-4421-8e72-61b721c11588 — Gate-parity disposition matrix | `docs/operations/gate-parity.md` | 6.3 repo hygiene |
-| B11 | 31f79d81-1405-421f-a575-5d5afe967dad — Test-suite value method and findings | `docs/research/test-suite-value.md` | 6.3 repo hygiene |
-| B12 | bb5dea3e-83b2-4b3c-933a-824d030c7094 — Structural merge negative result and case summaries | `docs/research/structural-merge.md` | 6.3 repo hygiene |
-| B13 | 0ed227d6-a68e-40e8-b83b-dd623564098c — Bet 2 metrics method and denominators | `docs/research/bet2-metrics.md` | 6.3 repo hygiene |
-| B14 | 868f7c3a-84b1-4117-9814-8418a2b48717 — Observe-only proposal with unapproved choices | `docs/design/observe-only-proposal.md` | 7.1 prep |
-| B15 | 92cdb8e9-a408-4c92-a961-9879ca2f93a9 — Historical E1 and E3 full methods | `docs/research/e1-overlap.md; docs/research/e3-failing-burst.md` | 6.3 repo hygiene |
+| B05 | 3feb02c5-6399-433e-99db-4c8eb56f78f1 — Planning design pack and owner-vision extract | [`docs/design/planning/`](design/planning/README.md) | 7.1 prep |
+| B06 | 271884c2-ab7d-47bd-9cdc-8ffc83b8c3c9 — Landing study: tentative mockup, critique and verdict | [`docs/design/landing-study/`](design/landing-study/README.md) | 7.1 prep |
+| B07 | 6f9ec5d8-6705-43b7-a800-c871a445be9f — Visual reference catalog and Forge translation | [`docs/design/references.md`](design/references.md) | 7.1 prep |
+| B08 | 56662beb-5918-4d87-a0a7-90249ac80a0f — Marketing scenarios with evidence annotations | [`docs/marketing/scenarios.md`](marketing/scenarios.md) | 6.3 repo hygiene |
+| B09 | d8a3d743-c3f7-4421-8e72-61b721c11588 — Gate-parity disposition matrix | [`docs/operations/gate-parity.md`](operations/gate-parity.md) | 6.3 repo hygiene |
+| B11 | 31f79d81-1405-421f-a575-5d5afe967dad — Test-suite value method and findings | [`docs/research/test-suite-value.md`](research/test-suite-value.md) | 6.3 repo hygiene |
+| B12 | bb5dea3e-83b2-4b3c-933a-824d030c7094 — Structural merge negative result and case summaries | [`docs/research/structural-merge.md`](research/structural-merge.md) | 6.3 repo hygiene |
+| B13 | 0ed227d6-a68e-40e8-b83b-dd623564098c — Bet 2 metrics method and denominators | [`docs/research/bet2-metrics.md`](research/bet2-metrics.md) | 6.3 repo hygiene |
+| B14 | 868f7c3a-84b1-4117-9814-8418a2b48717 — Observe-only proposal with unapproved choices | [`docs/design/observe-only-proposal.md`](design/observe-only-proposal.md) | 7.1 prep |
+| B15 | 92cdb8e9-a408-4c92-a961-9879ca2f93a9 — Historical E1 and E3 full methods | [`docs/research/e1-overlap.md`](research/e1-overlap.md); [`docs/research/e3-failing-burst.md`](research/e3-failing-burst.md) | 6.3 repo hygiene |
 
 Audit friction and historical holding records:
 

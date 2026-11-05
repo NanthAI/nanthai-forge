@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<!-- Design mockup with synthetic example data (project, people, Items and numbers are invented). It shows intended layout and wording only; it does not describe behavior that ships. See docs/design/planning/README.md. -->
+<meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Planning · Backlog (default: alive) · demo-project</title>
+<link rel="stylesheet" href="p6.css" /><script src="p6.js"></script>
+</head>
+<body>
+<header class="fx-topbar">
+  <span class="fx-mark">F</span><span class="fx-brandname">Forge</span>
+  <span class="fx-proj">demo-project ▾</span>
+  <nav class="fx-nav"><a href="#">Now</a><a href="#" aria-current="page">Work</a><a href="#">Code</a><a href="#">Settings</a></nav>
+  <div class="fx-topbar-right"><div class="fx-search-ghost">Search <kbd>/</kbd></div><span class="fx-count hot">1</span><span class="fx-avatar">A</span></div>
+</header>
+<div class="fx-strip">main · accepted 24 min ago by agent-a · <span class="fx-st fx-tone-passed">✓ passing</span><span class="fx-live"><i></i>Live</span></div>
+
+<main class="fx-page">
+  <div class="fx-page-head">
+    <div>
+      <div class="fx-crumbs"><a href="#">Work</a><span>›</span><span>Planning</span></div>
+      <h1>Planning</h1>
+      <p class="fx-situation"><b>41 alive</b> in 5 Initiatives · <a href="#">7 working</a> · <a href="#">1 waiting on you</a> · 3 dated · 30 planned.</p>
+    </div>
+    <div class="fx-page-actions">
+      <span class="fx-seg" role="tablist"><a aria-current="page">Intents</a><a>Lanes</a><a>Planning</a></span>
+      <button class="fx-btn ghost">New Initiative</button>
+      <button class="fx-btn primary">New Item</button>
+    </div>
+  </div>
+
+  <div class="pl-bar">
+    <span class="fx-seg" role="tablist" aria-label="View"><button aria-pressed="true">List</button><button>Board</button><button>History</button></span>
+    <span class="fx-seg" role="tablist" aria-label="Filter"><button aria-pressed="true">Alive <span class="fx-count">41</span></button><button>Waiting on you <span class="fx-count hot">1</span></button><button>Blocked <span class="fx-count">0</span></button><button>Dated <span class="fx-count">3</span></button></span>
+    <button class="fx-sel">Group by <b>Initiative</b></button>
+    <button class="fx-sel">Type <b>any</b></button>
+    <label class="pl-search"><input class="fx-input" type="search" placeholder="Filter alive items…" aria-label="Filter alive items" /></label>
+  </div>
+
+  <form class="pl-capture" aria-label="Quick capture">
+    <input placeholder="Jot it down… (Enter creates a planned Item; refine later)" aria-label="New item title" />
+    <span class="pl-capture-in">in <button type="button" class="fx-sel" style="height:24px"><b>Release 2: beta</b></button></span>
+  </form>
+
+  <!-- Release 1 close -->
+  <section class="pl-group pl-grp" aria-labelledby="g1">
+    <header class="pl-grp-h">
+      <a class="pl-grp-title" id="g1" href="04-initiative.html" data-toggle><span class="chev">▾</span>Release 1 close</a>
+      <span class="pl-line"><span class="pl-mini" title="0 landed · 2 working · 1 waiting · 6 planned"><i class="on"></i><i class="on"></i><i class="wait"></i><i></i><i></i><i></i><i></i><i></i><i></i></span> &nbsp;<b>0 of 9</b> landed · 2 working · 1 waiting on you · 3 dated · 3 planned</span>
+      <span class="pl-grp-more"><span class="fx-st fx-tone-active">● In motion</span><button class="fx-btn ghost sm" aria-label="More">⋯</button></span>
+    </header>
+    <ol class="pl-rows">
+      <li class="pl-row t-active" tabindex="0"><span class="pl-handle" aria-hidden="true">⋮⋮</span><span class="fx-st fx-tone-active">● Working</span>
+        <div class="pl-main"><div class="pl-title"><a href="02-item.html">Benchmark checkout flow against baseline</a><span class="fx-tag">measure</span></div><div class="pl-fact">1 Lane · 6 saves · last save 32 min ago</div></div>
+        <span class="pl-who"><span class="fx-avatar sm agent">Ag</span><span>agent-a · bench</span></span><span class="pl-age num" title="2026-10-31 09:05">1 h</span></li>
+      <li class="pl-row t-active" tabindex="0"><span class="pl-handle" aria-hidden="true">⋮⋮</span><span class="fx-st fx-tone-active">● Working</span>
+        <div class="pl-main"><div class="pl-title"><a href="02-item.html">Disk hygiene: the cache stops growing</a><span class="fx-tag">bug</span><span class="pl-sub num">2 of 5 sub-items</span></div><div class="pl-fact">2 Lanes · 1 checking · last save 12 min ago</div></div>
+        <span class="pl-who"><span class="fx-avatar sm agent">Ag</span><span>agent-a +1</span></span><span class="pl-age num">1 h</span></li>
+      <li class="pl-row t-waiting" tabindex="0"><span class="pl-handle" aria-hidden="true">⋮⋮</span><span class="fx-st fx-tone-waiting">◷ Waiting</span>
+        <div class="pl-main"><div class="pl-title"><a href="#">Stall alerts live: email and push</a><span class="fx-tag">chore</span></div><div class="pl-fact"><span class="dec">waiting on you</span> · add the alert topic · asked 1 h ago by lead</div></div>
+        <span class="pl-who"><span class="fx-avatar sm">A</span><span>you</span></span><span class="pl-age num">1 h</span></li>
+      <li class="pl-row" tabindex="0"><span class="pl-handle" aria-hidden="true">⋮⋮</span><span class="fx-st fx-tone-plain">Planned</span>
+        <div class="pl-main"><div class="pl-title"><a href="#">Queue throughput after a provider outage</a><span class="fx-tag">friction</span></div><div class="pl-fact">no Lane yet · 1 comment</div></div>
+        <span class="pl-who"></span><span class="pl-age num">1 h</span></li>
+      <li class="pl-row" tabindex="0"><span class="pl-handle" aria-hidden="true">⋮⋮</span><span class="fx-st fx-tone-plain">Planned</span>
+        <div class="pl-main"><div class="pl-title"><a href="#">Release 1 close report</a><span class="fx-tag">docs</span></div><div class="pl-fact">no Lane yet</div></div>
+        <span class="pl-who"></span><span class="pl-age num">1 h</span></li>
+      <li class="pl-row" tabindex="0"><span class="pl-handle" aria-hidden="true">⋮⋮</span><span class="fx-st fx-tone-plain">Planned</span>
+        <div class="pl-main"><div class="pl-title"><a href="#">Docs sync: roadmap, release plan, backlog</a><span class="fx-tag">docs</span></div><div class="pl-fact">no Lane yet · repeats at every stage close</div></div>
+        <span class="pl-who"></span><span class="pl-age num">1 h</span></li>
+      <li class="pl-row t-stale" tabindex="0"><span class="pl-handle" aria-hidden="true">⋮⋮</span><span class="fx-st fx-tone-stale">○ Dated</span>
+        <div class="pl-main"><div class="pl-title"><a href="#">Soak watch ends 2026-11-04</a><span class="fx-tag">watch</span></div><div class="pl-fact">not before <b>4 Nov</b> · then decide the cleanup with you</div></div>
+        <span class="pl-who"></span><span class="pl-age num">1 h</span></li>
+      <li class="pl-row t-stale" tabindex="0"><span class="pl-handle" aria-hidden="true">⋮⋮</span><span class="fx-st fx-tone-stale">○ Dated</span>
+        <div class="pl-main"><div class="pl-title"><a href="#">Retired-table purge</a><span class="fx-tag">chore</span></div><div class="pl-fact">not before <b>9 Nov</b> · export done (manifest abc12345)</div></div>
+        <span class="pl-who"></span><span class="pl-age num">1 h</span></li>
+      <li class="pl-row t-stale" tabindex="0"><span class="pl-handle" aria-hidden="true">⋮⋮</span><span class="fx-st fx-tone-stale">○ Dated</span>
+        <div class="pl-main"><div class="pl-title"><a href="#">Credential rotations</a><span class="fx-tag">chore</span></div><div class="pl-fact">not before <b>28 Nov</b> · backup token first</div></div>
+        <span class="pl-who"></span><span class="pl-age num">1 h</span></li>
+    </ol>
+  </section>
+
+  <!-- Team friction -->
+  <section class="pl-group pl-grp" aria-labelledby="g2">
+    <header class="pl-grp-h">
+      <a class="pl-grp-title" id="g2" href="#" data-toggle><span class="chev">▾</span>Team friction</a>
+      <span class="pl-line"><span class="pl-mini"><i class="ok"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i></i><i></i><i></i><i></i></span> &nbsp;<b>1 of 10</b> landed · 4 working · 1 checking · 4 planned</span>
+      <span class="pl-grp-more"><span class="fx-st fx-tone-active">● In motion</span><button class="fx-btn ghost sm" aria-label="More">⋯</button></span>
+    </header>
+    <ol class="pl-rows">
+      <li class="pl-row t-active" tabindex="0"><span class="pl-handle">⋮⋮</span><span class="fx-st fx-tone-active">● Working</span>
+        <div class="pl-main"><div class="pl-title"><a href="#">CORE: an imported project is not writable without a local owner</a><span class="fx-tag">friction</span></div><div class="pl-fact">1 Lane · 2 saves · last save 9 min ago</div></div>
+        <span class="pl-who"><span class="fx-avatar sm agent">Ag</span><span>agent-a · import-fix</span></span><span class="pl-age num">1 h</span></li>
+      <li class="pl-row t-active" tabindex="0"><span class="pl-handle">⋮⋮</span><span class="fx-st fx-tone-active">● Working</span>
+        <div class="pl-main"><div class="pl-title"><a href="#">Lane stuck in a stale state</a><span class="fx-tag">friction</span></div><div class="pl-fact">1 Lane · 4 saves · last save 20 min ago</div></div>
+        <span class="pl-who"><span class="fx-avatar sm agent">Ag</span><span>agent-a · stale-fix</span></span><span class="pl-age num">1 h</span></li>
+      <li class="pl-row t-active" tabindex="0"><span class="pl-handle">⋮⋮</span><span class="fx-st fx-tone-active">● Working</span>
+        <div class="pl-main"><div class="pl-title"><a href="#">Finish output is buffered; the operation id prints late</a><span class="fx-tag">friction</span></div><div class="pl-fact">shares Lane feedback-fix with 1 other Item · 3 saves</div></div>
+        <span class="pl-who"><span class="fx-avatar sm agent">Ag</span><span>agent-b · feedback-fix</span></span><span class="pl-age num">1 h</span></li>
+      <li class="pl-row t-active" tabindex="0"><span class="pl-handle">⋮⋮</span><span class="fx-st fx-tone-active">● Working</span>
+        <div class="pl-main"><div class="pl-title"><a href="#">Reading a file returned empty output</a><span class="fx-tag">friction</span></div><div class="pl-fact">shares Lane feedback-fix with 1 other Item</div></div>
+        <span class="pl-who"><span class="fx-avatar sm agent">Ag</span><span>agent-b · feedback-fix</span></span><span class="pl-age num">1 h</span></li>
+      <li class="pl-row t-active" tabindex="0"><span class="pl-handle">⋮⋮</span><span class="fx-st fx-tone-active">◐ Checking</span>
+        <div class="pl-main"><div class="pl-title"><a href="#">Queued Candidate goes stale</a><span class="fx-tag">friction</span></div><div class="pl-fact">check running 4 min · Lane defaults-a · in queue, position 2</div></div>
+        <span class="pl-who"><span class="fx-avatar sm agent">Ag</span><span>agent-a · defaults-a</span></span><span class="pl-age num">1 h</span></li>
+      <li class="pl-row" tabindex="0"><span class="pl-handle">⋮⋮</span><span class="fx-st fx-tone-plain">Planned</span>
+        <div class="pl-main"><div class="pl-title"><a href="#">Landed Lane still counted as an open overlap</a><span class="fx-tag">friction</span></div><div class="pl-fact">no Lane yet</div></div>
+        <span class="pl-who"></span><span class="pl-age num">1 h</span></li>
+      <li class="pl-row" tabindex="0"><span class="pl-handle">⋮⋮</span><span class="fx-st fx-tone-plain">Planned</span>
+        <div class="pl-main"><div class="pl-title"><a href="#">Import spends the user's API quota</a><span class="fx-tag">friction</span></div><div class="pl-fact">no Lane yet</div></div>
+        <span class="pl-who"></span><span class="pl-age num">1 h</span></li>
+      <li class="pl-row" tabindex="0"><span class="pl-handle">⋮⋮</span><span class="fx-st fx-tone-plain">Planned</span>
+        <div class="pl-main"><div class="pl-title"><a href="#">Long queues outlive the finish poller</a><span class="fx-tag">friction</span></div><div class="pl-fact">no Lane yet</div></div>
+        <span class="pl-who"></span><span class="pl-age num">1 h</span></li>
+      <li class="pl-more"><a href="#">1 more planned</a>&nbsp;· <a href="#">1 landed today</a></li>
+    </ol>
+  </section>
+
+  <!-- Release 2 -->
+  <section class="pl-group pl-grp" aria-labelledby="g3">
+    <header class="pl-grp-h">
+      <a class="pl-grp-title" id="g3" href="#" data-toggle><span class="chev">▾</span>Release 2: beta</a>
+      <span class="pl-line"><b>0 of 15</b> landed · 15 planned</span>
+      <span class="pl-grp-more"><span class="fx-st fx-tone-plain">Planned</span><button class="fx-btn ghost sm" aria-label="More">⋯</button></span>
+    </header>
+    <ol class="pl-rows">
+      <li class="pl-row" aria-selected="true" tabindex="0"><span class="pl-handle">⋮⋮</span><span class="fx-st fx-tone-plain">Planned</span>
+        <div class="pl-main"><div class="pl-title"><a href="#">Planning for agents and humans</a><span class="fx-tag">feature</span></div><div class="pl-fact">design in review · 2 comments · last by lead 40 min ago</div></div>
+        <span class="pl-who"></span><span class="pl-age num">1 h</span></li>
+      <li class="pl-row" tabindex="0"><span class="pl-handle">⋮⋮</span><span class="fx-st fx-tone-plain">Planned</span>
+        <div class="pl-main"><div class="pl-title"><a href="#">Website: reposition the hero</a><span class="fx-tag">feature</span></div><div class="pl-fact">see Initiative Website refresh</div></div>
+        <span class="pl-who"></span><span class="pl-age num">1 h</span></li>
+      <li class="pl-row" tabindex="0"><span class="pl-handle">⋮⋮</span><span class="fx-st fx-tone-plain">Planned</span>
+        <div class="pl-main"><div class="pl-title"><a href="#">Merge train and contract gate</a><span class="fx-tag">feature</span></div><div class="pl-fact">no Lane yet · starts once first-check failure p is low</div></div>
+        <span class="pl-who"></span><span class="pl-age num">1 h</span></li>
+      <li class="pl-row" tabindex="0"><span class="pl-handle">⋮⋮</span><span class="fx-st fx-tone-plain">Planned</span>
+        <div class="pl-main"><div class="pl-title"><a href="#">Shortest expected check first</a><span class="fx-tag">feature</span></div><div class="pl-fact">no Lane yet</div></div>
+        <span class="pl-who"></span><span class="pl-age num">1 h</span></li>
+      <li class="pl-row" tabindex="0"><span class="pl-handle">⋮⋮</span><span class="fx-st fx-tone-plain">Planned</span>
+        <div class="pl-main"><div class="pl-title"><a href="#">Queue reordering by agents</a><span class="fx-tag">feature</span></div><div class="pl-fact">no Lane yet · policy decided 26 Oct</div></div>
+        <span class="pl-who"></span><span class="pl-age num">1 h</span></li>
+      <li class="pl-row" tabindex="0"><span class="pl-handle">⋮⋮</span><span class="fx-st fx-tone-plain">Planned</span>
+        <div class="pl-main"><div class="pl-title"><a href="#">Selector: by-name closures and symbol-level selection</a><span class="fx-tag">feature</span></div><div class="pl-fact">no Lane yet</div></div>
+        <span class="pl-who"></span><span class="pl-age num">1 h</span></li>
+      <li class="pl-row" tabindex="0"><span class="pl-handle">⋮⋮</span><span class="fx-st fx-tone-plain">Planned</span>
+        <div class="pl-main"><div class="pl-title"><a href="#">Stage 1 remainder</a><span class="fx-tag">chore</span></div><div class="pl-fact">no Lane yet</div></div>
+        <span class="pl-who"></span><span class="pl-age num">1 h</span></li>
+      <li class="pl-row" tabindex="0"><span class="pl-handle">⋮⋮</span><span class="fx-st fx-tone-plain">Planned</span>
+        <div class="pl-main"><div class="pl-title"><a href="#">CLI verbs, batch two</a><span class="fx-tag">feature</span></div><div class="pl-fact">no Lane yet</div></div>
+        <span class="pl-who"></span><span class="pl-age num">1 h</span></li>
+      <li class="pl-more"><a href="#">7 more planned</a></li>
+    </ol>
+  </section>
+
+  <!-- Agent defaults -->
+  <section class="pl-group pl-grp" aria-labelledby="g4">
+    <header class="pl-grp-h">
+      <a class="pl-grp-title" id="g4" href="#" data-toggle><span class="chev">▾</span>Agent defaults</a>
+      <span class="pl-line"><b>0 of 3</b> landed · 3 planned</span>
+      <span class="pl-grp-more"><span class="fx-st fx-tone-plain">Planned</span><button class="fx-btn ghost sm" aria-label="More">⋯</button></span>
+    </header>
+    <ol class="pl-rows">
+      <li class="pl-row" tabindex="0"><span class="pl-handle">⋮⋮</span><span class="fx-st fx-tone-plain">Planned</span><div class="pl-main"><div class="pl-title"><a href="#">Measure the defaults on a sample project</a><span class="fx-tag">measure</span></div><div class="pl-fact">no Lane yet</div></div><span class="pl-who"></span><span class="pl-age num">1 h</span></li>
+      <li class="pl-row" tabindex="0"><span class="pl-handle">⋮⋮</span><span class="fx-st fx-tone-plain">Planned</span><div class="pl-main"><div class="pl-title"><a href="#">Shrink the shared rules file and lane script</a><span class="fx-tag">chore</span></div><div class="pl-fact">no Lane yet</div></div><span class="pl-who"></span><span class="pl-age num">1 h</span></li>
+      <li class="pl-row" tabindex="0"><span class="pl-handle">⋮⋮</span><span class="fx-st fx-tone-plain">Planned</span><div class="pl-main"><div class="pl-title"><a href="#">Planning skill text</a><span class="fx-tag">docs</span></div><div class="pl-fact">no Lane yet</div></div><span class="pl-who"></span><span class="pl-age num">1 h</span></li>
+    </ol>
+  </section>
+
+  <!-- Landing page -->
+  <section class="pl-group pl-grp collapsed" aria-labelledby="g5">
+    <header class="pl-grp-h">
+      <a class="pl-grp-title" id="g5" href="#" data-toggle><span class="chev">▸</span>Website refresh</a>
+      <span class="pl-line"><b>0 of 4</b> landed · 4 planned</span>
+      <span class="pl-grp-more"><span class="fx-st fx-tone-plain">Planned</span><button class="fx-btn ghost sm" aria-label="More">⋯</button></span>
+    </header>
+    <ol class="pl-rows">
+      <li class="pl-row"><span class="pl-handle">⋮⋮</span><span class="fx-st fx-tone-plain">Planned</span><div class="pl-main"><div class="pl-title"><a href="#">Reposition hero and story</a></div></div><span class="pl-who"></span><span class="pl-age num">1 h</span></li>
+    </ol>
+  </section>
+
+  <!-- Quiet Initiatives -->
+  <div class="pl-quiet"><span class="chev">▸</span><a href="#"><b style="color:var(--fx-text-2)">14 quiet Initiatives</b></a> · imported history · 46 planned, 1 working · no activity since 16 Oct</div>
+
+  <div class="fx-toast" role="status">Added <b>“Import tarball instead of per-blob requests”</b> to Release 2 <span class="fx-tag">auto-typed idea</span> <a href="#">Undo</a> <a href="#">Open</a></div>
+</main>
+</body>
+</html>

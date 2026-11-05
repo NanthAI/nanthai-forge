@@ -1,0 +1,9 @@
+# Verdict: keep Part A, fence Part B, narrow the trigger
+
+> Status: tentative design input from a 2026-10-27 trial; nothing here is approved or shipped. See the [study README](README.md).
+
+Worth keeping, for one half of it. Part A (intake, page structure, proof beside claim, objections as a section, specific copy, final CTA, SEO and meta) found real gaps on our landing that our own DESIGN.md never would: no proof on the page, no FAQ, no final CTA, a headline that tells an LLM nothing, missing title and description, wrong repository links. Those findings alone justify the trial.
+
+Part B is a competitor's house style, not a design system. Gradient heading text, grey only dark palettes, floating blurred nav, 500 ms curves, scroll reveals and a mandatory word by word tagline animation are the exact template look DESIGN.md exists to avoid, and they conflict with "idle costs nothing" and "no count ups". Two Part B rules are dangerous for Forge: B8 tells the builder to invent brand names and testimonials, and the risk reversal list assumes pricing we do not have. The useful Part B leftovers are small: the nested radius formula, skeleton loaders, the ship checklist (B10) and the idea of one large type promise mid page.
+
+Recommendation: keep the skill but write a project override in the Forge repo that says "Part A applies to the public landing and docs site; Part B is superseded by DESIGN.md and web/src/style.css; B8 content invention is forbidden". Narrow the trigger from "ANY web UI, page section, component, or prototype" to "public landing and marketing pages only"; for cockpit work (Now, Work, Lane, Settings) the skill must not fire, since every one of its visual rules would fight the operate mode tokens. If the skill is left with its broad trigger, builder agents will keep proposing gradient text and Phosphor icons on signed in screens and the lead will spend review cycles reverting them.

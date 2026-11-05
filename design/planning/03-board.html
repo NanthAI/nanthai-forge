@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<!-- Design mockup with synthetic example data (project, people, Items and numbers are invented). It shows intended layout and wording only; it does not describe behavior that ships. See docs/design/planning/README.md. -->
+<meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Planning · Board · demo-project</title>
+<link rel="stylesheet" href="p6.css" /><script src="p6.js"></script>
+</head>
+<body>
+<header class="fx-topbar">
+  <span class="fx-mark">F</span><span class="fx-brandname">Forge</span><span class="fx-proj">demo-project ▾</span>
+  <nav class="fx-nav"><a href="#">Now</a><a href="#" aria-current="page">Work</a><a href="#">Code</a><a href="#">Settings</a></nav>
+  <div class="fx-topbar-right"><div class="fx-search-ghost">Search <kbd>/</kbd></div><span class="fx-count hot">1</span><span class="fx-avatar">A</span></div>
+</header>
+<div class="fx-strip">main · accepted 24 min ago by agent-a · <span class="fx-st fx-tone-passed">✓ passing</span><span class="fx-live"><i></i>Live</span></div>
+
+<main class="fx-page">
+  <div class="fx-page-head">
+    <div>
+      <div class="fx-crumbs"><a href="#">Work</a><span>›</span><span>Planning</span></div>
+      <h1>Planning</h1>
+      <p class="fx-situation"><b>41 alive</b> in 5 Initiatives · <a href="#">7 working</a> · <a href="#">1 waiting on you</a> · 3 dated · 30 planned.</p>
+    </div>
+    <div class="fx-page-actions">
+      <span class="fx-seg" role="tablist"><a>Intents</a><a>Lanes</a><a aria-current="page">Planning</a></span>
+      <button class="fx-btn ghost">New Initiative</button><button class="fx-btn primary">New Item</button>
+    </div>
+  </div>
+
+  <div class="pl-bar">
+    <span class="fx-seg" role="tablist" aria-label="View"><a href="01-backlog.html">List</a><button aria-pressed="true">Board</button><a href="05-history.html">History</a></span>
+    <button class="fx-sel">Initiative <b>Release 1 close + Team friction</b></button>
+    <button class="fx-sel">Type <b>any</b></button>
+    <label class="pl-search"><input class="fx-input" type="search" placeholder="Filter cards…" aria-label="Filter cards" /></label>
+  </div>
+
+  <div class="pl-board">
+    <section class="pl-col" aria-label="Planned">
+      <header class="pl-col-h">Planned <span class="fx-count">11</span></header>
+      <div class="pl-cards">
+        <article class="pl-card"><div class="eyebrow">Release 1 close · #4</div><div class="t">Queue throughput after a provider outage</div><div class="f"><span class="fx-tag">friction</span>1 comment</div></article>
+        <article class="pl-card"><div class="eyebrow">Release 1 close · #5</div><div class="t">Release 1 close report</div><div class="f"><span class="fx-tag">docs</span></div></article>
+        <article class="pl-card"><div class="eyebrow">Release 1 close · #6</div><div class="t">Docs sync: roadmap, release plan, backlog</div><div class="f"><span class="fx-tag">docs</span></div></article>
+        <article class="pl-card t-stale" style="--pl-rail:var(--fx-stale)"><div class="eyebrow">Release 1 close · #7</div><div class="t">Soak watch ends 2026-11-04</div><div class="f"><span class="fx-tag">watch</span>not before 4 Nov</div></article>
+        <article class="pl-card" style="--pl-rail:var(--fx-stale)"><div class="eyebrow">Release 1 close · #8</div><div class="t">Retired-table purge</div><div class="f"><span class="fx-tag">chore</span>not before 9 Nov</div></article>
+        <article class="pl-card" style="--pl-rail:var(--fx-stale)"><div class="eyebrow">Release 1 close · #9</div><div class="t">Credential rotations</div><div class="f"><span class="fx-tag">chore</span>not before 28 Nov</div></article>
+        <article class="pl-card"><div class="eyebrow">Team friction · #6</div><div class="t">Landed Lane still counted as an open overlap</div><div class="f"><span class="fx-tag">friction</span></div></article>
+        <article class="pl-card"><div class="eyebrow">Team friction · #7</div><div class="t">Import spends the user's API quota</div><div class="f"><span class="fx-tag">friction</span></div></article>
+        <article class="pl-card"><div class="eyebrow">Team friction · #8</div><div class="t">Long queues outlive the finish poller</div><div class="f"><span class="fx-tag">friction</span></div></article>
+        <article class="pl-card"><div class="eyebrow">Team friction · #9</div><div class="t">Lead is not woken after builders finish</div><div class="f"><span class="fx-tag">external</span></div></article>
+        <div class="pl-col-empty"><a href="#">1 more</a></div>
+      </div>
+    </section>
+
+    <section class="pl-col" aria-label="Working">
+      <header class="pl-col-h">Working <span class="fx-count">6</span></header>
+      <div class="pl-cards">
+        <article class="pl-card t-active"><div class="eyebrow">Release 1 close · #1</div><div class="t">Benchmark checkout flow against baseline</div><div class="f">6 saves · 32 min<span class="fx-avatar sm agent" title="agent-a">Ag</span></div></article>
+        <article class="pl-card t-active"><div class="eyebrow">Release 1 close · #2</div><div class="t">Disk hygiene: the cache stops growing</div><div class="f">2 Lanes · 2 of 5 sub-items<span class="fx-avatar sm agent">Ag</span></div></article>
+        <article class="pl-card t-active"><div class="eyebrow">Team friction · #1</div><div class="t">CORE: an imported project is not writable without a local owner</div><div class="f">2 saves · 9 min<span class="fx-avatar sm agent">Ag</span></div></article>
+        <article class="pl-card t-active"><div class="eyebrow">Team friction · #2</div><div class="t">Lane stuck in a stale state</div><div class="f">4 saves · 20 min<span class="fx-avatar sm agent">Ag</span></div></article>
+        <article class="pl-card t-active"><div class="eyebrow">Team friction · #3</div><div class="t">Finish output is buffered; the operation id prints late</div><div class="f">shares a Lane with 1 Item<span class="fx-avatar sm agent">Ag</span></div></article>
+        <article class="pl-card t-active"><div class="eyebrow">Team friction · #4</div><div class="t">Reading a file returned empty output</div><div class="f">shares a Lane with 1 Item<span class="fx-avatar sm agent">Ag</span></div></article>
+      </div>
+    </section>
+
+    <section class="pl-col" aria-label="Checking">
+      <header class="pl-col-h">Checking <span class="fx-count">1</span></header>
+      <div class="pl-cards">
+        <article class="pl-card t-active"><div class="eyebrow">Team friction · #5</div><div class="t">Queued Candidate goes stale</div><div class="f">check 4 min · queue 2<span class="fx-avatar sm agent">Ag</span></div></article>
+      </div>
+    </section>
+
+    <section class="pl-col" aria-label="Ready">
+      <header class="pl-col-h">Ready <span class="fx-count">1</span></header>
+      <div class="pl-cards">
+        <article class="pl-card t-waiting"><div class="eyebrow">Release 1 close · #3</div><div class="t">Stall alerts live: email and push</div><div class="f"><span class="fx-st fx-tone-waiting">◷ waiting on you</span></div></article>
+        <div class="pl-col-empty">Ready = checked and waiting to land or for a person.</div>
+      </div>
+    </section>
+
+    <section class="pl-col" aria-label="Done, last 7 days">
+      <header class="pl-col-h">Done <span class="fx-faint">7 days</span><span class="fx-count">2</span></header>
+      <div class="pl-cards">
+        <article class="pl-card t-passed"><div class="eyebrow">Team friction</div><div class="t">Runtime rejects Node-only globals</div><div class="f">landed a1b2c3d4 · 11 h ago<span class="fx-avatar sm">L</span></div></article>
+        <article class="pl-card t-passed"><div class="eyebrow">Release 1 close › Disk hygiene</div><div class="t">One-time cleanup pass on the demo project</div><div class="f">closed by hand · 45 min<span class="fx-avatar sm">L</span></div></article>
+        <div class="pl-col-empty"><a href="05-history.html">All done and abandoned →</a></div>
+      </div>
+    </section>
+  </div>
+</main>
+</body>
+</html>

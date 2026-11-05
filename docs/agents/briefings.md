@@ -84,6 +84,7 @@ budget, time box, acceptance bar and metrics that must not regress.
    any correction to an impossible assertion. Report observed commands, exit codes
    and counts; label unrun work. Runtime/storage changes also need real billed
    usage and byte-placement evidence; otherwise that acceptance stays open.
+   Perf/cost claims: [perf-claims](perf-claims.md).
 10. Finish your own Lane unless review is required first. Check the benchmark hold
     before each submission; wait without touching it. No routine urgent priority.
     Freeze edits/saves/sync until terminal. Stay with all dependent work and keep

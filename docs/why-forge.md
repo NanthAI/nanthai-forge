@@ -65,7 +65,8 @@ On the current build every overlapping agent pair and file raised an alert at sa
 time (90 / 90), and 84 / 90 reached both agents' transcripts. Alerts arrive with an
 agent's next Forge call, so a fast second save can come first: only 2 / 5 replays
 delivered the first alert to both agents before the second save. Delivery at first
-write has since landed (B3.1); it has not been re-measured. These are the on-main E1/E3 summaries (raw evidence private); full-method extraction is tracked in the [Phase 6 plan](phase6-plan.md).
+write has since landed (B3.1); it has not been re-measured. On-main E1/E3 summaries
+(raw evidence private); methods: [E1](research/e1-overlap.md), [E3](research/e3-failing-burst.md).
 
 **Coordination (R3, measured in B1.5d on 2026-11-04).** Across the scored Forge cells at N ≥ 3,
 Forge raised 45 blocking overlap notices; 13 matched a real conflict and agents acknowledged 42.

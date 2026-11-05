@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<!-- Design mockup with synthetic example data (project, people, Items and numbers are invented). It shows intended layout and wording only; it does not describe behavior that ships. See docs/design/planning/README.md. -->
+<meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Planning · component states sheet</title>
+<link rel="stylesheet" href="p6.css" /><script src="p6.js"></script>
+<style>.sheet-h{font:700 14px var(--fx-font-head);margin:24px 0 10px}.sheet-h:first-child{margin-top:0}.row-demo{display:flex;flex-wrap:wrap;gap:8px;padding:12px 14px;align-items:center}</style>
+</head>
+<body>
+<main class="fx-page" style="max-width:1240px;margin:0 auto">
+  <h1 style="font:700 20px/1.25 var(--fx-font-head);letter-spacing:-.015em">Planning states sheet</h1>
+  <p class="fx-situation" style="margin-bottom:14px">Every state a builder must render. Words and colours are fixed; see SPEC.md §Status.</p>
+
+  <div class="pl-sheet">
+    <section class="fx-panel">
+      <header class="fx-panel-h"><h2>Status pills (derived)</h2></header>
+      <div class="row-demo">
+        <span class="fx-st fx-tone-stale">○ Proposed</span>
+        <span class="fx-st fx-tone-plain">Planned</span>
+        <span class="fx-st fx-tone-stale">○ Dated</span>
+        <span class="fx-st fx-tone-active">● Working</span>
+        <span class="fx-st fx-tone-active">◐ Checking</span>
+        <span class="fx-st fx-tone-passed">✓ Ready</span>
+        <span class="fx-st fx-tone-waiting">◷ Waiting</span>
+        <span class="fx-st fx-tone-failed">✕ Check failed</span>
+        <span class="fx-st fx-tone-conflict">⧉ Conflict</span>
+        <span class="fx-st fx-tone-passed">✓ Done</span>
+        <span class="fx-st fx-tone-stale">— Abandoned</span>
+      </div>
+      <div class="fx-panel-f">Initiative pills: Planned · ● In motion · ✓ Done · — Abandoned. Group counts never use colour.</div>
+    </section>
+
+    <section class="fx-panel">
+      <header class="fx-panel-h"><h2>Quick capture</h2></header>
+      <div style="padding:12px 14px;display:grid;gap:10px">
+        <form class="pl-capture" style="margin:0"><input placeholder="Jot it down… (Enter creates a planned Item; refine later)" /><span class="pl-capture-in">in <button type="button" class="fx-sel" style="height:24px"><b>Release 2: beta</b></button></span></form>
+        <form class="pl-capture is-typing" style="margin:0"><input value="Import tarball instead of per-blob requests" /><span class="pl-capture-in"><span class="fx-kbd">↵</span> add · <span class="fx-kbd">⌘↵</span> add and open</span></form>
+        <form class="pl-capture is-saving" style="margin:0"><input value="Import tarball instead of per-blob requests" disabled /><span class="pl-capture-in">adding…</span></form>
+        <form class="pl-capture is-error" style="margin:0"><input value="Import tarball instead of per-blob requests" /><span class="pl-capture-err">Not saved: you are offline. Retry keeps the same operation.</span><button class="fx-btn sm" type="button">Retry</button></form>
+      </div>
+      <div class="fx-panel-f">After add: toast “Added ‘…’ to Release 2 · Undo · Open” for 6 s. Input clears and keeps focus. Type is inferred from the first word when it matches a type (“bug: …”, “idea …”) and shown as an <code>auto</code> tag with Undo.</div>
+    </section>
+
+    <section class="fx-panel">
+      <header class="fx-panel-h"><h2>Rows, every tone</h2></header>
+      <ol class="pl-rows">
+        <li class="pl-row t-stale"><span class="pl-handle">⋮⋮</span><span class="fx-st fx-tone-stale">○ Proposed</span><div class="pl-main"><div class="pl-title"><a href="#">Add a dark-mode toggle to the CLI brief</a><span class="fx-tag">idea</span></div><div class="pl-fact">proposed from outside by m.chen · <a href="#">Plan it</a> · <a href="#">Decline</a></div></div><span class="pl-who"><span class="fx-avatar sm">M</span><span>m.chen</span></span><span class="pl-age num">2 d</span></li>
+        <li class="pl-row"><span class="pl-handle">⋮⋮</span><span class="fx-st fx-tone-plain">Planned</span><div class="pl-main"><div class="pl-title"><a href="#">Queue throughput after a provider outage</a><span class="fx-tag">friction</span></div><div class="pl-fact">no Lane yet · 1 comment</div></div><span class="pl-who"></span><span class="pl-age num">1 h</span></li>
+        <li class="pl-row t-stale"><span class="pl-handle">⋮⋮</span><span class="fx-st fx-tone-stale">○ Dated</span><div class="pl-main"><div class="pl-title"><a href="#">Retired-table purge</a><span class="fx-tag">chore</span></div><div class="pl-fact">not before <b>9 Nov</b> · becomes Planned that day</div></div><span class="pl-who"></span><span class="pl-age num">1 h</span></li>
+        <li class="pl-row t-active"><span class="pl-handle">⋮⋮</span><span class="fx-st fx-tone-active">● Working</span><div class="pl-main"><div class="pl-title"><a href="#">Lane stuck in a stale state</a><span class="fx-tag">friction</span></div><div class="pl-fact">1 Lane · 4 saves · last save 20 min ago</div></div><span class="pl-who"><span class="fx-avatar sm agent">Ag</span><span>agent-a · stale-fix</span></span><span class="pl-age num">1 h</span></li>
+        <li class="pl-row t-active"><span class="pl-handle">⋮⋮</span><span class="fx-st fx-tone-active">◐ Checking</span><div class="pl-main"><div class="pl-title"><a href="#">Queued Candidate goes stale</a><span class="fx-tag">friction</span></div><div class="pl-fact">check running 4 min · queue position 2</div></div><span class="pl-who"><span class="fx-avatar sm agent">Ag</span><span>agent-a</span></span><span class="pl-age num">1 h</span></li>
+        <li class="pl-row t-passed"><span class="pl-handle">⋮⋮</span><span class="fx-st fx-tone-passed">✓ Ready</span><div class="pl-main"><div class="pl-title"><a href="#">Freeze edits during finish and dispatch ready work first</a><span class="fx-tag">feature</span></div><div class="pl-fact">check passed · landing, position 1</div></div><span class="pl-who"><span class="fx-avatar sm agent">Ag</span><span>agent-a</span></span><span class="pl-age num">3 h</span></li>
+        <li class="pl-row t-waiting"><span class="pl-handle">⋮⋮</span><span class="fx-st fx-tone-waiting">◷ Waiting</span><div class="pl-main"><div class="pl-title"><a href="#">Stall alerts live: email and push</a><span class="fx-tag">chore</span></div><div class="pl-fact"><span class="dec">waiting on you</span> · add the alert topic · <a href="#">Answer</a></div></div><span class="pl-who"><span class="fx-avatar sm">A</span><span>you</span></span><span class="pl-age num">1 h</span></li>
+        <li class="pl-row t-failed"><span class="pl-handle">⋮⋮</span><span class="fx-st fx-tone-failed">✕ Check failed</span><div class="pl-main"><div class="pl-title"><a href="#">Selector: by-name closures</a><span class="fx-tag">feature</span></div><div class="pl-fact">verify failed 6 min ago · 2 tests · <a href="#">log</a></div></div><span class="pl-who"><span class="fx-avatar sm agent">Ag</span><span>agent-b</span></span><span class="pl-age num">2 h</span></li>
+        <li class="pl-row t-conflict"><span class="pl-handle">⋮⋮</span><span class="fx-st fx-tone-conflict">⧉ Conflict</span><div class="pl-main"><div class="pl-title"><a href="#">CLI verbs, batch two</a><span class="fx-tag">feature</span></div><div class="pl-fact">conflicts with main in 2 files since 14 min ago</div></div><span class="pl-who"><span class="fx-avatar sm agent">Ag</span><span>agent-a</span></span><span class="pl-age num">5 h</span></li>
+        <li class="pl-row t-passed done"><span class="pl-handle">⋮⋮</span><span class="fx-st fx-tone-passed">✓ Done</span><div class="pl-main"><div class="pl-title"><a href="#">Runtime rejects Node-only globals</a><span class="fx-tag">friction</span></div><div class="pl-fact">landed <code>a1b2c3d4</code> · 11 h ago · leaves Alive at 24 h</div></div><span class="pl-who"><span class="fx-avatar sm">L</span><span>lead</span></span><span class="pl-age num">11 h</span></li>
+        <li class="pl-row t-stale done"><span class="pl-handle">⋮⋮</span><span class="fx-st fx-tone-stale">— Abandoned</span><div class="pl-main"><div class="pl-title"><a href="#">Paid CI trial</a><span class="fx-tag">decision</span></div><div class="pl-fact">abandoned · “cost too high; free runners only”</div></div><span class="pl-who"><span class="fx-avatar sm">A</span><span>alex</span></span><span class="pl-age num">6 d</span></li>
+        <li class="pl-row pl-child t-active"><span class="pl-handle">⋮⋮</span><span class="fx-st fx-tone-active">● Working</span><div class="pl-main"><div class="pl-title"><a href="#">Cache GC for nested Lane copies</a></div><div class="pl-fact">sub-item of Disk hygiene · shown only when the parent is expanded</div></div><span class="pl-who"><span class="fx-avatar sm agent">Ag</span><span>agent-a</span></span><span class="pl-age num">58 m</span></li>
+      </ol>
+    </section>
+
+    <section class="fx-panel">
+      <header class="fx-panel-h"><h2>Empty, loading, error</h2></header>
+      <div style="padding:12px 14px;display:grid;gap:12px">
+        <div class="pl-group" style="margin:0"><header class="pl-grp-h"><span class="pl-grp-title"><span class="chev">▾</span>Release 3</span><span class="pl-line">nothing planned yet</span><span class="fx-st fx-tone-plain">Planned</span></header><div class="fx-quiet">Nothing here. Jot the first item above or <a href="#" style="color:var(--fx-accent)">move items in</a>.</div></div>
+        <div class="pl-group" style="margin:0"><div class="fx-quiet">Nothing alive. <a href="#" style="color:var(--fx-accent)">History</a> has 3 closed items.</div></div>
+        <div class="pl-group" style="margin:0"><div class="fx-quiet">No match for “gantt” among alive items. <a href="#" style="color:var(--fx-accent)">Search history too</a>.</div></div>
+        <div class="pl-group" style="margin:0"><header class="pl-grp-h"><span class="pl-grp-title"><span class="chev">▾</span>Release 1 close</span><span class="pl-line" style="color:var(--fx-text-3)">…</span><span></span></header><div class="pl-skel"></div><div class="pl-skel"></div><div class="pl-skel"></div></div>
+        <div class="pl-group" style="margin:0"><div class="pl-errbox"><span class="fx-st fx-tone-failed">✕ Not loaded</span><span>Planning could not be read (network). Shown: nothing. <a href="#" style="color:var(--fx-accent)">Retry</a></span></div></div>
+        <div class="fx-panel" style="margin:0"><header class="fx-panel-h"><h2>Progress</h2></header><div class="fx-quiet">Charts begin after two days of events. First point: 31 Oct.</div></div>
+      </div>
+      <div class="fx-panel-f">Skeleton at final row height, no shimmer over 600 ms. Errors never replace rows that were already shown; they add the box above them.</div>
+    </section>
+
+    <section class="fx-panel">
+      <header class="fx-panel-h"><h2>Reorder and move</h2></header>
+      <ol class="pl-rows">
+        <li class="pl-row" aria-selected="true" style="box-shadow:inset 0 0 0 1px var(--fx-accent)"><span class="pl-handle" style="opacity:1">⋮⋮</span><span class="fx-st fx-tone-plain">Planned</span><div class="pl-main"><div class="pl-title"><a href="#">Release 1 close report</a></div><div class="pl-fact">grabbed · <span class="fx-kbd">⌥↑</span><span class="fx-kbd">⌥↓</span> move · <span class="fx-kbd">esc</span> cancel</div></div><span class="pl-who"></span><span class="pl-age num">#5</span></li>
+        <li style="height:2px;background:var(--fx-accent);margin:0 14px"></li>
+        <li class="pl-row"><span class="pl-handle">⋮⋮</span><span class="fx-st fx-tone-plain">Planned</span><div class="pl-main"><div class="pl-title"><a href="#">Docs sync: roadmap, release plan, backlog</a></div><div class="pl-fact">drop line shows the new position</div></div><span class="pl-who"></span><span class="pl-age num">#6</span></li>
+      </ol>
+      <div class="fx-panel-f">After drop: toast “Moved to #6 · Undo”. Agents moving items you own are refused by policy; the row shows “order set by agent-a” in its fact line for 1 h after an agent move.</div>
+    </section>
+
+    <section class="fx-panel">
+      <header class="fx-panel-h"><h2>390 px</h2></header>
+      <div style="padding:12px 14px">
+        <div class="pl-phone">
+          <div class="fx-topbar" style="gap:10px"><span class="fx-mark">F</span><span class="fx-proj" style="border:0;padding:0">demo-project</span><div class="fx-topbar-right"><span class="fx-count hot">1</span><span class="fx-avatar">A</span></div></div>
+          <div style="padding:12px">
+            <h1 style="font:700 20px/1.25 var(--fx-font-head)">Planning</h1>
+            <p class="fx-situation" style="font-size:14px"><b>41 alive</b> · 7 working · 1 waiting on you.</p>
+            <div class="pl-bar" style="margin-top:10px"><span class="fx-seg"><button aria-pressed="true">List</button><button>Board</button><button>History</button></span><button class="fx-sel">Alive <b>41</b></button></div>
+            <form class="pl-capture" style="height:40px;margin-bottom:10px"><input placeholder="Jot it down…" /></form>
+            <section class="pl-group" style="margin:0">
+              <header class="pl-grp-h"><a class="pl-grp-title"><span class="chev">▾</span>Release 1 close</a><span class="fx-st fx-tone-active">● In motion</span><span class="pl-line"><b>0 of 9</b> landed · 2 working · 1 waiting on you · 3 dated</span></header>
+              <ol class="pl-rows">
+                <li class="pl-row t-active"><span></span><span class="fx-st fx-tone-active">● Working</span><div class="pl-main"><div class="pl-title"><a href="#">Benchmark checkout flow against baseline</a></div><div class="pl-fact">1 Lane · last save 32 min · agent-a</div></div><span class="pl-age num">1 h</span></li>
+                <li class="pl-row t-waiting"><span></span><span class="fx-st fx-tone-waiting">◷ Waiting</span><div class="pl-main"><div class="pl-title"><a href="#">Stall alerts live: email and push</a></div><div class="pl-fact"><span class="dec">waiting on you</span> · add the alert topic</div></div><span class="pl-age num">1 h</span></li>
+                <li class="pl-row"><span></span><span class="fx-st fx-tone-plain">Planned</span><div class="pl-main"><div class="pl-title"><a href="#">Queue throughput after a provider outage</a></div><div class="pl-fact">no Lane yet</div></div><span class="pl-age num">1 h</span></li>
+              </ol>
+            </section>
+          </div>
+        </div>
+      </div>
+      <div class="fx-panel-f">Phones: no handle, no who column, pill top-right, one-liner wraps under the title. Reorder via row menu “Move up / down / to…”.</div>
+    </section>
+  </div>
+</main>
+</body>
+</html>

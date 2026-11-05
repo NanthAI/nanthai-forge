@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<!-- Design mockup with synthetic example data (project, people, Items and numbers are invented). It shows intended layout and wording only; it does not describe behavior that ships. See docs/design/planning/README.md. -->
+<meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Planning · History · demo-project</title>
+<link rel="stylesheet" href="p6.css" /><script src="p6.js"></script>
+</head>
+<body>
+<header class="fx-topbar">
+  <span class="fx-mark">F</span><span class="fx-brandname">Forge</span><span class="fx-proj">demo-project ▾</span>
+  <nav class="fx-nav"><a href="#">Now</a><a href="#" aria-current="page">Work</a><a href="#">Code</a><a href="#">Settings</a></nav>
+  <div class="fx-topbar-right"><div class="fx-search-ghost">Search <kbd>/</kbd></div><span class="fx-count hot">1</span><span class="fx-avatar">A</span></div>
+</header>
+<div class="fx-strip">main · accepted 24 min ago by agent-a · <span class="fx-st fx-tone-passed">✓ passing</span><span class="fx-live"><i></i>Live</span></div>
+
+<main class="fx-page">
+  <div class="fx-page-head">
+    <div>
+      <div class="fx-crumbs"><a href="#">Work</a><span>›</span><span>Planning</span></div>
+      <h1>Planning</h1>
+      <p class="fx-situation"><b>3 closed</b> this week · 1 landed, 2 closed by hand · 0 abandoned.</p>
+    </div>
+    <div class="fx-page-actions">
+      <span class="fx-seg" role="tablist"><a>Intents</a><a>Lanes</a><a aria-current="page">Planning</a></span>
+      <button class="fx-btn ghost">Export</button>
+    </div>
+  </div>
+
+  <div class="pl-bar">
+    <span class="fx-seg" role="tablist" aria-label="View"><a href="01-backlog.html">List</a><a href="03-board.html">Board</a><button aria-pressed="true">History</button></span>
+    <span class="fx-seg" aria-label="Scope"><button aria-pressed="true">Done + abandoned</button><button>Everything</button></span>
+    <button class="fx-sel">Initiative <b>any</b></button>
+    <button class="fx-sel">Type <b>any</b></button>
+    <label class="pl-search" style="width:320px"><input class="fx-input" type="search" value="disk" aria-label="Search history" /></label>
+  </div>
+
+  <section class="pl-group">
+    <header class="pl-grp-h"><span class="pl-grp-title">2 matches for “disk”</span><span class="pl-line">titles, bodies, comments and close reasons · newest first</span><span></span></header>
+    <ol class="pl-rows">
+      <li class="pl-row pl-hist-row t-passed done"><span></span><span class="fx-st fx-tone-passed">✓ Done</span>
+        <div class="pl-main"><div class="pl-title"><a href="#">One-time cleanup pass on the demo project</a><span class="fx-tag">chore</span></div><div class="pl-fact">closed by hand · “free space restored after approved deletes” · Release 1 close › <span class="pl-mark">Disk</span> hygiene</div></div>
+        <span class="pl-who"><span class="fx-avatar sm">L</span><span>lead</span></span><span class="pl-when num" title="2026-10-31 09:55">31 Oct</span></li>
+      <li class="pl-row pl-hist-row t-passed done"><span></span><span class="fx-st fx-tone-passed">✓ Done</span>
+        <div class="pl-main"><div class="pl-title"><a href="#">Runtime rejects Node-only globals</a><span class="fx-tag">friction</span></div><div class="pl-fact">landed <code>a1b2c3d4</code> · check verify passed · Team friction · comment: “…guard check-co… freed <span class="pl-mark">disk</span>…”</div></div>
+        <span class="pl-who"><span class="fx-avatar sm">L</span><span>lead</span></span><span class="pl-when num" title="2026-10-30 22:51">30 Oct</span></li>
+    </ol>
+  </section>
+
+  <section class="pl-group">
+    <header class="pl-grp-h"><span class="pl-grp-title">Without the search: all closed</span><span class="pl-line">3 done · 0 abandoned · since 2 Oct</span><span></span></header>
+    <ol class="pl-rows">
+      <li class="pl-row pl-hist-row t-passed done"><span></span><span class="fx-st fx-tone-passed">✓ Done</span><div class="pl-main"><div class="pl-title"><a href="#">One-time cleanup pass on the demo project</a><span class="fx-tag">chore</span></div><div class="pl-fact">closed by hand · Release 1 close › Disk hygiene</div></div><span class="pl-who"><span class="fx-avatar sm">L</span><span>lead</span></span><span class="pl-when num">31 Oct</span></li>
+      <li class="pl-row pl-hist-row t-passed done"><span></span><span class="fx-st fx-tone-passed">✓ Done</span><div class="pl-main"><div class="pl-title"><a href="#">Runtime rejects Node-only globals</a><span class="fx-tag">friction</span></div><div class="pl-fact">landed <code>a1b2c3d4</code> · Team friction</div></div><span class="pl-who"><span class="fx-avatar sm">L</span><span>lead</span></span><span class="pl-when num">30 Oct</span></li>
+      <li class="pl-row pl-hist-row t-passed done"><span></span><span class="fx-st fx-tone-passed">✓ Done</span><div class="pl-main"><div class="pl-title"><a href="#">Use the product for its own roadmap</a><span class="fx-tag">feature</span></div><div class="pl-fact">landed · 1 Intent · Community and operation</div></div><span class="pl-who"></span><span class="pl-when num">2 Oct</span></li>
+      <li class="pl-more"><span class="fx-faint">End of history.</span></li>
+    </ol>
+  </section>
+</main>
+</body>
+</html>

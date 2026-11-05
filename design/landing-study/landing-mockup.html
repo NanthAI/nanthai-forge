@@ -1,0 +1,431 @@
+<!doctype html>
+<html lang="en">
+<head>
+<!-- Tentative landing mockup from the 2026-10-27 landing-page-skill trial. A design input only: not approved, not shipped. Claims (numbers, status, FAQ) reflect that date and must be re-checked against docs/status.md and docs/why-forge.md before any reuse. People and agent names are synthetic. See docs/design/landing-study/README.md. -->
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>NanthAi Forge: source host for people and coding agents changing one codebase at once</title>
+<meta name="description" content="Forge is an open source source host and workspace where people and coding agents change one codebase at once. Each works in its own Lane; a landing queue checks the exact composed result before it lands on main.">
+<meta property="og:title" content="NanthAi Forge">
+<meta property="og:description" content="Open source source host for people and coding agents changing one codebase at once. Lanes, exact checks, one screen that shows who is working, what is changing and what needs you.">
+<meta property="og:type" content="website">
+<!-- og:image: none exists yet; add a 1200×630 render of the Now panel before public beta. -->
+<style>
+/* Mockup only. Tokens mirror web/src/ui/tokens.css; landing-only additions are marked. */
+@font-face{font-family:Manrope;src:url(../../web/src/assets/fonts/Manrope-latin.woff2) format("woff2");font-weight:200 800;font-display:swap}
+:root{
+  --font-ui:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",system-ui,sans-serif;
+  --font-head:Manrope,-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
+  --font-mono:"SF Mono",SFMono-Regular,ui-monospace,Menlo,Consolas,monospace;
+  --s-1:4px;--s-2:8px;--s-3:12px;--s-4:16px;--s-6:24px;--s-8:32px;--s-12:48px;
+  --s-16:64px;--s-24:96px; /* landing only: section rhythm */
+  --r-1:4px;--r-2:6px;--r-3:8px;--r-4:12px;
+  --brand:#ff6b3d;--brand-hover:#ff865f;--on-brand:#17100b;
+  --ease:cubic-bezier(.2,.7,.2,1);--d-fast:150ms;--d-base:240ms;
+  --bg:#f4f6f9;--surface:#fff;--surface-2:#f8f9fb;--surface-3:#eef1f5;--hover:#f1f4f8;
+  --line:#e3e7ed;--line-strong:#cfd6df;--text:#141a24;--text-2:#4f5b6b;--text-3:#606c7c;
+  --accent:#b43a11;--accent-bg:#fff0e9;--focus:#b43a11;
+  --active:#1f6fd1;--active-bg:#e8f1fd;--waiting:#8a5800;--waiting-bg:#fff4dc;
+  --passed:#1e7a4c;--passed-bg:#e6f5ec;--failed:#c42b37;--failed-bg:#fdecee;
+  --conflict:#7a3fc4;--conflict-bg:#f3ecfd;--stale:#6c7686;--stale-bg:#eef1f5;--rail-off:#dde3ea;
+  --shadow:0 12px 40px #1a22302a,0 1px 3px #1a223014;
+}
+:root[data-theme=dark]{
+  --bg:#0b0e13;--surface:#11151c;--surface-2:#161b24;--surface-3:#1c2230;--hover:#1a202b;
+  --line:#222a36;--line-strong:#2e3746;--text:#e8ecf2;--text-2:#a3adbb;--text-3:#7a8596;
+  --accent:#ff936e;--accent-bg:#2b1d17;--focus:#ff936e;
+  --active:#6aaeff;--active-bg:#14233a;--waiting:#f2b84b;--waiting-bg:#2c2312;
+  --passed:#5fd39a;--passed-bg:#12281e;--failed:#ff6f7a;--failed-bg:#311519;
+  --conflict:#c79bff;--conflict-bg:#251a37;--stale:#7d8796;--stale-bg:#1a1f28;--rail-off:#2a3240;
+  --shadow:0 12px 40px #0009,0 1px 3px #0006;
+}
+*{box-sizing:border-box}
+html{background:var(--bg)}
+body{margin:0;font:400 16px/24px var(--font-ui);color:var(--text);background:var(--bg);-webkit-font-smoothing:antialiased;font-variant-numeric:tabular-nums;text-wrap:pretty}
+h1,h2,h3,p,ul,ol,dl,dd,figure{margin:0}
+h1,h2,h3{font-family:var(--font-head);letter-spacing:-.015em;color:var(--text);text-wrap:balance}
+h2{font-size:24px;line-height:32px;font-weight:700}
+h3{font-size:16px;line-height:24px;font-weight:700}
+a{color:inherit;text-decoration:none}
+a:hover{color:var(--accent)}
+p a,li a,dd a,td a{color:var(--accent);text-decoration:underline;text-decoration-color:var(--line-strong);text-underline-offset:3px}
+code,pre,kbd{font-family:var(--font-mono);font-size:14px}
+:focus-visible{outline:2px solid var(--focus);outline-offset:2px;border-radius:var(--r-1)}
+.skip{position:absolute;left:var(--s-4);top:-40px;padding:var(--s-2) var(--s-3);background:var(--surface);border:1px solid var(--line-strong);border-radius:var(--r-2);z-index:9}
+.skip:focus{top:var(--s-2)}
+.wrap{max-width:1180px;margin:0 auto;padding:0 var(--s-6)}
+.muted{color:var(--text-2)}.faint{color:var(--text-3);font-size:14px;line-height:20px}
+.eyebrow{font:600 12px/16px var(--font-ui);letter-spacing:.05em;text-transform:uppercase;color:var(--text-3)}
+
+/* Top bar: flat, flush, 56px (DESIGN.md), not the skill's floating blurred bar */
+.top{height:56px;display:flex;align-items:center;gap:var(--s-4);padding:0 var(--s-6)}
+.brand{display:flex;align-items:center;gap:10px;font-family:var(--font-head);font-weight:700;font-size:16px;line-height:1}
+.brand small{display:block;font:600 10px/1 var(--font-ui);letter-spacing:.08em;text-transform:uppercase;color:var(--text-3);margin-bottom:3px}
+.brand svg{width:22px;height:26px}
+.top nav{margin-left:auto;display:flex;align-items:center;gap:var(--s-1)}
+.top nav a,.top nav button{font:500 14px/20px var(--font-ui);padding:6px 10px;border-radius:var(--r-2);color:var(--text-2);background:none;border:0;cursor:pointer;transition:background var(--d-fast) var(--ease),color var(--d-fast) var(--ease)}
+.top nav a:hover,.top nav button:hover{background:var(--hover);color:var(--text)}
+.top nav a[aria-current=page]{color:var(--text);box-shadow:inset 0 -2px 0 var(--brand)}
+
+/* Buttons (DESIGN.md .btn family). Primary is the One Orange per area. */
+.btn{all:unset;box-sizing:border-box;display:inline-flex;align-items:center;justify-content:center;gap:6px;height:30px;padding:0 12px;border-radius:var(--r-2);border:1px solid var(--line-strong);background:var(--surface-2);color:var(--text);font:550 14px/1 var(--font-ui);white-space:nowrap;cursor:pointer;transition:background var(--d-fast) var(--ease),border-color var(--d-fast) var(--ease),transform var(--d-fast) var(--ease)}
+.btn:hover{background:var(--hover)}
+.btn:active{transform:translateY(1px)}
+.btn.primary{height:44px;padding:0 20px;border-color:transparent;background:var(--brand);color:var(--on-brand);font-weight:600;font-size:16px;border-radius:var(--r-3)}
+.btn.primary:hover{background:var(--brand-hover)}
+.btn.rec{border-color:var(--text-2);font-weight:600}
+.btn.ghost{border-color:transparent;background:none;color:var(--text-2)}
+.btn[disabled]{opacity:.5;cursor:default}
+
+/* Hero */
+.hero{border-bottom:1px solid var(--line)}
+.hero .wrap{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,480px);gap:var(--s-12);align-items:center;padding-top:var(--s-16);padding-bottom:var(--s-16);min-height:620px}
+.hero h1{max-width:680px;font:730 60px/1.08 var(--font-head);letter-spacing:-.035em}
+.hero h1 span{color:var(--brand)}
+.lead{max-width:600px;margin-top:var(--s-6);font-size:18px;line-height:28px;color:var(--text-2)}
+.lead strong{color:var(--text);font-weight:600}
+.paste{display:flex;align-items:center;gap:var(--s-2);width:100%;max-width:680px;height:58px;margin-top:var(--s-8);padding:6px 6px 6px 14px;border:1px solid var(--line-strong);border-radius:var(--r-4);background:var(--surface);box-shadow:var(--shadow);transition:border-color var(--d-fast) var(--ease)}
+.paste:focus-within{border-color:var(--accent);box-shadow:var(--shadow),0 0 0 3px color-mix(in srgb,var(--accent) 25%,transparent)}
+.paste .gh{flex:none;width:16px;height:16px;color:var(--text-3)}
+.paste input{flex:1;min-width:0;border:0;outline:0;background:none;font:400 16px/24px var(--font-ui);color:var(--text)}
+.paste input::placeholder{color:var(--text-3)}
+.paste .btn{flex:none}
+.note{margin-top:var(--s-3);font-size:14px;line-height:20px;color:var(--text-3)}
+.proof{margin-top:var(--s-6);padding-top:var(--s-6);border-top:1px solid var(--line);max-width:600px;font-size:14px;line-height:20px;color:var(--text-2)}
+.proof b{color:var(--text);font-weight:600}
+.proof .num{font-family:var(--font-head);font-weight:700;color:var(--text)}
+
+/* Example Now panel (typed facsimile; the real page keeps the river canvas or a live render) */
+.now{position:relative;border:1px solid var(--line);border-radius:var(--r-3);background:var(--surface);font-size:13px;line-height:1.45;overflow:hidden}
+.now .ribbon{position:absolute;top:-1px;right:var(--s-4);padding:2px 9px;border-radius:0 0 var(--r-1) var(--r-1);background:var(--waiting-bg);color:var(--waiting);font:650 11px/16px var(--font-ui)}
+.now .strip{height:32px;display:flex;align-items:center;gap:var(--s-2);padding:0 14px;background:var(--bg);color:var(--text-2);font-size:12px;border-bottom:1px solid var(--line)}
+.now .strip b{color:var(--text);font-weight:600}
+.now .ph{display:flex;align-items:center;justify-content:space-between;height:42px;padding:0 14px;border-bottom:1px solid var(--line)}
+.now .ph h3{font-size:14px;line-height:1.3;font-weight:700}
+.pill{display:inline-flex;align-items:center;gap:4px;height:20px;padding:0 7px;border-radius:var(--r-1);font:600 11.5px/1 var(--font-ui)}
+.pill.hot{background:var(--brand);color:var(--on-brand);border-radius:9px}
+.pill.active{background:var(--active-bg);color:var(--active)}
+.pill.waiting{background:var(--waiting-bg);color:var(--waiting)}
+.pill.passed{background:var(--passed-bg);color:var(--passed)}
+.pill.conflict{background:var(--conflict-bg);color:var(--conflict)}
+.row{position:relative;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 14px;padding:10px 14px 10px 18px;border-bottom:1px solid var(--line)}
+.row::before{content:"";position:absolute;left:0;top:10px;bottom:10px;width:3px;border-radius:2px;background:var(--rail-off)}
+.row.active::before{background:var(--active)}
+.row.waiting::before{background:var(--waiting)}
+.row.passed::before{background:var(--passed)}
+.row .t{font-weight:650}
+.row .who{grid-column:1/-1;color:var(--text-2);font-size:12px}
+.row .who i{font-style:normal;display:inline-block;padding:0 5px;border-radius:3px;background:var(--surface-3);color:var(--text-2);font-size:10.5px;margin-left:4px}
+.decision{padding:12px 14px 14px;background:var(--surface-2);border-bottom:1px solid var(--line)}
+.decision .eyebrow{color:var(--waiting)}
+.decision .t{margin-top:4px;font-weight:650}
+.decision .why{margin-top:2px;color:var(--text-2);font-size:12.5px}
+.decision .ans{display:flex;gap:var(--s-2);margin-top:10px;flex-wrap:wrap}
+.decision .btn{height:28px;font-size:12.5px}
+.rail{display:inline-flex;gap:3px;vertical-align:middle;margin-left:6px}
+.rail span{width:16px;height:4px;border-radius:2px;background:var(--rail-off)}
+.rail .on{background:var(--text-2)}.rail .ok{background:var(--passed)}
+.now .pf{padding:8px 14px;color:var(--text-2);font-size:12px}
+
+/* Sections */
+section.block{padding:var(--s-24) 0}
+section.block.tight{padding:var(--s-16) 0}
+section.block + section.block{border-top:1px solid var(--line)}
+.head{max-width:680px}
+.head p{margin-top:var(--s-3);color:var(--text-2)}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:var(--s-8);margin-top:var(--s-12)}
+.two h3{color:var(--text-3);font-family:var(--font-ui);font-weight:600;font-size:14px;line-height:20px;letter-spacing:.02em}
+.two ul{margin:var(--s-3) 0 0;padding-left:18px;color:var(--text-2)}
+.two li+li{margin-top:var(--s-2)}
+.two li strong{color:var(--text);font-weight:600}
+
+/* Large type statement (skill B11 as content, static per DESIGN.md) */
+.statement{padding:var(--s-24) 0}
+.statement p{max-width:900px;font:730 48px/1.1 var(--font-head);letter-spacing:-.03em;color:var(--text);text-wrap:balance}
+.statement p span{color:var(--text-3)}
+.statement .faint{margin-top:var(--s-6);max-width:600px}
+
+dl.benefits{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--s-8) var(--s-12);margin-top:var(--s-12)}
+dl.benefits dt{font:700 18px/28px var(--font-head);letter-spacing:-.015em}
+dl.benefits dd{margin-top:var(--s-2);color:var(--text-2)}
+
+ol.steps{list-style:none;padding:0;margin:var(--s-12) 0 0;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--s-6)}
+ol.steps li{counter-increment:step;padding:var(--s-6);border:1px solid var(--line);border-radius:var(--r-3);background:var(--surface)}
+ol.steps li::before{content:counter(step);display:grid;place-items:center;width:28px;height:28px;border-radius:var(--r-1);background:var(--surface-3);color:var(--text-2);font:700 13px/1 var(--font-ui)}
+ol.steps h3{margin-top:var(--s-3)}
+ol.steps p{margin-top:var(--s-2);color:var(--text-2);font-size:14px;line-height:20px}
+ol.steps pre{margin:var(--s-3) 0 0;padding:10px 12px;border-radius:var(--r-2);border:1px solid var(--line);background:var(--surface-2);font-size:12px;line-height:18px;white-space:pre-wrap;overflow-wrap:anywhere;color:var(--text)}
+
+table{width:100%;border-collapse:collapse;margin-top:var(--s-8);font-size:14px;line-height:20px}
+th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-weight:600;color:var(--text-2);font-size:12px;letter-spacing:.03em;text-transform:uppercase}
+td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
+td .win{color:var(--passed);font-weight:600}
+td .loss{color:var(--failed);font-weight:600}
+.caveat{margin-top:var(--s-4);font-size:14px;line-height:20px;color:var(--text-2);max-width:760px}
+
+.status{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--s-6);margin-top:var(--s-12)}
+.status div{padding:var(--s-6);border:1px solid var(--line);border-radius:var(--r-3);background:var(--surface)}
+.status h3{display:flex;align-items:center;gap:8px}
+.status ul{margin:var(--s-3) 0 0;padding-left:18px;color:var(--text-2);font-size:14px;line-height:20px}
+.status li+li{margin-top:6px}
+
+.faq{margin-top:var(--s-12);max-width:760px;border-top:1px solid var(--line)}
+.faq details{border-bottom:1px solid var(--line)}
+.faq summary{list-style:none;cursor:pointer;padding:var(--s-4) 0;font:700 16px/24px var(--font-head);letter-spacing:-.015em;display:flex;justify-content:space-between;gap:var(--s-4)}
+.faq summary::-webkit-details-marker{display:none}
+.faq summary::after{content:"+";color:var(--text-3);font-family:var(--font-ui);font-weight:400}
+.faq details[open] summary::after{content:"−"}
+.faq details p{padding:0 0 var(--s-4);color:var(--text-2)}
+
+.final{padding:var(--s-24) 0;text-align:left}
+.final .paste{margin-top:var(--s-8)}
+
+footer{border-top:1px solid var(--line);padding:var(--s-8) 0 var(--s-12);font-size:14px;line-height:20px;color:var(--text-3)}
+footer .wrap{display:flex;flex-wrap:wrap;gap:var(--s-4) var(--s-6);align-items:center}
+footer nav{margin-left:auto;display:flex;gap:var(--s-4)}
+
+@media(max-width:1000px){
+  .hero .wrap{grid-template-columns:1fr;min-height:0;gap:var(--s-12)}
+  .now{max-width:600px}
+  ol.steps,.status{grid-template-columns:1fr}
+  dl.benefits{grid-template-columns:1fr}
+}
+@media(max-width:720px){
+  .wrap{padding:0 var(--s-4)}
+  .top{padding:0 var(--s-4)}.top nav a:not([aria-current]){display:none}
+  .hero .wrap{padding-top:var(--s-8);padding-bottom:var(--s-8)}
+  .hero h1{font-size:38px}.lead{font-size:16px;line-height:24px}
+  .paste{height:auto;flex-wrap:wrap;padding:10px;border-radius:var(--r-3)}
+  .paste input{flex-basis:100%;min-width:160px}.paste .btn{width:100%}
+  .statement p{font-size:32px}
+  .two{grid-template-columns:1fr}
+  section.block{padding:var(--s-16) 0}
+  footer nav{margin-left:0}
+  table{display:block;overflow-x:auto}
+}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{transition:none!important;animation:none!important}}
+</style>
+<script>
+/* Trivial: honour stored or system theme before paint. The toggle below only flips the attribute. */
+(function(){var t='system';try{t=localStorage.getItem('forge-theme')||'system'}catch(e){}
+document.documentElement.dataset.theme=t==='dark'||t==='light'?t:(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light')})();
+</script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="top">
+  <a class="brand" href="/" aria-current="page" aria-label="NanthAi Forge home">
+    <svg viewBox="0 0 22 26" aria-hidden="true"><rect x="2" y="1" width="4" height="24" rx="1" fill="currentColor"/><rect x="2" y="3" width="18" height="4" rx="1" fill="currentColor"/><rect x="2" y="12" width="14" height="4" rx="1" fill="currentColor"/><rect x="5" y="3" width="2" height="4" fill="#ffb347"/><rect x="5" y="12" width="2" height="4" fill="#23cbff"/></svg>
+    <span><small>NanthAi</small>Forge</span>
+  </a>
+  <nav aria-label="Public navigation">
+    <a href="https://github.com/NanthAI/nanthai-forge/blob/main/docs/README.md">Docs</a>
+    <a href="https://github.com/NanthAI/nanthai-forge/blob/main/docs/status.md">Status</a>
+    <a href="https://github.com/NanthAI/nanthai-forge">GitHub</a>
+    <button type="button" id="theme" aria-label="Switch theme">Theme</button>
+    <a href="#sign-in" class="btn ghost" style="height:30px">Sign in</a>
+  </nav>
+</header>
+
+<main id="main" tabindex="-1">
+
+<section class="hero" aria-labelledby="title">
+  <div class="wrap">
+    <div>
+      <h1 id="title">Hand it off.<br>Watch it <span>land.</span></h1>
+      <p class="lead"><strong>Forge is an open source source host for people and coding agents changing one codebase at once.</strong> Each works in its own Lane; a landing queue checks the exact composed result before it reaches main, and one screen shows who is working, what is changing and what needs you.</p>
+      <form class="paste" action="#preview" method="get">
+        <label for="url" style="position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)">Public GitHub repository</label>
+        <svg class="gh" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 0a8 8 0 0 0-2.5 15.6c.4.1.5-.2.5-.4v-1.4c-2.2.5-2.7-1-2.7-1-.4-.9-.9-1.2-.9-1.2-.7-.5.1-.5.1-.5.8.1 1.2.8 1.2.8.7 1.3 1.9.9 2.3.7.1-.5.3-.9.5-1.1-1.8-.2-3.6-.9-3.6-4 0-.9.3-1.6.8-2.1-.1-.2-.4-1 .1-2.1 0 0 .7-.2 2.2.8a7.6 7.6 0 0 1 4 0c1.5-1 2.2-.8 2.2-.8.5 1.1.2 1.9.1 2.1.5.5.8 1.2.8 2.1 0 3.1-1.9 3.7-3.6 3.9.3.3.5.8.5 1.5v2.2c0 .2.1.5.6.4A8 8 0 0 0 8 0Z"/></svg>
+        <input id="url" name="repository" placeholder="github.com/NanthAI/nanthai-forge" autocomplete="off" spellcheck="false" required>
+        <button class="btn primary" type="submit">Preview with Forge</button>
+      </form>
+      <p class="note">Any public repository · no account · nothing is written to it</p>
+      <p class="proof">Measured 2026-10-20 on the same runners: four finished changes landed in <span class="num">297 s</span> on Forge and <span class="num">702 s</span> through GitHub's merge queue (3 of 3 runs). <a href="#measured">All measurements, including the one GitHub wins</a>.</p>
+    </div>
+
+    <figure class="now" aria-label="Example of the Now screen">
+      <span class="ribbon">Example</span>
+      <div class="strip"><b>main</b> · accepted 12 min ago by agent-a · <span class="pill passed">✓ passing</span> · <span class="pill active">● Live</span></div>
+      <div class="ph"><h3>Needs you <span class="pill hot">1</span></h3><span class="faint">forge</span></div>
+      <div class="decision">
+        <div class="eyebrow">◷ Overlap · 4 min ago</div>
+        <div class="t">agent-a and agent-b both changed src/exchange/push.ts</div>
+        <div class="why">Different functions, text merge is clean. Land together with one check, or agent-a first.</div>
+        <div class="ans"><button class="btn rec" type="button">Land together</button><button class="btn" type="button">agent-a first</button><button class="btn ghost" type="button">Later</button></div>
+      </div>
+      <div class="ph"><h3>What's changing</h3><span class="faint">3 open Lanes</span></div>
+      <div class="row active"><span class="t">Source return commits a large projection in bounded batches</span><span class="pill active">● Working</span><span class="who">agent-a <i>agent</i> · seen 40 s · 3 saves <span class="rail"><span class="on"></span><span class="on"></span><span></span><span></span></span></span></div>
+      <div class="row waiting"><span class="t">A stuck retained push can be safely superseded by a fresh delta push</span><span class="pill waiting">◷ Waiting</span><span class="who">agent-b <i>agent</i> · check queued · position 2 <span class="rail"><span class="on"></span><span class="on"></span><span></span><span></span></span></span></div>
+      <div class="row passed"><span class="t">Agent start, checkpoint, sync and status read outside the owner writer lock</span><span class="pill passed">✓ Ready</span><span class="who">alex · check passed 2 min ago <span class="rail"><span class="on"></span><span class="on"></span><span class="ok"></span><span></span></span></span></div>
+      <div class="pf">2 agents and 1 person working · 1 waiting for your decision</div>
+      <figcaption class="pf faint" style="border-top:1px solid var(--line)">Lane titles are examples of landings on Forge's own main; names and times are illustrative.</figcaption>
+    </figure>
+  </div>
+</section>
+
+<section class="block tight" aria-labelledby="what-changes">
+  <div class="wrap">
+    <div class="head">
+      <h2 id="what-changes">What changes from GitHub</h2>
+      <p>Agents keep their editors, their tools and their test commands. What moves is the waiting, the rebasing and the merge queue.</p>
+    </div>
+    <div class="two">
+      <div>
+        <h3>On GitHub today</h3>
+        <ul>
+          <li>Each agent opens a branch and a pull request, then waits for CI.</li>
+          <li>Every PR runs the full suite on almost the same tree; a four change burst costs 12 checks.</li>
+          <li>Rebases and merge queue retries fall to the agent, or to you.</li>
+          <li>Who is editing what is invisible until the conflict.</li>
+        </ul>
+      </div>
+      <div>
+        <h3>In Forge</h3>
+        <ul>
+          <li><strong>Start a Lane for an Intent</strong>, edit its path, run affected tests, finish.</li>
+          <li><strong>Concurrent changes share one landing check</strong> on their combined result: 4 checks per burst instead of 12.</li>
+          <li><strong>Updating from main, composition and check scheduling</strong> are Forge's job. Accepting never drops another accepted change.</li>
+          <li><strong>Overlaps are raised at save time</strong>, as advice, before they become conflicts.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="statement" aria-label="Forge in one line">
+  <div class="wrap">
+    <p>Many agents. One codebase. <span>Nothing lost.</span></p>
+    <p class="faint">Accepting refuses stale work, main moves only by compare and swap, and a failed check never lands. Those are rules in the code, not promises on this page.</p>
+  </div>
+</section>
+
+<section class="block" aria-labelledby="benefits">
+  <div class="wrap">
+    <div class="head">
+      <h2 id="benefits">What you get</h2>
+    </div>
+    <dl class="benefits">
+      <div><dt>Nothing lands unchecked, and nothing lands twice</dt><dd>Every acceptance records the exact code it ran on. A failed check comes back to the Lane with the failing test, not a red wall. In 40 overlapping finishes under test, 0 were dropped.</dd></div>
+      <div><dt>One screen that needs you</dt><dd>Now shows who is working, what is changing, where work overlaps and which one or two decisions are yours. Decisions arrive as questions with answers, recommended one first.</dd></div>
+      <div><dt>Agents arrive briefed</dt><dd>Copyable prompts and full briefings for nine situations, including fixing a failed check and landing several Lanes together. Prompts tell agents to follow your AGENTS.md or CLAUDE.md first; Forge never overrides a repository's own instructions.</dd></div>
+      <div><dt>Delegate at the level you choose</dt><dd>Autonomy is a per project policy from supervised to agents accepting on their own, with protected paths and exact View checks. Every automatic action is shown with an <code>auto</code> tag and Undo.</dd></div>
+      <div><dt>Your repository stays portable</dt><dd>Git repositories work as they are. Accepted source exports to GitHub; native projects need no Git at all. Execution stays on your machines or your own runners.</dd></div>
+      <div><dt>Built in the open, on itself</dt><dd>Every change to Forge lands through Forge: about 2,200 tests in 315 files, hosted and checked by the same landing queue you would use. <a href="https://github.com/NanthAI/nanthai-forge/blob/main/docs/status.md">What works today</a> is kept current.</dd></div>
+    </dl>
+  </div>
+</section>
+
+<section class="block" aria-labelledby="how">
+  <div class="wrap">
+    <div class="head">
+      <h2 id="how">How it works</h2>
+      <p>Three commands from an agent's point of view. People do the same from the browser.</p>
+    </div>
+    <ol class="steps">
+      <li><h3>Start a Lane for an Intent</h3><p>Forge creates an isolated working directory for that one outcome and returns its path.</p><pre>nforge agent . start '{"outcome":"fix tax rounding"}'</pre></li>
+      <li><h3>Edit and save in your own tools</h3><p>Claude Code, Codex or an editor works in the Lane. Saves are recorded; overlapping files raise an alert to both parties.</p><pre>nforge agent . tests  # affected tests for this Lane's saved head</pre></li>
+      <li><h3>Finish, and Forge lands it</h3><p>Forge updates from main, composes the exact View, runs the check on it and accepts, or hands the decision to you under a supervised policy.</p><pre>nforge agent . finish '{"laneId":"…","message":"…","accept":true}'</pre></li>
+    </ol>
+  </div>
+</section>
+
+<section class="block" id="measured" aria-labelledby="measured-h">
+  <div class="wrap">
+    <div class="head">
+      <h2 id="measured-h">Measured, both ways</h2>
+      <p>Timing starts when every change in a burst is already finished and ends when all are on main. Both sides ran on the same runners with four test shards. Medians in seconds.</p>
+    </div>
+    <table>
+      <thead><tr><th>Scenario</th><th>Date</th><th class="n">Forge</th><th class="n">GitHub merge queue</th><th class="n">Result</th><th class="n">Valid runs</th></tr></thead>
+      <tbody>
+        <tr><td>4 finished changes</td><td>2026-10-20</td><td class="n">296.9</td><td class="n">701.6</td><td class="n"><span class="win">Forge 2.36×</span></td><td class="n">3 / 3</td></tr>
+        <tr><td>8 finished changes (early sample)</td><td>2026-10-20</td><td class="n">372.9</td><td class="n">1,192.9</td><td class="n"><span class="win">Forge 3.20×</span></td><td class="n">2 / 3</td></tr>
+        <tr><td>1 docs change</td><td>2026-10-20</td><td class="n">57</td><td class="n">172</td><td class="n"><span class="win">Forge 3.0×</span></td><td class="n">3 / 3</td></tr>
+        <tr><td>4 changes, one deliberately failing</td><td>2026-10-24</td><td class="n">989</td><td class="n">189</td><td class="n"><span class="loss">GitHub 5.2×</span></td><td class="n">3 / 3</td></tr>
+        <tr><td>Overlapping finishes dropped (4 agents, 8 Lanes, 5 replays)</td><td>2026-10-25</td><td class="n">0 / 40</td><td class="n">—</td><td class="n">90 / 90 pairs alerted</td><td class="n">5</td></tr>
+      </tbody>
+    </table>
+    <p class="caveat">Forge isolates a failing change by checking prefixes one after another; that serial recovery is why GitHub wins the fourth row, and a fix was planned when this mockup was written. Burst landing says nothing about agent coding time or token use: in single agent trials Forge used 14% more input and 7% more time than plain Git. Coordination quality is not yet measured. <a href="https://github.com/NanthAI/nanthai-forge/blob/main/docs/why-forge.md#measured-landing-throughput">Method and sources</a>.</p>
+  </div>
+</section>
+
+<section class="block" aria-labelledby="today">
+  <div class="wrap">
+    <div class="head">
+      <h2 id="today">Where things stand</h2>
+      <p>Forge is in private alpha and builds itself. A public beta is planned.</p>
+    </div>
+    <div class="status">
+      <div><h3><span class="pill passed">✓ Works</span></h3><ul><li>Lanes, exact View checks, landing queue with compare and swap main, accept and revert</li><li>Git import and export, GitHub publish and one way GitHub sync</li><li>Hosted projects: Now, Work, Code, Settings, presence, messages, handoffs</li><li>Agent CLI, MCP and briefings for nine situations</li><li>Autonomy policy, protected paths, auto tag and Undo</li></ul></div>
+      <div><h3><span class="pill waiting">◷ Partial</span></h3><ul><li>Overlap alerts reach both agents at save time, not always before the next save</li><li>Clean check environments are not OS isolation</li><li>Making of record: local owners only</li><li>Hosted durability: one restore drill passed, no cadence yet</li></ul></div>
+      <div><h3><span class="pill" style="background:var(--stale-bg);color:var(--stale)">○ Planned</span></h3><ul><li>Hosted main as the only accept path, then deleting the dual master code</li><li>Overlap at first write through editor hooks</li><li>Per Intent contract checks and flake aware culprit finding</li><li>Public npm release, pricing with a free core, public beta</li></ul></div>
+    </div>
+  </div>
+</section>
+
+<section class="block" aria-labelledby="faq-h">
+  <div class="wrap">
+    <div class="head"><h2 id="faq-h">Questions people ask before trying it</h2></div>
+    <div class="faq">
+      <details><summary>Is Forge faster than Git for a single agent?</summary><p>No, not yet. In paired single agent trials Forge used 14% more total input and 7% more time than plain Git. Forge's case is several agents landing at once: a four change burst lands 2.2 to 2.4× faster than GitHub's merge queue, with a third of the check jobs.</p></details>
+      <details><summary>Do I have to leave GitHub?</summary><p>No. Git repositories work with Forge as they are, accepted source exports to GitHub, and native GitHub sync fast forwards one commit per acceptance. Your repository stays portable.</p></details>
+      <details><summary>Can I use it today?</summary><p>You can run it from source (Node 24.22.1 or newer, <code>npm ci</code>, <code>npm run verify</code>) and host your own backend. There is no public npm release and no pricing yet; Forge is in private alpha and the team uses it daily on Forge itself.</p></details>
+      <details><summary>Where does my code run?</summary><p>On your machines. Checks run locally or on runners you configure. Hosted Forge stores source and Work; it does not execute your code.</p></details>
+      <details><summary>Are checks isolated?</summary><p>Checks get a clean HOME, temp and environment with an explicit credential passthrough. That is not OS isolation: known absolute files remain readable. Forge makes no claim of confining hostile code. <a href="https://github.com/NanthAI/nanthai-forge/blob/main/docs/security.md">Security</a> has the details.</p></details>
+      <details><summary>What does hosting cost?</summary><p>There is no pricing yet. No cost figures are published until they are measured on real bills.</p></details>
+      <details><summary>What happens when two agents edit the same file?</summary><p>Both get an overlap alert at save time (90 of 90 pairs in the last measurement). Line level three way merge resolves disjoint edits; a true conflict stays explicit in Now and never lands. Accepting never drops another accepted change.</p></details>
+    </div>
+  </div>
+</section>
+
+<section class="final" id="preview" aria-labelledby="final-h">
+  <div class="wrap">
+    <h2 id="final-h">See it on a repository you know</h2>
+    <p class="muted" style="margin-top:var(--s-3);max-width:600px">The preview imports a public repository, draws its import graph, builds an example Now from its real files and shows the briefing an agent would receive.</p>
+    <form class="paste" action="#preview" method="get">
+      <label for="url2" style="position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)">Public GitHub repository</label>
+      <svg class="gh" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 0a8 8 0 0 0-2.5 15.6c.4.1.5-.2.5-.4v-1.4c-2.2.5-2.7-1-2.7-1-.4-.9-.9-1.2-.9-1.2-.7-.5.1-.5.1-.5.8.1 1.2.8 1.2.8.7 1.3 1.9.9 2.3.7.1-.5.3-.9.5-1.1-1.8-.2-3.6-.9-3.6-4 0-.9.3-1.6.8-2.1-.1-.2-.4-1 .1-2.1 0 0 .7-.2 2.2.8a7.6 7.6 0 0 1 4 0c1.5-1 2.2-.8 2.2-.8.5 1.1.2 1.9.1 2.1.5.5.8 1.2.8 2.1 0 3.1-1.9 3.7-3.6 3.9.3.3.5.8.5 1.5v2.2c0 .2.1.5.6.4A8 8 0 0 0 8 0Z"/></svg>
+      <input id="url2" name="repository" placeholder="github.com/NanthAI/nanthai-forge" autocomplete="off" spellcheck="false" required>
+      <button class="btn primary" type="submit">Preview with Forge</button>
+    </form>
+    <p class="note">Any public repository · no account · nothing is written to it</p>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>© 2026 NanthAi · Apache-2.0</span>
+    <span>Forge builds itself</span>
+    <nav aria-label="Footer">
+      <a href="https://github.com/NanthAI/nanthai-forge/blob/main/docs/README.md">Docs</a>
+      <a href="https://github.com/NanthAI/nanthai-forge/blob/main/docs/status.md">Status</a>
+      <a href="https://github.com/NanthAI/nanthai-forge/blob/main/docs/security.md">Security</a>
+      <a href="https://github.com/NanthAI/nanthai-forge">GitHub</a>
+      <a href="?surface=contact">Contact</a>
+      <!-- Privacy and Terms (skill B10) are missing on purpose: no such pages exist yet. Add before public beta. -->
+    </nav>
+  </div>
+</footer>
+
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"FAQPage","mainEntity":[
+{"@type":"Question","name":"Is Forge faster than Git for a single agent?","acceptedAnswer":{"@type":"Answer","text":"No, not yet. In paired single agent trials Forge used 14% more total input and 7% more time than plain Git. Forge's case is several agents landing at once: a four change burst lands 2.2 to 2.4 times faster than GitHub's merge queue, with a third of the check jobs."}},
+{"@type":"Question","name":"Do I have to leave GitHub?","acceptedAnswer":{"@type":"Answer","text":"No. Git repositories work with Forge as they are, accepted source exports to GitHub, and native GitHub sync fast forwards one commit per acceptance."}},
+{"@type":"Question","name":"Can I use it today?","acceptedAnswer":{"@type":"Answer","text":"You can run it from source and host your own backend. There is no public npm release and no pricing yet; Forge is in private alpha."}},
+{"@type":"Question","name":"Where does my code run?","acceptedAnswer":{"@type":"Answer","text":"On your machines: locally or on runners you configure. Hosted Forge stores source and Work; it does not execute your code."}},
+{"@type":"Question","name":"Are checks isolated?","acceptedAnswer":{"@type":"Answer","text":"Checks get a clean HOME, temp and environment with explicit credential passthrough. That is not OS isolation and Forge makes no claim of confining hostile code."}},
+{"@type":"Question","name":"What does hosting cost?","acceptedAnswer":{"@type":"Answer","text":"There is no pricing yet. No cost figures are published until they are measured on real bills."}},
+{"@type":"Question","name":"What happens when two agents edit the same file?","acceptedAnswer":{"@type":"Answer","text":"Both get an overlap alert at save time. Line level three way merge resolves disjoint edits; a true conflict stays explicit and never lands. Accepting never drops another accepted change."}}
+]}
+</script>
+<script>
+document.getElementById('theme').addEventListener('click',function(){var r=document.documentElement;var n=r.dataset.theme==='dark'?'light':'dark';r.dataset.theme=n;try{localStorage.setItem('forge-theme',n)}catch(e){}});
+</script>
+</body>
+</html>
