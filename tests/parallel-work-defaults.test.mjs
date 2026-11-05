@@ -295,7 +295,9 @@ test('land summary names the outcome, each failing file and its first error', ()
   assert.deepEqual(landSummary(response('landed', { acceptance: { receiptId: 'r1', head: 'h' } })), [
     'LANDED receipt r1',
   ]);
-  assert.deepEqual(landSummary(response('ready')), ['CHECK PASSED; waiting for acceptance']);
+  assert.deepEqual(landSummary(response('ready')), [
+    'CHECK PASSED; queued to land, not landed yet (waiting for acceptance)',
+  ]);
   const failed = Array.from({ length: 22 }, (_, index) => ({
     file: `tests/f${index}.test.mjs`,
     report: index === 0 ? { firstError: 'AssertionError:\n  expected 1' } : {},

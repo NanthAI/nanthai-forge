@@ -9,7 +9,7 @@ type Result = {
   progress?: { status?: string } & Record<string, unknown>;
   submission?: {
     phase?: string;
-    observation?: { state: string };
+    observation?: { state: string; pendingReason?: string | null };
     error?: { code: string; message: string } | null;
     acceptance?: { receiptId: string; head: string };
     testFiles?: {
@@ -42,9 +42,11 @@ export function landSummary(response: HostedAgentResponse): string[] {
     return [
       'SUPERSEDED; this operation does not land the newer saved head. Use its current Lane status before continuing.',
     ];
-  if (phase === 'ready')
-    return [submission ? 'CHECK PASSED; waiting for acceptance' : 'CHECK PASSED (not landed)'];
-  if (result.phase === 'check' && result.run?.status === 'passed') return ['CHECK PASSED (not landed)'];
+  // A passed check is not a landing, and a queued landing is not a failure: say which.
+  if (phase === 'ready' && submission?.observation?.state !== 'terminal-failed')
+    return ['CHECK PASSED; queued to land, not landed yet (waiting for acceptance)'];
+  if (result.phase === 'check' && result.run?.status === 'passed')
+    return ['CHECK PASSED (check only; this command does not land)'];
   if (retryableFinishSource(result) && result.command)
     return ['SOURCE NEEDS RECOVERY', `Continue recovery: ${result.command}`];
   const lines: string[] = [];
@@ -62,14 +64,19 @@ export function landSummary(response: HostedAgentResponse): string[] {
     ['failed', 'cancelled', 'runner-unavailable', 'interrupted'].includes(result.run?.status ?? '')
   )
     lines.push(
-      `FAILED${error ? ` ${error.code}: ${(recovery ? error.message.split(' Run nforge agent ')[0]! : error.message).replace(/\s+/g, ' ').slice(0, 300)}` : ''}`,
+      `FAILED${error ? ` ${error.code}: ${(recovery ? error.message.split(' Run nforge agent ')[0]! : error.message).replace(/\s+/g, ' ').slice(0, 900)}` : ''}`,
     );
   if (result.phase === 'conflict') lines.push('FAILED COMPOSITION_CONFLICT');
+  if (!lines.length && submission?.observation?.state === 'pending' && !recovery)
+    return [`${pendingLabel(submission.observation.pendingReason)}; not landed yet`];
   if (recovery) lines.push(`Continue recovery: ${recovery}`);
   else if (result.retryCommand) lines.push(`Retry: ${result.retryCommand}`);
   if (!lines.length && ['save', 'compose', 'sync'].includes(result.phase ?? ''))
     return ['SOURCE PENDING', ...(result.command ? [`Continue: ${result.command}`] : [])];
-  for (const file of submission?.testFiles?.failed?.slice(0, 20) ?? [])
+  // The failure message already names its first files and errors; list the rest.
+  for (const file of submission?.testFiles?.failed
+    ?.filter(item => !error?.message.includes(item.file))
+    .slice(0, 20) ?? [])
     lines.push(
       `  ${file.file}${file.report?.firstError ? ` :: ${file.report.firstError.replace(/\s+/g, ' ').slice(0, 300)}` : ''}`,
     );
@@ -77,6 +84,15 @@ export function landSummary(response: HostedAgentResponse): string[] {
   if (more > 0) lines.push(`  ... ${more} more failing files`);
   return lines;
 }
+
+const pendingLabels: Record<string, string> = {
+  queued: 'QUEUED',
+  checking: 'CHECKING',
+  'waiting-for-review': 'WAITING FOR REVIEW',
+  'waiting-for-dependency': 'WAITING FOR DEPENDENCY',
+  'pending-infra': 'WAITING FOR CHECK INFRASTRUCTURE',
+};
+const pendingLabel = (reason: string | null | undefined) => pendingLabels[reason ?? ''] ?? 'IN PROGRESS';
 
 /** Requested landings settle on canonical acceptance/failure, never check readiness. */
 export function landTerminal(response: HostedAgentResponse) {

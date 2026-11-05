@@ -1,5 +1,6 @@
 import { requireAgentRoot } from './agent-root.js';
 import { validateHostedCliCommand, validateNativeFrictionCommand } from './hosted-cli-validation.js';
+import { actionableNotFound, resolveShortLaneId } from './argument-errors.js';
 import { resolve } from 'node:path';
 import { hostedAgentHelp } from './hosted-agent-help.js';
 import { callerOverlaps } from './agent-caller-overlaps.js';
@@ -630,36 +631,46 @@ async function runAgentCli(args: string[], options: AgentCliOptions, notices: st
     if (current) notices.push(aliasNotice(root, requestedAction!, current));
   };
   if (hosted) {
+    // A unique short laneId of a Lane this machine opened resolves locally (no network).
+    const short = resolveShortLaneId(selected, hosted.projectId);
+    if (short.resolved) {
+      process.stderr.write(`laneId ${String(selected.laneId)} resolved to ${short.resolved}\n`);
+      selected = short.selected;
+    }
     const command = landSaveCommand(form!, true, selected);
-    if (options.beforeDispatch) {
-      validateHostedCliCommand(root, action, command);
-      if (!(await options.beforeDispatch(stdin === undefined ? undefined : { stdin }))) return;
-    }
-    notice(selected);
-    // The installed CLI detaches the submission and waits by default; in-process callers opt in.
-    if (action === 'finish' && (options.process || client.wait !== undefined))
-      return hostedLandCli(root, command, hosted, {
-        wait: client.wait ?? (options.process ? undefined : false),
-        detach: Boolean(options.process),
-      });
-    if (action === 'show') {
-      await hostedShowCli(root, command, hosted);
-      return undefined;
-    }
-    if (action !== 'start' || !options.process) return hostedAgentCli(root, action, command, hosted);
-    const transport = new HostedAgentTransport(root, hosted);
-    // The Lane id and path print before the checkout downloads, so a slow open never hides them.
-    transport.onStarted = lane => process.stderr.write(`${JSON.stringify({ started: lane })}\n`);
-    const response = (await hostedAgentCli(root, action, command, hosted, transport)) as {
-      localLanes?: {
-        idle: IdleLane[];
-        pruned: { count: number; bytes: number };
+    try {
+      if (options.beforeDispatch) {
+        validateHostedCliCommand(root, action, command);
+        if (!(await options.beforeDispatch(stdin === undefined ? undefined : { stdin }))) return;
+      }
+      notice(selected);
+      // The installed CLI detaches the submission and waits by default; in-process callers opt in.
+      if (action === 'finish' && (options.process || client.wait !== undefined))
+        return await hostedLandCli(root, command, hosted, {
+          wait: client.wait ?? (options.process ? undefined : false),
+          detach: Boolean(options.process),
+        });
+      if (action === 'show') {
+        await hostedShowCli(root, command, hosted);
+        return undefined;
+      }
+      if (action !== 'start' || !options.process) return await hostedAgentCli(root, action, command, hosted);
+      const transport = new HostedAgentTransport(root, hosted);
+      // The Lane id and path print before the checkout downloads, so a slow open never hides them.
+      transport.onStarted = lane => process.stderr.write(`${JSON.stringify({ started: lane })}\n`);
+      const response = (await hostedAgentCli(root, action, command, hosted, transport)) as {
+        localLanes?: {
+          idle: IdleLane[];
+          pruned: { count: number; bytes: number };
+        };
       };
-    };
-    if (response.localLanes)
-      for (const line of housekeepingLines(root, response.localLanes.idle, response.localLanes.pruned))
-        process.stderr.write(`${line}\n`);
-    return response;
+      if (response.localLanes)
+        for (const line of housekeepingLines(root, response.localLanes.idle, response.localLanes.pruned))
+          process.stderr.write(`${line}\n`);
+      return response;
+    } catch (error) {
+      throw actionableNotFound(error, action, command);
+    }
   }
   invariant(
     client.wait === undefined || action === 'finish',

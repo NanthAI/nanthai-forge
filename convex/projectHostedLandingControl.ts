@@ -1,4 +1,6 @@
 import { passedAlone } from '../src/hosted-landing-suspect';
+import { describeCheckFailure } from './projectHostedCheckFailure';
+import { CHECK_FAILED_NEXT } from '../src/check-failure-detail';
 import { loadBatch } from './projectHostedLandingBatchStore';
 import { releaseUnstartedBatchForPriority } from './projectHostedLandingBatchPriority';
 import { prepareLandingCheck } from './projectHostedLandingBatchCheck';
@@ -223,7 +225,7 @@ export async function advanceLandingQueue(ctx: MutationCtx, claim: LandingClaim,
         observation = landingObservation(run.status);
         error = {
           code: run.status === 'failed' ? 'CHECK_FAILED' : 'CHECK_NOT_PASSED',
-          message: `The original exact check settled as ${run.status}.${run.testFiles?.failed.length ? ' Failing tests: ' + run.testFiles.failed.map(f => f.file).join(', ') : ''}`,
+          message: `The original exact check settled as ${run.status}. ${await describeCheckFailure(ctx, claim.projectId, run)} ${CHECK_FAILED_NEXT}`,
         };
       } else {
         await requireHostedCheckEvidence(ctx, {

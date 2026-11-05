@@ -63,7 +63,7 @@ test('check-only dry runs resume the original run, without acceptance or a new f
   assert.equal(done.next, undefined);
   assert.equal(done.inProgress, undefined);
   assert.equal(done.instruction, undefined);
-  assert.deepEqual(landSummary({ result: done }), ['CHECK PASSED (not landed)']);
+  assert.deepEqual(landSummary({ result: done }), ['CHECK PASSED (check only; this command does not land)']);
 });
 
 for (const state of ['landed', 'superseded', 'terminal-failed'])

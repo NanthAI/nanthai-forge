@@ -241,7 +241,7 @@ test('check-only still waits only for its run and returns CHECK PASSED without a
   const result = await pending;
   assert.equal(result.result.run.status, 'passed');
   assert.equal(landTerminal(result), true);
-  assert.deepEqual(landSummary(result), ['CHECK PASSED (not landed)']);
+  assert.deepEqual(landSummary(result), ['CHECK PASSED (check only; this command does not land)']);
   assert.equal(s.calls.length, 1);
 });
 

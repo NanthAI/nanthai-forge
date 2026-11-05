@@ -81,6 +81,7 @@ export function failedGroupAction(input: {
 
 const stepLine = /budget|error|failed|fail\b|exceed|cannot|not found|ERR!/i;
 const npmTrailer = /^npm (?:ERR!|error)/i;
+const thrownLine = /^(?:Uncaught )?[A-Z]\w*Error(?: \[[A-Z_]+\])?: \S/;
 /** The failing step of a run whose failure names no test file, from the bounded
  * (<= 4 KiB per job) failure summaries the Actions jobs already sealed. Returns
  * the job and the most specific line, e.g. `llms-full.txt is 409868 bytes; the
@@ -106,7 +107,13 @@ export function failingStep(
     if (!lines.length) continue;
     // npm's own trailer (`npm ERR! code 1`) names no cause; prefer the step's line.
     const matches = [...lines].reverse().filter(text => stepLine.test(text));
-    const line = matches.find(text => !npmTrailer.test(text)) ?? matches[0] ?? lines.at(-1)!;
+    // A thrown error's own line (`AssertionError [ERR_ASSERTION]: Unlisted packaged
+    // document: ...`) names the cause better than a runner's later `failed` line.
+    const line =
+      matches.find(text => thrownLine.test(text)) ??
+      matches.find(text => !npmTrailer.test(text)) ??
+      matches[0] ??
+      lines.at(-1)!;
     const job =
       shard === undefined
         ? 'check'

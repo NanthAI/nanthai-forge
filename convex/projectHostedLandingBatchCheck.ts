@@ -2,7 +2,8 @@ import { withQueueStatusBatch } from './projectHostedQueueStatusWrite';
 import { diagnoseBatchFailure } from '../src/hosted-batch-diagnosis';
 import { advanceBatchFallback } from './projectHostedLandingBatchFallback';
 import { isolateFailedBatch } from './projectHostedLandingIsolation';
-import { failingStep, passedAlone } from '../src/hosted-landing-suspect';
+import { passedAlone } from '../src/hosted-landing-suspect';
+import { checkFailureStep } from './projectHostedCheckFailure';
 import { checkFailureKind } from '../src/hosted-landing-admission';
 import { admittedReuseFirst, loneAdmission } from './projectHostedLandingAdmission';
 import { holdForPeers } from './projectHostedLandingCohortHold';
@@ -157,19 +158,7 @@ async function prepareLandingCheckOnce(
           }
           // No failing test file: name the failing step from the sealed job
           // summaries (bounded, failure-only, no fetch). Wave 1: build:web budget.
-          const step =
-            run.testFiles?.failed.length ||
-            Object.values(run.contractReports ?? {}).some(report => report.failed)
-              ? null
-              : failingStep(
-                  await ctx.db
-                    .query('projectHostedOutputStreams')
-                    .withIndex('by_project_and_run', q =>
-                      q.eq('projectId', claim.projectId).eq('runId', run.id),
-                    )
-                    .take(64),
-                  run.plan?.shardCount,
-                );
+          const step = await checkFailureStep(ctx, claim.projectId, run);
           const failure = diagnoseBatchFailure(originals, run, semantic, previous, step);
           if (
             !(await isolateFailedBatch(

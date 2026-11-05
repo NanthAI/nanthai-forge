@@ -14,6 +14,7 @@ import {
 import { loadLanding, settleLandingOperation, writeLanding } from './projectHostedLandingStore';
 import { predecessorStatus } from './projectHostedLandingPipeline';
 import { hostedStartMain } from './projectHostedChannels';
+import { CHECK_FAILED_NEXT, checkFailureDetail } from '../src/check-failure-detail';
 
 /** Queue throughput after a failed combined generation (51bbbd00). Runs inside
  * the existing failure transition of the queue tick: no extra Convex call, no
@@ -97,7 +98,7 @@ export async function isolateFailedBatch(
       batchDiagnostic: diagnostic(failure, true, `${transition.message} Failing: ${files}.`),
       error: {
         code: 'CHECK_FAILED',
-        message: `The exact check on current main settled as failed. Failing: ${files}`,
+        message: `The exact check on current main settled as failed. ${checkFailureDetail(run, failure.step)} ${CHECK_FAILED_NEXT}`,
       },
     };
     await writeLanding(ctx, member.row, next, false);

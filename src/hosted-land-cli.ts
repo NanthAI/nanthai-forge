@@ -220,6 +220,11 @@ export async function hostedLandCli(
   ) {
     const lines = landSummary(submitted);
     for (const line of lines) process.stderr.write(`${line}\n`);
+    // Not waiting here: an unfinished landing still names the one command that waits for it.
+    const next = lines[0]?.startsWith('FAILED')
+      ? undefined
+      : landWaitCommand(hostedAgentRoot(root), submitted);
+    if (next) process.stderr.write(`Next: wait for the outcome with ${next}\n`);
     if (lines[0]?.startsWith('FAILED')) process.exitCode = 2;
     else if (
       wait &&

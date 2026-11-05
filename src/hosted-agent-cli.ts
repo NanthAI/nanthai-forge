@@ -4,7 +4,12 @@ import { clientCacheRoot } from './root-paths.js';
 import { isNetworkPending } from './network-continuation.js';
 import { join, resolve } from 'node:path';
 import { hostedAgentAddressSchema, type HostedAgentAddress } from './hosted-agent-contract.js';
-import { hostedAgentRoot, hostedAgentDirectory, readAgentJson } from './hosted-agent-journal.js';
+import {
+  hostedAgentRoot,
+  hostedAgentDirectory,
+  readAgentJson,
+  retainedHostedOperation,
+} from './hosted-agent-journal.js';
 import { checkoutPathExists } from './hosted-checkout-files.js';
 import { readHostedLaneCheckout } from './hosted-lane-checkout-marker.js';
 import { durableReplace } from './native-durability.js';
@@ -17,6 +22,8 @@ import { landSummary } from './hosted-land-summary.js';
 import { AGENT_WAIT_SECONDS, operationWait } from './agent-operation-wait.js';
 import { recordTurnWait, settleTurnWork } from './agent-turn-work.js';
 import { HostedAgentTransport } from './hosted-agent-transport.js';
+import { waitHostedAgentSource } from './hosted-agent-source-wait.js';
+import { networkTimeout } from './network-fetch.js';
 /** Address selection precedes construction of native WorkStore/owner services. */
 export function hostedAgentAddress(
   root: string,
@@ -52,6 +59,14 @@ export function hostedAgentAddress(
     );
   return address;
 }
+const sourcePending = (response: { result?: unknown } | undefined) => {
+  const result = response?.result as { status?: string; jobId?: string } | undefined;
+  return result?.status === 'submitted' && typeof result.jobId === 'string';
+};
+/** Replaceable in tests; production waits on the source progress subscription. */
+export const sourceWaitHooks = { wait: waitHostedAgentSource };
+const waitSource = (...args: Parameters<typeof waitHostedAgentSource>) =>
+  sourceWaitHooks.wait(args[0], args[1], args[2], args[3], undefined, 'Saves');
 export async function hostedAgentCli(
   root: string,
   action: string,
@@ -71,6 +86,49 @@ export async function hostedAgentCli(
       'BAD_ARGUMENT',
       'Choose one run or hosted landing operationIds.',
     );
+    // Wait accepts any operation id the CLI handed out. A save (or other non-landing
+    // operation) this checkout started resumes by exact replay of its local journal,
+    // the same request its receipt command makes; no new hosted call type.
+    const retained = (selectedWait.operationIds ?? []).flatMap(id => {
+      const operation = retainedHostedOperation(root, id);
+      return operation && operation.action !== 'finish' ? [{ id, ...operation }] : [];
+    });
+    if (retained.length) {
+      invariant(
+        retained.length === selectedWait.operationIds!.length,
+        'BAD_ARGUMENT',
+        `Wait on landings and on ${retained[0]!.action} operations in separate commands.`,
+      );
+      const budgetMs = (selectedWait.timeoutSeconds ?? AGENT_WAIT_SECONDS) * 1000,
+        deadline = Date.now() + budgetMs;
+      let response: Awaited<ReturnType<HostedAgentTransport['dispatch']>> | undefined;
+      for (const operation of retained) {
+        const replay = { ...operation.command, operationId: operation.id };
+        response = await transport.dispatch(operation.action, replay);
+        // A replay of a still-running save returns `submitted`: wait on its source
+        // progress subscription (event-driven, no polling), then replay once more.
+        while (sourcePending(response) && Date.now() < deadline) {
+          await waitSource(
+            address,
+            operation.id,
+            response.result,
+            networkTimeout(Math.max(1, deadline - Date.now())),
+          );
+          response = await transport.dispatch(operation.action, replay);
+        }
+        if (isNetworkPending(response) || sourcePending(response)) {
+          process.exitCode = 3;
+          const resume = operationWait(root, { operationIds: selectedWait.operationIds!, ...address });
+          return {
+            ...response,
+            result: { ...(response.result as object), status: 'IN_PROGRESS', reason: 'budget', ...resume },
+          };
+        }
+        process.stderr.write(`${operation.action.toUpperCase()} ${operation.id} finished\n`);
+      }
+      settleTurnWork(retained.map(operation => operation.id));
+      return response;
+    }
     const controller = new AbortController(),
       stop = () => controller.abort();
     process.once('SIGINT', stop);

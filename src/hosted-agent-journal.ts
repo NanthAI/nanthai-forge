@@ -90,7 +90,7 @@ export class HostedAgentJournal {
         invariant(
           this.read().identity === identity,
           'WORK_OPERATION_CHANGED',
-          'Retry the original hosted agent action and parameters.',
+          `Retry the original hosted agent action and parameters, or resume it with nforge agent ROOT wait '{"operationIds":["${this.operationId}"]}'.`,
         );
       } else
         durableReplace(
@@ -119,5 +119,25 @@ export class HostedAgentJournal {
   }
   id(key: string) {
     return this.retain(`id:${key}`, () => randomUUID());
+  }
+}
+
+/** The original action and parameters of an operation this checkout started, from
+ * its local journal: `wait` resumes a save (or other source operation) by exact
+ * replay, the same path its receipt's command takes. Local read only. */
+export function retainedHostedOperation(root: string, operationId: string) {
+  if (!z.uuid().safeParse(operationId).success) return null;
+  const path = join(hostedAgentDirectory(root), `${operationId}.json`);
+  if (!checkoutPathExists(path)) return null;
+  try {
+    const identity = JSON.parse(schema.parse(readAgentJson(path)).identity) as {
+      action?: unknown;
+      command?: unknown;
+    };
+    return typeof identity.action === 'string' && identity.command && typeof identity.command === 'object'
+      ? { action: identity.action, command: identity.command as Record<string, unknown> }
+      : null;
+  } catch {
+    return null;
   }
 }

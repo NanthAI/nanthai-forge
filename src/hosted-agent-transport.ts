@@ -1,4 +1,5 @@
 import { cliBuildCommit } from './cli-installation.js';
+import { describeIssues } from './argument-errors.js';
 import { liveLanes } from './hosted-live-lanes.js';
 import { cloneFreshness, mainCheckoutTransport, pullHostedProject } from './hosted-pull.js';
 import { readHostedMainSelection } from './hosted-main-marker.js';
@@ -425,7 +426,7 @@ export class HostedAgentTransport {
       invariant(
         command.success,
         'BAD_ARGUMENT',
-        `Invalid hosted ${requestedAction} parameters. ${command.success ? '' : command.error.issues.map(issue => `${issue.path.join('.') || 'parameters'}: ${issue.message}`).join('; ')}. Run nforge agent ROOT ${requestedAction} --help.`,
+        `Invalid hosted ${requestedAction} parameters. ${command.success ? '' : describeIssues(command.error.issues, observation ? input : parameters)}. Run nforge agent ROOT ${requestedAction} --help.`,
       );
       if (!observation && operationId !== undefined)
         invariant(z.uuid().safeParse(operationId).success, 'BAD_ARGUMENT', 'operationId must be a UUID.');

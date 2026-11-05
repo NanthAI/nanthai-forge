@@ -7,6 +7,8 @@ import { checkSetting, loadHostedCheck, writeHostedCheck } from './projectHosted
 import { hostedAcceptGate } from './projectHostedGate';
 import { hostedStartMain } from './projectHostedChannels';
 import { readHostedRecord } from './projectHostedRecords';
+import { describeCheckFailure } from './projectHostedCheckFailure';
+import { CHECK_FAILED_NEXT } from '../src/check-failure-detail';
 import {
   insertLandingAttempt,
   landingQueue,
@@ -138,7 +140,7 @@ export async function settleLandingAdmission(ctx: MutationCtx, original: Landing
   };
   await ctx.db.patch(row._id, { admission });
   if (kind !== 'platform') await recordFirstCheck(ctx, row.projectId, kind === 'passed');
-  const failed = run.testFiles?.failed.map(file => file.file) ?? [];
+  const detail = kind === 'tests' ? await describeCheckFailure(ctx, row.projectId, run) : '';
   const next =
     kind === 'tests'
       ? {
@@ -149,7 +151,7 @@ export async function settleLandingAdmission(ctx: MutationCtx, original: Landing
           observation: landingObservation('failed', 'CHECK_FAILED'),
           error: {
             code: 'CHECK_FAILED',
-            message: `The admission check of this change alone failed; it did not join a batch.${failed.length ? ' Failing tests: ' + failed.join(', ') : ''}`,
+            message: `The admission check of this change alone failed; it did not join a batch. ${detail} ${CHECK_FAILED_NEXT}`,
           },
         }
       : {
