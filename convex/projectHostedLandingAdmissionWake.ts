@@ -15,7 +15,8 @@ export async function releaseAdmissionWaiters(ctx: MutationCtx, projectId: Id<'h
     .take(2 * HOSTED_BATCH_MEMBERS);
   let released = false;
   for (const row of rows)
-    if (!row.runnable && row.admission?.status === 'passed') {
+    // A cohort hold (10b0a94b) has its own release; releasing it here only churns.
+    if (!row.runnable && row.admission?.status === 'passed' && !row.admission.hold) {
       await ctx.db.patch(row._id, { runnable: true });
       released = true;
     }

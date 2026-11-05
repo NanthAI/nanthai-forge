@@ -58,7 +58,11 @@ for (const [name, runner] of [
   ['a self-hosted runner', selfHosted],
 ])
   test(`runner contract on ${name}: the configured check runs before the queue and a red change never enters`, async t => {
-    const f = await batchesFixture(t, { ...full, count: 3, ...(runner ? { runner } : {}) });
+    const f = await batchesFixture(t, {
+      ...full,
+      count: 3,
+      ...(runner ? { runner } : {}),
+    });
     const lane = f.runs();
     assert.equal(lane.length, 3, 'every arrival starts its own Lane check at once');
     for (const run of lane) {
@@ -111,9 +115,14 @@ test('an admitted change lands on its own Lane run when main is unchanged', asyn
 
 // Synthetic 12-Lane wave: 12 changes arrive together, 3 are red (the 2026-10-30
 // first-check failure prior is 0.3). Before: deferred cohort checks (today's
-// default). After: pre-queue Lane checks. Runs are fake; only queue mechanics are real.
+// default). After: pre-queue Lane checks with the cohort hold. Runs are fake; only
+// queue mechanics are real.
 async function wave(t, options, red) {
-  const f = await batchesFixture(t, { count: 12, batchMaxSize: null, ...options });
+  const f = await batchesFixture(t, {
+    count: 12,
+    batchMaxSize: null,
+    ...options,
+  });
   let rounds = 0;
   await f.drain();
   while (await round(f, red)) rounds++;
@@ -165,14 +174,22 @@ test('synthetic 12-Lane wave: red-in-queue, landings per hour and superseded run
   assert(after.landingsPerHour > before.landingsPerHour);
   assert(after.supersededPerLanding < before.supersededPerLanding, 'no queue run is thrown away');
   assert(
-    after.checkMinutesPerLanding <= before.checkMinutesPerLanding,
-    'no extra runner minutes per landing',
+    after.checkMinutesPerLanding < before.checkMinutesPerLanding,
+    'fewer runner minutes per landing: refused changes share one cohort check (10b0a94b)',
   );
+  // 8 admitted changes miss proved reuse after main moves: one cohort per
+  // admitted cohort size (5), not one group per change (7 before the hold).
+  assert(after.queueRuns <= 2, `queue runs ${after.queueRuns}`);
+  assert(after.convexCallsPerLanding < before.convexCallsPerLanding, 'calls per landing do not rise');
 });
 
 test('a single Lane pays no extra runner minutes: its pre-queue run is the landing check', async t => {
   const solo = async admissionCheck => {
-    const f = await batchesFixture(t, { count: 1, batchMaxSize: null, admissionCheck });
+    const f = await batchesFixture(t, {
+      count: 1,
+      batchMaxSize: null,
+      admissionCheck,
+    });
     let rounds = 0;
     await f.drain();
     while (await round(f, [])) rounds++;

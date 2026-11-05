@@ -5,6 +5,7 @@ import { isolateFailedBatch } from './projectHostedLandingIsolation';
 import { failingStep, passedAlone } from '../src/hosted-landing-suspect';
 import { checkFailureKind } from '../src/hosted-landing-admission';
 import { admittedReuseFirst, loneAdmission } from './projectHostedLandingAdmission';
+import { holdForPeers } from './projectHostedLandingCohortHold';
 import {
   recordCohortOutcome,
   retryLandingBatchCheck,
@@ -55,7 +56,10 @@ async function prepareLandingCheckOnce(
     const key = { projectId: claim.projectId, batchId: state.batchId };
     const { batch } = await loadBatch(ctx, key);
     if (batch.phase === 'checking' && batch.runId) {
-      const { run } = await loadHostedCheck(ctx, { projectId: claim.projectId, runId: batch.runId });
+      const { run } = await loadHostedCheck(ctx, {
+        projectId: claim.projectId,
+        runId: batch.runId,
+      });
       retainCheckProgress(state, run, now);
       if (hostedCheckTerminal(run)) {
         const semantic = semanticVerdict(
@@ -134,7 +138,10 @@ async function prepareLandingCheckOnce(
                 'The original batch member Candidate changed.',
               );
               const candidate = hostedRecordSchema.options[3].parse(JSON.parse(row.value));
-              return { ...member, paths: candidate.governance?.paths ?? member.paths };
+              return {
+                ...member,
+                paths: candidate.governance?.paths ?? member.paths,
+              };
             }),
           );
           // Repeat-offender evidence: each member's previous combined failure.
@@ -199,6 +206,12 @@ async function prepareLandingCheckOnce(
   }
   if (!attempt.deferredCheck) return false;
   if (!state.batchSolo && (await admittedReuseFirst(ctx, selected))) {
+    await releaseLandingQueue(ctx, queue, now);
+    return true;
+  }
+  // A refused admitted member waits for peers still deciding their own Lane proof,
+  // so they form one cohort (10b0a94b). Bounded, holds no order, armed wake.
+  if (await holdForPeers(ctx, selected)) {
     await releaseLandingQueue(ctx, queue, now);
     return true;
   }

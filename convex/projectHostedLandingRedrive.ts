@@ -13,6 +13,7 @@ import { armLandingAlarm } from './projectHostedLandingStallWake';
 import { desiredLanding, scheduleDesired } from './projectHostedLandingDesiredWake';
 import { checkWakeRow, scheduleCheckWake } from './projectHostedLandingCheckWake';
 import { activeStoragePause } from './legacyStoragePause';
+import { redriveCohortHold } from './projectHostedLandingCohortHold';
 import { hostedLandingStateSchema } from '../src/hosted-landing';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { report } from './errors';
@@ -42,7 +43,10 @@ export const REDRIVE_SWEEP_ENTRIES = 64;
 export async function redriveLanding(
   ctx: MutationCtx,
   input: Identity,
-  options: { row?: Doc<'projectHostedLandingRequests'>; queueChecked?: boolean } = {},
+  options: {
+    row?: Doc<'projectHostedLandingRequests'>;
+    queueChecked?: boolean;
+  } = {},
 ) {
   const done: string[] = [];
   const row = options.row ?? (await landingRow(ctx, input));
@@ -84,10 +88,14 @@ export async function redriveLanding(
       done.push('dependency');
     }
   }
+  if (row.phase === 'queued' && (await redriveCohortHold(ctx, row))) done.push('hold');
   if (row.phase === 'queued' || row.phase === 'checking') {
     if (!options.queueChecked && (await redriveQueue(ctx, input.projectId))) done.push('queue');
     if (row.phase === 'checking' && row.runId) {
-      const wake = await checkWakeRow(ctx, { projectId: input.projectId, runId: row.runId });
+      const wake = await checkWakeRow(ctx, {
+        projectId: input.projectId,
+        runId: row.runId,
+      });
       if (wake?.wake && (await lost(ctx, wake.wake.taskId))) {
         await scheduleCheckWake(ctx, { projectId: input.projectId, runId: row.runId }, wake);
         done.push('check');

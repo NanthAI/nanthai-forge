@@ -17,6 +17,7 @@ export const control = await import(moduleUrl('../convex/projectHostedFinishCont
 export const records = await import(moduleUrl('../convex/projectHostedRecords.ts'));
 export const landingApi = await import(moduleUrl('../convex/projectHostedLanding.ts'));
 const stallApi = await import(moduleUrl('../convex/projectHostedLandingStall.ts'));
+const cohortHoldApi = await import(moduleUrl('../convex/projectHostedLandingCohortHold.ts'));
 const stallAlertApi = await import(moduleUrl('../convex/projectHostedLandingStallAlert.ts'));
 const wouldConflictApi = await import(moduleUrl('../convex/projectHostedLandingWouldConflict.ts'));
 const precomposeApi = await import(moduleUrl('../convex/projectHostedLandingPrecompose.ts'));
@@ -98,7 +99,10 @@ export async function finishFixture(
     store: c,
     projectId: c.projectId,
     candidate,
-    state: { sha256: candidate.result.head, size: c.objects.get(candidate.result.head).length },
+    state: {
+      sha256: candidate.result.head,
+      size: c.objects.get(candidate.result.head).length,
+    },
   });
   // Fake time jumps to each scheduled task, so a check waiting for passChecks() would reach both
   // stall-alert tiers; alert behaviour has its own tests (hosted-stall-alerts.test.mjs).
@@ -106,7 +110,10 @@ export async function finishFixture(
     // Finish mechanics run without pre-queue Lane checks (covered by hosted-landing-prequeue.test.mjs).
     autonomyPolicy: {
       ...policyPreset('trusted'),
-      acceptance: { ...policyPreset('trusted').acceptance, admissionCheck: false },
+      acceptance: {
+        ...policyPreset('trusted').acceptance,
+        admissionCheck: false,
+      },
       agentDefaults: { stallAlerts: { enabled: false } },
     },
   });
@@ -188,7 +195,13 @@ export async function finishFixture(
         );
         if (name === 'finishStep')
           assert(count.ranges <= 120 && count.documents <= 120, 'constant-size finish control');
-        const max = (maxima[name] ??= { ranges: 0, documents: 0, readBytes: 0, writes: 0, writeBytes: 0 });
+        const max = (maxima[name] ??= {
+          ranges: 0,
+          documents: 0,
+          readBytes: 0,
+          writes: 0,
+          writeBytes: 0,
+        });
         for (const key of Object.keys(max)) max[key] = Math.max(max[key], count[key]);
       }
       for (const row of f.tables.projectHostedFinishes.values()) {
@@ -209,17 +222,23 @@ export async function finishFixture(
         expectedConfiguration: f.rawChecks.configuration.digest,
         expectedEnvironment: f.rawChecks.runner.environmentFingerprint,
       },
-      finish: { composeOperationId: selection.request.operationId, after: null },
+      finish: {
+        composeOperationId: selection.request.operationId,
+        after: null,
+      },
       ...overrides,
     });
   const enqueue = r =>
-    tx('finishEnqueue', landingApi.enqueue, { projectId: f.projectId, request: JSON.stringify(r) }).then(
-      JSON.parse,
-    );
+    tx('finishEnqueue', landingApi.enqueue, {
+      projectId: f.projectId,
+      request: JSON.stringify(r),
+    }).then(JSON.parse);
   const current = id =>
-    tx('finishStatus', api.status, { projectId: f.projectId, submissionId: id, priorityInfo: 1 }).then(
-      JSON.parse,
-    );
+    tx('finishStatus', api.status, {
+      projectId: f.projectId,
+      submissionId: id,
+      priorityInfo: 1,
+    }).then(JSON.parse);
   const row = id => [...f.tables.projectHostedFinishes.values()].find(x => x.submissionId === id);
   const pending = () =>
     [...f.tables._scheduled_functions.values()]
@@ -232,7 +251,10 @@ export async function finishFixture(
       submissionId: args.submissionId,
     });
     if (!context) return null;
-    const owner = await tx('reuseClaim', reuseStore.claim, { ...args, owner: randomUUID() });
+    const owner = await tx('reuseClaim', reuseStore.claim, {
+      ...args,
+      owner: randomUUID(),
+    });
     if (!owner) return null;
     let proof = null;
     try {
@@ -251,7 +273,9 @@ export async function finishFixture(
   const execute = async (task = pending()[0], stop = null) => {
     assert(task, 'pending task');
     now = Math.max(now, task.scheduledTime);
-    f.patch('_scheduled_functions', task._id, { state: { kind: 'inProgress' } });
+    f.patch('_scheduled_functions', task._id, {
+      state: { kind: 'inProgress' },
+    });
     const input = task.args[0];
     metrics.ticks++;
     try {
@@ -285,7 +309,10 @@ export async function finishFixture(
                 blobs.set(id, { metadata: { sha256, size: bytes.length } });
                 c.objects.set(sha256, bytes);
                 metrics.uploadBytes += bytes.length;
-                metrics.legacyPlanWrites.push({ digest: sha256, size: bytes.length });
+                metrics.legacyPlanWrites.push({
+                  digest: sha256,
+                  size: bytes.length,
+                });
                 return id;
               },
             },
@@ -296,6 +323,8 @@ export async function finishFixture(
         await tx('landingAlarm', stallApi.alarm, input);
       } else if (task.name === 'projectHostedLandingStall:deadline') {
         await tx('landingDeadline', stallApi.deadline, input);
+      } else if (task.name === 'projectHostedLandingCohortHold:end') {
+        await tx('cohortHoldEnd', cohortHoldApi.end, input);
       } else if (task.name === 'projectHostedLandingStallAlert:alert') {
         await tx('stallAlert', stallAlertApi.alert, input);
       } else if (task.name === 'projectHostedLandingPrecompose:start') {
@@ -376,7 +405,9 @@ export async function finishFixture(
       } else if (task.name === 'projectHostedComposeJobs:complete') {
         const job = await tx(
           'finishLoadJob',
-          { _handler: ctx => sourceJobs.loadSourceJob(ctx, f.projectId, input.jobId) },
+          {
+            _handler: ctx => sourceJobs.loadSourceJob(ctx, f.projectId, input.jobId),
+          },
           {},
         );
         if (job.status === 'failed' || job.status === 'cancelled') {

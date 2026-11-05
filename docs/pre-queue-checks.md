@@ -56,6 +56,9 @@ configured check (no `configure-check`) skips it and queues as before.
      entry and joins a cohort for one combined check. That combined check is the
      re-check after main touched the change's import closure.
    Cohorts of admitted changes use the admitted failure prior, so they are larger.
+   A refused change waits for peers still deciding their own Lane run (bounded by
+   the train hold, holding no queue order, with one armed wake), so the refused
+   changes of one wave share one cohort check (Issue 10b0a94b).
 
 The Lane check never re-runs because main moved. Re-running it would race main
 again (model finding 5, moving-main starvation) and add a full run per move; the
@@ -138,9 +141,10 @@ lands on its Lane run with no second run.
 ## Measured effect
 
 On the synthetic 12-Lane wave with 3 red changes, no queue check contained a red
-change (before: 8 of 19), landings per hour rose from 6.1 to 8.2 and no queue run
-was thrown away (before: 0.67 per landing). Runner minutes per landing stayed at
-46: the passing Lane runs that were not reused cost what the failed queue runs
-cost before. A single Lane uses one run (22 runner minutes) with or without the Lane check.
+change (before: 8 of 19) and no queue run was thrown away (before: 0.67 per
+landing). With the cohort hold, the 8 changes that missed proved reuse share two
+cohort checks instead of 7 groups: runner minutes per landing fell from 46 to 34,
+landings per hour rose from 6.1 (8.2 without the hold) to 12.3 and Convex calls
+per landing from 121 (99) to 77. A single Lane uses one run (22 runner minutes) with or without the Lane check.
 Details are in [landing batches](operations/landing-batches.md#pre-queue-lane-checks).
 The live effect on the project's runner is not yet measured.

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-// Development-only: no provider calls, project code execution, or stored JAR.
+// Development-only: no provider calls or project code execution; the JAR is never
+// committed (a checksum-verified copy is cached in the OS temp folder).
 import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, writeFile, rm, statfs } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -45,6 +46,12 @@ if (config === 'all') {
     'prequeue-suffix',
     'prequeue-solo',
     'prequeue-solo-moved',
+    'prequeue-cohort',
+    'prequeue-cohort-mixed',
+    'prequeue-cohort-before',
+    'prequeue-hold-order',
+    'cohorthold',
+    'cohorthold-fixed',
   ]) {
     const code = await new Promise((resolve, reject) => {
       const child = spawn(process.execPath, [fileURLToPath(import.meta.url), name], { stdio: 'inherit' });
@@ -54,6 +61,28 @@ if (config === 'all') {
     if (code !== 0) process.exit(1);
   }
   process.exit(0);
+}
+/** The pinned jar: a checksum-verified copy in the OS temp folder, else the
+ * official release (three attempts; a release-host 504 no longer blocks a run). */
+async function officialJar() {
+  const verified = bytes => createHash('sha256').update(bytes).digest('hex') === tlaTools.sha256;
+  const cached = join(tmpdir(), `forge-tla2tools-${tlaTools.sha256}.jar`);
+  const hit = await readFile(cached).catch(() => null);
+  if (hit && verified(hit)) return hit;
+  for (let attempt = 1; ; attempt++) {
+    const response = await fetch(tlaTools.url, { signal: AbortSignal.timeout(60_000) }).catch(error => error);
+    if (response.ok) {
+      const bytes = Buffer.from(await response.arrayBuffer());
+      if (!verified(bytes)) throw new Error('Official tla2tools checksum differs; refusing to execute it.');
+      await writeFile(cached, bytes);
+      return bytes;
+    }
+    if (attempt === 3)
+      throw new Error(
+        `Official tla2tools download failed: ${response.status ? `HTTP ${response.status}` : response}`,
+      );
+    await new Promise(resolve => setTimeout(resolve, 5_000 * attempt));
+  }
 }
 const cfg = await readFile(join(directory, `${config}.cfg`), 'utf8');
 const disk = await statfs(tmpdir());
@@ -78,11 +107,7 @@ try {
       TEMP: temp,
     },
   });
-  const response = await fetch(tlaTools.url, { signal: AbortSignal.timeout(60_000) });
-  if (!response.ok) throw new Error(`Official tla2tools download failed: HTTP ${response.status}`);
-  const bytes = Buffer.from(await response.arrayBuffer());
-  if (createHash('sha256').update(bytes).digest('hex') !== tlaTools.sha256)
-    throw new Error('Official tla2tools checksum differs; refusing to execute it.');
+  const bytes = await officialJar();
   const jar = join(scratch, 'tla2tools.jar');
   await writeFile(jar, bytes);
   const module = cfg.includes('\\* Incident') ? 'Incidents' : 'LandingQueue';

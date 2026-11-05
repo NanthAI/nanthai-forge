@@ -6,6 +6,13 @@ CONSTANTS N, Cohort, Width, CrashBound, MoveBound, AllowCancel, AllowAdvice, All
 \* main move. SuffixWaits is the previous claim order, in which a group also waits
 \* for older entries stacked behind it (litmus only).
 CONSTANTS PreQueue, Red, Independent, LaneInfra, SuffixWaits
+\* Cohort hold (10b0a94b). "none": the earlier shape, no tracking (state counts
+\* unchanged). "before": today's code, tracked: a refused member forms its cohort
+\* while peers still decide their own proof. "hold": it waits, holding no queue
+\* order, until no peer is deciding or its bounded hold expires. "keep-order":
+\* the same hold, but it keeps its queue order (litmus only).
+CONSTANTS Hold
+OneCohort == [e \in 1..N |-> 1]
 Entries == 1..N
 SingletonCohorts == [e \in Entries |-> e]
 SmallCohorts == [e \in Entries |-> IF e <= 2 THEN 1 ELSE 2]
@@ -35,13 +42,31 @@ Init == /\ q = [phase |-> [e \in Entries |-> IF InitiallyQueued
                 batches |-> [g \in Entries |-> Empty], train |-> <<>>,
                 lane |-> [e \in Entries |-> IF PreQueue /\ InitiallyQueued THEN "checking" ELSE "none"],
                 lbase |-> [e \in Entries |-> {}], lrev |-> [e \in Entries |-> 0],
-                lretries |-> [e \in Entries |-> 0], tried |-> {}]
+                lretries |-> [e \in Entries |-> 0], tried |-> {},
+                expired |-> {}, early |-> FALSE]
         /\ main = {} /\ stamp = 0 /\ moves = 0
         /\ counts = [e \in Entries |-> 0] /\ audit = [cas |-> TRUE, exact |-> TRUE, authorized |-> TRUE]
         /\ running = TRUE /\ crashes = 0 /\ claim = 0 /\ fence = 0
 Live == {e \in Entries : q.phase[e] \notin Terminal \cup {"new"}}
-\* An entry still in its pre-queue Lane check holds no queue order.
-QueueLive == {e \in Live : q.rank[e] > 0 /\ q.lane[e] # "checking"}
+\* An admitted entry deciding its own proof: not tried yet, or in its one-member
+\* Lane group (exact, proved reuse or refused). A refused member waits for them.
+Deciding == {e \in Entries : PreQueue /\ q.phase[e] = "queued" /\ q.lane[e] = "passed"
+                             /\ e \notin q.tried}
+  \cup UNION {q.batches[g].members : g \in {h \in Entries : q.batches[h].lane
+                                          /\ q.batches[h].phase \in {"composing", "checking", "ready"}}}
+\* Held: a refused member (tried, batchable, free) while a peer is deciding and its
+\* bounded hold has not expired. Released in the transaction that ends the last
+\* decision (derived state); a lost wake is the Incidents `cohorthold` litmus.
+Held == IF Hold \in {"hold", "keep-order"}
+        THEN {e \in Entries : q.phase[e] = "queued" /\ e \in q.tried /\ e \notin q.expired
+                              /\ (\A g \in Entries : q.batches[g].phase \in {"composing", "checking", "ready"}
+                                   => e \notin q.batches[g].members)
+                              /\ Deciding # {}}
+        ELSE {}
+\* An entry still in its pre-queue Lane check holds no queue order, nor does a
+\* held one (else a peer it waits for waits for it: `prequeue-hold-order`).
+QueueLive == {e \in Live : q.rank[e] > 0 /\ q.lane[e] # "checking"
+                           /\ (Hold # "keep-order" => e \notin Held)}
 Earliest(entries) == CHOOSE e \in entries : \A f \in entries : q.rank[e] <= q.rank[f]
 Active == {g \in Entries : q.batches[g].phase \in {"composing", "checking", "ready"}}
 \* UUID spelling is unobservable. Recycle a name only after EVERY modeled
@@ -56,6 +81,8 @@ InBatch(e) == \E g \in Active : e \in q.batches[g].members
 \* An admitted entry first tries its own Lane proof; only then is it batchable.
 Batchable(e) == ~PreQueue \/ q.lane[e] = "unknown" \/ e \in q.tried
 Free == {e \in Entries : q.phase[e] = "queued" /\ Batchable(e) /\ ~InBatch(e)}
+\* Selectable for a cohort: a held entry is not runnable.
+Sel == Free \ Held
 Adoptable == {e \in Entries : PreQueue /\ q.phase[e] = "queued" /\ q.lane[e] = "passed"
                              /\ e \notin q.tried /\ ~InBatch(e)}
 \* 51bbbd00: entries named by combined-failure evidence whose own check has not
@@ -127,7 +154,7 @@ LaneCheck(e, outcome) ==
 \* a moved main only the conservative-impact proof (Reuse) may carry it.
 LaneAdopt(g) ==
   /\ running /\ claim = 0 /\ Adoptable # {} /\ g = Min(Entries \ Active)
-  /\ Len(q.train) < Width /\ Earliest(Free \cup Adoptable) \in Adoptable
+  /\ Len(q.train) < Width /\ Earliest(Sel \cup Adoptable) \in Adoptable
   /\ LET e == Earliest(Adoptable)
          b == [Empty EXCEPT !.phase = "ready", !.members = {e}, !.included = {e},
                  !.base = q.lbase[e], !.rev = q.lrev[e], !.head = q.lbase[e] \cup {e},
@@ -140,6 +167,10 @@ LaneAdopt(g) ==
 LaneRefused(g) ==
   /\ PreQueue /\ running /\ claim = 0 /\ q.batches[g].lane /\ q.batches[g].phase = "ready"
   /\ ~Exact(g) /\ ~(q.batches[g].included \subseteq Independent)
+  \* In code the refusal happens at publication, after the order claim. The
+  \* earlier configurations ("none") keep the simpler unordered refusal.
+  /\ (Hold # "none" => ~\E e \in QueueLive \ (q.batches[g].members \cup Suspects \cup Behind(g)) :
+                         q.rank[e] < q.rank[Earliest(q.batches[g].included)])
   /\ LET b == q.batches[g] invalid == Invalidated(g) IN
      q' = [invalid EXCEPT !.batches[g] = Empty,
            !.phase = [x \in Entries |-> IF x \in b.members \cap Live THEN "queued"
@@ -153,22 +184,24 @@ Precompose(e) == /\ AllowAdvice /\ e \in Free /\ e \notin q.advice
                 /\ q' = [q EXCEPT !.advice = @ \cup {e}]
                 /\ UNCHANGED <<main, stamp, moves, counts, audit, running, crashes, claim, fence>>
 Form(g) ==
-  /\ running /\ claim = 0 /\ Free # {} /\ g = Min(Entries \ Active)
+  /\ running /\ claim = 0 /\ Sel # {} /\ g = Min(Entries \ Active)
   /\ Len(q.train) < Width
-  /\ Earliest(Free \cup Adoptable) \in Free
-  /\ LET entry == Earliest(Free) IN
+  /\ Earliest(Sel \cup Adoptable) \in Sel
+  /\ LET entry == Earliest(Sel) IN
      /\ (entry \in q.solo => ~\E e \in QueueLive \cap q.solo : q.rank[e] < q.rank[entry])
      /\ (IF TrainTail = 0 \/ entry \in q.solo THEN TRUE
           ELSE q.batches[TrainTail].phase \in {"checking", "ready"})
      /\ LET members == IF entry \in q.solo THEN {entry}
-                       ELSE {e \in Free : Cohort[e] = Cohort[entry] /\ e \notin q.solo}
+                       ELSE {e \in Sel : Cohort[e] = Cohort[entry] /\ e \notin q.solo}
             base == IF TrainTail = 0 \/ entry \in q.solo THEN main ELSE q.batches[TrainTail].head
             rev == IF TrainTail = 0 \/ entry \in q.solo THEN stamp ELSE q.batches[TrainTail].receipt
         IN q' = [q EXCEPT !.batches[g] = [Empty EXCEPT !.phase = "composing",
                      !.members = members, !.included = members, !.base = base,
                      !.rev = rev, !.receipt = FreshReceipt,
                      !.pred = IF entry \in q.solo THEN 0 ELSE TrainTail],
-                   !.advice = @ \ members, !.train = Append(@, g)]
+                   !.advice = @ \ members, !.train = Append(@, g),
+                   !.early = @ \/ (Hold # "none" /\ Deciding # {} /\
+                                    \E m \in members : m \in q.tried /\ m \notin q.expired)]
   /\ UNCHANGED <<main, stamp, moves, counts, audit, running, crashes, claim, fence>>
 Compose(g, dropped) ==
   /\ running /\ g \in Active /\ q.batches[g].phase = "composing"
@@ -310,12 +343,16 @@ Reuse(g) == /\ AllowReuse /\ running /\ claim = 0 /\ ~Exact(g)
             /\ UNCHANGED <<main, stamp, moves, counts, audit, running, crashes, claim, fence>>
 StaleClaim(g) == /\ running /\ claim = g /\ (~Exact(g) \/ q.batches[g].phase # "ready") /\ claim' = 0
                  /\ UNCHANGED <<q, main, stamp, moves, counts, audit, running, crashes, fence>>
+\* The hold's one-shot wake at its bound (HOSTED_TRAIN_HOLD_MS). Not fair here, so
+\* liveness never relies on it; any expiry interleaving is explored.
+HoldExpire(e) == /\ e \in Held /\ q' = [q EXCEPT !.expired = @ \cup {e}]
+                 /\ UNCHANGED <<main, stamp, moves, counts, audit, running, crashes, claim, fence>>
 Driver(g) == Admit(g) \/ AdmissionFailure(g) \/ LaneAdopt(g) \/ LaneRefused(g)
              \/ (\E o \in {"pass", "test", "infra"} : LaneCheck(g, o))
              \/ SourceFailure(g) \/ StaleClaim(g) \/ Form(g) \/ Settle(g) \/ Rebase(g) \/ Claim(g) \/ Publish(g)
              \/ (\E d \in SUBSET Entries : Compose(g, d))
              \/ (\E o \in {"pass", "test", "infra"} : Check(g, o))
-Next == (\E e \in Entries : Submit(e) \/ Gate(e) \/ Precompose(e) \/ Cancel(e))
+Next == (\E e \in Entries : Submit(e) \/ Gate(e) \/ Precompose(e) \/ Cancel(e) \/ HoldExpire(e))
         \/ (\E g \in Entries : Driver(g) \/ Reuse(g) \/ Fallback(g) \/ (\E e \in Entries : CancelBatch(g,e)))
         \/ MoveMain \/ Crash \/ Restart
 Spec == Init /\ [][Next]_vars /\ WF_vars(Restart)
@@ -343,7 +380,7 @@ TypeOK == /\ main \subseteq Entries \cup {0} /\ stamp \in ReceiptNames
           /\ Len(q.train) <= Width /\ claim \in Entries \cup {0}
           /\ \A g \in Entries : q.batches[g].phase \in BatchPhases
           /\ \A e \in Entries : q.lane[e] \in {"none", "checking", "passed", "unknown", "failed"}
-          /\ q.tried \subseteq Entries
+          /\ q.tried \subseteq Entries /\ q.expired \subseteq Entries /\ q.early \in BOOLEAN
           /\ q.suspect \subseteq Entries /\ q.unstacked \subseteq Entries
 S1 == audit.cas /\ {e \in Entries : counts[e] > 0} \subseteq main
 S2 == audit.exact
@@ -365,6 +402,9 @@ RedNeverQueued == \A e \in Red : ~InBatch(e) /\ counts[e] = 0
 LaneRunsBounded == \A e \in Entries : q.lretries[e] <= 2
 \* A passed Lane check on unchanged main is the landing check: no queue check runs.
 NoQueueCheck == \A g \in Entries : q.batches[g].phase # "checking"
+\* No refused member forms a cohort while a peer still decides its own proof,
+\* unless its bounded hold expired.
+NoEarlyCohort == ~q.early
 L1 == \A e \in Entries : (q.phase[e] # "new") ~> (q.phase[e] \in Terminal)
 L2 == \A e \in Entries : (e \in Live) ~> (e \notin Live)
 =============================================================================

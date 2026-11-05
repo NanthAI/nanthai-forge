@@ -13,6 +13,7 @@ export const store = await import(moduleUrl('../convex/projectHostedLandingStore
 export const wake = await import(moduleUrl('../convex/projectHostedLandingWake.ts'));
 export const pins = await import(moduleUrl('../convex/projectHostedLandingPins.ts'));
 const alarms = await import(moduleUrl('../convex/projectHostedLandingStall.ts'));
+const cohortHold = await import(moduleUrl('../convex/projectHostedLandingCohortHold.ts'));
 const stallAlerts = await import(moduleUrl('../convex/projectHostedLandingStallAlert.ts'));
 const wouldConflict = await import(moduleUrl('../convex/projectHostedLandingWouldConflict.ts'));
 const records = await import(moduleUrl('../convex/projectHostedRecords.ts'));
@@ -28,7 +29,10 @@ export async function landingFixture(source = null) {
   // Fake time jumps to each scheduled task; alerts have their own tests (hosted-stall-alerts.test.mjs).
   if (!f.tables.hostedProjects.get(f.projectId).autonomyPolicy)
     f.patch('hostedProjects', f.projectId, {
-      autonomyPolicy: { ...legacyPolicy(), agentDefaults: { stallAlerts: { enabled: false } } },
+      autonomyPolicy: {
+        ...legacyPolicy(),
+        agentDefaults: { stallAlerts: { enabled: false } },
+      },
     });
   let now = Date.now(),
     schedulerFailure = false;
@@ -49,7 +53,12 @@ export async function landingFixture(source = null) {
     authority: { mode: 'server', epoch: 1 },
     channel: 'main',
     head: f.candidate.base.head,
-    receipt: { id: f.candidate.base.receiptId, kind: 'server', previousHead: null, previousReceiptId: null },
+    receipt: {
+      id: f.candidate.base.receiptId,
+      kind: 'server',
+      previousHead: null,
+      previousReceiptId: null,
+    },
   };
   let mainRow = [...f.tables.projectHostedChannels.values()].find(r => r.projectId === f.projectId);
   const mainId =
@@ -100,7 +109,13 @@ export async function landingFixture(source = null) {
         ),
         `${name}: no source pages, shards or history hydration`,
       );
-      const max = (maxima[name] ??= { ranges: 0, documents: 0, readBytes: 0, writes: 0, writeBytes: 0 });
+      const max = (maxima[name] ??= {
+        ranges: 0,
+        documents: 0,
+        readBytes: 0,
+        writes: 0,
+        writeBytes: 0,
+      });
       for (const k of Object.keys(max)) max[k] = Math.max(max[k], c[k]);
     }
     for (const [table, rows] of Object.entries(f.tables)) {
@@ -162,7 +177,9 @@ export async function landingFixture(source = null) {
   const execute = async (task = nextTask(), stopAfterClaim = false) => {
     assert(task, 'pending scheduled task');
     now = Math.max(now, task.scheduledTime, Date.now());
-    f.patch('_scheduled_functions', task._id, { state: { kind: 'inProgress' } });
+    f.patch('_scheduled_functions', task._id, {
+      state: { kind: 'inProgress' },
+    });
     try {
       let result;
       if (task.name === 'projectHostedLandingStall:alarm')
@@ -177,6 +194,8 @@ export async function landingFixture(source = null) {
           (ctx, input) => alarms.resolveStalledLanding(ctx, input, now),
           task.args[0],
         );
+      else if (task.name === 'projectHostedLandingCohortHold:end')
+        result = await call('cohortHoldEnd', cohortHold.end, task.args[0]);
       else if (task.name === 'projectHostedLandingStallAlert:alert')
         result = await run(
           'stallAlert',
@@ -229,7 +248,9 @@ export async function landingFixture(source = null) {
       f.patch('_scheduled_functions', task._id, { state: { kind: 'success' } });
       return result;
     } catch (error) {
-      f.patch('_scheduled_functions', task._id, { state: { kind: 'failed', error: 'synthetic failure' } });
+      f.patch('_scheduled_functions', task._id, {
+        state: { kind: 'failed', error: 'synthetic failure' },
+      });
       throw error;
     }
   };
@@ -243,7 +264,11 @@ export async function landingFixture(source = null) {
   };
   const candidate = async (overrides = {}) => {
     const c = { ...f.candidate, id: randomUUID(), ...overrides };
-    await run('landingSeed', records.writeHostedRecord, { ...f.auth, expectedVersion: null, record: c });
+    await run('landingSeed', records.writeHostedRecord, {
+      ...f.auth,
+      expectedVersion: null,
+      record: c,
+    });
     return c;
   };
   return {

@@ -43,6 +43,12 @@ npm run model:landing-queue -- prequeue-before    # expected: a red change enter
 npm run model:landing-queue -- prequeue-suffix    # expected: waiting for your own suffix deadlocks
 npm run model:landing-queue -- prequeue-solo      # one Lane, unchanged main: no queue check
 npm run model:landing-queue -- prequeue-solo-moved # expected: a main move needs the queue check
+npm run model:landing-queue -- prequeue-cohort        # cohort hold: refused changes form one cohort
+npm run model:landing-queue -- prequeue-cohort-mixed  # the same with a red and an independent change
+npm run model:landing-queue -- prequeue-cohort-before # expected: a cohort forms while peers decide
+npm run model:landing-queue -- prequeue-hold-order    # expected: a hold that keeps its order deadlocks
+npm run model:landing-queue -- cohorthold             # expected: lost release wake (10b0a94b)
+npm run model:landing-queue -- cohorthold-fixed
 ```
 
 An installed JDK is a **development-only** prerequisite. On the development Mac, `java`
@@ -154,6 +160,39 @@ Findings while extending the model:
    main move) violates `NoQueueCheck`, as it should: a moved main needs the
    combined check unless the proof holds.
 
+## Cohort hold
+
+`Hold` (Issue 10b0a94b) models the cohort hold
+(`convex/projectHostedLandingCohortHold.ts`). Admitted changes each try their own
+Lane run first; on a moved main the refused ones recomposed and each formed its
+cohort before its peers had tried, so the synthetic wave re-checked 8 changes as
+7 groups. `Deciding` is the set of admitted entries that have not tried their run
+or are in their one-member Lane group. `Held` is a refused (tried, free) entry
+while `Deciding` is not empty and its bounded hold has not expired: it is not
+selectable and holds no queue order. Release is derived state, so it happens in
+the transaction that ends the last decision. `HoldExpire` (the one-shot wake at
+`HOSTED_TRAIN_HOLD_MS`) is not fair, so liveness never relies on it. With
+`Hold # "none"` a refused proof needs the order claim (`LaneRefused`), as in code,
+where refusal happens at publication. `"none"` keeps the earlier shape and state
+counts; `OneCohort` puts every entry in one cohort class.
+
+- `prequeue-cohort` and `prequeue-cohort-mixed` hold S1, S3, `RedNeverQueued`,
+  `NoEarlyCohort` (no refused member forms a cohort while a peer still decides,
+  unless its hold expired), L1 and L2.
+- `prequeue-cohort-before` (today's code, tracked) violates `NoEarlyCohort`.
+- `prequeue-hold-order` (the hold keeps its queue order) violates L1: the held
+  older entry waits for a younger peer's decision while that peer's publication
+  waits for the older entry's place. In code this was the existing chain in the
+  wave: refused peers parked behind the oldest refused member until its 15-minute
+  stall alarm. Fix: a held entry holds no order and wakes its order waiters.
+- Incidents `cohorthold`: the peer's decision releases the hold and schedules one
+  queue drive, which is lost (OCC exhaustion); in another branch the peer never
+  decides; with `main = 1` a write outage also refuses the hold's own wake. The
+  unfixed shape (release by the peer only) violates `CohortForms`.
+  `cohorthold-fixed` arms one wake at the bound in the hold's transaction and
+  re-drives it after the outage (`redriveCohortHold`). Replayed against the
+  implementation in `tests/hosted-landing-cohort-hold.test.mjs`.
+
 ## Model-to-code map and simplifications
 
 Line references are to the pinned source above. Every abstraction below is a
@@ -175,6 +214,7 @@ scope limitation; passing TLC does not verify the omitted implementation.
 | `Claim`, `Publish`, `MoveMain` | `convex/projectHostedLandingControl.ts:293`, `convex/projectHostedLandingBatchPublish.ts:48`, `convex/projectHostedAcceptancePublish.ts:110` | Transactional OCC/CAS is atomic; includes main receipt equality, exact proof and member counters. Policy, contributor access, full shard evidence and registration are assumed validated; this is the automatic agent path, not explicit unchecked owner acceptance (which independently also makes unrestricted literal S2 false). Main contributions are append-only ancestry tokens; legitimate file edits/reverts are outside this property. |
 | `Reuse` | `convex/projectHostedFinishCompose.ts:402`, `convex/projectHostedAcceptancePublish.ts:125`, `convex/projectHostedAcceptancePublish.ts:175`, `src/hosted-cross-head-proof.ts:46` | Eligible owner-agent cross-head proof on disjoint synthetic main change. Analysis/audit eligibility is assumed; original checked result stays different from applied result. `strict.cfg` disables this branch; the default enables it; `reuse-core` explicitly enables it. |
 | `LaneCheck`, `LaneAdopt`, `LaneRefused`, `Behind` | `convex/projectHostedLandingAdmission.ts` (`startLandingAdmission`, `settleLandingAdmission`, `admittedReuseFirst`), `convex/projectHostedLandingStore.ts` (`orderLive`, `batchable`), `convex/projectHostedLandingSuffix.ts`, `convex/projectHostedLandingOrder.ts` (`olderLandingAhead`) | Lane-check outcomes are fixed by `Red`; in-flight interaction failures stay nondeterministic in `Check`. Proof eligibility is the constant `Independent`, not the path/test analysis. A refused proof is reduced to returning to the pool; the code recomposes on current main first. The code walks the suffix only for entries that went through full admission: only they can enter the queue behind a younger group. |
+| `Deciding`, `Held`, `HoldExpire` | `convex/projectHostedLandingCohortHold.ts` (`decidingSince`, `holdForPeers`, `releaseCohortHolds`, `end`, `redriveCohortHold`), `convex/projectHostedLandingStore.ts` (`writeLanding`), `convex/projectHostedLandingBatchCheck.ts` | The code waits only for peers whose admission ended before the hold began (`deciding` index), so later arrivals never extend it; the model starts with every entry admitted. A held entry outside the release window is released by its own wake. |
 | crash/restart, fair driver | `convex/projectHostedLandingControl.ts:43`, `convex/projectHostedLandingControl.ts:123`, `convex/projectHostedLandingDriver.ts:46`, `convex/projectHostedFinishWake.ts:48` | Finite crashes between transactions; durable watchdog eventually runs, lease fence rises on restart. Expiry alone creates no new run. Timers become fair events; physical durations and stale worker payloads are not simulated. |
 | stall/hold repair | `convex/projectHostedLandingWake.ts:112`, `convex/projectHostedLandingStall.ts:90`, `convex/projectHostedLandingStall.ts:157` | Fair source failure/fallback stands in for 5-minute hold release and 15/60-minute stall events. Real drop deadlines only cancel structurally ownerless work and eventually stop rearming live work. Permanent transaction faults are outside successful-driver fairness; the stranded litmus tests the missing-recovery shape, not all six historic incidents. |
 | client observation | `src/hosted-agent-submission-wait.ts:164`, `src/hosted-agent-submission-wait.ts:267`, `src/hosted-agent-submission-wait.ts:392` | Separate litmus because client cache state does not authorize server acceptance. Only cached-ready/canonical-terminal/input-terminal interleaving is needed. |
@@ -343,7 +383,13 @@ or production historical replay is implied.
 | `prequeue-suffix` | 129,008 | 59,606 | 63.990 | Expected liveness violation |
 | `prequeue-solo` | 5 | 5 | 0.797 | Passed |
 | `prequeue-solo-moved` | 20 | 18 | 1.033 | Expected NoQueueCheck |
+| `cohorthold` | 12 | 12 | 0.575 | Expected liveness violation |
+| `cohorthold-fixed` | 28 | 28 | 0.584 | Passed; lost release, stuck peer and outage branches |
+| `prequeue-cohort` | 210,470 | 69,900 | 168.934 | Passed |
+| `prequeue-cohort-mixed` | 620 | 278 | 1.476 | Passed |
+| `prequeue-cohort-before` | 306 | 199 | 2.015 | Expected NoEarlyCohort |
+| `prequeue-hold-order` | 123,398 | 58,527 | 496.188 | Expected liveness violation |
 
-All 18 configurations matched their expected outcomes on the registered Java 25.0.3 JDK (2026-11-05, Lane fefd80ee). The seven `prequeue` rows and every `LandingQueue` configuration were then re-run on the spec composed with that change (2026-11-05, Issue e7d27937): all matched, and the non-`prequeue` state counts were unchanged. The `prequeue` rows are from that run. The six positive queue configurations fully exhausted their state graphs; the negative cases stopped at the named counterexample. The default remained below five minutes (94.046 s); `isolation` took 290.953 s.
+All 18 configurations matched their expected outcomes on the registered Java 25.0.3 JDK (2026-11-05, Lane fefd80ee). The seven `prequeue` rows and every `LandingQueue` configuration were then re-run on the spec composed with that change (2026-11-05, Issue e7d27937): all matched, and the non-`prequeue` state counts were unchanged. The `prequeue` rows are from that run. The six positive queue configurations fully exhausted their state graphs; the negative cases stopped at the named counterexample. The default remained below five minutes (94.046 s); `isolation` took 290.953 s. The six cohort-hold rows were added with Issue 10b0a94b (2026-11-05, Lane 2881e6cc). With `Hold = "none"` the `prequeue` and `small` counts were re-run and unchanged. `prequeue-cohort` and `prequeue-cohort-mixed` use `MoveBound = 0`: queue publications move main, which is what refuses the Lane proofs. With one extra external move, `prequeue-cohort` had not finished after 18 minutes and is not counted. `prequeue-hold-order` keeps that move.
 
 Incomplete calibration explorations with allocation-history counters and arbitrary three-entry admission interleavings reached the five-minute limit and were not counted as passing checks. The delivered configurations use fresh symbolic names and the admission bounds described above; those incomplete variants are not a proof of broader bounds. No live provider replay, full six-incident historical replay, or proof of the source merge/fence implementation was performed. Peak resident memory was not measured; the Java heap was limited to 2 GiB. Disk stayed above the 40 GB reserve.

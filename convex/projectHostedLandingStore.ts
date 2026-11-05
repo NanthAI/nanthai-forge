@@ -8,6 +8,7 @@ import { semanticPayload } from '../src/semantic-payload';
 import { hostedLandingProgressAt } from '../src/hosted-landing-stall';
 import { landingAlarmPatch } from './projectHostedLandingStallWake';
 import { releaseAdmissionWaiters } from './projectHostedLandingAdmissionWake';
+import { cohortHeld, decidingSince, releaseCohortHolds } from './projectHostedLandingCohortHold';
 // SPDX-License-Identifier: Apache-2.0
 import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
@@ -30,7 +31,10 @@ import { invariant } from '../src/errors';
 export type { LandingChannel } from './projectHostedLandingEvents';
 export { landingQueue, ensureLandingQueue, recordLandingObservation } from './projectHostedLandingEvents';
 import { recordLandingObservation } from './projectHostedLandingEvents';
-export type LandingIdentity = { projectId: Id<'hostedProjects'>; submissionId: string };
+export type LandingIdentity = {
+  projectId: Id<'hostedProjects'>;
+  submissionId: string;
+};
 export type LandingRow = Doc<'projectHostedLandingRequests'>;
 export const landingRow = (ctx: QueryCtx | MutationCtx, input: LandingIdentity) =>
   ctx.db
@@ -193,9 +197,13 @@ export async function writeLanding(
   // An admission run holds the request until it settles; it never joins a cohort meanwhile.
   const admitting = row.admission?.status === 'checking' && state.phase === 'checking';
   const runId = attempt.check?.runId ?? (admitting ? row.admission!.runId : null);
-  // A submission still in its own admission (pre-queue) check is not in the queue yet.
+  // A submission still in its own admission (pre-queue) check is not in the queue yet,
+  // nor is one held for peers still deciding their Lane proof (10b0a94b).
   const orderLive =
-    !admitting && holdsLandingOrder({ phase: state.phase as LandingRow['phase'], hold: row.hold }, state);
+    !admitting &&
+    !cohortHeld(row, state, runnable) &&
+    holdsLandingOrder({ phase: state.phase as LandingRow['phase'], hold: row.hold }, state);
+  const deciding = decidingSince(row, state, attempt, orderLive);
   await ctx.db.patch(row._id, {
     ...(alarm && alarm.id === row._id ? { alarm: alarm.alarm } : {}),
     attemptId: state.attemptId,
@@ -204,6 +212,7 @@ export async function writeLanding(
     runId,
     checkWakeVersion: row.runId === runId ? row.checkWakeVersion : undefined,
     admitting: admitting ? true : undefined,
+    deciding,
     batchSelection:
       !state.batchSolo && (attempt.deferredCheck || row.batchSelection)
         ? canonicalPayload(attempt)
@@ -229,6 +238,7 @@ export async function writeLanding(
     value: semanticPayload(state),
   });
   if (row.admitting && !admitting) await releaseAdmissionWaiters(ctx, row.projectId);
+  if (row.deciding !== undefined && deciding === undefined) await releaseCohortHolds(ctx, row.projectId);
   if (row.orderWaited && (!orderLive || retiresSolo)) await wakeLandingOrderWaiters(ctx, row, orderLive);
   if (
     releaseRun &&
@@ -237,7 +247,10 @@ export async function writeLanding(
       state.phase === 'terminal-failed' ||
       state.phase === 'landed')
   )
-    await cancelUnneededHostedCheck(ctx, { projectId: row.projectId, runId: row.runId });
+    await cancelUnneededHostedCheck(ctx, {
+      projectId: row.projectId,
+      runId: row.runId,
+    });
   if (state.phase === 'landed' && previous.phase !== 'landed' && state.acceptance) {
     const project = await ctx.db.get(row.projectId);
     if (project?.needsFix)
@@ -307,7 +320,10 @@ export async function retainLandingProgress(
             code: 'CHANNEL_CHANGED',
             message: 'Main changed; a named child recomposes the original selection.',
           }
-        : { code: 'ATTEMPT_REPLACED', message: 'A named child or check binding replaced this attempt.' }
+        : {
+            code: 'ATTEMPT_REPLACED',
+            message: 'A named child or check binding replaced this attempt.',
+          }
       : replaced || null;
   if (row.progress) {
     const retained = hostedLandingProgressSchema.parse(JSON.parse(row.progress));
@@ -319,7 +335,10 @@ export async function retainLandingProgress(
         canonicalPayload(retained.batchDiagnostic ?? null) !== canonicalPayload(state.batchDiagnostic)
       )
         await ctx.db.patch(row._id, {
-          progress: semanticPayload({ ...retained, batchDiagnostic: state.batchDiagnostic }),
+          progress: semanticPayload({
+            ...retained,
+            batchDiagnostic: state.batchDiagnostic,
+          }),
         });
       return;
     }

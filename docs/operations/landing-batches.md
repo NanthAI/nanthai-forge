@@ -682,6 +682,12 @@ the same runner minutes as without the Lane check.
   finish retry applies the [conservative-impact proof](../agents/workflow.md#check-scope):
   an independent change lands on proved reuse; otherwise it recomposes on current
   main and joins a cohort for one combined check, sized with the admitted prior.
+- A refused change waits for peers that entered the queue before it and are still
+  deciding their own Lane run, so they form one cohort instead of one group each.
+  The wait holds no queue order, ends in the transaction where the last peer
+  decides, and lasts at most the train hold (5 minutes); one wake at that bound is
+  armed with the hold, and a write outage that refuses it is re-driven when
+  writes resume.
 - The Lane check never re-runs because main moved; the combined check is that
   re-check, once per cohort.
 - A group never waits for an older entry stacked behind it in the pipeline: that
@@ -693,22 +699,23 @@ nothing polls and an idle queue costs nothing.
 Measured on the synthetic 12-Lane wave (`tests/hosted-landing-prequeue.test.mjs`:
 real queue code, fake 22-minute runs, 12 changes arriving together, 3 of them red):
 
-| | Before (`admissionCheck: false`) | After (default `"full"`) |
-| --- | --- | --- |
-| Queue checks containing a red change | 8 of 19 (0.42) | 0 of 7 |
-| Accepted landings per hour | 6.1 | 8.2 |
-| Superseded or cancelled queue runs per accepted landing | 0.67 | 0 |
-| Passing Lane runs not reused, per accepted landing | 0 | 0.89 |
-| Runner minutes per accepted landing | 46 | 46 |
-| Runs (Lane + queue) | 19 | 19 (12 + 7) |
-| Convex calls per accepted landing | 121 | 99 |
-| Single Lane alone: runs, runner minutes, Convex calls | 1, 22, 56 | 1, 22, 59 |
+| | Before (`admissionCheck: false`) | Lane check (e7d27937) | With cohort hold (default) |
+| --- | --- | --- | --- |
+| Queue checks containing a red change | 8 of 19 (0.42) | 0 of 7 | 0 of 2 |
+| Accepted landings per hour | 6.1 | 8.2 | 12.3 |
+| Superseded or cancelled queue runs per accepted landing | 0.67 | 0 | 0 |
+| Passing Lane runs not reused, per accepted landing | 0 | 0.89 | 0.89 |
+| Runner minutes per accepted landing | 46 | 46 | 34 |
+| Runs (Lane + queue) | 19 | 19 (12 + 7) | 14 (12 + 2) |
+| Convex calls per accepted landing | 121 | 99 | 77 |
+| Single Lane alone: runs, runner minutes, Convex calls | 1, 22, 56 | 1, 22, 59 | 1, 22, 59 |
 
 "Before" includes repeat-offender isolation (51bbbd00). Wall time counts runner
-rounds, so these figures exclude dispatch latency. The 8 admitted changes that
-missed proved reuse were re-checked as 7 queue groups, not one cohort, because
-each tries its own run in turn before cohorts form; batching them is the
-remaining runner-minute saving. The
+rounds, so these figures exclude dispatch latency. Without the cohort hold the 8
+admitted changes that missed proved reuse were re-checked as 7 queue groups,
+and each refused peer waited in queue order behind the oldest refused one until
+its 15-minute stall alarm. With the hold they form two cohorts (the admitted
+cohort size is five) in two queue runs. The
 same contract test passes on GitHub Actions and on a registered self-hosted
 runner.
 

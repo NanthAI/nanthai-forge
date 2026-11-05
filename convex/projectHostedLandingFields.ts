@@ -2,7 +2,13 @@
 import { defineTable } from 'convex/server';
 import { v } from 'convex/values';
 const alarm = v.optional(
-  v.union(v.object({ taskId: v.id('_scheduled_functions'), lastProgressAt: v.string() }), v.null()),
+  v.union(
+    v.object({
+      taskId: v.id('_scheduled_functions'),
+      lastProgressAt: v.string(),
+    }),
+    v.null(),
+  ),
 );
 const phase = v.union(
   v.literal('queued'),
@@ -92,12 +98,21 @@ export const hostedLandingTables = {
     ),
     fence: v.number(),
     wake: v.union(
-      v.object({ taskId: v.id('_scheduled_functions'), id: v.string(), at: v.number() }),
+      v.object({
+        taskId: v.id('_scheduled_functions'),
+        id: v.string(),
+        at: v.number(),
+      }),
       v.null(),
     ),
     lease: v.union(lease, v.null()),
     /** Recent cohort outcomes for sizing (`1` passed, `0` a test failed), newest last. */
-    checkHistory: v.optional(v.object({ first: v.optional(v.string()), admitted: v.optional(v.string()) })),
+    checkHistory: v.optional(
+      v.object({
+        first: v.optional(v.string()),
+        admitted: v.optional(v.string()),
+      }),
+    ),
   }).index('by_project_and_channel', ['projectId', 'channel']),
   projectHostedLandingRequests: defineTable({
     alarm,
@@ -125,9 +140,21 @@ export const hostedLandingTables = {
         retries: v.optional(v.number()),
         /** The admitted change has tried its own Lane run as acceptance evidence. */
         reuse: v.optional(v.literal('tried')),
+        /** Its one cohort hold for peers still deciding their own Lane proof (10b0a94b). */
+        hold: v.optional(
+          v.object({
+            since: v.number(),
+            /** The hold's one-shot wake at its bound, armed with the hold. */
+            taskId: v.id('_scheduled_functions'),
+            done: v.optional(v.literal(true)),
+          }),
+        ),
       }),
     ),
     admitting: v.optional(v.literal(true)),
+    /** Admission end of an admitted change still deciding its own Lane proof
+     * (untried, or bound to its Lane run): refused peers wait for it (10b0a94b). */
+    deciding: v.optional(v.number()),
     revertOf: v.optional(v.string()),
     actor: v.string(),
     sequence: v.number(),
@@ -227,6 +254,7 @@ export const hostedLandingTables = {
       'admitting',
       'sequence',
     ])
+    .index('by_project_and_channel_and_deciding', ['projectId', 'channel', 'deciding'])
     .index('by_project_and_run_and_phase', ['projectId', 'runId', 'phase'])
     .index('by_project_run_phase_checkWakeVersion', ['projectId', 'runId', 'phase', 'checkWakeVersion']),
   projectHostedLandingAttempts: defineTable({

@@ -6,7 +6,7 @@ vars == <<pc, canonical, observed, inputsDone, returned, a, b, main, checked, ap
 Init == /\ pc = 0 /\ canonical = "ready" /\ observed = "ready"
         /\ inputsDone = FALSE /\ returned = FALSE
         /\ a = "queued" /\ b = "queued"
-        /\ main \in (IF Scenario = "outage" THEN {0, 1} ELSE {0})
+        /\ main \in (IF Scenario \in {"outage", "cohorthold"} THEN {0, 1} ELSE {0})
         /\ checked \in (IF Scenario = "cohort" THEN {0, 1} ELSE {0})
         /\ applied = 0 /\ owner = TRUE
 Idle == UNCHANGED vars
@@ -102,7 +102,37 @@ Outage == /\ Scenario = "outage"
        [] pc = 3 /\ owner /\ b = "ready" /\ ~inputsDone -> /\ b' = "landed" /\ pc' = 4
                      /\ UNCHANGED <<canonical, observed, inputsDone, returned, a, main, checked, applied, owner>>
        [] OTHER -> FALSE
-Step == Wait \/ CohortConflict \/ LostWake \/ MovingMain \/ CrossHead \/ OrderWake \/ Outage
+\* Issue 10b0a94b: b is an admitted change whose Lane proof was refused on a moved
+\* main; it holds (not runnable, no queue order) until its peer a, still deciding
+\* its own proof, decides, so both join one cohort. The peer's decision releases b
+\* in the same transaction and schedules one queue wake; that drive is lost (OCC
+\* exhaustion). The peer may also never decide (a stuck compose). main = 0: the
+\* lost wake; main = 1: a write outage (72d50375) also refuses the hold's own
+\* step. checked = the hold's wake: 1 armed, 2 thrown during the outage. Fixed:
+\* the hold arms one wake at its bound in the same transaction, and resumed
+\* writes re-drive it if it threw. Unfixed: only the peer's release wakes b.
+CohortHold == /\ Scenario = "cohorthold"
+  /\ CASE pc = 0 -> /\ b' = "held" /\ owner' = FALSE /\ checked' = (IF Fixed THEN 1 ELSE 0) /\ pc' = 1
+                     /\ UNCHANGED <<canonical, observed, inputsDone, returned, a, main, applied>>
+       [] pc = 1 -> /\ a' \in {"decided", "stuck"}
+                     /\ b' = (IF a' = "decided" THEN "queued" ELSE b) /\ owner' = (a' = "decided")
+                     /\ pc' = 2
+                     /\ UNCHANGED <<canonical, observed, inputsDone, returned, main, checked, applied>>
+       [] pc = 2 -> /\ owner' = FALSE /\ inputsDone' = (main = 1) /\ pc' = 3
+                     /\ UNCHANGED <<canonical, observed, returned, a, b, main, checked, applied>>
+       [] pc = 3 /\ checked = 1 ->
+                     /\ IF inputsDone THEN /\ checked' = 2 /\ UNCHANGED <<b, owner>>
+                        ELSE /\ checked' = 0 /\ owner' = TRUE /\ b' = "queued"
+                     /\ pc' = 4
+                     /\ UNCHANGED <<canonical, observed, inputsDone, returned, a, main, applied>>
+       [] pc = 4 -> /\ inputsDone' = FALSE
+                     /\ checked' = (IF checked = 2 /\ Fixed THEN 1 ELSE checked)
+                     /\ pc' = (IF checked' = 1 THEN 3 ELSE 5)
+                     /\ UNCHANGED <<canonical, observed, returned, a, b, main, applied, owner>>
+       [] pc = 5 /\ owner /\ b = "queued" -> /\ b' = "cohort" /\ pc' = 6
+                     /\ UNCHANGED <<canonical, observed, inputsDone, returned, a, main, checked, applied, owner>>
+       [] OTHER -> FALSE
+Step == Wait \/ CohortConflict \/ LostWake \/ MovingMain \/ CrossHead \/ OrderWake \/ Outage \/ CohortHold
 Spec == Init /\ [][Step]_vars /\ WF_vars(Step)
 FreshTerminal == returned => observed = canonical
 NoOrphanConflict == ~(a \in {"failed", "cancelled"} /\ b = "conflict" /\ main = 0 /\ checked = 0)
@@ -112,4 +142,5 @@ CohortSettles == Scenario = "cohort" => <>(b \in {"landed", "conflict"})
 ExactCheckedHead == applied # 0 => applied = checked
 EventuallyTerminal == <>(a = "landed" \/ a = "failed")
 HeadLands == <>(b = "landed")
+CohortForms == <>(b = "cohort")
 =============================================================================
