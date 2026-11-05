@@ -213,6 +213,7 @@ test('new Issues become planned Intents with memberships and capture a pin at th
     title: 'Planned work',
     status: 'closed',
     intentIds: [],
+    initiativeId: null, // an omitted initiativeId now keeps the group; null removes it
   });
   intent = f.store.load().intents.find(item => item.id === itemId);
   assert.equal(intent.memberships.length, 0);

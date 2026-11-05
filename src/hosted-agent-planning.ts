@@ -53,7 +53,11 @@ async function workspace(port: PlanningPort, planningDuplicateText?: string): Pr
     )
       throw error;
     ws = await port.query<Workspace | null>('projectWorkIndex:workspace', {});
-    if (ws) ws.likelyDuplicates = { items: [], coverage: 'unavailable-server-upgrade-required' };
+    if (ws)
+      ws.likelyDuplicates = {
+        items: [],
+        coverage: 'unavailable-server-upgrade-required',
+      };
   }
   invariant(
     ws,
@@ -125,7 +129,7 @@ async function writePlanning(
       const ws = await workspace(
         port,
         command.action === 'put-planning-item' && command.kind === 'issue' && command.expectedVersion === 0
-          ? `${command.title} ${command.body}`
+          ? `${command.title ?? ''} ${command.body ?? ''}`
           : undefined,
       );
       return {
@@ -167,13 +171,9 @@ const putFrom = (
   operationId,
   itemId: item.id,
   expectedVersion: item.version,
-  kind: item.kind,
-  title: item.title,
-  body: item.body,
+  // Status only: the server keeps the stored title, body, links and group.
   status,
   ...(reason === undefined ? {} : { reason }),
-  intentIds: item.intentIds,
-  ...(item.initiativeId ? { initiativeId: item.initiativeId } : {}),
 });
 
 /** Issue states from started Intents, one indexed read per Issue in a single call. */
@@ -283,7 +283,10 @@ async function readPlanning(
     const sync = input.reconcile ? await reconcile(port, ws, [item], states) : undefined;
     return {
       workRevision: ws.revision,
-      item: { ...item, ...(states[item.id] ? { intent: states[item.id] } : {}) },
+      item: {
+        ...item,
+        ...(states[item.id] ? { intent: states[item.id] } : {}),
+      },
       comments: comments.page.map(row => JSON.parse(row.value)).reverse(),
       ...(comments.isDone ? {} : { commentsMore: true }),
       ...(sync?.changed.length || sync?.failed || sync?.held?.length ? { reconciled: sync } : {}),
@@ -320,7 +323,10 @@ async function readPlanning(
     workRevision: ws.revision,
     items: matches.map(item =>
       compact(
-        { ...item, status: (closed.get(item.id) as PlanningItem['status']) ?? item.status },
+        {
+          ...item,
+          status: (closed.get(item.id) as PlanningItem['status']) ?? item.status,
+        },
         states[item.id],
       ),
     ),
@@ -357,10 +363,19 @@ export async function executeHostedPlanning(
     );
     return {
       operationId: journal.operationId,
-      result: { itemId: comment.itemId, commentId: journal.operationId, workRevision: revision },
+      result: {
+        itemId: comment.itemId,
+        commentId: journal.operationId,
+        workRevision: revision,
+      },
     };
   }
   const put = hostedAgentCommandSchemas['put-planning-item'].parse(input);
+  invariant(
+    put.expectedVersion > 0 || (put.kind && put.title),
+    'BAD_ARGUMENT',
+    'Creating a planning item (expectedVersion 0) needs `kind` and `title`.',
+  );
   const itemId = put.itemId ?? (await journal.id('item'));
   const hints: { likelyDuplicates?: unknown } = {};
   const revision = await writePlanning(
@@ -374,7 +389,7 @@ export async function executeHostedPlanning(
     result: {
       itemId,
       version: put.expectedVersion + 1,
-      status: put.status,
+      ...(put.status === undefined ? {} : { status: put.status }),
       workRevision: revision,
       ...hints,
     },
@@ -409,7 +424,11 @@ export async function markPlanningStarted(port: PlanningPort, itemId: string, st
   try {
     const ws = await workspace(port);
     const item = await fullItem(port, ws, itemId);
-    if (!item) return { updated: false, error: { code: 'NOT_FOUND', message: 'Planning item not found.' } };
+    if (!item)
+      return {
+        updated: false,
+        error: { code: 'NOT_FOUND', message: 'Planning item not found.' },
+      };
     if (item.status === 'in-progress') return { updated: false, status: item.status };
     await writePlanning(port, putFrom(item, uuidFrom(`${startOperationId}:planning-start`), 'in-progress'));
     return { updated: true, status: 'in-progress', version: item.version + 1 };

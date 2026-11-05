@@ -20,7 +20,11 @@ function setup(t) {
     local = command => work.execute(command, work.status().revision).result;
   const dispatch = (command, revision = work.status().revision) => work.dispatch(command, revision);
   const intent = local({ action: 'intent', outcome: 'Linked local work' });
-  const lane = local({ action: 'lane', intentId: intent.id, name: 'Unfinished approach' });
+  const lane = local({
+    action: 'lane',
+    intentId: intent.id,
+    name: 'Unfinished approach',
+  });
   write(root, 'a.ts', 'unfinished root source');
   write(work.store.path(lane.id), 'a.ts', 'unfinished Lane source');
   git(root, ['add', 'a.ts']);
@@ -42,7 +46,10 @@ test('local Issues, Initiatives and discussion retain versions/CAS and reconcile
     original = git(root, ['rev-parse', 'HEAD']),
     index = git(root, ['write-tree']);
   const initiative = (await dispatch(item({ kind: 'initiative', title: 'Synthetic Initiative' }))).result;
-  const command = item({ initiativeId: initiative.id, intentIds: [intent.id, intent.id] });
+  const command = item({
+    initiativeId: initiative.id,
+    intentIds: [intent.id, intent.id],
+  });
   const save = work.store.commitRecords.bind(work.store);
   work.store.commitRecords = () => {
     throw new Error('Before write');
@@ -78,7 +85,13 @@ test('local Issues, Initiatives and discussion retain versions/CAS and reconcile
   await assert.rejects(dispatch({ ...update, operationId: randomUUID() }), code('PLANNING_CHANGED'));
   const third = (
     await dispatch(
-      item({ itemId: first.id, expectedVersion: 2, title: first.title, body: first.body, status: 'closed' }),
+      item({
+        itemId: first.id,
+        expectedVersion: 2,
+        title: first.title,
+        body: first.body,
+        status: 'closed',
+      }),
     )
   ).result;
   assert.equal(third.version, 3);
@@ -109,6 +122,48 @@ test('local Issues, Initiatives and discussion retain versions/CAS and reconcile
   assert.equal(readFileSync(join(work.store.path(lane.id), 'a.ts'), 'utf8'), 'unfinished Lane source');
 });
 
+test('a local put keeps the stored body, links and group a later put omits (c0255160)', async t => {
+  const { dispatch, item, intent } = setup(t);
+  const initiative = (await dispatch(item({ kind: 'initiative', title: 'Group', intentIds: [] }))).result;
+  const first = (await dispatch(item({ initiativeId: initiative.id, status: 'proposed' }))).result;
+  const bare = { action: 'put-planning-item', itemId: first.id };
+  const moved = (
+    await dispatch({
+      ...bare,
+      operationId: randomUUID(),
+      expectedVersion: 1,
+      status: 'open',
+    })
+  ).result;
+  assert.deepEqual(
+    [moved.body, moved.title, moved.initiativeId, moved.intentIds, moved.status, moved.version],
+    [first.body, first.title, initiative.id, [intent.id], 'open', 2],
+  );
+  const cleared = (
+    await dispatch({
+      ...bare,
+      operationId: randomUUID(),
+      expectedVersion: 2,
+      body: '',
+      intentIds: [],
+      initiativeId: null,
+    })
+  ).result;
+  assert.deepEqual(
+    [cleared.body, cleared.intentIds, cleared.initiativeId, cleared.title],
+    ['', [], undefined, first.title],
+  );
+  await assert.rejects(
+    dispatch({
+      action: 'put-planning-item',
+      operationId: randomUUID(),
+      itemId: randomUUID(),
+      expectedVersion: 0,
+    }),
+    code('BAD_ARGUMENT'),
+  );
+});
+
 test('planning links validate local identities and private exports preserve complete original versions, discussion and linked work', async t => {
   const { work, dispatch, local, intent, item } = setup(t);
   const other = local({ action: 'intent', outcome: 'Second linked outcome' });
@@ -132,7 +187,14 @@ test('planning links validate local identities and private exports preserve comp
   );
   await assert.rejects(dispatch(item(), 0), code('WORK_STALE'));
   const edit = (
-    await dispatch(item({ itemId: issue.id, expectedVersion: 1, title: 'Revised issue', intentIds: [] }))
+    await dispatch(
+      item({
+        itemId: issue.id,
+        expectedVersion: 1,
+        title: 'Revised issue',
+        intentIds: [],
+      }),
+    )
   ).result;
   const input = {
     action: 'comment-planning-item',
@@ -206,7 +268,14 @@ test('new work responses advertise actual capabilities', async t => {
     artifactDeduplication: false,
   });
   const nativeRoot = mkdtempSync(join(tmpdir(), 'forge-native-capabilities-'));
-  t.after(() => rmSync(nativeRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
+  t.after(() =>
+    rmSync(nativeRoot, {
+      recursive: true,
+      force: true,
+      maxRetries: 10,
+      retryDelay: 50,
+    }),
+  );
   writeFileSync(join(nativeRoot, 'a.ts'), 'export const a=1;');
   initNative(nativeRoot);
   const native = new WorkService(nativeRoot).status({ compact: true });

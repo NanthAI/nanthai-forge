@@ -6,7 +6,7 @@ import { recordCaller } from './projectHostedFrictionStore';
 import { record, recordPartition, selectedGeneration } from './projectWorkIndexStore';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { digest } from '../src/portable-hash';
-import { planningSearchTerms } from '../src/planning-search';
+import { planningIdPrefix, planningSearchTerms } from '../src/planning-search';
 import { workHead } from './projectWorkHead';
 import { invariant } from '../src/errors';
 import { report } from './errors';
@@ -45,6 +45,7 @@ export async function searchPlanning(
   project: Doc<'hostedProjects'>,
   input: Input,
   allowMissing = false,
+  byId = false,
 ) {
   invariant(
     Number.isInteger(input.limit) && input.limit >= 1 && input.limit <= 100,
@@ -53,7 +54,11 @@ export async function searchPlanning(
   );
   const generation = await selectedGeneration(ctx, project);
   if (!generation && allowMissing)
-    return { items: [], coverage: 'unavailable', code: 'PROJECT_WORK_INDEX_MISSING' };
+    return {
+      items: [],
+      coverage: 'unavailable',
+      code: 'PROJECT_WORK_INDEX_MISSING',
+    };
   invariant(generation, 'PROJECT_WORK_INDEX_MISSING', 'The Work index is unavailable.');
   const { cursor: supplied, ...selection } = input;
   const binding = digest(
@@ -98,7 +103,37 @@ export async function searchPlanning(
         maximumBytesRead: 512000,
       })
     : { page: [], isDone: true, continueCursor: '' };
-  const items = [];
+  const items: unknown[] = [];
+  // An id (8-character prefix or full UUID) names its item: it leads the first page, one indexed
+  // range read, before text mentions of that id. Other queries read nothing extra.
+  const idPrefix = byId && supplied === null ? planningIdPrefix(input.text) : undefined;
+  const named = new Set<string>();
+  if (idPrefix) {
+    const rows = await ctx.db
+      .query('projectWorkRecords')
+      .withIndex('by_generation_and_collection_and_key', q =>
+        q
+          .eq('generationId', recordPartition(generation))
+          .eq('collection', 'planningSearch')
+          .gte('key', idPrefix)
+          .lt('key', `${idPrefix}\uffff`),
+      )
+      .take(5);
+    for (const row of rows) {
+      const summary = JSON.parse(row.value);
+      const open = ['proposed', 'open', 'in-progress'].includes(summary.status);
+      if (
+        (input.status === 'active' ? !open : input.status !== 'all' && summary.status !== input.status) ||
+        (input.kind && summary.kind !== input.kind) ||
+        (input.initiativeId && summary.initiativeId !== input.initiativeId)
+      )
+        continue;
+      delete summary.payloadKey;
+      delete summary.payloadParts;
+      named.add(summary.id);
+      items.push({ ...summary, matchedBy: 'id' });
+    }
+  }
   const representatives = new Map<string, { best?: string; summary?: unknown }>();
   // A single representative per item/query keeps items unique across cursor pages
   // without retaining an unbounded seen-ID list. Retired fragments never match a current root.
@@ -122,7 +157,7 @@ export async function searchPlanning(
       }
     }
     const selected = representatives.get(identity)!;
-    if (selected.best === row._id) items.push(selected.summary);
+    if (selected.best === row._id && !named.has(itemId)) items.push(selected.summary);
   }
   return {
     workRevision: (await workHead(ctx, project._id))?.revision ?? project.work?.revision,
@@ -143,7 +178,7 @@ export const search = query({
   handler: async (ctx, { projectId, ...input }) => {
     try {
       const { project } = await recordCaller(ctx, projectId);
-      return canonicalPayload(await searchPlanning(ctx, project, input));
+      return canonicalPayload(await searchPlanning(ctx, project, input, false, true));
     } catch (error) {
       return report(error);
     }
@@ -158,7 +193,13 @@ export async function likelyPlanningDuplicates(
   return searchPlanning(
     ctx,
     project,
-    { ...planningSearchTerms(text), status: 'active', kind: 'issue', limit: 5, cursor: null },
+    {
+      ...planningSearchTerms(text),
+      status: 'active',
+      kind: 'issue',
+      limit: 5,
+      cursor: null,
+    },
     true,
   );
 }

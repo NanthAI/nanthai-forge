@@ -4,6 +4,7 @@ import { invariant } from './errors.js';
 import type { PlanningWrite } from './work-planning-types.js';
 import type { WorkData } from './work-types.js';
 import { isUnifiedWork } from './work-unified-types.js';
+import { resolvePlanningPut } from './work-planning-put.js';
 import { applyUnifiedPlanning, type UnifiedPlanningData } from './work-planning-unified.js';
 
 // ponytail: derive current versions from retained planning history; index here if measured reads warrant it.
@@ -12,7 +13,9 @@ export const currentPlanning = (data: Pick<WorkData, 'planningItems'>) => [
 ];
 export const normalizedPlanning = (command: PlanningWrite): PlanningWrite =>
   command.action === 'put-planning-item'
-    ? { ...command, intentIds: [...new Set(command.intentIds)].sort() }
+    ? command.intentIds
+      ? { ...command, intentIds: [...new Set(command.intentIds)].sort() }
+      : command
     : command;
 export const planningRequest = (command: PlanningWrite) =>
   digest(JSON.stringify(normalizedPlanning(command)));
@@ -61,20 +64,21 @@ export function applyPlanningMetadata(data: WorkData, command: PlanningWrite, at
     'PLANNING_CHANGED',
     'This item has a newer version. Load it before saving; your existing work remains available.',
   );
+  const put = resolvePlanningPut(command, current);
   invariant(
-    !current || current.kind === command.kind,
+    !current || current.kind === put.kind,
     'BAD_ARGUMENT',
     'Retain the item’s original Issue or Initiative identity.',
   );
   invariant(
-    command.intentIds.every(id => data.intents.some(item => item.id === id)),
+    put.intentIds.every(id => data.intents.some(item => item.id === id)),
     'NOT_FOUND',
     'Select existing local Intents.',
   );
   invariant(
-    !command.initiativeId ||
-      (command.kind === 'issue' &&
-        currentPlanning(data).some(item => item.id === command.initiativeId && item.kind === 'initiative')),
+    !put.initiativeId ||
+      (put.kind === 'issue' &&
+        currentPlanning(data).some(item => item.id === put.initiativeId && item.kind === 'initiative')),
     'NOT_FOUND',
     'Select an existing Initiative for the Issue.',
   );
@@ -84,13 +88,13 @@ export function applyPlanningMetadata(data: WorkData, command: PlanningWrite, at
     request,
     version: command.expectedVersion + 1,
     previousVersion: command.expectedVersion,
-    kind: command.kind,
-    title: command.title,
-    body: command.body,
-    status: command.status,
-    ...(command.reason !== undefined ? { reason: command.reason } : {}),
-    intentIds: [...new Set(command.intentIds)].sort(),
-    ...(command.initiativeId ? { initiativeId: command.initiativeId } : {}),
+    kind: put.kind,
+    title: put.title,
+    body: put.body,
+    status: put.status,
+    ...(put.reason !== undefined ? { reason: put.reason } : {}),
+    intentIds: put.intentIds,
+    ...(put.initiativeId ? { initiativeId: put.initiativeId } : {}),
     at,
     provenance,
   };

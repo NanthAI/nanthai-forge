@@ -152,7 +152,7 @@ export function PlanningIntentPage({
         status: next.status,
         ...(next.reason !== undefined ? { reason: next.reason } : {}),
         intentIds: full.intentIds,
-        ...(next.initiativeId ? { initiativeId: next.initiativeId } : {}),
+        initiativeId: next.initiativeId || null,
       };
       // Retain the operation across an unknown result; a changed draft is a different request.
       const previous = pending.current;

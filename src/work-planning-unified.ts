@@ -1,12 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 import { planningIntentStatus } from './work-planning-lifecycle.js';
 import { invariant } from './errors.js';
+import { resolvePlanningPut } from './work-planning-put.js';
 import { resolveIntentId, type IntentAlias } from './work-intent-local.js';
 import type { PlanningItem, PlanningWrite } from './work-planning-types.js';
 import type { WorkData } from './work-types.js';
 import type { UnifiedIntent, UnifiedWorkData } from './work-unified-types.js';
 
-type Initiative = UnifiedWorkData['initiatives'][number] & { nextMembershipOrder?: number };
+type Initiative = UnifiedWorkData['initiatives'][number] & {
+  nextMembershipOrder?: number;
+};
 /** The subset a schema-16 planning write reads; selected-record callers load only these records. */
 export type UnifiedPlanningData = Pick<WorkData, 'planningItems' | 'planningComments'> & {
   intents: UnifiedIntent[];
@@ -27,7 +30,11 @@ export function planningTarget(
   if (initiative) return { initiative, historyId: itemId };
   const intentId = resolveIntentId(data.intentAliases, itemId),
     intent = data.intents.find(item => item.id === intentId);
-  return { intentId, intent, historyId: intent?.historyRefs[0]?.itemId ?? intentId };
+  return {
+    intentId,
+    intent,
+    historyId: intent?.historyRefs[0]?.itemId ?? intentId,
+  };
 }
 
 function placeMemberships(
@@ -75,7 +82,11 @@ export function applyUnifiedPlanning(
       provenance,
     };
     data.planningComments.push(comment);
-    target.intent?.conversation.push({ id: comment.id, kind: 'planning-comment', itemId: comment.itemId });
+    target.intent?.conversation.push({
+      id: comment.id,
+      kind: 'planning-comment',
+      itemId: comment.itemId,
+    });
     return comment;
   }
   const current = data.planningItems.filter(item => item.id === target.historyId).at(-1);
@@ -84,20 +95,21 @@ export function applyUnifiedPlanning(
     'PLANNING_CHANGED',
     'This item has a newer version. Load it before saving; your existing work remains available.',
   );
+  const put = resolvePlanningPut(command, current);
   invariant(
-    command.kind === 'initiative' ? !target.intent : !target.initiative,
+    put.kind === 'initiative' ? !target.intent : !target.initiative,
     'BAD_ARGUMENT',
     'Retain the item’s original Issue or Initiative identity.',
   );
-  const linked = [...new Set(command.intentIds.map(id => resolveIntentId(data.intentAliases, id)))].sort();
+  const linked = [...new Set(put.intentIds.map(id => resolveIntentId(data.intentAliases, id)))].sort();
   invariant(
     linked.every(id => data.intents.some(item => item.id === id)),
     'NOT_FOUND',
     'Select existing local Intents.',
   );
   invariant(
-    !command.initiativeId ||
-      (command.kind === 'issue' && data.initiatives.some(item => item.id === command.initiativeId)),
+    !put.initiativeId ||
+      (put.kind === 'issue' && data.initiatives.some(item => item.id === put.initiativeId)),
     'NOT_FOUND',
     'Select an existing Initiative for the Issue.',
   );
@@ -107,18 +119,18 @@ export function applyUnifiedPlanning(
     request,
     version: command.expectedVersion + 1,
     previousVersion: command.expectedVersion,
-    kind: command.kind,
-    title: command.title,
-    body: command.body,
-    status: command.status,
-    ...(command.reason !== undefined ? { reason: command.reason } : {}),
-    intentIds: [...new Set(command.intentIds)].sort(),
-    ...(command.initiativeId ? { initiativeId: command.initiativeId } : {}),
+    kind: put.kind,
+    title: put.title,
+    body: put.body,
+    status: put.status,
+    ...(put.reason !== undefined ? { reason: put.reason } : {}),
+    intentIds: put.intentIds,
+    ...(put.initiativeId ? { initiativeId: put.initiativeId } : {}),
     at,
     provenance,
   };
   data.planningItems.push(item);
-  if (command.kind === 'initiative') {
+  if (put.kind === 'initiative') {
     // Update in place: selected-record callers track loaded records by identity.
     if (target.initiative) Object.assign(target.initiative, item, { kind: 'initiative' });
     else data.initiatives.push({ ...item, kind: 'initiative' });
@@ -180,6 +192,6 @@ export function applyUnifiedPlanning(
     const other = data.intents.find(candidate => candidate.id === id)!;
     if (!other.relatedIntentIds.includes(intent.id)) other.relatedIntentIds.push(intent.id);
   }
-  placeMemberships(data, item.id, command.initiativeId, [...new Set([intent.id, ...linked])]);
+  placeMemberships(data, item.id, put.initiativeId, [...new Set([intent.id, ...linked])]);
   return item;
 }

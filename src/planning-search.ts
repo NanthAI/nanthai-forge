@@ -5,7 +5,11 @@ import type { IndexEntry } from './work-hosted-index.js';
 import type { PlanningItem } from './work-planning-types.js';
 
 export const planningSummary = (
-  item: PlanningItem & { bodyLength?: number; hasDoneWhen?: boolean; payloadKey?: string },
+  item: PlanningItem & {
+    bodyLength?: number;
+    hasDoneWhen?: boolean;
+    payloadKey?: string;
+  },
 ) => {
   const bodyKnown = item.bodyLength !== undefined || !item.payloadKey || item.body.length > 0;
   const length = bodyKnown ? (item.bodyLength ?? item.body.length) : null;
@@ -30,6 +34,17 @@ export function planningSearchTerms(text: string) {
   const all = [...new Set(text.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [])];
   const terms = all.filter(term => [...term].length <= 32).slice(0, 16);
   return { text: terms.join(' '), omittedTerms: all.length - terms.length };
+}
+/**
+ * A query that is one 8-character id prefix or a full UUID (as `planningSearchTerms` tokenised it)
+ * names an item: the key prefix to look up directly, so the item comes before text mentions.
+ */
+export function planningIdPrefix(text: string): string | undefined {
+  const terms = text.split(' ');
+  if (terms.length === 1 && /^[0-9a-f]{8}$/.test(terms[0]!)) return terms[0];
+  if (terms.length === 5 && /^[0-9a-f]{8} [0-9a-f]{4} [0-9a-f]{4} [0-9a-f]{4} [0-9a-f]{12}$/.test(text))
+    return terms.join('-');
+  return undefined;
 }
 /** Search previews are bounded independently of the full, unchanged planning record. */
 export function planningSearchEntry(item: PlanningItem, position: number): IndexEntry {
@@ -93,7 +108,11 @@ export function planningSearchEntries(item: PlanningItem, position: number): Ind
   if (chunk || !fragments.length) fragments.push(chunk);
   const root = {
     ...entry,
-    value: JSON.stringify({ ...JSON.parse(entry.value), payloadKey, payloadParts: fragments.length }),
+    value: JSON.stringify({
+      ...JSON.parse(entry.value),
+      payloadKey,
+      payloadParts: fragments.length,
+    }),
     planning: { ...entry.planning!, text: '' },
   };
   return [

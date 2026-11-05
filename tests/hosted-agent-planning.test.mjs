@@ -76,7 +76,12 @@ test('agents create an Initiative and Issue, comment, and read them filtered and
       initiativeId: initiative.itemId,
     })
   ).result;
-  await put(p, { kind: 'issue', title: 'Later', status: 'proposed', initiativeId: initiative.itemId });
+  await put(p, {
+    kind: 'issue',
+    title: 'Later',
+    status: 'proposed',
+    initiativeId: initiative.itemId,
+  });
   await put(p, { kind: 'issue', title: 'Elsewhere' });
   const comment = await run(p, 'comment-planning-item', {
     itemId: issue.itemId,
@@ -112,6 +117,107 @@ test('agents create an Initiative and Issue, comment, and read them filtered and
   // The Planning view reads the same records.
   const work = (await s.read()).data;
   assert.equal(work.planningItems.filter(item => item.kind === 'issue').length, 3);
+});
+
+test('a put keeps every stored field it omits; clearing needs an explicit empty value (status-only move kept a body, c0255160)', async t => {
+  const s = await setup(t),
+    p = port(s);
+  const initiative = (await put(p, { kind: 'initiative', title: 'Phase 6' })).result;
+  const body = 'Found it.\n\nDone when:\n- [ ] the body survives a move';
+  const issue = (
+    await put(p, {
+      kind: 'issue',
+      title: 'Keep me',
+      body,
+      status: 'proposed',
+      initiativeId: initiative.itemId,
+    })
+  ).result;
+  const stored = async () => (await list(p, { id: issue.itemId, reconcile: false })).item;
+  const before = await stored();
+  // The incident: kind, title, status and reason, no body.
+  p.calls.length = 0;
+  const moved = await put(p, {
+    itemId: issue.itemId,
+    expectedVersion: 1,
+    kind: 'issue',
+    title: 'Keep me',
+    status: 'open',
+    reason: 'triaged',
+  });
+  assert.deepEqual(p.calls, ['projectWorkIndex:workspace', 'projectWorkActions:command']);
+  assert.equal(moved.result.status, 'open');
+  let item = await stored();
+  assert.equal(item.body, body);
+  assert.equal(item.status, 'open');
+  assert.equal(item.initiativeId, initiative.itemId);
+  assert.equal(item.version, 2);
+  // Status-only form: no kind, title or body at all.
+  await put(p, {
+    itemId: issue.itemId,
+    expectedVersion: 2,
+    status: 'in-progress',
+  });
+  item = await stored();
+  assert.deepEqual(
+    [item.title, item.body, item.initiativeId, item.status, item.version],
+    [before.title, body, initiative.itemId, 'in-progress', 3],
+  );
+  // Replacing one field leaves the rest.
+  await put(p, { itemId: issue.itemId, expectedVersion: 3, title: 'Renamed' });
+  item = await stored();
+  assert.deepEqual([item.title, item.body, item.status], ['Renamed', body, 'in-progress']);
+  // Explicit empty values clear.
+  await put(p, {
+    itemId: issue.itemId,
+    expectedVersion: 4,
+    initiativeId: null,
+  });
+  assert.equal((await stored()).initiativeId ?? null, null);
+  await put(p, { itemId: issue.itemId, expectedVersion: 5, body: '' });
+  item = await stored();
+  assert.equal(item.body, '');
+  assert.equal(item.title, 'Renamed');
+  // Creating still needs kind and title, before any Convex call.
+  p.calls.length = 0;
+  await assert.rejects(put(p, { body: 'orphan' }), code('BAD_ARGUMENT'));
+  assert.deepEqual(p.calls, []);
+});
+
+test('searching by an 8-character id or a full UUID returns that item first, then text mentions', async t => {
+  const s = await setup(t),
+    p = port(s);
+  const target = (await put(p, { kind: 'issue', title: 'Alpha behaviour', body: 'plain' })).result.itemId;
+  const id8 = target.slice(0, 8);
+  const mention = (
+    await put(p, {
+      kind: 'issue',
+      title: 'Beta follow-up',
+      body: `Done when:\n- [ ] depends on ${target}, short ${id8}`,
+    })
+  ).result.itemId;
+  for (const query of [id8, target, id8.toUpperCase()]) {
+    p.calls.length = 0;
+    const found = await list(p, { search: query });
+    assert.deepEqual(p.calls, ['projectHostedPlanningSearch:search']);
+    assert.equal(found.items[0].id, target, query);
+    assert.equal(found.items[0].matchedBy, 'id');
+    assert.deepEqual(
+      found.items.map(item => item.id),
+      [target, mention],
+    );
+  }
+  // Closed items follow the usual status filter; ordinary words do not look an id up.
+  assert.deepEqual(
+    (await list(p, { search: 'follow' })).items.map(item => item.id),
+    [mention],
+  );
+  await put(p, { itemId: target, expectedVersion: 1, status: 'closed' });
+  assert.deepEqual(
+    (await list(p, { search: id8 })).items.map(item => item.id),
+    [mention],
+  );
+  assert.equal((await list(p, { search: id8, status: 'all' })).items[0].id, target);
 });
 
 test('a repeated operation replays, a lost reply reconciles, and a stale Work revision retries', async t => {
@@ -173,7 +279,11 @@ test('a completed Intent closes its Issue only when every Done-when line is tick
   for (const id of [unmet.itemId, met.itemId, plain.itemId]) p.states.set(id, 'completed');
   const read = await list(p);
   const status = Object.fromEntries(read.items.map(item => [item.id, item.status]));
-  assert.deepEqual(status, { [unmet.itemId]: 'open', [met.itemId]: 'closed', [plain.itemId]: 'closed' });
+  assert.deepEqual(status, {
+    [unmet.itemId]: 'open',
+    [met.itemId]: 'closed',
+    [plain.itemId]: 'closed',
+  });
   assert.deepEqual(
     read.reconciled.held.map(held => [held.id, held.openLines]),
     [[unmet.itemId, 2]],
@@ -212,7 +322,11 @@ test('an Issue whose Intent completed is closed by the next read, with undo name
   assert.equal(read.reconciled.changed.length, 2);
   assert(read.reconciled.changed.every(change => change.undo.includes('put-planning-item')));
   const byId = Object.fromEntries(read.items.map(item => [item.id, item.status]));
-  assert.deepEqual(byId, { [done]: 'closed', [dropped]: 'abandoned', [live]: 'open' });
+  assert.deepEqual(byId, {
+    [done]: 'closed',
+    [dropped]: 'abandoned',
+    [live]: 'open',
+  });
   const persisted = (await s.read()).data.planningItems;
   assert.equal(persisted.filter(item => item.id === done).at(-1).status, 'closed');
   assert.equal(persisted.filter(item => item.id === done).at(-1).reason, 'Intent completed');
@@ -233,7 +347,12 @@ test('start from an Issue: planned Intent shares the Issue id, the Issue becomes
     p = port(s);
   const initiative = (await put(p, { kind: 'initiative', title: 'Group' })).result.itemId;
   const issue = (
-    await put(p, { kind: 'issue', title: 'Build it', body: 'Constraints here', initiativeId: initiative })
+    await put(p, {
+      kind: 'issue',
+      title: 'Build it',
+      body: 'Constraints here',
+      initiativeId: initiative,
+    })
   ).result.itemId;
   const planned = await plannedIntent(p, issue);
   assert.deepEqual(planned, {
@@ -247,7 +366,11 @@ test('start from an Issue: planned Intent shares the Issue id, the Issue becomes
 
   const startOperation = randomUUID();
   const marked = await markPlanningStarted(p, issue, startOperation);
-  assert.deepEqual(marked, { updated: true, status: 'in-progress', version: 2 });
+  assert.deepEqual(marked, {
+    updated: true,
+    status: 'in-progress',
+    version: 2,
+  });
   const events = s.tables.projectWorkEvents.size;
   assert.deepEqual(await markPlanningStarted(p, issue, startOperation), {
     updated: false,
@@ -285,7 +408,11 @@ test('a 100-item backlog reads in three Convex calls and idle reads nothing', as
   const initiative = (await put(p, { kind: 'initiative', title: 'Backlog' })).result.itemId;
   for (let i = 0; i < 99; i++)
     await s.send(
-      s.item({ title: `Issue ${i}`, initiativeId: initiative, status: i % 3 ? 'open' : 'proposed' }),
+      s.item({
+        title: `Issue ${i}`,
+        initiativeId: initiative,
+        status: i % 3 ? 'open' : 'proposed',
+      }),
     );
   p.calls.length = 0;
   const page = await list(p, { limit: 100 });
@@ -394,9 +521,19 @@ test('start {planningItemId} starts the Issue as a planned Intent and links it o
   s.exchange.client.query = async (ref, args) => {
     const name = getFunctionName(ref);
     if (name === 'projectWorkIndex:workspace')
-      return JSON.stringify({ generationId: 'g', revision: 5, sourceRevision: 1 });
+      return JSON.stringify({
+        generationId: 'g',
+        revision: 5,
+        sourceRevision: 1,
+      });
     if (name === 'projectWorkIndex:detail')
-      return { generationId: 'g', revision: 1, value: JSON.stringify(item), editable: true, intentPin: null };
+      return {
+        generationId: 'g',
+        revision: 1,
+        value: JSON.stringify(item),
+        editable: true,
+        intentPin: null,
+      };
     return query(ref, args);
   };
   s.exchange.client.action = async (ref, args) => {
@@ -412,7 +549,11 @@ test('start {planningItemId} starts the Issue as a planned Intent and links it o
     outcome: 'Planned outcome',
     constraints: 'Planned constraints',
   });
-  assert.deepEqual(started.result.planning, { updated: true, status: 'in-progress', version: 2 });
+  assert.deepEqual(started.result.planning, {
+    updated: true,
+    status: 'in-progress',
+    version: 2,
+  });
   assert.equal(commands.length, 1);
   assert.equal(commands[0].status, 'in-progress');
   assert.equal(commands[0].expectedVersion, 1);
@@ -456,9 +597,19 @@ function plannedStartFixture(t) {
   s.exchange.client.query = async (ref, args) => {
     const name = getFunctionName(ref);
     if (name === 'projectWorkIndex:workspace')
-      return JSON.stringify({ generationId: 'g', revision: 5, sourceRevision: 1 });
+      return JSON.stringify({
+        generationId: 'g',
+        revision: 5,
+        sourceRevision: 1,
+      });
     if (name === 'projectWorkIndex:detail')
-      return { generationId: 'g', revision: 1, value: JSON.stringify(item), editable: true, intentPin: null };
+      return {
+        generationId: 'g',
+        revision: 1,
+        value: JSON.stringify(item),
+        editable: true,
+        intentPin: null,
+      };
     return query(ref, args);
   };
   s.exchange.client.action = async () => ({ revision: 6 });
@@ -586,7 +737,11 @@ test('Issue filing returns candidates without another call and retries retain th
   const s = await setup(t),
     p = port(s);
   const prior = (
-    await put(p, { kind: 'issue', title: 'Sync worker diagnostics', body: 'retain failure cause' })
+    await put(p, {
+      kind: 'issue',
+      title: 'Sync worker diagnostics',
+      body: 'retain failure cause',
+    })
   ).result;
   p.calls.length = 0;
   const input = { kind: 'issue', title: 'Sync failure diagnostics' };
@@ -601,7 +756,11 @@ test('Issue filing returns candidates without another call and retries retain th
 test('CLI planning search forwards one query and summaries need no per-item detail reads', async t => {
   const s = await setup(t),
     p = port(s);
-  await put(p, { kind: 'issue', title: 'Searchable sync', body: 'Done when: verified' });
+  await put(p, {
+    kind: 'issue',
+    title: 'Searchable sync',
+    body: 'Done when: verified',
+  });
   p.calls.length = 0;
   const found = await list(p, { search: 'sync' });
   assert.equal(found.items.length, 1);

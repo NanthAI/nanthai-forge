@@ -12,6 +12,20 @@ const planningFields = {
   intentIds: z.array(id).default([]),
   initiativeId: id.optional(),
 };
+/**
+ * A put names only what it changes. An omitted field keeps the stored value (kind and title are
+ * required only to create); clearing needs an explicit empty value: body "", intentIds [],
+ * initiativeId null. `reason` describes one version and is never carried over.
+ */
+const planningPutFields = {
+  kind: planningFields.kind.optional(),
+  title: planningFields.title.optional(),
+  body: z.string().optional(),
+  status: z.enum(['proposed', 'open', 'in-progress', 'closed', 'abandoned']).optional(),
+  reason: planningFields.reason,
+  intentIds: z.array(id).optional(),
+  initiativeId: id.nullable().optional(),
+};
 export const planningItemSchema = z.object({
   id,
   operationId: id,
@@ -36,7 +50,7 @@ export const planningPutSchema = z.object({
   operationId: id,
   itemId: id,
   expectedVersion: z.number().int().nonnegative().default(0),
-  ...planningFields,
+  ...planningPutFields,
 });
 export const planningCommentCommandSchema = z.object({
   action: z.literal('comment-planning-item'),

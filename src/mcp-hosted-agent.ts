@@ -171,7 +171,7 @@ export function registerHostedAgentWorkflow(
     'forge_planning',
     {
       description:
-        'Planning: indexed title/body search; active by default, status:all includes history. Filter kind/status/initiativeId; cursor pages or id+comments. reconcile:false skips Intent updates. New Issues/friction return advisory likelyDuplicates. put-planning-item replaces at expectedVersion (0 creates); comment-planning-item adds discussion. Start via forge_task {action:start,planningItemId}.',
+        'Planning: indexed title/body search; active by default, status:all includes history. Filter kind/status/initiativeId; cursor pages or id+comments. reconcile:false skips Intent updates. New Issues/friction return advisory likelyDuplicates. put-planning-item sets only named fields (0 creates); comment-planning-item adds discussion. Start via forge_task {action:start,planningItemId}.',
       inputSchema: { command: z.union([planning[0]!, planning[1]!, planning[2]!]) },
       annotations: { ...read, readOnlyHint: false },
     },

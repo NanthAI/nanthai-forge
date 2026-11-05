@@ -34,12 +34,15 @@ export function planningWork(store: WorkStore, command: PlanningCommand, revisio
     const current = tx.find('planningItems', command.itemId, 'id', true)?.record;
     if (current) data.planningItems.push(current);
     if (command.action === 'put-planning-item') {
-      for (const id of command.intentIds) {
+      // Kept (omitted) links come from the stored item, so load those as well.
+      for (const id of command.intentIds ?? current?.intentIds ?? []) {
         const found = tx.fields('intents', id)?.record;
         if (found) data.intents.push(found);
       }
-      if (command.initiativeId && command.initiativeId !== command.itemId) {
-        const found = tx.find('planningItems', command.initiativeId, 'id', true)?.record;
+      const initiativeId =
+        command.initiativeId === null ? undefined : (command.initiativeId ?? current?.initiativeId);
+      if (initiativeId && initiativeId !== command.itemId) {
+        const found = tx.find('planningItems', initiativeId, 'id', true)?.record;
         if (found) data.planningItems.push(found);
       }
     }
@@ -91,7 +94,7 @@ function unifiedPlanningWork(
   target?.relatedIntentIds.forEach(load);
   target?.memberships.forEach(item => group(item.initiativeId));
   if (command.action === 'put-planning-item') {
-    command.intentIds.forEach(load);
+    command.intentIds?.forEach(load);
     if (command.initiativeId) group(command.initiativeId);
   }
   const current = tx.find(

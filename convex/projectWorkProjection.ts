@@ -40,7 +40,7 @@ export function commandKeys(command: Command, input: { operationId: string }) {
     add('planningVersions', command.operationId);
     add('planningComments', command.operationId);
     if (command.action === 'put-planning-item') {
-      for (const id of command.intentIds) {
+      for (const id of command.intentIds ?? []) {
         add('intents', id);
         add('intentAliases', id);
       }
@@ -98,7 +98,10 @@ export function commandProjection(
   );
   // Reducer inputs include selected headers and required attributes; retained histories stay separate.
   data.intents = values('intents');
-  Object.assign(data, { intentAliases: values('intentAliases'), initiatives: values('initiatives') });
+  Object.assign(data, {
+    intentAliases: values('intentAliases'),
+    initiatives: values('initiatives'),
+  });
   data.views = values('views');
   data.channelMoves = values('channelMoves');
   data.hostedChannelMoves = values('hostedChannels');
@@ -184,7 +187,11 @@ export function commandProjection(
     else {
       // Legacy mutable status/counts leave original large payload chunks unchanged.
       const old = unique.find(row => row.collection === 'intents' && row.key === intent.id)!;
-      entries.push({ ...old, status: intent.status, value: JSON.stringify(header) });
+      entries.push({
+        ...old,
+        status: intent.status,
+        value: JSON.stringify(header),
+      });
     }
   } else if (command.action === 'accept-hosted-channel') {
     const move = data.hostedChannelMoves!.at(-1)!;
@@ -240,7 +247,10 @@ export function commandProjection(
       if (beforeInitiatives.get(item.id) !== JSON.stringify(item)) update('initiatives', item.id, '', item);
   }
   if (command.action === 'intent' && [16, 18, 20, 22, 24].includes(data.schema))
-    update('intentAuthorities', `${event.id}:${owner}`, event.id, { intentId: event.id, accountId: owner });
+    update('intentAuthorities', `${event.id}:${owner}`, event.id, {
+      intentId: event.id,
+      accountId: owner,
+    });
   update('events', event.id, '', event);
   return {
     generationId,

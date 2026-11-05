@@ -224,7 +224,7 @@ test('Edit changes the header in place, preserves full details and saves on the 
   page = find(harnessed.render(props), node => node.type === 'detail');
   assert.equal(page.props.row.outcome, 'Edited outcome');
   assert.equal(page.props.editor, undefined);
-  assert.equal(calls[0].initiativeId, undefined);
+  assert.equal(calls[0].initiativeId, null, 'an emptied group is an explicit clear');
   assert.equal(calls[0].expectedVersion, 3);
   harnessed.clear();
 });

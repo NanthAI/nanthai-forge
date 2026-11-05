@@ -236,7 +236,10 @@ export function WorkPlanning({
   }
   const intentHref = (id: string) => href({ kind: 'intent', id });
   const itemHref = (item: PlanningItem) =>
-    href({ kind: item.kind === 'initiative' ? 'initiative' : 'planning', id: item.id });
+    href({
+      kind: item.kind === 'initiative' ? 'initiative' : 'planning',
+      id: item.id,
+    });
   const listHref = href({ kind: 'list' });
   const confirmed = data.planningItems.find(item => item.operationId === pending?.operationId);
   useEffect(() => {
@@ -298,7 +301,7 @@ export function WorkPlanning({
       body,
       status,
       intentIds: links,
-      ...(parent ? { initiativeId: parent } : {}),
+      initiativeId: parent || null,
     };
     const sequence = loadSequence.current;
     setPending(command);
@@ -497,7 +500,10 @@ export function WorkPlanning({
             (() => {
               const first = data.planningItems.find(item => item.id === detailItem.id && item.version === 1);
               return (
-                first && { ...first, actorDisplayName: planningActor(first.operationId, data.hostedEvents) }
+                first && {
+                  ...first,
+                  actorDisplayName: planningActor(first.operationId, data.hostedEvents),
+                }
               );
             })()
           }
