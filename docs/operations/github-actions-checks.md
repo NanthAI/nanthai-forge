@@ -583,6 +583,14 @@ project code has run. Test and source-pack jobs restore it read-only. Candidate 
 check results are never cache entries. Lockfile changes create independent keys;
 there are no partial-key restores. Cache loss changes preparation time only.
 
+Every Actions job ends with one log line, `Check phases on N CPUs, M GiB: install 3.4s (cpu 52%); build
+5.8s (cpu 90%); tests 359.1s (cpu 58%)`, giving each phase's wall time and the machine's CPU busy share
+(`scripts/check-phases.mjs`, run by `scripts/github-actions-check.mjs`; any CI that runs those scripts
+logs it). Standard GitHub-hosted runners for this public repository are 4 CPUs and 16 GiB. On
+2026-11-05 shards ran two test workers at 58-69% CPU busy, so a third worker would saturate the box.
+Use these lines, not estimates, before changing the worker count (`FORGE_TEST_WORKERS` in
+`scripts/github-actions-check.mjs`) or the shard count.
+
 When the pinned recipe has exactly one execution job (no test groups plus the
 static execution), that execution runs in `hosted-plan` after planning. This includes
 opaque configured commands and standard docs-only checks. It uses the same persisted
