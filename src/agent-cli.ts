@@ -8,6 +8,8 @@ import { agentWaitCli } from './agent-wait.js';
 import { canonicalCandidateAction, noticeViewAlias } from './candidate-names.js';
 import { aliasNotice, landSaveCommand, lowerVerb, newForm, parseVerbForm } from './agent-verbs.js';
 // SPDX-License-Identifier: Apache-2.0
+import { parseWaitBudget } from './agent-operation-wait.js';
+import { recordTurnWait } from './agent-turn-work.js';
 import { readFileSync, realpathSync } from 'node:fs';
 import { sep } from 'node:path';
 import { integrationPreview } from './integration-preview.js';
@@ -274,7 +276,7 @@ function actionHelp(action: string): string {
       'Optional tests:["tests/example.test.mjs"] replaces only the standard check test selection. Static checks still run. Explicit lists (including []) are partial evidence and cannot satisfy a landing gate or check reuse.\n';
   if (action === 'observe' || action === 'log' || action === 'cancel')
     result +=
-      'operationId is the nested check run operation ID, not the finish operation ID. Resume an admitted finish with wait {operationIds:[ORIGINAL_UUID],until:"terminal",timeoutSeconds:3600}. Replay its full original request plus resolved pins only when admission is unknown.\n';
+      'operationId is the nested check run operation ID, not the finish operation ID. Resume an admitted finish with wait {operationIds:[ORIGINAL_UUID],until:"terminal"}. Replay its full original request plus resolved pins only when admission is unknown.\n';
   if (action === 'cancel')
     result +=
       'Hosted cancel takes {submissionId,operationId?}: submissionId selects a landing request and operationId identifies this cancellation. An already accepted request returns its receipt; Lane lifecycle stays independent; an unneeded hosted check is cancelled when its last live submission leaves.\n';
@@ -387,10 +389,18 @@ type AgentCliOptions = {
 /** Client-side flags, accepted anywhere after the action: --wait/--no-wait and --message-file FILE|-. */
 function clientOptions(tail: string[]) {
   const rest: string[] = [];
-  let wait: boolean | undefined, messageFile: string | undefined;
+  let wait: boolean | undefined, messageFile: string | undefined, budget: number | undefined;
   for (let index = 0; index < tail.length; index++) {
     const arg = tail[index]!;
-    if (arg === '--wait' || arg === '--no-wait') {
+    if (arg === '--budget') {
+      budget = parseWaitBudget(tail[index + 1]);
+      invariant(
+        budget !== undefined,
+        'BAD_ARGUMENT',
+        'Use --budget SECONDS once (or 90s, 9m); it bounds how long wait blocks before IN_PROGRESS.',
+      );
+      index++;
+    } else if (arg === '--wait' || arg === '--no-wait') {
       invariant(wait === undefined, 'BAD_ARGUMENT', 'Choose --wait or --no-wait once.');
       wait = arg === '--wait';
     } else if (arg === '--message-file') {
@@ -402,7 +412,7 @@ function clientOptions(tail: string[]) {
       messageFile = tail[++index];
     } else rest.push(arg);
   }
-  return { rest, wait, messageFile };
+  return { rest, wait, messageFile, budget };
 }
 function readInput(path: string, name: string): string {
   try {
@@ -417,9 +427,16 @@ export async function agentCli(args: string[], options: AgentCliOptions = {}): P
   const notices: string[] = [];
   const result = await runAgentCli(args, options, notices);
   for (const notice of notices) process.stderr.write(notice);
-  const pending = (result as { result?: { inProgress?: boolean; waitCommand?: string } } | undefined)?.result;
+  const pending = (
+    result as
+      | { result?: { inProgress?: boolean; waitCommand?: string; next?: Record<string, unknown> } }
+      | undefined
+  )?.result;
   if (options.process && args[1] !== 'wait' && pending?.inProgress && pending.waitCommand)
     process.stderr.write(`Forge work is unfinished; keep this turn active and run: ${pending.waitCommand}\n`);
+  // Unfinished work this agent session owns, for its turn-end hook (one local write).
+  if (options.process && pending?.inProgress && args[0] && ['land', 'finish', 'wait'].includes(args[1] ?? ''))
+    recordTurnWait(resolve(args[0]), pending.next, null);
   return result;
 }
 
@@ -495,6 +512,10 @@ async function runAgentCli(args: string[], options: AgentCliOptions, notices: st
     'Command parameters must be a JSON object.',
   );
   let selected = parameters as Record<string, unknown>;
+  if (client.budget !== undefined) {
+    invariant(action === 'wait', 'BAD_ARGUMENT', '--budget applies to wait.');
+    selected = { ...selected, timeoutSeconds: client.budget };
+  }
   // Any message text (apostrophes, newlines) arrives verbatim from a file or stdin, never through shell quoting.
   if (client.messageFile !== undefined)
     selected = { ...selected, message: read(client.messageFile, 'Message file').replace(/\r?\n$/, '') };

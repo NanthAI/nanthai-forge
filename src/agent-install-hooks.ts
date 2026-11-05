@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { readFileSync, existsSync, realpathSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
 import { shellQuote } from './agent-brief-render.js';
@@ -26,7 +26,8 @@ export function installEditHooks(
   if (automatic && !uninstall && !editHooksEnabled(undefined, home))
     return { status: 'disabled', files: [], changed: [], undo: '' };
   const runner = stableCliRunner(fileURLToPath(new URL('./agent-edit-hook.js', import.meta.url)));
-  const command = [process.execPath, runner, '--auto', '--forge-first-write'].map(shellQuote).join(' ');
+  const command = hookCommand(runner);
+  const stopCommand = turnEndCommand(turnEndRunner(runner));
   const files = [join(home, '.claude', 'settings.json'), join(home, '.codex', 'hooks.json')];
   // Validate both client files before changing either one.
   const updates = files.map(path => {
@@ -43,7 +44,7 @@ export function installEditHooks(
       'Client hooks must be an object.',
     );
     config.hooks ??= {};
-    for (const event of ['PreToolUse', 'UserPromptSubmit']) {
+    for (const event of ['PreToolUse', 'UserPromptSubmit', 'Stop']) {
       invariant(
         config.hooks[event] === undefined || Array.isArray(config.hooks[event]),
         'BAD_ARGUMENT',
@@ -58,14 +59,23 @@ export function installEditHooks(
       const groups = (config.hooks[event] ?? [])
         .map(group => ({
           ...group,
-          hooks: group.hooks.filter(hook => !isForgeHook(hook.command, runner)),
+          hooks: group.hooks.filter(
+            hook => !isForgeHook(hook.command, runner) && !isTurnEndHook(hook.command),
+          ),
         }))
         .filter(group => group.hooks.length);
       if (!uninstall)
-        groups.push({
-          ...(event === 'PreToolUse' ? { matcher: '^(Edit|Write|MultiEdit|NotebookEdit|apply_patch)$' } : {}),
-          hooks: [{ type: 'command', command, timeout: 2 }],
-        });
+        groups.push(
+          event === 'Stop'
+            ? // Turn-end guard: blocks only a first stop while owned Forge work runs.
+              { hooks: [{ type: 'command', command: stopCommand, timeout: 5 }] }
+            : {
+                ...(event === 'PreToolUse'
+                  ? { matcher: '^(Edit|Write|MultiEdit|NotebookEdit|apply_patch)$' }
+                  : {}),
+                hooks: [{ type: 'command', command, timeout: 2 }],
+              },
+        );
       if (groups.length) config.hooks[event] = groups;
       else delete config.hooks[event];
     }
@@ -89,6 +99,14 @@ export function installEditHooks(
   };
 }
 
+const hookCommand = (runner: string) =>
+  [process.execPath, runner, '--auto', '--forge-first-write'].map(shellQuote).join(' ');
+const turnEndRunner = (runner: string) => join(dirname(runner), 'agent-stop-hook.js');
+const turnEndCommand = (runner: string) =>
+  [process.execPath, runner, '--forge-turn-end'].map(shellQuote).join(' ');
+function isTurnEndHook(command: string | undefined) {
+  return Boolean(command?.endsWith(' ' + shellQuote('--forge-turn-end')));
+}
 function isForgeHook(command: string | undefined, runner: string) {
   if (!command) return false;
   // Match only a shell-quoted Forge runner argument, including older per-Lane installs.
@@ -135,7 +153,8 @@ export function ensureEditHooks() {
  * Validate both files first; each durable replacement is atomic. The updater keeps
  * old builds until every replacement succeeds, so interrupted migrations stay valid. */
 export function migrateEditHookRunner(runner: string, home = homedir()) {
-  const command = [process.execPath, runner, '--auto', '--forge-first-write'].map(shellQuote).join(' ');
+  const command = hookCommand(runner),
+    stopCommand = turnEndCommand(turnEndRunner(runner));
   const updates = ['.claude/settings.json', '.codex/hooks.json'].flatMap(name => {
     const path = join(home, name);
     refuseRealUserState(path, 'agent hook config');
@@ -155,7 +174,9 @@ export function migrateEditHookRunner(runner: string, home = homedir()) {
           'BAD_ARGUMENT',
           'Client hook group must contain hooks.',
         );
-        for (const hook of group.hooks) if (isForgeHook(hook.command, runner)) hook.command = command;
+        for (const hook of group.hooks)
+          if (isTurnEndHook(hook.command)) hook.command = stopCommand;
+          else if (isForgeHook(hook.command, runner)) hook.command = command;
       }
     }
     return JSON.stringify(config) === JSON.stringify(JSON.parse(original)) ? [] : [{ path, config }];

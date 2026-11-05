@@ -59,7 +59,7 @@ test('the hosted Vite build emits linked LLM files, every packaged doc and crawl
   const robots = readFileSync(join(output, 'robots.txt'), 'utf8');
   assert.match(llms, /^# NanthAi:Forge\n\n> Forge/);
   assert.match(llms, /Keep this turn active on unfinished work/);
-  assert.match(llms, /operationIds:\[ORIGINAL_UUID\],until:"acceptance",timeoutSeconds:3600/);
+  assert.match(llms, /operationIds:\[ORIGINAL_UUID\],until:"acceptance"\}`; it blocks up to its budget/);
   assert.match(llms, /repeat on IN PROGRESS/);
   assert.match(llms, /Hosted peers and diff are unavailable/);
   assert.match(llms, /saved-path windows exclude unsaved peer edits/);

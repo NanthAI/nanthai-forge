@@ -30,7 +30,6 @@ test('an admitted finish has one executable blocking wait on its original operat
   assert.deepEqual(next.body, {
     operationIds: [response.operationId],
     until: 'acceptance',
-    timeoutSeconds: 3600,
   });
   assert.equal(result.waitCommand, result.command);
   assert.equal(result.command, landWaitCommand(root, response));
@@ -51,7 +50,7 @@ test('check-only dry runs resume the original run, without acceptance or a new f
       run: { id: runId, status: 'running' },
     },
   );
-  assert.deepEqual(continuation(result, root).body, { runId, timeoutSeconds: 3600 });
+  assert.deepEqual(continuation(result, root).body, { runId });
   const done = normalizeHostedFinishResult(
     root,
     {},

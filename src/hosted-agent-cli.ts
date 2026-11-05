@@ -14,7 +14,8 @@ import { invariant } from './errors.js';
 import { withLaneCommand } from './lane-registry.js';
 import { markerIdentity } from './lane-prune.js';
 import { landSummary } from './hosted-land-summary.js';
-import { operationWait } from './agent-operation-wait.js';
+import { AGENT_WAIT_SECONDS, operationWait } from './agent-operation-wait.js';
+import { recordTurnWait, settleTurnWork } from './agent-turn-work.js';
 import { HostedAgentTransport } from './hosted-agent-transport.js';
 /** Address selection precedes construction of native WorkStore/owner services. */
 export function hostedAgentAddress(
@@ -75,29 +76,47 @@ export async function hostedAgentCli(
     process.once('SIGINT', stop);
     process.once('SIGTERM', stop);
     try {
+      // The resume command repeats the caller's own selection (and budget, if chosen).
       const continuation = operationWait(root, { ...selectedWait, ...address });
-      process.stderr.write(
-        `wait: keep this turn active; resume after a killed shell with: ${continuation.command}\n`,
-      );
-      // A waiting agent is alive: show it as running in its Lane (local file write, no network).
-      const emit = (event: unknown) => process.stdout.write(`${JSON.stringify(event)}\n`);
+      const budgetSeconds = selectedWait.timeoutSeconds ?? AGENT_WAIT_SECONDS;
+      const observed = { ...command, timeoutSeconds: budgetSeconds };
+      // This session now waits on this work: its turn-end hook sees a live observer.
+      recordTurnWait(root, continuation.next, process.pid);
+      // Events stay internal: the caller gets one line when the budget or outcome returns.
       const response = await withLaneCommand(markerIdentity(root)?.laneId ?? undefined, 'wait', async () =>
         selectedWait.runId
-          ? await observeHostedRun(transport, command, controller.signal, emit)
-          : await observeHostedSubmissions(transport, command, controller.signal, emit),
+          ? await observeHostedRun(transport, observed, controller.signal)
+          : await observeHostedSubmissions(transport, observed, controller.signal),
       );
-      process.exitCode =
-        response.result.status === 'timeout' ? 3 : response.result.status === 'cancelled' ? 130 : 0;
-      if (response.result.status === 'timeout' || response.result.status === 'cancelled') {
-        process.stderr.write(
-          `wait: IN PROGRESS; ${response.result.status === 'timeout' ? 'wait deadline reached' : 'stopped waiting'}; keep this turn active and keep waiting with: ${continuation.command}\n`,
-        );
-      }
-      // The NDJSON stream stays machine-readable; the outcome also prints as plain stderr lines.
-      const { submissions, status } = response.result as {
-        submissions?: { submission: unknown; recovery?: unknown; conflict?: unknown }[];
+      const { submissions, status, run } = response.result as {
+        submissions?: { submission: { phase?: string }; recovery?: unknown; conflict?: unknown }[];
         status: string;
+        run?: { status?: string } | null;
       };
+      if (status === 'timeout' || status === 'cancelled') {
+        process.exitCode = status === 'timeout' ? 3 : 130;
+        recordTurnWait(root, continuation.next, null);
+        const { next, waitCommand, inProgress } = continuation;
+        const resume = { next, command: waitCommand, waitCommand, inProgress };
+        return {
+          ...response,
+          result: {
+            status: 'IN_PROGRESS',
+            reason: status === 'timeout' ? 'budget' : 'cancelled',
+            budgetSeconds,
+            ...(selectedWait.runId
+              ? { runId: selectedWait.runId, phase: run?.status ?? 'unknown' }
+              : {
+                  operationIds: selectedWait.operationIds,
+                  phase:
+                    submissions?.length === 1 ? (submissions[0]!.submission.phase ?? 'unknown') : 'pending',
+                }),
+            ...resume,
+          },
+        };
+      }
+      process.exitCode = 0;
+      settleTurnWork(selectedWait.runId ? [selectedWait.runId] : (selectedWait.operationIds ?? []));
       // A single-target wait exposes the same observed outcome as finish, while
       // retaining the complete selection below. Continuation consumers can follow
       // finish -> wait -> outcome without another read or a finish replay.
@@ -108,14 +127,7 @@ export async function hostedAgentCli(
             result: { phase: 'finish', ...entry },
           } as never))
             process.stderr.write(`${line}\n`);
-      return {
-        ...response,
-        result: {
-          ...response.result,
-          ...selected,
-          ...(['timeout', 'cancelled'].includes(status) ? continuation : {}),
-        },
-      };
+      return { ...response, result: { ...response.result, ...selected } };
     } finally {
       process.removeListener('SIGINT', stop);
       process.removeListener('SIGTERM', stop);

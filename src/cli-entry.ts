@@ -25,6 +25,18 @@ try {
   process.exit(1);
 }
 
+// `nforge wait ID` is the short resume form for this session's own recorded wait.
+if (process.argv[2] === 'wait') {
+  try {
+    const { resolveTurnWait } = await import('./agent-turn-wait.js');
+    process.argv.splice(2, process.argv.length - 2, ...resolveTurnWait(process.argv.slice(3)));
+  } catch (error) {
+    const failure = error instanceof ForgeError ? describeFailure(error) : recordFailure(error);
+    process.stderr.write(`${JSON.stringify({ error: failure })}\n`);
+    process.exit(1);
+  }
+}
+
 // Diagnose locally first; valid work passes freshness before hooks and execution.
 let runCommand = false;
 try {

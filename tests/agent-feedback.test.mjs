@@ -109,7 +109,7 @@ test('finish prints the original operation wait and overlap banner before waitin
   assert.match(
     text,
     new RegExp(
-      `Resume after interruption with: nforge agent '/tmp/lane-root' wait '\\{"operationIds":\\["${operationId}"\\],"until":"acceptance","timeoutSeconds":3600\\}'`,
+      `Resume after interruption with: nforge agent '/tmp/lane-root' wait '\\{"operationIds":\\["${operationId}"\\],"until":"acceptance"\\}'`,
     ),
   );
   assert.match(text, /OVERLAP NOTICE: ACTION REQUIRED/);
@@ -141,7 +141,7 @@ test('the receipt carries one wait command while a landing or check is pending, 
   const queued = wait({ phase: 'finish', submission: { phase: 'queued' } });
   assert.equal(
     queued,
-    `nforge agent '/tmp/it'\\''s' wait '{"operationIds":["${operationId}"],"until":"acceptance","timeoutSeconds":3600}'`,
+    `nforge agent '/tmp/it'\\''s' wait '{"operationIds":["${operationId}"],"until":"acceptance"}'`,
   );
   assert.equal(wait({ phase: 'finish', submission: { phase: 'landed' } }), undefined);
   assert.equal(wait({ phase: 'finish', submission: { phase: 'terminal-failed' } }), undefined);

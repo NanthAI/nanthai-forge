@@ -19,9 +19,10 @@ Three verbs: `start`, `save` and `land`; reads keep their names; operator action
 
 `land --save` / `finish` blocks by default. Keep this turn active while your work is
 unfinished. After a killed shell or deadline, run the receipt's `command` / `waitCommand`:
-`nforge agent ROOT wait '{"operationIds":["ORIGINAL_UUID"],"until":"acceptance","timeoutSeconds":3600}'`
-(native: `until:"terminal"`; check-only: `{"runId":"RUN_ID","timeoutSeconds":3600}`).
-Repeat that wait on IN PROGRESS. LANDED is acceptance; CHECK PASSED alone is not.
+`nforge agent ROOT wait '{"operationIds":["ORIGINAL_UUID"],"until":"acceptance"}'`
+(native: `until:"terminal"`; check-only: `{"runId":"RUN_ID"}`). It blocks up to 540 s
+(`--budget`), then prints IN_PROGRESS: repeat it in the foreground, never sleep.
+A Stop hook blocks your first turn end while your work runs; follow its `nforge wait ID`. LANDED is acceptance; CHECK PASSED alone is not.
 On failure or conflict, follow the returned recovery; report the terminal evidence.
 
 For work on Forge itself, read [AGENTS.md](../../AGENTS.md), the [lead playbook](../../docs/agents/lead.md) and [builder rules](../../docs/agents/briefings.md#building-forge). They carry durable working rules; generated defaults below still describe the current project settings.

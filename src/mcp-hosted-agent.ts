@@ -25,7 +25,7 @@ import { observeHostedRun, hostedWaitSchema, type HostedRunSubscription } from '
 import { observeHostedSubmissions } from './hosted-agent-submission-wait.js';
 import { ForgeError, invariant } from './errors.js';
 import { hostedActionError } from './hosted-action-error.js';
-import { operationWait } from './agent-operation-wait.js';
+import { AGENT_WAIT_SECONDS, operationWait } from './agent-operation-wait.js';
 import {
   hostedSourceSelectionSchema,
   hostedSourceShowSchema,
@@ -226,12 +226,15 @@ export function registerHostedAgentWorkflow(
     'forge_wait',
     {
       description:
-        'Block on the original run or landing operationIds. Keep waiting on unfinished work; timeout/cancellation returns next and command for the same targets. Follow the terminal outcome and recovery before ending the turn. Reconnect cursor binds project, actor and operations. Only this active call subscribes; disconnect closes it. progressToken enables progress notifications. No polling or compute wake.',
+        'Block on the original run or landing operationIds for up to maxWaitMs (default 540000; set it under your client tool timeout). Unfinished work returns IN_PROGRESS with one resume command: call again; follow the terminal outcome and recovery before ending the turn. progressToken enables progress notifications. Only this call subscribes; no polling.',
 
-      inputSchema: hostedWaitSchema.shape,
+      inputSchema: {
+        ...hostedWaitSchema.shape,
+        maxWaitMs: z.number().int().nonnegative().max(86_400_000).optional(),
+      },
       annotations: read,
     },
-    async (input, extra) => {
+    async ({ maxWaitMs, ...input }, extra) => {
       const controller = new AbortController();
       const cancel = () => controller.abort();
       extra.signal.addEventListener('abort', cancel, { once: true });
@@ -246,9 +249,11 @@ export function registerHostedAgentWorkflow(
           'Choose one run or hosted landing operationIds.',
         );
         const response = await result(async () => {
+          const budgetSeconds =
+            maxWaitMs !== undefined ? maxWaitMs / 1000 : (input.timeoutSeconds ?? AGENT_WAIT_SECONDS);
           const observed = await (input.runId ? observeHostedRun : observeHostedSubmissions)(
             transport,
-            input,
+            { ...input, timeoutSeconds: budgetSeconds },
             controller.signal,
             value => {
               const progressToken = extra._meta?.progressToken;
@@ -266,18 +271,32 @@ export function registerHostedAgentWorkflow(
             },
             subscribe,
           );
-          return {
-            ...observed,
-            result: {
-              ...observed.result,
-              ...('submissions' in observed.result && observed.result.submissions.length === 1
-                ? observed.result.submissions[0]
-                : {}),
-              ...(['timeout', 'cancelled'].includes(observed.result.status)
-                ? operationWait(transport.root, { ...input, ...transport.address })
-                : {}),
-            },
-          };
+          const single =
+            'submissions' in observed.result && observed.result.submissions.length === 1
+              ? observed.result.submissions[0]
+              : undefined;
+          if (['timeout', 'cancelled'].includes(observed.result.status)) {
+            const { next, command, waitCommand, inProgress } = operationWait(transport.root, {
+              ...input,
+              ...transport.address,
+            });
+            const resume = { next, command, waitCommand, inProgress };
+            const run = 'run' in observed.result ? (observed.result.run as { status?: string } | null) : null;
+            return {
+              ...observed,
+              result: {
+                status: 'IN_PROGRESS',
+                reason: observed.result.status === 'timeout' ? 'budget' : 'cancelled',
+                budgetSeconds,
+                phase: input.runId
+                  ? (run?.status ?? 'unknown')
+                  : ((single?.submission as { phase?: string } | undefined)?.phase ?? 'pending'),
+                ...('cursor' in observed.result ? { cursor: observed.result.cursor } : {}),
+                ...resume,
+              },
+            };
+          }
+          return { ...observed, result: { ...observed.result, ...single } };
         });
         await notifications;
         return response;

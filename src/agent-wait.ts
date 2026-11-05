@@ -3,6 +3,7 @@ import { watchLocal, type LocalWatcher } from './local-watcher.js';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { WaitCursor } from './agent-wait-cursor.js';
+import { AGENT_WAIT_SECONDS } from './agent-operation-wait.js';
 import { digest } from './hash.js';
 import { ForgeError, invariant } from './errors.js';
 import { WorkStore } from './work-store.js';
@@ -15,7 +16,7 @@ export const agentWaitSchema = z.object({
   laneIds: z.array(z.uuid()).default([]),
   operationIds: z.array(z.uuid()).default([]),
   until: z.enum(['terminal', 'any-change']).default('terminal'),
-  timeoutSeconds: z.number().nonnegative().finite().default(600),
+  timeoutSeconds: z.number().nonnegative().finite().default(AGENT_WAIT_SECONDS),
 });
 export type WaitSummary = {
   type: 'summary';

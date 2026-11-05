@@ -4,7 +4,6 @@ import { resultOf, landTerminal } from './hosted-land-summary.js';
 import type { HostedAgentResponse } from './hosted-agent-transport.js';
 import { operationWait } from './agent-operation-wait.js';
 import { retryableFinishSource } from './hosted-agent-finish-result.js';
-export { WAIT_COMMAND_SECONDS } from './agent-operation-wait.js';
 
 const runDone = new Set(['passed', 'failed', 'cancelled', 'runner-unavailable', 'interrupted']);
 

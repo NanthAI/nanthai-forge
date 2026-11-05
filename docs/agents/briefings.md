@@ -88,8 +88,10 @@ budget, time box, acceptance bar and metrics that must not regress.
     before each submission; wait without touching it. No routine urgent priority.
     Freeze edits/saves/sync until terminal. Stay with all dependent work and keep
     this turn active. Resume a killed shell with the receipt's blocking `waitCommand`:
-    `nforge agent ROOT wait '{"operationIds":["ORIGINAL_UUID"],"until":"acceptance","timeoutSeconds":3600}'`
-    (native: `until:"terminal"`; check-only: `{"runId":"RUN_ID","timeoutSeconds":3600}`).
+    `nforge agent ROOT wait '{"operationIds":["ORIGINAL_UUID"],"until":"acceptance"}'`
+    (native: `until:"terminal"`; check-only: `{"runId":"RUN_ID"}`). It blocks up to
+    540 s, under agent shell limits; run it in the foreground, never sleep or end on
+    a background task. If the turn-end hook blocks a stop, run its `nforge wait ID`.
     Repeat on IN PROGRESS; follow terminal recovery on failure/conflict. A passed
     check alone is not a landing. Before admission, replay the full original request. Retryable source work follows its returned recovery.
 11. Fix failures in the same Lane and land again; never cancel and recreate.

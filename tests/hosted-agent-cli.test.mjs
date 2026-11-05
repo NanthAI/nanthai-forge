@@ -132,23 +132,22 @@ test('hosted wait CLI reports a persistent observe 502 as IN PROGRESS with an ex
   };
   const command = { operationIds: [operationId], until: 'acceptance', timeoutSeconds: 0.01 };
   const result = await hostedAgentCli(s.root, 'wait', command, s.address, transport);
-  assert.equal(result.result.status, 'timeout');
+  assert.equal(result.result.status, 'IN_PROGRESS');
+  assert.equal(result.result.reason, 'budget');
+  assert.equal(result.result.budgetSeconds, 0.01);
   assert.equal(result.result.inProgress, true);
   assert.equal(result.result.command, result.result.waitCommand);
   assert.equal(result.result.next.action, 'wait');
   assert.deepEqual(result.result.next.operationIds, [operationId]);
-  assert.match(result.result.instruction, /Keep this turn active/);
+  assert.equal(result.result.instruction, undefined);
+  assert.equal(result.result.submissions, undefined, 'no status dump on IN_PROGRESS');
   assert.equal(process.exitCode, 3);
-  assert(err.join('').includes('IN PROGRESS; wait deadline reached'));
-  assert(
-    err
-      .join('')
-      .includes(
-        `nforge agent '${canonicalRoot(s.root)}' wait '${JSON.stringify({ ...command, ...s.address })}'`,
-      ),
+  assert.equal(
+    result.result.command,
+    `nforge agent '${canonicalRoot(s.root)}' wait '${JSON.stringify({ ...command, ...s.address })}'`,
   );
-  assert(!err.join('').includes('FAILED'));
-  assert(output.every(line => JSON.parse(line).type === 'observation-retry'));
+  assert.deepEqual(err, [], 'the one return line is the result; nothing else is printed');
+  assert.deepEqual(output, [], 'observation retries stay internal');
 });
 
 test('hosted wait CLI returns and prints direct conflict recovery without finish', async t => {

@@ -59,6 +59,7 @@ Usage:
   nforge improve ROOT [--json]
   nforge release ROOT --command-file FILE | --resume UUID | --status UUID
   nforge land ROOT LANE… [--message MESSAGE] [--operation-id UUID] [--wait]
+  nforge wait ID [--budget SECONDS]   # resume this agent session's own unfinished landing or run
   nforge docs [name]
   nforge --version
   nforge pr list|candidate|create|checks|merge|diff|checkout [LANE_ID] [--repo ROOT] [--json [fields]]

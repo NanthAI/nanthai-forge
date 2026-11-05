@@ -136,7 +136,6 @@ test('an admitted pending finish source child waits on the public operation, nev
     action: 'wait',
     operationIds: [operationId],
     until: 'acceptance',
-    timeoutSeconds: 3600,
   });
   assert.equal(result.result.replayParameters.operationId, operationId);
   assert.equal(result.result.command, result.result.waitCommand);

@@ -18,7 +18,8 @@ import { readClientSettings } from './client-settings.js';
 import { withLaneCommand } from './lane-registry.js';
 import { markerIdentity } from './lane-prune.js';
 import { landPhase, landSummary, resultOf, landTerminal } from './hosted-land-summary.js';
-import { landAnnouncement, landWaitCommand } from './hosted-land-wait.js';
+import { landAnnouncement, landWaitCommand, landWaitContinuation } from './hosted-land-wait.js';
+import { recordTurnWait, settleTurnWork } from './agent-turn-work.js';
 import { markOverlapShown, overlapBannerOnce, type HostedOverlapNotice } from './hosted-overlap-notice.js';
 import { LAND_INVOKED_ENV, landTiming, landTimingLine, startLandTiming } from './land-timing.js';
 
@@ -231,6 +232,12 @@ export async function hostedLandCli(
     `land: waiting for the outcome (operationId ${submitted.operationId}); Ctrl-C stops waiting, not the landing.\n`,
   );
   const transport = new HostedAgentTransport(root, address);
+  // This session owns the landing now: its turn-end hook sees a live observer.
+  recordTurnWait(
+    transport.root ?? root,
+    landWaitContinuation(transport.root ?? root, submitted)?.next,
+    process.pid,
+  );
   const finished = await withLaneCommand(markerIdentity(root)?.laneId ?? undefined, 'land', () =>
     waitLanding(transport, submitted, options.timeoutSeconds ?? 5400),
   );
@@ -263,6 +270,14 @@ export async function hostedLandCli(
   };
   const lines = landSummary(final);
   for (const line of lines) process.stderr.write(`${line}\n`);
+  const resumeWith = landWaitContinuation(transport.root ?? root, final)?.next;
+  if (resumeWith) recordTurnWait(transport.root ?? root, resumeWith, null);
+  else
+    settleTurnWork(
+      [submitted.operationId, resultOf(submitted).run?.id].filter(
+        (id): id is string => typeof id === 'string',
+      ),
+    );
   const outcome = landPhase(final);
   if (outcome === 'terminal-failed' || lines[0]?.startsWith('FAILED')) process.exitCode = 2;
   else if (!landTerminal(final)) {

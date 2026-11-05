@@ -59,7 +59,7 @@ export function hostedAgentHelp(action?: string) {
     'queue {limit?} lists the landing queue in dispatch order: Lane, Intent title, phase, suspect, last failing test files and recompose count per entry. One bounded read, no idle cost.',
     'diff {laneId?,paths?,byteBudget?,cursor?} compares pinned base to saved head; nextCursor continues that pair. show {state?|candidateId?|laneId?|channel:"main",path} reads exact bytes. forge_review exposes show/diff/peers/queue.',
     'Keep every original parameter, including message and pins, when replaying an operationId. Use the receipt replay command.',
-    'Keep this turn active while your work is unfinished. Resume with the receipt command: wait {operationIds:[ORIGINAL_UUID],until:"acceptance",timeoutSeconds:3600}; check-only work uses wait {runId,timeoutSeconds:3600}. Transient observation failures retry until the deadline. Exit 3 is IN PROGRESS: run the same wait again. Terminal failure follows its recovery command; LANDED is acceptance, CHECK PASSED alone is not.',
+    'Keep this turn active while your work is unfinished. Resume with the receipt command: wait {operationIds:[ORIGINAL_UUID],until:"acceptance"}; check-only work uses wait {runId}. wait blocks up to 540 s (--budget SECONDS); transient observation failures retry within it. Exit 3 is IN PROGRESS: run the same wait again. Terminal failure follows its recovery command; LANDED is acceptance, CHECK PASSED alone is not.',
     '',
   ].join('\n');
 }

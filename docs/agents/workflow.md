@@ -1110,28 +1110,47 @@ is unfinished. A progressing hosted landing's `next`, `command` and `waitCommand
 name one blocking continuation on the original operation:
 
 ```sh
-nforge agent ROOT wait '{"operationIds":["ORIGINAL_UUID"],"until":"acceptance","timeoutSeconds":3600}'
+nforge agent ROOT wait '{"operationIds":["ORIGINAL_UUID"],"until":"acceptance"}'
 ```
 
-After a killed shell or IN PROGRESS deadline, repeat that wait; do not resubmit.
+`wait` blocks for its budget, then returns one line. In agent mode the budget is
+540 s, under the 10-minute tool limit of common agent shells; `--budget 90s` (CLI)
+or `maxWaitMs` (MCP `forge_wait`) sets another. Unfinished work returns
+`IN_PROGRESS` (exit 3) with the same resume command: run it again in the
+foreground. Never resubmit, sleep between checks or end the turn on a background
+wait. MCP sends progress notifications while it waits.
 Native operations use `until:"terminal"`. Hosted check-only and harness checks use
-`{"runId":"RUN_ID","timeoutSeconds":3600}`; native checks use their run operation
-id. Before admission, source preparation keeps the full original replay command.
+`{"runId":"RUN_ID"}`; native checks use their run operation id. Before admission,
+source preparation keeps the full original replay command.
 Retryable source work follows its returned recovery; a child failure does not settle a pending landing.
 `--no-wait` returns with an unfinished-work warning and the blocking continuation.
 
 LANDED reports acceptance; CHECK PASSED alone does not. Follow failure/conflict
 recovery in the same Lane; inspect current Lane status after supersession.
 Single-target hosted CLI/MCP waits expose `submission` alongside `submissions`.
-CLI/MCP has no external turn-end callback or authoritative turn-to-operation map,
-so it cannot refuse a harness ending its turn. External drivers without Forge run
-IDs need their harness's original wait/recovery. Hosted peer waits require a
-submitted operation ID; an unsubmitted Lane is not a hosted wait target.
+External drivers without Forge run IDs need their harness's original wait/recovery.
+Hosted peer waits require a submitted operation ID; an unsubmitted Lane is not a
+hosted wait target.
+
+### Turn-end guard
+
+The first-write hooks also install a turn-end guard: a Claude Code and a Codex
+`Stop` hook. Landings, check runs and waits that an agent session starts are
+recorded in a local ledger, keyed by a digest of the client session id
+(`CLAUDE_CODE_SESSION_ID` or `CODEX_THREAD_ID`). While one still runs, the first
+stop attempt is blocked: "Your landing ID is still running. Run: nforge wait ID.
+To stop anyway, stop again." The next attempt is always allowed. After a Forge
+wait, the next stop counts as a first attempt again. `nforge wait ID [--budget S]`
+runs the canonical wait for that session's recorded work. Each stop costs one
+local read. A hosted query runs only when no live or recent (30 s) observation
+exists. Idle costs nothing, and any failure allows the stop. Work without a
+session id, and non-Forge background processes, are not covered. Turn it off with
+`nforge settings firstWriteHooks false`.
 
 Native waits can also select latest Lane work or several operations:
 
 ```sh
-nforge agent OWNER wait '{"laneIds":["LANE_ID"],"operationIds":["OPERATION_ID"],"until":"terminal","timeoutSeconds":600}'
+nforge agent OWNER wait '{"laneIds":["LANE_ID"],"operationIds":["OPERATION_ID"],"until":"terminal"}'
 ```
 
 NDJSON contains initial observations, changed source/check/shard/overlap states

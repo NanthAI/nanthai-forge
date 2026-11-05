@@ -369,7 +369,8 @@ test('MCP hosted wait accepts multi-operation selection and closes on disconnect
   await turn();
   close();
   const response = JSON.parse((await waiting).content[0].text);
-  assert.equal(response.result.status, 'cancelled');
+  assert.equal(response.result.status, 'IN_PROGRESS');
+  assert.equal(response.result.reason, 'cancelled');
   assert.equal(notifications.length, 1);
   assert.equal(JSON.parse(notifications[0].params.message).cursor, response.result.cursor);
   assert.equal(s.counts().closes, 1);
