@@ -183,6 +183,7 @@ export const hostedAgentCommandSchemas = {
       after: uuid.nullable().default(null),
       accept: z.boolean().optional(),
       keepOpen: z.boolean().optional(),
+      closes: z.boolean().optional(),
       priority: z.enum(['urgent', 'normal']).optional(),
       overlapAnswer: z.literal('accept-order').optional(),
       retry: z.boolean().optional(),

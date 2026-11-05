@@ -267,6 +267,7 @@ async function executeFinishWork(session: HostedAgentSession, input: unknown) {
           check: await checkSelection(session, command.check),
           ...(command.reason ? { retryReason: command.reason } : {}),
           ...(command.keepOpen === undefined ? {} : { keepOpen: command.keepOpen }),
+          ...(command.closes === undefined ? {} : { closes: command.closes }),
         }),
       );
       const submission = await session.mutation('projectHostedLandingDesired:submit', {
@@ -329,6 +330,7 @@ async function executeFinishWork(session: HostedAgentSession, input: unknown) {
       ...(command.reason ? { retryReason: command.reason } : {}),
       finish: { composeOperationId, after: command.after },
       ...(command.keepOpen === undefined ? {} : { keepOpen: command.keepOpen }),
+      ...(command.closes === undefined ? {} : { closes: command.closes }),
     });
   });
   if (command.accept === false) {

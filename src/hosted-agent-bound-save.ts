@@ -242,6 +242,7 @@ export async function prepareBoundHostedCommands(
         }
       : {}),
     ...(retained.command.keepOpen === undefined ? {} : { keepOpen: retained.command.keepOpen }),
+    ...(retained.command.closes === undefined ? {} : { closes: retained.command.closes }),
     dependencies: (
       (retained.command.dependencies as { viewId: string; head: string }[] | undefined) ?? []
     ).map(d => ({ candidateId: d.viewId, head: d.head })),

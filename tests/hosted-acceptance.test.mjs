@@ -369,7 +369,7 @@ test('the landing that completes an Intent’s last Lane completes the Intent, i
   assert.equal(f.tables.projectHostedRecords.size, versions);
 });
 
-test('with completeOnAccept off the Intent stays open at landing, and an explicit last Lane completion completes it', async () => {
+test('with completeOnAccept off the landing still completes the Intent it declares and leaves the Lane open', async () => {
   const f = await acceptanceFixture(),
     intentId = await seedIntent(f);
   const lane = await f.lane({ intentId });
@@ -381,8 +381,8 @@ test('with completeOnAccept off the Intent stays open at landing, and an explici
   const { state } = await f.ready(item);
   const { receipt } = await f.accept(state);
   await f.materialize(receipt.id);
-  assert.equal(await intentStatus(f, intentId), 'active');
-  assert.equal((await f.readLane(lane.laneId)).state, 'active');
+  assert.equal(await intentStatus(f, intentId), 'completed');
+  assert.equal((await f.readLane(lane.laneId)).state, 'active', 'the Lane stays open for reopen/more edits');
 });
 
 test('Lane status carries the landing state, receipt and accepted commit from the same read, with completion on or off', async () => {
@@ -436,7 +436,7 @@ test('completeOnAccept skips a pinned Lane and still completes its unpinned sibl
   assert.equal((await f.readLane(pinned.laneId)).state, 'active', 'a pinned Lane is never completed');
 });
 
-test('disabled completion policy preserves all Lane state and never completes an Intent', async () => {
+test('disabled completion policy preserves all Lane state; only the declared Intent completes', async () => {
   const f = await acceptanceFixture(),
     lane = await f.lane(),
     item = await f.makeCandidate([lane]);
@@ -449,6 +449,86 @@ test('disabled completion policy preserves all Lane state and never completes an
   assert.equal(receipt.completion.enabled, false);
   await f.materialize(receipt.id);
   assert.equal((await f.readLane(lane.laneId)).state, 'active');
+});
+
+const landOne = async (f, { policyEdit = {}, request = {}, laneInput = {}, siblings = [] } = {}) => {
+  const intentId = await seedIntent(f),
+    lane = await f.lane({ intentId, ...laneInput }),
+    others = [];
+  for (const sibling of siblings) others.push(await f.lane({ intentId, ...sibling }));
+  const policy = policyPreset('supervised');
+  f.patch('hostedProjects', f.projectId, {
+    autonomyPolicy: { ...policy, lifecycle: { ...policy.lifecycle, ...policyEdit } },
+  });
+  const item = await f.makeCandidate([lane]);
+  const { state } = await f.ready(item, request);
+  const { receipt } = await f.accept(state);
+  await f.materialize(receipt.id);
+  return { intentId, lane, others, receipt };
+};
+
+test('a landing completes the Intent it declares whether the Lane completes, stays open (keepOpen) or completion is off', async () => {
+  for (const [name, args, laneState] of [
+    ['completeOnAccept on', {}, 'completed'],
+    ['completeOnAccept off', { policyEdit: { completeOnAccept: false } }, 'active'],
+    ['keepOpen', { policyEdit: { completeOnAccept: true }, request: { keepOpen: true } }, 'active'],
+  ]) {
+    const f = await acceptanceFixture(),
+      { intentId, lane, receipt } = await landOne(f, args);
+    assert.equal(receipt.completion.closeIntents, true, name);
+    assert.equal(await intentStatus(f, intentId), 'completed', name);
+    assert.equal((await f.readLane(lane.laneId)).state, laneState, name);
+    // Replay of the completion tick writes nothing.
+    const versions = f.tables.projectHostedRecords.size;
+    await f.materialize(receipt.id);
+    assert.equal(f.tables.projectHostedRecords.size, versions, `${name} replay`);
+  }
+});
+
+test('refs-only landings (closes:false) and closeOnLand off leave the Intent open, completing Lanes only when enabled', async () => {
+  for (const [name, args, laneState] of [
+    [
+      'refs, completeOnAccept on',
+      { policyEdit: { completeOnAccept: true }, request: { closes: false } },
+      'completed',
+    ],
+    [
+      'refs, completeOnAccept off',
+      { policyEdit: { completeOnAccept: false }, request: { closes: false } },
+      'active',
+    ],
+    [
+      'closeOnLand off, completeOnAccept off',
+      { policyEdit: { completeOnAccept: false, closeOnLand: 'off' } },
+      'active',
+    ],
+    [
+      'closeOnLand off, completeOnAccept on',
+      { policyEdit: { completeOnAccept: true, closeOnLand: 'off' } },
+      'completed',
+    ],
+  ]) {
+    const f = await acceptanceFixture(),
+      { intentId, lane, receipt } = await landOne(f, args);
+    assert.equal(receipt.completion.closeIntents, false, name);
+    assert.equal(await intentStatus(f, intentId), 'active', name);
+    assert.equal((await f.readLane(lane.laneId)).state, laneState, name);
+  }
+});
+
+test('landing without completion keeps the Intent open while another Lane of it is open or pinned', async () => {
+  const off = { completeOnAccept: false };
+  let f = await acceptanceFixture(),
+    landed = await landOne(f, { policyEdit: off, siblings: [{}] });
+  assert.equal(await intentStatus(f, landed.intentId), 'active', 'an unlanded open sibling keeps it open');
+  // Once that sibling completes explicitly, the next landing of the Intent can complete it.
+  f = await acceptanceFixture();
+  landed = await landOne(f, { policyEdit: off, laneInput: { pinned: true } });
+  assert.equal(
+    await intentStatus(f, landed.intentId),
+    'active',
+    'a pinned Lane is never treated as landed-and-done',
+  );
 });
 
 test('final scheduler failure rolls back main, all receipts, operation and queue atomically', async () => {

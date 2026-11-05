@@ -19,6 +19,9 @@ export async function completeIntentWhenLanesDone(
     authorityEpoch: number;
     intentId: string;
     at: string;
+    /** Lanes of a landing that stay active (keepOpen, completeOnAccept off): they declared this Intent and do
+     * not keep it open. A pinned Lane always does. */
+    landed?: ReadonlySet<string>;
   },
 ) {
   // Head rows carry the status, so a settled or missing Intent and any open sibling cost no record body read.
@@ -30,7 +33,11 @@ export async function completeIntentWhenLanesDone(
       q.eq('projectId', input.projectId).eq('kind', 'lane').eq('parent', input.intentId),
     )
     .take(SIBLINGS + 1);
-  if (siblings.length > SIBLINGS || siblings.some(row => row.status === 'active')) return false;
+  if (
+    siblings.length > SIBLINGS ||
+    siblings.some(row => row.status === 'active' && (row.pinned || !input.landed?.has(row.key)))
+  )
+    return false;
   const current = await readHostedRecord(ctx, {
     projectId: input.projectId,
     actor: input.actor,

@@ -9,6 +9,7 @@ const keys = [
   'after',
   'priority',
   'keepOpen',
+  'closes',
   'overlapAnswer',
   'retry',
   'reason',

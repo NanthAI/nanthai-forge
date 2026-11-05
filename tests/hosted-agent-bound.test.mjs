@@ -241,7 +241,7 @@ test('unknown enqueue response and caller reconnect preserve the original operat
   );
 });
 
-test('check-only finish does not request landing; keepOpen is pinned on accepting finish', async t => {
+test('check-only finish does not request landing; keepOpen and closes are pinned on accepting finish', async t => {
   const f = fixture(t);
   const checked = await boundAgentSubmission(
     f.store,
@@ -253,13 +253,18 @@ test('check-only finish does not request landing; keepOpen is pinned on acceptin
   assert(!f.calls.some(c => c.name === 'projectHostedLanding:enqueue'));
   await boundAgentSubmission(
     f.store,
-    { ...f.command, operationId: randomUUID(), keepOpen: true },
+    { ...f.command, operationId: randomUUID(), keepOpen: true, closes: false },
     noNative,
     f.transport(),
   );
   assert.equal(
     JSON.parse(f.calls.find(c => c.name === 'projectHostedLanding:enqueue').args.request).keepOpen,
     true,
+  );
+  assert.equal(
+    JSON.parse(f.calls.find(c => c.name === 'projectHostedLanding:enqueue').args.request).closes,
+    false,
+    'a refs-only landing carries closes:false into the request the server pins',
   );
 });
 

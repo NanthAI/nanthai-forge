@@ -45,7 +45,16 @@ export const hostedAcceptanceSchema = z
       .strict()
       .nullable(),
     snapshot: z.object({ id: z.uuid(), previousId: z.string().min(1), revision: count }).strict(),
-    completion: z.object({ root: hash, pages: count, lanes: count, enabled: z.boolean() }).strict(),
+    completion: z
+      .object({
+        root: hash,
+        pages: count,
+        lanes: count,
+        enabled: z.boolean(),
+        /** The landing completes its Lanes' Intents (closeOnLand declared and not refs-only). Absent on older receipts: the Intent follows `enabled` only. */
+        closeIntents: z.boolean().optional(),
+      })
+      .strict(),
     automatic: z.boolean(),
     undo: z.object({ kind: z.literal('revert'), receiptId: z.uuid() }).strict(),
   })

@@ -92,7 +92,11 @@ export const autonomyPolicy = v.object({
   ownerRootUpdates: v.optional(v.boolean()),
   autoSnapshot: v.optional(v.boolean()),
   laneUpdates: v.union(v.literal('auto'), v.literal('ask')),
-  lifecycle: v.object({ completeOnAccept: v.boolean(), cleanRegenerableCopies: v.boolean() }),
+  lifecycle: v.object({
+    completeOnAccept: v.boolean(),
+    cleanRegenerableCopies: v.boolean(),
+    closeOnLand: v.optional(v.union(v.literal('declared'), v.literal('off'))),
+  }),
   notify: v.object({ awaySummary: v.boolean() }),
   githubMirror: v.optional(v.object({ repo: v.string(), autoPush: v.boolean(), laneRefs: v.literal(false) })),
 });

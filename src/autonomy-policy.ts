@@ -82,7 +82,12 @@ export const autonomyPolicySchema = z.object({
   /** Debounced local snapshots of open native Lanes; absent means on. */
   autoSnapshot: z.boolean().optional(),
   laneUpdates: z.enum(['auto', 'ask']),
-  lifecycle: z.object({ completeOnAccept: z.boolean(), cleanRegenerableCopies: z.boolean() }),
+  lifecycle: z.object({
+    completeOnAccept: z.boolean(),
+    cleanRegenerableCopies: z.boolean(),
+    /** `declared` (default, GitHub `Closes #N`): a landing completes the Intents of its Lanes whatever completeOnAccept says; `off`: landing never completes an Intent. */
+    closeOnLand: z.enum(['declared', 'off']).optional(),
+  }),
   notify: z.object({ awaySummary: z.boolean() }),
 });
 export type AutonomyPolicy = z.infer<typeof autonomyPolicySchema>;

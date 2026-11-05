@@ -34,6 +34,8 @@ export const hostedLandingRequestSchema = z
     expectedHead: hash.nullable(),
     agent: z.boolean().default(false),
     keepOpen: z.boolean().optional(),
+    /** false: the landing only references its Lanes' Intents (GitHub `Refs #N`); absent or true declares them (`Closes #N`). */
+    closes: z.boolean().optional(),
     message: landingMessageSchema.nullable().optional(),
     priority: z.enum(['urgent', 'normal']).optional(),
     revertOf: z.uuid().optional(),

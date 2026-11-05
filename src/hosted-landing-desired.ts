@@ -8,6 +8,7 @@ export const hostedLandingDesiredSchema = hostedLandingRequestSchema
     authorityEpoch: true,
     check: true,
     keepOpen: true,
+    closes: true,
     message: true,
     priority: true,
     retryReason: true,

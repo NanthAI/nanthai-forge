@@ -284,6 +284,7 @@ export async function publishAcceptance(
       pages: plan.inputPages,
       lanes: plan.lanes,
       enabled: policy.lifecycle.completeOnAccept && !state.request.keepOpen,
+      closeIntents: policy.lifecycle.closeOnLand !== 'off' && state.request.closes !== false,
     },
     automatic: requiresGovernedCheck(project, actor),
     undo: { kind: 'revert', receiptId: identity.receiptId },

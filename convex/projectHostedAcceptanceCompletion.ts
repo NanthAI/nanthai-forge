@@ -7,7 +7,7 @@ import {
   acceptancePage,
   type ReceiptIdentity,
 } from './projectHostedAcceptanceStore';
-import { readHostedRecord, writeHostedRecord } from './projectHostedRecords';
+import { readHostedRecord, recordHead, writeHostedRecord } from './projectHostedRecords';
 import { sameSaveLane } from './projectHostedSaveStore';
 import { retireLandedOverlapLanes } from './projectHostedOverlapLanded';
 import { completeIntentWhenLanesDone } from './projectHostedIntentCompletion';
@@ -45,8 +45,14 @@ export async function completeAcceptedHeads(ctx: MutationCtx, input: CompletionI
   // or skips a Lane whose pins moved after finish. Idempotent and bounded to one input page.
   const landed = { commit: receipt.candidate.head, at: receipt.at };
   if (!receipt.completion.enabled && plan.inputPages) await retireLandedOverlapLanes(ctx, input, landed);
-  if (!receipt.completion.enabled || plan.appliedPage === plan.inputPages) return { complete: true };
-  if (plan.appliedPage === 0 && plan.appliedEntry === 0) await retireLandedOverlapLanes(ctx, input, landed);
+  // Landing declares the Intents of its Lanes even when the Lanes themselves stay open (completeOnAccept off or
+  // keepOpen): `closeIntents` completes them in this same tick, and the planning read closes the Issue if its
+  // Done-when lines are ticked. Refs-only landings and closeOnLand off leave the Intent alone.
+  const lanesDone = receipt.completion.enabled,
+    declares = receipt.completion.closeIntents ?? lanesDone;
+  if ((!lanesDone && !declares) || plan.appliedPage === plan.inputPages) return { complete: true };
+  if (lanesDone && plan.appliedPage === 0 && plan.appliedEntry === 0)
+    await retireLandedOverlapLanes(ctx, input, landed);
   const project = await ctx.db.get(input.projectId);
   invariant(
     project &&
@@ -58,12 +64,19 @@ export async function completeAcceptedHeads(ctx: MutationCtx, input: CompletionI
   const page = await acceptancePage(ctx, { ...input, kind: 'inputs', index: plan.appliedPage });
   invariant(page, 'SOURCE_UNAVAILABLE', 'The accepted input page is unavailable.');
   const entries = validateComposePage(JSON.parse(page.value)).entries;
+  const pageLanes = new Set(entries.flatMap(entry => ('laneId' in entry ? [entry.laneId] : [])));
   // A byte-sized source page can contain 100 inputs. Materialize at most 20
   // canonical records per tick; counters are transaction windows, not Lane caps.
   const end = Math.min(entries.length, plan.appliedEntry + 20);
   const finished = new Set<string>();
   for (const value of entries.slice(plan.appliedEntry, end)) {
     const entry = composeLaneSchema.parse(value);
+    if (!lanesDone) {
+      // Lanes stay as they are: the head row (parent, status, pin) is the whole read, no record body.
+      const row = await recordHead(ctx, input.projectId, 'lane', entry.laneId);
+      if (row && row.status === 'active' && !row.pinned) finished.add(row.parent);
+      continue;
+    }
     const current = await readHostedRecord(ctx, {
       projectId: input.projectId,
       actor: project.owner,
@@ -89,13 +102,14 @@ export async function completeAcceptedHeads(ctx: MutationCtx, input: CompletionI
     finished.add(lane.intentId);
   }
   // The Intent completes with its last Lane, so the planning read can close its Issue.
-  for (const intentId of finished)
+  for (const intentId of declares ? finished : [])
     await completeIntentWhenLanesDone(ctx, {
       projectId: input.projectId,
       actor: project.owner,
       authorityEpoch: receipt.authorityEpoch,
       intentId,
       at: receipt.at,
+      ...(lanesDone ? {} : { landed: pageLanes }),
     });
   const appliedPage = end === entries.length ? plan.appliedPage + 1 : plan.appliedPage;
   await ctx.db.patch(plan._id, { appliedPage, appliedEntry: end === entries.length ? 0 : end });
