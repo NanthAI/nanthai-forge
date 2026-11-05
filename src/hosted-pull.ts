@@ -66,7 +66,7 @@ const pendingSchema = z
   })
   .strict();
 /** A plain repeat resumes the same pinned installation after an interruption.
- * The address/operation journals live beside ROOT, outside the atomic swap. */
+ * The address/operation journals live beside ROOT, outside the in-place publication. */
 export async function pullHostedProject(
   root: string,
   address: HostedAgentAddress,

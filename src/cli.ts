@@ -133,6 +133,8 @@ Semantic coverage is partial. Global/package/tsconfig path resolution is not sup
 `;
 
 async function main(args: string[]): Promise<unknown> {
+  const runtimeCallbacks = (await import('./cli-command-ready.js')).cliRuntimeCallbacks(args);
+  const { beforeDispatch, beforeLocal } = runtimeCallbacks;
   if (!args.length || args[0] === '--help' || args[0] === 'help') {
     process.stdout.write(HELP);
     return undefined;
@@ -159,8 +161,15 @@ async function main(args: string[]): Promise<unknown> {
     );
     return refreshOwnerRoot(new WorkStore(args[2]));
   }
-  if (args[0] === 'pull') return (await import('./hosted-pull-cli.js')).hostedPullCli(args.slice(1));
-  if (args[0] === 'clone') return (await import('./hosted-clone-cli.js')).hostedCloneCli(args.slice(1));
+  if (args[0] === 'pull')
+    return (await import('./hosted-pull-cli.js')).hostedPullCli(args.slice(1), beforeDispatch, beforeLocal);
+  if (args[0] === 'clone')
+    return (await import('./hosted-clone-cli.js')).hostedCloneCli(
+      args.slice(1),
+      undefined,
+      beforeDispatch,
+      beforeLocal,
+    );
   if (args[0] === 'host') return hostCli(args.slice(1));
   if (args[0] === 'policy' || args[0] === 'set-policy') {
     invariant(
@@ -190,10 +199,12 @@ async function main(args: string[]): Promise<unknown> {
   if (args[0] === 'land') return landCli(args.slice(1));
   if (args[0] === 'release')
     return (await import('./maintainer-release-cli.js')).maintainerReleaseCli(args.slice(1));
-  if (args[0] === 'agent') return agentCli(args.slice(1), { process: true });
-  if (args[0] === 'x') return agentCli(args.slice(1), { operator: true, process: true });
+  if (args[0] === 'agent') return agentCli(args.slice(1), { process: true, ...runtimeCallbacks });
+  if (args[0] === 'x') return agentCli(args.slice(1), { operator: true, process: true, ...runtimeCallbacks });
   if (args[0] === 'heavy') {
-    process.exitCode = await (await import('./heavy-slots.js')).heavyCli(args.slice(1));
+    process.exitCode = await (
+      await import('./heavy-slots.js')
+    ).heavyCli(args.slice(1), beforeDispatch, beforeLocal);
     return undefined;
   }
   if (args[0] === 'settings') return (await import('./client-settings.js')).clientSettingsCli(args.slice(1));

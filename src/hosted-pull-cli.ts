@@ -9,8 +9,13 @@ import { mainCheckoutTransport, pullHostedProject } from './hosted-pull.js';
 import { invariant } from './errors.js';
 export const PULL_HELP =
   'nforge pull ROOT\nRefresh a Forge clone to accepted main; re-run to resume an interrupted refresh.\n';
-export async function hostedPullCli(args: string[]) {
+export async function hostedPullCli(
+  args: string[],
+  beforeRun?: () => Promise<boolean>,
+  beforeLocal?: () => Promise<void>,
+) {
   if (args.includes('--help')) {
+    await beforeLocal?.();
     process.stdout.write(PULL_HELP);
     return;
   }
@@ -19,6 +24,7 @@ export async function hostedPullCli(args: string[]) {
     path = join(clientCacheRoot(root), 'agent', 'address.json'),
     address = checkoutPathExists(path) ? hostedAgentAddressSchema.parse(readAgentJson(path)) : null;
   invariant(address, 'WORK_CONFLICT', 'Pull requires a Forge clone root; use nforge clone PROJECT DIR.');
+  if (beforeRun && !(await beforeRun())) return;
   const exchange = new ConvexExchange(address.url, undefined, address.projectId, '', null);
   return pullHostedProject(root, address, mainCheckoutTransport(root, address, exchange));
 }

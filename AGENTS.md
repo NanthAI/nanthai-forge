@@ -28,7 +28,7 @@ nforge agent ROOT land --save '{"laneId":"…","message":"…"}'
 nforge agent ROOT comment-planning-item '{"itemId":"ISSUE_ID","text":"What landed, follow-ups"}'
 ```
 
-Agreed ideas, decisions and builder-found friction go into planning as Issues (`put-planning-item`), not only into a handoff. Discuss an owner question or idea before filing it; a question is not agreement to add work. For a new friction item with no existing planning match, run `nforge agent ROOT friction '{"laneId":"…","title":"…","detail":"…","area":"…"}'`.
+Agreed ideas, decisions and builder-found friction go into planning as Issues (`put-planning-item`), not only into a handoff. Discuss an owner question or idea before filing it; a question is not agreement to add work. For a new friction item with no existing planning match, run `nforge agent ROOT friction '{"title":"…","detail":"…","area":"…"}'`. Outside a Lane this records project/actor friction; inside a Lane it attaches that Lane automatically. Supply `laneId` to attach a different Lane.
 
 Before filing an Issue or friction, search planning and comment on an existing match instead of duplicating it. Use `planning {"search":"relevant words","limit":50}` and follow `nextCursor`; add `status:"all"` to include closed work.
 

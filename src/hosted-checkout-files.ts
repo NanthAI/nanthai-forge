@@ -25,7 +25,7 @@ export function checkoutPathExists(path: string) {
     lstatSync(path);
     return true;
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+    if (['ENOENT', 'ENOTDIR'].includes((error as NodeJS.ErrnoException).code ?? '')) return false;
     throw error;
   }
 }

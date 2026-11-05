@@ -4,7 +4,7 @@ import { checkoutPathExists } from './hosted-checkout-files.js';
 import { z } from 'zod';
 import { readSource, safeRelative } from './files.js';
 import { hostedLaneSelectionSchema } from './hosted-lane.js';
-import { parseNativeState, stateSchema } from './native-state-format.js';
+import { parseNativeStateValue, stateSchema } from './native-state-format.js';
 import { invariant } from './errors.js';
 export const hostedLaneExpectationSchema = hostedLaneSelectionSchema.pick({
   head: true,
@@ -48,7 +48,7 @@ export function readHostedLaneCheckout(root: string): HostedLaneCheckoutMarker |
   const bytes = readSource(root, `.forge/${hostedLaneMarkerName}`, Number.MAX_SAFE_INTEGER);
   if (!bytes) return null;
   const marker = hostedLaneCheckoutMarkerSchema.parse(JSON.parse(bytes.toString('utf8')));
-  parseNativeState(Buffer.from(JSON.stringify(marker.state)));
+  parseNativeStateValue(marker.state);
   const paths = new Set(marker.state.files.map(file => file.path));
   invariant(
     new Set(marker.materialized).size === marker.materialized.length &&

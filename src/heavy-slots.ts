@@ -1,8 +1,9 @@
+import { canonicalRoot } from './root-paths.js';
 // SPDX-License-Identifier: Apache-2.0
 import { spawn } from 'node:child_process';
 import { mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { constants, tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { heavySlots, readClientSettings } from './client-settings.js';
 import { watchLocal } from './local-watcher.js';
 import { invariant } from './errors.js';
@@ -85,21 +86,89 @@ export async function acquireHeavySlot(
   return slot;
 }
 
+export const HEAVY_HELP = `nforge heavy CMD [ARGS...]
+nforge heavy --status
+nforge heavy --help | -h
+Run bounded builds and test batches under the machine-wide slot limit.
+Run long-lived servers (Vite/dev servers) directly, outside heavy.
+`;
+/** Metadata contains only the executable basename, never arguments or environment. */
+export function heavyStatus(directory: string, slots: number, cwd = process.cwd()) {
+  const holders = [];
+  for (let index = 1; index <= slots; index++) {
+    const slot = join(directory, String(index));
+    try {
+      const pid = Number(readFileSync(join(slot, 'pid'), 'utf8'));
+      if (!Number.isSafeInteger(pid) || pid <= 0 || !alive(pid)) continue;
+      let metadata: { cwd?: string; startedAt?: number; command?: string } = {};
+      try {
+        metadata = JSON.parse(readFileSync(join(slot, 'holder.json'), 'utf8'));
+      } catch {}
+      const folder = typeof metadata.cwd === 'string' ? metadata.cwd : null;
+      holders.push({
+        slot: index,
+        pid,
+        folder,
+        elapsedMs: Math.max(
+          0,
+          Date.now() - (typeof metadata.startedAt === 'number' ? metadata.startedAt : statSync(slot).mtimeMs),
+        ),
+        command: typeof metadata.command === 'string' ? basename(metadata.command) : null,
+        selfHeld: folder !== null && canonicalRoot(folder) === canonicalRoot(cwd),
+      });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
+  }
+  return { slots, holders, selfHeld: holders.some(holder => holder.selfHeld) };
+}
+
 /** nforge heavy CMD [ARGS...]: run one heavy local command under the machine-wide slot limit. */
-export async function heavyCli(args: string[]): Promise<number> {
-  invariant(args.length > 0, 'BAD_ARGUMENT', 'Use heavy CMD [ARGS...].');
+export async function heavyCli(
+  args: string[],
+  beforeRun?: () => Promise<boolean>,
+  beforeLocal?: () => Promise<void>,
+): Promise<number> {
+  if (!args.length || (args.length === 1 && ['--help', '-h'].includes(args[0]!))) {
+    await beforeLocal?.();
+    process.stdout.write(HEAVY_HELP);
+    return 0;
+  }
+  invariant(
+    !args[0]!.startsWith('-') || args[0] === '--status',
+    'BAD_ARGUMENT',
+    'Unknown heavy option. Run nforge heavy --help; use heavy CMD [ARGS...] for a bounded batch.',
+  );
+  invariant(
+    args[0] !== '--status' || args.length === 1,
+    'BAD_ARGUMENT',
+    'heavy --status takes no command. Run nforge heavy --status.',
+  );
   const slots = heavySlots(readClientSettings().localHeavySlots);
+  if (args[0] === '--status') {
+    await beforeLocal?.();
+    process.stdout.write(`${JSON.stringify(heavyStatus(heavySlotDirectory(), slots))}\n`);
+    return 0;
+  }
+  if (beforeRun && !(await beforeRun())) return Number(process.exitCode ?? 0);
   const slot =
     slots === 0
       ? null
       : await acquireHeavySlot(heavySlotDirectory(), slots, () =>
-          process.stderr.write(`heavy: all ${slots} local slots busy; waiting\n`),
+          process.stderr.write(
+            `heavy: all ${slots} local slots busy; waiting. ${JSON.stringify(heavyStatus(heavySlotDirectory(), slots))} Run nforge heavy --status to inspect holders.\n`,
+          ),
         );
   const release = () => {
     if (slot) rmSync(slot, { recursive: true, force: true });
   };
   process.once('exit', release);
   try {
+    if (slot)
+      writeFileSync(
+        join(slot, 'holder.json'),
+        JSON.stringify({ cwd: process.cwd(), startedAt: Date.now(), command: basename(args[0]!) }),
+      );
     return await new Promise<number>((resolve, reject) => {
       const child = spawn(args[0]!, args.slice(1), { stdio: 'inherit' });
       const forward = (signal: NodeJS.Signals) => () => child.kill(signal);

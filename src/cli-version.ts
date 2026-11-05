@@ -14,13 +14,23 @@ export function cliVersionCheck() {
     (checked ??= current().then(release => (release.head === installed ? installed : release.head)));
 }
 export const checkCliVersion = cliVersionCheck();
+export function cliDeferredCommand(args: string[]) {
+  return ['agent', 'x', 'heavy', 'pull', 'clone'].includes(args[0]!);
+}
+export function cliLocalArgumentsFirst(args: string[]) {
+  return !args.length || ['--help', '-h', 'help'].includes(args[0]!) || cliDeferredCommand(args);
+}
 export async function cliStartup(
   args = process.argv.slice(2),
   root = cliPackageRoot(),
   check = checkCliVersion,
+  options: { validated?: boolean; stdin?: string } = {},
 ): Promise<boolean> {
   // Claim the pinned runtime before any command modules can lazy-load from it.
   retainCliRuntime(root);
+  // Local diagnostics must remain available without discovery. These handlers
+  // call back after their local argument checks and before valid work begins.
+  if (!options.validated && cliLocalArgumentsFirst(args)) return true;
   if (args[0] === 'update') {
     const { cliUpdateCli } = await import('./cli-update.js');
     process.stdout.write(`${JSON.stringify(await cliUpdateCli(args.slice(1)))}\n`);
@@ -70,7 +80,7 @@ export async function cliStartup(
         process.execPath,
         [join(installation, 'current', 'dist', 'cli-entry.js'), ...args],
         {
-          stdio: 'inherit',
+          stdio: options.stdin === undefined ? 'inherit' : ['pipe', 'inherit', 'inherit'],
           env: childEnv({
             allow: [
               'FORGE_AUTH_TOKEN',
@@ -89,6 +99,12 @@ export async function cliStartup(
           }),
         },
       );
+      if (options.stdin !== undefined) {
+        child.stdin?.on('error', error => {
+          if ((error as NodeJS.ErrnoException).code !== 'EPIPE') reject(error);
+        });
+        child.stdin?.end(options.stdin);
+      }
       child.once('error', reject);
       child.once('exit', (status, signal) => done(status ?? (signal === 'SIGINT' ? 130 : 1)));
     });

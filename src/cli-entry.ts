@@ -1,10 +1,31 @@
 #!/usr/bin/env node
 // SPDX-License-Identifier: Apache-2.0
+import { isAbsolute } from 'node:path';
 import { supportedNode, nodeRequirement } from '../scripts/node-runtime.mjs';
 import { ForgeError, invariant } from './errors.js';
 import { describeFailure, recordFailure } from './system-errors.js';
 
-// Resolve freshness before hooks or any command work. Failed checks never dispatch old code.
+// Check before hook setup and imports that resolve relative paths.
+try {
+  process.cwd();
+} catch {
+  const root = ['agent', 'x', 'status', 'pull'].includes(process.argv[2]!) ? process.argv[3] : undefined;
+  const advice =
+    root && isAbsolute(root)
+      ? `cd '${root.replaceAll("'", "'\\''")}'`
+      : 'cd /, then cd /absolute/path/to/your/Forge/checkout';
+  process.stderr.write(
+    `${JSON.stringify({
+      error: {
+        code: 'CWD_UNAVAILABLE',
+        message: `The current working directory was removed or is unavailable. Run ${advice} and retry the original command.`,
+      },
+    })}\n`,
+  );
+  process.exit(1);
+}
+
+// Diagnose locally first; valid work passes freshness before hooks and execution.
 let runCommand = false;
 try {
   invariant(supportedNode(), 'UNSUPPORTED_NODE', nodeRequirement);
@@ -16,21 +37,9 @@ try {
   process.exitCode = 1;
 }
 if (runCommand) {
-  // First run, including installs using --ignore-scripts: reversible global hooks, no network.
-  if (!process.argv.includes('uninstall-hooks') && !process.argv.includes('install-hooks')) {
-    const { ensureEditHooks } = await import('./agent-install-hooks.js');
-    ensureEditHooks();
-  }
-
-  // Checkout installs run 16 concurrent file operations; libuv reads this before its first use.
-  process.env.UV_THREADPOOL_SIZE ??= '16';
-  // Bounded local cleanup of Forge temp and peers caches, at most hourly; never fails a command.
-  try {
-    const { sweepClientDisk } = await import('./forge-disk.js');
-    sweepClientDisk();
-  } catch {
-    /* advisory */
-  }
+  (await import('./cli-command-ready.js')).enableCliRuntimePreparation();
+  if (!(await import('./cli-version.js')).cliDeferredCommand(process.argv.slice(2)))
+    await (await import('./cli-command-ready.js')).prepareCliRuntime();
   // Hosted clone needs no native owner, graph compiler or local execution services.
   // Keep the established CLI as the entry for every other command and direct caller.
   if (!['clone', 'pull'].includes(process.argv[2]!)) await import('./cli.js');
@@ -38,10 +47,14 @@ if (runCommand) {
     try {
       invariant(supportedNode(), 'UNSUPPORTED_NODE', nodeRequirement);
       const { hostedCloneCli } = await import('./hosted-clone-cli.js');
+      const beforeDispatch = async () => (await import('./cli-command-ready.js')).cliCommandReady();
+      const beforeLocal = async () => (await import('./cli-command-ready.js')).prepareCliRuntime();
       const output =
         process.argv[2] === 'pull'
-          ? await (await import('./hosted-pull-cli.js')).hostedPullCli(process.argv.slice(3))
-          : await hostedCloneCli(process.argv.slice(3));
+          ? await (
+              await import('./hosted-pull-cli.js')
+            ).hostedPullCli(process.argv.slice(3), beforeDispatch, beforeLocal)
+          : await hostedCloneCli(process.argv.slice(3), undefined, beforeDispatch, beforeLocal);
       if (output !== undefined) process.stdout.write(`${JSON.stringify(output, null, 2)}\n`);
     } catch (error) {
       const failure = error instanceof ForgeError ? describeFailure(error) : recordFailure(error);

@@ -143,16 +143,20 @@ The normal clone refresh is `nforge pull ROOT`; use `nforge status ROOT` for its
 freshness and the distance in accepted source revisions. Agent `pull {}` uses
 the same implementation (MCP `forge_task`, without a new tool). Root/address
 receipts remain beside the checkout and its installed `.forge/hosted-main.json`
-advances atomically with source. The original clone-operation receipt remains
+advances after changed source files are durable. The original clone-operation receipt remains
 pinned to its original selection; it is not the installed-baseline record.
 
-Pull reuses the existing main-checkout clean/stage/preserve/swap engine. It
+Pull validates the full checkout and stages changed files. It keeps ROOT and
+surviving directories in place, so existing shells and editors retain their cwd. It
 refuses tracked edits with a next step to move them into a Lane, preserves
 disjoint ignored artifacts/dependency links, and never merges local source.
-Recovery retains the original operation and repeats safely after either directory
-rename or artifact transfer. Completed retries cannot rewind a newer root.
-The original checkout is removed only after artifact preservation is durable;
-completion is recorded after that cleanup so a crash cannot strand a backup.
+Recovery retains the original operation. A sibling publication journal backs up
+changed files before renaming their replacements from the verified stage. The
+marker publishes last; interrupted publication restores changed paths before
+validation and retries. Occupied paths with different bytes surface as conflicts.
+Completed retries cannot rewind a newer root. Initial clone and legacy interrupted
+swaps retain their prior recovery path. Completion follows durable publication and
+backup cleanup.
 Main clone roots remain outside Lane prune; the sibling Lane cache is untouched.
 
 Pull uses its recorded protocol to select the current-authority head API directly,

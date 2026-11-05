@@ -339,10 +339,113 @@ test('a current installed process reuses its freshness receipt with zero idle ca
   const f = fixture(t),
     calls = await releaseFixture(t, f, a),
     check = cliVersionCheck();
-  assert.equal(await cliStartup(['--version'], f.old, check), true);
   assert.equal(await cliStartup(['--help'], f.old, check), true);
+  assert.equal(Atomics.load(calls, 0), 0);
+  assert.equal(await cliStartup(['--version'], f.old, check), true);
+  assert.equal(await cliStartup(['init-native', join(f.directory, 'unused')], f.old, check), true);
+  assert.equal(await cliStartup(['init-native', join(f.directory, 'unused')], f.old, check), true);
   await new Promise(done => setImmediate(done));
   assert.equal(Atomics.load(calls, 0), 1);
+});
+
+test('installed help and targeted argument errors make zero release or work calls; valid work stays gated', async t => {
+  const f = fixture(t),
+    calls = await releaseFixture(t, f, a),
+    check = cliVersionCheck();
+  const { agentCli } = await import('../dist/agent-cli.js');
+  const { heavyCli } = await import('../dist/heavy-slots.js');
+  const { hostedPullCli } = await import('../dist/hosted-pull-cli.js');
+  const { clientCacheRoot } = await import('../dist/root-paths.js');
+  const root = join(f.directory, 'checkout'),
+    unaddressed = join(f.directory, 'unaddressed');
+  mkdirSync(root);
+  mkdirSync(unaddressed);
+  mkdirSync(join(clientCacheRoot(root), 'agent'), { recursive: true });
+  writeFileSync(
+    join(clientCacheRoot(root), 'agent/address.json'),
+    JSON.stringify({ url: 'https://fixture.invalid', projectId: 'project' }),
+  );
+  t.mock.method(process.stdout, 'write', () => true);
+  const invoke = async (args, gate) => {
+    assert.equal(await cliStartup(args, f.old, check), true);
+    const before = gate ?? (() => cliStartup(args, f.old, check, { validated: true }));
+    if (args[0] === 'agent') return agentCli(args.slice(1), { beforeDispatch: before });
+    if (args[0] === 'heavy') return heavyCli(args.slice(1), before);
+    if (args[0] === 'pull') return hostedPullCli(args.slice(1), before);
+  };
+  for (const args of [
+    ['agent', root, '--help'],
+    ['agent', root, 'lanes', '--help'],
+    ['heavy'],
+    ['heavy', '--help'],
+    ['heavy', '-h'],
+    ['heavy', '--status'],
+    ['pull', '--help'],
+  ])
+    await invoke(args);
+  for (const args of [
+    ['agent', unaddressed, 'planning', '{}'],
+    ['agent', root, 'lanes', '{"limit":0}'],
+    ['agent', root, 'friction', '{"title":3}'],
+    ['agent', root, 'friction', '{'],
+    ['heavy', '--unknown'],
+    ['heavy', '--status', 'extra'],
+    ['pull'],
+    ['pull', root, 'extra'],
+  ])
+    await assert.rejects(invoke(args), error =>
+      ['BAD_ARGUMENT', 'FORGE_ROOT_UNAVAILABLE'].includes(error.code),
+    );
+  assert.equal(Atomics.load(calls, 0), 0);
+  let gates = 0;
+  const stopAfterFreshness = async () => {
+    gates++;
+    assert.equal(await cliStartup(['agent', root, 'lanes'], f.old, check, { validated: true }), true);
+    return false; // A redispatched process handles the valid command instead.
+  };
+  await invoke(['agent', root, 'lanes', '{}'], stopAfterFreshness);
+  const output = join(f.directory, 'never-executed');
+  await invoke(
+    ['heavy', process.execPath, '-e', 'require("node:fs").writeFileSync(process.argv[1], "ran")', output],
+    stopAfterFreshness,
+  );
+  assert.equal(gates, 2);
+  assert.equal(Atomics.load(calls, 0), 1);
+  assert.equal(existsSync(output), false);
+});
+
+test('freshness redispatch preserves stdin already consumed by local argument validation', async t => {
+  const f = fixture(t);
+  await releaseFixture(t, f, b);
+  const next = f.build(b),
+    output = join(f.directory, 'replayed-input');
+  writeFileSync(
+    join(next, 'dist/cli-entry.js'),
+    `import { readFileSync, writeFileSync } from 'node:fs'; writeFileSync(${JSON.stringify(output)}, readFileSync(0));`,
+  );
+  const payload = JSON.stringify({ title: "Synthetic quote's", detail: 'first\nsecond', area: 'checks' });
+  const code = `
+    import { readFileSync } from 'node:fs';
+    const { cliStartup } = await import(${JSON.stringify(new URL('../dist/cli-version.js', import.meta.url).href)});
+    const stdin = readFileSync(0, 'utf8');
+    const run = await cliStartup(['agent', ${JSON.stringify(f.directory)}, 'friction', '--command-file', '-'], ${JSON.stringify(f.old)}, undefined, { validated: true, stdin });
+    process.stdout.write(JSON.stringify({ run }));
+  `;
+  const reply = spawnSync(process.execPath, ['--input-type=module', '-e', code], {
+    input: payload,
+    encoding: 'utf8',
+    env: childEnv({
+      extra: {
+        HOME: f.home,
+        XDG_CONFIG_HOME: join(f.home, '.config'),
+        FORGE_CLIENT_SETTINGS: process.env.FORGE_CLIENT_SETTINGS,
+        FORGE_AUTH_TOKEN: 'synthetic-cli-test-token',
+      },
+    }),
+  });
+  assert.equal(reply.status, 0, reply.stderr);
+  assert.deepEqual(JSON.parse(reply.stdout), { run: false });
+  assert.equal(readFileSync(output, 'utf8'), payload);
 });
 
 test('canonical path aliases never allow pruning the selected current build', t => {
@@ -365,7 +468,8 @@ test('measurement landing waits on local removal before making the one version r
     calls = await releaseFixture(t, f, a);
   const hold = join(f.installation, '.freeze');
   writeFileSync(hold, 'measurement');
-  const pending = cliStartup(['agent', '.', 'land'], f.old, cliVersionCheck());
+  assert.equal(await cliStartup(['agent', '.', 'land'], f.old, cliVersionCheck()), true);
+  const pending = cliStartup(['agent', '.', 'land'], f.old, cliVersionCheck(), { validated: true });
   await new Promise(done => setImmediate(done));
   assert.equal(Atomics.load(calls, 0), 0);
   rmSync(hold);

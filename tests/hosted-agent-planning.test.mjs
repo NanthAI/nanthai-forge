@@ -449,3 +449,29 @@ test('released planning servers keep filing available and name missing search co
   assert.equal(filed.result.likelyDuplicates.coverage, 'unavailable-server-upgrade-required');
   await assert.rejects(list(p, { search: 'Compatible' }), code('HOSTED_ACTION_UNSUPPORTED'));
 });
+
+test('hosted planning CLI reads and writes from an explicitly addressed non-Git folder', async t => {
+  const s = await setup(t),
+    current = transport(s, { planning: true });
+  const { mkdirSync, existsSync } = await import('node:fs');
+  const { hostedAgentAddress, hostedAgentCli } = await import('../dist/hosted-agent-cli.js');
+  mkdirSync(current.p.root);
+  const address = hostedAgentAddress(current.p.root, current.p.address);
+  const created = await hostedAgentCli(
+    current.p.root,
+    'put-planning-item',
+    { kind: 'issue', title: 'No Git planning' },
+    address,
+    current.transport,
+  );
+  const read = await hostedAgentCli(
+    current.p.root,
+    'planning',
+    { reconcile: false },
+    address,
+    current.transport,
+  );
+  assert(read.result.items.some(item => item.id === created.result.itemId));
+  assert.equal(existsSync(join(current.p.root, '.git')), false);
+  assert.equal(existsSync(join(current.p.root, '.forge')), false);
+});

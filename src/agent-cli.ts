@@ -1,3 +1,5 @@
+import { requireAgentRoot } from './agent-root.js';
+import { validateHostedCliCommand, validateNativeFrictionCommand } from './hosted-cli-validation.js';
 import { resolve } from 'node:path';
 import { hostedAgentHelp } from './hosted-agent-help.js';
 import { callerOverlaps } from './agent-caller-overlaps.js';
@@ -374,7 +376,13 @@ function laneFromCwd(directory: string): string | undefined {
 }
 
 /** process: invoked as the nforge process (land detaches its submission and waits by default). */
-type AgentCliOptions = { operator?: boolean; notices?: boolean; process?: boolean };
+type AgentCliOptions = {
+  operator?: boolean;
+  notices?: boolean;
+  process?: boolean;
+  beforeDispatch?: (input?: { stdin?: string }) => Promise<boolean>;
+  beforeLocal?: () => Promise<void>;
+};
 
 /** Client-side flags, accepted anywhere after the action: --wait/--no-wait and --message-file FILE|-. */
 function clientOptions(tail: string[]) {
@@ -416,7 +424,14 @@ export async function agentCli(args: string[], options: AgentCliOptions = {}): P
 }
 
 async function runAgentCli(args: string[], options: AgentCliOptions, notices: string[]): Promise<unknown> {
+  let stdin: string | undefined;
+  const read = (path: string, name: string) => {
+    const value = readInput(path, name);
+    if (path === '-' && stdin === undefined) stdin = value;
+    return value;
+  };
   if (!args.length || args[0] === '--help' || args[0] === 'help') {
+    await options.beforeLocal?.();
     process.stdout.write(AGENT_HELP);
     return undefined;
   }
@@ -432,6 +447,7 @@ async function runAgentCli(args: string[], options: AgentCliOptions, notices: st
   const client = clientOptions(rawTail),
     tail = client.rest;
   if (requestedAction === 'help' || requestedAction === '--help') {
+    await options.beforeLocal?.();
     process.stdout.write(hostedAgentAddress(root!, {}) ? hostedAgentHelp() : AGENT_HELP);
     return undefined;
   }
@@ -448,6 +464,7 @@ async function runAgentCli(args: string[], options: AgentCliOptions, notices: st
     'Use agent ROOT ACTION [JSON | --command-file FILE].',
   );
   if (option === '--help') {
+    await options.beforeLocal?.();
     if (action === 'install-hooks' || action === 'uninstall-hooks') {
       process.stdout.write(
         'Local first-write hooks: {scope?:"user"|"project",laneId?:"legacy ignored"}. Lane-independent; first CLI run installs by default. Uninstall persists off; undo with install-hooks. User switch: nforge settings firstWriteHooks false.\n',
@@ -464,7 +481,7 @@ async function runAgentCli(args: string[], options: AgentCliOptions, notices: st
   let text = option ?? '{}';
   if (option === '--command-file') {
     invariant(path, 'BAD_ARGUMENT', 'Choose a command JSON file, or - for stdin.');
-    text = readInput(path, 'Command file');
+    text = read(path, 'Command file');
   }
   let parameters: unknown;
   try {
@@ -480,9 +497,14 @@ async function runAgentCli(args: string[], options: AgentCliOptions, notices: st
   let selected = parameters as Record<string, unknown>;
   // Any message text (apostrophes, newlines) arrives verbatim from a file or stdin, never through shell quoting.
   if (client.messageFile !== undefined)
-    selected = { ...selected, message: readInput(client.messageFile, 'Message file').replace(/\r?\n$/, '') };
+    selected = { ...selected, message: read(client.messageFile, 'Message file').replace(/\r?\n$/, '') };
   if (typeof selected.action === 'string') noticeViewAlias(selected.action);
   if (action === 'install-hooks' || action === 'uninstall-hooks') {
+    if (
+      options.beforeDispatch &&
+      !(await options.beforeDispatch(stdin === undefined ? undefined : { stdin }))
+    )
+      return;
     const { configureEditHooks } = await import('./agent-install-hooks.js');
     return configureEditHooks(resolve(root), selected, action === 'uninstall-hooks');
   }
@@ -507,8 +529,12 @@ async function runAgentCli(args: string[], options: AgentCliOptions, notices: st
     if (current) notices.push(aliasNotice(root, requestedAction!, current));
   };
   if (hosted) {
-    notice(selected);
     const command = landSaveCommand(form!, true, selected);
+    if (options.beforeDispatch) {
+      validateHostedCliCommand(root, action, command);
+      if (!(await options.beforeDispatch(stdin === undefined ? undefined : { stdin }))) return;
+    }
+    notice(selected);
     // The installed CLI detaches the submission and waits by default; in-process callers opt in.
     if (action === 'finish' && (options.process || client.wait !== undefined))
       return hostedLandCli(root, command, hosted, {
@@ -538,11 +564,15 @@ async function runAgentCli(args: string[], options: AgentCliOptions, notices: st
   );
   // Native finish already waits by default; --no-wait returns after durable submission.
   if (action === 'finish' && client.wait === false) selected = { ...selected, wait: false };
+  const nativeRoot = requireAgentRoot(root);
+  if (options.beforeDispatch && action === 'friction') validateNativeFrictionCommand(selected);
+  if (options.beforeDispatch && !(await options.beforeDispatch(stdin === undefined ? undefined : { stdin })))
+    return;
   if (action === 'wait') {
-    await agentWaitCli(root, selected, textMode);
+    await agentWaitCli(nativeRoot, selected, textMode);
     return undefined;
   }
-  const agent = new AgentWorkflow(root);
+  const agent = new AgentWorkflow(nativeRoot);
   const retained =
     action === 'finish' && typeof selected.operationId === 'string'
       ? retainedFinishCommand(agent.work.store, selected.operationId)
@@ -551,7 +581,7 @@ async function runAgentCli(args: string[], options: AgentCliOptions, notices: st
   selected = landSaveCommand(form!, false, selected, retained);
   if (action === 'integrate') return integrationPreview(agent.work.store, selected);
   if (
-    ['checkpoint', 'sync', 'finish', 'handoff', 'handoff-read'].includes(action) &&
+    ['checkpoint', 'sync', 'finish', 'handoff', 'handoff-read', 'friction'].includes(action) &&
     selected.laneId === undefined &&
     retained?.laneId === undefined
   ) {

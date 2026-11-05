@@ -697,10 +697,15 @@ identify the event, revision, action and expected/actual Work digest prefixes.
 `nforge pull ROOT` (agent `pull {}`, existing MCP `forge_task`) refreshes a clone
 through `checkoutHostedMain`, using the shared clean/stage/artifact-preservation
 engine. Its sibling operation journal automatically resumes an interrupted pull;
-source and the installed baseline marker publish as one directory set. Local
+refresh preserves the root and surviving directory inodes, renames changed files
+from a verified stage, and publishes the baseline marker last. A sibling journal
+retains old changed files and restores interrupted publication before validation.
+Local
 tracked edits refuse with a Lane next step. Ignored build outputs and dependency
 links survive disjoint changes; occupied incoming paths are refused. Completion
-follows durable artifact transfer and old-tree cleanup. Main clone roots remain
+follows durable marker publication and backup cleanup. Initial clone publication
+retains its directory-swap path and interrupted legacy swaps remain recoverable.
+Main clone roots remain
 outside Lane pruning, and sibling editing Lanes are untouched.
 
 The recorded source protocol selects the authorized head endpoint directly:

@@ -45,11 +45,22 @@ export function overlappingPaths(files: NativeFile[]): string[] {
   return [...conflicts].sort();
 }
 export function parseNativeState(bytes: Uint8Array): NativeState {
+  let value: unknown;
+  try {
+    value = JSON.parse(new TextDecoder('utf-8', { ignoreBOM: true }).decode(bytes));
+  } catch (error) {
+    if (!(error instanceof SyntaxError)) throw error;
+    throw new ForgeError('INVALID_NATIVE_SOURCE', 'Native source manifest encoding is invalid.');
+  }
+  return parseNativeStateValue(value);
+}
+/** Validate an already decoded marker without serializing and cloning its manifest again. */
+export function parseNativeStateValue(value: unknown): NativeState {
   let state: NativeState;
   try {
-    state = stateSchema.parse(JSON.parse(new TextDecoder('utf-8', { ignoreBOM: true }).decode(bytes)));
+    state = stateSchema.parse(value);
   } catch (error) {
-    if (!(error instanceof SyntaxError || error instanceof z.ZodError)) throw error;
+    if (!(error instanceof z.ZodError)) throw error;
     throw new ForgeError('INVALID_NATIVE_SOURCE', 'Native source manifest encoding is invalid.');
   }
   invariant(

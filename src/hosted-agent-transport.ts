@@ -1,4 +1,5 @@
 import { cliBuildCommit } from './cli-installation.js';
+import { liveLanes } from './hosted-live-lanes.js';
 import { cloneFreshness, mainCheckoutTransport, pullHostedProject } from './hosted-pull.js';
 import { readHostedMainSelection } from './hosted-main-marker.js';
 import { diffHostedSource, peersHostedSource, queueHostedSource } from './hosted-agent-reads.js';
@@ -145,7 +146,7 @@ export type HostedAgentResponse = {
   cliCommit?: string;
   schema: 1;
   transport: 'hosted';
-  action: HostedAgentAction | 'diff' | 'peers' | 'queue';
+  action: HostedAgentAction | 'diff' | 'peers' | 'lanes' | 'queue';
   sourceContext?: unknown;
   operationId: string | null;
   resolved: { operationId: string } | null;
@@ -203,6 +204,7 @@ export class HostedAgentTransport {
     input: Record<string, unknown>,
     signal?: AbortSignal,
   ): Promise<HostedAgentResponse> {
+    if (requestedAction === 'lanes') return liveLanes(this, input);
     if (requestedAction === 'diff')
       return {
         schema: 1,

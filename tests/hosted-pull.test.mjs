@@ -49,6 +49,37 @@ test('several accepted revisions refresh only changed bytes, reuse root/cache, a
   assert.equal(f.calls.queries, 1);
   assert.equal(f.calls.gets.length, 0);
 });
+test('refresh stages only changed files, including modes and renamed reused bytes', async t => {
+  const f = pullFixture(t, 100);
+  const unchanged = fs.statSync(join(f.root, 'src/99.txt')).ino;
+  f.select([
+    ['src/0.txt', 'changed'],
+    ['src/1.txt', 'source 1\n', 'executable'],
+    ['src/2.txt', null],
+    ['moved.txt', 'source 2\n'],
+  ]);
+  let staged;
+  f.onCurrent(() => {
+    if (f.calls.queries !== 2) return;
+    const cache = clientCacheRoot(f.root);
+    const stage = join(
+      cache,
+      fs.readdirSync(cache).find(name => name.startsWith('checkout-')),
+    );
+    staged = fs
+      .readdirSync(stage, { recursive: true })
+      .filter(path => {
+        return !path.startsWith('.forge') && !fs.lstatSync(join(stage, path)).isDirectory();
+      })
+      .sort();
+  });
+  await pull(f);
+  assert.deepEqual(staged, ['moved.txt', 'src/0.txt', 'src/1.txt']);
+  assert.equal(f.calls.gets.length, 2); // Manifest and changed bytes only, even with an empty blob cache.
+  assert.equal(fs.statSync(join(f.root, 'src/99.txt')).ino, unchanged);
+  assert.equal(fs.readFileSync(join(f.root, 'moved.txt'), 'utf8'), 'source 2\n');
+  assert(fs.statSync(join(f.root, 'src/1.txt')).mode & 0o111);
+});
 test('tracked deletes/modes refuse; ignored outputs, dependency links and nested Lane cache survive', async t => {
   const f = pullFixture(t);
   fs.mkdirSync(join(f.root, 'dist'));
@@ -103,7 +134,7 @@ test('interrupted transfer resumes pinned head with the same plain command', asy
   await pull(f);
   assert.equal(readHostedMainMarker(f.root).selection.head, f.main().head);
 });
-for (const point of ['old-renamed', 'new-installed', 'artifact-moved', 'backup-removed'])
+for (const point of ['old-file-backed-up', 'new-file-linked', 'marker-installed', 'backup-removed'])
   test(`crash at ${point} resumes without mixed files or lost artifacts`, async t => {
     const f = pullFixture(t);
     fs.mkdirSync(join(f.root, 'dist'));
@@ -113,24 +144,37 @@ for (const point of ['old-renamed', 'new-installed', 'artifact-moved', 'backup-r
       ['src/1.txt', 'new one'],
     ]);
     const rename = fs.renameSync,
-      remove = fs.rmSync;
+      remove = fs.rmSync,
+      link = fs.linkSync;
     let injected = false;
     fs.renameSync = (from, to) => {
       const value = rename(from, to);
       if (
         !injected &&
-        ((point === 'old-renamed' && to === join(clientCacheRoot(f.root), 'previous')) ||
-          (point === 'new-installed' && to === f.root) ||
-          (point === 'artifact-moved' && to === join(f.root, 'dist')))
+        ((point === 'old-file-backed-up' &&
+          to === join(clientCacheRoot(f.root), 'publish-backup/src/0.txt')) ||
+          (point === 'marker-installed' && to === join(f.root, '.forge/hosted-main.json')))
       ) {
         injected = true;
         throw Error('simulated crash');
       }
       return value;
     };
+    fs.linkSync = (from, to) => {
+      const result = link(from, to);
+      if (!injected && point === 'new-file-linked' && to === join(f.root, 'src/0.txt')) {
+        injected = true;
+        throw Error('simulated crash');
+      }
+      return result;
+    };
     fs.rmSync = (path, options) => {
       const value = remove(path, options);
-      if (!injected && point === 'backup-removed' && path === join(clientCacheRoot(f.root), 'previous')) {
+      if (
+        !injected &&
+        point === 'backup-removed' &&
+        path === join(clientCacheRoot(f.root), 'publish-backup')
+      ) {
         injected = true;
         throw Error('simulated crash');
       }
@@ -143,13 +187,14 @@ for (const point of ['old-renamed', 'new-installed', 'artifact-moved', 'backup-r
     } finally {
       fs.renameSync = rename;
       fs.rmSync = remove;
+      fs.linkSync = link;
       syncBuiltinESMExports();
     }
     await pull(f);
     assert.equal(fs.readFileSync(join(f.root, 'src/0.txt'), 'utf8'), 'new zero');
     assert.equal(fs.readFileSync(join(f.root, 'src/1.txt'), 'utf8'), 'new one');
     assert.equal(fs.readFileSync(join(f.root, 'dist/out'), 'utf8'), 'keep');
-    assert(!fs.existsSync(join(clientCacheRoot(f.root), 'previous')));
+    assert(!fs.existsSync(join(clientCacheRoot(f.root), 'publish-backup')));
   });
 test('unauthorized no-op, revoked after transfer, and completed replay all refuse', async t => {
   const f = pullFixture(t);
@@ -204,4 +249,126 @@ test('an editor changing tracked source while transfer/staging runs is preserved
   await assert.rejects(pull(f), { code: 'WORK_CONFLICT' });
   assert.equal(fs.readFileSync(join(f.root, 'src/0.txt'), 'utf8'), 'source 0\n');
   assert.equal(fs.readFileSync(join(f.root, 'src/1.txt'), 'utf8'), 'late editor change');
+});
+
+test('pull then status from the same cwd preserves root and surviving directory inodes', async t => {
+  const f = pullFixture(t),
+    original = process.cwd();
+  const rootInode = fs.statSync(f.root).ino,
+    sourceInode = fs.statSync(join(f.root, 'src')).ino;
+  f.select([['src/0.txt', 'new cwd-visible bytes']]);
+  try {
+    process.chdir(f.root);
+    await pull(f);
+    assert.equal(process.cwd(), f.root);
+    assert.equal(fs.readFileSync('src/0.txt', 'utf8'), 'new cwd-visible bytes');
+    assert.equal((await cloneFreshness('.', f.transport)).clone.status, 'current');
+    assert.equal(fs.statSync('.').ino, rootInode);
+    assert.equal(fs.statSync('src').ino, sourceInode);
+  } finally {
+    process.chdir(original);
+  }
+});
+
+test('in-place pull handles file/directory transitions and retains unrelated artifacts', async t => {
+  const f = pullFixture(t);
+  f.select([
+    ['src/0.txt', null],
+    ['src/0.txt/nested/deep', 'nested'],
+  ]);
+  await pull(f);
+  assert.equal(fs.readFileSync(join(f.root, 'src/0.txt/nested/deep'), 'utf8'), 'nested');
+  f.select([
+    ['src/0.txt/nested/deep', null],
+    ['src/0.txt', 'file again'],
+  ]);
+  await pull(f);
+  assert.equal(fs.readFileSync(join(f.root, 'src/0.txt'), 'utf8'), 'file again');
+});
+
+test('interrupted per-file publication restores the old tree before validating a replay', async t => {
+  const f = pullFixture(t);
+  f.select([
+    ['src/0.txt', 'first replacement'],
+    ['src/1.txt', 'second replacement'],
+  ]);
+  const link = fs.linkSync;
+  let interrupted = false;
+  fs.linkSync = (from, to) => {
+    if (!interrupted && String(from).includes('checkout-') && String(to) === join(f.root, 'src/1.txt')) {
+      interrupted = true;
+      throw new Error('synthetic publication interruption');
+    }
+    return link(from, to);
+  };
+  syncBuiltinESMExports();
+  try {
+    await assert.rejects(pull(f), /synthetic publication interruption/);
+  } finally {
+    fs.linkSync = link;
+    syncBuiltinESMExports();
+  }
+  assert(interrupted);
+  assert.equal(fs.readFileSync(join(f.root, 'src/0.txt'), 'utf8'), 'source 0\n');
+  assert.equal(fs.readFileSync(join(f.root, 'src/1.txt'), 'utf8'), 'source 1\n');
+  await pull(f);
+  assert.equal(fs.readFileSync(join(f.root, 'src/1.txt'), 'utf8'), 'second replacement');
+});
+
+test('pull retains concurrent edits observed after moving an old file to backup', async t => {
+  const f = pullFixture(t);
+  f.select([['src/0.txt', 'accepted next']]);
+  const rename = fs.renameSync;
+  let edited = false;
+  fs.renameSync = (from, to) => {
+    const result = rename(from, to);
+    if (!edited && String(from) === join(f.root, 'src/0.txt') && String(to).includes('publish-backup')) {
+      edited = true;
+      fs.writeFileSync(to, 'concurrent local edit');
+    }
+    return result;
+  };
+  syncBuiltinESMExports();
+  try {
+    await assert.rejects(pull(f), error => error.code === 'WORK_CONFLICT');
+  } finally {
+    fs.renameSync = rename;
+    syncBuiltinESMExports();
+  }
+  assert(edited);
+  assert.equal(fs.readFileSync(join(f.root, 'src/0.txt'), 'utf8'), 'concurrent local edit');
+});
+
+test('checkout existence treats a descendant of a file as absent', async t => {
+  const f = pullFixture(t);
+  const { checkoutPathExists } = await import('../dist/hosted-checkout-files.js');
+  assert.equal(checkoutPathExists(join(f.root, 'src/0.txt/child')), false);
+});
+
+test('interrupted dangling-symlink publication restores its prior link and replays safely', async t => {
+  const f = pullFixture(t);
+  f.select([['link', 'old-missing-target', 'symlink']]);
+  await pull(f);
+  f.select([['link', 'new-missing-target', 'symlink']]);
+  const symlink = fs.symlinkSync;
+  let interrupted = false;
+  fs.symlinkSync = (target, path, ...rest) => {
+    const value = symlink(target, path, ...rest);
+    if (!interrupted && path === join(f.root, 'link')) {
+      interrupted = true;
+      throw Error('synthetic symlink publication interruption');
+    }
+    return value;
+  };
+  syncBuiltinESMExports();
+  try {
+    await assert.rejects(pull(f), /synthetic symlink publication interruption/);
+  } finally {
+    fs.symlinkSync = symlink;
+    syncBuiltinESMExports();
+  }
+  assert(interrupted);
+  assert.equal(fs.readlinkSync(join(f.root, 'link')), 'old-missing-target');
+  await pull(f);
+  assert.equal(fs.readlinkSync(join(f.root, 'link')), 'new-missing-target');
 });

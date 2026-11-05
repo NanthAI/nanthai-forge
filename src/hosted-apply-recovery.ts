@@ -17,7 +17,7 @@ import { hostedLaneMarkerName } from './hosted-lane-checkout-marker.js';
 import { HostedCheckoutCache } from './hosted-checkout-cache.js';
 import { type LaneTransport } from './hosted-lane-checkout.js';
 import { hostedRecoveryCommand } from './hosted-agent-resolution.js';
-import { parseNativeState } from './native-state-format.js';
+import { parseNativeStateValue } from './native-state-format.js';
 import { applyHostedSync } from './hosted-sync-client.js';
 import { applySchema } from './hosted-sync-contract.js';
 import { withCheckoutWritePass } from './checkout-materialization.js';
@@ -95,7 +95,7 @@ export async function recoverLocalApply(root: string, id: string, transport: Lan
       z.object({ complete: z.boolean() }).parse(read(checkoutReceipt)).complete;
     if (!receipt.restored && !alreadyApplied) {
       const paths = new Set<string>(receipt.marker.materialized);
-      const state = parseNativeState(Buffer.from(JSON.stringify(receipt.marker.state)));
+      const state = parseNativeStateValue(receipt.marker.state);
       const files = state.files.filter(file => paths.has(file.path));
       const cache = new HostedCheckoutCache(cacheRoot, transport);
       await cache.ensure(files.map(file => file.blob));

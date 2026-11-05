@@ -5,6 +5,7 @@ import { canonicalPayload } from './hosted-source-operation.js';
 import { ForgeError, invariant } from './errors.js';
 import type { HostedAgentTransport, HostedAgentResponse } from './hosted-agent-transport.js';
 import { z } from 'zod';
+import { readHostedLaneCheckout } from './hosted-lane-checkout-marker.js';
 /** These finite record endpoints authorize on the server themselves. No capability
  * round trip, source worker, owner service or edit hook network dependency. */
 export async function executeHostedRecords(
@@ -13,11 +14,21 @@ export async function executeHostedRecords(
   input: Record<string, unknown>,
 ): Promise<HostedAgentResponse> {
   const { operationId, ...parameters } = input;
+  if (action === 'friction' && parameters.laneId === undefined) {
+    const marker = readHostedLaneCheckout(transport.root);
+    if (marker) parameters.laneId = marker.selection.laneId;
+  }
   const parsed = hostedRecordCommands[action].safeParse(parameters);
   invariant(
     parsed.success && (operationId === undefined || z.uuid().safeParse(operationId).success),
     'BAD_ARGUMENT',
-    'Send valid hosted record inputs and an optional operation UUID.',
+    `Invalid ${action} parameters: ${
+      !parsed.success
+        ? parsed.error.issues
+            .map(issue => `${issue.path.join('.') || 'parameters'}: ${issue.message}`)
+            .join('; ')
+        : 'operationId: expected a UUID'
+    }. Run nforge agent ROOT ${action} --help, correct the named fields and retry.`,
   );
   try {
     if (action === 'decisions') {

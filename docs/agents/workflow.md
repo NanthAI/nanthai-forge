@@ -97,6 +97,7 @@ Include `overlapAnswer:"accept-order"` in `land --save` to answer the pending no
 | `planning` | `id?, search?, kind?, status?, initiativeId?, limit?, cursor?, reconcile?, operationId?` |
 | `put-planning-item` | `expectedVersion?, kind, title, body?, status?, reason?, intentIds?, initiativeId?, itemId?, operationId?` |
 | `comment-planning-item` | `itemId, authorLabel?, text, operationId?` |
+| `lanes` | `cursor?, limit?` |
 | `diff` | `laneId?, paths?, byteBudget?, cursor?` |
 | `peers` | `laneId?, path?, detail?` |
 | `queue` | `limit?` |
@@ -460,7 +461,7 @@ Hosted overlap records and answers use the separate [hosted advice](#hosted-over
 
 ## Overlap before the first write
 
-The first CLI run installs Claude Code and Codex hooks, even with
+The first successful CLI command installs Claude Code and Codex hooks, even with
 `--ignore-scripts`. It prints changed files and the exact undo
 command. Installation is idempotent, preserves other hooks/settings and resolves
 the Lane from each edited path, covering every hosted/native Lane.
@@ -1813,6 +1814,32 @@ Intents/Lanes to have been migrated, and preserves their references as recorded.
 ### Recover a blocked local apply
 
 See [recovery details](../architecture.md#hosted-agent-transport).
+
+### CLI diagnostics and live work
+
+`agent ROOT lanes '{"limit":50}'` pages open hosted Lanes with Lane/Intent id,
+actor, last save and latest Intent landing (`scope:"intent"`). Follow
+`continueCursor` as `cursor`. One query/page, zero writes/idle calls, at most 100
+indexed Lanes and O(page) metadata reads; no client follow-ups or source downloads.
+Lifecycle overlays can shorten pages; missing facts are `null`.
+
+No-Lane friction attaches to project/actor; inside a Lane it infers that Lane:
+
+```sh
+nforge agent ROOT friction '{"title":"…","detail":"…","area":"cli"}'
+```
+
+Recording uses one mutation; field errors use zero network calls. Hosted roots
+need no Git; explicit `url` plus `projectId` works from any folder.
+`FORGE_ROOT_UNAVAILABLE` names an unaddressed root and next steps.
+
+`heavy --help`, `-h`, no command and `--status` acquire no slot and use no network.
+Status shows slot, folder, elapsed time, executable and same-folder `selfHeld`;
+older holders can lack metadata. Run bounded batches under heavy, dev servers directly.
+
+Pull preserves ROOT and surviving directory inodes; see [recovery](../operations/source-exchange.md#hosted-main-client-checkout).
+`CWD_UNAVAILABLE` precedes hooks and gives `cd` advice: `cd /`, then
+`cd /absolute/path/to/your/Forge/checkout`, then retry.
 
 Preflight time estimates use the latest successful local run's measured wall time
 per selected file, including its build, when present. Sibling Lanes reuse the same

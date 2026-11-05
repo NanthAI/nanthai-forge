@@ -16,9 +16,10 @@ checks cannot become an unguarded PATH entry. The next ordinary invocation resto
 verified main before dispatch; the controller and current then share one build again.
 There is no second user-selectable CLI.
 
-Every managed CLI process checks the configured Forge main before dispatching a
-command, including help and version. It makes one authorized, finite metadata
-query and caches the result or failure for that process. There is no timer,
+Managed commands check configured Forge main before hooks or execution.
+Help, heavy status and local agent/heavy/pull/clone argument errors make zero
+network calls. Valid commands make one authorized metadata query, cached
+for that process in addition to its action calls. There is no timer,
 background check or idle network activity. A CLI behind main installs that exact
 State, then starts the completed current runtime. Failed discovery, unavailable
 authentication, a busy updater, or a failed build refuses command execution with

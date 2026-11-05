@@ -63,8 +63,11 @@ export async function hostedCloneCli(
     client: Client;
     transport(projectId: string): MainTransport;
   },
+  beforeRun?: () => Promise<boolean>,
+  beforeLocal?: () => Promise<void>,
 ) {
   if (args.includes('--help')) {
+    await beforeLocal?.();
     process.stdout.write(CLONE_HELP);
     return;
   }
@@ -100,6 +103,7 @@ export async function hostedCloneCli(
     'Run nforge login DEPLOYMENT_URL before cloning, or pass --deployment.',
   );
   const url = deploymentUrl(selected);
+  if (beforeRun && !(await beforeRun())) return;
   const client = dependencies?.client ?? new ConvexExchange(url, undefined, '', '', null).client;
   const project = z
     .object({ id: z.string() })

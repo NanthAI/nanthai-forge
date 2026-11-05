@@ -228,3 +228,67 @@ test('hosted MCP exposes record writes and paged decision reads through the shar
     assert.equal(JSON.parse(response.content[0].text).transport, 'hosted');
   }
 });
+
+test('friction validation names every field without a network call', async t => {
+  const s = fixture(t);
+  for (const [field, value] of [
+    ['title', ''],
+    ['detail', 3],
+    ['area', null],
+    ['laneId', 'wrong'],
+    ['cost', { minutes: -1 }],
+    ['operationId', 'wrong'],
+  ]) {
+    await assert.rejects(
+      s.transport.dispatch('friction', { title: 'Title', detail: 'Detail', area: 'cli', [field]: value }),
+      error =>
+        error.code === 'BAD_ARGUMENT' && error.message.includes(field) && error.message.includes('--help'),
+    );
+  }
+  assert.deepEqual(s.calls, []);
+});
+
+test('project friction omits Lane and Lane friction infers it using the same single mutation', async t => {
+  const s = fixture(t);
+  const project = await s.transport.dispatch('friction', { title: 'Project', detail: 'Detail', area: 'cli' });
+  assert.equal(project.result.laneId, undefined);
+  const laneId = randomUUID(),
+    head = 'a'.repeat(64);
+  mkdirSync(join(s.root, '.forge'), { recursive: true });
+  writeFileSync(
+    join(s.root, '.forge/hosted-lane.json'),
+    JSON.stringify({
+      schema: 1,
+      kind: 'forge-hosted-lane-checkout',
+      url: s.address.url,
+      operationId: randomUUID(),
+      selection: {
+        schema: 2,
+        projectId: 'project',
+        laneId,
+        intentId: randomUUID(),
+        head,
+        version: 0,
+        sourceVersion: 0,
+        lifecycleVersion: 0,
+        state: 'active',
+        base: { head, receiptId: randomUUID() },
+        authority: { mode: 'server', epoch: 1 },
+      },
+      state: {
+        schema: 1,
+        kind: 'forge-source-state',
+        parents: [],
+        files: [],
+        message: 'Fixture',
+        at: '2026-01-01T00:00:00Z',
+      },
+      scope: null,
+      materialized: [],
+    }),
+  );
+  s.tables.projectHostedRecordHeads.set('lane', { projectId: 'project', kind: 'lane', key: laneId });
+  const lane = await s.transport.dispatch('friction', { title: 'Lane', detail: 'Detail', area: 'cli' });
+  assert.equal(lane.result.laneId, laneId);
+  assert.deepEqual(s.calls, ['projectHostedFriction:capture', 'projectHostedFriction:capture']);
+});

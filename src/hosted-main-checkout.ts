@@ -1,3 +1,4 @@
+import { publishMainInPlace, recoverMainPublication } from './hosted-main-publish.js';
 // SPDX-License-Identifier: Apache-2.0
 import { readHostedMainMarker } from './hosted-main-marker.js';
 import { reuseMainSource } from './hosted-main-reuse.js';
@@ -10,7 +11,7 @@ import { dirname, join } from 'node:path';
 import { z } from 'zod';
 import { digest } from './hash.js';
 import { invariant } from './errors.js';
-import { parseNativeState } from './native-state-format.js';
+import { parseNativeState, parseNativeStateValue } from './native-state-format.js';
 import { hostedMainSchema, type HostedMain, type MainExpectation } from './hosted-main.js';
 import { durableReplace, syncDirectory } from './native-durability.js';
 import {
@@ -83,6 +84,7 @@ export async function checkoutHostedMain(root: string, input: unknown, transport
   const observed = hostedMainSchema.parse(await transport.current());
   invariant(observed.projectId === request.projectId, 'PROJECT_UNAVAILABLE', 'Select this project.');
   let operation = workLocked(lock, () => {
+    recoverMainPublication(root, cache);
     if (existsSync(previous) && !existsSync(root)) renameSync(previous, root);
     const original = existsSync(receiptPath) ? json(receiptPath) : undefined;
     if (original) {
@@ -150,17 +152,27 @@ export async function checkoutHostedMain(root: string, input: unknown, transport
   );
   await objects.ensure([selection.head]);
   const state = parseNativeState(readFileSync(join(objects.objects, selection.head)));
+  let stagedFiles = state.files;
   if (request.refresh) {
     const baseline = readHostedMainMarker(root);
-    if (baseline) reuseMainSource(root, objects.objects, baseline.state.files, state.files);
+    if (baseline) {
+      // In-place publication only needs changed bytes. Keep validating the full
+      // checkout before publication, without cloning or queuing unchanged files.
+      const before = new Map(baseline.state.files.map(file => [file.path, file]));
+      stagedFiles = state.files.filter(file => {
+        const old = before.get(file.path);
+        return old?.blob !== file.blob || old?.mode !== file.mode;
+      });
+      reuseMainSource(root, objects.objects, baseline.state.files, stagedFiles);
+    }
   }
-  await objects.ensure(state.files.map(file => file.blob));
+  await objects.ensure(stagedFiles.map(file => file.blob));
   const stage = mkdtempSync(join(cache, 'checkout-'));
   try {
-    await installHostedFiles(stage, objects.objects, state.files);
+    await installHostedFiles(stage, objects.objects, stagedFiles);
     mkdirSync(join(stage, '.forge'), { mode: 0o700 });
     save(join(stage, '.forge', 'hosted-main.json'), { selection, state });
-    await flushHostedCheckoutFiles(stage, state.files);
+    await flushHostedCheckoutFiles(stage, stagedFiles);
     // Reauthorize after transfer and staging, immediately before publication.
     const authorized = await transport.current();
     invariant(authorized.projectId === request.projectId, 'PROJECT_UNAVAILABLE', 'Select this project.');
@@ -183,7 +195,7 @@ export async function checkoutHostedMain(root: string, input: unknown, transport
         'CHANNEL_CHANGED',
         'Another pull updated this client while the selected head was downloading.',
       );
-      const beforeFiles = marker ? parseNativeState(Buffer.from(JSON.stringify(marker.state))).files : [];
+      const beforeFiles = marker ? parseNativeStateValue(marker.state).files : [];
       const preserveArtifacts = () =>
         preserveCheckoutArtifacts(root, previous, preservationPath, () => {
           const oldBytes = readSource(previous, '.forge/hosted-main.json', Number.MAX_SAFE_INTEGER);
@@ -195,7 +207,7 @@ export async function checkoutHostedMain(root: string, input: unknown, transport
           const old = oldBytes ? markerSchema.parse(JSON.parse(oldBytes.toString())) : null;
           return cleanHostedCheckout(
             previous,
-            old ? parseNativeState(Buffer.from(JSON.stringify(old.state))).files : [],
+            old ? parseNativeStateValue(old.state).files : [],
             'hosted-main.json',
             Boolean(old),
             { target: state.files },
@@ -207,7 +219,9 @@ export async function checkoutHostedMain(root: string, input: unknown, transport
       const artifacts = cleanHostedCheckout(root, beforeFiles, 'hosted-main.json', Boolean(marker), {
         target: state.files,
       });
-      if (!installed) {
+      if (!installed && request.refresh && marker) {
+        publishMainInPlace(root, cache, stage, beforeFiles, state.files);
+      } else if (!installed) {
         invariant(!existsSync(previous), 'WORK_CONFLICT', 'An earlier checkout backup is preserved.');
         planCheckoutPreservation(preservationPath, artifacts);
         if (existsSync(root)) renameSync(root, previous);

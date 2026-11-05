@@ -254,3 +254,23 @@ test('decision lists retain opaque page cursors and bounded brief coverage beyon
   assert.equal(brief.decisions.length, 100);
   assert.deepEqual(brief.decisions, records.slice(20));
 });
+
+test('server friction validation names the field and expected shape, including no-Lane requests', async () => {
+  const s = recordsFixture();
+  for (const [field, value] of [
+    ['title', ''],
+    ['laneId', 'invalid'],
+    ['operationId', 'invalid'],
+    ['cost', { minutes: -1 }],
+  ])
+    await assert.rejects(
+      s.request('projectHostedFriction:capture', friction({ [field]: value })),
+      error =>
+        error.data?.code === 'BAD_ARGUMENT' &&
+        error.data.message.includes(field) &&
+        error.data.message.includes('--help'),
+    );
+  const result = await s.request('projectHostedFriction:capture', friction());
+  assert.equal(result.laneId, undefined);
+  assert.equal([...s.tables.projectHostedFriction.values()][0].actor, 'owner');
+});

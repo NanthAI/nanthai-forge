@@ -22,8 +22,22 @@ export const capture = mutation({
   handler: async (ctx, { projectId, request: input }) => {
     try {
       const { actor, project } = await recordCaller(ctx, projectId, true);
-      const parsed = frictionInputSchema.required({ operationId: true }).safeParse(JSON.parse(input));
-      invariant(parsed.success, 'BAD_ARGUMENT', 'Send the original friction inputs and operation UUID.');
+      let value: unknown;
+      try {
+        value = JSON.parse(input);
+      } catch {
+        invariant(
+          false,
+          'BAD_ARGUMENT',
+          'request: expected a JSON object with title, detail, area and operationId UUID; laneId is optional. Correct the JSON and retry the same operation.',
+        );
+      }
+      const parsed = frictionInputSchema.required({ operationId: true }).safeParse(value);
+      invariant(
+        parsed.success,
+        'BAD_ARGUMENT',
+        `Invalid friction parameters: ${parsed.success ? '' : parsed.error.issues.map(issue => `${issue.path.join('.') || 'request'}: ${issue.message}`).join('; ')}. Run nforge agent ROOT friction --help, correct the named fields and retry the original operation.`,
+      );
       const command = parsed.data,
         request = digest(JSON.stringify(command));
       const old = await frictionRow(ctx, projectId, command.operationId);

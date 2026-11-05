@@ -1,3 +1,4 @@
+import { liveLanesInput } from './hosted-live-lanes.js';
 import { hostedDiffSchema, hostedPeersSchema, hostedQueueSchema } from './hosted-agent-reads.js';
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
@@ -11,6 +12,7 @@ import { hostedActionAlternative } from './hosted-agent-version.js';
  * wait/show have their own enforced schemas. No capability request is needed to print help. */
 export const hostedAgentHelpEntries = [
   ...Object.entries(hostedAgentCommandSchemas),
+  ['lanes', liveLanesInput] as const,
   ['diff', hostedDiffSchema] as const,
   ['peers', hostedPeersSchema] as const,
   ['queue', hostedQueueSchema] as const,
@@ -24,7 +26,7 @@ export const hostedAgentHelpEntries = [
     json.properties.path = { type: 'string', minLength: 1 };
     json.properties.open = { type: 'boolean' };
   }
-  if (!['status', 'observe', 'wait', 'show', 'diff', 'peers', 'queue'].includes(action))
+  if (!['status', 'observe', 'wait', 'show', 'diff', 'peers', 'lanes', 'queue'].includes(action))
     json.properties.operationId = { type: 'string', format: 'uuid' };
   const required = new Set(json.required ?? []);
   const parameters = Object.keys(json.properties ?? {}).map(
@@ -47,10 +49,11 @@ export function hostedAgentHelp(action?: string) {
     'Parameters (? = optional; nested fields and constraints follow the command schema):',
     ...entries.map(entry => `  ${entry.command}: ${entry.parameters.join(', ') || '{}'}`),
     ...(canonical ? entries.map(entry => JSON.stringify(entry.schema, null, 2)) : []),
-    'First CLI run installs advisory Claude Code/Codex first-write hooks for every Lane. nforge x ROOT install-hooks|uninstall-hooks {scope?:"user"|"project"} controls local setup; uninstall defaults to user and persists off. nforge settings firstWriteHooks false disables them. Hooks never deny edits; hosted coverage excludes unsaved edits, uses one query per uncached path/session and fails open within one second.',
+    'First successful CLI command installs advisory Claude Code/Codex first-write hooks for every Lane. nforge x ROOT install-hooks|uninstall-hooks {scope?:"user"|"project"} controls local setup; uninstall defaults to user and persists off. nforge settings firstWriteHooks false disables them. Hooks never deny edits; hosted coverage excludes unsaved edits, uses one query per uncached path/session and fails open within one second.',
     'land --save waits; --no-wait returns after submission. Use --check-only to check without landing.',
     'land --save overlapAnswer:"accept-order" answers the pending notices for this landing and records them like ack, so peers see the answer.',
     'pull {} refreshes a clean clone root to main; a repeat resumes interruption. Root status {} reports clone freshness.',
+    'lanes {limit?,cursor?} lists open hosted Lanes with Intent, actor, last save and latest Intent landing context in one bounded query. Follow continueCursor; idle makes zero calls.',
     'status accepts laneId; observe/landing select operationId (original landing UUID), submissionId or runId.',
     'peers {laneId?,path?,detail?} reads current saved overlap evidence in one query. Coverage excludes unsaved peer edits and never proves independence. start/save/status retain unacknowledgedOverlaps and behindMain.',
     'queue {limit?} lists the landing queue in dispatch order: Lane, Intent title, phase, suspect, last failing test files and recompose count per entry. One bounded read, no idle cost.',

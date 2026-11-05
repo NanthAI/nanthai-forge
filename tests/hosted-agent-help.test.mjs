@@ -33,7 +33,7 @@ async function output(call) {
 test('hosted help and packaged docs are generated from every enforced schema', async t => {
   assert.deepEqual(
     hostedAgentHelpEntries.map(e => e.action),
-    [...Object.keys(hostedAgentCommandSchemas), 'diff', 'peers', 'queue', 'wait', 'show'],
+    [...Object.keys(hostedAgentCommandSchemas), 'lanes', 'diff', 'peers', 'queue', 'wait', 'show'],
   );
   for (const entry of hostedAgentHelpEntries)
     assert.deepEqual(
@@ -52,6 +52,7 @@ test('hosted help and packaged docs are generated from every enforced schema', a
   for (const [form, action] of [
     [['land', '--save'], 'finish'],
     [['observe'], 'observe'],
+    [['lanes'], 'lanes'],
     [['landing'], 'observe'],
   ])
     assert.equal(await output(() => agentCli([s.root, ...form, '--help'])), hostedAgentHelp(action));
