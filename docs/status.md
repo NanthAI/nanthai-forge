@@ -69,6 +69,8 @@ Live release adoption and billed-usage qualification remain unverified.
 
 Hosted land/save reject complete conflict hunks locally before compose/check; resolve accepts Lane subdirectories. Receipts retain one recovery step.
 
+Hosted compose parses every text-merged JS/TS file and reports a file that no longer parses (while each side does) as a composition conflict with the parser message, before any check runs; sync and local composition do not.
+
 - Hosted relative, trailing-slash and symlinked roots keep source-read caches beside
   the canonical checkout. Sync/resolve preserve verified legacy misplaced caches;
   blocked local applies expose executable preservation recovery through CLI/MCP.

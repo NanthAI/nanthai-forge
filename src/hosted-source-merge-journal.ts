@@ -9,6 +9,7 @@ import type { WorkerObject } from './hosted-source-worker-format.js';
 import { canonicalPayload } from './hosted-source-operation.js';
 import { SourceIoError, sourceCall } from './hosted-source-io-error.js';
 import { invariant } from './errors.js';
+import { syntaxConflictReason } from './native-merge-syntax.js';
 /** Bounds for the native whole-file text/import parser. Its memory grows with
  * bytes and with line count, so a file over either bound that both sides changed
  * is reported as a conflict instead of merged line by line (Git hosts do the same). */
@@ -27,6 +28,8 @@ export type SourceCalculation = {
   item: NativeMergeConflict;
   order: NativeInsertionOrder;
   channel: string;
+  /** Compose only: a merged JS/TS file that fails to parse although both sides do is a conflict. */
+  syntax?: true;
 };
 export type SourceCalculationResult = {
   key: string;
@@ -42,18 +45,20 @@ export class SourceCalculationsPending extends Error {}
 export function journalSourceCalculations(c: SourceStepCursor, source: MemoryMergeSource) {
   const pending = new Map<string, SourceCalculation>();
   const reasons = new Map<string, string>();
+  const compose = (c.plan as { kind?: string }).kind === 'forge-hosted-compose-input';
   source.mergeConflictReason = path => reasons.get(path);
   const request = (
     kind: SourceCalculation['kind'],
     item: NativeMergeConflict,
     order: NativeInsertionOrder,
     channel = 'target',
+    syntax = false,
   ) => {
-    const key = canonicalPayload({ kind, item, order, channel }),
+    const key = canonicalPayload({ kind, item, order, channel, ...(syntax ? { syntax: true } : {}) }),
       prior = c.calculations?.[key];
     if (prior?.reason) reasons.set(item.path, prior.reason);
     if (prior) return prior;
-    pending.set(key, { key, kind, item, order, channel });
+    pending.set(key, { key, kind, item, order, channel, ...(syntax ? { syntax: true as const } : {}) });
     if (pending.size >= 100) throw new SourceCalculationsPending();
     return null;
   };
@@ -70,6 +75,8 @@ export function journalSourceCalculations(c: SourceStepCursor, source: MemoryMer
       'merge',
       { path: left.path, base, left, right },
       options.insertionOrder ?? 'left-first',
+      'target',
+      compose,
     );
     if (result) resolutions.push(...result.resolutions);
     return result?.blob ?? null;
@@ -197,6 +204,14 @@ export async function calculateSourceFiles(
         { size: base.length + left.length + right.length, objects: required.length },
       );
       resolutions.push(...notes.map(item => ({ ...item, path: request.item.path })));
+      // A line merge of two edits that each parse can still not parse. Compose
+      // reports that before any check runs; a side that already fails is not blocked.
+      const reason =
+        bytes && request.syntax ? await syntaxConflictReason(request.item.path, bytes, left, right) : null;
+      if (reason) {
+        results.push({ key: request.key, blob: null, kind: 'binary', resolutions: [], reason });
+        continue;
+      }
     } else {
       const marked = await sourceCall(
         'merge-markers',

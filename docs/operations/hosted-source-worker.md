@@ -166,7 +166,14 @@ size. A text file changed on both sides is merged line by line only when base,
 ours and theirs are each at most 4 MiB and 65,536 lines. Otherwise the job
 reports a normal conflict for that path with the reason "too large to merge
 automatically", like Git hosts that decline to merge or diff very large files in
-the browser. The author resolves it locally. At both limits at once the
+the browser. The author resolves it locally.
+
+Compose (not sync) then parses each text-merged JS/TS file of at most 256 KiB
+(see [architecture](../architecture.md#hosted-composition-and-candidates)). One
+that fails although both sides parse is a normal conflict with a parser reason.
+Measured: about 0.6 ms per typical source file, 12 ms at 100 KB and 40 ms at
+256 KB (50 files at the bound: about 1.9 s; 50 typical files: under 0.1 s); the compiler adds about 100 ms on first use and about 10 MB to each
+Convex Node action bundle that reaches the compose worker, loaded only then. At both limits at once the
 measured action peak is about 320 MiB; at 16 MiB it was over 500 MiB.
 
 A single saved direct child of main needs only its two verified tip manifests to

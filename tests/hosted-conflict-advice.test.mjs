@@ -64,6 +64,7 @@ test('batch-member conflict advice names the rejected current Candidate and path
     'server evidence must not compete with the one exact-root recovery command',
   );
   assert(f.counts.slice(before).every(call => call.writes === 0));
+  assert(!('reasons' in result.conflict), 'a plain text conflict carries no reasons');
   f.patch('hostedProjects', f.projectId, { removal: 'deleted' });
   await assert.rejects(
     hostedConflictAdvice(session, { submission: failed }),

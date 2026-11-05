@@ -33,6 +33,9 @@ import { safeRelative } from './safe-relative.js';
 import { readLaneEntry, recordLane } from './lane-registry.js';
 import { ForgeError, invariant } from './errors.js';
 import type { HostedAgentSession } from './hosted-agent-transport.js';
+/** Why Forge reports a file the line merge accepted (it no longer parses) or declined (too large). */
+export const conflictReasons = (files: readonly { path: string; reason?: string | undefined }[]) =>
+  files.flatMap(file => (file.reason ? [{ path: file.path, reason: file.reason }] : []));
 const quote = (text: string) => `'${text.replaceAll("'", "'\\''")}'`;
 export function hostedRecoveryCommand(root: string, action: string, command: object) {
   return `nforge agent ${quote(root)} ${action} ${quote(JSON.stringify(command))}`;
@@ -57,6 +60,7 @@ export async function guideHostedSync(session: HostedAgentSession, value: unknow
     session.exchange,
   );
   const paths: string[] = [],
+    reasons: { path: string; reason: string }[] = [],
     seen = new Set<string>();
   let pin: { sha256: string; size: number } | null = source.resolution.conflicts;
   while (pin) {
@@ -73,6 +77,7 @@ export async function guideHostedSync(session: HostedAgentSession, value: unknow
     for (const file of page.paths) {
       invariant(safeRelative(file.path), 'UNSAFE_PATH', 'Conflict paths must be relative source files.');
       paths.push(file.path);
+      reasons.push(...conflictReasons([file]));
     }
     pin = page.next;
   }
@@ -87,6 +92,7 @@ export async function guideHostedSync(session: HostedAgentSession, value: unknow
         laneId: source.lane.laneId,
         paths: paths.slice(0, 100),
         more: Math.max(0, paths.length - 100),
+        ...(reasons.length ? { reasons: reasons.slice(0, 100) } : {}),
         next: { action: 'open', ...next },
         command: hostedRecoveryCommand(session.root, 'open', next),
       },
@@ -371,6 +377,7 @@ export async function hostedConflictAdvice(
       candidateId: candidate.id,
       paths: page.paths.map(file => file.path),
       more: page.next !== null,
+      ...(conflictReasons(page.paths).length ? { reasons: conflictReasons(page.paths) } : {}),
       next: { action: 'sync', ...command },
       command: hostedRecoveryCommand(session.root, 'sync', command),
     },

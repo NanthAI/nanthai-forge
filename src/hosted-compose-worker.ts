@@ -17,6 +17,7 @@ import {
 import type { SourceWorkerReader } from './hosted-source-worker-reader.js';
 import { LazyMergeSource, lazyMerge } from './hosted-merge-reader.js';
 import type { WorkerPin } from './hosted-source-worker-format.js';
+import { syntaxGatedMerge } from './hosted-compose-syntax.js';
 
 export type ComposeBases = Map<string, Pick<NativeFile, 'blob' | 'mode'> | null>;
 const sameFile = (a: Pick<NativeFile, 'blob' | 'mode'> | null | undefined, b: typeof a) =>
@@ -48,6 +49,8 @@ export async function buildHostedComposeState(
   await reader.file(plan.main);
   invariant(plan.main.object.sha256 === plan.base.head, 'SOURCE_JOB_INVALID', 'Compose main pins differ.');
   const calculate = <T>(action: () => T) => lazyMerge(reader, progress, action, source);
+  // Compose parses text-merged JS/TS before accepting it; see hosted-compose-syntax.
+  const gated = <T>(action: () => T) => syntaxGatedMerge(source, calculate, action);
   let head = plan.base.head,
     pageCount = 0,
     selected = 0;
@@ -96,7 +99,7 @@ export async function buildHostedComposeState(
         if (result) continue;
         let left = head;
         const right = entry.head;
-        let merged = await calculate(() => {
+        let merged = await gated(() => {
           source.state(left);
           source.state(right);
           return restoreBase
@@ -109,7 +112,7 @@ export async function buildHostedComposeState(
           // base in the same worker; retain prompt main conflicts with their
           // actual base root, and mark prefix-only conflicts as advisory.
           if (plan.batch && left !== plan.base.head) {
-            const onMain = await calculate(() =>
+            const onMain = await gated(() =>
               restoreBase
                 ? composeStack(
                     source,
@@ -126,7 +129,7 @@ export async function buildHostedComposeState(
               merged = onMain;
             }
           }
-          const details = await calculate(() =>
+          const details = await gated(() =>
             restoreBase
               ? source.mergeFiles(
                   left,

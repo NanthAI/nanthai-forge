@@ -682,3 +682,83 @@ test('streamed resolution-marker scans require complete hunks across recipe cont
   assert(steps > 1);
   assert.equal(result.progress.calculations[0].markers, true);
 });
+
+test('journaled composition reports a merged JS file that no longer parses, matching the fixed worker', async () => {
+  const lines = [
+    "import test from 'node:test';",
+    '',
+    "test('x', t => {",
+    '  const a = 1;',
+    '  const b = 2;',
+    '});',
+    '',
+  ];
+  const insert = (index, line) => [...lines.slice(0, index), line, ...lines.slice(index)].join('\n');
+  const cases = [
+    {
+      name: 'duplicate declaration',
+      left: insert(3, '  const root = one(t);'),
+      right: insert(5, '  const root = two();'),
+    },
+    {
+      name: 'distinct declarations',
+      left: insert(3, '  const one = 1;'),
+      right: insert(5, '  const two = 2;'),
+    },
+    {
+      name: 'one side already broken',
+      left: insert(3, '  const root = ((;'),
+      right: insert(5, '  const root = two();'),
+    },
+  ];
+  for (const c of cases) {
+    const x = fixture(),
+      file = (path, text) => ({ path, mode: 'file', blob: x.put(text).sha256 }),
+      base = x.state([file('tests/a.test.mjs', lines.join('\n'))]);
+    const left = x.state([file('tests/a.test.mjs', c.left)], [base.sha256]),
+      right = x.state([file('tests/a.test.mjs', c.right)], [base.sha256]);
+    const inputs = buildComposePages([
+        {
+          laneId: randomUUID(),
+          head: right.sha256,
+          version: 0,
+          sourceVersion: 0,
+          lifecycleVersion: 0,
+          state: { object: right, recipe: null },
+        },
+      ]),
+      dependencies = buildComposePages([]);
+    for (const page of [...inputs.pages, ...dependencies.pages]) x.json(page.value);
+    const input = x.json({
+      schema: 1,
+      kind: 'forge-hosted-compose-input',
+      base: { head: left.sha256, receiptId: 'main' },
+      main: { object: left, recipe: null },
+      inputs: inputs.manifest,
+      dependencies: dependencies.manifest,
+      algorithm: 'forge-native-compose-v1',
+      message: 'merge',
+      at,
+    });
+    const expected = await buildHostedSourceState(input, x.io),
+      actual = await drain(x, input, true);
+    assert.deepEqual(
+      actual.cursor.output,
+      expected.output,
+      `${c.name}: journaled output equals fixed worker`,
+    );
+    const { result } = JSON.parse(x.objects.get(actual.cursor.output.sha256));
+    if (c.name === 'duplicate declaration') {
+      assert.equal(result.status, 'conflict');
+      assert.deepEqual(result.paths, ['tests/a.test.mjs']);
+      const page = JSON.parse(x.objects.get(result.conflicts.sha256));
+      assert.match(
+        page.paths[0].reason,
+        /^composed tests\/a\.test\.mjs:\d+:\d+ does not parse although each side does: .*'root'/,
+      );
+      assert.equal(x.objects.get(page.paths[0].left.blob).toString(), c.left);
+      assert.equal(x.objects.get(page.paths[0].right.blob).toString(), c.right);
+      assert.equal(x.objects.get(page.paths[0].base.blob).toString(), lines.join('\n'));
+    } else assert.equal(result.status, 'clean', c.name);
+  }
+});
