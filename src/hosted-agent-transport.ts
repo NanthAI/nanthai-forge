@@ -26,6 +26,7 @@ import { sourceTree } from './source-tree.js';
 import { withSourceRecovery } from './hosted-agent-source-recovery.js';
 import { readHostedOverlapAdvice, recordHostedOverlapDelivery } from './hosted-overlap-client.js';
 import { presenceDelivery, presenceSince, type PresenceDelivery } from './hosted-presence-client.js';
+import { boardEnvelope, boardHostedSource, hostedBoardSchemas, readBoardCursor } from './hosted-board.js';
 import { hostedOverlapNotice, type HostedOverlapNotice } from './hosted-overlap-notice.js';
 import { waitHostedAgentSource } from './hosted-agent-source-wait.js';
 import { recoverHostedFinish, hostedConflictAdvice } from './hosted-agent-resolution.js';
@@ -156,7 +157,7 @@ export type HostedAgentResponse = {
   cliCommit?: string;
   schema: 1;
   transport: 'hosted';
-  action: HostedAgentAction | 'diff' | 'peers' | 'lanes' | 'queue';
+  action: HostedAgentAction | 'diff' | 'peers' | 'lanes' | 'queue' | 'board' | 'board-post' | 'board-reply';
   sourceContext?: unknown;
   operationId: string | null;
   resolved: { operationId: string } | null;
@@ -165,6 +166,8 @@ export type HostedAgentResponse = {
   behindMain?: unknown;
   /** Present only while an overlap is unanswered: who, which files and the acknowledge or route-around command. */
   overlapNotice?: HostedOverlapNotice;
+  /** Present only when board notes arrived since this machine's cursor: one line each (≤240 chars). */
+  board?: { notices: string[]; more: number };
   /** start only: your idle open Lanes and finished Lane roots pruned on this machine. */
   localLanes?: { idle: unknown[]; pruned: { count: number; bytes: number } };
   /** land --save only: where the submitting process spent its time before submission. */
@@ -180,6 +183,8 @@ export type HostedAgentResponse = {
 export class HostedAgentTransport {
   private priorityReads: boolean | undefined;
   private defaults: EffectiveAgentDefaults | undefined;
+  /** The server advertised boardVersion:1: Lane actions ask the overlap read for new board notes. */
+  private boardVersion = false;
   /** Effective project agent defaults from the latest capability read (undefined on older servers). */
   get agentDefaults() {
     return this.defaults;
@@ -259,6 +264,15 @@ export class HostedAgentTransport {
         operationId: null,
         resolved: null,
         result: await queueHostedSource(this, input),
+      };
+    if (Object.hasOwn(hostedBoardSchemas, requestedAction))
+      return {
+        schema: 1,
+        transport: 'hosted',
+        action: requestedAction as keyof typeof hostedBoardSchemas,
+        operationId: null,
+        resolved: null,
+        result: await boardHostedSource(this, requestedAction as keyof typeof hostedBoardSchemas, input),
       };
     if (requestedAction === 'peers')
       return {
@@ -502,6 +516,7 @@ export class HostedAgentTransport {
           landingMessageVersion: 1,
           openLanesVersion: 1,
           presenceVersion: 1,
+          boardVersion: 1,
         };
         for (;;) {
           try {
@@ -518,7 +533,7 @@ export class HostedAgentTransport {
             )
               throw error;
             const field =
-              /extra field\s+[`'"]?(features|noticeVersion|resolveVersion|overlapVersion|overlapEvidenceVersion|mirrorVersion|metricReceiptVersion|planningVersion|defaultsVersion|landingMessageVersion|openLanesVersion|presenceVersion)\b/i.exec(
+              /extra field\s+[`'"]?(features|noticeVersion|resolveVersion|overlapVersion|overlapEvidenceVersion|mirrorVersion|metricReceiptVersion|planningVersion|defaultsVersion|landingMessageVersion|openLanesVersion|presenceVersion|boardVersion)\b/i.exec(
                 error.message,
               )?.[1];
             // Preserve independently supported features, and never repeat a
@@ -547,6 +562,7 @@ export class HostedAgentTransport {
       this.presenceAction =
         capabilities.presenceVersion === 1 && ['start', 'save', 'sync', 'compose', 'finish'].includes(action);
       this.serverFeatures = capabilities.features ?? [];
+      this.boardVersion = capabilities.boardVersion === 1;
       this.receiptActor = capabilities.metricReceiptVersion === 1 ? capabilities.actor : undefined;
       metricRequesterActor({ kind: 'agent', name: capabilities.actor });
       invariant(
@@ -1037,9 +1053,14 @@ export class HostedAgentTransport {
       operationId,
       resolved: operationId ? { operationId } : null,
       result,
-      ...(advice ? (({ changedPaths: _paths, presence: _presence, ...shown }) => shown)(advice) : {}),
+      ...(advice
+        ? (({ changedPaths: _paths, presence: _presence, board: _board, ...shown }) => shown)(advice)
+        : {}),
       ...(notice ? { overlapNotice: notice } : {}),
       ...(presence ? { presence } : {}),
+      ...(advice?.board && overlapLaneId
+        ? { board: boardEnvelope(this.root, overlapLaneId, advice.board) }
+        : {}),
       ...this.nudge(action, result),
       ...(missing.length ? { serverContract: { missing } } : {}),
     };
@@ -1062,6 +1083,7 @@ export class HostedAgentTransport {
       paths,
       undefined,
       this.presenceAction ? presenceSince(laneId) : undefined,
+      this.boardVersion ? { after: readBoardCursor(this.root, laneId) } : undefined,
     );
     this.cachedAdvice = { laneId, value };
     return value;

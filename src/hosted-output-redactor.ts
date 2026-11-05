@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { BOUNDARY_CREDENTIAL_PREFIXES, CREDENTIAL_PREFIXES } from './credential-prefixes.js';
 // Byte-preserving: artifacts need not be UTF-8. Only matched bytes are replaced.
 type Rule = { from: Buffer; to: Buffer; mask?: boolean; boundary?: boolean };
 const boundary = (byte: number) => byte <= 32 || [34, 39, 40, 61, 58, 91, 123].includes(byte);
@@ -21,25 +22,11 @@ export class HostedOutputRedactor {
       ...input.paths
         .filter(Boolean)
         .map(from => ({ from: Buffer.from(from), to: Buffer.from('[workspace]') })),
-      ...[
-        'Bearer ',
-        'bearer ',
-        'Basic ',
-        'token=',
-        'password=',
-        'secret=',
-        'api_key=',
-        'apiKey=',
-        'authorization=',
-        'ghp_',
-        'gho_',
-        'github_pat_',
-        'sk-',
-      ].map(from => ({
+      ...CREDENTIAL_PREFIXES.map(from => ({
         from: Buffer.from(from),
         to: Buffer.from('[redacted]'),
         mask: true,
-        boundary: ['Bearer ', 'bearer ', 'Basic ', 'ghp_', 'gho_', 'github_pat_', 'sk-'].includes(from),
+        boundary: BOUNDARY_CREDENTIAL_PREFIXES.includes(from),
       })),
       ...['/', '~/', 'file://'].map(from => ({
         from: Buffer.from(from),

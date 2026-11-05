@@ -14,7 +14,8 @@ export const STALL_ALERT_ENV = {
 export const DEFAULT_ALERT_SENDER = 'support@nanthai.tech';
 export type StallAlertTier = 1 | 2;
 export type StallAlert = {
-  tier: StallAlertTier;
+  /** 3: the supervisor ended the landing at its retry cap (19328518). */
+  tier: StallAlertTier | 3;
   submissionId: string;
   operationId: string;
   subject: string;
@@ -47,7 +48,7 @@ export function stallAlert(
   const retried = [
     step === 'checking'
       ? 'stall alarm re-woke the landing and reconciled an unacknowledged check dispatch at 15 min'
-      : 'stall alarm re-woke the landing queue at 15 min',
+      : 'stall alarm replayed any lost landing step (queue, finish, check or compose) at 15 min',
     ...(state.supersedes ? [`resubmission of ${state.supersedes} (${state.retryReason ?? 'retry'})`] : []),
   ];
   const lines = [
@@ -72,6 +73,34 @@ export function stallAlert(
     operationId: state.operationId,
     subject: `[Forge] ${tier === 1 ? 'Landing stalled' : 'Still stalled'}: ${input.project} ${step}`,
     text: lines.join('\n'),
+    repair,
+    at: new Date(now).toISOString(),
+  };
+}
+
+/** The supervisor's cap (19328518): a permanent fault ended the landing with a reason
+ * instead of leaving it pending. Sent once, when the end is decided. */
+export function exhaustedStallAlert(
+  state: HostedLandingState,
+  reason: string,
+  input: { project: string; now?: number },
+): StallAlert {
+  const now = input.now ?? Date.now(),
+    step = state.observation.stall?.step ?? state.phase,
+    since = state.observation.stall?.lastProgressAt ?? state.at;
+  const repair =
+    `nforge agent ROOT landing '{"operationId":"${state.operationId}"}' to read it; finish the same Lane ` +
+    'again to retry. If it ends the same way, the failing step needs a fix first.';
+  return {
+    tier: 3,
+    submissionId: state.id,
+    operationId: state.operationId,
+    subject: `[Forge] Landing ended: ${input.project} ${step}`,
+    text: [
+      `Landing ended: ${input.project}, submission ${state.id} by ${state.actor}, ${minutes(since, now)} min without progress at ${step}.`,
+      `Why: ${reason}`,
+      `Repair: ${repair}`,
+    ].join('\n'),
     repair,
     at: new Date(now).toISOString(),
   };

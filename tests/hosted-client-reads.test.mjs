@@ -19,6 +19,9 @@ const minimal = {
   queue: {},
   wait: { runId: randomUUID() },
   show: { path: 'a.ts' },
+  board: {},
+  'board-post': { to: 'project', text: 'Synthetic note' },
+  'board-reply': { id: 'abcdef12', text: 'Synthetic reply' },
 };
 
 // 60720390: `queue` was advertised in help but unknown to validation, so it failed before dispatch.

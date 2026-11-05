@@ -46,27 +46,32 @@ export async function redriveLanding(
   options: {
     row?: Doc<'projectHostedLandingRequests'>;
     queueChecked?: boolean;
+    /** Report the lost drivers without replaying them (the supervisor tick, 19328518). */
+    probe?: boolean;
   } = {},
 ) {
   const done: string[] = [];
+  const act = !options.probe;
   const row = options.row ?? (await landingRow(ctx, input));
   if (!row) {
     const desired = await desiredLanding(ctx, input);
     if (!desired || hostedLandingStateSchema.parse(JSON.parse(desired.value)).observation.state !== 'pending')
       return done;
     if (desired.wake && (await lost(ctx, desired.wake.taskId))) {
-      await scheduleDesired(ctx, desired, 0);
+      if (act) await scheduleDesired(ctx, desired, 0);
       done.push('compose');
     }
     if (desired.alarm && (await lost(ctx, desired.alarm.taskId))) {
-      const alarm = await armLandingAlarm(ctx, input, desired.alarm.lastProgressAt);
-      await ctx.db.patch(desired._id, { alarm });
+      if (act)
+        await ctx.db.patch(desired._id, {
+          alarm: await armLandingAlarm(ctx, input, desired.alarm.lastProgressAt),
+        });
       done.push('alarm');
     }
     return done;
   }
   if (row.phase === 'landed' || row.phase === 'terminal-failed') return done;
-  if (row.alarm && (await lost(ctx, row.alarm.taskId))) {
+  if (!options.probe && row.alarm && (await lost(ctx, row.alarm.taskId))) {
     const alarm = await armLandingAlarm(ctx, input, row.alarm.lastProgressAt);
     await ctx.db.patch(row._id, { alarm });
     done.push('alarm');
@@ -74,8 +79,14 @@ export async function redriveLanding(
   const finish = await finishRow(ctx, input);
   if (finish?.wake && (await lost(ctx, finish.wake.taskId))) {
     // Same generation: the lost step's IO fence stays valid and nothing is repeated twice.
-    await scheduleFinish(ctx, finish, 0, true);
+    if (act) await scheduleFinish(ctx, finish, 0, true);
     done.push('finish');
+  } else if (finish && row.phase === 'ready' && (await idleReady(ctx, row, finish))) {
+    // 19328518 (88-minute landing, 2026-11-05): a passed head whose settlement
+    // step ended without scheduling the next one has no driver at all. Only the
+    // finish publishes it, and every later passed entry waits for it in order.
+    if (act) await scheduleFinish(ctx, finish);
+    done.push('finish-idle');
   } else if (finish?.waiting && finish.parentSubmissionId) {
     // The parent's terminal event (FinishDriver:dependents) was lost.
     const parent = await landingRow(ctx, {
@@ -83,32 +94,48 @@ export async function redriveLanding(
       submissionId: finish.parentSubmissionId,
     });
     if (parent && (parent.phase === 'landed' || parent.phase === 'terminal-failed')) {
-      await ctx.db.patch(finish._id, { waiting: false });
-      await scheduleFinish(ctx, { ...finish, waiting: false });
+      if (act) {
+        await ctx.db.patch(finish._id, { waiting: false });
+        await scheduleFinish(ctx, { ...finish, waiting: false });
+      }
       done.push('dependency');
     }
   }
-  if (row.phase === 'queued' && (await redriveCohortHold(ctx, row))) done.push('hold');
+  if (act && row.phase === 'queued' && (await redriveCohortHold(ctx, row))) done.push('hold');
   if (row.phase === 'queued' || row.phase === 'checking') {
-    if (!options.queueChecked && (await redriveQueue(ctx, input.projectId))) done.push('queue');
+    if (!options.queueChecked && (await redriveQueue(ctx, input.projectId, act))) done.push('queue');
     if (row.phase === 'checking' && row.runId) {
       const wake = await checkWakeRow(ctx, {
         projectId: input.projectId,
         runId: row.runId,
       });
       if (wake?.wake && (await lost(ctx, wake.wake.taskId))) {
-        await scheduleCheckWake(ctx, { projectId: input.projectId, runId: row.runId }, wake);
+        if (act) await scheduleCheckWake(ctx, { projectId: input.projectId, runId: row.runId }, wake);
         done.push('check');
       }
     }
   }
   return done;
 }
-async function redriveQueue(ctx: MutationCtx, projectId: Id<'hostedProjects'>) {
+async function redriveQueue(ctx: MutationCtx, projectId: Id<'hostedProjects'>, act = true) {
   const queue = await landingQueue(ctx, { projectId, channel: 'main' });
   if (!queue?.wake || !(await lost(ctx, queue.wake.taskId))) return false;
-  await scheduleLandingWake(ctx, queue, queue.wake.at);
+  if (act) await scheduleLandingWake(ctx, queue, queue.wake.at);
   return true;
+}
+/** A Ready entry nothing drives: not parked behind an older entry (that one owns
+ * it), not waiting for review or a parent, and its finish step neither pending
+ * nor running. One scheduler-row read. */
+async function idleReady(
+  ctx: MutationCtx,
+  row: Doc<'projectHostedLandingRequests'>,
+  finish: Doc<'projectHostedFinishes'>,
+) {
+  if (row.orderWait || finish.waiting) return false;
+  const reason = hostedLandingStateSchema.parse(JSON.parse(row.value)).observation.pendingReason;
+  if (reason === 'waiting-for-review' || reason === 'waiting-for-dependency') return false;
+  const task = finish.wake ? await ctx.db.system.get(finish.wake.taskId) : null;
+  return task?.state.kind !== 'pending' && task?.state.kind !== 'inProgress';
 }
 
 /** A waiting reader asks for this when its entry stays Ready. Contributors only;

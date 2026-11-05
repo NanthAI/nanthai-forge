@@ -6,7 +6,7 @@ vars == <<pc, canonical, observed, inputsDone, returned, a, b, main, checked, ap
 Init == /\ pc = 0 /\ canonical = "ready" /\ observed = "ready"
         /\ inputsDone = FALSE /\ returned = FALSE
         /\ a = "queued" /\ b = "queued"
-        /\ main \in (IF Scenario \in {"outage", "cohorthold"} THEN {0, 1} ELSE {0})
+        /\ main \in (IF Scenario \in {"outage", "cohorthold", "supervisor"} THEN {0, 1} ELSE {0})
         /\ checked \in (IF Scenario = "cohort" THEN {0, 1} ELSE {0})
         /\ applied = 0 /\ owner = TRUE
 Idle == UNCHANGED vars
@@ -179,7 +179,36 @@ RetryKeep == /\ Scenario = "retrykeep"
        [] pc = 4 -> /\ b' = (IF a = "landed" /\ checked = main THEN "landed" ELSE "queued") /\ pc' = 5
                      /\ UNCHANGED <<canonical, observed, inputsDone, returned, a, main, checked, applied, owner>>
        [] OTHER -> FALSE
+\* Issue 19328518: b is a pending entry (here the passed Ready head) whose one
+\* driver step fails. main = 0: the step's task failed and nothing owns b
+\* (owner = FALSE). main = 1: the queue lease still owns b, but every advance it
+\* claims throws and rolls back, so the expired lease re-claims the same attempt.
+\* inputsDone = the fault is permanent (every replay fails the same way).
+\* applied = consecutive failed repairs (or uncommitted re-claims), cap 2.
+\* Unfixed: the stall alarm only flags a Ready head (no replay) and a re-claim
+\* that never commits looks owned, so b is pending forever. Fixed: the
+\* supervisor replays the lost step each round and the claim counts re-claims;
+\* after the cap b ends with a stated reason (never silently, never twice).
+Supervisor == /\ Scenario = "supervisor"
+  /\ CASE pc = 0 -> /\ b' = "ready" /\ owner' = (main = 1) /\ inputsDone' \in BOOLEAN /\ pc' = 1
+                     /\ UNCHANGED <<canonical, observed, returned, a, main, checked, applied>>
+       [] pc = 1 /\ main = 0 /\ owner -> /\ b' = "landed" /\ pc' = 2
+                     /\ UNCHANGED <<canonical, observed, inputsDone, returned, a, main, checked, applied, owner>>
+       [] pc = 1 /\ main = 1 /\ ~inputsDone -> /\ b' = "landed" /\ pc' = 2
+                     /\ UNCHANGED <<canonical, observed, inputsDone, returned, a, main, checked, applied, owner>>
+       [] pc = 1 /\ applied < 2 /\ ((main = 0 /\ ~owner) \/ (main = 1 /\ inputsDone)) ->
+                     \* main = 0: a supervisor round; main = 1: the lease expires and is re-claimed.
+                     /\ IF Fixed
+                        THEN /\ applied' = applied + (IF inputsDone THEN 1 ELSE 0)
+                             /\ owner' = (main = 1 \/ ~inputsDone)
+                             /\ checked' = checked
+                        ELSE /\ checked' = 1 - checked /\ UNCHANGED <<applied, owner>>
+                     /\ UNCHANGED <<canonical, observed, inputsDone, returned, a, b, main, pc>>
+       [] pc = 1 /\ applied = 2 -> /\ b' = "failed" /\ pc' = 2
+                     /\ UNCHANGED <<canonical, observed, inputsDone, returned, a, main, checked, applied, owner>>
+       [] OTHER -> FALSE
 Step == Wait \/ CohortConflict \/ LostWake \/ MovingMain \/ CrossHead \/ OrderWake \/ Outage \/ CohortHold \/ LostDispatch
+        \/ Supervisor
         \/ RetryKeep
 Spec == Init /\ [][Step]_vars /\ WF_vars(Step)
 FreshTerminal == returned => observed = canonical
@@ -192,6 +221,8 @@ EventuallyTerminal == <>(a = "landed" \/ a = "failed")
 HeadLands == <>(b = "landed")
 CohortForms == <>(b = "cohort")
 HeadSettles == <>(b \in {"landed", "failed"})
+\* A transient fault never ends a landing; only the cap on a permanent one does.
+FailsOnlyPermanent == Scenario = "supervisor" /\ b = "failed" => inputsDone /\ applied = 2
 \* ea86f3fb: no live dependent is pinned to a stale predecessor generation, none
 \* lands on one, and a dependent check is discarded only when the head changed.
 NoStaleStack == Scenario = "retrykeep" /\ pc \in 2..4 /\ b \in {"checking", "ready"} => checked = main

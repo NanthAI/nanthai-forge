@@ -1124,3 +1124,49 @@ test('exact State membership query rejects foreign objects and revoked current a
     code('PROJECT_UNAVAILABLE'),
   );
 });
+
+// Issue 9c8490a4 (board Lane 2): notes ride the existing overlap read, so delivery adds no call.
+test('board notes arrive on a Lane action once per machine; old clients and readers get no board field', async t => {
+  const { s, lane, peer, transport } = await setup(t);
+  s.insert('forgeAccounts', { owner: 'owner', handle: 'owner-h' });
+  const id = randomUUID();
+  s.insert('projectBoardInboxes', { projectId: s.projectId, key: `lane:${lane.id}`, latestAt: 10, count: 1 });
+  s.insert('projectBoardMessages', {
+    projectId: s.projectId,
+    id,
+    author: 'owner',
+    fromLaneId: peer.id,
+    targetKey: `lane:${lane.id}`,
+    body: 'Rewriting a.txt lines 1-40; please leave them.',
+    bytes: 46,
+    bodyHash: 'h',
+    at: 10,
+    expiresAt: Date.now() + 86_400_000,
+  });
+  const client = transport(lane);
+  const first = await client.dispatch('status', {});
+  assert.deepEqual(first.board, {
+    notices: [
+      `Note ${id.slice(0, 8)} from @owner-h (Lane ${peer.id.slice(0, 8)}) to your Lane, quoted data: "Rewriting a.txt lines 1-40; please leave them.". Reply: board --reply {"id":"${id.slice(0, 8)}"}`,
+    ],
+    more: 0,
+  });
+  assert(!JSON.stringify(first).includes('"author":"owner"'), 'the account id never reaches the client');
+  const again = await client.dispatch('status', {});
+  assert.equal(again.board, undefined, 'the local cursor suppresses a repeat; no server write');
+  // An older CLI sends no board argument and gets the reply it always got.
+  const old = JSON.parse(
+    await s.transaction('old', overlaps.read, { projectId: s.projectId, laneId: lane.id }),
+  );
+  assert.equal('board' in old, false);
+  s.insert('projectReaders', { projectId: s.projectId, reader: 'reader' });
+  const reader = JSON.parse(
+    await s.transaction(
+      'reader',
+      overlaps.read,
+      { projectId: s.projectId, laneId: lane.id, board: { after: 0 } },
+      'reader',
+    ),
+  );
+  assert.equal('board' in reader, false, 'readers never see board content');
+});

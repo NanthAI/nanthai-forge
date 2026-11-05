@@ -23,6 +23,11 @@ const lease = v.object({
   until: v.number(),
   submissionId: v.string(),
   attemptId: v.string(),
+  /** The row version this claim wrote (19328518): unchanged at the next claim
+   * means its advance never committed. */
+  claimed: v.optional(v.number()),
+  /** Consecutive re-claims of this attempt whose advance never committed. */
+  retries: v.optional(v.number()),
 });
 export const hostedLandingTables = {
   projectHostedLandingQueueStatus: defineTable({
@@ -35,7 +40,7 @@ export const hostedLandingTables = {
     projectId: v.id('hostedProjects'),
     submissionId: v.string(),
     lastProgressAt: v.string(),
-    tier: v.union(v.literal(1), v.literal(2)),
+    tier: v.union(v.literal(1), v.literal(2), v.literal(3)),
     value: v.string(),
   }).index('by_project_and_submission', ['projectId', 'submissionId']),
   projectHostedLandingBatches: defineTable({

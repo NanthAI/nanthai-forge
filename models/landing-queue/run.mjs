@@ -54,6 +54,8 @@ if (config === 'all') {
     'cohorthold-fixed',
     'lostdispatch',
     'lostdispatch-fixed',
+    'supervisor',
+    'supervisor-fixed',
     'retrykeep',
     'retrykeep-fixed',
   ]) {

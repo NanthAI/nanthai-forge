@@ -68,6 +68,19 @@ async function cancel(f, submissionId) {
     request: JSON.stringify({ operationId: randomUUID(), authorityEpoch: 1, submissionId }),
   });
 }
+/** The deadline decides; its repair runs as its own scheduled step (19328518), so
+ * a repair that throws cannot take the supervisor round down with it. */
+async function runRepair(f, submissionId) {
+  const task = f
+    .pending()
+    .find(
+      task => task.name === 'projectHostedLandingStall:repair' && task.args[0].submissionId === submissionId,
+    );
+  assert(task, 'the deadline scheduled its repair');
+  f.patch('_scheduled_functions', task._id, { state: { kind: 'success' } });
+  await f.transaction('stall-repair', stallApi.repair, task.args[0]);
+  return task.args[0];
+}
 async function landRest(f) {
   for (let i = 0; i < 3; i++) {
     await f.drain();
@@ -143,6 +156,7 @@ test('replay 108a24e3: the deadline re-drives a member orphaned after fallback a
   f.advanceClock(Math.max(0, deadline.scheduledTime - Date.now()));
   f.patch('_scheduled_functions', deadline._id, { state: { kind: 'success' } });
   await f.transaction('stall-deadline', stallApi.deadline, deadline.args[0]);
+  assert.equal((await runRepair(f, target.id)).mode, 'drop');
   assert(
     waiting.some(s => progressAt(stateOf(f, s.id)) !== before[s.id]),
     're-driven: a waiting member took the fallback turn',
@@ -192,6 +206,7 @@ test('a member still pointing at a retired batch gets a terminal outcome at the 
     lastProgressAt: at,
     attempt: 0,
   });
+  await runRepair(f, member.id);
   const after = stateOf(f, member.id);
   assert.equal(after.phase, 'terminal-failed');
   assert.equal(after.error.code, 'LANDING_STALLED', 'a Forge outcome, not an operator cancel');

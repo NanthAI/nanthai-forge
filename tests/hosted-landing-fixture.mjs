@@ -194,6 +194,12 @@ export async function landingFixture(source = null) {
           (ctx, input) => alarms.resolveStalledLanding(ctx, input, now),
           task.args[0],
         );
+      else if (task.name === 'projectHostedLandingStall:repair')
+        result = await run(
+          'landingRepair',
+          (ctx, input) => alarms.repairStalledLanding(ctx, input, now),
+          task.args[0],
+        );
       else if (task.name === 'projectHostedLandingCohortHold:end')
         result = await call('cohortHoldEnd', cohortHold.end, task.args[0]);
       else if (task.name === 'projectHostedLandingStallAlert:alert')

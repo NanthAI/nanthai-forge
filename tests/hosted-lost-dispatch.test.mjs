@@ -79,8 +79,10 @@ test('incident a7de3a93 replay: an unacknowledged dispatch is re-checked by the 
   // Bounded: one alarm-driven reconciliation, no poller (drain refuses >100 steps).
   t.diagnostic(JSON.stringify({ steps, calls: f.counts.length - calls }));
   assert(f.counts.length - calls <= 12, 'a handful of calls for the whole recovery');
+  // The re-dispatch time itself (the clock after drain also covers the
+  // supervisor's follow-up round at +15 min, 19328518).
   assert(
-    Date.now() - Date.parse(first.at) < 2 * LANDING_STALL_MS,
+    Date.parse(after[1].at) - Date.parse(first.at) < 2 * LANDING_STALL_MS,
     're-checked within the stall window, not 12 h',
   );
   await f.passChecks();

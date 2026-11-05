@@ -10,6 +10,7 @@ import { hostedOverlapAdvice } from '../src/hosted-overlap';
 import { invariant } from '../src/errors';
 import { report } from './errors';
 import { safeRelative } from '../src/safe-relative';
+import { boardDelivery } from './projectBoardDelivery';
 
 /** One finite agent read. No source objects, Work hydration, scheduler or subscription. */
 export const read = query({
@@ -23,9 +24,11 @@ export const read = query({
     items: v.optional(v.number()),
     /** Presence (capability presenceVersion): related open Lanes. `since` is the previous reply's `at`. */
     presence: v.optional(v.object({ since: v.optional(v.number()) })),
+    /** Board notes newer than the client's local cursor (ms); members with write access only. */
+    board: v.optional(v.object({ after: v.number() })),
   },
   returns: v.string(),
-  handler: async (ctx, { projectId, laneId, paths, items, path, detail, presence }) => {
+  handler: async (ctx, { projectId, laneId, paths, items, path, detail, presence, board: boardCursor }) => {
     try {
       invariant(path === undefined || safeRelative(path), 'BAD_ARGUMENT', 'Select a repository path.');
       const user = await ctx.auth.getUserIdentity();
@@ -207,6 +210,16 @@ export const read = query({
             },
           }
         : {};
+      const board = boardCursor
+        ? await boardDelivery(ctx, {
+            projectId,
+            viewer: user.subject,
+            laneId,
+            intentId: lane.intentId,
+            after: boardCursor.after,
+          })
+        : undefined;
+      const boardField = board ? { board } : {};
       if (acks.length > 100) {
         // A large old inbox stays bounded. Verify every displayed item against the
         // exact answer index, so an answer outside the window can never repeat.
@@ -239,6 +252,7 @@ export const read = query({
           ...changedPaths,
           ...evidence,
           ...present,
+          ...boardField,
           unacknowledgedOverlaps: {
             ...advice.unacknowledgedOverlaps,
             count: null,
@@ -246,7 +260,7 @@ export const read = query({
           },
         });
       }
-      return JSON.stringify({ ...advice, ...changedPaths, ...evidence, ...present });
+      return JSON.stringify({ ...advice, ...changedPaths, ...evidence, ...present, ...boardField });
     } catch (error) {
       return report(error);
     }

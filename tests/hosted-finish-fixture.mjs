@@ -335,6 +335,8 @@ export async function finishFixture(
         await tx('landingAlarm', stallApi.alarm, input);
       } else if (task.name === 'projectHostedLandingStall:deadline') {
         await tx('landingDeadline', stallApi.deadline, input);
+      } else if (task.name === 'projectHostedLandingStall:repair') {
+        await tx('landingRepair', stallApi.repair, input);
       } else if (task.name === 'projectHostedLandingCohortHold:end') {
         await tx('cohortHoldEnd', cohortHoldApi.end, input);
       } else if (task.name === 'projectHostedLandingStallAlert:alert') {

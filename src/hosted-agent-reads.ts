@@ -16,6 +16,7 @@ import { readHostedLaneCheckout } from './hosted-lane-checkout-marker.js';
 import type { HostedAgentTransport } from './hosted-agent-transport.js';
 import { QUEUE_VIEW_LIMIT } from './hosted-queue-view.js';
 import { liveLanesInput } from './hosted-live-lanes.js';
+import { hostedBoardSchemas } from './hosted-board.js';
 const hash = z.string().regex(/^[0-9a-f]{64}$/);
 export const hostedPeersSchema = z
   .object({
@@ -104,6 +105,8 @@ export const hostedClientReadSchemas = {
   queue: hostedQueueSchema,
   wait: hostedWaitSchema,
   show: hostedSourceShowSchema.omit({ action: true }),
+  /** The board verbs are client actions too: `board --post`/`--reply` write one note each. */
+  ...hostedBoardSchemas,
 } as const;
 /** Immutable manifests and selected blobs live in R2, never in a Convex response. */
 export async function diffHostedSource(transport: HostedAgentTransport, input: unknown) {

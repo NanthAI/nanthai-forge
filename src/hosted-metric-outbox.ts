@@ -24,7 +24,12 @@ const lifecycle: Record<string, 'start' | 'checkpoint' | 'sync' | 'finish'> = {
   finish: 'finish',
 };
 /** Recorded worker/run/batch cause of a no-owner incident. Codes alone name it. */
-const noOwnerCodes = new Set(['LANDING_STALLED', 'MAC_RUNNER_NO_OWNER', 'MAC_RUNNER_LEASE_EXPIRED']);
+const noOwnerCodes = new Set([
+  'LANDING_STALLED',
+  'LANDING_DRIVER_EXHAUSTED',
+  'MAC_RUNNER_NO_OWNER',
+  'MAC_RUNNER_LEASE_EXPIRED',
+]);
 export function metricOutboxDirectory(address: HostedAgentAddress) {
   const base = process.env.XDG_CONFIG_HOME || join(homedir(), '.config');
   return join(base, 'forge', 'metric-outbox', digest(`${address.url}\0${address.projectId}`).slice(0, 32));

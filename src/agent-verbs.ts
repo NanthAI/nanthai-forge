@@ -29,6 +29,12 @@ export const verbModes: Readonly<Record<Verb, Readonly<Record<string, string>>>>
   land: { '--save': 'finish', '--resume-ready': 'land-ready' },
 };
 
+/** Hosted board (Issue 9c8490a4): `board` reads, `board --post`/`--reply` write. Client actions. */
+export const boardModes: Readonly<Record<string, string>> = {
+  '--post': 'board-post',
+  '--reply': 'board-reply',
+};
+
 /** Operator and repair actions, reached with `nforge x ROOT ACTION`. Same schemas and authority. */
 export const operatorActions = [
   'undo-sync',
@@ -78,6 +84,7 @@ export const namedReads = [
   'brief',
   'peers',
   'queue',
+  'board',
   'handoff-read',
   'making-of',
   'metrics',
@@ -110,8 +117,13 @@ export type VerbForm = { verb: string; flags: string[]; operator: boolean };
 /** Split `VERB [--mode…] [JSON | --command-file FILE | --help]` into its form and the remainder. */
 export function parseVerbForm(verb: string, rest: string[], operator = false): [VerbForm, string[]] {
   const flags: string[] = [];
-  const modes =
-    (lifecycleVerbs as readonly string[]).includes(verb) && !operator ? verbModes[verb as Verb] : {};
+  const modes = operator
+    ? {}
+    : (lifecycleVerbs as readonly string[]).includes(verb)
+      ? verbModes[verb as Verb]
+      : verb === 'board'
+        ? boardModes
+        : {};
   while (rest[0] !== undefined && (Object.hasOwn(modes, rest[0]) || rest[0] === '--check-only')) {
     invariant(!flags.includes(rest[0]), 'BAD_ARGUMENT', `Repeated ${rest[0]}.`);
     flags.push(rest.shift()!);
@@ -137,6 +149,7 @@ export function lowerVerb(form: VerbForm, hosted: boolean): string {
   const mode = form.flags.find(flag => flag !== '--check-only');
   if (form.verb === 'save' && !mode) return hosted ? 'save' : 'checkpoint';
   if (form.verb === 'save' && mode === '--check') return hosted ? 'check' : 'run';
+  if (form.verb === 'board') return mode ? boardModes[mode]! : 'board';
   return mode ? verbModes[form.verb as Verb][mode]! : form.verb;
 }
 

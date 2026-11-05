@@ -36,6 +36,7 @@ export const capabilities = query({
     presenceVersion: v.optional(v.literal(1)),
     /** Contract features the client may rely on; the reply names the ones this code implements. */
     features: v.optional(v.array(v.string())),
+    boardVersion: v.optional(v.literal(1)),
   },
   returns: v.string(),
   handler: async (
@@ -55,6 +56,7 @@ export const capabilities = query({
       openLanesVersion,
       presenceVersion,
       features,
+      boardVersion,
     },
   ) => {
     try {
@@ -74,6 +76,7 @@ export const capabilities = query({
           ...(features ? { features: advertisedFeatures(features) } : {}),
           ...(openLanesVersion === 1 ? { openLanesVersion: 1 } : {}),
           ...(presenceVersion === 1 ? { presenceVersion: 1 } : {}),
+          ...(boardVersion === 1 ? { boardVersion: 1 } : {}),
           ...(overlapVersion === 1 ? { overlapVersion: 1 } : {}),
           ...(overlapEvidenceVersion === 1 ? { overlapEvidenceVersion: 1 } : {}),
           ...(metricReceiptVersion === 1 ? { metricReceiptVersion: 1 } : {}),

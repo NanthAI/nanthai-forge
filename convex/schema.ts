@@ -1,6 +1,7 @@
 import { finishReadTables } from './projectFinishReadFields';
 // SPDX-License-Identifier: Apache-2.0
 import { hostedOverlapTables } from './projectHostedOverlapFields';
+import { boardTables } from './projectBoardFields';
 import { hostedFrictionTables } from './projectHostedFrictionFields';
 import { selfMetricBillTables } from './projectSelfMetricBillFields';
 import { selfMetricReceiptTables } from './projectSelfMetricReceiptFields';
@@ -743,6 +744,7 @@ export default defineSchema({
   ...hostedFrictionTables,
   ...selfMetricReceiptTables,
   ...hostedOverlapTables,
+  ...boardTables,
   ...hostedDecisionTables,
   ...hostedTrustTables,
   imports: defineTable(jobFields)

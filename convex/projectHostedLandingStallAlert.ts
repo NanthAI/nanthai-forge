@@ -11,7 +11,7 @@ import { hostedLandingProgressAt } from '../src/hosted-landing-stall';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { effectivePolicy } from '../src/autonomy-policy';
 import { effectiveAgentDefaults, effectiveAgentDefaultsSchema } from '../src/agent-parallel-defaults';
-import { deliverStallAlert, stallAlert, type StallAlertTier } from '../src/stall-alerts';
+import { deliverStallAlert, exhaustedStallAlert, stallAlert, type StallAlertTier } from '../src/stall-alerts';
 
 const tier = v.union(v.literal(1), v.literal(2));
 type Identity = { projectId: Id<'hostedProjects'>; submissionId: string; lastProgressAt: string };
@@ -59,7 +59,7 @@ export async function latestStallAlert(
     .order('desc')
     .take(1);
   if (!row || row.lastProgressAt !== stall.lastProgressAt) return undefined;
-  const { tier, text, at } = JSON.parse(row.value) as { tier: StallAlertTier; text: string; at: string };
+  const { tier, text, at } = JSON.parse(row.value) as { tier: StallAlertTier | 3; text: string; at: string };
   return { tier, text, at };
 }
 
@@ -121,6 +121,44 @@ export async function raiseStallAlert(
     settings: canonicalPayload(settings),
   });
   if (input.tier === 1) await scheduleTier(ctx, input, 2, settings.repeatAfterMinutes);
+  return value;
+}
+
+/** The supervisor's cap (19328518) ended this landing: tell the owner once, at
+ * the decision, whether or not the ending transaction itself later succeeds.
+ * One indexed read for the dedupe; disabled alerts schedule nothing. */
+export async function raiseExhaustedAlert(
+  ctx: MutationCtx,
+  input: Identity,
+  state: HostedLandingState,
+  reason: string,
+  now = Date.now(),
+) {
+  const project = await ctx.db.get(input.projectId);
+  if (!project) return null;
+  const settings = alerts(project);
+  if (!settings.enabled) return null;
+  const sent = await ctx.db
+    .query('projectHostedStallAlerts')
+    .withIndex('by_project_and_submission', q =>
+      q.eq('projectId', input.projectId).eq('submissionId', input.submissionId),
+    )
+    .order('desc')
+    .take(20);
+  if (sent.some(item => item.lastProgressAt === input.lastProgressAt && item.tier === 3)) return null;
+  const value = exhaustedStallAlert(state, reason, { project: project.name, now });
+  await ctx.db.insert('projectHostedStallAlerts', {
+    projectId: input.projectId,
+    submissionId: input.submissionId,
+    lastProgressAt: input.lastProgressAt,
+    tier: 3,
+    value: canonicalPayload(value),
+  });
+  await ctx.scheduler.runAfter(0, makeFunctionReference<'action'>('projectHostedLandingStallAlert:deliver'), {
+    subject: value.subject,
+    text: value.text,
+    settings: canonicalPayload(settings),
+  });
   return value;
 }
 

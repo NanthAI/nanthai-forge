@@ -77,6 +77,8 @@ export const hostedAgentCapabilitiesSchema = z
     openLanesVersion: z.literal(1).optional(),
     /** Overlap reads accept `presence` and return related open Lanes (Issue 9c8490a4). */
     presenceVersion: z.literal(1).optional(),
+    /** Agent board (Issue 9c8490a4): board verbs and board notes on Lane actions. */
+    boardVersion: z.literal(1).optional(),
     overlapVersion: z.literal(1).optional(),
     overlapEvidenceVersion: z.literal(1).optional(),
     /** Deferred caller outcome/delivery receipts may ride on CLI mutations. */

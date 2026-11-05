@@ -36,6 +36,8 @@ export async function cancelHostedLanding(
     abandonOperationId?: string;
     /** The stall deadline ended it (metric 5.3): a Forge outcome, not an operator cancel. */
     drop?: true;
+    /** The supervisor's typed outcome for a drop (19328518): defaults to LANDING_STALLED. */
+    code?: 'LANDING_DRIVER_EXHAUSTED';
   },
 ) {
   const { projectId, actor, request } = input;
@@ -107,7 +109,7 @@ export async function cancelHostedLanding(
         phase: 'terminal-failed',
         observation: landingObservation('cancelled'),
         error: {
-          code: input.drop ? 'LANDING_STALLED' : 'LANDING_CANCELLED',
+          code: input.drop ? (input.code ?? 'LANDING_STALLED') : 'LANDING_CANCELLED',
           message: input.reason ?? 'The hosted landing request was cancelled.',
         },
       };

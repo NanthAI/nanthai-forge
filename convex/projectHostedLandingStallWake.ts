@@ -30,11 +30,12 @@ export async function landingAlarmPatch(ctx: MutationCtx, state: HostedLandingSt
   const row = canonical ?? desired;
   if (!row) return null;
   const at = hostedLandingProgressAt(state);
-  const pending =
-    state.observation.state === 'pending' &&
-    state.observation.pendingReason !== 'waiting-for-review' &&
-    state.observation.stall?.lastProgressAt !== at;
-  if (pending && row.alarm?.lastProgressAt === at) return null;
+  const live =
+    state.observation.state === 'pending' && state.observation.pendingReason !== 'waiting-for-review';
+  const pending = live && state.observation.stall?.lastProgressAt !== at;
+  // Same progress time: keep its alarm, or the supervisor round that follows a
+  // raised stall (19328518); writes that make no progress must not cancel it.
+  if (live && row.alarm?.lastProgressAt === at) return null;
   if (row.alarm) await ctx.scheduler.cancel(row.alarm.taskId);
   if (!pending) return row.alarm ? { id: row._id, alarm: null } : null;
   const taskId = await ctx.scheduler.runAfter(

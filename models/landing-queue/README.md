@@ -51,6 +51,8 @@ npm run model:landing-queue -- cohorthold             # expected: lost release w
 npm run model:landing-queue -- cohorthold-fixed
 npm run model:landing-queue -- lostdispatch           # expected: a lost check dispatch strands the head (a7de3a93)
 npm run model:landing-queue -- lostdispatch-fixed
+npm run model:landing-queue -- supervisor             # expected: a driver that fails every time strands the head (19328518)
+npm run model:landing-queue -- supervisor-fixed
 npm run model:landing-queue -- retrykeep              # expected: a same-head retry discards dependent checks (ea86f3fb)
 npm run model:landing-queue -- retrykeep-fixed
 ```
@@ -303,6 +305,18 @@ algorithm drift: changes to these code anchors require manual model review.
    retries alone cannot promise L1 in that fault model. Recommendation: replay
    the six incidents with existing implementation fixtures and verify typed
    exhaustion/terminal settlement on permanent errors; no idle poller is proposed.
+   **Follow-up (19328518, fixed).** `supervisor` keeps the head pending while
+   its step is lost (`main = 0`) or its lease is held but every advance throws
+   (`main = 1`); with a permanent fault the unfixed retries loop forever and
+   `HeadSettles` fails. `supervisor-fixed` replays the lost step from the stall
+   alarm's supervisor rounds and, after two failed repairs, ends the entry with
+   `LANDING_DRIVER_EXHAUSTED`; `FailsOnlyPermanent` checks that it ends only on a
+   permanent fault after exactly two repairs. Code: rounds and typed exhaustion in
+   `convex/projectHostedLandingStall.ts` and `convex/projectHostedLandingExhaust.ts`,
+   lease re-claim cap in `convex/projectHostedLandingControl.ts`
+   (`LANDING_LEASE_RETRIES`). The rounds are timers that exist only after a stall
+   alarm fired for a pending entry, so an empty queue schedules nothing.
+   `tests/hosted-landing-supervisor.test.mjs` replays the incidents per driver.
 5. **Moving-main starvation (51ff7e8e; historical scheduling defect and fairness
    boundary).** Recompose/check, another writer moves main, retry; repeat forever.
    The `moving` litmus finds an infinite cycle despite weakly fair driver steps.
@@ -410,10 +424,12 @@ or production historical replay is implied.
 | `prequeue-cohort-mixed` | 620 | 278 | 1.476 | Passed |
 | `prequeue-cohort-before` | 306 | 199 | 2.015 | Expected NoEarlyCohort |
 | `prequeue-hold-order` | 123,398 | 58,527 | 496.188 | Expected liveness violation |
+| `supervisor` | 13 | 10 | <1.1 | Expected liveness violation |
+| `supervisor-fixed` | 15 | 15 | <1.1 | Passed; lost step and throwing advance branches |
 | `retrykeep` | 5 | 5 | 0.677 | Expected KeepsSameHead |
 | `retrykeep-fixed` | 15 | 15 | 0.548 | Passed; same-head and changed-head retries |
 
-All 18 configurations matched their expected outcomes on the registered Java 25.0.3 JDK (2026-11-05, Lane fefd80ee). The seven `prequeue` rows and every `LandingQueue` configuration were then re-run on the spec composed with that change (2026-11-05, Issue e7d27937): all matched, and the non-`prequeue` state counts were unchanged. The `prequeue` rows are from that run. The six positive queue configurations fully exhausted their state graphs; the negative cases stopped at the named counterexample. The default remained below five minutes (94.046 s); `isolation` took 290.953 s. The six cohort-hold rows were added with Issue 10b0a94b (2026-11-05, Lane 2881e6cc). With `Hold = "none"` the `prequeue` and `small` counts were re-run and unchanged. `prequeue-cohort` and `prequeue-cohort-mixed` use `MoveBound = 0`: queue publications move main, which is what refuses the Lane proofs. With one extra external move, `prequeue-cohort` had not finished after 18 minutes and is not counted. `prequeue-hold-order` keeps that move.
+All 18 configurations matched their expected outcomes on the registered Java 25.0.3 JDK (2026-11-05, Lane fefd80ee). The seven `prequeue` rows and every `LandingQueue` configuration were then re-run on the spec composed with that change (2026-11-05, Issue e7d27937): all matched, and the non-`prequeue` state counts were unchanged. The `prequeue` rows are from that run. The six positive queue configurations fully exhausted their state graphs; the negative cases stopped at the named counterexample. The default remained below five minutes (94.046 s); `isolation` took 290.953 s. The six cohort-hold rows were added with Issue 10b0a94b (2026-11-05, Lane 2881e6cc). With `Hold = "none"` the `prequeue` and `small` counts were re-run and unchanged. `prequeue-cohort` and `prequeue-cohort-mixed` use `MoveBound = 0`: queue publications move main, which is what refuses the Lane proofs. With one extra external move, `prequeue-cohort` had not finished after 18 minutes and is not counted. `prequeue-hold-order` keeps that move. The two `supervisor` rows were added with Issue 19328518 (2026-11-05, Lane d3a3c850); every Incidents configuration was re-run with them and matched, with existing counts unchanged.
 
 With ea86f3fb (2026-11-05, Lane c1759651) `small`, `strict`, `races`, `six-slots` and `isolation` were re-run with `StackPinned`; their rows are from that run. A platform retry no longer branches into invalidation, so `small`, `strict`, `races` and `isolation` explore fewer states. `six-slots` has no platform outcome and kept its count; its wall time on current main is ~17 min (an unmodified copy of the main model ran at the same rate, friction filed). The other rows predate this change.
 

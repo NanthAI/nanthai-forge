@@ -28,10 +28,16 @@ import { retrySoloLandingCheck } from './projectHostedLandingCheckRetry';
 import { loadHostedCheck } from './projectHostedCheckStore';
 import { requireHostedCheckEvidence } from './projectHostedCheckRead';
 import { hostedCheckTerminal } from '../src/hosted-check';
-import { HOSTED_LANDING_LEASE_MS, landingObservation, type HostedLandingState } from '../src/hosted-landing';
+import {
+  HOSTED_LANDING_LEASE_MS,
+  hostedLandingStateSchema,
+  landingObservation,
+  type HostedLandingState,
+} from '../src/hosted-landing';
 import { ForgeError, invariant } from '../src/errors';
 import { finishRow } from './projectHostedFinishWake';
 import { claimFinishPrecompose } from './projectHostedFinishPrecompose';
+import { alertExhausted, exhaustLanding, exhaustedReason } from './projectHostedLandingExhaust';
 export type LandingClaim = LandingChannel & {
   owner: string;
   token: number;
@@ -68,6 +74,25 @@ export async function claimLandingQueue(
     (row.attemptId !== queue.lease!.attemptId || row.phase === 'terminal-failed' || row.phase === 'landed')
   )
     row = null;
+  // 19328518: an advance that throws every time (a permanent non-Forge fault)
+  // rolls back, so the expired lease re-selects the same attempt forever while
+  // the queue still looks owned. Back the watchdog off and end that entry with
+  // a reason after a few re-claims whose advance never committed.
+  // The lease records the row version its claim wrote; a row still at that
+  // version means no advance committed since (no extra write to settle it).
+  const retries =
+    row && queue.lease!.claimed !== undefined && JSON.parse(row.value).version === queue.lease!.claimed
+      ? (queue.lease!.retries ?? 0) + 1
+      : 0;
+  if (row && retries > LANDING_LEASE_RETRIES) {
+    const stuck = hostedLandingStateSchema.parse(JSON.parse(row.value));
+    const reason = exhaustedReason(
+      `The landing controller step failed ${retries - 1} times in a row on this entry without recording a result.`,
+    );
+    await alertExhausted(ctx, stuck, reason);
+    await exhaustLanding(ctx, stuck, reason);
+    return null;
+  }
   const held = { until: null as number | null };
   if (!row) {
     row = await nextTrainLandingRow(ctx, queue, now, held);
@@ -87,16 +112,18 @@ export async function claimLandingQueue(
       await scheduleLandingWake(ctx, { ...queue, lease: null, wake: null }, held.until, now);
     return null;
   }
-  const lease = {
-    owner: input.wakeId,
-    token: queue.fence + 1,
-    until: now + HOSTED_LANDING_LEASE_MS,
-    submissionId: row.submissionId,
-    attemptId: row.attemptId,
-  };
   const selectedState = (
     await loadLanding(ctx, { projectId: input.projectId, submissionId: row.submissionId })
   ).state;
+  const lease = {
+    owner: input.wakeId,
+    token: queue.fence + 1,
+    until: now + HOSTED_LANDING_LEASE_MS * 2 ** retries,
+    submissionId: row.submissionId,
+    attemptId: row.attemptId,
+    claimed: selectedState.version + 1,
+    ...(retries ? { retries } : {}),
+  };
   await writeLanding(
     ctx,
     row,
@@ -122,6 +149,9 @@ export async function claimLandingQueue(
     attemptId: lease.attemptId,
   };
 }
+/** Re-claims of one attempt allowed before the supervisor ends it: the watchdog
+ * waits 1, 2, 4 and 8 lease periods (about 7.5 min) between them. */
+export const LANDING_LEASE_RETRIES = 4;
 /** H14 must call this in the publication transaction before its independent
  * authority/main/receipt/policy/exact-run CAS. A lease is not acceptance evidence. */
 export async function requireLandingLease(ctx: MutationCtx, claim: LandingClaim, now = Date.now()) {

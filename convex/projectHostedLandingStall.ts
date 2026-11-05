@@ -4,12 +4,13 @@ import { v } from 'convex/values';
 import { makeFunctionReference } from 'convex/server';
 import { internalMutation } from './server';
 import type { MutationCtx } from './_generated/server';
+import type { Id } from './_generated/dataModel';
 import type { LandingIdentity, LandingRow } from './projectHostedLandingStore';
 import { landingRow, loadLanding, writeLanding } from './projectHostedLandingStore';
 import { desiredLanding } from './projectHostedLandingDesiredWake';
 import { hostedLandingStateSchema, type HostedLandingState } from '../src/hosted-landing';
 import { hostedLandingProgressAt, hostedLandingStall } from '../src/hosted-landing-stall';
-import { LANDING_DROP_MS } from '../src/landing-stall';
+import { LANDING_DROP_MS, LANDING_STALL_MS } from '../src/landing-stall';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { scheduleStallAlert } from './projectHostedLandingStallAlert';
 import { loadBatch, writeBatch } from './projectHostedLandingBatchStore';
@@ -20,11 +21,40 @@ import { finishRow, scheduleFinish } from './projectHostedFinishWake';
 import { cancelHostedLanding } from './projectHostedLandingCancel';
 import { holdsLandingOrder } from './projectHostedLandingOrder';
 import { reconcileUnacknowledgedCheck } from './projectHostedCheckReconcile';
+import { redriveLanding } from './projectHostedLandingRedrive';
+import { alertExhausted, exhaustLanding, exhaustedReason } from './projectHostedLandingExhaust';
 
 type Stalled = LandingIdentity & { lastProgressAt: string };
 const identity = { projectId: v.id('hostedProjects'), submissionId: v.string(), lastProgressAt: v.string() };
-/** While a live owner keeps it waiting, the deadline re-arms at 2, 4, 8 and 16 h, then stops. */
+/** While a live owner keeps it waiting, the deadline re-arms at 2, 4, 8 and 16 h; at
+ * the cap the supervisor ends the entry with a reason (19328518), unless a healthy
+ * train is still moving the queue. */
 export const LANDING_DROP_ATTEMPTS = 4;
+/** Two consecutive supervisor rounds whose repair crashed, or whose replayed driver
+ * failed again, prove a permanent fault (2026-10-30 14:20: the 15-minute retry
+ * crashed the same way). A write outage cannot count: its own rounds cannot commit. */
+export const LANDING_REPAIR_FAILURES = 2;
+/** An ending transaction that itself crashes is retried this often, then the chain
+ * stops; the cap alert has already gone out. */
+export const LANDING_EXHAUST_RETRIES = 2;
+const supervised = (phase: LandingRow['phase']) =>
+  phase === 'queued' || phase === 'checking' || phase === 'ready';
+/** Entries a supervisor round follows. A Ready entry counts only while a hosted
+ * finish driver owns it; without one it waits for its requester (an explicit
+ * person acceptance, H14), which is not a stall to end. */
+async function supervises(ctx: MutationCtx, row: LandingRow) {
+  if (row.phase !== 'ready') return supervised(row.phase);
+  return Boolean(await finishRow(ctx, row));
+}
+const repairMode = v.union(v.literal('alarm'), v.literal('resolve'), v.literal('drop'), v.literal('exhaust'));
+type RepairMode = 'alarm' | 'resolve' | 'drop' | 'exhaust';
+type Round = Stalled & {
+  attempt: number;
+  repair?: Id<'_scheduled_functions'>;
+  failures?: number;
+  exhaust?: boolean;
+  reason?: string;
+};
 
 export const alarm = internalMutation({
   args: identity,
@@ -35,10 +65,27 @@ export const alarm = internalMutation({
 });
 
 export const deadline = internalMutation({
-  args: { ...identity, attempt: v.number() },
+  args: {
+    ...identity,
+    attempt: v.number(),
+    repair: v.optional(v.id('_scheduled_functions')),
+    failures: v.optional(v.number()),
+    exhaust: v.optional(v.boolean()),
+    reason: v.optional(v.string()),
+  },
   returns: v.null(),
   handler: async (ctx, input) => {
     return resolveStalledLanding(ctx, input);
+  },
+});
+
+/** The supervisor's actions run apart from its bookkeeping: a repair that throws
+ * fails only this task, and the next supervisor round sees it and escalates. */
+export const repair = internalMutation({
+  args: { ...identity, mode: repairMode, reason: v.optional(v.string()) },
+  returns: v.null(),
+  handler: async (ctx, input) => {
+    return repairStalledLanding(ctx, input);
   },
 });
 
@@ -54,42 +101,256 @@ export async function raiseLandingAlarm(ctx: MutationCtx, input: Stalled, now = 
   if (!stall && queue && state.observation.state === 'pending') {
     // Keep the existing orphan-recovery deadline even when a healthy train owns
     // the wait. No follower alarm, alert or controller redrive is warranted.
-    await scheduleDropDeadline(ctx, input, 0, Date.parse(input.lastProgressAt) + LANDING_DROP_MS);
+    await scheduleDeadline(
+      ctx,
+      canonical!._id,
+      { ...input, attempt: 0 },
+      Date.parse(input.lastProgressAt) + LANDING_DROP_MS,
+    );
     return null;
   }
-  if (!stall || state.observation.stall?.lastProgressAt === stall.lastProgressAt) return null;
+  if (!stall) return null;
+  if (state.observation.stall?.lastProgressAt === stall.lastProgressAt)
+    // The stall was raised already: this is a supervisor round restored after it
+    // was lost (a redrive re-arms a failed one as this alarm). Continue the ladder.
+    return canonical && (await supervises(ctx, canonical))
+      ? resolveStalledLanding(ctx, { ...input, attempt: 0 }, now)
+      : null;
+  // A passed entry waiting for an older submission is not stalled: the older
+  // one owns progress and its own alarm. If it no longer holds its place, re-drive.
+  if (canonical?.orderWait && canonical.phase === 'ready' && (await aheadHoldsOrder(ctx, canonical)))
+    return null;
+  const token = { ...input, lastProgressAt: stall.lastProgressAt };
+  // Only a Ready entry's repair replays settlement IO that can crash (2026-10-30
+  // 14:20): it runs as its own task. Queued and checking repairs stay inline, as
+  // before, so a batch waiting on slow CI costs one call per member.
+  const inline = canonical?.phase !== 'ready';
+  // Ready: schedule the repair only when a driver is lost (a read-only probe) or
+  // an order waiter lost its place; a member waiting on its leader costs nothing.
+  const repair =
+    !inline &&
+    (canonical!.orderWait || (await redriveLanding(ctx, input, { row: canonical!, probe: true })).length)
+      ? await scheduleRepair(ctx, token, 'alarm')
+      : undefined;
+  const next = { ...state, version: state.version + 1, observation: { ...state.observation, stall } };
+  const project = await ctx.db.get(input.projectId);
+  if (project) await scheduleStallAlert(ctx, token, project);
+  if (canonical) {
+    await writeLanding(ctx, canonical, next, canonical.runnable);
+    if (inline) await repairStalledLanding(ctx, { ...token, mode: 'alarm' }, now);
+    // A check keeps its own run lease and execution watchdog: no round follows.
+    if (canonical.phase === 'checking') return null;
+    // This alarm fires once per progress time. One retained supervisor round
+    // follows its repair (Issue 108a24e3: an owner that stopped after the alarm
+    // left two entries queued for 36 h; 19328518: a Ready head nobody drove).
+    // A dependency wait has its parent's own outcome event instead.
+    if (state.observation.pendingReason !== 'waiting-for-dependency' && (await supervises(ctx, canonical)))
+      await scheduleDeadline(ctx, canonical._id, { ...token, attempt: 0, repair }, now + LANDING_STALL_MS);
+  } else {
+    await ctx.db.patch(row._id, { value: canonicalPayload(next) });
+    await repairStalledLanding(ctx, { ...token, mode: 'alarm' }, now);
+  }
+  return null;
+}
+
+async function aheadHoldsOrder(ctx: MutationCtx, row: LandingRow) {
+  const ahead = await landingRow(ctx, { projectId: row.projectId, submissionId: row.orderWait! });
+  return Boolean(ahead && holdsLandingOrder(ahead, hostedLandingStateSchema.parse(JSON.parse(ahead.value))));
+}
+
+/** One supervisor action. `alarm`/`resolve` replay every lost driver (queue wake,
+ * finish step, check callback, dispatch, compose, dependency event) and repair a
+ * queued entry's ownership; `drop` may then end an ownerless queued entry (metric
+ * 5.3); `exhaust` ends it with the supervisor's typed reason. */
+export async function repairStalledLanding(
+  ctx: MutationCtx,
+  input: Stalled & { mode: RepairMode; reason?: string },
+  now = Date.now(),
+) {
+  const canonical = await landingRow(ctx, input);
+  if (!canonical) {
+    if (input.mode === 'alarm') await redriveLanding(ctx, input);
+    return null;
+  }
+  const state = hostedLandingStateSchema.parse(JSON.parse(canonical.value));
+  if (
+    !supervised(canonical.phase) ||
+    state.observation.state !== 'pending' ||
+    hostedLandingProgressAt(state) !== input.lastProgressAt
+  )
+    return null;
+  if (input.mode === 'exhaust') {
+    await exhaustLanding(ctx, state, input.reason ?? exhaustedReason('The landing supervisor gave up.'));
+    return null;
+  }
   // Incident a7de3a93: a checking entry whose dispatch no runner acknowledged
   // has no other owner for 12 h. Act on it, not only flag it (one read otherwise).
-  if (canonical?.phase === 'checking' && canonical.runId)
+  if (canonical.phase === 'checking' && canonical.runId)
     await reconcileUnacknowledgedCheck(ctx, { projectId: input.projectId, runId: canonical.runId }, now);
-  if (canonical?.orderWait && canonical.phase === 'ready') {
-    // A passed entry waiting for an older submission is not stalled: the older
-    // one owns progress and its own alarm. If it no longer holds its place, re-drive.
-    const ahead = await landingRow(ctx, { projectId: input.projectId, submissionId: canonical.orderWait });
-    if (ahead && holdsLandingOrder(ahead, hostedLandingStateSchema.parse(JSON.parse(ahead.value))))
-      return null;
+  if (canonical.orderWait && canonical.phase === 'ready' && !(await aheadHoldsOrder(ctx, canonical))) {
     const finish = await finishRow(ctx, input);
     if (finish) await scheduleFinish(ctx, finish);
   }
-  const next = { ...state, version: state.version + 1, observation: { ...state.observation, stall } };
-  const project = await ctx.db.get(input.projectId);
-  if (project) await scheduleStallAlert(ctx, { ...input, lastProgressAt: stall.lastProgressAt }, project);
-  if (canonical) {
-    await writeLanding(ctx, canonical, next, canonical.runnable);
-    // This alarm fires once per progress time. One later deadline makes sure the
-    // entry is re-driven or ends (Issue 108a24e3: an owner that stopped after
-    // the alarm left two entries queued for 36 h). Only queued entries can lose
-    // every owner: checking ones keep the run lease watchdog, desired goals their own.
-    if (state.phase === 'queued' && state.observation.pendingReason !== 'waiting-for-dependency')
-      await scheduleDropDeadline(
-        ctx,
-        { ...input, lastProgressAt: stall.lastProgressAt },
-        0,
-        Date.parse(stall.lastProgressAt) + LANDING_DROP_MS,
-      );
-    if (state.phase === 'queued') await redriveQueued(ctx, input, canonical, state);
-  } else await ctx.db.patch(row._id, { value: canonicalPayload(next) });
+  await redriveLanding(ctx, input);
+  if (canonical.phase !== 'queued') return null;
+  const loaded = await loadLanding(ctx, input);
+  if (input.mode === 'alarm') {
+    if (loaded.state.phase === 'queued') await redriveQueued(ctx, input, loaded.row, loaded.state);
+    return null;
+  }
+  return resolveQueued(ctx, input, loaded.row, loaded.state, input.mode === 'drop', now);
+}
+
+/** One supervisor round (pure bookkeeping: reads, schedules, one row patch): did
+ * the last repair take? Escalate on a repeated failure, keep the dropped-landing
+ * deadline and backoff otherwise, and end the entry at the cap. Retained on the
+ * row as its alarm, so a lost round is restored like any lost step. No round
+ * exists for an entry that progresses, settles or waits for review: idle is free. */
+export async function resolveStalledLanding(ctx: MutationCtx, input: Round, now = Date.now()) {
+  const row = await landingRow(ctx, input);
+  if (!row) return null;
+  const state = hostedLandingStateSchema.parse(JSON.parse(row.value));
+  if (!stalledSince(state, input.lastProgressAt) || !(await supervises(ctx, row))) return null;
+  // Parked behind an older entry that still holds its place: that one owns
+  // progress, and its exit re-arms this entry's alarm (c329d191).
+  if (row.orderWait && row.phase === 'ready' && (await aheadHoldsOrder(ctx, row))) return null;
+  const token = {
+    projectId: input.projectId,
+    submissionId: input.submissionId,
+    lastProgressAt: input.lastProgressAt,
+  };
+  const task = input.repair ? await ctx.db.system.get(input.repair) : null;
+  const crashed = task?.state.kind === 'failed';
+  if (input.exhaust) {
+    const failures = (input.failures ?? 0) + 1;
+    if (!crashed || failures > LANDING_EXHAUST_RETRIES) return null;
+    const repair = await scheduleRepair(ctx, token, 'exhaust', input.reason);
+    await scheduleDeadline(ctx, row._id, { ...input, repair, failures }, now + LANDING_STALL_MS);
+    return null;
+  }
+  // Read-only: which drivers are lost now (a failed task, or a finish step that
+  // stopped without scheduling its next one). Lost again right after a repair
+  // replayed it is a failure: a step that keeps stopping is a permanent fault.
+  const found = await redriveLanding(ctx, input, { row, probe: true });
+  const lost = [...new Set(found.map(kind => (kind === 'finish-idle' ? 'finish' : kind)))];
+  const failing = crashed || (input.repair !== undefined && lost.length > 0);
+  const failures = failing ? (input.failures ?? 0) + 1 : 0;
+  if (failures >= LANDING_REPAIR_FAILURES)
+    return endLanding(
+      ctx,
+      row._id,
+      state,
+      { ...input, failures: 0 },
+      exhaustedReason(
+        crashed
+          ? `Forge's repair of this landing crashed ${failures} times in a row at ${row.phase}.`
+          : `Forge re-drove the lost ${lost.join(', ')} step ${failures} times and it failed again each time.`,
+      ),
+      now,
+    );
+  if (crashed || lost.length) {
+    const repair = await scheduleRepair(ctx, token, 'resolve');
+    await scheduleDeadline(ctx, row._id, { ...input, repair, failures }, now + LANDING_STALL_MS);
+    return null;
+  }
+  // A check keeps its own run lease and execution watchdog, which end a silent
+  // run; the supervisor stays only while it is replaying lost drivers.
+  if (row.phase === 'checking') return null;
+  const queue = row.phase === 'queued' ? await readQueueStatus(ctx, state, now) : null;
+  const dropAt = Date.parse(input.lastProgressAt) + LANDING_DROP_MS;
+  if (now < dropAt) {
+    // The repair took; hold the regular dropped-landing deadline.
+    await scheduleDeadline(ctx, row._id, { ...token, attempt: input.attempt }, dropAt);
+    return null;
+  }
+  // A live train already owns progress. Preserve its recovery deadline and
+  // backoff, without redriving healthy controllers on every follower timer.
+  const repair =
+    row.phase !== 'queued' || !queue?.owner
+      ? await scheduleRepair(ctx, token, row.phase === 'queued' ? 'drop' : 'resolve')
+      : undefined;
+  const next = { ...token, ...(repair ? { repair } : {}) };
+  if (input.attempt < LANDING_DROP_ATTEMPTS) {
+    await scheduleDeadline(
+      ctx,
+      row._id,
+      { ...next, attempt: input.attempt + 1 },
+      now + LANDING_DROP_MS * 2 ** (input.attempt + 1),
+    );
+    return null;
+  }
+  // A queued entry ends only through the drop repair (structurally ownerless);
+  // work something still drives is never ended: a live check runner has its own
+  // run watchdog, the controller lease its re-claim cap, and either exit
+  // re-selects this entry. Leave no timer here, as before 19328518.
+  if (row.phase === 'queued') return null;
+  const hours = Math.round((now - Date.parse(input.lastProgressAt)) / 3_600_000);
+  return endLanding(
+    ctx,
+    row._id,
+    state,
+    { ...token, attempt: input.attempt },
+    exhaustedReason(
+      `No landing progress for ${hours} h at ${row.phase} although its driver still looked live after every re-drive.`,
+    ),
+    now,
+  );
+}
+
+/** Decide the end: the alert goes out now, the ending runs as its own repair, and
+ * one more round retries the ending if it crashed. */
+async function endLanding(
+  ctx: MutationCtx,
+  rowId: Id<'projectHostedLandingRequests'>,
+  state: HostedLandingState,
+  input: Round,
+  reason: string,
+  now: number,
+) {
+  await alertExhausted(ctx, state, reason, input.lastProgressAt);
+  const token = {
+    projectId: input.projectId,
+    submissionId: input.submissionId,
+    lastProgressAt: input.lastProgressAt,
+  };
+  const repair = await scheduleRepair(ctx, token, 'exhaust', reason);
+  await scheduleDeadline(
+    ctx,
+    rowId,
+    { ...token, attempt: input.attempt, repair, failures: 0, exhaust: true, reason },
+    now + LANDING_STALL_MS,
+  );
   return null;
+}
+
+async function scheduleRepair(ctx: MutationCtx, input: Stalled, mode: RepairMode, reason?: string) {
+  return ctx.scheduler.runAfter(0, makeFunctionReference<'mutation'>('projectHostedLandingStall:repair'), {
+    projectId: input.projectId,
+    submissionId: input.submissionId,
+    lastProgressAt: input.lastProgressAt,
+    mode,
+    ...(reason ? { reason } : {}),
+  });
+}
+
+/** The next supervisor round, retained as the row's alarm for this progress
+ * time: progress or settlement cancels it, and a redrive restores it if it failed. */
+async function scheduleDeadline(
+  ctx: MutationCtx,
+  rowId: Id<'projectHostedLandingRequests'>,
+  input: Round,
+  at: number,
+) {
+  const row = await ctx.db.get(rowId);
+  // Never cancel the round that is running now; only a still-pending older one.
+  const old = row?.alarm ? await ctx.db.system.get(row.alarm.taskId) : null;
+  if (old?.state.kind === 'pending') await ctx.scheduler.cancel(old._id);
+  const taskId = await ctx.scheduler.runAfter(
+    Math.max(0, at - Date.now()),
+    makeFunctionReference<'mutation'>('projectHostedLandingStall:deadline'),
+    input,
+  );
+  await ctx.db.patch(rowId, { alarm: { taskId, lastProgressAt: input.lastProgressAt } });
 }
 
 async function redriveQueued(
@@ -141,14 +402,6 @@ async function redriveQueued(
   await wakeLandingQueue(ctx, { projectId: input.projectId, channel: 'main' });
 }
 
-async function scheduleDropDeadline(ctx: MutationCtx, input: Stalled, attempt: number, at: number) {
-  await ctx.scheduler.runAfter(
-    Math.max(0, at - Date.now()),
-    makeFunctionReference<'mutation'>('projectHostedLandingStall:deadline'),
-    { ...input, attempt },
-  );
-}
-
 const stalledSince = (state: HostedLandingState, lastProgressAt: string) =>
   state.observation.state === 'pending' &&
   state.observation.pendingReason !== 'waiting-for-review' &&
@@ -159,33 +412,23 @@ const stalledSince = (state: HostedLandingState, lastProgressAt: string) =>
  * progress and nothing live will drive it, end it with a stated outcome through
  * the cancellation path (peers re-selected, operation settled, queue released).
  * One read when progress happened since; at most 2 reads per batch member otherwise. */
-export async function resolveStalledLanding(
+async function resolveQueued(
   ctx: MutationCtx,
-  input: Stalled & { attempt: number },
-  now = Date.now(),
+  input: Stalled,
+  row: LandingRow,
+  state: HostedLandingState,
+  drop: boolean,
+  now: number,
 ) {
-  const row = await landingRow(ctx, input);
-  if (!row) return null;
-  const state = hostedLandingStateSchema.parse(JSON.parse(row.value));
   if (state.phase !== 'queued' || !stalledSince(state, input.lastProgressAt)) return null;
-  // A live train already owns progress. Preserve its existing recovery deadline
-  // and backoff, without redriving healthy controllers on every follower timer.
   const queue = await readQueueStatus(ctx, state, now);
-  if (!queue?.owner) await redriveQueued(ctx, input, row, state);
-  const after = queue?.owner ? { row, state } : await loadLanding(ctx, input);
-  if (after.state.phase !== 'queued' || !stalledSince(after.state, input.lastProgressAt)) return null;
-  const owner = queue?.owner ?? (await liveOwner(ctx, input, after.row, after.state));
-  if (owner) {
-    // Never end work something live still drives; its own path re-selects this entry.
-    if (input.attempt < LANDING_DROP_ATTEMPTS)
-      await scheduleDropDeadline(
-        ctx,
-        input,
-        input.attempt + 1,
-        now + LANDING_DROP_MS * 2 ** (input.attempt + 1),
-      );
+  if (queue?.owner) return null;
+  await redriveQueued(ctx, input, row, state);
+  const after = await loadLanding(ctx, input);
+  if (!drop || after.state.phase !== 'queued' || !stalledSince(after.state, input.lastProgressAt))
     return null;
-  }
+  // Never end work something live still drives; its own path re-selects this entry.
+  if (await liveOwner(ctx, input, after.row, after.state)) return null;
   const hours = Math.round((now - Date.parse(input.lastProgressAt)) / 3_600_000);
   await cancelHostedLanding(ctx, {
     projectId: input.projectId,
