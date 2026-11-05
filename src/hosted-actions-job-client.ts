@@ -15,7 +15,12 @@ import {
   actionsRefusalReasons,
   actionsPreflightCapability,
 } from './hosted-actions-capabilities.js';
-import { retryActionsInfrastructure, actionsInfrastructureResponse } from './hosted-actions-retry.js';
+import {
+  retryActionsInfrastructure,
+  actionsInfrastructureResponse,
+  actionsDeliveryDeadlineMs,
+  actionsDeliveryPolicy,
+} from './hosted-actions-retry.js';
 import { parseTimingHistory, timingDurations } from '../scripts/test-shards.mjs';
 export class ActionsJobClient {
   run: HostedCheckRun | null = null;
@@ -33,12 +38,6 @@ export class ActionsJobClient {
     readonly request = networkFetch,
   ) {}
   async call(command: z.infer<typeof directCommandSchema>) {
-    if (this.expires < Date.now() + 30_000) {
-      this.refreshing ??= this.refreshToken().finally(() => {
-        this.refreshing = null;
-      });
-      await this.refreshing;
-    }
     // Session/source are reads; plan is digest-CAS; output is create-only;
     // result is deduped by run/index/digest; sourcePack uses its immutable key.
     const body = JSON.stringify({
@@ -47,28 +46,42 @@ export class ActionsJobClient {
       ...(this.run ? { fence: this.run.fence } : {}),
       command: actionsCommandForCapabilities(command, this.capabilities),
     });
-    const { response, value } = await retryActionsInfrastructure(async signal => {
-      const response = await actionsInfrastructureResponse(
-        await this.request(`${this.site}/checks/actions`, {
-          method: 'POST',
-          redirect: 'error',
-          signal,
-          headers: { authorization: `Bearer ${this.token}`, 'content-type': 'application/json' },
-          body,
-        }),
-      );
-      if (!response.ok) {
-        // Only a fixed reason vocabulary may reach logs; never echo a response body.
-        const body = (await response.json().catch(() => null)) as { reason?: unknown } | null;
-        const reason = actionsRefusalReasons.find(value => value === body?.reason);
-        invariant(
-          false,
-          reason === 'cancelled' ? 'CHECK_CANCELLED' : 'RUNNER_UNAVAILABLE',
-          `Convex Actions request failed (${response.status}${reason ? `; reason: ${reason}` : ''}).`,
+    // A finished check's output and result outlast a write outage (72d50375).
+    const delivery = command.kind === 'result' || command.kind === 'output';
+    const { response, value } = await retryActionsInfrastructure(
+      async signal => {
+        // Per attempt: a long delivery window outlives one OIDC token.
+        if (this.expires < Date.now() + 30_000) {
+          this.refreshing ??= this.refreshToken().finally(() => {
+            this.refreshing = null;
+          });
+          await this.refreshing;
+        }
+        const response = await actionsInfrastructureResponse(
+          await this.request(`${this.site}/checks/actions`, {
+            method: 'POST',
+            redirect: 'error',
+            signal,
+            headers: { authorization: `Bearer ${this.token}`, 'content-type': 'application/json' },
+            body,
+          }),
         );
-      }
-      return { response, value: await response.json() };
-    });
+        if (!response.ok) {
+          // Only a fixed reason vocabulary may reach logs; never echo a response body.
+          const body = (await response.json().catch(() => null)) as { reason?: unknown } | null;
+          const reason = actionsRefusalReasons.find(value => value === body?.reason);
+          invariant(
+            false,
+            reason === 'cancelled' ? 'CHECK_CANCELLED' : 'RUNNER_UNAVAILABLE',
+            `Convex Actions request failed (${response.status}${reason ? `; reason: ${reason}` : ''}).`,
+          );
+        }
+        return { response, value: await response.json() };
+      },
+      60_000,
+      delivery ? actionsDeliveryDeadlineMs : undefined,
+      delivery ? actionsDeliveryPolicy : undefined,
+    );
     if (
       command.kind === 'session' &&
       Array.isArray(value.capabilities) &&

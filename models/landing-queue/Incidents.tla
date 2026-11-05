@@ -5,7 +5,8 @@ VARIABLES pc, canonical, observed, inputsDone, returned, a, b, main, checked, ap
 vars == <<pc, canonical, observed, inputsDone, returned, a, b, main, checked, applied, owner>>
 Init == /\ pc = 0 /\ canonical = "ready" /\ observed = "ready"
         /\ inputsDone = FALSE /\ returned = FALSE
-        /\ a = "queued" /\ b = "queued" /\ main = 0
+        /\ a = "queued" /\ b = "queued"
+        /\ main \in (IF Scenario = "outage" THEN {0, 1} ELSE {0})
         /\ checked \in (IF Scenario = "cohort" THEN {0, 1} ELSE {0})
         /\ applied = 0 /\ owner = TRUE
 Idle == UNCHANGED vars
@@ -81,7 +82,27 @@ OrderWake == /\ Scenario = "orderwake"
        [] pc = 4 /\ owner -> /\ b' = "landed" /\ pc' = 5
                      /\ UNCHANGED <<canonical, observed, inputsDone, returned, a, main, checked, applied, owner>>
        [] OTHER -> FALSE
-Step == Wait \/ CohortConflict \/ LostWake \/ MovingMain \/ CrossHead \/ OrderWake
+\* Issue 72d50375 (2026-11-05): a write outage (the dev storage pause) refuses
+\* every write for minutes. main = 0 puts it in the middle of b's CI, main = 1
+\* in the middle of settlement. inputsDone = writes refused; owner = b's
+\* scheduled step is alive; returned = the runner still holds b's passed result.
+\* A step that fires during the outage throws and Convex never retries it. The
+\* unfixed runner drops its result after ~3 s. Fixed: the runner keeps the
+\* result until accepted, and resumed writes (or a waiting reader) re-drive the
+\* lost step. No timer or poll is modelled: recovery follows the outage's end.
+Outage == /\ Scenario = "outage"
+  /\ CASE pc = 0 -> /\ b' = (IF main = 0 THEN "checking" ELSE "ready") /\ inputsDone' = TRUE
+                     /\ pc' = 1
+                     /\ UNCHANGED <<canonical, observed, returned, a, main, checked, applied, owner>>
+       [] pc = 1 -> /\ owner' = FALSE /\ returned' = (main = 0 /\ Fixed) /\ pc' = 2
+                     /\ UNCHANGED <<canonical, observed, inputsDone, a, b, main, checked, applied>>
+       [] pc = 2 -> /\ inputsDone' = FALSE /\ owner' = Fixed
+                     /\ b' = (IF main = 0 /\ returned THEN "ready" ELSE b) /\ pc' = 3
+                     /\ UNCHANGED <<canonical, observed, returned, a, main, checked, applied>>
+       [] pc = 3 /\ owner /\ b = "ready" /\ ~inputsDone -> /\ b' = "landed" /\ pc' = 4
+                     /\ UNCHANGED <<canonical, observed, inputsDone, returned, a, main, checked, applied, owner>>
+       [] OTHER -> FALSE
+Step == Wait \/ CohortConflict \/ LostWake \/ MovingMain \/ CrossHead \/ OrderWake \/ Outage
 Spec == Init /\ [][Step]_vars /\ WF_vars(Step)
 FreshTerminal == returned => observed = canonical
 NoOrphanConflict == ~(a \in {"failed", "cancelled"} /\ b = "conflict" /\ main = 0 /\ checked = 0)

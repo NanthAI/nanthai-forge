@@ -18,6 +18,10 @@ import { invariant } from '../src/errors';
 import { storeSourceBytes } from './projectSourceBytes';
 import { savePin } from '../src/hosted-save';
 import type { SessionInput } from './projectHostedActionsSession';
+import { activeStoragePause } from './legacyStoragePause';
+/** Refused writes that resolve on their own: the runner keeps its result and
+ * retries the same request (Issue 72d50375). */
+const transientCodes = ['RUNNER_UNAVAILABLE', 'LEGACY_STORAGE_WRITES_PAUSED', 'HOSTED_CONFLICT'];
 export const handle = httpAction(async (ctx, request) => {
   let reason: 'authorization' | 'validation' | 'storage' | 'cancelled' = 'authorization';
   try {
@@ -186,14 +190,21 @@ export const handle = httpAction(async (ctx, request) => {
       (error as { code?: string })?.code;
     const unavailable =
       reason === 'storage' ||
-      code === 'RUNNER_UNAVAILABLE' ||
+      transientCodes.includes(code ?? '') ||
       ['TimeoutError', 'AbortError', 'TypeError'].includes((error as Error)?.name) ||
       (!code && (error as Error)?.name === 'Error' && reason !== 'validation');
+    // A paused deployment names its end, so runners wait once instead of polling.
+    const pause = unavailable ? activeStoragePause() : null;
     return Response.json(
       { reason, error: 'Actions request failed authorization, validation or storage verification.' },
       {
         status: unavailable ? 503 : 403,
-        headers: { 'Cache-Control': 'no-store' },
+        headers: {
+          'Cache-Control': 'no-store',
+          ...(pause
+            ? { 'Retry-After': String(Math.max(1, Math.ceil((pause.expiresAt - Date.now()) / 1000))) }
+            : {}),
+        },
       },
     );
   }

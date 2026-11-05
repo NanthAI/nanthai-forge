@@ -177,7 +177,14 @@ reads that row. Resume closes it before clearing flags, so an older transaction
 conflicts and retries against the closed fence rather than committing after
 writes resume. If the flag expires, the first ordinary resumed writer closes
 the fence in its own transaction. With no flag, ordinary writes still add zero
-DB calls. See Convex’s [transaction model](https://stack.convex.dev/how-convex-works). Queries
+DB calls. A refused write is `LEGACY_STORAGE_WRITES_PAUSED` with the pause end as
+`retryAt`; the CLI marks it retryable and says when to retry. Landing steps that
+fire during the pause fail and are never retried by Convex, so closing the
+window (by `end` or by the first write after expiry) schedules one
+`projectHostedLandingRedrive` sweep: one project per transaction, at most 64
+live entries per phase, re-scheduling only lost steps (Issue 72d50375). A `resume`
+after `end` waits for the flag to be removed before sweeping. Idle cost stays
+zero. See Convex’s [transaction model](https://stack.convex.dev/how-convex-works). Queries
 and byte reads remain available. New R2 write signatures are also paused.
 Already-issued external PUT URLs cannot be revoked, but their database
 publication is paused. The mechanical cleanup test rejects mutation-builder

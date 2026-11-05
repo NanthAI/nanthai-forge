@@ -2,6 +2,7 @@
 // Pause-exempt control only: no project/file deletion or application policy.
 import { maintenanceInternalMutation as internalMutation } from './server';
 import { v } from 'convex/values';
+import { makeFunctionReference } from 'convex/server';
 import { requireStoragePause, configuredStoragePause } from './legacyStoragePause';
 import { invariant } from '../src/errors';
 const args = { operationId: v.string() };
@@ -44,7 +45,15 @@ export const end = internalMutation({
       'LEGACY_STORAGE_WINDOW_CHANGED',
       'Resume only the original dev deployment.',
     );
-    if (old?.active) await ctx.db.patch(old._id, { active: false, endedAt: Date.now() });
+    if (old?.active) {
+      await ctx.db.patch(old._id, { active: false, endedAt: Date.now() });
+      // Re-drive landing steps the pause made fail once the flag is gone (72d50375).
+      await ctx.scheduler.runAfter(
+        0,
+        makeFunctionReference<'action'>('projectHostedLandingRedrive:resume'),
+        {},
+      );
+    }
     return { ended: true as const };
   },
 });

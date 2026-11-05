@@ -1,26 +1,28 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { MutationCtx } from './_generated/server';
-import { activeStoragePause, storageMutationAvailable } from './legacyStoragePause';
-import { invariant } from '../src/errors';
+import {
+  activeStoragePause,
+  storageMutationAvailable,
+  storageWritesPaused,
+  type StoragePause,
+} from './legacyStoragePause';
 /** Some freshly signed reads are registered as mutations. Preserve those reads
  * while refusing every writer/scheduler method in their transactional context. */
-function reader<T extends object>(value: T, reads: string[]): T {
+function reader<T extends object>(value: T, reads: string[], pause: StoragePause): T {
   return new Proxy(value, {
     get(target, key, receiver) {
       const member = Reflect.get(target, key, receiver);
       if (typeof member !== 'function') return member;
       if (reads.includes(String(key))) return member.bind(target);
-      return () =>
-        invariant(
-          false,
-          'LEGACY_STORAGE_WRITES_PAUSED',
-          'Dev writes are temporarily paused for approved storage maintenance.',
-        );
+      return () => {
+        throw storageWritesPaused(pause);
+      };
     },
   });
 }
 export async function storageMutationContext(ctx: MutationCtx): Promise<MutationCtx> {
-  if (!activeStoragePause()) {
+  const pause = activeStoragePause();
+  if (!pause) {
     await storageMutationAvailable(ctx);
     return ctx;
   }
@@ -36,7 +38,7 @@ export async function storageMutationContext(ctx: MutationCtx): Promise<Mutation
               ? []
               : null;
       if (!reads) return Reflect.get(target, key, receiver);
-      if (!ports.has(key)) ports.set(key, reader(Reflect.get(target, key, receiver), reads));
+      if (!ports.has(key)) ports.set(key, reader(Reflect.get(target, key, receiver), reads, pause));
       return ports.get(key);
     },
   });

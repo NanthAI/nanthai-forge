@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { getFunctionName } from 'convex/server';
 import { readFileSync, readdirSync } from 'node:fs';
 import { mkdtemp, rm, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -417,6 +418,7 @@ function backendFixture() {
     };
     return q;
   };
+  const scheduled = [];
   const ctx = {
     db: {
       query,
@@ -449,6 +451,7 @@ function backendFixture() {
         deletes++;
       },
     },
+    scheduler: { runAfter: async (delay, ref, args) => scheduled.push({ delay, ref, args }) },
   };
   const now = Date.now();
   const args = {
@@ -493,7 +496,7 @@ function backendFixture() {
       },
     ],
   };
-  return { ctx, tables, files, args, deletes: () => deletes };
+  return { ctx, tables, files, args, scheduled, deletes: () => deletes };
 }
 test('ordinary server writers maintain finish projections and the pause blocks the tracked source write', async () => {
   const previous = { cloud: process.env.CONVEX_CLOUD_URL, pause: process.env.FORGE_LEGACY_STORAGE_PAUSE };
@@ -1062,6 +1065,11 @@ test('revocation closes the transaction fence before writes resume, refuses new 
       ended: true,
     });
     assert.equal(s.tables.legacyStorageCleanupWindows.get('window').active, false);
+    // Issue 72d50375: ending the window re-drives steps the pause made fail.
+    assert.deepEqual(
+      s.scheduled.map(({ delay, ref, args }) => [delay, getFunctionName(ref), args]),
+      [[0, 'projectHostedLandingRedrive:resume', {}]],
+    );
     await assert.rejects(
       backend.deletePage._handler(s.ctx, s.args),
       e => e.code === 'LEGACY_STORAGE_WINDOW_ENDED',
@@ -1114,6 +1122,7 @@ test('ordinary writes use zero DB reads without a pause flag; an expired configu
       expiresAt: now - 1,
     });
     const marker = { _id: 'window', active: true };
+    const sweeps = [];
     const ctx = {
       db: {
         query: () => ({
@@ -1129,6 +1138,7 @@ test('ordinary writes use zero DB reads without a pause flag; an expired configu
           Object.assign(marker, p);
         },
       },
+      scheduler: { runAfter: async (delay, ref, args) => sweeps.push([delay, getFunctionName(ref), args]) },
     };
     const resumed = server.mutation({
       args: {},
@@ -1140,6 +1150,8 @@ test('ordinary writes use zero DB reads without a pause flag; an expired configu
     assert.equal(await resumed._handler(ctx, {}), 2);
     assert.equal(reads, 1);
     assert.equal(patches, 1);
+    // Issue 72d50375: the first write after expiry re-drives lost landing steps once.
+    assert.deepEqual(sweeps, [[0, 'projectHostedLandingRedrive:sweep', { cursor: null }]]);
   } finally {
     for (const [k, v] of [
       ['CONVEX_CLOUD_URL', before.cloud],

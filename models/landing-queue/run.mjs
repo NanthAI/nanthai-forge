@@ -33,6 +33,8 @@ if (config === 'all') {
     'stranded-fixed',
     'orderwake',
     'orderwake-fixed',
+    'outage',
+    'outage-fixed',
     'moving',
     'reuse',
     'reuse-fixed',

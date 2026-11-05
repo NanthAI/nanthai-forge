@@ -31,6 +31,8 @@ npm run model:landing-queue -- stranded
 npm run model:landing-queue -- stranded-fixed
 npm run model:landing-queue -- orderwake       # expected liveness violation (c329d191)
 npm run model:landing-queue -- orderwake-fixed
+npm run model:landing-queue -- outage          # expected liveness violation (72d50375)
+npm run model:landing-queue -- outage-fixed
 npm run model:landing-queue -- moving
 npm run model:landing-queue -- reuse
 npm run model:landing-queue -- reuse-fixed
@@ -278,6 +280,19 @@ algorithm drift: changes to these code anchors require manual model review.
    while parked waiters still cost nothing. `tests/hosted-landing-lost-wake.test.mjs`
    replays the incident against the implementation.
 
+7. **Write outage (72d50375; 2026-11-05, fixed).** An approved dev storage
+   pause refuses every write for up to 30 minutes. A scheduled settlement step,
+   queue wake or stall alarm that fires during it throws, and Convex never
+   retries it; the old runner dropped a passed result after ~3 s. `Init`
+   places the outage in the middle of CI (`main = 0`) or of settlement
+   (`main = 1`). `outage` finds a liveness counterexample (`HeadLands`).
+   `outage-fixed` keeps the runner's result until Forge accepts it
+   (`src/hosted-actions-retry.ts`, about 35 minutes) and re-drives the lost step
+   when writes resume (`convex/projectHostedLandingRedrive.ts`: the window end,
+   the first write after expiry, or a waiting reader of a quiet Ready entry).
+   No timer or poll is modelled or added. `tests/hosted-landing-write-outage.test.mjs`
+   replays a 20-minute outage against the implementation.
+
 `isolation.cfg` checks the 51bbbd00 isolation semantics in the core model:
 combined-failure evidence may name suspects (released with the reason, never
 re-stacked onto: `NoStackOnSuspect`), and a group stacked on an unpassed
@@ -316,6 +331,8 @@ or production historical replay is implied.
 | `stranded-fixed` | 4 | 4 | 0.640 | Passed |
 | `orderwake` | 4 | 4 | 0.630 | Expected liveness violation |
 | `orderwake-fixed` | 6 | 6 | 0.638 | Passed |
+| `outage` | 8 | 8 | 0.747 | Expected liveness violation |
+| `outage-fixed` | 10 | 10 | 0.548 | Passed; CI and settlement branches |
 | `moving` | 8 | 7 | 0.613 | Expected liveness violation |
 | `reuse` | 4 | 4 | 0.604 | Expected ExactCheckedHead |
 | `reuse-fixed` | 4 | 4 | 0.637 | Passed |

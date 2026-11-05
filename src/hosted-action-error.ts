@@ -10,13 +10,18 @@ export function hostedActionError(error: unknown, phase: string): ForgeError {
   if (error instanceof ForgeError) return error;
   if (networkFailure(error)) return new ForgeError(error.code, error.message);
   if (error instanceof ConvexError && error.data && typeof error.data === 'object') {
-    const data = error.data as { code?: unknown; message?: unknown; authority?: unknown };
+    const data = error.data as { code?: unknown; message?: unknown; authority?: unknown; retryAt?: unknown };
     if (data.code === 'SOURCE_AUTHORITY_STALE') {
       const authority = sourceAuthoritySchema.safeParse(data.authority);
       if (authority.success) return new SourceAuthorityStaleError(authority.data);
     }
     if (typeof data.code === 'string' && typeof data.message === 'string' && data.code !== 'INTERNAL_ERROR')
-      return new ForgeError(data.code, data.message);
+      // A refusal that names its end (a write pause) keeps it: Issue 72d50375.
+      return new ForgeError(
+        data.code,
+        data.message,
+        Number.isSafeInteger(data.retryAt) ? (data.retryAt as number) : undefined,
+      );
   }
   const requestId =
     error instanceof Error ? /\[Request ID:\s*([a-f0-9]+)\]/i.exec(error.message)?.[1] : undefined;

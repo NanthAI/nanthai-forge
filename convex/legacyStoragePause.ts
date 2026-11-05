@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import { invariant } from '../src/errors';
+import { makeFunctionReference } from 'convex/server';
+import { ForgeError, invariant } from '../src/errors';
 import type { MutationCtx } from './_generated/server';
 
 export const pauseFlag = 'FORGE_LEGACY_STORAGE_PAUSE';
@@ -32,12 +33,17 @@ export function activeStoragePause(now = Date.now()): StoragePause | null {
   const pause = configuredStoragePause(now);
   return pause && pause.expiresAt > now ? pause : null;
 }
-export function storageWritesAvailable() {
-  invariant(
-    !activeStoragePause(),
+/** Refused writes say when to retry; nothing was changed (Issue 72d50375). */
+export function storageWritesPaused(pause: StoragePause) {
+  return new ForgeError(
     'LEGACY_STORAGE_WRITES_PAUSED',
-    'Dev writes are temporarily paused for approved storage maintenance.',
+    `Dev writes are temporarily paused for approved storage maintenance until ${new Date(pause.expiresAt).toISOString()}. Nothing was changed; retry the same request after that.`,
+    pause.expiresAt,
   );
+}
+export function storageWritesAvailable() {
+  const pause = activeStoragePause();
+  if (pause) throw storageWritesPaused(pause);
 }
 export function requireStoragePause(operationId: string) {
   const pause = activeStoragePause();
@@ -60,7 +66,12 @@ export async function storageMutationAvailable(ctx: MutationCtx) {
     .query('legacyStorageCleanupWindows')
     .withIndex('by_operation', q => q.eq('operationId', pause.operationId))
     .unique();
-  if (window?.active) await ctx.db.patch(window._id, { active: false, endedAt: Date.now() });
+  if (!window?.active) return;
+  await ctx.db.patch(window._id, { active: false, endedAt: Date.now() });
+  // Writes are back: re-drive steps the pause made fail (Issue 72d50375).
+  await ctx.scheduler.runAfter(0, makeFunctionReference<'mutation'>('projectHostedLandingRedrive:sweep'), {
+    cursor: null,
+  });
 }
 /** The indexed read is part of every destructive transaction's OCC read set. */
 export async function requireCleanupWindow(ctx: MutationCtx, operationId: string) {

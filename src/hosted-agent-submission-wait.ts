@@ -13,6 +13,7 @@ import { ForgeError, invariant } from './errors.js';
 import { hostedActionError } from './hosted-action-error.js';
 import { hostedRunSubscription, type HostedRunSubscription } from './hosted-agent-observe.js';
 import type { HostedAgentTransport } from './hosted-agent-transport.js';
+import { landingRedriver } from './hosted-landing-redrive.js';
 
 export const hostedSubmissionWaitSchema = z
   .object({
@@ -258,6 +259,7 @@ async function observeHostedSubmissionsOnce(
     baseline = command.cursor == null,
     stopped = false,
     resnapshot = false;
+  const redrive = landingRedriver(transport, () => stopped || Boolean(signal?.aborted));
   const publish = (operationId: string, event: z.infer<typeof eventSchema>, snapshot: boolean) => {
     const state = event.submission;
     invariant(
@@ -310,6 +312,7 @@ async function observeHostedSubmissionsOnce(
         'Submission page differs from the selected project/operation.',
       );
       if (stopped || signal.aborted) return;
+      redrive(page.submission);
       canonicalOperations.set(operationId, page.canonicalOperationId ?? operationId);
       const authority = JSON.stringify(page.authority);
       if (cursor.authority && cursor.authority !== authority) {
