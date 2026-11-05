@@ -10,6 +10,7 @@ import { editHooksEnabled, setEditHooksEnabled } from './agent-hook-settings.js'
 import { editTarget, readEditMarkerIdentity } from './agent-edit-target.js';
 import { refuseRealUserState } from './test-isolation.js';
 import { invariant } from './errors.js';
+import { stableCliRunner } from './cli-installation.js';
 
 type Group = { matcher?: string; hooks: { type: string; command?: string; timeout?: number }[] };
 type Config = { hooks?: Record<string, Group[]>; [key: string]: unknown };
@@ -24,7 +25,7 @@ export function installEditHooks(
   for (const name of ['.claude', '.codex']) refuseRealUserState(join(home, name), 'agent hook config');
   if (automatic && !uninstall && !editHooksEnabled(undefined, home))
     return { status: 'disabled', files: [], changed: [], undo: '' };
-  const runner = fileURLToPath(new URL('./agent-edit-hook.js', import.meta.url));
+  const runner = stableCliRunner(fileURLToPath(new URL('./agent-edit-hook.js', import.meta.url)));
   const command = [process.execPath, runner, '--auto', '--forge-first-write'].map(shellQuote).join(' ');
   const files = [join(home, '.claude', 'settings.json'), join(home, '.codex', 'hooks.json')];
   // Validate both client files before changing either one.
@@ -128,4 +129,37 @@ export function ensureEditHooks() {
       "Forge first-write hooks unavailable; setup incomplete; existing settings retained. Retry: nforge x . install-hooks '{}'\n",
     );
   }
+}
+
+/** Migrate only existing Forge hooks. Opt-outs and unrelated settings are preserved.
+ * Validate both files first; each durable replacement is atomic. The updater keeps
+ * old builds until every replacement succeeds, so interrupted migrations stay valid. */
+export function migrateEditHookRunner(runner: string, home = homedir()) {
+  const command = [process.execPath, runner, '--auto', '--forge-first-write'].map(shellQuote).join(' ');
+  const updates = ['.claude/settings.json', '.codex/hooks.json'].flatMap(name => {
+    const path = join(home, name);
+    refuseRealUserState(path, 'agent hook config');
+    if (!existsSync(path)) return [];
+    const original = readFileSync(path, 'utf8');
+    const config: Config = JSON.parse(original);
+    invariant(
+      config && typeof config === 'object' && !Array.isArray(config),
+      'BAD_ARGUMENT',
+      'Client hook config must be an object.',
+    );
+    for (const groups of Object.values(config.hooks ?? {})) {
+      invariant(Array.isArray(groups), 'BAD_ARGUMENT', 'Client hook groups must be an array.');
+      for (const group of groups) {
+        invariant(
+          group && Array.isArray(group.hooks),
+          'BAD_ARGUMENT',
+          'Client hook group must contain hooks.',
+        );
+        for (const hook of group.hooks) if (isForgeHook(hook.command, runner)) hook.command = command;
+      }
+    }
+    return JSON.stringify(config) === JSON.stringify(JSON.parse(original)) ? [] : [{ path, config }];
+  });
+  for (const { path, config } of updates) writeRecoveryState(path, config);
+  return updates.map(update => update.path);
 }

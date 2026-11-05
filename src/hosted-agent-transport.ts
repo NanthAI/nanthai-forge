@@ -1,3 +1,4 @@
+import { cliBuildCommit } from './cli-installation.js';
 import { cloneFreshness, mainCheckoutTransport, pullHostedProject } from './hosted-pull.js';
 import { readHostedMainSelection } from './hosted-main-marker.js';
 import { diffHostedSource, peersHostedSource } from './hosted-agent-reads.js';
@@ -140,6 +141,7 @@ export type HostedAgentExchange = Pick<
   | 'prepareDownloads'
 >;
 export type HostedAgentResponse = {
+  cliCommit?: string;
   schema: 1;
   transport: 'hosted';
   action: HostedAgentAction | 'diff' | 'peers';
@@ -879,6 +881,7 @@ export class HostedAgentTransport {
       result = hostedObservationContinuation(this.root, result as Record<string, unknown>);
     return {
       schema: 1,
+      cliCommit: cliBuildCommit(),
       transport: 'hosted',
       action,
       operationId,

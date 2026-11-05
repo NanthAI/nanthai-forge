@@ -1,3 +1,4 @@
+import { cliBuildCommit } from './cli-installation.js';
 import { rememberCaller } from './agent-caller-overlaps.js';
 import { readAgentTurn } from './agent-edit-context.js';
 import { unacknowledgedOverlaps } from './agent-edit-notices.js';
@@ -102,7 +103,7 @@ export class AgentWorkflow {
       this.callerLaneId = process.cwd().slice(prefix.length).split('/')[0]!;
   }
   async dispatch(input: unknown) {
-    let response = await this.dispatchCore(input);
+    let response = { ...(await this.dispatchCore(input)), cliCommit: cliBuildCommit() };
     if ((input as { action?: string })?.action === 'status') {
       const metrics = await hostedStatusMetrics(this.work.store.root);
       if (metrics) response = { ...response, result: { ...(response.result as object), metrics } };

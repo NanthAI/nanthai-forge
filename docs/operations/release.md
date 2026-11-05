@@ -162,3 +162,6 @@ integrity, previous CLI selection, fake supervised owner restarts, runtime verif
 crash/resume, identity-fenced worker retirement and both workers’ SIGTERM shutdown. Fixture success is not evidence that a live
 development release, account login, provider reconciliation or cross-version
 backend/client compatibility has been exercised.
+
+Product CLI freshness checks and atomic source updates are described in
+[CLI updates](cli-update.md). Maintainer backend/web release stages remain explicit.

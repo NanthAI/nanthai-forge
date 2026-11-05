@@ -1,3 +1,4 @@
+import { cliPackageRoot, retainCliRuntime } from './cli-installation.js';
 import { canonicalEditPath, editTarget } from './agent-edit-target.js';
 import { mkdirBelow } from './mkdir-below.js';
 import { Worker, MessageChannel, receiveMessageOnPort, isMainThread, workerData } from 'node:worker_threads';
@@ -11,6 +12,15 @@ import { join, relative, resolve, isAbsolute, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID, createHash } from 'node:crypto';
 
+let runtimeAvailable = true;
+if (isMainThread) {
+  try {
+    retainCliRuntime(cliPackageRoot(import.meta.url));
+  } catch {
+    runtimeAvailable = false;
+  }
+}
+
 /** Small supervisor: enforces the one-second fail-open deadline even on blocked disk IO. */
 export function runEditHook(
   owner: string,
@@ -18,6 +28,7 @@ export function runEditHook(
   input: unknown,
   worker = fileURLToPath(import.meta.url),
 ) {
+  if (!runtimeAvailable) return failOpen(owner, laneId, 'unreachable');
   if (worker === fileURLToPath(import.meta.url)) {
     const signal = new Int32Array(new SharedArrayBuffer(4));
     const { port1, port2 } = new MessageChannel();

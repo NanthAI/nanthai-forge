@@ -52,6 +52,7 @@ Browse packaged documentation: nforge docs
 Usage:
   nforge clone <project-url|project-id> DIR [--deployment URL]
   nforge pull ROOT             # refresh a clean clone to accepted main
+  nforge update [FORGE_CHECKOUT] [--directory DIR] [--state STATE]
   nforge worker DEPLOYMENT_URL PROJECT_ID MACHINE_UUID
   nforge metrics ROOT [--from DATE] [--to DATE] [--json] [--report FILE.md] [--compare FROM..TO]
   nforge metrics record-bill ROOT --provider P --from DATE --to DATE --billed-usd N [--list-usd N] [--usage unit=qty,...] [--rate unit=usd,...] [--basis TEXT]

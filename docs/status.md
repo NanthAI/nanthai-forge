@@ -47,6 +47,12 @@ source import reconciliation includes its parser in the bundle.
 
 ## Works
 
+Managed CLI installations check accepted Forge main once per process and update
+through a staged build and atomic current selection, or refuse with a typed
+recovery command. First-write hooks follow current and survive old-build pruning;
+in-flight runtime leases protect lazy imports. See [CLI updates](operations/cli-update.md).
+Live release adoption and billed-usage qualification remain unverified.
+
 - Hosted CLI diff pins Lane base/saved-head source with byte-budgeted pages.
   Peers reads the existing saved overlap projection, including a single path
   before its first save. Exact State/Candidate show and the existing MCP

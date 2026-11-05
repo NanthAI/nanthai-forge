@@ -2,10 +2,12 @@
 // Standard code verification: installs and exercises the actual local npm archive.
 import assert from 'node:assert/strict';
 import { cleanupOwner } from '../tests/owner-cleanup.mjs';
+import { Worker } from 'node:worker_threads';
 import { spawnSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import {
   existsSync,
+  copyFileSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -43,7 +45,7 @@ const npm = process.env.npm_execpath || createRequire(import.meta.url).resolve('
 const buildEnv = { ...process.env, PATH: `${dirname(process.execPath)}:${process.env.PATH ?? ''}` };
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const originalPath = process.env.PATH;
-let client;
+let client, releaseService;
 const run = (executable, argv, options = {}) => {
   const reply = spawnSync(executable, argv, {
     cwd: directory,
@@ -218,12 +220,56 @@ try {
   });
   symlinkSync(process.execPath, join(bin, 'node'));
   for (const name of ['tar', 'gzip']) symlinkSync(`/usr/bin/${name}`, join(bin, name));
-  const env = { PATH: bin, FORGE_PACKAGE_GIT_CALLED: gitCalled };
+  const home = join(directory, 'synthetic-home');
+  mkdirSync(home);
+  const env = {
+    PATH: bin,
+    HOME: home,
+    USERPROFILE: home,
+    XDG_CONFIG_HOME: join(home, '.config'),
+    FORGE_TEST_MODE: '1',
+    FORGE_PACKAGE_GIT_CALLED: gitCalled,
+  };
+  const unconfigured = spawnSync(process.execPath, [cli, '--help'], { env, encoding: 'utf8' });
+  assert.equal(unconfigured.status, 1);
+  assert.equal(JSON.parse(unconfigured.stderr).error.code, 'CLI_UPDATE_SOURCE_REQUIRED');
+  const installation = join(directory, 'forge-cli');
+  mkdirSync(join(installation, 'builds'), { recursive: true });
+  symlinkSync(installed, join(installation, 'current'), 'dir');
+  symlinkSync(installed, join(installation, 'manager'), 'dir');
+  copyFileSync(join(installed, 'dist', 'cli-launcher.js'), join(installation, 'launcher.mjs'));
+  writeFileSync(join(installed, '.cli-installation'), installation);
+  const head = 'a'.repeat(64),
+    projectId = 'synthetic-cli-source';
+  writeFileSync(join(installed, '.commit'), head);
+  const releaseCalls = new Int32Array(new SharedArrayBuffer(4));
+  releaseService = new Worker(new URL('./package-cli-release-worker.mjs', import.meta.url), {
+    workerData: { head, projectId, calls: releaseCalls.buffer },
+  });
+  const releaseUrl = await new Promise((done, reject) => {
+    releaseService.once('message', done);
+    releaseService.once('error', reject);
+  });
+  writeFileSync(join(installation, 'source.json'), JSON.stringify({ url: releaseUrl, projectId }));
+  env.FORGE_AUTH_TOKEN = 'synthetic-package-release-token';
+
   // In-process public SDK calls receive the same unavailable Git boundary as CLI/MCP.
   process.env.PATH = bin;
   process.env.FORGE_PACKAGE_GIT_CALLED = gitCalled;
   const command = (...argv) => JSON.parse(run(process.execPath, [cli, ...argv], { env }));
   assert.match(run(join(prefix, 'node_modules', '.bin', 'nforge'), ['--help'], { env }), /init-native/);
+  assert.equal(
+    Atomics.load(releaseCalls, 0),
+    1,
+    'Installed freshness check must make exactly one release read.',
+  );
+  const beforeLauncher = Atomics.load(releaseCalls, 0);
+  assert.match(run(process.execPath, [join(installation, 'launcher.mjs'), '--help'], { env }), /init-native/);
+  assert.equal(
+    Atomics.load(releaseCalls, 0) - beforeLauncher,
+    1,
+    'Stable launcher makes one per-process release read.',
+  );
   const owner = join(directory, 'native');
   mkdirSync(owner);
   writeFileSync(join(owner, 'a.ts'), 'export const answer = 1;\n');
@@ -571,5 +617,6 @@ try {
   else process.env.PATH = originalPath;
   delete process.env.FORGE_PACKAGE_GIT_CALLED;
   await client?.close();
+  await releaseService?.terminate();
   if (!kept) await cleanupOwner(directory, join(directory, 'installed/node_modules/@nanthai/forge/dist'));
 }
