@@ -2,6 +2,35 @@
 
 This is a disposition and precondition guide, not permission to delete. New bytes already go to R2. P1 and B1.9 have separate approved scopes and evidence. Current scope lives on 13402039 (backup), 40dad5e0 (storage), 8678148e (R2 evidence), e542a26e (narrower follow-up) and 64d7192b (B1.9). See the [R2 backfill runbook](r2-backfill.md) for the existing evidence contract.
 
+## Current dev disposition
+
+Dev retains **49,266 files / 1,009,639,246 bytes**. The approved deleted bench
+project's 155,012 rows are removed, all 58 per-table after counts are zero, and
+six cursor references are migrated to R2 and verified. Complete frozen table
+and recursive body coverage passed. Committed cleanup pages removed 43,400
+Convex files / 1,676,836,100 bytes: class 1 accounts for 42,342 files /
+1,654,634,977 bytes and class 3 for 1,058 files / 22,201,123 bytes. No class 2 or
+class 4 file was deleted. R2 objects are retained.
+
+The remaining approved target is **31,108 files / 364,102,209 bytes**: class 1
+has 4,793 files / 272,520,960 bytes, the six migrated class 2 files total 20,486
+bytes, and class 3 has 26,309 files / 91,560,763 bytes. Five additional class 3
+files / 410,230 bytes remain referenced; all 18,153 class 4 files / 645,126,807
+bytes remain retained. Class 4 attribution is incomplete and grants no deletion
+permission. The older-backend `uploadUrl` / `putConvexUpload` paths and legacy
+read/record-field allowlists remain needed or await their separate disposition.
+
+The single dev pause ended with both maintenance flags proven absent. A HEAD
+fetch failure stopped the file stage, and the first resume proof also failed;
+same-session outer recovery closed the fence and proved absence. Page receipts,
+physical files and owner flags reconcile without a half-applied batch. Issue
+1323a44c tracks bounded HEAD retry/backoff with page skipping, reliable flag
+removal and preservation of the original failure. These fixes are pending.
+The existing driver's closed window cannot reopen, and its original catalog and
+completed bench/cursor stages cannot be reused as a remaining-only run. Any
+future run needs fresh remaining-state inputs, verification and dry-run evidence,
+a new operation and a new owner-approved window. No further cleanup is armed.
+
 ## Read-only inventory first
 
 The historical inventory totals **2.50 GiB** of legacy file storage; a dashboard reading rounded it to **2.5 GB**. Approximately **1.93 GB** consists of retained R2 duplicates; the remainder is unclassified. These units/observations are distinct, not an exact subtraction. Reconcile current references and byte placement read-only before selecting any action. Keep raw inventory and backup evidence private. No broad sweep is authorized by an aggregate total.
