@@ -241,29 +241,29 @@ test('presence hook requests all flat pages and resolves a Lane on page two', as
     useMemo: fn => fn(),
     useState: () => [0, () => {}],
   };
-  globalThis.__f4Convex = {
-    usePaginatedQuery: (_ref, args) => {
-      assert.equal(args.all, true);
-      return {
-        results: loaded ? [...first.page, ...second.page] : first.page,
-        status: loaded ? 'Exhausted' : 'CanLoadMore',
-        loadMore: size => {
-          assert.equal(size, 50);
-          loads++;
-          loaded = true;
-        },
-      };
-    },
+  const paged = (_ref, args) => {
+    assert.equal(args.all, true);
+    return {
+      results: loaded ? [...first.page, ...second.page] : first.page,
+      status: loaded ? 'Exhausted' : 'CanLoadMore',
+      loadMore: size => {
+        assert.equal(size, 50);
+        loads++;
+        loaded = true;
+      },
+    };
   };
+  globalThis.__f4Convex = { useSafePaginatedQuery: paged, useSafeQuery: () => ({}) };
   try {
     const source = moduleSource('../web/src/cockpit/coordination.ts')
       .replace(
         /import \{ useEffect, useMemo, useState \} from [^;]+;/,
         'const { useEffect, useMemo, useState } = globalThis.__f4React;',
       )
+      .replace(/import \{ useMutation \} from [^;]+;/, 'const useMutation = () => {};')
       .replace(
-        /import \{ useMutation, usePaginatedQuery(?:, useQuery)? \} from [^;]+;/,
-        'const { useMutation, usePaginatedQuery, useQuery } = globalThis.__f4Convex;',
+        /import \{ useSafePaginatedQuery, useSafeQuery \} from [^;]+;/,
+        'const { useSafePaginatedQuery, useSafeQuery } = globalThis.__f4Convex;',
       );
     const { usePresenceSessions } = await import(
       `data:text/javascript;base64,${Buffer.from(source).toString('base64')}`

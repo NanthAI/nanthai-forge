@@ -8,6 +8,7 @@ import { captureLanding } from './ui-shots/landing.mjs';
 import { options, usage, destination, selectedReviewRoute, ShotError } from './ui-shots/options.mjs';
 import { signIn, waitForPage, convexToken } from './ui-shots/browser.mjs';
 import { observeData } from './ui-shots/data.mjs';
+import { explainBotAccess } from './ui-bot-grant.mjs';
 import { join } from 'node:path';
 
 let stage = 'arguments';
@@ -72,7 +73,11 @@ try {
     if (config.pages.some(p => p !== 'device')) {
       await page.goto(destination(config.base, projectId, 'now'), { waitUntil: 'domcontentloaded' });
       await page.waitForFunction(() => Boolean(window.Clerk?.session));
-      await query('projectWork:state', { projectId });
+      try {
+        await query('projectWork:state', { projectId });
+      } catch (error) {
+        throw explainBotAccess(error, deployment, projectId);
+      }
       const raw = await query('projectWorkIndex:workspace', { projectId });
       if (!raw)
         throw new ShotError('Project Work is not indexed yet. Open the project and retry after it loads.');

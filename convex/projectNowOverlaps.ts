@@ -4,13 +4,35 @@ import type { Id } from './_generated/dataModel';
 import { channelRow } from './projectHostedChannels';
 import { nowOverlapSignals } from '../src/now-overlap-signals';
 
+const OPEN_LANE_ROWS = 100;
+const OPEN_LANE_BYTES = 1024 * 1024;
+
+/**
+ * At most 100 open Lanes and 1 MiB, read lazily. Not paginate(): the caller already runs one
+ * paginated query, and Convex rejects a second one in the same query function (2026-11-05).
+ */
+async function openLanePage(ctx: QueryCtx, projectId: Id<'hostedProjects'>) {
+  const page = [];
+  let bytes = 0;
+  let isDone = true;
+  for await (const row of ctx.db
+    .query('projectHostedOverlapLanes')
+    .withIndex('by_project_and_open', q => q.eq('projectId', projectId).eq('open', true))) {
+    const size = JSON.stringify(row).length;
+    if (page.length >= OPEN_LANE_ROWS || (page.length && bytes + size > OPEN_LANE_BYTES)) {
+      isDone = false;
+      break;
+    }
+    page.push(row);
+    bytes += size;
+  }
+  return { page, isDone };
+}
+
 /** Shared by the existing ack subscription. No per-Lane function calls or background work. */
 export async function readNowOverlaps(ctx: QueryCtx, projectId: Id<'hostedProjects'>) {
   const [page, headers, latest, channel] = await Promise.all([
-    ctx.db
-      .query('projectHostedOverlapLanes')
-      .withIndex('by_project_and_open', q => q.eq('projectId', projectId).eq('open', true))
-      .paginate({ cursor: null, numItems: 100, maximumRowsRead: 100, maximumBytesRead: 1024 * 1024 }),
+    openLanePage(ctx, projectId),
     Promise.all(
       ['active', 'paused', 'ready'].map(status =>
         ctx.db

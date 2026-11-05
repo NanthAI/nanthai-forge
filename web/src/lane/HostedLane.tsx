@@ -550,7 +550,11 @@ export function HostedLane({
   return (
     <BriefSourceContext.Provider value={briefs}>
       <div className="fx">
-        {sessions.status !== 'Exhausted' && <p role="status">Reading participant pages…</p>}
+        {sessions.failed ? (
+          <p role="status">Participant pages are unavailable, so presence may be incomplete.</p>
+        ) : (
+          sessions.status !== 'Exhausted' && <p role="status">Reading participant pages…</p>
+        )}
         <HostedLaneView
           laneId={laneId}
           readSaveFiles={readSaveFiles}

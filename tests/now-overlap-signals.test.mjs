@@ -195,3 +195,32 @@ test('a read-only reader gets the same bounded read; a reader still cannot recor
   );
   assert.equal(s.tables.projectHostedOverlapAcks.size, before);
 });
+test('signals share one query function with the ack page: only one paginate() runs, on any ack page', async () => {
+  const s = fixture(20);
+  const first = JSON.parse(
+    await s.call('page one', acks.list, { projectId: s.projectId, cursor: null, signals: true }),
+  );
+  assert.equal(first.isDone, true);
+  // Convex rejects a second paginate() in one query function; the fake now does too (2026-11-05 dev failure).
+  const twice = {
+    isQuery: true,
+    _handler: async ctx => {
+      const q = () =>
+        ctx.db
+          .query('projectHostedOverlapAcks')
+          .withIndex('by_project_and_id', x => x.eq('projectId', s.projectId));
+      await q().paginate({ cursor: null, numItems: 1 });
+      return q().paginate({ cursor: null, numItems: 1 });
+    },
+  };
+  await assert.rejects(s.call('two paginates', twice, {}), /multiple paginated queries/);
+  const withCursor = JSON.parse(
+    await s.call('page two', acks.list, {
+      projectId: s.projectId,
+      cursor: '50',
+      signals: true,
+    }),
+  );
+  assert.equal(withCursor.page.length, 50);
+  assert.deepEqual(withCursor.signals, first.signals);
+});

@@ -86,6 +86,8 @@ for (const [panel, suffix] of [
   ['unacked', ':unacked'],
   ['claims', ':claims'],
   ['counts', ':counts'],
+  ['sessions', 'projectCoordination:sessions'],
+  ['events', 'projectCoordination:recent'],
 ])
   test(`a refused ${panel} read degrades only that panel: the page renders, others stay live`, async () => {
     const base = backend();
@@ -102,6 +104,15 @@ for (const [panel, suffix] of [
       assert.deepEqual(seen.live.overlapAnswers, []);
     }
     if (panel === 'unacked') assert.equal(seen.live.unackedComplete, false);
+    if (panel === 'sessions') {
+      assert.equal(seen.live.sessionsComplete, false);
+      assert.equal(seen.live.sessionsLoading, false, 'a failed page is settled, not an endless spinner');
+      assert.equal(seen.live.loading, false);
+    }
+    if (panel === 'events') {
+      assert.equal(seen.live.eventsComplete, false);
+      assert.equal(seen.live.eventsLoading, false);
+    }
     assert.equal(fake.count(), baseline, 'subscriptions per view are unchanged');
     fake.reset();
     await settle();

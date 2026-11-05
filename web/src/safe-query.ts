@@ -1,6 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 import { useMemo } from 'react';
+import * as convexReact from 'convex/react';
 import { useQueries } from 'convex/react';
+import type {
+  PaginatedQueryArgs,
+  PaginatedQueryItem,
+  PaginatedQueryReference,
+  PaginationStatus,
+} from 'convex/react';
 import {
   getFunctionName,
   type FunctionArgs,
@@ -30,4 +37,46 @@ export function useSafeQuery<Query extends FunctionReference<'query'>>(
   return result instanceof Error
     ? { value: undefined, error: result }
     : { value: result as FunctionReturnType<Query> | undefined, error: undefined };
+}
+
+type InternalPaginated = (
+  query: PaginatedQueryReference,
+  args: unknown,
+  options: { initialNumItems: number },
+  throwOnError: boolean,
+) => {
+  user: {
+    results: unknown[];
+    status: PaginationStatus | 'Error';
+    error?: Error;
+    loadMore: (n: number) => void;
+  };
+};
+// usePaginatedQuery is this same function with throwOnError = true; it is not in the public typings.
+// convex is pinned, and tests/reader-pages.test.mjs mounts it, so an upgrade that moves it fails loudly.
+const paginated = (convexReact as unknown as { usePaginatedQueryInternal?: InternalPaginated })
+  .usePaginatedQueryInternal;
+
+/**
+ * `usePaginatedQuery` that reports a failed page as `status: 'Error'` (with the pages read before it)
+ * instead of throwing during render. Same subscriptions, cursors, splits and resets as the original.
+ */
+export function useSafePaginatedQuery<Query extends PaginatedQueryReference>(
+  query: Query,
+  args: PaginatedQueryArgs<Query> | 'skip',
+  options: { initialNumItems: number },
+): {
+  results: PaginatedQueryItem<Query>[];
+  status: PaginationStatus | 'Error';
+  error: Error | undefined;
+  loadMore: (numItems: number) => void;
+} {
+  if (!paginated) throw new Error('convex/react no longer exposes usePaginatedQueryInternal.');
+  const { user } = paginated(query, args, options, false);
+  return {
+    results: user.results as PaginatedQueryItem<Query>[],
+    status: user.status,
+    error: user.error,
+    loadMore: user.loadMore,
+  };
 }

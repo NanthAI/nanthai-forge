@@ -5,7 +5,7 @@ import { createContext, useContext, useRef } from 'react';
 import { PendingWrite } from '../pending-write';
 import { activityAt, collapseSessions } from '../../../src/presence';
 import { useEffect, useMemo, useState } from 'react';
-import { useMutation, usePaginatedQuery } from 'convex/react';
+import { useMutation } from 'convex/react';
 import { api } from '../../../convex/_generated/api';
 import type { Id } from '../../../convex/_generated/dataModel';
 import {
@@ -18,7 +18,7 @@ import {
   type Session,
 } from '../coordination-view';
 import { hostedError } from '../snapshot';
-import { useSafeQuery } from '../safe-query';
+import { useSafePaginatedQuery, useSafeQuery } from '../safe-query';
 import { freshness } from '../ui/status';
 
 import type { DecisionItem, FeedItem } from './attention';
@@ -27,7 +27,7 @@ import type { CockpitLane, CockpitWork } from './model';
 
 /** Presence needs every descendant, without expanding any branch in a server transaction. */
 export function usePresenceSessions(projectId: Id<'hostedProjects'>, enabled = true) {
-  const page = usePaginatedQuery(
+  const page = useSafePaginatedQuery(
     api.projectCoordination.sessions,
     enabled ? { projectId, all: true } : 'skip',
     { initialNumItems: 50 },
@@ -36,7 +36,8 @@ export function usePresenceSessions(projectId: Id<'hostedProjects'>, enabled = t
     if (page.status === 'CanLoadMore') page.loadMore(50);
   }, [page.status, page.loadMore]);
   const results = useMemo(() => sessionForest(page.results as Session[]), [page.results]);
-  return { ...page, results };
+  // A failed page is settled, not loading: the pages read before it stay, and the view says incomplete.
+  return { ...page, results, failed: page.status === 'Error' };
 }
 
 /**
@@ -51,7 +52,7 @@ export function useCoordination(projectId: Id<'hostedProjects'>) {
 }
 export function useLiveCoordination(projectId: Id<'hostedProjects'>, enabled: boolean) {
   const sessions = usePresenceSessions(projectId, enabled);
-  const recent = usePaginatedQuery(api.projectCoordination.recent, enabled ? { projectId } : 'skip', {
+  const recent = useSafePaginatedQuery(api.projectCoordination.recent, enabled ? { projectId } : 'skip', {
     initialNumItems: 40,
   });
   // A refused or failed read degrades its own panel to empty and "incomplete"; it never throws the page.
@@ -67,11 +68,14 @@ export function useLiveCoordination(projectId: Id<'hostedProjects'>, enabled: bo
   );
   const rawAnswers = answers.value;
   const unavailable = [
+    ...(sessions.failed ? ['sessions'] : []),
+    ...(recent.status === 'Error' ? ['events'] : []),
     ...(unacked.error ? ['unacked'] : []),
     ...(counts.error ? ['counts'] : []),
     ...(claims.error ? ['claims'] : []),
     ...(answers.error ? ['overlaps'] : []),
   ];
+  const sessionsLoading = !sessions.failed && sessions.status !== 'Exhausted';
   const settled = (read: { value: unknown; error: Error | undefined }) =>
     read.value !== undefined || read.error !== undefined;
   const overlaps = useMemo(
@@ -91,7 +95,7 @@ export function useLiveCoordination(projectId: Id<'hostedProjects'>, enabled: bo
     overlapsComplete: !answers.error && overlaps?.isDone !== false && overlaps?.signals?.complete !== false,
     unavailable,
     sessions: sessions.results as Session[],
-    sessionsLoading: sessions.status !== 'Exhausted',
+    sessionsLoading: sessionsLoading,
     sessionsComplete: sessions.status === 'Exhausted',
     loadMoreSessions: () => sessions.loadMore(50),
     eventsComplete: recent.status === 'Exhausted',
@@ -108,7 +112,7 @@ export function useLiveCoordination(projectId: Id<'hostedProjects'>, enabled: bo
     claims: claims.value?.claims ?? [],
     ...(counts.value ? { counts: counts.value } : {}),
     initialLoading: !settled(unacked) || !settled(claims) || !settled(answers),
-    loading: !settled(unacked) || !settled(claims) || !settled(answers) || sessions.status !== 'Exhausted',
+    loading: !settled(unacked) || !settled(claims) || !settled(answers) || sessionsLoading,
   };
 }
 

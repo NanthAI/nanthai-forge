@@ -31,6 +31,10 @@ export const usePaginatedQuery = (reference, args) => ({
   isLoading: false,
   loadMore() {},
 });
+// The real module also exports this (the hook usePaginatedQuery wraps); useSafePaginatedQuery calls it.
+export const usePaginatedQueryInternal = (reference, args, options) => ({
+  user: usePaginatedQuery(reference, args, options),
+});
 export const useMutation = () => async () => null;
 export const useAction = reference => async args => tree().actions?.[name(reference)]?.(args) ?? null;
 

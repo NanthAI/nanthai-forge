@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { execFileSync } from 'node:child_process';
-import { randomBytes, randomUUID } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 import { mkdir, readFile, writeFile, chmod, lstat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -8,6 +8,7 @@ import { parseArgs } from 'node:util';
 import { ConvexHttpClient } from 'convex/browser';
 import { makeFunctionReference } from 'convex/server';
 import { ShotError } from './ui-shots/options.mjs';
+import { readerGrantOperationId } from './ui-bot-grant.mjs';
 
 let stage = 'arguments';
 try {
@@ -122,14 +123,14 @@ try {
         throw new ShotError(
           'The bot has contributor access; a reader grant cannot remove existing write access.',
         );
-      credentials.readerGrantOperationId ??= randomUUID();
+      const operationId = readerGrantOperationId(credentials, deployment, projectId);
       await save();
       stage = 'apply deployed reader grant';
       await client.action(makeFunctionReference('projectReaderActions:set'), {
         projectId,
         reader: user.id,
         present: true,
-        operationId: credentials.readerGrantOperationId,
+        operationId,
       });
       stage = 'verify reader grant';
       let cursor = null,
@@ -144,7 +145,7 @@ try {
       } while (cursor);
       if (!found)
         throw new ShotError(
-          'Original reader grant was removed. Clear readerGrantOperationId locally to request a new grant.',
+          "Original reader grant was removed. Delete this project's entry from readerGrantOperationIds locally to request a new grant.",
         );
       console.log('Reader grant verified. Bot has no owner or contributor grant.');
     }

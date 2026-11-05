@@ -224,7 +224,7 @@ export default function HostedIntents({
         now={now}
         intentId={intentId}
         loading={
-          sessions.status !== 'Exhausted' ||
+          (!sessions.failed && sessions.status !== 'Exhausted') ||
           intents.loading ||
           (Boolean(intentId) && (lanes.loading || views.loading || runs.loading || moves.loading))
         }

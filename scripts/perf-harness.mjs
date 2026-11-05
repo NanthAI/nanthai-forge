@@ -108,13 +108,14 @@ export async function main(args) {
       record.browser.version = observed.browserVersion;
       for (const name of ['now', 'work', 'laneFirstDiff'])
         record.measurements[name] = measurement(name, observed.samples[name], observed.reason);
-    } catch {
+    } catch (error) {
+      // Only the typed bot-access error carries a message: it names a project id and a command, no secrets.
+      const reason =
+        error?.code === 'BOT_NO_READER_GRANT'
+          ? error.message
+          : 'Live browser setup failed; verify the private bot file, Chromium, dev origin and authenticated access. Details redacted.';
       for (const name of ['now', 'work', 'laneFirstDiff'])
-        record.measurements[name] = measurement(
-          name,
-          [],
-          'Live browser setup failed; verify the private bot file, Chromium, dev origin and authenticated access. Details redacted.',
-        );
+        record.measurements[name] = measurement(name, [], reason);
       record.browser.status = 'failed';
     }
   }

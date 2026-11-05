@@ -41,6 +41,8 @@ export function lanesFixture() {
         local = Object.fromEntries(Object.entries(baseline).map(([table, rows]) => [table, new Map(rows)])),
         reads = [],
         writes = [];
+      // A Convex query function may run one paginate(); a second fails in production only (mutations are exempt).
+      let paginations = 0;
       const meter = {
         name,
         retries,
@@ -199,8 +201,31 @@ export function lanesFixture() {
                 assert(rows.length <= 1, 'unique index');
                 return rows[0] ?? null;
               },
+              [Symbol.asyncIterator]: async function* () {
+                assert(match, 'indexed reads only');
+                const ordered = match(local[table]);
+                if (descending) ordered.reverse();
+                let consumed = 0;
+                try {
+                  for (const row of ordered) {
+                    consumed++;
+                    yield structuredClone(row);
+                  }
+                } finally {
+                  // Lazy like Convex: only the rows the loop consumed are read and metered.
+                  read(table, rows => {
+                    const all = match(rows);
+                    if (descending) all.reverse();
+                    return all.slice(0, consumed);
+                  });
+                }
+              },
               paginate: async ({ cursor, numItems, maximumRowsRead, maximumBytesRead }) => {
                 assert(match, 'indexed reads only');
+                assert(
+                  !fn.isQuery || ++paginations === 1,
+                  'This query function ran multiple paginated queries. Convex only supports a single paginated query in each query function.',
+                );
                 const start = Number(cursor ?? 0);
                 const rows = read(table, all => {
                   const result = [];

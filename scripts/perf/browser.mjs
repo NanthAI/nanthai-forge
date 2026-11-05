@@ -5,6 +5,7 @@ import { ConvexHttpClient } from 'convex/browser';
 import { makeFunctionReference } from 'convex/server';
 import { signIn, convexToken } from '../ui-shots/browser.mjs';
 import { destination } from '../ui-shots/options.mjs';
+import { explainBotAccess } from '../ui-bot-grant.mjs';
 import { routeUrlState, projectIdentity } from '../../src/project-routes.ts';
 
 export function successfulSample(
@@ -55,6 +56,11 @@ export async function browserSamples(config) {
     if (!token || !deployment) throw new Error('PERF_PROJECT_CONNECTION');
     const client = new ConvexHttpClient(deployment, { logger: false });
     client.setAuth(token);
+    try {
+      await client.query(makeFunctionReference('projectWork:state'), { projectId: project });
+    } catch (error) {
+      throw explainBotAccess(error, deployment, project);
+    }
     const identity = await client.query(makeFunctionReference('urlProjects:resolve'), { projectId: project });
     if (!identity) throw new Error('PERF_PROJECT_IDENTITY');
     projectIdentity(identity.id, identity.handle, identity.name, identity.slug);

@@ -568,6 +568,7 @@ project and seed a replacement instead of migrating it. Only the lead performs t
    completion before testing full recovery. The initial seed eventually uploads the complete closure.
    `nforge exchange "$OWNER" push` no longer exists (it returns `CLI_UPGRADE_REQUIRED`); later changes
    reach the hosted project through hosted Lanes and landing. Recreate any desired contributor grants on the replacement explicitly.
+   Also re-grant service readers such as the UI bot on the replacement project: run `node scripts/ui-bot-setup.mjs --deployment CONVEX_URL --project NEW_PROJECT_ID --convex-cwd "$FORGE_OWNER" --grant-reader`. Reader grants belong to one project and do not follow a new project id; without the re-grant, `ui-shots` and `perf-harness` report that the bot has no reader grant and print this command.
 
    Inspect the new format's summaries, then open the printed URL and inspect Now, a Lane and Intents:
 
