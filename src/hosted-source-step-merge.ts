@@ -378,9 +378,7 @@ export async function computeMergeStep(
     bases,
   );
   if (bases && !(plan.batch && manifestConflict(result, source))) c.composeBases = [...bases];
-  const manifest = composeResultSchema.parse(
-    JSON.parse(source.object(result.output.sha256).toString('utf8')),
-  );
+  let manifest = composeResultSchema.parse(JSON.parse(source.object(result.output.sha256).toString('utf8')));
   c.index++;
   if (
     manifest.result.status === 'conflict' &&
@@ -388,8 +386,27 @@ export async function computeMergeStep(
     'candidateId' in value &&
     plan.batch.members.includes(value.candidateId)
   ) {
+    let againstMain = c.head === plan.base.head;
+    if (!againstMain) {
+      const onMain = await buildHostedComposeState(
+        c.input,
+        { ...plan, batch: undefined, inputs: inputs.manifest, dependencies: dependencies.manifest },
+        reader,
+        source,
+        async () => {},
+      );
+      const checked = composeResultSchema.parse(
+        JSON.parse(source.object(onMain.output.sha256).toString('utf8')),
+      );
+      if (checked.result.status === 'conflict') {
+        manifest = checked;
+        againstMain = true;
+      }
+    }
+    invariant(manifest.result.status === 'conflict', 'SOURCE_JOB_INVALID', 'Retain the rejected merge.');
     (c.batchDropped ??= []).push({
       candidateId: value.candidateId,
+      ...(againstMain ? { againstMain: true as const } : {}),
       conflicts: manifest.result.conflicts,
       paths: manifest.result.paths,
       more: manifest.result.more,

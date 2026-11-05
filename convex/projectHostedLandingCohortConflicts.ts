@@ -12,6 +12,8 @@ import { batchConflictPeers } from './projectHostedLandingConflictPeers';
 import { loadFinish } from './projectHostedFinishStore';
 import { reserveFinishRetry } from './projectHostedFinishCompose';
 import { scheduleFinish } from './projectHostedFinishWake';
+import { hostedRecordSchema } from '../src/hosted-records';
+import { invariant } from '../src/errors';
 
 /** Rejected members wait outside the checking train. Its tail is the last
  * included acceptance receipt, even when the original last member conflicts. */
@@ -54,13 +56,26 @@ export async function settleBatchConflicts(ctx: MutationCtx, input: BatchIdentit
   const exact =
     main.head === source.state.request.expectedMain.head &&
     main.receipt.id === source.state.request.expectedMain.receiptId;
+  const internal = dropped.filter(drop => !drop.againstMain);
+  if (exact && internal.length && batch.included?.length && batch.phase !== 'landed') {
+    const tail = batch.members.filter(member => batch.included!.includes(member.submissionId)).at(-1)!;
+    const candidate = hostedRecordSchema.options[3].parse(source.operation.terminal.outcome.result);
+    invariant(candidate.result.status === 'clean', 'COMPOSITION_CONFLICT', 'Retain the survivor head.');
+    // An external predecessor may have just landed. Prefix-only rejections now
+    // belong to this cohort's settlement, rather than its predecessor's event.
+    await deferSpeculativeConflict(ctx, input, batch, internal, {
+      submissionId: tail.submissionId,
+      head: candidate.result.head,
+      receiptId: tail.operations.accept,
+    });
+  }
   for (const member of batch.members.filter(member => !batch.included?.includes(member.submissionId))) {
     const current = await loadLanding(ctx, { projectId: input.projectId, submissionId: member.submissionId });
     if (current.state.batchId !== batch.id || ['landed', 'terminal-failed'].includes(current.state.phase))
       continue;
     const conflict = dropped.find(drop => drop.candidateId === member.candidate.id);
     if (!conflict) continue;
-    if (exact) {
+    if (exact && conflict.againstMain) {
       await settleMemberBatchConflict(ctx, {
         projectId: input.projectId,
         member,
@@ -76,7 +91,7 @@ export async function settleBatchConflicts(ctx: MutationCtx, input: BatchIdentit
         ),
         at: batch.at,
       });
-    } else {
+    } else if (!exact || batch.phase === 'landed' || !batch.included?.length) {
       await recomposeRejectedMember(ctx, input, batch, current);
     }
   }

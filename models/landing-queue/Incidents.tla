@@ -6,7 +6,8 @@ vars == <<pc, canonical, observed, inputsDone, returned, a, b, main, checked, ap
 Init == /\ pc = 0 /\ canonical = "ready" /\ observed = "ready"
         /\ inputsDone = FALSE /\ returned = FALSE
         /\ a = "queued" /\ b = "queued" /\ main = 0
-        /\ checked = 0 /\ applied = 0 /\ owner = TRUE
+        /\ checked \in (IF Scenario = "cohort" THEN {0, 1} ELSE {0})
+        /\ applied = 0 /\ owner = TRUE
 Idle == UNCHANGED vars
 \* Minimal litmus reductions, not full historical incident replays.
 Wait == /\ Scenario = "wait"
@@ -18,13 +19,21 @@ Wait == /\ Scenario = "wait"
                      /\ observed' = (IF Fixed THEN canonical ELSE observed)
                      /\ UNCHANGED <<canonical, inputsDone, a, b, main, checked, applied, owner>>
        [] OTHER -> FALSE
+\* checked = 1 means the worker independently proves a conflict on main.
+\* checked = 0 is a conflict only with A's unaccepted same-cohort prefix.
 CohortConflict == /\ Scenario = "cohort"
-  /\ CASE pc = 0 -> /\ a' = "checking" /\ b' = (IF Fixed THEN "deferred" ELSE "conflict")
+  /\ CASE pc = 0 -> /\ a' = "checking"
+                     /\ b' = (IF Fixed /\ checked = 0 THEN "deferred" ELSE "conflict")
                      /\ pc' = 1
                      /\ UNCHANGED <<canonical, observed, inputsDone, returned, main, checked, applied, owner>>
-       [] pc = 1 -> /\ a' = "failed" /\ pc' = 2
-                     /\ UNCHANGED <<canonical, observed, inputsDone, returned, b, main, checked, applied, owner>>
-       [] pc = 2 /\ Fixed -> /\ b' = "retry-on-main" /\ pc' = 3
+       [] pc = 1 -> /\ a' \in {"failed", "landed", "cancelled"} /\ pc' = 2
+                     /\ main' = (IF a' = "landed" THEN 1 ELSE 0)
+                     /\ UNCHANGED <<canonical, observed, inputsDone, returned, b, checked, applied, owner>>
+       [] pc = 2 /\ Fixed -> /\ b' = (IF b = "deferred" THEN "retry-on-main" ELSE b) /\ pc' = 3
+                     /\ UNCHANGED <<canonical, observed, inputsDone, returned, a, main, checked, applied, owner>>
+       [] pc = 3 /\ Fixed -> /\ b' = (IF b = "retry-on-main" THEN
+                                          (IF main = 0 THEN "landed" ELSE "conflict") ELSE b)
+                     /\ pc' = 4
                      /\ UNCHANGED <<canonical, observed, inputsDone, returned, a, main, checked, applied, owner>>
        [] OTHER -> FALSE
 LostWake == /\ Scenario = "stranded"
@@ -57,7 +66,10 @@ CrossHead == /\ Scenario = "reuse"
 Step == Wait \/ CohortConflict \/ LostWake \/ MovingMain \/ CrossHead
 Spec == Init /\ [][Step]_vars /\ WF_vars(Step)
 FreshTerminal == returned => observed = canonical
-NoOrphanConflict == ~(a = "failed" /\ b = "conflict" /\ main = 0)
+NoOrphanConflict == ~(a \in {"failed", "cancelled"} /\ b = "conflict" /\ main = 0 /\ checked = 0)
+NoPrematureConflict == Scenario = "cohort" /\ checked = 0 /\ a = "checking" => b # "conflict"
+PromptMainConflict == Scenario = "cohort" /\ checked = 1 /\ pc > 0 => b = "conflict"
+CohortSettles == Scenario = "cohort" => <>(b \in {"landed", "conflict"})
 ExactCheckedHead == applied # 0 => applied = checked
 EventuallyTerminal == <>(a = "landed" \/ a = "failed")
 =============================================================================

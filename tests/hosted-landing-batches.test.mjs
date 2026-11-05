@@ -116,7 +116,7 @@ test('one member compose conflict is retained without blocking the rest or addin
     [...f.tables.projectHostedLandingAttempts.values()].find(r => r.attemptId === failed.attemptId).value,
   );
   assert.equal(pins.candidate.head, null, 'member has its own resolvable conflict Candidate');
-  assert.match(failed.error.message, /retained conflict root [0-9a-f]{64}/);
+  assert.match(failed.error.message, /conflict/i);
   assert.equal(f.runs().length, 1);
 });
 

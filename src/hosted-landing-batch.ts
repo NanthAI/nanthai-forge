@@ -30,6 +30,8 @@ export const batchDroppedSchema = z
     z
       .object({
         candidateId: z.uuid(),
+        /** Worker proved this rejection against the outer base, without cohort members. */
+        againstMain: z.literal(true).optional(),
         paths: z.array(z.string()).max(10).optional(),
         more: z.number().int().nonnegative().optional(),
         conflicts: z

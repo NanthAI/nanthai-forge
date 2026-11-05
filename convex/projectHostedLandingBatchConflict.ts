@@ -33,6 +33,11 @@ export async function retainBatchConflict(
     'CHANNEL_CHANGED',
     'Retain terminal conflicts only on the current accepted main base; recompose speculative or stale bases.',
   );
+  invariant(
+    input.conflict.againstMain === true,
+    'CHANNEL_CHANGED',
+    'An unaccepted cohort prefix is advisory; recompose on accepted main before terminal conflict retention.',
+  );
   const row = await readHostedRecord(ctx, {
     projectId: input.projectId,
     actor: member.actor.id,

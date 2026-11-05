@@ -94,9 +94,9 @@ export async function buildHostedComposeState(
         selected++;
         // Retain every input even after the first conflict; do not reinterpret a suffix.
         if (result) continue;
-        const left = head,
-          right = entry.head;
-        const merged = await calculate(() => {
+        let left = head;
+        const right = entry.head;
+        let merged = await calculate(() => {
           source.state(left);
           source.state(right);
           return restoreBase
@@ -105,6 +105,27 @@ export async function buildHostedComposeState(
         });
         if (merged.head) head = merged.head;
         else {
+          // A cohort prefix is unaccepted. Probe this member against the outer
+          // base in the same worker; retain prompt main conflicts with their
+          // actual base root, and mark prefix-only conflicts as advisory.
+          if (plan.batch && left !== plan.base.head) {
+            const onMain = await calculate(() =>
+              restoreBase
+                ? composeStack(
+                    source,
+                    right,
+                    plan.base.head,
+                    restoreBase.object.sha256,
+                    plan.message,
+                    plan.at,
+                  )
+                : source.compose(plan.base.head, right, plan.message, plan.at),
+            );
+            if (!onMain.head) {
+              left = plan.base.head;
+              merged = onMain;
+            }
+          }
           const details = await calculate(() =>
             restoreBase
               ? source.mergeFiles(
@@ -159,6 +180,7 @@ export async function buildHostedComposeState(
           if (plan.batch && 'candidateId' in entry && plan.batch.members.includes(entry.candidateId))
             dropped.push({
               candidateId: entry.candidateId,
+              ...(left === plan.base.head ? { againstMain: true as const } : {}),
               conflicts,
               paths: paths.slice(0, 10),
               more: Math.max(0, paths.length - 10),

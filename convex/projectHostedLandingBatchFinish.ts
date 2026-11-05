@@ -165,9 +165,21 @@ export async function batchFinishStep(
       if (included.includes(member))
         await hostedWriteProject(ctx, input.projectId, member.actor.id, member.authorityEpoch);
     }
-    if (predecessor === 'pending' && dropped.length) await deferSpeculativeConflict(ctx, key, batch, dropped);
+    if (dropped.length) {
+      if (predecessor === 'pending') await deferSpeculativeConflict(ctx, key, batch, dropped);
+      else if (included.length) {
+        const tail = included.at(-1)!;
+        const unproved = dropped.filter(drop => !drop.againstMain);
+        if (unproved.length)
+          await deferSpeculativeConflict(ctx, key, batch, unproved, {
+            submissionId: tail.submissionId,
+            head: candidate.result.head,
+            receiptId: tail.operations.accept,
+          });
+      }
+    }
     for (const member of batch.members.filter(
-      m => predecessor !== 'pending' && dropped.some(d => d.candidateId === m.candidate.id),
+      m => predecessor !== 'pending' && dropped.some(d => d.candidateId === m.candidate.id && d.againstMain),
     )) {
       if (
         (await loadLanding(ctx, { projectId: input.projectId, submissionId: member.submissionId })).state
@@ -193,6 +205,8 @@ export async function batchFinishStep(
     }
     if (!included.length) {
       await retainSurvivorTrain(ctx, key, [], batch);
+      if (predecessor !== 'pending' && dropped.some(drop => !drop.againstMain))
+        await settleBatchConflicts(ctx, key, { ...batch, included: [], phase: 'landed' });
       await writeBatch(ctx, key, {
         ...batch,
         included: [],

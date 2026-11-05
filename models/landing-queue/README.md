@@ -2,7 +2,8 @@
 
 This is a finite TLA+ abstraction of the hosted queue at accepted source
 `d34fe6fa3332d0e924f5ae22dbe1646e76aa1ddd5be3b6b7691021ff032671ba`.
-It describes the existing implementation, including undesirable behavior. It is
+It describes the pinned implementation, including undesirable behavior. The
+same-cohort litmus also guards the corrected controller behavior below. It is
 not a refinement proof of the TypeScript or of the source merge algorithm.
 No runtime, Convex, policy or byte-placement behavior changes.
 
@@ -149,15 +150,27 @@ algorithm drift: changes to these code anchors require manual model review.
 2. **Same-cohort conflict against work that never lands (6e587f06; design
    behavior).** A and B compose alone cleanly; B conflicts only with A's prefix.
    B becomes terminal conflict before A's check; A fails; neither lands and B
-   still carries an unaccepted-prefix conflict. The `cohort` litmus violates
-   `NoOrphanConflict`. The executable characterization in `tests/landing-model-cohort.test.mjs` also checks the actual implementation. This is real in `src/hosted-source-step-merge.ts:387` and
+   still carries an unaccepted-prefix conflict in the pinned implementation. The `cohort` litmus violates
+   `NoOrphanConflict`. The executable regression in `tests/landing-model-cohort.test.mjs` checks the actual implementation. This is real in `src/hosted-source-step-merge.ts:387` and
    `convex/projectHostedLandingBatchFinish.ts:168`, which defers only when there
    is a *separate pending predecessor*. `retainBatchConflict` checks the outer
    base against main (`convex/projectHostedLandingBatchConflict.ts:38`), not
    acceptance of the internal prefix. Recommendation: retain the prefix-dependent
    rejection as advisory until the contributing cohort settles; on failure retry
    B alone on actual main. Preserve prompt terminal conflicts proven against main
-   itself. `cohort-fixed` checks that proposed behavior only.
+   itself. `cohort-fixed` guards the corrected behavior, including failed, cancelled and
+   landed prefixes, no premature rejection, prompt independently proven main
+   conflicts and eventual rejected-member settlement. The deterministic tests
+   now require the rejected member to retry and land after a failed prefix.
+   Both workers mark a drop `againstMain` only after composing that member
+   against the outer base alone; conflict roots then pin that base. Other drops
+   wait on the included tail using the existing advisory/order-settlement path,
+   and recompose their immutable selection on actual main after settlement.
+   Legacy unmarked drops also recompose. Clean landings add no RPC, source
+   probe, DB record or byte storage. Only a conflicting prefix probes the
+   resident merge inputs again in its existing source step; recovery uses the
+   ordinary retry path. Metadata stays bounded by eight group members; new
+   source/conflict bytes stay in R2. No idle calls or periodic wakes are added.
 3. **Stale terminal wait payload (74017d1b; implementation/observation bug).**
    Cache Ready; canonical submission becomes terminal; input pages finish; the
    client exits with `status: terminal` and the older Ready payload.
@@ -197,7 +210,7 @@ success only when the named expected violation is found. A parse error, unrelate
 invariant failure, timeout, or unexpected pass is a failed run. `*-fixed` models
 proposals/recovery contracts, not changes made to product code.
 
-The implementation characterization test for the same-cohort finding passes against the pinned source: the rejected member retains its original conflict attempt after every surviving-prefix check fails, no acceptance is recorded, and main head and receipt both remain unchanged.
+The original implementation characterization reproduced the finding against the pinned source: the rejected member retained its conflict attempt after surviving-prefix check failures, with no acceptance and unchanged main. The current regression instead requires automatic recovery, original-selection preservation, cancelled-run fencing and prompt main-proven rejection; it also checks a full-size cohort and transfer from an external predecessor to the internal settlement owner.
 
 ## TLC results
 
@@ -218,7 +231,7 @@ or production historical replay is implied.
 | `wait` | 4 | 4 | 1.292 | Expected FreshTerminal |
 | `wait-fixed` | 4 | 4 | 0.998 | Passed |
 | `cohort` | 3 | 3 | 0.950 | Expected NoOrphanConflict |
-| `cohort-fixed` | 4 | 4 | 0.837 | Passed |
+| `cohort-fixed` | 22 | 22 | 0.731 | Passed; failed/cancelled/landed prefix and independent-main branches |
 | `stranded` | 2 | 2 | 0.850 | Expected liveness violation |
 | `stranded-fixed` | 4 | 4 | 0.649 | Passed |
 | `moving` | 8 | 7 | 0.554 | Expected liveness violation |

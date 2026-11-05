@@ -215,7 +215,9 @@ export async function writeLanding(
     runnable,
     wouldConflict,
     orderLive: orderLive ? true : undefined,
-    orderWait: state.phase === 'ready' ? row.orderWait : undefined,
+    // Queued advisory conflicts also depend on an existing settlement event.
+    // A same-attempt diagnostic write must not silently discard that owner.
+    orderWait: state.phase === 'ready' || (speculative && !retireAdvice) ? row.orderWait : undefined,
     orderWaited: orderLive ? row.orderWaited : undefined,
     value: semanticPayload(state),
   });

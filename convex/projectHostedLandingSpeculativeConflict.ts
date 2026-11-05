@@ -15,11 +15,13 @@ export async function deferSpeculativeConflict(
   input: BatchIdentity,
   batch: LandingBatch,
   dropped: BatchDropped,
+  // For an internal prefix, use the included tail's existing settlement event.
+  waitFor = batch.predecessor,
 ) {
-  invariant(batch.predecessor, 'WORK_STALE', 'Retain the speculative predecessor.');
+  invariant(waitFor, 'WORK_STALE', 'Retain the unaccepted prefix owner.');
   const predecessor = await loadLanding(ctx, {
     projectId: input.projectId,
-    submissionId: batch.predecessor.submissionId,
+    submissionId: waitFor.submissionId,
   });
   for (const member of batch.members.filter(member =>
     dropped.some(drop => drop.candidateId === member.candidate.id),
@@ -39,7 +41,7 @@ export async function deferSpeculativeConflict(
         wouldConflictSchema.parse({
           code: 'COMPOSITION_CONFLICT',
           predecessor: {
-            ...batch.predecessor,
+            ...waitFor,
             groupId: predecessor.state.batchId ?? predecessor.state.id,
           },
           paths,

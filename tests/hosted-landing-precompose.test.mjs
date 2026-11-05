@@ -9,6 +9,7 @@ import { moduleUrl } from './convex-module.mjs';
 import { compose, records } from './hosted-finish-fixture.mjs';
 const precompose = await import(moduleUrl('../convex/projectHostedLandingPrecompose.ts'));
 const observe = await import(moduleUrl('../convex/projectHostedFinishObserve.ts'));
+const conflictPeers = await import(moduleUrl('../convex/projectHostedLandingConflictPeers.ts'));
 const prior = Object.fromEntries(Object.keys(synthetic).map(k => [k, process.env[k]]));
 test.before(() => Object.assign(process.env, synthetic));
 test.after(() => {
@@ -223,11 +224,52 @@ test('group conflict peers exclude earlier dropped members that never entered it
     assert(++ticks < 300);
     await f.execute(f.pending().find(task => task.scheduledTime <= Date.now() + 30000));
   }
+  const pending = await f.current(f.entries[2].state.id);
+  assert.equal(pending.submission.phase, 'queued');
+  assert.equal(pending.submission.error, null, 'an unaccepted prefix is advisory until its group settles');
+  const row = [...f.tables.projectHostedLandingRequests.values()].find(
+    row => row.submissionId === f.entries[2].state.id,
+  );
+  const advice = JSON.parse(row.wouldConflict);
+  assert.equal(advice.predecessor.groupId, pending.submission.batchId);
+  assert.deepEqual(advice.paths, ['collision']);
+  const batch = JSON.parse([...f.tables.projectHostedLandingBatches.values()][0].value);
+  const peers = await f.transaction(
+    'retained-prefix-peers',
+    {
+      _handler: ctx =>
+        conflictPeers.batchConflictPeers(ctx, f.projectId, batch, f.entries[2].candidate.id, [
+          f.entries[1].candidate.id,
+          f.entries[2].candidate.id,
+        ]),
+    },
+    {},
+  );
+  assert(peers.includes(f.entries[0].lane.laneId));
+  assert(!peers.includes(f.entries[1].lane.laneId), 'an earlier dropped member never entered this prefix');
+  assert(!peers.includes(f.entries[3].lane.laneId), 'a later survivor is not part of this prefix');
+  await f.passChecks();
+  await f.drain();
   const status = await f.current(f.entries[2].state.id);
   assert.equal(status.submission.error?.code, 'COMPOSITION_CONFLICT');
-  assert(status.submission.error.message.includes('collision'));
-  assert(status.submission.error.message.includes(f.entries[0].lane.laneId));
-  assert(!status.submission.error.message.includes(f.entries[1].lane.laneId));
+  const attempt = [...f.tables.projectHostedLandingAttempts.values()]
+    .map(row => JSON.parse(row.value))
+    .find(attempt => attempt.id === status.submission.attemptId);
+  const candidateRow = await f.c.run('read-settled-conflict', records.readHostedRecord, {
+    ...f.c.auth,
+    kind: 'candidate',
+    key: attempt.candidate.id,
+  });
+  const candidate = JSON.parse(candidateRow.value);
+  const conflicts = JSON.parse(f.c.objects.get(candidate.result.conflicts.sha256));
+  assert.deepEqual(
+    conflicts.paths.map(entry => entry.path),
+    ['collision'],
+  );
+  assert.equal(conflicts.left, f.currentMain().head, 'the conflict root pins actual accepted main');
+  assert.equal(attempt.main.head, f.currentMain().head, 'terminal evidence uses actual accepted main');
+  assert.equal(attempt.main.receiptId, f.currentMain().receipt.id);
+  assert.equal(states(f).find(state => state.id === f.entries[0].state.id).phase, 'landed');
 });
 
 test('a delayed main event preserves its conflict priority after a newer disjoint landing', async t => {
