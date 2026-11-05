@@ -71,7 +71,8 @@ function client(f) {
     events,
     subscriptions,
     counts: () => ({ opens, closes, calls }),
-    wait: input => observeHostedSubmissions(transport, input, undefined, e => events.push(e), subscribe),
+    wait: (input, signal) =>
+      observeHostedSubmissions(transport, input, signal, e => events.push(e), subscribe),
     wake: () => {
       for (const s of subscriptions.values()) s.next(null);
     },
@@ -124,23 +125,49 @@ test('a later saved Lane supersedes a staged input during live wait without chan
     await f.execute();
     assert(i < 29, 'input staging is finite');
   }
-  const waiting = c.wait({ operationIds: [request.operationId], timeoutSeconds: 2 });
+  const controller = new AbortController();
+  t.after(() => controller.abort());
+  let done = false;
+  const waiting = c
+    .wait({ operationIds: [request.operationId], timeoutSeconds: 2 }, controller.signal)
+    .then(result => {
+      done = true;
+      return result;
+    });
   await turn();
   assert([...c.subscriptions.keys()].some(k => k.startsWith('projectHostedFinish:inputs')));
   const old = await f.readLane(f.lane.laneId);
   await f.changeLane(old.id, { head: 'e'.repeat(64), sourceVersion: old.sourceVersion + 1 });
   c.wake();
-  const result = await waiting;
-  assert.equal(result.result.status, 'terminal');
-  assert.equal(result.result.successful, false);
+  await turn();
+  // Supersession is input progress, not a terminal outcome for the request.
+  assert.equal(done, false);
   const input = c.events.filter(e => e.type === 'submission-input').at(-1);
   assert.equal(input.state, 'superseded');
   assert.equal(input.outcome, 'pending');
   assert.equal(input.complete, false);
   assert.equal((await f.current(state.id)).submission.observation.state, 'pending');
   assert.equal(f.tables.projectHostedAcceptances.size, 0);
-  assert.equal(c.counts().closes, 1);
   const calls = c.counts().calls;
   await turn();
   assert.equal(c.counts().calls, calls);
+  await f.drain();
+  const canonical = JSON.parse(
+    await f.tx('finishWaitCanonical', observe.page, {
+      projectId: f.projectId,
+      operationId: request.operationId,
+      nextVersion: 0,
+    }),
+  ).submission;
+  assert.equal(canonical.observation.state, 'landed');
+  assert.equal(f.tables.projectHostedAcceptances.size, 1);
+  assert.equal((await f.readLane(old.id)).head, 'e'.repeat(64), 'acceptance preserves the later saved Lane');
+  c.wake();
+  const result = await waiting;
+  assert.equal(result.result.status, 'terminal');
+  assert.deepEqual(result.result.submissions[0].submission, canonical);
+  assert.equal(result.result.successful, true);
+  assert.equal(c.events.filter(e => e.type === 'submission' && e.terminal).length, 1);
+  assert.equal(c.counts().closes, 1);
+  assert.equal(c.subscriptions.size, 0);
 });

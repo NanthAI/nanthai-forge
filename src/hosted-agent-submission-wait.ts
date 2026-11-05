@@ -161,14 +161,13 @@ async function observeHostedSubmissionsOnce(
   const cursor = new HostedSubmissionWaitCursor(transport.address, actor, operations, command.cursor);
   const canonicalOperations = new Map<string, string>();
   const current = new Map<string, z.infer<typeof eventSchema>>();
-  const sourceTerminal = new Map<string, boolean>();
+  // Input pages describe an attempt's Lane-relative outcome. They may settle
+  // after that attempt was replaced, or before the canonical receipt is visible.
+  // Only the current submission can end the wait; its existing subscription and
+  // register-then-reread path deliver settlement without another query per wake.
   const terminal = () =>
     current.size === operations.length &&
-    [...current.entries()].every(
-      ([id, e]) =>
-        e.submission.observation.state !== 'pending' ||
-        (command.until !== 'acceptance' && sourceTerminal.get(id)),
-    );
+    [...current.values()].every(e => e.submission.observation.state !== 'pending');
   let client: HostedRunSubscription | undefined;
   let wake = () => {};
   let fail: (error: unknown) => void = () => {};
@@ -184,13 +183,8 @@ async function observeHostedSubmissionsOnce(
         inputSubscriptions.delete(key);
       }
     }
-    if (!selected.request.finish || observed.pendingAttempt) {
-      sourceTerminal.set(operationId, false);
-      return;
-    }
-    let index: number | null = 0,
-      allTerminal = true,
-      count = 0;
+    if (!selected.request.finish || observed.pendingAttempt) return;
+    let index: number | null = 0;
     do {
       const args = {
         projectId: transport.address.projectId,
@@ -235,10 +229,7 @@ async function observeHostedSubmissionsOnce(
         })
         .parse(await transport.query('projectHostedFinish:inputs', args));
       if (stopped || signal.aborted) return;
-      if (!page.staged) {
-        allTerminal = false;
-        break;
-      }
+      if (!page.staged) break;
       for (const entry of page.entries) {
         invariant(
           entry.submissionId === selected.id &&
@@ -247,8 +238,6 @@ async function observeHostedSubmissionsOnce(
           'HOSTED_PROTOCOL_INVALID',
           'Input observation differs from the selected submission/attempt.',
         );
-        count++;
-        allTerminal &&= entry.terminal;
         const key = `input:${entry.submissionId}:${entry.attemptId}:${entry.laneId}`,
           hash = digest(JSON.stringify(entry));
         if (cursor.seen.seen.get(key) !== hash) {
@@ -264,7 +253,6 @@ async function observeHostedSubmissionsOnce(
       );
       index = page.nextIndex;
     } while (index !== null && !stopped);
-    sourceTerminal.set(operationId, count > 0 && allTerminal);
   };
   let changed = false,
     baseline = command.cursor == null,
@@ -327,7 +315,6 @@ async function observeHostedSubmissionsOnce(
       if (cursor.authority && cursor.authority !== authority) {
         cursor.authority = authority;
         resnapshot = true;
-        sourceTerminal.clear();
         // Resnapshot under fresh authority. Retained version identities remain
         // offsets only; every replay/page still rechecks access at the server.
         continue;

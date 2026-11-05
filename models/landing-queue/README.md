@@ -23,7 +23,7 @@ npm run model:landing-queue -- six-slots    # seven singleton groups, six occupi
 npm run model:landing-queue -- all          # all configurations sequentially
 npm run model:landing-queue -- reuse-core   # expected literal S2 counterexample
 npm run model:landing-queue -- wait         # expected observation counterexample
-npm run model:landing-queue -- wait-fixed   # proposed correction, not implemented
+npm run model:landing-queue -- wait-fixed   # canonical-terminal observation
 npm run model:landing-queue -- cohort
 npm run model:landing-queue -- cohort-fixed
 npm run model:landing-queue -- stranded
@@ -174,13 +174,15 @@ algorithm drift: changes to these code anchors require manual model review.
 3. **Stale terminal wait payload (74017d1b; implementation/observation bug).**
    Cache Ready; canonical submission becomes terminal; input pages finish; the
    client exits with `status: terminal` and the older Ready payload.
-   `FreshTerminal` fails in `wait`. The real stop condition ORs input settlement
-   into submission terminality at `src/hosted-agent-submission-wait.ts:166`, and
-   `result` serializes the unchanged cache at line 392. Recommendation: after
-   input settlement, drain a fresh canonical observation and finalize only when
-   the submission itself is terminal; otherwise continue the existing event wait.
-   Emit that final version once. `wait-fixed` models that refresh. Server S1–S3
-   remain unaffected; this is not false acceptance.
+   `FreshTerminal` fails in the historical `wait` litmus. The client now ends
+   only on the current canonical submission's terminal observation. Input pages
+   remain progress evidence, including superseded old attempts. A concurrent
+   settlement reaches the cache through the existing canonical subscription or
+   its register-then-reread path; no extra query is added per refresh. The final
+   version emits once. `wait-fixed` models the fresh terminal payload, and
+   `tests/hosted-submission-wait-races.test.mjs` holds old input pages across
+   replacements before, during and after Ready, plus same-attempt settlement.
+   Server S1–S3 remain unaffected; this is not false acceptance.
 4. **Stranded entry (19328518; historical implementation failure shape).**
    Submit/claim, crash, lose the recovery event, then stutter forever; L1 fails in
    `stranded`. The corresponding recovery-enabled litmus passes. Current code
