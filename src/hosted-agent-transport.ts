@@ -193,6 +193,9 @@ export class HostedAgentTransport {
   }
   /** CLI only: start reports the new Lane before its checkout downloads. */
   onStarted?: (lane: { laneId: string; path: string | null }) => void;
+  /** Fires once the local journal selects the operation id, before any network wait:
+   * a backgrounded or killed client still leaves its id and resume command behind. */
+  onOperation?: (action: string, operationId: string) => void;
   constructor(
     readonly root: string,
     readonly address: HostedAgentAddress,
@@ -670,6 +673,7 @@ export class HostedAgentTransport {
             );
       metricOperationId(journal.operationId);
       this.callerOperationId = journal.operationId;
+      this.onOperation?.(action, journal.operationId);
       const session: HostedAgentSession = {
         root,
         address: this.address,

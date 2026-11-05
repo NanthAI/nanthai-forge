@@ -19,6 +19,7 @@ import { invariant } from './errors.js';
 import { withLaneCommand } from './lane-registry.js';
 import { markerIdentity } from './lane-prune.js';
 import { landSummary } from './hosted-land-summary.js';
+import { operationLine } from './hosted-land-wait.js';
 import { AGENT_WAIT_SECONDS, operationWait } from './agent-operation-wait.js';
 import { recordTurnWait, settleTurnWork } from './agent-turn-work.js';
 import { HostedAgentTransport } from './hosted-agent-transport.js';
@@ -202,6 +203,10 @@ export async function hostedAgentCli(
     process.once('SIGINT', stop);
     process.once('SIGTERM', stop);
   }
+  // Landings announce their own first line after submission (hosted-land-wait).
+  if (action !== 'finish' && !transport.onOperation)
+    transport.onOperation = (selected, operationId) =>
+      process.stderr.write(`${operationLine(root, selected, operationId)}\n`);
   let result;
   try {
     result = await transport.dispatch(action, command, signal ?? controller.signal);

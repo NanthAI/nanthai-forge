@@ -103,13 +103,15 @@ test('finish prints the original operation wait and overlap banner before waitin
   assert.equal(response.result.phase, 'finish');
   const text = lines.join('');
   assert.match(text, new RegExp(`land: operationId ${operationId}`));
+  assert.match(text.split('\n')[0], new RegExp(`^land: operationId ${operationId}; .*resume with: .* wait `));
   assert.doesNotMatch(text, / finish /);
   assert.match(text, /keep this turn active/);
   assert.equal((text.match(/nforge agent '\/tmp\/lane-root' wait /g) ?? []).length, 1);
   assert.match(
     text,
     new RegExp(
-      `Resume after interruption with: nforge agent '/tmp/lane-root' wait '\\{"operationIds":\\["${operationId}"\\],"until":"acceptance"\\}'`,
+      `^land: operationId ${operationId}; work is unfinished, keep this turn active; resume with: nforge agent '/tmp/lane-root' wait '\\{"operationIds":\\["${operationId}"\\],"until":"acceptance"\\}'$`,
+      'm',
     ),
   );
   assert.match(text, /OVERLAP NOTICE: ACTION REQUIRED/);

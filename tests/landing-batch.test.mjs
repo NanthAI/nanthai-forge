@@ -27,6 +27,7 @@ import { parseWork } from '../dist/work-unified-types.js';
 import { ForgeError } from '../dist/errors.js';
 import { NativeSource } from '../dist/native-source.js';
 import { fixture as batchFixture } from './landing-batch-fixture.mjs';
+import { asAnotherProcess } from './another-process.mjs';
 
 async function fixture(t, options) {
   const f = await batchFixture(t, { delay: 0, ...options });
@@ -287,7 +288,7 @@ test('queued cancellation retains and checks the prefix before that entry', asyn
     const result = await dispatch(...args);
     if (!cancelled && args[0].action === 'run-check') {
       cancelled = true;
-      await cancelLandingEntry(f.work, f.pending[1]);
+      await asAnotherProcess(() => cancelLandingEntry(f.work, f.pending[1]));
     }
     return result;
   };
@@ -329,17 +330,19 @@ test('main can overtake a checking batch with manifest-disjoint evidence', async
     if (!moved && args[0].action === 'accept-channel') {
       moved = true;
       const person = new WorkService(f.root);
-      await person.dispatch(
-        {
-          action: 'accept-channel',
-          operationId: randomUUID(),
-          channel: 'main',
-          viewId: rival.view.id,
-          expectedHead: rival.view.head,
-          expectedPrevious: null,
-        },
-        person.store.revision(),
-        { keepOpen: true },
+      await asAnotherProcess(() =>
+        person.dispatch(
+          {
+            action: 'accept-channel',
+            operationId: randomUUID(),
+            channel: 'main',
+            viewId: rival.view.id,
+            expectedHead: rival.view.head,
+            expectedPrevious: null,
+          },
+          person.store.revision(),
+          { keepOpen: true },
+        ),
       );
     }
     return dispatch(...args);
@@ -420,9 +423,11 @@ test('policy changes before acceptance return checked batch evidence for person 
     if (!changed && args[0].action === 'accept-channel') {
       changed = true;
       const person = new WorkService(f.root);
-      await person.dispatch(
-        { action: 'set-policy', operationId: randomUUID(), preset: 'supervised' },
-        person.store.revision(),
+      await asAnotherProcess(() =>
+        person.dispatch(
+          { action: 'set-policy', operationId: randomUUID(), preset: 'supervised' },
+          person.store.revision(),
+        ),
       );
     }
     return dispatch(...args);
@@ -458,17 +463,19 @@ test('an overlapping main move supersedes the checked attempt without changing a
     if (!moved && args[0].action === 'accept-channel') {
       moved = true;
       const person = new WorkService(f.root);
-      await person.dispatch(
-        {
-          action: 'accept-channel',
-          operationId: randomUUID(),
-          channel: 'main',
-          viewId: rival.view.id,
-          expectedHead: rival.view.head,
-          expectedPrevious: null,
-        },
-        person.store.revision(),
-        { keepOpen: true },
+      await asAnotherProcess(() =>
+        person.dispatch(
+          {
+            action: 'accept-channel',
+            operationId: randomUUID(),
+            channel: 'main',
+            viewId: rival.view.id,
+            expectedHead: rival.view.head,
+            expectedPrevious: null,
+          },
+          person.store.revision(),
+          { keepOpen: true },
+        ),
       );
     }
     return dispatch(...args);

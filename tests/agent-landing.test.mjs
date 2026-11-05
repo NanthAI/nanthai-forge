@@ -21,6 +21,7 @@ import { withLandingSlot } from '../dist/landing-queue.js';
 import { finishChild } from '../dist/agent-finish-journal.js';
 import { drainPostAccept } from '../dist/post-accept-main.js';
 import { trustAgents } from './autonomy-fixture.mjs';
+import { asAnotherProcess } from './another-process.mjs';
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 function mainCheckPassed(root) {
@@ -123,16 +124,18 @@ async function fixture(t, native = true) {
   }
   async function personAccept(view, previous = currentChannelHead(store, 'main')) {
     const person = new WorkService(root);
-    return person.dispatch(
-      {
-        action: 'accept-channel',
-        operationId: randomUUID(),
-        channel: 'main',
-        viewId: view.viewId,
-        expectedHead: view.head,
-        expectedPrevious: previous,
-      },
-      person.store.revision(),
+    return asAnotherProcess(() =>
+      person.dispatch(
+        {
+          action: 'accept-channel',
+          operationId: randomUUID(),
+          channel: 'main',
+          viewId: view.viewId,
+          expectedHead: view.head,
+          expectedPrevious: previous,
+        },
+        person.store.revision(),
+      ),
     );
   }
   return { root, agent, store, lane, request, proposal, personAccept, background };
@@ -451,9 +454,11 @@ test('laneUpdates ask still stops an automatic retry without modifying Lane file
       moved = true;
       await f.personAccept(rival);
       const person = new WorkService(f.root);
-      await person.dispatch(
-        { action: 'set-policy', operationId: randomUUID(), laneUpdates: 'ask' },
-        person.store.revision(),
+      await asAnotherProcess(() =>
+        person.dispatch(
+          { action: 'set-policy', operationId: randomUUID(), laneUpdates: 'ask' },
+          person.store.revision(),
+        ),
       );
     }
     return dispatch(...args);

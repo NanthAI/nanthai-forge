@@ -710,16 +710,17 @@ Heavy-slot and checkout admission hints also use the isolated helper. Their
 existing thirty-second and one-second fallback timers still make progress when
 native startup, event delivery or close fails; no new retry timer is installed.
 
-A bounded synthetic churn investigation created and removed three 2,500-file
-scratch trees on the local APFS volume, probing delivery and fseventsd RSS/CPU
-before and after each tree. The 7,500 files contained 75,000 bytes; the experiment
-finished in 10.37 s with 53.67 MiB parent peak RSS (child RSS excluded). Median
-event latencies were 3.58, 11.70, 1.10 and 12.14 ms; all twelve attempts were
-healthy. Daemon RSS changed from 9.55 to 10.08 MiB. Other builders were active,
-so these observations cannot attribute that small change to this experiment.
-This checks immediate churn, not the reported multi-day daemon growth. Exact
-observations are retained on Issue d269e4f2; there is no evidence yet establishing
-that checkout churn causes the long-lived fseventsd wedge. This sample establishes no indexing mitigation or daemon policy change.
+Measured checkout churn is far too small to explain the multi-day fseventsd wedge,
+whose cause remains unknown. Two bounded
+synthetic runs on the local APFS volume probed delivery and daemon RSS around each
+tree: three 2,500-file trees (all twelve probes healthy, RSS 9.55 to 10.08 MiB), and
+five 29,000-file trees, 145,000 files created and removed in 21.3 s (all eleven
+probes healthy, median delivery 11.4-12.7 ms, RSS 9.33 to 10.36 MiB, about 7 KiB per
+thousand files). At that rate the observed 2.4-7 GB would need hundreds of millions
+of churned files. After the daemon restart, about 56 hours of concurrent multi-builder
+Lane and bench churn left it at 9.6 MiB. No indexing exclusion, tree reuse or daemon
+policy change is warranted; the health probe, ordinary ENVIRONMENT classification
+and `nforge doctor` remain the containment, with `sudo killall fseventsd` as the remedy.
 Bench preflight continues to refuse unhealthy cells before timing.
 
 ### Check environment contract

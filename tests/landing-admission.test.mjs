@@ -81,7 +81,17 @@ for (const action of ['finish', 'land']) {
     assert.deepEqual(submissions(replay), submissions(admitted));
     // A newer unsaved edit must not be recaptured when the service adopts the request.
     writeFileSync(join(lane.path, 'async.txt'), 'new unsaved edit\n');
-    await drive(f, () => f.store.load().channelMoves.find(move => move.channel === 'main'));
+    // Acceptance moves main before a separate write settles the entry. Stopping the
+    // worker at the move can cancel that settlement while another process holds the
+    // Work lock, so drive until the queued entry itself is terminal.
+    await drive(f, () => {
+      const data = f.store.load();
+      return (
+        data.channelMoves.some(move => move.channel === 'main') &&
+        data.landingEntries.length > 0 &&
+        data.landingEntries.every(entry => entry.terminalAt)
+      );
+    });
     const terminal = (await f.agent.dispatch(command)).result;
     assert.equal(terminal.terminal, true);
     assert.match(terminal.message, /terminal outcome/);

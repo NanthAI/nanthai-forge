@@ -103,7 +103,10 @@ export async function runFiles(
       const headings = new Map();
       let timedOut = false,
         firstError = '',
-        captureError = false;
+        captureError = false,
+        // A file that fails to load (SyntaxError, missing export) prints the real error as
+        // top-level TAP comments; its file-level result says only `error: 'test failed'`.
+        loadError = [];
       const counts = Object.fromEntries(Object.keys(totals).map(key => [key, 0]));
       const timer = setTimeout(() => {
         timedOut = true;
@@ -117,6 +120,15 @@ export async function runFiles(
       for (const stream of [child.stdout, child.stderr]) {
         createInterface({ input: stream }).on('line', line => {
           if (process.env.FORGE_TEST_DIAGNOSTICS === '1') diagnostics.push(line);
+          const comment = /^# (?!Subtest: )(.*)$/.exec(line);
+          if (comment && !/^\s*at |^Node\.js v/.test(comment[1]) && loadError.length < 32)
+            loadError.push(comment[1]);
+          // Each result's YAML block ends with `...`; later comments belong to later results.
+          else if (/^\s*\.\.\.$/.test(line)) loadError = [];
+          if (/^\s*error: 'test failed'$/.test(line) && !firstError && loadError.length) {
+            firstError = errorExcerpt(loadError.join('\n'));
+            loadError = [];
+          }
           if (/^\s*error:/.test(line) && !firstError) captureError = true;
           if (captureError && firstError.length < 2048) {
             if (/^\s*(?:code|stack|operator|failureType):/.test(line)) captureError = false;

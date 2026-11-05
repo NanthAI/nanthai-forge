@@ -122,7 +122,8 @@ test('source work without admission retains its replay, without inventing a land
   };
   assert.equal(normalizeHostedFinishResult(root, {}, source), source);
   const announcement = landAnnouncement(root, {}, { operationId: source.next.operationId, result: source });
-  assert.match(announcement.join('\n'), /source preparation is unfinished; keep this turn active; replay:/);
+  assert.equal(announcement.length, 1, 'one first line carries id and resume');
+  assert.match(announcement.join('\n'), /source preparation is unfinished, keep this turn active; replay:/);
   assert(announcement.join('\n').includes(JSON.stringify(original)));
   assert(!announcement.join('\n').includes('private recovery helper'));
 });

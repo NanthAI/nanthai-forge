@@ -100,6 +100,27 @@ test('fail once passes the check, reports flakiness and both attempt timings, ev
   assert.ok(verdicts.verdicts.some(item => item.verdict === 'flake'));
 });
 
+test('a file that cannot load keeps its compile error, not the generic file-level failure', async t => {
+  // Incident 2026-11-05 (run 5f2d241b): a composition of two separate fixes declared `root`
+  // twice; the receipt said only "test failed", so it read as an order-dependent flake.
+  const root = mkdtempSync(join(tmpdir(), 'forge-file-load-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const file = join(root, 'duplicate.test.mjs');
+  writeFileSync(
+    file,
+    "import test from 'node:test';\ntest('a', () => {\n  const root = 1;\n  const root = 2;\n});\n",
+  );
+  const result = await run([file]);
+  assert.equal(result.code, 1);
+  const [report] = result.reports;
+  assert.equal(report.flaky, false);
+  for (const error of [report.firstError, report.retry.firstError]) {
+    assert.match(error, /SyntaxError: Identifier 'root' has already been declared/);
+    assert.match(error, /duplicate\.test\.mjs:4/);
+    assert.doesNotMatch(error, /test failed|\bat compileSourceTextModule/);
+  }
+});
+
 test('persistent failures run twice, while four failures exceed the default budget and run only once', async t => {
   const persistent = fixture(t, ['always']);
   const result = await run(persistent.files);

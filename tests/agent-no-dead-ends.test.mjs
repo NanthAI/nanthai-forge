@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -275,4 +275,34 @@ test('wait accepts a save operation id and resumes it by exact replay', async t 
   assert.equal(pending.result.status, 'IN_PROGRESS');
   assert.match(pending.result.waitCommand, new RegExp(`wait .*${running.operationId}`));
   process.exitCode = 0;
+});
+
+// Lead report: a backgrounded land client lost its operation id. The first stderr
+// line names the id and its exact resume command before any network wait.
+test('save prints its operation id and resume command first, before waiting', async t => {
+  const root = checkout(t);
+  const operationId = randomUUID();
+  const written = [];
+  t.mock.method(process.stderr, 'write', chunk => {
+    written.push(String(chunk));
+    return true;
+  });
+  let before;
+  const transport = {
+    async dispatch(action, command) {
+      this.onOperation?.(action, operationId);
+      before = written.join('');
+      return { schema: 1, transport: 'hosted', action, operationId, result: { status: 'submitted' } };
+    },
+  };
+  await hostedAgentCli(root, 'save', { message: 'm' }, address, transport);
+  t.mock.restoreAll();
+  assert.equal(
+    before.split('\n')[0],
+    `save: operationId ${operationId}; resume with: nforge agent '${realpathSync(root)}' wait '{"operationIds":["${operationId}"]}'`,
+  );
+  // Landings keep their own single first line (after submission names the landing).
+  const finishTransport = { dispatch: async () => ({ result: {} }) };
+  await hostedAgentCli(root, 'finish', {}, address, finishTransport);
+  assert.equal(finishTransport.onOperation, undefined);
 });

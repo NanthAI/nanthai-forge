@@ -38,14 +38,19 @@ export function landAnnouncement(
   if (!response.operationId) return [];
   const wait = landWaitCommand(root, response);
   const recoveryCommand = resultOf(response).command;
-  return [
-    `land: operationId ${response.operationId}`,
-    ...(wait
-      ? [`land: work is unfinished; keep this turn active. Resume after interruption with: ${wait}`]
-      : !landTerminal(response)
-        ? [
-            `land: source preparation is unfinished; keep this turn active; ${recoveryCommand ? `continue: ${recoveryCommand}` : `replay: nforge agent ${shellQuote(root)} finish ${shellQuote(JSON.stringify((resultOf(response) as { replayParameters?: Record<string, unknown> }).replayParameters ?? { ...command, operationId: response.operationId }))}`}`,
-          ]
-        : []),
-  ];
+  // One first line carries the id and its exact resume command: a backgrounded,
+  // redirected or killed client never loses either.
+  const resume = wait
+    ? `; work is unfinished, keep this turn active; resume with: ${wait}`
+    : !landTerminal(response)
+      ? `; source preparation is unfinished, keep this turn active; ${recoveryCommand ? `continue: ${recoveryCommand}` : `replay: nforge agent ${shellQuote(root)} finish ${shellQuote(JSON.stringify((resultOf(response) as { replayParameters?: Record<string, unknown> }).replayParameters ?? { ...command, operationId: response.operationId }))}`}`
+      : '';
+  return [`land: operationId ${response.operationId}${resume}`];
+}
+
+/** The first line for any other journaled operation (save, sync, start...): its id
+ * and the wait that resumes it by exact replay. Formatting only; no reads. */
+export function operationLine(root: string, action: string, operationId: string) {
+  const { waitCommand } = operationWait(root, { operationIds: [operationId] });
+  return `${action}: operationId ${operationId}; resume with: ${waitCommand}`;
 }

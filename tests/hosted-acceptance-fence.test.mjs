@@ -14,6 +14,7 @@ import { updateHostState } from '../dist/host-binding.js';
 import { drainLandingBatches } from '../dist/landing-batch.js';
 import { fixture as batchFixture } from './landing-batch-fixture.mjs';
 import { cleanupOwner } from './owner-cleanup.mjs';
+import { asAnotherProcess } from './another-process.mjs';
 
 const binding = {
   projectId: 'synthetic-project',
@@ -184,7 +185,8 @@ test('native landing worker cannot accept a passing batch when the project becom
   await f.candidate('ready.txt');
   await assert.rejects(
     drainLandingBatches(f.work, 'main', undefined, async () => {
-      bind(f.store, { acceptanceOwner: true, sourceAuthority: server });
+      // The binding stands in for another process, never the driver's lock context.
+      asAnotherProcess(() => bind(f.store, { acceptanceOwner: true, sourceAuthority: server }));
     }),
     hosted,
   );

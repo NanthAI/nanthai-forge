@@ -86,7 +86,10 @@ function readRunWhileStarting(store) {
   }
 }
 // These phase assertions compare canonical evidence; replay advice is asserted separately.
-function canonicalReceipt({ peers: _peers, ...receipt }) {
+// Per-delivery advisories are not the finish outcome. Presence activity is recorded
+// when its lock is free and deferred under contention, so replays may differ.
+function canonicalReceipt({ peers: _peers, activity, ...receipt }) {
+  if (activity !== undefined) assert.ok(['recorded', 'deferred'].includes(activity.status), activity.status);
   return receipt;
 }
 function pins(data) {
