@@ -7,6 +7,7 @@ import { writeFileSync, chmodSync } from 'node:fs';
 import { join } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
 import { chronologicalJobs, parseRunnerLog } from './runners.mjs';
+import { oracleBranchCell } from './oracle-branches.mjs';
 
 const run = promisify(execFile);
 export const repository = 'NanthAI/forge-b15d-t3code';
@@ -109,8 +110,11 @@ export async function retryResetRequest(request, pause = wait) {
   }
 }
 
-/** Reset main to the frozen base: close open PRs, drop agent branches, force main. */
-export async function reset(base, { request = gh, pause = wait } = {}) {
+/** Reset main to the frozen base: close open PRs, drop agent branches, force main.
+ * `finishedCell(cellId)` says whether a cell of this harness's ledger has ended; the grading
+ * branch (oracle/<cellId>) of such a cell is removed here, because a network blip can leave
+ * it behind. Any other non-agent branch still fails the reset (BENCH_FORK_NOT_CLEAN). */
+export async function reset(base, { request = gh, pause = wait, finishedCell = () => false } = {}) {
   const gh = args => retryResetRequest(() => request(args), pause);
   const api = async (path, ...rest) => JSON.parse((await gh(['api', ...rest, path])) || 'null');
   const branches = async () =>
@@ -134,7 +138,11 @@ export async function reset(base, { request = gh, pause = wait } = {}) {
   ))
     await gh(['pr', 'close', String(pr.number), '-R', repository]);
   const names = await branches();
-  for (const name of names.filter(n => n.startsWith('agent-')))
+  const staleOracle = names.filter(n => {
+    const cell = oracleBranchCell(n);
+    return cell && finishedCell(cell);
+  });
+  for (const name of [...names.filter(n => n.startsWith('agent-')), ...staleOracle])
     await gh(['api', '-X', 'DELETE', `repos/${repository}/git/refs/heads/${name}`]);
   await setRuleset('disabled');
   try {
@@ -155,7 +163,12 @@ export async function reset(base, { request = gh, pause = wait } = {}) {
   if (head !== base) throw Error(`BENCH_RESET_FAILED ${head}`);
   const foreign = foreignBranches(await branches());
   if (foreign.length) throw Error(`BENCH_FORK_NOT_CLEAN ${foreign.slice(0, 5).join(' ')}`);
-  return { main: head, remaining: 0, at: new Date().toISOString() };
+  return {
+    main: head,
+    remaining: 0,
+    at: new Date().toISOString(),
+    ...(staleOracle.length ? { removedOracleBranches: staleOracle } : {}),
+  };
 }
 
 /** One local clone per cell (outside cell timing), like a developer's existing clone: main

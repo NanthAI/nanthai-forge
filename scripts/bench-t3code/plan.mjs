@@ -38,6 +38,10 @@ export const DESIGN = Object.freeze({
   // A batch with a void cell (infrastructure reasons) is re-run once, whole, after the reps
   // it belongs to. Both attempts are published.
   maxAttempts: 2,
+  // A batch whose every cell crashed in setup before any agent ran (reset, clock probe,
+  // barrier: infrastructure, not an arm) is not an attempt; it is re-run, up to this many
+  // times, and disclosed as setup-only in its batch.json.
+  maxSetupRetries: 2,
   tasksSha256: 'dc4346af484794cc181a953b37a42c132b9bf57abcd4b6a0b871e3f84c7b52f1',
 });
 
@@ -111,11 +115,20 @@ export function batches(taskIds, reps = [1, 2]) {
   return reps.flatMap(rep => repNs(rep).map(N => batch(taskIds, N, rep)));
 }
 
-/** Index of the next batch to run, given each batch's attempts in plan order (true = void):
- * the first with no valid attempt and fewer than DESIGN.maxAttempts; -1 when all are done.
- * A void batch is re-run before the next starts, and a resume continues in the same order. */
-export function nextBatch(history, maxAttempts = DESIGN.maxAttempts) {
-  return history.findIndex(voids => voids.length < maxAttempts && voids.every(Boolean));
+/** Attempt state for `nextBatch`: a setup-only void (no agent ran in either arm) does not
+ * consume an attempt. */
+export const SETUP_ONLY = 'setup-only';
+
+/** Index of the next batch to run, given each batch's attempts in plan order (false = valid,
+ * true = void, SETUP_ONLY = void before any agent ran): the first with no valid attempt,
+ * fewer than DESIGN.maxAttempts consuming attempts and at most DESIGN.maxSetupRetries
+ * setup-only ones; -1 when all are done. A void batch is re-run before the next starts, and
+ * a resume continues in the same order. */
+export function nextBatch(history, maxAttempts = DESIGN.maxAttempts, maxSetup = DESIGN.maxSetupRetries) {
+  return history.findIndex(states => {
+    const setup = states.filter(s => s === SETUP_ONLY).length;
+    return states.every(Boolean) && states.length - setup < maxAttempts && setup <= maxSetup;
+  });
 }
 
 /** Every cell any batch may run (reps 1-3), for run-cell's lookup by key. */

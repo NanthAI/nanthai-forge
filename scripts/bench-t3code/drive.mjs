@@ -32,10 +32,12 @@ import {
   batches as planBatches,
   repNs,
   nextBatch,
+  SETUP_ONLY,
   rep3Decision,
   loadTasks,
 } from './plan.mjs';
 import { snapshot, snapshotProblems, differences, forgeInFlight, FREEZE } from './versions.mjs';
+import { drainBatch, hostedQueueEntries } from './drain.mjs';
 import { usageGate, usageProblems, diskFreeGb, diskNeed } from './gates.mjs';
 import { agentOf } from './agent.mjs';
 import { runnerFairness } from './runners.mjs';
@@ -178,6 +180,8 @@ async function main() {
     return out;
   }
   const isVoid = r => Boolean(r.voided?.length);
+  /** What an attempt counts as in `nextBatch`. */
+  const attemptState = r => (isVoid(r) ? (r.setupOnly ? SETUP_ONLY : true) : false);
   const forgeSpend = () =>
     readdirSync(runs)
       .filter(d => d.startsWith('forge-'))
@@ -189,19 +193,26 @@ async function main() {
         }
       }, 0);
 
-  /** Under the hold, wait until nanthai-forge has no workflow queued or running. */
-  async function drain(key) {
-    const until = Date.now() + DRAIN_MS;
-    for (;;) {
-      const inFlight = await forgeInFlight().catch(e => [{ name: `unreadable: ${e.message}` }]);
-      if (!inFlight.length) return true;
-      if (Date.now() > until) return false;
-      say(
-        `WAIT ${key}: holding; ${inFlight.length} nanthai-forge run(s) still in flight (${inFlight.map(x => x.workflowName ?? x.name).join(', ')})`,
-      );
-      await wait(Math.min(60_000, RETRY_MS));
-    }
-  }
+  /** Under the hold, wait until nanthai-forge has no workflow queued or running and the
+   * dogfood project has no admitted hosted submission (drain.mjs; nothing is cancelled). */
+  const drain = key =>
+    drainBatch({
+      key,
+      runs: forgeInFlight,
+      queue: config.dogfood?.projectId
+        ? () =>
+            hostedQueueEntries({
+              cli: config.forge.cli,
+              url: config.dogfood.url ?? config.forge.url,
+              projectId: config.dogfood.projectId,
+              root: join(B, '.dogfood-anchor'),
+            })
+        : async () => [],
+      deadlineMs: DRAIN_MS,
+      pauseMs: Math.min(60_000, RETRY_MS),
+      say,
+      wait,
+    });
 
   /** Start rules a batch checks before taking the hold. */
   async function batchRefusals(b) {
@@ -336,6 +347,8 @@ async function main() {
           cellId,
           runner: r?.runner ?? null,
           refused: r?.refused ?? null,
+          // Crashed in setup: the cell wrote agentsStarted:false (run-cell.mjs).
+          setupCrash: Boolean(r?.crashed && r.agentsStarted === false),
           voided: r?.voided ?? ['no result'],
         };
       });
@@ -365,10 +378,12 @@ async function main() {
         cells,
         runner,
         voided,
+        // Every cell crashed before any agent ran: not an attempt (plan.mjs nextBatch).
+        setupOnly: cells.length > 0 && cells.every(c => c.setupCrash),
       };
       writeFileSync(join(dir, 'batch.json'), JSON.stringify(result, null, 1) + '\n', { flag: 'wx' });
       say(
-        `BATCH ${b.key} attempt ${attempt} ${voided.length ? `VOID ${voided.join(' | ').slice(0, 600)}` : 'ok'}`,
+        `BATCH ${b.key} attempt ${attempt} ${voided.length ? `VOID${result.setupOnly ? ' (setup only: no agent ran, not counted as an attempt)' : ''} ${voided.join(' | ').slice(0, 600)}` : 'ok'}`,
       );
       return result;
     }
@@ -378,7 +393,7 @@ async function main() {
   async function runInOrder(list) {
     for (;;) {
       const history = [];
-      for (const b of list) history.push((await attempts(b.key)).map(isVoid));
+      for (const b of list) history.push((await attempts(b.key)).map(attemptState));
       const i = nextBatch(history);
       if (i < 0) return;
       await runBatch(list[i], history[i].length + 1);

@@ -206,6 +206,7 @@ test('run-cell task-error and abnormal cleanup observe before close and retain i
       lanes,
       records,
       crashing: false,
+      agentsStarted: true,
       forge: {
         startLane: async () => 'lane',
         agentEnv: async () => {

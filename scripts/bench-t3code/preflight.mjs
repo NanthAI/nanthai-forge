@@ -9,6 +9,7 @@ import { join } from 'node:path';
 import { homedir, loadavg } from 'node:os';
 import { checkPlan, DESIGN, batches, loadTasks, schedule, repNs } from './plan.mjs';
 import { snapshot, snapshotProblems, pinProblems, forgeInFlight, FREEZE } from './versions.mjs';
+import { hostedQueueEntries } from './drain.mjs';
 import { usageGate, diskFreeGb, diskNeed, filesystemEventGate } from './gates.mjs';
 import { probeFilesystemEvents } from '../filesystem-event-health.mjs';
 import { pathToFileURL } from 'node:url';
@@ -143,6 +144,31 @@ export async function main({
       dry,
     );
   });
+  check(
+    'dogfood queue',
+    Boolean(config.dogfood?.projectId),
+    config.dogfood?.projectId
+      ? 'config.dogfood names the project whose admitted submissions the driver waits for under the hold'
+      : 'config.dogfood {projectId, url?} is missing: the driver cannot see submissions admitted before the hold (97c7a123)',
+    dry,
+  );
+  if (config.dogfood?.projectId)
+    await tryRun('dogfood queue read', async () => {
+      const entries = await hostedQueueEntries({
+        cli: config.forge.cli,
+        url: config.dogfood.url ?? config.forge.url,
+        projectId: config.dogfood.projectId,
+        root: join(B, '.dogfood-anchor'),
+      });
+      check(
+        'no admitted dogfood submissions',
+        !entries.length,
+        entries.length
+          ? `${entries.length} admitted: ${entries.join(', ')}`
+          : 'the dogfood landing queue is empty',
+        dry,
+      );
+    });
   const disk = diskFreeGb(),
     need = diskNeed('github', 10, dry).requiredGb;
   check('disk', disk >= need, `${disk.toFixed(1)} GB free, largest cell needs ${need.toFixed(1)} GB`);

@@ -14,6 +14,7 @@ import { setTimeout as wait } from 'node:timers/promises';
 import { repository, fromGithub } from './github-arm.mjs';
 import { attribute, gitShow, titleMatches } from './attribution.mjs';
 import { gitlinks } from './forge-arm.mjs';
+import { deleteRefWithBackoff } from './oracle-branches.mjs';
 
 const run = promisify(execFile);
 const ORACLE_SH = join(import.meta.dirname, 'oracle.sh');
@@ -72,17 +73,24 @@ export async function oracleCommit({ meta, tasks, label, fromCommit, fromDirecto
 const gh = async args => (await run('gh', args, { maxBuffer: 256 << 20 })).stdout;
 
 /** Push the grading branch, dispatch bench-ci, wait (30 s reads, 40 min cap), keep the log
- * under logFile, then delete the run and the branch. */
-export async function runOracle({ meta, branch, commit }, logFile) {
-  await run('git', ['-C', meta, 'push', '-q', '--force', 'fork', `${commit}:refs/heads/${branch}`]);
+ * under logFile, then delete the run and the branch (retried with backoff). The branch
+ * outcome lands in `report.branch` even when grading throws, so a branch that could not be
+ * deleted is recorded; the next batch reset removes it (oracle-branches.mjs). */
+export async function runOracle(
+  { meta, branch, commit },
+  logFile,
+  report = {},
+  { request = gh, deleteBackoff = {} } = {},
+) {
   let r = null;
   try {
+    await run('git', ['-C', meta, 'push', '-q', '--force', 'fork', `${commit}:refs/heads/${branch}`]);
     const since = new Date(Date.now() - 5000).toISOString();
-    await gh(['workflow', 'run', 'bench-ci.yml', '-R', repository, '--ref', branch]);
+    await request(['workflow', 'run', 'bench-ci.yml', '-R', repository, '--ref', branch]);
     for (let i = 0; i < 80; i++) {
       await wait(30_000);
       r ??= JSON.parse(
-        await gh([
+        await request([
           'run',
           'list',
           '-R',
@@ -99,7 +107,7 @@ export async function runOracle({ meta, branch, commit }, logFile) {
       ).find(x => x.headSha === commit && fromGithub(x.createdAt) >= since);
       if (!r) continue;
       r = JSON.parse(
-        await gh([
+        await request([
           'run',
           'view',
           String(r.databaseId),
@@ -112,13 +120,17 @@ export async function runOracle({ meta, branch, commit }, logFile) {
       if (r.status === 'completed') break;
     }
     if (r?.status !== 'completed') return { runId: r?.databaseId ?? null, status: 'unfinished' };
-    const log = await gh(['run', 'view', String(r.databaseId), '-R', repository, '--log']);
+    const log = await request(['run', 'view', String(r.databaseId), '-R', repository, '--log']);
     const lines = log.split('\n').filter(l => l.includes('ORACLE'));
     writeFileSync(logFile, lines.join('\n') + '\n');
     return { runId: r.databaseId, conclusion: r.conclusion, ...parseOracle(lines) };
   } finally {
-    if (r?.databaseId) await gh(['run', 'delete', String(r.databaseId), '-R', repository]).catch(() => {});
-    await gh(['api', '-X', 'DELETE', `repos/${repository}/git/refs/heads/${branch}`]).catch(() => {});
+    if (r?.databaseId)
+      await request(['run', 'delete', String(r.databaseId), '-R', repository]).catch(() => {});
+    report.branch = {
+      name: branch,
+      ...(await deleteRefWithBackoff(request, `repos/${repository}/git/refs/heads/${branch}`, deleteBackoff)),
+    };
   }
 }
 

@@ -258,7 +258,10 @@ export function forgeArm(config, { callLog, ws, ledger = null, cellDir = dirname
         log('closed', laneId, { abandoned: true });
         return r;
       } catch (error) {
-        return { error: String(error.stdout ?? error.message).slice(-500) };
+        // The CLI prints its structured error on stderr; `error` stays a string for callers
+        // that slice or test it, with the decoded code and message kept beside it.
+        const { code, message } = cliError(error);
+        return { error: `${code}: ${message}`.slice(-500), code, message };
       }
     },
     async removeRoot(root, reason = 'remove-root') {

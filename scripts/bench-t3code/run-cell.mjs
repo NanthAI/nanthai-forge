@@ -21,6 +21,7 @@ import { forgeArm, readCalls, openLanes } from './forge-arm.mjs';
 import { convexMeter } from './meter.mjs';
 import { landingFields, cellSummary } from './score.mjs';
 import { oracleCommit, runOracle, grade } from './oracle.mjs';
+import { cellFinished } from './oracle-branches.mjs';
 import { attribute, gitShow } from './attribution.mjs';
 import { sharedDeps, linkDepsAsync } from './deps.mjs';
 import { loadTasks, schedule, cellKey } from './plan.mjs';
@@ -105,6 +106,9 @@ const forge = arm === 'forge' ? forgeArm(config.forge, { callLog, ws, ledger, ce
 const lanes = new Map(); // laneId -> { task, root }
 let records = [];
 let crashing = false;
+// True from the first dispatch on. A crash before it left no agent run in either arm, which
+// the driver does not count as a batch attempt (drive.mjs).
+let agentsStarted = false;
 // Crash safety: any escape writes a voided result, abandons idle Lanes and removes the cell's
 // checkouts, so the driver can re-run the cell from a clean state.
 // Agents run detached (own process groups) and are killed first; a Lane whose landing is
@@ -116,7 +120,13 @@ async function crash(reason) {
   }
   event({ event: 'crash', reason });
   const killed = killAgents();
-  writeResult({ crashed: reason, records, killedAgents: killed, voided: [`harness crash: ${reason}`] });
+  writeResult({
+    crashed: reason,
+    agentsStarted,
+    records,
+    killedAgents: killed,
+    voided: [`harness crash: ${reason}`],
+  });
   let retained = false;
   for (const [laneId, { root, task }] of lanes) {
     const now = await forge?.landing(task, laneId, { deadlineMs: 0 }).catch(() => null);
@@ -223,7 +233,7 @@ event({ event: 'reset-start' });
 try {
   result.resetReceipt =
     arm === 'github'
-      ? await github.reset(base)
+      ? await github.reset(base, { finishedCell: id => cellFinished(join(B, 'runs'), id) })
       : await forge.reset({ meta: config.meta, baseCommit: base, root: join(ws, 'reset') });
 } catch (error) {
   await crash(`reset failed: ${String(error.message).slice(0, 400)}`);
@@ -274,6 +284,7 @@ if (batchDir) {
 }
 
 // ---- Cell.
+agentsStarted = true;
 const queue = [...tasks];
 const settling = [];
 const cellStart = Date.now();
@@ -483,6 +494,11 @@ for (const r of records) {
       mergeShas,
       ownPrs: r.landing?.prs ?? [],
       workspace: join(ws, r.task),
+      // The agent's own fork and branch, and the tools the harness gave it: reads of those
+      // are not reaches for the answer (d8cf81b4).
+      ownRepo: arm === 'github' ? github.repository : null,
+      ownBranches: [r.branch].filter(Boolean),
+      toolPaths: [bin, vpHome, shared?.deps].filter(Boolean),
     });
   } catch (error) {
     r.harnessError ??= `post-cell audit: ${error.message}`;
@@ -531,6 +547,7 @@ if (batchDir) {
 
 // ---- Grade the exact final main (no agent runs now; the grading branch is deleted after).
 let oracle = null;
+const oracleReport = {};
 try {
   if (result.batchBarrier && !result.batchBarrier.ok)
     throw Error(`batch barrier: ${result.batchBarrier.waiting.join(',')} still running`);
@@ -551,7 +568,7 @@ try {
     await forge.abandon(root, laneId);
     await forge.removeRoot(root);
   }
-  const ran = await runOracle({ meta, ...c }, join(dir, 'oracle-log.txt'));
+  const ran = await runOracle({ meta, ...c }, join(dir, 'oracle-log.txt'), oracleReport);
   oracle = {
     commit: c.commit,
     changedFromBase: c.changedFromBase,
@@ -562,6 +579,8 @@ try {
 } catch (error) {
   oracle = { error: String(error.message).slice(0, 500) };
 }
+// A grading branch that could not be deleted is disclosed here; the next reset removes it.
+if (oracleReport.branch) oracle.branchCleanup = oracleReport.branch;
 
 // ---- Versions at the end, voids, result.
 const end = await snapshot(config);
