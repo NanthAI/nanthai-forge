@@ -2,6 +2,7 @@
 import { z } from 'zod';
 import { hostedActionError } from './hosted-action-error.js';
 import type { HostedAgentTransport } from './hosted-agent-transport.js';
+import { presenceSchema } from './hosted-presence-client.js';
 
 const advice = z.object({
   unacknowledgedOverlaps: z.object({
@@ -33,6 +34,8 @@ const advice = z.object({
   }),
   /** The Lane's saved base-to-head paths, when asked (paths:true) and current. */
   changedPaths: z.object({ paths: z.array(z.string()), complete: z.boolean() }).optional(),
+  /** Related open Lanes, when asked (presence, capability presenceVersion) by a write member. */
+  presence: presenceSchema.optional(),
 });
 /** Advice never changes a save receipt; observation failures remain explicitly unknown. */
 export async function readHostedOverlapAdvice(
@@ -40,6 +43,7 @@ export async function readHostedOverlapAdvice(
   laneId: string,
   paths = false,
   items?: number,
+  presence?: { since?: number },
 ) {
   try {
     return advice.parse(
@@ -47,6 +51,7 @@ export async function readHostedOverlapAdvice(
         laneId,
         ...(paths ? { paths: true } : {}),
         ...(items ? { items } : {}),
+        ...(presence ? { presence } : {}),
       }),
     );
   } catch (error) {

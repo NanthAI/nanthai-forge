@@ -798,7 +798,8 @@ identities recorded inside and outside a sandbox compare equal. Linux reads
 
 A sandbox profile must allow: exec of `/usr/bin/perl` and `sysctl-read` (macOS), outbound
 network to the hosted service, and writes to the Lane folder, its `ROOT.forge-client`
-folder, `~/.forge` (or `FORGE_CHECK_QUEUE_DIR`), `~/.cache/forge` and the temp directory.
+folder, `~/.forge` (or `FORGE_CHECK_QUEUE_DIR`), `~/.cache/forge`, the temp directory and
+the CLI installation folder (the launcher takes `runtime.lock` there on every command).
 `tests/sandbox-process-identity.test.mjs` runs the identity paths under a minimal
 `sandbox-exec` profile on macOS.
 

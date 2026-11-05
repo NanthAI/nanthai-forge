@@ -251,7 +251,9 @@ test('ten changed files in a 3,000-file tree fit the complete save budget at dog
     );
     assert(run.stats.calls <= 30, JSON.stringify(run.calls));
     assert.equal(run.stats.overlapWrites, 1, 'one atomic path projection update per changed save');
-    assert(run.stats.writes - run.stats.overlapWrites <= 98, JSON.stringify(run.stats));
+    // Writes 98 -> 99 (9c8490a4 presence): the Lane's slim presence row is rewritten with the save's
+    // new paths in the same mutation. Calls and reads are unchanged.
+    assert(run.stats.writes - run.stats.overlapWrites <= 99, JSON.stringify(run.stats));
     const prior = run.c.calls.length;
     await saveHostedLane(run.root, run.command, run.transport);
     assert.equal(run.c.calls.length - prior, 1, 'same-op terminal retry only prepares/returns the receipt');
@@ -464,7 +466,8 @@ test('Convex source provider: complete 10-file save including new object uploads
   const run = await changedSave(t, false, true, 'convex');
   assert(run.stats.totalCalls <= 30, JSON.stringify({ stats: run.stats, functions: run.calls }));
   assert.equal(run.stats.overlapWrites, 1, 'one atomic path projection update per changed save');
-  assert(run.stats.writes - run.stats.overlapWrites <= 97, JSON.stringify(run.stats));
+  // Writes 97 -> 98 (9c8490a4 presence): the slim presence row follows the save's new paths.
+  assert(run.stats.writes - run.stats.overlapWrites <= 98, JSON.stringify(run.stats));
   t.diagnostic(
     JSON.stringify({
       convex: run.stats,

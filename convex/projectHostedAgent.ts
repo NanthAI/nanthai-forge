@@ -33,6 +33,7 @@ export const capabilities = query({
     defaultsVersion: v.optional(v.literal(1)),
     landingMessageVersion: v.optional(v.literal(1)),
     openLanesVersion: v.optional(v.literal(1)),
+    presenceVersion: v.optional(v.literal(1)),
     /** Contract features the client may rely on; the reply names the ones this code implements. */
     features: v.optional(v.array(v.string())),
   },
@@ -52,6 +53,7 @@ export const capabilities = query({
       defaultsVersion,
       landingMessageVersion,
       openLanesVersion,
+      presenceVersion,
       features,
     },
   ) => {
@@ -71,6 +73,7 @@ export const capabilities = query({
           ...(landingMessageVersion === 1 ? { landingMessageVersion: 1 } : {}),
           ...(features ? { features: advertisedFeatures(features) } : {}),
           ...(openLanesVersion === 1 ? { openLanesVersion: 1 } : {}),
+          ...(presenceVersion === 1 ? { presenceVersion: 1 } : {}),
           ...(overlapVersion === 1 ? { overlapVersion: 1 } : {}),
           ...(overlapEvidenceVersion === 1 ? { overlapEvidenceVersion: 1 } : {}),
           ...(metricReceiptVersion === 1 ? { metricReceiptVersion: 1 } : {}),

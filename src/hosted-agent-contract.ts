@@ -75,6 +75,8 @@ export const hostedAgentCapabilitiesSchema = z
     features: z.array(z.string()).optional(),
     /** start replies list the other open Lanes on the same Intent (openLanes). */
     openLanesVersion: z.literal(1).optional(),
+    /** Overlap reads accept `presence` and return related open Lanes (Issue 9c8490a4). */
+    presenceVersion: z.literal(1).optional(),
     overlapVersion: z.literal(1).optional(),
     overlapEvidenceVersion: z.literal(1).optional(),
     /** Deferred caller outcome/delivery receipts may ride on CLI mutations. */

@@ -4,6 +4,7 @@ import type { Id } from './_generated/dataModel';
 import type { z } from 'zod';
 import type { hostedLaneSchema } from '../src/hosted-lane';
 import { mergeOverlapChanges, advanceOverlapMain, type OverlapChange } from '../src/hosted-overlap';
+import { trackHostedPresence } from './projectHostedPresence';
 
 export async function trackHostedOverlapLane(
   ctx: MutationCtx,
@@ -44,8 +45,25 @@ export async function trackHostedOverlapLane(
     ...(old?.landed ? { landed: old.landed } : {}),
     ...projection,
   };
-  if (old) await ctx.db.replace(old._id, value);
-  else await ctx.db.insert('projectHostedOverlapLanes', value);
+  const at = Date.parse(lane.at);
+  const presenceRow = await trackHostedPresence(
+    ctx,
+    projectId,
+    lane.id,
+    old ? { ...old, pointer: old.presenceRow, goal: old.intent } : null,
+    value.open
+      ? {
+          intentId: value.intentId,
+          actor: value.actor,
+          goal: value.intent,
+          changes: value.changes,
+          at: Number.isFinite(at) ? at : Date.now(),
+        }
+      : null,
+  );
+  const stored = { ...value, ...(presenceRow ? { presenceRow } : {}) };
+  if (old) await ctx.db.replace(old._id, stored);
+  else await ctx.db.insert('projectHostedOverlapLanes', stored);
 }
 
 export async function trackHostedOverlapMain(
@@ -74,7 +92,9 @@ export async function markHostedOverlapLifecycle(
     .query('projectHostedOverlapLanes')
     .withIndex('by_project_and_lane', q => q.eq('projectId', projectId).eq('laneId', laneId))
     .unique();
-  if (row) await ctx.db.patch(row._id, { lifecyclePlanId });
+  // A staged close hides the Lane from presence now; a later record write of a still-open Lane restores it.
+  if (row?.presenceRow) await ctx.db.delete(row.presenceRow.id);
+  if (row) await ctx.db.patch(row._id, { lifecyclePlanId, presenceRow: undefined });
 }
 
 /** Retire the advisory open entry when its existing lifecycle overlay is promoted. */
@@ -88,5 +108,12 @@ export async function materializeHostedOverlapLifecycle(
     .query('projectHostedOverlapLanes')
     .withIndex('by_project_and_lane', q => q.eq('projectId', projectId).eq('laneId', laneId))
     .unique();
-  if (row) await ctx.db.patch(row._id, { open: false, recordVersion, lifecyclePlanId: undefined });
+  if (row?.presenceRow) await ctx.db.delete(row.presenceRow.id);
+  if (row)
+    await ctx.db.patch(row._id, {
+      open: false,
+      recordVersion,
+      lifecyclePlanId: undefined,
+      presenceRow: undefined,
+    });
 }

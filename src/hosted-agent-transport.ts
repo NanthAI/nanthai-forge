@@ -25,6 +25,7 @@ import { AGENT_WAIT_SECONDS } from './agent-operation-wait.js';
 import { sourceTree } from './source-tree.js';
 import { withSourceRecovery } from './hosted-agent-source-recovery.js';
 import { readHostedOverlapAdvice, recordHostedOverlapDelivery } from './hosted-overlap-client.js';
+import { presenceDelivery, presenceSince, type PresenceDelivery } from './hosted-presence-client.js';
 import { hostedOverlapNotice, type HostedOverlapNotice } from './hosted-overlap-notice.js';
 import { waitHostedAgentSource } from './hosted-agent-source-wait.js';
 import { recoverHostedFinish, hostedConflictAdvice } from './hosted-agent-resolution.js';
@@ -168,6 +169,8 @@ export type HostedAgentResponse = {
   localLanes?: { idle: unknown[]; pruned: { count: number; bytes: number } };
   /** land --save only: where the submitting process spent its time before submission. */
   landTiming?: LandTiming;
+  /** Lane-changing actions: other open Lanes on related work not shown before (≤3 lines, ~60 tokens each). */
+  presence?: PresenceDelivery;
   /** Present only while the server lacks a contract feature this build cannot do without; the
    * pre-switch canary holds an update on it (a83b6fd5). */
   serverContract?: { missing: string[] };
@@ -181,6 +184,8 @@ export class HostedAgentTransport {
   get agentDefaults() {
     return this.defaults;
   }
+  /** This dispatch asks the overlap read for presence (start/save/sync/compose/finish, presenceVersion). */
+  private presenceAction = false;
   private cachedAdvice:
     | {
         laneId: string;
@@ -496,6 +501,7 @@ export class HostedAgentTransport {
           defaultsVersion: 1,
           landingMessageVersion: 1,
           openLanesVersion: 1,
+          presenceVersion: 1,
         };
         for (;;) {
           try {
@@ -512,7 +518,7 @@ export class HostedAgentTransport {
             )
               throw error;
             const field =
-              /extra field\s+[`'"]?(features|noticeVersion|resolveVersion|overlapVersion|overlapEvidenceVersion|mirrorVersion|metricReceiptVersion|planningVersion|defaultsVersion|landingMessageVersion|openLanesVersion)\b/i.exec(
+              /extra field\s+[`'"]?(features|noticeVersion|resolveVersion|overlapVersion|overlapEvidenceVersion|mirrorVersion|metricReceiptVersion|planningVersion|defaultsVersion|landingMessageVersion|openLanesVersion|presenceVersion)\b/i.exec(
                 error.message,
               )?.[1];
             // Preserve independently supported features, and never repeat a
@@ -538,6 +544,8 @@ export class HostedAgentTransport {
         knownCapabilities(hostedAgentRoot(this.root), discovery),
       );
       this.callerActor = capabilities.actor;
+      this.presenceAction =
+        capabilities.presenceVersion === 1 && ['start', 'save', 'sync', 'compose', 'finish'].includes(action);
       this.serverFeatures = capabilities.features ?? [];
       this.receiptActor = capabilities.metricReceiptVersion === 1 ? capabilities.actor : undefined;
       metricRequesterActor({ kind: 'agent', name: capabilities.actor });
@@ -1005,6 +1013,8 @@ export class HostedAgentTransport {
     this.cachedAdvice = undefined;
     const notice =
       advice && overlapLaneId ? hostedOverlapNotice(this.root, overlapLaneId, advice) : undefined;
+    const presence =
+      advice?.presence && overlapLaneId ? presenceDelivery(overlapLaneId, advice.presence) : undefined;
     // Delivered means returned on a Lane-changing action; a bare status read is not a delivery.
     if (advice && notice && overlapLaneId && ['start', 'save', 'sync', 'compose', 'finish'].includes(action))
       await recordHostedOverlapDelivery(this, overlapLaneId, action, advice);
@@ -1027,8 +1037,9 @@ export class HostedAgentTransport {
       operationId,
       resolved: operationId ? { operationId } : null,
       result,
-      ...(advice ? (({ changedPaths: _paths, ...shown }) => shown)(advice) : {}),
+      ...(advice ? (({ changedPaths: _paths, presence: _presence, ...shown }) => shown)(advice) : {}),
       ...(notice ? { overlapNotice: notice } : {}),
+      ...(presence ? { presence } : {}),
       ...this.nudge(action, result),
       ...(missing.length ? { serverContract: { missing } } : {}),
     };
@@ -1045,7 +1056,13 @@ export class HostedAgentTransport {
   /** One overlap read per dispatch: a finish gate and its receipt share it. */
   private async overlapAdvice(laneId: string, paths = false) {
     if (this.cachedAdvice?.laneId === laneId) return this.cachedAdvice.value;
-    const value = await readHostedOverlapAdvice(this, laneId, paths);
+    const value = await readHostedOverlapAdvice(
+      this,
+      laneId,
+      paths,
+      undefined,
+      this.presenceAction ? presenceSince(laneId) : undefined,
+    );
     this.cachedAdvice = { laneId, value };
     return value;
   }

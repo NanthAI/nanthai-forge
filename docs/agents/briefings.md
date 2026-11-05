@@ -70,8 +70,8 @@ budget, time box, acceptance bar and metrics that must not regress.
 6. Save at milestones/~30 minutes; read the head and capture coverage. Use `mktemp`
    logs, never shared fixed paths. Keep a private handoff with observation time,
    saved head, operation id and next action for interruption recovery.
-7. Read hosted start/save/status overlap advice before editing and coordinate shared
-   scope; native owners can use `peers`. Saved-path windows exclude unsaved peer
+7. Read hosted start/save/status overlap advice and `presence` notices before editing
+   and coordinate shared scope; native owners can use `peers`. Saved-path windows exclude unsaved peer
    edits; missing notices never prove independence. Answer blocking notices
    before landing; advisory notices need no answer. Record order/split, notice
    counts and conflicts. Missing alerts mean friction, not independence.

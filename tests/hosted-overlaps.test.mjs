@@ -243,7 +243,7 @@ const trackChange = (s, lane, paths = [delta('a.txt')], intent = 'My change') =>
   );
 
 test('two separate checkout roots save the same file; second response reports peer and hosted acknowledgement suppresses it', async t => {
-  const { s, lane, peer, transport } = await setup(t);
+  const { s, lane, peer, transport, discovery } = await setup(t);
   const first = transport(lane),
     second = transport(peer);
   assert.notEqual(first.root, second.root);
@@ -259,6 +259,12 @@ test('two separate checkout roots save the same file; second response reports pe
   assert.equal(notice.file, 'a.txt');
   assert.deepEqual(notice.lanes, [lane.id, peer.id].sort());
   assert.equal(notice.participants.find(p => p.lane === lane.id).intent, 'My change');
+  // Presence (9c8490a4) rides on the same overlap read: the shared file and similar goal name the
+  // first Lane once, as one bounded line; a status read asks for none.
+  assert(discovery.every(args => args.presenceVersion === 1));
+  assert.equal(response.presence.notices.length, 1);
+  assert.match(response.presence.notices[0], new RegExp(`Lane ${lane.id.slice(0, 8)}`));
+  assert(response.presence.notices[0].length <= 240);
   await s.transaction('ack', acks.append, {
     projectId: s.projectId,
     request: JSON.stringify({
@@ -270,6 +276,7 @@ test('two separate checkout roots save the same file; second response reports pe
   });
   const status = await second.dispatch('status', { laneId: peer.id });
   assert.equal(status.unacknowledgedOverlaps.count, 0);
+  assert.equal(status.presence, undefined);
   const other = JSON.parse(
     await s.transaction('other', overlaps.read, { projectId: s.projectId, laneId: lane.id }),
   );

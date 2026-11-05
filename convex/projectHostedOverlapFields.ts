@@ -22,6 +22,8 @@ export const hostedOverlapTables = {
     ),
     changes: v.string(),
     complete: v.boolean(),
+    /** This Lane's presence row and the activity time it last wrote, so presence costs no read. */
+    presenceRow: v.optional(v.object({ id: v.id('projectHostedPresence'), at: v.number() })),
   })
     .index('by_project_and_lane', ['projectId', 'laneId'])
     .index('by_project_and_open', ['projectId', 'open']),
@@ -36,6 +38,22 @@ export const hostedOverlapTables = {
   })
     .index('by_project_and_id', ['projectId', 'id'])
     .index('by_project_and_lane', ['projectId', 'laneId']),
+  /** Presence (Issue 9c8490a4): one slim row per open Lane, so a start reads ~0.5 KB per peer instead
+   * of the full overlap row (measured 2026-11-05: 41 open rows, ~330 KB). Deleted when the Lane closes. */
+  projectHostedPresence: defineTable({
+    projectId: v.id('hostedProjects'),
+    laneId: v.string(),
+    intentId: v.string(),
+    actor: v.string(),
+    goal: v.string(),
+    paths: v.array(v.string()),
+    pathCount: v.number(),
+    /** Last Lane record time (ms). */
+    at: v.number(),
+  })
+    .index('by_project_and_lane', ['projectId', 'laneId'])
+    .index('by_project_and_at', ['projectId', 'at'])
+    .index('by_project_and_intent_and_at', ['projectId', 'intentId', 'at']),
   projectHostedOverlapMain: defineTable({
     projectId: v.id('hostedProjects'),
     sequence: v.number(),

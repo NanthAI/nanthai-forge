@@ -120,6 +120,7 @@ export const projectPurgeTables = {
   projectHostedAckBatches: 'by_project_and_id',
   projectSelfMetricReceipts: 'by_project_and_key',
   projectHostedOverlapLanes: 'by_project_and_lane',
+  projectHostedPresence: 'by_project_and_lane',
   projectHostedOverlapDeliveries: 'by_project_and_id',
   projectHostedOverlapMain: 'by_project',
   projectHostedDecisions: 'by_project',

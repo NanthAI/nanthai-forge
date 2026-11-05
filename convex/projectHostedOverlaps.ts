@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
 import { query } from './cliServer';
-import { accessibleProject } from './projectAuthority';
+import { accessibleProject, activeProject } from './projectAuthority';
+import { readHostedPresence } from './projectHostedPresence';
 import { hostedStartMain } from './projectHostedChannels';
 import { readHostedRecord } from './projectHostedRecords';
 import { hostedLaneSchema } from '../src/hosted-lane';
@@ -20,9 +21,11 @@ export const read = query({
     detail: v.optional(v.boolean()),
     /** Notices to list, 5 by default; ack asks for more so one read answers a large inbox. */
     items: v.optional(v.number()),
+    /** Presence (capability presenceVersion): related open Lanes. `since` is the previous reply's `at`. */
+    presence: v.optional(v.object({ since: v.optional(v.number()) })),
   },
   returns: v.string(),
-  handler: async (ctx, { projectId, laneId, paths, items, path, detail }) => {
+  handler: async (ctx, { projectId, laneId, paths, items, path, detail, presence }) => {
     try {
       invariant(path === undefined || safeRelative(path), 'BAD_ARGUMENT', 'Select a repository path.');
       const user = await ctx.auth.getUserIdentity();
@@ -152,6 +155,29 @@ export const read = query({
           path,
         );
       let advice = compute();
+      // Presence is for members with write access only; readers and public viewers get no field.
+      const writer =
+        presence &&
+        (await activeProject(ctx, projectId, user.subject).then(
+          () => true,
+          () => false,
+        ));
+      const present = writer
+        ? {
+            presence: await readHostedPresence(
+              ctx,
+              projectId,
+              {
+                laneId,
+                intentId: lane.intentId,
+                goal: mine?.intent ?? '',
+                paths: (JSON.parse(focus.changes) as { path: string }[]).map(change => change.path),
+                actor: user.subject,
+              },
+              presence.since,
+            ),
+          }
+        : {};
       // Preflight selection input: free here, the Lane's projection is already loaded.
       const evidence =
         detail || path
@@ -212,6 +238,7 @@ export const read = query({
           ...advice,
           ...changedPaths,
           ...evidence,
+          ...present,
           unacknowledgedOverlaps: {
             ...advice.unacknowledgedOverlaps,
             count: null,
@@ -219,7 +246,7 @@ export const read = query({
           },
         });
       }
-      return JSON.stringify({ ...advice, ...changedPaths, ...evidence });
+      return JSON.stringify({ ...advice, ...changedPaths, ...evidence, ...present });
     } catch (error) {
       return report(error);
     }
