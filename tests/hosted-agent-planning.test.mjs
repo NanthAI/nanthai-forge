@@ -904,6 +904,49 @@ test('incident replay 20b91e86: an identical start from another agent session op
   assert.equal(reads().length, 2, 'only the two same-session retries read their Lane state');
 });
 
+// Follow-up 3676f3e1: native subagents of one client share its session id. No per-subagent identity
+// is exposed to the CLI, so the client process narrows the scope: two processes with one session id
+// open their own Lanes, and a same-process retry (another shell of that client) still replays.
+test('two client processes sharing one session id each get their own Lane; a same-process retry replays', async t => {
+  const { s, item, starts } = plannedStartFixture(t);
+  const created = new Map(),
+    mutation = s.exchange.client.mutation;
+  s.exchange.client.mutation = async (ref, args) => {
+    const value = await mutation(ref, args);
+    if (getFunctionName(ref) !== 'projectHostedStart:start') return value;
+    if (!created.has(args.operationId)) created.set(args.operationId, randomUUID());
+    const result = JSON.parse(value);
+    result.lane.laneId = created.get(args.operationId);
+    return JSON.stringify(result);
+  };
+  const previous = process.env.CLAUDE_CODE_SESSION_ID;
+  process.env.CLAUDE_CODE_SESSION_ID = 'shared-client-session';
+  t.after(() => {
+    if (previous === undefined) delete process.env.CLAUDE_CODE_SESSION_ID;
+    else process.env.CLAUDE_CODE_SESSION_ID = previous;
+  });
+  // The session id comes from the environment (agentSession undefined); the process is detected or declared.
+  const process_ = agentProcess => Object.assign(s.transport(), { agentSession: undefined, agentProcess });
+  const a = await process_('100@Thu Nov  5 10:00:00 2026').dispatch('start', { planningItemId: item.id });
+  const b = await process_('200@Thu Nov  5 10:00:01 2026').dispatch('start', { planningItemId: item.id });
+  assert.notEqual(b.operationId, a.operationId, 'another process never replays this start');
+  assert.notEqual(b.result.lane.laneId, a.result.lane.laneId);
+  assert.equal(starts().length, 2);
+  for (const [client, original] of [
+    ['100@Thu Nov  5 10:00:00 2026', a],
+    ['200@Thu Nov  5 10:00:01 2026', b],
+  ]) {
+    const retry = await process_(client).dispatch('start', { planningItemId: item.id });
+    assert.equal(retry.operationId, original.operationId);
+    assert.equal(retry.result.lane.laneId, original.result.lane.laneId);
+  }
+  assert.equal(created.size, 2, 'same-process retries opened no Lane');
+  // No readable client process: the session id alone still scopes, as before.
+  const c = await process_(null).dispatch('start', { planningItemId: item.id });
+  const d = await process_(null).dispatch('start', { planningItemId: item.id });
+  assert.equal(d.operationId, c.operationId);
+});
+
 test('start reads the local registry first and skips the Lane read when this machine saw the Lane end', async t => {
   const { mkdtempSync, rmSync } = await import('node:fs');
   const { tmpdir } = await import('node:os');

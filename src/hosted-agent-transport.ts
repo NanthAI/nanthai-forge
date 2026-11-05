@@ -82,6 +82,7 @@ import { gcNestedLanesHourly } from './client-cache-gc.js';
 import { hostedStartResultSchema } from './hosted-lane.js';
 import { readHostedLaneCheckout } from './hosted-lane-checkout-marker.js';
 import { HostedAgentJournal, agentSessionKey, hostedAgentRoot } from './hosted-agent-journal.js';
+import { detectedClientProcess } from './agent-client-process.js';
 import {
   hostedAgentAction,
   hostedAgentAddressSchema,
@@ -219,6 +220,15 @@ export class HostedAgentTransport {
   /** The agent session an identical start replays within; undefined reads it from the client
    * environment (agentSessionKey), null declares none. */
   agentSession?: string | null;
+  /** The client process an identical start replays within, with the session id; undefined detects
+   * it (agentClientProcess, cached per process), null declares none. */
+  agentProcess?: string | null;
+  private startScope(): string | undefined {
+    const session = this.agentSession === undefined ? agentSessionKey() : this.agentSession;
+    if (!session) return undefined;
+    const client = this.agentProcess === undefined ? detectedClientProcess() : this.agentProcess;
+    return client ? `${session}\u0000${client}` : session;
+  }
   /** CLI only: start reports the new Lane before its checkout downloads. */
   onStarted?: (lane: { laneId: string; path: string | null }) => void;
   /** Fires once the local journal selects the operation id, before any network wait:
@@ -694,10 +704,9 @@ export class HostedAgentTransport {
       if (pendingSave)
         return this.response(action, typeof operationId === 'string' ? operationId : null, pendingSave);
       // An identical start replays only within the agent session that made it (issue b6ba9219).
-      const startSession =
-        action === 'start' && !operationId
-          ? ((this.agentSession === undefined ? agentSessionKey() : this.agentSession) ?? undefined)
-          : undefined;
+      // Where the client's own environment gave the session id, the client process narrows it:
+      // two processes sharing one session id never replay each other's start (issue 3676f3e1).
+      const startSession = action === 'start' && !operationId ? this.startScope() : undefined;
       const previousStart =
         action === 'start' && !operationId
           ? await this.closedStart(root, capabilities.actor, command.data, startSession)
