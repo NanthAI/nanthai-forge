@@ -125,7 +125,7 @@ async function readLaneTests(store: WorkStore, command: Command) {
     'VIEW_STALE',
     'Select the original Candidate head.',
   );
-  const { standardSelection, selectionSourcePath } = await import('../scripts/test-impact.mjs');
+  const { advisorySelection, selectionSourcePath } = await import('../scripts/test-impact.mjs');
   const files = new Map<string, string>();
   if (store.native) {
     const source = new NativeSource(store.root);
@@ -150,7 +150,7 @@ async function readLaneTests(store: WorkStore, command: Command) {
     reason,
     tests: selected,
     coverage,
-  } = standardSelection({
+  } = advisorySelection({
     coverage: latestCheckCoverage(store, main),
     files,
     paths,

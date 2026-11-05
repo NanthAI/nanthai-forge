@@ -7,7 +7,7 @@ import { contractTestPath } from './intent-test-contract.js';
 import { checkPin } from './hosted-check.js';
 import { semanticTests } from './intent-semantic-conflict.js';
 import { digest } from './hash.js';
-import { standardSelection } from '../scripts/test-impact.mjs';
+import { guardedSelection, standardSelection } from '../scripts/test-impact.mjs';
 import { timedShards } from '../scripts/test-shards.mjs';
 import { hostedActionsRecipeSchema } from './hosted-actions.js';
 import { ActionsJobClient } from './hosted-actions-job-client.js';
@@ -151,6 +151,17 @@ export function actionsGateSelection(
   files: Map<string, string>,
   standard: boolean,
   mainPaths: string[] | null = null,
+) {
+  const selected = gateSelection(run, paths, files, standard, mainPaths);
+  // Gate probes, contract unions and rechecks can select nothing; that must never pass.
+  return standard ? guardedSelection(selected, { files, paths }) : selected;
+}
+function gateSelection(
+  run: HostedCheckRun,
+  paths: string[],
+  files: Map<string, string>,
+  standard: boolean,
+  mainPaths: string[] | null,
 ) {
   if (!standard) return { scope: 'full', reason: 'Exact configured command', tests: [] as string[] };
   const gate = run.gate;

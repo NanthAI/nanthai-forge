@@ -40,7 +40,7 @@ export async function remoteCheckPlan(
     JSON.stringify(run.check.args) === JSON.stringify(['scripts/forge-check.mjs']) &&
     (run.check.executable === process.execPath || /(?:^|\/)node$/.test(run.check.executable));
   const files = new Map(state.files.map(file => [file.path, source.object(file.blob).toString('utf8')]));
-  const { standardSelection, selectTests } = await import('../scripts/test-impact.mjs');
+  const { standardSelection, guardedSelection, selectTests } = await import('../scripts/test-impact.mjs');
   let comparison: { paths?: string[]; base?: string; semanticTests?: string[] } = {};
   try {
     const observed = JSON.parse(readFileSync(writeCheckScope(store, run, path), 'utf8'));
@@ -49,7 +49,7 @@ export async function remoteCheckPlan(
   } catch {
     /* Full selection on missing ancestry. */
   }
-  const selection =
+  const planned =
     run.checkSelection?.scope === 'partial'
       ? runDetails(store, run).checkSelection!
       : standard
@@ -62,6 +62,10 @@ export async function remoteCheckPlan(
             env: run.environment.env,
           })
         : { scope: 'full', reason: 'Exact configured command', tests: [] as string[] };
+  // A selection that touches code but selects no test never reaches a passing plan.
+  const selection = standard
+    ? guardedSelection(planned, { files, paths: comparison.paths, interaction: run.interaction })
+    : planned;
   if (run.checkSelection?.scope === 'partial' && selection.tests.some(path => !files.has(path)))
     throw new Error('An explicit test file is absent from the pinned source.');
   const durations = timingDurations(readTimingHistory(join(store.directory, 'test-timings.json')));

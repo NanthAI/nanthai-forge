@@ -4,6 +4,7 @@ import { posix, join } from 'node:path';
 import { testImportGraph } from './test-import-graph.mjs';
 import { coverageShadow } from './test-coverage.mjs';
 import { classifyCheckPath, webTest } from './check-path-scopes.mjs';
+import { guardSelection } from './selection-guard.mjs';
 import { docsPackager, docsWrapper, scriptPath, scriptSelectionReason } from './script-impact.mjs';
 
 export const smokeTests = [
@@ -364,7 +365,28 @@ export function pinnedComparison(env = process.env) {
 
 export const pinnedPaths = (env = process.env) => pinnedComparison(env)?.paths ?? null;
 
+/** Never returns a non-docs selection with zero tests: see selection-guard.mjs. */
+export function guardedSelection(selection, { files, paths, interaction }) {
+  return guardSelection(selection, { files, paths, interaction, documentation, smoke: smokeTests });
+}
+
 export function standardSelection(input) {
+  return guardedSelection(composedSelection(input), input);
+}
+
+/** For reads that only report what a check would select (the `tests` query, Intent contracts):
+ * a project with no test file reports an empty selection and why, instead of failing the read.
+ * The check itself still fails closed through standardSelection. */
+export function advisorySelection(input) {
+  try {
+    return standardSelection(input);
+  } catch (error) {
+    if (error?.code !== 'ZERO_SELECTION') throw error;
+    return { ...composedSelection(input), reason: error.message };
+  }
+}
+
+function composedSelection(input) {
   const selection = baseStandardSelection(input);
   const tests = input.semanticTests ?? [];
   if (!tests.length) return selection;

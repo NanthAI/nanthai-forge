@@ -49,6 +49,9 @@ export function runActionsCheck(execute = execFileSync, { install = true, build 
       // verify reads only scope and tests. Selection reasons can exceed Linux's 128 KiB
       // per-variable limit, which makes the child spawn fail with E2BIG.
       const { scope, domain, reason } = plan.selection;
+      // Tests run in the shard jobs. A standard code check with no shard has no test job at all.
+      if (plan.standard && !['docs', 'partial'].includes(scope) && !plan.groups.length)
+        throw new Error('ZERO_SELECTION: the plan has no test shard for a code change; no test would run.');
       env.FORGE_SELECTED_TESTS = JSON.stringify({ scope, domain, reason, tests: [] });
       if (plan.selection.scope === 'docs')
         runDocumentationChecks({ npm, node: script => run('node', [script]), interaction: plan.interaction });
@@ -56,6 +59,7 @@ export function runActionsCheck(execute = execFileSync, { install = true, build 
     } else {
       const index = Number(shard);
       if (!Number.isInteger(index) || !plan.groups[index]) throw new Error('Unselected Actions shard.');
+      if (!plan.groups[index].length) throw new Error('ZERO_SELECTION: this shard has no test file.');
       if (build) {
         phases.time('build', () => {
           npm('run', 'build:core');

@@ -274,6 +274,8 @@ test('pages may complete out of order, but links are created only after every re
     ...Array.from({ length: 1200 }, (_, i) => s.entry(`source/file-${i}.txt`, `bytes-${i}`)),
   ];
   s.run.request.expectedHead = s.state(files).sha256;
+  // Source download is under test, not selection: an opaque command has no test selection.
+  s.run.check = { executable: 'true', args: [], definition: 'c'.repeat(64) };
   const original = s.client.transport.bind(s.client);
   let release,
     ahead = false;
@@ -757,6 +759,8 @@ test('pack round-trip preserves bytes, modes and links; delta applies added, cha
     s.entry('test-link', 'nested/new.txt', 'symlink'),
   ].filter((file, i, files) => files.findLastIndex(other => other.path === file.path) === i);
   s.run.request.expectedHead = s.state(candidateFiles).sha256;
+  // Source download is under test, not selection: an opaque command has no test selection.
+  s.run.check = { executable: 'true', args: [], definition: 'c'.repeat(64) };
   const result = await prepareActionsJob(
     s.client,
     join(s.directory, 'candidate'),
@@ -1088,10 +1092,16 @@ test('hosted workflow restores trusted dependencies and exact control build, fal
   for (const name of ['hosted-plan', 'hosted-check', 'hosted-pack']) {
     const job = jobs(name);
     assert.match(job, /actions\/cache(?:\/restore)?@[a-f0-9]{40}/);
+    // One CI-neutral key from the pinned control lockfile alone: no Candidate input, no prefix restore.
     assert.match(
       job,
-      /forge-control-v1-.*runner.os.*node-24\.22\.1-.*hashFiles\('control\/package-lock.json'\)/,
+      /id: deps-key\n\s+run: echo "key=\$\(node scripts\/control-deps-key.mjs\)" >> "\$GITHUB_OUTPUT"\n\s+working-directory: control/,
     );
+    assert.match(
+      job,
+      /id: deps\n\s+with:\n\s+path: \|\n[^\n]*\n[^\n]*\n\s+key: \$\{\{ steps.deps-key.outputs.key \}\}/,
+    );
+    assert.doesNotMatch(job, /forge-control-v1|hashFiles/);
     assert.match(job, /if: steps.deps.outputs.cache-hit != 'true'\n\s+run: npm ci --ignore-scripts/);
     assert.match(job, /control\/node_modules\n\s+~\/\.npm/);
     assert.doesNotMatch(job, /restore-keys:|blacksmith|uses:.*cache.*candidate/);

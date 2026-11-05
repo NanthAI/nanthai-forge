@@ -29,7 +29,7 @@ for (const failure of [
       'node_modules/@typescript/native/bin',
     ])
       mkdirSync(join(root, directory), { recursive: true });
-    for (const name of ['verify.mjs', 'verify-queue.mjs', 'prepare-convex-api.mjs'])
+    for (const name of ['verify.mjs', 'verify-queue.mjs', 'selection-guard.mjs', 'prepare-convex-api.mjs'])
       write(`scripts/${name}`, readFileSync(`scripts/${name}`));
     write('scripts/check-schema-compat.mjs', `process.exit(${failure === 'schema' ? 9 : 0});`);
     write('scripts/check-convex-runtime.mjs', 'process.exit(0);');
@@ -42,6 +42,8 @@ for (const failure of [
       `import { appendFileSync } from 'node:fs'; appendFileSync('oxc.jsonl', JSON.stringify(process.argv.slice(2)) + '\\n');`,
     );
     write('tests/worker-budget.mjs', 'export const workerBudget = () => 2;');
+    // A selection with no test file now fails closed; the stub runner ignores this file.
+    write('tests/placeholder.test.mjs', '');
     write(
       'scripts/test-files.mjs',
       `import { writeFileSync } from 'node:fs';
@@ -98,7 +100,7 @@ for (const failure of [
       env: {
         ...process.env,
         FORGE_STATIC_WORKERS: '2',
-        FORGE_SELECTED_TESTS: JSON.stringify({ scope: 'full', tests: [] }),
+        FORGE_SELECTED_TESTS: JSON.stringify({ scope: 'full', tests: ['tests/placeholder.test.mjs'] }),
       },
       encoding: 'utf8',
       timeout: 30000,

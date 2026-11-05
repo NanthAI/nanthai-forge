@@ -84,13 +84,17 @@ jobs:
         with:
           node-version: '24.22.1'
       # Save only trusted control dependencies; Candidate source/results are never cached.
+      # Key from the pinned control lockfile only (scripts/control-deps-key.mjs; any CI computes it).
+      - id: deps-key
+        run: echo "key=$(node scripts/control-deps-key.mjs)" >> "$GITHUB_OUTPUT"
+        working-directory: control
       - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         id: deps
         with:
           path: |
             control/node_modules
             ~/.npm
-          key: forge-control-v1-${{ runner.os }}-${{ runner.arch }}-node-24.22.1-${{ hashFiles('control/package-lock.json') }}
+          key: ${{ steps.deps-key.outputs.key }}
       - if: steps.deps.outputs.cache-hit != 'true'
         run: npm ci --ignore-scripts
         working-directory: control
@@ -114,13 +118,14 @@ jobs:
           key: forge-control-dist-v2-${{ runner.os }}-${{ runner.arch }}-node-24.22.1-${{ steps.build-key.outputs.hash }}
       # Candidate code shares this runner: save trusted dependencies before it executes,
       # never with an automatic post-job cache save after project code has run.
-      - if: steps.deps.outputs.cache-hit != 'true'
+      # Only the default branch seeds the cache, so every other ref restores a main-seeded entry.
+      - if: steps.deps.outputs.cache-hit != 'true' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
         uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: |
             control/node_modules
             ~/.npm
-          key: forge-control-v1-${{ runner.os }}-${{ runner.arch }}-node-24.22.1-${{ hashFiles('control/package-lock.json') }}
+          key: ${{ steps.deps-key.outputs.key }}
       - id: plan
         timeout-minutes: 30
         run: node control/scripts/hosted-actions-job.mjs plan
@@ -178,13 +183,17 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24.22.1'
+      # Key from the pinned control lockfile only (scripts/control-deps-key.mjs; any CI computes it).
+      - id: deps-key
+        run: echo "key=$(node scripts/control-deps-key.mjs)" >> "$GITHUB_OUTPUT"
+        working-directory: control
       - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         id: deps
         with:
           path: |
             control/node_modules
             ~/.npm
-          key: forge-control-v1-${{ runner.os }}-${{ runner.arch }}-node-24.22.1-${{ hashFiles('control/package-lock.json') }}
+          key: ${{ steps.deps-key.outputs.key }}
       # A miss retains the cold install; dist comes from this run's pinned control commit.
       - if: steps.deps.outputs.cache-hit != 'true'
         run: npm ci --ignore-scripts
@@ -223,13 +232,17 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24.22.1'
+      # Key from the pinned control lockfile only (scripts/control-deps-key.mjs; any CI computes it).
+      - id: deps-key
+        run: echo "key=$(node scripts/control-deps-key.mjs)" >> "$GITHUB_OUTPUT"
+        working-directory: control
       - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         id: deps
         with:
           path: |
             control/node_modules
             ~/.npm
-          key: forge-control-v1-${{ runner.os }}-${{ runner.arch }}-node-24.22.1-${{ hashFiles('control/package-lock.json') }}
+          key: ${{ steps.deps-key.outputs.key }}
       # A miss retains the cold install; dist comes from this run's pinned control commit.
       - if: steps.deps.outputs.cache-hit != 'true'
         run: npm ci --ignore-scripts

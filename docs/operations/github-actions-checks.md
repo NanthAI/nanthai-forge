@@ -33,6 +33,16 @@ an unstarted old-runtime plan needs a new check on the fixed runtime.
 Arbitrary commands run once in the static job. Candidate sources must include the
 Actions-aware standard check script to use standard sharding.
 
+A standard check never passes without running a test for a change that touches code. Every
+planner (local, owner, hosted gate planning) applies `scripts/selection-guard.mjs`: a non-docs selection
+with zero tests runs the fixed smoke set instead (every test file when the source has no smoke file),
+and a docs scope that covers a non-Markdown path becomes a full selection. Both record
+`Zero-selection guard:` in the selection reason. A source with no test file at all fails with
+`ZERO_SELECTION`. The runners refuse the same state at execution: an Actions plan with no test shard for
+code, an empty shard, or a pinned selection that names no test file fails with `ZERO_SELECTION`.
+Only docs scope and explicit partial evidence (which never lands) run without test files; arbitrary
+commands have no selection.
+
 For this repository, code verification runs document validation and the installed
 package smoke in the shared `scripts/verify.mjs` entry point. Native-owner landing
 checks, hosted landing checks and the public mirror therefore exercise the same
@@ -580,14 +590,35 @@ by configuring this runner.
 
 ### Warm hosted Actions jobs and optional setup
 
-The App/OIDC workflow uses free `ubuntu-latest` runners by default. Its existing
+The App/OIDC workflow uses free `ubuntu-latest` runners by default. Its
 `hosted-plan` job restores `control/node_modules` and the npm download cache using
-SHA-pinned `actions/cache`, keyed by OS, architecture, Node 24.22.1 and the control lockfile hash.
-A miss runs `npm ci --ignore-scripts`. The planning job explicitly saves this
-cache before Candidate execution; it never saves through a post-job action after
-project code has run. Test and source-pack jobs restore it read-only. Candidate source, plans and
-check results are never cache entries. Lockfile changes create independent keys;
-there are no partial-key restores. Cache loss changes preparation time only.
+SHA-pinned `actions/cache`. The key comes from `node scripts/control-deps-key.mjs`
+(plain Node, so any CI computes the same key): platform, architecture, the exact Node
+version and a hash of the pinned control lockfile, with no Candidate input and no
+prefix restores. A miss runs `npm ci --ignore-scripts`. Test and source-pack jobs
+restore read-only.
+
+Cache policy for every CI adapter, not only GitHub Actions:
+
+- **Only main writes.** The planning job saves the cache before any Candidate code runs, from the
+  pinned control checkout, and only when the run's ref is the repository's default branch
+  (`github.ref` equals `refs/heads/<default_branch>`). The workflow is always dispatched on
+  that branch, so every Lane check restores a main-seeded entry. Lanes read; a Lane's checkout never
+  writes or chooses an entry, and nothing saves through a post-job action after project code has run.
+- **Candidate installs are not cached.** A Candidate's own `npm ci --ignore-scripts` reads the
+  main-seeded npm download cache and verifies each package against the Candidate lockfile's integrity
+  hashes, so a changed lockfile downloads only its new packages. Caching a Candidate's `node_modules`
+  would let one Lane plant files for another, so no job does.
+- Candidate source, plans and check results are never cache entries. Lockfile changes create
+  independent keys; cache loss changes preparation time only.
+- A new adapter implements the same three rules with its own cache primitive: key from
+  `control-deps-key.mjs`, seed from the default branch before Candidate execution, restore read-only.
+
+Measure the policy with `node scripts/actions-cache-report.mjs OWNER/REPO [runs]` (uses the owner's
+`gh` login, one list call plus one read per run): jobs, misses (a job whose `npm ci` step ran),
+hit rate, median restore time and check wall-time median and p90. Each job's `install` phase is in
+its `Check phases` line below. The active entry is about 150 MiB, inside the free Actions cache
+allowance; it costs no money and no Convex call.
 
 Every Actions job ends with one log line, `Check phases on N CPUs, M GiB: install 3.4s (cpu 52%); build
 5.8s (cpu 90%); tests 359.1s (cpu 58%)`, giving each phase's wall time and the machine's CPU busy share

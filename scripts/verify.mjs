@@ -7,6 +7,7 @@ import { StringDecoder } from 'node:string_decoder';
 import { commandQueue } from './verify-queue.mjs';
 import { workerBudget } from '../tests/worker-budget.mjs';
 import { fileTimeout } from './test-files.mjs';
+import { assertRunnableSelection } from './selection-guard.mjs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { existsSync, readdirSync, realpathSync } from 'node:fs';
@@ -172,6 +173,13 @@ const tests = coreBuild.then(ok => {
           )
           .sort((a, b) => rank(a) - rank(b) || (a < b ? -1 : 1))
           .map(name => join('tests', name));
+  // A pinned selection that names no test fails closed (selection-guard.mjs).
+  try {
+    assertRunnableSelection(selection, files, env.FORGE_ACTIONS_SHARD === 'static');
+  } catch (error) {
+    console.log(error.message);
+    return false;
+  }
   // Budget test files explicitly: concurrent recorded verifies already share this machine.
   // Fixture queues stay private; no correctness test loses its own queue overrides.
   const workers = workerBudget(env);

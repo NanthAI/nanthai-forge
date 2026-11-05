@@ -26,6 +26,15 @@ export function standardSelection(input: {
   env?: Record<string, string | undefined>;
 }): TestSelection;
 
+/** Fail-closed wrapper used by every planner: a non-docs selection always has tests. */
+export function guardedSelection<T extends { scope: string; reason: string; tests: string[] }>(
+  selection: T,
+  input: { files: Map<string, string>; paths?: string[] | null | undefined; interaction?: unknown },
+): T;
+
+/** Read-only variant for reports: a source with no test file yields an empty selection with the reason. */
+export function advisorySelection(input: Parameters<typeof standardSelection>[0]): TestSelection;
+
 export function selectionSourcePath(path: string): boolean;
 
 /** `graphCache`: a caller-owned `{}` shared by calls on one immutable inventory and path list. */
