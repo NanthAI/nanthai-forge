@@ -21,6 +21,8 @@ export const syncStateSchema = z
     base: hostedLaneSchema.shape.base,
     lane: hostedLaneSchema.nullable(),
     resolutionLaneId: z.uuid(),
+    /** A conflict's resolution Lane records the conflicted Lane it settles. */
+    origin: hostedLaneSchema.shape.resolution.unwrap().shape.origin,
     jobOperationId: z.uuid(),
     status: z.enum(['ready', 'submitted', 'completed', 'stale', 'failed']),
   })

@@ -19,6 +19,10 @@ import { branches, foreignBranches, repository, rulesetName, measureSkew } from 
 import { convexMeter } from './meter.mjs';
 import { rateLimit } from './samplers.mjs';
 import { staleBenchFreeze, BUDGET_USD } from './drive.mjs';
+import { SETUP_COMMAND } from './env.mjs';
+
+/** What to tell the operator when a piece of the bench environment is missing. */
+export const setupHint = step => ` (missing? ${SETUP_COMMAND} --dry names step "${step}" and what it costs)`;
 
 export async function main({
   benchRoot = process.env.BENCH_ROOT || join(homedir(), 'NanthAI/forge-bench/b15d'),
@@ -36,7 +40,16 @@ export async function main({
     return 1;
   }
   const dry = process.argv.includes('--dry');
-  const config = JSON.parse(readFileSync(join(B, 'config.json'), 'utf8'));
+  let config;
+  try {
+    config = JSON.parse(readFileSync(join(B, 'config.json'), 'utf8'));
+  } catch {
+    log(
+      `NO-GO config.json: ${join(B, 'config.json')} is missing or unreadable; owner-held input, then ${SETUP_COMMAND} --dry`,
+    );
+    log('NO-GO (1): config.json');
+    return 1;
+  }
   const lines = [],
     nogo = [];
   const check = (name, ok, detail, warnOnly = false) => {
@@ -50,11 +63,11 @@ export async function main({
       maxBuffer: 64 << 20,
       stdio: ['ignore', 'pipe', 'pipe'],
     }).trim();
-  const tryRun = async (name, fn) => {
+  const tryRun = async (name, fn, hint = '') => {
     try {
       await fn();
     } catch (error) {
-      check(name, false, `check failed: ${String(error.message).slice(0, 200)}`);
+      check(name, false, `check failed: ${String(error.message).slice(0, 200)}${hint}`);
     }
   };
 
@@ -125,7 +138,7 @@ export async function main({
   check(
     'harness pinned',
     !pp.length,
-    pp.length ? pp.join('; ') : `${s.harness.dir} at ${s.harness.commit?.slice(0, 12)}`,
+    pp.length ? pp.join('; ') + setupHint('pin') : `${s.harness.dir} at ${s.harness.commit?.slice(0, 12)}`,
   );
   if (!dry)
     check(
@@ -200,34 +213,38 @@ export async function main({
         true,
       );
   }
-  await tryRun('fork', async () => {
-    const names = await branches();
-    const foreign = foreignBranches(names);
-    check(
-      'fork branches clean',
-      !foreign.length,
-      foreign.length
-        ? `${foreign.length} non-agent branches: ${foreign.slice(0, 8).join(' ')}`
-        : `only main${names.length > 1 ? ' + agent-*' : ''}`,
-    );
-    const main = sh('gh', ['api', `repos/${repository}/branches/main`, '--jq', '.commit.sha']);
-    check(
-      'fork main',
-      true,
-      main === config.github.mainBase
-        ? 'at base'
-        : `${main.slice(0, 12)} (the first cell's reset restores base)`,
-    );
-    const rs = JSON.parse(sh('gh', ['api', `repos/${repository}/rulesets`])).find(
-      r => r.name === rulesetName,
-    );
-    check('fork ruleset', rs?.enforcement === 'active', `${rulesetName} ${rs?.enforcement}`);
+  await tryRun(
+    'fork',
+    async () => {
+      const names = await branches();
+      const foreign = foreignBranches(names);
+      check(
+        'fork branches clean',
+        !foreign.length,
+        foreign.length
+          ? `${foreign.length} non-agent branches: ${foreign.slice(0, 8).join(' ')}`
+          : `only main${names.length > 1 ? ' + agent-*' : ''}`,
+      );
+      const main = sh('gh', ['api', `repos/${repository}/branches/main`, '--jq', '.commit.sha']);
+      check(
+        'fork main',
+        true,
+        main === config.github.mainBase
+          ? 'at base'
+          : `${main.slice(0, 12)} (the first cell's reset restores base)`,
+      );
+      const rs = JSON.parse(sh('gh', ['api', `repos/${repository}/rulesets`])).find(
+        r => r.name === rulesetName,
+      );
+      check('fork ruleset', rs?.enforcement === 'active', `${rulesetName} ${rs?.enforcement}`);
 
-    const queued = JSON.parse(
-      sh('gh', ['run', 'list', '-R', repository, '--status', 'queued', '-L', '20', '--json', 'databaseId']),
-    );
-    check('fork runner backlog', !queued.length, `${queued.length} queued run(s)`);
-  });
+      const queued = JSON.parse(
+        sh('gh', ['run', 'list', '-R', repository, '--status', 'queued', '-L', '20', '--json', 'databaseId']),
+      );
+      check('fork runner backlog', !queued.length, `${queued.length} queued run(s)`);
+    },
+    setupHint('fork'),
+  );
   await tryRun('GitHub clock', async () => {
     const c = await measureSkew(config.github.mainBase);
     check(
@@ -251,8 +268,16 @@ export async function main({
     config.forge.mainBase === config.github.mainBase,
     `forge ${config.forge.mainBase?.slice(0, 12)} github ${config.github.mainBase?.slice(0, 12)}`,
   );
-  check('shared deps', Boolean(sharedDeps(B, config.baseCheckout)), 'deps/ toolchain and install');
-  check('meta repo', existsSync(join(config.meta, '.git')), config.meta);
+  check(
+    'shared deps',
+    Boolean(sharedDeps(B, config.baseCheckout)),
+    `deps/ toolchain and install${sharedDeps(B, config.baseCheckout) ? '' : setupHint('deps')}`,
+  );
+  check(
+    'meta repo',
+    existsSync(join(config.meta, '.git')),
+    `${config.meta}${existsSync(join(config.meta, '.git')) ? '' : setupHint('meta')}`,
+  );
   check('no driver running', !existsSync(join(B, 'drive.lock')), 'drive.lock absent', true);
   await tryRun('budget', () => {
     const runs = join(B, 'runs');
@@ -286,14 +311,18 @@ export async function main({
         .filter(l => l.startsWith('{'))
         .at(-1),
     );
-  await tryRun('Forge bench project', () => {
-    const caps = forgeAgent('capabilities', {});
-    check(
-      'Forge bench project',
-      caps.result?.mainReady !== false,
-      `capabilities: ${(caps.result?.actions ?? []).length} actions, mainReady ${caps.result?.mainReady}`,
-    );
-  });
+  await tryRun(
+    'Forge bench project',
+    () => {
+      const caps = forgeAgent('capabilities', {});
+      check(
+        'Forge bench project',
+        caps.result?.mainReady !== false,
+        `capabilities: ${(caps.result?.actions ?? []).length} actions, mainReady ${caps.result?.mainReady}`,
+      );
+    },
+    setupHint('forge-project'),
+  );
   await tryRun('Convex meter', async () => {
     const meter = convexMeter({
       deployment: config.forge.deployment,

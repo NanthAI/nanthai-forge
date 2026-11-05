@@ -279,7 +279,22 @@ export async function hostedLandCli(
         );
       process.exitCode = 3;
     }
-    return submitted;
+    // stdout names the same one step as stderr: wait, not a blocking finish replay.
+    const resume =
+      next && !lines[0]?.startsWith('FAILED')
+        ? landWaitContinuation(hostedAgentRoot(root), submitted)
+        : undefined;
+    return resume && resultOf(submitted).phase !== 'finish'
+      ? {
+          ...submitted,
+          result: {
+            ...(submitted.result as object),
+            next: resume.next,
+            command: resume.command,
+            waitCommand: resume.waitCommand,
+          },
+        }
+      : submitted;
   }
   process.stderr.write(
     `land: waiting for the outcome (operationId ${submitted.operationId}); Ctrl-C stops waiting, not the landing.\n`,

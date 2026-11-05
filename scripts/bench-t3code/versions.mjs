@@ -1,13 +1,14 @@
 // B1.5d version record (B2/B3/S6): everything that defines the system under test, read at
 // cell start and end. Any difference voids the cell; the driver also holds every cell of a
 // run to the first cell's record (the run pin), so cells compare like with like.
-import { execFile } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { homedir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { agentOf, CLAUDE, CODEX } from './agent.mjs';
+import { parseMirror } from './pin.mjs';
 
 const run = promisify(execFile);
 const FORGE = 'NanthAI/nanthai-forge';
@@ -84,9 +85,42 @@ const blobAt = (repo, sha, path) =>
   safe(() => out('gh', ['api', `repos/${repo}/contents/${path}?ref=${sha}`, '--jq', '.sha']));
 
 /** One record of every version that matters; arm-independent so both arms record the same. */
+/** The Git commit of a CLI commit. Forge main is the authority and its State heads are 64 hex
+ * (the CLI's `.commit` is one); GitHub main is a Git commit. The project's own mirror record
+ * maps one to the other; a 40-hex CLI commit is already Git. null = not mapped (yet). */
+export function cliGitCommit(cliCommit, mirror) {
+  if (/^[0-9a-f]{40}$/.test(cliCommit ?? '')) return cliCommit;
+  return mirror && mirror.mirroredHead === cliCommit && /^[0-9a-f]{40}$/.test(mirror.gitHead ?? '')
+    ? mirror.gitHead
+    : null;
+}
+
 export async function snapshot(config) {
   const cliPkg = dirname(dirname(config.forge.cli));
   const cliCommit = await safe(() => readFileSync(join(cliPkg, '.commit'), 'utf8').trim());
+  // One read of the dogfood project's mirror record (not the bench project): needed only when
+  // the CLI commit is a State head.
+  const mirror = await safe(() => {
+    if (!config.dogfood?.projectId || /^[0-9a-f]{40}$/.test(cliCommit ?? '')) return null;
+    const root = join(tmpdir(), 'forge-bench-mirror-probe');
+    mkdirSync(root, { recursive: true });
+    const line = execFileSync(
+      '/usr/local/bin/node',
+      [
+        config.forge.cli,
+        'agent',
+        root,
+        'capabilities',
+        JSON.stringify({ url: config.dogfood.url ?? config.forge.url, projectId: config.dogfood.projectId }),
+      ],
+      { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] },
+    )
+      .split('\n')
+      .filter(l => l.startsWith('{'))
+      .at(-1);
+    return parseMirror(JSON.parse(line));
+  });
+  const cliGit = cliGitCommit(cliCommit, mirror);
   const githubMain = await safe(
     async () =>
       (await out('git', ['ls-remote', `https://github.com/${FORGE}`, 'refs/heads/main'])).split(/\s/)[0],
@@ -112,11 +146,11 @@ export async function snapshot(config) {
   );
   return {
     at: new Date().toISOString(),
-    cli: { build: await safe(() => realpathSync(cliPkg)), commit: cliCommit },
+    cli: { build: await safe(() => realpathSync(cliPkg)), commit: cliCommit, git: cliGit },
     githubMain,
     deploy: deploy ?? null,
     convexTree: {
-      cli: await treeEntry(FORGE, cliCommit, 'convex'),
+      cli: await treeEntry(FORGE, cliGit, 'convex'),
       deploy: await treeEntry(FORGE, deploy?.headSha, 'convex'),
     },
     checkWorkflow: {
@@ -169,8 +203,11 @@ export function differences(a, b, { liveMain = false, unpinned = false } = {}) {
 export function snapshotProblems(s, { requireFreeze, liveMain = false }) {
   const p = [];
   if (!s.cli.commit) p.push('CLI commit unreadable');
-  else if (!liveMain && s.cli.commit !== s.githubMain)
-    p.push(`CLI ${s.cli.commit} is not GitHub main ${s.githubMain}`);
+  else if (!liveMain && s.cli.commit !== s.githubMain && (s.cli.git ?? null) !== s.githubMain)
+    p.push(
+      `CLI ${s.cli.commit} is not GitHub main ${s.githubMain}` +
+        (s.cli.git ? ` (mirror maps it to Git ${s.cli.git})` : ' (no mirror mapping for this State head)'),
+    );
   if (!liveMain && (!s.convexTree.cli || s.convexTree.cli !== s.convexTree.deploy))
     p.push(`deployed convex/ (${s.deploy?.headSha?.slice(0, 12)}) differs from the CLI commit's convex/`);
   if (!s.checkWorkflow.forge || !s.checkWorkflow.github) p.push('check workflow version unreadable');

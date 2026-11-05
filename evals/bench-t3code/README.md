@@ -34,7 +34,26 @@ The known gap is explicit: synthesized base **fa3b7349 is not in the retained up
 4. Reconstruct upstream C (`52f4ec6f`) plus the six preview prerequisites (#21745, #22739, #25436, #22062, #25028, #24244). Replace upstream workflows with the exact recovered bench CI scaffolding as described in the registered plan; retain the oracle separately from agent workspaces. Compare file modes, paths, complete tree digest and workflow bytes with retained qualification evidence for fa3b7349. Record every patch/reference port and its provenance. This step currently lacks a proven recipe/tree comparison; do not declare recovery complete until 8c9b84fc proves it.
 5. Re-run the qualification matrix in a separately authorized environment: same base tree and check in both arms; base green three times; each task with hidden tests red in its owned scope and with its reference green. Verify that no solution or hidden test appears in the agent base. Restore the exact toolchain/lockfiles and runner scope from the plan, then record harness, source, CLI, runner and backend pins.
 
-`tasks.mjs` constructs the manifest; `plan.mjs` fixes digest/order/repetition rules; `deps.mjs` prepares shared dependencies; `oracle.mjs`, `oracle.sh` and `score.mjs` qualify and score; `drive.mjs` schedules `run-cell.mjs`; `github-arm.mjs` and `forge-arm.mjs` implement the arms; `preflight.mjs`, `versions.mjs`, `meter.mjs`, `samplers.mjs` and `summarize.mjs` capture conditions and results. `pin.mjs` still has machine-specific defaults: use its supported explicit root; its historical dependency-donor path still needs a portable replacement, and do not mistake it for the missing fixture.
+## Rebuild the environment with one script
+
+`scripts/bench-t3code/setup` builds everything a bench needs outside the harness code; `scripts/bench-t3code/teardown` removes it. Both need an explicit `--dry` (reads only) or `--live`.
+
+```sh
+export BENCH_ROOT=...   # holds the owner's config.json, tasks.json; setup copies PLAN.md
+scripts/bench-t3code/setup --dry     # every step, its state, its cost (repos, CI minutes, Convex calls, disk); creates nothing
+scripts/bench-t3code/setup --live --base-source BASE_REPO_OR_BUNDLE --dogfood-project PROJECT_ID
+scripts/bench-t3code/teardown --dry  # then --live [--keep deps]
+```
+
+Steps, in order: `prereqs`, `inputs`, `pin`, `meta`, `base`, `base-checkout`, `deps`, `fork` (temporary **public** repo, outward), `forge-project` (hosted Convex spend, outward), `dogfood`. Each is idempotent: a step whose check passes is skipped, so a rerun resumes. Everything setup creates is written to `BENCH_ROOT/setup-manifest.json` before the call that creates it. Teardown reads only that manifest and re-checks each entry first: a repo is deleted only if it still has the id setup recorded, a path only if it is inside `BENCH_ROOT`, a `config.json` key only if it still holds setup's value. A repo that exists without a manifest entry is never adopted or deleted. `preflight.mjs` names the setup step for every missing piece.
+
+What setup cannot do for you, and says so: it cannot rebuild base **fa3b7349** (see above), so `base` needs `--base-source` (a repo or bundle that holds the commit; `--new-base` accepts a different commit as a new base, which the plan must register before any scored cell). It stops at the Vite+ installer and prints its sha256; you read it and pass `--installer-sha256`. It does not define the Forge project's check command (`bash .bench/ci.sh`) and its ruleset follows the plan's stated fields only; the exit bench dry run's base-green qualification is the proof. `forge-project` hosts a one-commit snapshot of the base tree, not the B1.5d full history, and its Convex cost is unmeasured until it runs once.
+
+**Harness pin.** `pin.mjs` takes a Forge State head (the CLI's `.commit`, the default) and maps it to a Git commit through the project's own mirror record (`capabilities.githubMirror`: `mirroredHead` to `gitHead`). It never waits silently: when the mirror has not reached that State it exits `BENCH_PIN_WAITS_FOR_MIRROR` naming the State it needs, the State the mirror has, and when the next attempt is due (`nforge github-sync ROOT --push` pushes now). The version record uses the same mapping, so a State-head CLI commit is compared with GitHub main correctly. `FORGE_CLI_HOME` overrides the dependency donor; by default it is the CLI build next to `config.forge.cli`.
+
+## What each harness file does
+
+`tasks.mjs` constructs the manifest; `plan.mjs` fixes digest/order/repetition rules; `deps.mjs` prepares shared dependencies; `oracle.mjs`, `oracle.sh` and `score.mjs` qualify and score; `drive.mjs` schedules `run-cell.mjs`; `github-arm.mjs` and `forge-arm.mjs` implement the arms; `preflight.mjs`, `versions.mjs`, `meter.mjs`, `samplers.mjs` and `summarize.mjs` capture conditions and results. `pin.mjs` takes `BENCH_ROOT` and `FORGE_CLI_HOME` explicitly.
 
 `preflight.mjs --dry` and `drive.mjs --dry` are **live qualification**, not offline recovery: they inspect external services and can prepare workspaces. Recover private configuration through the owner, authorize its resources/spend, review those scripts and preconditions, and qualify the exact harness before using them. This handover runs neither a dry cell nor a scored cell. Future scored repeats need their own registered plan (including the agreed outlier rule); the historical result is unchanged.
 

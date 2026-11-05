@@ -16,6 +16,9 @@ export const hostedContractFeatures = [
   /** put-planning-item keeps every stored field the put omits (c0255160). Without it the CLI sends
    * the stored kind, title, body, status, links and group, as older servers require. */
   'planning-put-keeps-omitted',
+  /** A conflict resolution records the caller's conflicted Lane (sync originLaneId) and completes it
+   * when the resolution lands (36a087ea). Without it the CLI sends no originLaneId. */
+  'resolution-origin',
 ] as const;
 export type HostedContractFeature = (typeof hostedContractFeatures)[number];
 

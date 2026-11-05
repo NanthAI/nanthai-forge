@@ -25,6 +25,8 @@ or report `submission.phase:"terminal-failed"` as the actual failure.
 Conflict receipts supply one recovery continuation. Edit the named hunks first;
 land/save reject them locally before compose/check, with zero added Convex calls.
 Resolve accepts the Lane root or a subdirectory; separator-only text is valid. Recovery preserves check-only intent and check pins.
+The resolution Lane opens beside the original Lane (`ROOT.forge-client/lanes/ID`) with the whole tree, so helpers a hunk uses are readable and checks run there. When it lands, Forge completes the original Lane it was made for (only at the recorded source: a Lane saved again after the conflict stays open; reopen undoes it), so its Intent and Issue close without a manual `complete`. Syntax conflicts (both sides parse, the line merge does not) list `reasons`, and the resolve instruction names them.
+Replaying the original `land --save` or `finish` after a conflict follows the resolution's real state: unresolved, the same `resolve`; resolved, that resolution Lane's exact `finish` (one landing, never two); landed, `RESOLVED in Lane ID` and no step; abandoned, one `sync` with a fresh `operationId`. A `landing` or `status` read of a terminal conflict names the same `sync` recovery as `wait` (one landing-status read), never a wait on the ended operation. When source preparation outlives the land budget, land names `wait` (as for every landing); `wait` replays that unsubmitted finish by its id within its budget and then waits on the submission.
 
 After a landing wait, its authoritative observation replaces pending-source
 advice. Terminal responses drop obsolete status, progress and replay advice using

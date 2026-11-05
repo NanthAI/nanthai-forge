@@ -11,6 +11,7 @@ import { readHostedRecord, recordHead, writeHostedRecord } from './projectHosted
 import { sameSaveLane } from './projectHostedSaveStore';
 import { retireLandedOverlapLanes } from './projectHostedOverlapLanded';
 import { completeIntentWhenLanesDone } from './projectHostedIntentCompletion';
+import { completeResolutionOrigins } from './projectHostedResolutionOrigin';
 import { hostedAcceptanceSchema } from '../src/hosted-acceptance';
 import { validateComposePage, composeLaneSchema } from '../src/hosted-compose';
 import { hostedLaneSchema } from '../src/hosted-lane';
@@ -100,6 +101,21 @@ export async function completeAcceptedHeads(ctx: MutationCtx, input: CompletionI
       },
     });
     finished.add(lane.intentId);
+    // A resolution Lane carries its conflicted original's work: complete that Lane too.
+    if (lane.resolution?.origin)
+      for (const intentId of await completeResolutionOrigins(
+        ctx,
+        {
+          projectId: input.projectId,
+          owner: project.owner,
+          authorityEpoch: receipt.authorityEpoch,
+          receiptId: input.receiptId,
+          commit: landed.commit,
+          at: receipt.at,
+        },
+        lane,
+      ))
+        finished.add(intentId);
   }
   // The Intent completes with its last Lane, so the planning read can close its Issue.
   for (const intentId of declares ? finished : [])

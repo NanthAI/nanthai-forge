@@ -22,7 +22,10 @@ type Result = {
   retryCommand?: string;
   status?: string;
   terminal?: boolean;
-  recovery?: { command?: string; conflict?: { command?: string; instruction?: string } };
+  recovery?: {
+    command?: string;
+    conflict?: { command?: string; instruction?: string; state?: string; laneId?: string };
+  };
   conflict?: { command?: string; instruction?: string };
 };
 export const resultOf = (response: HostedAgentResponse) => (response.result ?? {}) as Result;
@@ -47,6 +50,11 @@ export function landSummary(response: HostedAgentResponse): string[] {
     return ['CHECK PASSED; queued to land, not landed yet (waiting for acceptance)'];
   if (result.phase === 'check' && result.run?.status === 'passed')
     return ['CHECK PASSED (check only; this command does not land)'];
+  // The conflict's resolution Lane already completed: its landing carried this work.
+  if (result.recovery?.conflict?.state === 'completed')
+    return [
+      `RESOLVED in Lane ${result.recovery.conflict.laneId}; this conflicted landing needs nothing more`,
+    ];
   if (retryableFinishSource(result) && result.command)
     return ['SOURCE NEEDS RECOVERY', `Continue recovery: ${result.command}`];
   const lines: string[] = [];

@@ -255,14 +255,16 @@ export function agentFixture(t) {
           error: null,
         };
       });
-    } else if (name === 'projectHostedLanding:status')
+    } else if (name === 'projectHostedLanding:status') {
+      const found = [...operations.values()].find(
+        value => value?.id === args.submissionId && value?.observation,
+      );
       result = {
-        request: [...operations.values()].find(
-          value => value?.id === args.submissionId && value?.observation,
-        ) ?? { id: args.submissionId, priorityVersion: 0 },
+        request: found ?? { id: args.submissionId, priorityVersion: 0 },
+        ...(found ? { attempt: { id: found.attemptId, candidate: { id: found.request.candidateId } } } : {}),
         queuePosition: 1,
       };
-    else if (name === 'projectHostedLandingPriority:prioritize')
+    } else if (name === 'projectHostedLandingPriority:prioritize')
       result = once(id, () => ({
         id: request.submissionId,
         priority: request.priority,

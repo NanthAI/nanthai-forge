@@ -67,7 +67,7 @@ Live release adoption and billed-usage qualification remain unverified.
   before its first save. Exact State/Candidate show and the existing MCP
   `forge_review` expose these reads with current access and explicit omissions.
 
-Hosted land/save reject complete conflict hunks locally before compose/check; resolve accepts Lane subdirectories. Receipts retain one recovery step.
+Hosted land/save reject complete conflict hunks locally before compose/check; resolve accepts Lane subdirectories. Receipts retain one recovery step. The resolution Lane opens beside the original with the whole tree; landing it completes the original Lane, and replays of the original landing follow the resolution's actual state.
 
 Hosted compose parses every text-merged JS/TS file and reports a file that no longer parses (while each side does) as a composition conflict with the parser message, before any check runs; sync and local composition do not.
 

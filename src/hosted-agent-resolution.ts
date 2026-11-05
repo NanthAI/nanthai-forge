@@ -6,7 +6,12 @@ import {
   resolutionContinuation,
   rememberConflictFinishOptions,
   resolutionFinishOptions,
+  rememberResolutionFinish,
+  resolvedFinishContinuation,
 } from './hosted-conflict-precheck.js';
+import { shareDependencies } from './shared-dependencies.js';
+import { hostedLaneSelectionSchema } from './hosted-lane.js';
+import { randomUUID } from 'node:crypto';
 import { conflictFinishOptions } from './hosted-conflict-finish-options.js';
 import { clientCacheRoot } from './root-paths.js';
 import { retainSyncHandoff, clearSyncHandoff } from './hosted-sync-handoff.js';
@@ -23,7 +28,7 @@ import { saveExpectedSchema, saveResultSchema } from './hosted-save.js';
 import { syncRequestSchema, syncResultSchema } from './hosted-sync.js';
 import { saveHostedLane } from './hosted-save-client.js';
 import { driveAgentSource, syncAgentSource } from './hosted-agent-source.js';
-import { openHostedRootLane, hostedRootLanePath } from './hosted-root-checkout.js';
+import { openHostedRootLane, siblingLanePath } from './hosted-root-checkout.js';
 import { applyHostedSync } from './hosted-sync-client.js';
 import { markerAt, retainedLocalApplyBlocked } from './hosted-apply-recovery-records.js';
 import { ConvexLaneTransport } from './hosted-lane-transport.js';
@@ -53,8 +58,14 @@ export async function guideHostedSync(session: HostedAgentSession, value: unknow
   if (!parsed.success || parsed.data.status !== 'conflict') return value;
   const source = parsed.data;
   invariant(source.resolution, 'SOURCE_UNAVAILABLE', 'Retain the exact resolution pins.');
-  // Recheck current access even when every source object is cached.
-  await session.query('projectHostedLanes:select', { laneId: source.lane.laneId });
+  // Recheck current access even when every source object is cached. The same read says
+  // whether the resolution Lane already landed or was dropped, so a replay never sends the
+  // agent back to resolve settled work.
+  const current = hostedLaneSelectionSchema.safeParse(
+    parseValue(await session.query('projectHostedLanes:select', { laneId: source.lane.laneId })),
+  );
+  if (current.success && current.data.state !== 'active')
+    return { source: value, conflict: settledResolution(session.root, source, current.data.state) };
   const objects = new HostedObjectStore(
     join(clientCacheRoot(session.root), 'conflict-objects'),
     session.exchange,
@@ -82,7 +93,7 @@ export async function guideHostedSync(session: HostedAgentSession, value: unknow
     pin = page.next;
   }
   if (!apply) {
-    const root = hostedRootLanePath(session.root, session.address, source.lane.laneId);
+    const root = siblingLanePath(session.root, session.address, source.lane.laneId);
     rememberConflictPaths(root, source.lane.laneId, paths);
     rememberConflictFinishOptions(root, source.lane.laneId, session.journal.get('resolution-finish-options'));
     const next = { laneId: source.lane.laneId };
@@ -98,17 +109,28 @@ export async function guideHostedSync(session: HostedAgentSession, value: unknow
       },
     };
   }
-  const opened = await openHostedRootLane(session.root, session.address, session.exchange, {
-    operationId: await session.journal.id('conflict-checkout'),
-    laneId: source.lane.laneId,
-    expected: {
-      head: source.lane.head,
-      version: source.lane.version,
-      sourceVersion: source.lane.sourceVersion,
+  // The whole tree, beside the original Lane: the agent reads the helpers a hunk
+  // uses and runs checks there, as in any Lane (objects come from the shared cache).
+  const opened = await openHostedRootLane(
+    session.root,
+    session.address,
+    session.exchange,
+    {
+      operationId: await session.journal.id('conflict-checkout'),
+      laneId: source.lane.laneId,
+      expected: {
+        head: source.lane.head,
+        version: source.lane.version,
+        sourceVersion: source.lane.sourceVersion,
+      },
     },
-    paths,
-  });
+    siblingLanePath(session.root, session.address, source.lane.laneId),
+  );
   recordLane({ laneId: source.lane.laneId, root: opened.root, ...session.address });
+  const dependencies = await shareDependencies(opened.root).catch((error: unknown) => ({
+    status: 'failed' as const,
+    message: error instanceof Error ? error.message : String(error),
+  }));
   let remaining = 128 * 1024;
   const files = paths.slice(0, 100).map(path => {
     let bytes: Buffer | null;
@@ -133,20 +155,72 @@ export async function guideHostedSync(session: HostedAgentSession, value: unknow
     source.lane.laneId,
     session.journal.get('resolution-finish-options'),
   );
+  const shown = reasons.slice(0, 100);
+  const origin = source.resolution.origin?.laneId;
   return {
     source: value,
     conflict: {
-      ...resolutionContinuation(opened.root, source.lane.laneId, paths.slice(0, 100), command.operationId),
+      ...(resolvedFinishContinuation(opened.root, source.lane.laneId) ??
+        resolutionContinuation(
+          opened.root,
+          source.lane.laneId,
+          paths.slice(0, 100),
+          command.operationId,
+          shown,
+        )),
       laneId: source.lane.laneId,
       head: source.lane.head,
       paths: paths.slice(0, 100),
       more: Math.max(0, paths.length - 100),
+      ...(shown.length ? { reasons: shown } : {}),
       files,
+      dependencies,
       automatic: {
-        summary: 'Opened a sibling Lane containing the conflict files.',
-        undo: 'The original Lane and accepted main are unchanged; continue in the original Lane to discard this draft.',
+        summary: `Opened resolution Lane ${source.lane.laneId} beside the original Lane, with the whole tree; only the listed files need edits.`,
+        undo: origin
+          ? `Accepted main is unchanged. When this resolution Lane lands, Forge completes the original Lane ${origin} (reopen it to undo); abandon this Lane to keep working in the original instead.`
+          : 'The original Lane and accepted main are unchanged; abandon this Lane to keep working in the original instead.',
       },
     },
+  };
+}
+const parseValue = (value: unknown) => (typeof value === 'string' ? JSON.parse(value) : value);
+/** A replayed recovery whose resolution Lane is no longer active. Completed: its landing
+ * (or an explicit complete) settled the conflict, so there is nothing to resolve. Abandoned:
+ * the draft was dropped, so the one step is a fresh resolution with a new operation. */
+function settledResolution(
+  root: string,
+  source: z.infer<typeof syncResultSchema>,
+  state: 'completed' | 'abandoned',
+) {
+  const laneId = source.lane.laneId;
+  if (state === 'completed')
+    return {
+      laneId,
+      state,
+      resolved: true,
+      instruction: `This conflict was resolved in Lane ${laneId}, which is completed; nothing is left to do for it.`,
+    };
+  const candidateId = source.resolution?.candidateId;
+  const fresh = candidateId
+    ? { candidateId, operationId: randomUUID() }
+    : source.from
+      ? { laneId: source.from.laneId, operationId: randomUUID() }
+      : null;
+  if (!fresh)
+    return {
+      laneId,
+      state,
+      instruction: `The resolution Lane ${laneId} was abandoned and its original source is unknown.`,
+      terminal: true,
+    };
+  const command = hostedRecoveryCommand(root, 'sync', fresh);
+  return {
+    laneId,
+    state,
+    next: { action: 'sync', ...fresh },
+    command,
+    instruction: `The resolution Lane ${laneId} was abandoned. Start a new resolution with: ${command}`,
   };
 }
 export async function resolveHostedAgent(session: HostedAgentSession, input: unknown) {
@@ -171,7 +245,9 @@ export async function resolveHostedAgent(session: HostedAgentSession, input: unk
       `Select the resolution laneId, or run resolve in its returned Lane root; ${session.root} is not a Lane checkout.`,
     );
     const known = readLaneEntry(command.laneId);
-    let root = join(clientCacheRoot(session.root), 'lanes', command.laneId);
+    const placed = siblingLanePath(session.root, session.address, command.laneId);
+    let root =
+      placed === session.root ? join(clientCacheRoot(session.root), 'lanes', command.laneId) : placed;
     const matches = (local: ReturnType<typeof markerAt>) =>
       !!local &&
       local.selection.laneId === command.laneId &&
@@ -276,6 +352,8 @@ export async function resolveHostedAgent(session: HostedAgentSession, input: unk
     operationId: await session.journal.id('next-finish'),
     accept: options?.accept ?? true,
   };
+  // A later replay of the original Lane's recovery points straight at this landing.
+  rememberResolutionFinish(session.root, source.lane.laneId, next);
   return {
     source: progress,
     applied,

@@ -210,6 +210,9 @@ async function syncAgentSourceOnce(
         'VIEW_CONFLICT',
         'Select the exact conflicted Candidate.',
       );
+      // From the conflicted Lane's own checkout, the resolution records that Lane, so landing
+      // the resolution completes it. Local marker only: no added read.
+      const origin = session.marker()?.selection;
       return syncRequestSchema.parse({
         kind: 'resolution',
         operationId,
@@ -217,6 +220,11 @@ async function syncAgentSourceOnce(
         candidateId: candidate.id,
         conflicts: candidate.result.conflicts,
         message: command.message,
+        ...(session.capabilities.features?.includes('resolution-origin') &&
+        origin?.intentId === candidate.intentId &&
+        origin.state === 'active'
+          ? { originLaneId: origin.laneId }
+          : {}),
       });
     }
     const marker = session.marker(),

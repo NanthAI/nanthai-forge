@@ -5,6 +5,26 @@ import { hostedRecoveryCommand } from './hosted-agent-resolution.js';
 import type { HostedLandingState } from './hosted-landing.js';
 import type { HostedAgentTransport } from './hosted-agent-transport.js';
 
+/** A landing read whose submission ended in a composition conflict and carries no recovery yet. */
+export function terminalConflict(
+  value: unknown,
+): value is { submission: HostedLandingState; recovery?: unknown; conflict?: unknown } {
+  const entry = value as
+    | {
+        submission?: { phase?: string; observation?: { state?: string }; error?: { code?: string } | null };
+        recovery?: unknown;
+        conflict?: unknown;
+      }
+    | null
+    | undefined;
+  const state = entry?.submission?.observation?.state ?? entry?.submission?.phase;
+  return (
+    state === 'terminal-failed' &&
+    entry?.submission?.error?.code === 'COMPOSITION_CONFLICT' &&
+    !entry.recovery &&
+    !entry.conflict
+  );
+}
 /** Observation must retain the rejected attempt, which can differ from the
  * originally submitted Candidate after recomposition or batching. No source IO
  * or recovery mutation belongs in a wait; sync owns preparation and resolve. */

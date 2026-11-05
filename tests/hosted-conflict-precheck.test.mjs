@@ -321,7 +321,10 @@ test('a lost completed resolve reply retains its exact recovery identity instead
   assert.equal((await f.current(submitted.result.submission.id)).submission.phase, 'landed');
 });
 
-test('finite conflict status offers the existing exact-recovery wait with no extra reads', async t => {
+// Lead case 3 (2026-11-05, incident 2e264cd6): a landing read of a terminal conflict said
+// "wait" on an operation that had already ended. It now names the sync recovery, as wait does,
+// for one landing-status read on the conflict path only.
+test('finite conflict status names the sync recovery, never a wait on the ended operation', async t => {
   const s = agentFixture(t);
   await s.transport().dispatch('open', { laneId: s.lane.laneId });
   const first = await s.transport().dispatch('finish', { laneId: s.lane.laneId });
@@ -329,9 +332,15 @@ test('finite conflict status offers the existing exact-recovery wait with no ext
   state.phase = 'terminal-failed';
   state.observation = { state: 'terminal-failed', cause: 'conflict', pendingReason: null };
   state.error = { code: 'COMPOSITION_CONFLICT', message: 'Synthetic rejected attempt' };
-  const before = s.calls.length;
-  const result = await s.transport().dispatch('status', { operationId: first.operationId });
-  assert.equal(result.result.next.action, 'wait');
-  assert.deepEqual(result.result.next.operationIds, [first.operationId]);
-  assert.equal(s.calls.length - before, 2, 'capabilities plus canonical status only');
+  for (const action of ['status', 'landing']) {
+    const before = s.calls.length;
+    const result = await s.transport().dispatch(action, { operationId: first.operationId });
+    assert.equal(result.result.next, undefined, `${action}: no wait on a terminal conflict`);
+    assert.equal(result.result.waitCommand, undefined);
+    const recovery = result.result.recovery.conflict;
+    assert.equal(recovery.next.action, 'sync');
+    assert.equal(recovery.next.candidateId, state.request.candidateId);
+    assert.match(recovery.command, / sync /);
+    assert.equal(s.calls.length - before, 3, 'capabilities, canonical status and one landing status read');
+  }
 });

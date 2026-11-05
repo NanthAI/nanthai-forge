@@ -23,6 +23,8 @@ type ConflictContext = {
   resolveParameters?: ResolveParameters | undefined;
   resolved?: boolean;
   finishOptions?: ConflictFinishOptions | undefined;
+  /** The landing step a completed resolve returned; replays point here instead of resolve. */
+  finishParameters?: Record<string, unknown> | undefined;
 };
 function context(root: string, laneId?: string): ConflictContext | undefined {
   try {
@@ -53,6 +55,13 @@ function context(root: string, laneId?: string): ConflictContext | undefined {
         : undefined,
       resolved: saved.resolved === true,
       finishOptions: conflictFinishOptions(saved.finishOptions),
+      finishParameters:
+        saved.finishParameters &&
+        typeof saved.finishParameters === 'object' &&
+        z.uuid().safeParse(saved.finishParameters.operationId).success &&
+        (saved.finishParameters.laneId === undefined || saved.finishParameters.laneId === saved.laneId)
+          ? saved.finishParameters
+          : undefined,
     };
   } catch {
     return undefined;
@@ -75,8 +84,30 @@ export function rememberConflictPaths(
       resolveParameters,
       resolved: prior?.resolved,
       finishOptions: prior?.finishOptions,
+      finishParameters: prior?.finishParameters,
     }),
   );
+}
+/** Retain the exact finish a completed resolve handed out, with its operationId. */
+export function rememberResolutionFinish(root: string, laneId: string, parameters: Record<string, unknown>) {
+  const saved = context(root, laneId);
+  if (saved)
+    durableReplace(pathFor(root), JSON.stringify({ ...saved, resolved: true, finishParameters: parameters }));
+}
+/** After resolve completed here, the one next step is landing the resolution Lane. */
+export function resolvedFinishContinuation(root: string, laneId: string) {
+  const saved = context(root, laneId);
+  if (!saved?.resolved || !saved.finishParameters) return undefined;
+  const parameters = saved.finishParameters;
+  const command = `nforge agent ${shellQuote(root)} finish ${shellQuote(JSON.stringify(parameters))}`;
+  return {
+    root,
+    paths: [] as string[],
+    resolved: true,
+    next: { action: 'finish', ...parameters },
+    command,
+    instruction: `The conflict is resolved and saved in Lane ${laneId}. Land it (a replay is safe; it never lands twice): ${command}`,
+  };
 }
 export function rememberConflictFinishOptions(root: string, laneId: string, options: unknown) {
   const saved = context(root, laneId),
@@ -101,18 +132,29 @@ export function pendingConflictPaths(root: string, laneId: string): string[] {
   const saved = context(root, laneId);
   return saved?.resolved ? [] : (saved?.paths ?? []);
 }
-export function resolutionContinuation(root: string, laneId: string, paths: string[], operationId?: string) {
+export function resolutionContinuation(
+  root: string,
+  laneId: string,
+  paths: string[],
+  operationId?: string,
+  reasons: readonly { path: string; reason: string }[] = [],
+) {
   const parameters = context(root, laneId)?.resolveParameters ?? {
     laneId,
     ...(operationId ? { operationId } : {}),
   };
   const command = `nforge agent ${shellQuote(root)} resolve ${shellQuote(JSON.stringify(parameters))}`;
+  // Syntax conflicts: both sides parse and the line merge did not, so the file needs a
+  // real merge even where no hunk overlaps. Say so instead of leaving a marker hunt.
+  const why = reasons.length
+    ? ` Forge flagged ${reasons.map(item => `${item.path} (${item.reason})`).join('; ')}: merge both sides so the file parses.`
+    : '';
   return {
     root,
     paths,
     next: { action: 'resolve', ...parameters },
     command,
-    instruction: `Edit ${paths.join(', ')} in ${root} to resolve each conflict hunk, then run: ${command}`,
+    instruction: `Edit ${paths.join(', ')} in ${root} to resolve each conflict hunk, then run: ${command}${why}`,
   };
 }
 export function requireResolution(root: string, laneId: string) {

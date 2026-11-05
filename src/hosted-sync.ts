@@ -38,7 +38,16 @@ export const syncRequestSchema = z.discriminatedUnion('kind', [
       ]),
     })
     .strict(),
-  z.object({ ...common, kind: z.literal('resolution'), candidateId: z.uuid(), conflicts: object }).strict(),
+  z
+    .object({
+      ...common,
+      kind: z.literal('resolution'),
+      candidateId: z.uuid(),
+      conflicts: object,
+      /** The caller's conflicted Lane (contract feature resolution-origin); completed when the resolution lands. */
+      originLaneId: z.uuid().optional(),
+    })
+    .strict(),
   z.object({ ...common, ...lane, kind: z.literal('resolve') }).strict(),
 ]);
 export const syncWorkSchema = z.discriminatedUnion('mode', [

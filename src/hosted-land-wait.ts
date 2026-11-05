@@ -20,10 +20,13 @@ export function landWaitContinuation(root: string, response: HostedAgentResponse
       ? runDone.has(result.run.status ?? '')
         ? null
         : { runId: result.run.id }
-      : result.phase === 'finish' &&
-          response.operationId &&
+      : response.operationId &&
           !landTerminal(response) &&
-          !retryableFinishSource(result)
+          !retryableFinishSource(result) &&
+          (result.phase === 'finish' ||
+            // Source preparation outlived the budget: wait replays it by id (never a second landing).
+            (['save', 'compose', 'sync'].includes(String(result.phase)) &&
+              (result as { status?: unknown }).status === 'submitted'))
         ? { operationIds: [response.operationId], until: 'acceptance' }
         : null;
   return wait ? operationWait(root, wait) : undefined;

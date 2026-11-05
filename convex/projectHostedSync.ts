@@ -18,6 +18,11 @@ import { canonicalPayload, hostedPayloadHash } from '../src/hosted-source-operat
 import { invariant } from '../src/errors';
 import { report } from './errors';
 const identity = { projectId: v.id('hostedProjects'), operationId: v.string() };
+const laneOrigin = (lane: NonNullable<SyncState['lane']>) => ({
+  laneId: lane.id,
+  head: lane.head,
+  sourceVersion: lane.sourceVersion,
+});
 async function caller(
   ctx: QueryCtx | MutationCtx,
   input: { projectId: Id<'hostedProjects'>; operationId: string },
@@ -79,6 +84,7 @@ export const prepare = receiptMutation({
       let ownerInputs = false;
       let work: SyncState['work'],
         lane: SyncState['lane'] = null,
+        origin: SyncState['origin'],
         intentId: string,
         base: SyncState['base'];
       const candidate = async (id: string) => {
@@ -106,6 +112,16 @@ export const prepare = receiptMutation({
         intentId = selected.intentId;
         base = selected.base;
         work = { mode: 'resolution', candidateId: selected.id, conflicts: request.conflicts };
+        if (request.originLaneId) {
+          // Only the caller's own active Lane on the same Intent; anything else is not recorded.
+          const conflicted = (await saveLaneRecord(ctx, { ...auth, laneId: request.originLaneId })).lane;
+          if (
+            conflicted.intentId === selected.intentId &&
+            conflicted.actor === auth.actor &&
+            conflicted.state === 'active'
+          )
+            origin = laneOrigin(conflicted);
+        }
       } else {
         const original = await saveLaneRecord(ctx, { ...auth, laneId: request.laneId });
         lane = original.lane;
@@ -113,6 +129,7 @@ export const prepare = receiptMutation({
         invariant(sameSaveLane(lane, request.expected), 'WORK_STALE', 'Select the exact saved Lane pins.');
         intentId = lane.intentId;
         base = lane.base;
+        if (request.kind === 'sync' && lane.actor === auth.actor) origin = laneOrigin(lane);
         const left = await saveObject(ctx, auth.projectId, { sha256: lane.head });
         if (request.kind === 'resolve') {
           invariant(
@@ -182,6 +199,7 @@ export const prepare = receiptMutation({
         intentId,
         base,
         resolutionLaneId: prepared.operation.firstAttempt.ids.lane!,
+        ...(origin ? { origin } : {}),
         jobOperationId: prepared.operation.firstAttempt.ids.jobOperation!,
         status: 'ready',
       };

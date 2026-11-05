@@ -148,6 +148,7 @@ export async function publishHostedSync(ctx: MutationCtx, input: SaveIdentity & 
         left: result.left,
         right: result.right,
         draftHead: result.state.sha256,
+        ...(state.origin ? { origin: state.origin } : {}),
         status: 'pending',
       },
     };

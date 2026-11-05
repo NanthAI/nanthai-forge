@@ -28,6 +28,7 @@ import { readHostedOverlapAdvice, recordHostedOverlapDelivery } from './hosted-o
 import { hostedOverlapNotice, type HostedOverlapNotice } from './hosted-overlap-notice.js';
 import { waitHostedAgentSource } from './hosted-agent-source-wait.js';
 import { recoverHostedFinish, hostedConflictAdvice } from './hosted-agent-resolution.js';
+import { observedConflictRecovery, terminalConflict } from './hosted-observed-conflict.js';
 import type { HostedRunSubscription } from './hosted-agent-observe.js';
 import { executeHostedRecords } from './hosted-agent-records.js';
 import {
@@ -1007,6 +1008,14 @@ export class HostedAgentTransport {
     // Delivered means returned on a Lane-changing action; a bare status read is not a delivery.
     if (advice && notice && overlapLaneId && ['start', 'save', 'sync', 'compose', 'finish'].includes(action))
       await recordHostedOverlapDelivery(this, overlapLaneId, action, advice);
+    // Conflict advice first, so the continuation never offers wait beside a recovery.
+    // Finite canonical reads never hydrate conflict/advice source; a terminal conflict on
+    // a landing read gets the same one-query sync recovery as wait. Mutating flows may
+    // still prepare their existing actionable conflict checkout.
+    result =
+      action === 'status' || action === 'observe'
+        ? enrichHostedQueueAhead(this, terminalConflict(result) ? await this.readRecovery(result) : result)
+        : await hostedConflictAdvice(this, enrichHostedQueueAhead(this, result));
     if (result && typeof result === 'object')
       result = hostedObservationContinuation(this.root, result as Record<string, unknown>);
     const missing = this.serverFeatures ? missingRequiredFeatures(this.serverFeatures) : [];
@@ -1017,17 +1026,21 @@ export class HostedAgentTransport {
       action,
       operationId,
       resolved: operationId ? { operationId } : null,
-      // Finite canonical reads never hydrate conflict/advice source. Mutating
-      // flows may still prepare their existing actionable conflict checkout.
-      result:
-        action === 'status' || action === 'observe'
-          ? enrichHostedQueueAhead(this, result)
-          : await hostedConflictAdvice(this, enrichHostedQueueAhead(this, result)),
+      result,
       ...(advice ? (({ changedPaths: _paths, ...shown }) => shown)(advice) : {}),
       ...(notice ? { overlapNotice: notice } : {}),
       ...this.nudge(action, result),
       ...(missing.length ? { serverContract: { missing } } : {}),
     };
+  }
+  /** A read keeps its canonical terminal outcome even when recovery metadata is unreadable or
+   * belongs to another attempt; wait and finish still surface that refusal. */
+  private async readRecovery<T extends Parameters<typeof observedConflictRecovery>[1]>(entry: T) {
+    try {
+      return await observedConflictRecovery(this, entry);
+    } catch {
+      return entry;
+    }
   }
   /** One overlap read per dispatch: a finish gate and its receipt share it. */
   private async overlapAdvice(laneId: string, paths = false) {

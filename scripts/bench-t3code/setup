@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# Bench environment setup; see setup.mjs. Patched Node only.
+exec /usr/local/bin/node "$(dirname "$0")/setup.mjs" "$@"

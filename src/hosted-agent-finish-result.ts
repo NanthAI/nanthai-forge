@@ -36,14 +36,14 @@ export function hostedObservationContinuation(root: string, result: Reply, opera
   if (result.phase === 'check' && run?.id && !['passed', ...failedRuns].includes(run.status ?? ''))
     return { ...result, ...operationWait(root, { runId: run.id }) };
   const state = submission?.observation?.state ?? submission?.phase;
+  // Only unfinished work waits. A terminal conflict follows its sync/resolve recovery,
+  // never a wait on an operation that already ended.
   const pending = submission && !['landed', 'terminal-failed', 'superseded'].includes(state ?? '');
-  const conflict = submission?.error?.code === 'COMPOSITION_CONFLICT' && !result.recovery && !result.conflict;
   const replayOperation = (result.replayParameters as Reply | undefined)?.operationId;
   const original =
     operationId ?? (typeof replayOperation === 'string' ? replayOperation : submission?.operationId);
-  if ((!pending && !conflict) || !original) return result;
+  if (!pending || !original) return result;
   const continuation = operationWait(root, { operationIds: [original], until: 'acceptance' });
-  if (!pending) return { ...result, next: continuation.next, command: continuation.command };
   return {
     ...result,
     ...continuation,

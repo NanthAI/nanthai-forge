@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# Bench environment teardown; see teardown.mjs. Patched Node only.
+exec /usr/local/bin/node "$(dirname "$0")/teardown.mjs" "$@"

@@ -4,7 +4,12 @@ import { join } from 'node:path';
 import { makeFunctionReference } from 'convex/server';
 import { z } from 'zod';
 import { clientCacheRoot } from './root-paths.js';
-import { hostedAgentDirectory, hostedAgentRoot, readAgentJson } from './hosted-agent-journal.js';
+import {
+  hostedAgentDirectory,
+  hostedAgentRoot,
+  readAgentJson,
+  retainedHostedOperation,
+} from './hosted-agent-journal.js';
 import { checkoutPathExists } from './hosted-checkout-files.js';
 import { hostedActionError } from './hosted-action-error.js';
 import { observeHostedSubmissions } from './hosted-agent-submission-wait.js';
@@ -16,7 +21,11 @@ import {
 import type { HostedAgentTransport } from './hosted-agent-transport.js';
 
 /** What this client's own records say an operation id is, when the server has no landing for it. */
-export type LocalOperation = { kind: 'check-run'; runId: string } | { kind: 'check-only' } | { kind: 'save' };
+export type LocalOperation =
+  | { kind: 'check-run'; runId: string }
+  | { kind: 'check-only' }
+  | { kind: 'save' }
+  | { kind: 'finish'; command: Record<string, unknown> };
 
 export function localOperation(root: string, operationId: string): LocalOperation | undefined {
   const base = hostedAgentRoot(root);
@@ -28,6 +37,9 @@ export function localOperation(root: string, operationId: string): LocalOperatio
     const request = values['finish-request'] as { channel?: unknown } | undefined;
     const context = values['finish-context'] as { command?: { accept?: unknown } } | undefined;
     if ((request && !request.channel) || context?.command?.accept === false) return { kind: 'check-only' };
+    // A landing whose source preparation has not reached submission yet.
+    const retained = retainedHostedOperation(base, operationId);
+    if (retained?.action === 'finish') return { kind: 'finish', command: retained.command };
   }
   if (existsSync(join(clientCacheRoot(base), 'saves', operationId))) return { kind: 'save' };
   return undefined;
@@ -132,6 +144,37 @@ async function observeHostedSave(
   }
 }
 
+/** wait on a landing that has not been submitted yet (source preparation outlived land's budget):
+ * replay the original finish by its operationId within this wait's budget, which never submits
+ * twice, then wait on the submission it reaches. So land and finish hand out the same `wait`
+ * continuation as every other landing step. Calls: the replay's own, plus the ordinary wait. */
+async function continueFinish(
+  transport: HostedAgentTransport,
+  operationId: string,
+  command: Record<string, unknown>,
+  input: { operationIds: string[]; timeoutSeconds: number },
+  signal: AbortSignal | undefined,
+  emit: ((value: unknown) => void) | undefined,
+  subscribe: () => HostedRunSubscription,
+) {
+  const deadline = Date.now() + input.timeoutSeconds * 1000;
+  transport.waitUntil = deadline;
+  const replayed = await transport.dispatch('finish', { ...command, operationId }, signal);
+  const result = (replayed.result ?? {}) as Record<string, unknown>;
+  if (result.phase === 'finish' && result.submission)
+    return observeHostedSubmissions(
+      transport,
+      { ...input, timeoutSeconds: Math.max(0, (deadline - Date.now()) / 1000) },
+      signal,
+      emit,
+      subscribe,
+    );
+  // Source still running (not retryable or failed, which carry their own recovery): the same wait resumes it.
+  const preparing =
+    ['save', 'compose', 'sync'].includes(String(result.phase)) && result.status === 'submitted';
+  return response({ ...result, status: preparing ? 'timeout' : 'terminal', operationId });
+}
+
 /** After an operation-id wait fails with NOT_FOUND: the server has no landing for the id. A check-only
  * finish (its run, or a clear terminal answer when it produced none) and a save follow what this
  * client recorded for the id, instead of failing forever. undefined when the id is not a recorded
@@ -160,6 +203,8 @@ export async function followLocalOperation(
     );
   if (local.kind === 'save')
     return observeHostedSave(transport, operationId, input.timeoutSeconds, signal, subscribe);
+  if (local.kind === 'finish')
+    return continueFinish(transport, operationId, local.command, input, signal, emit, subscribe);
   return response({
     status: 'terminal',
     successful: false,

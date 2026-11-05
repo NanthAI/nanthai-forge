@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import { clientCacheRoot } from './root-paths.js';
-import { join } from 'node:path';
+import { canonicalRoot, clientCacheRoot } from './root-paths.js';
+import { basename, dirname, join } from 'node:path';
 import { readSource } from './files.js';
 import { hostedMainSchema } from './hosted-main.js';
 import { readHostedLaneCheckout } from './hosted-lane-checkout-marker.js';
@@ -43,6 +43,17 @@ export function hostedRootLanePath(root: string, address: HostedAgentAddress, la
   if (!laneId) return Boolean(main || lane);
   if (main || (lane && lane.selection.laneId !== laneId)) return join(clientCacheRoot(root), 'lanes', laneId);
   return root;
+}
+/** A Lane opened from another Lane's checkout (a conflict resolution) is its sibling:
+ * when ROOT is itself ROOT0.forge-client/lanes/<id>, the new Lane opens beside it in
+ * ROOT0.forge-client/lanes/<laneId>, never nested in ROOT.forge-client. */
+export function siblingLanePath(root: string, address: HostedAgentAddress, laneId: string) {
+  const path = hostedRootLanePath(root, address, laneId);
+  if (path === root || !readHostedLaneCheckout(root)) return path;
+  const lanes = dirname(canonicalRoot(root));
+  return basename(lanes) === 'lanes' && basename(dirname(lanes)).endsWith('.forge-client')
+    ? join(lanes, laneId)
+    : path;
 }
 export async function openHostedRootLane(
   root: string,

@@ -63,6 +63,8 @@ export const hostedRecordSchema = z.discriminatedUnion('kind', [
           right: hash,
           draftHead: hash,
           mergeBase: hash.optional(),
+          /** The conflicted Lane this resolves; landing the resolution completes it at this exact source. */
+          origin: z.object({ laneId: z.uuid(), head: hash, sourceVersion: version }).strict().optional(),
           status: z.enum(['pending', 'resolved']),
         })
         .strict()
