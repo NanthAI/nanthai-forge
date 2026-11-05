@@ -4,8 +4,11 @@ import { privateJson } from '../legacy-storage-audit.mjs';
 import { auditPage } from './legacy-storage-query.mjs';
 import { catalogDigest } from './legacy-storage-closure.mjs';
 import { storageClass, digestHex } from './legacy-storage-verify.mjs';
+import { headPins, MAX_SKIPPED_PAGES } from './legacy-storage-heads.mjs';
 export const sha = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
-export function deletionPlan(audit, verification, scan) {
+/** Class 4 (no R2 copy) is deleted only from an explicit owner-approved,
+ * audit-pinned manifest, and only when current coverage finds no reference. */
+export function deletionPlan(audit, verification, scan, approval = null) {
   if (!verification.complete || verification.deployment !== audit.deployment || !audit.coverage?.fullyPaged)
     throw new Error('CLEANUP_VERIFICATION_REQUIRED');
   const verified = new Map(verification.results.map(r => [r.storageId, r]));
@@ -17,9 +20,40 @@ export function deletionPlan(audit, verification, scan) {
   }
   const pins = [],
     excluded = [],
-    counts = {};
+    counts = {},
+    class4 = new Map((approval?.files ?? []).map(f => [f.storageId, f]));
   for (const file of audit.files) {
     const cls = storageClass(file);
+    if (cls === 4 && class4.has(file.storageId)) {
+      const approved = class4.get(file.storageId),
+        current = refs.get(file.storageId) ?? [];
+      let code =
+        approved.bytes !== file.bytes || digestHex(approved.sha256) !== digestHex(file.sha256)
+          ? 'CLASS4_APPROVAL_CHANGED'
+          : null;
+      if (current.length) code = 'REFERENCE_REMAINS';
+      if (scan?.bodyCoverage?.complete !== true) code = 'BODY_COVERAGE_REQUIRED';
+      const c = (counts[4] ??= { files: 0, bytes: 0, eligible: 0, excluded: 0 });
+      c.files++;
+      c.bytes += file.bytes;
+      if (code) {
+        excluded.push({ storageId: file.storageId, class: 4, code });
+        c.excluded++;
+        continue;
+      }
+      pins.push({
+        storageId: file.storageId,
+        class: 4,
+        digest: digestHex(file.sha256),
+        size: file.bytes,
+        verifiedAt: approval.checkedAt,
+        fullDigest: true,
+        keys: [],
+        owners: [],
+      });
+      c.eligible++;
+      continue;
+    }
     if (![1, 2, 3].includes(cls)) continue;
     const v = verified.get(file.storageId),
       current = refs.get(file.storageId) ?? [];
@@ -69,7 +103,9 @@ export function deletionPlan(audit, verification, scan) {
     pins,
     excluded,
     counts,
-    scopeSha256: sha(audit.files.filter(f => [1, 2, 3].includes(storageClass(f)))),
+    scopeSha256: approval
+      ? sha([sha(audit.files.filter(f => [1, 2, 3].includes(storageClass(f)))), approval.sha256])
+      : sha(audit.files.filter(f => [1, 2, 3].includes(storageClass(f)))),
   };
 }
 /** Four table streams, serial pages within each table. Complete table discovery
@@ -173,6 +209,7 @@ export function deletionSummary(plan, pages, results) {
     1: { deleted: 0, excluded: 0, bytesFreed: 0 },
     2: { deleted: 0, excluded: 0, bytesFreed: 0 },
     3: { deleted: 0, excluded: 0, bytesFreed: 0 },
+    4: { deleted: 0, excluded: 0, bytesFreed: 0 },
   };
   for (const row of plan.excluded) classes[row.class].excluded++;
   for (let i = 0; i < pages.length; i++) {
@@ -238,32 +275,111 @@ export async function storageTotals(reader, retained) {
 }
 
 /** Preserve the old purge's current-checksum precondition during preparation,
- * so a known missing checksum does not consume the single approved pause. */
-export async function preflightHeads(audit, verification, io, progress = () => {}) {
+ * so a known missing checksum does not consume the single approved pause.
+ * Transient provider failures get the same bounded retry as the pause. */
+export async function preflightHeads(audit, verification, io, progress = () => {}, retry = {}) {
   const originals = new Map(
     audit.files.filter(f => [1, 2, 3].includes(storageClass(f))).map(f => [f.storageId, f]),
   );
-  const files = verification.results.filter(v => v.fullDigest && originals.has(v.storageId));
-  const excluded = [];
-  let checked = 0;
-  await boundedPages(
-    files,
-    async pin => {
-      try {
-        for (const key of pin.keys) await io.headR2(key, pin.bytes, pin.sha256);
-      } catch (error) {
-        excluded.push({
-          storageId: pin.storageId,
-          class: storageClass(originals.get(pin.storageId)),
-          code: /^VERIFY_HEAD_[A-Z_]+$/.test(error.message ?? '') ? error.message : 'VERIFY_HEAD_UNAVAILABLE',
-        });
-      }
-      checked++;
-      if (checked % 1000 === 0) progress({ phase: 'dry-run-heads', checked, excluded: excluded.length });
-    },
-    32,
-  );
-  return { checked, excluded };
+  const files = verification.results
+    .filter(v => v.fullDigest && originals.has(v.storageId))
+    .map(v => ({
+      storageId: v.storageId,
+      class: storageClass(originals.get(v.storageId)),
+      keys: v.keys,
+      size: v.bytes,
+      digest: v.sha256,
+    }));
+  const checked = await headPins(files, io, retry);
+  progress({ phase: 'dry-run-heads', checked: files.length, excluded: checked.failures.length });
+  return {
+    checked: files.length,
+    attempts: checked.attempts,
+    history: checked.history,
+    excluded: checked.failures,
+  };
+}
+const pageBytes = pins => pins.reduce((n, p) => n + p.size, 0);
+function pageClasses(pins) {
+  const classes = {};
+  for (const pin of pins) {
+    const c = (classes[pin.class] ??= { files: 0, bytes: 0 });
+    c.files++;
+    c.bytes += pin.size;
+  }
+  return classes;
+}
+/** Each 100-file page is HEAD-rechecked with page-scoped bounded retry. An
+ * exhausted page is skipped and reported (no mutation); other approved pages
+ * continue within the original window, deadline and page bounds. More than
+ * maxSkippedPages skipped pages stop further dispatch. */
+export async function applyFilePages({
+  pages,
+  heads,
+  io,
+  out,
+  request,
+  backup,
+  retry = {},
+  maxSkippedPages = MAX_SKIPPED_PAGES,
+}) {
+  const skipped = [];
+  let current = backup;
+  const results = await boundedPages(pages, async (pins, index) => {
+    const headed = pins.some(p => p.keys.length)
+      ? await headPins(
+          pins.filter(p => p.keys.length),
+          heads,
+          retry,
+        )
+      : null;
+    for (const pin of pins) if (!pin.keys.length) pin.recheckedAt = new Date().toISOString();
+    if (headed && !headed.ok) {
+      const report = {
+        page: index,
+        files: pins.length,
+        bytes: pageBytes(pins),
+        classes: pageClasses(pins),
+        attempts: headed.attempts,
+        history: headed.history,
+        failures: headed.failures,
+        skippedAt: new Date().toISOString(),
+      };
+      await privateJson(`${out}/skipped-page-${index}.json`, report);
+      skipped.push(report);
+      io.progress?.({
+        phase: 'delete-page-skipped',
+        page: index,
+        files: pins.length,
+        attempts: headed.attempts,
+      });
+      if (skipped.length > maxSkippedPages) throw new Error('CLEANUP_HEAD_SKIP_LIMIT');
+      const codes = new Map(headed.failures.map(f => [f.storageId, f.code]));
+      return {
+        skipped: true,
+        deleted: 0,
+        bytes: 0,
+        changedRows: 0,
+        excluded: pins.map(p => ({ storageId: p.storageId, code: codes.get(p.storageId) ?? 'PAGE_SKIPPED' })),
+      };
+    }
+    if (Date.now() - Date.parse(current.checkedAt) > 240_000) current = await io.backup();
+    const args = { ...request(index), backup: current, pins };
+    // Durable original request precedes the mutation, so an unknown outcome can be replayed exactly.
+    await privateJson(`${out}/request-${index}.json`, args);
+    const result = await io.call('projectLegacyStorageCleanup:deletePage', args);
+    await privateJson(`${out}/result-${index}.json`, result);
+    io.progress?.({
+      phase: 'delete-page',
+      page: index,
+      deleted: result.deleted,
+      bytes: result.bytes,
+      excluded: result.excluded.length,
+    });
+    if (result.excluded.length) throw new Error('CLEANUP_FILE_EXCLUDED');
+    return result;
+  });
+  return { results, skipped };
 }
 export function excludeHeadFailures(plan, failures) {
   const failed = new Map(failures.map(r => [r.storageId, r]));

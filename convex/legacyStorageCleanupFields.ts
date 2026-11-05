@@ -4,7 +4,8 @@ export const cleanupPin = v.object({
   storageId: v.id('_storage'),
   digest: v.string(),
   size: v.number(),
-  class: v.union(v.literal(1), v.literal(2), v.literal(3)),
+  // Class 4 has no R2 copy: allowed only with an owner-approved manifest digest, no keys and no owners.
+  class: v.union(v.literal(1), v.literal(2), v.literal(3), v.literal(4)),
   verifiedAt: v.string(),
   recheckedAt: v.string(),
   fullDigest: v.literal(true),

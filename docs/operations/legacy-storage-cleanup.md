@@ -24,12 +24,12 @@ The single dev pause ended with both maintenance flags proven absent. A HEAD
 fetch failure stopped the file stage, and the first resume proof also failed;
 same-session outer recovery closed the fence and proved absence. Page receipts,
 physical files and owner flags reconcile without a half-applied batch. Issue
-1323a44c tracks bounded HEAD retry/backoff with page skipping, reliable flag
-removal and preservation of the original failure. These fixes are pending.
-The existing driver's closed window cannot reopen, and its original catalog and
-completed bench/cursor stages cannot be reused as a remaining-only run. Any
-future run needs fresh remaining-state inputs, verification and dry-run evidence,
-a new operation and a new owner-approved window. No further cleanup is armed.
+1323a44c added bounded page-scoped HEAD retry with page skipping, sequential
+verified flag removal with a proof loop, and preservation of the original
+failure (see [Remaining-only run](#remaining-only-run)). The old driver's closed
+window cannot reopen, and its original catalog and completed bench/cursor stages
+are never reused. A remaining-only run needs fresh inputs, verification and
+dry-run evidence, a new operation and a new lead go.
 
 ## Read-only inventory first
 
@@ -224,7 +224,14 @@ except when every missing root and referring row belongs to the exact separately
 approved record-removal manifest. After that removal, a fresh frozen all-table
 scan and recursive body closure must pass before **any file deletion**. A remaining
 missing root stops the run and resumes writes.
-Before each deletion page it re-HEADs every R2 key for current size and checksum. Deletion retains the six existing indexed reference probes, qualifies every
+Before each deletion page it re-HEADs every R2 key for current size and checksum.
+A HEAD with no HTTP response, a timeout, 408, 429 or 5xx is transient: only the
+failing files are retried, at most three attempts with 1 s and 4 s backoff. A
+missing object or a size/checksum mismatch is never retried. An exhausted page
+sends no mutation; it is written to a private `skipped-page-N.json` with each
+failure's code, status class, HTTP status and timeout/network code, and the
+other approved pages continue. More than five skipped pages stop further dispatch.
+The 26-minute deadline, page size and four-page bound are unchanged. Deletion retains the six existing indexed reference probes, qualifies every
 joint object/backup owner against current R2 pins, and rejects other references.
 No derived-file deletion cascade runs. The existing purge functions and their
 guards remain unchanged.
@@ -255,7 +262,16 @@ counts but cannot qualify apply. Record its unresolved roots on the Issue.
 
 The driver removes `FORGE_LEGACY_STORAGE_PAUSE` and `FORGE_R2_MAINTENANCE` in its
 failure/success unwind and verifies absence by names only, before returning an
-error for investigation. SIGINT/SIGTERM and the 26-minute dispatch deadline initiate fence revocation and
+error for investigation. Resume first closes the fence (three attempts), then
+removes the flags one at a time and proves name-only absence in up to six
+rounds with backoff. A name whose removal reported success gets one more proof
+round before it is removed again, which covers delayed visibility. If that
+whole resume fails, one outer recovery repeats it. Every fence, removal and proof
+outcome is kept in `window.json` with structured codes and redacted provider exit
+evidence, together with the original work failure. A resume failure never hides
+that work failure. The flags are removed even if the fence cannot be confirmed,
+because every owned page has settled and deletion also needs the matching active
+pause flag. That case reports `CLEANUP_FENCE_RESUME_FAILED`. SIGINT/SIGTERM and the 26-minute dispatch deadline initiate fence revocation and
 resumption, reserving four minutes within the approved 30-minute window;
 metadata/configuration CLI reads and operator CLI calls terminate a stalled child
 after at most 90 seconds, so a hung provider does not hold the unwind indefinitely;
@@ -270,6 +286,30 @@ An unknown page result is reconciled by replaying its exact original request;
 an uncommitted page cannot delete outside a newly approved active window.
 Any failure means resume writes first. Do not investigate while leaving flags
 set, extend the deadline, start another window, or expand the approved classes.
+
+## Remaining-only run
+
+A remaining-only run starts from fresh inputs after an earlier window has closed.
+Use a fresh inventory, verification, recursive body coverage and class 4
+attribution, a new private output folder and a new operation ID. `--remaining-only`
+refuses a bench manifest and any pending cursor migration, and it never runs those
+stages. Its dry run must also be remaining-only. Class 4 files have no R2 copy.
+They are deleted only from an owner-approved manifest built offline from the
+same fresh audit, attribution and body proof:
+
+```sh
+node scripts/legacy-storage-class4.mjs --deployment dev:NAME --audit /private/audit.json --attribution /private/attribution.json --body-coverage /private/body-coverage.json --decision 'Exact owner decision' --out /private/class4.json
+nforge heavy node scripts/legacy-storage-cleanup.mjs dry-run --remaining-only --class4-approval /private/class4.json --deployment dev:NAME --audit /private/audit.json --verification /private/verification.json --body-coverage /private/body-coverage.json --out /private/remaining
+```
+
+The manifest keeps every file that a reachable body references (for example
+Forge's own source sections). It also keeps every file whose exact digest appears
+in the history of a live project or of unattributed or import rows. A file linked
+only to a project the audit records as deleted may be listed. Inside the pause, the
+frozen scan and recursive closure must still find no reference. Each mutation
+rechecks the six indexed guards, the pinned digest and size, and the manifest digest.
+Class 4 pins carry no R2 keys or owners and need no HEAD. Rollback for class 4 is
+the file-inclusive backup only.
 
 The raw receipts and exact operational counts stay private and on the Issue,
 not in this public runbook. File-inclusive backup 41887010710 remains the

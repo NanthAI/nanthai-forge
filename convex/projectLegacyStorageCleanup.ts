@@ -73,7 +73,14 @@ async function indexedReferences(ctx: MutationCtx, storageId: Id<'_storage'>) {
   ).flat();
 }
 export const deletePage = internalMutation({
-  args: { ...identity, scopeSha256: v.string(), scan: coverage, backup, pins: v.array(cleanupPin) },
+  args: {
+    ...identity,
+    scopeSha256: v.string(),
+    scan: coverage,
+    backup,
+    pins: v.array(cleanupPin),
+    class4Sha256: v.optional(v.string()),
+  },
   returns: cleanupResult,
   handler: async (ctx, args) => {
     const request = digest(new TextEncoder().encode(JSON.stringify(args)));
@@ -106,7 +113,16 @@ export const deletePage = internalMutation({
     invariant(
       args.pins.length > 0 &&
         args.pins.length <= 100 &&
-        args.pins.every(p => p.class === 1 || p.class === 2 || p.class === 3) &&
+        args.pins.every(
+          p =>
+            p.class === 1 ||
+            p.class === 2 ||
+            p.class === 3 ||
+            (p.class === 4 &&
+              /^[a-f0-9]{64}$/.test(args.class4Sha256 ?? '') &&
+              p.keys.length === 0 &&
+              p.owners.length === 0),
+        ) &&
         new Set(args.pins.map(p => p.storageId)).size === args.pins.length &&
         args.pins.every(
           p => p.owners.length <= 2 && new Set(p.owners.map(o => o.id)).size === p.owners.length,
@@ -128,10 +144,12 @@ export const deletePage = internalMutation({
         : file.size !== pin.size || storageDigest(file.sha256) !== pin.digest
           ? 'FILE_CHANGED'
           : null;
+      // Class 4 has no R2 copy to recheck; its approved manifest pins Convex metadata only.
       if (
         !recent(pin.verifiedAt, 0, 86400_000) ||
-        !pin.keys.length ||
-        pin.keys.some(k => !k.startsWith('v1/') || k.split('/').at(-1) !== pin.digest)
+        (pin.class !== 4 &&
+          (!pin.keys.length ||
+            pin.keys.some(k => !k.startsWith('v1/') || k.split('/').at(-1) !== pin.digest)))
       )
         code = 'FULL_DIGEST_REQUIRED';
       if (pin.class !== 1 && pin.owners.length) code = 'REFERENCE_REMAINS';

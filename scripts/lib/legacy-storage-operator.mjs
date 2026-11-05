@@ -6,6 +6,16 @@ import { deploymentOptions } from '../hosted-durability.mjs';
 import { deploymentReader } from './legacy-storage-reader.mjs';
 import { childEnv } from '../child-env.mjs';
 const root = fileURLToPath(new URL('../..', import.meta.url));
+const flagNames = new Set(['FORGE_LEGACY_STORAGE_PAUSE', 'FORGE_R2_MAINTENANCE']);
+/** Failure evidence only: URLs, assignments and long tokens are
+ * redacted, so configuration values, keys and signatures cannot be retained. */
+export function redactProviderText(text) {
+  return text
+    .replace(/https?:\/\/\S*/g, '[url]')
+    .replace(/(\b[A-Z][A-Z0-9_]{2,}\s*[=:]\s*)\S+/g, '$1[redacted]')
+    .replace(/[A-Za-z0-9+/_=.-]{24,}/g, token => (flagNames.has(token) ? token : '[redacted]'))
+    .slice(-1024);
+}
 export function operatorIo(command) {
   if (
     !command.deployment.startsWith('dev:') ||
@@ -15,22 +25,33 @@ export function operatorIo(command) {
   const selection = deploymentOptions(command.deployment);
   async function execute(executable, args, env = selection.env) {
     const child = spawn(executable, args, { cwd: root, env, stdio: ['ignore', 'pipe', 'pipe'] });
-    let output = '';
+    let output = '',
+      stderr = '',
+      timedOut = false;
     child.stdout.on('data', b => {
       output += b;
     });
-    child.stderr.resume();
-    const timeout = setTimeout(() => child.kill('SIGKILL'), 90_000);
-    let code;
+    // Keep a bounded, redacted tail for failure evidence instead of discarding it.
+    child.stderr.on('data', b => {
+      stderr = (stderr + b).slice(-4096);
+    });
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      child.kill('SIGKILL');
+    }, 90_000);
+    let code, signal;
     try {
-      code = await new Promise((done, reject) => {
+      [code, signal] = await new Promise((done, reject) => {
         child.once('error', reject);
-        child.once('close', done);
+        child.once('close', (c, s) => done([c, s]));
       });
     } finally {
       clearTimeout(timeout);
     }
-    if (code !== 0) throw new Error('CLEANUP_PROVIDER_FAILED');
+    if (code !== 0)
+      throw Object.assign(new Error('CLEANUP_PROVIDER_FAILED'), {
+        provider: { exitCode: code, signal: signal ?? null, timedOut, stderr: redactProviderText(stderr) },
+      });
     return output.trim();
   }
   const cli = args =>
@@ -60,14 +81,16 @@ export function operatorIo(command) {
       JSON.parse(await cli(['run', 'projectLegacyStorageWindow:end', JSON.stringify({ operationId })])),
     setFlag: (name, value) => cli(['env', 'set', name, value]),
     unsetFlag: name => cli(['env', 'remove', name]),
-    async flagsAbsent() {
-      return (
-        (
-          await baseReader.page(
-            `return ['FORGE_LEGACY_STORAGE_PAUSE','FORGE_R2_MAINTENANCE'].filter(name=>process.env[name]!==undefined);`,
-          )
-        ).length === 0
+    /** Names only: values never leave the deployment. */
+    async flagsPresent() {
+      const names = await baseReader.page(
+        `return ['FORGE_LEGACY_STORAGE_PAUSE','FORGE_R2_MAINTENANCE'].filter(name=>process.env[name]!==undefined);`,
       );
+      if (!Array.isArray(names)) throw new Error('CLEANUP_FLAG_PROOF_INVALID');
+      return names;
+    },
+    async flagsAbsent() {
+      return (await this.flagsPresent()).length === 0;
     },
     async backup() {
       const result = JSON.parse(

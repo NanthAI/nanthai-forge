@@ -77,6 +77,15 @@ export async function verifyFile(file, current, io) {
     verifiedAt: new Date().toISOString(),
   };
 }
+/** Status class, HTTP status and timeout/network code only; never URLs or messages. */
+function headError(code, head) {
+  return Object.assign(new Error(code), { head });
+}
+function safeErrorCode(error) {
+  const code = error?.cause?.code ?? error?.code;
+  if (typeof code === 'string' && /^[A-Z][A-Z0-9_]{1,63}$/.test(code)) return code;
+  return typeof error?.name === 'string' && /^[A-Za-z]{1,40}$/.test(error.name) ? error.name : 'unknown';
+}
 export function verificationIo(config, metrics, fetcher = fetch) {
   async function hash(url, size, provider) {
     metrics[provider + 'Gets']++;
@@ -107,11 +116,16 @@ export function verificationIo(config, metrics, fetcher = fetch) {
           redirect: 'error',
           signal: AbortSignal.timeout(20_000),
         });
-      } catch {
-        throw new Error('VERIFY_HEAD_UNAVAILABLE');
+      } catch (error) {
+        throw headError('VERIFY_HEAD_UNAVAILABLE', {
+          statusClass: 'none',
+          timeout: error?.name === 'TimeoutError' || error?.name === 'AbortError',
+          network: safeErrorCode(error),
+        });
       }
-      if (response.status === 404) throw new Error('VERIFY_HEAD_MISSING');
-      if (!response.ok) throw new Error('VERIFY_HEAD_UNAVAILABLE');
+      const head = { httpStatus: response.status, statusClass: `${Math.floor(response.status / 100)}xx` };
+      if (response.status === 404) throw headError('VERIFY_HEAD_MISSING', head);
+      if (!response.ok) throw headError('VERIFY_HEAD_UNAVAILABLE', head);
       if (
         response.headers.get('content-length') === null ||
         Number(response.headers.get('content-length')) !== size

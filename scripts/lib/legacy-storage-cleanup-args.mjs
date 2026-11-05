@@ -16,6 +16,8 @@ export function parseCleanup(args) {
       out: { type: 'string' },
       'operation-id': { type: 'string' },
       'lead-go': { type: 'string' },
+      'remaining-only': { type: 'boolean' },
+      'class4-approval': { type: 'string' },
     },
   });
   if (
@@ -24,6 +26,8 @@ export function parseCleanup(args) {
     !v.deployment?.startsWith('dev:') ||
     (p[0] !== 'resume-writes' && (!v.audit || !v.verification || !v['body-coverage'])) ||
     !v.out ||
+    (v['remaining-only'] && v['bench-manifest']) ||
+    (v['class4-approval'] && !v['remaining-only']) ||
     (p[0] === 'apply' &&
       (!v['lead-go']?.trim() ||
         !/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(v['operation-id'] ?? '')))
@@ -41,5 +45,7 @@ export function parseCleanup(args) {
     benchManifest: v['bench-manifest'] ? resolve(v['bench-manifest']) : null,
     operationId: v['operation-id'],
     leadGo: v['lead-go'],
+    remainingOnly: v['remaining-only'] === true,
+    class4Approval: v['class4-approval'] ? resolve(v['class4-approval']) : null,
   };
 }

@@ -8,6 +8,7 @@ import { join } from 'node:path';
 import { moduleUrl } from './convex-module.mjs';
 import { maintenanceWindow } from '../scripts/legacy-storage-cleanup.mjs';
 import { boundedPages, deletionPlan } from '../scripts/lib/legacy-storage-cleanup.mjs';
+import { FLAG_NAMES } from '../scripts/lib/legacy-storage-window.mjs';
 const pause = await import(moduleUrl('../convex/legacyStoragePause.ts'));
 const server = await import(moduleUrl('../convex/server.ts'));
 function enable() {
@@ -750,6 +751,234 @@ test('complete synthetic dry-run / pause / full scan / delete / resume deletes c
       else process.env[k] = before[k];
     }
     await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('remaining-only run from fresh inputs skips bench/migration stages, deletes approved class 4 and retains the rest', async () => {
+  const { cleanup } = await import('../scripts/legacy-storage-cleanup.mjs');
+  const { class4Approval } = await import('../scripts/lib/legacy-storage-class4.mjs');
+  const { closeBodies } = await import('../scripts/lib/legacy-storage-closure.mjs');
+  const { createHash } = await import('node:crypto');
+  const { writeFile } = await import('node:fs/promises');
+  const dir = await mkdtemp(join(tmpdir(), 'forge-remaining-only-'));
+  const before = { ...process.env },
+    fetcher = globalThis.fetch;
+  try {
+    process.env.CONVEX_CLOUD_URL = 'https://fixture.convex.cloud';
+    delete process.env.FORGE_LEGACY_STORAGE_PAUSE;
+    delete process.env.FORGE_R2_MAINTENANCE;
+    const s = backendFixture(),
+      hash = 'a'.repeat(64),
+      key = 'v1/p/project/o/' + hash;
+    s.tables.projectObjects.clear();
+    s.tables.projectBackups.clear();
+    s.files.clear();
+    const storage = [
+      ['orphan', 7, hash],
+      ['approved4', 9, 'b'.repeat(64)],
+      ['kept4', 11, 'c'.repeat(64)],
+    ];
+    for (const [id, size, sha256] of storage) s.files.set(id, { _id: id, size, sha256 });
+    const files = [
+      { storageId: 'orphan', bytes: 7, sha256: hash, references: [], matchingCopies: [{ key, size: 7 }] },
+      { storageId: 'approved4', bytes: 9, sha256: 'b'.repeat(64), references: [], matchingCopies: [] },
+      { storageId: 'kept4', bytes: 11, sha256: 'c'.repeat(64), references: [], matchingCopies: [] },
+    ];
+    const audit = { deployment: 'dev:fixture', coverage: { fullyPaged: true }, projects: [], files };
+    const raw = JSON.stringify(audit),
+      auditSha256 = createHash('sha256').update(raw).digest('hex');
+    await writeFile(join(dir, 'audit.json'), raw);
+    await writeFile(
+      join(dir, 'verification.json'),
+      JSON.stringify({
+        complete: true,
+        deployment: 'dev:fixture',
+        auditSha256,
+        results: [
+          {
+            storageId: 'orphan',
+            bytes: 7,
+            sha256: hash,
+            keys: [key],
+            verifiedAt: new Date().toISOString(),
+            fullDigest: true,
+          },
+        ],
+      }),
+    );
+    const readQuery = table => {
+      const rows = table === '_storage' ? [...s.files.values()] : [...s.tables[table].values()];
+      const q = { order: () => q, paginate: async () => ({ page: rows, isDone: true, continueCursor: '' }) };
+      return q;
+    };
+    const reader = {
+      tables: async () => Object.keys(s.tables),
+      r2Config: async () => ({
+        R2_ACCOUNT_ID: 'x',
+        R2_BUCKET: 'b',
+        R2_ACCESS_KEY_ID: 'x',
+        R2_SECRET_ACCESS_KEY: 'x',
+      }),
+      page: async source =>
+        new (Object.getPrototypeOf(async function () {}).constructor)('ctx', source)({
+          db: {
+            query: readQuery,
+            system: { query: readQuery, normalizeId: (_, id) => (s.files.has(id) ? id : null) },
+          },
+        }),
+    };
+    const rpcs = [];
+    const io = {
+      beginWindow: operationId => windowBackend.begin._handler(s.ctx, { operationId }),
+      endWindow: operationId => windowBackend.end._handler(s.ctx, { operationId }),
+      reader,
+      flagsPresent: async () => FLAG_NAMES.filter(n => process.env[n] !== undefined),
+      flagsAbsent: async () => !process.env.FORGE_LEGACY_STORAGE_PAUSE && !process.env.FORGE_R2_MAINTENANCE,
+      setFlag: async (n, v) => {
+        process.env[n] = v;
+      },
+      unsetFlag: async n => {
+        delete process.env[n];
+      },
+      backup: async () => ({
+        run: 41887010710,
+        successful: true,
+        includeFileStorage: true,
+        checkedAt: new Date().toISOString(),
+      }),
+      call: async (name, args) => {
+        rpcs.push(name);
+        return backend[name.split(':')[1]]._handler(s.ctx, args);
+      },
+    };
+    globalThis.fetch = async (_, args) => {
+      assert.equal(args.method, 'HEAD');
+      return new Response(null, {
+        headers: {
+          'content-length': '7',
+          'x-amz-checksum-sha256': Buffer.from(hash, 'hex').toString('base64'),
+        },
+      });
+    };
+    const proof = await closeBodies(
+      audit,
+      { references: [], durableReferences: [] },
+      reader,
+      {},
+      join(dir, 'body-proof.json'),
+    );
+    const approval = class4Approval({
+      audit,
+      auditSha256,
+      attribution: {
+        complete: true,
+        deployment: 'dev:fixture',
+        auditSha256,
+        finishedAt: 'synthetic',
+        matches: [],
+      },
+      bodyProof: proof,
+      decision: 'synthetic owner approval',
+    });
+    // Only approved4 is approved; kept4 stays retained and verified.
+    approval.files = approval.files.filter(f => f.storageId === 'approved4');
+    delete approval.sha256;
+    approval.sha256 = createHash('sha256').update(JSON.stringify(approval)).digest('hex');
+    await writeFile(join(dir, 'class4.json'), JSON.stringify(approval));
+    const command = {
+      bodyCoverage: join(dir, 'body-proof.json'),
+      mode: 'dry-run',
+      deployment: 'dev:fixture',
+      audit: join(dir, 'audit.json'),
+      verification: join(dir, 'verification.json'),
+      out: join(dir, 'run'),
+      operationId: s.args.operationId,
+      leadGo: 'synthetic lead go',
+      remainingOnly: true,
+      class4Approval: join(dir, 'class4.json'),
+    };
+    const dry = await cleanup(command, io);
+    assert.equal(dry.remainingOnly, true);
+    assert.equal(dry.counts[4].eligible, 1);
+    assert.equal(dry.counts[3].eligible, 1);
+    // A dry run without remaining-only cannot qualify a remaining-only apply.
+    await assert.rejects(
+      cleanup({ ...command, mode: 'apply', remainingOnly: false, class4Approval: null }, io),
+      /CLEANUP_DRY_RUN_REQUIRED/,
+    );
+    const result = await cleanup({ ...command, mode: 'apply' }, io);
+    assert.deepEqual(rpcs, [
+      'projectLegacyStorageCleanup:status',
+      'projectLegacyStorageCleanup:status',
+      'projectLegacyStorageCleanup:deletePage',
+    ]);
+    assert.equal(result.summary.classes[3].deleted, 1);
+    assert.equal(result.summary.classes[4].deleted, 1);
+    assert.equal(result.summary.classes[4].bytesFreed, 9);
+    assert.deepEqual(result.skippedPages, []);
+    assert.deepEqual([...s.files.keys()], ['kept4']);
+    assert.equal(result.after.retainedClass4Verified, 1);
+    assert.equal(await io.flagsAbsent(), true);
+    const receipt = JSON.parse(await readFile(join(dir, 'run', 'window.json')));
+    assert.equal(receipt.status, 'ended');
+    assert.equal(receipt.workFailure, null);
+    // The backend refuses class 4 pins without an approval digest or with an indexed reference.
+    const request = JSON.parse(await readFile(join(dir, 'run', 'request-0.json')));
+    assert.ok(request.class4Sha256);
+    assert.ok(request.pins.some(p => p.class === 4 && p.keys.length === 0 && p.owners.length === 0));
+  } finally {
+    globalThis.fetch = fetcher;
+    for (const k of ['CONVEX_CLOUD_URL', 'FORGE_LEGACY_STORAGE_PAUSE', 'FORGE_R2_MAINTENANCE']) {
+      if (before[k] === undefined) delete process.env[k];
+      else process.env[k] = before[k];
+    }
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+test('backend class 4 deletion needs the approval digest, no keys/owners and zero indexed references', async () => {
+  const before = { ...process.env };
+  try {
+    enable();
+    process.env.FORGE_R2_MAINTENANCE = '1';
+    const s = backendFixture(),
+      sha = 'b'.repeat(64);
+    s.files.set('c4', { _id: 'c4', size: 9, sha256: sha });
+    const c4 = { ...s.args.pins[0], storageId: 'c4', digest: sha, size: 9, class: 4, keys: [], owners: [] };
+    await assert.rejects(
+      backend.deletePage._handler(s.ctx, { ...s.args, part: 'c4-a', pins: [c4] }),
+      e => e.code === 'BAD_ARGUMENT',
+    );
+    await assert.rejects(
+      backend.deletePage._handler(s.ctx, {
+        ...s.args,
+        part: 'c4-b',
+        class4Sha256: 'e'.repeat(64),
+        pins: [{ ...c4, keys: ['v1/x/' + sha] }],
+      }),
+      e => e.code === 'BAD_ARGUMENT',
+    );
+    s.tables.imports.set('imp', { _id: 'imp', artifactKey: 'c4' });
+    const held = await backend.deletePage._handler(s.ctx, {
+      ...s.args,
+      part: 'c4-c',
+      class4Sha256: 'e'.repeat(64),
+      pins: [c4],
+    });
+    assert.deepEqual(held.excluded, [{ storageId: 'c4', code: 'REFERENCE_CHANGED' }]);
+    s.tables.imports.delete('imp');
+    const ok = await backend.deletePage._handler(s.ctx, {
+      ...s.args,
+      part: 'c4-d',
+      class4Sha256: 'e'.repeat(64),
+      pins: [c4],
+    });
+    assert.equal(ok.deleted, 1);
+    assert.equal(s.files.has('c4'), false);
+  } finally {
+    for (const k of ['CONVEX_CLOUD_URL', 'FORGE_LEGACY_STORAGE_PAUSE', 'FORGE_R2_MAINTENANCE']) {
+      if (before[k] === undefined) delete process.env[k];
+      else process.env[k] = before[k];
+    }
   }
 });
 
