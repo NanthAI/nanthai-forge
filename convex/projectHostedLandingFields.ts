@@ -119,6 +119,12 @@ export const hostedLandingTables = {
           v.literal('unavailable'),
         ),
         endedAt: v.optional(v.number()),
+        /** Pre-queue Lane check (`admissionCheck: "full"`). */
+        full: v.optional(v.literal(true)),
+        /** Platform-failure restarts of the Lane check, at most HOSTED_PLATFORM_RETRIES. */
+        retries: v.optional(v.number()),
+        /** The admitted change has tried its own Lane run as acceptance evidence. */
+        reuse: v.optional(v.literal('tried')),
       }),
     ),
     admitting: v.optional(v.literal(true)),

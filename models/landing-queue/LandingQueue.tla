@@ -1,6 +1,11 @@
 --------------------------- MODULE LandingQueue ---------------------------
 EXTENDS Naturals, FiniteSets, Sequences, TLC
 CONSTANTS N, Cohort, Width, CrashBound, MoveBound, AllowCancel, AllowAdvice, AllowReuse, InitiallyQueued, Isolation
+\* Pre-queue Lane check (e7d27937). Red: changes whose own check fails on their
+\* base. Independent: changes the conservative-impact proof accepts after any
+\* main move. SuffixWaits is the previous claim order, in which a group also waits
+\* for older entries stacked behind it (litmus only).
+CONSTANTS PreQueue, Red, Independent, LaneInfra, SuffixWaits
 Entries == 1..N
 SingletonCohorts == [e \in Entries |-> e]
 SmallCohorts == [e \in Entries |-> IF e <= 2 THEN 1 ELSE 2]
@@ -18,29 +23,41 @@ vars == <<q, main, stamp, moves, counts, audit, running, crashes, claim, fence>>
 \* read their phase, and both distinguish active vs inactive, never the outcome.
 \* Entry reasons, accepted counts, actual main and fresh receipt names remain.
 Empty == [phase |-> "idle", members |-> {}, included |-> {}, rejected |-> {},
-          base |-> {}, rev |-> 0, head |-> {}, proof |-> <<>>, retries |-> 0, pred |-> 0, receipt |-> 0]
-Init == /\ q = [phase |-> [e \in Entries |-> IF InitiallyQueued THEN "queued" ELSE "new"],
+          base |-> {}, rev |-> 0, head |-> {}, proof |-> <<>>, retries |-> 0, pred |-> 0, receipt |-> 0,
+          lane |-> FALSE]
+
+Init == /\ q = [phase |-> [e \in Entries |-> IF InitiallyQueued
+                                  THEN IF PreQueue THEN "checking" ELSE "queued" ELSE "new"],
                 rank |-> [e \in Entries |-> IF InitiallyQueued THEN e ELSE 0],
                 sequence |-> IF InitiallyQueued THEN N ELSE 0,
                 reason |-> [e \in Entries |-> ""], solo |-> {}, advice |-> {},
                 suspect |-> {}, unstacked |-> {},
-                batches |-> [g \in Entries |-> Empty], train |-> <<>>]
+                batches |-> [g \in Entries |-> Empty], train |-> <<>>,
+                lane |-> [e \in Entries |-> IF PreQueue /\ InitiallyQueued THEN "checking" ELSE "none"],
+                lbase |-> [e \in Entries |-> {}], lrev |-> [e \in Entries |-> 0],
+                lretries |-> [e \in Entries |-> 0], tried |-> {}]
         /\ main = {} /\ stamp = 0 /\ moves = 0
         /\ counts = [e \in Entries |-> 0] /\ audit = [cas |-> TRUE, exact |-> TRUE, authorized |-> TRUE]
         /\ running = TRUE /\ crashes = 0 /\ claim = 0 /\ fence = 0
 Live == {e \in Entries : q.phase[e] \notin Terminal \cup {"new"}}
-QueueLive == {e \in Live : q.rank[e] > 0}
+\* An entry still in its pre-queue Lane check holds no queue order.
+QueueLive == {e \in Live : q.rank[e] > 0 /\ q.lane[e] # "checking"}
 Earliest(entries) == CHOOSE e \in entries : \A f \in entries : q.rank[e] <= q.rank[f]
 Active == {g \in Entries : q.batches[g].phase \in {"composing", "checking", "ready"}}
 \* UUID spelling is unobservable. Recycle a name only after EVERY modeled
 \* reference has gone; generation-fenced delayed messages are abstract stutters.
-ReceiptNames == 0..(3*N + 2)
+ReceiptNames == 0..(4*N + 2)
 UsedReceipts == {stamp} \cup {q.batches[g].rev : g \in Active}
   \cup {q.batches[g].receipt : g \in Active}
   \cup {IF Len(q.batches[g].proof) = 4 THEN q.batches[g].proof[2] ELSE 0 : g \in Active}
+  \cup {q.lrev[e] : e \in {x \in Entries : q.lane[x] \in {"checking", "passed"}}}
 FreshReceipt == Min(ReceiptNames \ UsedReceipts)
-Free == {e \in Entries : q.phase[e] = "queued" /\
-                         ~\E g \in Active : e \in q.batches[g].members}
+InBatch(e) == \E g \in Active : e \in q.batches[g].members
+\* An admitted entry first tries its own Lane proof; only then is it batchable.
+Batchable(e) == ~PreQueue \/ q.lane[e] = "unknown" \/ e \in q.tried
+Free == {e \in Entries : q.phase[e] = "queued" /\ Batchable(e) /\ ~InBatch(e)}
+Adoptable == {e \in Entries : PreQueue /\ q.phase[e] = "queued" /\ q.lane[e] = "passed"
+                             /\ e \notin q.tried /\ ~InBatch(e)}
 \* 51bbbd00: entries named by combined-failure evidence whose own check has not
 \* passed. They still check and may land, but never serve as a speculative base
 \* and never hold queue order against later entries.
@@ -64,6 +81,9 @@ Descendants(g, depth) == IF depth = 0 THEN {g} ELSE
     prior \cup {h \in Active : IF q.batches[h].pred \in prior THEN
       q.batches[h].rev = q.batches[q.batches[h].pred].receipt ELSE FALSE}
 Suffix(g) == Descendants(g, N) \ {g}
+\* Never wait for an entry that is itself stacked behind you: it can only publish
+\* after you (second prequeue counterexample). SuffixWaits restores the old rule.
+Behind(g) == IF SuffixWaits THEN {} ELSE UNION {q.batches[h].members : h \in Suffix(g)}
 Invalidated(g) == LET descendants == Suffix(g) IN
   [q EXCEPT !.batches = [h \in Entries |-> IF h \in descendants
                          THEN Empty
@@ -79,12 +99,53 @@ Submit(e) == /\ Arrives(e)
 \* The durable desired handle exists before initial source preparation ends.
 \* Queue sequence is allocated only at canonical enqueue, not at source submit.
 Admit(e) == /\ running /\ q.phase[e] = "composing"
-            /\ q' = [q EXCEPT !.phase[e] = "queued", !.rank[e] = q.sequence + 1,
+            /\ q' = IF PreQueue
+                    THEN [q EXCEPT !.phase[e] = "checking", !.lane[e] = "checking",
+                           !.lbase[e] = main, !.lrev[e] = stamp,
+                           !.rank[e] = q.sequence + 1, !.sequence = @ + 1]
+                    ELSE [q EXCEPT !.phase[e] = "queued", !.rank[e] = q.sequence + 1,
                               !.sequence = @ + 1]
             /\ UNCHANGED <<main, stamp, moves, counts, audit, running, crashes, claim, fence>>
 AdmissionFailure(e) == /\ running /\ q.phase[e] = "composing"
             /\ q' = [q EXCEPT !.phase[e] = "terminal-failed", !.reason[e] = "SOURCE_RETRY_EXHAUSTED"]
             /\ UNCHANGED <<main, stamp, moves, counts, audit, running, crashes, claim, fence>>
+\* The project's configured check of this change alone, on the main it composed
+\* on, in parallel with every other arrival. A failing test ends it before the
+\* queue; two platform retries, then it enters unadmitted (unknown, not red).
+LaneCheck(e, outcome) ==
+  /\ PreQueue /\ running /\ q.phase[e] = "checking" /\ q.lane[e] = "checking"
+  /\ (outcome = "pass" => e \notin Red) /\ (outcome = "test" => e \in Red)
+  /\ (outcome = "infra" => LaneInfra)
+  /\ LET enter == [q EXCEPT !.phase[e] = "queued"] IN q' = CASE outcome = "pass" -> [enter EXCEPT !.lane[e] = "passed"]
+               [] outcome = "test" -> [q EXCEPT !.phase[e] = "terminal-failed",
+                                        !.reason[e] = "CHECK_FAILED", !.lane[e] = "failed"]
+               [] q.lretries[e] < 2 -> [q EXCEPT !.lretries[e] = @ + 1,
+                                        !.lbase[e] = main, !.lrev[e] = stamp]
+               [] OTHER -> [enter EXCEPT !.lane[e] = "unknown"]
+  /\ UNCHANGED <<main, stamp, moves, counts, audit, running, crashes, claim, fence>>
+\* Reuse first, once: the Lane run is the exact proof of a one-member group. On
+\* a moved main only the conservative-impact proof (Reuse) may carry it.
+LaneAdopt(g) ==
+  /\ running /\ claim = 0 /\ Adoptable # {} /\ g = Min(Entries \ Active)
+  /\ Len(q.train) < Width /\ Earliest(Free \cup Adoptable) \in Adoptable
+  /\ LET e == Earliest(Adoptable)
+         b == [Empty EXCEPT !.phase = "ready", !.members = {e}, !.included = {e},
+                 !.base = q.lbase[e], !.rev = q.lrev[e], !.head = q.lbase[e] \cup {e},
+                 !.receipt = FreshReceipt, !.lane = TRUE]
+     IN q' = [q EXCEPT !.batches[g] = [b EXCEPT !.proof = Proof(b)], !.phase[e] = "ready",
+                       !.tried = @ \cup {e}, !.advice = @ \ {e}, !.train = Append(@, g)]
+  /\ UNCHANGED <<main, stamp, moves, counts, audit, running, crashes, claim, fence>>
+\* A refused proof returns the member to the batchable pool for one combined
+\* check, keeping its rank; Claim never waits for its own speculative suffix.
+LaneRefused(g) ==
+  /\ PreQueue /\ running /\ claim = 0 /\ q.batches[g].lane /\ q.batches[g].phase = "ready"
+  /\ ~Exact(g) /\ ~(q.batches[g].included \subseteq Independent)
+  /\ LET b == q.batches[g] invalid == Invalidated(g) IN
+     q' = [invalid EXCEPT !.batches[g] = Empty,
+           !.phase = [x \in Entries |-> IF x \in b.members \cap Live THEN "queued"
+                     ELSE invalid.phase[x]],
+           !.train = Keep(@, Range(@) \ {g})]
+  /\ UNCHANGED <<main, stamp, moves, counts, audit, running, crashes, claim, fence>>
 Gate(e) == /\ Arrives(e)
            /\ q' = [q EXCEPT !.phase[e] = "needs-action", !.reason[e] = "OVERLAP_OR_REVIEW"]
            /\ UNCHANGED <<main, stamp, moves, counts, audit, running, crashes, claim, fence>>
@@ -94,6 +155,7 @@ Precompose(e) == /\ AllowAdvice /\ e \in Free /\ e \notin q.advice
 Form(g) ==
   /\ running /\ claim = 0 /\ Free # {} /\ g = Min(Entries \ Active)
   /\ Len(q.train) < Width
+  /\ Earliest(Free \cup Adoptable) \in Free
   /\ LET entry == Earliest(Free) IN
      /\ (entry \in q.solo => ~\E e \in QueueLive \cap q.solo : q.rank[e] < q.rank[entry])
      /\ (IF TrainTail = 0 \/ entry \in q.solo THEN TRUE
@@ -161,6 +223,7 @@ Unstack(g) ==
 Check(g, outcome) ==
   /\ running /\ q.batches[g].phase = "checking" /\ q.batches[g].included # {}
   /\ outcome \in {"pass", "test", "infra"}
+  /\ (outcome = "pass" => q.batches[g].included \cap Red = {})
   /\ LET b == q.batches[g] IN
      IF outcome = "pass" THEN
        /\ q' = [q EXCEPT !.batches[g].phase = "ready", !.batches[g].proof = Proof(b),
@@ -182,7 +245,10 @@ Check(g, outcome) ==
                /\ UNCHANGED <<main, stamp, moves, counts, audit, running, crashes, fence>>
 SourceFailure(g) == /\ running /\ q.batches[g].phase = "composing"
                     /\ Release(g, "SOURCE_RETRY_EXHAUSTED")
+\* An adopted Lane group binds its own run with no cohort membership: the cohort
+\* governance fallback does not apply to it (`admittedReuseFirst`).
 Fallback(g) == /\ running /\ g \in Active /\ claim = 0 /\ ~(q.batches[g].members \subseteq q.solo)
+               /\ ~q.batches[g].lane
                /\ Release(g, "GOVERNANCE_OR_COMPOSE_FALLBACK")
 Rebase(g) ==
   /\ running /\ g \in Active /\ claim = 0
@@ -195,8 +261,8 @@ Rebase(g) ==
   /\ UNCHANGED <<main, stamp, moves, counts, audit, running, crashes, claim, fence>>
 Claim(g) == /\ running /\ claim = 0 /\ q.batches[g].phase = "ready"
             /\ q.batches[g].rejected = {} /\ PredOK(g) /\ Exact(g)
-            /\ ~\E e \in QueueLive \ (q.batches[g].members \cup Suspects) :
-                  q.rank[e] < q.rank[Earliest(q.batches[g].included)]
+            /\ ~\E e \in QueueLive \ (q.batches[g].members \cup Suspects \cup Behind(g)) :
+                 q.rank[e] < q.rank[Earliest(q.batches[g].included)]
             /\ claim' = g
             /\ UNCHANGED <<q, main, stamp, moves, counts, audit, running, crashes, fence>>
 Publish(g) ==
@@ -238,12 +304,15 @@ Restart == /\ ~running /\ running' = TRUE /\ claim' = 0 /\ fence' = fence + 1
 Reuse(g) == /\ AllowReuse /\ running /\ claim = 0 /\ ~Exact(g)
             /\ q.batches[g].phase = "ready" /\ q.batches[g].pred = 0
             /\ q.batches[g].base \subseteq main
+            /\ (PreQueue => q.batches[g].included \subseteq Independent)
             /\ q' = [q EXCEPT !.batches[g].base = main, !.batches[g].rev = stamp,
                               !.batches[g].head = main \cup q.batches[g].included]
             /\ UNCHANGED <<main, stamp, moves, counts, audit, running, crashes, claim, fence>>
 StaleClaim(g) == /\ running /\ claim = g /\ (~Exact(g) \/ q.batches[g].phase # "ready") /\ claim' = 0
                  /\ UNCHANGED <<q, main, stamp, moves, counts, audit, running, crashes, fence>>
-Driver(g) == Admit(g) \/ AdmissionFailure(g) \/ SourceFailure(g) \/ StaleClaim(g) \/ Form(g) \/ Settle(g) \/ Rebase(g) \/ Claim(g) \/ Publish(g)
+Driver(g) == Admit(g) \/ AdmissionFailure(g) \/ LaneAdopt(g) \/ LaneRefused(g)
+             \/ (\E o \in {"pass", "test", "infra"} : LaneCheck(g, o))
+             \/ SourceFailure(g) \/ StaleClaim(g) \/ Form(g) \/ Settle(g) \/ Rebase(g) \/ Claim(g) \/ Publish(g)
              \/ (\E d \in SUBSET Entries : Compose(g, d))
              \/ (\E o \in {"pass", "test", "infra"} : Check(g, o))
 Next == (\E e \in Entries : Submit(e) \/ Gate(e) \/ Precompose(e) \/ Cancel(e))
@@ -273,6 +342,8 @@ TypeOK == /\ main \subseteq Entries \cup {0} /\ stamp \in ReceiptNames
           /\ \A e \in Entries : q.phase[e] \in EntryPhases /\ counts[e] \in 0..N
           /\ Len(q.train) <= Width /\ claim \in Entries \cup {0}
           /\ \A g \in Entries : q.batches[g].phase \in BatchPhases
+          /\ \A e \in Entries : q.lane[e] \in {"none", "checking", "passed", "unknown", "failed"}
+          /\ q.tried \subseteq Entries
           /\ q.suspect \subseteq Entries /\ q.unstacked \subseteq Entries
 S1 == audit.cas /\ {e \in Entries : counts[e] > 0} \subseteq main
 S2 == audit.exact
@@ -288,6 +359,12 @@ TrainSound == Cardinality(Range(q.train)) = Len(q.train) /\ Range(q.train) \subs
 NoStackOnSuspect == \A g \in Active :
   q.batches[g].pred # 0 => q.batches[q.batches[g].pred].members \cap Suspects = {}
 Reasons == \A e \in Entries : q.phase[e] \in {"terminal-failed", "needs-action"} => q.reason[e] # ""
+KnownRedNeverQueued == \A e \in Entries : q.lane[e] = "failed" =>
+                        q.phase[e] = "terminal-failed" /\ ~InBatch(e) /\ counts[e] = 0
+RedNeverQueued == \A e \in Red : ~InBatch(e) /\ counts[e] = 0
+LaneRunsBounded == \A e \in Entries : q.lretries[e] <= 2
+\* A passed Lane check on unchanged main is the landing check: no queue check runs.
+NoQueueCheck == \A g \in Entries : q.batches[g].phase # "checking"
 L1 == \A e \in Entries : (q.phase[e] # "new") ~> (q.phase[e] \in Terminal)
 L2 == \A e \in Entries : (e \in Live) ~> (e \notin Live)
 =============================================================================

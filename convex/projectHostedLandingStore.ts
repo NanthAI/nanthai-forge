@@ -193,7 +193,9 @@ export async function writeLanding(
   // An admission run holds the request until it settles; it never joins a cohort meanwhile.
   const admitting = row.admission?.status === 'checking' && state.phase === 'checking';
   const runId = attempt.check?.runId ?? (admitting ? row.admission!.runId : null);
-  const orderLive = holdsLandingOrder({ phase: state.phase as LandingRow['phase'], hold: row.hold }, state);
+  // A submission still in its own admission (pre-queue) check is not in the queue yet.
+  const orderLive =
+    !admitting && holdsLandingOrder({ phase: state.phase as LandingRow['phase'], hold: row.hold }, state);
   await ctx.db.patch(row._id, {
     ...(alarm && alarm.id === row._id ? { alarm: alarm.alarm } : {}),
     attemptId: state.attemptId,
@@ -211,6 +213,8 @@ export async function writeLanding(
       !state.batchSolo &&
       !admitting &&
       row.admission?.status !== 'failed' &&
+      // Pre-queue: an admitted change tries its own Lane run once before any cohort.
+      !(row.admission?.full && row.admission.status === 'passed' && !row.admission.reuse) &&
       (attempt.deferredCheck || row.batchSelection) &&
       (state.phase === 'queued' || state.phase === 'checking'),
     ),

@@ -8,6 +8,7 @@ import { hostedLandingStateSchema } from '../src/hosted-landing';
 import type { Doc } from './_generated/dataModel';
 import { effectivePolicy } from '../src/autonomy-policy';
 import { HOSTED_TRAIN_HOLD_MS } from '../src/hosted-landing-batch';
+import { stackedBehind } from './projectHostedLandingSuffix';
 import { landingSuspect } from '../src/hosted-landing-suspect';
 import { effectiveAgentDefaults, urgentAllowed, urgentRefusal } from '../src/agent-parallel-defaults';
 
@@ -104,6 +105,9 @@ export async function olderLandingAhead(
     const value = hostedLandingStateSchema.parse(JSON.parse(other.value));
     if (state.batchId && value.batchId === state.batchId) continue;
     if (!holdsLandingOrder(other, value)) continue;
+    // Only an entry that entered the queue late (pre-queue Lane check, refused proof)
+    // can be stacked behind a younger group; others cost no extra read.
+    if (other.admission?.full && (await stackedBehind(ctx, row, state, value))) continue;
     if (other.phase !== 'queued' || other.runnable) return { row: other, state: value, until: null };
     const until =
       Math.max(

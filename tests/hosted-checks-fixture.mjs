@@ -185,8 +185,10 @@ export async function checksFixture(source = null) {
       runId: id,
       command: JSON.stringify(command),
     }).then(JSON.parse);
+  // A registered machine runner (self-hosted, mac) claims as its session.
+  let machineOwner;
   const prepare = async (id, shardCount = 2, overrides = {}) => {
-    const owner = randomUUID(),
+    const owner = machineOwner ?? randomUUID(),
       claim = await control(id, { kind: 'claim', owner, leaseMs: 60000 });
     const plan = {
       head: claim.run.request.expectedHead,
@@ -222,7 +224,7 @@ export async function checksFixture(source = null) {
     operationId: r.request.operationId,
     authorityEpoch: 1,
     fence: r.fence,
-    provider: 'github-actions',
+    provider: r.configuration?.provider ?? 'github-actions',
     executionId: r.executionId ?? 'synthetic-provider-execution',
     head: r.request.expectedHead,
     definition: r.check.definition,
@@ -246,7 +248,8 @@ export async function checksFixture(source = null) {
       kind: 'shard',
       shard: {
         index,
-        attempt: 0,
+        // A machine runner reports each attempt under its current fence.
+        attempt: machineOwner ? r.fence : 0,
         executionId: `synthetic-shard-${index}`,
         status,
         exitCode: status === 'passed' ? 0 : status === 'failed' ? 1 : null,
@@ -308,6 +311,9 @@ export async function checksFixture(source = null) {
     control,
     prepare,
     activate,
+    claimAs: sessionId => {
+      machineOwner = sessionId;
+    },
     body,
     callback,
     sign: body => signHostedCheckCallback(body, callbackKey),

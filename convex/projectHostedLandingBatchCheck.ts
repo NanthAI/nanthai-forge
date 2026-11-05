@@ -4,7 +4,7 @@ import { advanceBatchFallback } from './projectHostedLandingBatchFallback';
 import { isolateFailedBatch } from './projectHostedLandingIsolation';
 import { failingStep, passedAlone } from '../src/hosted-landing-suspect';
 import { checkFailureKind } from '../src/hosted-landing-admission';
-import { loneAdmission } from './projectHostedLandingAdmission';
+import { admittedReuseFirst, loneAdmission } from './projectHostedLandingAdmission';
 import {
   recordCohortOutcome,
   retryLandingBatchCheck,
@@ -198,6 +198,10 @@ async function prepareLandingCheckOnce(
     return true;
   }
   if (!attempt.deferredCheck) return false;
+  if (!state.batchSolo && (await admittedReuseFirst(ctx, selected))) {
+    await releaseLandingQueue(ctx, queue, now);
+    return true;
+  }
   if (!state.batchSolo && (await formLandingBatch(ctx, claim, { row: selected.row, state }))) {
     await releaseLandingQueue(ctx, queue, now);
     return true;

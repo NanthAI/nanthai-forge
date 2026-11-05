@@ -1451,8 +1451,9 @@ default (`acceptance.landing: "serial"` opts out). Up to six groups check at onc
 receipt. Publication retains exact-source evidence and queue order; a failed or
 changed predecessor invalidates only its dependent stack. Unstarted batches yield
 to urgent work before reserving
-a check; reserved checks continue. Opt-in admission runs (`acceptance.admissionCheck`)
-wake their request only on a terminal run write, and size and split cohorts as
+a check; reserved checks continue. Admission runs (`acceptance.admissionCheck`; the default `"full"` is the
+[pre-queue Lane check](pre-queue-checks.md) on any runner, `false` opts out) hold no
+queue order while they run, wake their request only on a terminal run write, and size and split cohorts as
 described in [hosted queue priority](operations/landing-batches.md#hosted-queue-priority). A retained train with no member checking holds
 later deferred entries for at most `HOSTED_TRAIN_HOLD_MS` after its newest compose;
 then selection drops it, with one scheduled queue wake for the hold's end. See [hosted queue priority](operations/landing-batches.md#hosted-queue-priority). Checking,

@@ -13,6 +13,7 @@ import { latestStallAlert } from './projectHostedLandingStallAlert';
 import { reuseHostedLanding } from './projectHostedLandingIdentity';
 // SPDX-License-Identifier: Apache-2.0
 import { startLandingAdmission } from './projectHostedLandingAdmission';
+import { preQueueCheck } from '../src/hosted-landing-admission';
 import { v } from 'convex/values';
 import { mutation, query, receiptMutation } from './cliServer';
 import { acceptanceActor } from './projectAutonomy';
@@ -321,7 +322,14 @@ export async function enqueueHostedLanding(
     candidateId: request.candidateId,
     ...(attempt.deferredCheck ? { batchSelection: canonicalPayload(attempt), batchable: !admission } : {}),
     ...(admission
-      ? { admission: { runId: admission, status: 'checking' as const }, admitting: true as const }
+      ? {
+          admission: {
+            runId: admission,
+            status: 'checking' as const,
+            ...(preQueueCheck(attempt.policy) ? { full: true as const } : {}),
+          },
+          admitting: true as const,
+        }
       : {}),
     ...(request.revertOf ? { revertOf: request.revertOf } : {}),
     actor: actor.id,
@@ -330,7 +338,8 @@ export async function enqueueHostedLanding(
     sequence,
     ...(reused.selectionKey ? { selectionKey: reused.selectionKey } : {}),
     runnable: !admission,
-    orderLive: true,
+    // An admission run is pre-queue: no queue order until it settles.
+    ...(admission ? {} : { orderLive: true as const }),
     phase: state.phase as import('./projectHostedLandingStore').LandingRow['phase'],
     runId: attempt.check?.runId ?? admission,
     attemptId: attempt.id,

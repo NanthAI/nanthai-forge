@@ -103,7 +103,12 @@ export async function finishFixture(
   // Fake time jumps to each scheduled task, so a check waiting for passChecks() would reach both
   // stall-alert tiers; alert behaviour has its own tests (hosted-stall-alerts.test.mjs).
   f.patch('hostedProjects', f.projectId, {
-    autonomyPolicy: { ...policyPreset('trusted'), agentDefaults: { stallAlerts: { enabled: false } } },
+    // Finish mechanics run without pre-queue Lane checks (covered by hosted-landing-prequeue.test.mjs).
+    autonomyPolicy: {
+      ...policyPreset('trusted'),
+      acceptance: { ...policyPreset('trusted').acceptance, admissionCheck: false },
+      agentDefaults: { stallAlerts: { enabled: false } },
+    },
   });
   const blobs = new Map(),
     metrics = {

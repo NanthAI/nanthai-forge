@@ -9,6 +9,7 @@ export const batchAbandon = await import(moduleUrl('../convex/projectHostedBatch
 export const batchPublish = await import(moduleUrl('../convex/projectHostedLandingBatchPublish.ts'));
 export const batchStore = await import(moduleUrl('../convex/projectHostedLandingBatchStore.ts'));
 export const checkStore = await import(moduleUrl('../convex/projectHostedCheckStore.ts'));
+const checkWorker = await import(moduleUrl('../convex/projectHostedCheckWorker.ts'));
 export const states = f => [...f.tables.projectHostedLandingRequests.values()].map(r => JSON.parse(r.value));
 export async function batchesFixture(
   t,
@@ -30,6 +31,8 @@ export async function batchesFixture(
     // entry is not batch-eligible, so its check starts at submission, in parallel
     // with every other arrival (the dogfood main queue on 2026-11-01).
     requestCheck = false,
+    // Any configured runner (BYOCI). Same runtime and environment pins, other provider.
+    runner,
   } = {},
 ) {
   const f = await finishFixture(t, { fileCount });
@@ -43,12 +46,30 @@ export async function batchesFixture(
           ...policy.acceptance,
           ...(batching === 'default' ? {} : { landing: batching ? 'batched' : 'serial' }),
           ...(batchMaxSize ? { batchMaxSize } : {}),
-          ...(admissionCheck ? { admissionCheck } : {}),
+          // Queue-mechanics tests pin pre-queue checks off; 'default' leaves the policy default.
+          ...(admissionCheck === 'default' ? {} : { admissionCheck }),
         },
         ...(concurrency ? { checks: { runner: 'github-actions', concurrency } } : {}),
         agentDefaults: { stallAlerts: { enabled: false } },
       },
     });
+  }
+  if (runner) {
+    const configuration = { ...runner, runtime: f.rawChecks.runner.runtime };
+    f.rawChecks.configuration = await f.rawChecks.configure(
+      { kind: 'runner', configuration },
+      f.rawChecks.configuration.digest,
+    );
+    f.rawChecks.runner = configuration;
+    // A machine runner reports through its active registration.
+    if (configuration.machineId) {
+      const sessionId = randomUUID();
+      await f.rawChecks.call('macRegister', checkWorker.register, {
+        projectId: f.rawChecks.projectId,
+        request: JSON.stringify({ operationId: sessionId, authorityEpoch: 1, configuration }),
+      });
+      f.rawChecks.claimAs(sessionId);
+    }
   }
   const entries = [];
   const add = async i => {
@@ -148,6 +169,12 @@ export async function batchesFixture(
     // fixtures record it instead of running a deferred full audit.
     if (task.name === 'projectHostedMainAudit:start') {
       auditWakes.push(task.args[0]);
+      f.patch('_scheduled_functions', task._id, { state: { kind: 'canceled' } });
+      return;
+    }
+    // A synthetic machine runner always claims and reports inside its lease; the
+    // lease watchdog itself is covered by hosted-mac-runner.test.mjs.
+    if (task.name === 'projectHostedCheckLease:expire') {
       f.patch('_scheduled_functions', task._id, { state: { kind: 'canceled' } });
       return;
     }

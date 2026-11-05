@@ -34,6 +34,13 @@ npm run model:landing-queue -- orderwake-fixed
 npm run model:landing-queue -- moving
 npm run model:landing-queue -- reuse
 npm run model:landing-queue -- reuse-fixed
+npm run model:landing-queue -- prequeue           # pre-queue Lane check, main move, proved reuse
+npm run model:landing-queue -- prequeue-strict    # the same, reuse disabled, literal S2
+npm run model:landing-queue -- prequeue-platform  # Lane-check platform failures, crash
+npm run model:landing-queue -- prequeue-before    # expected: a red change enters the queue
+npm run model:landing-queue -- prequeue-suffix    # expected: waiting for your own suffix deadlocks
+npm run model:landing-queue -- prequeue-solo      # one Lane, unchanged main: no queue check
+npm run model:landing-queue -- prequeue-solo-moved # expected: a main move needs the queue check
 ```
 
 An installed JDK is a **development-only** prerequisite. On the development Mac, `java`
@@ -95,6 +102,56 @@ infinite stream of urgent arrivals likewise requires a no-infinite-overtaking
 assumption or fairness across priority classes, which current policy does not
 promise. The finite model does not silently add that product policy.
 
+## Pre-queue Lane check
+
+`PreQueue` adds the state of [pre-queue Lane checks](../../docs/pre-queue-checks.md)
+(`acceptance.admissionCheck: "full"`). `q.lane` is each entry's Lane check
+(`checking`, `passed`, `unknown`, `failed`), pinned to the main it composed on
+(`lbase`, `lrev`); `lretries` counts platform restarts and `tried` the entries
+that already offered their own run. The constant `Red` names changes whose own
+check fails on their base, so any check that includes one fails; `Independent`
+names changes the conservative-impact proof accepts after any main move.
+`NoQueueCheck` says no queue group ever checks; it is checked only by the solo
+configs.
+
+- `LaneCheck` runs for every arrival at once. A failing test is terminal before the
+  queue; two platform restarts, then the entry enters unadmitted.
+- An entry in its Lane check holds no queue order (`QueueLive` excludes it).
+- Selection takes the earliest runnable entry. An admitted entry that has not
+  tried its run forms a one-member ready group on its Lane proof (`LaneAdopt`):
+  exact on unchanged main, carried by `Reuse` only when `Independent`, otherwise
+  `LaneRefused` returns it to the batchable pool for a combined check.
+- `Behind(g)`: a group never waits for an older entry stacked behind it.
+
+Added properties: `KnownRedNeverQueued` (a failed Lane check is terminal, never in
+a group, never accepted), `RedNeverQueued` (no red change is ever in a group or
+accepted, without platform outcomes) and `LaneRunsBounded`; S1, S3, authorized
+evidence, L1 and L2 still hold, and S2 holds with reuse off (`prequeue-strict`).
+
+Findings while extending the model:
+
+7. **Arrival order with a pre-queue check deadlocks (implementation shape).** An
+   older entry that finishes its Lane check, or re-enters after a refused proof,
+   after a younger group formed is stacked behind that group; the younger group
+   then waits for it to publish first. `prequeue-suffix` keeps the previous claim
+   rule and finds the cycle. Fix: an entry in a group's own speculative suffix
+   never holds that group (`convex/projectHostedLandingSuffix.ts`, called from
+   `olderLandingAhead` for entries that went through the pre-queue check), and an
+   entry still in its Lane check holds no order. A similar cycle may exist without
+   the pre-queue check when a refused cross-head proof recomposes behind a younger
+   train; this model does not explore that path and the code does not apply the
+   rule there.
+8. **Red enters the queue without it.** `prequeue-before` (same red change,
+   `PreQueue = FALSE`) violates `RedNeverQueued` at once: the first full check of
+   a red change is a queue check.
+9. **A single Lane pays nothing extra.** `prequeue-solo` (one entry, no main move,
+   reuse off) holds `NoQueueCheck`: the Lane run is the landing check. The first
+   run found the cohort governance `Fallback` releasing an adopted Lane group into
+   a queue check; in code an adopted entry binds its own run with no cohort
+   membership, so `Fallback` now excludes Lane groups. `prequeue-solo-moved` (one
+   main move) violates `NoQueueCheck`, as it should: a moved main needs the
+   combined check unless the proof holds.
+
 ## Model-to-code map and simplifications
 
 Line references are to the pinned source above. Every abstraction below is a
@@ -115,6 +172,7 @@ scope limitation; passing TLC does not verify the omitted implementation.
 | cancel/abandon | `convex/projectHostedLandingCancel.ts:35`, `convex/projectHostedBatchAbandon.ts:35` | One atomic target settlement and peer release; final publication wins or cancellation wins. Abandon discovery pages and Lane lifecycle are hidden. Shared check execution continues independently; only binding authority matters here. |
 | `Claim`, `Publish`, `MoveMain` | `convex/projectHostedLandingControl.ts:293`, `convex/projectHostedLandingBatchPublish.ts:48`, `convex/projectHostedAcceptancePublish.ts:110` | Transactional OCC/CAS is atomic; includes main receipt equality, exact proof and member counters. Policy, contributor access, full shard evidence and registration are assumed validated; this is the automatic agent path, not explicit unchecked owner acceptance (which independently also makes unrestricted literal S2 false). Main contributions are append-only ancestry tokens; legitimate file edits/reverts are outside this property. |
 | `Reuse` | `convex/projectHostedFinishCompose.ts:402`, `convex/projectHostedAcceptancePublish.ts:125`, `convex/projectHostedAcceptancePublish.ts:175`, `src/hosted-cross-head-proof.ts:46` | Eligible owner-agent cross-head proof on disjoint synthetic main change. Analysis/audit eligibility is assumed; original checked result stays different from applied result. `strict.cfg` disables this branch; the default enables it; `reuse-core` explicitly enables it. |
+| `LaneCheck`, `LaneAdopt`, `LaneRefused`, `Behind` | `convex/projectHostedLandingAdmission.ts` (`startLandingAdmission`, `settleLandingAdmission`, `admittedReuseFirst`), `convex/projectHostedLandingStore.ts` (`orderLive`, `batchable`), `convex/projectHostedLandingSuffix.ts`, `convex/projectHostedLandingOrder.ts` (`olderLandingAhead`) | Lane-check outcomes are fixed by `Red`; in-flight interaction failures stay nondeterministic in `Check`. Proof eligibility is the constant `Independent`, not the path/test analysis. A refused proof is reduced to returning to the pool; the code recomposes on current main first. The code walks the suffix only for entries that went through full admission: only they can enter the queue behind a younger group. |
 | crash/restart, fair driver | `convex/projectHostedLandingControl.ts:43`, `convex/projectHostedLandingControl.ts:123`, `convex/projectHostedLandingDriver.ts:46`, `convex/projectHostedFinishWake.ts:48` | Finite crashes between transactions; durable watchdog eventually runs, lease fence rises on restart. Expiry alone creates no new run. Timers become fair events; physical durations and stale worker payloads are not simulated. |
 | stall/hold repair | `convex/projectHostedLandingWake.ts:112`, `convex/projectHostedLandingStall.ts:90`, `convex/projectHostedLandingStall.ts:157` | Fair source failure/fallback stands in for 5-minute hold release and 15/60-minute stall events. Real drop deadlines only cancel structurally ownerless work and eventually stop rearming live work. Permanent transaction faults are outside successful-driver fairness; the stranded litmus tests the missing-recovery shape, not all six historic incidents. |
 | client observation | `src/hosted-agent-submission-wait.ts:164`, `src/hosted-agent-submission-wait.ts:267`, `src/hosted-agent-submission-wait.ts:392` | Separate litmus because client cache state does not authorize server acceptance. Only cached-ready/canonical-terminal/input-terminal interleaving is needed. |
@@ -261,7 +319,14 @@ or production historical replay is implied.
 | `moving` | 8 | 7 | 0.613 | Expected liveness violation |
 | `reuse` | 4 | 4 | 0.604 | Expected ExactCheckedHead |
 | `reuse-fixed` | 4 | 4 | 0.637 | Passed |
+| `prequeue` | 88,190 | 25,434 | 67.409 | Passed |
+| `prequeue-strict` | 70,443 | 21,720 | 55.943 | Passed |
+| `prequeue-platform` | 1,190,037 | 377,715 | 592.230 | Passed |
+| `prequeue-before` | 2 | 2 | 0.630 | Expected RedNeverQueued |
+| `prequeue-suffix` | 129,008 | 59,606 | 63.990 | Expected liveness violation |
+| `prequeue-solo` | 5 | 5 | 0.797 | Passed |
+| `prequeue-solo-moved` | 20 | 18 | 1.033 | Expected NoQueueCheck |
 
-All 18 configurations matched their expected outcomes on the registered Java 25.0.3 JDK (2026-11-05, Lane fefd80ee). The six positive queue configurations fully exhausted their state graphs; the negative cases stopped at the named counterexample. The default remained below five minutes (94.046 s); `isolation` took 290.953 s.
+All 18 configurations matched their expected outcomes on the registered Java 25.0.3 JDK (2026-11-05, Lane fefd80ee). The seven `prequeue` rows and every `LandingQueue` configuration were then re-run on the spec composed with that change (2026-11-05, Issue e7d27937): all matched, and the non-`prequeue` state counts were unchanged. The `prequeue` rows are from that run. The six positive queue configurations fully exhausted their state graphs; the negative cases stopped at the named counterexample. The default remained below five minutes (94.046 s); `isolation` took 290.953 s.
 
 Incomplete calibration explorations with allocation-history counters and arbitrary three-entry admission interleavings reached the five-minute limit and were not counted as passing checks. The delivered configurations use fresh symbolic names and the admission bounds described above; those incomplete variants are not a proof of broader bounds. No live provider replay, full six-incident historical replay, or proof of the source merge/fence implementation was performed. Peak resident memory was not measured; the Java heap was limited to 2 GiB. Disk stayed above the 40 GB reserve.

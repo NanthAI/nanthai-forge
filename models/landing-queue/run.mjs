@@ -36,6 +36,13 @@ if (config === 'all') {
     'moving',
     'reuse',
     'reuse-fixed',
+    'prequeue',
+    'prequeue-strict',
+    'prequeue-platform',
+    'prequeue-before',
+    'prequeue-suffix',
+    'prequeue-solo',
+    'prequeue-solo-moved',
   ]) {
     const code = await new Promise((resolve, reject) => {
       const child = spawn(process.execPath, [fileURLToPath(import.meta.url), name], { stdio: 'inherit' });

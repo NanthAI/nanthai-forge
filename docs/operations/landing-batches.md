@@ -654,10 +654,63 @@ waits, not runnable and with no timer, while an earlier arrival is still
 admitting; the last admission to settle releases it, so arrivals that admit
 together form one cohort. An admitted member without a cohort lands on its own
 admission run when that run is still exact evidence on current main, with no
-second run; scoped evidence counts towards the main audit cadence. Admission is
-off by default: a clean five-member cohort runs six checks instead of one and
+second run; scoped evidence counts towards the main audit cadence. Scoped
+admission is opt-in: a clean five-member cohort runs six checks instead of one and
 uses about 30% more Convex calls per landing. With one bad change in four, it
 runs five checks instead of six and uses about 38% fewer.
+
+An admission run is not in the queue yet: while it runs, its submission holds no
+queue order, so younger submissions that are already queued never wait for it.
+
+### Pre-queue Lane checks
+
+`acceptance.admissionCheck: "full"` is the default (absent means `"full"`;
+`false` opts out). It makes admission the project's configured check on any configured runner: GitHub Actions, other hosted CI or a registered
+self-hosted or Mac machine. Each batchable arrival's check runs at once, with
+its configured gate, on the main it composed on, in parallel with every other
+arrival ([decision record](../pre-queue-checks.md)). A finish that carries no
+configured check (a project without `configure-check`) skips the Lane check and
+queues directly. A single Lane on unchanged main lands on its Lane run: one run,
+the same runner minutes as without the Lane check.
+
+- A failing test ends the submission with `CHECK_FAILED` before the queue. A
+  change known to be red never joins a cohort or a queue check.
+- A run that ends without a failing test starts the same Lane check again, at
+  most twice; then the change enters unadmitted.
+- A passing change enters the queue and first tries its own Lane run, once. On
+  unchanged main it lands on that run with no second check. On a moved main the
+  finish retry applies the [conservative-impact proof](../agents/workflow.md#check-scope):
+  an independent change lands on proved reuse; otherwise it recomposes on current
+  main and joins a cohort for one combined check, sized with the admitted prior.
+- The Lane check never re-runs because main moved; the combined check is that
+  re-check, once per cohort.
+- A group never waits for an older entry stacked behind it in the pipeline: that
+  entry can publish only after the group.
+
+Lane checks wake their submission only when the run reaches a terminal state;
+nothing polls and an idle queue costs nothing.
+
+Measured on the synthetic 12-Lane wave (`tests/hosted-landing-prequeue.test.mjs`:
+real queue code, fake 22-minute runs, 12 changes arriving together, 3 of them red):
+
+| | Before (`admissionCheck: false`) | After (default `"full"`) |
+| --- | --- | --- |
+| Queue checks containing a red change | 8 of 19 (0.42) | 0 of 7 |
+| Accepted landings per hour | 6.1 | 8.2 |
+| Superseded or cancelled queue runs per accepted landing | 0.67 | 0 |
+| Passing Lane runs not reused, per accepted landing | 0 | 0.89 |
+| Runner minutes per accepted landing | 46 | 46 |
+| Runs (Lane + queue) | 19 | 19 (12 + 7) |
+| Convex calls per accepted landing | 121 | 99 |
+| Single Lane alone: runs, runner minutes, Convex calls | 1, 22, 56 | 1, 22, 59 |
+
+"Before" includes repeat-offender isolation (51bbbd00). Wall time counts runner
+rounds, so these figures exclude dispatch latency. The 8 admitted changes that
+missed proved reuse were re-checked as 7 queue groups, not one cohort, because
+each tries its own run in turn before cohorts form; batching them is the
+remaining runner-minute saving. The
+same contract test passes on GitHub Actions and on a registered self-hosted
+runner.
 
 A shared check that fails a test splits its cohort into groups that check at
 the same time. Members whose changed paths or declared contract tests match the

@@ -2,10 +2,15 @@
 import type { AutonomyPolicy } from './autonomy-policy.js';
 import { HOSTED_BATCH_MEMBERS, hostedBatching } from './hosted-landing-batch.js';
 
-/** Off by default: per-member admission runs add Convex work to a clean cohort
- * (see docs/operations/landing-batches.md). `acceptance.admissionCheck: true` opts in. */
+/** Arrival checks before the queue. Absent, the mode is `"full"`: the pre-queue Lane
+ * check (docs/pre-queue-checks.md), the project's configured check and gate on any
+ * runner provider. It starts only for finishes that carry a configured check.
+ * `false` opts out; `true` is the older scoped admission (GitHub Actions only). */
+export const admissionMode = (policy: AutonomyPolicy) => policy.acceptance.admissionCheck ?? 'full';
 export const hostedAdmission = (policy: AutonomyPolicy) =>
-  hostedBatching(policy) && policy.acceptance.admissionCheck === true;
+  hostedBatching(policy) && admissionMode(policy) !== false;
+export const preQueueCheck = (policy: AutonomyPolicy) =>
+  hostedBatching(policy) && admissionMode(policy) === 'full';
 /** A cohort check that ends without a failing test (runner unavailable, Actions
  * 403 or server error, cancelled, timeout) retries the same cohort this often. */
 export const HOSTED_PLATFORM_RETRIES = 2;
