@@ -90,6 +90,7 @@ export function registerHostedAgentWorkflow(
         'abandon',
         'reopen',
         'friction',
+        'friction-triage',
         'decide',
         'peer-ack',
         'overlap-acks',
@@ -107,9 +108,9 @@ export function registerHostedAgentWorkflow(
     },
     {
       name: 'forge_work_overview',
-      actions: ['status', 'capabilities', 'metrics', 'decisions'],
+      actions: ['status', 'capabilities', 'metrics', 'decisions', 'friction-list'],
       description:
-        'Read paged metrics/decisions, capabilities or one Lane/run/operation/submission. Decisions: target?, cursor?. No Work hydration, wakes or idle observer.',
+        'Read paged metrics/decisions/friction-list, capabilities or one Lane/run/operation/submission. Decisions: target?, cursor?. friction-list: status?(default open),area?,laneId?,search?,limit?,cursor?; friction-triage (forge_task) dismisses (dropped+reason) or links an Issue (planned+planningItemId). No Work hydration, wakes or idle observer.',
     },
   ];
   // Project rules: defaults until the first call reads the live policy, then regenerated from it.

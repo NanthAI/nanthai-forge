@@ -69,6 +69,7 @@ start, save, save --sync, land --save and Lane status include a local peers dige
 declares paths; start retains planned claims until the Lane closes.
 nforge x ROOT take {laneId,takeover:true} hands another actor’s Lane to you with its context. peers {laneId,detail:true} reads full details.
 save --friction captures workflow cost in owner Work; improve groups it; x friction-triage records a decision.
+Hosted: friction-list {status?,area?,laneId?,search?,limit?,cursor?} reads one newest-first page (default status open); x friction-triage {frictionIds,status:"dropped",reason} dismisses, {status:"planned",planningItemId} links an Issue.
 start/land --save frictionIds:[ID] links a fixing Lane and closes reports when it lands.
 After save --sync, resolve any conflict markers, then land --save again. Inside a Lane directory laneId may be omitted.
 
@@ -97,7 +98,7 @@ a blocking notice is open (overlapGate:block). Receipts carry unsavedFor and a s
 
 Reads: tests, status, landing, observe, wait, log, link,
        records, candidate, provenance, candidates, review, diff, show, brief, peers,
-       handoff-read, making-of, metrics, improve, decisions, policy, check-settings, capabilities,
+       handoff-read, making-of, metrics, improve, decisions, friction-list, policy, check-settings, capabilities,
        planning (hosted backlog; writes: put-planning-item, comment-planning-item; start planningItemId).
 Operator (nforge x ROOT ACTION): accept, cancel, revert, undo-revert, undo-sync, abandon,
        complete, complete-merged, pin, clean, take, guidance, pre-edit, install-hooks, uninstall-hooks,
@@ -160,8 +161,10 @@ const examples: Record<string, unknown> = {
   'friction-triage': {
     frictionIds: ['FRICTION_ID'],
     status: 'planned',
+    planningItemId: 'ISSUE_ID',
     reason: 'Next check-runner slice',
   },
+  'friction-list': { status: 'open', limit: 50 },
   improve: {},
   metrics: { from: '2026-10-14', to: '2026-10-26' },
   decide: {

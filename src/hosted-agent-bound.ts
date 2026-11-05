@@ -58,7 +58,17 @@ export async function boundAgentRecords(
 ): Promise<Response> {
   if (!input || typeof input !== 'object') return native(input);
   const { action, ...command } = input as Command;
-  if (!['friction', 'decide', 'decisions', 'peer-ack', 'overlap-acks'].includes(String(action)))
+  if (
+    ![
+      'friction',
+      'friction-list',
+      'friction-triage',
+      'decide',
+      'decisions',
+      'peer-ack',
+      'overlap-acks',
+    ].includes(String(action))
+  )
     return native(input);
   const binding = readHostState(store).binding;
   if (!binding || sourceAuthority(binding).mode !== 'server') return native(input);

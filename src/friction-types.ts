@@ -17,22 +17,58 @@ export const frictionInputSchema = z.object({
   workaround: z.string().optional(),
   evidence: z.array(z.string()).optional(),
 });
-export const frictionTriageSchema = z
+const triageObject = z.object({
+  operationId: id.optional(),
+  frictionIds: z.array(id).min(1),
+  status: z.enum(['fixed', 'planned', 'dropped', 'open']),
+  reason: text.optional(),
+  laneId: id.optional(),
+  /** The Issue a `planned` record points at (hosted triage: link to an Issue). */
+  planningItemId: id.optional(),
+});
+export const frictionTriageSchema = triageObject.superRefine((command, context) => {
+  if (command.status === 'dropped' && !command.reason)
+    context.addIssue({
+      code: 'custom',
+      path: ['reason'],
+      message: 'Give the reason for dropping this friction.',
+    });
+});
+/** Hosted triage: a plain strict object (MCP extends it), at most 50 ids per call so the
+ * mutation patches a bounded number of rows. `frictionTriageProblem` holds the cross-field rules. */
+export const hostedFrictionTriageSchema = triageObject
+  .omit({ operationId: true })
+  .extend({ frictionIds: z.array(id).min(1).max(50) })
+  .strict();
+export function frictionTriageProblem(command: z.infer<typeof hostedFrictionTriageSchema>) {
+  if (command.status === 'dropped' && !command.reason) return 'reason: give the reason for dismissing.';
+  if (command.status === 'fixed' && !command.laneId) return 'laneId: name the Lane that fixed this friction.';
+  if (command.status === 'planned' && !command.planningItemId && !command.reason)
+    return 'planningItemId or reason: say where the planned fix lives.';
+  return undefined;
+}
+export const frictionListStatuses = ['open', 'planned', 'fixed', 'dropped', 'all'] as const;
+/** One bounded page of captured friction, newest first, with its current triage status. */
+export const frictionListSchema = z
   .object({
-    operationId: id.optional(),
-    frictionIds: z.array(id).min(1),
-    status: z.enum(['fixed', 'planned', 'dropped', 'open']),
-    reason: text.optional(),
+    status: z.enum(frictionListStatuses).default('open'),
+    area: text.optional(),
     laneId: id.optional(),
+    search: text.optional(),
+    limit: z.number().int().min(1).max(100).default(50),
+    cursor: z.string().nullable().default(null),
   })
-  .superRefine((command, context) => {
-    if (command.status === 'dropped' && !command.reason)
-      context.addIssue({
-        code: 'custom',
-        path: ['reason'],
-        message: 'Give the reason for dropping this friction.',
-      });
-  });
+  .strict();
+export type FrictionListInput = z.infer<typeof frictionListSchema>;
+export const frictionTriageState = z.object({
+  status: z.enum(['fixed', 'planned', 'dropped', 'open']),
+  reason: z.string().optional(),
+  laneId: id.optional(),
+  planningItemId: id.optional(),
+  at: z.string(),
+  by: z.string(),
+});
+export type FrictionTriageState = z.infer<typeof frictionTriageState>;
 export const frictionEventSchema = z.discriminatedUnion('kind', [
   z.object({
     id,

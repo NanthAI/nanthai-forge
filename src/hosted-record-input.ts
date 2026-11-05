@@ -1,7 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
 import { decideInputSchema, decisionsInputSchema, decisionRecordSchema } from './decision-types.js';
-import { frictionInputSchema, frictionEventSchema } from './friction-types.js';
+import {
+  frictionInputSchema,
+  frictionEventSchema,
+  frictionListSchema,
+  hostedFrictionTriageSchema,
+} from './friction-types.js';
 import { conversationSchema } from './agent-edit-types.js';
 export const hostedPeerAckSchema = z.object({
   operationId: z.uuid().optional(),
@@ -20,6 +25,8 @@ export const hostedAckBatchSchema = z.object({
 });
 export const hostedRecordCommands = {
   friction: frictionInputSchema.omit({ operationId: true }).strict(),
+  'friction-list': frictionListSchema,
+  'friction-triage': hostedFrictionTriageSchema,
   decide: decideInputSchema.omit({ operationId: true }).strict(),
   decisions: decisionsInputSchema.extend({ cursor: z.string().nullable().default(null) }).strict(),
   'peer-ack': hostedPeerAckSchema.omit({ operationId: true }).strict(),

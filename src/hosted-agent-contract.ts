@@ -55,6 +55,8 @@ export const hostedAgentOwnerActions = [
 // Kept outside the strictly parsed advertised capability list.
 export const hostedAgentRecordActions = [
   'friction',
+  'friction-list',
+  'friction-triage',
   'decide',
   'decisions',
   'peer-ack',

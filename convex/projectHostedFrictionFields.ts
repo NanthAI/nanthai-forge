@@ -7,7 +7,11 @@ export const hostedFrictionTables = {
     ...record,
     actor: v.string(),
     likelyDuplicates: v.optional(v.string()),
-  }).index('by_project_and_id', ['projectId', 'id']),
+    /** Latest triage state (JSON), patched when a triage event lands; absent means open. */
+    triage: v.optional(v.string()),
+  })
+    .index('by_project_and_id', ['projectId', 'id'])
+    .index('by_project', ['projectId']),
   projectHostedFrictionHints: defineTable({
     projectId: v.id('hostedProjects'),
     id: v.string(),

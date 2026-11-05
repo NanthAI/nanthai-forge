@@ -83,6 +83,7 @@ export const namedReads = [
   'metrics',
   'improve',
   'decisions',
+  'friction-list',
   'policy',
   'check-settings',
   'capabilities',

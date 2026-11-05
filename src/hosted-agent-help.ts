@@ -18,7 +18,7 @@ export const hostedAgentHelpEntries = [
     json.properties.path = { type: 'string', minLength: 1 };
     json.properties.open = { type: 'boolean' };
   }
-  if (!['status', 'observe', ...Object.keys(hostedClientReadSchemas)].includes(action))
+  if (!['status', 'observe', 'friction-list', ...Object.keys(hostedClientReadSchemas)].includes(action))
     json.properties.operationId = { type: 'string', format: 'uuid' };
   const required = new Set(json.required ?? []);
   const parameters = Object.keys(json.properties ?? {}).map(

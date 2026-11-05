@@ -88,6 +88,7 @@ const rows = [
   ['metrics', null],
   ['friction', 'save --friction', 'friction', 'friction'],
   ['friction-triage', 'x friction-triage'],
+  ['friction-list', null],
   ['improve', null],
   ['decide', 'save --decision', 'decide', 'decide'],
   ['decisions', null],

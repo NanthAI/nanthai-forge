@@ -59,6 +59,8 @@ Include `overlapAnswer:"accept-order"` in `land --save` to answer the pending no
 | --- | --- |
 | `pull` | `operationId?` |
 | `save --friction` | `laneId?, title, detail, area, cost?, workaround?, evidence?, operationId?` |
+| `friction-list` | `status?, area?, laneId?, search?, limit?, cursor?` |
+| `x friction-triage` | `frictionIds, status, reason?, laneId?, planningItemId?, operationId?` |
 | `save --decision` | `conversation?, target, decidedBy, what, why, decidedAt?, overrides?, supersedes?, delegation?, actor?, tool?, operationId?` |
 | `decisions` | `target?, cursor?, operationId?` |
 | `save --overlap-answer` | `laneId, noticeId, choice, text?, conversation?, operationId?` |
@@ -1803,6 +1805,19 @@ Work records. These commands are deliberately absent from the advertised
 capabilities array so released clients continue to parse it. A server without the
 record endpoints returns `HOSTED_ACTION_UNSUPPORTED`; the client retains the
 operation and never falls back to writing Mac Work.
+
+`friction-list {status?,area?,laneId?,search?,limit?,cursor?}` reads one newest-first
+page of captured friction (default `status:"open"`, `limit` 50, at most 100 rows
+scanned) as `items` (`id`, `laneId?`, `title`, `area`, `at`, `detail`, `status`,
+`reason?`, `planningItemId?`, `fixedByLaneId?`), `scanned` and `nextCursor`. Filters
+apply inside the scanned page, so a sparse match can return few items with a
+`nextCursor`; follow it. `x friction-triage {frictionIds,status,reason?,laneId?,planningItemId?}`
+takes at most 50 ids: `dropped` with `reason` dismisses, `planned` with
+`planningItemId` (or a `reason`) links an Issue, `fixed` names the fixing `laneId`
+(the checkout's Lane when omitted), `open` reopens. Triage is an append-only event
+that also patches each capture's current status, so a list is one indexed page with
+no join; a replay of the same `operationId` changes nothing. The Issue id is stored,
+not checked for existence. Reads cost one query and idle costs none.
 
 Friction permits the owner and project contributors. Decisions permit the owner
 and owner-assigned decision maintainers (`projectHostedDecisions:setMaintainer`,

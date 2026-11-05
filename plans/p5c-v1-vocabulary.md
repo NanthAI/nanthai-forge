@@ -94,7 +94,8 @@ N = native agent schema/parser; H = hosted contract; O = hosted owner list; D = 
 | making-of (N)                            | Derived Intent work record → `R making-of`                                                                                        | R           |
 | metrics (N,O)                            | Measured/partial metric window → `R metrics`; preserve existing owner/maintainer access                                           | R           |
 | friction (N,D)                           | Capture structured workflow cost → `save --friction` (metadata only)                                                              | A           |
-| friction-triage (N)                      | Record report disposition/reason → `X friction-triage`                                                                            | A           |
+| friction-triage (N,D)                    | Record report disposition/reason (hosted: dismiss, or link an Issue) → `X friction-triage`                                        | A           |
+| friction-list (D)                        | Read friction records in newest-first pages with triage status → `R friction-list`                                                | R           |
 | improve (N)                              | Group retained friction → `R improve`                                                                                             | R           |
 | decide (N,D)                             | Append authorized decision → `save --decision` (metadata only)                                                                    | A           |
 | decisions (N,D)                          | Read decisions/replacement links in pages → `R decisions`                                                                         | R           |

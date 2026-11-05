@@ -5,6 +5,7 @@ import { canonicalPayload } from './hosted-source-operation.js';
 import { ForgeError, invariant } from './errors.js';
 import type { HostedAgentTransport, HostedAgentResponse } from './hosted-agent-transport.js';
 import { z } from 'zod';
+import { frictionTriageProblem } from './friction-types.js';
 import { readHostedLaneCheckout } from './hosted-lane-checkout-marker.js';
 /** These finite record endpoints authorize on the server themselves. No capability
  * round trip, source worker, owner service or edit hook network dependency. */
@@ -14,7 +15,10 @@ export async function executeHostedRecords(
   input: Record<string, unknown>,
 ): Promise<HostedAgentResponse> {
   const { operationId, ...parameters } = input;
-  if (action === 'friction' && parameters.laneId === undefined) {
+  if (
+    (action === 'friction' || (action === 'friction-triage' && parameters.status === 'fixed')) &&
+    parameters.laneId === undefined
+  ) {
     const marker = readHostedLaneCheckout(transport.root);
     if (marker) parameters.laneId = marker.selection.laneId;
   }
@@ -30,7 +34,17 @@ export async function executeHostedRecords(
         : 'operationId: expected a UUID'
     }. Run nforge agent ROOT ${action} --help, correct the named fields and retry.`,
   );
+  if (action === 'friction-triage') {
+    const problem = frictionTriageProblem(parsed.data as Parameters<typeof frictionTriageProblem>[0]);
+    invariant(!problem, 'BAD_ARGUMENT', `Invalid friction-triage parameters: ${problem}`);
+  }
   try {
+    if (action === 'friction-list') {
+      const result = await transport.query('projectHostedFriction:read', {
+        request: canonicalPayload(parsed.data),
+      });
+      return { schema: 1, transport: 'hosted', action, operationId: null, resolved: null, result };
+    }
     if (action === 'decisions') {
       const command = hostedRecordCommands.decisions.parse(parameters);
       const result = await transport.query('projectHostedDecisions:list', {
@@ -53,9 +67,11 @@ export async function executeHostedRecords(
     const endpoint =
       action === 'friction'
         ? 'projectHostedFriction:capture'
-        : action === 'decide'
-          ? 'projectHostedDecisions:decide'
-          : 'projectHostedOverlapAcks:append';
+        : action === 'friction-triage'
+          ? 'projectHostedFriction:triage'
+          : action === 'decide'
+            ? 'projectHostedDecisions:decide'
+            : 'projectHostedOverlapAcks:append';
     const result = await transport.mutation(endpoint, { request: canonicalPayload(request) });
     return {
       schema: 1,

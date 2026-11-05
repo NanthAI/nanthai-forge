@@ -7,7 +7,7 @@ import { sourceAuthority } from '../src/hosted-source-authority';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { digest } from '../src/portable-hash';
 import { invariant } from '../src/errors';
-import type { FrictionEvent } from '../src/friction-types';
+import type { FrictionEvent, FrictionTriageState } from '../src/friction-types';
 export async function recordCaller(
   ctx: QueryCtx | MutationCtx,
   projectId: Id<'hostedProjects'>,
@@ -72,7 +72,31 @@ export async function appendFriction(
     await ctx.db.insert('projectHostedFriction', row);
     await ctx.db.insert('projectHostedFrictionHints', { projectId, id: record.id, value: likelyDuplicates! });
   }
+  if (record.kind === 'triage') await applyTriage(ctx, projectId, actor, record);
   return true;
+}
+/** Keep the latest triage on each capture row so a list is one indexed page, never a join.
+ * An older event (an out-of-order import) never replaces a newer state. One point read and
+ * one patch per id; the hosted command bounds ids at 50. */
+async function applyTriage(
+  ctx: MutationCtx,
+  projectId: Id<'hostedProjects'>,
+  actor: string,
+  record: Extract<FrictionEvent, { kind: 'triage' }>,
+) {
+  const state: FrictionTriageState = {
+    status: record.status,
+    ...(record.reason ? { reason: record.reason } : {}),
+    ...(record.laneId ? { laneId: record.laneId } : {}),
+    ...(record.planningItemId ? { planningItemId: record.planningItemId } : {}),
+    at: record.at,
+    by: actor,
+  };
+  for (const frictionId of record.frictionIds) {
+    const row = await frictionRow(ctx, projectId, frictionId);
+    if (!row || (row.triage && (JSON.parse(row.triage) as FrictionTriageState).at > record.at)) continue;
+    await ctx.db.patch(row._id, { triage: canonicalPayload(state) });
+  }
 }
 export const recordRequest = (value: unknown) => digest(canonicalPayload(value));
 export function replayRequest(request: string, expected: string) {
