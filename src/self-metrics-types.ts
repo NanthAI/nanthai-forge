@@ -62,6 +62,8 @@ export type MetricRun = {
   reusedFrom?: string | undefined;
   reuseKey?: string | undefined;
   started?: boolean | undefined;
+  /** Files that recovered on the single retry (hosted runs projection only). */
+  flaky?: import('./self-metrics-flakes.js').RunFlakes | undefined;
 };
 export type MetricRecords = {
   fullResultsUnavailable?: string;
@@ -95,6 +97,8 @@ export type MetricRecords = {
     deliveries?: string | undefined;
     checkRequests?: string | undefined;
   };
+  /** A hosted runs page predates the flaky projection: the flaky list may be incomplete. */
+  flakesUnprojected?: boolean;
   gaps: string[];
   landingKindsComplete?: boolean;
   lifecycleCoverageGaps?: string[];

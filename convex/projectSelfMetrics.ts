@@ -14,6 +14,7 @@ import { hostedRunReuseKey } from '../src/self-metrics-reuse-key';
 import { scopedRecheckBase } from '../src/scoped-recheck-policy';
 import { report } from './errors';
 import { metricReceiptCoverage } from '../src/self-metric-receipts';
+import { runFlakes } from '../src/self-metrics-flakes';
 
 const tables = {
   acceptances: 'projectHostedAcceptances',
@@ -219,6 +220,9 @@ export const page = query({
                     (run.gate ?? run.request.gate)!.effective === 'full'
                   : null,
               ...(scopedRecheckBase(run.gate) ? { scopedRecheck: true } : {}),
+              // Files that failed once and passed on the single retry.
+              // Explicit null means projected and none; an older deploy omits the field.
+              flaky: runFlakes(run) ?? null,
             };
           }
           if (input.stream === 'requests') {

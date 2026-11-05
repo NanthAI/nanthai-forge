@@ -56,6 +56,8 @@ export function formatMetricReport(current: MetricsSurface, before?: MetricsSurf
     `Main-race re-checks: ${current.totals.waste.mainRaceRecheckRuns} runs / ${number(current.totals.waste.mainRaceRecheckRunnerMinutes)} runner minutes; ${recheckShare(current)}. ${cell(current.totals.waste.gaps.join(' '))}`,
     `Finish-to-main p50 (trusted actors): ${number(current.totals.finishToMain.p50Minutes)} minutes. ${cell(current.totals.finishToMain.gaps.join(' '))}`,
     '',
+    ...formatFlakes(current).map(line => (line.startsWith('  ') ? `- ${line.trim()}` : line)),
+    '',
   ].join('\n');
 }
 /** Scoped share, and recheck runner minutes per main-race attempt. */
@@ -63,6 +65,37 @@ function recheckShare(current: MetricsSurface) {
   const waste = current.totals.waste;
   const races = waste.byCause.find(row => row.cause === 'main-race')?.attempts ?? 0;
   return `${waste.mainRaceScopedRecheckRuns} scoped (${number(waste.mainRaceScopedRecheckRunnerMinutes)} runner min); ${races ? number(waste.mainRaceRecheckRunnerMinutes / races) : 'n/a'} recheck runner min per main-race attempt`;
+}
+const FLAKE_LINES = 10;
+const ms = (value: number) => `${Number((value / 1000).toFixed(1))}s`;
+/** One line per flaky file, with the same-day next step: comment on the Issue or file one. */
+export function formatFlakes(current: MetricsSurface) {
+  const flakes = current.totals.flakes;
+  if (!flakes.files.length)
+    return [`Flaky files (recovered on retry): none in window${flakes.partial ? ' · partial' : ''}`];
+  const rest = flakes.filesTotal - Math.min(flakes.files.length, FLAKE_LINES);
+  return [
+    `Flaky files (recovered on retry, never a clean pass): ${flakes.filesTotal} files in ${flakes.flakyRuns} runs${flakes.partial ? ' · partial' : ''}`,
+    ...flakes.files.slice(0, FLAKE_LINES).map(row => {
+      const attempts = row.lastAttempts
+        ?.map(a => `${a.failed ? 'failed' : 'passed'} ${ms(a.durationMs)}`)
+        .join(' → ');
+      const issue =
+        row.issue === undefined
+          ? `next: nforge agent ROOT planning '{"search":"${row.search}","status":"all"}' → comment run ids on a match, else file an Issue today`
+          : row.issue === null
+            ? 'no Issue found: file one today with the file, first error and run ids'
+            : 'possible' in row.issue
+              ? `check before filing: ${row.issue.possible.map(i => `${i.id.slice(0, 8)} ${i.title}`).join('; ')}`
+              : `Issue ${row.issue.id.slice(0, 8)} (${row.issue.status}): comment these run ids`;
+      return `  ${row.file} ×${row.runs} · last ${row.lastAt.slice(0, 16)}Z${attempts ? ` · ${attempts}` : ''} · runs ${row.runIds.map(id => id.slice(0, 8)).join(',')}${row.lastError ? ` · ${row.lastError.split('\n')[0]!.slice(0, 120)}` : ''}\n    ${issue}`;
+    }),
+    ...(rest > 0 ? [`  … ${rest} more (--json: totals.flakes)`] : []),
+    ...(flakes.omittedPerRun
+      ? [`  ${flakes.omittedPerRun} further flaky files were omitted by the per-run cap.`]
+      : []),
+    ...flakes.gaps.map(gap => `  ${gap}`),
+  ];
 }
 export function formatMetrics(current: MetricsSurface) {
   const values = metricValues(current.totals);
@@ -81,6 +114,7 @@ export function formatMetrics(current: MetricsSurface) {
           `Waste ${row.cause}: ${number(row.elapsedMinutes)} elapsed / ${number(row.runnerMinutes)} runner min; discarded passed ${number(row.discardedPassedRunnerMinutes)} runner min`,
       ),
     `Main-race re-checks: ${current.totals.waste.mainRaceRecheckRuns} runs / ${number(current.totals.waste.mainRaceRecheckRunnerMinutes)} runner min; ${recheckShare(current)}`,
+    ...formatFlakes(current),
     'Daily values and named gaps: --json; report: --report FILE.md',
   ].join('\n');
 }

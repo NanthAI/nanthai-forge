@@ -2,6 +2,7 @@
 import { calculateSelfMetrics } from './self-metrics.js';
 import { calculateWaste } from './self-metrics-waste.js';
 import { observations, during, percentile } from './self-metrics-joins.js';
+import { flakeList } from './self-metrics-flakes.js';
 import { z } from 'zod';
 import { invariant } from './errors.js';
 import type { MetricPeriod, MetricRecords } from './self-metrics-types.js';
@@ -146,6 +147,19 @@ export function metricTotals(
           e =>
             (e.type === 'full-result' || e.type === 'culprit') && Date.parse(e.at) <= Date.parse(period.to),
         ).length,
+    ),
+    // G4: files that recovered on retry. Counted in the same run rows as 5.6; never a clean pass.
+    flakes: wrap(
+      {
+        ...flakeList(records.runs, period),
+        partial: !!records.flakesUnprojected,
+        gaps: records.flakesUnprojected
+          ? [
+              'Hosted runs pages lack the flaky projection: deploy projectSelfMetrics; the flaky list may be incomplete.',
+            ]
+          : [],
+      },
+      records.runs.filter(run => run.flaky && during(run.endedAt ?? run.at, period)).length,
     ),
     placement: wrap(result.placement, records.placement ? 1 : 0),
     disk: wrap(

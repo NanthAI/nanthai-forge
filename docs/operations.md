@@ -165,6 +165,26 @@ receipts separates failed and flaky file lists and their counts. The existing
 when their passing test names have been removed. All file evidence travels in the
 existing result writes; a clean check adds no Convex calls.
 
+#### Weekly flaky list and the same-day Issue
+
+`nforge metrics ROOT` (default window: the last 7 days) ends with a flaky-files
+section: each file that failed once and passed its single retry, with the number of
+runs, the latest run ids (up to five), attempt durations, the latest first error
+(up to 512 characters) and the execution id. A file that stayed failed is a failure
+and is never listed as a flake; a recovered file is never counted as a clean pass.
+The list is built from the check run rows the runs page already returns
+(`projectSelfMetrics:page`, runs stream): a metrics read makes no extra call and a
+check makes none either. A run lists at most eight flaky files (its true total is
+kept) and the list shows the 50 most frequent. A deployment without this projection
+shows the list as partial instead of empty.
+
+Each listed file carries the same-day step: search planning for the file name
+(`planning {"search":"FILE.test.mjs","status":"all"}`), comment the run ids on a
+match, otherwise file an Issue with the file, first error and run ids. With
+`--flake-issues`, `metrics` runs that search itself (one planning search per listed
+file, at most ten, opt-in; the default read makes none) and prints the matching
+Issue, a look-alike to check before filing, or "no Issue found: file one today".
+
 Quarantined tests continue to run. A check passes with quarantine only when all
 remaining failures are named, quarantined and unrelated, and every non-test step
 passed. Run details name each ignored test; landing receipts retain

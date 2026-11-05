@@ -209,7 +209,7 @@ export function fixture() {
       accepted,
     );
   };
-  const run = (id, start, end, seconds = 240) =>
+  const run = (id, start, end, seconds = 240, extra = {}) =>
     put(
       'projectHostedCheckRuns',
       {
@@ -226,6 +226,7 @@ export function fixture() {
           executionId: id,
           retainedPlanAndConfiguration: 'x'.repeat(4096),
           cost: { status: 'observed', seconds },
+          ...extra,
         }),
       },
       start,

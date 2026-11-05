@@ -77,6 +77,25 @@ const rowSchemas = {
     scopedRecheck: z.literal(true).optional(),
     inputPin: pin,
     reuseKey: z.string().nullable().optional(),
+    flaky: z
+      .object({
+        total: z.number().int().positive(),
+        executionId: z.string().nullable().optional(),
+        files: z
+          .array(
+            z.object({
+              file: z.string(),
+              attempts: z
+                .array(z.object({ durationMs: z.number().nonnegative(), failed: z.boolean() }))
+                .max(2)
+                .optional(),
+              firstError: z.string().max(512).optional(),
+            }),
+          )
+          .max(8),
+      })
+      .nullable()
+      .optional(),
   }),
   attempts: z.object({
     id: z.string(),
@@ -111,7 +130,8 @@ export async function readHostedMetricPages(query: MetricQuery, period: MetricPe
     landingKindsComplete: true,
   };
   let cutover: string | null = null,
-    reuseKeysProjected = true;
+    reuseKeysProjected = true,
+    flakesProjected = true;
   const pins = new Map<string, MetricPin>();
   const attempts: MetricAttempt[] = [],
     lanes: MetricLane[] = [],
@@ -189,8 +209,9 @@ export async function readHostedMetricPages(query: MetricQuery, period: MetricPe
           } else if (stream === 'runs') {
             const row = rowSchemas.runs.parse(rawRow);
             if (row.inputPin) pins.set(`run:${row.id}`, row.inputPin);
-            const { reuseKey, ...run } = row;
+            const { reuseKey, flaky, ...run } = row;
             if (reuseKey === undefined) reuseKeysProjected = false;
+            if (flaky === undefined) flakesProjected = false;
             records.runs.push({
               ...run,
               inputs: [],
@@ -199,6 +220,7 @@ export async function readHostedMetricPages(query: MetricQuery, period: MetricPe
               runnerMinutes: row.runnerMinutes ?? undefined,
               fullSuite: row.fullSuite ?? false,
               ...(reuseKey ? { reuseKey } : {}),
+              ...(flaky ? { flaky } : {}),
             });
             // Hosted landing never adopts earlier check evidence: each run row is its own request.
             (records.checkRequests ??= []).push({
@@ -283,6 +305,7 @@ export async function readHostedMetricPages(query: MetricQuery, period: MetricPe
       'METRICS_UNAVAILABLE: the hosted self-metrics module is unavailable; no native fallback was used.',
     );
   }
+  if (!flakesProjected) records.flakesUnprojected = true;
   if (reuseKeysProjected && cutover) records.coverage = { ...records.coverage, checkRequests: cutover };
   else records.gaps.push('Hosted reuse keys need the deployed projectSelfMetrics runs projection.');
   if (!records.error && !summary) {
