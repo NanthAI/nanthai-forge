@@ -80,6 +80,21 @@ function dead(owner: { pid?: number; host?: string; startTime?: string }) {
 /** How long a user command, the launcher or the updater waits for a live runtime-lock holder. */
 export const CLI_RUNTIME_WAIT_MS = 30_000;
 const sleepSync = (ms: number) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+/** Resolve `current`/`manager` to its build. Replacing a symlink by rename is atomic for the link,
+ * but macOS (APFS) lookups racing that rename can fail with EINVAL for an instant, so a
+ * reader retries briefly instead of failing a command at the moment of the switch. */
+export function resolveCliPointer(installation: string, pointer: 'current' | 'manager'): string {
+  const path = join(installation, pointer);
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return realpathSync(path);
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (attempt >= 200 || code !== 'EINVAL') throw error;
+      sleepSync(attempt < 20 ? 1 : 5);
+    }
+  }
+}
 /** Publish complete lock-owner bytes atomically; a killed claimant never leaves an empty lock.
  * The lock is held for milliseconds, so contention (parallel commands, an update publishing) is
  * absorbed by a bounded backoff wait instead of refusing. Hooks keep waitMs = 0 and fail open. */
@@ -110,6 +125,21 @@ export function withCliRuntimeLock<T>(installation: string, run: () => T, waitMs
         acquired = true;
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+        // The lock is synchronous and not re-entrant: waiting on our own hold could only time out.
+        if (attempt === 0) {
+          let holder: { pid?: number; host?: string; startTime?: string } = {};
+          try {
+            holder = JSON.parse(readFileSync(path, 'utf8'));
+          } catch {
+            /* Unreadable owner: the normal wait applies. */
+          }
+          if (
+            holder.pid === process.pid &&
+            holder.host === hostname() &&
+            holder.startTime === cliProcessIdentity().startTime
+          )
+            throw failure('CLI_RUNTIME_LOCK_REENTERED', 'This CLI process already holds the runtime lock.');
+        }
         const fence = `${path}-recovery`;
         try {
           mkdirSync(fence, { mode: 0o700 });
@@ -174,7 +204,7 @@ async function launch() {
   const manager = withCliRuntimeLock(
     installation,
     () => {
-      const selected = realpathSync(join(installation, 'manager'));
+      const selected = resolveCliPointer(installation, 'manager');
       const value = cliProcessIdentity(),
         users = join(selected, '.users');
       mkdirSync(users, { recursive: true, mode: 0o700 });

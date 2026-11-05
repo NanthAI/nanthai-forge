@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 import {
   existsSync,
+  lstatSync,
   readFileSync,
   readdirSync,
-  realpathSync,
   renameSync,
   rmSync,
+  statSync,
   symlinkSync,
 } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
@@ -14,7 +15,12 @@ import { cliRuntimePaths, type CliRuntimeUser } from './cli-runtime-processes.js
 import { randomUUID } from 'node:crypto';
 import { durableReplace, syncDirectory } from './native-durability.js';
 import { processAlive, processStartTime } from './local-process.js';
-import { CLI_RUNTIME_WAIT_MS, claimCliRuntime, withCliRuntimeLock } from './cli-launcher.js';
+import {
+  CLI_RUNTIME_WAIT_MS,
+  claimCliRuntime,
+  resolveCliPointer,
+  withCliRuntimeLock,
+} from './cli-launcher.js';
 import { canonicalRoot } from './root-paths.js';
 import { ForgeError } from './errors.js';
 
@@ -31,6 +37,16 @@ export function cliBuildCommit(root = cliPackageRoot()): string {
   if (existsSync(path)) return readFileSync(path, 'utf8').trim();
   const marker = join(root, '.forge', 'hosted-main.json');
   return existsSync(marker) ? JSON.parse(readFileSync(marker, 'utf8')).selection.head : 'development';
+}
+/** The build a pointer selects, or null when the pointer does not exist. Never follows the link
+ * for the existence check, so a lookup racing a switch cannot read as "no selection". */
+export function cliSelectedBuild(installation: string, pointer: 'current' | 'manager' = 'current') {
+  try {
+    lstatSync(join(installation, pointer));
+  } catch {
+    return null;
+  }
+  return resolveCliPointer(installation, pointer);
 }
 export function stableCliRunner(runner: string) {
   const installation = cliInstallation(dirname(dirname(runner)));
@@ -62,21 +78,37 @@ export function selectCliBuild(installation: string, build: string, pointer = 'c
 export function permitCliRetirement(installation: string) {
   durableReplace(join(installation, 'hooks-ready'), cliBuildCommit(join(installation, 'current')));
 }
-/** Inspect legacy users before retirement; managed users additionally carry durable leases. */
+/** A replaced build stays on disk this long after it stops being selected. Leases protect processes
+ * that claimed it; the grace also covers a process that resolved the old path just before the
+ * switch and has not claimed yet, so it never meets a deleted runtime. Product retention, not a
+ * machine setting: at most the builds of the last few minutes of updates stay on disk. */
+export const CLI_RETIRE_GRACE_MS = 10 * 60_000;
+const RETIRED = '.retired';
+/** Selecting a build (again) clears its retirement mark. */
+export function unretireCliBuild(build: string) {
+  rmSync(join(build, RETIRED), { force: true });
+}
+/** Inspect legacy users before retirement; managed users additionally carry durable leases.
+ * Slow work (process table, lease liveness, recursive deletion) runs outside the runtime lock;
+ * the lock is held only to re-check leases and rename chosen builds out of `builds/`, so
+ * concurrent CLI starts never queue behind a prune. */
 export function pruneCliBuilds(
   installation: string,
   inspectUsers: () => (CliRuntimeUser | string)[] = cliRuntimePaths,
+  graceMs = 0,
 ) {
   installation = canonicalRoot(installation);
-  const current = realpathSync(join(installation, 'current'));
-  const manager = existsSync(join(installation, 'manager'))
-    ? realpathSync(join(installation, 'manager'))
-    : null;
+  const current = resolveCliPointer(installation, 'current');
+  const manager = cliSelectedBuild(installation, 'manager');
   const permission = join(installation, 'hooks-ready');
   if (!existsSync(permission) || readFileSync(permission, 'utf8') !== cliBuildCommit(current)) return [];
-  const builds = readdirSync(join(installation, 'builds'))
+  const directory = join(installation, 'builds');
+  // A prune killed mid-deletion leaves only renamed (unselectable) leftovers.
+  for (const name of readdirSync(directory))
+    if (name.startsWith('.retiring-')) rmSync(join(directory, name), { recursive: true, force: true });
+  const builds = readdirSync(directory)
     .filter(name => /^[a-f0-9]{12,64}$/.test(name))
-    .map(name => ({ name, path: join(installation, 'builds', name), live: false }));
+    .map(name => ({ name, path: join(directory, name), live: false }));
   const covered = new Set<number>();
   for (const build of builds) {
     const users = join(build.path, '.users');
@@ -106,26 +138,45 @@ export function pruneCliBuilds(
     const root = dirname(dirname(user.path));
     return basename(root) === 'current' && canonicalRoot(dirname(root)) === installation;
   });
-  const removed: string[] = [];
-  for (const build of builds) {
+  const now = Date.now();
+  const candidates = builds.filter(build => {
     if (canonicalRoot(build.path) === current || canonicalRoot(build.path) === manager || build.live)
-      continue;
-    if (!legacyUsers || ambiguous) continue;
+      return false;
+    if (!legacyUsers || ambiguous) return false;
     if (
       legacyUsers.some(user =>
         canonicalRoot(typeof user === 'string' ? user : user.path).startsWith(build.path + '/'),
       )
     )
-      continue;
+      return false;
     if (
       !existsSync(join(build.path, '.managed-cli')) &&
       (!existsSync(join(build.path, '.commit')) || !existsSync(join(build.path, 'dist', 'cli-entry.js')))
     )
-      continue;
-    rmSync(build.path, { recursive: true });
-    removed.push(build.name);
-  }
-  return removed;
+      return false;
+    if (graceMs <= 0) return true;
+    const mark = join(build.path, RETIRED);
+    if (!existsSync(mark)) {
+      durableReplace(mark, new Date(now).toISOString());
+      return false;
+    }
+    return now - statSync(mark).mtimeMs >= graceMs;
+  });
+  if (!candidates.length) return [];
+  // Fence: a process that claimed a candidate since the inspection above keeps it.
+  const retiring = withCliLock(installation, () => {
+    const selected = [resolveCliPointer(installation, 'current'), cliSelectedBuild(installation, 'manager')];
+    return candidates.flatMap(build => {
+      const users = join(build.path, '.users');
+      if (selected.includes(canonicalRoot(build.path))) return [];
+      if (existsSync(users) && readdirSync(users).length) return [];
+      const target = join(directory, `.retiring-${build.name}-${randomUUID()}`);
+      renameSync(build.path, target);
+      return [{ name: build.name, target }];
+    });
+  });
+  for (const build of retiring) rmSync(build.target, { recursive: true, force: true });
+  return retiring.map(build => build.name);
 }
 /** `waitMs` > 0 lets a user command ride out a concurrent update; hooks keep 0 and fail open. */
 export function retainCliRuntime(root = cliPackageRoot(), waitMs = 0) {

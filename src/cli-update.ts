@@ -1,6 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { z } from 'zod';
@@ -12,7 +21,13 @@ import { tryHeavySlot } from './heavy-slots.js';
 import { shareDependencies } from './shared-dependencies.js';
 import { cliReleaseSource, type CliSource } from './cli-update-source.js';
 import { cliBuildCommit, cliInstallation, withCliLock } from './cli-installation.js';
-import { cliCurrentCommit, ensureCliManager, publishCliBuild, canManageCli } from './cli-update-install.js';
+import {
+  activateCliBuild,
+  cliCurrentCommit,
+  ensureCliManager,
+  installCliBuild,
+  canManageCli,
+} from './cli-update-install.js';
 import { migrateEditHookRunner } from './agent-install-hooks.js';
 import type { HostedMain } from './hosted-main.js';
 import { clientCacheRoot } from './root-paths.js';
@@ -20,8 +35,31 @@ import { cliPackageRoot } from './cli-installation.js';
 import { shellQuote } from './agent-brief-render.js';
 
 const sourceSchema = z.object({ url: z.url(), projectId: z.string().min(1) }).strict();
-/** How long an update waits for a concurrent updater before refusing with CLI_UPDATE_BUSY. */
-export const CLI_UPDATE_WAIT_MS = 180_000;
+/** How long a write command waits for a live concurrent updater (a dead one is reclaimed at once).
+ * A normal update takes seconds; this only bounds a wedged updater process. */
+export const CLI_UPDATE_WAIT_MS = 600_000;
+/** After a failed background update, reads stop starting new ones for this long. */
+export const CLI_BACKGROUND_RETRY_MS = 10 * 60_000;
+const failureMark = (installation: string) => join(installation, 'update-failed.json');
+/** Live updater on this installation (dead holders do not count). */
+export function cliUpdateRunning(installation: string) {
+  const slot = join(installation, 'update-lock', '1');
+  try {
+    const pid = Number(readFileSync(join(slot, 'pid'), 'utf8'));
+    if (!Number.isSafeInteger(pid) || pid <= 0) return Date.now() - statSync(slot).mtimeMs < 60_000;
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'EPERM';
+  }
+}
+export function cliBackgroundUpdateFailedRecently(installation: string) {
+  try {
+    return Date.now() - statSync(failureMark(installation)).mtimeMs < CLI_BACKGROUND_RETRY_MS;
+  } catch {
+    return false;
+  }
+}
 export const defaultCliInstallation = () => join(homedir(), '.local', 'share', 'forge-cli');
 export const cliUpdateCommand = (installation: string) =>
   `nforge update --directory ${shellQuote(installation)}`;
@@ -86,6 +124,13 @@ export async function updateCli(
     source: cliReleaseSource(address),
     run: cliUpdateRun,
     migrate: (runner: string) => migrateEditHookRunner(runner),
+  } as {
+    source: Pick<ReturnType<typeof cliReleaseSource>, 'current' | 'checkout'>;
+    run: typeof cliUpdateRun;
+    migrate(runner: string): unknown;
+    /** Pre-switch check (canary, ac9c4ed4): runs on the installed-but-not-active build; throwing
+     * keeps the previous build selected. Explicit rollback (--state) skips it. */
+    preSwitch?: (build: string, head: string) => unknown;
   },
   options: {
     expectedCurrent?: string | null;
@@ -93,6 +138,10 @@ export async function updateCli(
     /** Wait this long for a concurrent updater, then continue from whatever it installed. */
     lockWaitMs?: number;
     onWait?: () => void;
+    retireGraceMs?: number;
+    /** Background updates: the head the starting read saw. When an earlier updater already
+     * selected it, finish without a release read. */
+    skipIfCurrent?: string;
   } = {},
 ) {
   let expectedCurrent =
@@ -112,6 +161,11 @@ export async function updateCli(
   );
   let stage: string | undefined;
   try {
+    // Only the update-lock holder creates stages, so any stage now is from an updater that died
+    // mid-install. It was never selected: current still names the complete previous build.
+    for (const name of readdirSync(join(installation, 'builds')))
+      if (name.startsWith('.install-'))
+        rmSync(join(installation, 'builds', name), { recursive: true, force: true });
     const sourcePath = join(installation, 'source.json');
     if (existsSync(sourcePath))
       invariant(
@@ -119,10 +173,18 @@ export async function updateCli(
         'CLI_UPDATE_SOURCE_CHANGED',
         'Keep the configured Forge CLI source.',
       );
-    // After waiting, the other updater moved current: read the release and current again.
+    if (options.skipIfCurrent && cliCurrentCommit(installation) === options.skipIfCurrent)
+      return { status: 'current', cliCommit: options.skipIfCurrent, installation, removed: [] };
+    // After waiting: when the other updater moved current, use what it installed from main (no
+    // second release read; the next command's own check still sees any newer main). When it
+    // failed, current is unchanged and this updater installs the release it already read.
     if (waited && !options.rollback) {
-      selected = undefined;
-      expectedCurrent = cliCurrentCommit(installation);
+      const installed = cliCurrentCommit(installation);
+      if (installed !== expectedCurrent && installed && existsSync(join(installation, 'manager'))) {
+        rmSync(failureMark(installation), { force: true });
+        return { status: 'current', cliCommit: installed, installation, removed: [] };
+      }
+      expectedCurrent = installed;
     }
     const release = selected ?? (await dependencies.source.current());
     invariant(
@@ -150,10 +212,11 @@ export async function updateCli(
           if (!existsSync(sourcePath)) durableReplace(sourcePath, JSON.stringify(address));
           if (!options.rollback) rmSync(join(installation, 'rollback.json'), { force: true });
         });
+      rmSync(failureMark(installation), { force: true });
       return { status: 'current', cliCommit: release.head, installation, removed: [] };
     }
-    const publish = (prepared?: string) =>
-      publishCliBuild({
+    const publish = async (prepared?: string) => {
+      const input = {
         installation,
         address,
         head: release.head,
@@ -162,13 +225,23 @@ export async function updateCli(
         expectedCurrent,
         rollback: options.rollback,
         migrate: dependencies.migrate,
-      });
+        retireGraceMs: options.retireGraceMs,
+      };
+      installCliBuild(input);
+      if (!options.rollback) await dependencies.preSwitch?.(build, release.head);
+      return activateCliBuild(input);
+    };
+    const published = async (result: ReturnType<typeof publish>) => {
+      const value = await result;
+      rmSync(failureMark(installation), { force: true });
+      return value;
+    };
     if (
       existsSync(build) &&
       cliBuildCommit(build) === release.head &&
       existsSync(join(build, '.managed-cli'))
     )
-      return publish();
+      return await published(publish());
     stage = mkdtempSync(join(installation, 'builds', '.install-'));
     const transferCache = clientCacheRoot(stage);
     try {
@@ -211,7 +284,7 @@ export async function updateCli(
     );
     durableReplace(join(stage, '.commit'), release.head);
     writeFileSync(join(stage, '.managed-cli'), '1');
-    return publish(stage);
+    return await published(publish(stage));
   } finally {
     if (stage) rmSync(stage, { recursive: true, force: true });
     rmSync(lock, { recursive: true, force: true });
@@ -228,11 +301,17 @@ export async function cliUpdateCli(args: string[]) {
     installation = cliInstallation() ?? defaultCliInstallation(),
     state: string | undefined,
     bin = join(homedir(), '.local', 'bin', 'nforge'),
-    login = false;
+    login = false,
+    background = false,
+    expected: string | undefined;
   while (flags.length) {
     const flag = flags.shift()!;
     if (flag === '--login') login = true;
-    else if (flag === '--directory') {
+    else if (flag === '--background') background = true;
+    else if (flag === '--release-head') {
+      expected = flags.shift();
+      invariant(expected && /^[a-f0-9]{64}$/.test(expected), 'BAD_ARGUMENT', 'Use a full Forge State hash.');
+    } else if (flag === '--directory') {
       const value = flags.shift();
       invariant(value, 'BAD_ARGUMENT', 'Supply --directory DIR.');
       installation = resolve(value);
@@ -246,6 +325,29 @@ export async function cliUpdateCli(args: string[]) {
     } else {
       invariant(!root && !flag.startsWith('-'), 'BAD_ARGUMENT', 'Use nforge update --help.');
       root = resolve(flag);
+    }
+  }
+  // Started detached by a read that found main moved: install next to the running build, never
+  // wait. A busy updater already does the work; the update lock comes before any release read.
+  if (background) {
+    invariant(
+      !root && !state && !login,
+      'BAD_ARGUMENT',
+      'nforge update --background takes only --directory and --release-head.',
+    );
+    try {
+      return await updateCli(installation, readCliSource(installation), undefined, undefined, {
+        lockWaitMs: 0,
+        ...(expected ? { skipIfCurrent: expected } : {}),
+      });
+    } catch (error) {
+      if (error instanceof ForgeError && error.code === 'CLI_UPDATE_BUSY')
+        return { status: 'busy', installation };
+      durableReplace(
+        failureMark(installation),
+        JSON.stringify({ code: error instanceof ForgeError ? error.code : 'CLI_UPDATE_FAILED' }),
+      );
+      throw error;
     }
   }
   const address = root ? hostedAgentAddress(root, {}) : readCliSource(installation);

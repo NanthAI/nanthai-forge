@@ -1,11 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 import { childEnv } from '../scripts/child-env.mjs';
-import { existsSync, readFileSync } from 'node:fs';
+import { closeSync, existsSync, openSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
-import { cliBuildCommit, cliInstallation, cliPackageRoot, retainCliRuntime } from './cli-installation.js';
+import {
+  cliBuildCommit,
+  cliInstallation,
+  cliPackageRoot,
+  cliSelectedBuild,
+  retainCliRuntime,
+} from './cli-installation.js';
 import { cliLandingCommand, waitForCliMeasurement } from './cli-measurement-hold.js';
-import { CLI_RUNTIME_WAIT_MS } from './cli-launcher.js';
+import { CLI_RUNTIME_WAIT_MS, resolveCliPointer } from './cli-launcher.js';
 import { ForgeError } from './errors.js';
 
 /** Cache the promise, including failures, so concurrent callers never repeat discovery. */
@@ -18,6 +24,118 @@ export const checkCliVersion = cliVersionCheck();
 export function cliDeferredCommand(args: string[]) {
   return ['agent', 'x', 'heavy', 'pull', 'clone'].includes(args[0]!);
 }
+/** Commands that never write to Forge. While main moves they keep running on the current build
+ * and start the install in the background; anything not listed waits for the new build. */
+const READ_ACTIONS = new Set([
+  'status',
+  'planning',
+  'show',
+  'diff',
+  'peers',
+  'lanes',
+  'observe',
+  'landing',
+  'wait',
+  'preflight',
+  'decisions',
+  'queue',
+  'doctor',
+  'candidate',
+  'candidates',
+  'view',
+  'views',
+]);
+export function cliReadOnlyCommand(args: string[]) {
+  if (['agent', 'x'].includes(args[0]!)) return READ_ACTIONS.has(args[2]?.toLowerCase() ?? '');
+  return ['status', 'wait', 'docs', 'heavy', 'doctor'].includes(args[0]!);
+}
+/** A parent CLI that just installed and verified main hands that fact to the child it re-runs the
+ * command in, so the child does not repeat the release read. Bound to the parent pid. */
+const VERIFIED = 'FORGE_CLI_VERIFIED_RELEASE';
+function inheritedVerification(installed: string, installation: string) {
+  const value = process.env[VERIFIED];
+  delete process.env[VERIFIED];
+  return (
+    value === `${installed}:${process.ppid}` &&
+    cliBuildCommit(cliSelectedBuild(installation) ?? installation) === installed &&
+    !existsSync(join(installation, 'rollback.json'))
+  );
+}
+const RUNTIME_ENV = [
+  'FORGE_AUTH_TOKEN',
+  'FORGE_DEPLOYMENT_URL',
+  'FORGE_DEPLOYMENT',
+  'FORGE_AGENT_NAME',
+  'FORGE_ACTOR',
+  'FORGE_LAND_CHILD',
+  'FORGE_LAND_INVOKED_AT',
+  'XDG_STATE_HOME',
+  'FORGE_PROJECT_ID',
+  'XDG_CONFIG_HOME',
+  'XDG_CACHE_HOME',
+  'FORGE_CLIENT_SETTINGS',
+];
+/** Start one detached updater unless one is live or one failed recently. Never waits. */
+export async function startBackgroundCliUpdate(
+  installation: string,
+  root: string,
+  released: string,
+): Promise<'started' | 'running' | 'failed'> {
+  const { cliUpdateRunning, cliBackgroundUpdateFailedRecently } = await import('./cli-update.js');
+  if (cliUpdateRunning(installation)) return 'running';
+  if (cliBackgroundUpdateFailedRecently(installation)) return 'failed';
+  const log = openSync(join(installation, 'update.log'), 'w', 0o600);
+  try {
+    spawn(
+      process.execPath,
+      [
+        join(root, 'dist', 'cli-entry.js'),
+        'update',
+        '--background',
+        '--release-head',
+        released,
+        '--directory',
+        installation,
+      ],
+      {
+        cwd: installation,
+        detached: true,
+        stdio: ['ignore', log, log],
+        env: childEnv({ allow: RUNTIME_ENV }),
+      },
+    ).unref();
+  } finally {
+    closeSync(log);
+  }
+  return 'started';
+}
+/** Run the command in a fresh process on the selected build; no command ran in this one. */
+async function redispatch(
+  installation: string,
+  args: string[],
+  stdin: string | undefined,
+  verified?: string,
+) {
+  return new Promise<number>((done, reject) => {
+    // The concrete build path: a child never resolves `current` while another update switches it.
+    const entry = join(resolveCliPointer(installation, 'current'), 'dist', 'cli-entry.js');
+    const child = spawn(process.execPath, [entry, ...args], {
+      stdio: stdin === undefined ? 'inherit' : ['pipe', 'inherit', 'inherit'],
+      env: childEnv({
+        allow: RUNTIME_ENV,
+        ...(verified ? { extra: { [VERIFIED]: `${verified}:${process.pid}` } } : {}),
+      }),
+    });
+    if (stdin !== undefined) {
+      child.stdin?.on('error', error => {
+        if ((error as NodeJS.ErrnoException).code !== 'EPIPE') reject(error);
+      });
+      child.stdin?.end(stdin);
+    }
+    child.once('error', reject);
+    child.once('exit', (status, signal) => done(status ?? (signal === 'SIGINT' ? 130 : 1)));
+  });
+}
 export function cliLocalArgumentsFirst(args: string[]) {
   return !args.length || ['--help', '-h', 'help'].includes(args[0]!) || cliDeferredCommand(args);
 }
@@ -29,7 +147,22 @@ export async function cliStartup(
 ): Promise<boolean> {
   // Claim the pinned runtime before any command modules can lazy-load from it.
   // Parallel commands and an update's publication hold the lock for milliseconds: wait, never refuse.
-  retainCliRuntime(root, CLI_RUNTIME_WAIT_MS);
+  try {
+    retainCliRuntime(root, CLI_RUNTIME_WAIT_MS);
+  } catch (error) {
+    // This build was retired between this process resolving its path and claiming it. Nothing ran
+    // yet, so the command runs on the selected build instead of being refused.
+    const installation = cliInstallation(root);
+    if (
+      !(error instanceof ForgeError) ||
+      error.code !== 'CLI_RUNTIME_RETIRED' ||
+      !installation ||
+      !existsSync(join(installation, 'current', 'dist', 'cli-entry.js'))
+    )
+      throw error;
+    process.exitCode = await redispatch(installation, args, options.stdin);
+    return false;
+  }
   // Local diagnostics must remain available without discovery. These handlers
   // call back after their local argument checks and before valid work begins.
   if (!options.validated && cliLocalArgumentsFirst(args)) return true;
@@ -55,15 +188,34 @@ export async function cliStartup(
       source = cliReleaseSource(address);
     let selected: Awaited<ReturnType<typeof source.current>> | undefined;
     const installed = cliBuildCommit(root);
-    const expectedCurrent = existsSync(join(installation, 'current'))
-      ? cliBuildCommit(join(installation, 'current'))
-      : null;
+    const selectedBuild = cliSelectedBuild(installation);
+    const expectedCurrent = selectedBuild ? cliBuildCommit(selectedBuild) : null;
     const rollbackPath = join(installation, 'rollback.json');
     const restoreMain =
       expectedCurrent === null ||
       (existsSync(rollbackPath) && JSON.parse(readFileSync(rollbackPath, 'utf8')).head === expectedCurrent);
+    if (!restoreMain && inheritedVerification(installed, installation)) return true;
     const released = await check(installed, async () => (selected = await source.current()));
     if (released === installed && !restoreMain) return true;
+    // Reads never wait for, or fail because of, an install: they run on this complete build while
+    // the next one installs beside it. Writes below still run only on main (enforced).
+    if (cliReadOnlyCommand(args) && expectedCurrent !== null) {
+      const state = existsSync(join(installation, '.freeze'))
+        ? 'held by a measurement hold'
+        : await startBackgroundCliUpdate(installation, root, released).then(
+            started =>
+              ({
+                started: 'is installing',
+                running: 'is installing (already running)',
+                failed: `last install failed (${join(installation, 'update.log')}); the next write retries it`,
+              })[started],
+            () => 'could not start installing; the next write installs it',
+          );
+      process.stderr.write(
+        `Forge CLI main ${released.slice(0, 8)} ${state}; this read ran on ${installed.slice(0, 8)}.\n`,
+      );
+      return true;
+    }
     if (existsSync(join(installation, '.freeze')))
       throw new ForgeError(
         'CLI_UPDATE_FROZEN',
@@ -84,41 +236,14 @@ export async function cliStartup(
       `Forge CLI selected ${result.cliCommit}.${result.undo ? ` Revert: ${result.undo}` : ''}\n`,
     );
     if (released === installed) return true;
-    // A fresh process uses only the completed selected runtime, with its own single freshness check.
-    const code = await new Promise<number>((done, reject) => {
-      const child = spawn(
-        process.execPath,
-        [join(installation, 'current', 'dist', 'cli-entry.js'), ...args],
-        {
-          stdio: options.stdin === undefined ? 'inherit' : ['pipe', 'inherit', 'inherit'],
-          env: childEnv({
-            allow: [
-              'FORGE_AUTH_TOKEN',
-              'FORGE_DEPLOYMENT_URL',
-              'FORGE_DEPLOYMENT',
-              'FORGE_AGENT_NAME',
-              'FORGE_ACTOR',
-              'FORGE_LAND_CHILD',
-              'FORGE_LAND_INVOKED_AT',
-              'XDG_STATE_HOME',
-              'FORGE_PROJECT_ID',
-              'XDG_CONFIG_HOME',
-              'XDG_CACHE_HOME',
-              'FORGE_CLIENT_SETTINGS',
-            ],
-          }),
-        },
-      );
-      if (options.stdin !== undefined) {
-        child.stdin?.on('error', error => {
-          if ((error as NodeJS.ErrnoException).code !== 'EPIPE') reject(error);
-        });
-        child.stdin?.end(options.stdin);
-      }
-      child.once('error', reject);
-      child.once('exit', (status, signal) => done(status ?? (signal === 'SIGINT' ? 130 : 1)));
-    });
-    process.exitCode = code;
+    // A fresh process uses only the completed selected runtime. When that is the release this
+    // process just read, the child skips its own read; otherwise it checks main itself.
+    process.exitCode = await redispatch(
+      installation,
+      args,
+      options.stdin,
+      result.cliCommit === released ? released : undefined,
+    );
     return false;
   } catch (error) {
     if (

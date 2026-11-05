@@ -20,19 +20,37 @@ Managed commands check configured Forge main before hooks or execution.
 Help, heavy status and local agent/heavy/pull/clone argument errors make zero
 network calls. Valid commands make one authorized metadata query, cached
 for that process in addition to its action calls. There is no timer,
-background check or idle network activity. A CLI behind main installs that exact
-State, then re-runs the same command in the completed current runtime, so the
-caller gets one result and never runs `nforge update` by hand. The enforcement
-stays: no command runs on an older build. The update is cheap and invisible:
+periodic check or idle network activity.
+
+When main moves, reads and writes behave differently:
+
+- Reads (agent `status`, `planning`, `show`, `diff`, `peers`, `lanes`, `observe`,
+  `landing`, `wait`, `preflight`, `decisions`, `queue`, `doctor`, and top-level
+  `status`, `wait`, `docs`, `heavy`) never wait for an install. They run on the
+  complete current build, print one stderr line, and start one detached
+  `nforge update --background` unless an updater is already live. The background
+  updater takes the update lock before its single release read, so extra starts
+  cost nothing. Its output goes to `DIR/update.log`. After a failed background
+  install, reads stop starting new ones for 10 minutes (`DIR/update-failed.json`);
+  the next write retries and reports the failure.
+- Writes (everything else) never run on an older build. A write installs that exact
+  State, or joins an install already running, and then re-runs the same command in
+  the new build. The caller gets one result and never runs `nforge update` by hand.
+  A write that waited does not read the release again; the re-run child does not
+  read it either when its parent just verified that build. So each command makes
+  one release read.
+
+The update is cheap and invisible:
 stdout holds only the command's result; the one progress line, the selected/revert
 line and any step failure output go to stderr; successful build and smoke output is
 discarded and no help text is printed. The build is not a heavy-slot job, so it never
 queues behind test batches (about 4 s warm; one updater per installation through
-`update-lock`). Parallel commands during an update wait for the runtime lock (up to
-30 s) and for the running updater (up to 3 min), then continue from what it installed;
-only first-write hooks keep the zero-wait fail-open lock. Failed discovery, unavailable
-authentication, an updater still busy after the wait, or a failed build refuses
-command execution with
+`update-lock`). The runtime lock is held only for milliseconds: selection, hook
+migration and the final retirement fence. Process inspection and deletion of old
+builds run outside it. Commands wait up to 30 s for that lock and up to 10 min for a
+live updater; a dead updater is reclaimed at once and its unselected stage is
+removed by the next update. Only first-write hooks keep the zero-wait fail-open lock.
+Failed discovery, unavailable authentication or a failed build refuses a write with
 `CLI_UPDATE_REQUIRED` and the exact `nforge update --directory DIR` recovery
 command. When sign-in is missing or expired, that command includes `--login`,
 which runs the existing device sign-in flow inside the updater before its release
@@ -44,9 +62,17 @@ Update source uses Forge's existing hash-verified paged checkout and R2 download
 The updater serializes installations, reuses product-managed dependencies only
 for the exact package, lockfile, platform and Node major identity, and installs
 missing dependencies using `npm ci --ignore-scripts`. It builds and smoke-checks
-the staged CLI with a synthetic home before atomically replacing the `current`
-symlink. A failed transfer, dependency install, build or smoke check preserves
-the prior current. Publication compares the current observed before discovery;
+the staged CLI with a synthetic home. Activation has two steps.
+`installCliBuild` makes the complete stage an installed build at `builds/HEAD`;
+that build is installed but not active, and nothing selects it yet. Then
+`activateCliBuild`, the one switch, atomically replaces the `manager` and `current`
+symlinks under the runtime lock. A pre-switch check (`preSwitch(build, head)` in
+the updater dependencies, reserved for the canary, ac9c4ed4) runs between the
+two steps. If it throws, the previous build stays selected. A failed transfer,
+dependency install, build, smoke check or pre-switch check preserves the prior
+current. On macOS, a lookup that races the symlink rename can fail with EINVAL
+for an instant. Readers resolve `current`/`manager` with a short retry, and a
+re-run child gets the concrete build path. Publication compares the current observed before discovery;
 a concurrent change is preserved with `CLI_UPDATE_CHANGED`, rather than downgraded
 from an earlier release read. A failed hook migration retains old build bytes.
 
@@ -65,9 +91,12 @@ The owner does not need to reinstall hooks after updates.
 The stable bootstrap and managed CLI/hook processes record local runtime leases,
 including kernel process identity. Replaced builds remain while their processes may lazy-load
 modules. Retirement checks detached-worker and legacy process script paths privately.
-If inspection is unavailable, it preserves uncertain runtimes. It removes unused old builds on a
-successful swap after their users have exited; no age-based retention
-policy or background collector is added. A no-op update performs no cleanup.
+If inspection is unavailable, it preserves uncertain runtimes. A replaced build is marked
+`.retired` and stays for 10 minutes (product retention, `CLI_RETIRE_GRACE_MS`). This covers
+a process that resolved the old path just before the switch and has not claimed a lease yet.
+A later update removes it once it has no live users. If a build is still retired when a
+process tries to claim it, that process re-runs on current and is not refused. There is no
+background collector, and a no-op update performs no cleanup.
 
 A measurement hold at `DIR/.freeze` prevents changes to current. Landing commands
 explain the wait and watch local hold removal before reading the released version,
