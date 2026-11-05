@@ -42,6 +42,7 @@ export const objectTables = {
     .index('by_project_and_removed', ['projectId', 'removed'])
     .index('by_digest_and_removed', ['digest', 'removed'])
     .index('by_storage', ['storageId'])
+    .index('by_project_and_storage_and_removed', ['projectId', 'storageId', 'removed'])
     .index('by_nonce', ['nonce']),
   /** Sorted, immutable object catalog pages: one row per `objectCatalogPage`
    * stored objects instead of one row per object (GitHub import). */

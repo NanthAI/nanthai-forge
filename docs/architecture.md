@@ -54,7 +54,8 @@ headers cooperatively, then observes queued/checking entries and live batches
 through selected, freshly validated reads. It recovers already-on-main Lane
 completion when the relevant records change. Work publication waits asynchronously
 in the existing FIFO queue; legacy synchronous driver phases return contention to
-their asynchronous retry instead of blocking the owner event loop. GitHub landing
+their asynchronous retry instead of blocking the owner event loop. Direct batch
+drains enter that yielding context with inherited lock patience. GitHub landing
 checks use detached check controllers, isolating provider polling from driver work.
 Receipt progress selects the submitted entry's batch history and recent Channel
 moves, rather than hydrating all landing records. One pinned observation shares
@@ -169,6 +170,12 @@ references carrying their exact digest and size, alongside existing Convex IDs.
 These internal progress references address immutable project object keys directly;
 the owning step/task rows retain them. R2 placement takes precedence over any
 retained legacy Convex copy.
+
+The durable reader checks legacy IDs against a live `projectObjects` binding
+using the project/storage/removed index before reading bytes. Unowned IDs fail
+with `SOURCE_REF_UNOWNED`, including old unregistered cursor/section blobs;
+those continuations need migration before resumption. Each legacy read adds
+one internal query and at most one indexed lookup. R2 reads add no Convex calls.
 
 Hosted check selection/recipe objects, browser bootstrap objects, Work detail
 objects and mirror continuations use the same checksum-verified R2 source seam.

@@ -192,6 +192,7 @@ export function lanesFixture() {
                     .slice(0, n),
                 );
               },
+              first: async () => (await q.take(1))[0] ?? null,
               unique: async () => {
                 assert(match, 'indexed reads only');
                 const rows = read(table, match);

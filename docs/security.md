@@ -38,6 +38,14 @@ Handing a secret to arbitrary code lets that code leak it.
 
 ## Access is checked before retrieval
 
+Durable source-worker and mirror continuation reads bind legacy Convex file IDs
+to a live `projectObjects` owner row before fetching bytes. Foreign, unknown,
+removed and unregistered references fail with `SOURCE_REF_UNOWNED`; a cursor
+containing an ID does not prove ownership. Old continuations without owner rows
+need migration before resumption. This legacy check costs at most one indexed
+lookup and one internal query per read. Project-scoped `r2source:` reads retain
+their digest/size verification and add no Convex calls.
+
 Forge sign-in, GitHub App installation and a person's repository entitlement are separate. Every read of private imported source, graph or export checks current policy and current provider entitlement. Policy is rechecked after provider calls. A saved snapshot, an old grant or a download never creates new access.
 
 Paths, counts, search results and relationships derived from source are part of the visibility boundary.

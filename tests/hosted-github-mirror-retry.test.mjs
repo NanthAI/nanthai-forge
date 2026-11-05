@@ -8,6 +8,7 @@ import { lanesFixture } from './hosted-lanes-fixture.mjs';
 import { mirrorFixture } from './hosted-github-mirror-fixture.mjs';
 import { agentFixture } from './hosted-agent-fixture.mjs';
 import { policyPreset } from '../dist/autonomy-policy.js';
+import { digest } from '../dist/hash.js';
 import { prepareMirror } from '../dist/hosted-github-mirror.js';
 import { githubRequest } from '../dist/hosted-github-api.js';
 import { hostedMirrorStatusText } from '../dist/hosted-github-mirror-status.js';
@@ -16,6 +17,7 @@ import { interceptDefaultR2 } from './default-r2.mjs';
 const queue = await import(moduleUrl('../convex/projectGithubMirrorQueue.ts'));
 const store = await import(moduleUrl('../convex/projectGithubMirrorStore.ts'));
 const action = await import(moduleUrl('../convex/projectGithubMirror.ts'));
+const ownership = await import(moduleUrl('../convex/projectConvexSourceOwnership.ts'));
 const { githubMirrorStatus } = await import(moduleUrl('../convex/projectGithubMirrorStatus.ts'));
 const agent = await import(moduleUrl('../convex/projectHostedAgent.ts'));
 const { HostedMirrorStatus } = await import(moduleUrl('../web/src/cockpit/HostedMirrorStatus.tsx'));
@@ -51,7 +53,13 @@ async function fixture(t, fail, source) {
     },
   });
   f.decorateContext(ctx => {
-    ctx.db.system = { get: async id => tasks.get(id) ?? null };
+    ctx.db.system = {
+      get: async id => tasks.get(id) ?? null,
+      normalizeId: (table, ref) => {
+        assert.equal(table, '_storage');
+        return ref;
+      },
+    };
     ctx.scheduler = {
       runAfter: async (delay, ref, args) => {
         const _id = `task-${scheduled.length}`;
@@ -77,9 +85,18 @@ async function fixture(t, fail, source) {
   const input = scheduled[0].args,
     cursor = 'retained-cursor';
   f.patch('projectGithubMirrorJobs', input.jobId, { cursor });
-  const storage = new Map([
-    [cursor, new Blob([JSON.stringify(await prepareMirror(github.seed, github.io))])],
-  ]);
+  const cursorBytes = Buffer.from(JSON.stringify(await prepareMirror(github.seed, github.io)));
+  const cursorOwnerId = f.insert('projectObjects', {
+    projectId,
+    digest: digest(cursorBytes),
+    size: cursorBytes.length,
+    nonce: 'synthetic-mirror',
+    storageId: cursor,
+    removed: false,
+  });
+  const storage = new Map([[cursor, new Blob([cursorBytes])]]),
+    storageReads = [];
+  assert.equal(await run(ownership.owns, { projectId, ref: cursor }), true);
   for (const [id, bytes] of github.objects) storage.set(id, new Blob([bytes]));
   const originalFetch = globalThis.fetch;
   const values = {
@@ -111,16 +128,23 @@ async function fixture(t, fail, source) {
   const methods = { begin: store.begin, commit: store.commit, failed: store.failed };
   const ctx = {
     runMutation: (ref, args) => run(methods[getFunctionName(ref).split(':')[1]], args),
-    runQuery: async (_ref, args) =>
-      JSON.stringify(
+    runQuery: async (ref, args) => {
+      const name = getFunctionName(ref);
+      if (name === 'projectConvexSourceOwnership:owns') return run(ownership.owns, args);
+      assert.equal(name, 'projectGithubMirrorObjects:resolve');
+      return JSON.stringify(
         args.digests.map(id => ({
           descriptor: { object: { sha256: id, size: storage.get(id).size }, recipe: null },
           storageId: id,
           url: null,
         })),
-      ),
+      );
+    },
     storage: {
-      get: async id => storage.get(id),
+      get: async id => {
+        storageReads.push(id);
+        return storage.get(id);
+      },
       store: async blob => {
         const id = `cursor-${storage.size}`;
         storage.set(id, blob);
@@ -137,6 +161,8 @@ async function fixture(t, fail, source) {
     run,
     input,
     cursor,
+    cursorOwnerId,
+    storageReads,
     scheduled,
     tasks,
     ctx,
@@ -166,6 +192,21 @@ test('real action: HTTP 500 retains the cursor, schedules one backoff, then succ
   await f.step(f.input);
   assert.equal(f.scheduled.length, 2, 'late worker is fenced');
 });
+
+for (const kind of ['foreign', 'unknown']) {
+  test(`real action refuses ${kind} legacy continuation before reading bytes`, async t => {
+    const f = await fixture(t, () => assert.fail('unowned cursor reached GitHub writes'));
+    const githubCalls = f.github.calls.length;
+    if (kind === 'foreign') f.patch('projectObjects', f.cursorOwnerId, { projectId: 'other-project' });
+    else f.tables.projectObjects.delete(f.cursorOwnerId);
+    await f.step();
+    assert.equal(f.job().status, 'failed');
+    assert.equal(f.job().error, 'SOURCE_REF_UNOWNED');
+    assert.deepEqual(f.storageReads, []);
+    assert.equal(f.scheduled.length, 1, 'unowned progress schedules no retry');
+    assert.equal(f.github.calls.length, githubCalls);
+  });
+}
 
 test('a 500 after verified blob replies checkpoints partial progress instead of repeating the whole window', async t => {
   let requests = 0;

@@ -1,15 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { ActionCtx } from './_generated/server';
+import type { ActionCtx } from './server';
 import type { Id } from './_generated/dataModel';
+import { makeFunctionReference } from 'convex/server';
 import { digest } from '../src/portable-hash';
 import { invariant } from '../src/errors';
 import { r2Config, r2Key, presignGet } from './r2';
 import { storeSourceBytes } from './projectSourceBytes';
 import { SourceIoError, transientSourceStatus } from '../src/hosted-source-io-error';
 
-/** Internal, project-bound content references for durable cursor/task data. The
- * reference carries exact byte pins, so neither storage nor reads need an RPC
- * per object. Existing Convex references remain readable after the cutover. */
+/** Durable cursor/task data. Project-scoped R2 references carry exact byte pins
+ * and need no per-object RPC. Legacy Convex references require an ownership
+ * query against a live project row before any byte read. */
 export function sourceR2Pin(ref: string) {
   const match = /^r2source:([a-f0-9]{64}):(0|[1-9][0-9]*)$/.exec(ref);
   if (!match) return null;
@@ -28,6 +29,11 @@ export function sourceStorage(ctx: ActionCtx, projectId: Id<'hostedProjects'>) {
       const pin = sourceR2Pin(ref);
       if (!pin) {
         invariant(!ref.startsWith('r2source:'), 'SOURCE_HASH_MISMATCH', 'Source storage reference changed.');
+        const owned = await ctx.runQuery(
+          makeFunctionReference<'query'>('projectConvexSourceOwnership:owns'),
+          { projectId, ref },
+        );
+        invariant(owned, 'SOURCE_REF_UNOWNED', 'Durable source reference has no owner in this project.');
         const blob = await ctx.storage.get(ref as Id<'_storage'>);
         invariant(blob, 'SOURCE_UNAVAILABLE', 'Durable source data is absent.');
         return new Uint8Array(await blob.arrayBuffer());

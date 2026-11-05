@@ -45,6 +45,10 @@ failing source step and call, and digest/size context when known. The landing
 check verifies that deployed function dependencies resolve from isolated bundles;
 source import reconciliation includes its parser in the bundle.
 
+Durable source and mirror reads verify legacy file IDs against live project
+ownership before fetching bytes. Unowned references return `SOURCE_REF_UNOWNED`;
+unregistered old continuations need migration. R2 reads add no ownership RPC.
+
 ## Works
 
 Managed CLI installations check accepted Forge main once per process and update
