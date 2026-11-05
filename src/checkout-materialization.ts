@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
-import { existsSync, mkdirSync, statSync, watch } from 'node:fs';
+import { existsSync, mkdirSync, statSync } from 'node:fs';
 import { setMaxListeners } from 'node:events';
 import { homedir, userInfo } from 'node:os';
 import { inTestProcess } from './test-isolation.js';
 import { dirname, join } from 'node:path';
-import { CheckQueue, queueEntries, compareTickets } from './check-queue.js';
+import { acquire } from './checkout-admission.js';
+import { CheckQueue, queueEntries } from './check-queue.js';
 import {
   checkoutIoCapacity,
   checkoutVolumeCapacity,
@@ -25,8 +26,9 @@ export function materializationDirectory(path: string) {
   }
   return join(home, '.cache', 'forge', 'materialization-v2', String(statSync(path).dev));
 }
+type MaterializationPhase = CheckoutIoPhase | 'shared';
 type Job = {
-  phase: CheckoutIoPhase;
+  phase: MaterializationPhase;
   run: () => Promise<unknown>;
   resolve: (value: unknown) => void;
   reject: (error: unknown) => void;
@@ -39,6 +41,8 @@ export async function withCheckoutMaterialization<T>(
   run: () => Promise<T>,
   options: {
     directory?: string;
+    /** Small verified trees share either phase, retaining the same worker ceiling. */
+    cooperative?: () => boolean;
     paths?: string[];
     waited?: (ms: number) => void;
     budget?: (value: { volumeWorkers: number; localWorkers: number }) => void;
@@ -74,7 +78,12 @@ export async function withCheckoutMaterialization<T>(
   };
   const executor: CheckoutIoExecutor = (callback, phase) =>
     new Promise((resolve, reject) => {
-      pending.push({ phase, run: callback, resolve: resolve as (value: unknown) => void, reject });
+      pending.push({
+        phase: options.cooperative?.() === false ? 'shared' : phase,
+        run: callback,
+        resolve: resolve as (value: unknown) => void,
+        reject,
+      });
       mark();
       pump();
     });
@@ -113,7 +122,7 @@ export async function withCheckoutMaterialization<T>(
                 identity: { phase },
               }),
             );
-          if (!(await acquire(queues[i]!, directories[i]!, phase, stop.signal))) return;
+          if (!(await acquire(queues[i]!, directories[i]!, stop.signal))) return;
         }
         let until = performance.now() + 1000;
         while (pending[0]?.phase === phase) {
@@ -162,72 +171,6 @@ export async function withCheckoutMaterialization<T>(
     mark();
   }
 }
-/** Gate contenders retain their bakery ticket while choosing settles. Admission
- * metadata is never fsynced, and ineligible waiters publish no mutex traffic. */
-async function acquire(queue: CheckQueue, directory: string, phase: CheckoutIoPhase, signal: AbortSignal) {
-  const gateDirectory = `${directory}.phase-gate`;
-  mkdirSync(gateDirectory, { recursive: true, mode: 0o700 });
-  let gate: CheckQueue | undefined;
-  const releaseGate = () => {
-    gate?.release();
-    gate = undefined;
-  };
-  const eligible = (entries: ReturnType<typeof queueEntries>) => {
-    if (entries.some(entry => !entry.ticket)) return false;
-    const limit = Math.min(...entries.map(entry => entry.ticket!.limit));
-    if (entries.filter(entry => entry.ticket?.holding).length >= limit) return false;
-    if (entries.some(entry => entry.ticket?.holding && entry.ticket.phase !== phase)) return false;
-    const ordered = entries.sort(compareTickets);
-    const first = ordered.find(entry => !entry.ticket?.holding);
-    return first?.ticket?.phase === phase && ordered.findIndex(entry => entry.path === queue.path) < limit;
-  };
-  const attempt = () => {
-    const entries = queueEntries(directory);
-    // A watcher recheck may already have acquired this exact ticket.
-    if (entries.some(entry => entry.path === queue.path && entry.ticket?.holding)) return true;
-    if (!eligible(entries)) {
-      releaseGate();
-      return false;
-    }
-    gate ??= new CheckQueue(gateDirectory, { limit: 1, serializeAdmission: false });
-    if (!gate.tryAcquire()) return false;
-    try {
-      return eligible(queueEntries(directory)) && queue.tryAcquire();
-    } finally {
-      releaseGate();
-    }
-  };
-  try {
-    while (!signal.aborted && !attempt()) {
-      await new Promise<void>((resolve, reject) => {
-        const watchers = [directory, gateDirectory].map(path => watch(path, () => done()));
-        const timer = setTimeout(() => done(), 1000);
-        const abort = () => done();
-        let finished = false;
-        function done(error?: Error) {
-          if (finished) return;
-          finished = true;
-          clearTimeout(timer);
-          for (const watcher of watchers) watcher.close();
-          signal.removeEventListener('abort', abort);
-          if (error) reject(error);
-          else resolve();
-        }
-        signal.addEventListener('abort', abort, { once: true });
-        for (const watcher of watchers) watcher.once('error', done);
-        try {
-          if (signal.aborted || attempt()) done();
-        } catch (error) {
-          done(error as Error);
-        }
-      });
-    }
-    return !signal.aborted;
-  } finally {
-    releaseGate();
-  }
-}
-
 /** One editing write pass per device preserves filesystem transaction locality.
  * Verification/network preparation remains outside this lease and shares the
  * worker budget. This is a single-writer rule, not a CPU-derived pipeline count. */
@@ -241,27 +184,7 @@ export async function withCheckoutWritePass<T>(
   mkdirSync(directory, { recursive: true, mode: 0o700 });
   const queue = new CheckQueue(directory, { limit: 1, serializeAdmission: false });
   try {
-    while (!queue.tryAcquire()) {
-      await new Promise<void>((resolve, reject) => {
-        const watcher = watch(directory, () => done()),
-          timer = setTimeout(() => done(), 1000);
-        let finished = false;
-        function done(error?: Error) {
-          if (finished) return;
-          finished = true;
-          clearTimeout(timer);
-          watcher.close();
-          if (error) reject(error);
-          else resolve();
-        }
-        watcher.once('error', done);
-        try {
-          if (queue.tryAcquire()) done();
-        } catch (error) {
-          done(error as Error);
-        }
-      });
-    }
+    await acquire(queue, directory);
     options.waited?.(performance.now() - start);
     return await run();
   } finally {

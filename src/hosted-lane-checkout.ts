@@ -18,6 +18,7 @@ import { workLocked } from './work-lock.js';
 import { indexInstalledFiles, writeCheckoutStatIndex } from './checkout-stat-index.js';
 import { withCheckoutOpenMetrics, type CheckoutOpenMetrics } from './checkout-open-metrics.js';
 import { checkoutIo } from './checkout-io.js';
+import { smallCheckout } from './checkout-workload.js';
 import { withCheckoutMaterialization, withCheckoutWritePass } from './checkout-materialization.js';
 import { HostedCheckoutCache, type CheckoutObjectTransport } from './hosted-checkout-cache.js';
 import { machineObjectsDirectory } from './machine-object-store.js';
@@ -146,6 +147,7 @@ async function checkout(
   // Access is checked even on verified cache hits and completed original-operation retries.
   const observed = hostedLaneSelectionSchema.parse(await transport.select(request.laneId));
   identity(observed);
+  let cooperative = true;
   return withCheckoutMaterialization(
     cache.root,
     async () => {
@@ -246,6 +248,7 @@ async function checkout(
       );
       metrics.files = files.length;
       await metrics.measure('cacheVerify', () => cache.ensure(files.map(file => file.blob)));
+      cooperative = !(await checkoutIo(async () => smallCheckout(files, cache.objects)));
       identity(hostedLaneSelectionSchema.parse(await transport.select(request.laneId)));
       await withCheckoutWritePass(
         cache.root,
@@ -353,6 +356,7 @@ async function checkout(
     },
     {
       paths: cache.ioPaths,
+      cooperative: () => cooperative,
       budget: selected => {
         metrics.ioBudget = selected;
       },

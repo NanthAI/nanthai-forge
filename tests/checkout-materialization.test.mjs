@@ -57,36 +57,31 @@ test('unrelated checkout roots on the same device share one volume coordinator',
   }
 });
 
-test('50 opens across ten processes all run, with one shared volume I/O budget', async t => {
-  const root = fixture(t);
-  const results = await Promise.all(Array.from({ length: 10 }, () => worker(t, ['queue', root, '5']).done));
-  for (const result of results) assert.equal(result.code, 0, result.stderr);
-  const events = readFileSync(join(root, 'events'), 'utf8')
-    .trim()
-    .split('\n')
-    .map(line => {
-      const [at, delta, phase] = line.split(' ');
-      return { at: BigInt(at), delta: Number(delta), phase };
-    })
-    .sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : a.delta - b.delta));
-  let active = 0,
-    peak = 0;
-  const phases = new Map();
-  for (const event of events) {
-    phases.set(event.phase, (phases.get(event.phase) || 0) + event.delta);
-    assert(
-      [...phases.values()].filter(count => count > 0).length <= 1,
-      'copy and durability epochs must not overlap',
-    );
-    active += event.delta;
-    peak = Math.max(peak, active);
-    assert(active >= 0 && active <= checkoutVolumeCapacity(), `active=${active}`);
-  }
-  assert.equal(events.length, 100);
-  assert.equal(active, 0);
-  assert(peak >= Math.min(2, checkoutVolumeCapacity()) && peak <= checkoutVolumeCapacity());
-  assert.deepEqual(queueEntries(join(root, 'queue')), []);
-});
+for (const mode of ['queue', 'queue-shared'])
+  test(`50 ${mode} opens across ten processes all run, with one shared volume I/O budget`, async t => {
+    const root = fixture(t);
+    const results = await Promise.all(Array.from({ length: 10 }, () => worker(t, [mode, root, '5']).done));
+    for (const result of results) assert.equal(result.code, 0, result.stderr);
+    const events = readFileSync(join(root, 'events'), 'utf8')
+      .trim()
+      .split('\n')
+      .map(line => {
+        const [at, delta, phase] = line.split(' ');
+        return { at: BigInt(at), delta: Number(delta), phase };
+      })
+      .sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : a.delta - b.delta));
+    let active = 0,
+      peak = 0;
+    for (const event of events) {
+      active += event.delta;
+      peak = Math.max(peak, active);
+      assert(active >= 0 && active <= checkoutVolumeCapacity(), `active=${active}`);
+    }
+    assert.equal(events.length, 100);
+    assert.equal(active, 0);
+    assert(peak >= Math.min(2, checkoutVolumeCapacity()) && peak <= checkoutVolumeCapacity());
+    assert.deepEqual(queueEntries(join(root, 'queue')), []);
+  });
 
 test('a failed pass releases capacity and independent volume queues proceed separately', async t => {
   const root = fixture(t),

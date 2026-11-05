@@ -200,3 +200,12 @@ Markdown-only sync conflicts deterministically (both sides kept, main first;
 edited prose and any code conflict still stop for the agent), records the paths
 in the sync receipt and undo summary, and re-checks them with docs scope. The
 exact-manifest zero-check landing rule and full post-accept main checks remain.
+
+Hosted Lane opens admit FIFO workers across I/O phases without a global phase gate.
+Opens below both the 4,096-file and 16 MiB logical-byte boundaries
+reuse workers across phases after cache verification, retaining the editing
+write-pass lease and
+the shared per-volume worker ceiling, digest checks, independent inodes and
+publication barriers. Cancelled or missing materialization tickets fail explicitly
+instead of waiting indefinitely. Synthetic open qualification is local-only; it
+does not establish a universal latency gain on other filesystems or under load.

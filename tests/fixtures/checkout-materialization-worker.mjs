@@ -15,13 +15,13 @@ if (mode === 'writes') {
     await new Promise(resolve => setTimeout(resolve, 20));
     appendFileSync(join(directory, 'events'), `${process.hrtime.bigint()} -1\n`);
   }, { directory: join(directory, 'queue') });
-} else if (mode === 'queue') {
+} else if (mode === 'queue' || mode === 'queue-shared') {
   await Promise.all(Array.from({ length: Number(count) }, (_, index) =>
     withCheckoutMaterialization(directory, () => checkoutIo(async () => {
       appendFileSync(join(directory, 'events'), `${process.hrtime.bigint()} 1 ${index % 2 ? "durability" : "copy"}\n`);
       await new Promise(resolve => setTimeout(resolve, 20));
       appendFileSync(join(directory, 'events'), `${process.hrtime.bigint()} -1 ${index % 2 ? "durability" : "copy"}\n`);
-    }, index % 2 ? 'durability' : 'copy'), { directory: join(directory, 'queue') }),
+    }, index % 2 ? 'durability' : 'copy'), { directory: join(directory, 'queue'), cooperative: () => mode !== 'queue-shared' }),
   ));
 } else {
   const { request, selection } = JSON.parse(readFileSync(join(directory, 'request.json')));

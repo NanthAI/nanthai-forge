@@ -307,6 +307,25 @@ invalid metadata and other read failures remain explicit.
 
 **Compatibility.** Older JSON journals stay readable. The first indexed write migrates them, and older CLIs then refuse the owner rather than damage it. Never copy `work.json` alone. Use an export, or keep the `records` directory with it.
 
+Hosted Lane opens share a per-user/device worker queue; CPU and network waits hold
+no worker. FIFO bakery admission admits either I/O phase under the same capacity;
+a separate global phase gate no longer stalls free workers behind an incompatible
+phase. Unknown trees and trees exceeding 4,096 files or 16 MiB of logical
+installed bytes keep phase-specific worker batches and a device-wide editing
+write pass for filesystem transaction locality. After verifying the selected
+objects, smaller trees reuse workers across phases. The editing write-pass lease remains
+for every tree: overlapping many small copy/fsync passes can still amplify disk
+contention and delay first completion. They still
+acquire the same shared volume and local worker permits, including cache devices,
+and retain independent verified inodes and every file/directory durability barrier.
+Repeated blobs count once per installed path toward the byte threshold. Cancelled
+or removed worker and write-pass tickets fail with
+`CHECKOUT_QUEUE_CANCELLED` or `CHECKOUT_QUEUE_LOST`; retry uses the original checkout
+operation. No waiting worker survives checkout completion. The local-only
+`scripts/qualify-checkout-open.mjs` harness measures real synthetic opens against an
+explicit retained runtime at 1, 6, 12 and 10 concurrent opens, including slot wait,
+first completion, tail and RSS; it makes no hosted calls.
+
 **Hosting.** `nforge host` reuses owner/key project creation and device CLI authority, then a paged one-time seed, hosted Work initialization and the current derived index. The seed pins source/Work and journal-only recovery inputs before upload, commits bounded validated pages with a durable cursor, and compares hosted native main bytes with the original native digest before selecting main and recording completion. It reuses object upload/R2 transport without invoking exchange push, publication or history completion; retries retain the original snapshot. Seed authority remains pinned to its original mode/epoch, independently of the later authority cutover. Deployment/project bindings and pending operation pins live in an atomically replaced `hosted-binding.json` beside local Work. This transport state does not change Work revisions. Project creation validates the complete autonomy policy, including the optional disjoint fast-path setting; older policies without that field remain readable. Unexpected hosted errors retain a generic client response and log their name, message and stack server-side, without custom error payloads; rejected Convex document payloads are redacted.
 
 **Browser bootstrap.** `projectBootstrap.create` prepares an empty native State,
