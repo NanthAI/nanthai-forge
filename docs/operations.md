@@ -784,6 +784,24 @@ Queue holders and runs record PID plus process start identity. Status, observe, 
 
 Before Lane/check materialization and check execution, Forge probes free space on the owner's filesystem. At ≤5 GB free, receipts include a warning; below 2 GB, preparation refuses with `DISK_LOW` and points to `nforge agent ROOT clean` (dry run). A drop while queued produces a failed run with a structured `error` rather than executing. Configure decimal-GB thresholds with `FORGE_DISK_WARN_GB` and `FORGE_DISK_BLOCK_GB` (non-negative; `0` disables that threshold). Forge never deletes files because of low disk space.
 
+### Agent sandboxes
+
+`nforge` works inside agent sandboxes such as macOS `sandbox-exec` (Codex, Claude Code
+sandbox mode). Every lock, queue ticket and landing worker records
+its PID plus the kernel process start time, so a reused PID never counts as the old
+owner. On macOS that start time comes from setuid `/bin/ps`, which sandboxes refuse to
+exec. When `ps` is refused, Forge reads the same kernel record (`sysctl kern.proc`)
+through `/usr/bin/perl`, which needs no setuid, and formats it exactly like `ps`, so
+identities recorded inside and outside a sandbox compare equal. Linux reads
+`/proc/PID/stat`, which namespace sandboxes normally leave readable. If neither source works, the command fails with
+`PROCESS_IDENTITY_UNAVAILABLE` rather than guessing.
+
+A sandbox profile must allow: exec of `/usr/bin/perl` and `sysctl-read` (macOS), outbound
+network to the hosted service, and writes to the Lane folder, its `ROOT.forge-client`
+folder, `~/.forge` (or `FORGE_CHECK_QUEUE_DIR`), `~/.cache/forge` and the temp directory.
+`tests/sandbox-process-identity.test.mjs` runs the identity paths under a minimal
+`sandbox-exec` profile on macOS.
+
 ### Landing lifecycle drill
 
 Run the Q4 drill from a prepared checkout (Node 24.22.1+, dependencies installed

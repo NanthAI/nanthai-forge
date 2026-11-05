@@ -15,7 +15,7 @@ import {
 } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import { hostname } from 'node:os';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, type ExecFileSyncOptionsWithStringEncoding } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -49,10 +49,38 @@ function kernelStart(pid: number): string | undefined {
           ['-NoProfile', '-NonInteractive', '-Command', `(Get-Process -Id ${pid}).StartTime.ToFileTimeUtc()`],
           options,
         ).trim()
-      : execFileSync('/bin/ps', ['-p', String(pid), '-o', 'lstart='], options).trim();
+      : darwinStart(pid, options);
   } catch {
     return undefined;
   }
+}
+/** Byte-identical to DARWIN_KERNEL_READER in local-process.ts (this file imports only Node). */
+export const LAUNCHER_KERNEL_READER =
+  'my $m=shift;for my $i(@ARGV){my $k=pack("i4",1,14,$m,$i);my $l=pack("Q",0);' +
+  'syscall(202,$k,4,0,$l,0,0)==0 or die;my $n=unpack("Q",$l)+6480;my $b="\\0"x$n;$l=pack("Q",$n);' +
+  'syscall(202,$k,4,$b,$l,0,0)==0 or die;$n=unpack("Q",$l);$n%648==0 or die;' +
+  'for(my $o=0;$o<$n;$o+=648){my $s=unpack("q",substr($b,$o,8));$s>0 or die;' +
+  'printf "%d %d %d\\n",unpack("i",substr($b,$o+40,4)),$s,unpack("C",substr($b,$o+36,1))}}';
+let psRefused = false;
+/** ps lstart; inside a macOS sandbox that refuses setuid ps, the same kernel record via sysctl. */
+function darwinStart(pid: number, options: ExecFileSyncOptionsWithStringEncoding): string | undefined {
+  if (!psRefused)
+    try {
+      return execFileSync('/bin/ps', ['-p', String(pid), '-o', 'lstart='], options).trim();
+    } catch (error) {
+      const { code, status } = error as { code?: unknown; status?: unknown };
+      if (!(status == null && (code === 'EPERM' || code === 'EACCES' || code === 'ENOENT'))) throw error;
+      psRefused = true;
+    }
+  const row = /^(\d+) (\d+) \d+$/.exec(
+    execFileSync('/usr/bin/perl', ['-e', LAUNCHER_KERNEL_READER, '1', String(pid)], options).trim(),
+  );
+  if (!row || Number(row[1]) !== pid) return undefined;
+  const at = new Date(Number(row[2]) * 1000),
+    two = (value: number) => String(value).padStart(2, '0');
+  const day = 'SunMonTueWedThuFriSat'.slice(at.getUTCDay() * 3, at.getUTCDay() * 3 + 3),
+    month = 'JanFebMarAprMayJunJulAugSepOctNovDec'.slice(at.getUTCMonth() * 3, at.getUTCMonth() * 3 + 3);
+  return `${day} ${month} ${String(at.getUTCDate()).padStart(2, ' ')} ${two(at.getUTCHours())}:${two(at.getUTCMinutes())}:${two(at.getUTCSeconds())} ${at.getUTCFullYear()}`;
 }
 let identity: Identity | undefined;
 export function cliProcessIdentity(): Identity {
