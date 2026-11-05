@@ -33,6 +33,12 @@ import type { HostedMain } from './hosted-main.js';
 import { clientCacheRoot } from './root-paths.js';
 import { cliPackageRoot } from './cli-installation.js';
 import { shellQuote } from './agent-brief-render.js';
+import {
+  activeCliCanaryRefusal,
+  cliCanaryPreSwitch,
+  clearCliCanaryRefusal,
+  rememberCanaryClone,
+} from './cli-canary.js';
 
 const sourceSchema = z.object({ url: z.url(), projectId: z.string().min(1) }).strict();
 /** How long a write command waits for a live concurrent updater (a dead one is reclaimed at once).
@@ -104,7 +110,7 @@ export async function cliUpdateRun(cwd: string, args: string[], home?: string) {
   });
 }
 /** Wait for another updater (same installation) instead of refusing; null when still busy. */
-async function updateLock(installation: string, waitMs: number, onWait?: () => void) {
+export async function updateLock(installation: string, waitMs: number, onWait?: () => void) {
   const path = join(installation, 'update-lock');
   let lock = tryHeavySlot(path, 1);
   if (lock || waitMs <= 0) return { lock, waited: false };
@@ -124,6 +130,8 @@ export async function updateCli(
     source: cliReleaseSource(address),
     run: cliUpdateRun,
     migrate: (runner: string) => migrateEditHookRunner(runner),
+    // Every auto-update smoke-tests the new build before the switch (canary, ac9c4ed4).
+    preSwitch: cliCanaryPreSwitch(installation),
   } as {
     source: Pick<ReturnType<typeof cliReleaseSource>, 'current' | 'checkout'>;
     run: typeof cliUpdateRun;
@@ -192,6 +200,15 @@ export async function updateCli(
       'CLI_UPDATE_SOURCE_INVALID',
       'Select the configured Forge release State.',
     );
+    // A waiter does not repeat a canary the updater it waited for just failed on this head.
+    if (waited && !options.rollback) {
+      const refused = activeCliCanaryRefusal(installation, release.head);
+      if (refused)
+        throw new ForgeError(
+          'CLI_CANARY_FAILED',
+          `Pre-switch canary refused build ${release.head.slice(0, 8)}: ${refused.reason}.`,
+        );
+    }
     const build = join(installation, 'builds', release.head);
     if (cliCurrentCommit(installation) === release.head) {
       // Adoption/repair and clearing an explicit pin never perform no-op GC.
@@ -228,12 +245,16 @@ export async function updateCli(
         retireGraceMs: options.retireGraceMs,
       };
       installCliBuild(input);
-      if (!options.rollback) await dependencies.preSwitch?.(build, release.head);
+      // Nothing to fall back on (first install) means nothing to protect: the canary needs a
+      // selected build to keep serving callers when it refuses.
+      if (!options.rollback && cliCurrentCommit(installation))
+        await dependencies.preSwitch?.(build, release.head);
       return activateCliBuild(input);
     };
     const published = async (result: ReturnType<typeof publish>) => {
       const value = await result;
       rmSync(failureMark(installation), { force: true });
+      clearCliCanaryRefusal(installation, release.head);
       return value;
     };
     if (
@@ -351,6 +372,7 @@ export async function cliUpdateCli(args: string[]) {
     }
   }
   const address = root ? hostedAgentAddress(root, {}) : readCliSource(installation);
+  rememberCanaryClone(installation, root);
   invariant(
     address,
     'CLI_UPDATE_SOURCE_REQUIRED',

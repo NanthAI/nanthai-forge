@@ -13,6 +13,13 @@ import {
 import { cliLandingCommand, waitForCliMeasurement } from './cli-measurement-hold.js';
 import { CLI_RUNTIME_WAIT_MS, resolveCliPointer } from './cli-launcher.js';
 import { ForgeError } from './errors.js';
+import {
+  activeCliCanaryRefusal,
+  readCliCanaryRefusal,
+  canaryCloneHint,
+  cliCanaryNotice,
+  rememberCanaryClone,
+} from './cli-canary.js';
 
 /** Cache the promise, including failures, so concurrent callers never repeat discovery. */
 export function cliVersionCheck() {
@@ -80,10 +87,12 @@ export async function startBackgroundCliUpdate(
   installation: string,
   root: string,
   released: string,
+  args: string[] = [],
 ): Promise<'started' | 'running' | 'failed'> {
   const { cliUpdateRunning, cliBackgroundUpdateFailedRecently } = await import('./cli-update.js');
   if (cliUpdateRunning(installation)) return 'running';
   if (cliBackgroundUpdateFailedRecently(installation)) return 'failed';
+  rememberCanaryClone(installation, canaryCloneHint(args));
   const log = openSync(join(installation, 'update.log'), 'w', 0o600);
   try {
     spawn(
@@ -166,6 +175,15 @@ export async function cliStartup(
   // Local diagnostics must remain available without discovery. These handlers
   // call back after their local argument checks and before valid work begins.
   if (!options.validated && cliLocalArgumentsFirst(args)) return true;
+  // Canary child of the updater (ac9c4ed4): this build under test runs one command with no
+  // freshness read and no update, so the check itself adds no release reads or recursion.
+  if (process.env.FORGE_CLI_CANARY && process.env.FORGE_CLI_CANARY === cliBuildCommit(root)) return true;
+  if (args[0] === 'cli') {
+    const { cliManageCli } = await import('./cli-rollback.js');
+    const output = await cliManageCli(args.slice(1));
+    process.stdout.write(`${JSON.stringify(output)}\n`);
+    return false;
+  }
   if (args[0] === 'update') {
     const { cliUpdateCli } = await import('./cli-update.js');
     process.stdout.write(`${JSON.stringify(await cliUpdateCli(args.slice(1)))}\n`);
@@ -197,12 +215,19 @@ export async function cliStartup(
     if (!restoreMain && inheritedVerification(installed, installation)) return true;
     const released = await check(installed, async () => (selected = await source.current()));
     if (released === installed && !restoreMain) return true;
+    // A build the canary refused (or an owner rolled back) never strands anyone: reads and writes
+    // keep running on the working build, with one notice line, until the back-off ends or main moves.
+    const refused = activeCliCanaryRefusal(installation, released);
+    if (refused) {
+      process.stderr.write(`${cliCanaryNotice(installation, refused, installed)}\n`);
+      return true;
+    }
     // Reads never wait for, or fail because of, an install: they run on this complete build while
     // the next one installs beside it. Writes below still run only on main (enforced).
     if (cliReadOnlyCommand(args) && expectedCurrent !== null) {
       const state = existsSync(join(installation, '.freeze'))
         ? 'held by a measurement hold'
-        : await startBackgroundCliUpdate(installation, root, released).then(
+        : await startBackgroundCliUpdate(installation, root, released, args).then(
             started =>
               ({
                 started: 'is installing',
@@ -227,6 +252,7 @@ export async function cliStartup(
     process.stderr.write(
       `Forge CLI is behind main ${released.slice(0, 8)}; installing it, then running your command.\n`,
     );
+    rememberCanaryClone(installation, canaryCloneHint(args));
     const result = await updateCli(installation, address, selected, undefined, {
       expectedCurrent,
       lockWaitMs: CLI_UPDATE_WAIT_MS,
@@ -246,6 +272,14 @@ export async function cliStartup(
     );
     return false;
   } catch (error) {
+    if (error instanceof ForgeError && error.code === 'CLI_CANARY_FAILED') {
+      // The new build failed its smoke test. The previous build is still selected and works.
+      const refusal = readCliCanaryRefusal(installation);
+      process.stderr.write(
+        `${refusal ? cliCanaryNotice(installation, refusal, cliBuildCommit(root)) : error.message}\n`,
+      );
+      return true;
+    }
     if (
       error instanceof ForgeError &&
       ['CLI_UPDATE_FROZEN', 'CLI_UPDATE_SOURCE_REQUIRED'].includes(error.code)

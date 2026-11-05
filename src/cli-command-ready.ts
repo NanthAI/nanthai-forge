@@ -18,6 +18,8 @@ export function cliRuntimeCallbacks(args: string[]) {
 export function prepareCliRuntime(args = process.argv.slice(2)) {
   return (preparation ??= (async () => {
     process.env.UV_THREADPOOL_SIZE ??= '16';
+    // The updater's canary child (ac9c4ed4) never writes hooks or sweeps disk.
+    if (process.env.FORGE_CLI_CANARY) return;
     if (!args.includes('uninstall-hooks') && !args.includes('install-hooks')) {
       const { ensureEditHooks } = await import('./agent-install-hooks.js');
       ensureEditHooks();

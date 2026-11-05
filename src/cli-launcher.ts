@@ -83,7 +83,7 @@ const sleepSync = (ms: number) => Atomics.wait(new Int32Array(new SharedArrayBuf
 /** Resolve `current`/`manager` to its build. Replacing a symlink by rename is atomic for the link,
  * but macOS (APFS) lookups racing that rename can fail with EINVAL for an instant, so a
  * reader retries briefly instead of failing a command at the moment of the switch. */
-export function resolveCliPointer(installation: string, pointer: 'current' | 'manager'): string {
+export function resolveCliPointer(installation: string, pointer: 'current' | 'manager' | 'previous'): string {
   const path = join(installation, pointer);
   for (let attempt = 0; ; attempt++) {
     try {

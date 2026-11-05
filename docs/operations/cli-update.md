@@ -67,7 +67,7 @@ the staged CLI with a synthetic home. Activation has two steps.
 that build is installed but not active, and nothing selects it yet. Then
 `activateCliBuild`, the one switch, atomically replaces the `manager` and `current`
 symlinks under the runtime lock. A pre-switch check (`preSwitch(build, head)` in
-the updater dependencies, reserved for the canary, ac9c4ed4) runs between the
+the updater dependencies; the canary below) runs between the
 two steps. If it throws, the previous build stays selected. A failed transfer,
 dependency install, build, smoke check or pre-switch check preserves the prior
 current. On macOS, a lookup that races the symlink rename can fail with EINVAL
@@ -124,3 +124,43 @@ project-sized buffer. Build time and disk use depend on source and dependencies.
 Synthetic tests assert single-read caching, zero timer work, atomic selection,
 update-then-prune hook validity and protection of live runtimes. Live billed
 usage, platform qualification and installation adoption require release evidence.
+
+## Canary and rollback
+
+A broken build must never strand every agent at once, so each auto-update
+smoke-tests the new build before the switch. The canary runs in `preSwitch`: the build
+is installed but not active, and every caller keeps using `current`. It runs the new
+build's own entry with a hard 20 s limit for all steps together: `--version`, `status ROOT
+--json` on a Forge clone, a `planning` read, and a `wait` on a known finished operation.
+Each step needs exit 0 and a JSON document (agent receipts must name the build under test).
+The clone is the one `nforge update ROOT` or the first update-starting command named
+(`DIR/canary-clone.json`); with none recorded, only the version step runs and the log says
+so. The finished operation comes from the two most recently written Issues (hosted operation
+records expire, so it is re-derived when the stored one is gone). A wait on an operation the
+project no longer knows is skipped and logged, never a refusal; any other wait failure refuses.
+
+The canary adds no hosted call to a normal call: its children skip the freshness read
+(`FORGE_CLI_CANARY=HEAD`, honored only by that exact build), and its own reads (status,
+a 50-item planning page of about 40 KB, one or two planning items, one or two waits) happen once per attempted build. It never writes
+hooks and never writes hosted state: children run with a private `HOME` that is deleted
+afterwards, so the real `~/.claude` and `~/.codex` are unreachable by construction; credentials
+and caches come from the real XDG directories. One log line reports a pass with per-step
+timings.
+
+On any failure (non-zero exit, timeout, bad JSON) the switch is refused, the previous
+build keeps serving every call, and the reason goes to `DIR/canary-refused.json`. The
+refused build is not retried in a loop: the same head waits 10 min, then 20, 40, ... up to
+6 h; a new main is tried at once; a waiter never repeats a canary that just failed. While a
+refusal is active, reads and writes both run on the working build and print one stderr
+line (the first call also names the file and `nforge cli rollback`). The alert goes out
+once per head: that notice plus one ntfy/Cloudflare message through the existing stall-alert
+transport, using `FORGE_ALERT_WEBHOOK_URL` or a private `$XDG_CONFIG_HOME/forge/alert-webhook-url`
+file. The message names the step and exit class only (no URLs, tokens, paths or child output).
+
+Exactly one previous build is kept, the exception to pruning (the one-CLI rule otherwise
+stands; older builds retire as before). `nforge cli rollback [--directory DIR]` switches
+`current` (and `manager`) to it with one atomic rename, makes the build it left the new
+previous, and holds the left head off until main moves; run it again to switch back. It
+makes no network call and no release read, takes the update lock, refuses under a
+measurement hold, and migrates hooks as an update does. An explicit `nforge update`
+installs main even while it is held.

@@ -13,6 +13,7 @@ import {
   withCliLock,
 } from './cli-installation.js';
 import { invariant } from './errors.js';
+import { canonicalRoot } from './root-paths.js';
 import { shellQuote } from './shell-quote.js';
 import type { CliSource } from './cli-update-source.js';
 
@@ -82,6 +83,7 @@ export function activateCliBuild(input: PublishInput) {
       `Measurement hold appeared during the update. Remove ${join(installation, '.freeze')}, then run ${next}.`,
     );
     const previous = cliCurrentCommit(installation);
+    const previousBuild = cliSelectedBuild(installation);
     invariant(
       previous === input.expectedCurrent || previous === head,
       'CLI_UPDATE_CHANGED',
@@ -96,6 +98,9 @@ export function activateCliBuild(input: PublishInput) {
     ensureCliManager(installation, build, !input.rollback);
     durableReplace(join(installation, 'source.json'), JSON.stringify(address));
     selectCliBuild(installation, build);
+    // Exactly one previous build is kept for `nforge cli rollback` (exempt from pruning).
+    if (previousBuild && canonicalRoot(previousBuild) !== canonicalRoot(build))
+      selectCliBuild(installation, previousBuild, 'previous');
     if (input.rollback) durableReplace(join(installation, 'rollback.json'), JSON.stringify({ head }));
     else rmSync(join(installation, 'rollback.json'), { force: true });
     // Old and new runners remain valid until both client settings have migrated.

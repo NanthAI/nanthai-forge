@@ -40,13 +40,22 @@ export function cliBuildCommit(root = cliPackageRoot()): string {
 }
 /** The build a pointer selects, or null when the pointer does not exist. Never follows the link
  * for the existence check, so a lookup racing a switch cannot read as "no selection". */
-export function cliSelectedBuild(installation: string, pointer: 'current' | 'manager' = 'current') {
+export function cliSelectedBuild(
+  installation: string,
+  pointer: 'current' | 'manager' | 'previous' = 'current',
+) {
   try {
     lstatSync(join(installation, pointer));
   } catch {
     return null;
   }
-  return resolveCliPointer(installation, pointer);
+  try {
+    return resolveCliPointer(installation, pointer);
+  } catch (error) {
+    // A previous pointer whose build is gone is just "no previous build".
+    if (pointer === 'previous' && (error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw error;
+  }
 }
 export function stableCliRunner(runner: string) {
   const installation = cliInstallation(dirname(dirname(runner)));
@@ -100,6 +109,8 @@ export function pruneCliBuilds(
   installation = canonicalRoot(installation);
   const current = resolveCliPointer(installation, 'current');
   const manager = cliSelectedBuild(installation, 'manager');
+  // The one rollback build is the single exception to retirement (canary, ac9c4ed4).
+  const previous = cliSelectedBuild(installation, 'previous');
   const permission = join(installation, 'hooks-ready');
   if (!existsSync(permission) || readFileSync(permission, 'utf8') !== cliBuildCommit(current)) return [];
   const directory = join(installation, 'builds');
@@ -140,7 +151,12 @@ export function pruneCliBuilds(
   });
   const now = Date.now();
   const candidates = builds.filter(build => {
-    if (canonicalRoot(build.path) === current || canonicalRoot(build.path) === manager || build.live)
+    if (
+      canonicalRoot(build.path) === current ||
+      canonicalRoot(build.path) === manager ||
+      canonicalRoot(build.path) === previous ||
+      build.live
+    )
       return false;
     if (!legacyUsers || ambiguous) return false;
     if (
@@ -165,7 +181,11 @@ export function pruneCliBuilds(
   if (!candidates.length) return [];
   // Fence: a process that claimed a candidate since the inspection above keeps it.
   const retiring = withCliLock(installation, () => {
-    const selected = [resolveCliPointer(installation, 'current'), cliSelectedBuild(installation, 'manager')];
+    const selected = [
+      resolveCliPointer(installation, 'current'),
+      cliSelectedBuild(installation, 'manager'),
+      cliSelectedBuild(installation, 'previous'),
+    ];
     return candidates.flatMap(build => {
       const users = join(build.path, '.users');
       if (selected.includes(canonicalRoot(build.path))) return [];

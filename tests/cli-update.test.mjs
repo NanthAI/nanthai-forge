@@ -25,6 +25,7 @@ import { withCliRuntimeLock, cliProcessIdentity } from '../dist/cli-launcher.js'
 import { cliUpdateRun } from '../dist/cli-update.js';
 import { cliStartup, cliVersionCheck } from '../dist/cli-version.js';
 import { updateCli } from '../dist/cli-update.js';
+import { publishCliBuild } from '../dist/cli-update-install.js';
 import {
   cliBuildCommit,
   pruneCliBuilds,
@@ -297,15 +298,29 @@ test('successful updater builds and smoke-checks before selection, then migrates
   assert.equal(result.status, 'updated');
   assert.equal(result.cliCommit, b);
   assert.equal(result.undo, `nforge update --directory '${f.installation}' --state ${a}`);
-  // The replaced build stays for the retirement grace (a process may have resolved it just
-  // before the switch); a later prune past the grace removes it.
+  // The replaced build is the one retained previous build (canary rollback target): it is exempt
+  // from pruning while it is `previous`, and is not marked retired.
   assert.deepEqual(result.removed, []);
-  assert.ok(existsSync(join(f.old, '.retired')));
+  assert.equal(existsSync(join(f.old, '.retired')), false);
+  assert.equal(realpathSync(join(f.installation, 'previous')), f.old);
   assert.equal(cliBuildCommit(join(f.installation, 'current')), b);
   assert.deepEqual(
     pruneCliBuilds(f.installation, () => [], 60_000),
     [],
   );
+  // Once another build replaces it as previous, the old one retires after the grace and is removed.
+  const c = 'c'.repeat(64),
+    third = f.build(c);
+  publishCliBuild({
+    installation: f.installation,
+    address,
+    head: c,
+    build: third,
+    expectedCurrent: b,
+    migrate: () => {},
+  });
+  assert.equal(realpathSync(join(f.installation, 'previous')), join(f.installation, 'builds', b));
+  assert.ok(existsSync(join(f.old, '.retired')));
   const past = new Date(Date.now() - 120_000);
   utimesSync(join(f.old, '.retired'), past, past);
   assert.deepEqual(
@@ -437,7 +452,9 @@ test('freshness redispatch preserves stdin already consumed by local argument va
     output = join(f.directory, 'replayed-input');
   writeFileSync(
     join(next, 'dist/cli-entry.js'),
-    `import { readFileSync, writeFileSync } from 'node:fs'; writeFileSync(${JSON.stringify(output)}, readFileSync(0));`,
+    `import { readFileSync, writeFileSync } from 'node:fs';
+if (process.env.FORGE_CLI_CANARY) { process.stdout.write('nforge version synthetic\\n'); process.exit(0); }
+writeFileSync(${JSON.stringify(output)}, readFileSync(0));`,
   );
   const payload = JSON.stringify({ title: "Synthetic quote's", detail: 'first\nsecond', area: 'checks' });
   const code = `
@@ -637,7 +654,11 @@ test('historical selection restores a complete main build before dispatch, with 
   assert.equal(cliBuildCommit(join(f.installation, 'current')), b);
   assert.equal(realpathSync(join(f.installation, 'manager')), main);
   assert.equal(existsSync(join(f.installation, 'rollback.json')), false);
-  assert.ok(existsSync(join(f.old, '.retired')), 'historical build retires after the grace');
+  assert.equal(
+    realpathSync(join(f.installation, 'previous')),
+    f.old,
+    'historical build is the retained previous',
+  );
 });
 
 test('bootstrap leases the manager before its first imported module can race retirement', t => {
