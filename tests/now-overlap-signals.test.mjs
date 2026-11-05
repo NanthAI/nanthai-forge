@@ -175,3 +175,23 @@ test('retained hook inbox publishes twenty newest exact deliveries, ignores unre
   assert.equal(rows[19].file, 'file-5');
   assert.deepEqual(Object.keys(rows[0]).sort(), ['at', 'file', 'lanes', 'noticeId']);
 });
+test('a read-only reader gets the same bounded read; a reader still cannot record an answer', async () => {
+  const s = fixture(3);
+  s.insert('projectReaders', { projectId: s.projectId, reader: 'reader' });
+  const owner = JSON.parse(
+    await s.call('owner', acks.list, { projectId: s.projectId, cursor: null, signals: true }),
+  );
+  const reader = JSON.parse(
+    await s.call('reader', acks.list, { projectId: s.projectId, cursor: null, signals: true }, 'reader'),
+  );
+  assert.deepEqual(reader.signals, owner.signals);
+  assert.equal(reader.page.length, owner.page.length);
+  assert.equal(s.counts.at(-1).writes, 0);
+  const before = s.tables.projectHostedOverlapAcks.size;
+  await assert.rejects(
+    s.call('reader append', acks.append, { projectId: s.projectId, request: '{}' }, 'reader'),
+    error => error.data?.code === 'PROJECT_UNAVAILABLE',
+    'a reader still cannot record an answer',
+  );
+  assert.equal(s.tables.projectHostedOverlapAcks.size, before);
+});

@@ -262,7 +262,7 @@ test('presence hook requests all flat pages and resolves a Lane on page two', as
         'const { useEffect, useMemo, useState } = globalThis.__f4React;',
       )
       .replace(
-        /import \{ useMutation, usePaginatedQuery, useQuery \} from [^;]+;/,
+        /import \{ useMutation, usePaginatedQuery(?:, useQuery)? \} from [^;]+;/,
         'const { useMutation, usePaginatedQuery, useQuery } = globalThis.__f4Convex;',
       );
     const { usePresenceSessions } = await import(

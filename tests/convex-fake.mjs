@@ -102,10 +102,17 @@ export function fakeConvex({ resolve = () => null, collections = {}, generationI
   };
   const execute = entry => {
     stats.executions++;
-    const value =
-      entry.name === 'projectWorkIndex:records'
-        ? page(entry.args, entry.token)
-        : resolve(entry.name, entry.args);
+    let value;
+    entry.error = undefined;
+    try {
+      value =
+        entry.name === 'projectWorkIndex:records'
+          ? page(entry.args, entry.token)
+          : resolve(entry.name, entry.args);
+    } catch (error) {
+      // A refused or failed read: the real client throws it from localQueryResult.
+      entry.error = error;
+    }
     stats.bytes += JSON.stringify(value ?? null).length;
     computed.add(entry.token);
     return value;
@@ -145,7 +152,11 @@ export function fakeConvex({ resolve = () => null, collections = {}, generationI
           }
         };
       },
-      localQueryResult: () => live.get(token)?.value,
+      localQueryResult: () => {
+        const entry = live.get(token);
+        if (entry?.error) throw entry.error;
+        return entry?.value;
+      },
       journal: () => undefined,
     };
   };

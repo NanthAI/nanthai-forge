@@ -5,7 +5,7 @@ import { createContext, useContext, useRef } from 'react';
 import { PendingWrite } from '../pending-write';
 import { activityAt, collapseSessions } from '../../../src/presence';
 import { useEffect, useMemo, useState } from 'react';
-import { useMutation, usePaginatedQuery, useQuery } from 'convex/react';
+import { useMutation, usePaginatedQuery } from 'convex/react';
 import { api } from '../../../convex/_generated/api';
 import type { Id } from '../../../convex/_generated/dataModel';
 import {
@@ -18,6 +18,7 @@ import {
   type Session,
 } from '../coordination-view';
 import { hostedError } from '../snapshot';
+import { useSafeQuery } from '../safe-query';
 import { freshness } from '../ui/status';
 
 import type { DecisionItem, FeedItem } from './attention';
@@ -53,13 +54,26 @@ export function useLiveCoordination(projectId: Id<'hostedProjects'>, enabled: bo
   const recent = usePaginatedQuery(api.projectCoordination.recent, enabled ? { projectId } : 'skip', {
     initialNumItems: 40,
   });
-  const unacked = useQuery(api.projectCoordinationReads.unacked, enabled ? { projectId, limit: 20 } : 'skip');
-  const counts = useQuery(api.projectCoordination.counts, enabled ? { projectId } : 'skip');
-  const claims = useQuery(api.projectCoordinationReads.claims, enabled ? { projectId } : 'skip');
-  const rawAnswers = useQuery(
+  // A refused or failed read degrades its own panel to empty and "incomplete"; it never throws the page.
+  const unacked = useSafeQuery(
+    api.projectCoordinationReads.unacked,
+    enabled ? { projectId, limit: 20 } : 'skip',
+  );
+  const counts = useSafeQuery(api.projectCoordination.counts, enabled ? { projectId } : 'skip');
+  const claims = useSafeQuery(api.projectCoordinationReads.claims, enabled ? { projectId } : 'skip');
+  const answers = useSafeQuery(
     api.projectHostedOverlapAcks.list,
     enabled ? { projectId, cursor: null, signals: true } : 'skip',
   );
+  const rawAnswers = answers.value;
+  const unavailable = [
+    ...(unacked.error ? ['unacked'] : []),
+    ...(counts.error ? ['counts'] : []),
+    ...(claims.error ? ['claims'] : []),
+    ...(answers.error ? ['overlaps'] : []),
+  ];
+  const settled = (read: { value: unknown; error: Error | undefined }) =>
+    read.value !== undefined || read.error !== undefined;
   const overlaps = useMemo(
     () =>
       rawAnswers
@@ -74,7 +88,8 @@ export function useLiveCoordination(projectId: Id<'hostedProjects'>, enabled: bo
   return {
     overlapAnswers: overlaps?.page ?? [],
     overlapSignals: overlaps?.signals,
-    overlapsComplete: overlaps?.isDone !== false && overlaps?.signals?.complete !== false,
+    overlapsComplete: !answers.error && overlaps?.isDone !== false && overlaps?.signals?.complete !== false,
+    unavailable,
     sessions: sessions.results as Session[],
     sessionsLoading: sessions.status !== 'Exhausted',
     sessionsComplete: sessions.status === 'Exhausted',
@@ -88,16 +103,12 @@ export function useLiveCoordination(projectId: Id<'hostedProjects'>, enabled: bo
       loading: recent.status === 'LoadingMore',
       loadMore: () => recent.loadMore(40),
     },
-    unacked: unacked?.items ?? [],
-    unackedComplete: unacked?.complete ?? true,
-    claims: claims?.claims ?? [],
-    ...(counts ? { counts } : {}),
-    initialLoading: unacked === undefined || claims === undefined || rawAnswers === undefined,
-    loading:
-      unacked === undefined ||
-      claims === undefined ||
-      rawAnswers === undefined ||
-      sessions.status !== 'Exhausted',
+    unacked: unacked.value?.items ?? [],
+    unackedComplete: !unacked.error && (unacked.value?.complete ?? true),
+    claims: claims.value?.claims ?? [],
+    ...(counts.value ? { counts: counts.value } : {}),
+    initialLoading: !settled(unacked) || !settled(claims) || !settled(answers),
+    loading: !settled(unacked) || !settled(claims) || !settled(answers) || sessions.status !== 'Exhausted',
   };
 }
 
