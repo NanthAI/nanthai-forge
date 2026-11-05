@@ -71,6 +71,8 @@ export { hostedAgentAddressSchema, type HostedAgentAddress } from './hosted-addr
 export const hostedAgentCapabilitiesSchema = z
   .object({
     landingMessageVersion: z.literal(1).optional(),
+    /** start replies list the other open Lanes on the same Intent (openLanes). */
+    openLanesVersion: z.literal(1).optional(),
     overlapVersion: z.literal(1).optional(),
     overlapEvidenceVersion: z.literal(1).optional(),
     /** Deferred caller outcome/delivery receipts may ride on CLI mutations. */

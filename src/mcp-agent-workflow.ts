@@ -22,11 +22,17 @@ import { readPendingStatus, type PendingStatusOptions } from './pending-status-r
 import { hostedAgentAddress } from './hosted-agent-cli.js';
 import { HostedAgentTransport } from './hosted-agent-transport.js';
 import { registerHostedAgentWorkflow } from './mcp-hosted-agent.js';
+import { agentSessionKey } from './hosted-agent-journal.js';
+import { randomUUID } from 'node:crypto';
 
 export function registerAgentWorkflow(server: McpServer, root: string, hosted?: HostedAgentTransport) {
   const address = hosted ? null : hostedAgentAddress(root, {});
-  if (hosted || address)
-    return registerHostedAgentWorkflow(server, hosted ?? new HostedAgentTransport(root, address!));
+  if (hosted || address) {
+    const transport = hosted ?? new HostedAgentTransport(root, address!);
+    // One MCP server serves one agent session for its life: an identical start replays only here.
+    transport.agentSession ??= agentSessionKey() ?? `mcp:${randomUUID()}`;
+    return registerHostedAgentWorkflow(server, transport);
+  }
   const agent = new AgentWorkflow(root, true);
   registerAgentWait(server, agent.work.store);
   const notifications = overlapNotifications(server, agent.work.store);

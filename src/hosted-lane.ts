@@ -27,6 +27,8 @@ export const hostedIntentInputSchema = z.discriminatedUnion('kind', [
 export const hostedStartSchema = z
   .object({
     noticeVersion: z.literal(1).optional(),
+    /** The client reads openLanes in the reply (capability openLanesVersion); never part of the payload hash. */
+    openLanesVersion: z.literal(1).optional(),
     operationId: z.uuid(),
     authorityEpoch: sourceAuthoritySchema.shape.epoch,
     expectedMain: mainExpectationSchema,
@@ -67,6 +69,20 @@ export const hostedStartResultSchema = z
     intentId: z.uuid(),
     lane: hostedLaneSelectionSchema.nullable(),
     at: z.iso.datetime(),
+    /** Other open Lanes on the same Intent when this start ran, newest first (bounded). */
+    openLanes: z
+      .array(
+        z
+          .object({
+            laneId: z.uuid(),
+            /** Public handle, or null when the account has none. Never an account id or name. */
+            owner: z.string().nullable(),
+            yours: z.boolean(),
+            lastActivityAt: z.iso.datetime(),
+          })
+          .strict(),
+      )
+      .optional(),
   })
   .strict();
 export type HostedStartResult = z.infer<typeof hostedStartResultSchema>;

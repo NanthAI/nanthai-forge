@@ -501,6 +501,66 @@ test('a follow-up start after the Issue landed opens a new Lane; a first start a
   assert.equal(again.operationId, followUp.operationId);
 });
 
+// Incident replay 20b91e86 (issue b6ba9219): two builders on one machine with one account and one clone
+// root ran the identical `start {planningItemId}`; the second got the first builder's open Lane back.
+test('incident replay 20b91e86: an identical start from another agent session opens its own Lane and lists the first', async t => {
+  const { s, item, starts, reads } = plannedStartFixture(t);
+  s.caps.openLanesVersion = 1;
+  // Like the server: each start operation creates its own Lane and, when asked, lists the Issue's other open Lanes.
+  const created = new Map(),
+    mutation = s.exchange.client.mutation;
+  s.exchange.client.mutation = async (ref, args) => {
+    const value = await mutation(ref, args);
+    if (getFunctionName(ref) !== 'projectHostedStart:start') return value;
+    if (!created.has(args.operationId))
+      created.set(args.operationId, {
+        laneId: randomUUID(),
+        openLanes: [...created.values()].map(lane => ({
+          laneId: lane.laneId,
+          owner: 'builder',
+          yours: true,
+          lastActivityAt: '2026-01-01T00:00:00.000Z',
+        })),
+      });
+    const lane = created.get(args.operationId),
+      result = JSON.parse(value);
+    result.lane.laneId = lane.laneId;
+    if (args.openLanesVersion === 1 && lane.openLanes.length) result.openLanes = lane.openLanes;
+    return JSON.stringify(result);
+  };
+  const a = await s.transport('agent-a').dispatch('start', { planningItemId: item.id });
+  const b = await s.transport('agent-b').dispatch('start', { planningItemId: item.id });
+  assert.notEqual(b.operationId, a.operationId, "the second agent never replays the first agent's start");
+  assert.notEqual(b.result.lane.laneId, a.result.lane.laneId);
+  assert.equal(starts().length, 2);
+  assert.equal(starts()[1].args.openLanesVersion, 1);
+  assert.deepEqual(
+    b.result.openLanes.map(lane => [lane.laneId, lane.owner]),
+    [[a.result.lane.laneId, 'builder']],
+    'the second agent sees the first Lane in its reply',
+  );
+  assert.equal(reads().length, 0, 'a first start in each session reads no Lane');
+  // The lost-reply retry in the same session still returns its own Lane and opens none.
+  for (const [session, original] of [
+    ['agent-a', a],
+    ['agent-b', b],
+  ]) {
+    const retry = await s.transport(session).dispatch('start', { planningItemId: item.id });
+    assert.equal(retry.operationId, original.operationId);
+    assert.equal(retry.result.lane.laneId, original.result.lane.laneId);
+    assert.equal(retry.result.previousLane, undefined);
+  }
+  assert.equal(created.size, 2, 'retries opened no Lane');
+  // With no session id, an open Lane another process started is never replayed: a new Lane, and why.
+  const anonymous = await s.transport(null).dispatch('start', { planningItemId: item.id });
+  const again = await s.transport(null).dispatch('start', { planningItemId: item.id });
+  assert.notEqual(again.operationId, anonymous.operationId);
+  assert.equal(again.result.previousLane.laneId, anonymous.result.lane.laneId);
+  assert.match(again.result.previousLane.note, /No agent session id/);
+  assert.equal(again.result.previousLane.unscoped, undefined);
+  assert.equal(reads().length, 2, 'only the two same-session retries read their Lane state');
+});
+
 test('start reads the local registry first and skips the Lane read when this machine saw the Lane end', async t => {
   const { mkdtempSync, rmSync } = await import('node:fs');
   const { tmpdir } = await import('node:os');

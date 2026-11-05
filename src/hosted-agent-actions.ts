@@ -402,6 +402,7 @@ export async function executeHostedAgent(
       return hostedStartSchema.parse({
         operationId,
         ...(session.capabilities.needsFix !== undefined ? { noticeVersion: 1 } : {}),
+        ...(session.capabilities.openLanesVersion === 1 ? { openLanesVersion: 1 } : {}),
         authorityEpoch: epoch,
         expectedMain: { head: main.head, receiptId: main.receipt.id },
         ...((parent?.head ?? command.initialHead)

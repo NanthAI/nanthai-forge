@@ -78,7 +78,7 @@ import { hostedRootLanePath, openHostedRootLane } from './hosted-root-checkout.j
 import { gcNestedLanesHourly } from './client-cache-gc.js';
 import { hostedStartResultSchema } from './hosted-lane.js';
 import { readHostedLaneCheckout } from './hosted-lane-checkout-marker.js';
-import { HostedAgentJournal, hostedAgentRoot } from './hosted-agent-journal.js';
+import { HostedAgentJournal, agentSessionKey, hostedAgentRoot } from './hosted-agent-journal.js';
 import {
   hostedAgentAction,
   hostedAgentAddressSchema,
@@ -195,6 +195,9 @@ export class HostedAgentTransport {
     const current = this.operationContext.getStore();
     if (current) current.id = id;
   }
+  /** The agent session an identical start replays within; undefined reads it from the client
+   * environment (agentSessionKey), null declares none. */
+  agentSession?: string | null;
   /** CLI only: start reports the new Lane before its checkout downloads. */
   onStarted?: (lane: { laneId: string; path: string | null }) => void;
   /** Fires once the local journal selects the operation id, before any network wait:
@@ -479,6 +482,7 @@ export class HostedAgentTransport {
           planningVersion: 1,
           defaultsVersion: 1,
           landingMessageVersion: 1,
+          openLanesVersion: 1,
         };
         for (;;) {
           try {
@@ -495,7 +499,7 @@ export class HostedAgentTransport {
             )
               throw error;
             const field =
-              /extra field\s+[`'"]?(noticeVersion|resolveVersion|overlapVersion|overlapEvidenceVersion|mirrorVersion|metricReceiptVersion|planningVersion|defaultsVersion|landingMessageVersion)\b/i.exec(
+              /extra field\s+[`'"]?(noticeVersion|resolveVersion|overlapVersion|overlapEvidenceVersion|mirrorVersion|metricReceiptVersion|planningVersion|defaultsVersion|landingMessageVersion|openLanesVersion)\b/i.exec(
                 error.message,
               )?.[1];
             // Preserve independently supported features, and never repeat a
@@ -650,9 +654,14 @@ export class HostedAgentTransport {
         action === 'finish' && !replaying ? await reconcileHostedSave(root, this.exchange) : null;
       if (pendingSave)
         return this.response(action, typeof operationId === 'string' ? operationId : null, pendingSave);
+      // An identical start replays only within the agent session that made it (issue b6ba9219).
+      const startSession =
+        action === 'start' && !operationId
+          ? ((this.agentSession === undefined ? agentSessionKey() : this.agentSession) ?? undefined)
+          : undefined;
       const previousStart =
         action === 'start' && !operationId
-          ? await this.closedStart(root, capabilities.actor, command.data)
+          ? await this.closedStart(root, capabilities.actor, command.data, startSession)
           : null;
       // An identical auto-addressed sync whose retained pins this checkout has moved past is new
       // work, never a replay of the old request (local reads only).
@@ -684,6 +693,7 @@ export class HostedAgentTransport {
               command.data,
               operationId as string | undefined,
               previousStart !== null || movedSync,
+              startSession,
             );
       metricOperationId(journal.operationId);
       this.callerOperationId = journal.operationId;
@@ -836,14 +846,18 @@ export class HostedAgentTransport {
           }
         }
         if (planning) result = { ...(result as object), planning };
-        if (action === 'start' && previousStart)
+        if (action === 'start' && previousStart) {
+          const { unscoped, ...previousLane } = previousStart;
           result = {
             ...(result as object),
             previousLane: {
-              ...previousStart,
-              note: `The Lane from your earlier identical start is ${previousStart.state}; this opened a new Lane.`,
+              ...previousLane,
+              note: unscoped
+                ? `An identical start on this machine ran before (${'operationId' in previousStart ? `operation ${previousStart.operationId}` : `Lane ${previousStart.laneId}`}). No agent session id (CLAUDE_CODE_SESSION_ID, CODEX_THREAD_ID or the MCP session) shows it was yours, so this opened a new Lane instead of replaying it; openLanes lists the open ones. To retry a lost start, pass its operationId.`
+                : `The Lane from your earlier identical start is ${previousStart.state}; this opened a new Lane.`,
             },
           };
+        }
       }
       if (action === 'open') {
         const opened = result as { root?: unknown; laneId?: unknown };
@@ -1015,21 +1029,29 @@ export class HostedAgentTransport {
     const frozen = liveLanding(result) || ownsLiveLanding(root);
     return checkpointNudge(root, laneId, this.defaults, unsavedMinutes(root), frozen);
   }
-  /** The finished Lane of an earlier identical `start`, so a follow-up start opens a new Lane instead of
-   * replaying it. null while there is no earlier start, it never produced a Lane, or its Lane is still
-   * open (that replay is the idempotent retry). Local registry first; one Lane read only when an
-   * earlier start exists, so a first start makes no extra call. */
-  private async closedStart(root: string, actor: string, command: unknown) {
-    const previous = HostedAgentJournal.previous(root, this.address, actor, 'start', command);
+  /** The Lane of an earlier identical `start` that this start must not replay. Within one agent
+   * session: its Lane once finished (a follow-up start opens a new Lane), else null while it is open
+   * (that replay is the idempotent retry). Without a session id nothing proves the earlier start was
+   * this agent's, so any earlier Lane is reported and never replayed (no read). Local registry first;
+   * one Lane read only when an earlier same-session start exists, so a first start makes no extra call. */
+  private async closedStart(root: string, actor: string, command: unknown, session: string | undefined) {
+    const previous = HostedAgentJournal.previous(root, this.address, actor, 'start', command, session);
     const laneId = previous?.values['started-lane'];
+    if (previous && session === undefined)
+      return typeof laneId === 'string'
+        ? { laneId, state: readLaneEntry(laneId)?.state ?? 'unknown', unscoped: true }
+        : { laneId: null, operationId: previous.operationId, state: 'unknown', unscoped: true };
     if (typeof laneId !== 'string') return null;
     const local = readLaneEntry(laneId)?.state;
-    if (local) return { laneId, state: local };
+    if (local) return { laneId, state: local, unscoped: false };
     try {
       const lane = await this.query<{ state?: string }>('projectHostedLanes:select', { laneId });
-      return lane.state === 'completed' || lane.state === 'abandoned' ? { laneId, state: lane.state } : null;
+      return lane.state === 'completed' || lane.state === 'abandoned'
+        ? { laneId, state: lane.state, unscoped: false }
+        : null;
     } catch (error) {
-      if (hostedActionError(error, 'start').code === 'NOT_FOUND') return { laneId, state: 'missing' };
+      if (hostedActionError(error, 'start').code === 'NOT_FOUND')
+        return { laneId, state: 'missing', unscoped: false };
       throw error;
     }
   }

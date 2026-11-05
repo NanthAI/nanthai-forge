@@ -12,6 +12,21 @@ import { checkoutPathExists } from './hosted-checkout-files.js';
 import { invariant } from './errors.js';
 import type { HostedAgentAddress } from './hosted-agent-contract.js';
 import { neverIndex } from './forge-disk.js';
+import { turnSessionKey } from './agent-turn-work.js';
+/** The calling agent session: the client's session id (Claude Code, Codex). Undefined when
+ * nothing identifies the session. Only its digest reaches disk. */
+export function agentSessionKey(env: NodeJS.ProcessEnv = process.env) {
+  return turnSessionKey(env);
+}
+/** The auto-address index of an identical request. A session-scoped request (start) replays only
+ * within the agent session that made it; the operation's own identity never includes the session,
+ * so an explicit operationId replays from anywhere. */
+function autoIndex(directory: string, identity: string, session?: string) {
+  return join(
+    directory,
+    `auto-${digest(session === undefined ? identity : canonicalPayload({ identity, session: digest(session) }))}.json`,
+  );
+}
 export function hostedAgentRoot(root: string) {
   let selected = canonicalRoot(root);
   for (;;) {
@@ -72,6 +87,8 @@ export class HostedAgentJournal {
     operationId?: string,
     /** Start a new operation for this identity even though an earlier one is indexed (its work ended). */
     fresh = false,
+    /** Scope the auto-address index to this agent session (start only). */
+    session?: string,
   ) {
     const directory = hostedAgentDirectory(root);
     this.lock = join(directory, 'lock');
@@ -79,7 +96,7 @@ export class HostedAgentJournal {
     // Auto-addressed requests remain replayable even when stdout was lost after
     // the completed receipt was persisted. A fresh UUID explicitly starts new work.
     this.operationId = workLocked(this.lock, () => {
-      const index = join(directory, `auto-${digest(identity)}.json`);
+      const index = autoIndex(directory, identity, session);
       if (operationId) return z.uuid().parse(operationId);
       if (!fresh && checkoutPathExists(index)) return z.uuid().parse(readAgentJson(index));
       const id = randomUUID();
@@ -108,10 +125,11 @@ export class HostedAgentJournal {
     actor: string,
     action: string,
     command: unknown,
+    session?: string,
   ): { operationId: string; values: Record<string, unknown> } | undefined {
     const directory = hostedAgentDirectory(root);
     const identity = canonicalPayload({ root: hostedAgentRoot(root), address, actor, action, command });
-    const index = join(directory, `auto-${digest(identity)}.json`);
+    const index = autoIndex(directory, identity, session);
     if (!checkoutPathExists(index)) return undefined;
     const operationId = z.uuid().parse(readAgentJson(index)),
       path = join(directory, `${operationId}.json`);

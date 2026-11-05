@@ -31,6 +31,7 @@ export const capabilities = query({
     planningVersion: v.optional(v.literal(1)),
     defaultsVersion: v.optional(v.literal(1)),
     landingMessageVersion: v.optional(v.literal(1)),
+    openLanesVersion: v.optional(v.literal(1)),
   },
   returns: v.string(),
   handler: async (
@@ -47,6 +48,7 @@ export const capabilities = query({
       planningVersion,
       defaultsVersion,
       landingMessageVersion,
+      openLanesVersion,
     },
   ) => {
     try {
@@ -58,6 +60,7 @@ export const capabilities = query({
       return canonicalPayload(
         hostedAgentCapabilitiesSchema.parse({
           ...(landingMessageVersion === 1 ? { landingMessageVersion: 1 } : {}),
+          ...(openLanesVersion === 1 ? { openLanesVersion: 1 } : {}),
           ...(overlapVersion === 1 ? { overlapVersion: 1 } : {}),
           ...(overlapEvidenceVersion === 1 ? { overlapEvidenceVersion: 1 } : {}),
           ...(metricReceiptVersion === 1 ? { metricReceiptVersion: 1 } : {}),

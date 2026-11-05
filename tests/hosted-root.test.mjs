@@ -47,6 +47,7 @@ test('second and third Lane use independent paths and locks, retain drafts, repl
   const f = await rootFixture(t);
   await clone(f);
   const agent = new HostedAgentTransport(f.root, f.address, f.exchange);
+  agent.agentSession = 'one-agent-session'; // the identical start below replays within this session
   const first = await agent.dispatch('start', { outcome: 'First' });
   writeFileSync(join(first.result.path, 'draft'), 'keep');
   const [second, third] = await Promise.all([

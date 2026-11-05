@@ -371,7 +371,10 @@ export function agentFixture(t) {
     },
     prepareDownloads: async () => {},
   };
-  const transport = () => new HostedAgentTransport(root, address, exchange);
+  // One agent session (as from CLAUDE_CODE_SESSION_ID), independent of the test runner's environment:
+  // an identical start replays only within one session (issue b6ba9219).
+  const transport = (agentSession = 'fixture-agent-session') =>
+    Object.assign(new HostedAgentTransport(root, address, exchange), { agentSession });
   return {
     root,
     address,

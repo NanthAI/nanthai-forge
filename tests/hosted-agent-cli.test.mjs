@@ -10,6 +10,17 @@ import { ForgeError } from '../dist/errors.js';
 import { agentCli } from '../dist/agent-cli.js';
 import { agentFixture } from './hosted-agent-fixture.mjs';
 const errorCode = expected => error => error.code === expected;
+/** One client session for this test (as Claude Code sets it): an identical start replays only within it. */
+function agentSession(t, id) {
+  const previous = { claude: process.env.CLAUDE_CODE_SESSION_ID, codex: process.env.CODEX_THREAD_ID };
+  process.env.CLAUDE_CODE_SESSION_ID = id;
+  delete process.env.CODEX_THREAD_ID;
+  t.after(() => {
+    if (previous.claude === undefined) delete process.env.CLAUDE_CODE_SESSION_ID;
+    else process.env.CLAUDE_CODE_SESSION_ID = previous.claude;
+    if (previous.codex !== undefined) process.env.CODEX_THREAD_ID = previous.codex;
+  });
+}
 function http(t, s) {
   const previous = process.env.FORGE_AUTH_TOKEN;
   process.env.FORGE_AUTH_TOKEN = 'synthetic-test-credential';
@@ -35,6 +46,7 @@ function http(t, s) {
 test('the actual agent CLI routes explicit hosted addressing before native owner construction and retains the address', async t => {
   const s = agentFixture(t);
   http(t, s);
+  agentSession(t, 'cli-agent-session');
   const first = await agentCli([s.root, 'start', JSON.stringify({ ...s.address, outcome: 'CLI synthetic' })]);
   assert.equal(first.transport, 'hosted');
   assert.equal(first.action, 'start');

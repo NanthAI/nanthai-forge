@@ -19,11 +19,13 @@ import { invariant } from '../src/errors';
 import { report } from './errors';
 import { isStored } from './projectObjectFields';
 import { findObject } from './projectObjectFind';
+import { openSiblingLanes } from './projectHostedStartPeers';
 
 const args = {
   projectId: v.id('hostedProjects'),
   operationId: v.string(),
   noticeVersion: v.optional(v.literal(1)),
+  openLanesVersion: v.optional(v.literal(1)),
   authorityEpoch: v.number(),
   expectedMain: v.object({ head: v.string(), receiptId: v.string() }),
   initialHead: v.optional(v.string()),
@@ -44,6 +46,7 @@ type Input = {
   projectId: Id<'hostedProjects'>;
   operationId: string;
   noticeVersion?: 1;
+  openLanesVersion?: 1;
   authorityEpoch: number;
   expectedMain: { head: string; receiptId: string };
   initialHead?: string;
@@ -55,10 +58,12 @@ type Input = {
     | { kind: 'planned'; intentId: string; outcome: string; constraints?: string };
 };
 
-function startReply(value: unknown, noticeVersion?: 1) {
-  const result = hostedStartResultSchema.parse(value);
-  if (noticeVersion === 1) return result;
-  const { fixBrief: brief, needsFix: notices, ...legacy } = result;
+function startReply(value: unknown, noticeVersion?: 1, openLanesVersion?: 1) {
+  const { openLanes, ...result } = hostedStartResultSchema.parse(value);
+  // Older strict clients reject unknown reply fields: each one is sent only when the client asked.
+  const current = openLanesVersion === 1 && openLanes ? { ...result, openLanes } : result;
+  if (noticeVersion === 1) return current;
+  const { fixBrief: brief, needsFix: notices, ...legacy } = current;
   void brief;
   void notices;
   return legacy;
@@ -78,7 +83,7 @@ async function execute(ctx: MutationCtx, input: Input, action: 'start' | 'intent
     'BAD_ARGUMENT',
     'Send a hosted start with an operation UUID and exact main pins.',
   );
-  const { noticeVersion, ...semanticRequest } = validated.data;
+  const { noticeVersion, openLanesVersion, ...semanticRequest } = validated.data;
   const payload = { action, ...semanticRequest };
   invariant(action === 'start' || payload.intent.kind === 'new', 'BAD_ARGUMENT', 'Create a new Intent.');
   let overlapIntent = payload.intent.kind === 'existing' ? payload.intent.intentId : payload.intent.outcome;
@@ -150,7 +155,7 @@ async function execute(ctx: MutationCtx, input: Input, action: 'start' | 'intent
       'WORK_OPERATION_CHANGED',
       'The original operation did not complete.',
     );
-    return canonicalPayload(startReply(terminal.result, noticeVersion));
+    return canonicalPayload(startReply(terminal.result, noticeVersion, openLanesVersion));
   }
   const main = await hostedStartMain(ctx, projectId);
   invariant(
@@ -259,6 +264,11 @@ async function execute(ctx: MutationCtx, input: Input, action: 'start' | 'intent
       },
     });
   const pendingFixes = needsFix(project);
+  // A new Intent has no other Lanes: no read.
+  const openLanes =
+    lane && (payload.intent.kind === 'existing' || plannedExists)
+      ? await openSiblingLanes(ctx, projectId, intentId, laneId, actor)
+      : [];
   const result = hostedStartResultSchema.parse({
     schema: 1,
     operationId,
@@ -267,6 +277,7 @@ async function execute(ctx: MutationCtx, input: Input, action: 'start' | 'intent
     at: first.at,
     ...(recovery ? { fixBrief: fixBrief(recovery) } : {}),
     ...(pendingFixes.length ? { needsFix: pendingFixes } : {}),
+    ...(openLanes.length ? { openLanes } : {}),
   });
   await finishHostedOperation(ctx, {
     projectId,
@@ -274,7 +285,7 @@ async function execute(ctx: MutationCtx, input: Input, action: 'start' | 'intent
     operationId,
     receipt: { attemptId: first.id, at: first.at, outcome: { status: 'completed', result } },
   });
-  return canonicalPayload(startReply(result, noticeVersion));
+  return canonicalPayload(startReply(result, noticeVersion, openLanesVersion));
 }
 
 export const start = receiptMutation({

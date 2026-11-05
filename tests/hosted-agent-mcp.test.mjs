@@ -43,6 +43,17 @@ function registry(t, s) {
   return tools;
 }
 const body = response => JSON.parse(response.content[0].text);
+/** One client session for this test (as Claude Code sets it): an identical start replays only within it. */
+function agentSession(t, id) {
+  const previous = { claude: process.env.CLAUDE_CODE_SESSION_ID, codex: process.env.CODEX_THREAD_ID };
+  process.env.CLAUDE_CODE_SESSION_ID = id;
+  delete process.env.CODEX_THREAD_ID;
+  t.after(() => {
+    if (previous.claude === undefined) delete process.env.CLAUDE_CODE_SESSION_ID;
+    else process.env.CLAUDE_CODE_SESSION_ID = previous.claude;
+    if (previous.codex !== undefined) process.env.CODEX_THREAD_ID = previous.codex;
+  });
+}
 const parameters = s => ({
   start: { outcome: 'MCP parity' },
   open: { laneId: s.lane.laneId },
@@ -146,6 +157,8 @@ for (const [action, api] of [
       });
     });
     syntheticAuth(t);
+    // The same agent session drives the MCP tool and the CLI (the fixture transport's session).
+    agentSession(t, 'fixture-agent-session');
     const cli = await agentCli([s.root, action, JSON.stringify({ ...s.address, ...input })]);
     assert.equal(
       cli.operationId,

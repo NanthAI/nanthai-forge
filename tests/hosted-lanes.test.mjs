@@ -391,6 +391,58 @@ test('trusted main seeding is insert-only, owner-authorized, and cannot rewind s
   assert.equal(JSON.parse([...s.tables.projectHostedChannels.values()][0].selection).head, nextHead);
 });
 
+// Issue b6ba9219: a start on an Issue others already work on lists their open Lanes (handle only).
+test('a sibling start lists the other open Lanes newest first with public handles, only when asked', async () => {
+  const s = await setup();
+  s.insert('forgeAccounts', { owner: 'owner', handle: 'lead' });
+  s.insert('projectContributors', { projectId: s.projectId, contributor: 'assigned' });
+  const first = await s.begin({ ...s.input(), openLanesVersion: 1 });
+  assert.equal(first.openLanes, undefined, 'a new Intent has no other Lanes and reads none');
+  const intent = JSON.parse(
+    await s.invoke('intent', reads.intent, { projectId: s.projectId, intentId: first.intentId }),
+  );
+  await s.call('assign', {
+    _handler: ctx =>
+      records.writeHostedRecord(ctx, {
+        projectId: s.projectId,
+        actor: 'owner',
+        authorityEpoch: 1,
+        expectedVersion: 0,
+        record: { ...intent, version: 1, assigneeAccountIds: ['assigned'] },
+      }),
+  });
+  const sibling = s.input({ kind: 'existing', intentId: first.intentId });
+  const legacy = await s.begin(sibling);
+  assert.equal(legacy.openLanes, undefined, 'older strict clients never see the new field');
+  const asked = { ...s.input({ kind: 'existing', intentId: first.intentId }), openLanesVersion: 1 };
+  const second = await s.begin(asked);
+  assert.deepEqual(
+    second.openLanes.map(lane => [lane.laneId, lane.owner, lane.yours]),
+    [
+      [legacy.lane.laneId, 'lead', true],
+      [first.lane.laneId, 'lead', true],
+    ],
+  );
+  assert.equal(second.openLanes[0].lastActivityAt, legacy.at);
+  assert.deepEqual(await s.begin(asked), second, 'the replay returns the original list');
+  const theirs = await s.begin(
+    { ...s.input({ kind: 'existing', intentId: first.intentId }), openLanesVersion: 1 },
+    'assigned',
+  );
+  assert.equal(theirs.openLanes.length, 3);
+  assert(theirs.openLanes.every(lane => lane.owner === 'lead' && lane.yours === false));
+  assert(!JSON.stringify(theirs.openLanes).includes('"owner":"owner"'), 'never an account id');
+  // A finished Lane is not listed.
+  const row = [...s.tables.projectHostedRecordHeads.values()].find(h => h.key === first.lane.laneId);
+  s.patch('projectHostedRecordHeads', row._id, { status: 'completed' });
+  const later = await s.begin({
+    ...s.input({ kind: 'existing', intentId: first.intentId }),
+    openLanesVersion: 1,
+  });
+  assert(!later.openLanes.some(lane => lane.laneId === first.lane.laneId));
+  assert.equal(later.openLanes.length, 3);
+});
+
 test('assigned contributors can start siblings; removing assignment revokes their completed retry', async () => {
   const s = await setup(),
     first = await s.begin();
