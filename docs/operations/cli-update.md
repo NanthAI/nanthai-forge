@@ -157,6 +157,24 @@ once per head: that notice plus one ntfy/Cloudflare message through the existing
 transport, using `FORGE_ALERT_WEBHOOK_URL` or a private `$XDG_CONFIG_HOME/forge/alert-webhook-url`
 file. The message names the step and exit class only (no URLs, tokens, paths or child output).
 
+### Server contract (CLI ahead of the deploy)
+
+The CLI switches as soon as main moves; the server of the same State deploys later (minutes on
+the dev mirror, possibly much later for a self-hoster with any CI). So a build never assumes
+server behaviour its server has not advertised. The capability read every hosted command
+already makes names the contract features of `src/hosted-contract-features.ts`
+(`features:[...]`); the server answers with the subset its code implements. A server that
+predates the list rejects the argument, the CLI drops just that field and retries once, and
+it advertises nothing. For each feature not advertised the CLI keeps the old safe behaviour:
+without `planning-put-keeps-omitted`, a put sends the stored kind, title, body, status, links
+and group (one extra planning-item read for a hand-written put; none for start and
+reconcile, which already hold the item). A feature listed in `hostedRequiredFeatures` has no
+fallback: while the server lacks it, every hosted reply carries `serverContract.missing`, and
+the canary **holds** the switch (`step: server-capabilities`, the same back-off, no alert,
+log line `Forge CLI canary held HEAD: the server does not yet advertise ...; next retry after
+HH:MM UTC`). The next attempt after the deploy switches. Add a feature name in the same change
+that implements the behaviour on the server; never rename or reuse one.
+
 Exactly one previous build is kept, the exception to pruning (the one-CLI rule otherwise
 stands; older builds retire as before). `nforge cli rollback [--directory DIR]` switches
 `current` (and `manager`) to it with one atomic rename, makes the build it left the new

@@ -93,6 +93,7 @@ import {
 import { executeHostedAgent, hostedCheckSettings } from './hosted-agent-actions.js';
 import { savedChangedPaths } from './hosted-changed-paths.js';
 import { publishClientSourcePack } from './source-pack-client.js';
+import { hostedContractFeatures, missingRequiredFeatures } from './hosted-contract-features.js';
 import { HostedCheckoutDownloads } from './hosted-checkout-downloads.js';
 import { selectHostedFinish } from './hosted-agent-finish-identity.js';
 import { reconcileHostedSave } from './hosted-save-client.js';
@@ -166,6 +167,9 @@ export type HostedAgentResponse = {
   localLanes?: { idle: unknown[]; pruned: { count: number; bytes: number } };
   /** land --save only: where the submitting process spent its time before submission. */
   landTiming?: LandTiming;
+  /** Present only while the server lacks a contract feature this build cannot do without; the
+   * pre-switch canary holds an update on it (a83b6fd5). */
+  serverContract?: { missing: string[] };
 };
 /** The shared CLI/MCP transport. Source bytes use the existing verified exchange;
  * every dispatch is finite and every mutation is pinned before network IO. */
@@ -185,6 +189,12 @@ export class HostedAgentTransport {
   /** Requester whose deferred receipts this deployment accepts; unset until negotiated. */
   private receiptActor: string | undefined;
   private callerActor: string | null = null;
+  /** Contract features the server advertised on this process's latest capability read (a83b6fd5);
+   * undefined before discovery. The CLI keeps the old safe behaviour for any feature not listed. */
+  private serverFeatures: readonly string[] | undefined;
+  get advertisedFeatures() {
+    return this.serverFeatures;
+  }
   private readonly operationContext = new AsyncLocalStorage<{
     id: string | null;
   }>();
@@ -472,7 +482,9 @@ export class HostedAgentTransport {
         );
       let discovery: unknown;
       try {
-        let options: Record<string, 1> = {
+        let options: Record<string, unknown> = {
+          // Named contract features (a83b6fd5): the reply lists the ones this server implements.
+          features: [...hostedContractFeatures],
           noticeVersion: 1,
           resolveVersion: 1,
           overlapVersion: 1,
@@ -499,7 +511,7 @@ export class HostedAgentTransport {
             )
               throw error;
             const field =
-              /extra field\s+[`'"]?(noticeVersion|resolveVersion|overlapVersion|overlapEvidenceVersion|mirrorVersion|metricReceiptVersion|planningVersion|defaultsVersion|landingMessageVersion|openLanesVersion)\b/i.exec(
+              /extra field\s+[`'"]?(features|noticeVersion|resolveVersion|overlapVersion|overlapEvidenceVersion|mirrorVersion|metricReceiptVersion|planningVersion|defaultsVersion|landingMessageVersion|openLanesVersion)\b/i.exec(
                 error.message,
               )?.[1];
             // Preserve independently supported features, and never repeat a
@@ -525,6 +537,7 @@ export class HostedAgentTransport {
         knownCapabilities(hostedAgentRoot(this.root), discovery),
       );
       this.callerActor = capabilities.actor;
+      this.serverFeatures = capabilities.features ?? [];
       this.receiptActor = capabilities.metricReceiptVersion === 1 ? capabilities.actor : undefined;
       metricRequesterActor({ kind: 'agent', name: capabilities.actor });
       invariant(
@@ -547,6 +560,7 @@ export class HostedAgentTransport {
             address: this.address,
             exchange: this.exchange,
             query: this.query.bind(this),
+            serverFeatures: this.serverFeatures,
             retainOperation: (id: string) => {
               this.callerOperationId ??= id;
             },
@@ -792,6 +806,7 @@ export class HostedAgentTransport {
                 address: this.address,
                 exchange: this.exchange,
                 query: this.query.bind(this),
+                serverFeatures: this.serverFeatures,
               },
               planningItemId,
               journal.operationId,
@@ -994,6 +1009,7 @@ export class HostedAgentTransport {
       await recordHostedOverlapDelivery(this, overlapLaneId, action, advice);
     if (result && typeof result === 'object')
       result = hostedObservationContinuation(this.root, result as Record<string, unknown>);
+    const missing = this.serverFeatures ? missingRequiredFeatures(this.serverFeatures) : [];
     return {
       schema: 1,
       cliCommit: cliBuildCommit(),
@@ -1010,6 +1026,7 @@ export class HostedAgentTransport {
       ...(advice ? (({ changedPaths: _paths, ...shown }) => shown)(advice) : {}),
       ...(notice ? { overlapNotice: notice } : {}),
       ...this.nudge(action, result),
+      ...(missing.length ? { serverContract: { missing } } : {}),
     };
   }
   /** One overlap read per dispatch: a finish gate and its receipt share it. */

@@ -71,6 +71,8 @@ export { hostedAgentAddressSchema, type HostedAgentAddress } from './hosted-addr
 export const hostedAgentCapabilitiesSchema = z
   .object({
     landingMessageVersion: z.literal(1).optional(),
+    /** Contract features the server implements, from the ones the client named (a83b6fd5). */
+    features: z.array(z.string()).optional(),
     /** start replies list the other open Lanes on the same Intent (openLanes). */
     openLanesVersion: z.literal(1).optional(),
     overlapVersion: z.literal(1).optional(),

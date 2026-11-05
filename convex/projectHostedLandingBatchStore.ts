@@ -190,6 +190,9 @@ export async function installBatchAttempt(
     main?: LandingBatch['members'][number]['main'];
     checkOperationId?: string;
     check: NonNullable<LandingBatch['members'][number]['check']>;
+    /** A platform retry of the same generation keeps its reserved receipt, so
+     * groups stacked on (head, receipt) stay valid (ea86f3fb). */
+    keepReceipt?: boolean;
   },
 ) {
   const { original } = input;
@@ -204,7 +207,11 @@ export async function installBatchAttempt(
     ...(input.main ? { main: input.main } : {}),
     operations: {
       ...pins.operations,
-      ...(parent.id !== original.id ? { accept: crypto.randomUUID() } : {}),
+      ...(input.keepReceipt
+        ? { accept: parent.operations.accept }
+        : parent.id !== original.id
+          ? { accept: crypto.randomUUID() }
+          : {}),
       ...(input.checkOperationId ? { check: input.checkOperationId } : {}),
     },
     id: crypto.randomUUID(),

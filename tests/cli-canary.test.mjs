@@ -63,7 +63,9 @@ if (target === step) {
   if (kind === 'badjson') { process.stdout.write('{not json\\n'); process.exit(0); }
   if (kind === 'hang') { writeFileSync(join(installation, 'hang.pid'), String(process.pid)); setInterval(() => {}, 1000); await new Promise(() => {}); }
 }
-const out = value => process.stdout.write(JSON.stringify(value) + '\\n');
+// behind:STEP: the server this build talks to lacks a contract feature the build cannot do without.
+const behind = kind === 'behind' && target === step ? { serverContract: { missing: ['future-feature'] } } : {};
+const out = value => process.stdout.write(JSON.stringify({ ...value, ...behind }) + '\\n');
 if (step === 'version') process.stdout.write('nforge version fake\\n');
 else if (step === 'status') out({ clone: { status: 'current' }, hooks: { status: 'ok' } });
 else if (step === 'planning') out({ schema: 1, cliCommit: head, result: { items: [{ id: 'item-1' }] } });
@@ -258,6 +260,42 @@ test('a good build passes every step once, switches, keeps one previous build an
   assert.deepEqual(calls(f), ['version', 'status', 'planning', 'wait']);
   assert.equal(realpathSync(join(f.installation, 'previous')), join(f.installation, 'builds', b));
   assert.equal(current(f), c);
+  assert.equal(readCliCanaryRefusal(f.installation), null);
+});
+
+test('a server that lacks a feature the build needs holds the switch with the back-off, no alert, until it advertises it (a83b6fd5)', async t => {
+  const f = fixture(t);
+  f.build(b, 'behind:planning');
+  const alerts = [],
+    lines = [];
+  const canary = cliCanaryPreSwitch(f.installation, {
+    home: f.home,
+    alert: async record => alerts.push(record),
+    log: line => lines.push(line),
+  });
+  await assert.rejects(run(f, b, canary), { code: 'CLI_CANARY_FAILED' });
+  assert.equal(current(f), a, 'the previous build keeps serving');
+  const record = readCliCanaryRefusal(f.installation);
+  assert.equal(record.step, 'server-capabilities');
+  assert.match(record.reason, /server does not yet advertise future-feature that this build needs/);
+  assert.equal(record.attempts, 1);
+  assert.equal(record.nextRetryAt - Date.parse(record.at), cliCanaryBackoffMs(1));
+  assert.equal(alerts.length, 0, 'deploy order is not a broken build');
+  assert.match(
+    lines.join('\n'),
+    /Forge CLI canary held bbbbbbbb: the server does not yet advertise future-feature .*previous build stays selected, next retry after \d\d:\d\d UTC \(attempt 1\)\./,
+  );
+  assert.equal(activeCliCanaryRefusal(f.installation, b)?.step, 'server-capabilities');
+  const { cliCanaryNotice } = await import('../dist/cli-canary.js');
+  assert.match(cliCanaryNotice(f.installation, record, a), /was held by its pre-switch canary/);
+  // Still behind after the back-off: held again, the back-off doubles (bounded by its maximum).
+  await assert.rejects(run(f, b, canary), { code: 'CLI_CANARY_FAILED' });
+  assert.equal(readCliCanaryRefusal(f.installation).attempts, 2);
+  assert.equal(alerts.length, 0);
+  // The server's deploy arrives: the next attempt switches and clears the hold.
+  writeFileSync(join(f.installation, 'builds', b, 'mode'), 'ok');
+  assert.equal((await run(f, b, canary)).status, 'updated');
+  assert.equal(current(f), b);
   assert.equal(readCliCanaryRefusal(f.installation), null);
 });
 

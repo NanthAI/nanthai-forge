@@ -51,6 +51,8 @@ npm run model:landing-queue -- cohorthold             # expected: lost release w
 npm run model:landing-queue -- cohorthold-fixed
 npm run model:landing-queue -- lostdispatch           # expected: a lost check dispatch strands the head (a7de3a93)
 npm run model:landing-queue -- lostdispatch-fixed
+npm run model:landing-queue -- retrykeep              # expected: a same-head retry discards dependent checks (ea86f3fb)
+npm run model:landing-queue -- retrykeep-fixed
 ```
 
 An installed JDK is a **development-only** prerequisite. On the development Mac, `java`
@@ -212,6 +214,7 @@ scope limitation; passing TLC does not verify the omitted implementation.
 | `Invalidated`, `Rebase` | `convex/projectHostedLandingPipelineInvalidation.ts:24`, `convex/projectHostedLandingBatchStore.ts:267` | Bounded predecessor closure identifies transitive dependents; an ordinary solo recovery can coexist with a later train. Descendants revert to original selections; independent groups remain. Inactive historical batch bodies are forgotten (the active record slot becomes `idle`); no transition reads their outcome. Entry outcomes/reasons, counts and current-main receipt are retained, and fresh symbolic names prevent record-slot reuse from impersonating any referenced old generation. Generation-bound delayed callbacks stutter; source-job callback validation itself is not proved. |
 | `Check`, `SourceFailure`, `Release`, `Fallback` | `convex/projectHostedLandingBatchCheck.ts:43`, `convex/projectHostedLandingBatchSplit.ts:65`, `convex/projectHostedLandingBatchRelease.ts:16`, `convex/projectHostedLandingBatchFallback.ts:18` | Source retry exhaustion terminalizes its members (`convex/projectHostedLandingBatchFinish.ts:108`). Full check pass/test failure/infrastructure failure; infrastructure retries are exactly 2. Split children are reduced to the existing serial solo fallback for these small cohorts. With `Isolation` (`isolation.cfg`), a failure may name suspects (released, never re-stacked onto) and a group stacked on an unpassed predecessor unstacks once (`src/hosted-landing-suspect.ts`). Larger parallel halves, contract diagnosis and admission-run reuse are not explored. No semantic conflict policy is invented. |
 | standalone retry | `convex/projectHostedLandingCheckRetry.ts:14`, `src/hosted-landing-admission.ts:11` | Same two-retry budget and immutable Candidate proof. Individual provider states, cancellation vs timeout classification and complete shard validation collapse into check outcome. |
+| `Check(g, "infra")` retry keeps receipt and dependents, `StackPinned` | `convex/projectHostedLandingStore.ts` (`retiresSolo` keep pins), `convex/projectHostedLandingPipelineInvalidation.ts` (`keep`), `convex/projectHostedLandingBatchSplit.ts` (`retryLandingBatchCheck`), `convex/projectHostedLandingBatchStore.ts` (`keepReceipt`) | Since ea86f3fb a platform retry re-checks the same base, members and head and keeps its receipt, so groups stacked on that (head, receipt) keep their checks. A stacked group's base is its pending predecessor, not main. A changed predicted head or receipt is `Rebase`/`Unstack`/`Released`, which still invalidate. `StackPinned`: while a predecessor slot reserves a dependent's pinned receipt it predicts the pinned head. |
 | cancel/abandon | `convex/projectHostedLandingCancel.ts:35`, `convex/projectHostedBatchAbandon.ts:35` | One atomic target settlement and peer release; final publication wins or cancellation wins. Abandon discovery pages and Lane lifecycle are hidden. Shared check execution continues independently; only binding authority matters here. |
 | `Claim`, `Publish`, `MoveMain` | `convex/projectHostedLandingControl.ts:293`, `convex/projectHostedLandingBatchPublish.ts:48`, `convex/projectHostedAcceptancePublish.ts:110` | Transactional OCC/CAS is atomic; includes main receipt equality, exact proof and member counters. Policy, contributor access, full shard evidence and registration are assumed validated; this is the automatic agent path, not explicit unchecked owner acceptance (which independently also makes unrestricted literal S2 false). Main contributions are append-only ancestry tokens; legitimate file edits/reverts are outside this property. |
 | `Reuse` | `convex/projectHostedFinishCompose.ts:402`, `convex/projectHostedAcceptancePublish.ts:125`, `convex/projectHostedAcceptancePublish.ts:175`, `src/hosted-cross-head-proof.ts:46` | Eligible owner-agent cross-head proof on disjoint synthetic main change. Analysis/audit eligibility is assumed; original checked result stays different from applied result. `strict.cfg` disables this branch; the default enables it; `reuse-core` explicitly enables it. |
@@ -335,6 +338,22 @@ algorithm drift: changes to these code anchors require manual model review.
    No timer or poll is modelled or added. `tests/hosted-landing-write-outage.test.mjs`
    replays a 20-minute outage against the implementation.
 
+8. **Retry discards dependents (ea86f3fb; incident a7de3a93, fixed).** A platform
+   retry (`interrupted`, `runner-unavailable`) of a check re-checks the same
+   Candidate and receipt, yet it superseded every stacked group: in the incident a
+   batch run with 75 test files passed was cancelled (~74 runner-minutes) and the
+   replacement batch had the identical predecessor head and receipt. `Check(g,
+   "infra")` used to apply `Invalidated(g)` and a `FreshReceipt`; it now keeps both,
+   and the core safety configurations still hold S1/S3/`AuthorizedEvidence`/
+   `UniqueReservations` plus the new `StackPinned` (and S2 in `strict`/`six-slots`).
+   Incidents `retrykeep` (the old discard) violates `KeepsSameHead`;
+   `retrykeep-fixed` keeps the dependent only when the predecessor's predicted
+   generation is unchanged and holds `NoStaleStack` (no live dependent on a stale
+   predecessor), `StackedExact` (none lands on one) and `StackSettles`. Keeping
+   the dependent on every retry instead violates `NoStaleStack`. Replayed in
+   `tests/hosted-landing-retry-keeps-stack.test.mjs` for a solo head, a batch head
+   and a stacked batch.
+
 `isolation.cfg` checks the 51bbbd00 isolation semantics in the core model:
 combined-failure evidence may name suspects (released with the reason, never
 re-stacked onto: `NoStackOnSuspect`), and a group stacked on an unpassed
@@ -358,13 +377,13 @@ or production historical replay is implied.
 
 | Configuration | Generated | Distinct | Java wall time (s) | Result |
 | --- | ---: | ---: | ---: | --- |
-| `small` | 191,567 | 69,393 | 94.046 | Passed |
-| `strict` | 170,707 | 64,056 | 122.612 | Passed |
-| `races` | 91,367 | 29,151 | 22.937 | Passed |
+| `small` | 60,565 | 22,509 | 64.737 | Passed |
+| `strict` | 55,453 | 21,582 | 69.097 | Passed |
+| `races` | 46,296 | 15,030 | 20.940 | Passed |
 | `submission` | 957,613 | 306,753 | 363.927 | Passed |
-| `six-slots` | 3,655 | 3,655 | 9.027 | Passed |
+| `six-slots` | 3,655 | 3,655 | 1017.262 | Passed |
 | `reuse-core` | 205 | 115 | 0.830 | Expected S2 |
-| `isolation` | 415,924 | 107,090 | 290.953 | Passed |
+| `isolation` | 123,429 | 33,252 | 119.388 | Passed |
 | `wait` | 4 | 4 | 0.695 | Expected FreshTerminal |
 | `wait-fixed` | 4 | 4 | 0.758 | Passed |
 | `cohort` | 6 | 6 | 0.562 | Expected NoOrphanConflict |
@@ -391,7 +410,11 @@ or production historical replay is implied.
 | `prequeue-cohort-mixed` | 620 | 278 | 1.476 | Passed |
 | `prequeue-cohort-before` | 306 | 199 | 2.015 | Expected NoEarlyCohort |
 | `prequeue-hold-order` | 123,398 | 58,527 | 496.188 | Expected liveness violation |
+| `retrykeep` | 5 | 5 | 0.677 | Expected KeepsSameHead |
+| `retrykeep-fixed` | 15 | 15 | 0.548 | Passed; same-head and changed-head retries |
 
 All 18 configurations matched their expected outcomes on the registered Java 25.0.3 JDK (2026-11-05, Lane fefd80ee). The seven `prequeue` rows and every `LandingQueue` configuration were then re-run on the spec composed with that change (2026-11-05, Issue e7d27937): all matched, and the non-`prequeue` state counts were unchanged. The `prequeue` rows are from that run. The six positive queue configurations fully exhausted their state graphs; the negative cases stopped at the named counterexample. The default remained below five minutes (94.046 s); `isolation` took 290.953 s. The six cohort-hold rows were added with Issue 10b0a94b (2026-11-05, Lane 2881e6cc). With `Hold = "none"` the `prequeue` and `small` counts were re-run and unchanged. `prequeue-cohort` and `prequeue-cohort-mixed` use `MoveBound = 0`: queue publications move main, which is what refuses the Lane proofs. With one extra external move, `prequeue-cohort` had not finished after 18 minutes and is not counted. `prequeue-hold-order` keeps that move.
+
+With ea86f3fb (2026-11-05, Lane c1759651) `small`, `strict`, `races`, `six-slots` and `isolation` were re-run with `StackPinned`; their rows are from that run. A platform retry no longer branches into invalidation, so `small`, `strict`, `races` and `isolation` explore fewer states. `six-slots` has no platform outcome and kept its count; its wall time on current main is ~17 min (an unmodified copy of the main model ran at the same rate, friction filed). The other rows predate this change.
 
 Incomplete calibration explorations with allocation-history counters and arbitrary three-entry admission interleavings reached the five-minute limit and were not counted as passing checks. The delivered configurations use fresh symbolic names and the admission bounds described above; those incomplete variants are not a proof of broader bounds. No live provider replay, full six-incident historical replay, or proof of the source merge/fence implementation was performed. Peak resident memory was not measured; the Java heap was limited to 2 GiB. Disk stayed above the 40 GB reserve.

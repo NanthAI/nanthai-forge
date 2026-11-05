@@ -54,6 +54,8 @@ if (config === 'all') {
     'cohorthold-fixed',
     'lostdispatch',
     'lostdispatch-fixed',
+    'retrykeep',
+    'retrykeep-fixed',
   ]) {
     const code = await new Promise((resolve, reject) => {
       const child = spawn(process.execPath, [fileURLToPath(import.meta.url), name], { stdio: 'inherit' });

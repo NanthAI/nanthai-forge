@@ -16,13 +16,17 @@ type PipelineStore = Pick<
 
 /** Retire only descendants of this generation. Restore each original selection
  * as a new immutable deferred attempt; late source/check callbacks cannot land
- * the discarded stack. All work is bounded by configured width * cohort size. */
+ * the discarded stack. All work is bounded by configured width * cohort size.
+ * `keep` is the new generation's predicted head and receipt (a platform retry
+ * of the same Candidate, ea86f3fb): direct dependents pinned to exactly that
+ * pair stay, with their checks. Publication still compares the pins. */
 async function invalidatePipelineOnce(
   ctx: MutationCtx,
   input: BatchIdentity,
   batch: { members: { submissionId: string }[] },
   store: PipelineStore,
   retireMembers = false,
+  keep?: { head: string; receiptId: string },
 ) {
   const { loadLanding, loadLandingAttempt, insertLandingAttempt, writeLanding } = store;
   const queue = await landingQueue(ctx, { projectId: input.projectId, channel: 'main' });
@@ -45,7 +49,15 @@ async function invalidatePipelineOnce(
     )
       continue;
     const descendant = await loadBatch(ctx, { projectId: input.projectId, batchId: current.state.batchId });
-    if (!descendant.batch.predecessor || !invalid.has(descendant.batch.predecessor.submissionId)) continue;
+    const pinned = descendant.batch.predecessor;
+    if (!pinned || !invalid.has(pinned.submissionId)) continue;
+    if (
+      keep &&
+      pinned.head === keep.head &&
+      pinned.receiptId === keep.receiptId &&
+      batch.members.some(member => member.submissionId === pinned.submissionId)
+    )
+      continue;
     retired.add(descendant.batch.id);
     for (const member of descendant.batch.members) {
       invalid.add(member.submissionId);

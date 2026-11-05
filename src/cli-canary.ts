@@ -42,6 +42,8 @@ export type CanaryRefusal = {
   noticed?: boolean;
 };
 type CloneRecord = { root: string; operationId?: string };
+/** The canary step name of a hold for a server that is behind the build (not a broken build). */
+export const SERVER_BEHIND_STEP = 'server-capabilities';
 
 function readJson<T>(path: string): T | null {
   try {
@@ -143,6 +145,7 @@ function runChild(
 /** The last JSON document on stdout (a wait prints a status line before it). */
 type Doc = {
   error?: unknown;
+  serverContract?: { missing?: unknown };
   clone?: unknown;
   cliCommit?: unknown;
   result?: { items?: { id?: unknown; at?: unknown; kind?: unknown }[]; item?: { operationId?: unknown } };
@@ -217,6 +220,17 @@ export async function runCliCanary(input: CanaryInput): Promise<CanaryResult> {
       throw new CanaryFailure(name, `canary step ${name} returned an error document`);
     if (json.cliCommit !== undefined && json.cliCommit !== head)
       throw new CanaryFailure(name, `canary step ${name} ran a different build than ${head.slice(0, 8)}`);
+    // The new build names server contract features it cannot do without (a83b6fd5): hold the switch
+    // until the server it talks to advertises them, typically until its Convex deploy finishes.
+    const missing = json.serverContract?.missing;
+    if (Array.isArray(missing) && missing.length)
+      throw new CanaryFailure(
+        SERVER_BEHIND_STEP,
+        `the server does not yet advertise ${missing
+          .slice(0, 5)
+          .map(feature => String(feature).slice(0, 80))
+          .join(', ')} that this build needs (its deploy has not reached this server)`,
+      );
     return json;
   };
   let operationId: string | undefined;
@@ -324,7 +338,7 @@ export function cliCanaryNotice(installation: string, record: CanaryRefusal, run
   const retry = record.hold
     ? 'held until main moves (explicit rollback)'
     : `next retry after ${clock(record.nextRetryAt)}`;
-  const head = `Forge CLI main ${record.head.slice(0, 8)} was ${record.hold ? 'rolled back' : 'refused by its pre-switch canary'}`;
+  const head = `Forge CLI main ${record.head.slice(0, 8)} was ${record.hold ? 'rolled back' : record.step === SERVER_BEHIND_STEP ? 'held by its pre-switch canary' : 'refused by its pre-switch canary'}`;
   return (
     `${head} (${record.reason}); running on ${runningOn.slice(0, 8)}, ${retry}.` +
     (first
@@ -416,10 +430,14 @@ export const cliCanaryPreSwitch =
         ...(same?.noticed && same.reason === (failure?.message ?? '') ? { noticed: true } : {}),
       };
       writeCliCanaryRefusal(installation, record);
+      const behind = record.step === SERVER_BEHIND_STEP;
       log(
-        `Forge CLI canary refused ${head.slice(0, 8)}: ${record.reason}; the previous build stays selected.`,
+        behind
+          ? `Forge CLI canary held ${head.slice(0, 8)}: ${record.reason}; the previous build stays selected, next retry after ${clock(record.nextRetryAt)} (attempt ${attempts}).`
+          : `Forge CLI canary refused ${head.slice(0, 8)}: ${record.reason}; the previous build stays selected.`,
       );
-      if (!record.alerted) {
+      // A server that is behind is the normal deploy order, not a broken build: no alert.
+      if (!record.alerted && !behind) {
         // Alert once per head, before the throw, and only ever once even if delivery failed.
         writeCliCanaryRefusal(installation, { ...record, alerted: true });
         await Promise.race([

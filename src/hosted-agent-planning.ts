@@ -14,6 +14,8 @@ import type { PlanningItem, PlanningWrite } from './work-planning-types.js';
  * indexed reads and the existing owner `projectWorkActions:command`; it adds no storage. */
 export type PlanningPort = Pick<HostedAgentSession, 'query' | 'address' | 'exchange' | 'root'> & {
   retainOperation?: (id: string) => void;
+  /** Contract features the server advertised (a83b6fd5); unknown means none. */
+  serverFeatures?: readonly string[];
 };
 type Workspace = {
   generationId: string;
@@ -116,14 +118,54 @@ function decode(cursor: string | null, ws: Workspace): string | null {
 const encode = (ws: Workspace, cursor: string) =>
   cursorPrefix + Buffer.from(JSON.stringify({ generationId: ws.generationId, cursor })).toString('base64url');
 
+/** The put a server can apply safely (a83b6fd5). A server that does not advertise
+ * planning-put-keeps-omitted (deployed before c0255160) needs kind and title and turns an omitted
+ * body into "", status into open, links into [] and group into none; it gets the stored values for
+ * every field the put omits (an explicit null group becomes an omitted one). One detail read on
+ * that path only, none when the caller already holds the stored item; the result is retained so a
+ * replay sends the same command. */
+async function compatiblePut(
+  port: PlanningPort,
+  command: PlanningWrite,
+  journal?: HostedAgentJournal,
+  stored?: PlanningItem,
+): Promise<PlanningWrite> {
+  if (command.action !== 'put-planning-item' || port.serverFeatures?.includes('planning-put-keeps-omitted'))
+    return command;
+  const fill = async (): Promise<PlanningWrite> => {
+    const { initiativeId, ...rest } = command;
+    if (command.expectedVersion === 0) return { ...rest, ...(initiativeId ? { initiativeId } : {}) };
+    const item = stored ?? (await fullItem(port, await workspace(port), command.itemId));
+    invariant(item, 'NOT_FOUND', 'Planning item not found.');
+    invariant(
+      item.version === command.expectedVersion,
+      'PLANNING_CHANGED',
+      `The planning item is at version ${item.version}, not ${command.expectedVersion}. Read it again.`,
+    );
+    const group = initiativeId === null ? undefined : (initiativeId ?? item.initiativeId);
+    return {
+      ...rest,
+      kind: command.kind ?? item.kind,
+      title: command.title ?? item.title,
+      body: command.body ?? item.body,
+      status: command.status ?? item.status,
+      intentIds: command.intentIds ?? item.intentIds,
+      ...(group ? { initiativeId: group } : {}),
+    };
+  };
+  return journal ? journal.retain('planning-compatible-put', fill) : fill();
+}
+
 /** Writes carry the original operation; a stale or moved Work revision is retried a few times with
  * the revision each attempt used retained, so a lost reply replays instead of repeating. */
 async function writePlanning(
   port: PlanningPort,
-  command: PlanningWrite,
+  request: PlanningWrite,
   journal?: HostedAgentJournal,
   hints?: { likelyDuplicates?: unknown },
+  stored?: PlanningItem,
 ) {
+  const command = await compatiblePut(port, request, journal, stored);
   for (let attempt = 0; ; attempt++) {
     const observe = async () => {
       const ws = await workspace(
@@ -171,7 +213,8 @@ const putFrom = (
   operationId,
   itemId: item.id,
   expectedVersion: item.version,
-  // Status only: the server keeps the stored title, body, links and group.
+  // Status only: the server keeps the stored title, body, links and group (older servers get the
+  // stored fields from compatiblePut).
   status,
   ...(reason === undefined ? {} : { reason }),
 });
@@ -219,6 +262,9 @@ async function reconcile(
       await writePlanning(
         port,
         putFrom(item, uuidFrom(`${item.id}:${item.version}:${status}`), status, reason),
+        undefined,
+        undefined,
+        item,
       );
       changed.push({
         id: item.id,
@@ -430,7 +476,13 @@ export async function markPlanningStarted(port: PlanningPort, itemId: string, st
         error: { code: 'NOT_FOUND', message: 'Planning item not found.' },
       };
     if (item.status === 'in-progress') return { updated: false, status: item.status };
-    await writePlanning(port, putFrom(item, uuidFrom(`${startOperationId}:planning-start`), 'in-progress'));
+    await writePlanning(
+      port,
+      putFrom(item, uuidFrom(`${startOperationId}:planning-start`), 'in-progress'),
+      undefined,
+      undefined,
+      item,
+    );
     return { updated: true, status: 'in-progress', version: item.version + 1 };
   } catch (error) {
     const safe = hostedActionError(error, 'planning start');

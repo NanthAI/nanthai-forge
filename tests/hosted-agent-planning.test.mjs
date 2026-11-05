@@ -11,6 +11,9 @@ import { moduleUrl } from './convex-module.mjs';
 import { executeHostedPlanning, plannedIntent, markPlanningStarted } from '../dist/hosted-agent-planning.js';
 import { hostedAgentCommandSchemas, hostedAgentActions } from '../dist/hosted-agent-contract.js';
 import { HostedAgentTransport } from '../dist/hosted-agent-transport.js';
+import { hostedContractFeatures } from '../dist/hosted-contract-features.js';
+import { z } from 'zod';
+import { ConvexError } from 'convex/values';
 
 const index = await import(moduleUrl('../convex/projectWorkIndex.ts'));
 const actions = await import(moduleUrl('../convex/projectWorkActions.ts'));
@@ -18,8 +21,9 @@ const search = await import(moduleUrl('../convex/projectHostedPlanningSearch.ts'
 const code = expected => error => (error.data?.code ?? error.code) === expected;
 
 /** The agent's port over the real Convex handlers; Intent states are the one stub (tested with
- * the Convex lanes fixture). Counts every Convex call the agent makes. */
-function port(s, states = new Map()) {
+ * the Convex lanes fixture). Counts every Convex call the agent makes. The real handlers keep
+ * omitted put fields, so the port advertises that by default, as the transport does after discovery. */
+function port(s, states = new Map(), serverFeatures = [...hostedContractFeatures]) {
   installPlanningSearch(s);
   const calls = [];
   let intercept;
@@ -55,8 +59,40 @@ function port(s, states = new Map()) {
       return typeof value === 'string' ? JSON.parse(value) : value;
     },
     intercept: fn => (intercept = fn),
+    serverFeatures,
   };
   return result;
+}
+
+/** The put schema of the server deployed before c0255160 (State 45c971d5), verbatim: kind and
+ * title required; an omitted body became "", status open, links [] and group none. */
+const previousServerPut = z.object({
+  action: z.literal('put-planning-item'),
+  operationId: z.string().uuid(),
+  itemId: z.string().uuid(),
+  expectedVersion: z.number().int().nonnegative().default(0),
+  kind: z.enum(['issue', 'initiative']),
+  title: z.string().trim().min(1),
+  body: z.string().default(''),
+  status: z.enum(['proposed', 'open', 'in-progress', 'closed', 'abandoned']).default('open'),
+  reason: z.string().optional(),
+  intentIds: z.array(z.string().uuid()).default([]),
+  initiativeId: z.string().uuid().optional(),
+});
+/** Make the fixture's real handlers apply a put exactly as that previous server did: every field
+ * explicit (null group = cleared), or the same schema refusal. Comments are unchanged. */
+function previousServer(p) {
+  const seen = [];
+  p.intercept(async args => {
+    const command = JSON.parse(args.command);
+    seen.push(command);
+    if (command.action !== 'put-planning-item') return;
+    const parsed = previousServerPut.safeParse(command);
+    if (!parsed.success)
+      throw new ConvexError({ code: 'BAD_ARGUMENT', message: 'Invalid planning command.' });
+    args.command = JSON.stringify({ ...parsed.data, initiativeId: parsed.data.initiativeId ?? null });
+  });
+  return seen;
 }
 const run = (p, action, input, operationId) =>
   executeHostedPlanning(p, 'owner', action, hostedAgentCommandSchemas[action].parse(input), operationId);
@@ -182,6 +218,104 @@ test('a put keeps every stored field it omits; clearing needs an explicit empty 
   p.calls.length = 0;
   await assert.rejects(put(p, { body: 'orphan' }), code('BAD_ARGUMENT'));
   assert.deepEqual(p.calls, []);
+});
+
+test('new CLI against the previous server (no planning-put-keeps-omitted): a put keeps the body and every stored field (a83b6fd5)', async t => {
+  const s = await setup(t);
+  const body = 'Found it.\n\nDone when:\n- [ ] the body survives the deploy gap';
+  const seed = port(s);
+  const initiative = (await put(seed, { kind: 'initiative', title: 'Phase 6' })).result.itemId;
+  const created = async title =>
+    (await put(seed, { kind: 'issue', title, body, status: 'proposed', initiativeId: initiative })).result
+      .itemId;
+  const stored = async id => (await list(seed, { id, reconcile: false })).item;
+
+  // The gap the Issue describes: a CLI that assumes the new semantics against the previous server.
+  const assuming = port(s);
+  previousServer(assuming);
+  const wiped = await created('Assumed');
+  await assert.rejects(
+    put(assuming, { itemId: wiped, expectedVersion: 1, status: 'open' }),
+    code('BAD_ARGUMENT'),
+  );
+  await put(assuming, { itemId: wiped, expectedVersion: 1, kind: 'issue', title: 'Assumed', status: 'open' });
+  const lost = await stored(wiped);
+  assert.deepEqual(
+    [lost.body, lost.initiativeId ?? null],
+    ['', null],
+    'the previous server wipes what is omitted',
+  );
+
+  // The CLI as built: the server did not advertise the feature, so it sends the stored fields.
+  const p = port(s, new Map(), []);
+  const sent = previousServer(p);
+  const issue = await created('Keep me');
+  p.calls.length = 0;
+  const moved = await put(p, { itemId: issue, expectedVersion: 1, status: 'open', reason: 'triaged' });
+  assert.equal(moved.result.status, 'open');
+  // One detail read more than the new server, on this path only.
+  assert.deepEqual(p.calls, [
+    'projectWorkIndex:workspace',
+    'projectWorkIndex:detail',
+    'projectWorkIndex:workspace',
+    'projectWorkActions:command',
+  ]);
+  assert.deepEqual(
+    (({ kind, title, body: sentBody, status, intentIds, initiativeId, reason }) => ({
+      kind,
+      title,
+      sentBody,
+      status,
+      intentIds,
+      initiativeId,
+      reason,
+    }))(sent.at(-1)),
+    {
+      kind: 'issue',
+      title: 'Keep me',
+      sentBody: body,
+      status: 'open',
+      intentIds: [],
+      initiativeId: initiative,
+      reason: 'triaged',
+    },
+  );
+  let item = await stored(issue);
+  assert.deepEqual(
+    [item.title, item.body, item.status, item.initiativeId, item.version],
+    ['Keep me', body, 'open', initiative, 2],
+  );
+  // Title-only and body-only puts keep the rest too; an explicit null group still clears it.
+  await put(p, { itemId: issue, expectedVersion: 2, title: 'Renamed' });
+  await put(p, { itemId: issue, expectedVersion: 3, initiativeId: null });
+  item = await stored(issue);
+  assert.deepEqual(
+    [item.title, item.body, item.status, item.initiativeId ?? null],
+    ['Renamed', body, 'open', null],
+  );
+  // A stale version is refused before anything is sent.
+  const before = sent.length;
+  await assert.rejects(
+    put(p, { itemId: issue, expectedVersion: 2, status: 'closed' }),
+    code('PLANNING_CHANGED'),
+  );
+  assert.equal(sent.length, before);
+  // Start and reconcile already hold the stored item: same calls as on the new server, body kept.
+  const started = await created('Started');
+  p.calls.length = 0;
+  assert.equal((await markPlanningStarted(p, started, randomUUID())).updated, true);
+  assert.deepEqual(p.calls, [
+    'projectWorkIndex:workspace',
+    'projectWorkIndex:detail',
+    'projectWorkIndex:workspace',
+    'projectWorkActions:command',
+  ]);
+  item = await stored(started);
+  assert.deepEqual([item.status, item.body, item.initiativeId], ['in-progress', body, initiative]);
+  // Creating needs no stored read.
+  p.calls.length = 0;
+  await put(p, { kind: 'issue', title: 'New', initiativeId: null });
+  assert.deepEqual(p.calls, ['projectWorkIndex:workspace', 'projectWorkActions:command']);
 });
 
 test('searching by an 8-character id or a full UUID returns that item first, then text mentions', async t => {
@@ -430,7 +564,7 @@ test('a 100-item backlog reads in three Convex calls and idle reads nothing', as
   assert.equal(p.calls.length, idle);
 });
 
-function transport(s, { planning }) {
+function transport(s, { planning, features = false }) {
   const p = port(s),
     seen = [];
   const capabilities = JSON.stringify({
@@ -454,7 +588,16 @@ function transport(s, { planning }) {
       // A released server rejects arguments it does not know, one named field at a time.
       if (!planning && 'planningVersion' in args)
         throw new Error('ArgumentValidationError: Object contains extra field `planningVersion`');
-      return capabilities;
+      if (!features && 'features' in args)
+        throw new Error(
+          'ArgumentValidationError: Object contains extra field `features` that is not in the validator.',
+        );
+      return features
+        ? JSON.stringify({
+            ...JSON.parse(capabilities),
+            features: args.features.filter(name => features.includes(name)),
+          })
+        : capabilities;
     }
     return query(ref, args);
   };
@@ -498,6 +641,52 @@ test('the transport serves planning actions from the advertised capability and t
   });
   // The released server's argument error removed only the new field, and nothing was written.
   assert(old.seen.length === 1 || !old.seen.at(-1).includes('planningVersion'));
+});
+
+test('new CLI vs previous server through the transport: the capability read drops only `features`, and a status-only put keeps the body (a83b6fd5)', async t => {
+  const s = await setup(t);
+  const body = 'Body that must survive';
+  const created = await transport(s, {
+    planning: true,
+    features: ['planning-put-keeps-omitted'],
+  }).transport.dispatch('put-planning-item', { kind: 'issue', title: 'Gap', body });
+  const itemId = created.result.itemId;
+  // Previous server: rejects the features argument and applies puts with the old defaults.
+  const old = transport(s, { planning: true });
+  const sent = previousServer(old.p);
+  const moved = await old.transport.dispatch('put-planning-item', {
+    itemId,
+    expectedVersion: 1,
+    status: 'open',
+  });
+  assert.equal(moved.result.version, 2);
+  assert.equal(old.seen.length, 2, 'one retry on a server that predates features');
+  assert(old.seen[0].includes('features'));
+  assert.deepEqual(
+    old.seen[1],
+    old.seen[0].filter(name => name !== 'features'),
+    'every other negotiated field is kept',
+  );
+  assert.equal(sent.at(-1).body, body);
+  assert.equal(moved.serverContract, undefined, 'nothing this build needs is missing');
+  const read = await old.transport.dispatch('planning', { id: itemId, reconcile: false });
+  assert.deepEqual([read.result.item.body, read.result.item.status], [body, 'open']);
+  // Current server: it advertises the feature, so the put names only what changes, in one read.
+  const current = transport(s, { planning: true, features: ['planning-put-keeps-omitted'] });
+  const commands = [];
+  current.p.intercept(async args => commands.push(JSON.parse(args.command)));
+  await current.transport.dispatch('put-planning-item', {
+    itemId,
+    expectedVersion: 2,
+    status: 'in-progress',
+  });
+  assert.equal(current.seen.length, 1);
+  assert.equal(current.transport.advertisedFeatures.includes('planning-put-keeps-omitted'), true);
+  assert.equal('body' in commands.at(-1), false);
+  assert.equal(
+    (await current.transport.dispatch('planning', { id: itemId, reconcile: false })).result.item.body,
+    body,
+  );
 });
 
 test('start {planningItemId} starts the Issue as a planned Intent and links it once, with the original operation on replay', async t => {
@@ -556,6 +745,9 @@ test('start {planningItemId} starts the Issue as a planned Intent and links it o
   });
   assert.equal(commands.length, 1);
   assert.equal(commands[0].status, 'in-progress');
+  // This server advertises no contract features: the link carries the stored fields (a83b6fd5).
+  assert.equal(commands[0].body, 'Planned constraints');
+  assert.equal(commands[0].title, 'Planned outcome');
   assert.equal(commands[0].expectedVersion, 1);
   assert.equal(commands[0].itemId, item.id);
 

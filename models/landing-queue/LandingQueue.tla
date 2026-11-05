@@ -263,9 +263,12 @@ Check(g, outcome) ==
                  !.suspect = @ \ b.included,
                  !.phase = [e \in Entries |-> IF e \in b.included THEN "ready" ELSE q.phase[e]]]
        /\ UNCHANGED <<main, stamp, moves, counts, audit, running, crashes, claim, fence>>
+     \* A platform retry re-checks the same pinned base, members and composed head
+     \* (ea86f3fb): it keeps its reserved receipt, so dependents stacked on that
+     \* (head, receipt) stay valid and keep their checks. A retry whose predicted
+     \* head or receipt changes is a `Rebase`/`Unstack`, which still invalidates.
      ELSE IF outcome = "infra" /\ b.retries < 2 THEN
-       /\ q' = [Invalidated(g) EXCEPT !.batches[g].retries = @ + 1,
-                 !.batches[g].receipt = FreshReceipt]
+       /\ q' = [q EXCEPT !.batches[g].retries = @ + 1]
        /\ UNCHANGED <<main, stamp, moves, counts, audit, running, crashes, claim, fence>>
      ELSE IF outcome = "infra" THEN Release(g, "CHECK_NOT_PASSED")
      \* No member named: a stacked group below an unpassed predecessor may recompose
@@ -395,6 +398,11 @@ TrainSound == Cardinality(Range(q.train)) = Len(q.train) /\ Range(q.train) \subs
 \* No live speculative group is stacked on a suspect's unproven head.
 NoStackOnSuspect == \A g \in Active :
   q.batches[g].pred # 0 => q.batches[q.batches[g].pred].members \cap Suspects = {}
+\* A dependent's pinned receipt names exactly one predicted head (ea86f3fb): while
+\* its predecessor slot still reserves that receipt, it predicts the pinned head.
+\* A same-head platform retry keeps both; any head change takes a fresh receipt.
+StackPinned == \A h \in Active : LET p == q.batches[h].pred IN
+  p # 0 /\ p \in Active /\ q.batches[p].receipt = q.batches[h].rev => q.batches[p].head = q.batches[h].base
 Reasons == \A e \in Entries : q.phase[e] \in {"terminal-failed", "needs-action"} => q.reason[e] # ""
 KnownRedNeverQueued == \A e \in Entries : q.lane[e] = "failed" =>
                         q.phase[e] = "terminal-failed" /\ ~InBatch(e) /\ counts[e] = 0

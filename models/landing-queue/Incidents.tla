@@ -155,7 +155,32 @@ LostDispatch == /\ Scenario = "lostdispatch"
        [] pc = 2 /\ b = "ready" -> /\ b' = "landed" /\ pc' = 3
                      /\ UNCHANGED <<canonical, observed, inputsDone, returned, a, main, checked, applied, owner>>
        [] OTHER -> FALSE
+\* Issue ea86f3fb (incident a7de3a93, 2026-11-05): a is a checking predecessor,
+\* b a dependent group stacked on a's predicted generation (checked = main: head
+\* and receipt). a's check ends with a platform outcome and retries. owner = TRUE:
+\* the retry keeps a's predicted head and receipt (same Candidate, unchanged
+\* base); FALSE: main moved, so a recomposes with a new head and receipt (main =
+\* 1). Unfixed, every retry supersedes b and its run (applied counts discarded
+\* dependent checks, ~74 runner-minutes each in the incident). Fixed keeps b only
+\* when the generation is unchanged. Publication still compares b's pins with a's
+\* acceptance (`predecessorStatus`), so a stale b re-queues rather than lands.
+RetryKeep == /\ Scenario = "retrykeep"
+  /\ CASE pc = 0 -> /\ a' = "checking" /\ b' = "checking" /\ checked' = main
+                     /\ owner' \in BOOLEAN /\ pc' = 1
+                     /\ UNCHANGED <<canonical, observed, inputsDone, returned, main, applied>>
+       [] pc = 1 -> /\ main' = (IF owner THEN main ELSE 1)
+                     /\ b' = (IF Fixed /\ owner THEN b ELSE "queued")
+                     /\ applied' = applied + (IF Fixed /\ owner THEN 0 ELSE 1) /\ pc' = 2
+                     /\ UNCHANGED <<canonical, observed, inputsDone, returned, a, checked, owner>>
+       [] pc = 2 -> /\ b' = "ready" /\ checked' = (IF b = "queued" THEN main ELSE checked) /\ pc' = 3
+                     /\ UNCHANGED <<canonical, observed, inputsDone, returned, a, main, applied, owner>>
+       [] pc = 3 -> /\ a' \in {"landed", "failed"} /\ pc' = 4
+                     /\ UNCHANGED <<canonical, observed, inputsDone, returned, b, main, checked, applied, owner>>
+       [] pc = 4 -> /\ b' = (IF a = "landed" /\ checked = main THEN "landed" ELSE "queued") /\ pc' = 5
+                     /\ UNCHANGED <<canonical, observed, inputsDone, returned, a, main, checked, applied, owner>>
+       [] OTHER -> FALSE
 Step == Wait \/ CohortConflict \/ LostWake \/ MovingMain \/ CrossHead \/ OrderWake \/ Outage \/ CohortHold \/ LostDispatch
+        \/ RetryKeep
 Spec == Init /\ [][Step]_vars /\ WF_vars(Step)
 FreshTerminal == returned => observed = canonical
 NoOrphanConflict == ~(a \in {"failed", "cancelled"} /\ b = "conflict" /\ main = 0 /\ checked = 0)
@@ -167,4 +192,10 @@ EventuallyTerminal == <>(a = "landed" \/ a = "failed")
 HeadLands == <>(b = "landed")
 CohortForms == <>(b = "cohort")
 HeadSettles == <>(b \in {"landed", "failed"})
+\* ea86f3fb: no live dependent is pinned to a stale predecessor generation, none
+\* lands on one, and a dependent check is discarded only when the head changed.
+NoStaleStack == Scenario = "retrykeep" /\ pc \in 2..4 /\ b \in {"checking", "ready"} => checked = main
+StackedExact == Scenario = "retrykeep" /\ b = "landed" => a = "landed" /\ checked = main
+KeepsSameHead == Scenario = "retrykeep" /\ applied > 0 => main = 1
+StackSettles == Scenario = "retrykeep" => <>(pc = 5)
 =============================================================================

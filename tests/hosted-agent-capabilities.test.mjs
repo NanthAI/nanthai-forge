@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { moduleUrl } from './convex-module.mjs';
 import { lanesFixture } from './hosted-lanes-fixture.mjs';
 import { hostedAgentActions, hostedAgentPlanningActions } from '../dist/hosted-agent-contract.js';
+import { hostedContractFeatures } from '../dist/hosted-contract-features.js';
 const { capabilities } = await import(moduleUrl('../convex/projectHostedAgent.ts'));
 const code = expected => error => (error.data?.code ?? error.code) === expected;
 function setup() {
@@ -123,4 +124,20 @@ test('resolve advertisement is opt-in so released strict capability readers rema
     current.actions,
     hostedAgentActions.filter(action => !hostedAgentPlanningActions.includes(action)),
   );
+});
+
+test('contract features: the server names the asked features its code implements, only when asked (a83b6fd5)', async () => {
+  const s = setup();
+  const ask = features =>
+    s.call('capabilities', capabilities, { projectId: s.projectId, features }, 'owner').then(JSON.parse);
+  // Released strict readers never ask, so they never see the field.
+  assert.equal('features' in (await s.read('owner')), false);
+  assert.deepEqual((await ask(['planning-put-keeps-omitted', 'not-implemented-yet'])).features, [
+    'planning-put-keeps-omitted',
+  ]);
+  assert.deepEqual((await ask([])).features, []);
+  // Every name this build's CLI may ask for is implemented by this build's server.
+  assert.deepEqual((await ask([...hostedContractFeatures])).features, [...hostedContractFeatures]);
+  await assert.rejects(ask(Array.from({ length: 65 }, (_, index) => `f${index}`)), code('BAD_ARGUMENT'));
+  assert(s.counts.every(count => count.writes === 0));
 });

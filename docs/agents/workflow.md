@@ -1803,7 +1803,9 @@ older source without a projection, syncs without path evidence and unknown base
 sequences report incomplete coverage; a missing notice never proves independence.
 Unavailable advice retains the source receipt with explicit unknown coverage.
 Older clients and servers keep their existing protocol through capability
-negotiation. Needs you continues using its existing work projection.
+negotiation. Needs you continues using its existing work projection. Server behaviour a
+new CLI relies on is a named contract feature on that same capability read; a CLI never
+assumes one its server has not advertised ([CLI update: server contract](../operations/cli-update.md#server-contract-cli-ahead-of-the-deploy)).
 
 ### Hosted friction, decisions and overlap answers
 

@@ -173,6 +173,11 @@ export async function writeLanding(
       { members: [{ submissionId: state.id }] },
       { loadLanding, loadLandingAttempt, insertLandingAttempt, writeLanding },
       state.phase === 'terminal-failed',
+      // A new attempt that still proves the same head under the same receipt
+      // (a platform retry) keeps dependents pinned to that pair (ea86f3fb).
+      (state.phase === 'checking' || state.phase === 'ready') && attempt.candidate.head
+        ? { head: attempt.candidate.head, receiptId: attempt.operations.accept }
+        : undefined,
     );
   if (previous.attemptId !== state.attemptId) await retainLandingProgress(ctx, previous, true, attempt.main);
   if (

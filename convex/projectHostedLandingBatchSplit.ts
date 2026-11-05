@@ -27,6 +27,7 @@ import { admissionProof, bindAdmissionProof } from './projectHostedLandingAdmiss
 import { loadFinish } from './projectHostedFinishStore';
 import { reserveFinishRetry } from './projectHostedFinishCompose';
 import { hostedStartMain } from './projectHostedChannels';
+import { predecessorStatus } from './projectHostedLandingPipeline';
 import { invariant } from '../src/errors';
 import { canonicalPayload } from '../src/hosted-source-operation';
 
@@ -228,7 +229,11 @@ async function adoptAdmission(
   return true;
 }
 /** A shared check that failed without a failing test keeps its cohort: the same
- * members check again (recomposing only if main moved). No member goes solo. */
+ * members check again (recomposing only if its predicted base changed). No member
+ * goes solo. A stacked group's base is its pending predecessor, not main: while
+ * that predecessor still predicts the pinned head and receipt the base is
+ * unchanged. The retry keeps the members' receipts, so successors stacked on
+ * this group keep their checks too (ea86f3fb). */
 export async function retryLandingBatchCheck(
   ctx: MutationCtx,
   input: BatchIdentity,
@@ -241,7 +246,12 @@ export async function retryLandingBatchCheck(
   const pending = await pendingMembers(ctx, input, batch);
   if (!pending.length) return writeBatch(ctx, input, { ...batch, phase: 'landed' });
   const main = await hostedStartMain(ctx, input.projectId);
-  if (main.head !== shared.main.head || main.receipt.id !== shared.main.receiptId) {
+  const predecessor = await predecessorStatus(ctx, input, batch);
+  if (
+    predecessor === 'invalid' ||
+    (predecessor !== 'pending' &&
+      (main.head !== shared.main.head || main.receipt.id !== shared.main.receiptId))
+  ) {
     if (pending.length === batch.members.length)
       return retryLandingBatch(ctx, input, { ...batch, platformRetries: retries });
     return splitLandingBatch(ctx, input, batch);
@@ -275,6 +285,7 @@ export async function retryLandingBatchCheck(
       main: shared.main,
       checkOperationId,
       candidate: shared.candidate,
+      keepReceipt: true,
       check: {
         runId: next.id,
         checkId: next.check.id,

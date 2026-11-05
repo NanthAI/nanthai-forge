@@ -17,6 +17,7 @@ import { report } from './errors';
 import { requireCutoverVersion } from '../src/cutover-version';
 import { effectivePolicy } from '../src/autonomy-policy';
 import { effectiveAgentDefaults } from '../src/agent-parallel-defaults';
+import { advertisedFeatures, MAX_CONTRACT_FEATURES } from '../src/hosted-contract-features';
 /** Discovery is a current-authority read, never a worker wake or an availability promise. */
 export const capabilities = query({
   args: {
@@ -32,6 +33,8 @@ export const capabilities = query({
     defaultsVersion: v.optional(v.literal(1)),
     landingMessageVersion: v.optional(v.literal(1)),
     openLanesVersion: v.optional(v.literal(1)),
+    /** Contract features the client may rely on; the reply names the ones this code implements. */
+    features: v.optional(v.array(v.string())),
   },
   returns: v.string(),
   handler: async (
@@ -49,6 +52,7 @@ export const capabilities = query({
       defaultsVersion,
       landingMessageVersion,
       openLanesVersion,
+      features,
     },
   ) => {
     try {
@@ -57,9 +61,15 @@ export const capabilities = query({
       const project = await accessibleProject(ctx, projectId, user.subject),
         authority = sourceAuthority(project);
       if (project.sourceCutover && authority.mode === 'server') requireCutoverVersion(clientVersion);
+      invariant(
+        !features || features.length <= MAX_CONTRACT_FEATURES,
+        'BAD_ARGUMENT',
+        `Name at most ${MAX_CONTRACT_FEATURES} contract features.`,
+      );
       return canonicalPayload(
         hostedAgentCapabilitiesSchema.parse({
           ...(landingMessageVersion === 1 ? { landingMessageVersion: 1 } : {}),
+          ...(features ? { features: advertisedFeatures(features) } : {}),
           ...(openLanesVersion === 1 ? { openLanesVersion: 1 } : {}),
           ...(overlapVersion === 1 ? { overlapVersion: 1 } : {}),
           ...(overlapEvidenceVersion === 1 ? { overlapEvidenceVersion: 1 } : {}),
