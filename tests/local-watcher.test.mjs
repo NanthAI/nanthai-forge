@@ -375,3 +375,28 @@ test('doctor reports unavailable private temporary storage as degraded', async t
   });
   assert.deepEqual(await probeLocalWatching(), { status: 'degraded', code: 'ENOENT' });
 });
+
+test('fake missing probe close expires exactly once, degrades peers, and recovers only on a later explicit probe', async t => {
+  const workers = fake(t, { missingProbeClose: true });
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const one = watching(t),
+    two = watching(t);
+  const pending = Promise.all([one.probe(), two.probe()]);
+  // Flush startup/open/probe IPC without advancing any deadline.
+  for (let i = 0; i < 6; i++) await Promise.resolve();
+  t.mock.timers.tick(24);
+  assert.equal(one.health.status, 'probing');
+  t.mock.timers.tick(1);
+  assert.ok((await pending).every(h => h.code === 'WATCH_PROBE_CLOSE_TIMEOUT'));
+  await Promise.resolve();
+  assert.equal(workers[0].terminations, 1);
+  time += WATCH_RETRY_MS;
+  watcherRuntime.createWorker.mock.mockImplementation(() => {
+    const worker = new FakeWatchWorker();
+    workers.push(worker);
+    return worker;
+  });
+  assert.ok((await Promise.all([one.probe(), two.probe()])).every(h => h.status === 'healthy'));
+  assert.equal(workers.length, 2);
+  t.mock.timers.reset();
+});

@@ -27,6 +27,13 @@ import {
   type PreflightEvidence,
 } from './agent-preflight-evidence.js';
 import { shellQuote } from './agent-brief-render.js';
+import {
+  filesystemEventHealth,
+  filesystemEnvironment,
+  filesystemEnvironmentSchema,
+} from './filesystem-event-health.js';
+
+export const preflightRuntime = { filesystemEventHealth };
 
 /** Default local cost per selected test file at concurrency 1, used for the time estimate. */
 export const PREFLIGHT_SECONDS_PER_FILE = 4;
@@ -48,6 +55,7 @@ export const preflightReceiptSchema = z
     passed: z.boolean(),
     durationMs: z.number().nonnegative(),
     at: z.string(),
+    environment: filesystemEnvironmentSchema.optional(),
     evidence: z
       .string()
       .regex(/^[a-f0-9]{64}$/)
@@ -249,6 +257,8 @@ export function runPreflight(
 ) {
   const started = Date.now();
   let exitCode: number | null = 0;
+  let environment: PreflightReceipt['environment'];
+  const environmentNext = `nforge agent ${shellQuote(root)} land --save ${shellQuote(JSON.stringify({ laneId }))}`;
   let passedTests: string[] = [];
   if (plan.tests.length) {
     const scripts = (() => {
@@ -265,6 +275,10 @@ export function runPreflight(
       exitCode = build.status;
     }
     if (exitCode === 0) {
+      const health = preflightRuntime.filesystemEventHealth(root);
+      if (!health.ok) environment = filesystemEnvironment(health, environmentNext);
+    }
+    if (exitCode === 0 && !environment) {
       // A surrounding test runner's protocol variable would swallow this run's own exit code.
       const env = { ...process.env };
       delete env.NODE_TEST_CONTEXT;
@@ -295,6 +309,10 @@ export function runPreflight(
       } finally {
         rmSync(directory, { recursive: true, force: true });
       }
+      if (exitCode !== 0) {
+        const health = preflightRuntime.filesystemEventHealth(root);
+        if (!health.ok) environment = filesystemEnvironment(health, environmentNext);
+      }
     }
   }
   const evidence = preparedEvidence.get(plan);
@@ -318,7 +336,8 @@ export function runPreflight(
     ...(plan.deferredTests?.length ? { deferredTests: plan.deferredTests.length } : {}),
     selection: plan.deferredTests?.length ? 'local' : plan.scope,
     exitCode,
-    passed: exitCode === 0,
+    passed: exitCode === 0 && !environment,
+    ...(environment ? { environment, exitCode: exitCode || null } : {}),
     durationMs: Date.now() - started,
     at: new Date().toISOString(),
   };

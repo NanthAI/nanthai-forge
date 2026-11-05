@@ -617,7 +617,13 @@ first matching event after the write. Three isolated child processes bound nativ
 watcher open/close hangs. No network calls or idle work are added.
 
 The diagnostic fails when two of three attempts miss a 1,000 ms event deadline
-(allocation errors and hung native calls also fail an attempt). Healthy delivery
+(allocation errors and hung native calls also fail an attempt). The default
+standalone and benchmark probe keeps its existing two-second process envelope for native open/close hangs. Ordinary agent preflight and
+`nforge doctor` additionally require close acknowledgement within the shared
+watcher’s existing 250 ms bound; slow, missing or failed acknowledgement is
+local environment evidence and does not block landing. The standalone flag
+`--watcher-close-health` requests this extended diagnostic explicitly. Benchmark
+preflight and cell refusal policy remain unchanged. Healthy delivery
 is normally milliseconds; one second allows headroom above observed healthy
 delivery of 10–213 ms, while the majority rule tolerates one transient delay.
 The result includes `ok`, median observed `latencyMs` (null when none arrived),
@@ -629,8 +635,48 @@ Bench preflight and every cell gate refuse unhealthy event delivery with
 `ENVIRONMENT FILESYSTEM_EVENTS_UNHEALTHY`. On macOS the refusal names fseventsd
 and the operator remedy `sudo killall fseventsd`; rerun the diagnostic afterwards.
 The diagnostic never restarts services itself. Linux operators should check local
-watcher resources and event delivery. This bench gate does not change ordinary
-agent preflight or landing fault classification.
+watcher resources and event delivery.
+
+`nforge doctor ROOT` also runs this finite target-volume diagnostic and returns
+`filesystemEvents` with the health evidence and an exact diagnostic next command.
+Ordinary diagnostics create their transient pulses under the target’s existing
+private `.forge` metadata namespace on the same volume, so concurrent source
+capture cannot save a probe signal; no new source exclusion is added.
+Ordinary agent preflight probes before its local test process and again after a
+failed test process. Unhealthy delivery records an `environment` receipt with
+category `ENVIRONMENT`, code `FILESYSTEM_EVENTS_UNHEALTHY`, the fseventsd remedy
+and a next action: land the same saved source again. `passed` remains false and
+a null `exitCode` records that no local test result is available; a failed run
+retains its exit status. This local
+environment receipt is advisory at landing, bound to the same source tree/head
+as an ordinary preflight receipt. The hosted check still verifies the Candidate;
+no tests, assertions or hosted acceptance checks are disabled. A healthy local
+environment with failing tests still receives `PREFLIGHT_REQUIRED`. No service
+restart happens automatically.
+
+Measurement-hold waits use the isolated helper and a one-second local removal check only while a hold exists. Degraded hints report `ENVIRONMENT` and `nforge doctor .`; an active hold remains in force. No hold means no watcher, timer or server call.
+
+The shared watcher's close acknowledgement is flushed before removing its
+private probe directory. Removal runs asynchronously so target events and close
+acknowledgements continue while deletion is pending. Directory cleanup cannot consume the
+250 ms native-close deadline or falsely degrade the remaining subscribers.
+A missing close acknowledgement still degrades and terminates the helper;
+only a later explicit consumer probe can recover it under the existing backoff.
+Heavy-slot and checkout admission hints also use the isolated helper. Their
+existing thirty-second and one-second fallback timers still make progress when
+native startup, event delivery or close fails; no new retry timer is installed.
+
+A bounded synthetic churn investigation created and removed three 2,500-file
+scratch trees on the local APFS volume, probing delivery and fseventsd RSS/CPU
+before and after each tree. The 7,500 files contained 75,000 bytes; the experiment
+finished in 10.37 s with 53.67 MiB parent peak RSS (child RSS excluded). Median
+event latencies were 3.58, 11.70, 1.10 and 12.14 ms; all twelve attempts were
+healthy. Daemon RSS changed from 9.55 to 10.08 MiB. Other builders were active,
+so these observations cannot attribute that small change to this experiment.
+This checks immediate churn, not the reported multi-day daemon growth. Exact
+observations are retained on Issue d269e4f2; there is no evidence yet establishing
+that checkout churn causes the long-lived fseventsd wedge. This sample establishes no indexing mitigation or daemon policy change.
+Bench preflight continues to refuse unhealthy cells before timing.
 
 ### Check environment contract
 

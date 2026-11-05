@@ -3,6 +3,7 @@ import { watch, mkdtempSync, realpathSync, writeFileSync, rmSync, type FSWatcher
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { rm } from 'node:fs/promises';
 
 export type Command = { id: number; type: string; path: string; recursive: boolean; probe: number };
 type Probe = {
@@ -14,7 +15,10 @@ type Probe = {
 };
 /** One child multiplexes every subscription in its parent. A native hang stalls
  * only this helper; the parent bounds each acknowledgement and can abandon it. */
-export function startLocalWatcher(output?: (message: object, done: () => void) => void) {
+export function startLocalWatcher(
+  output?: (message: object, done: () => void) => void,
+  runtime = { watch, remove: rm, setImmediate },
+) {
   type Target = { watcher: FSWatcher; ids: Set<number>; key: string };
   const targets = new Map<number, Target>();
   const shared = new Map<string, Target>();
@@ -26,22 +30,38 @@ export function startLocalWatcher(output?: (message: object, done: () => void) =
   };
   const failed = (id: number, error: NodeJS.ErrnoException) =>
     send({ id, type: 'degraded', code: error.code ?? 'WATCH_FAILED' });
-  const probeMessages = (current: Probe, type: string) => {
-    for (const [id, generation] of current.participants) send({ id, probe: generation, type });
+  const probeMessages = (current: Probe, type: string, done = () => {}) => {
+    let pending = current.participants.size;
+    if (!pending) return done();
+    for (const [id, generation] of current.participants)
+      send({ id, probe: generation, type }, () => {
+        if (!--pending) done();
+      });
   };
   const cleaned = (current: Probe) => {
     if (probe !== current) return;
-    probe = undefined;
-    try {
-      rmSync(current.directory, { recursive: true, force: true });
-      send({ type: 'probe-cleaned', directory: current.directory });
-    } catch {
-      /* Parent retains cleanup ownership if the helper cannot remove it. */
-    }
-    probeMessages(current, 'healthy');
-    const waiting = [...queued.values()];
-    queued.clear();
-    for (const message of waiting) if (targets.has(message.id)) requestProbe(message);
+    current.closing = true;
+    // Native close has acknowledged. Flush its result before unrelated synchronous
+    // filesystem cleanup: a slow rm must not turn a successful close into a timeout.
+    probeMessages(current, 'healthy', () => {
+      // Keep serving target events and close requests while deletion is pending.
+      // New probes wait for cleanup; successful native close is already reported.
+      void Promise.resolve()
+        .then(() => runtime.remove(current.directory, { recursive: true, force: true }))
+        .then(
+          () => send({ type: 'probe-cleaned', directory: current.directory }),
+          () => {
+            /* Parent retains cleanup ownership if the helper cannot remove it. */
+          },
+        )
+        .then(() => {
+          if (probe !== current) return;
+          probe = undefined;
+          const waiting = [...queued.values()];
+          queued.clear();
+          for (const message of waiting) if (targets.has(message.id)) requestProbe(message);
+        });
+    });
   };
   const closeProbe = (current: Probe) => {
     current.closing = true;
@@ -49,7 +69,7 @@ export function startLocalWatcher(output?: (message: object, done: () => void) =
     if (!current.watcher) return; // Initialization's IPC callback observes cancellation.
     current.watcher.once('close', () => cleaned(current));
     // Flush the event receipt before a potentially blocking native close.
-    setImmediate(() => current.watcher?.close());
+    probeMessages(current, 'probe-event', () => runtime.setImmediate(() => current.watcher?.close()));
   };
   const initializeProbe = (current: Probe, recursive: boolean) => {
     if (current.closing) {
@@ -57,9 +77,8 @@ export function startLocalWatcher(output?: (message: object, done: () => void) =
       return;
     }
     try {
-      current.watcher = watch(current.directory, { recursive }, (_event, name) => {
+      current.watcher = runtime.watch(current.directory, { recursive }, (_event, name) => {
         if (name?.toString() !== 'signal' || probe !== current || current.closing) return;
-        probeMessages(current, 'probe-event');
         closeProbe(current);
       });
       current.watcher.on('error', error => {
@@ -113,7 +132,7 @@ export function startLocalWatcher(output?: (message: object, done: () => void) =
         let target = shared.get(key);
         if (!target) {
           const ids = new Set<number>();
-          const watcher = watch(message.path, { recursive: message.recursive }, (event, name) => {
+          const watcher = runtime.watch(message.path, { recursive: message.recursive }, (event, name) => {
             for (const id of ids) send({ id, type: 'event', event, name: name?.toString() ?? null });
           });
           target = { watcher, ids, key };

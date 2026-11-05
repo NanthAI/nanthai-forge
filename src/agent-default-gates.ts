@@ -48,7 +48,14 @@ export function finishGates(
     const sameSource =
       receipt?.laneId === lane.laneId &&
       (receipt.tree && lane.tree ? receipt.tree === lane.tree : receipt.head === lane.head);
-    if (sameSource && receipt?.passed)
+    if (sameSource && receipt?.environment)
+      advisories.preflight = {
+        status: 'environment',
+        ...receipt.environment,
+        tests: receipt.tests,
+        at: receipt.at,
+      };
+    else if (sameSource && receipt?.passed)
       advisories.preflight = {
         status: 'passed',
         tests: receipt.tests,

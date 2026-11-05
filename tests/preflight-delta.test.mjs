@@ -6,10 +6,20 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { digest } from '../dist/portable-hash.js';
 import { sourceTree } from '../dist/source-tree.js';
-import { preflightPlan, runPreflight } from '../dist/agent-preflight.js';
+import { preflightPlan, runPreflight, preflightRuntime } from '../dist/agent-preflight.js';
 import { clientCacheRoot } from '../dist/root-paths.js';
 import { deltaPaths, savedInventory } from '../dist/agent-preflight-evidence.js';
 const laneId = '11111111-1111-4111-8111-111111111111';
+const healthy = {
+  ok: true,
+  latencyMs: 1,
+  fseventsdRssMb: null,
+  fseventsdCpuPercent: null,
+  reason: null,
+  attempts: [],
+};
+test.beforeEach(t => t.mock.method(preflightRuntime, 'filesystemEventHealth', () => healthy));
+
 function fixture(t, fail = false) {
   const dir = mkdtempSync(join(tmpdir(), 'forge-preflight-delta-'));
   const root = join(dir, 'lane');
@@ -151,4 +161,43 @@ test('a sparse selector inventory defers unseen consumers and never reuses parti
   assert.equal(plan.scope, 'full');
   assert.ok(plan.deferredTests.includes('tests/b.test.mjs'));
   assert.deepEqual(plan.reusedTests, []);
+});
+
+test('environment failure before execution cannot create reusable per-file passes and recovery runs the tests', t => {
+  const f = fixture(t);
+  t.mock.method(preflightRuntime, 'filesystemEventHealth', () => ({
+    ...healthy,
+    ok: false,
+    reason: 'watcher close timed out',
+  }));
+  const receipt = f.run(f.plan());
+  assert.equal(receipt.passed, false);
+  assert.equal(receipt.exitCode, null);
+  assert.equal(receipt.environment.code, 'FILESYSTEM_EVENTS_UNHEALTHY');
+  const retry = f.plan();
+  assert.deepEqual(retry.reusedTests, []);
+  assert.deepEqual(retry.tests, ['tests/a.test.mjs', 'tests/b.test.mjs']);
+  t.mock.method(preflightRuntime, 'filesystemEventHealth', () => healthy);
+  assert.equal(f.run(retry).passed, true);
+  assert.deepEqual(f.plan().reusedTests, ['tests/a.test.mjs', 'tests/b.test.mjs']);
+});
+
+test('environment classification after a failed run preserves only the reporter actual passes', t => {
+  const f = fixture(t, true);
+  let checks = 0;
+  t.mock.method(preflightRuntime, 'filesystemEventHealth', () =>
+    ++checks === 1 ? healthy : { ...healthy, ok: false, reason: 'watcher process timed out' },
+  );
+  const receipt = f.run(f.plan());
+  assert.equal(checks, 2);
+  assert.equal(receipt.passed, false);
+  assert.equal(receipt.exitCode, 1);
+  assert.equal(receipt.environment.category, 'ENVIRONMENT');
+  assert.match(receipt.environment.next, /land --save/);
+  const retry = f.plan();
+  assert.deepEqual(retry.tests, ['tests/a.test.mjs']);
+  assert.deepEqual(retry.reusedTests, ['tests/b.test.mjs']);
+  f.put('src/a.ts', 'export const n = 1;');
+  t.mock.method(preflightRuntime, 'filesystemEventHealth', () => healthy);
+  assert.equal(f.run(f.plan()).passed, true);
 });

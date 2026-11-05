@@ -7,7 +7,7 @@ import { join, resolve } from 'node:path';
 import { randomUUID, createHash } from 'node:crypto';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
-import { doctor, mcpConfig } from '../dist/setup.js';
+import { doctor, diagnosticRuntime, mcpConfig } from '../dist/setup.js';
 import { fixture, write, git } from './helpers.mjs';
 
 test('real stdio MCP discovery, refresh, queries, mutations, validation and shutdown', async t => {
@@ -475,4 +475,27 @@ test('opt-in real stdio workflow MCP shares local work, pins exact source and le
       line,
       /^(?:waiting for lock|queued for check|preparing check|running check): .* elapsed=\d+s totalAge=\d+s$/,
     );
+});
+
+test('doctor exposes the finite filesystem environment result and an exact diagnostic next step', async t => {
+  const root = fixture(t, { 'a.ts': 'export const a = 1;' });
+  const health = {
+    ok: false,
+    latencyMs: null,
+    fseventsdRssMb: 4000,
+    fseventsdCpuPercent: 99,
+    reason: 'no filesystem event within 1000 ms',
+    attempts: [],
+  };
+  t.mock.method(diagnosticRuntime, 'filesystemEventHealth', directory => {
+    assert.equal(directory, root);
+    return health;
+  });
+  const result = await doctor(root);
+  assert.equal(result.filesystemEvents.status, 'environment');
+  assert.equal(result.filesystemEvents.category, 'ENVIRONMENT');
+  assert.equal(result.filesystemEvents.code, 'FILESYSTEM_EVENTS_UNHEALTHY');
+  assert.match(result.filesystemEvents.message, /fseventsd.*sudo killall fseventsd/);
+  assert.equal(result.filesystemEvents.next, `nforge doctor '${root}'`);
+  assert.deepEqual(result.filesystemEvents.health, health);
 });

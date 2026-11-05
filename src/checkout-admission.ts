@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import { existsSync, watch } from 'node:fs';
+import { existsSync } from 'node:fs';
+import { watchLocal } from './local-watcher.js';
 import { join } from 'node:path';
 import { CheckQueue } from './check-queue.js';
 import { invariant } from './errors.js';
@@ -23,7 +24,7 @@ export async function acquire(queue: CheckQueue, directory: string, signal?: Abo
   };
   while (!signal?.aborted && !attempt()) {
     await new Promise<void>((resolve, reject) => {
-      const watcher = watch(directory, () => done());
+      const watcher = watchLocal(directory, {}, () => done());
       const timer = setTimeout(() => done(), 1000);
       const abort = () => done();
       let finished = false;
@@ -31,13 +32,12 @@ export async function acquire(queue: CheckQueue, directory: string, signal?: Abo
         if (finished) return;
         finished = true;
         clearTimeout(timer);
-        watcher.close();
+        void watcher.close();
         signal?.removeEventListener('abort', abort);
         if (error) reject(error);
         else resolve();
       }
       signal?.addEventListener('abort', abort, { once: true });
-      watcher.once('error', done);
       try {
         if (signal?.aborted || attempt()) done();
       } catch (error) {

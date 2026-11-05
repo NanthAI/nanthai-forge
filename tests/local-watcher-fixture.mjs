@@ -11,12 +11,13 @@ export class FakeWatchWorker extends EventEmitter {
     code,
     silent = false,
     hangClose = false,
+    missingProbeClose = false,
     hangTerminate = false,
     startupMs = 0,
     hangStartup = false,
   } = {}) {
     super();
-    Object.assign(this, { code, silent, hangClose, hangTerminate });
+    Object.assign(this, { code, silent, hangClose, hangTerminate, missingProbeClose });
     if (hangStartup) return;
     if (startupMs) setTimeout(() => this.emit('message', { type: 'ready' }), startupMs);
     else queueMicrotask(() => this.emit('message', { type: 'ready' }));
@@ -35,7 +36,7 @@ export class FakeWatchWorker extends EventEmitter {
         this.emit('message', { id, probe, type: 'probe-written' });
         if (!this.silent) {
           this.emit('message', { id, probe, type: 'probe-event' });
-          this.emit('message', { id, probe, type: 'healthy' });
+          if (!this.missingProbeClose) this.emit('message', { id, probe, type: 'healthy' });
         }
       });
     } else if (message.type === 'close' && !this.hangClose) {

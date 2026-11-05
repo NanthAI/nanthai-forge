@@ -111,7 +111,9 @@ deadlines; the event deadline starts when the signal is written, after a finite
 stream changes from closing one probe while another signal is in flight. The
 helper owns its private directory independently of subscribers; the parent tracks
 cleanup if it must kill the helper. Probe directories use the real temporary path,
-never source. Both probe close and subscription close wait at most 250 ms for an
+never source. Native-close acknowledgements are flushed before directory cleanup,
+so cleanup latency cannot falsely consume the close deadline. Directory removal
+is asynchronous and does not delay target events or close acknowledgements. Both probe close and subscription close wait at most 250 ms for an
 acknowledgement. A timeout degrades all subscriptions on that helper, kills it,
 disconnects the affected transport and unrefs it without waiting for native teardown. A replacement
 requires an existing consumer's probe or a new subscription, a completed prior

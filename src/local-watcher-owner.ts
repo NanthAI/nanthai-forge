@@ -58,8 +58,8 @@ export function startSharedWatcher(directory: string) {
     const message = value as { id?: number; type: string };
     const route = message.id === undefined ? undefined : routes.get(message.id);
     if (route && !route.socket.destroyed)
-      route.socket.write(JSON.stringify({ ...message, id: route.id }) + '\n');
-    done();
+      route.socket.write(JSON.stringify({ ...message, id: route.id }) + '\n', done);
+    else done();
   });
   const server = createServer(socket => {
     clearTimeout(startup);

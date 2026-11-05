@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 import { spawn } from 'node:child_process';
-import { mkdirSync, readFileSync, rmSync, statSync, watch, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { constants, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { heavySlots, readClientSettings } from './client-settings.js';
+import { watchLocal } from './local-watcher.js';
 import { invariant } from './errors.js';
 
 /** Shared with every Lane and agent on this machine (and lane.sh's same-named slots). */
@@ -58,13 +59,26 @@ export async function acquireHeavySlot(
   let slot = tryHeavySlot(directory, slots);
   if (slot) return slot;
   onWait();
-  while (!(slot = tryHeavySlot(directory, slots)))
+  while (!(slot ??= tryHeavySlot(directory, slots)))
     await new Promise<void>(resolve => {
-      const watcher = watch(directory, () => done());
+      let finished = false;
+      const watcher = watchLocal(
+        directory,
+        {
+          onReady: () =>
+            queueMicrotask(() => {
+              // Attachment is asynchronous: a release before open need not replay.
+              if (!finished && (slot = tryHeavySlot(directory, slots))) done();
+            }),
+        },
+        () => done(),
+      );
       const timer = setTimeout(() => done(), 30_000);
       function done() {
+        if (finished) return;
+        finished = true;
         clearTimeout(timer);
-        watcher.close();
+        void watcher.close();
         resolve();
       }
     });

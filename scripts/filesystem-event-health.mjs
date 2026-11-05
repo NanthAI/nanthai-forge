@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { execFile } from 'node:child_process';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, mkdir, lstat, stat as volumeStat } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
@@ -10,6 +10,26 @@ const run = promisify(execFile);
 // Healthy local delivery is normally milliseconds. One second allows stream arming/load
 // headroom while detecting delays large enough to distort ordinary source operations.
 export const FILESYSTEM_EVENT_DEADLINE_MS = 1000;
+// Optional ordinary diagnostics use the shared watcher's existing close bound.
+export const FILESYSTEM_EVENT_CLOSE_DEADLINE_MS = 250;
+
+/** Existing private metadata stays on the target volume and outside source capture. */
+export async function filesystemDiagnosticDirectory(root) {
+  const directory = join(root, '.forge');
+  try {
+    await mkdir(directory, { mode: 0o700 });
+  } catch (error) {
+    if (error.code !== 'EEXIST') throw error;
+  }
+  const stat = await lstat(directory);
+  if (!stat.isDirectory() || stat.isSymbolicLink())
+    throw Object.assign(new Error('Diagnostic metadata directory must be real'), { code: 'UNSAFE_PATH' });
+  if (stat.dev !== (await volumeStat(root)).dev)
+    throw Object.assign(new Error('Diagnostic metadata must stay on the target volume'), {
+      code: 'DIAGNOSTIC_VOLUME_MISMATCH',
+    });
+  return directory;
+}
 
 /** No arguments or environments are inspected; ps failure leaves optional metrics unknown. */
 export async function fseventsdStats({ platform = process.platform, execute = run } = {}) {
@@ -37,13 +57,20 @@ export async function fseventsdStats({ platform = process.platform, execute = ru
 }
 
 /** Isolate native fs.watch open/close: either can wedge in FSEvents. The parent owns cleanup. */
-export async function filesystemEventAttempt(targetDirectory, { execute = run } = {}) {
+export async function filesystemEventAttempt(
+  targetDirectory,
+  { execute = run, requireCloseAck = false } = {},
+) {
   let directory;
   try {
     directory = await mkdtemp(join(targetDirectory, '.forge-event-probe-'));
     const { stdout } = await execute(
       process.execPath,
-      [fileURLToPath(new URL('./filesystem-event-health-worker.mjs', import.meta.url)), directory],
+      [
+        fileURLToPath(new URL('./filesystem-event-health-worker.mjs', import.meta.url)),
+        directory,
+        ...(requireCloseAck ? ['--watcher-close-health'] : []),
+      ],
       {
         encoding: 'utf8',
         timeout: 2000,
@@ -68,12 +95,12 @@ export async function filesystemEventAttempt(targetDirectory, { execute = run } 
 /** Finite, local-only diagnostic on the caller's volume. No daemon, polling or network I/O. */
 export async function probeFilesystemEvents(
   targetDirectory,
-  { attempt = filesystemEventAttempt, stats = fseventsdStats } = {},
+  { attempt = filesystemEventAttempt, stats = fseventsdStats, requireCloseAck = false } = {},
 ) {
   const attempts = [];
   for (let i = 0; i < 3; i++) {
     try {
-      attempts.push(await attempt(targetDirectory));
+      attempts.push(await attempt(targetDirectory, { requireCloseAck }));
     } catch (error) {
       attempts.push({ latencyMs: null, reason: `probe failed (${error.code ?? 'unknown'})` });
     }
@@ -95,7 +122,7 @@ export async function probeFilesystemEvents(
     ...(await stats()),
     reason:
       failed.length >= 2
-        ? `${failed.length}/3 attempts failed to deliver a filesystem event within ${FILESYSTEM_EVENT_DEADLINE_MS} ms: ${failed.map(a => a.reason ?? `${a.latencyMs} ms`).join('; ')}`
+        ? `${failed.length}/3 attempts failed filesystem event health (event deadline ${FILESYSTEM_EVENT_DEADLINE_MS} ms): ${failed.map(a => a.reason ?? `${a.latencyMs} ms`).join('; ')}`
         : null,
     attempts,
   };
@@ -111,7 +138,24 @@ export function filesystemEventRefusal(probe, platform = process.platform) {
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
-  const result = await probeFilesystemEvents(process.argv[2] ?? process.cwd());
+  let result;
+  try {
+    const root = process.argv[2] ?? process.cwd();
+    const directory = process.argv.includes('--private-root')
+      ? await filesystemDiagnosticDirectory(root)
+      : root;
+    result = await probeFilesystemEvents(directory, {
+      requireCloseAck: process.argv.includes('--watcher-close-health'),
+    });
+  } catch (error) {
+    result = {
+      ok: false,
+      latencyMs: null,
+      ...(await fseventsdStats()),
+      reason: `diagnostic setup failed (${error.code ?? 'unknown'})`,
+      attempts: [],
+    };
+  }
   console.log(JSON.stringify(result));
   process.exitCode = result.ok ? 0 : 1;
 }

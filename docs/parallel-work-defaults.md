@@ -1,17 +1,13 @@
 # Parallel-work defaults
 
-Forge ships the rules we use to run many agents at once on one project. These defaults change
-how agents behave out of the box, so that parallel work holds up without a wrapper script. Each one
-is on by default, and each can be changed or switched off unless it is critical or has no sensible
-alternative. Agent-facing output stays terse; this page explains the full behaviour.
+These defaults support parallel work. They are configurable except for the always-on rules below.
 
 ## Client settings (this machine)
 
-These settings live in `client.json` in the Forge config directory
-(`$XDG_CONFIG_HOME/forge/`, default `~/.config/forge/`), next to the saved login. They apply to every
-project on the machine. Read them with `nforge settings`. Change one with `nforge settings KEY VALUE`,
-and return it to its default with `nforge settings KEY --reset`. `FORGE_CLIENT_SETTINGS=FILE`
-selects another file.
+Machine-wide settings are in `$XDG_CONFIG_HOME/forge/client.json` (default
+`~/.config/forge/client.json`); `FORGE_CLIENT_SETTINGS=FILE` overrides it.
+Read: `nforge settings`; set: `nforge settings KEY VALUE`; reset:
+`nforge settings KEY --reset`.
 
 | Setting | Default | Why | Change |
 | --- | --- | --- | --- |
@@ -107,18 +103,16 @@ selects another file.
 
 ## Project settings
 
-These settings are part of the project policy, under `agentDefaults`. They change what agents are
-told and what `land --save` (old name `finish`) accepts. Read the effective values, with every
-default filled in, with `nforge hosted-work ROOT '{"action":"policy"}'` (native owners:
-`nforge policy ROOT`); `nforge agent ROOT capabilities` returns them with the generated `rules`.
-The owner changes one with `set-policy`, for example:
+Project policy stores `agentDefaults`. `nforge hosted-work ROOT '{"action":"policy"}'`
+(native: `nforge policy ROOT`) shows effective defaults; `nforge agent ROOT capabilities`
+includes their generated `rules`. The owner changes named fields with `set-policy`:
 
 ```sh
 nforge hosted-work ROOT '{"action":"set-policy","operationId":"UUID","agentDefaults":{"preflight":"advise"}}'
 ```
 
-An edit changes only the fields it names. Editing `agentDefaults` never invalidates a queued
-landing: landings are pinned to the acceptance policy, which leaves these settings out.
+Only named fields change. `agentDefaults` edits do not invalidate queued landings: their
+acceptance-policy pins exclude these settings.
 
 | Setting | Default | Why | Change |
 | --- | --- | --- | --- |
@@ -131,19 +125,20 @@ landing: landings are pinned to the acceptance policy, which leaves these settin
 
 ### preflight
 
-- `nforge agent ROOT preflight '{"laneId":"…"}'` runs saved Lane tests locally. Changed tests,
-  explicit coverage and smoke always run here; nearest certain consumers within two import edges
-  fill a 25-file local budget. Every other consumer stays listed in `deferredTests` for the landing runner; no consumer is discarded.
-- A private, content-bound receipt retains per-file passes, including passes from a failed run.
-  After a save, delta selection checks both old and new inventories. Unaffected local passes are
-  reused; failed, new and affected files run again. Missing/corrupt evidence or a changed runtime
-  cannot transfer passes. The returned plan names `reusedTests` and `deltaPaths`.
-- Root non-Markdown files, non-Markdown `docs/` files and all `evals/` files select full landing
-  coverage. Markdown-only docs keep their fast path. Near-full coverage runs on the landing runner.
-- `land --save` reuses an identical source tree's pass. Otherwise `preflight:require` refuses only
-  within `preflightMaxMinutes`, estimated from complete coverage before local deferral. Larger
-  selections and unavailable saved paths remain advisory. Delta evidence adds no server calls;
-  gzip snapshots and receipts stay in the private local cache, with no source upload.
+- `nforge agent ROOT preflight '{"laneId":"…"}'` always runs changed tests, explicit coverage
+  and smoke. Certain consumers within two import edges fill a 25-file local budget; others
+  remain in `deferredTests` for landing.
+- Private gzip receipts retain per-file passes, even from failed runs. Delta selection checks
+  both inventories; invalid evidence or changed runtime prevents reuse. Plans name `reusedTests`
+  and `deltaPaths`. No server calls or uploads are added.
+- Non-Markdown root/docs files and all `evals/` select full landing coverage; Markdown-only docs
+  retain their fast path. Near-full coverage runs on the landing runner.
+- Identical source trees reuse passes. Otherwise `require` demands a pass only when complete
+  coverage fits `preflightMaxMinutes`; larger sets or unavailable paths remain advisory.
+- An unhealthy finite probe records `ENVIRONMENT / FILESYSTEM_EVENTS_UNHEALTHY`, the fseventsd
+  remedy and next action. This source-bound advisory never claims a local pass; hosted checks
+  remain required. `nforge doctor ROOT` runs the diagnostic.
+- `"run":false` only plans. Save first: receipts name saved source; unsaved edits are refused.
 
 ### overlapGate
 

@@ -7,7 +7,22 @@ import { join } from 'node:path';
 import { sourceTree } from '../dist/source-tree.js';
 import { effectiveAgentDefaults } from '../dist/agent-parallel-defaults.js';
 import { ackAnswers, checkpointNudge, finishGates, unsavedMinutes } from '../dist/agent-default-gates.js';
-import { preflightPlan, readPreflightReceipt, runPreflight } from '../dist/agent-preflight.js';
+import {
+  preflightPlan,
+  readPreflightReceipt,
+  runPreflight,
+  preflightRuntime,
+} from '../dist/agent-preflight.js';
+
+const healthy = {
+  ok: true,
+  latencyMs: 1,
+  fseventsdRssMb: null,
+  fseventsdCpuPercent: null,
+  reason: null,
+  attempts: [],
+};
+test.beforeEach(t => t.mock.method(preflightRuntime, 'filesystemEventHealth', () => healthy));
 
 const lane = { laneId: '11111111-1111-4111-8111-111111111111', head: 'a'.repeat(64) };
 const defaults = overrides => effectiveAgentDefaults(overrides);
@@ -274,4 +289,90 @@ test('learned timings preserve advisory coverage when the selector defers most c
   assert.equal(result.preflight.deferredTests, 55);
   assert.equal(result.preflight.estimateMinutes, 1);
   assert.equal(result.preflight.totalEstimateMinutes, 1);
+});
+
+for (const reason of [
+  'no filesystem event within 1000 ms',
+  'watcher process timed out',
+  'watcher close did not acknowledge within 250 ms',
+])
+  test(`environment receipt keeps landing available for ${reason} and is pinned to source`, t => {
+    const root = repo(t, {
+      'tests/b.test.mjs': "throw Error('local test must not run while environment is unavailable');",
+    });
+    t.mock.method(preflightRuntime, 'filesystemEventHealth', () => ({ ...healthy, ok: false, reason }));
+    const receipt = runPreflight(root, lane.laneId, lane.head, preflightPlan(root, advice().changedPaths));
+    assert.equal(receipt.passed, false);
+    assert.equal(receipt.exitCode, null);
+    assert.equal(receipt.environment.category, 'ENVIRONMENT');
+    assert.equal(receipt.environment.code, 'FILESYSTEM_EVENTS_UNHEALTHY');
+    assert.match(receipt.environment.message, /fseventsd.*sudo killall fseventsd/);
+    assert.match(receipt.environment.next, /nforge agent .* land --save/);
+    assert.ok(receipt.environment.next.includes(lane.laneId));
+    assert.equal(finishGates(root, defaults({}), lane, advice()).preflight.status, 'environment');
+    assert.throws(
+      () => finishGates(root, defaults({}), { ...lane, head: 'c'.repeat(64) }, advice()),
+      code('PREFLIGHT_REQUIRED'),
+    );
+    // Recovery replaces the environment receipt; ordinary failures still refuse landing.
+    t.mock.method(preflightRuntime, 'filesystemEventHealth', () => healthy);
+    writeFileSync(
+      join(root, 'tests/b.test.mjs'),
+      "import test from 'node:test'; test('recovered', () => {});",
+    );
+    const recovered = runPreflight(root, lane.laneId, lane.head, preflightPlan(root, advice().changedPaths));
+    assert.equal(recovered.passed, true);
+    assert.equal(recovered.environment, undefined);
+    assert.equal(finishGates(root, defaults({}), lane, advice()).preflight.status, 'passed');
+  });
+
+test('event delivery lost during a failed local run is classified separately from healthy-environment test failures', t => {
+  const root = repo(t, { 'tests/b.test.mjs': "throw Error('synthetic watcher failure');" });
+  let probes = 0;
+  t.mock.method(preflightRuntime, 'filesystemEventHealth', () =>
+    ++probes === 1 ? healthy : { ...healthy, ok: false, reason: 'no events' },
+  );
+  const receipt = runPreflight(root, lane.laneId, lane.head, preflightPlan(root, advice().changedPaths));
+  assert.equal(receipt.exitCode, 1);
+  assert.equal(receipt.passed, false);
+  assert.equal(receipt.environment.category, 'ENVIRONMENT');
+  assert.equal(probes, 2);
+});
+
+test('an unhealthy diagnostic never converts a build failure into an environment advisory', t => {
+  const root = repo(t, {
+    'package.json': JSON.stringify({
+      type: 'module',
+      scripts: { 'build:core': 'node -e "process.exit(1)"' },
+    }),
+  });
+  t.mock.method(preflightRuntime, 'filesystemEventHealth', () => {
+    throw Error('must not probe after a build failure');
+  });
+  const receipt = runPreflight(root, lane.laneId, lane.head, preflightPlan(root, advice().changedPaths));
+  assert.equal(receipt.passed, false);
+  assert.equal(receipt.exitCode, 1);
+  assert.equal(receipt.environment, undefined);
+  assert.throws(() => finishGates(root, defaults({}), lane, advice()), code('PREFLIGHT_REQUIRED'));
+});
+
+test('environment advisories preserve tree identity and overlap gates', t => {
+  const root = repo(t);
+  t.mock.method(preflightRuntime, 'filesystemEventHealth', () => ({
+    ...healthy,
+    ok: false,
+    reason: 'no events',
+  }));
+  const tree = sourceTree([]);
+  runPreflight(root, lane.laneId, lane.head, preflightPlan(root, advice().changedPaths), tree);
+  const saved = { ...lane, head: 'b'.repeat(64), tree };
+  assert.equal(finishGates(root, defaults({}), saved, advice()).preflight.status, 'environment');
+  assert.throws(
+    () => finishGates(root, defaults({}), { ...saved, tree: 'c'.repeat(64) }, advice()),
+    code('PREFLIGHT_REQUIRED'),
+  );
+  assert.throws(
+    () => finishGates(root, defaults({}), saved, advice({ notices: [notice('src/x.ts')] })),
+    code('OVERLAP_UNANSWERED'),
+  );
 });
