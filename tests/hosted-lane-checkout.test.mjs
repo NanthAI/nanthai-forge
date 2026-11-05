@@ -400,7 +400,12 @@ test('an interrupted older checkout cannot overwrite a newer checkout; completed
 test('verified cache repairs corrupt bytes; malformed downloads never install', async t => {
   const s = setup(t);
   await checkoutHostedLane(s.root, s.request(), s.transport);
-  writeFileSync(join(`${s.root}.forge-client`, 'objects', s.files[0].blob), 'corrupt', { mode: 0o600 });
+  // Unchanged files never need their cached object; a corrupt one is repaired when it is installed.
+  const first = s.files;
+  s.advance(first.map(file => (file.path === 'src/a.txt' ? { ...file, blob: s.put('second') } : file)));
+  await checkoutHostedLane(s.root, s.request(), s.transport);
+  writeFileSync(join(`${s.root}.forge-client`, 'objects', first[0].blob), 'corrupt', { mode: 0o600 });
+  s.advance(first);
   assert.equal((await checkoutHostedLane(s.root, s.request(), s.transport)).downloadedObjects, 1);
   assert.equal(readFileSync(join(s.root, 'src/a.txt'), 'utf8'), 'first\n');
   const bad = setup(t);

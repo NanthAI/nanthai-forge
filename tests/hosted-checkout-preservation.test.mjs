@@ -23,6 +23,15 @@ const rules = [
   { path: '.gitignore', content: '/out/\n/convex/_generated/\n' },
   { path: '.forgeignore', content: '/custom-cache/\n' },
 ];
+// A file turning into a directory keeps the full private-stage install; ordinary edits apply in place.
+function fullStageCommand(s) {
+  s.setFiles([
+    { ...s.files[0], blob: s.put('after\n') },
+    { path: 'unaffected/inner', blob: s.put('unchanged'), mode: 'file' },
+    ...s.files.slice(2),
+  ]);
+  return s.command();
+}
 function outputs(s) {
   const files = [
     'dist/accounting-records.d.ts',
@@ -64,19 +73,31 @@ test('sync onto changed source preserves build outputs, generated API, declared 
   check();
 });
 
-for (const phase of ['old-rename', 'new-rename', 'legacy-new-rename', 'artifact-rename', 'complete-receipt'])
+const fullPhases = ['old-rename', 'new-rename', 'legacy-new-rename', 'artifact-rename', 'complete-receipt'];
+const deltaPhases = ['delta-displace', 'delta-install', 'delta-marker', 'delta-complete-receipt'];
+for (const phase of [...fullPhases, ...deltaPhases])
   test(`interrupted ${phase} resumes the original apply once with every artifact intact`, async t => {
     const s = await fixture(t, undefined, rules),
       check = outputs(s),
-      request = s.command();
+      delta = phase.startsWith('delta-'),
+      request = delta ? s.command() : fullStageCommand(s);
     const rename = fs.renameSync;
     let interrupted = false,
       installations = 0;
     t.mock.method(fs, 'renameSync', (from, to) => {
       const result = rename(from, to);
       if (String(from).includes('/checkout-') && to === s.root) installations++;
-      const match =
-        phase === 'old-rename'
+      if (String(from).includes('/delta-') && to === join(s.root, 'a')) installations++;
+      const match = delta
+        ? phase === 'delta-displace'
+          ? from === join(s.root, 'a')
+          : phase === 'delta-install'
+            ? String(from).includes('/delta-') && to === join(s.root, 'a')
+            : phase === 'delta-marker'
+              ? String(from).includes('/delta-') && String(to).startsWith(join(s.root, '.forge'))
+              : to === join(clientCacheRoot(s.root), `${request.operationId}.json`) &&
+                JSON.parse(readFileSync(to)).complete
+        : phase === 'old-rename'
           ? from === s.root
           : ['new-rename', 'legacy-new-rename'].includes(phase)
             ? String(from).includes('/checkout-') && to === s.root
@@ -105,7 +126,11 @@ for (const phase of ['old-rename', 'new-rename', 'legacy-new-rename', 'artifact-
     assert.equal(readHostedLaneCheckout(s.root).selection.head, request.lane.head);
     check();
     assert((await applyHostedSync(s.root, request, s.transport)).replayed);
-    assert.equal(installations, phase === 'old-rename' ? 0 : 1);
+    assert.equal(installations, ['old-rename', 'delta-displace'].includes(phase) ? 0 : 1);
+    if (delta) {
+      assert.equal(readFileSync(join(s.root, 'a'), 'utf8'), 'after\n');
+      assert(!fs.readdirSync(clientCacheRoot(s.root)).some(name => name.startsWith('delta-')));
+    }
   });
 
 for (const path of ['out/new.ts', 'node_modules/new.ts', 'a'])
@@ -233,7 +258,7 @@ test('tracked source within an ignored directory is always checked and ignored s
 test('an artifact destination recreated after interruption never overwrites either dependency link', async t => {
   const s = await fixture(t, undefined, rules),
     check = outputs(s),
-    request = s.command();
+    request = fullStageCommand(s);
   const rename = fs.renameSync;
   t.mock.method(fs, 'renameSync', (from, to) => {
     const result = rename(from, to);

@@ -31,7 +31,8 @@ fs.renameSync = (from, to) => {
               : boundary === 'restored-receipt'
                 ? receipt && data.restored
                 : boundary === 'apply-publication'
-                  ? String(from).includes('/checkout-') && to === root
+                  ? (String(from).includes('/checkout-') && to === root) ||
+                    (String(from).includes('/delta-') && String(to).startsWith(`${root}/`))
                   : boundary === 'additional-receipt'
                     ? receipt && !data.restored && data.additionalPreservedAt?.length
                     : boundary === 'additional-preserve'

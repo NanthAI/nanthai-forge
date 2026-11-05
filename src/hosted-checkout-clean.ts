@@ -7,6 +7,7 @@ import type { NativeFile } from './native-state-format.js';
 import { readSource, sourceExclusion } from './files.js';
 import { preserveLegacyCacheUse } from './client-cache-use.js';
 import { ignoredBy, ignoreLayer } from './source-ignore.js';
+import { indexedBlob, type CheckoutStatIndex } from './checkout-stat-index.js';
 
 /** Validate saved source even when ignored. Return only disjoint local artifacts
  * to carry across publication; never follow links or read ignored output bytes.
@@ -16,7 +17,7 @@ export function cleanHostedCheckout(
   files: NativeFile[],
   markerName: string,
   marked: boolean,
-  options: { target?: NativeFile[]; deferExtras?: boolean } = {},
+  options: { target?: NativeFile[]; deferExtras?: boolean; index?: CheckoutStatIndex } = {},
 ): string[] {
   let rootStat;
   try {
@@ -95,6 +96,11 @@ export function cleanHostedCheckout(
       }
       if (!saved && options.deferExtras) continue;
       const file = saved ?? incoming;
+      // Like save and dirty checks: an exact lstat match with this baseline is not re-read.
+      if (saved && options.index && indexedBlob(options.index, path, stat, saved.blob)) {
+        allowed.delete(path);
+        continue;
+      }
       const bytes = stat.isSymbolicLink()
         ? readlinkSync(join(root, path), { encoding: 'buffer' })
         : stat.isFile() && stat.nlink === 1

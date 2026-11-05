@@ -38,7 +38,8 @@ test('checkout drains file and directory barriers on failure and preserves the p
     closed = 0;
   fs.open = async (...args) => {
     const handle = await original(...args);
-    if (!String(args[0]).includes('/checkout-')) return handle;
+    // Private stage: the full checkout stage or an in-place apply's changed-path stage.
+    if (!/\/(checkout|delta)-/.test(String(args[0]))) return handle;
     opened++;
     const sync = handle.sync.bind(handle),
       close = handle.close.bind(handle);

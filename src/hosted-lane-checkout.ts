@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 import { canonicalRoot, clientCacheRoot } from './root-paths.js';
 import { preserveMisplacedReadCaches } from './hosted-legacy-cache.js';
+import { preserveLegacyCacheUse } from './client-cache-use.js';
 import { planCheckoutPreservation, preserveCheckoutArtifacts } from './hosted-checkout-preserve.js';
 import { sourceTree } from './source-tree.js';
 import { mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { z } from 'zod';
 import { hostedLaneSelectionSchema, type HostedLaneSelection } from './hosted-lane.js';
 import type { NativeFile } from './native-state-format.js';
@@ -15,7 +16,15 @@ import { digest } from './hash.js';
 import { ForgeError, invariant } from './errors.js';
 import { readSource } from './files.js';
 import { workLocked } from './work-lock.js';
-import { indexInstalledFiles, writeCheckoutStatIndex } from './checkout-stat-index.js';
+import { indexInstalledFiles, readCheckoutStatIndex, writeCheckoutStatIndex } from './checkout-stat-index.js';
+import {
+  checkoutDelta,
+  deltaJournalName,
+  deltaObstructed,
+  deltaRetainedName,
+  journalCheckoutDelta,
+  settleCheckoutDelta,
+} from './hosted-checkout-delta.js';
 import { withCheckoutOpenMetrics, type CheckoutOpenMetrics } from './checkout-open-metrics.js';
 import { checkoutIo } from './checkout-io.js';
 import { smallCheckout } from './checkout-workload.js';
@@ -96,6 +105,8 @@ async function checkout(
   };
   const recover = () => {
     if (checkoutPathExists(previous) && !checkoutPathExists(root)) renameSync(previous, root);
+    // An interrupted in-place install always rolls forward from its durable private stage.
+    settleCheckoutDelta(root, cache.root);
   };
   const identity = (selection: HostedLaneSelection) => {
     invariant(
@@ -196,6 +207,7 @@ async function checkout(
               );
             cleanHostedCheckout(root, materializedFiles(marker), hostedLaneMarkerName, Boolean(marker), {
               deferExtras: true,
+              index: readCheckoutStatIndex(root),
             });
             const next = { request, selection: observed, complete: false, previousMarker: markerDigest() };
             durableReplace(receiptPath, JSON.stringify(next));
@@ -216,6 +228,9 @@ async function checkout(
         ...(cache.machineObjects ? { machineObjects: cache.machineObjects } : {}),
         replayed,
         ...(checkoutPathExists(recoveryPath) ? { localRecovery: json(recoveryPath) } : {}),
+        ...(checkoutPathExists(join(cache.root, deltaRetainedName))
+          ? { displacedRecovery: json(join(cache.root, deltaRetainedName)) }
+          : {}),
       });
       if (operation.complete) {
         metrics.replayed = true;
@@ -236,10 +251,10 @@ async function checkout(
         'Selected State bytes changed.',
       );
       const state = parseNativeState(stateBytes);
-      const before = await checkoutIo(async () =>
+      const { before, beforeDigest } = await checkoutIo(async () =>
         workLocked(lock, () => {
           recover();
-          return baseline();
+          return { before: baseline(), beforeDigest: markerDigest() };
         }),
       );
       const scope =
@@ -254,23 +269,36 @@ async function checkout(
           scope.some(path => file.path === path || file.path.startsWith(`${path}/`)),
       );
       metrics.files = files.length;
+      // A trusted installed baseline changes in place: only paths whose bytes or mode differ are
+      // fetched, verified, staged and flushed. No baseline, or a file/directory flip, stages all.
+      const installedHere = before?.operationId === request.operationId;
+      let delta = installedHere
+        ? { install: [], remove: [] }
+        : before
+          ? checkoutDelta(materializedFiles(before), files)
+          : null;
+      if (delta && !installedHere && (await checkoutIo(async () => deltaObstructed(root, delta!))))
+        delta = null;
+      const staged = delta ? delta.install : files;
       await metrics.measure('cacheVerify', () =>
         cache.ensure(
-          files.map(file => file.blob),
+          staged.map(file => file.blob),
           { installVerifies: true },
         ),
       );
-      cooperative = !(await checkoutIo(async () => smallCheckout(files, cache.objects)));
+      cooperative = !(await checkoutIo(async () => smallCheckout(staged, cache.objects)));
       identity(hostedLaneSelectionSchema.parse(await transport.select(request.laneId)));
       await withCheckoutWritePass(
         cache.root,
         async () => {
-          const stage = await checkoutIo(async () => mkdtempSync(join(cache.root, 'checkout-')));
+          const stage = await checkoutIo(async () =>
+            mkdtempSync(join(cache.root, delta ? 'delta-' : 'checkout-')),
+          );
           try {
             const installed = await (async () => {
               const damaged: NativeFile[] = [];
               await metrics.measure('copyHash', () =>
-                stageHostedFiles(stage, cache.objects, files, cache.repairable ? damaged : undefined),
+                stageHostedFiles(stage, cache.objects, staged, cache.repairable ? damaged : undefined),
               );
               if (damaged.length) {
                 await metrics.measure('cacheVerify', () => cache.repair(damaged.map(file => file.blob)));
@@ -296,12 +324,15 @@ async function checkout(
               // Both barriers must finish before publication; their order inside a private
               // stage is immaterial. Drain both even on failure before removing the stage.
               const flushed = await metrics.measure('durability', () =>
-                Promise.allSettled([flushHostedFiles(stage, files), flushHostedCheckoutFiles(stage, files)]),
+                Promise.allSettled([
+                  flushHostedFiles(stage, staged),
+                  flushHostedCheckoutFiles(stage, staged),
+                ]),
               );
               for (const result of flushed) if (result.status === 'rejected') throw result.reason;
               // Stats of the private stage carry over the rename, so the first save reads only edited files.
               return metrics.measure('index', () =>
-                checkoutIo(async () => indexInstalledFiles(stage, files), 'durability'),
+                checkoutIo(async () => indexInstalledFiles(stage, staged), 'durability'),
               );
             })();
             await metrics.measure('publish', () =>
@@ -333,7 +364,7 @@ async function checkout(
                       materializedFiles(current),
                       hostedLaneMarkerName,
                       Boolean(current),
-                      { target: files },
+                      { target: files, index: readCheckoutStatIndex(root) },
                     );
                     // An interrupted post-rename install already has the original marker. Reconcile it.
                     if (current?.operationId !== request.operationId) {
@@ -342,6 +373,45 @@ async function checkout(
                         'WORK_CONFLICT',
                         'An earlier checkout backup is preserved.',
                       );
+                    }
+                    if (current?.operationId !== request.operationId && delta) {
+                      invariant(
+                        markerDigest() === beforeDigest,
+                        'WORK_STALE',
+                        'Another checkout updated this client while source was downloading.',
+                      );
+                      const obstruction = deltaObstructed(root, delta);
+                      if (obstruction)
+                        throw new ForgeError(
+                          'WORK_CONFLICT',
+                          `Local checkout content at ${JSON.stringify(obstruction)} is preserved.`,
+                          undefined,
+                          { obstruction: { kind: 'extra-source', path: obstruction } },
+                        );
+                      // Ignored artifacts stay where they are; only changed paths move.
+                      const prior = new Map(materializedFiles(current).map(file => [file.path, file]));
+                      const pin = ({ path, blob, mode }: NativeFile) => ({ path, blob, mode });
+                      journalCheckoutDelta(cache.root, {
+                        operationId: request.operationId,
+                        stage: basename(stage),
+                        marker: hostedLaneMarkerName,
+                        install: delta.install.map(pin),
+                        displace: [
+                          ...delta.remove,
+                          ...delta.install
+                            .filter(file => checkoutPathExists(join(root, file.path)))
+                            .map(file => prior.get(file.path) ?? file),
+                        ].map(pin),
+                        targetFiles: files,
+                      });
+                      settleCheckoutDelta(root, cache.root, true);
+                      // A full install replaces `.forge`; in place, retire the persisted legacy record.
+                      const legacyUse = join(root, '.forge', 'cache-use.json');
+                      if (checkoutPathExists(legacyUse) && preserveLegacyCacheUse(root)) {
+                        rmSync(legacyUse);
+                        syncDirectory(join(root, '.forge'));
+                      }
+                    } else if (current?.operationId !== request.operationId) {
                       planCheckoutPreservation(preservationPath, artifacts);
                       if (checkoutPathExists(root)) renameSync(root, previous);
                       renameSync(stage, root);
@@ -361,7 +431,12 @@ async function checkout(
               ),
             );
           } finally {
-            if (checkoutPathExists(stage))
+            // A journaled in-place install still owns its stage until it rolls forward.
+            const journal = join(cache.root, deltaJournalName);
+            if (
+              checkoutPathExists(stage) &&
+              !(checkoutPathExists(journal) && json(journal).stage === basename(stage))
+            )
               await checkoutIo(async () => rmSync(stage, { recursive: true, force: true }));
           }
         },

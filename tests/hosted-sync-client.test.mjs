@@ -311,39 +311,56 @@ test('an edit during recovery gets another preservation round instead of a new r
   assert.equal(recovered.applied.head, request.lane.head);
 });
 
-test('recovery reconciles source already installed before a lost local checkout receipt', async t => {
-  const fs = (await import('node:fs')).default;
-  const { syncBuiltinESMExports } = await import('node:module');
-  const { recoverLocalApply } = await import('../dist/hosted-apply-recovery.js');
-  const s = await fixture(t),
-    request = s.command(),
-    rename = fs.renameSync;
-  let interrupted = false;
-  t.mock.method(fs, 'renameSync', (from, to) => {
-    const result = rename(from, to);
-    if (!interrupted && String(from).includes('/checkout-') && to === s.root) {
-      interrupted = true;
-      throw Error('Synthetic apply publication interruption');
-    }
-    return result;
-  });
-  syncBuiltinESMExports();
-  try {
-    await assert.rejects(
-      applyHostedSync(s.root, request, s.transport),
-      /Synthetic apply publication interruption/,
-    );
-  } finally {
-    t.mock.restoreAll();
+for (const path of ['full-stage', 'in-place'])
+  test(`recovery reconciles source already installed (${path}) before a lost local checkout receipt`, async t => {
+    const fs = (await import('node:fs')).default;
+    const { syncBuiltinESMExports } = await import('node:module');
+    const { recoverLocalApply } = await import('../dist/hosted-apply-recovery.js');
+    const s = await fixture(t);
+    // A file turning into a directory keeps the full private-stage swap and its prior backup.
+    if (path === 'full-stage')
+      s.setFiles([
+        { ...s.files[0], blob: s.put('after\n') },
+        { path: 'unaffected/inner', blob: s.put('unchanged'), mode: 'file' },
+      ]);
+    const request = s.command(),
+      rename = fs.renameSync;
+    let interrupted = false;
+    t.mock.method(fs, 'renameSync', (from, to) => {
+      const result = rename(from, to);
+      // Full-stage swap or in-place marker publication: the new source is installed either way.
+      const published =
+        (String(from).includes('/checkout-') && to === s.root) ||
+        (String(from).includes('/delta-') && String(to).startsWith(join(s.root, '.forge')));
+      if (!interrupted && published) {
+        interrupted = true;
+        throw Error('Synthetic apply publication interruption');
+      }
+      return result;
+    });
     syncBuiltinESMExports();
-  }
-  assert(interrupted);
-  assert.equal(readHostedLaneCheckout(s.root).selection.head, request.lane.head);
-  writeFileSync(join(s.root, 'a'), 'draft after interrupted publication');
-  await assert.rejects(applyHostedSync(s.root, request, s.transport), { code: 'WORK_CONFLICT' });
-  const recovered = await recoverLocalApply(s.root, request.operationId, s.transport);
-  assert.equal(recovered.applied.head, request.lane.head);
-  assert.equal(readFileSync(join(recovered.preservedAt, 'a'), 'utf8'), 'draft after interrupted publication');
-  assert.equal(readFileSync(join(s.root, 'a'), 'utf8'), 'after\n');
-  assert(existsSync(recovered.priorPreservedAt), 'prior installer backup remains preserved too');
-});
+    try {
+      await assert.rejects(
+        applyHostedSync(s.root, request, s.transport),
+        /Synthetic apply publication interruption/,
+      );
+    } finally {
+      t.mock.restoreAll();
+      syncBuiltinESMExports();
+    }
+    assert(interrupted);
+    assert.equal(readHostedLaneCheckout(s.root).selection.head, request.lane.head);
+    writeFileSync(join(s.root, 'a'), 'draft after interrupted publication');
+    await assert.rejects(applyHostedSync(s.root, request, s.transport), { code: 'WORK_CONFLICT' });
+    const recovered = await recoverLocalApply(s.root, request.operationId, s.transport);
+    assert.equal(recovered.applied.head, request.lane.head);
+    assert.equal(
+      readFileSync(join(recovered.preservedAt, 'a'), 'utf8'),
+      'draft after interrupted publication',
+    );
+    assert.equal(readFileSync(join(s.root, 'a'), 'utf8'), 'after\n');
+    if (path === 'full-stage')
+      assert(existsSync(recovered.priorPreservedAt), 'prior installer backup remains preserved too');
+    // In place, only the changed path moved aside, matched its baseline and needs no backup.
+    else assert.equal(recovered.priorPreservedAt, undefined);
+  });

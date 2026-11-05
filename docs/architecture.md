@@ -1214,8 +1214,20 @@ external dependency links. The source baseline and incoming manifest take
 precedence over exclusions: changed saved bytes/modes and incoming path or parent
 collisions remain structured conflicts. Matching untracked incoming source is
 safe to install. Ignored directories without source intersections are pruned;
-link targets and ignored output bytes are never scanned. A local artifact-path
-journal precedes the directory swap. Artifacts move from the retained previous
+link targets and ignored output bytes are never scanned. The clean check skips
+reading saved files whose exact lstat the checkout stat index vouches for.
+
+When the checkout already has a trusted installed marker, apply is in place and
+proportional to changed paths: only paths whose bytes or mode differ are fetched,
+verified, staged privately and flushed. A durable `delta-apply.json` journal names
+the stage, the paths to move aside (with their verified baseline) and the paths to
+install; every later checkout operation rolls an interrupted journal forward first.
+Moved-aside bytes that differ from their baseline are restored and refused before
+any install, or kept and listed in `displacedRecovery` after one. Unchanged files
+keep their inodes, ignored output stays where it is, and emptied directories are
+removed. Without a trusted marker, or when a path changes between file and
+directory, the whole private stage is built and swapped. A local artifact-path
+journal precedes that directory swap. Artifacts move from the retained previous
 checkout only after publication, and original-operation replay resumes those
 renames without overwriting an occupied destination. Main checkout uses the same
 validation and preservation functions. Server source

@@ -43,7 +43,10 @@ Hosted sync/resolve local apply preserves ignored build output and dependency
 links using project ignore rules and Forge source exclusions. Saved source and
 incoming path collisions remain protected; interrupted artifact moves resume with
 the original apply operation. Relative checkout roots use a canonical sibling
-client cache.
+client cache. A sync/resolve apply onto an installed checkout installs only the
+changed paths in place, under a crash-safe journal (a one-file apply on a
+synthetic 29,000-file checkout: 9 hashes and 1 clone instead of 116,004 and
+29,000). The clean check still stats every materialized path, like Git.
 
 Hosted source-worker diagnostics retain typed dependency/runtime failures, the
 failing source step and call, and digest/size context when known. The landing
