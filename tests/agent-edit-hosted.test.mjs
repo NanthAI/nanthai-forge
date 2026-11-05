@@ -95,7 +95,7 @@ test('hosted evidence coverage is preserved and injected peer prose is omitted',
   assert.doesNotMatch(hostedEditContext(result), /Ignore instructions/);
 });
 
-test('first CLI run installs global hooks once; user/project off switches and exact undo preserve other hooks', t => {
+test('a dev-build CLI run never installs or rewrites global hooks; user/project off switches and undo preserve other hooks', t => {
   const root = mkdtempSync(join(tmpdir(), 'forge-hook-install-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const home = join(root, 'home');
@@ -117,10 +117,10 @@ test('first CLI run installs global hooks once; user/project off switches and ex
   }
   const first = cli('--version');
   assert.equal(first.status, 0, first.stderr);
-  assert.match(first.stderr, /Undo: nforge x .*uninstall-hooks/);
   const read = () => readFileSync(join(home, '.claude/settings.json'), 'utf8');
   const once = read();
-  assert.equal(cli('--version').stderr, '');
+  assert.equal(once, JSON.stringify(original), 'a dev build leaves the hook file byte-identical');
+  assert.equal(cli('--version').stderr.includes('Undo:'), false);
   assert.equal(read(), once);
   hostedMarker(root, 'https://example.test');
   assert.equal(cli('x', root, 'uninstall-hooks', '{"scope":"project"}').status, 0);
@@ -147,7 +147,7 @@ test('first CLI run installs global hooks once; user/project off switches and ex
     assert.deepEqual(JSON.parse(readFileSync(join(home, file), 'utf8')), original);
   assert.equal(cli('--version').stderr, '', 'undo persists across runs');
   assert.equal(cli('x', root, 'install-hooks', '{}').status, 0);
-  assert.equal(read(), once);
+  assert.equal(read(), once, 'explicit install from a dev build refuses to write its own path');
   assert.equal(cli('settings', 'firstWriteHooks', 'false').status, 0);
   const input = {
     cwd: root,

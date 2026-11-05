@@ -6,6 +6,7 @@ import { probeLocalWatching } from './local-watcher.js';
 import { filesystemEventHealth, filesystemEnvironment } from './filesystem-event-health.js';
 
 import { shellQuote } from './shell-quote.js';
+import { hookHealth } from './agent-hook-health.js';
 
 export const diagnosticRuntime = { filesystemEventHealth };
 export function mcpConfig(root: string, options: { agent?: boolean } = {}) {
@@ -39,6 +40,7 @@ export async function doctor(root: string): Promise<object> {
       node: process.version,
       watching,
       filesystemEvents,
+      hooks: hookHealth(root),
       transport: 'stdio',
       targetExecution: false,
       networkRequired: false,
@@ -51,6 +53,7 @@ export async function doctor(root: string): Promise<object> {
       node: process.version,
       watching,
       filesystemEvents,
+      hooks: hookHealth(root),
       error: { code: error.code, message: error.message },
       next: 'Run index, then doctor again.',
     };

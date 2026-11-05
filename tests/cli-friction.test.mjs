@@ -23,15 +23,33 @@ test('only the executable entry prepares hooks; direct CLI callers preserve alia
   fs.mkdirSync(config);
   const env = { ...process.env, HOME: home, USERPROFILE: home, XDG_CONFIG_HOME: config };
   const args = ['agent', '/unused/help-only', 'view', '--help'];
+  // A hook whose target is gone: the executable entry reports it (a dev build never rewrites it).
+  const hooks = join(home, '.codex/hooks.json');
+  fs.mkdirSync(join(home, '.codex'));
+  const stale = JSON.stringify({
+    hooks: {
+      PreToolUse: [
+        {
+          hooks: [
+            {
+              type: 'command',
+              command: `'node' '${join(root, 'gone-lane', 'dist', 'agent-edit-hook.js')}' '--auto' '--forge-first-write'`,
+            },
+          ],
+        },
+      ],
+    },
+  });
+  fs.writeFileSync(hooks, stale);
   const direct = spawnSync(process.execPath, [resolve('dist/cli.js'), ...args], { encoding: 'utf8', env });
   assert.equal(direct.status, 0, direct.stderr);
   assert.equal(direct.stderr, 'Deprecated: view is an alias for candidate; use candidate.\n');
-  assert.equal(fs.existsSync(join(home, '.codex/hooks.json')), false);
+  assert.equal(fs.readFileSync(hooks, 'utf8'), stale);
   const entry = spawnSync(process.execPath, [cli, ...args], { encoding: 'utf8', env });
   assert.equal(entry.status, 0, entry.stderr);
   assert.equal(entry.stdout, direct.stdout);
-  assert.match(entry.stderr, /Forge installed first-write hooks:/);
-  assert.equal(fs.existsSync(join(home, '.codex/hooks.json')), true);
+  assert.match(entry.stderr, /not the installed Forge CLI.*missing-target.*install-hooks/s);
+  assert.equal(fs.readFileSync(hooks, 'utf8'), stale, 'a dev build never rewrites hooks');
 });
 test('heavy help, no command, status and argument errors never acquire a busy slot or call the network', t => {
   const root = temporary(t);

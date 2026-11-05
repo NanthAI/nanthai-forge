@@ -461,10 +461,18 @@ Hosted overlap records and answers use the separate [hosted advice](#hosted-over
 
 ## Overlap before the first write
 
-The first successful CLI command installs Claude Code and Codex hooks, even with
+The first successful command of the installed CLI installs Claude Code and Codex hooks, even with
 `--ignore-scripts`. It prints changed files and the exact undo
 command. Installation is idempotent, preserves other hooks/settings and resolves
 the Lane from each edited path, covering every hosted/native Lane.
+
+Hooks only ever point at the installed, auto-updated CLI (`forge-cli/current`). A
+Lane, temp or dev build (`node dist/cli-entry.js`) never writes them, not even
+`install-hooks`; it reports `dev-build` and changes nothing. An automatic run of the
+installed CLI also leaves hooks that point at another valid install alone and only
+repairs a missing target; the explicit `install-hooks` from the installed `nforge` takes
+over. `nforge status ROOT` and `nforge doctor ROOT` show `hooks` and, for a missing,
+unreadable or non-installed hook path, print the one repair command.
 
 ```sh
 nforge x ROOT uninstall-hooks '{}'                  # remove; persist user off

@@ -10,7 +10,13 @@ import { editHooksEnabled, setEditHooksEnabled } from './agent-hook-settings.js'
 import { editTarget, readEditMarkerIdentity } from './agent-edit-target.js';
 import { refuseRealUserState } from './test-isolation.js';
 import { invariant } from './errors.js';
-import { stableCliRunner } from './cli-installation.js';
+import {
+  forgeHookRunner,
+  hookHealth,
+  hookHealthText,
+  installedRunner,
+  sameFile,
+} from './agent-hook-health.js';
 
 type Group = { matcher?: string; hooks: { type: string; command?: string; timeout?: number }[] };
 type Config = { hooks?: Record<string, Group[]>; [key: string]: unknown };
@@ -21,13 +27,31 @@ export function installEditHooks(
   uninstall = false,
   home = homedir(),
   automatic = false,
+  /** `runner` is for tests: it stands in for the installed CLI's runner. */
+  options: { runner?: string } = {},
 ) {
   for (const name of ['.claude', '.codex']) refuseRealUserState(join(home, name), 'agent hook config');
   if (automatic && !uninstall && !editHooksEnabled(undefined, home))
     return { status: 'disabled', files: [], changed: [], undo: '' };
-  const runner = stableCliRunner(fileURLToPath(new URL('./agent-edit-hook.js', import.meta.url)));
-  const command = hookCommand(runner);
-  const stopCommand = turnEndCommand(turnEndRunner(runner));
+  const own = options.runner ?? fileURLToPath(new URL('./agent-edit-hook.js', import.meta.url));
+  // Only the installed, auto-updated CLI's paths are ever written: never a Lane, temp or dev build.
+  const runner = options.runner ?? installedRunner(own);
+  if (!runner && !uninstall) {
+    const health = hookHealth(root, home);
+    return {
+      status: 'dev-build',
+      files: [],
+      changed: [],
+      undo: '',
+      health,
+      warning:
+        'This is not the installed Forge CLI, so agent hooks were not changed. ' +
+        (hookHealthText(health) ??
+          `Existing hooks are healthy. To (re)install them run the installed nforge: nforge x ${shellQuote(root)} install-hooks '{}'`),
+    };
+  }
+  const command = hookCommand(runner ?? own);
+  const stopCommand = turnEndCommand(turnEndRunner(runner ?? own));
   const files = [join(home, '.claude', 'settings.json'), join(home, '.codex', 'hooks.json')];
   // Validate both client files before changing either one.
   const updates = files.map(path => {
@@ -43,6 +67,9 @@ export function installEditHooks(
       'BAD_ARGUMENT',
       'Client hooks must be an object.',
     );
+    // An automatic run leaves hooks that point at another valid install alone; only an
+    // explicit install-hooks takes them over. Missing or broken targets are still repaired.
+    if (automatic && !uninstall && pointsAtOtherInstall(config, runner!)) return { path, config };
     config.hooks ??= {};
     for (const event of ['PreToolUse', 'UserPromptSubmit', 'Stop']) {
       invariant(
@@ -60,7 +87,7 @@ export function installEditHooks(
         .map(group => ({
           ...group,
           hooks: group.hooks.filter(
-            hook => !isForgeHook(hook.command, runner) && !isTurnEndHook(hook.command),
+            hook => !isForgeHook(hook.command, runner ?? own) && !isTurnEndHook(hook.command),
           ),
         }))
         .filter(group => group.hooks.length);
@@ -104,6 +131,19 @@ const hookCommand = (runner: string) =>
 const turnEndRunner = (runner: string) => join(dirname(runner), 'agent-stop-hook.js');
 const turnEndCommand = (runner: string) =>
   [process.execPath, runner, '--forge-turn-end'].map(shellQuote).join(' ');
+function pointsAtOtherInstall(config: Config, runner: string) {
+  const mine = [runner, turnEndRunner(runner)];
+  return Object.values(config.hooks ?? {}).some(
+    groups =>
+      Array.isArray(groups) &&
+      groups.some(group =>
+        (Array.isArray(group?.hooks) ? group.hooks : []).some(hook => {
+          const target = forgeHookRunner(hook?.command);
+          return Boolean(target && existsSync(target) && !mine.some(own => sameFile(own, target)));
+        }),
+      ),
+  );
+}
 function isTurnEndHook(command: string | undefined) {
   return Boolean(command?.endsWith(' ' + shellQuote('--forge-turn-end')));
 }
@@ -138,7 +178,12 @@ export function configureEditHooks(root: string, input: Record<string, unknown>,
 export function ensureEditHooks() {
   try {
     const result = installEditHooks(process.cwd(), undefined, false, homedir(), true);
-    if (result.changed.length)
+    if ('warning' in result && result.warning) {
+      // A dev build never touches hooks.
+      // Absent hooks are normal for a dev build (fresh HOME, CI); only a broken one is worth a line.
+      if (result.health?.problems.some(problem => problem.reason !== 'missing-hook'))
+        process.stderr.write(result.warning + '\n');
+    } else if (result.changed.length)
       process.stderr.write(
         `Forge installed first-write hooks: ${result.changed.join(', ')}. Undo: ${result.undo}\n`,
       );

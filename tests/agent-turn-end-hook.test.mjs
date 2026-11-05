@@ -372,7 +372,10 @@ test('install adds one Stop guard per client beside first-write hooks; uninstall
   const other = { hooks: [{ type: 'command', command: 'other-stop-hook' }] };
   for (const path of ['.claude/settings.json', '.codex/hooks.json'])
     writeFileSync(join(home, path), JSON.stringify({ hooks: { Stop: [other] } }));
-  for (let i = 0; i < 2; i++) installEditHooks(s.directory, undefined, false, home);
+  for (let i = 0; i < 2; i++)
+    installEditHooks(s.directory, undefined, false, home, false, {
+      runner: join(s.directory, 'old-build', 'dist', 'agent-edit-hook.js'),
+    });
   for (const path of ['.claude/settings.json', '.codex/hooks.json']) {
     const config = JSON.parse(readFileSync(join(home, path), 'utf8'));
     assert.equal(config.hooks.Stop.length, 2);
