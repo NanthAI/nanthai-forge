@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { StorageActionWriter, StorageReader, StorageWriter } from 'convex/server';
-import type { ActionCtx, MutationCtx } from './_generated/server';
+import type { ActionCtx, MutationCtx } from './server';
 import type { Doc } from './_generated/dataModel';
 import { internal } from './_generated/api';
 import { artifactBlobId } from './artifactBlobFields';
@@ -10,6 +10,7 @@ import { exchangeFetch } from '../src/exchange-request';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex } from '@noble/hashes/utils.js';
 import { invariant } from '../src/errors';
+import { storageWritesAvailable } from './legacyStoragePause';
 
 /** Opaque legacy storage ID or r2blob:<artifactBlobs ID>. Owning callers always
  * authorize before resolving a reference; storage metadata never grants access. */
@@ -89,6 +90,7 @@ export function blobStore(ctx: Context): BlobStore {
       return ref;
     },
     delete: async id => {
+      storageWritesAvailable();
       if (!artifactBlobId(id)) return storage.delete(id);
       if (ctx.db && ctx.scheduler) {
         const value = await ctx.db.get(artifactBlobId(id)!);

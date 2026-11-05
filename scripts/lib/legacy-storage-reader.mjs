@@ -6,8 +6,12 @@ import { presign } from '../../dist/r2-presign.js';
 
 /** Only the pinned CLI's readonly inline query, table list and individual config
  * reads are reachable. Provider output is captured and never included in errors. */
-export function deploymentReader(deployment, root, env = process.env) {
-  if (!deployment.startsWith('dev:')) throw new Error('AUDIT_DEV_DEPLOYMENT_REQUIRED');
+export function deploymentReader(deployment, root, env = process.env, timeoutMs = 90_000) {
+  if (
+    !deployment.startsWith('dev:') ||
+    /^(?:prod|preview|custom):/.test((env.CONVEX_DEPLOY_KEY ?? '').split('|')[0])
+  )
+    throw new Error('AUDIT_DEV_DEPLOYMENT_REQUIRED');
   const selection = deploymentOptions(deployment, env);
   async function cli(args) {
     const child = spawn(
@@ -27,10 +31,16 @@ export function deploymentReader(deployment, root, env = process.env) {
     child.stderr.on('data', b => {
       stderr += b;
     });
-    const status = await new Promise((done, reject) => {
-      child.once('error', reject);
-      child.once('close', done);
-    });
+    const timeout = setTimeout(() => child.kill('SIGKILL'), Math.min(timeoutMs, 90_000));
+    let status;
+    try {
+      status = await new Promise((done, reject) => {
+        child.once('error', reject);
+        child.once('close', done);
+      });
+    } finally {
+      clearTimeout(timeout);
+    }
     if (status !== 0) throw new Error('AUDIT_READ_FAILED');
     return output.trim();
   }

@@ -5,6 +5,7 @@ export async function auditPage(ctx, table, cursor, numItems = 512, idLengths = 
   const query = table === '_storage' ? ctx.db.system.query(table) : ctx.db.query(table);
   const result = await query.order('asc').paginate({ cursor, numItems, maximumBytesRead: 4_000_000 });
   const references = [],
+    durableReferences = [],
     projects = [],
     groups = {};
   let jsonBytes = 0;
@@ -24,6 +25,17 @@ export async function auditPage(ctx, table, cursor, numItems = 512, idLengths = 
     if (table === '_storage') continue;
     const walk = (value, path, parent) => {
       if (typeof value === 'string') {
+        const durable = /^r2source:([a-f0-9]{64}):(0|[1-9][0-9]*)$/.exec(value);
+        if (durable)
+          durableReferences.push({
+            ref: value,
+            project,
+            table,
+            document: row._id,
+            field: path,
+            digest: durable[1],
+            size: Number(durable[2]),
+          });
         // Lengths come from every present _storage ID, never an assumed ID format.
         const id =
           idLengths === null || idLengths.includes(value.length)
@@ -67,6 +79,7 @@ export async function auditPage(ctx, table, cursor, numItems = 512, idLengths = 
     jsonBytes,
     groups,
     references,
+    durableReferences,
     projects,
     storage: table === '_storage' ? result.page : [],
   };

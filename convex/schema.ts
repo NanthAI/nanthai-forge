@@ -419,6 +419,20 @@ export const projectProposalDocument = v.object({
 });
 export default defineSchema({
   ...finishReadTables,
+  legacyStorageCleanupWindows: defineTable({
+    operationId: v.string(),
+    deployment: v.string(),
+    startedAt: v.number(),
+    expiresAt: v.number(),
+    active: v.boolean(),
+    endedAt: v.optional(v.number()),
+  }).index('by_operation', ['operationId']),
+  legacyStorageCleanupPages: defineTable({
+    operationId: v.string(),
+    part: v.string(),
+    request: v.string(),
+    result: v.string(),
+  }).index('by_operation_and_part', ['operationId', 'part']),
   ...githubMirrorTables,
   ...githubBindingTables,
   ...sourceStepTables,

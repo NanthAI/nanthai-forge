@@ -167,3 +167,28 @@ test('presigned PUT allows unsigned content type while Forge supplies none', asy
   assert.equal(target.headers['content-type'], undefined);
   assert.equal(new URL(target.url).searchParams.get('X-Amz-SignedHeaders').includes('content-type'), false);
 });
+
+test('legacy cleanup HEAD uses identity and refuses a gzip HEAD without stored length', async () => {
+  const { verificationIo } = await import('../scripts/lib/legacy-storage-verify.mjs');
+  const hash = 'a'.repeat(64),
+    config = {
+      R2_ACCOUNT_ID: 'synthetic',
+      R2_BUCKET: 'bucket',
+      R2_ACCESS_KEY_ID: 'synthetic',
+      R2_SECRET_ACCESS_KEY: 'synthetic',
+    };
+  let complete = true;
+  const io = verificationIo(config, {}, async (_url, init) => {
+    identity(init);
+    assert.equal(init.method, 'HEAD');
+    return new Response(null, {
+      headers: {
+        ...(complete ? { 'content-length': '164700' } : { 'content-encoding': 'gzip' }),
+        'x-amz-checksum-sha256': Buffer.from(hash, 'hex').toString('base64'),
+      },
+    });
+  });
+  await io.headR2('v1/p/project/o/' + hash, 164700, hash);
+  complete = false;
+  await assert.rejects(io.headR2('v1/p/project/o/' + hash, 164700, hash), /VERIFY_HEAD_SIZE_MISMATCH/);
+});

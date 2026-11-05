@@ -20,6 +20,16 @@ const { blobStore } = await import(moduleUrl('../convex/blobStore.ts'));
 const legacy =
   'Convex file storage cleanup (Issue 40dad5e0): legacy Convex copies stay readable until moved and deleted.';
 const storageAllowlist = {
+  'legacyStorageCleanupFields.ts field': [
+    1,
+    'Approved legacy storage cleanup pins for Issue 40dad5e0.',
+    '2027-01-31',
+  ],
+  'projectLegacyStorageCleanup.ts field': [
+    1,
+    'Approved source cursor migration pins for Issue 40dad5e0.',
+    '2027-01-31',
+  ],
   'blobStore.ts handle': [
     1,
     'Blob reader: legacy ids read Convex storage; every write goes to R2.',

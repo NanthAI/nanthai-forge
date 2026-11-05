@@ -28,10 +28,16 @@ Every entry has an owner reason and expires on 2027-01-31; an expired entry fail
 | `convex/projectBackups.ts`, `convex/projectBackupActions.ts`, `convex/projectProposals.ts`, `convex/projectProposalActions.ts`, `convex/projectExchange.ts`, `convex/projectLifecycle.ts`, `convex/projectObjectFields.ts`, `convex/projectHostedActionsPlan.ts`, `convex/projectHostedFinishDriver.ts`, `convex/projectSourceStepFields.ts`, `convex/projectWorkIndexFields.ts`, `convex/schema.ts` | field | Legacy `storageId` columns, readable until cleanup. |
 | `convex/projectBootstrapStore.ts`, `convex/projectGithubImportBatch.ts`, `convex/projectGithubImportObjects.ts` | field | Legacy `storageId` receipts beside the R2 key; nothing new writes them. |
 
+The approved dev cleanup also uses legacy `_storage` pins in
+`convex/legacyStorageCleanupFields.ts` and `convex/projectLegacyStorageCleanup.ts` (field
+allowlist, expires 2027-01-31). It deletes only verified frozen-manifest files.
+
 ## Convex tables
 
 | Tables | Hold | Grows with |
 | --- | --- | --- |
+| `legacyStorageCleanupPages` | Retry receipts for approved maintenance pages; no file bodies. | Maintenance pages |
+| `legacyStorageCleanupWindows` | One metadata fence per approved dev cleanup window; closing it invalidates older deletion transactions. No source or file bytes. | Approved maintenance windows |
 | `projectObjects` | One row per physical object: digest, size, placement (`r2Key`, `location`, legacy `storageId`), recipe pin. No bytes. | Repo size |
 | `projectObjectCatalog` | Sorted pins of a GitHub archive import, 256 per row (digest, size, recipe or packed byte range; physical packs retain protected source pins), instead of one `projectObjects` row per object; `findObject` reads it. | Repo size / 256 |
 | `projectGithubImports`, `projectGithubImportInventory` | GitHub import jobs and their paged inventory (keys and positions per page). Inventory rows are deleted once the import is published. | Repo size, during an import |

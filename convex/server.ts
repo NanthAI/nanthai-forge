@@ -5,6 +5,7 @@ import {
   type MutationCtx,
 } from './_generated/server';
 import { finishReadWriter } from './projectFinishReadWriter';
+import { pausedBuilder } from './legacyStorageServer';
 // Preserve context accessors instead of eagerly spreading the context. Retired
 // functions can return their existing error without touching any runtime port.
 function withFinishReads<B extends typeof baseMutation | typeof baseInternalMutation>(base: B): B {
@@ -19,7 +20,11 @@ function withFinishReads<B extends typeof baseMutation | typeof baseInternalMuta
     );
   }) as B;
 }
-export const mutation = withFinishReads(baseMutation);
-export const internalMutation = withFinishReads(baseInternalMutation);
+export const mutation = withFinishReads(pausedBuilder(baseMutation));
+export const internalMutation = withFinishReads(pausedBuilder(baseInternalMutation));
+
+// Only the reviewed maintenance endpoints use this builder. Their handlers
+// require the active transaction fence; tracked-row writes still update reads.
+export const maintenanceInternalMutation = withFinishReads(baseInternalMutation);
 
 export * from './_generated/server';

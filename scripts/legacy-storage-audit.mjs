@@ -6,7 +6,7 @@ import { parseArgs } from 'node:util';
 import { pageSource } from './lib/legacy-storage-query.mjs';
 import { classifyStorage, costEstimate } from './lib/legacy-storage-report.mjs';
 import { deploymentReader, listR2 } from './lib/legacy-storage-reader.mjs';
-const root = fileURLToPath(new URL('..', import.meta.url));
+const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
 
 export function parseAudit(args) {
   const { values, positionals } = parseArgs({
