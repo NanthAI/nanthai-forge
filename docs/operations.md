@@ -431,10 +431,14 @@ explicit retry refreshes pins after a definite `WORK_STALE` rejection, or when a
 newer active project revision proves the earlier deletion could not have committed.
 Unknown outcomes retain the original operation and revision.
 
-Projects with R2 data remain `deleting` until every prefix DELETE succeeds. If
-maintenance is disabled, the purge records `R2_MAINTENANCE_DISABLED` and schedules
-nothing further. The CLI names the required backend setting,
-`FORGE_R2_MAINTENANCE=1`; after it is enabled, retry the same command to resume.
+Projects with R2 data remain `deleting` until every prefix DELETE succeeds. The
+prefix purge never needs `FORGE_R2_MAINTENANCE`: it deletes only under the
+project's own prefix, with a grant that exists only for an owner-confirmed or
+expired day-90 purge (`convex/projectPurgeAuthority.ts`). Without that grant the
+purge records `R2_PURGE_UNAUTHORIZED` and schedules nothing further; retrying the
+same command confirms it and resumes the saved page. Each page is one query, one
+LIST, at most 100 DELETEs and one mutation; the purge receipt counts `r2Objects`
+and `r2Bytes`.
 Transient R2 errors retry the saved page up to eight attempts, with delays doubling
 from one minute to a fifteen-minute cap. Exhaustion records
 `R2_PURGE_RETRY_EXHAUSTED`; resolve the storage error and retry the command. Retries
@@ -480,6 +484,13 @@ pages) is visible in Settings. A build test fails when a schema table with a
 Projects deleted before the retention window existed have no expiry. The lead arms
 them with the internal `projectRetention:armLegacyTrash` (one owner, 50 projects
 per page); projects removed more than 90 days earlier purge immediately.
+
+Older purges left `deleted` tombstones (name cleared, slug kept, no `purge`
+receipt) that still hold project rows and R2 objects. With owner approval the lead
+runs `projectRetention:repurgeLegacyTombstone '{"projectId":"ID","operationId":"UUID","confirm":"SLUG"}'`.
+It refuses anything except such a tombstone, re-enters the inventory-guarded purge
+as an owner-confirmed delete and ends at the normal tombstone; a replay of the same
+operation id is a no-op.
 
 To discard a pending host operation without deleting a hosted project:
 

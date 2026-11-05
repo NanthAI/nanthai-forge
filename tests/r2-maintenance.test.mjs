@@ -11,6 +11,7 @@ const names = [
   'projectR2Sweep',
   'r2ArchiveSource',
   'projectLifecycle',
+  'projectRetention',
 ];
 const modules = Object.fromEntries(
   await Promise.all(names.map(async name => [name, await import(moduleUrl(`../convex/${name}.ts`))])),
@@ -19,7 +20,14 @@ const commit = await import(moduleUrl('../convex/projectObjectCommit.ts'));
 const objects = await import(moduleUrl('../convex/projectObjects.ts'));
 const archive = await import(moduleUrl('../convex/projectArchivePart.ts'));
 const operations = await import(moduleUrl('../convex/r2Operations.ts'));
+const { purgeAuthority, authorizedKeys } = await import(moduleUrl('../convex/projectPurgeAuthority.ts'));
+const { projectRetentionMs } = await import(moduleUrl('../convex/projectRetention.ts'));
 const windowMs = 14 * 86400_000;
+/** The slug-confirmed delete transition's receipt: the project's scoped R2 purge grant. */
+const deleting = (operationId = 'owner-delete') => ({
+  removal: 'deleting',
+  purge: { operationId, reason: 'owner', startedAt: 1, rows: 0, bytes: 0, pages: 0 },
+});
 async function fixture(t) {
   const x = await setup(t);
   const previous = process.env.FORGE_R2_MAINTENANCE;
@@ -96,7 +104,7 @@ async function fixture(t) {
     return task;
   };
   x.startPrefix = async () => {
-    await x.s.ctx.db.patch('project', { removal: 'deleting' });
+    await x.s.ctx.db.patch('project', deleting());
     for (let i = 0; !x.s.tables.hostedProjects.get('project').r2Purge; i++) {
       assert.ok(i < 5, 'metadata cleanup reaches the prefix');
       await x.run('projectLifecycle:purge', { projectId: 'project' });
@@ -376,7 +384,7 @@ test('purged legacy archives retain their ID alias and serve authorized R2 bytes
 test('permanent project deletion discovers pre-existing R2 rows and waits for prefix cleanup before its tombstone', async t => {
   const x = await fixture(t);
   await x.row();
-  await x.s.ctx.db.patch('project', { removal: 'deleting' });
+  await x.s.ctx.db.patch('project', deleting());
   for (
     let i = 0;
     i < 4 &&
@@ -398,7 +406,7 @@ test('permanent project deletion discovers pre-existing R2 rows and waits for pr
 test('enabled project deletion removes untracked R2 prefix keys even without object rows or a backfill marker', async t => {
   const x = await fixture(t);
   x.fake.objects.set(x.fake.key('v1/p/project/artifacts/orphan'), Buffer.from('orphan'));
-  await x.s.ctx.db.patch('project', { removal: 'deleting' });
+  await x.s.ctx.db.patch('project', deleting());
   await x.run('projectLifecycle:purge', { projectId: 'project' });
   assert.equal((await x.s.ctx.db.get('project')).removal, 'deleting');
   assert.ok(
@@ -410,7 +418,7 @@ test('enabled project deletion removes untracked R2 prefix keys even without obj
   assert.equal(x.fake.objects.size, 0);
 });
 
-for (const failure of ['disabled', 'list', 'delete'])
+for (const failure of ['unauthorized', 'list', 'delete'])
   test(`project-prefix ${failure} failure retains its cursor and resumes without duplicate chains`, async t => {
     const x = await fixture(t);
     for (let i = 0; i < 101; i++)
@@ -422,7 +430,13 @@ for (const failure of ['disabled', 'list', 'delete'])
     assert.equal(x.fake.objects.size, 2);
     assert.ok(continuation.args.cursor);
     const fetch = globalThis.fetch;
-    if (failure === 'disabled') delete process.env.FORGE_R2_MAINTENANCE;
+    // A retention purge still inside its 90-day window carries no R2 grant.
+    const removedAt = (await x.s.ctx.db.get('project')).removedAt;
+    if (failure === 'unauthorized')
+      await x.s.ctx.db.patch('project', {
+        removedAt: Date.now(),
+        purge: { ...deleting().purge, reason: 'retention', operationId: 'retention:project:early' },
+      });
     if (failure === 'delete') x.fake.failDeletes = 1;
     if (failure === 'list')
       globalThis.fetch = (url, init) =>
@@ -437,7 +451,7 @@ for (const failure of ['disabled', 'list', 'delete'])
       return runAfter(delay, ...args);
     };
     try {
-      if (failure === 'disabled') await x.step(continuation);
+      if (failure === 'unauthorized') await x.step(continuation);
       else
         await assert.rejects(
           x.step(continuation),
@@ -450,17 +464,17 @@ for (const failure of ['disabled', 'list', 'delete'])
         );
     } finally {
       globalThis.fetch = fetch;
-      process.env.FORGE_R2_MAINTENANCE = '1';
+      if (failure === 'unauthorized') await x.s.ctx.db.patch('project', { ...deleting(), removedAt });
     }
     const project = await x.s.ctx.db.get('project');
     assert.equal(project.removal, 'deleting');
     assert.notEqual(project.r2PrefixPurged, true);
     assert.equal(project.r2Purge.cursor, continuation.args.cursor);
     assert.equal(x.fake.objects.size, 2);
-    if (failure === 'disabled') {
+    if (failure === 'unauthorized') {
       assert.equal(x.s.scheduled.length, scheduled);
       assert.deepEqual(delays, []);
-      assert.equal(project.purgeBlocked, 'R2_MAINTENANCE_DISABLED');
+      assert.equal(project.purgeBlocked, 'R2_PURGE_UNAUTHORIZED');
       assert.equal(project.task, undefined);
       await x.run('projectLifecycle:permanentlyDelete', {
         projectId: 'project',
@@ -547,7 +561,7 @@ test('deleted, active, trashed, missing and legacy unfenced deliveries do no R2 
     requests = x.fake.requests.length;
   for (const removal of ['deleted', undefined, 'trash']) {
     await x.s.ctx.db.patch('project', { removal });
-    assert.equal(await x.run('projectR2Maintenance:deletingProject', { projectId: 'project' }), false);
+    assert.equal(await x.run('projectR2Maintenance:deletingProject', { projectId: 'project' }), null);
     await x.step(task);
     await x.run('projectR2Maintenance:pageResult', { ...task.args, outcome: 'failed' });
     await x.run('projectR2Maintenance:prefixComplete', {
@@ -555,7 +569,7 @@ test('deleted, active, trashed, missing and legacy unfenced deliveries do no R2 
       generation: task.args.generation,
     });
   }
-  await x.s.ctx.db.patch('project', { removal: 'deleting' });
+  await x.s.ctx.db.patch('project', deleting());
   for (let i = 0; i < 7; i++)
     await x.run('projectR2Maintenance:purgeDeletedProjectPage', { projectId: 'project', cursor: 'old' });
   await x.s.ctx.db.delete('project');
@@ -700,4 +714,215 @@ test('early purge mutation rechecks receipt age after HEAD', async t => {
   };
   await assert.rejects(x.purge({ dryRun: false }));
   assert.equal(x.s.deleted.length, 0);
+});
+
+test('scoped purge grant: refused for live, trashed, restored, early and unreceipted projects; allowed for an expired tombstone or confirmed delete', () => {
+  const now = Date.now(),
+    removedAt = now - projectRetentionMs - 1000,
+    base = { _id: 'project', owner: 'owner', name: '', revision: 3, currentBackup: null, removedAt };
+  const receipt = (reason, operationId) => ({
+    operationId,
+    reason,
+    startedAt: now,
+    rows: 0,
+    bytes: 0,
+    pages: 0,
+  });
+  const expired = {
+    ...base,
+    removal: 'deleting',
+    purge: receipt('retention', `retention:project:${removedAt}`),
+  };
+  assert.equal(purgeAuthority({ ...base, removal: undefined, removedAt: undefined }, now), null, 'live');
+  assert.equal(
+    purgeAuthority(
+      {
+        ...base,
+        removal: undefined,
+        removedAt: undefined,
+        lifecycle: { operationId: 'r', action: 'restore', expectedRevision: 2 },
+      },
+      now,
+    ),
+    null,
+    'restored',
+  );
+  assert.equal(
+    purgeAuthority(
+      {
+        ...base,
+        removal: 'trash',
+        retention: { purgeAt: removedAt, retainedBytes: 0, retainedObjects: 0, measured: true },
+      },
+      now,
+    ),
+    null,
+    'trash stays restorable',
+  );
+  assert.equal(purgeAuthority({ ...base, removal: 'deleting' }, now), null, 'no purge receipt');
+  assert.equal(purgeAuthority({ ...expired, removal: 'deleted' }, now), null, 'finished tombstone');
+  assert.equal(
+    purgeAuthority(
+      { ...expired, removedAt: now - 1000, purge: receipt('retention', `retention:project:${now - 1000}`) },
+      now,
+    ),
+    null,
+    'inside its window',
+  );
+  assert.equal(
+    purgeAuthority({ ...expired, purge: receipt('retention', 'retention:other:1') }, now),
+    null,
+    'foreign receipt',
+  );
+  assert.deepEqual(purgeAuthority(expired, now), {
+    prefix: 'v1/p/project/',
+    operationId: `retention:project:${removedAt}`,
+  });
+  assert.deepEqual(purgeAuthority({ ...base, removal: 'deleting', purge: receipt('owner', 'op-1') }, now), {
+    prefix: 'v1/p/project/',
+    operationId: 'op-1',
+  });
+  const grant = purgeAuthority(expired, now);
+  assert.deepEqual(authorizedKeys(grant, 'project', ['v1/p/project/o/a']), ['v1/p/project/o/a']);
+  assert.throws(() => authorizedKeys(grant, 'project', ['v1/p/other/o/a']), /R2_PURGE_UNAUTHORIZED|limited/);
+  assert.throws(() => authorizedKeys(grant, 'other', ['v1/p/project/o/a']), /R2_PURGE_UNAUTHORIZED|limited/);
+  assert.throws(
+    () => authorizedKeys(grant, 'project', ['v1/p/projectx/o/a']),
+    /R2_PURGE_UNAUTHORIZED|limited/,
+  );
+});
+
+async function runToTombstone(x) {
+  for (let i = 0; (await x.s.ctx.db.get('project')).removal !== 'deleted'; i++) {
+    assert.ok(i < 40, 'purge reaches its tombstone in bounded steps');
+    await x.step();
+  }
+  return x.s.ctx.db.get('project');
+}
+test('day-90 expiry purges its own R2 prefix with the global maintenance flag off and counts objects and bytes', async t => {
+  const x = await fixture(t);
+  delete process.env.FORGE_R2_MAINTENANCE;
+  x.fake.objects.set(x.fake.key('v1/p/other/o/keep'), Buffer.from('keep'));
+  x.fake.objects.set(x.fake.key('v1/p/projectx/o/keep'), Buffer.from('keep'));
+  for (let i = 0; i < 101; i++)
+    x.fake.objects.set(x.fake.key(`v1/p/project/o/${String(i).padStart(3, '0')}`), Buffer.from('xy'));
+  const removedAt = Date.now() - projectRetentionMs - 1000;
+  await x.s.ctx.db.patch('project', {
+    removal: 'trash',
+    removedAt,
+    retention: {
+      purgeAt: removedAt + projectRetentionMs,
+      retainedBytes: 0,
+      retainedObjects: 0,
+      measured: true,
+    },
+  });
+  await x.run('projectRetention:expire', { projectId: 'project', removedAt });
+  const project = await runToTombstone(x);
+  assert.equal(process.env.FORGE_R2_MAINTENANCE, undefined);
+  assert.equal(project.purge.r2Objects, 101);
+  assert.equal(project.purge.r2Bytes, 202);
+  assert.ok(project.purge.completedAt);
+  assert.deepEqual(
+    [...x.fake.objects.keys()].sort(),
+    [x.fake.key('v1/p/other/o/keep'), x.fake.key('v1/p/projectx/o/keep')].sort(),
+  );
+  const lists = x.fake.requests.filter(r => r.method === 'LIST').length,
+    deletes = x.fake.requests.filter(r => r.method === 'DELETE').length;
+  assert.equal(lists, 2, 'one LIST per 100-key page');
+  assert.equal(deletes, 101, 'one DELETE per key, none outside the prefix');
+});
+test('a deleting project without a confirmed or expired grant blocks before any R2 delete', async t => {
+  const x = await fixture(t);
+  delete process.env.FORGE_R2_MAINTENANCE;
+  x.fake.objects.set(x.fake.key('v1/p/project/o/a'), Buffer.from('a'));
+  await x.startPrefix();
+  const removedAt = Date.now() - 1000;
+  for (const purge of [
+    undefined,
+    { ...deleting().purge, reason: 'retention', operationId: `retention:project:${removedAt}` },
+  ]) {
+    await x.s.ctx.db.patch('project', { purge, removedAt, purgeBlocked: undefined });
+    const before = x.fake.requests.length;
+    await x.step();
+    const project = await x.s.ctx.db.get('project');
+    assert.equal(project.purgeBlocked, 'R2_PURGE_UNAUTHORIZED');
+    assert.equal(project.task, undefined);
+    assert.equal(x.fake.requests.length, before, 'no LIST or DELETE');
+    assert.ok(x.fake.objects.has(x.fake.key('v1/p/project/o/a')));
+    // Retry needs a fresh chain; the blocked one never reschedules itself.
+    await x.s.ctx.db.patch('project', { purgeBlocked: undefined });
+    const { scheduleR2Purge } = await import(moduleUrl('../convex/projectPurgeScheduling.ts'));
+    await scheduleR2Purge(x.s.ctx, await x.s.ctx.db.get('project'));
+  }
+});
+test('an owner retry grants a pre-receipt deleting project its purge and finishes R2', async t => {
+  const x = await fixture(t);
+  delete process.env.FORGE_R2_MAINTENANCE;
+  x.fake.objects.set(x.fake.key('v1/p/project/o/a'), Buffer.from('a'));
+  await x.startPrefix();
+  await x.s.ctx.db.patch('project', { purge: undefined });
+  await x.step();
+  assert.equal((await x.s.ctx.db.get('project')).purgeBlocked, 'R2_PURGE_UNAUTHORIZED');
+  const project = await x.s.ctx.db.get('project');
+  await x.run('projectLifecycle:permanentlyDelete', {
+    projectId: 'project',
+    operationId: 'retry',
+    expectedRevision: project.revision,
+  });
+  assert.equal((await x.s.ctx.db.get('project')).purge.operationId, 'retry');
+  assert.equal((await runToTombstone(x)).purge.r2Objects, 1);
+  assert.equal(x.fake.objects.size, 0);
+});
+test('lead re-purge of a legacy tombstone is slug-confirmed, idempotent, and clears rows and R2', async t => {
+  const x = await fixture(t);
+  delete process.env.FORGE_R2_MAINTENANCE;
+  await x.row();
+  x.fake.objects.set(x.fake.key('v1/p/project/artifacts/orphan'), Buffer.from('orphan'));
+  x.fake.objects.set(x.fake.key('v1/p/other/o/keep'), Buffer.from('keep'));
+  const args = { projectId: 'project', operationId: 'legacy-op', confirm: 'legacy-slug' };
+  await assert.rejects(
+    x.run('projectRetention:repurgeLegacyTombstone', args),
+    /PROJECT_UNAVAILABLE|legacy tombstone/,
+  );
+  await x.s.ctx.db.patch('project', {
+    removal: 'deleted',
+    name: '',
+    slug: 'legacy-slug',
+    removedAt: 1,
+    r2PrefixPurged: true,
+  });
+  await assert.rejects(
+    x.run('projectRetention:repurgeLegacyTombstone', { ...args, confirm: 'other' }),
+    /BAD_ARGUMENT|slug/,
+  );
+  assert.ok((await x.run('projectRetention:residue', { projectId: 'project' })).includes('projectObjects'));
+  assert.deepEqual(await x.run('projectR2Maintenance:prefixCount', { projectId: 'project' }), {
+    keys: 2,
+    bytes: Buffer.byteLength('retained source') + 6,
+    more: false,
+  });
+  await x.run('projectRetention:repurgeLegacyTombstone', args);
+  const started = await x.s.ctx.db.get('project');
+  assert.equal(started.removal, 'deleting');
+  assert.equal(started.purge.reason, 'owner');
+  const count = x.s.scheduled.length;
+  await x.run('projectRetention:repurgeLegacyTombstone', args);
+  assert.equal(x.s.scheduled.length, count, 'replay is a no-op');
+  const project = await runToTombstone(x);
+  assert.equal(project.slug, undefined);
+  assert.equal(project.purge.r2Objects, 2);
+  assert.equal([...x.s.tables.projectObjects.values()].filter(row => row.projectId === 'project').length, 0);
+  assert.deepEqual([...x.fake.objects.keys()], [x.fake.key('v1/p/other/o/keep')]);
+  assert.deepEqual(await x.run('projectRetention:residue', { projectId: 'project' }), []);
+  assert.deepEqual(await x.run('projectR2Maintenance:prefixCount', { projectId: 'project' }), {
+    keys: 0,
+    bytes: 0,
+    more: false,
+  });
+  // A tombstone with a purge receipt was purged by the inventory purge; it cannot re-enter.
+  await assert.rejects(
+    x.run('projectRetention:repurgeLegacyTombstone', { ...args, operationId: 'again' }),
+    /PROJECT_UNAVAILABLE|legacy tombstone/,
+  );
 });

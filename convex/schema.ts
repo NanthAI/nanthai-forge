@@ -291,8 +291,10 @@ export const hostedWorkEventDocument = v.object({
 });
 export const projectRemoval = v.union(v.literal('trash'), v.literal('deleting'), v.literal('deleted'));
 export const projectPurgeBlocked = v.union(
+  /** Retired: the prefix purge no longer reads the global flag; kept for existing rows. */
   v.literal('R2_MAINTENANCE_DISABLED'),
   v.literal('R2_PURGE_RETRY_EXHAUSTED'),
+  v.literal('R2_PURGE_UNAUTHORIZED'),
 );
 export const projectRetention = v.object({
   purgeAt: v.number(),
@@ -318,6 +320,9 @@ export const projectPurge = v.object({
   rows: v.number(),
   bytes: v.number(),
   pages: v.number(),
+  /** R2 objects and bytes removed under the project prefix. */
+  r2Objects: v.optional(v.number()),
+  r2Bytes: v.optional(v.number()),
   completedAt: v.optional(v.number()),
 });
 const projectFields = {

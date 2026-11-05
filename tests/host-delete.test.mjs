@@ -441,7 +441,7 @@ test('a known stale rejection can retry and resume a different removal already u
   assert.equal(requests[1].expectedRevision, 8);
 });
 
-test('blocked R2 maintenance is actionable immediately and retry retains the original delete operation', async t => {
+test('blocked R2 purge grant is actionable immediately and retry retains the original delete operation', async t => {
   const f = setup(t),
     requests = [];
   f.client.mutation = async (_ref, args) => {
@@ -453,7 +453,7 @@ test('blocked R2 maintenance is actionable immediately and retry retains the ori
       revision: 8,
       currentBackup: null,
       removal: 'deleting',
-      purgeBlocked: 'R2_MAINTENANCE_DISABLED',
+      purgeBlocked: 'R2_PURGE_UNAUTHORIZED',
     });
   };
   await assert.rejects(
@@ -462,8 +462,8 @@ test('blocked R2 maintenance is actionable immediately and retry retains the ori
       wait: async () => assert.fail('blocked purge must not poll'),
     }),
     error =>
-      error.code === 'R2_MAINTENANCE_DISABLED' &&
-      error.message.includes('FORGE_R2_MAINTENANCE=1') &&
+      error.code === 'R2_PURGE_UNAUTHORIZED' &&
+      !error.message.includes('FORGE_R2_MAINTENANCE') &&
       error.message.includes('retry this command'),
   );
   const reads = f.calls.length;

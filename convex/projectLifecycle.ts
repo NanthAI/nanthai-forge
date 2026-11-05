@@ -69,7 +69,19 @@ export async function transition(
     'Project changed. Its original source and your operation remain available.',
   );
   if (action === 'delete' && ['deleting', 'deleted'].includes(project.removal ?? '')) {
-    if (project.removal === 'deleting') await schedule(ctx, project);
+    // A pre-receipt `deleting` row gets its owner-confirmed purge grant from this retry.
+    if (project.removal === 'deleting' && !project.purge)
+      await ctx.db.patch(project._id, {
+        purge: {
+          operationId: input.operationId,
+          reason: 'owner',
+          startedAt: Date.now(),
+          rows: 0,
+          bytes: 0,
+          pages: 0,
+        },
+      });
+    if (project.removal === 'deleting') await schedule(ctx, (await ctx.db.get(project._id))!);
     return null;
   }
   invariant(

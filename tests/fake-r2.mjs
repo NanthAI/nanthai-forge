@@ -122,7 +122,16 @@ export async function startFakeR2(config = fakeR2Config, { local = false } = {})
           '<ListBucketResult><IsTruncated>' +
             truncated +
             '</IsTruncated>' +
-            page.map(key => '<Contents><Key>' + encodeURIComponent(key) + '</Key></Contents>').join('') +
+            page
+              .map(
+                key =>
+                  '<Contents><Key>' +
+                  encodeURIComponent(key) +
+                  '</Key><Size>' +
+                  objects.get(bucket + '/' + key).length +
+                  '</Size></Contents>',
+              )
+              .join('') +
             (truncated ? '<NextContinuationToken>' + page.at(-1) + '</NextContinuationToken>' : '') +
             '</ListBucketResult>',
         );

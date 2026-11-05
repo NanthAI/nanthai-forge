@@ -65,8 +65,10 @@ export async function listR2Prefix(config: R2Config, prefix: string, cursor: str
     'R2_LIST_FAILED',
     'Object storage returned an invalid project-prefix page.',
   );
+  // Size appears only inside each listed object's Contents; the purge reports bytes freed.
+  const bytes = [...body.matchAll(/<Size>(\d+)<\/Size>/g)].reduce((n, match) => n + Number(match[1]), 0);
   const truncated = /<IsTruncated>true<\/IsTruncated>/.test(body);
   const next = body.match(/<NextContinuationToken>([\s\S]*?)<\/NextContinuationToken>/)?.[1];
   invariant(!truncated || !!next, 'R2_LIST_FAILED', 'Object storage omitted a continuation cursor.');
-  return { keys, cursor: next ? xml(next) : null, isDone: !truncated };
+  return { keys, bytes, cursor: next ? xml(next) : null, isDone: !truncated };
 }

@@ -20,7 +20,7 @@ type Project = {
   revision: number;
   currentBackup: string | null;
   removal?: 'trash' | 'deleting' | 'deleted';
-  purgeBlocked?: 'R2_MAINTENANCE_DISABLED' | 'R2_PURGE_RETRY_EXHAUSTED';
+  purgeBlocked?: 'R2_MAINTENANCE_DISABLED' | 'R2_PURGE_RETRY_EXHAUSTED' | 'R2_PURGE_UNAUTHORIZED';
 };
 const requestSchema = z.object({
   deployment: z.string(),
@@ -200,9 +200,9 @@ export async function deleteHostedProject(
       if (project.purgeBlocked)
         throw new ForgeError(
           project.purgeBlocked,
-          project.purgeBlocked === 'R2_MAINTENANCE_DISABLED'
-            ? `Project purge is blocked: set FORGE_R2_MAINTENANCE=1 on the backend, then retry this command to resume operation ${request.operationId}.`
-            : `R2 purge stopped after repeated storage errors. Resolve the R2 storage failure, then retry this command to resume operation ${request.operationId}.`,
+          project.purgeBlocked === 'R2_PURGE_RETRY_EXHAUSTED'
+            ? `R2 purge stopped after repeated storage errors. Resolve the R2 storage failure, then retry this command to resume operation ${request.operationId}.`
+            : `Project purge is blocked: the R2 prefix purge has no confirmed permanent-delete grant; retry this command to confirm and resume operation ${request.operationId}.`,
         );
       if (attempt + 1 < pollAttempts) {
         const delay = Math.min((dependencies?.pollIntervalMs ?? 2000) * 2 ** attempt, 10_000);

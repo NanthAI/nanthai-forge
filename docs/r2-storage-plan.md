@@ -372,15 +372,21 @@ A retry starts the indexed pages again and reconciles row markers/pending keys.
 Dry-runs do not claim uploads or delete storage. Failures do not advance the
 operator command past the failing page; earlier completed pages remain applied.
 
-Existing explicit permanent project deletion also removes the entire R2 project
-prefix in 100-key S3 pages once maintenance is enabled. When maintenance is off, Convex-only projects need
-no R2 configuration. Once enabled, prefix cleanup also covers projects without a
-prior R2 marker, including artifact-only or orphaned uploads. Each page transaction
-retains the next scheduled task, cursor and generation; concurrent deletion retries
-and stale deliveries cannot fork another chain. Disabled maintenance records
-`purgeBlocked: R2_MAINTENANCE_DISABLED` without rescheduling. The CLI reports
-`FORGE_R2_MAINTENANCE=1` and resumes the saved page on an explicit retry after it is
-enabled. Transient errors retain the same cursor and retry at one, two, four, eight,
+Permanent project deletion (owner-confirmed or the day-90 expiry) also removes the
+entire R2 project prefix in 100-key S3 pages. It does not read
+`FORGE_R2_MAINTENANCE`: each page needs the project's own scoped grant
+(`convex/projectPurgeAuthority.ts`), which exists only for a `deleting` tombstone
+whose purge receipt is owner-confirmed or is the exact day-90 expiry past its
+window. The grant names the project prefix and purge operation id; every listed key
+must sit under that prefix before a DELETE is signed, and each page's completion
+re-checks the operation id. Live, trashed, restored and foreign projects get no
+grant. Prefix cleanup also covers projects without a prior R2 marker, including
+artifact-only or orphaned uploads, and records `r2Objects`/`r2Bytes` on the purge
+receipt. Each page transaction retains the next scheduled task, cursor and
+generation; concurrent deletion retries and stale deliveries cannot fork another
+chain. A missing grant records `purgeBlocked: R2_PURGE_UNAUTHORIZED` without
+rescheduling; an owner delete retry grants a pre-receipt `deleting` project and
+resumes the saved page. Transient errors retain the same cursor and retry at one, two, four, eight,
 then fifteen-minute intervals, stopping after eight failed attempts per page with
 `R2_PURGE_RETRY_EXHAUSTED`. An owner retry resets that page's retry budget.
 Completion remains gated on successful R2 deletes. Prefix actions stop for every

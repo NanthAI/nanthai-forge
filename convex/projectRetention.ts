@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
 import { makeFunctionReference } from 'convex/server';
-import { internalMutation, type MutationCtx } from './server';
+import { internalMutation, internalQuery, type MutationCtx } from './server';
 import type { Doc, Id } from './_generated/dataModel';
-import type { ProjectPurgeTable } from './projectPurgeInventory';
+import { projectPurgeOrder, type ProjectPurgeTable } from './projectPurgeInventory';
 import { putExpiry } from './r2';
 import { projectRows } from './projectPurgeRows';
 import { projectExecution } from './projectExecution';
+import { invariant } from '../src/errors';
 
 /** Owner decision 2026-11-05: deleted projects stay restorable for 90 days (GitHub parity). */
 export const projectRetentionMs = 90 * 24 * 60 * 60 * 1000;
@@ -174,5 +175,60 @@ export const armLegacyTrash = internalMutation({
         armed++;
       }
     return { armed, cursor: page.continueCursor, isDone: page.isDone };
+  },
+});
+/** Lead-only, slug-confirmed purge of a pre-inventory tombstone (`deleted` with no purge
+ * receipt). Older purges left project rows and R2 objects behind; this re-enters the
+ * inventory-guarded purge as an owner-confirmed delete, which also grants its R2 prefix. */
+export const repurgeLegacyTombstone = internalMutation({
+  args: { projectId: v.id('hostedProjects'), operationId: v.string(), confirm: v.string() },
+  returns: v.null(),
+  handler: async (ctx, { projectId, operationId, confirm }) => {
+    const project = await ctx.db.get(projectId);
+    projectExecution(ctx, projectId, project?.name, project?.key);
+    if (project?.purge?.operationId === operationId) return null;
+    invariant(
+      project?.removal === 'deleted' && !project.purge && !project.retention,
+      'PROJECT_UNAVAILABLE',
+      'Only a legacy tombstone without a purge receipt can be re-purged.',
+    );
+    invariant(
+      operationId.trim() && !!project.slug && confirm.trim() === project.slug,
+      'BAD_ARGUMENT',
+      'Type the tombstone slug to confirm its permanent purge.',
+    );
+    await ctx.db.patch(projectId, {
+      removal: 'deleting',
+      removedAt: project.removedAt ?? Date.now(),
+      revision: project.revision + 1,
+      lifecycle: { operationId, action: 'delete', expectedRevision: project.revision },
+      purge: { operationId, reason: 'owner', startedAt: Date.now(), rows: 0, bytes: 0, pages: 0 },
+      r2PrefixPurged: undefined,
+      r2Purge: undefined,
+      purgeBlocked: undefined,
+      task: await ctx.scheduler.runAfter(0, makeFunctionReference<'mutation'>('projectLifecycle:purge'), {
+        projectId,
+      }),
+    });
+    return null;
+  },
+});
+/** Read-only purge proof: the inventory tables (and archive namespace) where a project
+ * still owns a row. One indexed single-row read per table; no scans. */
+export const residue = internalQuery({
+  args: { projectId: v.id('hostedProjects') },
+  returns: v.array(v.string()),
+  handler: async (ctx, { projectId }) => {
+    const left: string[] = [];
+    for (const table of projectPurgeOrder)
+      if ((await projectRows(ctx as unknown as MutationCtx, table, projectId, 1)).length) left.push(table);
+    const blob = await ctx.db
+      .query('artifactBlobs')
+      .withIndex('by_namespace_and_digest', q =>
+        q.gte('namespace', `v1/p/${projectId}/`).lt('namespace', `v1/p/${projectId}0`),
+      )
+      .take(1);
+    if (blob.length) left.push('artifactBlobs');
+    return left;
   },
 });
