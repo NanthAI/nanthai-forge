@@ -4,14 +4,6 @@ import { posix } from 'node:path';
 // paths stay unknown: a filename resemblance is never an independence proof.
 export const webTest = path => /^(?:tests\/ui-|tests\/.*-ui\.test)/.test(path);
 
-const ignoreTests = [
-  'tests/boundaries.test.mjs',
-  'tests/github.test.mjs',
-  'tests/index-reuse.test.mjs',
-  'tests/native-source-performance.test.mjs',
-  'tests/native-workspace-files.test.mjs',
-  'tests/source-durability.test.mjs',
-];
 /** A non-source file in a folder under scripts/ or tests/ (shell, Python, notes)
  * is data to the code that runs or reads it, which the selector never parses.
  * Its observers are its sibling code (relative spawns, folder walks) and any
@@ -50,22 +42,9 @@ export function classifyCheckPath(path, files) {
     seeds: [...files.keys()].filter(file => prefixes.some(prefix => file.startsWith(prefix))),
     reason,
   });
-  if (path === '.gitignore')
-    return { domain: 'tooling', seeds: [path], tests: ignoreTests, reason: 'Repository ignore rules' };
-  if (
-    [
-      '.editorconfig',
-      '.oxlintrc.json',
-      '.oxfmtrc.json',
-      '.prettierignore',
-      '.prettierrc',
-      '.prettierrc.json',
-      'prettier.config.mjs',
-      'eslint.config.mjs',
-    ].includes(path)
-  )
-    return { domain: 'tooling', seeds: [path], reason: 'Formatting/lint config; static checks still run' };
-  if (path === 'tsconfig.json') return domain('core', ['src/'], 'Core TypeScript configuration');
+  // Root configuration and non-Markdown docs/evals can alter any behaviour.
+  // Returning unknown selects full coverage, including for deleted files.
+  if (!path.includes('/') || path.startsWith('docs/') || path.startsWith('evals/')) return null;
   if (['web/tsconfig.json', 'web/vite.config.ts', 'web/index.html'].includes(path))
     return domain('web', ['web/src/'], 'Web build configuration');
   if (path === 'convex/tsconfig.json')

@@ -232,7 +232,7 @@ export function testImportGraph(files, scriptsChanged = []) {
           widen('web/src/');
         if (
           (path.startsWith('tests/') || path.startsWith('scripts/')) &&
-          ['../dist', 'dist', '../web/src', 'web/src', '../convex'].includes(
+          ['../dist', 'dist', '../src', '../web/src', 'web/src', '../convex'].includes(
             value.replace(/^(\.\.\/.+)\/$/, '$1'),
           ) &&
           directoryDependency(node, ast)

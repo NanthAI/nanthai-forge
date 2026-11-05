@@ -131,20 +131,19 @@ landing: landings are pinned to the acceptance policy, which leaves these settin
 
 ### preflight
 
-- `nforge agent ROOT preflight '{"laneId":"…"}'` runs in the Lane checkout. It selects the saved
-  head's affected tests with the landing check's selector, runs `build:core` when the project has
-  that script, runs the tests here and records the result in `ROOT.forge-client`.
-- `"run":false` only plans: the test files, an estimate in minutes and the command.
-- Save first. Preflight refuses unsaved edits, because its record names the saved source tree.
-- `land --save` then looks for a passing record for the source tree it is about to land. A new head with the same
-  paths, file modes and blob hashes reuses that pass; changed source needs a new preflight. Older
-  records without a tree identity apply only to their exact saved head. Without a matching pass it
-  refuses with `PREFLIGHT_REQUIRED`, the number of files, the estimate and the preflight command.
-- Never blocking on missing data: when the saved paths or the selection are unavailable, or the
-  selection is empty, `land --save` goes ahead and says why in `defaults.preflight`.
-- The estimate is 4 seconds per test file at one test at a time.
-- The record is local, like the tests themselves. It is evidence for this machine's agent, not a
-  check result; the landing check still runs on the project runner.
+- `nforge agent ROOT preflight '{"laneId":"…"}'` runs saved Lane tests locally. Changed tests,
+  explicit coverage and smoke always run here; nearest certain consumers within two import edges
+  fill a 25-file local budget. Every other consumer stays listed in `deferredTests` for the landing runner; no consumer is discarded.
+- A private, content-bound receipt retains per-file passes, including passes from a failed run.
+  After a save, delta selection checks both old and new inventories. Unaffected local passes are
+  reused; failed, new and affected files run again. Missing/corrupt evidence or a changed runtime
+  cannot transfer passes. The returned plan names `reusedTests` and `deltaPaths`.
+- Root non-Markdown files, non-Markdown `docs/` files and all `evals/` files select full landing
+  coverage. Markdown-only docs keep their fast path. Near-full coverage runs on the landing runner.
+- `land --save` reuses an identical source tree's pass. Otherwise `preflight:require` refuses only
+  within `preflightMaxMinutes`, estimated from complete coverage before local deferral. Larger
+  selections and unavailable saved paths remain advisory. Delta evidence adds no server calls;
+  gzip snapshots and receipts stay in the private local cache, with no source upload.
 
 ### overlapGate
 

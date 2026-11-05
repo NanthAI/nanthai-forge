@@ -158,29 +158,53 @@ test('protected paths are opt-in: a contract change on a protected path needs a 
   assert.deepEqual(protectedMatches(guarded, changed), ['src/lib.ts']);
 });
 
+// A default declaration's local binding is not its exported name. Keep the
+// parser oracle faithful to ESM for named/anonymous declarations and expressions.
+function parserExportNames(text) {
+  const names = new Set();
+  for (const node of ts.createSourceFile('module.ts', text, 99, true).statements) {
+    const modifiers = ts.canHaveModifiers(node) ? ts.getModifiers(node) : undefined;
+    if (ts.isExportAssignment(node)) {
+      if (!node.isExportEquals) names.add('default');
+    } else if (ts.isExportDeclaration(node)) {
+      if (node.exportClause && ts.isNamedExports(node.exportClause))
+        for (const item of node.exportClause.elements) names.add(item.name.text);
+      else names.add(node.exportClause ? node.exportClause.name.text : `*:${node.moduleSpecifier.text}`);
+    } else if (modifiers?.some(item => item.kind === ts.SyntaxKind.ExportKeyword)) {
+      if (modifiers.some(item => item.kind === ts.SyntaxKind.DefaultKeyword)) names.add('default');
+      else if (ts.isVariableStatement(node))
+        for (const item of node.declarationList.declarations) names.add(item.name.getText());
+      else names.add(node.name.text);
+    }
+  }
+  return names;
+}
+test('default exports keep their ESM name for declarations, generators and expressions', () => {
+  for (const text of [
+    'export default function named() {}',
+    'export default async function* named() { yield 1; }',
+    'export default function* () { yield 1; }',
+    'export default class Named {}',
+    'export default class {}',
+    'const local = 1; export default local;',
+    'export default 1;',
+  ]) {
+    assert.deepEqual([...parserExportNames(text)], ['default'], text);
+    assert.deepEqual([...scanExports(text).keys()], ['default'], text);
+  }
+});
 test('export scanner agrees with the TypeScript parser on every source module', () => {
   const directory = new URL('../src/', import.meta.url);
   let names = 0;
   for (const name of readdirSync(directory).filter(item => item.endsWith('.ts'))) {
     const text = readFileSync(new URL(name, directory), 'utf8'),
-      want = new Set();
-    for (const node of ts.createSourceFile(name, text, 99, true).statements) {
-      const modifiers = ts.canHaveModifiers(node) ? ts.getModifiers(node) : undefined;
-      if (ts.isExportDeclaration(node)) {
-        if (node.exportClause && ts.isNamedExports(node.exportClause))
-          for (const item of node.exportClause.elements) want.add(item.name.text);
-        else want.add(node.exportClause ? node.exportClause.name.text : `*:${node.moduleSpecifier.text}`);
-      } else if (modifiers?.some(item => item.kind === ts.SyntaxKind.ExportKeyword)) {
-        if (ts.isVariableStatement(node))
-          for (const item of node.declarationList.declarations) want.add(item.name.getText());
-        else want.add(node.name.text);
-      }
-    }
+      want = parserExportNames(text);
     names += want.size;
     assert.deepEqual([...scanExports(text).keys()].sort(), [...want].sort(), name);
   }
   assert.ok(names > 1000);
 });
+
 function world(t) {
   const root = mkdtempSync(join(tmpdir(), 'forge-contracts-'));
   t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));

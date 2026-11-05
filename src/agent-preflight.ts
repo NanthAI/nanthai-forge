@@ -1,16 +1,37 @@
 // SPDX-License-Identifier: Apache-2.0
 import { clientCacheRoot } from './root-paths.js';
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  writeFileSync,
+  mkdtempSync,
+  rmSync,
+} from 'node:fs';
 import { spawnSync } from 'node:child_process';
+import { tmpdir } from 'node:os';
 import { join, posix } from 'node:path';
 import { z } from 'zod';
-import { selectTests, selectionSourcePath } from '../scripts/test-impact.mjs';
+import { selectTests, selectPreflightTests, selectionSourcePath } from '../scripts/test-impact.mjs';
+import type { NativeFile } from './native-state-format.js';
+import { sourceTree } from './source-tree.js';
+import {
+  deltaPaths,
+  preflightDefinition,
+  readPreflightEvidence,
+  savedInventory,
+  writePreflightEvidence,
+  type PreflightEvidence,
+} from './agent-preflight-evidence.js';
 import { shellQuote } from './agent-brief-render.js';
 
 /** Default local cost per selected test file at concurrency 1, used for the time estimate. */
 export const PREFLIGHT_SECONDS_PER_FILE = 4;
 const SOURCE_DIRS = ['src', 'web', 'convex', 'netlify', 'tests', 'scripts'];
 
+const reusedFromSchema = z.object({ head: z.string(), tree: z.string(), evidence: z.string() }).strict();
 export const preflightReceiptSchema = z
   .object({
     schema: z.literal(1),
@@ -26,6 +47,13 @@ export const preflightReceiptSchema = z
     passed: z.boolean(),
     durationMs: z.number().nonnegative(),
     at: z.string(),
+    evidence: z
+      .string()
+      .regex(/^[a-f0-9]{64}$/)
+      .optional(),
+    reusedTests: z.number().int().nonnegative().optional(),
+    reusedFrom: reusedFromSchema.optional(),
+    deferredTests: z.number().int().nonnegative().optional(),
   })
   .strict();
 export type PreflightReceipt = z.infer<typeof preflightReceiptSchema>;
@@ -38,8 +66,14 @@ export type PreflightPlan =
       tests: string[];
       estimateMinutes: number;
       command: string | null;
+      deferredTests?: string[];
+      reusedTests?: string[];
+      reusedFrom?: z.infer<typeof reusedFromSchema>;
+      deltaPaths?: string[];
+      totalEstimateMinutes?: number;
     };
 
+const preparedEvidence = new WeakMap<PreflightPlan, PreflightEvidence>();
 const receiptPath = (root: string, laneId: string) =>
   join(clientCacheRoot(root), 'agent', 'preflight', `${laneId}.json`);
 
@@ -86,6 +120,7 @@ const testArgs = (root: string, tests: string[]) => [
 export function preflightPlan(
   root: string,
   changed: { paths: string[]; complete: boolean } | undefined,
+  context?: { laneId: string; files: NativeFile[] },
 ): PreflightPlan {
   if (!changed?.complete) return { status: 'unavailable', reason: 'saved changed paths are unavailable' };
   if (!changed.paths.length)
@@ -98,20 +133,81 @@ export function preflightPlan(
       command: null,
     };
   try {
-    const selection = selectTests({ files: laneFiles(root), paths: changed.paths });
-    const tests = [...new Set(selection.tests)].sort();
-    return {
+    const files = laneFiles(root);
+    const selection = selectPreflightTests({ files, paths: changed.paths });
+    let tests = [...new Set(selection.tests)].sort();
+    let reusedTests: string[] = [];
+    let delta: string[] | undefined;
+    let reusedFrom: z.infer<typeof reusedFromSchema> | undefined;
+    const saved = context && savedInventory(context.files, files);
+    if (context && !saved) {
+      // Sparse/mismatched local bytes cannot prove that an unseen consumer is independent.
+      // Preserve local execution, put the complete manifest test inventory on the runner.
+      const all = new Set([
+        ...selection.tests,
+        ...selection.deferredTests,
+        ...context.files.map(file => file.path).filter(path => /^tests\/[^/]+\.test\.mjs$/.test(path)),
+      ]);
+      selection.scope = 'full';
+      selection.deferredTests = [...all].filter(test => !selection.tests.includes(test)).sort();
+      selection.reason += '; incomplete local source inventory: full landing coverage, no receipt reuse';
+    }
+    if (context && saved) {
+      const receipt = readPreflightReceipt(root, context.laneId);
+      const previous =
+        receipt?.tree && receipt.evidence
+          ? readPreflightEvidence(root, receipt.evidence, receipt.tree)
+          : null;
+      if (previous) {
+        delta = deltaPaths(previous.files, context.files);
+        // Both inventories matter: removing an import/consumer must not erase its
+        // old dependency proof. Full/unknown on either side invalidates reuse.
+        const impacted = new Set<string>();
+        for (const [inventory, manifest] of [
+          [new Map(previous.inventory), previous.files],
+          [files, context.files],
+        ] as const) {
+          // A newly added file has no old consumers; a deleted file's consumers
+          // come from the old graph. Do not turn that absence into a full fallback.
+          const present = new Set(manifest.map(file => file.path));
+          const paths = delta.filter(path => present.has(path));
+          if (!paths.length) continue;
+          for (const test of selectTests({ files: inventory, paths }).tests) impacted.add(test);
+        }
+        const covered = new Set(previous.covered);
+        reusedTests = tests.filter(test => covered.has(test) && !impacted.has(test));
+        tests = tests.filter(test => !reusedTests.includes(test));
+        if (reusedTests.length && receipt?.tree && receipt.evidence)
+          reusedFrom = { head: receipt.head, tree: receipt.tree, evidence: receipt.evidence };
+      }
+    }
+    const plan: PreflightPlan = {
       status: 'planned',
       scope: selection.scope,
       reason: selection.reason,
       tests,
+      deferredTests: selection.deferredTests,
+      reusedTests,
+      ...(reusedFrom ? { reusedFrom } : {}),
+      ...(delta ? { deltaPaths: delta } : {}),
       estimateMinutes: Math.ceil((tests.length * PREFLIGHT_SECONDS_PER_FILE) / 60),
+      totalEstimateMinutes: Math.ceil(
+        ((selection.tests.length + selection.deferredTests.length) * PREFLIGHT_SECONDS_PER_FILE) / 60,
+      ),
       command: tests.length
         ? ['node', ...testArgs(root, tests)]
             .map(arg => (/^[\w./=-]+$/.test(arg) ? arg : shellQuote(arg)))
             .join(' ')
         : null,
     };
+    if (context && saved)
+      preparedEvidence.set(plan, {
+        definition: preflightDefinition,
+        files: context.files,
+        inventory: [...files],
+        covered: [...tests, ...reusedTests].sort(),
+      });
+    return plan;
   } catch (error) {
     return {
       status: 'unavailable',
@@ -131,6 +227,7 @@ export function runPreflight(
 ) {
   const started = Date.now();
   let exitCode: number | null = 0;
+  let passedTests: string[] = [];
   if (plan.tests.length) {
     const scripts = (() => {
       try {
@@ -149,20 +246,55 @@ export function runPreflight(
       // A surrounding test runner's protocol variable would swallow this run's own exit code.
       const env = { ...process.env };
       delete env.NODE_TEST_CONTEXT;
-      exitCode = spawnSync(process.execPath, testArgs(root, plan.tests), {
-        cwd: root,
-        env,
-        stdio: ['ignore', 2, 2],
-      }).status;
+      const directory = mkdtempSync(join(tmpdir(), 'forge-preflight-'));
+      const report = join(directory, 'passed.json');
+      try {
+        exitCode = spawnSync(
+          process.execPath,
+          [
+            '--test-reporter=tap',
+            '--test-reporter-destination=stderr',
+            `--test-reporter=${new URL('./agent-preflight-reporter.js', import.meta.url).href}`,
+            '--test-reporter-destination=stdout',
+            ...testArgs(root, plan.tests),
+          ],
+          {
+            cwd: root,
+            env: { ...env, FORGE_PREFLIGHT_REPORT: report },
+            stdio: ['ignore', 2, 2],
+          },
+        ).status;
+        try {
+          const observed = z.array(z.string()).parse(JSON.parse(readFileSync(report, 'utf8')));
+          passedTests = plan.tests.filter(test => observed.includes(test));
+        } catch {
+          /* Missing report: no per-file pass is reusable. */
+        }
+      } finally {
+        rmSync(directory, { recursive: true, force: true });
+      }
     }
   }
+  const evidence = preparedEvidence.get(plan);
   const receipt: PreflightReceipt = {
     schema: 1,
     laneId,
     head,
     ...(tree ? { tree } : {}),
     tests: plan.tests.length,
-    selection: plan.scope,
+    ...(evidence && tree === sourceTree(evidence.files)
+      ? {
+          evidence: writePreflightEvidence(root, {
+            ...evidence,
+            covered: [...passedTests, ...(plan.reusedTests ?? [])].sort(),
+          }),
+        }
+      : {}),
+    ...(plan.reusedTests?.length
+      ? { reusedTests: plan.reusedTests.length, reusedFrom: plan.reusedFrom }
+      : {}),
+    ...(plan.deferredTests?.length ? { deferredTests: plan.deferredTests.length } : {}),
+    selection: plan.deferredTests?.length ? 'local' : plan.scope,
     exitCode,
     passed: exitCode === 0,
     durationMs: Date.now() - started,

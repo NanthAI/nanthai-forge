@@ -49,7 +49,13 @@ export function finishGates(
       receipt?.laneId === lane.laneId &&
       (receipt.tree && lane.tree ? receipt.tree === lane.tree : receipt.head === lane.head);
     if (sameSource && receipt?.passed)
-      advisories.preflight = { status: 'passed', tests: receipt.tests, at: receipt.at };
+      advisories.preflight = {
+        status: 'passed',
+        tests: receipt.tests,
+        at: receipt.at,
+        deferredTests: receipt.deferredTests ?? 0,
+        reusedTests: receipt.reusedTests ?? 0,
+      };
     else {
       const plan = preflightPlan(root, advice?.changedPaths);
       const run = command(root, 'preflight', { laneId: lane.laneId });
@@ -58,12 +64,17 @@ export function finishGates(
       else if (plan.tests.length) {
         const summary = {
           tests: plan.tests.length,
+          deferredTests: plan.deferredTests?.length ?? 0,
+          totalEstimateMinutes: plan.totalEstimateMinutes ?? plan.estimateMinutes,
           selected: plan.tests.slice(0, 20),
           estimateMinutes: plan.estimateMinutes,
           run,
         };
         const failed = sameSource ? ' Its last run failed.' : '';
-        if (defaults.preflight === 'require' && plan.estimateMinutes <= defaults.preflightMaxMinutes)
+        if (
+          defaults.preflight === 'require' &&
+          (plan.totalEstimateMinutes ?? plan.estimateMinutes) <= defaults.preflightMaxMinutes
+        )
           throw new ForgeError(
             'PREFLIGHT_REQUIRED',
             `Run the ${plan.tests.length} affected test file(s) for saved head ${lane.head.slice(0, 12)} first (about ${plan.estimateMinutes} min): ${run}.${failed} Then land again.`,
@@ -72,6 +83,13 @@ export function finishGates(
           status: 'advised',
           ...summary,
           ...(defaults.preflight === 'require' ? { reason: `over ${defaults.preflightMaxMinutes} min` } : {}),
+        };
+      } else if (plan.deferredTests?.length) {
+        advisories.preflight = {
+          status: 'advised',
+          tests: 0,
+          deferredTests: plan.deferredTests.length,
+          reason: 'landing runner coverage',
         };
       }
     }

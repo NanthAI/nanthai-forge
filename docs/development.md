@@ -340,9 +340,9 @@ implementation does not imply every module depends on every other module.
 
 A `scoped` selection names its domain (`web`, `convex`, `core`, `netlify`, `tests`,
 `scripts`, `tooling`, or `mixed`) and prints its reason and complete file list before tests.
-Known formatting/lint configuration still runs every static check. `.gitignore`
-selects source-inventory/ignore regressions. TypeScript and Vite configuration widen
-to their domain. Convex functions, schema and generated API files widen to backend
+Root non-Markdown files, non-Markdown `docs/` files and all `evals/` files select
+full coverage. Markdown-only docs keep the fast path. Nested TypeScript and Vite
+configuration widen to their domain; every static check still runs. Convex functions, schema and generated API files widen to backend
 consumers; generated API changes also include web consumers. Test helpers and data
 fixtures follow their importing tests; an unreferenced, unclassified fixture stays
 full. Known manual browser/QA fixtures select UI regressions and asset serving.

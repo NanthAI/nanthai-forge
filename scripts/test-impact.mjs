@@ -59,7 +59,37 @@ export function selectImpactPair(files, comparisons) {
       : { scope: 'docs', reason: 'No paths in this inventory', tests: [], affectedTests: [] },
   );
 }
-function selectWithGraph({ paths, files, forceFull = false }, suppliedGraph) {
+/** Local execution is a partition of complete landing coverage, never an independence proof.
+ * Distance bounds work by the changed module's neighbourhood rather than suite size.
+ * Uncertain and distant consumers remain explicit landing-runner work. */
+export function selectPreflightTests(input) {
+  const selection = selectTests(input);
+  if (selection.scope === 'docs') return { ...selection, deferredTests: [] };
+  const consumers =
+    selection.scope === 'full' ? selectWithGraph({ ...input, consumersOnly: true }) : selection;
+  const changed = new Set(input.paths);
+  const mandatory = test =>
+    changed.has(test) || smokeTests.includes(test) || consumers.reasons?.[test]?.kind === 'explicit';
+  const selected = new Set(selection.tests.filter(mandatory));
+  const distance = test => consumers.reasons?.[test]?.edges?.length ?? Infinity;
+  const nearby = selection.tests
+    .filter(
+      test => !selected.has(test) && consumers.reasons?.[test]?.kind === 'dependency' && distance(test) <= 2,
+    )
+    .sort((a, b) => distance(a) - distance(b) || (a < b ? -1 : a > b ? 1 : 0));
+  // A shared hub can have hundreds of real direct consumers. Keep their complete
+  // coverage on the runner; the local budget ranks by distance, never proves absence.
+  // Mandatory changed/explicit/smoke tests are never capped.
+  for (const test of nearby.slice(0, Math.max(0, 25 - selected.size))) selected.add(test);
+  return {
+    ...selection,
+    tests: selection.tests.filter(test => selected.has(test)),
+    deferredTests: selection.tests.filter(test => !selected.has(test)),
+    reason: `${selection.reason}; local: changed tests, explicit coverage and smoke, then nearest certain consumers within two edges (25-file budget); remaining consumers run on the landing runner`,
+  };
+}
+
+function selectWithGraph({ paths, files, forceFull = false, consumersOnly = false }, suppliedGraph) {
   const tests = [...files.keys()].filter(path => /^tests\/[^/]+\.test\.mjs$/.test(path)).sort();
   const full = reason => explainAll({ scope: 'full', reason, tests });
   if (forceFull) return full('FORGE_CHECK_FULL=1');
@@ -145,8 +175,8 @@ function selectWithGraph({ paths, files, forceFull = false }, suppliedGraph) {
   );
   for (const item of scriptsChanged) {
     const evidence = scriptSelectionReason(item, packageGraph.roots, tests, reverse);
-    if (evidence.full) return full(evidence.full);
-    item.tests = [...(item.tests ?? []), ...evidence.tests];
+    if (evidence.full && !consumersOnly) return full(evidence.full);
+    item.tests = [...(item.tests ?? []), ...(evidence.tests ?? [])];
     item.reason = evidence.reason;
   }
   for (const item of classifications) {

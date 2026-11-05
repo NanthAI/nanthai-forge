@@ -943,7 +943,7 @@ export class HostedAgentTransport {
       'Run preflight in the Lane checkout; it tests the saved files here.',
     );
     const advice = await readHostedOverlapAdvice(this, laneId, true);
-    const plan = preflightPlan(root, advice.changedPaths);
+    const plan = preflightPlan(root, advice.changedPaths, { laneId, files: marker.state.files });
     const head = marker.selection.head;
     if (plan.status === 'unavailable' || !command.run)
       return this.response(action, null, { laneId, head, plan });

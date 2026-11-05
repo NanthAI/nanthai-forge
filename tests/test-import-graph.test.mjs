@@ -82,6 +82,8 @@ test('directory names do not pollute selector, foundation or cleanup hubs', () =
 test('directory enumeration, built web bundles and directory aliases keep their domain coverage', () => {
   for (const text of [
     "readdirSync(new URL('../dist', import.meta.url))",
+    "readdirSync(new URL('../src/', import.meta.url))",
+    "const dir = new URL('../src/', import.meta.url); readdirSync(dir)",
     "const dir = resolve('dist'); readdirSync(dir)",
     "function load(dir) { return readdirSync(dir); } load(resolve('dist'))",
     "unknown('dist')",

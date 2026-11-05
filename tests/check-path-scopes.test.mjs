@@ -38,21 +38,27 @@ test('a pinned Markdown-only change reaches the docs path without enabling behav
   );
 });
 
-test('ignore/tool configuration selects ignore regressions while static checks remain required', () => {
-  const result = select(['.gitignore', '.prettierignore']);
-  assert.equal(result.scope, 'scoped');
-  assert.equal(result.domain, 'tooling');
-  assert.ok(result.tests.includes('tests/boundaries.test.mjs'));
-  assert.ok(!result.tests.includes('tests/unrelated.test.mjs'));
-  assert.match(result.reason, /Repository ignore rules/);
-});
-
-test('Oxc configuration changes retain static checks without widening behavior scope', () => {
-  for (const path of ['.oxlintrc.json', '.oxfmtrc.json']) {
+test('docs/evals and root non-Markdown files require the full suite, including deletions', () => {
+  const all = [...files.keys()].filter(path => /^tests\/[^/]+\.test\.mjs$/.test(path)).sort();
+  for (const path of [
+    'docs/runtime.json',
+    'docs/tool.mjs',
+    'evals/case.md',
+    'evals/run.py',
+    'package.json',
+    'package-lock.json',
+    'tsconfig.json',
+    '.gitignore',
+    '.oxlintrc.json',
+    '.oxfmtrc.json',
+  ]) {
     const result = select([path]);
-    assert.equal(result.scope, 'scoped');
-    assert.equal(result.domain, 'tooling');
-    assert.match(result.reason, /Formatting\/lint config/);
+    assert.equal(result.scope, 'full', path);
+    assert.deepEqual(result.tests, all, path);
+  }
+  for (const path of ['docs/guide.md', 'README.md']) {
+    assert.equal(select([path]).scope, 'docs', path);
+    assert.deepEqual(select([path]).tests, [], path);
   }
 });
 
@@ -87,7 +93,7 @@ test('Convex schema and generated API share backend coverage; a function module 
 });
 
 test('core config-named modules stay core; TypeScript/Vite config widens only to its domain', () => {
-  for (const path of ['src/plugin-config.ts', 'tsconfig.json']) {
+  for (const path of ['src/plugin-config.ts']) {
     const result = select([path]);
     assert.equal(result.scope, 'scoped');
     assert.equal(result.domain, 'core');
