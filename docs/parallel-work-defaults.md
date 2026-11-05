@@ -180,7 +180,11 @@ acceptance-policy pins exclude these settings.
 
 - Hosted Lane receipts carry `unsavedFor`: minutes since the oldest file edit newer than the Lane's
   last save. Past the threshold they also carry `nudge` with the save command.
-- It is computed from local file times when an agent calls Forge. Nothing runs in between.
+- It is computed from local file times when an agent calls Forge. Nothing runs in between. A newer
+  file whose bytes and mode still equal the saved baseline is not an edit (stat index first, at most
+  256 files / 64 MiB read per call).
+- No `nudge` while a landing of this checkout is live (the reply names its wait, or this session's
+  turn ledger records it): the landing froze the saved source, and a save would supersede it.
 
 ### stallAlerts
 

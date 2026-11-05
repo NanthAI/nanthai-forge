@@ -475,7 +475,7 @@ function clientOptions(tail: string[]) {
       invariant(
         budget !== undefined,
         'BAD_ARGUMENT',
-        'Use --budget SECONDS once (or 90s, 9m); it bounds how long wait blocks before IN_PROGRESS.',
+        'Use --budget SECONDS once (or 90s, 9m); it bounds how long wait or land --save blocks before IN_PROGRESS.',
       );
       index++;
     } else if (arg === '--wait' || arg === '--no-wait') {
@@ -591,8 +591,13 @@ async function runAgentCli(args: string[], options: AgentCliOptions, notices: st
   );
   let selected = parameters as Record<string, unknown>;
   if (client.budget !== undefined) {
-    invariant(action === 'wait', 'BAD_ARGUMENT', '--budget applies to wait.');
-    selected = { ...selected, timeoutSeconds: client.budget };
+    invariant(
+      action === 'wait' || action === 'finish',
+      'BAD_ARGUMENT',
+      '--budget applies to wait and land --save.',
+    );
+    // land --save keeps its budget client-side: the finish request itself never carries a deadline.
+    if (action === 'wait') selected = { ...selected, timeoutSeconds: client.budget };
   }
   // Any message text (apostrophes, newlines) arrives verbatim from a file or stdin, never through shell quoting.
   if (client.messageFile !== undefined)
@@ -649,6 +654,7 @@ async function runAgentCli(args: string[], options: AgentCliOptions, notices: st
         return await hostedLandCli(root, command, hosted, {
           wait: client.wait ?? (options.process ? undefined : false),
           detach: Boolean(options.process),
+          ...(client.budget !== undefined ? { timeoutSeconds: client.budget } : {}),
         });
       if (action === 'show') {
         await hostedShowCli(root, command, hosted);

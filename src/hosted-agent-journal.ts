@@ -139,6 +139,16 @@ export class HostedAgentJournal {
   id(key: string) {
     return this.retain(`id:${key}`, () => randomUUID());
   }
+  /** Drop one retained value the server refused before any operation began (for example a request
+   * pinned to a Lane version that moved), so the next replay rebuilds it from current pins. */
+  forget(key: string) {
+    workLocked(this.lock, () => {
+      const current = this.read();
+      if (!Object.hasOwn(current.values, key)) return;
+      delete current.values[key];
+      durableReplace(this.path, canonicalPayload(current));
+    });
+  }
 }
 
 /** The original action and parameters of an operation this checkout started, from

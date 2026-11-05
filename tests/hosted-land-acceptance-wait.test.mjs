@@ -11,7 +11,8 @@ const turn = () => new Promise(resolve => setImmediate(resolve));
 async function fixture(t, checkOnly = false) {
   const calls = [],
     events = [],
-    err = [];
+    err = [],
+    budgets = [];
   const operationId = randomUUID();
   let accepted = false,
     release,
@@ -77,6 +78,7 @@ async function fixture(t, checkOnly = false) {
     observeHostedSubmissions: async (_transport, command, _signal, emit) => {
       assert.deepEqual(command.operationIds, [operationId]);
       assert.equal(command.until, 'acceptance');
+      budgets.push(command.timeoutSeconds);
       assert(!retained.some(row => command.operationIds.includes(row.operationId)));
       events.push('subscription');
       emit({
@@ -155,6 +157,7 @@ async function fixture(t, checkOnly = false) {
   return {
     calls,
     events,
+    budgets,
     err,
     output,
     release,
@@ -255,6 +258,8 @@ test('land exposes an unfinished source handoff and returns a pending exit statu
   assert.equal(s.calls.length, 1);
   assert(s.err.join('').includes('SOURCE PENDING'));
   assert(s.err.join('').includes('exact source continuation'));
+  // Source preparation outlived the land budget: one explicit IN_PROGRESS line with its resume.
+  assert(s.err.join('').includes('land: IN PROGRESS; resume with: exact source continuation'));
 });
 
 test('retryable source returns its same-operation recovery without opening an observer', async t => {
@@ -314,6 +319,10 @@ test('land observation deadline returns IN PROGRESS with the exact wait command 
   assert(stderr.includes('IN PROGRESS; wait deadline reached'));
   assert(stderr.includes(landWaitCommand('/synthetic', result)));
   assert(!stderr.includes('FAILED'));
+  // Issue 0fe39d02: the default budget is the agent wait's 540 s from command start (not 5400 s),
+  // so a foreground land returns before a 600 s agent shell backgrounds it.
+  assert.equal(s.budgets.length, 1);
+  assert(s.budgets[0] > 530 && s.budgets[0] <= 540, `budget ${s.budgets[0]}`);
 });
 
 test('land returns observed composition conflict details and sync instead of a finish replay', async t => {

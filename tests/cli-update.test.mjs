@@ -407,7 +407,6 @@ test('installed help and targeted argument errors make zero release or work call
     ['agent', root, 'friction', '{'],
     ['heavy', '--unknown'],
     ['heavy', '--status', 'extra'],
-    ['pull'],
     ['pull', root, 'extra'],
   ])
     await assert.rejects(invoke(args), error =>

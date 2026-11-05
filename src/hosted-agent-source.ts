@@ -11,7 +11,9 @@ import { hostedLaneSelectionSchema, type HostedLaneSelection } from './hosted-la
 import { saveExpectedSchema, savePin, saveBytes, saveWorkerObjectSchema } from './hosted-save.js';
 import { syncRequestSchema } from './hosted-sync.js';
 import { canonicalPayload } from './hosted-source-operation.js';
-import { invariant } from './errors.js';
+import { ForgeError, invariant } from './errors.js';
+import { hostedActionError } from './hosted-action-error.js';
+import { shellQuote } from './agent-brief-render.js';
 import type { HostedAgentSession } from './hosted-agent-transport.js';
 import { hostedRecordSchema } from './hosted-records.js';
 import { hostedAgentCommandSchemas } from './hosted-agent-contract.js';
@@ -53,10 +55,20 @@ export async function driveAgentSource(
   operationId: string,
   request: unknown,
   pages: { kind: string; index: number; pin: ReturnType<typeof savePin>; value: unknown }[] = [],
+  /** Report a WORK_STALE prepare refusal as PrepareRefused (the caller rebuilds its pins). */
+  refusable = false,
 ) {
-  const prepared = await session.mutation<SourceProgress>(`projectHosted${kind}:prepare`, {
-    request: canonicalPayload(request),
-  });
+  let prepared: SourceProgress;
+  try {
+    prepared = await session.mutation<SourceProgress>(`projectHosted${kind}:prepare`, {
+      request: canonicalPayload(request),
+    });
+  } catch (error) {
+    // prepare is one transaction: a refusal began no server operation.
+    if (refusable && hostedActionError(error, kind.toLowerCase()).code === 'WORK_STALE')
+      throw new PrepareRefused(error);
+    throw error;
+  }
   if (prepared.terminal) return prepared.terminal;
   for (const page of pages) {
     await session.exchange.upload(page.pin, Buffer.from(saveBytes(page.value)));
@@ -132,7 +144,53 @@ export async function composeAgentSource(
   });
   return driveAgentSource(session, 'Compose', operationId, prepared.request, prepared.pages);
 }
+/** The rebuilt sync was refused again: nothing began on the server. */
+export class SyncPinsStale extends ForgeError {
+  constructor(root: string, message: string) {
+    const save = { message: 'Bring the Lane binding up to date' };
+    // A recovery is surfaced as is: the next step is a save, not a replay of the refused sync.
+    super('WORK_STALE', message, undefined, {
+      next: { action: 'save', ...save },
+      command: `nforge agent ${shellQuote(root)} save ${shellQuote(JSON.stringify(save))}`,
+    });
+  }
+}
+/** A source prepare the server refused before any operation began. */
+export class PrepareRefused extends Error {
+  constructor(readonly refusal: unknown) {
+    super(refusal instanceof Error ? refusal.message : String(refusal));
+  }
+}
+/** Sync pins the Lane once per operation. When the server refuses those pins before the operation
+ * began (the Lane moved: a save finished after this request was retained), the retained request is
+ * dropped and rebuilt once from current pins; it is never replayed stale again. */
 export async function syncAgentSource(
+  session: HostedAgentSession,
+  command: z.infer<typeof hostedAgentCommandSchemas.sync>,
+  operationId: string,
+  refreshPins?: () => Promise<void>,
+) {
+  try {
+    return await syncAgentSourceOnce(session, command, operationId);
+  } catch (error) {
+    if (!(error instanceof PrepareRefused)) throw error;
+    session.journal.forget(`sync:${operationId}`);
+    if (command.candidateId) throw error.refusal;
+    await refreshPins?.();
+    try {
+      return await syncAgentSourceOnce(session, command, operationId);
+    } catch (again) {
+      if (!(again instanceof PrepareRefused)) throw again;
+      session.journal.forget(`sync:${operationId}`);
+      const selection = session.marker()?.selection;
+      throw new SyncPinsStale(
+        session.root,
+        `The Lane moved past this checkout's binding${selection ? ` (head ${selection.head.slice(0, 12)}, version ${selection.version})` : ''}. Nothing was synced. Run save in this checkout (it brings the binding to the Lane's current version, keeping your edits), then retry this same sync; it rebuilds its pins.`,
+      );
+    }
+  }
+}
+async function syncAgentSourceOnce(
   session: HostedAgentSession,
   command: z.infer<typeof hostedAgentCommandSchemas.sync>,
   operationId: string,
@@ -183,5 +241,5 @@ export async function syncAgentSource(
       message: command.message,
     });
   });
-  return driveAgentSource(session, 'Sync', operationId, request);
+  return driveAgentSource(session, 'Sync', operationId, request, [], true);
 }

@@ -14,7 +14,7 @@ import { hostedStartSchema, hostedStartResultSchema } from './hosted-lane.js';
 import { checkoutHostedLane } from './hosted-lane-checkout.js';
 import { adoptNestedLaneCopy } from './hosted-lane-adopt.js';
 import { ConvexLaneTransport } from './hosted-lane-transport.js';
-import { saveHostedLane } from './hosted-save-client.js';
+import { applyObservedSaveOutcome, saveHostedLane, settlePriorHostedSave } from './hosted-save-client.js';
 import { transitionHostedLane } from './hosted-lifecycle-client.js';
 import { hostedLifecycleRequestSchema } from './hosted-lifecycle.js';
 import { randomUUID } from 'node:crypto';
@@ -34,6 +34,7 @@ import {
   driveAgentSource,
   syncAgentSource,
   selectAgentLane,
+  SyncPinsStale,
 } from './hosted-agent-source.js';
 import { invariant } from './errors.js';
 import { plannedIntent } from './hosted-agent-planning.js';
@@ -443,7 +444,7 @@ export async function executeHostedAgent(
   if (action === 'save') {
     const command = hostedAgentCommandSchemas.save.parse(input);
     checkLocalLane(session, command.laneId);
-    return saveHostedLane(
+    const saved = await saveHostedLane(
       session.root,
       {
         operationId,
@@ -454,13 +455,26 @@ export async function executeHostedAgent(
       session.capabilities.overlapEvidenceVersion === 1,
       false,
       { action: 'save', parameters: { ...command, operationId: session.journal.operationId } },
+      (id, pending) => waitSaveUntil(session, id, pending),
     );
+    return awaitSaveOutcome(session, operationId, saved);
   }
   if (action === 'compose')
     return composeAgentSource(session, hostedAgentCommandSchemas.compose.parse(input), operationId);
   if (action === 'resolve') return resolveHostedAgent(session, input);
   if (action === 'sync') {
     const command = hostedAgentCommandSchemas.sync.parse(input);
+    // A save this client returned unfinished still pins the marker's old head: settle it (its own
+    // progress, no new save) before the sync pins the Lane. No pending save means no call.
+    if (
+      !command.candidateId &&
+      session.journal.get(`sync:${operationId}`) === undefined &&
+      session.marker() &&
+      (!command.laneId || command.laneId === session.marker()!.selection.laneId)
+    )
+      await settlePriorHostedSave(session.root, null, session.exchange, (id, pending) =>
+        waitSaveUntil(session, id, pending),
+      );
     if (command.apply && !markerAt(session.root)) {
       const blocked = retainedLocalApplyBlocked(
         session.root,
@@ -472,10 +486,19 @@ export async function executeHostedAgent(
       command.apply && !command.candidateId && session.marker()
         ? await retainSyncHandoff(session, 'sync', command)
         : null;
-    const result = await session.waitSource(
-        operationId,
-        await syncAgentSource(session, command, operationId),
-      ),
+    let prepared;
+    try {
+      prepared = await syncAgentSource(session, command, operationId, () =>
+        settlePriorHostedSave(session.root, null, session.exchange, (id, pending) =>
+          waitSaveUntil(session, id, pending),
+        ),
+      );
+    } catch (error) {
+      // Refused before any server operation began: nothing is left to install on a later land.
+      if (error instanceof SyncPinsStale && handoff) clearSyncHandoff(session.root, operationId);
+      throw error;
+    }
+    const result = await session.waitSource(operationId, prepared),
       completed = agentSourceOutcome(result);
     if (completed?.status === 'completed') {
       const source = syncResultSchema.parse(completed.result);
@@ -635,4 +658,35 @@ export async function executeHostedAgent(
   }
   invariant(action === 'finish', 'HOSTED_ACTION_UNSUPPORTED', 'Unsupported hosted action.');
   return executeHostedFinish(session, input);
+}
+
+const savePending = (value: unknown) => {
+  const reply = value as { status?: unknown; jobId?: unknown } | null;
+  return reply?.status === 'submitted' && typeof reply.jobId === 'string';
+};
+/** One progress subscription for the rest of the caller's budget; no polling or replays. The save
+ * is already submitted: an unavailable subscription leaves it pending (its wait resumes it), never
+ * turns it into a failure. */
+async function waitSaveUntil(session: HostedAgentSession, operationId: string, pending: unknown) {
+  const remaining = (session.waitUntil - Date.now()) / 1000;
+  if (!savePending(pending) || remaining <= 0) return pending;
+  try {
+    return await session.waitSource(operationId, pending, 'Saves', remaining);
+  } catch {
+    return pending;
+  }
+}
+/** A save waits for its own outcome within the agent budget: the job's progress subscription
+ * delivers the receipt and the Lane binding advances from it, with no replay or extra call. A save
+ * still running at the deadline returns `submitted` (the CLI reports IN_PROGRESS and its wait). */
+async function awaitSaveOutcome(session: HostedAgentSession, operationId: string, saved: unknown) {
+  if (!savePending(saved)) return saved;
+  const observed = (await waitSaveUntil(session, operationId, saved)) as {
+    outcome?: { status: string; result?: unknown };
+  } | null;
+  if (observed?.outcome) {
+    applyObservedSaveOutcome(session.root, operationId, observed as { outcome: { status: string } });
+    return observed;
+  }
+  return observed ?? saved;
 }

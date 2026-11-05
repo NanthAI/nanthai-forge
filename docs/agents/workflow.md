@@ -40,7 +40,7 @@ bounds](../operations/hosted-source-worker.md), including
 
 ## Refresh the clone root
 
-`nforge pull ROOT` / `nforge status ROOT` are the `git pull` / `git status`
+`nforge pull [ROOT]` (ROOT defaults to the clone holding the cwd) / `nforge status ROOT` are the `git pull` / `git status`
 equivalents. Agent: `pull {}` / `status {}`; MCP: existing `forge_task` /
 `forge_work_overview`. Pull refuses tracked edits, preserves ignored artifacts
 and resumes interruption. Current: 1 query, 0 GETs; idle: 0 calls.
@@ -1134,6 +1134,14 @@ or `maxWaitMs` (MCP `forge_wait`) sets another. Unfinished work returns
 `IN_PROGRESS` (exit 3) with the same resume command: run it again in the
 foreground. Never resubmit, sleep between checks or end the turn on a background
 wait. MCP sends progress notifications while it waits.
+`land --save` uses the same 540 s budget for its whole run (submission and wait,
+`--budget` sets another) and ends `IN_PROGRESS` (exit 3) with its exact resume command.
+A hosted `save` waits for its own outcome within that budget on its job's progress
+subscription (no replays, no extra calls) and advances the local Lane binding from the
+receipt; a save still running at the deadline returns `IN_PROGRESS` with its `wait`.
+A new `save` or `save --sync` first settles (waits for) a save this checkout left unfinished. A sync whose retained
+request the server refuses as `WORK_STALE` (no operation began) is rebuilt once from
+current pins; an identical later sync after the Lane moved starts a fresh operation.
 Native operations use `until:"terminal"`. Hosted check-only and harness checks use
 `{"runId":"RUN_ID"}`; native checks use their run operation id. Before admission,
 source preparation keeps the full original replay command.

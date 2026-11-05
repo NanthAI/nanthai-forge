@@ -47,10 +47,12 @@ export async function waitHostedAgentSource(
   signal?: AbortSignal,
   subscribe: () => HostedRunSubscription = () => hostedRunSubscription(address),
   kind: 'Sync' | 'Saves' | 'Compose' = 'Sync',
+  /** One subscription for the caller's whole budget (save waits for its own outcome). */
+  timeoutSeconds = 60,
 ) {
   let latest = initial;
   return retryHostedObservation({
-    timeoutSeconds: 60,
+    timeoutSeconds,
     signal,
     emit: event => process.stderr.write(`${JSON.stringify(event)}\n`),
     pending: () => sourceWaitSnapshot(latest),

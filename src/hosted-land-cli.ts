@@ -19,15 +19,29 @@ import { readClientSettings } from './client-settings.js';
 import { withLaneCommand } from './lane-registry.js';
 import { markerIdentity } from './lane-prune.js';
 import { landPhase, landSummary, resultOf, landTerminal } from './hosted-land-summary.js';
-import { landAnnouncement, landWaitCommand, landWaitContinuation } from './hosted-land-wait.js';
+import {
+  landAnnouncement,
+  landResumeCommand,
+  landWaitCommand,
+  landWaitContinuation,
+} from './hosted-land-wait.js';
 import { recordTurnWait, settleTurnWork } from './agent-turn-work.js';
 import { markOverlapShown, overlapBannerOnce, type HostedOverlapNotice } from './hosted-overlap-notice.js';
 import { LAND_INVOKED_ENV, landTiming, landTimingLine, startLandTiming } from './land-timing.js';
+import { AGENT_WAIT_SECONDS } from './agent-operation-wait.js';
 
 export { landPhase, landSummary };
 
 /** Set in the detached submitter; it submits and exits without waiting. */
 export const LAND_CHILD_ENV = 'FORGE_LAND_CHILD';
+/** The land command's budget in seconds, passed to its detached submitter. */
+const LAND_BUDGET_ENV = 'FORGE_LAND_BUDGET_SECONDS';
+/** Default: the agent wait budget, so a foreground land returns IN_PROGRESS with its resume
+ * command before a 600 s agent shell backgrounds or kills it. */
+function landBudgetSeconds() {
+  const chosen = Number(process.env[LAND_BUDGET_ENV]);
+  return Number.isFinite(chosen) && chosen > 0 ? chosen : AGENT_WAIT_SECONDS;
+}
 const noticeOf = (response: HostedAgentResponse) =>
   (response as { overlapNotice?: HostedOverlapNotice }).overlapNotice;
 /** Immediate stderr progress for a submitted landing: operation id, replay and wait commands, overlap banner. */
@@ -46,13 +60,18 @@ export async function submitHostedLand(
   transport = new HostedAgentTransport(root, address),
   rounds = 30,
 ) {
-  startLandTiming(Number(process.env[LAND_INVOKED_ENV]));
+  const invokedAt = Number(process.env[LAND_INVOKED_ENV]);
+  startLandTiming(invokedAt);
+  // The submitter shares the land command's budget, timed from when that command started.
+  const deadline = (Number.isFinite(invokedAt) ? invokedAt : Date.now()) + landBudgetSeconds() * 1000;
   let response = (await hostedAgentCli(root, 'finish', command, address, transport)) as HostedAgentResponse;
   // The first receipt already carries the operation id and any overlap notice: show them now, not at exit.
   announce(transport.root ?? root, command, response);
   for (let round = 0; round < rounds; round++) {
     const result = resultOf(response);
     if (result.phase !== 'save' || !result.saveOperationId || result.progress?.status === 'failed') break;
+    const remaining = (deadline - Date.now()) / 1000;
+    if (remaining <= 0) break;
     await waitHostedAgentSource(
       address,
       result.saveOperationId,
@@ -60,6 +79,7 @@ export async function submitHostedLand(
       undefined,
       undefined,
       'Saves',
+      Math.min(60, remaining),
     );
     response = (await hostedAgentCli(root, 'finish', command, address, transport)) as HostedAgentResponse;
   }
@@ -101,6 +121,7 @@ export function relayFile(path: string) {
 async function detachedSubmit(
   root: string,
   command: Record<string, unknown>,
+  budgetSeconds: number,
 ): Promise<HostedAgentResponse | null> {
   const directory = join(clientCacheRoot(hostedAgentRoot(root)), 'agent', 'land');
   mkdirSync(directory, { recursive: true, mode: 0o700 });
@@ -120,7 +141,12 @@ async function detachedSubmit(
       detached: true,
       stdio: ['ignore', out, err],
       // The submitter times from when this command started, not from its own spawn.
-      env: { ...process.env, [LAND_CHILD_ENV]: '1', [LAND_INVOKED_ENV]: String(performance.timeOrigin) },
+      env: {
+        ...process.env,
+        [LAND_CHILD_ENV]: '1',
+        [LAND_INVOKED_ENV]: String(performance.timeOrigin),
+        [LAND_BUDGET_ENV]: String(budgetSeconds),
+      },
     },
   );
   closeSync(out);
@@ -217,10 +243,13 @@ export async function hostedLandCli(
   options: { wait?: boolean | undefined; detach?: boolean; timeoutSeconds?: number } = {},
 ): Promise<HostedAgentResponse | undefined> {
   if (process.env[LAND_CHILD_ENV] === '1') return submitHostedLand(root, command, address);
+  // One budget for the whole command (submission and wait), from when it started.
+  const budgetSeconds = options.timeoutSeconds ?? AGENT_WAIT_SECONDS,
+    deadline = Date.now() + budgetSeconds * 1000;
   const submitted =
     options.detach === false
       ? await submitHostedLand(root, command, address)
-      : await detachedSubmit(root, command);
+      : await detachedSubmit(root, command, budgetSeconds);
   if (!submitted) return undefined;
   if (isNetworkPending(submitted)) return submitted;
   const wait = options.wait ?? readClientSettings().landWait;
@@ -242,8 +271,14 @@ export async function hostedLandCli(
     else if (
       wait &&
       (sourceNeedsRecovery || ['save', 'compose', 'sync'].includes(resultOf(submitted).phase ?? ''))
-    )
+    ) {
+      // Source preparation outlived the budget (or needs its recovery): one exact resume command.
+      if (!next)
+        process.stderr.write(
+          `land: IN PROGRESS; resume with: ${landResumeCommand(hostedAgentRoot(root), command, submitted)}\n`,
+        );
       process.exitCode = 3;
+    }
     return submitted;
   }
   process.stderr.write(
@@ -257,7 +292,7 @@ export async function hostedLandCli(
     process.pid,
   );
   const finished = await withLaneCommand(markerIdentity(root)?.laneId ?? undefined, 'land', () =>
-    waitLanding(transport.root ?? root, transport, submitted, options.timeoutSeconds ?? 5400),
+    waitLanding(transport.root ?? root, transport, submitted, Math.max(1, (deadline - Date.now()) / 1000)),
   );
   // The authoritative read already contains the outcome. Replaying finish here
   // could fail after acceptance or at the deadline, misreporting the landing.

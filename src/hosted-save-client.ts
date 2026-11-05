@@ -32,6 +32,7 @@ import type { ConvexExchange } from './exchange-client.js';
 import type { SaveChange, SaveRequest } from './hosted-save.js';
 import type { ContentPin } from './native-exchange.js';
 import { markLandStep } from './land-timing.js';
+import { operationWait } from './agent-operation-wait.js';
 
 type SaveExchange = Pick<ConvexExchange, 'client' | 'projectId' | 'uploadFile' | 'upload' | 'missing'> &
   Partial<Pick<ConvexExchange, 'uploadLazyBatch' | 'downloadToFile' | 'downloadBatch' | 'prepareDownloads'>>;
@@ -85,6 +86,8 @@ export async function saveHostedLane(
   overlapEvidence = false,
   preserveConflicts = false,
   continuation: ConflictContinuation = { action: 'save', parameters: command },
+  /** Wait on an earlier unfinished save of this checkout instead of refusing SAVE_PENDING. */
+  waitPrior?: (operationId: string, pending: unknown) => Promise<unknown>,
 ) {
   const first = await saveOnce(
     root,
@@ -94,9 +97,10 @@ export async function saveHostedLane(
     overlapEvidence,
     preserveConflicts,
     continuation,
+    waitPrior,
   );
   return first === rebased
-    ? saveOnce(root, command, exchange, false, overlapEvidence, preserveConflicts, continuation)
+    ? saveOnce(root, command, exchange, false, overlapEvidence, preserveConflicts, continuation, waitPrior)
     : first;
 }
 const rebased = Symbol('rebased');
@@ -108,6 +112,7 @@ async function saveOnce(
   overlapEvidence: boolean,
   preserveConflicts: boolean,
   continuation: ConflictContinuation,
+  waitPrior?: (operationId: string, pending: unknown) => Promise<unknown>,
 ) {
   saveCommandSchema.parse(command);
   invariant(!lstatSync(root).isSymbolicLink(), 'UNSAFE_PATH', 'Checkout directory must be real.');
@@ -141,7 +146,8 @@ async function saveOnce(
   const capturePath = join(directory, 'capture.json');
   // An earlier save whose reply was not seen pins this baseline. Settle it first,
   // or every new save captures against the old head and the server refuses it.
-  if (!checkoutPathExists(capturePath)) await settlePriorHostedSave(root, command.operationId, exchange);
+  if (!checkoutPathExists(capturePath))
+    await settlePriorHostedSave(root, command.operationId, exchange, waitPrior);
   const capture: Awaited<ReturnType<typeof captureHostedSave>> = checkoutPathExists(capturePath)
     ? JSON.parse(readFileSync(capturePath, 'utf8'))
     : await captureHostedSave(root, directory, preserveConflicts, continuation);
@@ -397,6 +403,27 @@ function applyHostedSaveReceipt(
   });
   settleSave(root, request.operationId, terminal);
 }
+/** Apply a save outcome observed after this client returned `submitted` (its own progress
+ * subscription delivered it): advance the matching marker from the retained capture and request,
+ * with no further call. A save already settled here, or never prepared here, changes nothing. */
+export function applyObservedSaveOutcome(
+  root: string,
+  operationId: string,
+  terminal: { outcome: { status: string; result?: unknown } },
+) {
+  root = realpathSync(root);
+  const directory = join(clientCacheRoot(root), `saves/${operationId}`);
+  if (checkoutPathExists(join(directory, 'terminal.json'))) return;
+  const capturePath = join(directory, 'capture.json'),
+    requestPath = join(directory, 'request.json');
+  if (!checkoutPathExists(capturePath) || !checkoutPathExists(requestPath)) return;
+  applyHostedSaveReceipt(
+    root,
+    JSON.parse(readFileSync(capturePath, 'utf8')),
+    saveRequestSchema.parse(JSON.parse(readFileSync(requestPath, 'utf8'))),
+    terminal,
+  );
+}
 /** Once its outcome is applied, a save keeps only its command, request and outcome: the capture
  * (a full baseline copy, ~400 KB for 3,000 files) and pages are never read again. */
 function settleSave(root: string, operationId: string, terminal: unknown) {
@@ -462,6 +489,8 @@ export async function settlePriorHostedSave(
   root: string,
   operationId: string | null,
   exchange: SaveExchange,
+  /** Callers that pin the marker (sync) wait on the earlier save's own progress instead of refusing. */
+  wait?: (operationId: string, pending: unknown) => Promise<unknown>,
 ): Promise<void> {
   const marker = readHostedLaneCheckout(root);
   if (!marker) return;
@@ -506,8 +535,15 @@ export async function settlePriorHostedSave(
     exchange,
   );
   if (resumed.outcome) return;
+  const observed = (wait ? await wait(prior.operationId, resumed) : undefined) as
+    | { outcome?: { status: string; result?: unknown } }
+    | undefined;
+  if (observed?.outcome) {
+    applyObservedSaveOutcome(root, prior.operationId, observed as { outcome: { status: string } });
+    return;
+  }
   throw new ForgeError(
     'SAVE_PENDING',
-    `The earlier save ${prior.operationId} is still publishing. Nothing new was captured. Retry this same save in a few seconds; it then saves on top of it.`,
+    `The earlier save ${prior.operationId} is still publishing. Nothing new was captured. Wait for it with ${operationWait(root, { operationIds: [prior.operationId] }).waitCommand}, then retry this same command; it then works on top of it.`,
   );
 }

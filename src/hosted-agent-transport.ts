@@ -20,6 +20,8 @@ import { withExchangeProgress } from './exchange-progress.js';
 import { networkFailure } from './network-fetch.js';
 import { networkContinuation } from './network-continuation.js';
 import { reconcileHostedSync, hasHostedSyncHandoff } from './hosted-sync-handoff.js';
+import { supersededSync } from './hosted-sync-retained.js';
+import { AGENT_WAIT_SECONDS } from './agent-operation-wait.js';
 import { sourceTree } from './source-tree.js';
 import { withSourceRecovery } from './hosted-agent-source-recovery.js';
 import { readHostedOverlapAdvice, recordHostedOverlapDelivery } from './hosted-overlap-client.js';
@@ -48,6 +50,7 @@ import {
 } from './hosted-agent-version.js';
 import { enrichHostedQueueAhead } from './queue-ahead-hosted.js';
 import { ackAnswers, checkpointNudge, finishGates, unsavedMinutes } from './agent-default-gates.js';
+import { liveLanding, ownsLiveLanding } from './landing-freeze.js';
 import { preflightPlan, runPreflight } from './agent-preflight.js';
 import { hostedLaneDirty } from './hosted-lane-dirty.js';
 import { agentDefaultLines, type EffectiveAgentDefaults } from './agent-parallel-defaults.js';
@@ -197,6 +200,9 @@ export class HostedAgentTransport {
   /** Fires once the local journal selects the operation id, before any network wait:
    * a backgrounded or killed client still leaves its id and resume command behind. */
   onOperation?: (action: string, operationId: string) => void;
+  /** Epoch ms deadline for actions that wait for their own outcome; default: the agent wait
+   * budget from dispatch. `wait` sets its own so a resumed save never outlives that budget. */
+  waitUntil?: number;
   constructor(
     readonly root: string,
     readonly address: HostedAgentAddress,
@@ -413,6 +419,7 @@ export class HostedAgentTransport {
     try {
       if ((hostedAgentRecordActions as readonly string[]).includes(action))
         return await executeHostedRecords(this, action as (typeof hostedAgentRecordActions)[number], input);
+      const dispatchedAt = Date.now();
       const observation = action === 'status' || action === 'observe';
       const { operationId, ...parameters } = input;
       // Client-only start placement: where to open the Lane, or open:false for pins only.
@@ -647,6 +654,12 @@ export class HostedAgentTransport {
         action === 'start' && !operationId
           ? await this.closedStart(root, capabilities.actor, command.data)
           : null;
+      // An identical auto-addressed sync whose retained pins this checkout has moved past is new
+      // work, never a replay of the old request (local reads only).
+      const movedSync =
+        action === 'sync' &&
+        !operationId &&
+        supersededSync(root, this.address, capabilities.actor, command.data);
       const journal =
         action === 'finish'
           ? await selectHostedFinish(
@@ -670,7 +683,7 @@ export class HostedAgentTransport {
               action,
               command.data,
               operationId as string | undefined,
-              previousStart !== null,
+              previousStart !== null || movedSync,
             );
       metricOperationId(journal.operationId);
       this.callerOperationId = journal.operationId;
@@ -692,8 +705,17 @@ export class HostedAgentTransport {
           );
           return main;
         },
-        waitSource: (operationId, initial, kind) =>
-          waitHostedAgentSource(this.address, operationId, initial, signal, this.subscribeSource, kind),
+        waitSource: (operationId, initial, kind, timeoutSeconds) =>
+          waitHostedAgentSource(
+            this.address,
+            operationId,
+            initial,
+            signal,
+            this.subscribeSource,
+            kind,
+            timeoutSeconds,
+          ),
+        waitUntil: this.waitUntil ?? dispatchedAt + AGENT_WAIT_SECONDS * 1000,
         finishGates: async (laneId: string, head: string, tree?: string, overlapAnswer?: 'accept-order') => {
           const read = await this.overlapAdvice(laneId, capabilities.agentDefaults?.preflight !== 'off');
           const selected = readHostedLaneCheckout(root)?.selection;
@@ -973,7 +995,7 @@ export class HostedAgentTransport {
           : await hostedConflictAdvice(this, enrichHostedQueueAhead(this, result)),
       ...(advice ? (({ changedPaths: _paths, ...shown }) => shown)(advice) : {}),
       ...(notice ? { overlapNotice: notice } : {}),
-      ...this.nudge(action),
+      ...this.nudge(action, result),
     };
   }
   /** One overlap read per dispatch: a finish gate and its receipt share it. */
@@ -984,11 +1006,14 @@ export class HostedAgentTransport {
     return value;
   }
   /** unsavedFor and the checkpoint nudge, on Lane calls only; a local stat walk, no timers. */
-  private nudge(action: HostedAgentAction) {
+  private nudge(action: HostedAgentAction, result: unknown) {
     if (!this.defaults || ['save', 'capabilities', 'metrics', 'check-settings'].includes(action)) return {};
     const root = hostedAgentRoot(this.root);
     const laneId = readHostedLaneCheckout(root)?.selection.laneId;
-    return laneId ? checkpointNudge(root, laneId, this.defaults, unsavedMinutes(root)) : {};
+    if (!laneId) return {};
+    // A live landing froze this saved source: saving now would supersede it, so never advise it.
+    const frozen = liveLanding(result) || ownsLiveLanding(root);
+    return checkpointNudge(root, laneId, this.defaults, unsavedMinutes(root), frozen);
   }
   /** The finished Lane of an earlier identical `start`, so a follow-up start opens a new Lane instead of
    * replaying it. null while there is no earlier start, it never produced a Lane, or its Lane is still
@@ -1196,7 +1221,10 @@ export type HostedAgentSession = {
     operationId: string,
     initial: unknown,
     kind?: 'Sync' | 'Saves' | 'Compose',
+    timeoutSeconds?: number,
   ) => Promise<unknown>;
+  /** Epoch ms by which an action that waits for its own outcome (save) returns IN_PROGRESS. */
+  waitUntil: number;
   query: <T = unknown>(name: string, args: Record<string, unknown>) => Promise<T>;
   mutation: <T = unknown>(name: string, args: Record<string, unknown>) => Promise<T>;
   main: () => Promise<z.infer<typeof hostedMainV2Schema>>;

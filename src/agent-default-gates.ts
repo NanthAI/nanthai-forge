@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
-import { existsSync, lstatSync, readdirSync, statSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, lstatSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { join, relative, sep } from 'node:path';
+import { digest } from './hash.js';
+import { indexedBlob, readCheckoutStatIndex } from './checkout-stat-index.js';
+import { readHostedLaneCheckout } from './hosted-lane-checkout-marker.js';
 import { ForgeError } from './errors.js';
 import { shellQuote } from './agent-brief-render.js';
 import { preflightPlan, readPreflightReceipt, PREFLIGHT_SECONDS_PER_FILE } from './agent-preflight.js';
@@ -134,14 +137,20 @@ export function ackAnswers(laneId: string, advice: Advice, choice: string, text?
 }
 
 const IGNORED = new Set(['node_modules', 'dist', '.forge', '.git', '.turbo', 'coverage']);
-/** Minutes the oldest unsaved edit has waited, from file times against the checkout marker's
- * save time. Local stat only (no reads, no server call); null when nothing is newer. */
+/** Files newer than the save whose bytes are confirmed against the saved baseline per call. */
+const VERIFY_FILES = 256,
+  VERIFY_BYTES = 64 * 1024 * 1024;
+/** Minutes the oldest unsaved edit has waited. File times against the checkout marker's save time
+ * pick candidates (local stat walk); a candidate whose bytes and mode still equal the saved
+ * baseline (a rewrite with the same content, a lazily materialized file) is not an edit. The stat
+ * index skips reads it vouches for; at most VERIFY_FILES/VERIFY_BYTES are read, anything past that
+ * counts as unsaved. No server call; null when nothing differs from the save. */
 export function unsavedMinutes(root: string, now = Date.now()) {
   const marker = join(root, '.forge', 'hosted-lane.json');
   if (!existsSync(marker)) return null;
   const savedAt = statSync(marker).mtimeMs;
-  let oldest = Infinity,
-    visited = 0;
+  const newer: { path: string; at: number }[] = [];
+  let visited = 0;
   const walk = (dir: string) => {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
       if (++visited > 20_000) return;
@@ -150,12 +159,51 @@ export function unsavedMinutes(root: string, now = Date.now()) {
       if (entry.isDirectory()) walk(path);
       else if (entry.isFile()) {
         const at = lstatSync(path).mtimeMs;
-        if (at > savedAt && at < oldest) oldest = at;
+        if (at > savedAt) newer.push({ path, at });
       }
     }
   };
   walk(root);
-  return oldest === Infinity ? null : Math.max(0, Math.floor((now - oldest) / 60_000));
+  if (!newer.length) return null;
+  const minutes = (at: number) => Math.max(0, Math.floor((now - at) / 60_000));
+  let baseline: Map<string, { blob: string; mode: string }> | null = null;
+  try {
+    baseline = new Map(readHostedLaneCheckout(root)?.state.files.map(file => [file.path, file]) ?? []);
+  } catch {
+    /* An unreadable marker vouches for nothing: every newer file counts. */
+  }
+  const index = baseline ? readCheckoutStatIndex(root) : null;
+  const budget = { files: VERIFY_FILES, bytes: VERIFY_BYTES };
+  for (const file of newer.sort((a, b) => a.at - b.at)) {
+    const path = relative(root, file.path).split(sep).join('/');
+    if (!baseline || !index || !savedBytes(root, path, baseline, index, budget)) return minutes(file.at);
+  }
+  return null;
+}
+/** True when the file at path still holds its saved baseline bytes and mode. */
+function savedBytes(
+  root: string,
+  path: string,
+  baseline: Map<string, { blob: string; mode: string }>,
+  index: ReturnType<typeof readCheckoutStatIndex>,
+  budget: { files: number; bytes: number },
+) {
+  const old = baseline.get(path);
+  if (!old) return false;
+  try {
+    const absolute = join(root, path),
+      stat = lstatSync(absolute);
+    if (!stat.isFile()) return false;
+    const mode = stat.mode & 0o111 ? 'executable' : 'file';
+    if (mode !== old.mode) return false;
+    if (indexedBlob(index, path, stat, old.blob)) return true;
+    if (budget.files <= 0 || budget.bytes < stat.size) return false;
+    budget.files--;
+    budget.bytes -= stat.size;
+    return digest(readFileSync(absolute)) === old.blob;
+  } catch {
+    return false;
+  }
 }
 
 export function checkpointNudge(
@@ -163,11 +211,13 @@ export function checkpointNudge(
   laneId: string | undefined,
   defaults: EffectiveAgentDefaults | undefined,
   minutes: number | null,
+  /** A live landing froze the saved source: report unsaved time, never advise a checkpoint. */
+  frozen = false,
 ) {
   if (minutes === null || !defaults) return {};
   return {
     unsavedFor: minutes,
-    ...(defaults.checkpointNudgeMinutes > 0 && minutes >= defaults.checkpointNudgeMinutes
+    ...(!frozen && defaults.checkpointNudgeMinutes > 0 && minutes >= defaults.checkpointNudgeMinutes
       ? {
           nudge: `Unsaved edits for ${minutes} min; save now: ${command(root, 'save', laneId ? { laneId, message: 'checkpoint' } : { message: 'checkpoint' })}`,
         }

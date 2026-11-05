@@ -7,6 +7,9 @@ import { join } from 'node:path';
 import { sourceTree } from '../dist/source-tree.js';
 import { effectiveAgentDefaults } from '../dist/agent-parallel-defaults.js';
 import { ackAnswers, checkpointNudge, finishGates, unsavedMinutes } from '../dist/agent-default-gates.js';
+import { liveLanding, ownsLiveLanding } from '../dist/landing-freeze.js';
+import { digest } from '../dist/hash.js';
+import { recordTurnWork, settleTurnWork } from '../dist/agent-turn-work.js';
 import {
   preflightPlan,
   readPreflightReceipt,
@@ -445,4 +448,95 @@ test('environment advisories preserve tree identity and overlap gates', t => {
     () => finishGates(root, defaults({}), saved, advice({ notices: [notice('src/x.ts')] })),
     code('OVERLAP_UNANSWERED'),
   );
+});
+
+// Issue cd503b40 (friction 294f86bf): observe emitted unsavedFor:33 and a save-now nudge on a
+// clean saved Lane while its source-frozen finish was live.
+test('save advice reflects real unsaved bytes and never nudges a live landing', t => {
+  const body = "import test from 'node:test';\ntest('b', () => {});\n";
+  const root = repo(t, { '.forge/hosted-lane.json': '{}' });
+  const marker = {
+    schema: 1,
+    kind: 'forge-hosted-lane-checkout',
+    url: 'https://fixture.invalid',
+    operationId: '22222222-2222-4222-8222-222222222222',
+    selection: {
+      schema: 2,
+      projectId: 'p',
+      laneId: lane.laneId,
+      intentId: '33333333-3333-4333-8333-333333333333',
+      head: lane.head,
+      version: 1,
+      sourceVersion: 1,
+      lifecycleVersion: 0,
+      state: 'active',
+      base: { head: 'b'.repeat(64), receiptId: '44444444-4444-4444-8444-444444444444' },
+      authority: { mode: 'server', epoch: 1 },
+    },
+    state: {
+      schema: 1,
+      kind: 'forge-source-state',
+      parents: [],
+      files: [
+        { path: 'package.json', blob: digest('{"type":"module"}'), mode: 'file' },
+        { path: 'tests/b.test.mjs', blob: digest(body), mode: 'file' },
+      ],
+      message: 'saved',
+      at: '2026-11-05T12:00:00.000Z',
+    },
+    scope: null,
+    materialized: [],
+  };
+  writeFileSync(join(root, '.forge/hosted-lane.json'), JSON.stringify(marker));
+  const saved = Date.parse('2026-11-05T12:00:00.000Z') / 1000,
+    now = (saved + 45 * 60) * 1000;
+  utimesSync(join(root, '.forge/hosted-lane.json'), saved, saved);
+  utimesSync(join(root, 'package.json'), saved - 60, saved - 60);
+  // Clean saved Lane: the file was rewritten after the save (materialized, formatter) with the
+  // same bytes. Not an edit.
+  writeFileSync(join(root, 'tests/b.test.mjs'), body);
+  utimesSync(join(root, 'tests/b.test.mjs'), saved + 12 * 60, saved + 12 * 60);
+  assert.equal(unsavedMinutes(root, now), null, 'identical bytes are saved source');
+  // Dirty work: a real edit counts from its own time.
+  writeFileSync(join(root, 'package.json'), '{"type":"module","x":1}');
+  utimesSync(join(root, 'package.json'), saved + 5 * 60, saved + 5 * 60);
+  assert.equal(unsavedMinutes(root, now), 40);
+  // A new file is unsaved work too.
+  writeFileSync(join(root, 'package.json'), '{"type":"module"}');
+  writeFileSync(join(root, 'tests/new.test.mjs'), 'new');
+  utimesSync(join(root, 'tests/new.test.mjs'), saved + 15 * 60, saved + 15 * 60);
+  assert.equal(unsavedMinutes(root, now), 30);
+  // Live finish: report the time, never advise a checkpoint that would supersede the landing.
+  const live = {
+    phase: 'finish',
+    submission: { phase: 'ready' },
+    inProgress: true,
+    next: { action: 'wait', operationIds: ['55555555-5555-4555-8555-555555555555'], until: 'acceptance' },
+  };
+  assert.equal(liveLanding(live), true);
+  assert.deepEqual(checkpointNudge(root, lane.laneId, defaults({}), 40, liveLanding(live)), {
+    unsavedFor: 40,
+  });
+  // Terminal finish (no wait left) or a non-landing reply: the nudge returns.
+  const landed = { phase: 'finish', submission: { phase: 'landed' } };
+  assert.equal(liveLanding(landed), false);
+  assert.equal(liveLanding({ inProgress: true, next: { action: 'wait', runId: 'r' } }), false);
+  assert.match(checkpointNudge(root, lane.laneId, defaults({}), 40, liveLanding(landed)).nudge, /save now/);
+  // This session's own recorded landing from this checkout also freezes advice (ledger read only).
+  assert.equal(ownsLiveLanding(root, ''), false, 'no session: nothing recorded');
+  const state = mkdtempSync(join(tmpdir(), 'forge-gates-state-')),
+    previous = process.env.XDG_STATE_HOME;
+  process.env.XDG_STATE_HOME = state;
+  t.after(() => {
+    if (previous === undefined) delete process.env.XDG_STATE_HOME;
+    else process.env.XDG_STATE_HOME = previous;
+    rmSync(state, { recursive: true, force: true });
+  });
+  const id = '66666666-6666-4666-8666-666666666666';
+  assert.equal(ownsLiveLanding(root, 'session-a'), false);
+  recordTurnWork({ id, kind: 'landing', root, input: { operationIds: [id] }, pid: null }, 'session-a');
+  assert.equal(ownsLiveLanding(root, 'session-a'), true);
+  assert.equal(ownsLiveLanding(root, 'session-b'), false, 'another session owns nothing here');
+  settleTurnWork([id], 'session-a');
+  assert.equal(ownsLiveLanding(root, 'session-a'), false, 'terminal landing clears the freeze');
 });

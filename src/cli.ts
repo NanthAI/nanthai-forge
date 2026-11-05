@@ -51,7 +51,7 @@ Browse packaged documentation: nforge docs
 
 Usage:
   nforge clone <project-url|project-id> DIR [--deployment URL]
-  nforge pull ROOT             # refresh a clean clone to accepted main
+  nforge pull [ROOT]           # refresh a clean clone to accepted main (ROOT: cwd clone)
   nforge update [FORGE_CHECKOUT] [--directory DIR] [--state STATE]
   nforge worker DEPLOYMENT_URL PROJECT_ID MACHINE_UUID
   nforge metrics ROOT [--from DATE] [--to DATE] [--json] [--report FILE.md] [--compare FROM..TO]

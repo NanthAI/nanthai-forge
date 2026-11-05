@@ -163,7 +163,10 @@ test('real source save uses opened marker, direct bytes and same request after l
     s.transport().dispatch('save', command),
     error => error.code === 'HOSTED_ACTION_FAILED',
   );
-  const saved = await s.transport().dispatch('save', command);
+  // No wait budget: the save returns at submission (its job never runs in this fixture).
+  const replaying = s.transport();
+  replaying.waitUntil = Date.now();
+  const saved = await replaying.dispatch('save', command);
   assert.equal(saved.result.status, 'submitted');
   const requests = s.calls
     .filter(call => call.name === 'projectHostedSaves:prepare')

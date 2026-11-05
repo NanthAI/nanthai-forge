@@ -102,6 +102,8 @@ export async function hostedAgentCli(
       );
       const budgetMs = (selectedWait.timeoutSeconds ?? AGENT_WAIT_SECONDS) * 1000,
         deadline = Date.now() + budgetMs;
+      // A replayed save waits for its own outcome inside dispatch: within this wait's budget.
+      transport.waitUntil = deadline;
       let response: Awaited<ReturnType<HostedAgentTransport['dispatch']>> | undefined;
       for (const operation of retained) {
         const replay = { ...operation.command, operationId: operation.id };
@@ -214,6 +216,24 @@ export async function hostedAgentCli(
       const pending = result.result as { command: string };
       process.stderr.write(`IN PROGRESS; network response unavailable. Continue: ${pending.command}\n`);
       process.exitCode = 3;
+    } else if (action === 'save' && result.operationId && sourcePending(result)) {
+      // The save waited its whole budget for its own outcome: one resume, never a new save.
+      const resume = operationWait(root, { operationIds: [result.operationId] });
+      process.stderr.write(`save: IN PROGRESS; keep waiting with: ${resume.waitCommand}\n`);
+      process.exitCode = 3;
+      const { next, waitCommand, inProgress } = resume;
+      result = {
+        ...result,
+        result: {
+          ...(result.result as object),
+          status: 'IN_PROGRESS',
+          reason: 'budget',
+          next,
+          command: waitCommand,
+          waitCommand,
+          inProgress,
+        },
+      };
     }
   } finally {
     process.removeListener('SIGINT', stop);

@@ -14,6 +14,7 @@ import { markerAt, retainedLocalApplyBlocked } from './hosted-apply-recovery-rec
 import { ConvexLaneTransport } from './hosted-lane-transport.js';
 import { hostedRecoveryCommand } from './hosted-agent-resolution.js';
 import { invariant } from './errors.js';
+import { hostedActionError } from './hosted-action-error.js';
 import type { HostedAgentSession, HostedAgentExchange } from './hosted-agent-transport.js';
 
 const handoffSchema = z.object({
@@ -57,12 +58,20 @@ export async function reconcileHostedSync(root: string, exchange: HostedAgentExc
   const path = pathFor(root);
   if (!checkoutPathExists(path)) return null;
   const handoff = handoffSchema.parse(JSON.parse(readFileSync(path, 'utf8')));
-  const progress = JSON.parse(
-    await exchange.client.query(makeFunctionReference<'query'>('projectHostedSync:progress'), {
-      projectId: exchange.projectId,
-      operationId: handoff.operationId,
-    }),
-  );
+  let progress;
+  try {
+    progress = JSON.parse(
+      await exchange.client.query(makeFunctionReference<'query'>('projectHostedSync:progress'), {
+        projectId: exchange.projectId,
+        operationId: handoff.operationId,
+      }),
+    );
+  } catch (error) {
+    // The sync was refused before it began (or never reached the server): nothing to install.
+    if (hostedActionError(error, 'sync reconciliation').code !== 'NOT_FOUND') throw error;
+    clearSyncHandoff(root, handoff.operationId);
+    return null;
+  }
   const outcome = progress.terminal?.outcome;
   const continuation = () => ({
     phase: 'sync',

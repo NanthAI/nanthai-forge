@@ -43,9 +43,27 @@ export function landAnnouncement(
   const resume = wait
     ? `; work is unfinished, keep this turn active; resume with: ${wait}`
     : !landTerminal(response)
-      ? `; source preparation is unfinished, keep this turn active; ${recoveryCommand ? `continue: ${recoveryCommand}` : `replay: nforge agent ${shellQuote(root)} finish ${shellQuote(JSON.stringify((resultOf(response) as { replayParameters?: Record<string, unknown> }).replayParameters ?? { ...command, operationId: response.operationId }))}`}`
+      ? `; source preparation is unfinished, keep this turn active; ${recoveryCommand ? 'continue' : 'replay'}: ${landResumeCommand(root, command, response)}`
       : '';
   return [`land: operationId ${response.operationId}${resume}`];
+}
+
+/** The one command that continues an unfinished land: its wait once submitted, else the source
+ * recovery it returned, else the exact replay of the original finish operation. Formatting only. */
+export function landResumeCommand(
+  root: string,
+  command: Record<string, unknown>,
+  response: HostedAgentResponse,
+) {
+  const wait = landWaitCommand(root, response);
+  if (wait) return wait;
+  const recoveryCommand = resultOf(response).command;
+  if (typeof recoveryCommand === 'string') return recoveryCommand;
+  const replay = (resultOf(response) as { replayParameters?: Record<string, unknown> }).replayParameters ?? {
+    ...command,
+    operationId: response.operationId,
+  };
+  return `nforge agent ${shellQuote(root)} finish ${shellQuote(JSON.stringify(replay))}`;
 }
 
 /** The first line for any other journaled operation (save, sync, start...): its id
