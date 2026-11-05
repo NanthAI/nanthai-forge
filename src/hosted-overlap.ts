@@ -19,6 +19,8 @@ export type OverlapLane = {
   baseHead: string;
   baseSequence: number | null;
   open: boolean;
+  /** Exact source being resolved; shared by the origin and its resolution siblings. */
+  resolutionLeft?: string;
   changes: string;
   complete: boolean;
 };
@@ -33,20 +35,46 @@ const same = (a: OverlapFile, b: OverlapFile) =>
 /** A display projection budget, never a source/save limit. Missing coverage is explicit. */
 export function boundOverlapChanges(changes: OverlapChange[], complete = true) {
   const selected: OverlapChange[] = [];
-  let bytes = 2;
+  let bytes = 2,
+    legacyBytes = 2;
+  const evidence: { index: number; change: OverlapChange }[] = [];
   for (const change of changes) {
-    const value = {
+    const value: OverlapChange = {
       path: change.path,
-      ...(change.evidence ? { evidence: change.evidence } : {}),
       before: change.before && { blob: change.before.blob, mode: change.before.mode },
       after: change.after && { blob: change.after.blob, mode: change.after.mode },
     };
+    // Preserve the old preflight-availability boundary while compacting advice.
+    legacyBytes +=
+      new TextEncoder().encode(
+        JSON.stringify({
+          ...value,
+          ...(change.evidence ? { evidence: change.evidence } : {}),
+        }),
+      ).length + 1;
     const size = new TextEncoder().encode(JSON.stringify(value)).length + 1;
     if (bytes + size > OVERLAP_METADATA_BYTES) {
       complete = false;
       continue;
     }
+    if (change.evidence) evidence.push({ index: selected.length, change });
     selected.push(value);
+    bytes += size;
+  }
+  complete &&= legacyBytes <= OVERLAP_METADATA_BYTES;
+  for (const { index, change } of evidence) {
+    // Keep full metadata while it fits, including across successive saves.
+    // Once legacy coverage is incomplete, spend bytes on ranges before unused
+    // declaration names. The incomplete flag propagates through later saves.
+    const ranges = complete ? change.evidence! : { ...change.evidence!, symbols: [] };
+    const size = new TextEncoder().encode(JSON.stringify(ranges)).length + 12;
+    if (bytes + size > OVERLAP_METADATA_BYTES) {
+      // Preserve the previous unavailable-preflight behavior when evidence does
+      // not fit. Retained paths improve advice without expanding enforcement.
+      complete = false;
+      continue;
+    }
+    selected[index]!.evidence = ranges;
     bytes += size;
   }
   return { changes: JSON.stringify(selected), complete };
@@ -93,7 +121,7 @@ export function advanceOverlapMain(
   return { sequence, coverageAfter, changes: JSON.stringify(selected) };
 }
 
-/** Saved range/symbol advice. Actual text conflicts are still decided by composition. */
+/** Saved range/path advice. Actual text conflicts are still decided by composition. */
 export function hostedOverlapAdvice(
   mine: OverlapLane,
   peers: OverlapLane[],
@@ -123,6 +151,13 @@ export function hostedOverlapAdvice(
     advisoryCount = 0;
   for (const peer of peers) {
     if (!peer.open || peer.laneId === mine.laneId) continue;
+    if (
+      mine.intentId === peer.intentId &&
+      ((mine.resolutionLeft &&
+        (mine.resolutionLeft === peer.head || mine.resolutionLeft === peer.resolutionLeft)) ||
+        (peer.resolutionLeft && peer.resolutionLeft === mine.head))
+    )
+      continue;
     complete &&= peer.complete;
     const lanes = [mine.laneId, peer.laneId].sort();
     for (const change of JSON.parse(peer.changes) as OverlapChange[]) {
@@ -132,6 +167,12 @@ export function hostedOverlapAdvice(
       const classification = mineChange
         ? classifyOverlap(mineChange, change)
         : { class: 'advisory' as const, reason: 'requested-path' };
+      // Known clean pairs are quiet. Missing evidence remains visible and incomplete,
+      // so older clients, different bases and non-text files cannot create new misses.
+      // Explicit peers(path) still shows saved activity before a first write.
+      if (classification.reason === 'unavailable') complete = false;
+      if (!requestedPath && classification.class === 'advisory' && classification.reason !== 'unavailable')
+        continue;
       const priority = classification.class === 'blocking';
       // Without answers there is no need to hash every omitted display item.
       const noticeId =

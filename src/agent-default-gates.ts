@@ -3,7 +3,7 @@ import { existsSync, lstatSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { ForgeError } from './errors.js';
 import { shellQuote } from './agent-brief-render.js';
-import { preflightPlan, readPreflightReceipt } from './agent-preflight.js';
+import { preflightPlan, readPreflightReceipt, PREFLIGHT_SECONDS_PER_FILE } from './agent-preflight.js';
 import { answerId } from './hosted-overlap-notice.js';
 import type { EffectiveAgentDefaults } from './agent-parallel-defaults.js';
 import type { readHostedOverlapAdvice } from './hosted-overlap-client.js';
@@ -71,10 +71,17 @@ export function finishGates(
           run,
         };
         const failed = sameSource ? ' Its last run failed.' : '';
-        if (
-          defaults.preflight === 'require' &&
-          (plan.totalEstimateMinutes ?? plan.estimateMinutes) <= defaults.preflightMaxMinutes
-        )
+        // Learned timings may make a run advisory, but must never expand the set
+        // that the existing fixed-cost policy made mandatory.
+        const gateMinutes = Math.max(
+          plan.totalEstimateMinutes ?? plan.estimateMinutes,
+          Math.ceil(
+            ((plan.tests.length + (plan.deferredTests?.length ?? 0) + (plan.reusedTests?.length ?? 0)) *
+              PREFLIGHT_SECONDS_PER_FILE) /
+              60,
+          ),
+        );
+        if (defaults.preflight === 'require' && gateMinutes <= defaults.preflightMaxMinutes)
           throw new ForgeError(
             'PREFLIGHT_REQUIRED',
             `Run the ${plan.tests.length} affected test file(s) for saved head ${lane.head.slice(0, 12)} first (about ${plan.estimateMinutes} min): ${run}.${failed} Then land again.`,

@@ -35,6 +35,7 @@ export async function trackHostedOverlapLane(
     intent: (metadata?.intent ?? old?.intent ?? lane.intentId).slice(0, 160),
     head: lane.head,
     baseHead: lane.base.head,
+    ...(lane.resolution ? { resolutionLeft: lane.resolution.left } : {}),
     baseReceiptId: lane.base.receiptId,
     baseSequence: metadata?.baseSequence ?? (sameBase ? (old?.baseSequence ?? null) : null),
     recordVersion: lane.version,

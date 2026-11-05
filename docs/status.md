@@ -124,6 +124,12 @@ Project search (⌘K / Ctrl+K) reads Intents, Lanes, Views and available files t
 
 ## Missing or unproven
 
+- **Saved overlap precision.** Automatic hosted notices omit disjoint saved edits,
+  identical results and resolve-origin/sibling self-overlaps. Shared symbol names
+  alone do not block. Exact-base touching ranges and path-operation collisions
+  retain blockers; unknown evidence reports incomplete coverage. The deterministic
+  B1.5d fixture covers all 66 notices and 22 missed pairs using reconstructed final
+  deltas; it does not prove timely delivery during live concurrent edits.
 - **First-write hooks.** First-write overlap hooks install on the first CLI run for Claude Code and Codex, with user/project off switches and an exact undo command. One Lane-independent hook resolves edited paths; hosted reads reuse the bounded peers query before the first save. Notices are advisory, cache per path/session, fail open within one second and exclude unsaved peer edits. Shell writes are outside coverage; hosted first-write delivery telemetry remains incomplete. See [first-write hooks](agents/workflow.md#overlap-before-the-first-write).
 
 - **Agent value.** On a real repository with real agents ([B1.5d](research/b15d-report.md), 2026-11-04), Forge's time to main per task is 24-35% lower than Git + GitHub at N = 1, 3, 5 and 10, with no overall correctness difference, about a third of the CI minutes and fewer model tokens. Whole-batch wall time is a clear win only at N = 1; at N = 10 GitHub's median is lower. Overlap notices are mostly noise (13 useful of 45 blocking); precision is Phase 6 work. The earlier burst-landing numbers on [why Forge](why-forge.md#measured-landing-throughput) are historical.

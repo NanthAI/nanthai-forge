@@ -62,7 +62,7 @@ export const read = query({
       }
       const focus =
         mine && mine.head === lane.head && mine.baseHead === lane.base.head
-          ? { ...mine, baseSequence }
+          ? { ...mine, baseSequence, ...(lane.resolution ? { resolutionLeft: lane.resolution.left } : {}) }
           : {
               laneId,
               intentId: lane.intentId,
@@ -70,6 +70,7 @@ export const read = query({
               intent: lane.intentId,
               head: lane.head,
               baseHead: lane.base.head,
+              ...(lane.resolution ? { resolutionLeft: lane.resolution.left } : {}),
               baseSequence,
               open: lane.state === 'active',
               changes: '[]',

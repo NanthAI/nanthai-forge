@@ -10,6 +10,7 @@ export const hostedOverlapTables = {
     intent: v.string(),
     head: v.string(),
     baseHead: v.string(),
+    resolutionLeft: v.optional(v.string()),
     baseReceiptId: v.string(),
     baseSequence: v.union(v.number(), v.null()),
     lifecyclePlanId: v.optional(v.id('projectHostedLifecyclePlans')),

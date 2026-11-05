@@ -203,3 +203,75 @@ test('land accepts the overlap answer in the same call and retains observed noti
   assert.equal(result.overlap.choice, 'accept-order');
   assert.deepEqual(result.overlap.notices, ['f'.repeat(64)]);
 });
+
+test('faster learned estimates never turn an advisory test set into a new mandatory run', t => {
+  const files = Object.fromEntries(
+    Array.from({ length: 80 }, (_, i) => [
+      `tests/extra-${i}.test.mjs`,
+      "import test from 'node:test'; test('fast',()=>{});\n",
+    ]),
+  );
+  const root = repo(t, files),
+    cache = root + '.forge-client';
+  mkdirSync(join(cache, 'agent'), { recursive: true });
+  writeFileSync(
+    join(cache, 'agent/preflight-estimate.json'),
+    JSON.stringify({
+      schema: 1,
+      laneId: lane.laneId,
+      head: lane.head,
+      tests: 80,
+      selection: 'test-only',
+      exitCode: 0,
+      passed: true,
+      durationMs: 100,
+      at: new Date(0).toISOString(),
+    }),
+  );
+  const result = finishGates(
+    root,
+    defaults({ preflightMaxMinutes: 5 }),
+    lane,
+    advice({ paths: Object.keys(files) }),
+  );
+  assert.equal(result.preflight.estimateMinutes, 1);
+  assert.equal(result.preflight.status, 'advised');
+  assert(result.preflight.tests >= 80);
+});
+
+test('learned timings preserve advisory coverage when the selector defers most consumers', t => {
+  const files = {
+    'src/hub.ts': 'export const n = 1;',
+    ...Object.fromEntries(
+      Array.from({ length: 80 }, (_, i) => [`tests/consumer-${i}.test.mjs`, "import '../dist/hub.js';\n"]),
+    ),
+  };
+  const root = repo(t, files),
+    cache = root + '.forge-client';
+  mkdirSync(join(cache, 'agent'), { recursive: true });
+  writeFileSync(
+    join(cache, 'agent/preflight-estimate.json'),
+    JSON.stringify({
+      schema: 1,
+      laneId: lane.laneId,
+      head: lane.head,
+      tests: 80,
+      selection: 'test-only',
+      exitCode: 0,
+      passed: true,
+      durationMs: 100,
+      at: new Date(0).toISOString(),
+    }),
+  );
+  const result = finishGates(
+    root,
+    defaults({ preflightMaxMinutes: 5 }),
+    lane,
+    advice({ paths: ['src/hub.ts'] }),
+  );
+  assert.equal(result.preflight.status, 'advised');
+  assert.equal(result.preflight.tests, 25);
+  assert.equal(result.preflight.deferredTests, 55);
+  assert.equal(result.preflight.estimateMinutes, 1);
+  assert.equal(result.preflight.totalEstimateMinutes, 1);
+});

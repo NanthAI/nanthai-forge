@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import { clientCacheRoot } from './root-paths.js';
+import { durableReplace } from './native-durability.js';
+import { clientCacheRoot, retainedRootSibling } from './root-paths.js';
 import {
   existsSync,
   mkdirSync,
@@ -89,6 +90,26 @@ function writePreflightReceipt(root: string, receipt: PreflightReceipt) {
   mkdirSync(join(path, '..'), { recursive: true, mode: 0o700 });
   writeFileSync(`${path}.tmp`, JSON.stringify(receipt), { mode: 0o600 });
   renameSync(`${path}.tmp`, path);
+}
+
+/** Learn from completed local runs, including build time and this machine's load.
+ * Sibling Lanes share this clone-local disposable record. It is never uploaded. */
+export function estimatePreflightMinutes(root: string, files: number) {
+  let secondsPerFile = PREFLIGHT_SECONDS_PER_FILE;
+  try {
+    const sample = preflightReceiptSchema.parse(
+      JSON.parse(
+        readFileSync(
+          join(retainedRootSibling(root, '.forge-client'), 'agent', 'preflight-estimate.json'),
+          'utf8',
+        ),
+      ),
+    );
+    if (sample.passed && sample.tests > 0) secondsPerFile = sample.durationMs / sample.tests / 1000;
+  } catch {
+    /* A cold or corrupt model uses the documented fallback. */
+  }
+  return Math.ceil((files * secondsPerFile) / 60);
 }
 
 /** Selector input from the Lane checkout; absent directories are simply absent. */
@@ -190,9 +211,10 @@ export function preflightPlan(
       reusedTests,
       ...(reusedFrom ? { reusedFrom } : {}),
       ...(delta ? { deltaPaths: delta } : {}),
-      estimateMinutes: Math.ceil((tests.length * PREFLIGHT_SECONDS_PER_FILE) / 60),
-      totalEstimateMinutes: Math.ceil(
-        ((selection.tests.length + selection.deferredTests.length) * PREFLIGHT_SECONDS_PER_FILE) / 60,
+      estimateMinutes: estimatePreflightMinutes(root, tests.length),
+      totalEstimateMinutes: estimatePreflightMinutes(
+        root,
+        selection.tests.length + selection.deferredTests.length,
       ),
       command: tests.length
         ? ['node', ...testArgs(root, tests)]
@@ -301,5 +323,14 @@ export function runPreflight(
     at: new Date().toISOString(),
   };
   writePreflightReceipt(root, receipt);
+  if (receipt.passed && receipt.tests > 0) {
+    const path = join(retainedRootSibling(root, '.forge-client'), 'agent', 'preflight-estimate.json');
+    try {
+      mkdirSync(join(path, '..'), { recursive: true, mode: 0o700 });
+      durableReplace(path, JSON.stringify(receipt));
+    } catch {
+      /* Estimates never invalidate a completed run. */
+    }
+  }
   return receipt;
 }

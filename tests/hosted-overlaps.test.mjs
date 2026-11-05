@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
+import { digest } from '../dist/hash.js';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
@@ -35,10 +36,16 @@ const acks = await import(moduleUrl('../convex/projectHostedOverlapAcks.ts'));
 const deliveries = await import(moduleUrl('../convex/projectHostedOverlapDeliveries.ts'));
 const oldFile = { blob: 'a'.repeat(64), mode: 'file' };
 const newFile = { blob: 'b'.repeat(64), mode: 'file' };
-const delta = path => ({ path, before: oldFile, after: newFile });
+const delta = path => ({
+  path,
+  before: oldFile,
+  after: newFile,
+  evidence: { baseBlob: oldFile.blob, ranges: [{ start: 0, end: 1 }], symbols: [] },
+});
 const code = expected => error => (error.data?.code ?? error.code) === expected;
 
 async function setup(t, options = {}) {
+  options = { base: 'original', ...options };
   const file = options.file ?? 'a.txt';
   const s = await saveFixture(options.base ?? 'original', file);
   const lane = JSON.parse(
@@ -221,7 +228,14 @@ const trackChange = (s, lane, paths = [delta('a.txt')], intent = 'My change') =>
             version: current.version + 1,
             sourceVersion: current.sourceVersion + 1,
           },
-          overlap: { baseSequence: 0, intent, changes: paths },
+          overlap: {
+            baseSequence: 0,
+            intent,
+            changes: paths.map(change => ({
+              ...change,
+              after: change.after && { ...change.after, blob: digest(lane.id + change.after.blob) },
+            })),
+          },
         });
       },
     },
@@ -486,6 +500,9 @@ test('20 open Lanes x 200 paths use one indexed peer read; history does not ente
       baseSequence: 0,
       open: true,
       ...value,
+      changes: JSON.stringify(
+        JSON.parse(value.changes).map(c => ({ ...c, after: { ...c.after, blob: digest(peerId) } })),
+      ),
     });
   }
   for (let i = 0; i < 560; i++)
@@ -736,7 +753,8 @@ test('a resolve capability refusal retains independently supported overlap advic
 });
 
 test('CLI path: the second save returns a structured notice, delivery and one-command acknowledgement are recorded', async t => {
-  const { s, lane, peer, transport } = await setup(t);
+  // Exercise an older checkout with no retained range sketch.
+  const { s, lane, peer, transport } = await setup(t, { base: null });
   const first = transport(lane),
     second = transport(peer);
   const quiet = await first.dispatch('save', { operationId: randomUUID(), message: 'first' });
@@ -858,7 +876,7 @@ test('overlap reads are O(1): a Lane without saved changes touches no peers, and
 });
 
 for (const file of ['src/shared.ts', 'notes.md', 'docs/guide.txt']) {
-  test(`${file}: disjoint saved hunks stay visible advisory and pass landing without an answer`, async t => {
+  test(`${file}: disjoint saved hunks produce no automatic notice and pass landing without an answer`, async t => {
     const base = Array.from({ length: 40 }, (_, i) => `line ${i}\n`).join('');
     const mine = base.replace('line 2\n', 'my edit\n');
     const peerText = base.replace('line 30\n', 'peer edit\n');
@@ -866,11 +884,8 @@ for (const file of ['src/shared.ts', 'notes.md', 'docs/guide.txt']) {
     await transport(lane).dispatch('save', { operationId: randomUUID(), message: 'disjoint first' });
     const second = transport(peer);
     const saved = await second.dispatch('save', { operationId: randomUUID(), message: 'disjoint second' });
-    const notice = saved.unacknowledgedOverlaps.items[0];
-    assert.equal(notice.class, 'advisory');
-    assert.equal(notice.reason, 'disjoint-ranges');
-    assert.equal(saved.overlapNotice.required, false);
-    assert.equal(saved.unacknowledgedOverlaps.advisoryCount, 1);
+    assert.equal(saved.unacknowledgedOverlaps.count, 0);
+    assert.equal(saved.unacknowledgedOverlaps.advisoryCount, 0);
     assert.equal(saved.unacknowledgedOverlaps.blockingCount, 0);
     assert.deepEqual(
       finishGates(
@@ -886,11 +901,9 @@ for (const file of ['src/shared.ts', 'notes.md', 'docs/guide.txt']) {
       mergeNativeText(Buffer.from(base), Buffer.from(mine), Buffer.from(peerText), file),
       'ordinary landing composition remains clean',
     );
-    const delivered = JSON.parse([...s.tables.projectHostedOverlapDeliveries.values()][0].value);
-    assert.equal(delivered.items[0].class, 'advisory', 'metric delivery retains class');
-    assert.deepEqual(delivered.items[0].lanes, [lane.id, peer.id].sort());
+    assert.equal(s.tables.projectHostedOverlapDeliveries.size, 0);
     const observed = await second.dispatch('status', { laneId: peer.id });
-    assert.equal(observed.overlapNotice.items[0].class, 'advisory', 'still visible without acknowledgement');
+    assert.equal(observed.unacknowledgedOverlaps.count, 0);
   });
 }
 

@@ -1717,19 +1717,31 @@ calculation is read-time work over landing records, with no new background job.
 Hosted agent start, save and Lane status responses include
 `unacknowledgedOverlaps:{count,items,coverage}` and
 `behindMain:{commits,conflictingPaths,more,coverage}` when the server advertises
-`overlapVersion:1`. Notice identities bind the Lane pair and path, with a separate advisory identity. Existing blocking answers remain valid across evidence updates. Notices name the peer
+`overlapVersion:1`. Notice identities bind the Lane pair and path, with a separate advisory identity for explicit path reads. Existing blocking answers remain valid across evidence updates. Notices name the peer
 Lane, actor, Intent and shared saved path. `peer-ack` and `overlap-acks` suppress
 that notice for the answering Lane across machines. Every notice carries `class:"blocking"|"advisory"` and a `reason`. Saving and checking remain available; with `overlapGate:block`, only unanswered blocking notices stop landing. MCP emits `forge-overlap` notices from these same responses;
 no polling, subscriptions or idle work are added.
 
 Save staging retains a bounded path projection and publishes it with the Lane
-head. Blocking means intersecting or immediately adjacent line ranges, a changed
-symbol shared by both Lanes in the same file, or delete/rename versus another
-change. Disjoint hunks in the same file, including `*.md` and `docs/**`, are
-advisory. Documentation uses range evidence rather than code-like symbols.
-Missing, stale or differently based range evidence remains advisory with
-`reason:"unavailable"`; composition still checks the exact Candidate and retains
-true conflicts through the existing resolution path.
+head. Blocking means intersecting or immediately adjacent line ranges with a
+shared exact base, distinct additions at the same path, or delete/rename versus
+another change. Symbol names alone do not block. Identical resulting bytes/modes
+and two deletions are clean. Disjoint saved changes produce no automatic notice;
+explicit `peers {path}` still shows saved-path activity. Missing, stale or differently
+based range evidence retains an advisory with incomplete coverage; it does not
+manufacture a blocker.
+Composition still checks the exact Candidate and retains true conflicts through
+the existing resolution path. Resolution projections retain the exact left source:
+the origin at that source and sibling resolutions of it are excluded within the
+same Intent. A peer's later saved work remains eligible.
+
+Path identities are selected before range metadata within the existing
+128 KiB projection budget, so a large early source file cannot hide later test
+paths. When the budget overflows, unused declaration names are omitted so useful ranges
+fit. Full metadata is kept while it fits, including across successive saves.
+The original full-metadata budget still marks coverage incomplete when it would
+overflow, preserving unavailable preflight behavior while retaining later paths
+and ranges for advice. Omitted range metadata also remains incomplete.
 
 Compact local line hashes and declaration summaries come from the checkout's
 existing verification stream and capture's already-read bytes. Saves reuse the
@@ -1737,7 +1749,7 @@ original base summary across successive edits and carry ranges on their existing
 metadata pages, with no new full-file reads or Convex calls. Older clients without
 summaries still save normally. `overlapEvidenceVersion:1` is negotiated through
 the existing capability read; clients omit range metadata for older strict save
-APIs, without an extra per-save probe. Display windows list blocking notices first and
+APIs, without an extra per-save probe. Automatic display windows list collision notices and
 report separate `blockingCount` and `advisoryCount`; the delivery write retains the
 class, reason and Lane pair for benchmark correlation with actual conflicts. Reverting a file to its saved base clears its projected change. Main
 acceptance updates the latest accepted sequence touching each retained path, so
@@ -1801,3 +1813,11 @@ Intents/Lanes to have been migrated, and preserves their references as recorded.
 ### Recover a blocked local apply
 
 See [recovery details](../architecture.md#hosted-agent-transport).
+
+Preflight time estimates use the latest successful local run's measured wall time
+per selected file, including its build, when present. Sibling Lanes reuse the same
+clone-local sample. The single disposable local
+sample is replaced after a completed successful run; failed runs do not train it.
+A cold/corrupt sample uses four seconds per file. Estimates are approximate when
+the selected mix or machine load changes. Learned estimates never expand the set
+of runs made mandatory by the existing fixed-cost gate budget. This adds no hosted reads or writes.
