@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { MutationCtx, QueryCtx } from './_generated/server';
+import type { MutationCtx, QueryCtx } from './server';
+import { getDocumentSize } from 'convex/values';
 import type { Id } from './_generated/dataModel';
 import { activeProject, accessibleProject } from './projectAuthority';
 import { sourceAuthority } from '../src/hosted-source-authority';
@@ -50,6 +51,7 @@ export async function appendFriction(
   projectId: Id<'hostedProjects'>,
   actor: string,
   record: FrictionEvent,
+  likelyDuplicates?: string,
 ) {
   const old = await frictionRow(ctx, projectId, record.id);
   if (old) {
@@ -60,13 +62,16 @@ export async function appendFriction(
     );
     return false;
   }
-  await ctx.db.insert('projectHostedFriction', {
-    projectId,
-    actor,
-    id: record.id,
-    request: record.request,
-    value: canonicalPayload(record),
-  });
+  const row = { projectId, actor, id: record.id, request: record.request, value: canonicalPayload(record) };
+  const inline = likelyDuplicates === undefined ? row : { ...row, likelyDuplicates };
+  if (likelyDuplicates === undefined || getDocumentSize(inline) <= 1048576)
+    await ctx.db.insert('projectHostedFriction', inline);
+  else {
+    // Hints must never make a formerly valid filing exceed the physical row limit.
+    // Both records commit together, so a lost response replays the original snapshot.
+    await ctx.db.insert('projectHostedFriction', row);
+    await ctx.db.insert('projectHostedFrictionHints', { projectId, id: record.id, value: likelyDuplicates! });
+  }
   return true;
 }
 export const recordRequest = (value: unknown) => digest(canonicalPayload(value));
@@ -79,3 +84,14 @@ export const recordPageOptions = (cursor: string | null) => ({
   maximumRowsRead: 100,
   maximumBytesRead: 256 * 1024,
 });
+
+export async function frictionHints(
+  ctx: QueryCtx | MutationCtx,
+  projectId: Id<'hostedProjects'>,
+  id: string,
+) {
+  return ctx.db
+    .query('projectHostedFrictionHints')
+    .withIndex('by_project_and_id', q => q.eq('projectId', projectId).eq('id', id))
+    .unique();
+}

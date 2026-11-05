@@ -97,13 +97,13 @@ export function registerHostedAgentWorkflow(
         'preflight',
       ],
       description:
-        "Hosted actions use CLI transport/journal. pull {} refreshes clone root to main, refusing local edits; Lane sync unchanged. {action:start|save|land,mode?,...legacy fields}: start open|reopen; save sync|candidate|overlap-answer|overlap-answers|friction|decision; land save (checkOnly:true checks without landing). Legacy names work; checkpoint=save. Replay original parameters/operationId after unknown replies; new UUID=new work. Finish requests agent acceptance under project policy, also with account credentials. Pending is not accepted: keep the turn active, use next/command on the original operation, repeat IN PROGRESS, then terminal recovery. finish priority:urgent is owner-only; others retain normal with a reason. prioritize updates queued priority:urgent|normal, never running checks. Owner pin {laneId?,pinned?:true|false} skips complete-merged, completeOnAccept, Intent cascade, prune and cache GC; explicit complete/abandon refuses until unpinned. ack answers all pending Lane overlaps. preflight runs the saved head's affected tests here and records the result for land.",
+        'pull {} refreshes a clean clone to main; Lane sync is unchanged. Verbs {action:start|save|land,mode?,...}: start open|reopen; save sync|candidate|overlap-answer|overlap-answers|friction|decision; land save (checkOnly:true checks only). Old names work; checkpoint=save. Unknown reply: replay original parameters/UUID; new UUID=new work. Finish always requests agent acceptance under current policy, including account auth. Pending is not accepted. Keep this turn active and follow the returned next/command wait on the original operation; repeat on IN PROGRESS and follow terminal recovery before reporting completion. finish priority:urgent and pin are owner-only; others retain normal priority with a reason. prioritize: urgent|normal; running checks continue. Pinned Lanes skip complete-merged, completeOnAccept, Intent cascade, prune and cache GC; unpin before explicit complete/abandon. ack answers pending Lane overlaps. preflight runs saved-head affected tests here and records evidence for land.',
     },
     {
       name: 'forge_check',
       actions: ['check', 'run', 'observe', 'tests', 'confirm-tests'],
       description:
-        '{action:save, mode:check|contract, ...fields of check or confirm-tests}; old names still work. tests proposes proving tests for a Candidate; confirm-tests stores the under-90-second contract using complete timings from an exact-Candidate runId, expectedHead and expectedVersion. Optional tests replaces the proposed list. Acceptance gates are unchanged. Check a pinned hosted Candidate or observe one run/source operation/submission. run aliases check. Observation is one finite authorized read; it starts no compute or subscription. Use forge_wait for explicitly requested live run or submission observation.',
+        'save modes check|contract use check/confirm-tests fields; old names work, run=check. tests proposes proving tests; confirm-tests stores a <90s contract from complete exact-Candidate timings (runId,expectedHead,expectedVersion). Optional tests replaces that list; gates unchanged. Check a pinned Candidate or finitely read a run/source operation/submission. Reads start no compute/subscription; forge_wait observes live.',
     },
     {
       name: 'forge_work_overview',
@@ -161,13 +161,16 @@ export function registerHostedAgentWorkflow(
     if (group.name === 'forge_task') task.tool = tool;
   }
   const planning = (['planning', 'put-planning-item', 'comment-planning-item'] as const).map(action =>
-    hostedAgentCommandSchemas[action].extend({ action: z.literal(action), operationId: z.uuid().optional() }),
+    hostedAgentCommandSchemas[action].safeExtend({
+      action: z.literal(action),
+      operationId: z.uuid().optional(),
+    }),
   );
   server.registerTool(
     'forge_planning',
     {
       description:
-        'The backlog: Initiatives and Issues. planning {id?,kind?,status?,initiativeId?,limit?,cursor?} reads a page or one item with comments (closes Issues whose Intent finished unless reconcile:false). put-planning-item replaces an item at expectedVersion (0 creates). comment-planning-item records a decision. Start work with forge_task start {planningItemId}.',
+        'Planning: indexed title/body search; active by default, status:all includes history. Filter kind/status/initiativeId; cursor pages or id+comments. reconcile:false skips Intent updates. New Issues/friction return advisory likelyDuplicates. put-planning-item replaces at expectedVersion (0 creates); comment-planning-item adds discussion. Start via forge_task {action:start,planningItemId}.',
       inputSchema: { command: z.union([planning[0]!, planning[1]!, planning[2]!]) },
       annotations: { ...read, readOnlyHint: false },
     },
@@ -223,7 +226,8 @@ export function registerHostedAgentWorkflow(
     'forge_wait',
     {
       description:
-        'Block on original run/landing operationIds; keep the turn active. Timeout/cancellation returns same-target next/command; repeat IN PROGRESS, then terminal recovery. Cursor binds project, actor, operations. Only this call subscribes; disconnect closes it. progressToken enables progress notifications. No polling or compute wake.',
+        'Block on the original run or landing operationIds. Keep waiting on unfinished work; timeout/cancellation returns next and command for the same targets. Follow the terminal outcome and recovery before ending the turn. Reconnect cursor binds project, actor and operations. Only this active call subscribes; disconnect closes it. progressToken enables progress notifications. No polling or compute wake.',
+
       inputSchema: hostedWaitSchema.shape,
       annotations: read,
     },

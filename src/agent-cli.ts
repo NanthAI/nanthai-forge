@@ -323,7 +323,7 @@ function actionHelp(action: string): string {
       'Totals are cumulative for this Lane session (actor + optional sessionId); a new report replaces them. Advisory and local; nothing is verified.\n';
   if (action === 'planning' || action === 'put-planning-item' || action === 'comment-planning-item')
     result +=
-      'Hosted backlog (Work > Planning). planning {id?,kind?,status?,initiativeId?,limit?,cursor?,reconcile?} reads one indexed page, or one item with comments; reconcile (default true) closes Issues whose Intent finished and reports it. put-planning-item replaces an item at expectedVersion (0 creates; omit itemId to create); comment-planning-item adds a comment. Writes need the project owner; replay operationId after an unknown reply. start planningItemId starts an Issue.\n';
+      'Hosted backlog (Work > Planning). search matches title/body by indexed relevance, active by default; status:all includes closed work. Search is read-only. New Issues/friction return advisory likelyDuplicates. planning {search?,id?,kind?,status?,initiativeId?,limit?,cursor?,reconcile?} reads one indexed page, or one item with comments; reconcile (default true) closes Issues whose Intent finished and reports it. put-planning-item replaces an item at expectedVersion (0 creates; omit itemId to create); comment-planning-item adds a comment. Writes need the project owner; replay operationId after an unknown reply. start planningItemId starts an Issue.\n';
   if (action === 'start')
     result +=
       'intentId adds a Lane to an open Intent; after declares a landing dependency. Default uses accepted main when present; channel:null explicitly selects workspace source.\n';

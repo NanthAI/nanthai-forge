@@ -6,8 +6,8 @@ import { invariant as check } from '../src/errors';
 import { purgeExchangeObjects } from './projectObjectLifecycle';
 import { reconcileRemovedObjectUploads } from './projectObjectCleanup';
 import { v } from 'convex/values';
-import { mutation, internalMutation } from './cliServer';
-import type { MutationCtx } from './_generated/server';
+import { mutation } from './cliServer';
+import { internalMutation, type MutationCtx } from './server';
 import type { Doc, Id } from './_generated/dataModel';
 import { internal } from './_generated/api';
 import { matchesUpload, scanComplete, removeDuplicate, removeExclusive } from './projectStorage';
@@ -301,6 +301,7 @@ export const purge = internalMutation({
       'projectWorkRecords',
       'projectWorkGenerations',
       'projectWorkDetailMigrations',
+      'projectHostedFrictionHints',
     ] as const) {
       const pageSize = table === 'projectGithubImportInventory' ? 1000 : 50;
       const rows = await ctx.db

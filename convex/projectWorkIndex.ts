@@ -1,3 +1,4 @@
+import { likelyPlanningDuplicates } from './projectHostedPlanningSearch';
 import { needsFix } from '../src/culprit-bisect';
 import { githubMirrorStatus } from './projectGithubMirrorStatus';
 import { hostedRecordValue } from './hostedRecordValue';
@@ -22,9 +23,9 @@ const identity = {
   revision: v.union(v.number(), v.null()),
 };
 export const workspace = query({
-  args: { projectId: v.id('hostedProjects') },
+  args: { projectId: v.id('hostedProjects'), planningDuplicateText: v.optional(v.string()) },
   returns: v.union(v.string(), v.null()),
-  handler: async (ctx, { projectId }) => {
+  handler: async (ctx, { projectId, planningDuplicateText }) => {
     try {
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to read your Forge project.');
@@ -47,6 +48,9 @@ export const workspace = query({
         );
       return JSON.stringify({
         ...hostedPaths(JSON.parse(generation.metadata)),
+        ...(planningDuplicateText === undefined
+          ? {}
+          : { likelyDuplicates: await likelyPlanningDuplicates(ctx, project, planningDuplicateText) }),
         autonomyPolicy: effectivePolicy(project),
         ...(project.needsFix ? { needsFix: needsFix(project) } : {}),
         githubMirror: await githubMirrorStatus(ctx, project),

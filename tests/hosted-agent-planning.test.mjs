@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { installPlanningSearch } from './planning-search-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
@@ -13,11 +14,13 @@ import { HostedAgentTransport } from '../dist/hosted-agent-transport.js';
 
 const index = await import(moduleUrl('../convex/projectWorkIndex.ts'));
 const actions = await import(moduleUrl('../convex/projectWorkActions.ts'));
+const search = await import(moduleUrl('../convex/projectHostedPlanningSearch.ts'));
 const code = expected => error => (error.data?.code ?? error.code) === expected;
 
 /** The agent's port over the real Convex handlers; Intent states are the one stub (tested with
  * the Convex lanes fixture). Counts every Convex call the agent makes. */
 function port(s, states = new Map()) {
+  installPlanningSearch(s);
   const calls = [];
   let intercept;
   const invoke = async (name, args) => {
@@ -28,7 +31,11 @@ function port(s, states = new Map()) {
       );
     const [module, fn] = name.split(':');
     if (name === 'projectWorkActions:command' && intercept) await intercept(args);
-    const handler = { projectWorkIndex: index, projectWorkActions: actions }[module][fn];
+    const handler = {
+      projectWorkIndex: index,
+      projectWorkActions: actions,
+      projectHostedPlanningSearch: search,
+    }[module][fn];
     return handler._handler(s.ctx, args);
   };
   const reference = ref => getFunctionName(ref);
@@ -396,4 +403,49 @@ test('start {planningItemId} starts the Issue as a planned Intent and links it o
     assert.equal(error.code, 'HOSTED_ACTION_UNSUPPORTED');
     return /does not offer hosted action planning/.test(error.message);
   });
+});
+
+test('Issue filing returns candidates without another call and retries retain the original candidate page', async t => {
+  const s = await setup(t),
+    p = port(s);
+  const prior = (
+    await put(p, { kind: 'issue', title: 'Sync worker diagnostics', body: 'retain failure cause' })
+  ).result;
+  p.calls.length = 0;
+  const input = { kind: 'issue', title: 'Sync failure diagnostics' };
+  const filed = await put(p, input);
+  assert(filed.result.likelyDuplicates.items.some(item => item.id === prior.itemId));
+  assert.deepEqual(p.calls, ['projectWorkIndex:workspace', 'projectWorkActions:command']);
+  await s.send(s.item({ title: 'Sync failure diagnostics' }));
+  const replay = await run(p, 'put-planning-item', input, filed.operationId);
+  assert.deepEqual(replay.result.likelyDuplicates, filed.result.likelyDuplicates);
+});
+
+test('CLI planning search forwards one query and summaries need no per-item detail reads', async t => {
+  const s = await setup(t),
+    p = port(s);
+  await put(p, { kind: 'issue', title: 'Searchable sync', body: 'Done when: verified' });
+  p.calls.length = 0;
+  const found = await list(p, { search: 'sync' });
+  assert.equal(found.items.length, 1);
+  assert.equal(found.items[0].initiativeId, null);
+  assert.equal(found.items[0].hasDoneWhen, true);
+  assert.deepEqual(p.calls, ['projectHostedPlanningSearch:search']);
+});
+
+test('released planning servers keep filing available and name missing search coverage', async t => {
+  const s = await setup(t),
+    p = port(s);
+  const query = p.query;
+  p.query = (name, args) => {
+    if ('planningDuplicateText' in args)
+      throw new Error('ArgumentValidationError: Object contains extra field `planningDuplicateText`');
+    if (name === 'projectHostedPlanningSearch:search')
+      throw new Error('Could not find public function for projectHostedPlanningSearch:search');
+    return query(name, args);
+  };
+  const filed = await put(p, { kind: 'issue', title: 'Compatible filing' });
+  assert.equal(filed.result.version, 1);
+  assert.equal(filed.result.likelyDuplicates.coverage, 'unavailable-server-upgrade-required');
+  await assert.rejects(list(p, { search: 'Compatible' }), code('HOSTED_ACTION_UNSUPPORTED'));
 });

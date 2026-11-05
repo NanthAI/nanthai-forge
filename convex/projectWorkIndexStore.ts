@@ -42,7 +42,7 @@ export async function record(
 }
 type RecordValue = Pick<
   Doc<'projectWorkRecords'>,
-  'collection' | 'key' | 'parent' | 'position' | 'value' | 'status' | 'actor'
+  'collection' | 'key' | 'parent' | 'position' | 'value' | 'status' | 'actor' | 'planning'
 >;
 /** Read-only lookup. Catalog-backed generations (GitHub import) keep no
  * per-blob record: their sourceBlobs resolve from the project object catalog. */
@@ -104,6 +104,7 @@ export const snapshotEntries = internalQuery({
         parent: row.parent,
         position: row.position,
         value: row.value,
+        ...(row.planning ? { planning: row.planning } : {}),
         ...(row.status === undefined ? {} : { status: row.status }),
         ...(row.actor === undefined ? {} : { actor: row.actor }),
       })),
@@ -245,6 +246,7 @@ export const publish = internalMutation({
     );
     await ctx.db.patch(generation._id, {
       status: 'ready',
+      planningSearchVersion: 2,
       workSchema: JSON.parse(input.metadata ?? generation.metadata).schema,
       ...(input.metadata ? { metadata: input.metadata } : {}),
     });
@@ -328,6 +330,7 @@ export const returnLookups = internalQuery({
               parent: row.parent,
               position: row.position,
               value: row.value,
+              ...(row.planning ? { planning: row.planning } : {}),
               ...(row.status ? { status: row.status } : {}),
               ...(row.actor ? { actor: row.actor } : {}),
             }
@@ -393,6 +396,7 @@ export const lookups = internalQuery({
   returns: v.array(
     v.union(
       v.object({
+        planning: indexEntry.fields.planning,
         status: v.optional(v.string()),
         actor: v.optional(v.string()),
         collection: v.string(),
@@ -429,6 +433,7 @@ export const lookups = internalQuery({
               parent: row.parent,
               position: row.position,
               value: row.value,
+              ...(row.planning ? { planning: row.planning } : {}),
             }
           : null;
       }),

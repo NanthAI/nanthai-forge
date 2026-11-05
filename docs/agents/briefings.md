@@ -95,9 +95,8 @@ budget, time box, acceptance bar and metrics that must not regress.
 11. Fix failures in the same Lane and land again; never cancel and recreate.
     Follow exact conflict/stale/stalled continuations; replay unknown outcomes.
     Before filing an Issue or friction, search planning and comment on an existing
-    match instead. Until search (18e28b75) ships, page
-    `planning {"reconcile":false,"limit":100}` through `nextCursor` and filter
-    titles. Log action/code/Lane/cost/workaround, then fix or link a slice.
+    match instead. Use `planning {"search":"relevant words","limit":50}`
+    through `nextCursor`; add `status:"all"` to include closed work. Log action/code/Lane/cost/workaround, then fix or link a slice.
 12. Match your receipt to your Lane/operation and verify files on accepted main.
     Convex changes also need deployment success at that commit; the lead deploys.
     Comment evidence per acceptance line; unmet lines stay open or name their next

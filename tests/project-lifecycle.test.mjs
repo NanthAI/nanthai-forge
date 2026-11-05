@@ -774,3 +774,22 @@ test('delete retries coalesce the tracked R2 chain and owner-only list exposes r
   assert.equal(s.scheduled.length, count + 2);
   assert.ok(s.tables.hostedProjects.get('project').r2Purge.generation > resumed.r2Purge.generation);
 });
+
+test('project deletion pages only its overflow duplicate-hint receipts and preserves foreign receipts', async () => {
+  const s = fixture();
+  for (let n = 0; n < 51; n++)
+    await s.ctx.db.insert('projectHostedFrictionHints', {
+      projectId: 'project',
+      id: randomUUID(),
+      value: JSON.stringify({ items: [] }),
+    });
+  await s.ctx.db.insert('projectHostedFrictionHints', {
+    projectId: 'foreign',
+    id: randomUUID(),
+    value: JSON.stringify({ items: [] }),
+  });
+  await modules.projectLifecycle.permanentlyDelete._handler(s.ctx, s.operation());
+  await s.drain();
+  assert.equal(s.tables.projectHostedFrictionHints.size, 1);
+  assert.equal([...s.tables.projectHostedFrictionHints.values()][0].projectId, 'foreign');
+});

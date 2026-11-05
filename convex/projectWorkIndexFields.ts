@@ -2,6 +2,17 @@
 import { defineTable } from 'convex/server';
 import { v } from 'convex/values';
 export const indexEntry = v.object({
+  planning: v.optional(
+    v.object({
+      text: v.string(),
+      itemId: v.optional(v.string()),
+      payloadKey: v.optional(v.string()),
+      kind: v.string(),
+      status: v.string(),
+      initiativeId: v.string(),
+      open: v.boolean(),
+    }),
+  ),
   activityAt: v.optional(v.number()),
   actor: v.optional(v.string()),
   status: v.optional(v.string()),
@@ -20,6 +31,7 @@ export const returnProjection = v.object({
   removed: v.array(v.object({ collection: v.string(), key: v.string() })),
 });
 export const generationFields = {
+  planningSearchVersion: v.optional(v.union(v.literal(1), v.literal(2))),
   /** Source blobs resolve through the project object catalog (no per-blob record). */
   objectCatalog: v.optional(v.literal(true)),
   ensureCursor: v.optional(v.string()),
@@ -122,5 +134,17 @@ export const indexTables = {
       'position',
     ])
     .index('by_project', ['projectId'])
-    .index('by_generation', ['generationId']),
+    .index('by_generation', ['generationId'])
+    .searchIndex('search_planning', {
+      searchField: 'planning.text',
+      filterFields: [
+        'generationId',
+        'planning.kind',
+        'planning.status',
+        'planning.initiativeId',
+        'planning.open',
+        'planning.itemId',
+        'planning.payloadKey',
+      ],
+    }),
 };

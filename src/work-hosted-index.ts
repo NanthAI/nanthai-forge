@@ -1,3 +1,4 @@
+import { planningSearchEntries } from './planning-search.js';
 import { latestTestContract } from './intent-test-contract.js';
 // SPDX-License-Identifier: Apache-2.0
 import { handoffSummary, latestHandoff } from './agent-handoff-types.js';
@@ -15,6 +16,15 @@ import { currentPlanning } from './work-planning-state.js';
 import { hostedChannels } from './work-metadata.js';
 import type { z } from 'zod';
 export type IndexEntry = {
+  planning?: {
+    itemId?: string;
+    payloadKey?: string;
+    text: string;
+    kind: string;
+    status: string;
+    initiativeId: string;
+    open: boolean;
+  };
   activityAt?: number;
   actor?: string;
   status?: string;
@@ -175,6 +185,12 @@ export function indexedRecord(
       );
       entries[0]!.value = json({
         ...small,
+        ...(collection === 'planningItems'
+          ? {
+              bodyLength: String(object.body ?? '').length,
+              hasDoneWhen: /done\s+when\s*:/i.test(String(object.body ?? '')),
+            }
+          : {}),
         id: key,
         payload: true,
         ...(collection === 'intents'
@@ -207,6 +223,8 @@ export function indexedRecord(
       }),
     );
   }
+  if (collection === 'planningItems')
+    entries.push(...planningSearchEntries(value as WorkData['planningItems'][number], position));
   return entries;
 }
 export function* workIndexRows(

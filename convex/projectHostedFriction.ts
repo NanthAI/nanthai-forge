@@ -1,10 +1,12 @@
 import { digest } from '../src/portable-hash';
 // SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
-import { mutation, query } from './cliServer';
+import { query, mutation } from './cliServer';
+import { likelyPlanningDuplicates } from './projectHostedPlanningSearch';
 import {
   recordCaller,
   frictionRow,
+  frictionHints,
   appendFriction,
   replayRequest,
   recordPageOptions,
@@ -19,7 +21,7 @@ export const capture = mutation({
   returns: v.string(),
   handler: async (ctx, { projectId, request: input }) => {
     try {
-      const { actor } = await recordCaller(ctx, projectId, true);
+      const { actor, project } = await recordCaller(ctx, projectId, true);
       const parsed = frictionInputSchema.required({ operationId: true }).safeParse(JSON.parse(input));
       invariant(parsed.success, 'BAD_ARGUMENT', 'Send the original friction inputs and operation UUID.');
       const command = parsed.data,
@@ -27,7 +29,11 @@ export const capture = mutation({
       const old = await frictionRow(ctx, projectId, command.operationId);
       if (old) {
         replayRequest(old.request, request);
-        return old.value;
+        const savedHints =
+          old.likelyDuplicates ?? (await frictionHints(ctx, projectId, command.operationId))?.value;
+        return savedHints === undefined
+          ? old.value
+          : canonicalPayload({ ...JSON.parse(old.value), likelyDuplicates: JSON.parse(savedHints) });
       }
       if (command.laneId)
         invariant(await recordHead(ctx, projectId, 'lane', command.laneId), 'NOT_FOUND', 'Lane not found.');
@@ -39,8 +45,13 @@ export const capture = mutation({
         at: new Date().toISOString(),
         count: 1,
       });
-      await appendFriction(ctx, projectId, actor, record);
-      return canonicalPayload(record);
+      const likelyDuplicates = await likelyPlanningDuplicates(
+        ctx,
+        project,
+        `${command.title} ${command.detail}`,
+      );
+      await appendFriction(ctx, projectId, actor, record, canonicalPayload(likelyDuplicates));
+      return canonicalPayload({ ...record, likelyDuplicates });
     } catch (error) {
       return report(error);
     }

@@ -30,7 +30,7 @@ nforge agent ROOT comment-planning-item '{"itemId":"ISSUE_ID","text":"What lande
 
 Agreed ideas, decisions and builder-found friction go into planning as Issues (`put-planning-item`), not only into a handoff. Discuss an owner question or idea before filing it; a question is not agreement to add work. For a new friction item with no existing planning match, run `nforge agent ROOT friction '{"laneId":"…","title":"…","detail":"…","area":"…"}'`.
 
-Before filing an Issue or friction, search planning and comment on an existing match instead of duplicating it; until search (18e28b75-5db5-4137-94e0-8fb889092996) ships, page `planning {"reconcile":false,"limit":100}` and filter titles.
+Before filing an Issue or friction, search planning and comment on an existing match instead of duplicating it. Use `planning {"search":"relevant words","limit":50}` and follow `nextCursor`; add `status:"all"` to include closed work.
 
 `land --save` saves, updates from main, composes a Candidate, runs the check and accepts under the project policy. Details: [agent workflow](docs/agents/workflow.md). Hosted start/save/status receipts include `unacknowledgedOverlaps` and `behindMain`; their bounded saved-path advice excludes unsaved peer edits and never establishes independence. Hosted `peers {laneId,path?,detail?}` reads the same saved overlap evidence in one query; `diff {laneId,paths?,byteBudget?}` compares pinned base to saved head. MCP uses `forge_review` for both.
 

@@ -1,3 +1,4 @@
+import { planningSummary, planningSearchTerms } from './planning-search.js';
 // SPDX-License-Identifier: Apache-2.0
 import { createHash } from 'node:crypto';
 import { makeFunctionReference } from 'convex/server';
@@ -14,7 +15,12 @@ import type { PlanningItem, PlanningWrite } from './work-planning-types.js';
 export type PlanningPort = Pick<HostedAgentSession, 'query' | 'address' | 'exchange' | 'root'> & {
   retainOperation?: (id: string) => void;
 };
-type Workspace = { generationId: string; revision: number; sourceRevision?: number };
+type Workspace = {
+  generationId: string;
+  revision: number;
+  sourceRevision?: number;
+  likelyDuplicates?: unknown;
+};
 type Page = {
   generationId: string | null;
   page: { id: string; value: string }[];
@@ -31,8 +37,24 @@ const uuidFrom = (seed: string) => {
   const h = createHash('sha256').update(seed).digest('hex');
   return `${h.slice(0, 8)}-${h.slice(8, 12)}-4${h.slice(13, 16)}-8${h.slice(17, 20)}-${h.slice(20, 32)}`;
 };
-async function workspace(port: PlanningPort): Promise<Workspace> {
-  const ws = await port.query<Workspace | null>('projectWorkIndex:workspace', {});
+async function workspace(port: PlanningPort, planningDuplicateText?: string): Promise<Workspace> {
+  let ws: Workspace | null;
+  try {
+    ws = await port.query<Workspace | null>(
+      'projectWorkIndex:workspace',
+      planningDuplicateText === undefined ? {} : { planningDuplicateText },
+    );
+  } catch (error) {
+    if (
+      planningDuplicateText === undefined ||
+      !(error instanceof Error) ||
+      !/ArgumentValidationError/.test(error.message) ||
+      !/extra field[^\n]*planningDuplicateText/.test(error.message)
+    )
+      throw error;
+    ws = await port.query<Workspace | null>('projectWorkIndex:workspace', {});
+    if (ws) ws.likelyDuplicates = { items: [], coverage: 'unavailable-server-upgrade-required' };
+  }
   invariant(
     ws,
     'PROJECT_WORK_INDEX_MISSING',
@@ -72,15 +94,7 @@ async function fullItem(port: PlanningPort, ws: Workspace, id: string) {
   return (detail.value as PlanningItem | null) ?? null;
 }
 const compact = (item: PlanningItem, intent?: string) => ({
-  id: item.id,
-  kind: item.kind,
-  title: item.title,
-  status: item.status,
-  version: item.version,
-  intentIds: item.intentIds,
-  ...(item.initiativeId ? { initiativeId: item.initiativeId } : {}),
-  at: item.at,
-  ...(item.body.length > 400 ? { body: item.body.slice(0, 400), bodyTruncated: true } : { body: item.body }),
+  ...planningSummary(item),
   ...(intent ? { intent } : {}),
 });
 function decode(cursor: string | null, ws: Workspace): string | null {
@@ -100,11 +114,32 @@ const encode = (ws: Workspace, cursor: string) =>
 
 /** Writes carry the original operation; a stale or moved Work revision is retried a few times with
  * the revision each attempt used retained, so a lost reply replays instead of repeating. */
-async function writePlanning(port: PlanningPort, command: PlanningWrite, journal?: HostedAgentJournal) {
+async function writePlanning(
+  port: PlanningPort,
+  command: PlanningWrite,
+  journal?: HostedAgentJournal,
+  hints?: { likelyDuplicates?: unknown },
+) {
   for (let attempt = 0; ; attempt++) {
-    const revision = journal
-      ? await journal.retain(`planning-revision-${attempt}`, async () => (await workspace(port)).revision)
-      : (await workspace(port)).revision;
+    const observe = async () => {
+      const ws = await workspace(
+        port,
+        command.action === 'put-planning-item' && command.kind === 'issue' && command.expectedVersion === 0
+          ? `${command.title} ${command.body}`
+          : undefined,
+      );
+      return {
+        revision: ws.revision,
+        ...(ws.likelyDuplicates === undefined ? {} : { likelyDuplicates: ws.likelyDuplicates }),
+      };
+    };
+    const retained = journal
+      ? await journal.retain(`planning-revision-${attempt}`, observe)
+      : await observe();
+    // Existing retry journals retain just the revision number.
+    const observed = typeof retained === 'number' ? { revision: retained } : retained;
+    const revision = observed.revision;
+    if (hints && 'likelyDuplicates' in observed) hints.likelyDuplicates = observed.likelyDuplicates;
     try {
       const event = (await port.exchange.client.action(
         makeFunctionReference<'action'>('projectWorkActions:command'),
@@ -195,6 +230,31 @@ async function readPlanning(
   port: PlanningPort,
   input: ReturnType<typeof hostedAgentCommandSchemas.planning.parse>,
 ) {
+  if (input.search !== undefined) {
+    const terms = planningSearchTerms(input.search);
+    try {
+      return await port.query('projectHostedPlanningSearch:search', {
+        ...terms,
+        status: input.status ?? 'active',
+        ...(input.kind ? { kind: input.kind } : {}),
+        ...(input.initiativeId ? { initiativeId: input.initiativeId } : {}),
+        cursor: input.cursor,
+        limit: input.limit,
+      });
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        /(?:Could not find (?:public )?function|No (?:public )?function found|Function .* not found)/i.test(
+          error.message,
+        )
+      )
+        throw new ForgeError(
+          'HOSTED_ACTION_UNSUPPORTED',
+          'This server does not implement planning search. Deploy the planning search API before retrying.',
+        );
+      throw error;
+    }
+  }
   const ws = await workspace(port);
   if (input.id) {
     const item = await fullItem(port, ws, input.id);
@@ -227,7 +287,7 @@ async function readPlanning(
       .filter(
         item =>
           (!input.kind || item.kind === input.kind) &&
-          (!input.status || item.status === input.status) &&
+          (!input.status || input.status === 'all' || item.status === input.status) &&
           (!input.initiativeId || item.initiativeId === input.initiativeId),
       );
   }
@@ -286,10 +346,12 @@ export async function executeHostedPlanning(
   }
   const put = hostedAgentCommandSchemas['put-planning-item'].parse(input);
   const itemId = put.itemId ?? (await journal.id('item'));
+  const hints: { likelyDuplicates?: unknown } = {};
   const revision = await writePlanning(
     port,
     { action, operationId: journal.operationId, ...put, itemId },
     journal,
+    hints,
   );
   return {
     operationId: journal.operationId,
@@ -298,6 +360,7 @@ export async function executeHostedPlanning(
       version: put.expectedVersion + 1,
       status: put.status,
       workRevision: revision,
+      ...hints,
     },
   };
 }

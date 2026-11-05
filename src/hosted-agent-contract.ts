@@ -295,16 +295,18 @@ export const hostedAgentCommandSchemas = {
   /** Finite page of the backlog (Initiatives and Issues). id reads one item with its comments. */
   planning: z
     .object({
-      id: uuid.optional(),
+      id: z.uuid('id must be a complete planning UUID (xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx).').optional(),
+      search: z.string().trim().min(1).optional(),
       kind: z.enum(['issue', 'initiative']).optional(),
-      status: z.enum(planningStatuses).optional(),
+      status: z.enum([...planningStatuses, 'all']).optional(),
       initiativeId: uuid.optional(),
       limit: z.number().int().min(1).max(100).default(50),
       cursor: z.string().nullable().default(null),
       /** Close or abandon Issues whose Intent finished; reports what it changed. */
       reconcile: z.boolean().default(true),
     })
-    .strict(),
+    .strict()
+    .refine(input => !(input.id && input.search), 'Use id or search, not both.'),
   'put-planning-item': planningPutSchema
     .omit({ action: true, operationId: true, itemId: true })
     .extend({ itemId: uuid.optional() })

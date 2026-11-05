@@ -95,7 +95,7 @@ export const fields: Record<string, string[]> = {
   views: ['views'],
   checks: ['checks'],
   runs: ['runs'],
-  planningItems: ['planningItems', 'planningVersions'],
+  planningItems: ['planningItems', 'planningVersions', 'planningSearch'],
   planningComments: ['planningComments'],
   channelMoves: ['channelMoves'],
   hostedChannelMoves: ['hostedChannelMoves'],

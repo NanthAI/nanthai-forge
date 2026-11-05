@@ -94,7 +94,7 @@ Include `overlapAnswer:"accept-order"` in `land --save` to answer the pending no
 | `check-settings` | `operationId?` |
 | `policy` | `operationId?` |
 | `x set-policy` | `governanceVersion?, expectedPolicy?, preset?, acceptance?, checks?, integrationPreview?, ownerRootUpdates?, autoSnapshot?, checkLogs?, laneUpdates?, lifecycle?, notify?, githubMirror?, trust?, agentDefaults?, autoExchange?, operationId?` |
-| `planning` | `id?, kind?, status?, initiativeId?, limit?, cursor?, reconcile?, operationId?` |
+| `planning` | `id?, search?, kind?, status?, initiativeId?, limit?, cursor?, reconcile?, operationId?` |
 | `put-planning-item` | `expectedVersion?, kind, title, body?, status?, reason?, intentIds?, initiativeId?, itemId?, operationId?` |
 | `comment-planning-item` | `itemId, authorLabel?, text, operationId?` |
 | `diff` | `laneId?, paths?, byteBudget?, cursor?` |
@@ -175,6 +175,7 @@ Hosted land waits for acceptance; check-only stops after its check. NDJSON wake 
 Hosted projects keep their backlog as planning: Initiatives group Issues, and an Issue is the work an agent starts. The same records show in the web app under Work > Planning. Read, write and start from them without leaving the agent command surface:
 
 ```sh
+nforge agent ROOT planning '{"search":"sync source worker","limit":50}'    # ranked title/body search, active items by default
 nforge agent ROOT planning '{"status":"open","limit":50}'                 # one page; filters: kind, status, initiativeId; cursor continues
 nforge agent ROOT planning '{"id":"ITEM_ID"}'                             # one item, full body, newest 50 comments
 nforge agent ROOT put-planning-item '{"kind":"initiative","title":"Phase 6","status":"open"}'
@@ -183,10 +184,7 @@ nforge agent ROOT comment-planning-item '{"itemId":"ITEM_ID","text":"Decision: u
 nforge agent ROOT start '{"planningItemId":"ISSUE_ID"}'                  # Lane on the Issue; Issue becomes in-progress
 ```
 
-Before filing an Issue or friction, search for an existing planning item and
-comment on it instead of creating a duplicate. Until search (18e28b75) ships,
-page `planning {"reconcile":false,"limit":100}` through `nextCursor` and filter
-titles; an empty filtered page is not the end of the backlog.
+Search before filing: `planning {"search":"words","status":"all"}` pages indexed title/body matches with status/kind/initiative filters. Filing returns advisory `likelyDuplicates`. See [planning search](../data-placement.md#planning-search) for filters, preparation and costs.
 
 `put-planning-item` and `comment-planning-item` take the schemas of `src/work-planning-types.ts` and the usual hosted `operationId` replay rules (identical parameters replay; a new `operationId` or changed parameters start new work). A put replaces the whole item at `expectedVersion` (0 creates; omit `itemId` to create one); a stale version fails with `PLANNING_CHANGED`. Writes need the project owner. `planning` reads indexed pages of the current Work records: `limit` is the page size, filters apply within a page, and an empty page continues up to five pages per call. Idle projects make no calls.
 
