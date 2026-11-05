@@ -7,7 +7,12 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { build } from 'vite';
 import { packageDocuments } from '../scripts/package-documents.mjs';
-import { llmDocuments, llmsFullPaths, llmsFullBudgetBytes } from '../scripts/llm-documents.mjs';
+import {
+  llmDocuments,
+  llmsFullPaths,
+  llmsFullWarnBytes,
+  llmsFullSizeReport,
+} from '../scripts/llm-documents.mjs';
 import { cleanUrl } from '../dist/project-routes.js';
 import { moduleUrl } from './convex-module.mjs';
 
@@ -93,7 +98,6 @@ test('the hosted Vite build emits linked LLM files, every packaged doc and crawl
     previous = position;
   }
   assert.equal((full.match(/^Source: /gm) ?? []).length, llmsFullPaths.length);
-  assert.ok(Buffer.byteLength(full) <= llmsFullBudgetBytes);
   for (const internal of [
     'docs/phase5-plan.md',
     'docs/status.md',
@@ -104,8 +108,7 @@ test('the hosted Vite build emits linked LLM files, every packaged doc and crawl
   assert.equal(robots, read('web/public/robots.txt'));
 });
 
-test('llms-full is curated: listed in the package inventory, within budget and without internal plans', () => {
-  assert.ok(llmsFullBudgetBytes <= 400 * 1024);
+test('llms-full is curated: listed in the package inventory and without internal plans', () => {
   for (const path of llmsFullPaths)
     assert.ok(path === 'README.md' || packageDocuments.includes(path), `${path} is a packaged document`);
   for (const internal of [
@@ -118,11 +121,8 @@ test('llms-full is curated: listed in the package inventory, within budget and w
     'docs/decisions.md',
   ])
     assert.ok(!llmsFullPaths.includes(internal), `${internal} is not concatenated`);
-  const bytes = llmsFullPaths.reduce((sum, path) => sum + Buffer.byteLength(read(path)), 0);
-  assert.ok(bytes < llmsFullBudgetBytes, `sources total ${bytes} bytes`);
   const first = llmDocuments(root);
   assert.deepEqual(llmDocuments(root), first);
-  assert.ok(Buffer.byteLength(first[1].source) <= llmsFullBudgetBytes);
 });
 
 test('llms.txt quotes only dated figures that why-forge.md states, and reports the failed bar', () => {
@@ -178,9 +178,44 @@ test('generation uses only the explicit inventory and reflects source edits dete
     assert.throws(() => llmDocuments(fixture), { code: 'ENOENT' }, path);
     put(path, copy);
   }
-  // The size budget fails the build rather than truncating.
-  put('docs/security.md', `# Security\n\n${'x'.repeat(llmsFullBudgetBytes)}\n`);
-  assert.throws(() => llmDocuments(fixture), /budget is/);
+  // Size is reported, never a build failure (combined Lanes would fail landings that pass alone).
+  put('docs/security.md', `# Security\n\n${'x'.repeat(llmsFullWarnBytes)}\n`);
+  const huge = llmDocuments(fixture)[1].source;
+  assert.ok(Buffer.byteLength(huge) > llmsFullWarnBytes);
+});
+
+test('llms-full size is a report with a non-failing warning above the line, never a cliff', () => {
+  const text = size => 'x'.repeat(size);
+  const under = llmsFullSizeReport(text(llmsFullWarnBytes));
+  assert.equal(under.warn, false);
+  assert.match(under.message, /^llms-full\.txt: 409600 bytes \(100\.0% of the 409600 byte warning line\)\.$/);
+  const over = llmsFullSizeReport(text(llmsFullWarnBytes + 1));
+  assert.equal(over.warn, true);
+  assert.match(over.message, /WARNING: llms-full\.txt is 1 bytes over the warning line/);
+  assert.match(over.message, /The build still passes/);
+});
+
+test('five Lanes each adding 2 KB of docs on the real files still generate llms-full', t => {
+  const fixture = mkdtempSync(join(tmpdir(), 'forge-llm-lanes-'));
+  t.after(() => rmSync(fixture, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
+  for (const path of [...packageDocuments, 'README.md', 'skills/forge-agent/SKILL.md']) {
+    mkdirSync(dirname(join(fixture, path)), { recursive: true });
+    writeFileSync(join(fixture, path), read(path));
+  }
+  const alone = Buffer.byteLength(llmDocuments(fixture)[1].source);
+  const addition = `\n## Lane note\n\n${'Lane documentation sentence.\n'.repeat(80).slice(0, 2048)}\n`;
+  for (const path of [
+    'docs/quickstart.md',
+    'docs/security.md',
+    'docs/workflows.md',
+    'docs/concepts.md',
+    'docs/gh-cli.md',
+  ])
+    writeFileSync(join(fixture, path), read(path) + addition);
+  const combined = llmDocuments(fixture)[1].source;
+  assert.ok(Buffer.byteLength(combined) >= alone + 5 * 2048, 'every addition is carried in full');
+  const report = llmsFullSizeReport(combined);
+  assert.equal(report.warn, report.size > llmsFullWarnBytes);
 });
 
 test('robots permits public static resources for all named crawlers without a sitemap', () => {

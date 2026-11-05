@@ -85,7 +85,7 @@ Use normal tools and tests inside a Lane. Git repositories work with Forge; acce
 
 ## Documentation for agents and LLMs
 
-The web build generates `/llms.txt` with agent rules, dated measurements (including the failed E3 bar) and links to every packaged document. `/llms-full.txt` concatenates the README and guides selected in `scripts/llm-documents.mjs`, in order, within 400 KB. Missing or oversize sources fail the build. Plans, research, status and other references remain linked. The installed agent skill is linked on GitHub.
+The web build generates `/llms.txt` with agent rules, dated measurements (including the failed E3 bar) and links to every packaged document. `/llms-full.txt` concatenates the README and guides selected in `scripts/llm-documents.mjs`, in order, within 400 KB. A missing source fails the build. The build prints the file size and warns above 400 KB; size never fails a build, because combined documentation changes would fail landings that pass alone. Plans, research, status and other references remain linked. The installed agent skill is linked on GitHub.
 
 `robots.txt` permits the public landing and static documentation for all crawlers,
 including AI crawlers. App and project URLs, including legacy query routes, are

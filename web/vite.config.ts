@@ -1,7 +1,7 @@
 import { defineConfig } from 'vite';
 import { builtinModules } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { llmDocuments } from '../scripts/llm-documents.mjs';
+import { llmDocuments, llmsFullSizeReport } from '../scripts/llm-documents.mjs';
 export default defineConfig({
   base: '/',
   envDir: '..',
@@ -29,8 +29,12 @@ export default defineConfig({
       name: 'forge-public-documentation',
       apply: 'build',
       generateBundle() {
-        for (const asset of llmDocuments(fileURLToPath(new URL('../', import.meta.url))))
-          this.emitFile({ type: 'asset', ...asset });
+        const assets = llmDocuments(fileURLToPath(new URL('../', import.meta.url)));
+        // Size is reported, never a build failure: Lanes that each fit alone must also land together.
+        const report = llmsFullSizeReport(assets.find(asset => asset.fileName === 'llms-full.txt').source);
+        if (report.warn) this.warn(report.message);
+        else this.info(report.message);
+        for (const asset of assets) this.emitFile({ type: 'asset', ...asset });
       },
     },
   ],

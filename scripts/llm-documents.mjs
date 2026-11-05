@@ -29,7 +29,9 @@ export const llmsFullPaths = [
   'docs/operations/github-actions-checks.md',
   'docs/readable-urls.md',
 ];
-export const llmsFullBudgetBytes = 400 * 1024;
+// Soft size line, in bytes. Crossing it only warns: the file is a sum over every Lane's docs, so a
+// hard limit fails combined landings that each pass alone (2026-11-05). Trim when you see the warning.
+export const llmsFullWarnBytes = 400 * 1024;
 
 // Dated numbers repeated from docs/why-forge.md; tests/llm-discoverability.test.mjs requires every
 // quoted figure to appear in that page, so this summary cannot drift from the measurement it cites.
@@ -79,6 +81,17 @@ const referenceDocs = new Set([
   'docs/operations/github-actions-checks.md',
   'docs/readable-urls.md',
 ]);
+
+export function llmsFullSizeReport(text) {
+  const size = Buffer.byteLength(text);
+  const percent = ((size / llmsFullWarnBytes) * 100).toFixed(1);
+  const head = `llms-full.txt: ${size} bytes (${percent}% of the ${llmsFullWarnBytes} byte warning line).`;
+  const warning =
+    size > llmsFullWarnBytes
+      ? `WARNING: llms-full.txt is ${size - llmsFullWarnBytes} bytes over the warning line; trim llmsFullPaths or shorten a guide soon. The build still passes.`
+      : '';
+  return { size, warn: size > llmsFullWarnBytes, message: warning ? `${head}\n${warning}` : head };
+}
 
 function describe(path, source) {
   const title = /^# (.+)$/m.exec(source)?.[1] ?? path;
@@ -130,10 +143,6 @@ export function llmDocuments(root) {
           `---\n\nSource: ${doc.path === 'README.md' ? `${repository}/README.md` : `/${doc.path}`}\n\n${doc.source}`,
       )
       .join('\n\n');
-  if (Buffer.byteLength(text) > llmsFullBudgetBytes)
-    throw new Error(
-      `llms-full.txt is ${Buffer.byteLength(text)} bytes; the budget is ${llmsFullBudgetBytes}. Trim llmsFullPaths.`,
-    );
   return [
     { fileName: 'llms.txt', source: llms },
     { fileName: 'llms-full.txt', source: text },
