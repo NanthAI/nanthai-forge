@@ -189,7 +189,11 @@ test('native hosted summaries track actual ancestry when main moves without read
     actor: 'owner',
     displayName: 'Maya',
   });
-  assert.equal(JSON.parse((await readPage(s, 'hostedChannels')).page[0].value).actorDisplayName, 'Maya');
+  assert.equal(
+    JSON.parse((await readPage(s, 'hostedChannels')).page[0].value).actorDisplayName,
+    undefined,
+    'retained provider names are never returned',
+  );
   const beforeQuery = s.ctx.db.query;
   s.ctx.db.query = table => {
     assert.notEqual(table, 'projectActorNames', 'denied readers never look up identities');
@@ -295,7 +299,7 @@ test('choice answers imply ack, reconcile retries, enforce recipient and reach s
   assert.equal(coordinationChoicesSchema.safeParse(['a', 'b', 'c']).success, true);
 });
 
-test('hosted actor labels are project scoped, omit email fallback and recheck access after Clerk lookup', async t => {
+test('hosted actor labels are project scoped Forge handles and never look up the identity provider', async t => {
   const s = state([]);
   s.tables.hostedProjects.set('project', {
     _id: 'project',
@@ -305,27 +309,21 @@ test('hosted actor labels are project scoped, omit email fallback and recheck ac
     revision: 1,
     currentBackup: null,
   });
-  const originalFetch = globalThis.fetch,
-    secret = process.env.CLERK_SECRET_KEY;
-  process.env.CLERK_SECRET_KEY = 'synthetic';
+  s.tables.forgeAccounts.set('account', { _id: 'account', owner: 'owner', handle: 'synthetic-owner' });
+  const originalFetch = globalThis.fetch;
   t.after(() => {
     globalThis.fetch = originalFetch;
-    if (secret === undefined) delete process.env.CLERK_SECRET_KEY;
-    else process.env.CLERK_SECRET_KEY = secret;
   });
   let calls = 0;
   globalThis.fetch = async () => {
     calls++;
-    return new Response(
-      JSON.stringify({ id: 'owner', email_addresses: [{ email_address: 'private@example.invalid' }] }),
-      { status: 200 },
-    );
+    return new Response(JSON.stringify({ id: 'owner', first_name: 'Private' }), { status: 200 });
   };
   const request = { projectId: 'project', actors: ['owner'] };
   assert.deepEqual(await people.labels._handler(s.ctx, request), [
-    { actor: 'owner', displayName: 'Forge contributor' },
+    { actor: 'synthetic-owner', displayName: 'synthetic-owner' },
   ]);
-  assert.ok(!JSON.stringify([...s.tables.projectActorNames.values()]).includes('@'));
+  assert.equal(s.tables.projectActorNames.size, 0, 'labels retain no provider names');
   await assert.rejects(
     people.labels._handler(s.ctx, { ...request, actors: ['unrelated'] }),
     /already visible/,
@@ -334,7 +332,6 @@ test('hosted actor labels are project scoped, omit email fallback and recheck ac
   await assert.rejects(people.labels._handler(s.ctx, request), /unavailable/);
   s.caller(null);
   await assert.rejects(people.labels._handler(s.ctx, request), /Sign in/);
-  assert.equal(calls, 1);
   s.tables.projectContributors.set('grant', { _id: 'grant', projectId: 'project', contributor: 'reader' });
   s.caller('reader');
   s.tables.projectContributors.set('hidden', {
@@ -357,13 +354,7 @@ test('hosted actor labels are project scoped, omit email fallback and recheck ac
     JSON.stringify({ actor: 'unrelated' }),
     'untrusted source actor declarations cannot disclose cached identities',
   );
-
-  globalThis.fetch = async () => {
-    s.tables.projectContributors.clear();
-    return new Response(JSON.stringify({ id: 'owner', first_name: 'Private' }), { status: 200 });
-  };
-  await assert.rejects(people.labels._handler(s.ctx, request), /unavailable/);
-  assert.equal([...s.tables.projectActorNames.values()][0].displayName, 'Forge contributor');
+  assert.equal(calls, 0, 'no identity-provider lookup');
 });
 
 for (const format of ['sha1', 'sha256'])

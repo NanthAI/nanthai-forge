@@ -245,25 +245,19 @@ test('team/member/import pagination preserves all choices, Trash hides readers a
   }
 });
 
-test('team email entry and account labels preserve owner authorization and recheck membership after lookup', async () => {
+test('team email entry and handle labels preserve owner authorization and recheck the team', async () => {
   const s = state([]),
     cleanup = providers();
   const id = await make(s),
     originalFetch = globalThis.fetch;
-  let remove = false,
-    calls = 0;
+  let calls = 0;
   globalThis.fetch = async url => {
     calls++;
-    if (remove) s.tables.teams.delete(id);
     const address = new URL(String(url));
-    if (address.searchParams.has('email_address'))
-      return Response.json([
-        { id: 'reader', email_addresses: [{ email_address: 'reader@example.com' }], first_name: 'Reader' },
-      ]);
-    return Response.json({
-      id: decodeURIComponent(address.pathname.split('/').at(-1)),
-      first_name: 'Team member',
-    });
+    assert(address.searchParams.has('email_address'), 'labels never look up the identity provider');
+    return Response.json([
+      { id: 'reader', email_addresses: [{ email_address: 'reader@example.com' }], first_name: 'Reader' },
+    ]);
   };
   try {
     s.caller('stranger');
@@ -272,13 +266,18 @@ test('team email entry and account labels preserve owner authorization and reche
     s.caller('owner');
     await actions.addByEmail._handler(s.ctx, { id, email: 'reader@example.com' });
     assert.equal(s.tables.teamMembers.size, 2);
+    s.tables.forgeAccounts.set('a-owner', { _id: 'a-owner', owner: 'owner', handle: 'team-owner' });
+    s.tables.forgeAccounts.set('a-reader', { _id: 'a-reader', owner: 'reader', handle: 'team-reader' });
     const labels = await actions.labels._handler(s.ctx, { id, paginationOpts });
-    assert.equal(labels.page.length, 2);
-    assert.equal(labels.page[0].label, 'Team member');
+    assert.deepEqual(labels.page.map(row => [row.member, row.label]).sort(), [
+      ['team-owner', 'team-owner'],
+      ['team-reader', 'team-reader'],
+    ]);
+    assert.equal(calls, 1);
     s.caller('reader');
     await assert.rejects(actions.labels._handler(s.ctx, { id, paginationOpts }), denied);
     s.caller('owner');
-    remove = true;
+    s.tables.teams.delete(id);
     await assert.rejects(actions.labels._handler(s.ctx, { id, paginationOpts }), denied);
   } finally {
     globalThis.fetch = originalFetch;

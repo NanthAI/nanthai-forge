@@ -65,6 +65,7 @@ export function fixture() {
           };
         },
       },
+      normalizeId: (table, id) => (tables[table]?.some(row => row._id === id) ? id : null),
       insert: async (table, row) => {
         meter.writes++;
         return put(table, row, new Date().toISOString())._id;

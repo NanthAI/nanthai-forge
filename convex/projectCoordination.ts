@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { rememberActor, withActorName } from './projectActorNames';
+import { withActorName } from './projectActorNames';
 import { v } from 'convex/values';
 import { coordinationFeed, feedPageSize } from './coordinationFeed';
 import { paginationOptsValidator, paginationResultValidator } from 'convex/server';
@@ -59,7 +59,6 @@ export const publish = mutation({
         'PROJECT_UNAVAILABLE',
         'This session belongs to another principal.',
       );
-      await rememberActor(ctx, input.projectId, actor, (await ctx.auth.getUserIdentity())?.name);
       const at = Date.now();
       let fields = {};
       if (parsed.kind === 'activity') {

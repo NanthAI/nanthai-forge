@@ -57,6 +57,8 @@ test('hosted workspace reads stay constant at twice dogfood size and ignore owne
       });
     }
   assert.ok(bytes > 100_000_000);
+  // The caller's own account: the identity mapping shows `actor` as this handle.
+  s.tables.forgeAccounts.set('account', { _id: 'account', owner: 'owner', handle: 'synthetic-owner' });
   const tables = [],
     get = s.ctx.db.get,
     query = s.ctx.db.query;
@@ -67,7 +69,10 @@ test('hosted workspace reads stay constant at twice dogfood size and ignore owne
   };
   s.ctx.db.query = table => {
     tables.push(table);
-    assert.equal(table, 'projectWorkHeads', 'workspace never reads history, freshness or owner reports');
+    assert(
+      ['projectWorkHeads', 'forgeAccounts'].includes(table),
+      'workspace never reads history, freshness or owner reports',
+    );
     return query(table);
   };
   s.ctx.db.insert = s.ctx.db.patch = s.ctx.db.replace = async () => assert.fail('workspace is read only');
@@ -80,8 +85,10 @@ test('hosted workspace reads stay constant at twice dogfood size and ignore owne
   assert.equal(result.counts.intents, 1200);
   assert.equal(Object.hasOwn(result, 'freshness'), false);
   assert.equal(result.githubMirror, null, 'retained workspace mirror status is still returned');
+  assert.equal(result.actor, 'synthetic-owner', 'the caller sees their own handle, never the account id');
+  // Three workspace gets; the caller's own handle needs one account lookup and no project get.
   assert.equal(reads, 3);
-  assert.deepEqual(tables, ['projectWorkHeads']);
+  assert.deepEqual(tables, ['projectWorkHeads', 'forgeAccounts']);
   assert.ok(allocated < 16 * 1024 * 1024, `workspace heap delta ${allocated}`);
   t.diagnostic(
     JSON.stringify({

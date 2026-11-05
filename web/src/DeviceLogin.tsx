@@ -5,6 +5,7 @@ import { useConvex, useConvexAuth } from 'convex/react';
 import { api } from '../../convex/_generated/api';
 import { Button } from './ui/primitives';
 import { Shell } from './shell/Shell';
+import { handleSeed } from './shell/viewer';
 import { useNow } from './shell/StatusBar';
 import { hostedError } from './snapshot';
 import { codeComplete, codeProblem, formatCode } from './device/code';
@@ -68,12 +69,7 @@ export default function DeviceLogin() {
     setBusy(true);
     setError('');
     try {
-      if (approve)
-        await client.mutation(api.urlAccounts.ensure, {
-          ...(user?.username ? { username: user.username } : {}),
-          ...(user?.firstName ? { firstName: user.firstName } : {}),
-          ...(user?.lastName ? { lastName: user.lastName } : {}),
-        });
+      if (approve) await client.mutation(api.urlAccounts.ensure, handleSeed(user));
       await client.action(api.deviceActions.decide, { code, ...decision.current });
       setPhase(approve ? { kind: 'approved', name } : { kind: 'denied', name });
     } catch (e) {

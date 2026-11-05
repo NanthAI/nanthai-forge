@@ -12,6 +12,8 @@ async function fixture() {
   const s = recordsFixture(),
     auth = await s.setup();
   s.ctx.auth = { getUserIdentity: async () => ({ subject: 'owner' }) };
+  await s.ctx.db.insert('forgeAccounts', { owner: 'owner', handle: 'synthetic-owner' });
+  await s.ctx.db.insert('accountHandles', { owner: 'owner', handle: 'synthetic-owner' });
   const put = record =>
     s.run('put', () => records.writeHostedRecord(s.ctx, { ...auth, record, expectedVersion: null }));
   return { ...s, auth, put };
@@ -102,7 +104,8 @@ test('live Lanes are paged with joined Intent, actor, save and landing metadata;
   assert.equal(first.page[0].laneId, lane.id);
   assert.equal(first.page[0].lastSaveAt, at);
   assert.equal(first.page[0].intent, 'Synthetic outcome');
-  assert.equal(first.page[0].actor, 'owner');
+  // Members see the Forge handle, never the auth subject.
+  assert.equal(first.page[0].actor, 'synthetic-owner');
   assert.deepEqual(first.page[0].landing, { submissionId, state: 'checking', scope: 'intent' });
   const count = s.counts.at(-1);
   assert.equal(count.writes, 0);
@@ -121,6 +124,43 @@ test('live Lanes are paged with joined Intent, actor, save and landing metadata;
   assert.equal(seen.length, 104);
   assert.equal(new Set(seen.map(row => row.laneId)).size, 104);
   assert(!seen.some(row => row.laneId === lanes[0].id));
+});
+test('a public reader of a public project sees live Lanes with no person', async () => {
+  const s = await fixture();
+  const intentId = randomUUID();
+  await s.put({
+    kind: 'intent',
+    id: intentId,
+    version: 0,
+    at,
+    outcome: 'Synthetic outcome',
+    constraints: '',
+    creatorAccountId: 'owner',
+    assigneeAccountIds: [],
+    base: { head: hash, receiptId: randomUUID() },
+    status: 'active',
+  });
+  await s.put({
+    kind: 'lane',
+    id: randomUUID(),
+    version: 0,
+    at,
+    intentId,
+    actor: 'owner',
+    base: { head: hash, receiptId: randomUUID() },
+    head: hash,
+    sourceVersion: 0,
+    lifecycleVersion: 0,
+    state: 'active',
+    authorityEpoch: 1,
+  });
+  await s.ctx.db.patch(s.auth.projectId, { visibility: 'public' });
+  s.ctx.auth = { getUserIdentity: async () => ({ subject: 'user_publicReader0001' }) };
+  const text = await s.call('public', api.list, { projectId: s.auth.projectId, cursor: null, limit: 50 });
+  const page = JSON.parse(text).page;
+  assert.equal(page.length, 1);
+  assert.equal('actor' in page[0], false);
+  assert(!text.includes('"owner"') && !text.includes('synthetic-owner'), text);
 });
 test('live Lane reads require current access and validate page size', async () => {
   const s = await fixture();

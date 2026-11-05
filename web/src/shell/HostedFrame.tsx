@@ -1,9 +1,9 @@
 import { SourcePinContext } from './ObjectActions';
+import { HandlePrompt } from './HandlePrompt';
 import { routeUrlState } from './location';
 // SPDX-License-Identifier: Apache-2.0
 import { type ReactNode } from 'react';
 import { useQuery } from 'convex/react';
-import { useUser } from '@clerk/react';
 import { ProjectSearch } from './ProjectSearch';
 import { api } from '../../../convex/_generated/api';
 import type { Id } from '../../../convex/_generated/dataModel';
@@ -69,7 +69,15 @@ export function leaveProject() {
  * Hosted application frame. Signed-out visitors get the public frame; signed-in visitors get account
  * destinations, and inside a project the same four destinations as local Forge.
  */
-export function HostedFrame({
+export function HostedFrame(props: Parameters<typeof HostedFrameBody>[0]) {
+  return (
+    <>
+      {props.identity && <HandlePrompt />}
+      <HostedFrameBody {...props} />
+    </>
+  );
+}
+function HostedFrameBody({
   identity,
   surface,
   setSurface,
@@ -82,9 +90,8 @@ export function HostedFrame({
   account?: ReactNode;
   children: ReactNode;
 }) {
-  const { user } = useUser();
   const currentAccount = useQuery(api.urlAccounts.current, identity ? {} : 'skip');
-  const accountName = user?.fullName || user?.username || currentAccount?.handle || 'Account';
+  const accountName = currentAccount?.handle || 'Account';
   const [projectId] = useDestination('project');
   const [laneId] = useDestination('lane');
   const [intentId] = useDestination('intent');

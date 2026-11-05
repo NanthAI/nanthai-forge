@@ -126,17 +126,17 @@ test('activity remains readable before its Lane or Intent exists in the uploaded
 const { activityAuthor } = await import(moduleUrl('../web/src/coordination-view.ts'));
 test('session identity wins over legacy agent text; prefix is a fallback only without a structured session', () => {
   const event = {
-    actorDisplayName: 'Project owner',
+    actor: 'project-owner',
     command: { kind: 'message', text: 'gpt-old: Ready', context: {} },
   };
   assert.equal(activityAuthor(event, []), 'gpt-old');
   assert.equal(activityAuthor({ ...event, command: { ...event.command, sessionId: 's1' } }, sessions), 'Zoe');
   assert.equal(
     activityAuthor({ ...event, command: { ...event.command, sessionId: 'missing' } }, []),
-    'Project owner',
+    'project-owner',
   );
   assert.equal(
     activityAuthor({ ...event, command: { ...event.command, text: 'Ready' } }, []),
-    'Project owner',
+    'project-owner',
   );
 });

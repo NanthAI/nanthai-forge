@@ -40,12 +40,11 @@ export function usePlanningActors(
         if (result instanceof Error) throw result;
         const event =
           result?.generationId === workspace.generationId && result?.value
-            ? (JSON.parse(result.value) as { actorDisplayName?: string })
+            ? (JSON.parse(result.value) as { actor?: unknown })
             : null;
-        return {
-          ...version,
-          ...(event?.actorDisplayName ? { actorDisplayName: event.actorDisplayName } : {}),
-        };
+        // Hosted reads name the author by Forge handle (or not at all for readers).
+        const actor = typeof event?.actor === 'string' && event.actor ? event.actor : undefined;
+        return { ...version, ...(actor ? { actorDisplayName: actor } : {}) };
       }),
     [versions, results, workspace.generationId],
   );

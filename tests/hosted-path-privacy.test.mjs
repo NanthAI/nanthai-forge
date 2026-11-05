@@ -187,7 +187,7 @@ test('removed Forge grant and access changed during provider calls hide personal
   );
 });
 
-test('former members keep server-retained identity/name and get a label; current readers and unknown imported actors do not', async () => {
+test('former members keep server-retained identity and get a label, never a provider name; current readers and unknown imported actors do not', async () => {
   const f = state([]);
   f.tables.hostedProjects.set('p', row('p', { owner: 'owner', name: 'Project', key: 'p' }));
   f.tables.projectActorNames.set(
@@ -200,7 +200,7 @@ test('former members keep server-retained identity/name and get a label; current
   await contributors.remove._handler(f.ctx, { projectId: 'p', contributor: 'person' });
   const former = await actors.withActorName(f.ctx, 'p', event);
   assert.equal(former.actor, 'person');
-  assert.equal(former.actorDisplayName, 'Alex');
+  assert.equal(former.actorDisplayName, undefined, 'retained provider names are never returned');
   assert.equal(former.actorFormerMember, true);
   assert.equal(former.at, 123);
   assert.doesNotMatch(former.summary, /Users/);
@@ -236,11 +236,9 @@ test('former members keep server-retained identity/name and get a label; current
     }),
   );
   assert.deepEqual(await actors.withActorName(f.ctx, 'p', forged), { actor: 'unknown' });
+  // Callers establish read authority first; the helper adds no provider name for anyone.
   f.caller('stranger');
-  await assert.rejects(
-    actors.withActorName(f.ctx, 'p', event),
-    error => error.code === 'PROJECT_UNAVAILABLE',
-  );
+  assert.equal((await actors.withActorName(f.ctx, 'p', event)).actorDisplayName, undefined);
 });
 
 test('legacy indexed payload redaction spans parts without rewriting records or changing their identities', async () => {

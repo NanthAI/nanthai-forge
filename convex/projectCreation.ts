@@ -28,9 +28,7 @@ export async function createProject(
   await ensureAccount(
     ctx,
     input.owner,
-    user?.subject === input.owner
-      ? { username: user.nickname, firstName: user.givenName, lastName: user.familyName }
-      : {},
+    user?.subject === input.owner ? { username: user.nickname ?? null } : {},
   );
   await ensureProjectSlug(ctx, project);
   return activeOwnedProject(ctx, project._id, input.owner);

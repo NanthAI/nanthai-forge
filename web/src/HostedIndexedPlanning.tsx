@@ -13,7 +13,7 @@ import { hostedHref } from './cockpit/HostedNow';
 import { BriefSourceContext, hostedBriefs } from './cockpit/brief';
 import { planningGroups } from './planning-rows';
 import { useDestination } from './WorkspaceUI';
-import { useUser } from '@clerk/react';
+import { useViewerHandle } from './shell/viewer';
 import { age } from './ui/status';
 import type { PlanningLane } from './planning-rows';
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
@@ -194,7 +194,7 @@ function PlannedIntentRoute({
   ...props
 }: Context & { item: PlanningItem; items: PlanningItem[] }) {
   const client = useConvex();
-  const { user } = useUser();
+  const viewer = useViewerHandle();
   const briefs = useMemo(() => hostedBriefs(client, props.projectId), [client, props.projectId]);
   const value = useResolvedWorkValue(props.projectId, props.workspace, 'planningItems', item);
   const history = useWorkRecords<PlanningItem>(props.projectId, props.workspace, 'planningVersions', item.id);
@@ -295,7 +295,7 @@ function PlannedIntentRoute({
                               operationId: crypto.randomUUID(),
                               itemId: item.id,
                               text,
-                              authorLabel: user?.fullName || user?.username || '',
+                              authorLabel: viewer ?? '',
                             };
                       messages.current = command;
                       try {
@@ -322,7 +322,7 @@ export default function HostedIndexedPlanning(
   props: Context & { exportHistory: () => Promise<PlanningExport> },
 ) {
   const client = useConvex();
-  const { user } = useUser();
+  const viewer = useViewerHandle();
   const [selected] = useDestination('planningItem');
   const [histories, setHistories] = useState<Record<string, Lifecycle[]>>({});
   const scope = `${props.projectId}:${props.workspace.generationId}`;
@@ -401,7 +401,7 @@ export default function HostedIndexedPlanning(
             <InitiativeConversation
               key={item.id}
               itemId={item.id}
-              authorLabel={user?.fullName || user?.username || ''}
+              authorLabel={viewer ?? ''}
               data={data}
               busy={props.busy}
               readOnly={props.readOnly}

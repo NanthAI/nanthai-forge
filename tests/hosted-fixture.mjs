@@ -47,6 +47,7 @@ const projectWorkAncestry = await import(moduleUrl('../convex/projectWorkAncestr
 const projectWorkIndexBuildFailure = await import(moduleUrl('../convex/projectWorkIndexBuildFailure.ts'));
 const projectWorkIndexBuildStore = await import(moduleUrl('../convex/projectWorkIndexBuildStore.ts'));
 const projectWorkIndexActions = await import(moduleUrl('../convex/projectWorkIndexActions.ts'));
+const publicPeople = await import(moduleUrl('../convex/publicPeople.ts'));
 export const job = (id = 'own') => ({
   _id: id,
   _creationTime: 1,
@@ -489,6 +490,7 @@ export function state(jobs = [job()], { keysetPaging = false } = {}) {
     accountExecute,
     teamLifecycle,
     projectLifecycle,
+    publicPeople,
   };
   ctx.runAction =
     ctx.runQuery =

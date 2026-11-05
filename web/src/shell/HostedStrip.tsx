@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
+import { useViewerHandle } from './viewer';
 import { useAttention } from './attention-context';
 import { useMemo } from 'react';
-import { useUser } from '@clerk/react';
 import { useConvexConnectionState, useQuery } from 'convex/react';
 import type { Id } from '../../../convex/_generated/dataModel';
 import type { HostedRunSummary } from '../../../src/work-hosted-summary';
@@ -17,7 +17,7 @@ import { latestRun } from '../cockpit/model';
  */
 export function HostedStrip({ projectId }: { projectId: Id<'hostedProjects'> }) {
   const attention = useAttention();
-  const viewer = useUser().user?.id;
+  const viewer = useViewerHandle();
   const value = useQuery(workIndex.workspace, { projectId });
   const workspace = useMemo(() => (value ? (JSON.parse(value) as WorkIndexWorkspace) : null), [value]);
   const moves = useWorkRecords<MoveRecord & { head: string }>(projectId, workspace, 'hostedChannels');
@@ -36,9 +36,7 @@ export function HostedStrip({ projectId }: { projectId: Id<'hostedProjects'> }) 
     );
   const run = main && latestRun(runs.records, main.viewId);
   const by =
-    main?.actor && main.actor === viewer
-      ? 'you'
-      : (main?.actorDisplayName ?? main?.acceptedBy?.name ?? undefined);
+    main?.actor && main.actor === viewer ? 'you' : main?.actor || main?.acceptedBy?.name || undefined;
   const live = (
     <LiveStatus
       {...(connection.isWebSocketConnected || !connection.hasEverConnected ? {} : { error: 'offline' })}

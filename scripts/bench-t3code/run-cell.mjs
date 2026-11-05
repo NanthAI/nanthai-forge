@@ -498,7 +498,8 @@ for (const r of records) {
       // are not reaches for the answer (d8cf81b4).
       ownRepo: arm === 'github' ? github.repository : null,
       ownBranches: [r.branch].filter(Boolean),
-      toolPaths: [bin, vpHome, shared?.deps].filter(Boolean),
+      toolPaths: [bin, vpHome, hub, shared?.deps].filter(Boolean),
+      benchRoot: B,
     });
   } catch (error) {
     r.harnessError ??= `post-cell audit: ${error.message}`;

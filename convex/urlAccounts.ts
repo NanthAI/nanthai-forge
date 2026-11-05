@@ -8,16 +8,20 @@ import { redeemInvites } from './projectContributors';
 import { report } from './errors';
 export const current = query({
   args: {},
-  returns: v.union(v.object({ handle: v.string() }), v.null()),
+  returns: v.union(v.object({ handle: v.string(), pick: v.optional(v.literal(true)) }), v.null()),
   handler: async ctx => {
     const user = await ctx.auth.getUserIdentity();
     const account = user && (await accountFor(ctx, user.subject));
-    return account ? { handle: account.handle } : null;
+    return account
+      ? { handle: account.handle, ...(account.handlePrompt ? { pick: true as const } : {}) }
+      : null;
   },
 });
 export const ensure = mutation({
   args: {
     username: v.optional(v.string()),
+    githubLogin: v.optional(v.string()),
+    // Accepted from older web builds and ignored: handles never derive from real names.
     firstName: v.optional(v.string()),
     lastName: v.optional(v.string()),
   },
@@ -29,9 +33,8 @@ export const ensure = mutation({
       await redeemInvites(ctx, user);
       return (
         await ensureAccount(ctx, user.subject, {
-          username: profile.username ?? user.nickname,
-          firstName: profile.firstName ?? user.givenName,
-          lastName: profile.lastName ?? user.familyName,
+          username: profile.username ?? user.nickname ?? null,
+          githubLogin: profile.githubLogin ?? null,
         })
       ).handle;
     } catch (e) {
@@ -94,6 +97,8 @@ export const set = mutation({
         await ctx.db.patch(account._id, { handle: input.handle });
       }
       await ctx.db.insert('handleOperations', { owner: user.subject, ...input });
+      // Picking or keeping a handle answers the one-time prompt.
+      if (account.handlePrompt !== false) await ctx.db.patch(account._id, { handlePrompt: false });
       return null;
     } catch (e) {
       return report(e);

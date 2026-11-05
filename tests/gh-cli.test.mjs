@@ -224,7 +224,7 @@ test('auth status signed out/in, hostname, hosts JSON and environment source nev
     response.end(
       JSON.stringify({
         status: 'success',
-        value: { subject: 'synthetic-owner', credentialId: 'device', token: 'must-never-leave-response' },
+        value: { handle: 'synthetic-owner', credentialId: 'device', token: 'must-never-leave-response' },
       }),
     );
   });

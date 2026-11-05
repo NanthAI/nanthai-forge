@@ -49,20 +49,21 @@ test('planning attribution reads named operations under the current project and 
       () => {
         replies = Object.fromEntries(
           [
-            ['creation', 'Dino'],
-            ['edit', 'Maya'],
-          ].map(([id, name]) => [
+            ['creation', 'first-author'],
+            ['edit', 'second-author'],
+          ].map(([id, handle]) => [
             id,
             {
               generationId: 'current',
-              value: JSON.stringify({ id, actor: `account-${id}`, actorDisplayName: name }),
+              // Hosted reads name the actor by handle; a provider name is never used.
+              value: JSON.stringify({ id, actor: handle, actorDisplayName: 'Ignored name' }),
             },
           ]),
         );
         renderToStaticMarkup(h(Fixture));
         assert.deepEqual(
           output.map(version => version.actorDisplayName),
-          ['Dino', 'Maya'],
+          ['first-author', 'second-author'],
         );
         assert.deepEqual(
           calls,
@@ -76,12 +77,13 @@ test('planning attribution reads named operations under the current project and 
         assert.ok(versions.every(version => !('actorDisplayName' in version)));
       },
     );
-    await t.test('unknown raw account ids, missing events and stale names stay absent', () => {
+    await t.test('hidden actors, missing events and stale generations stay absent', () => {
       for (const reply of [
         undefined,
         { generationId: 'current', value: null },
-        { generationId: 'current', value: JSON.stringify({ actor: 'raw-account-id' }) },
-        { generationId: 'old', value: JSON.stringify({ actorDisplayName: 'Stale actor' }) },
+        // A public reader's event carries no actor at all.
+        { generationId: 'current', value: JSON.stringify({ id: 'creation' }) },
+        { generationId: 'old', value: JSON.stringify({ actor: 'stale-author' }) },
       ]) {
         replies = { creation: reply, edit: reply };
         renderToStaticMarkup(h(Fixture));

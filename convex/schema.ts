@@ -516,7 +516,12 @@ export default defineSchema({
     revision: v.number(),
     replacementId: v.string(),
   }).index('by_project_and_operation', ['projectId', 'operationId']),
-  forgeAccounts: defineTable({ owner: v.string(), handle: v.string() })
+  forgeAccounts: defineTable({
+    owner: v.string(),
+    handle: v.string(),
+    /** True until the person picks or keeps a handle once; unset until first checked. */
+    handlePrompt: v.optional(v.boolean()),
+  })
     .index('by_owner', ['owner'])
     .index('by_handle', ['handle']),
   accountHandles: defineTable({ owner: v.string(), handle: v.string() }).index('by_handle', ['handle']),

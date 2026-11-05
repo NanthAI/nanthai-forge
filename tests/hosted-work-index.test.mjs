@@ -577,7 +577,7 @@ test('summary paging can start newest-first while preserving the default positio
   );
 });
 
-test('summary pages resolve a repeated actor once per request and keep fresh names and authority', async t => {
+test('summary pages resolve a repeated actor once per request and keep fresh handles and authority', async t => {
   const s = await setup(t);
   await indexActions.ensure._handler(s.ctx, { rebuild: true, projectId: s.projectId });
   const workspace = JSON.parse(await index.workspace._handler(s.ctx, { projectId: s.projectId }));
@@ -589,6 +589,7 @@ test('summary pages resolve a repeated actor once per request and keep fresh nam
     actor: 'owner',
     displayName: 'First name',
   });
+  s.tables.forgeAccounts.set('perf-account', { _id: 'perf-account', owner: 'owner', handle: 'first-handle' });
   for (let position = 0; position < 30; position++)
     s.tables.projectWorkRecords.set(`actor-perf-${position}`, {
       _id: `actor-perf-${position}`,
@@ -601,21 +602,22 @@ test('summary pages resolve a repeated actor once per request and keep fresh nam
       value: JSON.stringify({ id: String(position), actor: 'owner' }),
     });
   const query = s.ctx.db.query.bind(s.ctx.db);
-  let names = 0;
+  let accounts = 0;
   s.ctx.db.query = table => {
-    if (table === 'projectActorNames') names++;
+    if (table === 'forgeAccounts') accounts++;
     return query(table);
   };
+  const shown = rows => rows.page.map(row => JSON.parse(row.value));
   const rows = await page(s, 'perf-actors');
-  assert.equal(names, 1);
-  assert(rows.page.every(row => JSON.parse(row.value).actorDisplayName === 'First name'));
-  s.tables.projectActorNames.get('perf-name').displayName = 'Current name';
+  assert.equal(accounts, 1);
+  assert(shown(rows).every(row => row.actor === 'first-handle' && row.actorDisplayName === undefined));
+  s.tables.forgeAccounts.get('perf-account').handle = 'current-handle';
   const current = await page(s, 'perf-actors');
-  assert.equal(names, 2);
-  assert(current.page.every(row => JSON.parse(row.value).actorDisplayName === 'Current name'));
+  assert.equal(accounts, 2);
+  assert(shown(current).every(row => row.actor === 'current-handle'));
   s.caller('stranger');
   await assert.rejects(page(s, 'perf-actors'), error => error.data?.code === 'PROJECT_UNAVAILABLE');
-  assert.equal(names, 2);
+  assert.equal(accounts, 2);
 });
 
 test('owner decisions project additively into the shared workspace and exact collection without a format bump', async () => {

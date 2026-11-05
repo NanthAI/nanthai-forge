@@ -14,7 +14,38 @@ import {
 } from './server';
 import { report } from './errors';
 import { invariant } from '../src/errors';
+import { actionPublicPeople, actionSubjectArgs, publicPeople, subjectArgs, type Shape } from './publicPeople';
 export * from './server';
+type Mapper<C> = (ctx: C, args: unknown, value: unknown, shape?: Shape) => Promise<unknown>;
+/** Every public function applies the public identity rule (convex/publicPeople.ts) to
+ * its arguments and result. The guard test fails any return validator that could not. */
+function withPeople<B, C>(
+  builder: B,
+  mapArgs: (ctx: C, args: unknown) => Promise<unknown>,
+  mapResult: Mapper<C>,
+): B {
+  return ((definition: unknown) => {
+    const handler =
+      typeof definition === 'function'
+        ? (definition as (ctx: C, args: unknown) => unknown)
+        : (definition as { handler: (ctx: C, args: unknown) => unknown }).handler;
+    // Required person fields are blanked rather than removed, so the result still validates.
+    const declared = (definition as { returns?: unknown }).returns;
+    const returns = (
+      declared && typeof declared === 'object' && !('json' in declared)
+        ? (v.object(declared as Record<string, never>) as unknown as { json: unknown }).json
+        : (declared as { json?: unknown } | undefined)?.json
+    ) as Shape;
+    const wrapped = async (ctx: C, args: unknown) =>
+      mapResult(ctx, args, await handler(ctx, await mapArgs(ctx, args)), returns);
+    return (builder as (definition: unknown) => unknown)(
+      typeof definition === 'function' ? wrapped : { ...(definition as object), handler: wrapped },
+    );
+  }) as B;
+}
+const people = <B>(builder: B) => withPeople<B, QueryCtx | MutationCtx>(builder, subjectArgs, publicPeople);
+const actionPeople = <B>(builder: B) =>
+  withPeople<B, ActionCtx>(builder, actionSubjectArgs, actionPublicPeople);
 // Signed credential markers keep scope/revocation enforcement during issuer reconfiguration.
 export function isDeviceIdentity(user: { issuer?: string; forgeCredential?: unknown }) {
   return (
@@ -71,55 +102,67 @@ export async function guard(ctx: QueryCtx | MutationCtx | ActionCtx, scope: 'cli
     return report(error);
   }
 }
-export const query = customQuery(
-  baseQuery,
-  customCtx((ctx: QueryCtx) => guard(ctx, 'cli')),
+export const query = people(
+  customQuery(
+    baseQuery,
+    customCtx((ctx: QueryCtx) => guard(ctx, 'cli')),
+  ),
 );
-export const mutation = customMutation(
-  baseMutation,
-  customCtx((ctx: MutationCtx) => guard(ctx, 'cli')),
+export const mutation = people(
+  customMutation(
+    baseMutation,
+    customCtx((ctx: MutationCtx) => guard(ctx, 'cli')),
+  ),
 );
-export const action = customAction(baseAction, {
-  args: {},
-  input: async (ctx: ActionCtx) => {
-    await guard(ctx, 'cli');
-    return {
-      ctx: {},
-      args: {},
-      onSuccess: async () => {
-        await guard(ctx, 'cli');
-      },
-    };
-  },
-});
-export const coordinationQuery = customQuery(
-  baseQuery,
-  customCtx((ctx: QueryCtx) => guard(ctx, 'coordination')),
+export const action = actionPeople(
+  customAction(baseAction, {
+    args: {},
+    input: async (ctx: ActionCtx) => {
+      await guard(ctx, 'cli');
+      return {
+        ctx: {},
+        args: {},
+        onSuccess: async () => {
+          await guard(ctx, 'cli');
+        },
+      };
+    },
+  }),
 );
-export const coordinationMutation = customMutation(
-  baseMutation,
-  customCtx((ctx: MutationCtx) => guard(ctx, 'coordination')),
+export const coordinationQuery = people(
+  customQuery(
+    baseQuery,
+    customCtx((ctx: QueryCtx) => guard(ctx, 'coordination')),
+  ),
+);
+export const coordinationMutation = people(
+  customMutation(
+    baseMutation,
+    customCtx((ctx: MutationCtx) => guard(ctx, 'coordination')),
+  ),
 );
 /** A CLI mutation that may also carry deferred caller receipts (`metricReceipts`).
  * They are written only if the host mutation succeeds, bound to its authorized
  * project and authenticated requester. No extra call is made for them. */
-export const receiptMutation = customMutation(baseMutation, {
-  args: { metricReceipts: v.optional(v.string()) },
-  input: async (ctx: MutationCtx, { metricReceipts }) => {
-    await guard(ctx, 'cli');
-    return {
-      ctx: {},
-      args: {},
-      onSuccess: async ({ ctx: done, args }) => {
-        const user = metricReceipts ? await done.auth.getUserIdentity() : null;
-        if (user && typeof args.projectId === 'string')
-          await recordCallerReceipts(
-            done as MutationCtx,
-            args.projectId as Id<'hostedProjects'>,
-            user.subject,
-            metricReceipts!,
-          );
-      },
-    };
-  },
-});
+export const receiptMutation = people(
+  customMutation(baseMutation, {
+    args: { metricReceipts: v.optional(v.string()) },
+    input: async (ctx: MutationCtx, { metricReceipts }) => {
+      await guard(ctx, 'cli');
+      return {
+        ctx: {},
+        args: {},
+        onSuccess: async ({ ctx: done, args }) => {
+          const user = metricReceipts ? await done.auth.getUserIdentity() : null;
+          if (user && typeof args.projectId === 'string')
+            await recordCallerReceipts(
+              done as MutationCtx,
+              args.projectId as Id<'hostedProjects'>,
+              user.subject,
+              metricReceipts!,
+            );
+        },
+      };
+    },
+  }),
+);

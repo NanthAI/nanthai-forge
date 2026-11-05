@@ -715,7 +715,7 @@ function useFileHistory({
           href: pageHref({ projectTab: 'views', viewId: view.id }),
           head: view.head,
           at: move.at,
-          by: move.acceptedBy?.name ?? move.actorDisplayName,
+          by: move.acceptedBy?.name ?? (move.actor || undefined),
           auto: !!move.automatic,
           ...(run
             ? { check: `${run.checkName.split(' · ')[0]}${minutes !== undefined ? ` ${minutes} min` : ''}` }

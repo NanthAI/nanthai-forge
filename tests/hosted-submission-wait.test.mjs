@@ -211,7 +211,8 @@ test('a cursor from a mid-page progress event resumes every disconnected version
   assert.equal(s.counts().opens, 0);
   assert.equal(new Set(s.events.map(e => `${e.id}:${e.version}`)).size, s.events.length);
   for (const c of s.f.counts.filter(c => c.name === 'landingWaitPage')) {
-    assert(c.documents <= 25 && c.ranges <= 24, JSON.stringify(c));
+    // 24 page ranges plus one account read naming the caller by handle.
+    assert(c.documents <= 25 && c.ranges <= 25, JSON.stringify(c));
   }
   const replay = await s.wait({ ...selection, cursor: result.result.cursor });
   assert.equal(replay.result.status, 'terminal');

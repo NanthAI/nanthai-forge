@@ -783,6 +783,26 @@ test('CLI path: the second save returns a structured notice, delivery and one-co
   assert.equal(delivered.laneId, peer.id);
   assert.equal(delivered.surface, 'save');
   assert.equal(delivered.items[0].noticeId, notice.items[0].noticeId);
+  // The delivery list names the actor by handle for members and names nobody for public readers.
+  s.insert('forgeAccounts', { owner: 'owner', handle: 'synthetic-owner' });
+  const listed = JSON.parse(
+    await s.call('deliveries', deliveries.list, { projectId: s.projectId, cursor: null }),
+  );
+  assert.deepEqual(
+    listed.page.map(row => row.actor),
+    ['synthetic-owner'],
+  );
+  const project = s.tables.hostedProjects.get(s.projectId);
+  s.tables.hostedProjects.set(s.projectId, { ...project, visibility: 'public' });
+  const shown = await s.call(
+    'deliveries-public',
+    deliveries.list,
+    { projectId: s.projectId, cursor: null },
+    'user_publicReader0001',
+  );
+  assert.equal(JSON.parse(shown).page.length, 1);
+  assert(!shown.includes('"actor"') && !shown.includes('synthetic-owner'), shown);
+  s.tables.hostedProjects.set(s.projectId, project);
   // A repeated observation is not a second delivery.
   await second.dispatch('status', { laneId: peer.id });
   assert.equal(s.tables.projectHostedOverlapDeliveries.size, 1);

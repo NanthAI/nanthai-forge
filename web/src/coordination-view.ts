@@ -27,9 +27,7 @@ export function flattenSessions(roots: readonly Session[]): Session[] {
 }
 /** People's own editor sessions; older sessions without a kind count as one when named after their person. */
 export function isPersonSession(session: Session): boolean {
-  return session.kind
-    ? session.kind === 'person'
-    : Boolean(session.actorDisplayName) && session.name === session.actorDisplayName;
+  return session.kind ? session.kind === 'person' : Boolean(session.actor) && session.name === session.actor;
 }
 export type ActivityEvent = Doc<'projectCoordinationEvents'>;
 export type WorkLabels = {
@@ -97,7 +95,7 @@ export function activityAuthor(event: ActivityEvent, sessions: Session[]) {
       ? event.command.name
       : session
         ? session.name
-        : (declared ?? event.actorDisplayName ?? 'Project participant');
+        : (declared ?? (event.actor || 'Project participant'));
   return event.actorFormerMember ? `${name} · former member` : name;
 }
 /** Last-seen age label; a report is a receipt time, never proof the agent is running. */

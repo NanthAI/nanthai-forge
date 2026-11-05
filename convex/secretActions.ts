@@ -19,7 +19,7 @@ import { invariant } from '../src/errors';
 import { report } from './errors';
 import { affectedGrant } from './secretGrantAuthority';
 import type { SecretCapability } from './secrets';
-import { personDisplayName } from './projectPeople';
+import { handleLabels } from './publicPeople';
 
 type Snapshot = { object: Doc<'secretObjects'>; version: Doc<'secretVersions'> };
 function operation(value: string) {
@@ -375,12 +375,9 @@ export const revocationNames = action({
         capability: 'delegate',
       });
       const preview = await ctx.runQuery(api.secrets.revocationPreview, input);
-      const names = await Promise.all(
-        [input.principal, ...preview.grants.map(row => row.principal)].map(async principal => ({
-          principal,
-          name: await personDisplayName(principal),
-        })),
-      );
+      const principals = [input.principal, ...preview.grants.map(row => row.principal)];
+      const labels = await handleLabels(ctx, principals);
+      const names = principals.map(principal => ({ principal, name: labels.get(principal) ?? '' }));
       await ctx.runMutation(internal.secrets.authorize, {
         id: input.id,
         actor: caller,

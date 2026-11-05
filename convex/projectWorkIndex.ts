@@ -121,7 +121,7 @@ export const records = query({
                   .eq('parent', input.parentId!),
               );
       const main = await hostedMain(ctx, generation);
-      const actors = new Map<string, Promise<string | undefined>>();
+      const actors = new Map<string, Promise<boolean>>();
       const payloads = new Map<string, Promise<Map<string, string>>>();
       const page = await rows.order(input.newestFirst ? 'desc' : 'asc').paginate({
         ...input.paginationOpts,

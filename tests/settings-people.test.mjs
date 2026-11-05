@@ -77,19 +77,28 @@ test('pending email invitation is private, retry-safe, and redeemed only by veri
   assert.equal(s.tables.projectInvites.size, 0);
   assert.equal([...s.tables.projectContributors.values()][0].contributor, 'new');
 });
-test('person labels never fall back to emails', async t => {
+test('handle seeds use only the chosen username or GitHub login, never names or emails', async t => {
   const previous = globalThis.fetch,
     oldKey = process.env.CLERK_SECRET_KEY;
   process.env.CLERK_SECRET_KEY = 'synthetic';
-  globalThis.fetch = async () =>
-    Response.json({ id: 'person', email_addresses: [{ email_address: 'private@example.test' }] });
+  let person = {
+    id: 'person',
+    first_name: 'Private',
+    last_name: 'Person',
+    email_addresses: [{ email_address: 'private@example.test' }],
+  };
+  globalThis.fetch = async () => Response.json(person);
   t.after(() => {
     globalThis.fetch = previous;
     if (oldKey === undefined) delete process.env.CLERK_SECRET_KEY;
     else process.env.CLERK_SECRET_KEY = oldKey;
   });
-  const { personLabel } = await import(moduleUrl('../convex/projectPeople.ts'));
-  assert.equal(await personLabel('person'), 'Forge contributor');
+  const { personUrlProfile } = await import(moduleUrl('../convex/projectPeople.ts'));
+  assert.deepEqual(await personUrlProfile('person'), {});
+  person = { ...person, external_accounts: [{ provider: 'oauth_github', username: 'octo-person' }] };
+  assert.deepEqual(await personUrlProfile('person'), { githubLogin: 'octo-person' });
+  person = { ...person, username: 'chosen' };
+  assert.deepEqual(await personUrlProfile('person'), { username: 'chosen', githubLogin: 'octo-person' });
 });
 
 test('cancelled invitations remain cancelled on retry and cannot be cancelled across projects', async () => {

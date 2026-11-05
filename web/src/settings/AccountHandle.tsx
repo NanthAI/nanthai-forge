@@ -15,7 +15,7 @@ export function AccountHandle() {
     <p role="status">Reading your handle…</p>
   );
 }
-function HandleForm({ initial }: { initial: string }) {
+export function HandleForm({ initial }: { initial: string }) {
   const [handle, setHandle] = useState(initial);
   const [attempt, setAttempt] = useState<{ handle: string; operationId: string } | null>(null);
   const [busy, setBusy] = useState(false);

@@ -88,6 +88,9 @@ test('real CLI login, saved authentication, env override, denial, logout and sta
   const status = await run(['auth', 'status']);
   assert.equal(status.code, 0);
   assert.equal(JSON.parse(status.stdout).authenticated, true);
+  // A server from before the handle-only rule answers with `subject`; it is never printed.
+  assert.equal(JSON.parse(status.stdout).account, 'no handle yet');
+  assert(!status.stdout.includes('synthetic-owner'));
   assert.equal(seenAuth, `Bearer ${token}`);
   const coordination = await run(['coordination', deployment, 'synthetic-project', '{"action":"sessions"}']);
   assert.equal(coordination.code, 0);

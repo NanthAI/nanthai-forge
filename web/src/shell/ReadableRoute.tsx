@@ -6,6 +6,7 @@ import { workIndex } from '../hosted-work-index';
 import type { Id } from '../../../convex/_generated/dataModel';
 import { api } from '../../../convex/_generated/api';
 import { cleanUrl, projectIdentity, projectRouteIdentity } from './location';
+import { handleSeed } from './viewer';
 import { AppLoader } from '../ui/AppLoader';
 import { ErrorToast } from '../ui/Toast';
 import { hostedError } from '../snapshot';
@@ -15,13 +16,12 @@ export function ReadableRoute({ children }: { children: ReactNode }) {
   const [error, setError] = useState('');
   const { user } = useUser();
   const ensure = useMutation(api.urlAccounts.ensure);
+  // Handle defaults come from the chosen username or GitHub login, never real names. A string
+  // dependency keeps this to one call per distinct seed, not one per Clerk user object.
+  const seed = JSON.stringify(handleSeed(user));
   useEffect(() => {
-    void ensure({
-      ...(user?.username ? { username: user.username } : {}),
-      ...(user?.firstName ? { firstName: user.firstName } : {}),
-      ...(user?.lastName ? { lastName: user.lastName } : {}),
-    }).catch(e => setError(hostedError(e)));
-  }, [ensure, user?.username, user?.firstName, user?.lastName]);
+    void ensure(JSON.parse(seed) as ReturnType<typeof handleSeed>).catch(e => setError(hostedError(e)));
+  }, [ensure, seed]);
   useEffect(() => {
     const changed = () => setHref(location.href);
     addEventListener('popstate', changed);

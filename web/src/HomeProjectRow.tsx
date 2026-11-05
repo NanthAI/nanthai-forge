@@ -39,7 +39,7 @@ export function HomeProjectRow({
     );
   const n = summary?.attention.length ?? 0;
   const working = counts ? counts.activeAgents + counts.activeSubagents + counts.activePeople : null;
-  const actor = main?.actorDisplayName ?? main?.acceptedBy?.name;
+  const actor = main?.actor || main?.acceptedBy?.name;
   const named = actor && !/^(user_|contributor_)/.test(actor) ? actor : null;
   return (
     <div className="fx-home-row">

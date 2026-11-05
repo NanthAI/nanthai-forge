@@ -1,4 +1,5 @@
 import { countLabel } from './ui/count';
+import { useViewerHandle } from './shell/viewer';
 import { ReadableRoute } from './shell/ReadableRoute';
 import { AccountHandle } from './settings/AccountHandle';
 import { useReadRetry } from './ui/read-retry';
@@ -568,6 +569,7 @@ function SignedInImports({
 }
 function AccountSettings({ open, userId }: { open: (id: Id<'imports'>) => void; userId?: string }) {
   const { user } = useUser();
+  const handle = useViewerHandle();
   const { openUserProfile } = useClerk();
   const [section, setSection] = useSection(
     'settings',
@@ -602,7 +604,7 @@ function AccountSettings({ open, userId }: { open: (id: Id<'imports'>) => void; 
           </LazyPage>
           <LazyPage active={section === 'account'}>
             <section className="account-profile">
-              <h2>{user?.fullName || user?.username || 'Your account'}</h2>
+              <h2>{handle ? `@${handle}` : 'Your account'}</h2>
               <p>{user?.primaryEmailAddress?.emailAddress}</p>
               <Button onClick={() => openUserProfile()}>Manage account</Button>
             </section>

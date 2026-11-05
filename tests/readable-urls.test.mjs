@@ -2,7 +2,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
-import { handleBase, handleError, uniqueUrlName, reservedHandles } from '../dist/readable-urls.js';
+import {
+  defaultHandle,
+  handleError,
+  isDefaultHandle,
+  placeholderHandle,
+  uniqueUrlName,
+  reservedHandles,
+} from '../dist/readable-urls.js';
 import * as routes from '../dist/project-routes.js';
 import { moduleUrl } from './convex-module.mjs';
 import { state } from './hosted-fixture.mjs';
@@ -25,10 +32,16 @@ function fixture() {
   });
   return s;
 }
-test('handles derive from username then names, never email, validate length and reserve route roots', async () => {
-  assert.equal(handleBase({ username: 'Dino', firstName: 'Other' }, 'abcdef'), 'dino');
-  assert.equal(handleBase({ firstName: 'José', lastName: 'Smith' }, 'abcdef'), 'jose-smith');
-  assert.equal(handleBase({ username: 'dino@example.org', firstName: '' }, 'abcdef'), 'user-abcdef');
+test('default handles come from the username, then the GitHub login, never a real name or email', async () => {
+  assert.equal(defaultHandle({ username: 'Dino', githubLogin: 'other' }), 'dino');
+  assert.equal(defaultHandle({ githubLogin: 'Octo-Cat' }), 'octo-cat');
+  assert.equal(defaultHandle({ firstName: 'José', lastName: 'Smith' }), null);
+  assert.equal(defaultHandle({ username: 'dino@example.org' }), null);
+  assert.equal(placeholderHandle('ab-cd-ef'), 'user-abcdef');
+  assert.equal(isDefaultHandle('dino-2', { username: 'dino' }), true);
+  assert.equal(isDefaultHandle('jose-smith', { username: 'dino' }), false);
+  const long = 'a'.repeat(39);
+  assert.equal(isDefaultHandle(`${'a'.repeat(37)}-2`, { username: long }), true);
   for (const value of ['a', '-abc', 'abc-', 'Aaa', 'a_b', 'a'.repeat(40), ...reservedHandles])
     assert.ok(handleError(value), value);
   assert.equal(handleError('a1'), null);
@@ -55,6 +68,36 @@ test('account handle changes reserve aliases, reject clashes and replay original
   await assert.rejects(accounts.set._handler(s.ctx, { operationId: 'clash', handle: 'dino' }));
   for (const handle of ['settings', '-bad', 'a'])
     await assert.rejects(accounts.set._handler(s.ctx, { operationId: handle, handle }));
+});
+test('a handle not chosen and not the default is prompted for once; picking or keeping answers it', async () => {
+  const s = fixture();
+  // An older account whose handle came from the person's real name.
+  s.tables.forgeAccounts.set('a1', { _id: 'a1', _creationTime: 1, owner: 'owner', handle: 'jose-smith' });
+  s.tables.accountHandles.set('h1', { _id: 'h1', _creationTime: 1, owner: 'owner', handle: 'jose-smith' });
+  s.caller('owner');
+  assert.deepEqual(await accounts.current._handler(s.ctx, {}), { handle: 'jose-smith' });
+  await accounts.ensure._handler(s.ctx, { githubLogin: 'jsmith', firstName: 'José', lastName: 'Smith' });
+  const prompted = await identity.accountFor(s.ctx, 'owner');
+  assert.equal(prompted.handle, 'jose-smith', 'never renamed without the person');
+  assert.equal(prompted.handlePrompt, true);
+  assert.deepEqual(await accounts.current._handler(s.ctx, {}), { handle: 'jose-smith', pick: true });
+  // Checked once: later sign-ins write nothing.
+  const writes = JSON.stringify([...s.tables.forgeAccounts]);
+  await accounts.ensure._handler(s.ctx, { githubLogin: 'jsmith' });
+  assert.equal(JSON.stringify([...s.tables.forgeAccounts]), writes);
+  // Keeping the current handle answers the prompt.
+  await accounts.set._handler(s.ctx, { operationId: 'keep', handle: 'jose-smith' });
+  assert.deepEqual(await accounts.current._handler(s.ctx, {}), { handle: 'jose-smith' });
+  // A handle that is the person's default is not prompted.
+  s.tables.forgeAccounts.set('a2', { _id: 'a2', _creationTime: 1, owner: 'gh', handle: 'octo' });
+  s.caller('gh');
+  await accounts.ensure._handler(s.ctx, { githubLogin: 'Octo' });
+  assert.equal((await identity.accountFor(s.ctx, 'gh')).handlePrompt, false);
+  // A new account with a GitHub login takes it; with nothing, a placeholder and the prompt.
+  assert.equal((await identity.ensureAccount(s.ctx, 'new-gh', { githubLogin: 'newbie' })).handle, 'newbie');
+  const bare = await identity.ensureAccount(s.ctx, 'bare');
+  assert.match(bare.handle, /^user-/);
+  assert.equal(bare.handlePrompt, true);
 });
 test('cursor backfill is idempotent and assigns owner-scoped slug clashes', async () => {
   const s = fixture();
@@ -194,7 +237,10 @@ test('backfill action pages Clerk accounts before projects, omits emails, and fa
   const first = await backfill.run._handler(s.ctx, { cursor: null });
   assert.deepEqual(first, { cursor: 'projects:', isDone: false });
   assert.equal(s.tables.forgeAccounts.size, 2);
-  assert.equal((await identity.accountFor(s.ctx, 'no-projects')).handle, 'maya');
+  // A person with only a real name gets a random placeholder and is asked once to pick.
+  const unnamed = await identity.accountFor(s.ctx, 'no-projects');
+  assert.match(unnamed.handle, /^user-[a-z0-9]+$/);
+  assert.equal(unnamed.handlePrompt, true);
   assert.ok(!JSON.stringify([...s.tables.forgeAccounts]).includes('example.invalid'));
   assert.equal((await backfill.run._handler(s.ctx, { cursor: first.cursor })).isDone, true);
   await backfill.run._handler(s.ctx, { cursor: null });

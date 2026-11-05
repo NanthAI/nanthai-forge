@@ -2,6 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import { getFunctionName } from 'convex/server';
 import { moduleUrl } from './convex-module.mjs';
 import { state, providers } from './hosted-fixture.mjs';
 const secrets = await import(moduleUrl('../convex/secrets.ts'));
@@ -12,6 +13,20 @@ const caps = ['discover', 'names', 'use', 'reveal', 'modify', 'delegate'];
 const paginationOpts = { cursor: null, numItems: 100 };
 const denied = e => (e.data?.code ?? e.code) === 'SECRET_UNAVAILABLE';
 const code = expected => e => (e.data?.code ?? e.code) === expected;
+/** Runs `change` once, right after the handle lookup that labels revocation rows. */
+function onHandleLookup(s, change) {
+  const normal = s.ctx.runQuery;
+  let changed = false;
+  s.ctx.runQuery = async (ref, args) => {
+    const result = await normal(ref, args);
+    if (!changed && getFunctionName(ref) === 'publicPeople:resolve') {
+      changed = true;
+      await change();
+    }
+    return result;
+  };
+  return () => (s.ctx.runQuery = normal);
+}
 async function setup() {
   const s = state([]);
   const id = await secrets.create._handler(s.ctx, {
@@ -270,7 +285,7 @@ test('legacy grants use retained audit attribution without rewriting rows and in
   await assert.rejects(authorize('B'), denied);
 });
 
-test('preview and name lookups require current delegate authority, reject owner revocation and recheck after identity reads', async () => {
+test('preview and name lookups require current delegate authority, reject owner revocation and recheck after handle lookups', async () => {
   const { s, id, grant, preview } = await setup(),
     cleanup = providers();
   try {
@@ -293,18 +308,12 @@ test('preview and name lookups require current delegate authority, reject owner 
       ['B', 'C'],
     );
     s.caller('B');
-    const normal = globalThis.fetch;
-    let changed = false;
-    globalThis.fetch = async (...args) => {
-      const response = await normal(...args);
-      if (!changed) {
-        changed = true;
-        await grant('owner', 'B', []);
-        s.caller('B');
-      }
-      return response;
-    };
+    const restore = onHandleLookup(s, async () => {
+      await grant('owner', 'B', []);
+      s.caller('B');
+    });
     await assert.rejects(actions.revocationNames._handler(s.ctx, { id, principal: 'C' }), denied);
+    restore();
   } finally {
     cleanup();
   }
@@ -350,21 +359,12 @@ test('self-updates preserve the original delegation chain and retained capabilit
   await assert.rejects(authorize('D'), denied);
 });
 
-test('display-name results are discarded if policy changes while the revoker still has access', async () => {
+test('handle labels are discarded if policy changes while the revoker still has access', async () => {
   const { s, id, grant } = await setup(),
     cleanup = providers();
   try {
     await grant('owner', 'B');
-    const normal = globalThis.fetch;
-    let changed = false;
-    globalThis.fetch = async (...args) => {
-      const response = await normal(...args);
-      if (!changed) {
-        changed = true;
-        await grant('owner', 'other', ['use']);
-      }
-      return response;
-    };
+    onHandleLookup(s, () => grant('owner', 'other', ['use']));
     await assert.rejects(
       actions.revocationNames._handler(s.ctx, { id, principal: 'B' }),
       code('SECRET_CHANGED'),

@@ -3,7 +3,7 @@
 import { v } from 'convex/values';
 import { paginationOptsValidator, paginationResultValidator } from 'convex/server';
 import { action } from './cliServer';
-import { personByEmail, personLabel } from './projectPeople';
+import { personByEmail } from './projectPeople';
 import { api, internal } from './_generated/api';
 import type { Id } from './_generated/dataModel';
 import { currentAccess } from './access';
@@ -92,13 +92,10 @@ export const labels = action({
     try {
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'GITHUB_UNAVAILABLE', 'Sign in to manage a team.');
-      const rows = await ctx.runQuery(api.teams.members, args);
-      const page = await Promise.all(
-        rows.page.map(async row => ({ member: row.member, label: await personLabel(row.member) })),
-      );
       await ctx.runQuery(internal.teams.owned, { id: args.id, owner: user.subject });
-      const current = await ctx.runQuery(api.teams.members, args);
-      return { ...rows, page: page.filter(row => current.page.some(member => member.member === row.member)) };
+      // The public member list already names each member by handle; that handle is the label.
+      const rows = await ctx.runQuery(api.teams.members, args);
+      return { ...rows, page: rows.page.map(row => ({ member: row.member, label: row.member })) };
     } catch (error) {
       return report(error);
     }

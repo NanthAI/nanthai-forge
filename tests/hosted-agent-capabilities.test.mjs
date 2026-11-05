@@ -50,7 +50,8 @@ test('discovery reports protocol and actual project authority with constant read
   });
   result = await s.read('owner');
   assert.equal(result.mainReady, true);
-  assert(s.counts.every(count => count.ranges <= 2 && count.documents <= 2 && count.writes === 0));
+  // Two discovery reads plus one account read that shows the caller their own handle.
+  assert(s.counts.every(count => count.ranges <= 3 && count.documents <= 3 && count.writes === 0));
   assert(s.counts.every(count => !count.touched.some(table => /Work|SourceJob|CheckRuns/.test(table))));
 });
 test('legacy native authority is explicit and never advertises owner-free hosted mutations', async () => {

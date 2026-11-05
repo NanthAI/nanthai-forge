@@ -9,6 +9,7 @@ import { invariant } from '../src/errors';
 import { metadataCommandSchema } from '../src/work-types';
 import { metadataRequest, workDigest } from '../src/work-metadata';
 import { report } from './errors';
+import { actionPublicPeople } from './publicPeople';
 import { indexedCommand } from './projectWorkIndexedCommand';
 import { projectDocument, hostedWorkEventDocument } from './schema';
 
@@ -162,8 +163,10 @@ export const exportPlanning = action({
     try {
       const owner = await caller(ctx);
       await ctx.runQuery(internal.projectWork.owner, { projectId, owner });
-      const snapshot = await load(ctx, projectId, owner),
-        result = planningExport(snapshot.data, { key: snapshot.project.key, name: snapshot.project.name });
+      const snapshot = await load(ctx, projectId, owner);
+      // Name people by handle before the digest is taken, so the returned digest covers them.
+      const data = (await actionPublicPeople(ctx, { projectId }, snapshot.data)) as typeof snapshot.data,
+        result = planningExport(data, { key: snapshot.project.key, name: snapshot.project.name });
       await ctx.runQuery(internal.projectWork.owner, { projectId, owner });
       return JSON.stringify(result);
     } catch (error) {

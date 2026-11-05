@@ -32,7 +32,7 @@ Source tools accept an optional `laneId` to read a Lane instead of the startup r
 
 Run `nforge login https://your-deployment.convex.cloud` and approve the displayed code in the signed-in Forge browser. The CLI opens the browser when available; `--no-browser` prints the same URL for manual use. `--name "My laptop"` labels the device. Agents needing only coordination can use `--scope coordination`; full `cli` scope is the default and still uses your current project permissions. Coordination-only credentials do not grant source exchange or hosted Work access.
 
-`nforge auth status [URL]` verifies current authentication. `nforge logout [URL]` revokes the saved device and removes its local credential; if the server cannot be reached, it reports that remote revocation was not verified. Account → Account & data lists CLI devices and lets you revoke them. Credentials expire after 30 days; run login again. Codes expire after ten minutes.
+`nforge auth status [URL]` verifies current authentication and shows your Forge handle. `nforge auth handle NAME` picks a handle; `--keep` keeps the current one. `nforge logout [URL]` revokes the saved device and removes its local credential; if the server cannot be reached, it reports that remote revocation was not verified. Account → Account & data lists CLI devices and lets you revoke them. Credentials expire after 30 days; run login again. Codes expire after ten minutes.
 
 Credentials are stored per deployment in `$XDG_CONFIG_HOME/forge/auth.json` (default `~/.config/forge/auth.json`), mode `0600`. Hosted CLI, local checks and MCP commands read them automatically. `FORGE_AUTH_TOKEN` remains a private environment override for CI and existing Clerk JWT integrations; never place tokens in arguments or committed configuration. `FORGE_DEPLOYMENT_URL` or the last login supplies login/status/logout's optional URL. Source-only `FORGE_AGENT_TOKEN` grants remain separate.
 
@@ -54,9 +54,16 @@ an agent; older attribution stays unknown. These declarations grant no authority
 
 Hosted `projectPeopleActions.labels({projectId,actors})` resolves currently visible
 Work/coordination actors, or roster members named by owners. Imported declarations
-cannot authorize account lookup. Results use display names without email fallback;
-project reads recheck access. Summaries use `actorDisplayName`, coordination uses
-`fromDisplayName`; unrelated accounts cannot be looked up.
+cannot authorize account lookup. Results name people by Forge handle only;
+project reads recheck access; unrelated accounts cannot be looked up.
+
+Public identity rule: every public read and receipt passes its result through
+`convex/publicPeople.ts`. Project writers (owner and contributors) see each person as
+their Forge handle; public readers and signed-out viewers see no person field at all
+(required fields are blanked). Auth subjects, provider display names and, outside the
+owner's own settings, email addresses are never returned. Person arguments may be
+handles. `tests/public-identity-guard.test.mjs` fails if a return validator exposes a
+subject, display name or unreviewed email, or a public function bypasses the mapping.
 
 Hosted Candidate/run summaries report `main {head,included}` against current
 hosted main (imported main before selection). State and Git bundle parents are

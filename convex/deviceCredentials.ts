@@ -5,6 +5,7 @@ import { query, coordinationQuery, isDeviceIdentity } from './cliServer';
 // Self-revocation remains retryable after revocation; this endpoint only removes authority.
 import { mutation } from './server';
 import { deviceScope } from './deviceFields';
+import { accountFor } from './urlIdentity';
 import { invariant } from '../src/errors';
 const item = v.object({
   id: v.id('cliCredentials'),
@@ -59,12 +60,21 @@ export const revoke = mutation({
 });
 export const status = coordinationQuery({
   args: {},
-  returns: v.object({ subject: v.string(), credentialId: v.union(v.string(), v.null()) }),
+  // The account is named by its Forge handle; the auth subject never leaves the deployment.
+  returns: v.object({
+    handle: v.union(v.string(), v.null()),
+    credentialId: v.union(v.string(), v.null()),
+    /** The account still has to pick or keep its handle once. */
+    pick: v.optional(v.literal(true)),
+  }),
   handler: async ctx => {
     const user = await ctx.auth.getUserIdentity();
     invariant(user, 'AUTH_REQUIRED', 'Sign in to Forge.');
     return {
-      subject: user.subject,
+      ...(await (async () => {
+        const account = await accountFor(ctx, user.subject);
+        return { handle: account?.handle ?? null, ...(account?.handlePrompt ? { pick: true as const } : {}) };
+      })()),
       credentialId: typeof user.forgeCredential === 'string' ? user.forgeCredential : null,
     };
   },

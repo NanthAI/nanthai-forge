@@ -3,11 +3,18 @@
 import { invariant } from '../src/errors';
 type Person = {
   id: string;
-  first_name?: string | null;
-  last_name?: string | null;
   username?: string | null;
   email_addresses?: { email_address: string }[];
+  external_accounts?: { provider?: string; username?: string | null }[];
 };
+/** Handle seeds: the chosen username and the GitHub login, never real names or emails. */
+function handleSeed(person: Person | null) {
+  const github = person?.external_accounts?.find(account => /github/.test(account.provider ?? ''))?.username;
+  return {
+    ...(person?.username ? { username: person.username } : {}),
+    ...(github ? { githubLogin: github } : {}),
+  };
+}
 async function clerk(path: string): Promise<unknown> {
   invariant(process.env.CLERK_SECRET_KEY, 'GITHUB_SETUP_REQUIRED', 'Forge identity is not configured.');
   const response = await fetch(`https://api.clerk.com/v1/users${path}`, {
@@ -44,18 +51,7 @@ export async function personByEmail(value: string): Promise<Person> {
   invariant(person, 'BAD_ARGUMENT', 'No Forge account matches that email address.');
   return person;
 }
-export const personLabel = personDisplayName;
-
-/** Project readers receive display names only, never email fallback. */
-export async function personDisplayName(id: string) {
-  const person = (await clerk(`/${encodeURIComponent(id)}`)) as Person | null;
-  if (!person) return 'Account no longer available';
-  invariant(person.id === id, 'GITHUB_RESPONSE', 'The identity provider returned another account.');
-  const name = [person.first_name, person.last_name].filter(Boolean).join(' ') || person.username;
-  return name && !name.includes('@') ? name : 'Forge contributor';
-}
-
-/** URL identity seeds deliberately omit every email field. */
+/** URL identity seeds deliberately omit every name and email field. */
 export async function personUrlProfile(id: string) {
   const person = (await clerk(`/${encodeURIComponent(id)}`)) as Person | null;
   invariant(
@@ -63,11 +59,7 @@ export async function personUrlProfile(id: string) {
     'GITHUB_RESPONSE',
     'The identity provider returned another account.',
   );
-  return {
-    ...(person?.username ? { username: person.username } : {}),
-    ...(person?.first_name ? { firstName: person.first_name } : {}),
-    ...(person?.last_name ? { lastName: person.last_name } : {}),
-  };
+  return handleSeed(person);
 }
 
 export async function urlProfilesPage(offset: number) {
@@ -75,10 +67,5 @@ export async function urlProfilesPage(offset: number) {
     `?${new URLSearchParams({ limit: '25', offset: String(offset), order_by: '+created_at' })}`,
   );
   invariant(Array.isArray(people), 'GITHUB_RESPONSE', 'Forge could not read the account page.');
-  return (people as Person[]).map(person => ({
-    owner: person.id,
-    ...(person.username ? { username: person.username } : {}),
-    ...(person.first_name ? { firstName: person.first_name } : {}),
-    ...(person.last_name ? { lastName: person.last_name } : {}),
-  }));
+  return (people as Person[]).map(person => ({ owner: person.id, ...handleSeed(person) }));
 }

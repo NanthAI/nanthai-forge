@@ -62,7 +62,7 @@ pending or absent checks exit 8. No command reruns checks merely to display them
 `auth status` uses the current hosted authentication verification and never emits
 a credential. It accepts an optional deployment URL, `--hostname HOST` or URL,
 and defaults to FORGE_DEPLOYMENT_URL or the saved default. `account` is the
-verified account subject, not a guessed display name. `hosts` is a gh-shaped
+verified account's Forge handle, never the account id or a display name. `hosts` is a gh-shaped
 host-to-account-array map with host/login/active/state/tokenSource. Environment
 overrides use tokenSource FORGE_AUTH_TOKEN; saved credentials use saved. Signed
 out exits 1; verified authentication exits 0; unavailable verification is a

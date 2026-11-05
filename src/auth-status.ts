@@ -46,20 +46,23 @@ export async function authStatus(args: string[]): Promise<unknown> {
       options.fields,
     );
   }
-  let identity: { subject: string; credentialId: string | null };
+  let identity: { handle: string | null; credentialId: string | null; pick?: true };
   try {
     const result = (await coordinationClient(deployment!, token).query(
       makeFunctionReference<'query'>('deviceCredentials:status'),
       {},
-    )) as { subject?: unknown; credentialId?: unknown };
+    )) as { handle?: unknown; subject?: unknown; credentialId?: unknown; pick?: unknown };
+    // Servers before the handle-only identity rule return `subject`; it is never printed.
+    const legacy = result?.handle === undefined && typeof result?.subject === 'string';
     invariant(
-      typeof result?.subject === 'string',
+      typeof result?.handle === 'string' || result?.handle === null || legacy,
       'AUTH_RESPONSE_INVALID',
       'Forge returned an invalid account identity.',
     );
     identity = {
-      subject: result.subject,
+      handle: legacy ? null : (result.handle as string | null),
       credentialId: typeof result.credentialId === 'string' ? result.credentialId : null,
+      ...(result.pick === true ? { pick: true as const } : {}),
     };
   } catch {
     throw new ForgeError(
@@ -69,7 +72,7 @@ export async function authStatus(args: string[]): Promise<unknown> {
   }
   const environment = process.env.FORGE_AUTH_TOKEN !== undefined,
     tokenSource = environment ? 'FORGE_AUTH_TOKEN' : 'saved',
-    account = identity.subject;
+    account = identity.handle ?? 'no handle yet';
   return projectGh(
     {
       deployment,

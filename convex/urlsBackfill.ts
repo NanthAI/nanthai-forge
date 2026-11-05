@@ -9,8 +9,7 @@ const cursor = v.union(v.string(), v.null());
 const profile = v.object({
   owner: v.string(),
   username: v.optional(v.string()),
-  firstName: v.optional(v.string()),
-  lastName: v.optional(v.string()),
+  githubLogin: v.optional(v.string()),
 });
 export const owners = internalQuery({
   args: { cursor },

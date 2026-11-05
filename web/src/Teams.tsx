@@ -2,7 +2,7 @@ import { useReadRetry } from './ui/read-retry';
 import { ErrorToast } from './ui/Toast';
 // SPDX-License-Identifier: Apache-2.0
 import { useEffect, useState } from 'react';
-import { useUser } from '@clerk/react';
+import { useViewerHandle } from './shell/viewer';
 import { useConvex, usePaginatedQuery } from 'convex/react';
 import type { FunctionReturnType } from 'convex/server';
 import type { Id } from '../../convex/_generated/dataModel';
@@ -12,7 +12,7 @@ import { hostedError } from './snapshot';
 type Team = { id: Id<'teams'>; name: string; owner: string };
 export default function Teams({ open }: { open: (id: Id<'imports'>) => void }) {
   const client = useConvex(),
-    { user } = useUser();
+    viewer = useViewerHandle();
   const { results, status, loadMore } = usePaginatedQuery(api.teams.list, {}, { initialNumItems: 20 });
   const [name, setName] = useState(''),
     [operationId, setOperationId] = useState(() => crypto.randomUUID());
@@ -64,7 +64,7 @@ export default function Teams({ open }: { open: (id: Id<'imports'>) => void }) {
               >
                 <span>
                   <strong>{row.name}</strong>
-                  <small>{row.owner === user?.id ? 'Creator' : 'Reader'}</small>
+                  <small>{row.owner === viewer ? 'Creator' : 'Reader'}</small>
                 </span>
                 <span aria-hidden="true">→</span>
               </button>
@@ -73,7 +73,7 @@ export default function Teams({ open }: { open: (id: Id<'imports'>) => void }) {
         </ul>
       )}
       {status === 'CanLoadMore' && <button onClick={() => loadMore(20)}>Load more teams</button>}
-      {team && <TeamDetail key={team.id} team={team} owner={team.owner === user?.id} open={open} />}
+      {team && <TeamDetail key={team.id} team={team} owner={team.owner === viewer} open={open} />}
       {error && <ErrorToast>{error}</ErrorToast>}
     </section>
   );
@@ -98,7 +98,7 @@ function TeamDetail({
     [busy, setBusy] = useState(false),
     [error, setError] = useState(''),
     [saved, setSaved] = useState('');
-  const { user } = useUser();
+  const viewer = useViewerHandle();
   const [labels, setLabels] = useState<Record<string, string>>({});
   const memberKey = results.map(row => row.member).join(',');
   useEffect(() => {
@@ -185,11 +185,7 @@ function TeamDetail({
             <ul className="reader-list">
               {results.map(row => (
                 <li key={row.member}>
-                  <span>
-                    {row.member === user?.id
-                      ? user.fullName || user.primaryEmailAddress?.emailAddress || 'You'
-                      : labels[row.member] || 'Loading account…'}
-                  </span>
+                  <span>{row.member === viewer ? `${viewer} (you)` : labels[row.member] || row.member}</span>
                   {row.member === team.owner ? (
                     <small>Creator</small>
                   ) : (
@@ -246,7 +242,7 @@ function TeamDetail({
 }
 export function TeamSharing({ importId }: { importId: Id<'imports'> }) {
   const client = useConvex(),
-    { user } = useUser();
+    viewer = useViewerHandle();
   const teams = usePaginatedQuery(api.teams.list, {}, { initialNumItems: 20 });
   const links = usePaginatedQuery(api.teams.links, { importId }, { initialNumItems: 20 });
   const [selected, setSelected] = useState(''),
@@ -284,7 +280,7 @@ export function TeamSharing({ importId }: { importId: Id<'imports'> }) {
           <select value={selected} onChange={e => setSelected(e.target.value)} required>
             <option value="">Choose your team</option>
             {teams.results
-              .filter(row => row.owner === user?.id)
+              .filter(row => row.owner === viewer)
               .map(row => (
                 <option key={row.id} value={row.id}>
                   {row.name}

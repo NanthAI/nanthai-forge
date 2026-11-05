@@ -7,12 +7,13 @@ import { hostname } from 'node:os';
 import { spawn } from 'node:child_process';
 import { makeFunctionReference } from 'convex/server';
 import { coordinationClient } from './coordination-client.js';
-import { deploymentUrl, readAuth, writeAuth, type SavedCredential } from './auth-store.js';
+import { deploymentUrl, readAuth, resolveAuthToken, writeAuth, type SavedCredential } from './auth-store.js';
 import { ForgeError, invariant } from './errors.js';
 const help = `nforge login [DEPLOYMENT_URL] [--name NAME] [--scope cli|coordination] [--no-browser]
 nforge logout [DEPLOYMENT_URL]
 nforge auth status [DEPLOYMENT_URL] [--hostname HOST] [--json [fields]]
-Deployment defaults to FORGE_DEPLOYMENT_URL or your most recent login. Login uses a signed-in Forge browser approval and stores a revocable 30-day credential. FORGE_AUTH_TOKEN overrides stored credentials for hosted commands.\n`;
+nforge auth handle (NAME | --keep) [DEPLOYMENT_URL]
+Deployment defaults to FORGE_DEPLOYMENT_URL or your most recent login. Login uses a signed-in Forge browser approval and stores a revocable 30-day credential. Collaborators and agents see you by your Forge handle; \`auth handle\` picks it (or keeps the current one). FORGE_AUTH_TOKEN overrides stored credentials for hosted commands.\n`;
 export function httpOrigin(deployment: string) {
   if (process.env.FORGE_HTTP_URL) return deploymentUrl(process.env.FORGE_HTTP_URL);
   const url = new URL(deployment);
@@ -78,7 +79,9 @@ export async function authCli(command: string, args: string[]): Promise<unknown>
     return undefined;
   }
   if (command === 'auth') {
-    invariant(args.shift() === 'status', 'BAD_ARGUMENT', help);
+    const sub = args.shift();
+    if (sub === 'handle') return pickHandle(args);
+    invariant(sub === 'status', 'BAD_ARGUMENT', help);
     return authStatus(args);
   }
   let selected: string | undefined,
@@ -216,7 +219,51 @@ export async function authCli(command: string, args: string[]): Promise<unknown>
     latest.deployments[deployment] = credential;
     latest.defaultDeployment = deployment;
     writeAuth(latest);
+    await askForHandleOnce(deployment, credential.token);
     return { deployment, loggedIn: true, name, scope, expiresAt: credential.expiresAt };
   }
   throw new ForgeError('AUTH_EXPIRED', 'Device code expired. Run nforge login.');
+}
+
+const status = makeFunctionReference<'query', Record<string, never>, { handle: string | null; pick?: true }>(
+  'deviceCredentials:status',
+);
+/** Accounts without a chosen handle (no username or GitHub login, or an older name-derived
+ * one) are asked once, right after login; the web asks the same once. */
+async function askForHandleOnce(deployment: string, token: string) {
+  try {
+    const account = await coordinationClient(deployment, token).query(status, {});
+    if (account.pick)
+      process.stderr.write(
+        `Pick your Forge handle: it is how collaborators and agents see you. Run nforge auth handle NAME${account.handle ? `, or nforge auth handle --keep to keep @${account.handle}` : ''}.\n`,
+      );
+  } catch {
+    /* Login succeeded; the prompt is advice and the web shows it too. */
+  }
+}
+async function pickHandle(args: string[]) {
+  const keep = args.includes('--keep');
+  const positional = args.filter(arg => arg !== '--keep');
+  invariant(
+    positional.length <= (keep ? 1 : 2) && positional.every(arg => !arg.startsWith('-')),
+    'BAD_ARGUMENT',
+    help,
+  );
+  const wanted = keep ? undefined : positional.shift();
+  invariant(keep || wanted, 'BAD_ARGUMENT', help);
+  const store = readAuth();
+  const selected = positional[0] ?? process.env.FORGE_DEPLOYMENT_URL ?? store.defaultDeployment;
+  invariant(selected, 'BAD_ARGUMENT', 'Provide a deployment URL or set FORGE_DEPLOYMENT_URL.');
+  const deployment = deploymentUrl(selected),
+    token = resolveAuthToken(deployment);
+  invariant(token, 'AUTH_REQUIRED', 'Run nforge login first.');
+  const client = coordinationClient(deployment, token);
+  const handle = wanted ?? (await client.query(status, {})).handle;
+  invariant(handle, 'BAD_ARGUMENT', 'Pick a handle: nforge auth handle NAME.');
+  // Setting the same handle again is harmless, so each run uses a fresh operation id.
+  await client.mutation(makeFunctionReference<'mutation'>('urlAccounts:set'), {
+    handle: handle.trim().toLowerCase(),
+    operationId: randomUUID(),
+  });
+  return { deployment, handle: handle.trim().toLowerCase() };
 }

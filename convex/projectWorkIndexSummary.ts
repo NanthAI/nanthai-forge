@@ -18,7 +18,7 @@ export async function cockpitSummary(
   collection: string,
   value: string,
   main: string | null,
-  actors?: Map<string, Promise<string | undefined>>,
+  actors?: Map<string, Promise<boolean>>,
 ) {
   if (collection.endsWith(':payload')) return value;
   let result = await actorSummary(ctx, project._id, value, actors);

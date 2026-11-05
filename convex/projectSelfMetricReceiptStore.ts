@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { accountFor } from './urlIdentity';
 import type { MutationCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import { canonicalPayload } from '../src/hosted-source-operation';
@@ -66,12 +67,20 @@ export async function recordCallerReceipts(
   if (!Array.isArray(values)) return 0;
   const now = Date.now();
   let written = 0;
+  // Clients learn their own identity as a Forge handle (convex/publicPeople.ts); read it once.
+  let handle: Promise<string | undefined> | undefined;
+  const declaredBy = async (declared: string) =>
+    declared === actor || declared === (await (handle ??= accountFor(ctx, actor).then(row => row?.handle)));
   for (const value of values.slice(0, CALLER_RECEIPT_BATCH)) {
     const parsed = callerReceiptSchema.safeParse(value);
     if (!parsed.success) continue;
     const receipt = parsed.data;
     const at = Date.parse(receipt.at);
-    if ((receipt.actor !== null && receipt.actor !== actor) || at > now + 300_000 || at < now - 30 * DAY)
+    if (
+      (receipt.actor !== null && !(await declaredBy(receipt.actor))) ||
+      at > now + 300_000 ||
+      at < now - 30 * DAY
+    )
       continue;
     const { actor: _declared, kind, at: observedAt, ...rest } = receipt;
     void _declared;

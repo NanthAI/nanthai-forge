@@ -149,7 +149,7 @@ export function Sessions({
       summaryWords.filter(word => titleWords.has(word)).length / summaryWords.length > 0.7;
     const own = Boolean(summary) && !repeatsTitle;
     const activity = own ? summary : (session.activityKind?.replaceAll('-', ' ') ?? toneLabel[tone]);
-    const starter = !person && (session.actor === viewer ? 'you' : (session.actorDisplayName ?? undefined));
+    const starter = !person && (session.actor === viewer ? 'you' : session.actor || undefined);
     const where = [title && `Lane: ${title}`, session.summary].filter(Boolean).join('\n');
     return (
       <li key={session.sessionId} className={`fx-person fx-person-${tone}`}>

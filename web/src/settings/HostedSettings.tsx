@@ -237,15 +237,13 @@ function SignedInDevices() {
 }
 
 function OwnerRow() {
-  const { user } = useUser();
   const account = useQuery(api.urlAccounts.current, {});
   return (
     <div className="fx-check-row">
       <span className="fx-person">
-        <Avatar name={user?.fullName || user?.username || 'You'} />
+        <Avatar name={account?.handle || 'You'} />
         <span>
-          <b>{user?.fullName || user?.username || 'You'}</b>
-          {account && <small>@{account.handle}</small>}
+          <b>{account ? `@${account.handle}` : 'You'}</b>
         </span>
       </span>
       <span className="fx-muted">Owner</span>

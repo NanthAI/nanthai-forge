@@ -6,19 +6,6 @@ import type { Doc, Id } from './_generated/dataModel';
 import { selectedGeneration, recordPartition } from './projectWorkIndexStore';
 import { accessibleProject } from './projectAuthority';
 import { invariant } from '../src/errors';
-export async function actorName(ctx: QueryCtx | MutationCtx, projectId: Id<'hostedProjects'>, actor: string) {
-  const user = await ctx.auth.getUserIdentity();
-  if (!user) return undefined;
-  const project = await accessibleProject(ctx, projectId, user.subject);
-  if (!(await membership(ctx, projectId, actor)) || !(await known(ctx, project, actor, user.subject)))
-    return undefined;
-  return (
-    await ctx.db
-      .query('projectActorNames')
-      .withIndex('by_project_and_actor', q => q.eq('projectId', projectId).eq('actor', actor))
-      .unique()
-  )?.displayName;
-}
 async function known(
   ctx: QueryCtx | MutationCtx,
   project: Doc<'hostedProjects'>,
@@ -126,12 +113,13 @@ export const remember = internalMutation({
     return null;
   },
 });
-/** Only call after current project read authority has been established. */
+/** Only call after current project read authority has been established. People are named
+ * by handle at the public boundary (convex/publicPeople.ts); no provider name is added here. */
 export async function actorSummary(
   ctx: QueryCtx,
   projectId: Id<'hostedProjects'>,
   value: string,
-  names?: Map<string, Promise<string | undefined>>,
+  former?: Map<string, Promise<boolean>>,
 ) {
   const row = JSON.parse(value) as {
     actor?: unknown;
@@ -141,51 +129,24 @@ export async function actorSummary(
   delete row.actorFormerMember;
   delete row.actorDisplayName;
   if (typeof row.actor !== 'string') return JSON.stringify(hostedPaths(row));
-  let pending = names?.get(row.actor);
+  let pending = former?.get(row.actor);
   if (!pending) {
-    pending = actorName(ctx, projectId, row.actor);
-    names?.set(row.actor, pending);
+    pending = formerMember(ctx, projectId, row.actor);
+    former?.set(row.actor, pending);
   }
-  const displayName = await pending;
-  const former = displayName && (await formerMember(ctx, projectId, row.actor));
-  return JSON.stringify(
-    hostedPaths({
-      ...row,
-      ...(displayName ? { actorDisplayName: displayName } : {}),
-      ...(former ? { actorFormerMember: true } : {}),
-    }),
-  );
+  return JSON.stringify(hostedPaths({ ...row, ...((await pending) ? { actorFormerMember: true } : {}) }));
 }
 
-export async function rememberActor(
-  ctx: MutationCtx,
-  projectId: Id<'hostedProjects'>,
-  actor: string,
-  name?: string,
-) {
-  if (!name || name.includes('@')) return;
-  const row = await ctx.db
-    .query('projectActorNames')
-    .withIndex('by_project_and_actor', q => q.eq('projectId', projectId).eq('actor', actor))
-    .unique();
-  if (row) await ctx.db.patch(row._id, { displayName: name });
-  else await ctx.db.insert('projectActorNames', { projectId, actor, displayName: name });
-}
 export async function withActorName<T extends { actor: string }>(
   ctx: QueryCtx,
   projectId: Id<'hostedProjects'>,
   row: T,
 ) {
-  const name = await actorName(ctx, projectId, row.actor);
-  const former = name && (await formerMember(ctx, projectId, row.actor));
+  const former = await formerMember(ctx, projectId, row.actor);
   const result = { ...row } as T & { actorFormerMember?: boolean; actorDisplayName?: string };
   delete result.actorFormerMember;
   delete result.actorDisplayName;
-  return hostedPaths({
-    ...result,
-    ...(name ? { actorDisplayName: name } : {}),
-    ...(former ? { actorFormerMember: true } : {}),
-  });
+  return hostedPaths({ ...result, ...(former ? { actorFormerMember: true } : {}) });
 }
 
 /** Preserve membership provenance before deleting a live grant, even without a name. */

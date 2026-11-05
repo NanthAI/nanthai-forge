@@ -159,8 +159,8 @@ test('immutable attempt history pages completely and status never hydrates that 
   const reads = f.counts.filter(c => c.name === 'landingStatus').at(-1);
   assert.equal(
     reads.documents,
-    6,
-    'selected request/attempt plus the three active queue ranges for position; no attempt history',
+    7,
+    'selected request/attempt, the three active queue ranges for position and the caller handle; no attempt history',
   );
 });
 

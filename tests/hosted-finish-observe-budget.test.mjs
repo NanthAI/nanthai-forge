@@ -63,7 +63,8 @@ test('finish observer budgets calls and bytes per landing independently of 10x r
     assert.deepEqual(after, before, 'identical receipt, queue, progress and retained events');
     assert(projected.readBytes <= baseline.readBytes / 2, 'at least 50% fewer DB bytes');
     assert(projected.readBytes < 12000, 'per-landing initial read bytes');
-    assert(projected.documents <= 8, 'bounded selected documents, no history hydration');
+    // Eight selected documents plus one account read naming the caller by handle.
+    assert(projected.documents <= 9, 'bounded selected documents, no history hydration');
     assert(!projected.touched.includes('projectHostedLandingRequests'));
     assert(!projected.touched.includes('projectHostedFinishes'));
     // Queue/controller and Work-only publications must not invalidate the page.

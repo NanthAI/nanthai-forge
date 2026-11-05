@@ -48,19 +48,69 @@ function codexOutput(output) {
     .join('\n');
 }
 
-/** Actions and outputs of a Codex rollout (response items: tool calls and their outputs). */
+/** The text a Codex tool output shows the agent, without the harness wrappers: the `output`
+ * of a code-mode result (JSON, possibly nested in a Promise.allSettled list) or the plain
+ * text. Used to judge what a command returned. */
+function codexResult(output) {
+  const parts =
+    typeof output === 'string' ? [output] : Array.isArray(output) ? output.map(p => p?.text ?? '') : [];
+  const out = [];
+  const META = new Set(['chunk_id', 'wall_time_seconds', 'original_token_count', 'status', 'exit_code']);
+  (function collect(v) {
+    if (typeof v === 'string') {
+      try {
+        const j = JSON.parse(v);
+        if (j && typeof j === 'object') return collect(j);
+      } catch {}
+      out.push(v);
+    } else if (Array.isArray(v)) v.forEach(collect);
+    else if (v && typeof v === 'object') {
+      if (typeof v.output === 'string') collect(v.output);
+      else for (const [k, x] of Object.entries(v)) if (!META.has(k)) collect(x);
+    }
+  })(parts.filter(p => !/^(Script (completed|running)|Wall time|Output:)/.test(p.trim())));
+  return out.join('\n');
+}
+
+/** Actions and outputs of a Codex rollout (response items: tool calls and their outputs).
+ * Each action carries its call id and `result`, what its call returned; a code-mode cell that
+ * keeps running ("Script running with cell ID n") collects the outputs of the `wait` calls
+ * that resume it. */
 function codexEntries(entries, actions, seen) {
+  const byCall = new Map();
+  const cells = new Map(); // running cell id -> the action that started it
+  const waits = new Map(); // wait call id -> cell id
+  const add = (tool, input, p) => {
+    const action = { tool, input, id: p.call_id, result: '' };
+    actions.push(action);
+    if (p.call_id) byCall.set(p.call_id, action);
+    return action;
+  };
   for (const { type, payload: p } of entries) {
     if (type !== 'response_item' || !p) continue;
-    if (p.type === 'custom_tool_call') actions.push({ tool: p.name, input: String(p.input ?? '') });
-    else if (p.type === 'function_call') actions.push({ tool: p.name, input: String(p.arguments ?? '') });
-    else if (p.type === 'local_shell_call')
-      actions.push({ tool: 'shell', input: JSON.stringify(p.action ?? {}) });
-    else if (/_call_output$/.test(p.type)) seen.push(codexOutput(p.output));
+    if (p.type === 'custom_tool_call') add(p.name, String(p.input ?? ''), p);
+    else if (p.type === 'function_call') {
+      add(p.name, String(p.arguments ?? ''), p);
+      if (p.name === 'wait') {
+        try {
+          waits.set(p.call_id, String(JSON.parse(p.arguments).cell_id));
+        } catch {}
+      }
+    } else if (p.type === 'local_shell_call') add('shell', JSON.stringify(p.action ?? {}), p);
+    else if (/_call_output$/.test(p.type)) {
+      seen.push(codexOutput(p.output));
+      const shown = codexResult(p.output);
+      const action = byCall.get(p.call_id);
+      if (action) action.result += `${action.result ? '\n' : ''}${shown}`;
+      const running = /Script running with cell ID (\d+)/.exec(JSON.stringify(p.output ?? ''));
+      if (action && running) cells.set(running[1], action);
+      const owner = cells.get(waits.get(p.call_id));
+      if (owner && owner !== action) owner.result += `\n${shown}`;
+    }
   }
 }
 
-/** { actions: [{tool, input}], seen: [string] } from a transcript, or from a scripted
+/** { actions: [{tool, input, id, result}], seen: [string] } from a transcript, or from a scripted
  * agent's own stdout/stderr (dry runs have no transcript: its output stands in as `seen`). */
 export function readSession(prefix) {
   const actions = [],
@@ -78,11 +128,25 @@ export function readSession(prefix) {
       codexEntries(entries, actions, seen);
       return { source: 'transcript', format: 'codex', actions, seen };
     }
+    const byId = new Map();
     for (const entry of entries) {
       for (const part of Array.isArray(entry.message?.content) ? entry.message.content : []) {
-        if (part.type === 'tool_use')
-          actions.push({ tool: part.name, input: JSON.stringify(part.input ?? {}) });
-        if (part.type === 'tool_result') seen.push(text(part.content));
+        if (part.type === 'tool_use') {
+          const action = {
+            tool: part.name,
+            input: JSON.stringify(part.input ?? {}),
+            id: part.id,
+            result: '',
+          };
+          actions.push(action);
+          if (part.id) byId.set(part.id, action);
+        }
+        if (part.type === 'tool_result') {
+          const shown = text(part.content);
+          seen.push(shown);
+          const action = byId.get(part.tool_use_id);
+          if (action) action.result += `${action.result ? '\n' : ''}${shown}`;
+        }
       }
     }
     return { source: 'transcript', actions, seen };

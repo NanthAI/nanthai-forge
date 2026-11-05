@@ -12,7 +12,7 @@ import { Activity } from './Activity';
 import { activityItems } from './activity-model';
 import { hostedFeed } from './coordination';
 import { useMemo, useState } from 'react';
-import { useUser } from '@clerk/react';
+import { useViewerHandle } from '../shell/viewer';
 import { useConvex } from 'convex/react';
 import { BriefSourceContext, hostedBriefs } from './brief';
 import type { Id } from '../../../convex/_generated/dataModel';
@@ -116,7 +116,7 @@ export function HostedNowView({
     OverlapActions;
   newIntent: () => void;
   laneHref?: (laneId: string) => string;
-  /** The signed-in account id, to say "you" and count the viewer's answers. */
+  /** The signed-in viewer's Forge handle, to say "you" and count the viewer's answers. */
   viewer?: string;
   project?: string;
 }) {
@@ -356,8 +356,8 @@ function LiveNow({
     localMoves: !localMoves.initialLoading,
     inbox: !live.initialLoading,
   });
-  const { user } = useUser();
-  const ack = useAnswers(projectId, user?.fullName ?? user?.firstName ?? 'you');
+  const viewer = useViewerHandle();
+  const ack = useAnswers(projectId, viewer ?? 'you');
   const fix = useFixAnswers(projectId);
   const records = useMemo(
     () => ({
@@ -408,7 +408,7 @@ function LiveNow({
           capabilities={workspace.capabilities}
           newIntent={newIntent}
           project={projectId}
-          {...(user?.id ? { viewer: user.id } : {})}
+          {...(viewer ? { viewer } : {})}
         />
         <NowSubmodules
           projectId={projectId}

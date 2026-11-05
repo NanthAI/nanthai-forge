@@ -5,7 +5,7 @@ import { action } from './cliServer';
 import { api, internal } from './_generated/api';
 import { checkForgeUser } from './sharingActions';
 import { caller } from './projectWorkActions';
-import { personByEmail, personLabel, findPersonByEmail } from './projectPeople';
+import { personByEmail, findPersonByEmail } from './projectPeople';
 import { invariant } from '../src/errors';
 import { report } from './errors';
 export const add = action({
@@ -49,24 +49,13 @@ export const labels = action({
     try {
       const owner = await caller(ctx);
       await ctx.runQuery(internal.projectWork.owner, { projectId, owner });
+      // The public list already names each contributor by handle; that handle is the label.
       const rows = await ctx.runQuery(api.projectContributors.list, { projectId });
-      const labels = await Promise.all(
-        rows.map(async row => {
-          const identity = await ctx.runQuery(internal.projectContributors.identity, {
-            projectId,
-            owner,
-            contributor: row.contributor,
-          });
-          return {
-            contributor: row.contributor,
-            label: await personLabel(row.contributor),
-            ...(identity ? { handle: identity.handle } : {}),
-          };
-        }),
-      );
-      await ctx.runQuery(internal.projectWork.owner, { projectId, owner });
-      const current = await ctx.runQuery(api.projectContributors.list, { projectId });
-      return labels.filter(person => current.some(row => row.contributor === person.contributor));
+      return rows.map(row => ({
+        contributor: row.contributor,
+        label: row.contributor,
+        ...(row.contributor ? { handle: row.contributor } : {}),
+      }));
     } catch (error) {
       return report(error);
     }
