@@ -1,4 +1,4 @@
-import { hostedDiffSchema, hostedPeersSchema } from './hosted-agent-reads.js';
+import { hostedDiffSchema, hostedPeersSchema, hostedQueueSchema } from './hosted-agent-reads.js';
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
 import { hostedAgentCommandSchemas } from './hosted-agent-contract.js';
@@ -13,6 +13,7 @@ export const hostedAgentHelpEntries = [
   ...Object.entries(hostedAgentCommandSchemas),
   ['diff', hostedDiffSchema] as const,
   ['peers', hostedPeersSchema] as const,
+  ['queue', hostedQueueSchema] as const,
   ['wait', hostedWaitSchema] as const,
   ['show', hostedSourceShowSchema.omit({ action: true })] as const,
 ].map(([action, schema]) => {
@@ -23,7 +24,7 @@ export const hostedAgentHelpEntries = [
     json.properties.path = { type: 'string', minLength: 1 };
     json.properties.open = { type: 'boolean' };
   }
-  if (!['status', 'observe', 'wait', 'show', 'diff', 'peers'].includes(action))
+  if (!['status', 'observe', 'wait', 'show', 'diff', 'peers', 'queue'].includes(action))
     json.properties.operationId = { type: 'string', format: 'uuid' };
   const required = new Set(json.required ?? []);
   const parameters = Object.keys(json.properties ?? {}).map(
@@ -52,7 +53,8 @@ export function hostedAgentHelp(action?: string) {
     'pull {} refreshes a clean clone root to main; a repeat resumes interruption. Root status {} reports clone freshness.',
     'status accepts laneId; observe/landing select operationId (original landing UUID), submissionId or runId.',
     'peers {laneId?,path?,detail?} reads current saved overlap evidence in one query. Coverage excludes unsaved peer edits and never proves independence. start/save/status retain unacknowledgedOverlaps and behindMain.',
-    'diff {laneId?,paths?,byteBudget?,cursor?} compares pinned base to saved head; nextCursor continues that pair. show {state?|candidateId?|laneId?|channel:"main",path} reads exact bytes. forge_review exposes show/diff/peers.',
+    'queue {limit?} lists the landing queue in dispatch order: Lane, Intent title, phase, suspect, last failing test files and recompose count per entry. One bounded read, no idle cost.',
+    'diff {laneId?,paths?,byteBudget?,cursor?} compares pinned base to saved head; nextCursor continues that pair. show {state?|candidateId?|laneId?|channel:"main",path} reads exact bytes. forge_review exposes show/diff/peers/queue.',
     'Keep every original parameter, including message and pins, when replaying an operationId. Use the receipt replay command.',
     'Keep this turn active while your work is unfinished. Resume with the receipt command: wait {operationIds:[ORIGINAL_UUID],until:"acceptance",timeoutSeconds:3600}; check-only work uses wait {runId,timeoutSeconds:3600}. Transient observation failures retry until the deadline. Exit 3 is IN PROGRESS: run the same wait again. Terminal failure follows its recovery command; LANDED is acceptance, CHECK PASSED alone is not.',
     '',

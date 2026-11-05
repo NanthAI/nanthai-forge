@@ -8,6 +8,7 @@ import { hostedLandingStateSchema } from '../src/hosted-landing';
 import type { Doc } from './_generated/dataModel';
 import { effectivePolicy } from '../src/autonomy-policy';
 import { HOSTED_TRAIN_HOLD_MS } from '../src/hosted-landing-batch';
+import { landingSuspect } from '../src/hosted-landing-suspect';
 import { effectiveAgentDefaults, urgentAllowed, urgentRefusal } from '../src/agent-parallel-defaults';
 
 /** Queue jumping: the project owner only, further limited by agentDefaults.urgentRoles. */
@@ -58,11 +59,16 @@ export function orderHostedLandingRows<T extends Pick<LandingRow, 'sequence' | '
 /** Merge-queue order (core-claim incident e4aee4fe, 2026-11-01): a slow older
  * entry re-checked 6+ times in an hour because fast newer passes kept taking main.
  * An entry holds its place while it is still live; one that failed, stalled, is
- * held for red main or waits for review or a dependency gives its place up. */
+ * held for red main, is a named suspect of a combined failure or waits for review
+ * or a dependency gives its place up. */
 export function holdsLandingOrder(row: Pick<LandingRow, 'phase' | 'hold'>, state: HostedLandingState) {
   return (
     (row.phase === 'queued' || row.phase === 'checking' || row.phase === 'ready') &&
     !row.hold &&
+    // Wave 1 (51bbbd00): a passed entry waited an hour behind a failing one.
+    // A suspect named by combined-failure evidence gives up its place until its
+    // own check passes; it can still land, only later entries no longer wait.
+    !landingSuspect(state) &&
     !state.error &&
     !state.observation.stall &&
     state.observation.state === 'pending' &&

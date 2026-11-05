@@ -134,9 +134,11 @@ for (const history of [0, 575, 1150])
       peakRssBytes: process.resourceUsage().maxRSS * 1024,
     };
     const source = calls.map(observerProjectionBudget);
+    // Reads 3997 -> 3999 (incident c329d191): each of the two order-woken heads
+    // cancels the stall alarm armed with its wake when it lands.
     assert(
       budget.calls <= 199 &&
-        source.reduce((n, c) => n + c.documents, 0) <= 3997 &&
+        source.reduce((n, c) => n + c.documents, 0) <= 3999 &&
         source.reduce((n, c) => n + c.writes, 0) <= 1200,
       JSON.stringify(budget),
     );

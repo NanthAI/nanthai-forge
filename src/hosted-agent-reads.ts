@@ -13,6 +13,7 @@ import { invariant } from './errors.js';
 import { selectHostedSource } from './mcp-hosted-source.js';
 import { readHostedLaneCheckout } from './hosted-lane-checkout-marker.js';
 import type { HostedAgentTransport } from './hosted-agent-transport.js';
+import { QUEUE_VIEW_LIMIT } from './hosted-queue-view.js';
 const hash = z.string().regex(/^[0-9a-f]{64}$/);
 export const hostedPeersSchema = z
   .object({
@@ -51,6 +52,16 @@ export async function peersHostedSource(transport: HostedAgentTransport, input: 
     detail: true,
     items: command.detail ? 50 : 5,
   });
+}
+export const hostedQueueSchema = z
+  .object({ limit: z.number().int().min(1).max(QUEUE_VIEW_LIMIT).optional() })
+  .strict();
+/** One bounded read of the landing queue (09e637f7): Lane, Intent title, phase,
+ * last failing test files and recompose count per entry, in dispatch order. */
+export async function queueHostedSource(transport: HostedAgentTransport, input: unknown) {
+  const parsed = hostedQueueSchema.safeParse(input);
+  invariant(parsed.success, 'BAD_ARGUMENT', 'Invalid hosted queue parameters. Use queue --help.');
+  return transport.query('projectHostedQueueView:read', parsed.data);
 }
 /** Immutable manifests and selected blobs live in R2, never in a Convex response. */
 export async function diffHostedSource(transport: HostedAgentTransport, input: unknown) {

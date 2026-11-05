@@ -63,7 +63,25 @@ CrossHead == /\ Scenario = "reuse"
        [] pc = 2 -> /\ applied' = 3 /\ checked' = (IF Fixed THEN 3 ELSE checked) /\ pc' = 3
                      /\ UNCHANGED <<canonical, observed, inputsDone, returned, a, b, main, owner>>
        [] OTHER -> FALSE
-Step == Wait \/ CohortConflict \/ LostWake \/ MovingMain \/ CrossHead
+\* Incident c329d191 (2026-11-05): b is a passed head waiting in submission order
+\* for older a, with no timer while parked (owner = FALSE, checked = 0). a fails
+\* and wakes b once; that drive fails (Convex OCC exhaustion), so the wake is
+\* lost. `checked` = 1 is b's stall alarm: the fix arms it in the same
+\* transaction as the wake, so a lost drive is re-driven; parked waiters stay free.
+OrderWake == /\ Scenario = "orderwake"
+  /\ CASE pc = 0 -> /\ b' = "ready" /\ owner' = FALSE /\ checked' = 0
+                     /\ pc' = 1
+                     /\ UNCHANGED <<canonical, observed, inputsDone, returned, a, main, applied>>
+       [] pc = 1 -> /\ a' = "failed" /\ owner' = TRUE /\ checked' = (IF Fixed THEN 1 ELSE 0) /\ pc' = 2
+                     /\ UNCHANGED <<canonical, observed, inputsDone, returned, b, main, applied>>
+       [] pc = 2 -> /\ owner' = FALSE /\ pc' = 3
+                     /\ UNCHANGED <<canonical, observed, inputsDone, returned, a, b, main, checked, applied>>
+       [] pc = 3 /\ checked = 1 -> /\ owner' = TRUE /\ checked' = 0 /\ pc' = 4
+                     /\ UNCHANGED <<canonical, observed, inputsDone, returned, a, b, main, applied>>
+       [] pc = 4 /\ owner -> /\ b' = "landed" /\ pc' = 5
+                     /\ UNCHANGED <<canonical, observed, inputsDone, returned, a, main, checked, applied, owner>>
+       [] OTHER -> FALSE
+Step == Wait \/ CohortConflict \/ LostWake \/ MovingMain \/ CrossHead \/ OrderWake
 Spec == Init /\ [][Step]_vars /\ WF_vars(Step)
 FreshTerminal == returned => observed = canonical
 NoOrphanConflict == ~(a \in {"failed", "cancelled"} /\ b = "conflict" /\ main = 0 /\ checked = 0)
@@ -72,4 +90,5 @@ PromptMainConflict == Scenario = "cohort" /\ checked = 1 /\ pc > 0 => b = "confl
 CohortSettles == Scenario = "cohort" => <>(b \in {"landed", "conflict"})
 ExactCheckedHead == applied # 0 => applied = checked
 EventuallyTerminal == <>(a = "landed" \/ a = "failed")
+HeadLands == <>(b = "landed")
 =============================================================================

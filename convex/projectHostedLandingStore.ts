@@ -6,7 +6,7 @@ import { cancelUnneededHostedCheck } from './projectHostedCheckCancel';
 import { makeFunctionReference } from 'convex/server';
 import { semanticPayload } from '../src/semantic-payload';
 import { hostedLandingProgressAt } from '../src/hosted-landing-stall';
-import { scheduleLandingAlarm } from './projectHostedLandingStallWake';
+import { landingAlarmPatch } from './projectHostedLandingStallWake';
 import { releaseAdmissionWaiters } from './projectHostedLandingAdmissionWake';
 // SPDX-License-Identifier: Apache-2.0
 import type { MutationCtx, QueryCtx } from './_generated/server';
@@ -177,7 +177,9 @@ export async function writeLanding(
       hostedLandingProgressAt(state) !== state.observation.stall.lastProgressAt)
   )
     delete state.observation.stall;
-  await scheduleLandingAlarm(ctx, state);
+  // Folded into this row's single write below (c329d191 kept waiter alarms).
+  const alarm = await landingAlarmPatch(ctx, state);
+  if (alarm && alarm.id !== row._id) await ctx.db.patch(alarm.id, { alarm: alarm.alarm });
   await retainLandingProgress(ctx, state);
   const advice = row.wouldConflict ? JSON.parse(row.wouldConflict) : undefined;
   const speculative = Boolean(advice?.predecessor);
@@ -193,6 +195,7 @@ export async function writeLanding(
   const runId = attempt.check?.runId ?? (admitting ? row.admission!.runId : null);
   const orderLive = holdsLandingOrder({ phase: state.phase as LandingRow['phase'], hold: row.hold }, state);
   await ctx.db.patch(row._id, {
+    ...(alarm && alarm.id === row._id ? { alarm: alarm.alarm } : {}),
     attemptId: state.attemptId,
     pipelineRetiredAttemptId:
       previous.attemptId === state.attemptId ? row.pipelineRetiredAttemptId : undefined,

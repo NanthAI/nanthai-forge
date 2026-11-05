@@ -2,7 +2,9 @@
 import { makeFunctionReference } from 'convex/server';
 import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
-import type { HostedLandingState } from '../src/hosted-landing';
+import { hostedLandingStateSchema, type HostedLandingState } from '../src/hosted-landing';
+import { hostedLandingProgressAt } from '../src/hosted-landing-stall';
+import { armLandingAlarm } from './projectHostedLandingStallWake';
 import {
   HOSTED_FINISH_COMPOSE_WATCHDOG_MS,
   HOSTED_FINISH_COMPOSE_WATCH_WINDOW_MS,
@@ -133,9 +135,21 @@ export async function wakeLandingOrderWaiters(
         if (!next.orderWaited) await ctx.db.patch(next._id, { orderWaited: (next.orderWaited = true) });
         continue;
       }
-      await ctx.db.patch(waiter._id, { orderWait: undefined });
       const finish = await finishRow(ctx, { projectId: row.projectId, submissionId: waiter.submissionId });
-      if (finish && !JSON.parse(finish.value).pending) await scheduleFinish(ctx, finish);
+      const drive = finish && !JSON.parse(finish.value).pending;
+      // Incident c329d191 (2026-11-05): this one scheduled drive is the waiter's
+      // only wake and it can fail (OCC exhaustion). Arm the waiter's stall alarm
+      // in this same transaction; landing or a later park cancels it.
+      const alarm =
+        drive && !waiter.alarm && waiter.phase === 'ready'
+          ? await armLandingAlarm(
+              ctx,
+              waiter,
+              hostedLandingProgressAt(hostedLandingStateSchema.parse(JSON.parse(waiter.value))),
+            )
+          : undefined;
+      await ctx.db.patch(waiter._id, { orderWait: undefined, ...(alarm ? { alarm } : {}) });
+      if (drive) await scheduleFinish(ctx, finish);
       // A waiter that no longer holds its place cannot wake others; wake the next one too.
       if (waiter.orderLive) next = waiter;
     }

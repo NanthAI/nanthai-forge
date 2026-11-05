@@ -3,6 +3,8 @@ import {
   hostedPeersSchema,
   diffHostedSource,
   peersHostedSource,
+  queueHostedSource,
+  hostedQueueSchema,
 } from './hosted-agent-reads.js';
 import { hostedOverlapNotifications } from './mcp-hosted-overlaps.js';
 // SPDX-License-Identifier: Apache-2.0
@@ -198,12 +200,13 @@ export function registerHostedAgentWorkflow(
     'forge_review',
     {
       description:
-        'show: exact Lane/main/state/candidateId file; force permits binary/large bytes. diff: pinned Lane base to saved head, paths/byteBudget/cursor. peers: laneId/path/detail saved overlap evidence; incomplete coverage never proves independence. Unsaved bytes excluded.',
+        'show: exact Lane/main/state/candidateId file; force permits binary/large bytes. diff: pinned Lane base to saved head, paths/byteBudget/cursor. peers: laneId/path/detail saved overlap evidence; incomplete coverage never proves independence. queue: landing queue entries (Lane, Intent, phase, failing tests, recompose count). Unsaved bytes excluded.',
       inputSchema: {
         command: z.union([
           hostedSourceShowSchema,
           hostedDiffSchema.extend({ action: z.literal('diff') }),
           hostedPeersSchema.extend({ action: z.literal('peers') }),
+          hostedQueueSchema.extend({ action: z.literal('queue') }),
         ]),
       },
       annotations: read,
@@ -212,6 +215,7 @@ export function registerHostedAgentWorkflow(
       result(() => {
         if (command.action === 'show') return showHostedSource(transport, command);
         const { action, ...input } = command;
+        if (action === 'queue') return queueHostedSource(transport, input);
         return action === 'diff' ? diffHostedSource(transport, input) : peersHostedSource(transport, input);
       }),
   );

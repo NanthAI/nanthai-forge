@@ -20,6 +20,7 @@ npm run model:landing-queue -- races        # admitted entries: advice, cancel, 
 npm run model:landing-queue -- submission   # desired-source preparation and admission order
 npm run model:landing-queue -- strict       # literal S2, reuse disabled
 npm run model:landing-queue -- six-slots    # seven singleton groups, six occupied slots
+npm run model:landing-queue -- isolation    # suspect naming and one-time unstack (51bbbd00)
 npm run model:landing-queue -- all          # all configurations sequentially
 npm run model:landing-queue -- reuse-core   # expected literal S2 counterexample
 npm run model:landing-queue -- wait         # expected observation counterexample
@@ -28,6 +29,8 @@ npm run model:landing-queue -- cohort
 npm run model:landing-queue -- cohort-fixed
 npm run model:landing-queue -- stranded
 npm run model:landing-queue -- stranded-fixed
+npm run model:landing-queue -- orderwake       # expected liveness violation (c329d191)
+npm run model:landing-queue -- orderwake-fixed
 npm run model:landing-queue -- moving
 npm run model:landing-queue -- reuse
 npm run model:landing-queue -- reuse-fixed
@@ -107,7 +110,7 @@ scope limitation; passing TLC does not verify the omitted implementation.
 | `q.train`, width | `src/hosted-landing-batch.ts:16`, `convex/projectHostedLandingPipeline.ts:23`, `convex/projectHostedLandingWake.ts:28` | Width is 6; a fixed checked tail supplies its predicted head and final receipt. Reusable active record slots, with distinct fresh symbolic receipt names, stand in for historical batch UUIDs. The small bound exercises fewer than six slots; `six-slots.cfg` separately reaches six occupied slots with seven entries, pass/fail invalidation and no unrelated environment branching. |
 | trim rejected members, `Settle` | `convex/projectHostedLandingCohortConflicts.ts:18`, `convex/projectHostedLandingCohortConflicts.ts:39`, `convex/projectHostedLandingBatchFinish.ts:132`, `convex/projectHostedLandingSpeculativeConflict.ts:18` | Rejected members leave the train. Speculative rejection waits for predecessor settlement; exact-main rejection retains a terminal conflict; moved main releases it for solo recomposition. Per-member evidence failures become ordinary terminal reasons. |
 | `Invalidated`, `Rebase` | `convex/projectHostedLandingPipelineInvalidation.ts:24`, `convex/projectHostedLandingBatchStore.ts:267` | Bounded predecessor closure identifies transitive dependents; an ordinary solo recovery can coexist with a later train. Descendants revert to original selections; independent groups remain. Inactive historical batch bodies are forgotten (the active record slot becomes `idle`); no transition reads their outcome. Entry outcomes/reasons, counts and current-main receipt are retained, and fresh symbolic names prevent record-slot reuse from impersonating any referenced old generation. Generation-bound delayed callbacks stutter; source-job callback validation itself is not proved. |
-| `Check`, `SourceFailure`, `Release`, `Fallback` | `convex/projectHostedLandingBatchCheck.ts:43`, `convex/projectHostedLandingBatchSplit.ts:65`, `convex/projectHostedLandingBatchRelease.ts:16`, `convex/projectHostedLandingBatchFallback.ts:18` | Source retry exhaustion terminalizes its members (`convex/projectHostedLandingBatchFinish.ts:108`). Full check pass/test failure/infrastructure failure; infrastructure retries are exactly 2. Split children are reduced to the existing serial solo fallback for these small cohorts. Larger parallel halves, suspect ordering, contract diagnosis and admission-run reuse are not explored. No semantic conflict policy is invented. |
+| `Check`, `SourceFailure`, `Release`, `Fallback` | `convex/projectHostedLandingBatchCheck.ts:43`, `convex/projectHostedLandingBatchSplit.ts:65`, `convex/projectHostedLandingBatchRelease.ts:16`, `convex/projectHostedLandingBatchFallback.ts:18` | Source retry exhaustion terminalizes its members (`convex/projectHostedLandingBatchFinish.ts:108`). Full check pass/test failure/infrastructure failure; infrastructure retries are exactly 2. Split children are reduced to the existing serial solo fallback for these small cohorts. With `Isolation` (`isolation.cfg`), a failure may name suspects (released, never re-stacked onto) and a group stacked on an unpassed predecessor unstacks once (`src/hosted-landing-suspect.ts`). Larger parallel halves, contract diagnosis and admission-run reuse are not explored. No semantic conflict policy is invented. |
 | standalone retry | `convex/projectHostedLandingCheckRetry.ts:14`, `src/hosted-landing-admission.ts:11` | Same two-retry budget and immutable Candidate proof. Individual provider states, cancellation vs timeout classification and complete shard validation collapse into check outcome. |
 | cancel/abandon | `convex/projectHostedLandingCancel.ts:35`, `convex/projectHostedBatchAbandon.ts:35` | One atomic target settlement and peer release; final publication wins or cancellation wins. Abandon discovery pages and Lane lifecycle are hidden. Shared check execution continues independently; only binding authority matters here. |
 | `Claim`, `Publish`, `MoveMain` | `convex/projectHostedLandingControl.ts:293`, `convex/projectHostedLandingBatchPublish.ts:48`, `convex/projectHostedAcceptancePublish.ts:110` | Transactional OCC/CAS is atomic; includes main receipt equality, exact proof and member counters. Policy, contributor access, full shard evidence and registration are assumed validated; this is the automatic agent path, not explicit unchecked owner acceptance (which independently also makes unrestricted literal S2 false). Main contributions are append-only ancestry tokens; legitimate file edits/reverts are outside this property. |
@@ -207,6 +210,22 @@ algorithm drift: changes to these code anchors require manual model review.
    retain order/ready-priority guards when adding queue mechanisms; the separate
    timing-flaky test in the Issue is outside this model.
 
+6. **Lost order wake (c329d191; incident 2026-11-05, fixed).** A passed head B
+   waits in submission order for an older entry A, with no timer while parked.
+   A fails and wakes B's finish exactly once; that one drive fails (Convex OCC
+   exhaustion) and nothing of it commits, so nothing re-drives B and every later
+   passed entry waits on it. `orderwake` finds the liveness counterexample
+   (`HeadLands`); `orderwake-fixed` arms B's stall alarm in the same transaction
+   as the wake (`convex/projectHostedFinishWake.ts`), so a lost drive is re-driven
+   while parked waiters still cost nothing. `tests/hosted-landing-lost-wake.test.mjs`
+   replays the incident against the implementation.
+
+`isolation.cfg` checks the 51bbbd00 isolation semantics in the core model:
+combined-failure evidence may name suspects (released with the reason, never
+re-stacked onto: `NoStackOnSuspect`), and a group stacked on an unpassed
+predecessor unstacks once before it splits. The other core configurations keep
+`Isolation = FALSE` so their bounds and wall times stay comparable.
+
 The litmus configurations intentionally fail properties and the runner reports
 success only when the named expected violation is found. A parse error, unrelated
 invariant failure, timeout, or unexpected pass is a failed run. `*-fixed` models
@@ -224,22 +243,25 @@ or production historical replay is implied.
 
 | Configuration | Generated | Distinct | Java wall time (s) | Result |
 | --- | ---: | ---: | ---: | --- |
-| `small` | 191,567 | 69,393 | 94.370 | Passed |
-| `strict` | 170,707 | 64,056 | 94.187 | Passed |
-| `races` | 91,367 | 29,151 | 15.819 | Passed |
-| `submission` | 955,009 | 306,081 | 280.290 | Passed |
-| `six-slots` | 763 | 763 | 6.846 | Passed |
-| `reuse-core` | 205 | 115 | 1.738 | Expected S2 |
-| `wait` | 4 | 4 | 1.292 | Expected FreshTerminal |
-| `wait-fixed` | 4 | 4 | 0.998 | Passed |
-| `cohort` | 3 | 3 | 0.950 | Expected NoOrphanConflict |
+| `small` | 191,567 | 69,393 | 94.046 | Passed |
+| `strict` | 170,707 | 64,056 | 122.612 | Passed |
+| `races` | 91,367 | 29,151 | 22.937 | Passed |
+| `submission` | 957,613 | 306,753 | 363.927 | Passed |
+| `six-slots` | 3,655 | 3,655 | 9.027 | Passed |
+| `reuse-core` | 205 | 115 | 0.830 | Expected S2 |
+| `isolation` | 415,924 | 107,090 | 290.953 | Passed |
+| `wait` | 4 | 4 | 0.695 | Expected FreshTerminal |
+| `wait-fixed` | 4 | 4 | 0.758 | Passed |
+| `cohort` | 6 | 6 | 0.562 | Expected NoOrphanConflict |
 | `cohort-fixed` | 22 | 22 | 0.731 | Passed; failed/cancelled/landed prefix and independent-main branches |
-| `stranded` | 2 | 2 | 0.850 | Expected liveness violation |
-| `stranded-fixed` | 4 | 4 | 0.649 | Passed |
-| `moving` | 8 | 7 | 0.554 | Expected liveness violation |
-| `reuse` | 4 | 4 | 0.545 | Expected ExactCheckedHead |
-| `reuse-fixed` | 4 | 4 | 0.539 | Passed |
+| `stranded` | 2 | 2 | 0.662 | Expected liveness violation |
+| `stranded-fixed` | 4 | 4 | 0.640 | Passed |
+| `orderwake` | 4 | 4 | 0.630 | Expected liveness violation |
+| `orderwake-fixed` | 6 | 6 | 0.638 | Passed |
+| `moving` | 8 | 7 | 0.613 | Expected liveness violation |
+| `reuse` | 4 | 4 | 0.604 | Expected ExactCheckedHead |
+| `reuse-fixed` | 4 | 4 | 0.637 | Passed |
 
-All 15 configurations matched their expected outcomes on the registered Java 25.0.3 JDK. The five positive queue configurations fully exhausted their state graphs; the negative cases stopped at the named counterexample. The default remained below five minutes (94.370 s).
+All 18 configurations matched their expected outcomes on the registered Java 25.0.3 JDK (2026-11-05, Lane fefd80ee). The six positive queue configurations fully exhausted their state graphs; the negative cases stopped at the named counterexample. The default remained below five minutes (94.046 s); `isolation` took 290.953 s.
 
 Incomplete calibration explorations with allocation-history counters and arbitrary three-entry admission interleavings reached the five-minute limit and were not counted as passing checks. The delivered configurations use fresh symbolic names and the admission bounds described above; those incomplete variants are not a proof of broader bounds. No live provider replay, full six-incident historical replay, or proof of the source merge/fence implementation was performed. Peak resident memory was not measured; the Java heap was limited to 2 GiB. Disk stayed above the 40 GB reserve.

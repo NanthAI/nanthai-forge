@@ -131,6 +131,15 @@ test('failed survivor cohort recomposes parked rejection on actual main without 
   assert.equal(current(f, 3).phase, 'queued');
   await f.fail(cohort.runId);
   await drain(f);
+  // 51bbbd00: the failing file names no member and the predecessor has not
+  // passed, so the stacked cohort first rechecks once on current main without it.
+  const unstacked = batches(f).find(batch => batch.id === cohort.id);
+  assert.equal(unstacked.transition?.code, 'STACKED_FAILURE_UNSTACKED');
+  assert.equal(unstacked.predecessor, undefined);
+  assert.notEqual(unstacked.runId, cohort.runId);
+  // Failing again on its own base, it splits as before.
+  await f.fail(unstacked.runId);
+  await drain(f);
   const rejected = current(f, 3);
   assert.equal(batches(f).find(batch => batch.id === cohort.id).phase, 'split');
   assert.notEqual(rejected.error?.code, 'COMPOSITION_CONFLICT', 'failed survivors were never main');

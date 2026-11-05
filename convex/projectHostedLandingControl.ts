@@ -1,3 +1,4 @@
+import { passedAlone } from '../src/hosted-landing-suspect';
 import { loadBatch } from './projectHostedLandingBatchStore';
 import { releaseUnstartedBatchForPriority } from './projectHostedLandingBatchPriority';
 import { prepareLandingCheck } from './projectHostedLandingBatchCheck';
@@ -247,6 +248,10 @@ export async function advanceLandingQueue(ctx: MutationCtx, claim: LandingClaim,
     observation = landingObservation('failed', cause.code);
     error = { code: cause.code, message: cause.message };
   }
+  // Its own exact check passed: suspicion from a combined failure ends here (a
+  // later main-race recheck holds order and can be stacked on again), and a
+  // shared failure that did not reproduce alone is reported as such.
+  if (phase === 'ready' && state.batchDiagnostic) state.batchDiagnostic = passedAlone(state.batchDiagnostic);
   if (phase === 'ready')
     state.timing = {
       submittedAt: state.at,
@@ -310,8 +315,9 @@ export async function claimReadyLanding(
   )
     return { ...input, token: queue.lease!.token };
   // Submission order: an older live entry takes main first. The waiter keeps its
-  // passed proof and no timer, not even its stall alarm: the older entry owns
-  // progress and its own alarm, and its exit from the order wakes this one.
+  // passed proof and no timer while parked: the older entry owns progress, and
+  // its exit from the order wakes this one and arms its stall alarm in the same
+  // transaction (incident c329d191: that single wake drive can be lost).
   const ahead = await olderLandingAhead(ctx, row, state, now);
   if (ahead) {
     if (row.alarm) await ctx.scheduler.cancel(row.alarm.taskId);

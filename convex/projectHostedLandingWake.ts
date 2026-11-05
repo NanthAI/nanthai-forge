@@ -21,6 +21,7 @@ import { nextLandingRow, nextReadyLandingRow, orderHostedLandingRows } from './p
 import { loadBatch } from './projectHostedLandingBatchState';
 import { pipelinePredecessor, invalidatePipeline } from './projectHostedLandingPipeline';
 import { HOSTED_TRAIN_HOLD_MS } from '../src/hosted-landing-batch';
+import { progressWakeDue } from '../src/landing-stall';
 
 /** Retain a bounded stack while source/check IO runs. A fixed tail opens the
  * next speculative slot; publication still follows queue order. Dead composes
@@ -270,6 +271,16 @@ async function wakeLandingCheckPage(
         woken = true;
       }
       continue;
+    }
+    // Throttle non-terminal progress: skipping leaves the row unconsumed, so the
+    // next event (or the terminal one) still reaches it. The run is read only
+    // when progress reached the queue within the window.
+    if (
+      row.phase === 'checking' &&
+      !progressWakeDue(hostedLandingStateSchema.parse(JSON.parse(row.value)).timing?.ciProgressAt, Date.now())
+    ) {
+      run ??= (await loadHostedCheck(ctx, input)).run;
+      if (!hostedCheckTerminal(run)) continue;
     }
     woken = true;
     await ctx.db.patch(row._id, { checkWakeVersion: version, runnable: true });

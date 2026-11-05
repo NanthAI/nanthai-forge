@@ -75,8 +75,17 @@ test('FAILED singleton after progress retires shared generation and delivers can
   const retired = JSON.parse(
     [...f.tables.projectHostedLandingBatches.values()].find(row => row.batchId === singleton.id).value,
   );
-  assert.equal(retired.phase, 'split', 'FAILED is consumed instead of stranded');
-  assert(states(f).find(state => state.id === member).batchSolo);
+  // FAILED is consumed instead of stranded. Its own changes explain no failing
+  // file and its predecessor has not passed, so the singleton recomposes once on
+  // main without it (51bbbd00 unstack) rather than splitting into a solo that
+  // costs the same one recheck.
+  assert.equal(
+    retired.transition?.code,
+    'STACKED_FAILURE_UNSTACKED',
+    'FAILED is consumed instead of stranded',
+  );
+  assert.notEqual(retired.runId, run.id, 'the failed shared run is retired');
+  assert.equal(retired.predecessor, undefined, 'recomposed on main, not on the unpassed predecessor');
   await f.rawChecks.pass(active.find(current => current.id !== run.id));
   await drainActive(f);
   for (

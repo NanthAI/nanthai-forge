@@ -1,6 +1,6 @@
 --------------------------- MODULE LandingQueue ---------------------------
 EXTENDS Naturals, FiniteSets, Sequences, TLC
-CONSTANTS N, Cohort, Width, CrashBound, MoveBound, AllowCancel, AllowAdvice, AllowReuse, InitiallyQueued
+CONSTANTS N, Cohort, Width, CrashBound, MoveBound, AllowCancel, AllowAdvice, AllowReuse, InitiallyQueued, Isolation
 Entries == 1..N
 SingletonCohorts == [e \in Entries |-> e]
 SmallCohorts == [e \in Entries |-> IF e <= 2 THEN 1 ELSE 2]
@@ -23,6 +23,7 @@ Init == /\ q = [phase |-> [e \in Entries |-> IF InitiallyQueued THEN "queued" EL
                 rank |-> [e \in Entries |-> IF InitiallyQueued THEN e ELSE 0],
                 sequence |-> IF InitiallyQueued THEN N ELSE 0,
                 reason |-> [e \in Entries |-> ""], solo |-> {}, advice |-> {},
+                suspect |-> {}, unstacked |-> {},
                 batches |-> [g \in Entries |-> Empty], train |-> <<>>]
         /\ main = {} /\ stamp = 0 /\ moves = 0
         /\ counts = [e \in Entries |-> 0] /\ audit = [cas |-> TRUE, exact |-> TRUE, authorized |-> TRUE]
@@ -40,7 +41,12 @@ UsedReceipts == {stamp} \cup {q.batches[g].rev : g \in Active}
 FreshReceipt == Min(ReceiptNames \ UsedReceipts)
 Free == {e \in Entries : q.phase[e] = "queued" /\
                          ~\E g \in Active : e \in q.batches[g].members}
-TrainTail == IF Len(q.train) = 0 THEN 0 ELSE q.train[Len(q.train)]
+\* 51bbbd00: entries named by combined-failure evidence whose own check has not
+\* passed. They still check and may land, but never serve as a speculative base
+\* and never hold queue order against later entries.
+Suspects == {e \in Live : e \in q.suspect /\ q.phase[e] # "ready"}
+CleanTrain == SelectSeq(q.train, LAMBDA g : q.batches[g].members \cap Suspects = {})
+TrainTail == IF Len(CleanTrain) = 0 THEN 0 ELSE CleanTrain[Len(CleanTrain)]
 PredPending(g) == LET b == q.batches[g] IN
   IF b.pred = 0 THEN FALSE ELSE
     q.batches[b.pred].phase \in {"checking", "ready"} /\
@@ -125,33 +131,55 @@ Settle(g) ==
           !.batches[g] = IF b.included = {} THEN Empty ELSE
             [b EXCEPT !.rejected = {}, !.members = b.included]]
   /\ UNCHANGED <<main, stamp, moves, counts, audit, running, crashes, claim, fence>>
-Released(g, reason) ==
+\* A failed one-member group with no predecessor on exact main is its member's
+\* own exact check (settle); any other test failure splits, and attribution may
+\* name any subset of the pending members as suspects.
+Released(g, reason, named) ==
   LET b == q.batches[g]
       pending == b.members \cap Live
-      solo == Cardinality(b.members) = 1
+      solo == Cardinality(b.members) = 1 /\ b.pred = 0 /\ Exact(g)
       dead == reason = "SOURCE_RETRY_EXHAUSTED" \/ reason = "CHECK_NOT_PASSED" \/ (reason = "CHECK_FAILED" /\ solo)
       invalid == Invalidated(g)
   IN [invalid EXCEPT !.batches[g] = Empty,
-        !.solo = @ \cup pending,
+        !.solo = @ \cup pending, !.suspect = (@ \ b.members) \cup (named \cap pending),
         !.phase = [e \in Entries |-> IF e \in pending THEN
                   IF dead THEN "terminal-failed" ELSE "queued" ELSE invalid.phase[e]],
         !.reason = [e \in Entries |-> IF e \in pending /\ dead THEN reason ELSE q.reason[e]],
         !.train = Keep(@, Range(@) \ {g})]
-Release(g, reason) == /\ q' = Released(g, reason) /\ claim' = 0
+Release(g, reason) == /\ q' = Released(g, reason, {}) /\ claim' = 0
      /\ UNCHANGED <<main, stamp, moves, counts, audit, running, crashes, fence>>
+CanUnstack(g) == LET b == q.batches[g] IN
+  b.pred # 0 /\ q.batches[b.pred].phase \in {"composing", "checking"} /\ b.members \cap q.unstacked = {}
+Unstack(g) ==
+  LET b == q.batches[g] invalid == Invalidated(g) live == b.members \cap Live IN
+  /\ q' = [invalid EXCEPT !.batches[g] = [Reset(b) EXCEPT !.base = main, !.rev = stamp,
+              !.members = live, !.included = live, !.receipt = FreshReceipt],
+            !.unstacked = @ \cup live,
+            !.train = IF g \in Range(@) THEN @ ELSE Append(@, g),
+            !.phase = [e \in Entries |-> IF e \in live THEN "queued" ELSE invalid.phase[e]]]
+  /\ UNCHANGED <<main, stamp, moves, counts, audit, running, crashes, claim, fence>>
 Check(g, outcome) ==
   /\ running /\ q.batches[g].phase = "checking" /\ q.batches[g].included # {}
   /\ outcome \in {"pass", "test", "infra"}
   /\ LET b == q.batches[g] IN
      IF outcome = "pass" THEN
        /\ q' = [q EXCEPT !.batches[g].phase = "ready", !.batches[g].proof = Proof(b),
+                 !.suspect = @ \ b.included,
                  !.phase = [e \in Entries |-> IF e \in b.included THEN "ready" ELSE q.phase[e]]]
        /\ UNCHANGED <<main, stamp, moves, counts, audit, running, crashes, claim, fence>>
      ELSE IF outcome = "infra" /\ b.retries < 2 THEN
        /\ q' = [Invalidated(g) EXCEPT !.batches[g].retries = @ + 1,
                  !.batches[g].receipt = FreshReceipt]
        /\ UNCHANGED <<main, stamp, moves, counts, audit, running, crashes, claim, fence>>
-     ELSE Release(g, IF outcome = "infra" THEN "CHECK_NOT_PASSED" ELSE "CHECK_FAILED")
+     ELSE IF outcome = "infra" THEN Release(g, "CHECK_NOT_PASSED")
+     \* No member named: a stacked group below an unpassed predecessor may recompose
+     \* once on main without it. Any failure may instead split with any attribution
+     \* (the code also splits members that failed before), a superset of the code.
+     \* Isolation = FALSE keeps the pre-51bbbd00 bounds (split naming nobody).
+     ELSE \/ /\ Isolation /\ CanUnstack(g) /\ Unstack(g)
+          \/ \E named \in (IF Isolation THEN SUBSET (b.members \cap Live) ELSE {{}}) :
+               /\ q' = Released(g, "CHECK_FAILED", named) /\ claim' = 0
+               /\ UNCHANGED <<main, stamp, moves, counts, audit, running, crashes, fence>>
 SourceFailure(g) == /\ running /\ q.batches[g].phase = "composing"
                     /\ Release(g, "SOURCE_RETRY_EXHAUSTED")
 Fallback(g) == /\ running /\ g \in Active /\ claim = 0 /\ ~(q.batches[g].members \subseteq q.solo)
@@ -167,7 +195,8 @@ Rebase(g) ==
   /\ UNCHANGED <<main, stamp, moves, counts, audit, running, crashes, claim, fence>>
 Claim(g) == /\ running /\ claim = 0 /\ q.batches[g].phase = "ready"
             /\ q.batches[g].rejected = {} /\ PredOK(g) /\ Exact(g)
-            /\ ~\E e \in QueueLive \ q.batches[g].members : q.rank[e] < q.rank[Earliest(q.batches[g].included)]
+            /\ ~\E e \in QueueLive \ (q.batches[g].members \cup Suspects) :
+                  q.rank[e] < q.rank[Earliest(q.batches[g].included)]
             /\ claim' = g
             /\ UNCHANGED <<q, main, stamp, moves, counts, audit, running, crashes, fence>>
 Publish(g) ==
@@ -192,7 +221,7 @@ Cancel(e) == /\ AllowCancel /\ running /\ claim = 0 /\ e \in Live
 \* Cancel/abandon and peer release share one transaction.
 CancelBatch(g, e) == /\ AllowCancel /\ running /\ claim = 0 /\ g \in Active
                     /\ e \in q.batches[g].members \cap Live
-                    /\ q' = [Released(g, "CANCEL_RELEASE") EXCEPT
+                    /\ q' = [Released(g, "CANCEL_RELEASE", {}) EXCEPT
                               !.phase[e] = "terminal-failed", !.reason[e] = "LANDING_CANCELLED"]
                     /\ claim' = 0
                     /\ UNCHANGED <<main, stamp, moves, counts, audit, running, crashes, fence>>
@@ -244,6 +273,7 @@ TypeOK == /\ main \subseteq Entries \cup {0} /\ stamp \in ReceiptNames
           /\ \A e \in Entries : q.phase[e] \in EntryPhases /\ counts[e] \in 0..N
           /\ Len(q.train) <= Width /\ claim \in Entries \cup {0}
           /\ \A g \in Entries : q.batches[g].phase \in BatchPhases
+          /\ q.suspect \subseteq Entries /\ q.unstacked \subseteq Entries
 S1 == audit.cas /\ {e \in Entries : counts[e] > 0} \subseteq main
 S2 == audit.exact
 AuthorizedEvidence == audit.authorized
@@ -254,6 +284,9 @@ UniqueReservations == Cardinality({q.batches[g].receipt : g \in Active}) = Cardi
                       /\ \A g \in Active : q.batches[g].receipt # stamp
 Membership == \A e \in Live : Cardinality({g \in Active : e \in q.batches[g].members}) <= 1
 TrainSound == Cardinality(Range(q.train)) = Len(q.train) /\ Range(q.train) \subseteq Active
+\* No live speculative group is stacked on a suspect's unproven head.
+NoStackOnSuspect == \A g \in Active :
+  q.batches[g].pred # 0 => q.batches[q.batches[g].pred].members \cap Suspects = {}
 Reasons == \A e \in Entries : q.phase[e] \in {"terminal-failed", "needs-action"} => q.reason[e] # ""
 L1 == \A e \in Entries : (q.phase[e] # "new") ~> (q.phase[e] \in Terminal)
 L2 == \A e \in Entries : (e \in Live) ~> (e \notin Live)

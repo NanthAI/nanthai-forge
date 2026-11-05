@@ -77,6 +77,7 @@ export const namedReads = [
   'show',
   'brief',
   'peers',
+  'queue',
   'handoff-read',
   'making-of',
   'metrics',

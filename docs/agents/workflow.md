@@ -99,6 +99,7 @@ Include `overlapAnswer:"accept-order"` in `land --save` to answer the pending no
 | `comment-planning-item` | `itemId, authorLabel?, text, operationId?` |
 | `diff` | `laneId?, paths?, byteBudget?, cursor?` |
 | `peers` | `laneId?, path?, detail?` |
+| `queue` | `limit?` |
 | `wait` | `runId?, operationIds?, cursor?, until?, timeoutSeconds?` |
 | `show` | `laneId?, state?, candidateId?, expected?, channel?, path, force?` |
 <!-- hosted-agent-contract:end -->

@@ -12,6 +12,7 @@ import {
 import { type BatchIdentity, type LandingBatch } from './projectHostedLandingBatchState';
 import { hostedLandingStateSchema } from '../src/hosted-landing';
 import { hostedBatching, hostedPipelineWidth } from '../src/hosted-landing-batch';
+import { landingSuspect } from '../src/hosted-landing-suspect';
 import { invalidatePipeline as retirePipeline } from './projectHostedLandingPipelineInvalidation';
 
 export const livePipelineRow = (row: LandingRow | null): row is LandingRow =>
@@ -20,7 +21,7 @@ export const livePipelineRow = (row: LandingRow | null): row is LandingRow =>
 /** Read only the bounded retained train, never the active queue or history. A
  * tail becomes a base only after its exact head and acceptance IDs are fixed. */
 export async function pipelinePredecessor(ctx: MutationCtx, input: LandingChannel, selected?: LandingRow[]) {
-  const rows =
+  const live =
     selected ??
     (
       await Promise.all(
@@ -29,17 +30,17 @@ export async function pipelinePredecessor(ctx: MutationCtx, input: LandingChanne
         ) ?? [],
       )
     ).filter(livePipelineRow);
+  const states = live.map(row => hostedLandingStateSchema.parse(JSON.parse(row.value)));
+  // A suspect (51bbbd00) still checks, but nothing stacks on its unproven head.
+  // Its descendants retired when it became suspect, so the rest of the train
+  // never contains its changes. It still occupies an execution slot below.
+  const rows = live.filter((_, index) => !landingSuspect(states[index]!));
   if (!rows.length || rows.some(row => row.hold || (row.phase !== 'checking' && row.phase !== 'ready')))
     return undefined;
   const tail = rows.at(-1)!;
   if (tail.pipelineRetiredAttemptId === tail.attemptId) return undefined;
   const attempt = await loadLandingAttempt(ctx, { projectId: input.projectId, attemptId: tail.attemptId });
-  const groups = new Set(
-    rows.map(row => {
-      const state = hostedLandingStateSchema.parse(JSON.parse(row.value));
-      return state.batchId ?? state.id;
-    }),
-  );
+  const groups = new Set(states.map(state => state.batchId ?? state.id));
   if (
     !hostedBatching(attempt.policy) ||
     groups.size >= hostedPipelineWidth(attempt.policy) ||

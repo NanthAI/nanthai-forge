@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
 import type { semanticVerdict } from './intent-semantic-conflict.js';
+import { memberExplainsFailure, repeatOffender } from './hosted-landing-suspect.js';
 
 export const batchMemberDetailSchema = z
   .object({
@@ -23,6 +24,8 @@ export const batchFailureSchema = z
         .strict(),
     ),
     overBudgetPairs: z.array(budgetPair),
+    /** The failing step when no test file failed (e.g. a static build budget). */
+    step: z.object({ job: z.string(), excerpt: z.string() }).strict().optional(),
   })
   .strict();
 export const batchDiagnosticSchema = z
@@ -55,6 +58,9 @@ export function diagnoseBatchFailure(
     testFiles?: { failed: { file: string }[] } | undefined;
   },
   semantic: ReturnType<typeof semanticVerdict>,
+  /** Failed files each member's previous combined failure retained, if any. */
+  previous: Readonly<Record<string, readonly string[]>> = {},
+  step?: { job: string; excerpt: string } | null,
 ): BatchFailure {
   const reports = run.contractReports ?? {};
   const failedTests = [
@@ -69,13 +75,12 @@ export function diagnoseBatchFailure(
     runId: run.id,
     failedTests,
     suspects: members
-      .filter(member =>
-        failedTests.some(
-          file =>
-            member.tests.includes(file) ||
-            member.paths.includes(file) ||
-            member.paths.some(path => reports[file]?.firstError?.includes(path)),
-        ),
+      .filter(
+        member =>
+          failedTests.some(file => memberExplainsFailure(member, file, reports[file]?.firstError)) ||
+          // A failing step attributes only when its excerpt names a changed path.
+          (step && !failedTests.length && memberExplainsFailure(member, '', step.excerpt)) ||
+          repeatOffender(previous[member.submissionId], failedTests),
       )
       .map(member => member.submissionId),
     pairs: semantic.conflicts.flatMap(conflict => {
@@ -91,6 +96,7 @@ export function diagnoseBatchFailure(
         : [];
     }),
     overBudgetPairs: semantic.overBudgetPairs,
+    ...(step && !failedTests.length ? { step } : {}),
   };
 }
 export function batchMemberDiagnostic(
@@ -140,6 +146,7 @@ export function batchMemberDiagnostic(
         : cause
           ? `Shared batch transitioned to individual fallback: ${cause.code}: ${cause.message}`
           : 'The cohort transitioned to individual fallback; the legacy record has no retained cause.',
+    failure?.step ? `No test file failed; failing step (${failure.step.job}): ${failure.step.excerpt}.` : '',
     likelyCulprit
       ? 'Likely member: failing files match this member changed paths or declared contract tests.'
       : split

@@ -1,7 +1,7 @@
 import { cliBuildCommit } from './cli-installation.js';
 import { cloneFreshness, mainCheckoutTransport, pullHostedProject } from './hosted-pull.js';
 import { readHostedMainSelection } from './hosted-main-marker.js';
-import { diffHostedSource, peersHostedSource } from './hosted-agent-reads.js';
+import { diffHostedSource, peersHostedSource, queueHostedSource } from './hosted-agent-reads.js';
 import { hostedObservationContinuation } from './hosted-agent-finish-result.js';
 // SPDX-License-Identifier: Apache-2.0
 import {
@@ -100,6 +100,7 @@ import {
 const quietActions = new Set([
   'diff',
   'peers',
+  'queue',
   'capabilities',
   'metrics',
   'check-settings',
@@ -144,7 +145,7 @@ export type HostedAgentResponse = {
   cliCommit?: string;
   schema: 1;
   transport: 'hosted';
-  action: HostedAgentAction | 'diff' | 'peers';
+  action: HostedAgentAction | 'diff' | 'peers' | 'queue';
   sourceContext?: unknown;
   operationId: string | null;
   resolved: { operationId: string } | null;
@@ -210,6 +211,15 @@ export class HostedAgentTransport {
         operationId: null,
         resolved: null,
         ...(await diffHostedSource(this, input)),
+      };
+    if (requestedAction === 'queue')
+      return {
+        schema: 1,
+        transport: 'hosted',
+        action: 'queue',
+        operationId: null,
+        resolved: null,
+        result: await queueHostedSource(this, input),
       };
     if (requestedAction === 'peers')
       return {

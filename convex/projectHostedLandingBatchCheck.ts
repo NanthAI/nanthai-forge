@@ -1,6 +1,8 @@
 import { withQueueStatusBatch } from './projectHostedQueueStatusWrite';
 import { diagnoseBatchFailure } from '../src/hosted-batch-diagnosis';
 import { advanceBatchFallback } from './projectHostedLandingBatchFallback';
+import { isolateFailedBatch } from './projectHostedLandingIsolation';
+import { failingStep, passedAlone } from '../src/hosted-landing-suspect';
 import { checkFailureKind } from '../src/hosted-landing-admission';
 import { loneAdmission } from './projectHostedLandingAdmission';
 import {
@@ -104,6 +106,7 @@ async function prepareLandingCheckOnce(
                   : {}),
                 phase: 'ready',
                 version: current.version + 1,
+                ...(current.batchDiagnostic ? { batchDiagnostic: passedAlone(current.batchDiagnostic) } : {}),
                 ...(run.testFiles ? { testFiles: run.testFiles } : {}),
                 observation: landingObservation('queued'),
                 error: null,
@@ -134,7 +137,45 @@ async function prepareLandingCheckOnce(
               return { ...member, paths: candidate.governance?.paths ?? member.paths };
             }),
           );
-          await splitLandingBatch(ctx, key, batch, diagnoseBatchFailure(originals, run, semantic));
+          // Repeat-offender evidence: each member's previous combined failure.
+          const previous: Record<string, string[]> = {};
+          for (const member of details) {
+            const { state: current } = await loadLanding(ctx, {
+              projectId: claim.projectId,
+              submissionId: member.submissionId,
+            });
+            const prior = current.batchDiagnostic;
+            if (prior?.sharedRunId && prior.sharedRunId !== run.id)
+              previous[member.submissionId] = prior.failedTests;
+          }
+          // No failing test file: name the failing step from the sealed job
+          // summaries (bounded, failure-only, no fetch). Wave 1: build:web budget.
+          const step =
+            run.testFiles?.failed.length ||
+            Object.values(run.contractReports ?? {}).some(report => report.failed)
+              ? null
+              : failingStep(
+                  await ctx.db
+                    .query('projectHostedOutputStreams')
+                    .withIndex('by_project_and_run', q =>
+                      q.eq('projectId', claim.projectId).eq('runId', run.id),
+                    )
+                    .take(64),
+                  run.plan?.shardCount,
+                );
+          const failure = diagnoseBatchFailure(originals, run, semantic, previous, step);
+          if (
+            !(await isolateFailedBatch(
+              ctx,
+              key,
+              batch,
+              failure,
+              attempt,
+              run,
+              semantic.conflicts.length > 0 || Boolean(semantic.overBudget),
+            ))
+          )
+            await splitLandingBatch(ctx, key, batch, failure);
         }
       } else {
         // Progress may have made this request temporarily queued. Evaluation
