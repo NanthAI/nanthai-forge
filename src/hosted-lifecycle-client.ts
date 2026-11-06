@@ -90,7 +90,12 @@ export async function transitionHostedLane(
       request: unknown | null;
       selection: HostedLaneCheckoutMarker['selection'];
       kept?: ReturnType<typeof keepHostedEditsPatch>;
-    } = { identity, saveOperationId: randomUUID(), request: null, selection: marker.selection };
+    } = {
+      identity,
+      saveOperationId: randomUUID(),
+      request: null,
+      selection: marker.selection,
+    };
     durableReplace(path, canonicalPayload(saved));
     return saved;
   });
@@ -240,12 +245,13 @@ export async function transitionHostedLane(
   } catch (error) {
     // The server refused the retained pins (the Lane moved after this request was journaled: a sync draft's
     // landing, another save) and began no operation, so replaying it would repeat WORK_STALE forever (23429bac).
-    // An abandon with no save-first child and no unsaved edits holds nothing the pins protect: pin the Lane as
-    // the server has it now and send the same operation once more.
+    // A lifecycle command with no save-first child and no unsaved edits holds nothing the pins protect (abandon
+    // keeps the saved head; reopen and complete change only lifecycle state, never source bytes): pin the Lane as
+    // the server has it now and send the same operation once more. A reopen of an accepted Lane lands here when
+    // acceptance, a pin or a sync moved the Lane past this root's marker (f98f0f4b). Healthy calls add no read.
     const target = request.target;
     if (
       hostedActionError(error, 'lifecycle').code !== 'WORK_STALE' ||
-      request.action !== 'abandon' ||
       target.kind !== 'lane' ||
       target.saveOperationId !== null ||
       target.dirty
@@ -275,7 +281,11 @@ export async function transitionHostedLane(
     workLocked(lock, () =>
       durableReplace(
         path,
-        canonicalPayload({ ...original, request, ...(original.kept ? { kept: original.kept } : {}) }),
+        canonicalPayload({
+          ...original,
+          request,
+          ...(original.kept ? { kept: original.kept } : {}),
+        }),
       ),
     );
     result = await transition();
@@ -290,14 +300,19 @@ export async function transitionHostedLane(
       const marker = readHostedLaneCheckout(root);
       if (!marker || marker.selection.laneId !== target.laneId) return;
       const selection = marker.selection;
+      // Same source (head and sourceVersion) with older Lane versions: only metadata moved (acceptance, a pin, this
+      // transition), so the marker advances. A newer source or a later marker is never rewound or overwritten.
       if (
         selection.head !== lane.head ||
-        selection.version !== lane.version - 1 ||
         selection.sourceVersion !== lane.sourceVersion ||
-        selection.lifecycleVersion !== lane.lifecycleVersion - 1
+        selection.version >= lane.version ||
+        selection.lifecycleVersion >= lane.lifecycleVersion
       )
         return;
-      const next = hostedLaneCheckoutMarkerSchema.parse({ ...marker, selection: { ...selection, ...lane } });
+      const next = hostedLaneCheckoutMarkerSchema.parse({
+        ...marker,
+        selection: { ...selection, ...lane },
+      });
       durableReplace(join(root, '.forge/hosted-lane.json'), JSON.stringify(next));
     });
   }
@@ -309,5 +324,9 @@ export async function transitionHostedLane(
       progress: childProgress,
       lifecycle: result,
     };
-  return { phase: 'lifecycle' as const, result, ...(original.kept ? { kept: original.kept } : {}) };
+  return {
+    phase: 'lifecycle' as const,
+    result,
+    ...(original.kept ? { kept: original.kept } : {}),
+  };
 }
