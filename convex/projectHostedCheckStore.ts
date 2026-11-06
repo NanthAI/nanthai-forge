@@ -102,6 +102,8 @@ export async function loadHostedCheck(ctx: QueryCtx | MutationCtx, input: CheckI
   );
   return { row, run };
 }
+/** A run row already loaded (and write-authorized) in this transaction. */
+export type LoadedHostedCheck = Awaited<ReturnType<typeof writableHostedCheck>>;
 export async function writableHostedCheck(ctx: MutationCtx, input: CheckIdentity) {
   const selected = await loadHostedCheck(ctx, input);
   await hostedWriteProject(ctx, input.projectId, selected.run.actor, selected.run.request.authorityEpoch);

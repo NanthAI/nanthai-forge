@@ -9,6 +9,7 @@ import type { Id } from './_generated/dataModel';
 import {
   assertHostedCheckActive,
   writableHostedCheck,
+  type LoadedHostedCheck,
   writeHostedCheck,
   completeHostedCheck,
 } from './projectHostedCheckStore';
@@ -33,16 +34,21 @@ export async function receiveHostedCheckCallback(
     signature: string;
     /** Runs on a new (non-replayed) callback just before the one run write. */
     beforeWrite?: (run: HostedCheckRun) => Promise<void>;
+    /** The caller's run row from this same transaction; skips a second read of it. */
+    loaded?: LoadedHostedCheck;
   },
   key: (keyId: string) => string,
   now = Date.now(),
 ) {
   const callback = hostedCheckCallbackSchema.parse(input.callback);
   invariant(callback.projectId === input.projectId, 'EVIDENCE_CHANGED', 'Callback project differs.');
-  const { row, run } = await writableHostedCheck(ctx, {
-    projectId: input.projectId,
-    runId: callback.runId,
-  });
+  const { row, run } =
+    input.loaded ??
+    (await writableHostedCheck(ctx, {
+      projectId: input.projectId,
+      runId: callback.runId,
+    }));
+  invariant(run.id === callback.runId, 'EVIDENCE_CHANGED', 'Callback run differs.');
   verifyHostedCheckCallback(callback, input.signature, key(run.keyId));
   assertHostedCheckActive(run);
   const plan = run.plan,

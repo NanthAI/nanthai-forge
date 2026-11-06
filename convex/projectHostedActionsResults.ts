@@ -31,13 +31,15 @@ export const output = internalMutation({
   },
   returns: v.any(),
   handler: async (ctx, input) => {
-    const { run } = await actionsSession(ctx, input),
+    const selected = await actionsSession(ctx, input),
+      { run } = selected,
       log = directLogSchema.parse(JSON.parse(input.log));
     const entries = directOutput(run, input.index, log, outputSigningKey(run.keyId));
     await authorizeOutputWindow(
       ctx,
       entries.map(entry => ({ ...entry, projectId: input.projectId })),
       outputSigningKey,
+      selected,
     );
     const target = await presignPut(r2Config(), outputKey(input.projectId, run.id, log.object), {
       digest: log.object.sha256,
@@ -79,6 +81,7 @@ export const result = internalMutation({
           projectId: input.projectId,
         })),
         outputSigningKey,
+        selected,
       );
     const execution = shardExecution(result.execution, run.at, Date.now());
     const callback = directCallback(run, {
@@ -113,6 +116,7 @@ export const result = internalMutation({
         callback,
         signature: signHostedCheckCallback(callback, outputSigningKey(run.keyId)),
         beforeWrite: current => ((recorded = true), record(current)),
+        loaded: selected,
       },
       outputSigningKey,
     );

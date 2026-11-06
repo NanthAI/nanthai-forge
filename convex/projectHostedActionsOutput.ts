@@ -36,13 +36,21 @@ export const apply = internalMutation({
   args: { ...sessionArgs, root: v.string() },
   returns: v.null(),
   handler: async (ctx, input) => {
-    const { run } = await actionsSession(ctx, input);
+    const selected = await actionsSession(ctx, input),
+      { run } = selected;
     const root = JSON.parse(input.root);
     const message = outputMessage(run, { kind: 'final', root });
     await commitHostedOutputWindow(
       ctx,
-      [{ projectId: input.projectId, message, signature: signOutput(message, outputSigningKey(run.keyId)) }],
+      [
+        {
+          projectId: input.projectId,
+          message,
+          signature: signOutput(message, outputSigningKey(run.keyId)),
+        },
+      ],
       outputSigningKey,
+      selected,
     );
     invariant(
       canonicalPayload(root) === input.root,

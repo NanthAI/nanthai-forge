@@ -3,7 +3,7 @@ import { retainLogExpiry } from './projectCheckLogRetention';
 // SPDX-License-Identifier: Apache-2.0
 import type { QueryCtx, MutationCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
-import { writableHostedCheck } from './projectHostedCheckStore';
+import { writableHostedCheck, type LoadedHostedCheck } from './projectHostedCheckStore';
 import {
   outputMessageSchema,
   outputStreamId,
@@ -46,7 +46,11 @@ export const outputChunk = (
  * after terminal check results and again after external HEAD verification. */
 async function validateOutput(
   ctx: MutationCtx,
-  input: { projectId: Id<'hostedProjects'>; message: unknown; signature: string },
+  input: {
+    projectId: Id<'hostedProjects'>;
+    message: unknown;
+    signature: string;
+  },
   key: (id: string) => string,
   run: HostedCheckRun,
 ) {
@@ -123,7 +127,11 @@ async function validateOutput(
   );
   return message;
 }
-type SignedInput = { projectId: Id<'hostedProjects'>; message: unknown; signature: string };
+type SignedInput = {
+  projectId: Id<'hostedProjects'>;
+  message: unknown;
+  signature: string;
+};
 export async function authorizeOutput(ctx: MutationCtx, input: SignedInput, key: (id: string) => string) {
   return (await authorizeOutputWindow(ctx, [input], key))[0]!;
 }
@@ -133,11 +141,23 @@ export async function authorizeOutputWindow(
   ctx: MutationCtx,
   inputs: SignedInput[],
   key: (id: string) => string,
+  /** The caller's run row from this same transaction; skips a second read of it. */
+  loaded?: LoadedHostedCheck,
 ) {
   invariant(inputs.length > 0 && inputs.length <= 100, 'BAD_ARGUMENT', 'Select a bounded output window.');
   const first = inputs[0]!,
     message = outputMessageSchema.parse(first.message);
-  const { run } = await writableHostedCheck(ctx, { projectId: first.projectId, runId: message.runId });
+  const { run } =
+    loaded ??
+    (await writableHostedCheck(ctx, {
+      projectId: first.projectId,
+      runId: message.runId,
+    }));
+  invariant(
+    run.projectId === first.projectId,
+    'EVIDENCE_CHANGED',
+    'An output window belongs to one exact project and run.',
+  );
   const messages = [];
   for (const input of inputs) {
     invariant(
@@ -156,8 +176,9 @@ export async function commitHostedOutputWindow(
   ctx: MutationCtx,
   inputs: SignedInput[],
   key: (id: string) => string,
+  loaded?: LoadedHostedCheck,
 ) {
-  const messages = await authorizeOutputWindow(ctx, inputs, key),
+  const messages = await authorizeOutputWindow(ctx, inputs, key, loaded),
     receipts = [];
   for (const message of messages)
     receipts.push(await commitOutputMessage(ctx, inputs[0]!.projectId, message, true));
@@ -262,7 +283,11 @@ async function commitOutputMessage(
       head.revision++;
       head.chunks++;
       head.bytes += chunk.object.size;
-      head.chain = checkPin({ previous: head.chain, revision: head.revision, chunk });
+      head.chain = checkPin({
+        previous: head.chain,
+        revision: head.revision,
+        chunk,
+      });
       stream.chunks++;
       stream.bytes += chunk.object.size;
       stream.maxSequence = Math.max(stream.maxSequence, chunk.sequence);
@@ -300,7 +325,11 @@ async function commitOutputMessage(
       head.sealed++;
       // Seals and empty streams are part of the immutable manifest digest too.
       head.revision++;
-      head.chain = checkPin({ previous: head.chain, revision: head.revision, seal });
+      head.chain = checkPin({
+        previous: head.chain,
+        revision: head.revision,
+        seal,
+      });
     }
     if (!existingStream) {
       head.streams++;
@@ -314,5 +343,9 @@ async function commitOutputMessage(
   );
   if (!existingHead) await ctx.db.insert('projectHostedOutputHeads', head);
   else await ctx.db.patch(existingHead._id, head);
-  return { duplicate: false, revision: head.revision, root: rootForOutput(id, message.executionId, head) };
+  return {
+    duplicate: false,
+    revision: head.revision,
+    root: rootForOutput(id, message.executionId, head),
+  };
 }

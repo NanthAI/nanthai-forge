@@ -465,3 +465,14 @@ test('growth guard: a later shard result reads and writes no more than an early 
   for (const m of outputs) assert(m.readBytes <= outputs[0].readBytes + 4096, `output read ${m.readBytes}`);
   for (const call of calls.slice(0, -1)) assert(call.response < 24 * 1024, `response ${call.response}`);
 });
+
+test('the run row is read once per shard call: output reads 2 documents, an early result under 8 KB', async t => {
+  // Issue 75cb5074: actionsSession's row is passed through, not loaded again by output authorize or callback.
+  const { calls } = await measure(t, 4);
+  for (const call of calls) {
+    const output = call.meters.find(m => m.name.endsWith(':output'));
+    assert(output.documents <= 2, `output read ${output.documents} documents`);
+  }
+  const first = calls[0].meters.find(m => m.name.endsWith(':result'));
+  assert(first.readBytes < 8 * 1024, `early result read ${first.readBytes}`);
+});
