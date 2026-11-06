@@ -302,16 +302,26 @@ async function reconcile(
       if (!item || !open.includes(item.status)) continue;
       // A finished Intent closes its Issue only when every Done-when line is ticked (GitHub's Closes
       // semantics): otherwise the Issue stays open and the read says how many lines are left.
-      const unmet = status === 'closed' ? unmetDoneWhen(item.body) : 0;
+      const openLines = status === 'closed' ? openDoneWhenLines(item.body) : [];
+      const unmet = openLines.length;
       if (unmet) {
+        const marker = `Intent completed; ${unmet} Done-when line(s) still open`;
+        // The hold's own reason write bumps the version once; a read that finds the marker already there
+        // names the current version.
+        const advice = holdAdvice(
+          item.id,
+          item.reason === marker ? item.version : item.version + 1,
+          openLines,
+        );
         held.push({
           id: item.id,
           openLines: unmet,
-          reason: `Intent completed; ${unmet} Done-when line(s) are not ticked. Tick them with put-planning-item (the next read closes the Issue), close it explicitly once the work is done, or keep working.`,
+          lines: advice.lines,
+          close: advice.close,
+          reason: `${marker.replace('still open', 'are not ticked')}. ${advice.text}`,
         });
         // The Issue keeps its status. One comment and one reason write say so, then reads stay silent:
         // the reason is the marker, and both writes carry operation ids derived from the Issue version.
-        const marker = `Intent completed; ${unmet} Done-when line(s) still open`;
         if (item.reason !== marker) {
           await writePlanning(
             port,
@@ -320,7 +330,7 @@ async function reconcile(
               operationId: uuidFrom(`${item.id}:${item.version}:held-comment`),
               itemId: item.id,
               authorLabel: '',
-              text: `${marker}, so this Issue stays open. Tick the lines or close it with put-planning-item status closed.`,
+              text: `${marker}, so this Issue stays open. ${advice.text}`,
             },
             undefined,
             undefined,
@@ -367,24 +377,47 @@ async function reconcile(
  * `1. [ ]`) count. A Done-when section written without any checkbox (plain bullets or prose, friction
  * 8b4bfd78: Issues c329d191 and 47558a99 closed with agreed work pending) cannot be ticked, so each of
  * its bullet lines (or the paragraph, as one line) counts as open: a person closes such an Issue. A body
- * with no Done-when section keeps closing as before. */
-export const unmetDoneWhen = (body: string) => {
-  const boxes = body.match(/^[ \t>]*(?:[-*+]|\d+[.)])\s+\[([ xX])\]/gm) ?? [];
-  if (boxes.length) return boxes.filter(line => /\[ \]$/.test(line)).length;
+ * with no Done-when section keeps closing as before. Returns the line texts (CAS-free, body only). */
+export const openDoneWhenLines = (body: string): string[] => {
+  const lineText = (line: string) =>
+    line
+      .replace(/^[ \t>]*(?:[-*+]|\d+[.)])\s+(?:\[[ xX]\]\s*)?/, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  const boxes = body.match(/^[ \t>]*(?:[-*+]|\d+[.)])\s+\[([ xX])\].*$/gm) ?? [];
+  if (boxes.length) return boxes.filter(line => /^[ \t>]*(?:[-*+]|\d+[.)])\s+\[ \]/.test(line)).map(lineText);
   const heading = /^[ \t>#*_]*done[- ]when\b/im.exec(body);
-  if (!heading) return 0;
+  if (!heading) return [];
   const lines = body
     .slice(heading.index + heading[0].length)
     .split('\n')
     .map(line => line.trim());
-  let bullets = 0;
-  let text = /\w/.test(lines[0]?.replace(/^[:*_\s]+/, '') ?? '');
+  const bullets: string[] = [];
+  let first = lines[0]?.replace(/^[:*_\s]+/, '') ?? '';
+  let text = /\w/.test(first);
   for (const line of lines.slice(1)) {
     if (/^#{1,6}\s/.test(line) || /^\*\*[^*]+\*\*:?$/.test(line)) break;
-    if (/^(?:[-*+]|\d+[.)])\s+\S/.test(line)) bullets++;
-    else if (/\w/.test(line)) text = true;
+    if (/^(?:[-*+]|\d+[.)])\s+\S/.test(line)) bullets.push(lineText(line));
+    else if (/\w/.test(line)) {
+      text = true;
+      if (!/\w/.test(first)) first = line;
+    }
   }
-  return bullets || (text ? 1 : 0);
+  return bullets.length ? bullets : text ? [first || 'Done-when text'] : [];
+};
+export const unmetDoneWhen = (body: string) => openDoneWhenLines(body).length;
+
+/** What a builder needs after a landing that left Done-when lines open: which lines (at most five, 100
+ * characters each) and the one command that closes the Issue with evidence. Pure text from the item
+ * already read: no call. `version` is the Issue version the close must name. */
+const holdAdvice = (id: string, version: number, lines: string[]) => {
+  const shown = lines.slice(0, 5).map(line => (line.length > 100 ? `${line.slice(0, 99)}…` : line));
+  const more = lines.length - shown.length;
+  return {
+    lines: shown,
+    close: `nforge agent . put-planning-item '{"itemId":"${id}","expectedVersion":${version},"status":"closed","reason":"Done-when met, evidence in comments"}'`,
+    text: `Open: ${shown.map(line => `"${line}"`).join('; ')}${more > 0 ? `; and ${more} more` : ''}. Comment the evidence for each line, then close with: nforge agent . put-planning-item '{"itemId":"${id}","expectedVersion":${version},"status":"closed","reason":"Done-when met, evidence in comments"}'. Or tick the boxes (re-send the body with [x]) and the next planning read closes it.`,
+  };
 };
 
 async function readPlanning(

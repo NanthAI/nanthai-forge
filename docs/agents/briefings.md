@@ -103,7 +103,12 @@ budget, time box, acceptance bar and metrics that must not regress.
 12. Match your receipt to your Lane/operation and verify files on accepted main.
     Convex changes also need deployment success at that commit; the lead deploys.
     Comment evidence per acceptance line; unmet lines stay open or name their next
-    Issue. Handoff files/choices/tests/counts/actual verification/receipt/head,
+    Issue. After landing (and `complete` when the Lane stays open), read
+    `planning {"id":"ISSUE_ID"}` once: a closed Issue is done; a held one
+    (`reconciled.held`, or the "N Done-when line(s) still open" comment) names the open
+    lines and the one `put-planning-item … "status":"closed"` command. Run it once the
+    evidence comments cover every line, or tick the boxes; never leave the Issue
+    in-progress and never close with lines unmet. Handoff files/choices/tests/counts/actual verification/receipt/head,
     unverified work and next action. Abandon unused Lanes with work preserved;
     remove only your own regenerable temporary output.
 

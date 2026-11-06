@@ -540,6 +540,25 @@ test('a completed Intent holds an Issue with unticked or untickable Done-when li
     assert.match(comments[0], /^Intent completed; \d Done-when line\(s\) still open/);
   }
   assert.deepEqual(await commentsOf(ids.allTicked), []);
+  // The end state is clear (d56dfe49 replay): the comment and the held entry name the open lines and the
+  // one close command with the version the reason write leaves behind; ticked lines are not listed.
+  const boxesItem = (await list(p, { id: ids.boxes, reconcile: false })).item;
+  const boxesComment = (await commentsOf(ids.boxes))[0];
+  assert.match(boxesComment, /Open: "b"; "c"\./);
+  assert(!boxesComment.includes('"a"'));
+  assert(
+    boxesComment.includes(
+      `put-planning-item '{"itemId":"${ids.boxes}","expectedVersion":${boxesItem.version},"status":"closed"`,
+    ),
+  );
+  const heldBoxes = read.reconciled.held.find(h => h.id === ids.boxes);
+  assert.deepEqual(heldBoxes.lines, ['b', 'c']);
+  assert.match(heldBoxes.close, /"expectedVersion":\d+,"status":"closed"/);
+  assert.match(
+    (await commentsOf(ids.bullets))[0],
+    /Open: "the root cause is fixed;"; "the live queue drains;"\./,
+  );
+  assert.match((await commentsOf(ids.prose))[0], /Open: "The budget is met on both harnesses\."/);
   // Replays and later reads: still held, no second comment, no further write (reads only).
   p.calls.length = 0;
   const again = await list(p);
