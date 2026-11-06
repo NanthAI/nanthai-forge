@@ -43,7 +43,7 @@ export function selectTests(
   graphCache?: object,
 ): TestSelection;
 export type PreflightTier = {
-  tier: 'mandatory' | 'direct' | 'near';
+  tier: 'mandatory' | 'direct' | 'watch' | 'near';
   tests: string[];
 };
 export const preflightTierRule: string;
@@ -53,11 +53,18 @@ export function selectPreflightTests(
     paths: string[];
   },
   graphCache?: object,
-): TestSelection & { deferredTests: string[]; tiers: PreflightTier[] };
+): TestSelection & {
+  deferredTests: string[];
+  tiers: PreflightTier[];
+  /** Distinctive names each promoted `watch` test shares with a changed source. */
+  watchedNames: Record<string, string[]>;
+};
 export function fitPreflightBudget(input: {
   tiers: PreflightTier[];
   budgetSeconds: number;
   secondsPerFile: number;
+  /** Cost of one test file in seconds when it is known; defaults to `secondsPerFile`. */
+  secondsFor?: (test: string) => number;
   free?: Set<string>;
 }): {
   tests: string[];

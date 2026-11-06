@@ -1,0 +1,134 @@
+// SPDX-License-Identifier: Apache-2.0
+import { spawnSync } from 'node:child_process';
+
+/** A cheap, repository-wide check the landing check also runs. Declared in the project's
+ * package.json as `forge.preflight.static`; each entry is a script name or an object:
+ * `{ name?, script? | command?: string[], inputs?: glob[] }`. `inputs` limits the check to changes
+ * touching them; without it any change triggers the check. Absent a declaration, only formatter
+ * checks the project already names conventionally run. Nothing else is guessed: an unknown
+ * `check` script may be a full verification. */
+export type StaticCheck = {
+  name: string;
+  command: string[];
+  inputs: string[] | null;
+  source: 'declared' | 'conventional';
+};
+export type StaticCheckResult = {
+  name: string;
+  outcome: 'passed' | 'failed' | 'timed-out';
+  ms: number;
+};
+export const STATIC_CHECK_TIMEOUT_MS = 120_000;
+const CONVENTIONAL_FORMAT_SCRIPTS = ['format:check', 'check:format', 'fmt:check'];
+const CODE_INPUTS = ['**/*.{js,mjs,cjs,jsx,ts,mts,cts,tsx,json,css}'];
+
+const npm = (script: string) => ['npm', 'run', '-s', script];
+const record = (value: unknown): value is Record<string, unknown> =>
+  !!value && typeof value === 'object' && !Array.isArray(value);
+const strings = (value: unknown): string[] | null =>
+  Array.isArray(value) && value.length && value.every(item => typeof item === 'string')
+    ? (value as string[])
+    : null;
+
+/** The project's static checks from its package.json text. Unparseable or absent text means none. */
+export function staticChecks(packageJson: string | undefined): StaticCheck[] {
+  let manifest: unknown;
+  try {
+    manifest = JSON.parse(packageJson ?? '');
+  } catch {
+    return [];
+  }
+  if (!record(manifest)) return [];
+  const scripts = record(manifest.scripts) ? manifest.scripts : {};
+  const forge = record(manifest.forge) ? manifest.forge : {};
+  const declared = record(forge.preflight) ? forge.preflight.static : undefined;
+  if (Array.isArray(declared)) {
+    const checks: StaticCheck[] = [];
+    for (const item of declared) {
+      const entry = typeof item === 'string' ? { script: item } : record(item) ? item : {};
+      const command = strings(entry.command) ?? (typeof entry.script === 'string' ? npm(entry.script) : null);
+      // The first word names the program to run; an empty one could never start.
+      // A declared script the project no longer has must not silently stop checking: fail the plan.
+      if (!command?.[0] || (typeof entry.script === 'string' && typeof scripts[entry.script] !== 'string'))
+        throw new Error(
+          `forge.preflight.static names a check that cannot run: ${JSON.stringify(item).slice(0, 120)}`,
+        );
+      checks.push({
+        name:
+          typeof entry.name === 'string' && entry.name
+            ? entry.name
+            : String(entry.script ?? command.join(' ')),
+        command,
+        inputs: strings(entry.inputs),
+        source: 'declared',
+      });
+    }
+    return checks;
+  }
+  const script = CONVENTIONAL_FORMAT_SCRIPTS.find(name => typeof scripts[name] === 'string');
+  return script ? [{ name: script, command: npm(script), inputs: CODE_INPUTS, source: 'conventional' }] : [];
+}
+
+/** Glob with `**`, `*`, `?` and `{a,b}`; `/` separates segments. Enough for path scoping. */
+export function globRegExp(glob: string): RegExp {
+  let source = '';
+  for (let i = 0; i < glob.length; i++) {
+    const char = glob[i]!;
+    if (char === '*') {
+      if (glob[i + 1] === '*') {
+        i++;
+        if (glob[i + 1] === '/') {
+          i++;
+          source += '(?:.*/)?';
+        } else source += '.*';
+      } else source += '[^/]*';
+    } else if (char === '?') source += '[^/]';
+    else if (char === '{') {
+      const end = glob.indexOf('}', i);
+      if (end < 0) source += '\\{';
+      else {
+        source += `(?:${glob
+          .slice(i + 1, end)
+          .split(',')
+          .map(part => globRegExp(part).source.slice(1, -1))
+          .join('|')})`;
+        i = end;
+      }
+    } else source += /[\\^$.|+()[\]]/.test(char) ? `\\${char}` : char;
+  }
+  return new RegExp(`^${source}$`);
+}
+
+/** Checks whose inputs the saved change touches, and the ones it does not (named, never silent). */
+export function selectStaticChecks(checks: StaticCheck[], changedPaths: string[]) {
+  const selected: StaticCheck[] = [];
+  const untouched: string[] = [];
+  for (const check of checks) {
+    const patterns = check.inputs?.map(globRegExp);
+    if (!patterns || changedPaths.some(path => patterns.some(pattern => pattern.test(path))))
+      selected.push(check);
+    else untouched.push(check.name);
+  }
+  return { selected, untouched };
+}
+
+/** Runs each check in the Lane root, output to stderr, all of them even after a failure (they are
+ * short and one report names every static problem). A check that exceeds its timeout is reported,
+ * not counted as a pass or a failure: the landing check still runs it. */
+export function runStaticChecks(
+  root: string,
+  checks: StaticCheck[],
+  timeoutMs = STATIC_CHECK_TIMEOUT_MS,
+): StaticCheckResult[] {
+  return checks.map(check => {
+    const started = Date.now();
+    const [command, ...args] = check.command as [string, ...string[]];
+    const run = spawnSync(command, args, { cwd: root, stdio: ['ignore', 2, 2], timeout: timeoutMs });
+    const timedOut = (run.error as NodeJS.ErrnoException | undefined)?.code === 'ETIMEDOUT';
+    return {
+      name: check.name,
+      outcome: timedOut ? 'timed-out' : run.status === 0 ? 'passed' : 'failed',
+      ms: Date.now() - started,
+    };
+  });
+}

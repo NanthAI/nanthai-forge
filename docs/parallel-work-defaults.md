@@ -132,17 +132,41 @@ acceptance-policy pins exclude these settings.
 
 ### preflight
 
+- **Static checks first.** Cheap repository-wide checks the landing check also runs (formatting,
+  the foundation check, document and schema guards) run before any build or test, whenever the
+  change touches their inputs, and a failure ends the run with that check's own output and no tests
+  started (`receipt.static`, plan `static.selected` and `static.untouched`). They are declared in
+  the project's `package.json` as `forge.preflight.static`: each entry is a script name or
+  `{name?, script? | command?: [program, ...args], inputs?: [glob, ...]}`; without `inputs` any
+  change triggers it, and a declared script the project no longer defines makes the plan
+  unavailable instead of silently skipping. With no declaration only a conventionally named
+  formatter script (`format:check`, `check:format`, `fmt:check`) runs; an unknown `check` script is
+  never guessed, because it may be a full verification. A check over its 120 s timeout is reported
+  `timed-out`, not passed: the landing check still runs it.
 - `nforge agent ROOT preflight '{"laneId":"…"}'` always runs changed tests, explicit coverage
-  and smoke, then all direct consumers, then distance-2 consumers, nearest first. There is no
-  file count. A time budget (180 s by default; `"budgetSeconds":N` overrides) is filled in that
-  order using the measured seconds per file (the mean of the last 8 completed runs on this
-  machine; 4 s until one is measured). A wrong estimate cannot overrun: after the mandatory
-  group the run goes on in groups of 10, checks the budget between groups, and stops with
-  `stoppedForTime` tests unstarted, which join the deferred set. A cut trims the farthest
+  and smoke, then all direct consumers, then tests that watch a distinctive name in a changed
+  source (any import distance), then distance-2 consumers, nearest first. There is no
+  file count. A *name watcher* shares a rare path-like name with the change, such as a mkdtemp
+  prefix the module creates and a test that hooks `fs.open` on paths matching it; an import graph
+  cannot see that link (2026-11-05: `hosted-checkout-barriers` was four edges away). A name counts
+  only when at most 1% of the project's tests match it, and watchers rank by how rare their names
+  are. Within a tier, tests that failed last time run first, then the cheapest by what earlier
+  runs on this machine timed (`preflight-files.json` beside the timings: smoothed milliseconds and a
+  failed flag, bounded, never uploaded). Budget the ranked tiers leave over runs the cheapest timed
+  deferred tests, last (`local.filler`).
+  A time budget (180 s by default; `"budgetSeconds":N` overrides) is filled in that
+  order using each file's own measured time where known and the mean seconds per file otherwise
+  (the last 8 completed runs on this machine; 4 s until one is measured). A wrong estimate cannot
+  overrun by more than one group: after the mandatory group the run goes on in groups of about
+  30 estimated seconds, each sized from the speed this run has observed (a slow machine gets groups
+  of one file), checks the budget between groups, and stops with `stoppedForTime` tests unstarted,
+  which join the deferred set. A failure ends the run the same way (`stoppedForFailure`): the rest
+  is not started, passes are kept, fix and run again. A cut trims the farthest
   tier first, never leaves a nearer consumer out while a farther one runs, and never touches
   changed tests, explicit coverage or smoke. The plan's `local.summary` and the receipt
-  (`rule`, `budgetSeconds`, `trimmedTiers`, `deferredTests`, `deferredTo: "pre-queue"`) say what
-  was trimmed and why. Trimmed and farther consumers (three or more edges, dynamic) are
+  (`rule`, `budgetSeconds`, `trimmedTiers`, `deferredTests`, `deferredTo: "pre-queue"`, `slowest`)
+  say what was trimmed and why and which files were slowest. Trimmed and farther consumers (three
+  or more edges, dynamic) are
   `deferredTests`: they run in the pre-queue Lane check (`acceptance.admissionCheck`, on by
   default; with `false` they run first in the queue check). The receipt also reports build and
   test wall time (`buildMs`, `testMs`) and the largest test process's `peakRssMb` where

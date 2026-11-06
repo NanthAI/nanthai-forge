@@ -81,7 +81,7 @@ test('a small saved delta reruns its consumers and reuses passes for the unchang
   assert.equal(result.reusedTests, 1);
   const unchanged = f.plan();
   assert.deepEqual(unchanged.tests, []);
-  assert.deepEqual(unchanged.reusedTests, ['tests/a.test.mjs', 'tests/b.test.mjs']);
+  assert.deepEqual([...unchanged.reusedTests].sort(), ['tests/a.test.mjs', 'tests/b.test.mjs']);
 });
 test('an added regression test runs without invalidating unrelated prior passes', t => {
   const f = fixture(t);
@@ -89,7 +89,7 @@ test('an added regression test runs without invalidating unrelated prior passes'
   f.put('tests/new.test.mjs', "import test from 'node:test'; test('new', () => {});");
   const delta = f.plan(['tests/new.test.mjs']);
   assert.deepEqual(delta.tests, ['tests/new.test.mjs']);
-  assert.deepEqual(delta.reusedTests, ['tests/a.test.mjs', 'tests/b.test.mjs']);
+  assert.deepEqual([...delta.reusedTests].sort(), ['tests/a.test.mjs', 'tests/b.test.mjs']);
   assert.equal(f.run(delta).passed, true);
 });
 test('a failed run retains passing files; failed and newly affected files must execute', t => {
@@ -111,7 +111,7 @@ test('the old graph still invalidates consumers when a dependency edge is remove
   f.put('src/b.ts', 'export const n = 1;');
   f.put('src/a.ts', 'export const n = 1; // changed');
   const delta = f.plan();
-  assert.deepEqual(delta.tests, ['tests/a.test.mjs', 'tests/b.test.mjs']);
+  assert.deepEqual([...delta.tests].sort(), ['tests/a.test.mjs', 'tests/b.test.mjs']);
   assert.deepEqual(delta.reusedTests, []);
 });
 test('missing/tampered evidence and root configuration changes never transfer a pass', t => {
@@ -121,12 +121,12 @@ test('missing/tampered evidence and root configuration changes never transfer a 
   const config = f.plan();
   assert.deepEqual(config.reusedTests, []);
   // Full coverage is explicitly deferred to landing; it is never a reused local pass.
-  assert.deepEqual(config.tests, ['tests/a.test.mjs', 'tests/b.test.mjs']);
+  assert.deepEqual([...config.tests].sort(), ['tests/a.test.mjs', 'tests/b.test.mjs']);
   const evidence = join(clientCacheRoot(f.root), 'agent/preflight/evidence', `${result.evidence}.gz`);
   writeFileSync(evidence, 'corrupt');
   const fallback = f.plan();
   assert.deepEqual(fallback.reusedTests, []);
-  assert.deepEqual(fallback.tests, ['tests/a.test.mjs', 'tests/b.test.mjs']);
+  assert.deepEqual([...fallback.tests].sort(), ['tests/a.test.mjs', 'tests/b.test.mjs']);
   const receiptPath = join(clientCacheRoot(f.root), 'agent/preflight', `${laneId}.json`);
   const old = JSON.parse(readFileSync(receiptPath, 'utf8'));
   delete old.evidence;
@@ -191,7 +191,7 @@ test('environment failure before execution cannot create reusable per-file passe
   assert.deepEqual(retry.tests, ['tests/a.test.mjs', 'tests/b.test.mjs']);
   t.mock.method(preflightRuntime, 'filesystemEventHealth', () => healthy);
   assert.equal(f.run(retry).passed, true);
-  assert.deepEqual(f.plan().reusedTests, ['tests/a.test.mjs', 'tests/b.test.mjs']);
+  assert.deepEqual([...f.plan().reusedTests].sort(), ['tests/a.test.mjs', 'tests/b.test.mjs']);
 });
 
 test('environment classification after a failed run preserves only the reporter actual passes', t => {

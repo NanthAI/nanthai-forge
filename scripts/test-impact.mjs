@@ -2,6 +2,7 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import { posix, join } from 'node:path';
 import { testImportGraph } from './test-import-graph.mjs';
+import { watchRanking } from './test-name-watchers.mjs';
 import { coverageShadow } from './test-coverage.mjs';
 import { classifyCheckPath, webTest } from './check-path-scopes.mjs';
 import { guardSelection } from './selection-guard.mjs';
@@ -67,11 +68,13 @@ export function selectImpactPair(files, comparisons) {
 }
 /** Local execution is a partition of complete landing coverage, never an independence proof.
  * Tiers, nearest first: mandatory (changed tests, explicit coverage, smoke), direct consumers
- * (one import edge), distance-2 consumers. Nothing here counts files: the whole neighbourhood is
- * returned, and `fitPreflightBudget` trims it by time. Uncertain and distant consumers
- * (dynamic, domain, three or more edges) stay explicit pre-queue/landing work. */
+ * (one import edge), name watchers (tests that match a distinctive name in a changed source, at any
+ * import distance: an import graph cannot see a test that hooks the paths a module creates), then
+ * distance-2 consumers. Nothing here counts files: the whole neighbourhood is returned, and
+ * `fitPreflightBudget` trims it by time. Other uncertain and distant consumers (dynamic, domain,
+ * three or more edges) stay explicit pre-queue/landing work. */
 export const preflightTierRule =
-  'changed tests, explicit coverage and smoke; then direct consumers; then distance-2 consumers, nearest first';
+  'changed tests, explicit coverage and smoke; then direct consumers; then tests that watch a distinctive name in a changed source; then distance-2 consumers, nearest first';
 export function selectPreflightTests(input, graphCache = {}) {
   // The consumers-only pass reads the same inventory, so it reuses the graph the first pass built.
   const selection = selectTests(input, graphCache);
@@ -83,23 +86,38 @@ export function selectPreflightTests(input, graphCache = {}) {
   const changed = new Set(input.paths);
   const kind = test => consumers.reasons?.[test]?.kind;
   const distance = test => consumers.reasons?.[test]?.edges?.length ?? Infinity;
+  const mandatory = test => changed.has(test) || smokeTests.includes(test) || kind(test) === 'explicit';
+  const direct = test => kind(test) === 'dependency' && distance(test) === 1;
+  // Rarity is measured over every test in the inventory; only landing-covered tests are promoted.
+  const watchers = watchRanking({
+    files: input.files,
+    tests: [...input.files.keys()].filter(path => /^tests\/[^/]+\.test\.mjs$/.test(path)).sort(),
+    candidates: selection.tests.filter(test => !mandatory(test) && !direct(test)),
+    changed: input.paths,
+  });
   const tierOf = test =>
-    changed.has(test) || smokeTests.includes(test) || kind(test) === 'explicit'
+    mandatory(test)
       ? 'mandatory'
-      : kind(test) === 'dependency' && distance(test) === 1
+      : direct(test)
         ? 'direct'
-        : kind(test) === 'dependency' && distance(test) === 2
-          ? 'near'
-          : null;
-  const tiers = ['mandatory', 'direct', 'near'].map(tier => ({
-    tier,
-    tests: selection.tests.filter(test => tierOf(test) === tier),
-  }));
+        : watchers.has(test)
+          ? 'watch'
+          : kind(test) === 'dependency' && distance(test) === 2
+            ? 'near'
+            : null;
+  const ranked = tier => {
+    const tests = selection.tests.filter(test => tierOf(test) === tier);
+    return tier === 'watch'
+      ? tests.sort((a, b) => watchers.get(b).score - watchers.get(a).score || (a < b ? -1 : 1))
+      : tests;
+  };
+  const tiers = ['mandatory', 'direct', 'watch', 'near'].map(tier => ({ tier, tests: ranked(tier) }));
   const local = new Set(tiers.flatMap(item => item.tests));
   return {
     ...selection,
     tests: tiers.flatMap(item => item.tests),
     tiers,
+    watchedNames: Object.fromEntries([...watchers].map(([test, item]) => [test, item.names])),
     deferredTests: selection.tests.filter(test => !local.has(test)),
     reason: `${selection.reason}; local: ${preflightTierRule}; the rest runs in the pre-queue check`,
   };
@@ -109,8 +127,15 @@ export function selectPreflightTests(input, graphCache = {}) {
  * that fits; once a tier is cut, every farther tier is deferred whole, so a distance-2 test never
  * runs while a direct consumer waits. `free` tests (already passed for this source) cost nothing.
  * Returns what was cut and why; a cut is never silent. */
-export function fitPreflightBudget({ tiers, budgetSeconds, secondsPerFile, free = new Set() }) {
-  const cost = tests => tests.filter(test => !free.has(test)).length * secondsPerFile;
+export function fitPreflightBudget({
+  tiers,
+  budgetSeconds,
+  secondsPerFile,
+  secondsFor = () => secondsPerFile,
+  free = new Set(),
+}) {
+  const cost = tests =>
+    tests.filter(test => !free.has(test)).reduce((sum, test) => sum + secondsFor(test), 0);
   const kept = [];
   const trimmed = [];
   let used = 0;
@@ -124,9 +149,9 @@ export function fitPreflightBudget({ tiers, budgetSeconds, secondsPerFile, free 
     const deferred = [];
     for (const test of tests) {
       if (free.has(test)) kept.push(test);
-      else if (!cut && used + secondsPerFile <= budgetSeconds) {
+      else if (!cut && used + secondsFor(test) <= budgetSeconds) {
         kept.push(test);
-        used += secondsPerFile;
+        used += secondsFor(test);
       } else {
         cut = true;
         deferred.push(test);
