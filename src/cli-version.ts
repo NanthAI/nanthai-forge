@@ -46,6 +46,7 @@ const READ_ACTIONS = new Set([
   'preflight',
   'decisions',
   'queue',
+  'landings',
   'doctor',
   'candidate',
   'candidates',

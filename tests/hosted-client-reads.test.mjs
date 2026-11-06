@@ -17,6 +17,7 @@ const minimal = {
   diff: {},
   peers: {},
   queue: {},
+  landings: { from: '2026-11-05T21:00:00Z', to: '2026-11-05T23:20:00Z' },
   wait: { runId: randomUUID() },
   show: { path: 'a.ts' },
   board: {},

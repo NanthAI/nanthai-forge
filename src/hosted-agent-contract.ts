@@ -16,6 +16,7 @@ import { invariant } from './errors.js';
 import { isPlanningRef, planningIdHelp } from './planning-id.js';
 import { policyWriteObject } from './autonomy-policy.js';
 import { hostedCheckCommandSchema, hostedCheckRunnerSchema } from './hosted-check.js';
+import { metricPagingFields } from './self-metrics-page.js';
 export const hostedAgentActions = [
   'tests',
   'confirm-tests',
@@ -293,7 +294,9 @@ export const hostedAgentCommandSchemas = {
       version: z.number().int().nonnegative().optional(),
     })
     .strict(),
-  metrics: z.object({ from: z.string().optional(), to: z.string().optional() }).strict(),
+  metrics: z
+    .object({ from: z.string().optional(), to: z.string().optional(), ...metricPagingFields })
+    .strict(),
   capabilities: z.object({}).strict(),
   /** Owner-only. Default imports the hosted Work check named verify; command defines one. */
   'configure-check': z

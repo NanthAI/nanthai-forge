@@ -3,6 +3,7 @@ import { hostedAgentCommandSchemas, type HostedAgentAddress } from './hosted-age
 import { readMetricRecords } from './self-metrics-source.js';
 import type { MetricQuery } from './self-metrics-hosted-pages.js';
 import { metricPeriod, metricsSurface } from './self-metrics-surface.js';
+import { pageMetrics } from './self-metrics-page.js';
 import { networkDeadline, networkFailure } from './network-fetch.js';
 import { withExchangeProgress } from './exchange-progress.js';
 import { ForgeError } from './errors.js';
@@ -24,9 +25,16 @@ export async function executeHostedMetrics(
     return await networkDeadline(
       signal =>
         withExchangeProgress({ signal }, async () =>
-          metricsSurface(
-            await readMetricRecords(session.root, period, { address: session.address, query: session.query }),
+          pageMetrics(
+            metricsSurface(
+              await readMetricRecords(session.root, period, {
+                address: session.address,
+                query: session.query,
+              }),
+              period,
+            ),
             period,
+            command,
           ),
         ),
       deadlineMs,

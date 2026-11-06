@@ -39,6 +39,7 @@ test('hosted help and packaged docs are generated from every enforced schema', a
       'diff',
       'peers',
       'queue',
+      'landings',
       'wait',
       'show',
       'board',

@@ -15,6 +15,7 @@ import { hostedWaitSchema } from './hosted-agent-observe.js';
 import { readHostedLaneCheckout } from './hosted-lane-checkout-marker.js';
 import type { HostedAgentTransport } from './hosted-agent-transport.js';
 import { QUEUE_VIEW_LIMIT } from './hosted-queue-view.js';
+import { hostedLandingsSchema } from './hosted-agent-landings.js';
 import { liveLanesInput } from './hosted-live-lanes.js';
 import { hostedBoardSchemas } from './hosted-board.js';
 const hash = z.string().regex(/^[0-9a-f]{64}$/);
@@ -103,6 +104,7 @@ export const hostedClientReadSchemas = {
   diff: hostedDiffSchema,
   peers: hostedPeersSchema,
   queue: hostedQueueSchema,
+  landings: hostedLandingsSchema,
   wait: hostedWaitSchema,
   show: hostedSourceShowSchema.omit({ action: true }),
   /** The board verbs are client actions too: `board --post`/`--reply` write one note each, `--resolve` withdraws one. */

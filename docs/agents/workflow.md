@@ -96,7 +96,7 @@ When you change a hosted reply in Forge itself: add fields freely, but never rem
 | `start --reopen` | `laneId?, target?, operationId?` |
 | `status` | `laneId?, kind?, operationId?, submissionId?, runId?, version?` |
 | `observe` | `kind?, operationId?, submissionId?, runId?, version?` |
-| `metrics` | `from?, to?, operationId?` |
+| `metrics` | `from?, to?, limit?, cursor?, operationId?` |
 | `capabilities` | `operationId?` |
 | `x configure-check` | `name?, checkId?, command?, expected?, operationId?` |
 | `x configure-runner` | `provider?, runsOn?, concurrencyBudget?, machineId?, labels?, repository?, configuration?, expected?, operationId?` |
@@ -110,6 +110,7 @@ When you change a hosted reply in Forge itself: add fields freely, but never rem
 | `diff` | `laneId?, paths?, byteBudget?, cursor?` |
 | `peers` | `laneId?, path?, detail?` |
 | `queue` | `limit?, laneId?` |
+| `landings` | `from, to, limit?, cursor?` |
 | `wait` | `runId?, operationIds?, cursor?, until?, timeoutSeconds?, peer?` |
 | `show` | `laneId?, state?, candidateId?, expected?, channel?, at?, path, force?` |
 | `board` | `id?, laneId?, all?` |

@@ -258,6 +258,29 @@ test('source-authority gate preserves native/native-shadow readers; hosted handl
       (await agentCli([root, 'metrics', JSON.stringify(period)])).result.totals['5.1'].landings,
       1,
     );
+    // Part 1 of b78ca196: the reply is boundable, and --flake-issues prints only the flake list.
+    const flakeOnly = await metricsCli([root, '--from', period.from, '--to', period.to, '--flake-issues']);
+    assert.deepEqual(Object.keys(flakeOnly), ['schema', 'period', 'source', 'flakes']);
+    const paged = await metricsCli([
+      root,
+      '--from',
+      period.from,
+      '--to',
+      period.to,
+      '--json',
+      '--limit',
+      '1',
+    ]);
+    assert.equal(paged.page.limit, 1);
+    assert.equal(paged.totals['5.1'].landings, 1);
+    await assert.rejects(
+      metricsCli([root, '--from', period.from, '--to', period.to, '--flake-issues', '--limit', '1']),
+      /prints only the flake list/,
+    );
+    assert.equal(
+      (await agentCli([root, 'metrics', JSON.stringify({ ...period, limit: 1 })])).result.page.limit,
+      1,
+    );
   } finally {
     await cleanupOwner(root);
     rmSync(root, { recursive: true, force: true });

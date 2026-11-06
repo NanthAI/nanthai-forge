@@ -182,8 +182,30 @@ Each listed file carries the same-day step: search planning for the file name
 (`planning {"search":"FILE.test.mjs","status":"all"}`), comment the run ids on a
 match, otherwise file an Issue with the file, first error and run ids. With
 `--flake-issues`, `metrics` runs that search itself (one planning search per listed
-file, at most ten, opt-in; the default read makes none) and prints the matching
-Issue, a look-alike to check before filing, or "no Issue found: file one today".
+file, at most ten, opt-in; the default read makes none) and prints only the flake
+list, each file with its matching Issue, a look-alike to check before filing, or
+"no Issue found: file one today". It cannot combine with `--limit` or `--compare`.
+
+`metrics` replies are boundable: `--limit N` (`limit` in `nforge agent ROOT metrics`,
+1 to 200) pages every row list in the window totals (waste, landings by path, authority
+lag) by one shared offset, and `page.nextCursor` continues the same `from`/`to`.
+Counts and totals are whole on every page; the per-day sections keep their counts and
+report `rowsOmitted` instead of rows (a one-day window returns them). Paging bounds the
+reply, not the read: each page recomputes the report from the same hosted pages.
+
+`landings {from,to,limit?,cursor?}` (`nforge agent ROOT landings`) is the cheap read for
+replays and cost capture: accepted landings in the UTC window [from,to) by commit time,
+oldest first, at most 30 per page (default 20) and under 64 KB, read in one query per page
+from stored rows (the receipt index, then about four indexed rows per landing; a page also
+ends at 800 KB read) with no writes and no idle work. Each row carries `receiptId`,
+`submissionId`, `laneId`, `intentId`, `kind`, `submittedAt`, `admittedAt` (the end of the
+pre-queue Lane check, null when the change queued unadmitted), `committedAt`,
+`admissionBase` (the first landing attempt's main) and `landedBase` (main the receipt
+moved), `mainMoved` (they differ), the receipt's `firstCheck`, `landedHead`,
+`checkRunIds` (the admission Lane run, each attempt's run, the accepting run; at most 8),
+`recomposeCount` and `conflictPaths`. Text-conflict paths of an earlier generation live only
+in retained compose results (R2), so `conflictPaths` is null today. Follow `nextCursor`
+until it is null. Nothing in it depends on GitHub.
 
 Quarantined tests continue to run. A check passes with quarantine only when all
 remaining failures are named, quarantined and unrelated, and every non-test step

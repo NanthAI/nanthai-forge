@@ -4,6 +4,7 @@ import { decideInputSchema, decisionsInputSchema } from './decision-types.js';
 import { handoffSchema, handoffReadSchema } from './agent-handoff-types.js';
 import { frictionInputSchema, frictionTriageSchema } from './friction-types.js';
 import { landSchema } from './land-schema.js';
+import { metricPagingFields } from './self-metrics-page.js';
 import { peerAckSchema } from './agent-coordination-journal.js';
 // SPDX-License-Identifier: Apache-2.0
 import { viewReadSchemas } from './view-reads.js';
@@ -56,7 +57,12 @@ export const agentActionSchema = z.discriminatedUnion('action', [
   frictionInputSchema.extend({ action: z.literal('friction') }),
   frictionTriageSchema.safeExtend({ action: z.literal('friction-triage') }),
   z.object({ action: z.literal('improve') }),
-  z.object({ action: z.literal('metrics'), from: z.string().optional(), to: z.string().optional() }),
+  z.object({
+    action: z.literal('metrics'),
+    from: z.string().optional(),
+    to: z.string().optional(),
+    ...metricPagingFields,
+  }),
   landSchema,
   z.object({ action: z.literal('landing'), operationId: id }),
   handoffSchema,

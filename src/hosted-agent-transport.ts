@@ -4,6 +4,7 @@ import { liveLanes } from './hosted-live-lanes.js';
 import { cloneFreshness, mainCheckoutTransport, pullHostedProject } from './hosted-pull.js';
 import { readHostedMainSelection } from './hosted-main-marker.js';
 import { diffHostedSource, peersHostedSource, queueHostedSource } from './hosted-agent-reads.js';
+import { landingsHostedSource } from './hosted-agent-landings.js';
 import { hostedObservationContinuation } from './hosted-agent-finish-result.js';
 // SPDX-License-Identifier: Apache-2.0
 import {
@@ -120,6 +121,7 @@ const quietActions = new Set([
   'diff',
   'peers',
   'queue',
+  'landings',
   'capabilities',
   'metrics',
   'check-settings',
@@ -170,6 +172,7 @@ export type HostedAgentResponse = {
     | 'peers'
     | 'lanes'
     | 'queue'
+    | 'landings'
     | 'board'
     | 'board-post'
     | 'board-reply'
@@ -289,6 +292,15 @@ export class HostedAgentTransport {
         operationId: null,
         resolved: null,
         ...(await diffHostedSource(this, input)),
+      };
+    if (requestedAction === 'landings')
+      return {
+        schema: 1,
+        transport: 'hosted',
+        action: 'landings',
+        operationId: null,
+        resolved: null,
+        result: await landingsHostedSource(this, input),
       };
     if (requestedAction === 'queue')
       return {
