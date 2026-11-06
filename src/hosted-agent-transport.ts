@@ -57,6 +57,7 @@ import { ackAnswers, checkpointNudge, finishGates, unsavedMinutes } from './agen
 import { liveLanding, ownsLiveLanding } from './landing-freeze.js';
 import { preflightPlan, runPreflight } from './agent-preflight.js';
 import { hostedLaneDirty } from './hosted-lane-dirty.js';
+import { deltaApplyPending, finishPendingCheckoutDelta } from './hosted-checkout-delta-pending.js';
 import { agentDefaultLines, type EffectiveAgentDefaults } from './agent-parallel-defaults.js';
 import { dirname, basename, resolve } from 'node:path';
 import { existsSync, realpathSync } from 'node:fs';
@@ -1106,6 +1107,12 @@ export class HostedAgentTransport {
     const root = hostedAgentRoot(this.root);
     const laneId = readHostedLaneCheckout(root)?.selection.laneId;
     if (!laneId) return {};
+    // Reported, never finished here: observation takes no lock and changes no file.
+    if (deltaApplyPending(root))
+      return {
+        interruptedApply:
+          'A local apply is running or was interrupted in this checkout. The next sync, save or preflight here finishes it first.',
+      };
     // A live landing froze this saved source: saving now would supersede it, so never advise it.
     const frozen = liveLanding(result) || ownsLiveLanding(root);
     return checkpointNudge(root, laneId, this.defaults, unsavedMinutes(root), frozen);
@@ -1150,6 +1157,8 @@ export class HostedAgentTransport {
     // A save the client returned as pending may have completed on the server while the marker still
     // names the earlier head. Settle that original operation (no new save) before anything pins the
     // marker's head/tree. No pending file means no call.
+    // An interrupted local apply leaves the marker describing other bytes; finish it first.
+    if (action === 'preflight') finishPendingCheckoutDelta(root);
     const pendingSave = action === 'preflight' ? await reconcileHostedSave(root, this.exchange) : null;
     if (pendingSave) return this.response(action, null, pendingSave);
     const marker = readHostedLaneCheckout(root);

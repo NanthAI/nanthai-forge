@@ -46,7 +46,10 @@ the original apply operation. Relative checkout roots use a canonical sibling
 client cache. A sync/resolve apply onto an installed checkout installs only the
 changed paths in place, under a crash-safe journal (a one-file apply on a
 synthetic 29,000-file checkout: 9 hashes and 1 clone instead of 116,004 and
-29,000). The clean check still stats every materialized path, like Git.
+29,000). Save, abandon, preflight and every other command that trusts the
+checkout marker finish or roll back an interrupted apply first, so a crash
+mid-apply never turns upstream bytes into local edits. The clean check still
+stats every materialized path, like Git.
 
 Hosted source-worker diagnostics retain typed dependency/runtime failures, the
 failing source step and call, and digest/size context when known. The landing

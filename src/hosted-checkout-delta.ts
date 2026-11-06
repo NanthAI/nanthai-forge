@@ -1,14 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
-import { lstatSync, mkdirSync, readFileSync, readlinkSync, renameSync, rmdirSync, rmSync } from 'node:fs';
+import { lstatSync, readFileSync, readlinkSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 import { z } from 'zod';
 import type { NativeFile } from './native-state-format.js';
 import { digest } from './hash.js';
 import { ForgeError } from './errors.js';
-import { durableReplace, syncDirectory } from './native-durability.js';
-import { checkoutPathExists } from './hosted-checkout-files.js';
-import { readCheckoutStatIndex, statEntry, writeCheckoutStatIndex } from './checkout-stat-index.js';
+import { durableReplace } from './native-durability.js';
 
 /** One pending in-place apply per client cache; the work lock serializes writers. */
 export const deltaJournalName = 'delta-apply.json';
@@ -16,6 +14,10 @@ export const deltaJournalName = 'delta-apply.json';
  * later checkout result until the user removes them. */
 export const deltaRetainedName = 'delta-retained.json';
 const name = z.string().regex(/^delta-[A-Za-z0-9_-]+$/);
+const markerDigest = z
+  .string()
+  .regex(/^[0-9a-f]{64}$/)
+  .nullable();
 const relative = z
   .string()
   .min(1)
@@ -25,19 +27,30 @@ const relative = z
 const pinned = z
   .object({ path: relative, blob: z.string(), mode: z.enum(['file', 'executable', 'symlink', 'gitlink']) })
   .strict();
+const fields = {
+  operationId: z.uuid(),
+  stage: name,
+  backup: name,
+  marker: z.string().regex(/^[A-Za-z0-9._-]+$/),
+  install: z.array(pinned),
+  displace: z.array(pinned),
+  directories: z.array(relative),
+};
+/** Version 2 names the marker it replaces and the marker it publishes, so finishing never moves a
+ * marker backwards or vouches for a tree it did not finish. `aborting` makes a decided rollback
+ * resume as a rollback. Version 1 (no digests) is still finished, with the stage marker as target. */
 const journalSchema = z
   .object({
-    schema: z.literal(1),
-    operationId: z.uuid(),
-    stage: name,
-    backup: name,
-    marker: z.string().regex(/^[A-Za-z0-9._-]+$/),
-    install: z.array(pinned),
-    displace: z.array(pinned),
-    directories: z.array(relative),
+    schema: z.literal(2),
+    ...fields,
+    priorMarker: markerDigest,
+    targetMarker: markerDigest,
+    aborting: z.literal(true).optional(),
   })
   .strict();
-type Journal = z.infer<typeof journalSchema>;
+const legacyJournalSchema = z.object({ schema: z.literal(1), ...fields }).strict();
+export type DeltaJournal = z.infer<typeof journalSchema>;
+export type DeltaPin = z.infer<typeof pinned>;
 export type CheckoutDelta = { install: NativeFile[]; remove: NativeFile[] };
 
 const ancestors = (files: readonly { path: string }[]) => {
@@ -47,8 +60,13 @@ const ancestors = (files: readonly { path: string }[]) => {
       directories.add(file.path.slice(0, i));
   return directories;
 };
+/** Spelling-insensitive identity: case-insensitive and normalization-insensitive filesystems
+ * (default APFS, Windows) give these one directory entry. */
+const fold = (path: string) => path.normalize('NFC').toLowerCase();
 /** Changed paths between the installed materialized files and the target. Null when a path turns
- * from a file into a directory or back: that rare shape keeps the full private-stage install. */
+ * from a file into a directory or back, or when an incoming path or parent differs from an
+ * installed one only by case or Unicode normalization: those rare shapes keep the full
+ * private-stage install, which publishes the exact spelling. */
 export function checkoutDelta(
   prior: readonly NativeFile[],
   target: readonly NativeFile[],
@@ -68,6 +86,12 @@ export function checkoutDelta(
     remove.some(file => targetDirectories.has(file.path))
   )
     return null;
+  const spelled = new Map<string, string>();
+  for (const path of [...before.keys(), ...priorDirectories]) spelled.set(fold(path), path);
+  for (const path of [...install.map(file => file.path), ...ancestors(install)]) {
+    const installed = spelled.get(fold(path));
+    if (installed !== undefined && installed !== path) return null;
+  }
   return { install, remove };
 }
 /** Disk shapes the in-place install cannot take without moving untracked content: an incoming
@@ -92,7 +116,8 @@ export function deltaObstructed(root: string, delta: CheckoutDelta) {
   }
   return null;
 }
-function matches(path: string, file: z.infer<typeof pinned>) {
+/** Exact bytes and mode of one path, never following a link or a second name of the inode. */
+export function deltaMatches(path: string, file: DeltaPin) {
   const stat = lstatSync(path);
   const bytes = stat.isSymbolicLink()
     ? readlinkSync(path, { encoding: 'buffer' })
@@ -111,7 +136,9 @@ function matches(path: string, file: z.infer<typeof pinned>) {
  * whose current bytes move aside, with the bytes the caller verified there. */
 export function journalCheckoutDelta(
   cacheRoot: string,
-  input: Omit<Journal, 'schema' | 'backup' | 'directories'> & { targetFiles: readonly { path: string }[] },
+  input: Omit<DeltaJournal, 'schema' | 'backup' | 'directories' | 'aborting'> & {
+    targetFiles: readonly { path: string }[];
+  },
 ) {
   const { targetFiles, ...rest } = input,
     targetDirectories = ancestors(targetFiles),
@@ -121,7 +148,7 @@ export function journalCheckoutDelta(
   );
   directories.sort((a, b) => b.split('/').length - a.split('/').length || b.localeCompare(a));
   const journal = journalSchema.parse({
-    schema: 1,
+    schema: 2,
     ...rest,
     backup: `delta-${randomUUID()}-displaced`,
     directories,
@@ -129,102 +156,40 @@ export function journalCheckoutDelta(
   durableReplace(join(cacheRoot, deltaJournalName), JSON.stringify(journal));
   return journal;
 }
-const exists = checkoutPathExists;
-/** Roll a journaled install forward. Idempotent at every rename boundary, so crash recovery and a
- * fresh apply run the same steps. A fresh apply that finds a displaced path changed since its check
- * restores every path before anything is installed and refuses, like the clean check. Displaced
- * bytes are kept unless all of them match their verified baseline. */
-export function settleCheckoutDelta(root: string, cacheRoot: string, fresh = false): string | null {
-  const journalPath = join(cacheRoot, deltaJournalName);
-  if (!exists(journalPath)) return null;
-  const journal = journalSchema.parse(JSON.parse(readFileSync(journalPath, 'utf8')));
-  const stage = join(cacheRoot, journal.stage),
-    backup = join(cacheRoot, journal.backup);
-  const pending = new Set(
-    journal.install.filter(file => exists(join(stage, file.path))).map(file => file.path),
+export function writeDeltaJournal(cacheRoot: string, journal: DeltaJournal) {
+  durableReplace(join(cacheRoot, deltaJournalName), JSON.stringify(journalSchema.parse(journal)));
+}
+/** Typed refusal for an interrupted apply that cannot finish here. The journal, its stage and any
+ * moved-aside bytes are kept, so the same command finishes it once the cause is gone. */
+export function deltaPendingError(reason: string, path: string, next: string) {
+  return new ForgeError(
+    'WORK_CONFLICT',
+    `An interrupted local apply in this checkout cannot finish: ${reason} Nothing more was changed; the apply journal (.forge-client/${deltaJournalName}) and its staged files are kept. ${next}`,
+    undefined,
+    { obstruction: { kind: 'delta-apply-pending', path } },
   );
-  const installing = new Set(journal.install.map(file => file.path));
-  const touched = new Set<string>();
-  for (const file of journal.displace) {
-    if (installing.has(file.path) && !pending.has(file.path)) continue;
-    const from = join(root, file.path),
-      to = join(backup, file.path);
-    if (exists(from) && !exists(to)) {
-      mkdirSync(dirname(to), { recursive: true, mode: 0o700 });
-      renameSync(from, to);
-      touched.add(dirname(from));
-    }
+}
+export function readDeltaJournal(path: string): DeltaJournal {
+  let value: unknown;
+  try {
+    value = JSON.parse(readFileSync(path, 'utf8'));
+  } catch {
+    value = undefined;
   }
-  const changed = journal.displace.filter(
-    file => exists(join(backup, file.path)) && !matches(join(backup, file.path), file),
-  );
-  if (changed.length && fresh && pending.size === journal.install.length) {
-    for (const file of journal.displace) {
-      const from = join(backup, file.path),
-        to = join(root, file.path);
-      if (exists(from) && !exists(to)) renameSync(from, to);
-    }
-    for (const directory of touched) syncDirectory(directory);
-    rmSync(journalPath, { force: true });
-    syncDirectory(cacheRoot);
-    rmSync(stage, { recursive: true, force: true });
-    if (!journal.displace.some(file => exists(join(backup, file.path))))
-      rmSync(backup, { recursive: true, force: true });
-    const file = changed[0]!;
+  const version = (value as { schema?: unknown } | undefined)?.schema;
+  if (typeof version === 'number' && version > 2)
     throw new ForgeError(
-      'WORK_CONFLICT',
-      `Local checkout changes at ${JSON.stringify(file.path)} are preserved.`,
-      undefined,
-      { obstruction: { path: file.path, kind: 'source-edit', expectedDigest: file.blob } },
+      'CLI_UPGRADE_REQUIRED',
+      `A newer nforge started an apply in this checkout (journal version ${version}). Update nforge, then rerun the command; the newer version finishes it.`,
     );
-  }
-  let retained = changed.length > 0;
-  for (const file of journal.install) {
-    if (!pending.has(file.path)) continue;
-    const to = join(root, file.path);
-    mkdirSync(dirname(to), { recursive: true });
-    if (exists(to)) {
-      // Recreated after an interruption: keep it beside the displaced bytes, never replace it.
-      const spare = join(backup, 'occupied', randomUUID(), file.path);
-      mkdirSync(dirname(spare), { recursive: true, mode: 0o700 });
-      renameSync(to, spare);
-      retained = true;
-    }
-    renameSync(join(stage, file.path), to);
-    touched.add(dirname(to));
-  }
-  for (const directory of journal.directories)
-    try {
-      rmdirSync(join(root, directory));
-      touched.add(dirname(join(root, directory)));
-    } catch (error) {
-      if (!['ENOENT', 'ENOTEMPTY', 'EEXIST', 'ENOTDIR'].includes((error as NodeJS.ErrnoException).code ?? ''))
-        throw error;
-    }
-  for (const directory of touched) if (exists(directory)) syncDirectory(directory);
-  const marker = join(stage, '.forge', journal.marker);
-  if (exists(marker)) {
-    renameSync(marker, join(root, '.forge', journal.marker));
-    syncDirectory(join(root, '.forge'));
-  }
-  // Unchanged entries keep vouching for unchanged inodes; installed ones are re-read once.
-  const index = readCheckoutStatIndex(root);
-  for (const file of journal.displace) index.entries.delete(file.path);
-  for (const file of journal.install)
-    try {
-      index.entries.set(file.path, statEntry(lstatSync(join(root, file.path)), file.blob));
-    } catch {
-      index.entries.delete(file.path);
-    }
-  writeCheckoutStatIndex(root, index.since, index.entries);
-  rmSync(journalPath, { force: true });
-  syncDirectory(cacheRoot);
-  rmSync(stage, { recursive: true, force: true });
-  if (!retained) rmSync(backup, { recursive: true, force: true });
-  else {
-    const list = join(cacheRoot, deltaRetainedName),
-      kept: string[] = exists(list) ? JSON.parse(readFileSync(list, 'utf8')) : [];
-    if (!kept.includes(backup)) durableReplace(list, JSON.stringify([...kept, backup]));
-  }
-  return retained ? backup : null;
+  const legacy = legacyJournalSchema.safeParse(value);
+  if (legacy.success)
+    return { ...legacy.data, schema: 2, priorMarker: null, targetMarker: null } satisfies DeltaJournal;
+  const parsed = journalSchema.safeParse(value);
+  if (parsed.success) return parsed.data;
+  throw deltaPendingError(
+    'its journal is unreadable.',
+    deltaJournalName,
+    'Keep the checkout as it is and report this; recover-apply from a retained sync preserves the whole checkout.',
+  );
 }

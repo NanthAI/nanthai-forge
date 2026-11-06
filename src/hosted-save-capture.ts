@@ -41,6 +41,7 @@ import {
   rememberOverlapBases,
 } from './hosted-overlap-text.js';
 import { workLocked } from './work-lock.js';
+import { finishPendingCheckoutDelta, settlePendingCheckoutDelta } from './hosted-checkout-delta-pending.js';
 import { canonicalPayload } from './hosted-source-operation.js';
 import { forgeCachePath } from './forge-cache-paths.js';
 import { neverIndex } from './forge-disk.js';
@@ -165,6 +166,8 @@ export async function captureHostedSave(
   continuation?: ConflictContinuation,
 ) {
   root = realpathSync(root);
+  // An interrupted sync leaves a half-applied tree under the old marker; capture only a whole one.
+  finishPendingCheckoutDelta(root);
   const marker = readHostedLaneCheckout(root);
   invariant(marker, 'NOT_FOUND', 'Open a hosted Lane before preparing a save.');
   mkdirSync(directory, { recursive: true, mode: 0o700 });
@@ -223,6 +226,7 @@ export async function captureHostedSave(
   return workLocked(join(clientCacheRoot(root), 'lock'), () => {
     const path = join(directory, 'capture.json');
     if (checkoutPathExists(path)) return JSON.parse(readFileSync(path, 'utf8')) as typeof result;
+    settlePendingCheckoutDelta(root);
     invariant(
       canonicalPayload(readHostedLaneCheckout(root)) === canonicalPayload(marker),
       'WORK_STALE',

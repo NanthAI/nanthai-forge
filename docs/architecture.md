@@ -1220,13 +1220,30 @@ reading saved files whose exact lstat the checkout stat index vouches for.
 When the checkout already has a trusted installed marker, apply is in place and
 proportional to changed paths: only paths whose bytes or mode differ are fetched,
 verified, staged privately and flushed. A durable `delta-apply.json` journal names
-the stage, the paths to move aside (with their verified baseline) and the paths to
-install; every later checkout operation rolls an interrupted journal forward first.
-Moved-aside bytes that differ from their baseline are restored and refused before
-any install, or kept and listed in `displacedRecovery` after one. Unchanged files
-keep their inodes, ignored output stays where it is, and emptied directories are
-removed. Without a trusted marker, or when a path changes between file and
-directory, the whole private stage is built and swapped. A local artifact-path
+the stage, the paths to move aside (with their verified baseline), the paths to
+install, and the digests of the marker it replaces and the marker it publishes.
+Every command that trusts the marker (open, sync, resolve, save, abandon with
+`keepPatch`, preflight, rebase, lifecycle changes and save receipts) first finishes
+an interrupted journal under the work lock; the dirty check reports a pending
+journal as dirty and status reports it. Finishing rolls forward only while the
+root marker is the one the journal replaces and its stage is whole; when the
+target marker is already published only bookkeeping remains. A missing stage rolls
+back: installed paths are removed only while they hold exactly the incoming bytes,
+and moved-aside bytes return. A local edit found before anything was installed
+also rolls back and refuses, from any command; a recorded rollback resumes as one.
+A marker changed by anything else, a parent replaced by a link or a file, or a
+filesystem error refuses with a `delta-apply-pending` obstruction naming the path
+and keeps the journal; explicit `recover-apply` moves its moved-aside bytes beside
+the preserved checkout. A journal from a newer client asks for an upgrade. Bytes
+moved aside after installing began (an edit or a recreated incoming path) are kept,
+listed in `displacedRecovery` with a `warning`, and refuse a save once. Every
+parent directory the journal touched is flushed before the marker is published,
+and kept folders before the journal is removed. Unchanged files keep their inodes,
+ignored output stays where it is, and emptied directories are removed. Without a
+trusted marker, when a path changes between file and directory, or when an incoming
+path or parent differs from an installed one only by case or Unicode
+normalization, the whole private stage is built and swapped; day-old stages no
+journal names are swept. A local artifact-path
 journal precedes that directory swap. Artifacts move from the retained previous
 checkout only after publication, and original-operation replay resumes those
 renames without overwriting an occupied destination. Main checkout uses the same

@@ -23,6 +23,7 @@ import { digest } from './hash.js';
 import { readHostedLaneCheckout, hostedLaneCheckoutMarkerSchema } from './hosted-lane-checkout-marker.js';
 import { stateSchema } from './native-state-format.js';
 import { workLocked } from './work-lock.js';
+import { settlePendingCheckoutDelta } from './hosted-checkout-delta-pending.js';
 import { saveResultSchema } from './hosted-save.js';
 import { canonicalPayload } from './hosted-source-operation.js';
 import { buildSavePages, saveRequestSchema, saveBytes, savePin } from './hosted-save.js';
@@ -341,6 +342,8 @@ function applyHostedSaveReceipt(
   terminal: { outcome: { status: string; result?: unknown } },
 ) {
   workLocked(join(clientCacheRoot(root), 'lock'), () => {
+    // A sync interrupted since capture finishes first, so its marker never moves backwards.
+    settlePendingCheckoutDelta(root);
     const pending = pendingSavePath(root, capture.marker);
     const clearPending = () => {
       if (

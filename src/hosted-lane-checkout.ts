@@ -21,10 +21,10 @@ import {
   checkoutDelta,
   deltaJournalName,
   deltaObstructed,
-  deltaRetainedName,
   journalCheckoutDelta,
-  settleCheckoutDelta,
 } from './hosted-checkout-delta.js';
+import { retainedDeltaBackups, settleCheckoutDelta } from './hosted-checkout-delta-settle.js';
+import { sweepCheckoutStages } from './hosted-checkout-delta-pending.js';
 import { withCheckoutOpenMetrics, type CheckoutOpenMetrics } from './checkout-open-metrics.js';
 import { checkoutIo } from './checkout-io.js';
 import { smallCheckout } from './checkout-workload.js';
@@ -105,8 +105,9 @@ async function checkout(
   };
   const recover = () => {
     if (checkoutPathExists(previous) && !checkoutPathExists(root)) renameSync(previous, root);
-    // An interrupted in-place install always rolls forward from its durable private stage.
-    settleCheckoutDelta(root, cache.root);
+    // An interrupted in-place install finishes from its durable private stage, or rolls back.
+    const settled = settleCheckoutDelta(root, cache.root);
+    if (settled?.conflict) throw settled.conflict;
   };
   const identity = (selection: HostedLaneSelection) => {
     invariant(
@@ -217,6 +218,15 @@ async function checkout(
       );
       const selection = operation.selection;
       identity(selection);
+      const displaced = () => {
+        const kept = retainedDeltaBackups(cache.root);
+        return kept.length
+          ? {
+              displacedRecovery: kept,
+              warning: `Local bytes that differed from the checkout baseline were moved out of the working tree during an interrupted apply and kept at ${kept.join(', ')}. Copy back what you need, then delete the folder.`,
+            }
+          : {};
+      };
       const result = (replayed: boolean) => ({
         ...selection,
         root,
@@ -228,9 +238,7 @@ async function checkout(
         ...(cache.machineObjects ? { machineObjects: cache.machineObjects } : {}),
         replayed,
         ...(checkoutPathExists(recoveryPath) ? { localRecovery: json(recoveryPath) } : {}),
-        ...(checkoutPathExists(join(cache.root, deltaRetainedName))
-          ? { displacedRecovery: json(join(cache.root, deltaRetainedName)) }
-          : {}),
+        ...displaced(),
       });
       if (operation.complete) {
         metrics.replayed = true;
@@ -391,10 +399,13 @@ async function checkout(
                       // Ignored artifacts stay where they are; only changed paths move.
                       const prior = new Map(materializedFiles(current).map(file => [file.path, file]));
                       const pin = ({ path, blob, mode }: NativeFile) => ({ path, blob, mode });
+                      sweepCheckoutStages(cache.root);
                       journalCheckoutDelta(cache.root, {
                         operationId: request.operationId,
                         stage: basename(stage),
                         marker: hostedLaneMarkerName,
+                        priorMarker: beforeDigest,
+                        targetMarker: digest(readFileSync(join(stage, '.forge', hostedLaneMarkerName))),
                         install: delta.install.map(pin),
                         displace: [
                           ...delta.remove,
@@ -404,7 +415,8 @@ async function checkout(
                         ].map(pin),
                         targetFiles: files,
                       });
-                      settleCheckoutDelta(root, cache.root, true);
+                      const settled = settleCheckoutDelta(root, cache.root);
+                      if (settled?.conflict) throw settled.conflict;
                       // A full install replaces `.forge`; in place, retire the persisted legacy record.
                       const legacyUse = join(root, '.forge', 'cache-use.json');
                       if (checkoutPathExists(legacyUse) && preserveLegacyCacheUse(root)) {
@@ -432,11 +444,14 @@ async function checkout(
             );
           } finally {
             // A journaled in-place install still owns its stage until it rolls forward.
-            const journal = join(cache.root, deltaJournalName);
-            if (
-              checkoutPathExists(stage) &&
-              !(checkoutPathExists(journal) && json(journal).stage === basename(stage))
-            )
+            const owned = () => {
+              try {
+                return json(join(cache.root, deltaJournalName)).stage === basename(stage);
+              } catch {
+                return false; // No journal (or another process just finished it).
+              }
+            };
+            if (checkoutPathExists(stage) && !owned())
               await checkoutIo(async () => rmSync(stage, { recursive: true, force: true }));
           }
         },

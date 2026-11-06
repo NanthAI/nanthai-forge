@@ -22,6 +22,7 @@ import { applyHostedSync } from './hosted-sync-client.js';
 import { applySchema } from './hosted-sync-contract.js';
 import { withCheckoutWritePass } from './checkout-materialization.js';
 import { hostedActionError } from './hosted-action-error.js';
+import { retireCheckoutDelta } from './hosted-checkout-delta-pending.js';
 
 import {
   receiptSchema,
@@ -162,7 +163,16 @@ export async function recoverLocalApply(root: string, id: string, transport: Lan
               syncDirectory(directory);
               syncDirectory(dirname(root));
             }
-            if (!checkoutPathExists(root)) renameSync(stage, root);
+            if (!checkoutPathExists(root)) {
+              // The preserved checkout may be half of an interrupted in-place apply. Its journal
+              // must not finish over the restored baseline: keep its moved-aside bytes here too.
+              const displaced = retireCheckoutDelta(cacheRoot, directory);
+              if (displaced && !current.additionalPreservedAt?.includes(displaced)) {
+                current.additionalPreservedAt = [...(current.additionalPreservedAt ?? []), displaced];
+                durableReplace(receiptPath, JSON.stringify(current));
+              }
+              renameSync(stage, root);
+            }
             invariant(
               publishedBaseline(),
               'WORK_CONFLICT',

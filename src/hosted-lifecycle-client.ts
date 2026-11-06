@@ -17,6 +17,7 @@ import { checkoutPathExists } from './hosted-checkout-files.js';
 import { canonicalPayload } from './hosted-source-operation.js';
 import { hostedLifecycleRequestSchema, hostedLifecycleResultSchema } from './hosted-lifecycle.js';
 import { invariant } from './errors.js';
+import { finishPendingCheckoutDelta, settlePendingCheckoutDelta } from './hosted-checkout-delta-pending.js';
 import type { HostedLaneCheckoutMarker } from './hosted-lane-checkout-marker.js';
 import type { ConvexExchange } from './exchange-client.js';
 const commandSchema = z
@@ -56,6 +57,7 @@ export async function transitionHostedLane(
   }
   const lock = join(cache, 'lock'),
     path = join(directory, `${parsed.operationId}.json`);
+  finishPendingCheckoutDelta(root);
   // A save whose reply was never seen must not read as unsaved edits or pin a stale baseline.
   if (!checkoutPathExists(path)) await settlePriorHostedSave(root, null, exchange);
   const original = workLocked(lock, () => {
@@ -229,6 +231,7 @@ export async function transitionHostedLane(
     const target = request.target,
       lane = result.lane;
     workLocked(lock, () => {
+      settlePendingCheckoutDelta(root);
       const marker = readHostedLaneCheckout(root);
       if (!marker || marker.selection.laneId !== target.laneId) return;
       const selection = marker.selection;

@@ -17,6 +17,7 @@ import { durableReplace, syncDirectory } from './native-durability.js';
 import { workLocked } from './work-lock.js';
 import { digest } from './hash.js';
 import { invariant } from './errors.js';
+import { finishPendingCheckoutDelta, settlePendingCheckoutDelta } from './hosted-checkout-delta-pending.js';
 
 type Exchange = ConstructorParameters<typeof ConvexLaneTransport>[0];
 const shell = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
@@ -58,6 +59,7 @@ function onDisk(root: string, path: string, file: NativeFile | undefined) {
  * overwritten. One Lane read; a moved head adds one manifest and the changed
  * blobs in page-sized batches. Returns null when the checkout is already current. */
 export async function rebaseHostedCheckout(root: string, exchange: Exchange) {
+  finishPendingCheckoutDelta(root);
   const stale = readHostedLaneCheckout(root);
   invariant(stale, 'NOT_FOUND', 'Open a hosted Lane before saving.');
   const transport = new ConvexLaneTransport(exchange),
@@ -111,6 +113,7 @@ export async function rebaseHostedCheckout(root: string, exchange: Exchange) {
     materialized: [...materialized].sort(),
   });
   workLocked(join(clientCacheRoot(root), 'lock'), () => {
+    settlePendingCheckoutDelta(root);
     invariant(
       canonicalPayload(readHostedLaneCheckout(root)) === canonicalPayload(stale),
       'WORK_STALE',

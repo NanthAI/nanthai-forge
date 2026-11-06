@@ -6,13 +6,16 @@ import { forgeCachePath } from './forge-cache-paths.js';
 import { digest } from './hash.js';
 import { nativePaths } from './source-paths.js';
 import { indexedBlob, readCheckoutStatIndex } from './checkout-stat-index.js';
+import { deltaApplyPending } from './hosted-checkout-delta-pending.js';
 
 const LARGE_FILE = 256 * 1024 * 1024;
-/** True when the checkout differs from its saved baseline, or when that cannot be established.
+/** True when the checkout differs from its saved baseline, or when that cannot be established
+ * (an in-place apply is running or was interrupted: the marker may not describe the bytes yet).
  * Read-only and local: it hashes files in place (skipping those the checkout stat index vouches
  * for) and writes nothing, unlike a save capture. */
 export function hostedLaneDirty(root: string): boolean {
   try {
+    if (deltaApplyPending(root)) return true;
     const marker = readHostedLaneCheckout(root);
     if (!marker) return true;
     const baseline = new Map(marker.state.files.map(file => [file.path, file]));
