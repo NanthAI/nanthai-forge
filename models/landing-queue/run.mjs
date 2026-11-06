@@ -71,6 +71,8 @@ if (config === 'all') {
     'firstcheck-two',
     'firstcheck-two-fix',
     'firstcheck-mixed',
+    'progresswake',
+    'progresswake-fixed',
   ]) {
     const code = await new Promise((resolve, reject) => {
       const child = spawn(process.execPath, [fileURLToPath(import.meta.url), name], { stdio: 'inherit' });

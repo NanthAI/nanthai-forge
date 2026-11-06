@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import { makeFunctionReference } from 'convex/server';
 import type { MutationCtx } from './_generated/server';
-import type { Id } from './_generated/dataModel';
+import type { Doc, Id } from './_generated/dataModel';
+import { progressWakeDue } from '../src/landing-stall';
 
 export const checkWakeRow = (ctx: MutationCtx, input: { projectId: Id<'hostedProjects'>; runId: string }) =>
   ctx.db
@@ -57,9 +58,35 @@ export async function notifyLandingCheck(
   // Advance even while a fanout is in flight. Pages which already consumed a
   // progress event must see a later terminal event before that fanout retires.
   if (row) await ctx.db.patch(row._id, { version: (row.version ?? 1) + 1 });
+  // A progress event whose only waiter is a checking entry that retained
+  // progress inside the throttle window cannot change anything: the wake would
+  // read that row and the run, skip it unconsumed and retire. Schedule nothing.
+  // The next event outside the window (or the terminal one, always) reaches the
+  // entry through the version bumped above, exactly as a skipped wake would.
+  if (input.terminal === false && waiting.phase === 'checking' && (await skippable(ctx, input, waiting)))
+    return;
   if (row?.wake) {
     const task = await ctx.db.system.get(row.wake.taskId);
     if (task?.state.kind === 'pending' || task?.state.kind === 'inProgress') return;
   }
   await scheduleCheckWake(ctx, { projectId: input.projectId, runId: input.runId }, row);
+}
+/** The wake's own skip rule (`wakeLandingCheckPage`), evaluated from the head row
+ * alone: a solo checking entry inside the throttle window. Batch members and any
+ * run with a second waiter keep the earlier rule (no extra read for them). */
+async function skippable(
+  ctx: MutationCtx,
+  input: { projectId: Id<'hostedProjects'>; runId: string },
+  waiting: Doc<'projectHostedLandingRequests'>,
+) {
+  if (waiting.admission?.status === 'checking') return false;
+  const state = JSON.parse(waiting.value) as { batchId?: string; timing?: { ciProgressAt?: string } };
+  if (state.batchId || progressWakeDue(state.timing?.ciProgressAt, Date.now())) return false;
+  const waiters = await ctx.db
+    .query('projectHostedLandingRequests')
+    .withIndex('by_project_and_run_and_phase', q =>
+      q.eq('projectId', input.projectId).eq('runId', input.runId).lte('phase', 'queued'),
+    )
+    .take(2);
+  return waiters.length === 1;
 }

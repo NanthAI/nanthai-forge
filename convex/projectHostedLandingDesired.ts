@@ -179,7 +179,12 @@ export const submit = receiptMutation({
         value: canonicalPayload(state),
         wake: null,
       });
-      await schedule(ctx, (await ctx.db.get(key))!, 0);
+      // A source job still running cannot finish this goal: its completion wakes
+      // the goal at once (notifyDesiredCompose), so an immediate drive would claim
+      // and advance to nothing. Arm the same watchdog that drive's claim would
+      // have armed a moment later; terminal sources still drive immediately.
+      const running = source.state.status === 'submitted' && !source.operation.terminal;
+      await schedule(ctx, (await ctx.db.get(key))!, running ? desiredWatchdogMs(state) : 0);
       await scheduleLandingAlarm(ctx, state);
       return canonicalPayload(state);
     } catch (error) {

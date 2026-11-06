@@ -37,6 +37,8 @@ npm run model:landing-queue -- orderchain      # expected: a holder that lost ev
 npm run model:landing-queue -- orderchain-fixed
 npm run model:landing-queue -- expiry          # expected: an outage nobody ends strands a Ready head (72d50375)
 npm run model:landing-queue -- expiry-fixed
+npm run model:landing-queue -- progresswake    # expected liveness violation: a skip rule that also drops the terminal wake (7ecc4884)
+npm run model:landing-queue -- progresswake-fixed
 npm run model:landing-queue -- moving
 npm run model:landing-queue -- reuse
 npm run model:landing-queue -- reuse-fixed
@@ -277,7 +279,7 @@ scope limitation; passing TLC does not verify the omitted implementation.
 
 | Model action/state | Code anchor | Abstraction and reason |
 | --- | --- | --- |
-| `Submit`, `Admit`, `AdmissionFailure`, `Gate` | `convex/projectHostedLandingDesired.ts:27`, `convex/projectHostedLandingDesired.ts:189`, `convex/projectHostedLandingDesired.ts:204`, `convex/projectHostedLanding.ts:209`, `convex/projectHostedLandingPins.ts:28` | One entry per Lane/operation. The durable desired handle enters `composing`; source completion admits it or retains a structured failure. Canonical queue order is assigned at enqueue, so a later source job may enter first. Source cursor/transport work and selection validation are hidden; aliases stutter. Multi-Lane selections and access revocation remain outside the state space. |
+| `Submit`, `Admit`, `AdmissionFailure`, `Gate` | `convex/projectHostedLandingDesired.ts:27`, `convex/projectHostedLandingDesired.ts:197`, `convex/projectHostedLandingDesired.ts:212`, `convex/projectHostedLanding.ts:209`, `convex/projectHostedLandingPins.ts:28` | One entry per Lane/operation. The durable desired handle enters `composing`; source completion admits it or retains a structured failure. Canonical queue order is assigned at enqueue, so a later source job may enter first. Source cursor/transport work and selection validation are hidden; aliases stutter. Multi-Lane selections and access revocation remain outside the state space. |
 | needs action | `src/agent-default-gates.ts:28`, `convex/projectHostedLandingControl.ts:315`, `src/hosted-landing.ts:117` | Blocking overlap/review/dependency is an observable result, not a new stored terminal phase. Advisory overlaps never gate. Answer/resubmit is outside this finite episode. |
 | `Form`, `SmallCohorts` | `convex/projectHostedLandingBatchStore.ts:83`, `convex/projectHostedLandingOrder.ts:43` | Fixed cohort compatibility and one actor/priority/policy; rank is allocated at canonical admission. Dynamic cohort sizing, actor fairness and urgent preemption are reduced to finite selection. Membership and source-completion/admission order can differ in `submission.cfg`; the default starts after three admissions to keep the exploration small. |
 | `Precompose`, claim in `Form` | `convex/projectHostedLandingPrecompose.ts:50`, `convex/projectHostedFinishPrecompose.ts:13`, `convex/projectHostedFinishCompose.ts:268` | An advisory marker, never a queue claim. Useful selection detaches its advisory work. Peer markers may physically survive until attempt/shared-run validation; this model hides them at logical cohort selection, and merge outcomes remain nondeterministic. Byte-cache hit/miss, metadata uploads and late advisory callbacks are hidden; they grant no check/publication authority. |
@@ -295,6 +297,7 @@ scope limitation; passing TLC does not verify the omitted implementation.
 | `LaneCheck`, `LaneAdopt`, `LaneRefused`, `Behind` | `convex/projectHostedLandingAdmission.ts` (`startLandingAdmission`, `settleLandingAdmission`, `admittedReuseFirst`), `convex/projectHostedLandingStore.ts` (`orderLive`, `batchable`), `convex/projectHostedLandingSuffix.ts`, `convex/projectHostedLandingOrder.ts` (`olderLandingAhead`) | Lane-check outcomes are fixed by `Red`; in-flight interaction failures stay nondeterministic in `Check`. Proof eligibility is the constant `Independent`, not the path/test analysis. A refused proof is reduced to returning to the pool; the code recomposes on current main first. The code walks the suffix only for entries that went through full admission: only they can enter the queue behind a younger group. |
 | `EarlyRefusal`, `RefusableLane` | `convex/projectHostedLandingEarlyRefusal.ts` (`refuseStaleLaneProofNow`, `wakeAfterLaneRefusal`, `laneRefusalCohort`), `convex/projectHostedFinishControl.ts` (`finishStep`) | The code requires the retained train to be empty of live groups (a lane-bound entry is not in the train); the model requires no non-Lane active group. The cohort class stands for the code's cohort-size limit; urgent entries and the 16-row window are not modelled. |
 | `Deciding`, `Held`, `HoldExpire` | `convex/projectHostedLandingCohortHold.ts` (`decidingSince`, `holdForPeers`, `releaseCohortHolds`, `end`, `redriveCohortHold`), `convex/projectHostedLandingStore.ts` (`writeLanding`), `convex/projectHostedLandingBatchCheck.ts` | The code waits only for peers whose admission ended before the hold began (`deciding` index), so later arrivals never extend it; the model starts with every entry admitted. A held entry outside the release window is released by its own wake. |
+| check progress event, `CHECK_PROGRESS_WAKE_MS` | `convex/projectHostedLandingCheckWake.ts` (`notifyLandingCheck`, `throttled`), `convex/projectHostedLandingWake.ts` (`wakeLandingCheckPage`) | Non-terminal run events are stutter steps: they change no phase, order, eligibility or terminal evidence, only the progress timestamp the 15/60-minute stall events read. Only the terminal event and eligibility are modelled (`Check`); the `progresswake` litmus covers dropping the terminal wake. The throttle clock, wake pages and the version counter are not simulated. |
 | crash/restart, fair driver | `convex/projectHostedLandingControl.ts:43`, `convex/projectHostedLandingControl.ts:123`, `convex/projectHostedLandingDriver.ts:46`, `convex/projectHostedFinishWake.ts:48` | Finite crashes between transactions; durable watchdog eventually runs, lease fence rises on restart. Expiry alone creates no new run. Timers become fair events; physical durations and stale worker payloads are not simulated. |
 | stall/hold repair | `convex/projectHostedLandingWake.ts:112`, `convex/projectHostedLandingStall.ts:90`, `convex/projectHostedLandingStall.ts:157` | Fair source failure/fallback stands in for 5-minute hold release and 15/60-minute stall events. Real drop deadlines only cancel structurally ownerless work and eventually stop rearming live work. Permanent transaction faults are outside successful-driver fairness; the stranded litmus tests the missing-recovery shape, not all six historic incidents. |
 | client observation | `src/hosted-agent-submission-wait.ts:164`, `src/hosted-agent-submission-wait.ts:267`, `src/hosted-agent-submission-wait.ts:392` | Separate litmus because client cache state does not authorize server acceptance. Only cached-ready/canonical-terminal/input-terminal interleaving is needed. |
@@ -472,6 +475,23 @@ algorithm drift: changes to these code anchors require manual model review.
    Ask-only: a healthy landing and the resume sweep add nothing.
    `tests/hosted-landing-lost-wake.test.mjs` replays it against the implementation.
 
+10. **Skipped progress wakes (7ecc4884; cost slice 2, 2026-11-06).** The model has
+   no progress action: a running check's non-terminal events stutter. In code each
+   one schedules a check wake (`convex/projectHostedLandingCheckWake.ts`,
+   `notifyLandingCheck`) which, for a checking entry that retained progress inside
+   `CHECK_PROGRESS_WAKE_MS`, reads the entry and the run, skips the entry
+   unconsumed and retires. That wake now is not scheduled when the entry is a solo
+   (non-batch) checking entry, the run's only waiter, and the throttle would skip it. Terminal events (and every
+   event of an admission, queued or shared run) still schedule it in the same
+   transaction. `progresswake` is the lost-wakeup litmus: applying the same skip
+   to the terminal event drops the entry's only wake and `HeadLands` is violated.
+   `progresswake-fixed` skips only non-terminal events and settles;
+   `ProgressSkipIsNoop` holds in both. The same slice stops the desired-landing
+   submit from driving at once while its source job still runs (the job's
+   completion wakes it, `notifyDesiredCompose`; the watchdog armed instead is the
+   one the empty drive's claim armed a moment later). Replayed in
+   `tests/hosted-landing-controller-wakes.test.mjs`.
+
 `isolation.cfg` checks the 51bbbd00 isolation semantics in the core model:
 combined-failure evidence may name suspects (released with the reason, never
 re-stacked onto: `NoStackOnSuspect`), and a group stacked on an unpassed
@@ -516,6 +536,8 @@ or production historical replay is implied.
 | `orderchain-fixed` | 6 | 6 | 0.623 | Passed |
 | `expiry` | 4 | 4 | 0.704 | Expected liveness violation |
 | `expiry-fixed` | 5 | 5 | 0.774 | Passed |
+| `progresswake` | 4 | 4 | 0.707 | Expected liveness violation |
+| `progresswake-fixed` | 5 | 5 | 0.565 | Passed |
 | `moving` | 8 | 7 | 0.568 | Expected liveness violation |
 | `reuse` | 4 | 4 | 0.550 | Expected ExactCheckedHead |
 | `reuse-fixed` | 4 | 4 | 0.551 | Passed |

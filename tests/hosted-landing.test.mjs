@@ -415,6 +415,14 @@ test('check result and its notification commit together; failed scheduling repla
   const active = await f.rawChecks.activate(run.id),
     saved = await f.enqueue(f.request({ check: { kind: 'run', runId: run.id } }));
   await f.drain();
+  // A progress event inside the throttle window of the entry's last retained
+  // progress schedules no wake (7ecc4884), so nothing could fail. Age that
+  // progress past the window: this event does schedule its wake.
+  for (const row of f.tables.projectHostedLandingRequests.values()) {
+    const value = JSON.parse(row.value);
+    value.timing = { ...value.timing, ciProgressAt: new Date(Date.now() - 2 * 60_000).toISOString() };
+    f.patch('projectHostedLandingRequests', row._id, { value: JSON.stringify(value) });
+  }
   const callback = f.rawChecks.shard(active, 0),
     before = f.tables.projectHostedCheckCallbacks.size;
   f.schedulerFailure(true);

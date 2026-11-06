@@ -268,9 +268,27 @@ OutageExpiry == /\ Scenario = "expiry"
        [] pc = 3 /\ owner /\ ~inputsDone -> /\ b' = "landed" /\ pc' = 4
                      /\ UNCHANGED <<canonical, observed, inputsDone, returned, a, main, checked, applied, owner>>
        [] OTHER -> FALSE
+\* Issue 7ecc4884 (cost slice 2, w3c 2026-11-06): b is a checking entry whose last
+\* queue tick retained progress inside the throttle window (checked = 1), with no
+\* wake pending (owner = FALSE). A progress event arrives: the wake it would
+\* schedule reads the row and retires without changing anything, so none is
+\* scheduled. The run then reports its terminal result inside the same window
+\* (returned = TRUE). Unfixed, the skip rule is applied to that event too and
+\* b's only wake is dropped. Fixed, only non-terminal events are skipped; the
+\* terminal event always schedules its wake in the check-result transaction.
+ProgressWake == /\ Scenario = "progresswake"
+  /\ CASE pc = 0 -> /\ b' = "checking" /\ checked' = 1 /\ owner' = FALSE /\ pc' = 1
+                     /\ UNCHANGED <<canonical, observed, inputsDone, returned, a, main, applied>>
+       [] pc = 1 -> /\ pc' = 2
+                     /\ UNCHANGED <<canonical, observed, inputsDone, returned, a, b, main, checked, applied, owner>>
+       [] pc = 2 -> /\ returned' = TRUE /\ owner' = Fixed /\ pc' = 3
+                     /\ UNCHANGED <<canonical, observed, inputsDone, a, b, main, checked, applied>>
+       [] pc = 3 /\ owner -> /\ b' = "landed" /\ pc' = 4
+                     /\ UNCHANGED <<canonical, observed, inputsDone, returned, a, main, checked, applied, owner>>
+       [] OTHER -> FALSE
 Step == Wait \/ CohortConflict \/ LostWake \/ MovingMain \/ CrossHead \/ OrderWake \/ Outage \/ CohortHold \/ LostDispatch
         \/ Supervisor \/ CheckRound
-        \/ RetryKeep \/ OrderChain \/ OutageExpiry
+        \/ RetryKeep \/ OrderChain \/ OutageExpiry \/ ProgressWake
 Spec == Init /\ [][Step]_vars /\ WF_vars(Step)
 FreshTerminal == returned => observed = canonical
 NoOrphanConflict == ~(a \in {"failed", "cancelled"} /\ b = "conflict" /\ main = 0 /\ checked = 0)
@@ -290,4 +308,6 @@ NoStaleStack == Scenario = "retrykeep" /\ pc \in 2..4 /\ b \in {"checking", "rea
 StackedExact == Scenario = "retrykeep" /\ b = "landed" => a = "landed" /\ checked = main
 KeepsSameHead == Scenario = "retrykeep" /\ applied > 0 => main = 1
 StackSettles == Scenario = "retrykeep" => <>(pc = 5)
+\* A skipped progress event leaves every queue-visible fact as it was.
+ProgressSkipIsNoop == Scenario = "progresswake" /\ pc = 2 => b = "checking" /\ owner = FALSE /\ ~returned
 =============================================================================
