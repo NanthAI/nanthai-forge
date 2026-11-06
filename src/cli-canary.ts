@@ -17,6 +17,12 @@ export const CLI_CANARY_WAIT_STEP_MS = 10_000;
 /** After a refusal the same build is retried no sooner than this, doubling per attempt. */
 export const CLI_CANARY_BACKOFF_MS = 10 * 60_000;
 export const CLI_CANARY_BACKOFF_MAX_MS = 6 * 60 * 60_000;
+/** Version skew right after main moves is usually the server deploy of the same State still
+ * running (Issue 3205f7e6): retry this soon, without an alert, for at most the window below. */
+export const CLI_CANARY_DEPLOY_RETRY_MS = 60_000;
+export const CLI_CANARY_DEPLOY_WINDOW_MS = 15 * 60_000;
+/** Codes a CLI returns when it and the server it talks to are different versions. */
+const SKEW_CODES = new Set(['HOSTED_PROTOCOL_INVALID', 'HOSTED_ACTION_UNSUPPORTED', 'CLI_UPGRADE_REQUIRED']);
 const OUTPUT_CAP = 4 * 1024 * 1024;
 /** Environment names the canary children inherit; same set the detached updater already gets. */
 const CHILD_ENV = [
@@ -42,6 +48,11 @@ export type CanaryRefusal = {
   /** Epoch ms; a hold ignores it and lasts until main moves to another head. */
   nextRetryAt: number;
   hold?: boolean;
+  /** Epoch ms of this head's first version-skew failure: inside the deploy window it is retried
+   * every minute without an alert (the server deploy is probably not live yet). */
+  deployPendingSince?: number;
+  /** This record is such a deploy-window hold, not a refusal. */
+  deployPending?: boolean;
   alerted?: boolean;
   noticed?: boolean;
 };
@@ -425,7 +436,7 @@ export function cliCanaryNotice(installation: string, record: CanaryRefusal, run
   const retry = record.hold
     ? 'held until main moves (explicit rollback)'
     : `next retry after ${clock(record.nextRetryAt)}`;
-  const head = `Forge CLI main ${record.head.slice(0, 8)} was ${record.hold ? 'rolled back' : record.step === SERVER_BEHIND_STEP ? 'held by its pre-switch canary' : 'refused by its pre-switch canary'}`;
+  const head = `Forge CLI main ${record.head.slice(0, 8)} was ${record.hold ? 'rolled back' : record.step === SERVER_BEHIND_STEP || record.deployPending ? 'held by its pre-switch canary' : 'refused by its pre-switch canary'}`;
   return (
     `${head} (${record.reason}); running on ${runningOn.slice(0, 8)}, ${retry}.` +
     (first
@@ -505,26 +516,37 @@ export const cliCanaryPreSwitch =
       const failure = error instanceof CanaryFailure ? error : null;
       const previous = readCliCanaryRefusal(installation);
       const same = previous?.head === head ? previous : null;
-      const attempts = (same?.attempts ?? 0) + 1;
+      // A step the current build passes fails on the new one with a version-skew code: the
+      // server has probably not deployed this State yet. Retry every minute, no alert, for a
+      // bounded window; only a skew that outlasts the window is a refusal.
+      const skew =
+        !!failure && failure.step !== SERVER_BEHIND_STEP && SKEW_CODES.has(failureCode(failure) ?? '');
+      const pendingSince = skew ? (same?.deployPendingSince ?? now()) : undefined;
+      const pending = pendingSince !== undefined && now() - pendingSince < CLI_CANARY_DEPLOY_WINDOW_MS;
+      const attempts = pending ? (same?.attempts ?? 0) : (same?.attempts ?? 0) + 1;
       const record: CanaryRefusal = {
         head,
         at: new Date(now()).toISOString(),
         step: failure?.step ?? 'canary',
         reason: failure?.message ?? 'canary failed unexpectedly',
         attempts,
-        nextRetryAt: now() + cliCanaryBackoffMs(attempts),
+        nextRetryAt: now() + (pending ? CLI_CANARY_DEPLOY_RETRY_MS : cliCanaryBackoffMs(attempts)),
+        ...(pendingSince !== undefined ? { deployPendingSince: pendingSince } : {}),
+        ...(pending ? { deployPending: true } : {}),
         ...(same?.alerted ? { alerted: true } : {}),
         ...(same?.noticed && same.reason === (failure?.message ?? '') ? { noticed: true } : {}),
       };
       writeCliCanaryRefusal(installation, record);
       const behind = record.step === SERVER_BEHIND_STEP;
       log(
-        behind
-          ? `Forge CLI canary held ${head.slice(0, 8)}: ${record.reason}; the previous build stays selected, next retry after ${clock(record.nextRetryAt)} (attempt ${attempts}).`
-          : `Forge CLI canary refused ${head.slice(0, 8)}: ${record.reason}; the previous build stays selected.`,
+        pending
+          ? `Forge CLI canary held ${head.slice(0, 8)}: ${record.reason}; the server deploy of this State is probably not live yet, the previous build stays selected, next retry after ${clock(record.nextRetryAt)} (deploy window ends ${clock(pendingSince! + CLI_CANARY_DEPLOY_WINDOW_MS)}).`
+          : behind
+            ? `Forge CLI canary held ${head.slice(0, 8)}: ${record.reason}; the previous build stays selected, next retry after ${clock(record.nextRetryAt)} (attempt ${attempts}).`
+            : `Forge CLI canary refused ${head.slice(0, 8)}: ${record.reason}; the previous build stays selected.`,
       );
       // A server that is behind is the normal deploy order, not a broken build: no alert.
-      if (!record.alerted && !behind) {
+      if (!record.alerted && !behind && !pending) {
         // Alert once per head, before the throw, and only ever once even if delivery failed.
         writeCliCanaryRefusal(installation, { ...record, alerted: true });
         await Promise.race([

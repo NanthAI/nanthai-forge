@@ -364,6 +364,9 @@ export async function cliUpdateCli(args: string[]) {
     } catch (error) {
       if (error instanceof ForgeError && error.code === 'CLI_UPDATE_BUSY')
         return { status: 'busy', installation };
+      // A canary refusal or hold carries its own retry time (canary-refused.json); the generic
+      // 10-minute mark would delay a deploy-window retry (Issue 3205f7e6).
+      if (error instanceof ForgeError && error.code === 'CLI_CANARY_FAILED') throw error;
       durableReplace(
         failureMark(installation),
         JSON.stringify({ code: error instanceof ForgeError ? error.code : 'CLI_UPDATE_FAILED' }),

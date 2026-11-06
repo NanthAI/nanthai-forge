@@ -29,6 +29,8 @@ import { cliRollback } from '../dist/cli-rollback.js';
 import {
   activeCliCanaryRefusal,
   cliCanaryBackoffMs,
+  CLI_CANARY_DEPLOY_RETRY_MS,
+  CLI_CANARY_DEPLOY_WINDOW_MS,
   cliCanaryPreSwitch,
   readCliCanaryRefusal,
   rememberCanaryClone,
@@ -65,6 +67,8 @@ if (target === step) {
   if (kind === 'changed') { process.stderr.write('{"error":{"code":"WORK_OPERATION_CHANGED"}}\\n'); process.exit(1); }
   if (kind === 'running') { process.stdout.write('{"schema":1,"result":{"status":"IN_PROGRESS","reason":"budget"}}\\n'); process.exit(3); }
   if (kind === 'fail') { process.stderr.write('{"error":{"code":"HOSTED_ACTION_FAILED"}}\\n'); process.exit(1); }
+  // Version skew: this build and the server it talks to differ (3205f7e6: deploy not live yet).
+  if (kind === 'skew') { process.stderr.write('{"error":{"code":"HOSTED_PROTOCOL_INVALID"}}\\n'); process.exit(1); }
   if (kind === 'badjson') { process.stdout.write('{not json\\n'); process.exit(0); }
   if (kind === 'hang') { writeFileSync(join(installation, 'hang.pid'), String(process.pid)); setInterval(() => {}, 1000); await new Promise(() => {}); }
 }
@@ -315,6 +319,82 @@ test('a server that lacks a feature the build needs holds the switch with the ba
   assert.equal((await run(f, b, canary)).status, 'updated');
   assert.equal(current(f), b);
   assert.equal(readCliCanaryRefusal(f.installation), null);
+});
+
+test('incident replay 3205f7e6: version skew right after main moves is retried every minute without an alert, then refused', async t => {
+  const f = fixture(t);
+  f.build(b, 'skew:planning');
+  const alerts = [],
+    lines = [];
+  let clockMs = Date.parse('2026-11-06T02:10:00Z');
+  const canary = cliCanaryPreSwitch(f.installation, {
+    home: f.home,
+    now: () => clockMs,
+    alert: async record => alerts.push(record),
+    log: line => lines.push(line),
+  });
+  await assert.rejects(run(f, b, canary), { code: 'CLI_CANARY_FAILED' });
+  assert.equal(current(f), a, 'the previous build keeps serving');
+  let record = readCliCanaryRefusal(f.installation);
+  assert.equal(record.deployPending, true);
+  assert.equal(record.deployPendingSince, clockMs);
+  assert.equal(record.nextRetryAt - clockMs, CLI_CANARY_DEPLOY_RETRY_MS);
+  assert.equal(record.attempts, 0, 'a deploy-window hold is not a refusal attempt');
+  assert.equal(alerts.length, 0, 'no phone alert while the deploy may still be running');
+  assert.match(
+    lines.at(-1),
+    /canary held bbbbbbbb: .*probably not live yet.*next retry after 02:11 UTC \(deploy window ends 02:25 UTC\)/,
+  );
+  const { cliCanaryNotice } = await import('../dist/cli-canary.js');
+  assert.match(cliCanaryNotice(f.installation, record, a), /was held by its pre-switch canary/);
+  // Five minutes later, still skewed: still a hold, same window start.
+  clockMs += 5 * 60_000;
+  await assert.rejects(run(f, b, canary), { code: 'CLI_CANARY_FAILED' });
+  record = readCliCanaryRefusal(f.installation);
+  assert.equal(record.deployPendingSince, Date.parse('2026-11-06T02:10:00Z'));
+  assert.equal(alerts.length, 0);
+  // Skew that outlasts the window is a real refusal: back-off and one alert.
+  clockMs = Date.parse('2026-11-06T02:10:00Z') + CLI_CANARY_DEPLOY_WINDOW_MS;
+  await assert.rejects(run(f, b, canary), { code: 'CLI_CANARY_FAILED' });
+  record = readCliCanaryRefusal(f.installation);
+  assert.equal(record.deployPending, undefined);
+  assert.equal(record.attempts, 1);
+  assert.equal(record.nextRetryAt - clockMs, cliCanaryBackoffMs(1));
+  assert.equal(alerts.length, 1);
+  assert.match(lines.at(-1), /canary refused bbbbbbbb/);
+});
+
+test('version skew that clears inside the deploy window switches at the next retry and clears the hold', async t => {
+  const f = fixture(t);
+  f.build(b, 'skew:planning');
+  const alerts = [];
+  const canary = cliCanaryPreSwitch(f.installation, {
+    home: f.home,
+    alert: async record => alerts.push(record),
+  });
+  await assert.rejects(run(f, b, canary), { code: 'CLI_CANARY_FAILED' });
+  assert.equal(readCliCanaryRefusal(f.installation).deployPending, true);
+  // The server deploy lands: the same build now passes.
+  writeFileSync(join(f.installation, 'builds', b, 'mode'), 'ok');
+  assert.equal((await run(f, b, canary)).status, 'updated');
+  assert.equal(current(f), b);
+  assert.equal(readCliCanaryRefusal(f.installation), null);
+  assert.equal(alerts.length, 0);
+});
+
+test('a non-skew failure the current build passes is still refused at once with an alert', async t => {
+  const f = fixture(t);
+  f.build(b, 'fail:planning');
+  const alerts = [];
+  const canary = cliCanaryPreSwitch(f.installation, {
+    home: f.home,
+    alert: async record => alerts.push(record),
+  });
+  await assert.rejects(run(f, b, canary), { code: 'CLI_CANARY_FAILED' });
+  const record = readCliCanaryRefusal(f.installation);
+  assert.equal(record.deployPending, undefined);
+  assert.equal(record.attempts, 1);
+  assert.equal(alerts.length, 1);
 });
 
 test('with no Forge clone recorded the canary still runs the version step and says what it skipped', async t => {

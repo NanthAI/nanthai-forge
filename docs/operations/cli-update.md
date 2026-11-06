@@ -164,7 +164,13 @@ timings.
 On a failure the current build does not share (non-zero exit, timeout, bad JSON) the switch is refused, the previous
 build keeps serving every call, and the reason goes to `DIR/canary-refused.json`. The
 refused build is not retried in a loop: the same head waits 10 min, then 20, 40, ... up to
-6 h; a new main is tried at once; a waiter never repeats a canary that just failed. While a
+6 h; a new main is tried at once; a waiter never repeats a canary that just failed. One exception
+(Issue 3205f7e6): when the new build fails a step the current build passes with a version-skew
+code (`HOSTED_PROTOCOL_INVALID`, `HOSTED_ACTION_UNSUPPORTED`, `CLI_UPGRADE_REQUIRED`), the
+server deploy of that State is probably still running. The canary then **holds** without an
+alert and retries every minute for 15 minutes from the first such failure; only skew that
+outlasts the window becomes a refusal with the back-off and alert. A failed canary does not
+set the background updater's 10-minute failure mark, so reads also retry on the minute. While a
 refusal is active, reads and writes both run on the working build and print one stderr
 line (the first call also names the file and `nforge cli rollback`). The alert goes out
 once per head: that notice plus one ntfy/Cloudflare message through the existing stall-alert
