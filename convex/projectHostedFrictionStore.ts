@@ -7,6 +7,7 @@ import { sourceAuthority } from '../src/hosted-source-authority';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { digest } from '../src/portable-hash';
 import { invariant } from '../src/errors';
+import { isPlanningUuid, planningIdMaxCandidates } from '../src/planning-id';
 import type { FrictionEvent, FrictionTriageState } from '../src/friction-types';
 export async function recordCaller(
   ctx: QueryCtx | MutationCtx,
@@ -45,6 +46,39 @@ export async function frictionRow(ctx: QueryCtx | MutationCtx, projectId: Id<'ho
     .query('projectHostedFriction')
     .withIndex('by_project_and_id', q => q.eq('projectId', projectId).eq('id', id))
     .unique();
+}
+/** The captured friction rows an id or id prefix (8+ hex characters) names: a full UUID is one
+ * point read, a prefix one range read on by_project_and_id, at most six keys. Triage and count events
+ * have their own random ids, so only captures count. Zero matches is NOT_FOUND, several BAD_ARGUMENT. */
+export async function resolveFriction(
+  ctx: QueryCtx | MutationCtx,
+  projectId: Id<'hostedProjects'>,
+  ref: string,
+) {
+  const isCapture = (row: { value: string }) => JSON.parse(row.value).kind === 'capture';
+  if (isPlanningUuid(ref)) {
+    const row = await frictionRow(ctx, projectId, ref);
+    invariant(row && isCapture(row), 'NOT_FOUND', `Friction ${ref} not found.`);
+    return row;
+  }
+  const rows = (
+    await ctx.db
+      .query('projectHostedFriction')
+      .withIndex('by_project_and_id', q =>
+        q.eq('projectId', projectId).gte('id', ref).lt('id', `${ref}\uffff`),
+      )
+      .take(planningIdMaxCandidates + 1)
+  ).filter(isCapture);
+  invariant(rows.length > 0, 'NOT_FOUND', `No friction id starts with ${ref}.`);
+  invariant(
+    rows.length === 1,
+    'BAD_ARGUMENT',
+    `Friction id prefix ${ref} matches ${rows.length > planningIdMaxCandidates ? 'more than ' + planningIdMaxCandidates : rows.length} frictions (${rows
+      .slice(0, planningIdMaxCandidates)
+      .map(row => row.id)
+      .join(', ')}). Use a longer prefix.`,
+  );
+  return rows[0]!;
 }
 export async function appendFriction(
   ctx: MutationCtx,

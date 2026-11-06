@@ -1,6 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
+import { isPlanningRef, planningIdHelp } from './planning-id.js';
 const id = z.uuid();
+/** A friction id as a caller types it: a complete UUID or a hex prefix of at least 8 characters,
+ * resolved server-side by one indexed range read (same shape rule as planning ids). */
+export const frictionRef = z
+  .string()
+  .refine(isPlanningRef, { message: `expected ${planningIdHelp}` })
+  .transform(value => value.toLowerCase());
 const text = z.string().trim().min(1);
 export const frictionInputSchema = z.object({
   operationId: id.optional(),
@@ -38,7 +45,7 @@ export const frictionTriageSchema = triageObject.superRefine((command, context) 
  * mutation patches a bounded number of rows. `frictionTriageProblem` holds the cross-field rules. */
 export const hostedFrictionTriageSchema = triageObject
   .omit({ operationId: true })
-  .extend({ frictionIds: z.array(id).min(1).max(50) })
+  .extend({ frictionIds: z.array(frictionRef).min(1).max(50) })
   .strict();
 export function frictionTriageProblem(command: z.infer<typeof hostedFrictionTriageSchema>) {
   if (command.status === 'dropped' && !command.reason) return 'reason: give the reason for dismissing.';
@@ -51,6 +58,8 @@ export const frictionListStatuses = ['open', 'planned', 'fixed', 'dropped', 'all
 /** One bounded page of captured friction, newest first, with its current triage status. */
 export const frictionListSchema = z
   .object({
+    /** One friction by id or id prefix (8+ hex characters): one indexed read, no page scan. */
+    id: frictionRef.optional(),
     status: z.enum(frictionListStatuses).default('open'),
     area: text.optional(),
     laneId: id.optional(),

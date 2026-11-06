@@ -9,6 +9,7 @@ import { effectivePolicy } from '../src/autonomy-policy';
 import { checkPin } from '../src/hosted-check';
 import { recordHead, hostedWriteProject } from './projectHostedRecords';
 import { checkSetting, loadHostedCheck, type CheckIdentity } from './projectHostedCheckStore';
+import { summarizeCheckRun } from '../src/hosted-check-summary';
 import { exactHostedCheckEvidence } from '../src/hosted-check-evidence';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { invariant } from '../src/errors';
@@ -27,6 +28,20 @@ export const status = query({
     try {
       await reader(ctx, input.projectId);
       return canonicalPayload((await loadHostedCheck(ctx, input)).run);
+    } catch (error) {
+      return report(error);
+    }
+  },
+});
+/** `status` without the 80 KB run: counts, failed and flaky file names, timings and selection scope in
+ * under 8 KB. The same single run-row read as `status`; nothing else is read or written. */
+export const summary = query({
+  args: identity,
+  returns: v.string(),
+  handler: async (ctx, input) => {
+    try {
+      await reader(ctx, input.projectId);
+      return canonicalPayload(summarizeCheckRun((await loadHostedCheck(ctx, input)).run));
     } catch (error) {
       return report(error);
     }

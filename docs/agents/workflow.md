@@ -65,7 +65,7 @@ When you change a hosted reply in Forge itself: add fields freely, but never rem
 | --- | --- |
 | `pull` | `operationId?` |
 | `save --friction` | `laneId?, title, detail, area, cost?, workaround?, evidence?, operationId?` |
-| `friction-list` | `status?, area?, laneId?, search?, limit?, cursor?` |
+| `friction-list` | `id?, status?, area?, laneId?, search?, limit?, cursor?` |
 | `x friction-triage` | `frictionIds, status, reason?, laneId?, planningItemId?, operationId?` |
 | `save --decision` | `conversation?, target, decidedBy, what, why, decidedAt?, overrides?, supersedes?, delegation?, actor?, tool?, operationId?` |
 | `decisions` | `target?, cursor?, operationId?` |
@@ -94,7 +94,7 @@ When you change a hosted reply in Forge itself: add fields freely, but never rem
 | `x complete-merged` | `operationId?` |
 | `x abandon-dormant` | `apply?, limit?, operationId?` |
 | `start --reopen` | `laneId?, target?, operationId?` |
-| `status` | `laneId?, kind?, operationId?, submissionId?, runId?, version?` |
+| `status` | `laneId?, kind?, operationId?, submissionId?, runId?, version?, summary?` |
 | `observe` | `kind?, operationId?, submissionId?, runId?, version?` |
 | `metrics` | `from?, to?, limit?, cursor?, operationId?` |
 | `capabilities` | `operationId?` |
@@ -1981,13 +1981,16 @@ capabilities array so released clients continue to parse it. A server without th
 record endpoints returns `HOSTED_ACTION_UNSUPPORTED`; the client retains the
 operation and never falls back to writing Mac Work.
 
-`friction-list {status?,area?,laneId?,search?,limit?,cursor?}` reads one newest-first
+`friction-list {id?,status?,area?,laneId?,search?,limit?,cursor?}` reads one newest-first
 page of captured friction (default `status:"open"`, `limit` 50, at most 100 rows
 scanned) as `items` (`id`, `laneId?`, `title`, `area`, `at`, `detail`, `status`,
 `reason?`, `planningItemId?`, `fixedByLaneId?`), `scanned` and `nextCursor`. Filters
 apply inside the scanned page, so a sparse match can return few items with a
-`nextCursor`; follow it. `x friction-triage {frictionIds,status,reason?,laneId?,planningItemId?}`
-takes at most 50 ids: `dropped` with `reason` dismisses, `planned` with
+`nextCursor`; follow it. `id` (a full id or a hex prefix of at least 8 characters, as in
+planning) returns that one friction whatever its status or age: one indexed range read, no
+page scan, `BAD_ARGUMENT` listing the candidates when the prefix is ambiguous. `x friction-triage
+{frictionIds,status,reason?,laneId?,planningItemId?}` takes at most 50 ids or id prefixes
+(resolved in the same call; the stored event keeps the full ids): `dropped` with `reason` dismisses, `planned` with
 `planningItemId` (or a `reason`) links an Issue, `fixed` names the fixing `laneId`
 (the checkout's Lane when omitted), `open` reopens. Triage is an append-only event
 that also patches each capture's current status, so a list is one indexed page with

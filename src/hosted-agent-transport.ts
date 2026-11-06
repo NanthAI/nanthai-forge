@@ -1460,7 +1460,8 @@ export class HostedAgentTransport {
     return (typeof value === 'string' ? JSON.parse(value) : value) as T;
   }
   private async observe(command: z.infer<typeof hostedAgentCommandSchemas.status>) {
-    const { laneId, operationId, submissionId, runId, kind, version } = command;
+    const { laneId, operationId, submissionId, runId, kind, version, summary } = command;
+    invariant(!summary || runId, 'BAD_ARGUMENT', 'summary:true reads one check run: pass runId.');
     invariant(
       [laneId, operationId, submissionId, runId].filter(Boolean).length === 1,
       'BAD_ARGUMENT',
@@ -1471,7 +1472,7 @@ export class HostedAgentTransport {
         submissionId,
         ...(version === undefined ? {} : { version }),
       });
-    if (runId) return this.query('projectHostedCheckRead:status', { runId });
+    if (runId) return this.query(`projectHostedCheckRead:${summary ? 'summary' : 'status'}`, { runId });
     if (laneId) return this.query('projectHostedLanes:head', { laneId });
     if (!kind)
       return this.query('projectHostedFinishObserve:page', {

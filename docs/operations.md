@@ -184,7 +184,9 @@ match, otherwise file an Issue with the file, first error and run ids. With
 `--flake-issues`, `metrics` runs that search itself (one planning search per listed
 file, at most ten, opt-in; the default read makes none) and prints only the flake
 list, each file with its matching Issue, a look-alike to check before filing, or
-"no Issue found: file one today". It cannot combine with `--limit` or `--compare`.
+"no Issue found: file one today". It reads only the check runs stream (about one call per
+100 runs in the window, one day of context, no bills, placement or input hydration) instead
+of all eight metrics streams. It cannot combine with `--limit` or `--compare`.
 
 `metrics` replies are boundable: `--limit N` (`limit` in `nforge agent ROOT metrics`,
 1 to 200) pages every row list in the window totals (waste, landings by path, authority
@@ -203,9 +205,17 @@ pre-queue Lane check, null when the change queued unadmitted), `committedAt`,
 `admissionBase` (the first landing attempt's main) and `landedBase` (main the receipt
 moved), `mainMoved` (they differ), the receipt's `firstCheck`, `landedHead`,
 `checkRunIds` (the admission Lane run, each attempt's run, the accepting run; at most 8),
-`recomposeCount` and `conflictPaths`. Text-conflict paths of an earlier generation live only
+`followingAudit` (`{runId,verdict,sequence}` of the first stored main-audit event at or after
+the landing: `passed`, `failed` or `stalled`; null when none is stored yet), `recomposeCount` and `conflictPaths`. Text-conflict paths of an earlier generation live only
 in retained compose results (R2), so `conflictPaths` is null today. Follow `nextCursor`
 until it is null. Nothing in it depends on GitHub.
+
+`status {runId,summary:true}` (`projectHostedCheckRead:summary`) is the bounded read of one
+check run: the same single run-row read as `status`, but the reply is counts, failed and
+flaky file names (failed ones with a clipped first error, at most 40 each, the rest counted
+under `more`), timings (wall, execution, shards, five slowest files) and the selection scope
+(gate mode, requested tests, reported files, planned tests, shards), under 8 KB instead of
+the full run (about 80 KB).
 
 `lane-history {laneId?}` is the matching per-Lane read: one query, six indexed reads
 (Lane head and record, its first version, the overlap row), a few hundred bytes, no

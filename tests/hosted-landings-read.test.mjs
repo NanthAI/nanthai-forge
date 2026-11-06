@@ -50,7 +50,11 @@ function fixture() {
               },
             };
             build(bounds);
-            const order = spec.fields.includes('number') ? 'number' : '_creationTime';
+            const order = spec.fields.includes('number')
+              ? 'number'
+              : spec.fields.includes('sequence')
+                ? 'sequence'
+                : '_creationTime';
             selected = tables[table]
               .filter(row => predicates.every(p => p(row)))
               .sort((a, b) => a[order] - b[order]);
@@ -222,6 +226,33 @@ test('landings: one row per landing with times, bases, main move, runs and recom
   assert.deepEqual(a.firstCheck, { landedOn: 'admission-run', mainMoved: false });
 });
 
+test('landings: names the following main audit run and verdict, null when none is stored', async () => {
+  const f = fixture();
+  for (let n = 1; n <= 5; n++) f.landing(n, { at: n * 10 });
+  const event = (kind, sequence) =>
+    f.tables.projectHostedMainAuditEvents.push({
+      projectId: 'project',
+      kind,
+      at: iso(minute(sequence * 10)),
+      head: `h${sequence}`,
+      runId: `audit-${sequence}`,
+      sequence,
+    });
+  event('red', 4);
+  event('green', 2);
+  const rows = (await f.read()).landings;
+  assert.deepEqual(
+    rows.map(row => row.followingAudit),
+    [
+      { runId: 'audit-2', verdict: 'passed', sequence: 2 },
+      { runId: 'audit-2', verdict: 'passed', sequence: 2 },
+      { runId: 'audit-4', verdict: 'failed', sequence: 4 },
+      { runId: 'audit-4', verdict: 'failed', sequence: 4 },
+      null,
+    ],
+  );
+});
+
 test('landings: pages resume exactly, stay under limit, and read nothing outside indexed ranges', async () => {
   const f = fixture();
   for (let n = 1; n <= 45; n++) f.landing(n, { at: n * 10 });
@@ -234,8 +265,8 @@ test('landings: pages resume exactly, stay under limit, and read nothing outside
     pages++;
     assert(Buffer.byteLength(page.raw) < 64 * 1024, 'page under 64 KB');
     assert(page.landings.length <= 20);
-    // Receipt range, then request, attempts, finish and Lane per landing (plus the account lookup): no scans.
-    assert(f.meter.queries - before <= 1 + page.landings.length * 4, `queries ${f.meter.queries - before}`);
+    // Receipt range, then request, attempts, finish, Lane and audit event per landing: no scans.
+    assert(f.meter.queries - before <= 1 + page.landings.length * 5, `queries ${f.meter.queries - before}`);
     seen.push(...page.landings.map(row => row.receiptId));
     cursor = page.nextCursor;
   } while (cursor);

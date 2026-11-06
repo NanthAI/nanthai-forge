@@ -77,6 +77,8 @@ export async function readMetricRecords(
     pointer?: Buffer | null | undefined;
     query?: MetricQuery;
     summary?: boolean;
+    /** Read only the check runs stream (the flake list needs nothing else). */
+    runsOnly?: boolean;
     address?: HostedAgentAddress;
   } = {},
 ) {
@@ -93,6 +95,7 @@ export async function readMetricRecords(
     }),
     period,
     options.summary,
+    options.runsOnly,
   );
   if (cutover && Date.parse(period.from) < Date.parse(cutover)) {
     // Hosted-only checkouts have no owner history. Do not manufacture native evidence.

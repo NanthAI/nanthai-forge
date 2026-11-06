@@ -283,6 +283,8 @@ export const hostedAgentCommandSchemas = {
       submissionId: uuid.optional(),
       runId: uuid.optional(),
       version: z.number().int().nonnegative().optional(),
+      /** With runId: counts, failed/flaky file names, timings and selection scope, under 8 KB, not the 80 KB run. */
+      summary: z.boolean().optional(),
     })
     .strict(),
   observe: z

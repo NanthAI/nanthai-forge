@@ -112,7 +112,14 @@ const rowSchemas = {
   receipts: metricReceiptRowSchema,
 };
 const gaps = ['Hosted overlap acknowledgements and authority observations need durable coverage.'];
-export async function readHostedMetricPages(query: MetricQuery, period: MetricPeriod, summary = false) {
+/** `runsOnly` reads the runs stream alone (about one call per 100 check runs), with one day of
+ * context and no bills, placement or input hydration: enough for the flake list (Issue d710663d). */
+export async function readHostedMetricPages(
+  query: MetricQuery,
+  period: MetricPeriod,
+  summary = false,
+  runsOnly = false,
+) {
   const records: MetricRecords = {
     moves: [],
     submissions: [],
@@ -140,18 +147,20 @@ export async function readHostedMetricPages(query: MetricQuery, period: MetricPe
   const receiptRows: z.infer<typeof rowSchemas.receipts>[] = [];
   let receiptCoverage: Record<string, string | null> | undefined;
   try {
-    for (const stream of summary
-      ? (['acceptances', 'requests', 'runs', 'operations'] as const)
-      : ([
-          'acceptances',
-          'requests',
-          'runs',
-          'operations',
-          'attempts',
-          'lanes',
-          'saves',
-          'receipts',
-        ] as const)) {
+    for (const stream of runsOnly
+      ? (['runs'] as const)
+      : summary
+        ? (['acceptances', 'requests', 'runs', 'operations'] as const)
+        : ([
+            'acceptances',
+            'requests',
+            'runs',
+            'operations',
+            'attempts',
+            'lanes',
+            'saves',
+            'receipts',
+          ] as const)) {
       let cursor: string | null = null;
       const seen = new Set<string>();
       do {
@@ -160,7 +169,7 @@ export async function readHostedMetricPages(query: MetricQuery, period: MetricPe
           from: period.from,
           to: period.to,
           cursor,
-          contextDays: summary ? 1 : 30,
+          contextDays: summary || runsOnly ? 1 : 30,
         });
         const page = z
           .object({
@@ -308,7 +317,7 @@ export async function readHostedMetricPages(query: MetricQuery, period: MetricPe
   if (!flakesProjected) records.flakesUnprojected = true;
   if (reuseKeysProjected && cutover) records.coverage = { ...records.coverage, checkRequests: cutover };
   else records.gaps.push('Hosted reuse keys need the deployed projectSelfMetrics runs projection.');
-  if (!records.error && !summary) {
+  if (!records.error && !summary && !runsOnly) {
     records.billHistoryFrom = new Date(Date.parse(period.from) - 30 * 86400000).toISOString();
     await readHostedBills(query, period, records).catch(error => {
       throw hostedActionError(error, 'metrics');

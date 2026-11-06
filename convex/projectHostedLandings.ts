@@ -19,9 +19,15 @@ import {
   LANDINGS_RUN_IDS,
 } from '../src/hosted-landings-view';
 
+const AUDIT_VERDICT: Record<string, string> = { green: 'passed', red: 'failed', stalled: 'stalled' };
 const iso = (ms: number | undefined) => (ms === undefined ? null : new Date(ms).toISOString());
-/** One landing's evidence from rows already stored. Four indexed reads beyond the receipt itself. */
-async function evidence(ctx: QueryCtx, projectId: Id<'hostedProjects'>, receipt: HostedAcceptance) {
+/** One landing's evidence from rows already stored. Five indexed reads beyond the receipt itself. */
+async function evidence(
+  ctx: QueryCtx,
+  projectId: Id<'hostedProjects'>,
+  receipt: HostedAcceptance,
+  sequence: number,
+) {
   let bytes = 0;
   const request = await landingRow(ctx, { projectId, submissionId: receipt.submissionId });
   const state = request ? (JSON.parse(request.value) as HostedLandingState) : null;
@@ -69,6 +75,15 @@ async function evidence(ctx: QueryCtx, projectId: Id<'hostedProjects'>, receipt:
       ),
     ),
   ];
+  // The first stored main-audit event at or after this landing's sequence: the audit run that covered it.
+  const audit = (
+    await ctx.db
+      .query('projectHostedMainAuditEvents')
+      .withIndex('by_project_and_sequence', q => q.eq('projectId', projectId).gte('sequence', sequence))
+      .order('asc')
+      .take(1)
+  )[0];
+  bytes += audit ? 160 : 0;
   const admissionBase = attempts[0]?.main ?? null;
   const landedBase = receipt.previous;
   return {
@@ -93,6 +108,9 @@ async function evidence(ctx: QueryCtx, projectId: Id<'hostedProjects'>, receipt:
       checkRunIds: runIds.slice(0, LANDINGS_RUN_IDS),
       ...(runIds.length > LANDINGS_RUN_IDS ? { moreCheckRunIds: runIds.length - LANDINGS_RUN_IDS } : {}),
       ...(chain.length === LANDINGS_ATTEMPTS ? { checkRunIdsPartial: true } : {}),
+      followingAudit: audit
+        ? { runId: audit.runId, verdict: AUDIT_VERDICT[audit.kind] ?? audit.kind, sequence: audit.sequence }
+        : null,
       recomposeCount: last ? Math.max(0, last.number - 1) : null,
       // Text-conflict paths of an earlier generation live in retained compose results (R2), not in rows.
       conflictPaths: null,
@@ -152,7 +170,12 @@ export const read = query({
           next = receipt._creationTime;
           break;
         }
-        const found = await evidence(ctx, input.projectId, JSON.parse(receipt.value) as HostedAcceptance);
+        const found = await evidence(
+          ctx,
+          input.projectId,
+          JSON.parse(receipt.value) as HostedAcceptance,
+          receipt.sequence,
+        );
         read += receipt.value.length + found.bytes;
         output += JSON.stringify(found.row).length;
         rows.push(found.row);

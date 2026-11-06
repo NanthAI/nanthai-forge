@@ -11,6 +11,7 @@ import {
   appendFriction,
   replayRequest,
   recordPageOptions,
+  resolveFriction,
 } from './projectHostedFrictionStore';
 import {
   frictionInputSchema,
@@ -135,6 +136,29 @@ const parseRequest = <T extends z.ZodType>(schema: T, input: string, what: strin
   return parsed.data;
 };
 const clip = (text: string, length: number) => (text.length > length ? `${text.slice(0, length)}…` : text);
+type FrictionRow = { value: string; triage?: string };
+/** The list/lookup shape of one captured friction, or null for a count or triage event row. */
+function frictionItem(row: FrictionRow) {
+  const event = frictionEventSchema.safeParse(JSON.parse(row.value));
+  if (!event.success || event.data.kind !== 'capture') return null;
+  const f = event.data;
+  const state: FrictionTriageState | undefined = row.triage ? JSON.parse(row.triage) : undefined;
+  return {
+    search: `${f.title}\n${f.detail}`.toLowerCase(),
+    item: {
+      id: f.id,
+      ...(f.laneId ? { laneId: f.laneId } : {}),
+      title: clip(f.title, 200),
+      area: f.area,
+      at: f.at,
+      detail: clip(f.detail, 400),
+      status: state?.status ?? 'open',
+      ...(state?.reason ? { reason: clip(state.reason, 400) } : {}),
+      ...(state?.planningItemId ? { planningItemId: state.planningItemId } : {}),
+      ...(state?.laneId ? { fixedByLaneId: state.laneId } : {}),
+    },
+  };
+}
 /** One bounded, newest-first page of captured friction with its current triage status. The scan is
  * one indexed page of at most `limit` rows; filters apply inside it, so a sparse match can return
  * fewer items with a nextCursor. Idle cost is zero: nothing calls this unless a caller asks. */
@@ -145,6 +169,11 @@ export const read = query({
     try {
       await recordCaller(ctx, projectId);
       const filter = parseRequest(frictionListSchema, input, 'friction-list');
+      if (filter.id) {
+        // One id or prefix: one indexed read, no page scan, whatever its status or age.
+        const found = frictionItem(await resolveFriction(ctx, projectId, filter.id));
+        return canonicalPayload({ items: found ? [found.item] : [], scanned: 1, nextCursor: null });
+      }
       const page = await ctx.db
         .query('projectHostedFriction')
         .withIndex('by_project', q => q.eq('projectId', projectId))
@@ -153,30 +182,16 @@ export const read = query({
       const needle = filter.search?.toLowerCase();
       const items = [];
       for (const row of page.page) {
-        const event = frictionEventSchema.safeParse(JSON.parse(row.value));
-        if (!event.success || event.data.kind !== 'capture') continue;
-        const f = event.data;
-        const state: FrictionTriageState | undefined = row.triage ? JSON.parse(row.triage) : undefined;
-        const status = state?.status ?? 'open';
+        const item = frictionItem(row);
         if (
-          (filter.status !== 'all' && status !== filter.status) ||
-          (filter.area && f.area !== filter.area) ||
-          (filter.laneId && f.laneId !== filter.laneId) ||
-          (needle && !`${f.title}\n${f.detail}`.toLowerCase().includes(needle))
+          !item ||
+          (filter.status !== 'all' && item.item.status !== filter.status) ||
+          (filter.area && item.item.area !== filter.area) ||
+          (filter.laneId && item.item.laneId !== filter.laneId) ||
+          (needle && !item.search.includes(needle))
         )
           continue;
-        items.push({
-          id: f.id,
-          ...(f.laneId ? { laneId: f.laneId } : {}),
-          title: clip(f.title, 200),
-          area: f.area,
-          at: f.at,
-          detail: clip(f.detail, 400),
-          status,
-          ...(state?.reason ? { reason: clip(state.reason, 400) } : {}),
-          ...(state?.planningItemId ? { planningItemId: state.planningItemId } : {}),
-          ...(state?.laneId ? { fixedByLaneId: state.laneId } : {}),
-        });
+        items.push(item.item);
       }
       return canonicalPayload({
         items,
@@ -206,14 +221,14 @@ export const triage = mutation({
         replayRequest(old.request, request);
         return old.value;
       }
-      for (const id of command.frictionIds) {
-        const row = await frictionRow(ctx, projectId, id);
-        invariant(row && JSON.parse(row.value).kind === 'capture', 'NOT_FOUND', `Friction ${id} not found.`);
-      }
+      const frictionIds: string[] = [];
+      for (const ref of command.frictionIds)
+        frictionIds.push((await resolveFriction(ctx, projectId, ref)).id);
       if (command.laneId)
         invariant(await recordHead(ctx, projectId, 'lane', command.laneId), 'NOT_FOUND', 'Lane not found.');
       const record = frictionEventSchema.parse({
         ...command,
+        frictionIds: [...new Set(frictionIds)],
         id: command.operationId,
         kind: 'triage',
         request,

@@ -240,10 +240,12 @@ test('source-authority gate preserves native/native-shadow readers; hosted handl
       if (previousToken === undefined) delete process.env.FORGE_AUTH_TOKEN;
       else process.env.FORGE_AUTH_TOKEN = previousToken;
     });
+    const streams = [];
     t.mock.method(globalThis, 'fetch', async (_url, init) => {
       const request = JSON.parse(init.body);
       assert(['projectSelfMetrics:page', 'projectSelfMetricBills:page'].includes(request.path));
       const { projectId, ...args } = request.args[0];
+      streams.push(`${request.path}:${args.stream ?? ''}`);
       assert.equal(projectId, 'project');
       return new Response(JSON.stringify({ status: 'success', value: await f.query(request.path, args) }), {
         headers: { 'content-type': 'application/json' },
@@ -259,7 +261,12 @@ test('source-authority gate preserves native/native-shadow readers; hosted handl
       1,
     );
     // Part 1 of b78ca196: the reply is boundable, and --flake-issues prints only the flake list.
+    streams.length = 0;
     const flakeOnly = await metricsCli([root, '--from', period.from, '--to', period.to, '--flake-issues']);
+    assert(
+      streams.length > 0 && streams.every(name => name === 'projectSelfMetrics:page:runs'),
+      `${streams}`,
+    );
     assert.deepEqual(Object.keys(flakeOnly), ['schema', 'period', 'source', 'flakes']);
     const paged = await metricsCli([
       root,

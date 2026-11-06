@@ -116,3 +116,58 @@ test('friction-list is bounded and paged; triage rejects unknown ids and incompl
     await assert.rejects(s.transport.dispatch('friction-triage', input), code(expected));
   assert.equal(s.counts().writes, writes, 'a refused triage writes nothing');
 });
+
+test('friction-list {id} and triage take a full id or an 8+ character prefix in one indexed read', async t => {
+  const s = fixture(t);
+  const ids = [];
+  for (const title of ['alpha', 'beta', 'gamma']) ids.push((await file(s, title)).result.id);
+  const list = (input = {}) => s.transport.dispatch('friction-list', input).then(r => r.result);
+
+  s.calls.length = 0;
+  const byPrefix = await list({ id: ids[0].slice(0, 8), status: 'all' });
+  assert.deepEqual(s.calls, ['projectHostedFriction:read'], 'one call');
+  assert.deepEqual(
+    byPrefix.items.map(item => item.id),
+    [ids[0]],
+  );
+  assert.equal(byPrefix.scanned, 1);
+  assert.equal(byPrefix.nextCursor, null);
+  assert.deepEqual(
+    (await list({ id: ids[1] })).items.map(item => item.title),
+    ['beta'],
+  );
+  await assert.rejects(list({ id: 'abc' }), code('BAD_ARGUMENT'));
+  await assert.rejects(list({ id: 'deadbeef' }), code('NOT_FOUND'));
+  // Two ids sharing a prefix: the short form is refused with the candidates, a longer one resolves.
+  const one = 'aaaaaaaa-0000-4000-8000-000000000001',
+    two = 'aaaaaaaa-0000-4000-8000-000000000002';
+  await file(s, 'one', { operationId: one });
+  await file(s, 'two', { operationId: two });
+  await assert.rejects(
+    list({ id: 'aaaaaaaa' }),
+    error => error.code === 'BAD_ARGUMENT' && error.message.includes(two),
+  );
+  assert.deepEqual(
+    (await list({ id: 'aaaaaaaa-0000-4000-8000-000000000002' })).items.map(item => item.id),
+    [two],
+  );
+  assert.deepEqual(
+    await list({ id: 'aaaaaaaa-0000-4000-8000-00000000000' }).catch(error => error.code),
+    'BAD_ARGUMENT',
+  );
+
+  // Triage by prefix stores the full id; an unknown prefix writes nothing.
+  const done = await s.transport.dispatch('friction-triage', {
+    frictionIds: [ids[2].slice(0, 12)],
+    status: 'dropped',
+    reason: 'by prefix',
+  });
+  assert.deepEqual(done.result.frictionIds, [ids[2]]);
+  assert.equal((await list({ id: ids[2].slice(0, 8) })).items[0].status, 'dropped');
+  const writes = s.counts().writes;
+  await assert.rejects(
+    s.transport.dispatch('friction-triage', { frictionIds: ['deadbeef'], status: 'open' }),
+    code('NOT_FOUND'),
+  );
+  assert.equal(s.counts().writes, writes);
+});

@@ -85,7 +85,10 @@ export async function metricsCli(args: string[]) {
     'BAD_ARGUMENT',
     '--flake-issues prints only the flake list; do not combine it with --limit or --compare.',
   );
-  const result = metricsSurface(await readMetricRecords(owner, period), period);
+  const result = metricsSurface(
+    await readMetricRecords(owner, period, options['--flake-issues'] ? { runsOnly: true } : {}),
+    period,
+  );
   // Opt-in: one planning search per listed flaky file (at most 10). Reads add no calls by default.
   if (options['--flake-issues'] && result.totals.flakes.files.length) {
     const address = metricAddress(owner).address;
