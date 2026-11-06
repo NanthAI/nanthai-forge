@@ -13,6 +13,7 @@ import { ForgeError, invariant } from '../src/errors';
 import { parseNativeState } from '../src/native-state-format';
 import { nextStateGeneration, validStateGeneration } from '../src/state-generation';
 import { SourceIoError, transientSourceStatus } from '../src/hosted-source-io-error';
+import { retryR2Lag } from '../src/hosted-r2-retry';
 import { sourceDomainError } from './projectConvexSourceErrors';
 import { packHeaders, verifyPackRange, type PackRange } from '../src/object-pack-range';
 const reference = (name: string) => makeFunctionReference<'mutation'>(name);
@@ -152,10 +153,18 @@ export function convexSourceTransport(
       invariant(row.url, 'SOURCE_UNAVAILABLE', 'Exact source bytes are unavailable.');
       let response: Response;
       try {
-        response = await fetch(row.url, {
-          headers: { 'accept-encoding': 'identity', ...packHeaders(row.range, pin.size) },
-          signal: AbortSignal.timeout(15000),
-        });
+        const url = row.url;
+        // A committed object that answers 404 may be read-after-write lag; the
+        // shared bound retries it, then the exact SOURCE_UNAVAILABLE stands.
+        response = await retryR2Lag(
+          () =>
+            fetch(url, {
+              headers: { 'accept-encoding': 'identity', ...packHeaders(row.range, pin.size) },
+              signal: AbortSignal.timeout(15000),
+            }),
+          lagged => lagged.status === 404,
+          lagged => lagged.body?.cancel().catch(() => {}),
+        );
       } catch (error) {
         throw new SourceIoError(error, 'source-headers', pin.sha256);
       }

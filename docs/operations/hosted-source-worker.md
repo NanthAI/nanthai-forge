@@ -136,6 +136,15 @@ returns its fenced completion. Other queued projects can then use the pool.
 The normal terminal finish response advertises the standard new-attempt retry
 continuation above; replay of the failed operation remains immutable.
 
+Read-after-write lag is the one R2 answer retried inside the action
+(`src/hosted-r2-retry.ts`, shared policy): a 404 on the HEAD that verifies a
+source object this job just stored, or on the GET of a committed source object,
+is tried at most twice more (400 ms, then 1.6 s) before the exact
+`R2_VERIFY_FAILED` / `SOURCE_UNAVAILABLE` stands. Timeouts, resets and
+408/425/429/5xx are not retried there: they stay retryable and use the scheduled
+repair above. Hash or size mismatch, 403 and malformed data fail at once. The
+healthy path makes no extra call.
+
 Failed actions emit bounded structured context to retained Convex logs: job,
 step, task/generation, stage, exception class/code, available object digest,
 elapsed time and HTTP status. Failure receipts also retain the source step,

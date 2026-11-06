@@ -4,6 +4,7 @@ import type { Id } from './_generated/dataModel';
 import { r2Config, r2Key, presignPut, headObject, checksumOf } from './r2';
 import { invariant } from '../src/errors';
 import { SourceIoError, transientSourceStatus } from '../src/hosted-source-io-error';
+import { retryR2Lag } from '../src/hosted-r2-retry';
 
 /** One byte-write seam for trusted source producers in either Convex runtime. Bytes go
  * to R2 only; the `storageId` result shape remains for callers that still read legacy rows.
@@ -43,8 +44,15 @@ export async function storeSourceBytes(
   if (transientSourceStatus(response.status))
     throw new SourceIoError(null, 'source-put', pin.sha256, response.status);
   invariant(response.ok || response.status === 412, 'R2_UPLOAD_FAILED', 'Source upload failed.');
+  // Our own PUT was acknowledged, so a 404 here is read-after-write lag: retry it
+  // within the shared bound. Mismatch or any other answer fails at once.
   invariant(
-    matches(await headObject(config, key, true)),
+    matches(
+      await retryR2Lag(
+        () => headObject(config, key, true),
+        head => head.status === 'missing',
+      ),
+    ),
     'R2_VERIFY_FAILED',
     'Exact source size and checksum were not confirmed.',
   );

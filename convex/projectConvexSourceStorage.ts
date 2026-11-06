@@ -7,6 +7,7 @@ import { invariant } from '../src/errors';
 import { r2Config, r2Key, presignGet } from './r2';
 import { storeSourceBytes } from './projectSourceBytes';
 import { SourceIoError, transientSourceStatus } from '../src/hosted-source-io-error';
+import { retryR2Lag } from '../src/hosted-r2-retry';
 
 /** Durable cursor/task data. Project-scoped R2 references carry exact byte pins
  * and need no per-object RPC. Legacy Convex references require an ownership
@@ -41,11 +42,18 @@ export function sourceStorage(ctx: ActionCtx, projectId: Id<'hostedProjects'>) {
       const url = await presignGet(r2Config(), r2Key(projectId, pin.sha256));
       let response: Response;
       try {
-        response = await fetch(url, {
-          headers: { 'accept-encoding': 'identity' },
-          redirect: 'error',
-          signal: AbortSignal.timeout(20_000),
-        });
+        // A pinned durable object that answers 404 may be read-after-write lag;
+        // the shared bound retries it, then the exact SOURCE_UNAVAILABLE stands.
+        response = await retryR2Lag(
+          () =>
+            fetch(url, {
+              headers: { 'accept-encoding': 'identity' },
+              redirect: 'error',
+              signal: AbortSignal.timeout(20_000),
+            }),
+          lagged => lagged.status === 404,
+          lagged => lagged.body?.cancel().catch(() => {}),
+        );
       } catch (error) {
         throw new SourceIoError(error, 'durable-headers', pin.sha256);
       }
