@@ -2,7 +2,18 @@
 import type { Doc } from './_generated/dataModel';
 import type { Exchange, Cursor } from './projectWorkIndexBuildTypes';
 import { scratch } from './projectWorkIndexBuildTypes';
-import { indexBuildProgressSchema } from '../src/work-index-build-progress';
+import { indexBuildProgressSchema, indexPendingResumeLimit } from '../src/work-index-build-progress';
+/** Resumes spent on the current cursor, read from the generation already in hand. */
+function retries(generation: Doc<'projectWorkGenerations'>) {
+  if (!generation.ensureRetry) return {};
+  const saved = JSON.parse(generation.ensureRetry) as {
+    cursor?: string;
+    resumes?: number;
+  };
+  return saved.cursor === generation.ensureCursor && typeof saved.resumes === 'number'
+    ? { retries: Math.min(saved.resumes, indexPendingResumeLimit) }
+    : {};
+}
 /** Uses the generation already returned by a step: progress never performs IO. */
 export function buildProgress(generation: Doc<'projectWorkGenerations'>, exchange?: Exchange) {
   const cursor = JSON.parse(generation.ensureCursor!) as Cursor;
@@ -45,6 +56,7 @@ export function buildProgress(generation: Doc<'projectWorkGenerations'>, exchang
     step: generation.nextBatch,
     filesDone: counts.viewFiles ?? 0,
     filesTotal: Math.max(counts.viewFiles ?? 0, cursor.output?.after.filesTotal ?? cursor.filesTotal ?? 0),
+    ...retries(generation),
     filesTotalComplete:
       ['trees', 'blobs', 'journal', 'cleanup', 'done'].includes(cursor.phase) ||
       (cursor.phase === 'summaries' && cursor.field > 1),

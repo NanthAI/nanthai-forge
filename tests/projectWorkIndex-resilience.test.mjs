@@ -48,13 +48,17 @@ test('summaries retry ECONNRESET in-place with no extra successful RPCs', async 
   // Hold the action wall clock steady so unrelated scheduler pauses cannot add
   // continuation/catalog calls to just one side of this read-cost comparison.
   t.mock.method(Date, 'now', () => 1_000_000);
-  const baseline = progressFixture(0.02, undefined, undefined, { treeFiles: 40 });
+  const baseline = progressFixture(0.02, undefined, undefined, {
+    treeFiles: 40,
+  });
   const saved = baseline.snapshot();
   await complete(baseline);
   const f = progressFixture(0.02, saved, undefined, { treeFiles: 40 });
   const fault = injectSummary(
     f,
-    Object.assign(new Error('storage get url ECONNRESET'), { code: 'ECONNRESET' }),
+    Object.assign(new Error('storage get url ECONNRESET'), {
+      code: 'ECONNRESET',
+    }),
     1,
   );
   await complete(f);
@@ -79,7 +83,9 @@ test('permanent summary fault retains progress, fails after five resumes, and na
   const f = progressFixture(0.02);
   const fault = injectSummary(
     f,
-    Object.assign(new Error('storage get url ECONNRESET'), { code: 'ECONNRESET' }),
+    Object.assign(new Error('storage get url ECONNRESET'), {
+      code: 'ECONNRESET',
+    }),
   );
   let result;
   do {
@@ -91,9 +97,11 @@ test('permanent summary fault retains progress, fails after five resumes, and na
   assert.equal(progress.field, 'views');
   assert.equal(progress.total, f.data.views.length);
   assert(progress.total > 0, 'retry progress reads its durable cursor');
+  assert.equal(progress.retries, 0, 'the first pending answer reports no resume spent yet');
   for (let resume = 1; resume < pendingResumeLimit; resume++) {
     result = await f.drive();
     assert.equal(result.pending, true);
+    assert.equal(JSON.parse(result.progress).retries, resume, 'each pending resume shows its retry count');
     assert.equal(generation(f).ensureCursor, cursor);
   }
   await assert.rejects(f.drive(), error => {
@@ -136,7 +144,10 @@ test('failure operations reconcile and a moved cursor cannot be failed by an old
   };
   const once = await pending._handler(f.s.ctx, args);
   assert.deepEqual(await pending._handler(f.s.ctx, args), once);
-  const twice = await pending._handler(f.s.ctx, { ...args, operationId: 'two' });
+  const twice = await pending._handler(f.s.ctx, {
+    ...args,
+    operationId: 'two',
+  });
   assert.deepEqual(
     await pending._handler(f.s.ctx, args),
     twice,
@@ -204,7 +215,10 @@ test('lookup reads retry but typed access errors do not', async () => {
   calls = 0;
   ctx.runQuery = async () => {
     calls++;
-    throw new ConvexError({ code: 'PROJECT_UNAVAILABLE', message: 'ECONNRESET' });
+    throw new ConvexError({
+      code: 'PROJECT_UNAVAILABLE',
+      message: 'ECONNRESET',
+    });
   };
   await assert.rejects(buildLookups(ctx, {}, [{ collection: 'views', key: 'one' }]));
   assert.equal(calls, 1);
@@ -250,7 +264,11 @@ test('diffstat and State child actions retry the same read rather than repeating
     if (id === treePin.sha256 && ++calls === 1) throw new Error('ECONNRESET');
     return get(id);
   };
-  await buildStates.tree._handler(f.s.ctx, { projectId: 'project', actor: 'owner', pin: treePin });
+  await buildStates.tree._handler(f.s.ctx, {
+    projectId: 'project',
+    actor: 'owner',
+    pin: treePin,
+  });
   assert.equal(calls, 2);
 });
 
@@ -265,7 +283,13 @@ test('heavy View output exposes discovered file totals and a files-based resume-
       key: 'page',
       part: 1,
       parts: 10,
-      after: { phase: 'summaries', field: 1, record: 2, source: 0, filesTotal: 11000 },
+      after: {
+        phase: 'summaries',
+        field: 1,
+        record: 2,
+        source: 0,
+        filesTotal: 11000,
+      },
     },
   };
   const g = {

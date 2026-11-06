@@ -54,6 +54,19 @@ test('index progress uses committed records, phase/field, steps, rate and a resu
     /summaries\/views, 1010\/2167 records, 501 steps, .* steps\/s, ETA \d+s/,
   );
   assert(!JSON.stringify(event).includes('privateText'));
+  progress.index(
+    JSON.stringify({
+      phase: 'index',
+      buildPhase: 'summaries',
+      field: 'views',
+      done: 1010,
+      total: 2167,
+      step: 502,
+      retries: 2,
+    }),
+  );
+  assert.match(formatHostProgress(events.at(-1)), /, read retry 2\/5, ETA /);
+  assert(!formatHostProgress(event).includes('read retry'), 'no retry text without a fault');
   update(0, 502, 'summaries', 'runs');
   assert.equal(events.at(-1).etaSeconds, null, 'a field change resets its rate');
   const count = events.length;

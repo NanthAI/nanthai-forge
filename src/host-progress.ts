@@ -1,5 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
-import { indexBuildProgressSchema, type IndexBuildProgress } from './work-index-build-progress.js';
+import {
+  indexBuildProgressSchema,
+  indexPendingResumeLimit,
+  type IndexBuildProgress,
+} from './work-index-build-progress.js';
 export type HostProgress = {
   type: 'host-progress';
   updatedAt: number;
@@ -12,7 +16,10 @@ export type HostProgress = {
   bytesTotal: number;
   bytesPerSecond: number;
   etaSeconds: number | null;
-  indexBuild?: IndexBuildProgress & { stepsPerSecond: number; filesPerMinute?: number };
+  indexBuild?: IndexBuildProgress & {
+    stepsPerSecond: number;
+    filesPerMinute?: number;
+  };
 };
 export type ProgressSink = (event: HostProgress) => void;
 /** Only counters and fixed phase labels cross this boundary; no paths, URLs or credentials. */
@@ -26,7 +33,14 @@ export function hostProgress(sink?: ProgressSink) {
     bytesTotal = 0;
   let indexBuild: HostProgress['indexBuild'];
   let baseline:
-    | { at: number; done: number; filesDone?: number; step: number; phase: string; field?: string }
+    | {
+        at: number;
+        done: number;
+        filesDone?: number;
+        step: number;
+        phase: string;
+        field?: string;
+      }
     | undefined;
   const emit = () => {
     const now = performance.now(),
@@ -143,7 +157,9 @@ export function formatHostProgress(event: HostProgress) {
       build.filesDone !== undefined && build.filesTotal !== undefined
         ? `, ${build.filesDone}/${build.filesTotal} changed files${build.filesTotalComplete ? '' : ' discovered'}, ${(build.filesPerMinute ?? 0).toFixed(1)} files/min`
         : '';
-    return `${event.phase}: ${build.buildPhase}${build.field ? `/${build.field}` : ''}, ${build.done}/${build.total} ${build.buildPhase === 'cleanup' ? 'collections' : 'records'}, ${build.step} steps, ${build.stepsPerSecond.toFixed(1)} steps/s${files}, ETA ${event.etaSeconds === null ? 'pending' : `${Math.ceil(event.etaSeconds)}s`}`;
+    const retry =
+      build.retries === undefined ? '' : `, read retry ${build.retries}/${indexPendingResumeLimit}`;
+    return `${event.phase}: ${build.buildPhase}${build.field ? `/${build.field}` : ''}, ${build.done}/${build.total} ${build.buildPhase === 'cleanup' ? 'collections' : 'records'}, ${build.step} steps, ${build.stepsPerSecond.toFixed(1)} steps/s${files}${retry}, ETA ${event.etaSeconds === null ? 'pending' : `${Math.ceil(event.etaSeconds)}s`}`;
   }
   return `${event.phase}: ${event.objectsDone}/${event.objectsTotal} objects, ${mb(event.bytesDone)}/${mb(event.bytesTotal)} MB, ${mb(event.bytesPerSecond)} MB/s, ETA ${event.etaSeconds === null ? 'pending' : `${Math.ceil(event.etaSeconds)}s`}`;
 }

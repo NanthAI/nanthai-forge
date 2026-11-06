@@ -6,7 +6,8 @@ import { accessibleProject } from './projectAuthority';
 import { workProject } from './projectWorkHead';
 import { generationDocument } from './projectWorkIndexFields';
 import { invariant } from '../src/errors';
-export const pendingResumeLimit = 5;
+import { indexPendingResumeLimit } from '../src/work-index-build-progress';
+export const pendingResumeLimit = indexPendingResumeLimit;
 /** Failure-only write. The exact cursor and operation fence concurrent/lost replies. */
 export const pending = internalMutation({
   args: {
