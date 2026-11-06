@@ -307,8 +307,33 @@ async function reconcile(
         held.push({
           id: item.id,
           openLines: unmet,
-          reason: `Intent completed; ${unmet} Done-when line(s) are not ticked. Tick them with put-planning-item (the next read closes the Issue) or keep working.`,
+          reason: `Intent completed; ${unmet} Done-when line(s) are not ticked. Tick them with put-planning-item (the next read closes the Issue), close it explicitly once the work is done, or keep working.`,
         });
+        // The Issue keeps its status. One comment and one reason write say so, then reads stay silent:
+        // the reason is the marker, and both writes carry operation ids derived from the Issue version.
+        const marker = `Intent completed; ${unmet} Done-when line(s) still open`;
+        if (item.reason !== marker) {
+          await writePlanning(
+            port,
+            {
+              action: 'comment-planning-item',
+              operationId: uuidFrom(`${item.id}:${item.version}:held-comment`),
+              itemId: item.id,
+              authorLabel: '',
+              text: `${marker}, so this Issue stays open. Tick the lines or close it with put-planning-item status closed.`,
+            },
+            undefined,
+            undefined,
+            item,
+          );
+          await writePlanning(
+            port,
+            putFrom(item, uuidFrom(`${item.id}:${item.version}:held`), item.status, marker),
+            undefined,
+            undefined,
+            item,
+          );
+        }
         continue;
       }
       const reason = `Intent ${states[entry.id]}`;
@@ -338,8 +363,29 @@ async function reconcile(
   };
 }
 
-/** Unticked checklist lines (`- [ ]`) in the Issue body: acceptance not yet met. */
-export const unmetDoneWhen = (body: string) => (body.match(/^\s*[-*]\s+\[ \]/gm) ?? []).length;
+/** Done-when lines not yet ticked: acceptance not yet met. Unticked checkboxes (`- [ ]`, `* [ ]`,
+ * `1. [ ]`) count. A Done-when section written without any checkbox (plain bullets or prose, friction
+ * 8b4bfd78: Issues c329d191 and 47558a99 closed with agreed work pending) cannot be ticked, so each of
+ * its bullet lines (or the paragraph, as one line) counts as open: a person closes such an Issue. A body
+ * with no Done-when section keeps closing as before. */
+export const unmetDoneWhen = (body: string) => {
+  const boxes = body.match(/^[ \t>]*(?:[-*+]|\d+[.)])\s+\[([ xX])\]/gm) ?? [];
+  if (boxes.length) return boxes.filter(line => /\[ \]$/.test(line)).length;
+  const heading = /^[ \t>#*_]*done[- ]when\b/im.exec(body);
+  if (!heading) return 0;
+  const lines = body
+    .slice(heading.index + heading[0].length)
+    .split('\n')
+    .map(line => line.trim());
+  let bullets = 0;
+  let text = /\w/.test(lines[0]?.replace(/^[:*_\s]+/, '') ?? '');
+  for (const line of lines.slice(1)) {
+    if (/^#{1,6}\s/.test(line) || /^\*\*[^*]+\*\*:?$/.test(line)) break;
+    if (/^(?:[-*+]|\d+[.)])\s+\S/.test(line)) bullets++;
+    else if (/\w/.test(line)) text = true;
+  }
+  return bullets || (text ? 1 : 0);
+};
 
 async function readPlanning(
   port: PlanningPort,
@@ -521,10 +567,17 @@ export async function plannedIntent(port: PlanningPort, itemId: string) {
       {
         reopen: {
           action: 'put-planning-item',
-          input: { itemId: item.id, expectedVersion: item.version, status: 'open' },
+          input: {
+            itemId: item.id,
+            expectedVersion: item.version,
+            status: 'open',
+          },
           needs: 'project owner',
         },
-        plainStart: { action: 'start', input: { outcome: item.title.slice(0, 500) } },
+        plainStart: {
+          action: 'start',
+          input: { outcome: item.title.slice(0, 500) },
+        },
       },
     );
   return {

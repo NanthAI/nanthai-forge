@@ -93,8 +93,14 @@ function previousServer(p) {
     if (command.action !== 'put-planning-item') return;
     const parsed = previousServerPut.safeParse(command);
     if (!parsed.success)
-      throw new ConvexError({ code: 'BAD_ARGUMENT', message: 'Invalid planning command.' });
-    args.command = JSON.stringify({ ...parsed.data, initiativeId: parsed.data.initiativeId ?? null });
+      throw new ConvexError({
+        code: 'BAD_ARGUMENT',
+        message: 'Invalid planning command.',
+      });
+    args.command = JSON.stringify({
+      ...parsed.data,
+      initiativeId: parsed.data.initiativeId ?? null,
+    });
   });
   return seen;
 }
@@ -129,7 +135,10 @@ test('a server without the V8 command receives the same original operation on th
   names.length = 0;
   p.exchange.client.action = async (ref, args) => {
     names.push(getFunctionName(ref));
-    throw new ConvexError({ code: 'WORK_STALE', message: 'Hosted Work changed.' });
+    throw new ConvexError({
+      code: 'WORK_STALE',
+      message: 'Hosted Work changed.',
+    });
   };
   await assert.rejects(put(p, { kind: 'issue', title: 'Refused', status: 'open' }));
   assert.equal(names.filter(name => name.includes(':command')).length >= 1, true);
@@ -263,8 +272,15 @@ test('new CLI against the previous server (no planning-put-keeps-omitted): a put
   const seed = port(s);
   const initiative = (await put(seed, { kind: 'initiative', title: 'Phase 6' })).result.itemId;
   const created = async title =>
-    (await put(seed, { kind: 'issue', title, body, status: 'proposed', initiativeId: initiative })).result
-      .itemId;
+    (
+      await put(seed, {
+        kind: 'issue',
+        title,
+        body,
+        status: 'proposed',
+        initiativeId: initiative,
+      })
+    ).result.itemId;
   const stored = async id => (await list(seed, { id, reconcile: false })).item;
 
   // The gap the Issue describes: a CLI that assumes the new semantics against the previous server.
@@ -275,7 +291,13 @@ test('new CLI against the previous server (no planning-put-keeps-omitted): a put
     put(assuming, { itemId: wiped, expectedVersion: 1, status: 'open' }),
     code('BAD_ARGUMENT'),
   );
-  await put(assuming, { itemId: wiped, expectedVersion: 1, kind: 'issue', title: 'Assumed', status: 'open' });
+  await put(assuming, {
+    itemId: wiped,
+    expectedVersion: 1,
+    kind: 'issue',
+    title: 'Assumed',
+    status: 'open',
+  });
   const lost = await stored(wiped);
   assert.deepEqual(
     [lost.body, lost.initiativeId ?? null],
@@ -288,7 +310,12 @@ test('new CLI against the previous server (no planning-put-keeps-omitted): a put
   const sent = previousServer(p);
   const issue = await created('Keep me');
   p.calls.length = 0;
-  const moved = await put(p, { itemId: issue, expectedVersion: 1, status: 'open', reason: 'triaged' });
+  const moved = await put(p, {
+    itemId: issue,
+    expectedVersion: 1,
+    status: 'open',
+    reason: 'triaged',
+  });
   assert.equal(moved.result.status, 'open');
   // One detail read more than the new server, on this path only.
   assert.deepEqual(p.calls, [
@@ -464,7 +491,8 @@ test('a completed Intent closes its Issue only when every Done-when line is tick
   await put(p, {
     kind: 'issue',
     itemId: unmet.itemId,
-    expectedVersion: unmet.version,
+    // The hold wrote its marker once (version + 1) after the comment.
+    expectedVersion: unmet.version + 1,
     title: 'Unmet',
     body: body(['x', 'x', 'x']),
     status: 'open',
@@ -472,6 +500,61 @@ test('a completed Intent closes its Issue only when every Done-when line is tick
   const after = await list(p);
   assert.equal(after.items.find(item => item.id === unmet.itemId).status, 'closed');
   assert.equal(after.reconciled.held, undefined);
+});
+
+test('a completed Intent holds an Issue with unticked or untickable Done-when lines, comments once, and a replay adds nothing (8b4bfd78)', async t => {
+  const s = await setup(t),
+    p = port(s);
+  const bodies = {
+    boxes: 'Why\n\nDone when:\n- [x] a\n- [ ] b\n1. [ ] c',
+    bullets:
+      'Core-claim incident.\n\nDone when:\n- the root cause is fixed;\n- the live queue drains;\n\nOwner: x.',
+    prose: 'Intro\n\n**Done when**\nThe budget is met on both harnesses.\n\nFits Phase 6.',
+    allTicked: 'Done when:\n- [x] a\n- [X] b',
+    none: 'Just words, no section',
+  };
+  const ids = {};
+  for (const [name, body] of Object.entries(bodies))
+    ids[name] = (await put(p, { kind: 'issue', title: name, body })).result.itemId;
+  for (const id of Object.values(ids)) p.states.set(id, 'completed');
+  const read = await list(p);
+  const status = Object.fromEntries(
+    Object.entries(ids).map(([n, id]) => [n, read.items.find(i => i.id === id).status]),
+  );
+  assert.deepEqual(status, {
+    boxes: 'open',
+    bullets: 'open',
+    prose: 'open',
+    allTicked: 'closed',
+    none: 'closed',
+  });
+  assert.deepEqual(Object.fromEntries(read.reconciled.held.map(h => [h.id, h.openLines])), {
+    [ids.boxes]: 2,
+    [ids.bullets]: 2,
+    [ids.prose]: 1,
+  });
+  const commentsOf = async id => (await list(p, { id, reconcile: false })).comments.map(c => c.text);
+  for (const name of ['boxes', 'bullets', 'prose']) {
+    const comments = await commentsOf(ids[name]);
+    assert.equal(comments.length, 1);
+    assert.match(comments[0], /^Intent completed; \d Done-when line\(s\) still open/);
+  }
+  assert.deepEqual(await commentsOf(ids.allTicked), []);
+  // Replays and later reads: still held, no second comment, no further write (reads only).
+  p.calls.length = 0;
+  const again = await list(p);
+  assert.equal(again.reconciled.held.length, 3);
+  assert(!p.calls.some(name => name.includes(':command')));
+  for (const name of ['boxes', 'bullets', 'prose']) assert.equal((await commentsOf(ids[name])).length, 1);
+  // A person's explicit close stays allowed.
+  const held = await list(p, { id: ids.bullets, reconcile: false });
+  await put(p, {
+    itemId: ids.bullets,
+    expectedVersion: held.item.version,
+    status: 'closed',
+    reason: 'verified',
+  });
+  assert.equal((await list(p, { id: ids.bullets, reconcile: false })).item.status, 'closed');
 });
 
 test('an Issue whose Intent completed is closed by the next read, with undo named; reconcile:false changes nothing', async t => {
@@ -695,7 +778,11 @@ test('new CLI vs previous server through the transport: the capability read drop
   const created = await transport(s, {
     planning: true,
     features: ['planning-put-keeps-omitted'],
-  }).transport.dispatch('put-planning-item', { kind: 'issue', title: 'Gap', body });
+  }).transport.dispatch('put-planning-item', {
+    kind: 'issue',
+    title: 'Gap',
+    body,
+  });
   const itemId = created.result.itemId;
   // Previous server: rejects the features argument and applies puts with the old defaults.
   const old = transport(s, { planning: true });
@@ -715,10 +802,16 @@ test('new CLI vs previous server through the transport: the capability read drop
   );
   assert.equal(sent.at(-1).body, body);
   assert.equal(moved.serverContract, undefined, 'nothing this build needs is missing');
-  const read = await old.transport.dispatch('planning', { id: itemId, reconcile: false });
+  const read = await old.transport.dispatch('planning', {
+    id: itemId,
+    reconcile: false,
+  });
   assert.deepEqual([read.result.item.body, read.result.item.status], [body, 'open']);
   // Current server: it advertises the feature, so the put names only what changes, in one read.
-  const current = transport(s, { planning: true, features: ['planning-put-keeps-omitted'] });
+  const current = transport(s, {
+    planning: true,
+    features: ['planning-put-keeps-omitted'],
+  });
   const commands = [];
   current.p.intercept(async args => commands.push(JSON.parse(args.command)));
   await current.transport.dispatch('put-planning-item', {
@@ -730,7 +823,12 @@ test('new CLI vs previous server through the transport: the capability read drop
   assert.equal(current.transport.advertisedFeatures.includes('planning-put-keeps-omitted'), true);
   assert.equal('body' in commands.at(-1), false);
   assert.equal(
-    (await current.transport.dispatch('planning', { id: itemId, reconcile: false })).result.item.body,
+    (
+      await current.transport.dispatch('planning', {
+        id: itemId,
+        reconcile: false,
+      })
+    ).result.item.body,
     body,
   );
 });
@@ -1004,8 +1102,12 @@ test('two client processes sharing one session id each get their own Lane; a sam
   });
   // The session id comes from the environment (agentSession undefined); the process is detected or declared.
   const process_ = agentProcess => Object.assign(s.transport(), { agentSession: undefined, agentProcess });
-  const a = await process_('100@Thu Nov  5 10:00:00 2026').dispatch('start', { planningItemId: item.id });
-  const b = await process_('200@Thu Nov  5 10:00:01 2026').dispatch('start', { planningItemId: item.id });
+  const a = await process_('100@Thu Nov  5 10:00:00 2026').dispatch('start', {
+    planningItemId: item.id,
+  });
+  const b = await process_('200@Thu Nov  5 10:00:01 2026').dispatch('start', {
+    planningItemId: item.id,
+  });
   assert.notEqual(b.operationId, a.operationId, 'another process never replays this start');
   assert.notEqual(b.result.lane.laneId, a.result.lane.laneId);
   assert.equal(starts().length, 2);
@@ -1013,7 +1115,9 @@ test('two client processes sharing one session id each get their own Lane; a sam
     ['100@Thu Nov  5 10:00:00 2026', a],
     ['200@Thu Nov  5 10:00:01 2026', b],
   ]) {
-    const retry = await process_(client).dispatch('start', { planningItemId: item.id });
+    const retry = await process_(client).dispatch('start', {
+      planningItemId: item.id,
+    });
     assert.equal(retry.operationId, original.operationId);
     assert.equal(retry.result.lane.laneId, original.result.lane.laneId);
   }
@@ -1127,14 +1231,26 @@ test('hosted planning CLI reads and writes from an explicitly addressed non-Git 
 test('a unique 8+ character id prefix resolves in the same call; full ids stay byte-for-byte unchanged and add no call (ce863deb)', async t => {
   const s = await setup(t),
     p = port(s);
-  const issue = (await put(p, { kind: 'issue', title: 'Short ids', body: 'Done when:\n- [ ] x' })).result;
-  await run(p, 'comment-planning-item', { itemId: issue.itemId, text: 'first note' });
+  const issue = (
+    await put(p, {
+      kind: 'issue',
+      title: 'Short ids',
+      body: 'Done when:\n- [ ] x',
+    })
+  ).result;
+  await run(p, 'comment-planning-item', {
+    itemId: issue.itemId,
+    text: 'first note',
+  });
   p.calls.length = 0;
   const full = await list(p, { id: issue.itemId, reconcile: false });
   const fullCalls = [...p.calls];
   assert(!fullCalls.includes('projectHostedPlanning:resolveId'));
   p.calls.length = 0;
-  const short = await list(p, { id: issue.itemId.slice(0, 8), reconcile: false });
+  const short = await list(p, {
+    id: issue.itemId.slice(0, 8),
+    reconcile: false,
+  });
   assert.equal(JSON.stringify(short), JSON.stringify(full));
   assert.deepEqual(
     p.calls.filter(name => name !== 'projectHostedPlanning:resolveId'),
@@ -1156,7 +1272,11 @@ test('a unique 8+ character id prefix resolves in the same call; full ids stay b
   });
   assert.equal(commented.result.itemId, issue.itemId);
   assert.equal(p.calls.filter(name => name === 'projectHostedPlanning:resolveId').length, 1);
-  const moved = await put(p, { itemId: issue.itemId.slice(0, 8), expectedVersion: 1, status: 'in-progress' });
+  const moved = await put(p, {
+    itemId: issue.itemId.slice(0, 8),
+    expectedVersion: 1,
+    status: 'in-progress',
+  });
   assert.equal(moved.result.itemId, issue.itemId);
   const after = await list(p, { id: issue.itemId, reconcile: false });
   assert.equal(after.item.status, 'in-progress');
@@ -1178,7 +1298,11 @@ test('an ambiguous prefix lists at most 5 full candidate ids; an unknown one is 
     p = port(s);
   const ids = Array.from({ length: 7 }, (_, n) => `deadbeef-000${n}-4000-8000-000000000000`);
   for (const [n, itemId] of ids.entries()) await put(p, { itemId, kind: 'issue', title: `Twin ${n}` });
-  await put(p, { itemId: 'deadbee0-0000-4000-8000-000000000000', kind: 'issue', title: 'Near miss' });
+  await put(p, {
+    itemId: 'deadbee0-0000-4000-8000-000000000000',
+    kind: 'issue',
+    title: 'Near miss',
+  });
   const ambiguous = await list(p, { id: 'deadbeef', reconcile: false }).catch(error => error);
   assert.equal(ambiguous.code, 'AMBIGUOUS_ID');
   assert.deepEqual(ambiguous.recovery.candidates, ids.slice(0, 5));
@@ -1198,7 +1322,12 @@ test('an ambiguous prefix lists at most 5 full candidate ids; an unknown one is 
   assert.equal((await list(p, { id: 'deadbee0', reconcile: false })).item.title, 'Near miss');
   await assert.rejects(list(p, { id: 'cafebabe', reconcile: false }), code('NOT_FOUND'));
   await assert.rejects(
-    put(p, { itemId: 'cafebabe', expectedVersion: 0, kind: 'issue', title: 'new' }),
+    put(p, {
+      itemId: 'cafebabe',
+      expectedVersion: 0,
+      kind: 'issue',
+      title: 'new',
+    }),
     code('BAD_ARGUMENT'),
   );
 });
@@ -1214,7 +1343,10 @@ test('a prefix shorter than 8 characters or not hex is refused by the schema bef
       ['start', 'planningItemId'],
     ]) {
       const extra = action === 'comment-planning-item' ? { text: 'x' } : {};
-      const result = hostedAgentCommandSchemas[action].safeParse({ [field]: bad, ...extra });
+      const result = hostedAgentCommandSchemas[action].safeParse({
+        [field]: bad,
+        ...extra,
+      });
       assert.equal(result.success, false, `${action}.${field} ${JSON.stringify(bad)}`);
       assert.match(result.error.message, /at least 8 characters/);
     }
@@ -1228,7 +1360,10 @@ test('a prefix shorter than 8 characters or not hex is refused by the schema bef
   ])
     assert.equal(hostedAgentCommandSchemas[action].parse({ [field]: full })[field], full);
   assert.equal(
-    hostedAgentCommandSchemas['comment-planning-item'].parse({ itemId: 'deadbeef', text: 'x' }).itemId,
+    hostedAgentCommandSchemas['comment-planning-item'].parse({
+      itemId: 'deadbeef',
+      text: 'x',
+    }).itemId,
     'deadbeef',
   );
 });
