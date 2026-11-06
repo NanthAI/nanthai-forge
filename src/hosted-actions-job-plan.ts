@@ -8,7 +8,7 @@ import { checkPin } from './hosted-check.js';
 import { semanticTests } from './intent-semantic-conflict.js';
 import { digest } from './hash.js';
 import { guardedSelection, standardSelection } from '../scripts/test-impact.mjs';
-import { timedShards } from '../scripts/test-shards.mjs';
+import { describeShardPlan, timedShards } from '../scripts/test-shards.mjs';
 import { hostedActionsRecipeSchema } from './hosted-actions.js';
 import { ActionsJobClient } from './hosted-actions-job-client.js';
 import { actionsJobCalls } from './hosted-actions-capabilities.js';
@@ -92,6 +92,7 @@ export async function prepareActionsJob(
     console.log(
       `Actions capacity: ${capacity.activeChecks} active checks, ${capacity.jobCap} slots; ${groups.length} test shards`,
     );
+  if (groups.length) console.log(describeShardPlan(groups, client.timings));
   const pins = {
     head: run.request.expectedHead,
     definition: run.check.definition,

@@ -1,7 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 // One log line per job: wall seconds and machine CPU busy share for each phase, so
 // worker count and shard count are tuned from measurements on any CI, not guesses.
+// The line also names the CPU model: runner speed varies between jobs of one check
+// (the same test file ran 98 s on one runner and 183 s on another), which sets the
+// slowest shard's time, so a report can tie slow shards to hardware.
 import { availableParallelism, cpus, totalmem } from 'node:os';
+
+const cpuModel = () =>
+  (cpus()[0]?.model ?? '')
+    .replace(/\((?:R|TM)\)/gi, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 48);
 
 const sample = () => {
   let total = 0,
@@ -29,8 +39,9 @@ export function checkPhases(log = console.log) {
       }
     },
     report() {
+      const model = cpuModel();
       log(
-        `Check phases on ${availableParallelism()} CPUs, ${Math.round(totalmem() / 2 ** 30)} GiB: ${phases.join('; ')}`,
+        `Check phases on ${availableParallelism()} CPUs${model ? ` (${model})` : ''}, ${Math.round(totalmem() / 2 ** 30)} GiB: ${phases.join('; ')}`,
       );
     },
   };

@@ -25,6 +25,7 @@ export function partitionTests(
   durations?: Record<string, number>,
   workers?: number,
 ): string[][];
+export function describeShardPlan(groups: string[][], durations?: Record<string, number>): string;
 export const shardJobOverheadMs: number;
 export const shardTargetMs: number;
 export const maxTestShards: number;

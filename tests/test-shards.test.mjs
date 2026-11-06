@@ -5,6 +5,7 @@ import { mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
+  describeShardPlan,
   partitionTests,
   timedShards,
   shardDuration,
@@ -222,4 +223,18 @@ test('deep queues prefer fuller shards and fewer job-minutes under the org cap',
   assert.equal(timedShards(files, long, { concurrencyBudget: 30, callsPerJob: 4 }).length, 11);
   for (const capacity of [{ activeChecks: 0 }, { activeChecks: NaN }, { jobCap: 2 }])
     assert.throws(() => timedShards(files, timings, capacity));
+});
+
+test('the shard plan line states recorded-time coverage and planned seconds per shard', () => {
+  const durations = { 'tests/a.test.mjs': 4000, 'tests/b.test.mjs': 2000, 'tests/c.test.mjs': 2000 };
+  const groups = [['tests/a.test.mjs'], ['tests/b.test.mjs', 'tests/c.test.mjs', 'tests/new.test.mjs']];
+  // Two workers per shard: b and c run side by side (2 s), then the unknown file at the 4 s p75 fallback.
+  assert.equal(
+    describeShardPlan(groups, durations),
+    'Shard plan: 2 shards, 4 test files (3 with recorded time); planned test seconds per shard: 4 6',
+  );
+  assert.match(
+    describeShardPlan([['tests/a.test.mjs']]),
+    /1 shards, 1 test files \(0 with recorded time\); planned test seconds per shard: 1$/,
+  );
 });

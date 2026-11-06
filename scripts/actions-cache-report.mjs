@@ -3,6 +3,9 @@
 //   node scripts/actions-cache-report.mjs OWNER/REPO [runs=40]
 // Reads the GitHub API through the owner's gh login (one list call plus one call per run).
 // A job missed the cache when its `npm ci` step ran; a hit skips it. Wall time is created to updated.
+// `breakdown` splits the successful runs' wall time into queue, plan job, slowest shard and tail,
+// with shard balance and runner minutes. It uses only the jobs API (run logs are deleted within
+// about an hour), so a before/after pair can be taken any time after a run ends.
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
@@ -13,7 +16,69 @@ const percentile = (values, share) => {
   return sorted.length ? sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * share))] : null;
 };
 
-/** `runs`: [{createdAt, updatedAt, jobs: [{name, conclusion, steps: [{name, conclusion, startedAt, completedAt}]}]}] */
+const spanSeconds = item =>
+  item?.startedAt && item?.completedAt
+    ? (Date.parse(item.completedAt) - Date.parse(item.startedAt)) / 1000
+    : null;
+const spread = values => ({ p50: percentile(values, 0.5), p90: percentile(values, 0.9) });
+const mean = values => values.reduce((sum, value) => sum + value, 0) / values.length;
+
+/** Where the wall time of successful runs goes: queue, plan job, slowest test shard, tail, with
+ * shard balance (slowest over mean) and runner minutes. A run without timestamps is skipped. */
+export function summarizeWallBreakdown(runs) {
+  const rows = [];
+  for (const run of runs) {
+    if (run.conclusion !== undefined && run.conclusion !== 'success') continue;
+    const jobs = run.jobs.filter(job => job.conclusion !== 'skipped' && spanSeconds(job) !== null);
+    const plan = jobs.find(job => job.name === 'hosted-plan');
+    const shards = jobs.filter(job => /^forge-hosted-\d+$/.test(job.name));
+    if (!plan || !shards.length) continue;
+    const shardSeconds = shards.map(spanSeconds);
+    const wall = (Date.parse(run.updatedAt) - Date.parse(run.createdAt)) / 1000;
+    const start = Math.min(...jobs.map(job => Date.parse(job.startedAt)));
+    const end = Math.max(...jobs.map(job => Date.parse(job.completedAt)));
+    const staticJob = jobs.find(job => job.name === 'forge-hosted-static');
+    rows.push({
+      wall,
+      queue: (start - Date.parse(run.createdAt)) / 1000,
+      plan: spanSeconds(plan),
+      slowest: Math.max(...shardSeconds),
+      fastest: Math.min(...shardSeconds),
+      balance: Math.max(...shardSeconds) / mean(shardSeconds),
+      shards: shards.length,
+      static: staticJob ? spanSeconds(staticJob) : null,
+      // Everything a shard does outside its one run step: job setup, checkout, setup-node, cache restore, artifact.
+      setup: mean(
+        shards.map(
+          job =>
+            spanSeconds(job) -
+            job.steps
+              .filter(step => /hosted-actions-job\.mjs run/.test(step.name))
+              .reduce((sum, step) => sum + (spanSeconds(step) ?? 0), 0),
+        ),
+      ),
+      tail: (Date.parse(run.updatedAt) - end) / 1000,
+      runnerMinutes: jobs.reduce((sum, job) => sum + spanSeconds(job), 0) / 60,
+    });
+  }
+  const column = key => rows.map(row => row[key]).filter(value => value !== null);
+  return {
+    successRuns: rows.length,
+    wallSeconds: spread(column('wall')),
+    queueSeconds: spread(column('queue')),
+    planJobSeconds: spread(column('plan')),
+    slowestShardSeconds: spread(column('slowest')),
+    fastestShardSeconds: spread(column('fastest')),
+    slowestOverMeanShard: spread(column('balance')),
+    shardCount: spread(column('shards')),
+    staticJobSeconds: spread(column('static')),
+    shardSetupSeconds: spread(column('setup')),
+    tailSeconds: spread(column('tail')),
+    runnerMinutes: spread(column('runnerMinutes')),
+  };
+}
+
+/** `runs`: [{createdAt, updatedAt, conclusion?, jobs: [{name, conclusion, startedAt?, completedAt?, steps: [{name, conclusion, startedAt, completedAt}]}]}] */
 export function summarizeCacheRuns(runs) {
   let jobs = 0,
     misses = 0;
@@ -38,6 +103,7 @@ export function summarizeCacheRuns(runs) {
     restoreSecondsMedian: percentile(restores, 0.5),
     wallMinutesMedian: percentile(walls, 0.5),
     wallMinutesP90: percentile(walls, 0.9),
+    breakdown: summarizeWallBreakdown(runs),
   };
 }
 
@@ -56,7 +122,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     '--limit',
     count,
     '--json',
-    'databaseId,status,createdAt,updatedAt',
+    'databaseId,status,conclusion,createdAt,updatedAt',
   );
   const runs = listed
     .filter(run => run.status === 'completed')

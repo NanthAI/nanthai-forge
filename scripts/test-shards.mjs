@@ -130,6 +130,16 @@ export function partitionTests(files, count, durations = {}, workers = 2) {
   return groups;
 }
 
+/** One planning log line: how much of the plan rests on recorded time, and the planned
+ * seconds of every shard in index order. Compare it with each shard's `tests` phase to
+ * see whether a slow shard was planned heavy (history error) or ran on a slow runner. */
+export function describeShardPlan(groups, durations = {}) {
+  const files = groups.flat();
+  const recorded = files.filter(file => positive(durations[file])).length;
+  const planned = groups.map(group => Math.round(shardDuration(group, durations) / 1000));
+  return `Shard plan: ${groups.length} shards, ${files.length} test files (${recorded} with recorded time); planned test seconds per shard: ${planned.join(' ')}`;
+}
+
 // Rounded above the observed 23s p75 control preparation, allowing Candidate build
 // and result upload too. This is a planning estimate, never measured test evidence.
 export const shardJobOverheadMs = 60_000;

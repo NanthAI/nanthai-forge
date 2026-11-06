@@ -15,6 +15,6 @@ test('phases report wall time and CPU share on one line, even when a phase throw
   assert.equal(lines.length, 1);
   assert.match(
     lines[0],
-    /^Check phases on \d+ CPUs, \d+ GiB: install \d+\.\ds \(cpu \d+%\); tests \d+\.\ds \(cpu \d+%\)$/,
+    /^Check phases on \d+ CPUs(?: \([^)]+\))?, \d+ GiB: install \d+\.\ds \(cpu \d+%\); tests \d+\.\ds \(cpu \d+%\)$/,
   );
 });

@@ -620,13 +620,49 @@ hit rate, median restore time and check wall-time median and p90. Each job's `in
 its `Check phases` line below. The active entry is about 150 MiB, inside the free Actions cache
 allowance; it costs no money and no Convex call.
 
-Every Actions job ends with one log line, `Check phases on N CPUs, M GiB: install 3.4s (cpu 52%); build
-5.8s (cpu 90%); tests 359.1s (cpu 58%)`, giving each phase's wall time and the machine's CPU busy share
-(`scripts/check-phases.mjs`, run by `scripts/github-actions-check.mjs`; any CI that runs those scripts
-logs it). Standard GitHub-hosted runners for this public repository are 4 CPUs and 16 GiB. On
+Every Actions job ends with one log line, `Check phases on N CPUs (CPU model), M GiB: install 3.4s (cpu 52%);
+build 5.8s (cpu 90%); tests 359.1s (cpu 58%)`, giving each phase's wall time, the machine's CPU busy share and
+its CPU model (`scripts/check-phases.mjs`, run by `scripts/github-actions-check.mjs`; any CI that runs those
+scripts logs it). The planning job logs one `Shard plan:` line with the planned test seconds of every shard
+(`describeShardPlan` in `scripts/test-shards.mjs`), to compare with each shard's `tests` phase. Standard GitHub-hosted runners for this public repository are 4 CPUs and 16 GiB. On
 2026-11-05 shards ran two test workers at 58-69% CPU busy, so a third worker would saturate the box.
 Use these lines, not estimates, before changing the worker count (`FORGE_TEST_WORKERS` in
 `scripts/github-actions-check.mjs`) or the shard count.
+
+### Where a check's wall time goes (measured 2026-11-06)
+
+`node scripts/actions-cache-report.mjs NanthAI/nanthai-forge 40` also prints a `breakdown` of the successful
+runs, from the jobs API only (Actions run logs are deleted within about an hour, so a before/after pair
+can be taken any time after a run ends). 34 successful full checks, 11 test shards, p50 / p90:
+
+| Part | p50 | p90 |
+|---|---|---|
+| Whole check, created to updated | 508 s | 535 s |
+| Queue before the first job | 4 s | 4 s |
+| `hosted-plan` job | 30 s | 38 s |
+| Slowest test shard job (sets the wall time) | 470 s | 497 s |
+| Mean test shard job / fastest | 400 s / 293 s | |
+| Slowest over mean shard | 1.18 | 1.24 |
+| Shard job time outside the run step (setup-node, checkout, cache, artifact) | 17 s | 18 s |
+| `forge-hosted-static` job (parallel, off the critical path) | 232 s | 246 s |
+| Runner minutes per check | 77 | 83 |
+
+Shard balance is already at its floor. Planned shard times are equal to the second (LPT on recorded
+times: planned slowest over mean 1.000), yet the realized slowest over mean is 1.16. The cause is runner
+speed, not planning: the same test file with the same neighbours ran 98 s on one runner and 183 s on
+another in the same hour, and a shard's total time over the sum of its files' median times had a
+coefficient of variation of 0.13 (143 shard runs, from 0.62 to 1.18, two clusters near 0.7 and 1.05).
+Drawing 11 shard speeds from that distribution for a perfect plan gives slowest over mean 1.157 (p50),
+1.224 (p90); the 13 deployed runs measured 1.156 and 1.165. A better duration estimator or a refining
+pass over LPT cannot lower that. Only moving work between running jobs can, which needs a claim that is
+atomic without a Convex call (Issue a3d59b6c has the sketch). The CPU model in the phase line is there to
+confirm or refute a hardware cause.
+
+Fixed cost is about 12% of the wall time: queue 4 s, plan job 30 s (source fetch 8 s inside it, checkout
+2 s, setup-node 4 s, cache restore 3 s, artifact upload 2-3 s), then per shard about 17 s of job steps, 3-5 s
+of `npm ci` and 5-8 s of build. Each is a few seconds and is dominated by GitHub step overhead. Changing
+`forge-check.yml` is risky for what it saves: the workflow comes from GitHub `main`, so a broken workflow
+fails the check of its own fix.
 
 When the pinned recipe has exactly one execution job (no test groups plus the
 static execution), that execution runs in `hosted-plan` after planning. This includes
