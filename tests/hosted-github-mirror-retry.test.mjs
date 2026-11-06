@@ -35,7 +35,7 @@ test('unconfigured server projects do not read mirror storage or require mirror 
   assert.equal(status, null);
 });
 
-async function fixture(t, fail, source) {
+async function fixture(t, fail, source, respond = () => undefined) {
   const f = lanesFixture(),
     github = mirrorFixture(source),
     scheduled = [],
@@ -113,6 +113,8 @@ async function fixture(t, fail, source) {
     if (new URL(url).hostname.endsWith('.r2.cloudflarestorage.com')) return originalFetch(url, init);
     if (url.endsWith('/installation')) return Response.json({ id: 42 });
     if (url.includes('/access_tokens')) return Response.json({ token: 'synthetic-token' });
+    const response = respond(url, init);
+    if (response) return response;
     if (url.endsWith('/blobs') && fail()) return new Response('synthetic private response', { status: 500 });
     return Response.json(
       await github.io.api(new URL(url).pathname, init.method, init.body && JSON.parse(init.body)),
@@ -191,6 +193,38 @@ test('real action: HTTP 500 retains the cursor, schedules one backoff, then succ
   assert.equal(f.github.commits.size, 2);
   await f.step(f.input);
   assert.equal(f.scheduled.length, 2, 'late worker is fenced');
+});
+
+test('real action: GitHub 422 on trees fails once with its bounded message in job detail and status', async t => {
+  const f = await fixture(
+    t,
+    () => false,
+    undefined,
+    url =>
+      url.endsWith('/git/trees')
+        ? Response.json(
+            {
+              message: 'GitRPC::BadObjectState',
+              errors: [{ resource: 'Tree', field: 'tree', code: 'invalid' }],
+              documentation_url: 'https://docs.github.com/rest',
+              echoed: 'synthetic-token',
+            },
+            { status: 422 },
+          )
+        : undefined,
+  );
+  await f.step();
+  const job = f.job();
+  assert.equal(job.status, 'failed');
+  assert.equal(job.httpStatus, 422);
+  assert.equal(job.apiOperation, 'POST git/trees');
+  assert.match(job.detail, /GitHub error: "GitRPC::BadObjectState; Tree tree invalid"\./);
+  assert(!/synthetic-token|docs\.github\.com/.test(job.detail));
+  assert.notEqual(job.cursor, f.cursor, 'verified blob progress is checkpointed');
+  assert.equal(f.scheduled.length, 1, 'a 422 schedules no retry');
+  const status = await f.status();
+  assert.equal(status.detail, `Job for State ${f.github.head.slice(0, 8)}: ${job.detail}`);
+  assert.match(hostedMirrorStatusText(status, Date.now()), /GitRPC::BadObjectState/);
 });
 
 for (const kind of ['foreign', 'unknown']) {

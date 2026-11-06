@@ -497,16 +497,20 @@ or reconciles external GitHub history automatically.
 
 A failed action retains its cursor and structured error on the job, including
 the failed API operation, HTTP status and exact request byte count, without
-payloads, response bodies or credentials. HTTP 5xx and 429 schedule retries of
+payloads or credentials. From a JSON error reply it keeps only GitHub's
+`message` and `errors[]` (resource, field, code, message), with controls
+stripped, token-shaped text redacted and at most 500 characters, so a 4xx
+such as a rejected tree is diagnosable from status without a replay. HTTP 5xx and 429 schedule retries of
 that cursor after 1, 2, 4 and 8 minutes. Verified blob replies before a failed
 request are checkpointed so retry does not repeat the whole window. Five
 consecutive failures without checkpointed progress end in a terminal failure.
 A fully successful step or a durable advance to a different blob resets the
 budget; an unsuccessful cursor save does not. Failure details retain validated
 GitHub request IDs and numeric rate-limit/retry headers when present, without
-request or response bodies or credentials.
+request bodies, raw response bodies or credentials.
 Other failures stop immediately. `nforge status ROOT`, `nforge agent ROOT status`
-and Now show recorded mirror failure, lag and the next retry time. Status reads
+and Now show recorded mirror failure (prefixed with the failing job's State,
+which can be older than current main), lag and the next retry time. Status reads
 use selected rows through existing discovery/workspace requests, without polling.
 
 After resolving the cause, the operator can invoke the internal

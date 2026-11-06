@@ -46,7 +46,8 @@ export async function githubMirrorStatus(
     failures: job?.failures ?? 0,
     nextAttemptAt: job?.nextAttemptAt ?? null,
     error: job?.error ?? null,
-    detail: job?.detail ?? null,
+    // targetHead is current main; name the State this failing job publishes.
+    detail: job?.detail ? `Job for State ${job.state.slice(0, 8)}: ${job.detail}` : null,
     jobId: job?._id ?? null,
   };
 }
