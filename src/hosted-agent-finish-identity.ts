@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 import { conflictMarkerScan, scanConflictMarkers, conflictMarkersFound } from './conflict-markers.js';
-import { assertNoConflictMarkers, pendingConflictPaths } from './hosted-conflict-precheck.js';
+import {
+  assertNoConflictMarkers,
+  inPlaceResolution,
+  pendingConflictPaths,
+} from './hosted-conflict-precheck.js';
 import { normalizeHostedFinishResult } from './hosted-agent-finish-result.js';
 import { lstatSync, readlinkSync } from 'node:fs';
 import { join } from 'node:path';
@@ -126,7 +130,14 @@ export async function selectHostedFinish(
         }),
       );
   const previous = checkoutPathExists(index) ? selectionSchema.parse(readAgentJson(index)) : undefined;
-  const sameSource = previous?.fingerprint === fingerprint;
+  // This folder became the named Lane's conflict resolution: that Lane's saved source is unchanged
+  // by anything done here, so its shorthand keeps following the original operation's recovery.
+  const resolvedHere =
+    !!command.laneId &&
+    !!marker &&
+    marker.selection.laneId !== command.laneId &&
+    !!inPlaceResolution(root, command.laneId);
+  const sameSource = previous?.fingerprint === fingerprint || (resolvedHere && previous !== undefined);
   const terminal = async (prior: FinishSelection) => {
     const path = join(directory, `${prior.operationId}.json`);
     if (!checkoutPathExists(path)) return false;

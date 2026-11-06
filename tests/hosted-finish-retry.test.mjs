@@ -7,6 +7,7 @@ import { writeFileSync, readFileSync, mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { getFunctionName } from 'convex/server';
 import { agentFixture } from './hosted-agent-fixture.mjs';
+import { canonicalRoot } from '../dist/root-paths.js';
 import { resolutionFixture } from './hosted-agent-resolution-fixture.mjs';
 import { synthetic } from './hosted-revert-fixture.mjs';
 import { finishFixture, desired, compose } from './hosted-finish-fixture.mjs';
@@ -131,7 +132,7 @@ test('current conflict recovery survives retry integration and unchanged-source 
   assert.equal((await f.current(retry.result.submission.id)).submission.phase, 'landed');
 });
 
-test('a real edit after a retained composition conflict advances shorthand instead of replaying the conflict', async t => {
+test('a real edit after a retained composition conflict is the resolution: the shorthand names resolve, then lands', async t => {
   const s = await resolutionFixture(t, { overlap: true }),
     f = s.f;
   f.moveMain({ overlap: true });
@@ -139,10 +140,22 @@ test('a real edit after a retained composition conflict advances shorthand inste
   const command = { laneId: f.lane.laneId, accept: true };
   const first = await s.transport().dispatch('finish', command);
   assert.equal(first.result.phase, 'conflict');
+  // The conflict resolves in this same folder, so an edit here is the resolution, not new work on
+  // the original Lane: the shorthand follows the original recovery to its one resolve step.
+  assert.equal(first.result.recovery.conflict.root, canonicalRoot(s.root));
   writeFileSync(join(s.root, 'a.txt'), 'theirs\nb\nc\n');
   const next = await s.transport().dispatch('finish', command);
-  assert.notEqual(next.operationId, first.operationId);
-  assert.equal(next.result.phase, 'finish');
+  const step = next.result.recovery.conflict;
+  assert.equal(step.next.action, 'resolve');
+  const { action, ...parameters } = step.next;
+  const fixed = await s.transport().dispatch(action, parameters);
+  const { action: land, ...selection } = fixed.result.next;
+  const submitted = await s.transport().dispatch(land, selection);
+  await f.drain();
+  await f.passChecks();
+  await f.drain();
+  assert.equal((await f.current(submitted.result.submission.id)).submission.phase, 'landed');
+  assert.equal(f.text(f.currentMain().head, 'a.txt'), 'theirs\nb\nc\n');
 });
 
 for (const priority of [undefined, 'urgent'])

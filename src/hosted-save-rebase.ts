@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { clientCacheRoot } from './root-paths.js';
 import { sourceTree } from './source-tree.js';
-import { lstatSync, mkdirSync, readFileSync, readlinkSync, realpathSync, rmSync } from 'node:fs';
+import { cpSync, lstatSync, mkdirSync, readFileSync, readlinkSync, realpathSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { HostedCheckoutCache } from './hosted-checkout-cache.js';
 import { checkoutPathExists, installHostedFile } from './hosted-checkout-files.js';
@@ -57,13 +57,30 @@ function onDisk(root: string, path: string, file: NativeFile | undefined) {
  * current server Lane. Only paths the server changed are touched, and only when
  * the working file still equals the old baseline; local edits are never
  * overwritten. One Lane read; a moved head adds one manifest and the changed
- * blobs in page-sized batches. Returns null when the checkout is already current. */
-export async function rebaseHostedCheckout(root: string, exchange: Exchange) {
+ * blobs in page-sized batches. Returns null when the checkout is already current.
+ *
+ * `onto` rebinds the folder to another Lane instead: the conflict resolution Lane made
+ * from this exact saved head. Unsaved edits on paths it does not change stay in place;
+ * an unsaved edit on a path it changes is copied to `keptAt` (outside the source tree)
+ * before that path takes the resolution's bytes, so nothing is lost or left behind. */
+export async function rebaseHostedCheckout(
+  root: string,
+  exchange: Exchange,
+  onto?: { laneId: string; origin: { laneId: string; head: string; sourceVersion: number } },
+) {
   finishPendingCheckoutDelta(root);
   const stale = readHostedLaneCheckout(root);
   invariant(stale, 'NOT_FOUND', 'Open a hosted Lane before saving.');
+  if (onto)
+    invariant(
+      stale.selection.laneId === onto.origin.laneId &&
+        stale.selection.head === onto.origin.head &&
+        stale.selection.sourceVersion === onto.origin.sourceVersion,
+      'WORK_STALE',
+      'This checkout no longer holds the exact saved source the resolution was made from.',
+    );
   const transport = new ConvexLaneTransport(exchange),
-    lane = await transport.select(stale.selection.laneId);
+    lane = await transport.select(onto?.laneId ?? stale.selection.laneId);
   const repair = keepPatchCommand(root, lane.laneId);
   invariant(
     lane.state === 'active',
@@ -73,7 +90,14 @@ export async function rebaseHostedCheckout(root: string, exchange: Exchange) {
   if (canonicalPayload(lane) === canonicalPayload(stale.selection)) return null;
   let state = stale.state,
     objects = '';
-  const install: { path: string; file: NativeFile | undefined; old: NativeFile | undefined }[] = [];
+  const install: {
+    path: string;
+    file: NativeFile | undefined;
+    old: NativeFile | undefined;
+    keep?: boolean;
+    deleted?: boolean;
+  }[] = [];
+  const keptAt = onto ? join(clientCacheRoot(root), 'resolution-kept', lane.laneId) : null;
   const materialized = new Set(stale.materialized);
   if (lane.head !== stale.selection.head) {
     const cache = new HostedCheckoutCache(clientCacheRoot(root), transport);
@@ -94,8 +118,10 @@ export async function rebaseHostedCheckout(root: string, exchange: Exchange) {
       if (wanted) materialized.add(path);
       // Both sides made the same change, or the path stays unmaterialized.
       if (onDisk(root, path, wanted)) continue;
-      if (!onDisk(root, path, present)) conflicts.push(path);
-      else install.push({ path, file: wanted, old: present });
+      if (!onDisk(root, path, present)) {
+        if (keptAt) install.push({ path, file: wanted, old: present, keep: true });
+        else conflicts.push(path);
+      } else install.push({ path, file: wanted, old: present });
     }
     invariant(
       !conflicts.length,
@@ -122,13 +148,25 @@ export async function rebaseHostedCheckout(root: string, exchange: Exchange) {
     // Recheck each path under the lock: an edit since the scan is preserved.
     for (const item of install)
       invariant(
-        onDisk(root, item.path, item.old),
+        item.keep || onDisk(root, item.path, item.old),
         'SAVE_REBASE_CONFLICT',
         `${item.path} changed while the checkout was being repaired. Nothing was saved; retry the same save.`,
       );
+    // Unsaved bytes the resolution also changes move out of the source tree first (copied,
+    // then replaced), so the folder holds the resolution and the edit stays recoverable.
+    for (const item of install.filter(item => item.keep)) {
+      if (!checkoutPathExists(join(root, item.path))) {
+        item.deleted = true;
+        continue;
+      }
+      const kept = join(keptAt!, item.path);
+      mkdirSync(dirname(kept), { recursive: true, mode: 0o700 });
+      cpSync(join(root, item.path), kept, { recursive: true, verbatimSymlinks: true, force: true });
+      syncDirectory(dirname(kept));
+    }
     for (const item of install) {
       const target = join(root, item.path);
-      if (checkoutPathExists(target)) rmSync(target);
+      if (checkoutPathExists(target)) rmSync(target, { recursive: Boolean(item.keep) });
       if (!item.file) continue;
       mkdirSync(dirname(target), { recursive: true });
       invariant(
@@ -143,5 +181,14 @@ export async function rebaseHostedCheckout(root: string, exchange: Exchange) {
     // A save pinned to the old baseline either moved the Lane or will be refused; never look it up again.
     rmSync(pendingSavePath(root, stale), { force: true });
   });
-  return { from: stale.selection.head, to: lane.head, updatedPaths: install.map(item => item.path) };
+  const kept = install.filter(item => item.keep && !item.deleted).map(item => item.path),
+    deletedLocally = install.filter(item => item.deleted).map(item => item.path);
+  return {
+    from: stale.selection.head,
+    to: lane.head,
+    updatedPaths: install.map(item => item.path),
+    ...(kept.length ? { kept, keptAt } : {}),
+    // Unsaved local deletions of files the resolution changes: the resolution's bytes are back.
+    ...(deletedLocally.length ? { deletedLocally } : {}),
+  };
 }

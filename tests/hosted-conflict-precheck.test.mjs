@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { canonicalRoot } from '../dist/root-paths.js';
 import { hostedAgentRoot } from '../dist/hosted-agent-journal.js';
@@ -250,13 +250,25 @@ test('B1.5d n3-r3 t23938: stall alarm remains pending; terminal stall has one su
 test('B1.5d n3-r3 t19456: wrong editing root names one exact resolve location without help hunting', async t => {
   const s = await resolutionFixture(t, { overlap: true }),
     f = s.f;
+  // The machine Lane registry is how a foreign folder finds the Lane's real checkout.
+  const state = process.env.XDG_STATE_HOME;
+  process.env.XDG_STATE_HOME = join(dirname(s.root), 'state');
+  t.after(() => {
+    if (state === undefined) delete process.env.XDG_STATE_HOME;
+    else process.env.XDG_STATE_HOME = state;
+  });
   f.moveMain({ overlap: true });
   await s.transport().dispatch('open', { laneId: f.lane.laneId });
   const first = await s.transport().dispatch('finish', { laneId: f.lane.laneId });
   const conflict = first.result.recovery.conflict;
+  // The conflict resolves in the agent's own folder, so the usual root is the right one;
+  // a different folder still names the one exact place to run resolve.
+  assert.equal(conflict.root, canonicalRoot(s.root));
   writeFileSync(join(conflict.root, 'a.txt'), 'chosen after conflict\nb\nc\n');
+  const elsewhere = join(dirname(s.root), 'elsewhere');
+  mkdirSync(elsewhere);
   let recovery;
-  await assert.rejects(s.transport().dispatch('resolve', { laneId: conflict.laneId }), error => {
+  await assert.rejects(s.transport(elsewhere).dispatch('resolve', { laneId: conflict.laneId }), error => {
     assert.equal(error.code, 'HOSTED_CHECKOUT_REQUIRED');
     recovery = error.recovery;
     assert.equal(recovery.root, conflict.root);

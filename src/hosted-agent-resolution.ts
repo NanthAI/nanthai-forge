@@ -18,6 +18,7 @@ import { retainSyncHandoff, clearSyncHandoff } from './hosted-sync-handoff.js';
 import { hostedActionError } from './hosted-action-error.js';
 import { HostedAgentJournal } from './hosted-agent-journal.js';
 import { resolutionFinishSelection } from './hosted-resolution-selection.js';
+import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { TextDecoder } from 'node:util';
 import { z } from 'zod';
@@ -28,7 +29,8 @@ import { saveExpectedSchema, saveResultSchema } from './hosted-save.js';
 import { syncRequestSchema, syncResultSchema } from './hosted-sync.js';
 import { saveHostedLane } from './hosted-save-client.js';
 import { driveAgentSource, syncAgentSource } from './hosted-agent-source.js';
-import { openHostedRootLane, siblingLanePath } from './hosted-root-checkout.js';
+import { hostedRootLanePath } from './hosted-root-checkout.js';
+import { placeResolution } from './hosted-resolution-placement.js';
 import { applyHostedSync } from './hosted-sync-client.js';
 import { markerAt, retainedLocalApplyBlocked } from './hosted-apply-recovery-records.js';
 import { ConvexLaneTransport } from './hosted-lane-transport.js';
@@ -93,7 +95,9 @@ export async function guideHostedSync(session: HostedAgentSession, value: unknow
     pin = page.next;
   }
   if (!apply) {
-    const root = siblingLanePath(session.root, session.address, source.lane.laneId);
+    const root = hostedRootLanePath(session.root, session.address, source.lane.laneId);
+    // The open step creates the folder; its client record must exist before then.
+    mkdirSync(clientCacheRoot(root), { recursive: true, mode: 0o700 });
     rememberConflictPaths(root, source.lane.laneId, paths);
     rememberConflictFinishOptions(root, source.lane.laneId, session.journal.get('resolution-finish-options'));
     const next = { laneId: source.lane.laneId };
@@ -109,25 +113,10 @@ export async function guideHostedSync(session: HostedAgentSession, value: unknow
       },
     };
   }
-  // The whole tree, beside the original Lane: the agent reads the helpers a hunk
-  // uses and runs checks there, as in any Lane (objects come from the shared cache).
-  const opened = await openHostedRootLane(
-    session.root,
-    session.address,
-    session.exchange,
-    {
-      operationId: await session.journal.id('conflict-checkout'),
-      laneId: source.lane.laneId,
-      expected: {
-        head: source.lane.head,
-        version: source.lane.version,
-        sourceVersion: source.lane.sourceVersion,
-      },
-    },
-    siblingLanePath(session.root, session.address, source.lane.laneId),
-  );
-  recordLane({ laneId: source.lane.laneId, root: opened.root, ...session.address });
-  const dependencies = await shareDependencies(opened.root).catch((error: unknown) => ({
+  const placed = await placeResolution(session, source);
+  const { root } = placed;
+  recordLane({ laneId: source.lane.laneId, root, ...session.address });
+  const dependencies = await shareDependencies(root).catch((error: unknown) => ({
     status: 'failed' as const,
     message: error instanceof Error ? error.message : String(error),
   }));
@@ -135,7 +124,7 @@ export async function guideHostedSync(session: HostedAgentSession, value: unknow
   const files = paths.slice(0, 100).map(path => {
     let bytes: Buffer | null;
     try {
-      bytes = readSource(opened.root, path, remaining);
+      bytes = readSource(root, path, remaining);
     } catch (error) {
       if (!(error instanceof ForgeError) || error.code !== 'FILE_LIMIT') throw error;
       return { path, content: null };
@@ -149,25 +138,22 @@ export async function guideHostedSync(session: HostedAgentSession, value: unknow
     }
   });
   const command = { laneId: source.lane.laneId, operationId: await session.journal.id('next-resolve') };
-  rememberConflictPaths(opened.root, source.lane.laneId, paths, command);
-  rememberConflictFinishOptions(
-    opened.root,
+  rememberConflictPaths(
+    root,
     source.lane.laneId,
-    session.journal.get('resolution-finish-options'),
+    paths,
+    command,
+    false,
+    'origin' in placed ? placed.origin : undefined,
   );
+  rememberConflictFinishOptions(root, source.lane.laneId, session.journal.get('resolution-finish-options'));
   const shown = reasons.slice(0, 100);
   const origin = source.resolution.origin?.laneId;
   return {
     source: value,
     conflict: {
-      ...(resolvedFinishContinuation(opened.root, source.lane.laneId) ??
-        resolutionContinuation(
-          opened.root,
-          source.lane.laneId,
-          paths.slice(0, 100),
-          command.operationId,
-          shown,
-        )),
+      ...(resolvedFinishContinuation(root, source.lane.laneId) ??
+        resolutionContinuation(root, source.lane.laneId, paths.slice(0, 100), command.operationId, shown)),
       laneId: source.lane.laneId,
       head: source.lane.head,
       paths: paths.slice(0, 100),
@@ -175,8 +161,12 @@ export async function guideHostedSync(session: HostedAgentSession, value: unknow
       ...(shown.length ? { reasons: shown } : {}),
       files,
       dependencies,
+      workIn: placed.workIn,
+      ...(placed.kept ? { kept: placed.kept } : {}),
       automatic: {
-        summary: `Opened resolution Lane ${source.lane.laneId} beside the original Lane, with the whole tree; only the listed files need edits.`,
+        summary: placed.inPlace
+          ? `This folder now holds resolution Lane ${source.lane.laneId} (main merged into your saved work, conflict markers in the listed files); only those files need edits.`
+          : `Opened resolution Lane ${source.lane.laneId} beside the original Lane, with the whole tree; only the listed files need edits.`,
         undo: origin
           ? `Accepted main is unchanged. When this resolution Lane lands, Forge completes the original Lane ${origin} (reopen it to undo); abandon this Lane to keep working in the original instead.`
           : 'The original Lane and accepted main are unchanged; abandon this Lane to keep working in the original instead.',
@@ -245,7 +235,7 @@ export async function resolveHostedAgent(session: HostedAgentSession, input: unk
       `Select the resolution laneId, or run resolve in its returned Lane root; ${session.root} is not a Lane checkout.`,
     );
     const known = readLaneEntry(command.laneId);
-    const placed = siblingLanePath(session.root, session.address, command.laneId);
+    const placed = hostedRootLanePath(session.root, session.address, command.laneId);
     let root =
       placed === session.root ? join(clientCacheRoot(session.root), 'lanes', command.laneId) : placed;
     const matches = (local: ReturnType<typeof markerAt>) =>

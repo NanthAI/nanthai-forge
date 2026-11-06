@@ -25,6 +25,8 @@ type ConflictContext = {
   finishOptions?: ConflictFinishOptions | undefined;
   /** The landing step a completed resolve returned; replays point here instead of resolve. */
   finishParameters?: Record<string, unknown> | undefined;
+  /** Set when this folder itself became the resolution Lane of its own conflicted Lane. */
+  originLaneId?: string | undefined;
 };
 function context(root: string, laneId?: string): ConflictContext | undefined {
   try {
@@ -62,6 +64,7 @@ function context(root: string, laneId?: string): ConflictContext | undefined {
         (saved.finishParameters.laneId === undefined || saved.finishParameters.laneId === saved.laneId)
           ? saved.finishParameters
           : undefined,
+      originLaneId: z.uuid().safeParse(saved.originLaneId).success ? saved.originLaneId : undefined,
     };
   } catch {
     return undefined;
@@ -73,6 +76,7 @@ export function rememberConflictPaths(
   paths: string[],
   resolveParameters?: ResolveParameters,
   replaceOperation = false,
+  originLaneId?: string,
 ) {
   const prior = context(root, laneId);
   resolveParameters = (!replaceOperation && prior?.resolveParameters) || resolveParameters;
@@ -85,8 +89,16 @@ export function rememberConflictPaths(
       resolved: prior?.resolved,
       finishOptions: prior?.finishOptions,
       finishParameters: prior?.finishParameters,
+      originLaneId: originLaneId ?? prior?.originLaneId,
     }),
   );
+}
+/** The resolution Lane this folder became for `originLaneId`, with its retained paths. */
+export function inPlaceResolution(root: string, originLaneId: string) {
+  const saved = context(root);
+  return saved?.originLaneId === originLaneId
+    ? { laneId: saved.laneId, paths: saved.paths, resolved: saved.resolved === true }
+    : undefined;
 }
 /** Retain the exact finish a completed resolve handed out, with its operationId. */
 export function rememberResolutionFinish(root: string, laneId: string, parameters: Record<string, unknown>) {

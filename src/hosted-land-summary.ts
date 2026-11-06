@@ -24,9 +24,9 @@ type Result = {
   terminal?: boolean;
   recovery?: {
     command?: string;
-    conflict?: { command?: string; instruction?: string; state?: string; laneId?: string };
+    conflict?: { command?: string; instruction?: string; state?: string; laneId?: string; workIn?: string };
   };
-  conflict?: { command?: string; instruction?: string };
+  conflict?: { command?: string; instruction?: string; workIn?: string };
 };
 export const resultOf = (response: HostedAgentResponse) => (response.result ?? {}) as Result;
 export function landPhase(response: HostedAgentResponse): string | undefined {
@@ -77,6 +77,9 @@ export function landSummary(response: HostedAgentResponse): string[] {
   if (result.phase === 'conflict') lines.push('FAILED COMPOSITION_CONFLICT');
   if (!lines.length && submission?.observation?.state === 'pending' && !recovery)
     return [`${pendingLabel(submission.observation.pendingReason)}; not landed yet`];
+  // One line: which folder to work in now, and why (the same folder after an in-place resolution).
+  const workIn = result.recovery?.conflict?.workIn ?? result.conflict?.workIn;
+  if (workIn) lines.push(workIn);
   if (recovery) lines.push(`Continue recovery: ${recovery}`);
   else if (result.retryCommand) lines.push(`Retry: ${result.retryCommand}`);
   if (!lines.length && ['save', 'compose', 'sync'].includes(result.phase ?? ''))

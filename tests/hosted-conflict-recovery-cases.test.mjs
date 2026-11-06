@@ -137,12 +137,12 @@ test('case 2: an abandoned resolution Lane yields one fresh resolution command',
   assert.match(step.command, / sync /);
 });
 
-test('case 4 (2e264cd6): the resolution Lane opens beside the original Lane with the whole tree', async t => {
+test('case 4 (2e264cd6, 5b1c7e0e): the resolution happens in the original Lane folder, with the whole tree', async t => {
   const run = await conflicted(t, s => join(dirname(s.root), 'clone.forge-client', 'lanes', s.f.lane.laneId));
   const { root, conflict } = run;
-  const lanes = dirname(canonicalRoot(root));
-  assert.equal(conflict.root, join(lanes, conflict.laneId), 'sibling, not nested in the Lane cache');
-  assert(!conflict.root.startsWith(`${canonicalRoot(root)}.forge-client`));
+  assert.equal(conflict.root, canonicalRoot(root), 'the same folder, never a sibling or nested copy');
+  assert.match(conflict.workIn, /^WORK IN .* \(same folder\): it is now resolution Lane /);
+  assert(!existsSync(join(dirname(canonicalRoot(root)), conflict.laneId)), 'no second folder');
   // Non-conflicting files are present, so helpers a hunk uses are readable in place.
   const files = run.f.files(run.f.currentMain().head).map(file => file.path);
   assert(files.length > 1);

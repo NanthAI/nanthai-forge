@@ -84,7 +84,8 @@ Hosted addressing: pass {url,projectId,...} on this same command surface, or use
 a hosted Lane checkout ROOT. No native owner/listener is needed. Read capabilities
 and use status/observe for finite reads. Hosted also supports resolve and x revert.
 Hosted save --sync {candidateId} opens an exact conflict draft. Edit its files, call resolve
-in the returned root, then land --save there; a clean saved resolution needs no fake edit.
+in the returned root (your own folder when the conflict came from it; see its WORK IN line),
+then land --save there; a clean saved resolution needs no fake edit.
 Hosted land --save prepares conflict files automatically; pending source work stays durable.
 Hosted owners configure checks with x configure-check, x configure-runner and check-settings.
 Hosted commands retain generated UUIDs and exact pins in ROOT.forge-client/agent;

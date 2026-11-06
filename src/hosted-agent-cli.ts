@@ -301,6 +301,9 @@ export async function hostedAgentCli(
   let result;
   try {
     result = await transport.dispatch(action, command, signal ?? controller.signal);
+    // A conflict names the one folder to work in now (land prints it in its own summary).
+    const workIn = (result.result as { conflict?: { workIn?: unknown } } | undefined)?.conflict?.workIn;
+    if (action !== 'finish' && typeof workIn === 'string') process.stderr.write(`${workIn}\n`);
     if (isNetworkPending(result)) {
       const pending = result.result as { command: string };
       process.stderr.write(`IN PROGRESS; network response unavailable. Continue: ${pending.command}\n`);

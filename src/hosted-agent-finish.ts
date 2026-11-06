@@ -10,6 +10,7 @@ import { hostedRecordSchema } from './hosted-records.js';
 import { saveHostedLane } from './hosted-save-client.js';
 import { composeAgentSource, selectAgentLane } from './hosted-agent-source.js';
 import { recoverHostedCandidate } from './hosted-agent-resolution.js';
+import { inPlaceResolution } from './hosted-conflict-precheck.js';
 import { agentSourceOutcome, checkSelection } from './hosted-agent-actions.js';
 import { canonicalPayload } from './hosted-source-operation.js';
 import { invariant } from './errors.js';
@@ -177,6 +178,44 @@ async function executeFinishWork(session: HostedAgentSession, input: unknown) {
       return selected.stack && !selected.stack.detached ? (selected.stack.entryId ?? null) : null;
     });
   const marker = session.marker();
+  const resolvedHere =
+    command.laneId &&
+    !command.candidateId &&
+    !command.inputs &&
+    marker &&
+    marker.selection.laneId !== command.laneId
+      ? inPlaceResolution(session.root, command.laneId)
+      : undefined;
+  if (resolvedHere) {
+    // This folder became the named Lane's resolution, so that Lane has no checkout here: land its
+    // saved head exactly, as its own folder's unchanged save did. A replay reaches the same
+    // Candidate and its one resolution; if main moved so it composes cleanly, it lands as before.
+    const lane = await selectAgentLane(session, command.laneId);
+    // Settled (the resolution's landing completed it): report that, never land its old head again.
+    if (lane.state !== 'active')
+      return {
+        phase: 'conflict',
+        recovery: {
+          conflict: {
+            laneId: resolvedHere.laneId,
+            state: lane.state,
+            resolved: lane.state === 'completed',
+            instruction: `Lane ${lane.laneId} is ${lane.state}; this folder holds its resolution Lane ${resolvedHere.laneId}.`,
+          },
+        },
+      };
+    command.inputs = [
+      {
+        laneId: lane.laneId,
+        expected: {
+          head: lane.head,
+          version: lane.version,
+          sourceVersion: lane.sourceVersion,
+          lifecycleVersion: lane.lifecycleVersion,
+        },
+      },
+    ];
+  }
   if (
     !command.candidateId &&
     !command.inputs &&

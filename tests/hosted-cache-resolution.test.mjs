@@ -6,15 +6,31 @@ import { getFunctionName } from 'convex/server';
 import { existsSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { resolutionFixture } from './hosted-agent-resolution-fixture.mjs';
+import { canonicalRoot } from '../dist/root-paths.js';
 
 for (const legacy of [false, true])
   test(`parent housekeeping cannot obstruct a completed nested resolution (legacy=${legacy})`, async t => {
     const s = await resolutionFixture(t, { overlap: true });
-    const root = join(dirname(s.root), 'arbitrary project.with spaces');
+    // The parent Lane folder sits in a clone's lanes dir; its resolution opens as a sibling copy there.
+    const root = join(
+      dirname(s.root),
+      'arbitrary project.with spaces.forge-client',
+      'lanes',
+      s.f.lane.laneId,
+    );
     const parent = () => s.transport(root);
     s.f.moveMain({ overlap: true });
     await parent().dispatch('open', { laneId: s.f.lane.laneId });
-    const conflict = (await parent().dispatch('sync', { laneId: s.f.lane.laneId })).result.conflict;
+    await parent().dispatch('save', { operationId: randomUUID(), message: 'Parent work' });
+    const advice = (await parent().dispatch('sync', { laneId: s.f.lane.laneId, apply: false })).result
+      .conflict;
+    const opened = await parent().dispatch('open', { laneId: advice.laneId });
+    const conflict = {
+      root: opened.result.root,
+      laneId: advice.laneId,
+      next: { action: 'resolve', laneId: advice.laneId, operationId: randomUUID() },
+    };
+    assert.equal(conflict.root, join(dirname(canonicalRoot(root)), advice.laneId), 'a sibling, never nested');
     const legacyFile = join(conflict.root, '.forge', 'cache-use.json');
     if (legacy) {
       rmSync(join(`${conflict.root}.forge-client`, 'cache-use.json'));
@@ -40,7 +56,13 @@ for (const legacy of [false, true])
     assert.equal(readFileSync(join(conflict.root, 'a.txt'), 'utf8'), 'chosen\nb\nc\n');
     assert(!existsSync(legacyFile));
     const usage = JSON.parse(readFileSync(join(`${conflict.root}.forge-client`, 'cache-use.json')));
-    assert(usage.bytes >= 0);
+    // A sibling copy's size is measured by its clone's housekeeping, not the parent Lane's; the
+    // record (use time is its mtime) must stay valid and never hold anything but a byte count.
+    assert(usage.bytes === undefined || usage.bytes >= 0);
+    assert.deepEqual(
+      Object.keys(usage).filter(key => key !== 'bytes'),
+      [],
+    );
     if (legacy) assert.equal(usage.bytes, 12345);
     const replay = await s.transport(conflict.root).dispatch('resolve', command);
     assert.equal(replay.result.applied.replayed, true);
@@ -56,8 +78,8 @@ for (const obstruction of ['unknown metadata', 'unsaved edit'])
     const s = await resolutionFixture(t, { overlap: true });
     s.f.moveMain({ overlap: true });
     await s.transport().dispatch('open', { laneId: s.f.lane.laneId });
+    // In place: the original folder is the resolution checkout.
     const conflict = (await s.transport().dispatch('sync', { laneId: s.f.lane.laneId })).result.conflict;
-    await s.transport().dispatch('save', { operationId: randomUUID(), message: 'Parent mutation' });
     writeFileSync(join(conflict.root, 'a.txt'), 'chosen\nb\nc\n');
     const relative = obstruction === 'unknown metadata' ? '.forge/private-note.json' : 'a.txt';
     const path = join(conflict.root, relative);
