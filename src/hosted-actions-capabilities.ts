@@ -6,6 +6,9 @@ export const actionsPreflightCapability = 'session.preflight';
 /** The result call carries the log bytes; the server stores them, so a job skips
  * its separate output call and the result's session read. */
 export const actionsInlineLogCapability = 'results.inlineLog';
+/** The plan call returns one create-only claim PUT and one HEAD per shard pool unit, and results
+ * carry the files a home shard yielded to the pool (scripts/shard-pool.mjs). */
+export const actionsPoolCapability = 'checks.pool';
 /** Advertise only implemented extensions. Absent advertisement means the oldest protocol. */
 export const hostedActionsCapabilities = [
   'results.testFiles',
@@ -15,6 +18,7 @@ export const hostedActionsCapabilities = [
   'sourcePack',
   actionsPreflightCapability,
   actionsInlineLogCapability,
+  actionsPoolCapability,
 ] as const;
 /** Convex function calls per Actions job: preflight query, then either output
  * (action + mutation) and result (action + session + result mutations), or one
@@ -27,6 +31,8 @@ export const actionsCapabilityFields: Readonly<Record<string, string>> = {
   'result.result.testFiles.truncated': 'results.testFiles.truncated',
   'result.result.execution': 'results.execution',
   'result.logBytes': actionsInlineLogCapability,
+  'plan.plan.recipe.pool': actionsPoolCapability,
+  'result.result.pool': actionsPoolCapability,
 };
 /** Whole-command extensions gate every nested runner-sent field. */
 export const actionsCapabilityCommands: Readonly<Record<string, string>> = { sourcePack: 'sourcePack' };

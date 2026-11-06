@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { summarizeWallBreakdown } from '../scripts/actions-cache-report.mjs';
+import { summarizeWallBreakdown, poolPairs } from '../scripts/actions-cache-report.mjs';
 
 const at = seconds => new Date(Date.UTC(2026, 10, 6, 10, 0, 0) + seconds * 1000).toISOString();
 const job = (name, start, end, run = [start, end], conclusion = 'success') => ({
@@ -62,4 +62,44 @@ test('runs without a plan job, shards or timestamps are skipped, and an empty li
   assert.equal(summary.successRuns, 0);
   assert.equal(summary.wallSeconds.p50, null);
   assert.equal(summarizeWallBreakdown([]).slowestShardSeconds.p90, null);
+});
+
+test('shard pool A/B: runs are labelled by run id like the planner, paired in time order, voids listed', () => {
+  // Run ids ending in an odd hex digit are arm B (pool), even ones arm A (static), as poolArm('ab').
+  const id = last => `00000000-0000-4000-8000-00000000000${last}`;
+  const check = (created, wall, last, shards = 2) => ({
+    ...run(created, created + wall, [
+      job('hosted-plan', created + 4, created + 34),
+      ...Array.from({ length: shards }, (_, i) =>
+        job(`forge-hosted-${i}`, created + 36, created + wall - 10),
+      ),
+    ]),
+    databaseId: created,
+    displayTitle: `forge-check/${id(last)}`,
+  });
+  const runs = [
+    check(0, 500, '2'),
+    check(1000, 450, '3'),
+    check(2000, 460, '5'),
+    check(3000, 510, '4'),
+    check(4000, 300, '6', 1),
+    { ...check(5000, 400, '7'), displayTitle: 'something else' },
+    check(-1000, 999, '1'),
+  ];
+  const result = poolPairs(runs, at(0));
+  assert.deepEqual(
+    result.pairs.map(pair => [pair.a, pair.b]),
+    [
+      [0, 1000],
+      [3000, 2000],
+    ],
+  );
+  assert.deepEqual(result.wallSeconds.ci95.length, 2);
+  assert.equal(result.wallSeconds.n, 2);
+  assert.equal(result.wallSeconds.medianDifference, -50);
+  assert.deepEqual(
+    result.voided.map(row => row.reason),
+    ['not a successful multi-shard check', 'no run id'],
+  );
+  assert.deepEqual(result.unpaired, []);
 });

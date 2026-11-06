@@ -19,9 +19,27 @@ import { storeSourceBytes } from './projectSourceBytes';
 import { savePin } from '../src/hosted-save';
 import type { SessionInput } from './projectHostedActionsSession';
 import { activeStoragePause } from './legacyStoragePause';
+import { presignPoolClaim, r2Config } from './r2';
+import type { HostedActionsRecipe } from '../src/hosted-actions';
+import { poolClaimBody, poolClaimExpirySeconds, poolClaimKey, poolUnits } from '../src/hosted-actions-pool';
 /** Refused writes that resolve on their own: the runner keeps its result and
  * retries the same request (Issue 72d50375). */
 const transientCodes = ['RUNNER_UNAVAILABLE', 'LEGACY_STORAGE_WRITES_PAUSED', 'HOSTED_CONFLICT'];
+async function poolClaims(projectId: string, run: HostedCheckRun, recipe: HostedActionsRecipe) {
+  invariant(run.executionId, 'EVIDENCE_CHANGED', 'Prepare this exact Actions execution.');
+  const config = r2Config(),
+    execution = savePin(run.executionId).sha256.slice(0, 16);
+  return Promise.all(
+    poolUnits(recipe.groups, recipe.pool!).map(({ unit }) =>
+      presignPoolClaim(
+        config,
+        poolClaimKey(projectId, run.id, execution, unit),
+        poolClaimBody(unit),
+        poolClaimExpirySeconds,
+      ),
+    ),
+  );
+}
 export const handle = httpAction(async (ctx, request) => {
   let reason: 'authorization' | 'validation' | 'storage' | 'cancelled' = 'authorization';
   try {
@@ -114,6 +132,14 @@ export const handle = httpAction(async (ctx, request) => {
           : { selectionR2Key: selection.r2Key }),
         ...('storageId' in recipe ? { recipeStorage: recipe.storageId } : { recipeR2Key: recipe.r2Key }),
       });
+      // Shard pool: sign one claim per unit here (CPU only), so shards claim with no Convex call.
+      if (plan.recipe.pool) {
+        reason = 'storage';
+        value = {
+          run: value,
+          claims: await poolClaims(input.projectId, value as HostedCheckRun, plan.recipe),
+        };
+      }
     } else if (command.logBytes !== undefined) {
       // Inline log: authorize and store the bytes, then verify them like a separate
       // output upload would. The result transaction repeats authority/fence checks.

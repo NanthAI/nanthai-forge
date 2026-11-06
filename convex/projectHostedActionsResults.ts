@@ -21,6 +21,7 @@ import { writeHostedCheck } from './projectHostedCheckStore';
 import { applyCheckRetryBudget, capCheckReports } from '../src/check-report-cap';
 import { checkFileSummary } from '../src/check-file-summary';
 import { invariant } from '../src/errors';
+import { mergeShardReports, settlePoolPending } from '../src/hosted-actions-pool';
 export const output = internalMutation({
   // withRun: an inline-log result also needs the session run to verify the stored object.
   args: { ...sessionArgs, index: v.number(), log: v.string(), withRun: v.optional(v.boolean()) },
@@ -103,7 +104,17 @@ export const result = internalMutation({
         seconds: (run.execution?.seconds ?? 0) + execution.seconds,
         shards: (run.execution?.shards ?? 0) + 1,
       };
-    const combined = applyCheckRetryBudget({ ...run.contractReports, ...result.contractReports });
+    // A file run by two shards (shard pool doubt run) counts once; a pass never hides a failure.
+    const merged = mergeShardReports(run.contractReports ?? {}, result.contractReports ?? {});
+    const pool = settlePoolPending(
+      merged,
+      run.poolPending ?? [],
+      result.pool?.yielded ?? [],
+      run.counts.completed === run.plan!.shardCount,
+    );
+    if (pool.pending.length) run.poolPending = pool.pending;
+    else delete run.poolPending;
+    const combined = applyCheckRetryBudget(pool.reports);
     run.contractReports = capCheckReports(combined).reports;
     run.testFiles = checkFileSummary(run.contractReports);
     await writeHostedCheck(ctx, row._id, run);

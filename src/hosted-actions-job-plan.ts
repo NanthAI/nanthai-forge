@@ -11,7 +11,9 @@ import { guardedSelection, standardSelection } from '../scripts/test-impact.mjs'
 import { describeShardPlan, timedShards } from '../scripts/test-shards.mjs';
 import { hostedActionsRecipeSchema } from './hosted-actions.js';
 import { ActionsJobClient } from './hosted-actions-job-client.js';
-import { actionsJobCalls } from './hosted-actions-capabilities.js';
+import { actionsJobCalls, actionsPoolCapability } from './hosted-actions-capabilities.js';
+import { planPool, poolArm, poolUnits } from '../scripts/shard-pool.mjs';
+import { poolClaimsSchema, type PoolClaim } from './hosted-actions-pool.js';
 import { invariant } from './errors.js';
 import { materializeActionsSource } from './hosted-actions-job-source.js';
 import { scopedRecheckBase } from './scoped-recheck-policy.js';
@@ -93,21 +95,44 @@ export async function prepareActionsJob(
       `Actions capacity: ${capacity.activeChecks} active checks, ${capacity.jobCap} slots; ${groups.length} test shards`,
     );
   if (groups.length) console.log(describeShardPlan(groups, client.timings));
+  // Shard pool (scripts/shard-pool.mjs): only servers that sign claims receive one.
+  const poolMode = process.env.FORGE_ACTIONS_POOL_MODE;
+  const pool =
+    groups.length >= 2 && client.capabilities.includes(actionsPoolCapability) && poolArm(poolMode, run.id)
+      ? planPool(groups, client.timings)
+      : undefined;
+  if (groups.length >= 2)
+    console.log(
+      pool
+        ? `Shard pool: on${poolMode === 'ab' ? ' (ab arm B)' : ''}; ${poolUnits(groups, pool).length} units`
+        : `Shard pool: off${poolMode === 'ab' && client.capabilities.includes(actionsPoolCapability) ? ' (ab arm A)' : ''}`,
+    );
   const pins = {
     head: run.request.expectedHead,
     definition: run.check.definition,
     selection,
     groups,
+    ...(pool ? { pool } : {}),
     standard,
     interaction: false,
     command: [standard ? 'node' : run.check.executable, ...run.check.args],
   };
   const recipe = hostedActionsRecipeSchema.parse({ pin: checkPin(pins), ...pins });
   const lock = inventory.get('package-lock.json');
-  client.run = (await client.call({
+  const planned = (await client.call({
     kind: 'plan',
     plan: { recipe, lockfile: digest(lock ? readFileSync(join(cache, lock.blob)) : Buffer.alloc(0)) },
-  })) as typeof run;
+  })) as typeof run | { run: typeof run; claims: unknown };
+  let claims: PoolClaim[] | null = null;
+  if (recipe.pool) {
+    const reply = planned as { run: typeof run; claims: unknown };
+    client.run = reply.run;
+    // Unusable targets never fail the check: shards then run their static groups.
+    const parsed = poolClaimsSchema.safeParse(reply.claims);
+    claims =
+      parsed.success && parsed.data.length === poolUnits(groups, recipe.pool).length ? parsed.data : null;
+    if (!claims) console.log('Shard pool: claim targets unavailable; shards run their static groups');
+  } else client.run = planned as typeof run;
   return {
     packRefresh: {
       refresh:
@@ -128,6 +153,7 @@ export async function prepareActionsJob(
     },
     refreshSourcePack: () => refreshActionsSourcePack(client, source, cache),
     run: client.run,
+    claims,
     stateBytes: source.stateBytes,
     recipe,
     // The static job is always an execution, including opaque commands and docs.

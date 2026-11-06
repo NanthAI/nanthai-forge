@@ -138,6 +138,10 @@ jobs:
           # NanthAI is on the GitHub Team plan: 60 concurrent jobs. Other pipelines set
           # their own limit; unset keeps the Free-plan 20.
           FORGE_ACTIONS_JOB_CAP: '60'
+          # Shard pool (work stealing, docs/operations/github-actions-checks.md#shard-pool):
+          # on | off | ab. ab runs the pool on half the checks (random run id) for the
+          # interleaved before/after measurement; set on once it is measured.
+          FORGE_ACTIONS_POOL_MODE: 'ab'
       # Only distributed executions and the optional pack refresh need artifacts.
       - if: steps.plan.outputs.matrix != '[]' || steps.plan.outputs.pack_refresh == 'true'
         run: tar -cf "$RUNNER_TEMP/candidate.tar" -C "$RUNNER_TEMP" candidate forge-actions-plan.json forge-actions-run.json forge-pack-refresh.json forge-actions-state.json

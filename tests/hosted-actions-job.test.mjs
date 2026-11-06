@@ -32,6 +32,7 @@ import { refreshSourcePack, sourcePackFileBytes } from '../dist/source-pack.js';
 import { gzipSync, gunzipSync } from 'node:zlib';
 import { truncateSync } from 'node:fs';
 import { partitionTests, timedShards, shardDuration, checkCallBudget } from '../scripts/test-shards.mjs';
+import { poolUnits, keptFiles } from '../scripts/shard-pool.mjs';
 function fixture(
   t,
   {
@@ -85,7 +86,8 @@ function fixture(
   };
   const session = { sourcePack: null, unsupported: false };
   const calls = [],
-    traffic = { active: 0, peak: 0, downloads: 0, oidc: 0 };
+    traffic = { active: 0, peak: 0, downloads: 0, oidc: 0, claims: [] },
+    claimStore = { units: new Map(), failing: false };
   const oldUrl = process.env.ACTIONS_ID_TOKEN_REQUEST_URL,
     oldToken = process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
   process.env.ACTIONS_ID_TOKEN_REQUEST_URL = 'https://oidc.invalid/token';
@@ -106,6 +108,19 @@ function fixture(
       });
     }
     if (String(url).startsWith('https://output.invalid/')) return fetch(url, init);
+    // Synthetic create-only claim store (R2 If-None-Match: * semantics).
+    if (String(url).startsWith('https://claims.invalid/')) {
+      const unit = Number(String(url).split('/').at(-1));
+      traffic.claims.push({ method: init?.method, unit });
+      if (claimStore.failing) return new Response(null, { status: 503 });
+      if (init?.method === 'HEAD')
+        return new Response(null, { status: claimStore.units.has(unit) ? 200 : 404 });
+      assert.equal(init?.method, 'PUT');
+      assert.equal(init.headers['if-none-match'], '*');
+      if (claimStore.units.has(unit)) return new Response(null, { status: 412 });
+      claimStore.units.set(unit, Buffer.from(init.body).toString());
+      return new Response(null, { status: 200 });
+    }
     if (String(url).startsWith('https://objects.invalid/') && init?.method === 'PUT') {
       const parts = [];
       for await (const chunk of init.body) parts.push(chunk);
@@ -212,11 +227,36 @@ function fixture(
         selection: savePin(command.plan.recipe.selection),
         shardCount: command.plan.recipe.groups.length + 1,
       };
-      return Response.json(run);
+      const { pool, groups } = command.plan.recipe;
+      return Response.json(
+        pool
+          ? {
+              run,
+              claims: poolUnits(groups, pool).map(({ unit }) => ({
+                put: { url: `https://claims.invalid/${unit}`, headers: { 'if-none-match': '*' } },
+                head: `https://claims.invalid/${unit}`,
+              })),
+            }
+          : run,
+      );
     }
     throw new Error(`Unexpected synthetic command ${command.kind}`);
   });
-  return { directory, objects, recipes, put, entry, state, files, run, calls, client, traffic, session };
+  return {
+    directory,
+    objects,
+    recipes,
+    put,
+    entry,
+    state,
+    files,
+    run,
+    calls,
+    client,
+    traffic,
+    session,
+    claimStore,
+  };
 }
 
 test('6000-file download measurement keeps source calls within the existing page budget', async t => {
@@ -1734,4 +1774,134 @@ test('output PUT timeout retries the same bytes and records the real test exit o
   const results = s.calls.filter(c => c.kind === 'result');
   assert.equal(results.length, 1);
   assert.equal(results[0].result.exitCode, 7);
+});
+
+// Shard pool guard (Issue 0ea17a29): every selected file runs and is counted exactly once, a
+// store failure degrades to the static plan, and a forged claim can only fail the check.
+async function pooledCheck(t, scenario) {
+  const tests = Array.from({ length: 40 }, (_, i) => `tests/pool-${String(i).padStart(2, '0')}.test.mjs`);
+  const s = fixture(t, {
+    timingHistory: {
+      version: 1,
+      runs: [],
+      files: Object.fromEntries(
+        tests.map((file, i) => [file, { durationMs: 20000 + i * 500, updatedAt: '2026-01-01' }]),
+      ),
+    },
+  });
+  s.run.request.expectedHead = s.state([
+    s.entry('package-lock.json', '{}'),
+    ...tests.map(file => s.entry(file, '// synthetic')),
+  ]).sha256;
+  const candidate = join(s.directory, 'candidate');
+  const prepared = await prepareActionsJob(s.client, candidate, join(s.directory, 'cache'));
+  const { groups, pool } = prepared.recipe;
+  assert(groups.length >= 2 && pool, 'a measured multi-shard plan offers a pool');
+  const units = poolUnits(groups, pool);
+  assert.equal(prepared.claims.length, units.length);
+  assert.deepEqual(
+    [...groups.flatMap((_, i) => keptFiles(groups, pool, i)), ...units.flatMap(unit => unit.files)].sort(),
+    groups.flat().sort(),
+    'kept fronts and units partition the pinned groups',
+  );
+  const path = join(s.directory, 'plan.json');
+  writeFileSync(path, JSON.stringify(prepared.recipe));
+  s.client.poolClaims = prepared.claims;
+  if (scenario === 'forged')
+    for (const unit of units.filter(unit => unit.home === 1)) s.claimStore.units.set(unit.unit, 'forged');
+  if (scenario === 'unavailable') s.claimStore.failing = true;
+  const results = [];
+  s.client.call = async command => {
+    assert.equal(command.kind, 'result', 'a pooled shard makes no Convex call besides its result');
+    results.push(command.result);
+    return {};
+  };
+  t.mock.method(process.stdout, 'write', () => true);
+  const program = `
+    const { readFileSync } = await import('node:fs');
+    const { keptFiles, poolUnits } = await import(${JSON.stringify(join(process.cwd(), 'scripts/shard-pool.mjs'))});
+    const plan = JSON.parse(readFileSync(process.env.FORGE_ACTIONS_PLAN, 'utf8'));
+    const index = Number(process.env.FORGE_ACTIONS_SHARD), part = process.env.FORGE_ACTIONS_POOL_PART;
+    const files = part === 'kept' ? keptFiles(plan.groups, plan.pool, index) : poolUnits(plan.groups, plan.pool)[Number(part)].files;
+    for (const file of files) console.log('__FORGE_TESTS__' + JSON.stringify({ file, complete: true, durationMs: 5, failed: false, results: [{ name: 'x', passed: true }] }));`;
+  const before = s.calls.length;
+  for (let index = 0; index < groups.length; index++)
+    assert.equal(
+      await executeActionsJob(s.client, candidate, path, String(index), [
+        process.execPath,
+        '--input-type=module',
+        '--eval',
+        program,
+      ]),
+      0,
+    );
+  assert.equal(s.calls.slice(before).filter(call => call.kind !== 'preflight').length, 0);
+  return { s, tests, groups, units, results };
+}
+
+test('shard pool: an early shard steals every free unit, later homes yield theirs, each file reported once', async t => {
+  const { s, tests, units, results } = await pooledCheck(t, 'healthy');
+  const reported = results.flatMap(result => Object.keys(result.contractReports));
+  assert.deepEqual(reported.slice().sort(), tests.slice().sort(), 'every file exactly once');
+  // Shard 0 finished first in this interleaving, so it claimed every unit; others yielded theirs.
+  assert.deepEqual(
+    [...s.claimStore.units.keys()].sort((a, b) => a - b),
+    units.map(unit => unit.unit),
+  );
+  for (const [index, result] of results.entries())
+    assert.deepEqual(
+      (result.pool?.yielded ?? []).slice().sort(),
+      index === 0
+        ? []
+        : units
+            .filter(unit => unit.home === index)
+            .flatMap(unit => unit.files)
+            .sort(),
+    );
+  const { mergeShardReports, settlePoolPending } = await import('../dist/hosted-actions-pool.js');
+  let reports = {},
+    pending = [];
+  for (const [index, result] of results.entries()) {
+    reports = mergeShardReports(reports, result.contractReports);
+    ({ reports, pending } = settlePoolPending(
+      reports,
+      pending,
+      result.pool?.yielded ?? [],
+      index === results.length - 1,
+    ));
+  }
+  assert.equal(Object.values(reports).filter(report => report.failed).length, 0);
+  // R2 ops: one PUT per unit plus one 412 per yielded own unit; HEADs only for stealing.
+  const puts = s.traffic.claims.filter(call => call.method === 'PUT').length;
+  assert.equal(puts, units.length + units.filter(unit => unit.home !== 0).length);
+  t.diagnostic(JSON.stringify({ units: units.length, puts, heads: s.traffic.claims.length - puts }));
+});
+
+test('shard pool: an unavailable claim store falls back to the static plan with nothing lost', async t => {
+  const { tests, results } = await pooledCheck(t, 'unavailable');
+  const reported = results.flatMap(result => Object.keys(result.contractReports));
+  assert.deepEqual(reported.slice().sort(), tests.slice().sort());
+  assert(results.every(result => !result.pool?.yielded.length));
+});
+
+test('shard pool: a forged claim cannot pass a check with fewer tests', async t => {
+  const { tests, units, results } = await pooledCheck(t, 'forged');
+  const forged = units.filter(unit => unit.home === 1).flatMap(unit => unit.files);
+  const reported = results.flatMap(result => Object.keys(result.contractReports));
+  assert.deepEqual(reported.slice().sort(), tests.filter(file => !forged.includes(file)).sort());
+  const { mergeShardReports, settlePoolPending } = await import('../dist/hosted-actions-pool.js');
+  let reports = {},
+    pending = [];
+  for (const [index, result] of results.entries()) {
+    reports = mergeShardReports(reports, result.contractReports);
+    ({ reports, pending } = settlePoolPending(
+      reports,
+      pending,
+      result.pool?.yielded ?? [],
+      index === results.length - 1,
+    ));
+  }
+  const failed = Object.entries(reports).filter(([, report]) => report.failed);
+  assert.deepEqual(failed.map(([file]) => file).sort(), forged.slice().sort());
+  assert(failed.every(([, report]) => report.firstError.startsWith('POOL_UNIT_UNREPORTED')));
 });

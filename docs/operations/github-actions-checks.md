@@ -70,7 +70,10 @@ is plain Node and CI-neutral:
 Changing what the executor gives check scripts takes two Lanes: Lane A changes the executor and
 raises `PROVIDED` (check scripts must not use it yet, so its own check passes under the older
 executor); once Lane A is on main, Lane B changes the scripts that use it and raises `REQUIRED`.
-The contract only grows: to remove something, first stop requiring it, then remove it. Plan
+The contract only grows: to remove something, first stop requiring it, then remove it. Contract 2
+(2026-11-06) added the [shard pool](#shard-pool) parts: the executor may run a shard as its kept front
+and then single pool units (tests only), each a plain `scripts/test-files.mjs FILES...` call, so check
+scripts need nothing new. Plan
 recipe fields written by the planner and read by the executor belong to the same surface. Runtime
 pins (Node) are provided by the control workflow: raise the pin through the executor Lane first.
 
@@ -685,8 +688,8 @@ another in the same hour, and a shard's total time over the sum of its files' me
 coefficient of variation of 0.13 (143 shard runs, from 0.62 to 1.18, two clusters near 0.7 and 1.05).
 Drawing 11 shard speeds from that distribution for a perfect plan gives slowest over mean 1.157 (p50),
 1.224 (p90); the 13 deployed runs measured 1.156 and 1.165. A better duration estimator or a refining
-pass over LPT cannot lower that. Only moving work between running jobs can, which needs a claim that is
-atomic without a Convex call (Issue a3d59b6c has the sketch). The CPU model in the phase line is there to
+pass over LPT cannot lower that. Only moving work between running jobs can: the [shard pool](#shard-pool)
+does that with a claim that is atomic without a Convex call. The CPU model in the phase line is there to
 confirm or refute a hardware cause.
 
 Fixed cost is about 12% of the wall time: queue 4 s, plan job 30 s (source fetch 8 s inside it, checkout
@@ -694,6 +697,60 @@ Fixed cost is about 12% of the wall time: queue 4 s, plan job 30 s (source fetch
 of `npm ci` and 5-8 s of build. Each is a few seconds and is dominated by GitHub step overhead. Changing
 `forge-check.yml` is risky for what it saves: the workflow comes from GitHub `main`, so a broken workflow
 fails the check of its own fix.
+
+### Shard pool
+
+Work stealing between the test shards of one check (Issue 0ea17a29), so a fast runner finishes a slow
+runner's tail. The static LPT groups stay the plan of record; the pool only decides who runs the tail.
+
+- **Plan.** With recorded timings and at least two test shards, the planner (`scripts/shard-pool.mjs`)
+  keeps the front of each LPT-ordered group (the longest files) and offers the tail, about the last 20%
+  of the shard's planned time (its shortest files), as numbered units of at least 20 planned seconds,
+  at most 128 per check. Shards under 60 planned seconds offer nothing. The cut indices are the recipe's
+  optional `pool` field, inside the recipe pin, so every shard verifies them like the groups.
+- **Claims.** One create-only object per unit at `v1/pool/PROJECT/RUN/EXECUTION/UNIT` in the
+  deployment's R2 bucket. The existing plan call returns, for a pooled recipe, one presigned PUT
+  (`If-None-Match: *`, fixed public body, signed sha256, 2 hours) and one presigned HEAD per unit. They
+  are signed in the HTTP action (CPU only): no extra Convex function call, read or write. They travel in
+  the plan bundle (`forge-actions-run.json`) to the fixed supervisor, never in a project script's
+  environment and never in a log.
+- **Protocol** (`src/hosted-actions-pool.ts`, per shard). Run the kept front (install, build, tests).
+  Then claim the shard's own units front to back with a PUT each: 200 runs the unit (one executor
+  process with `FORGE_ACTIONS_POOL_PART=UNIT`, tests only, files taken from the pinned plan), 412 means
+  another shard has it. Then steal: HEAD every unit not yet seen taken, take the last free unit of the
+  home with the most free units, and keep taking that home's units from the back while claims succeed.
+  Homes claim from the front and thieves from the back, so they meet in the middle.
+- **Run on doubt.** A shard skips a unit only after a clean 412 on its single PUT (or a HEAD that showed
+  the object before it tried). Any other outcome (timeout, 5xx, expired URL, missing targets, an
+  error after which the write may have landed) ends stealing and runs every own unit the shard has not
+  seen taken. A misbehaving store can make a unit run twice, never zero times, and an unavailable
+  store means today's static plan: the pool never fails a check.
+- **Counting.** The result merges reports by file, so a file run twice counts once, and a pass never
+  replaces a failure. Each home's result lists the files it yielded to another claimer; the server keeps
+  the ones no shard has reported yet (`poolPending`, normally empty) and turns any left at completion
+  into failed reports `POOL_UNIT_UNREPORTED`. Anyone who can read the plan bundle (project code on the
+  runner, or a reader of a public repository's artifacts) can create claim objects, so a forged claim
+  can fail a check but never pass it with fewer tests; claims never add or choose files.
+- **Crash.** A shard posts one result at its end with every file it ran. A shard that dies loses its
+  kept files too, so reclaiming its units cannot complete that check: the existing bound applies (job
+  failure or the 90-minute job and 10-minute file timeouts), and a retry is a new run with a new claim
+  namespace.
+- **Log.** Each pooled shard prints `Shard pool: N units, ...; ran X own and Y claimed from other
+  shards; yielded Z; D run without a confirmed claim; P claim writes, H claim reads, R lost races`
+  and its phase lines show `pool` for unit time. The plan job prints `Shard pool: on|off`.
+- **Any CI.** Plain HTTPS PUT and HEAD, the plan bundle and N workers running the Forge supervisor. An
+  adapter that hands the bundle to its shard workers gets stealing; one that does not, an old server
+  (no `checks.pool` capability) or `FORGE_ACTIONS_POOL_MODE=off` keeps the static groups.
+- **Budgets.** Convex calls per check unchanged. R2 per 11-shard check: about one PUT per unit plus a
+  few lost races (Class A, ~35-50) and a few hundred HEADs at most (Class B), ~35 objects of 18 bytes.
+  Forge does not delete claim objects: give the bucket a lifecycle rule that expires prefix `v1/pool/`
+  after one day. Runner minutes stay flat (the same work, plus about one second of process start per
+  unit).
+- **Measurement.** `forge-check.yml` sets `FORGE_ACTIONS_POOL_MODE: 'ab'`: the pool runs on checks whose
+  random run id ends in an odd hex digit. `node scripts/actions-cache-report.mjs NanthAI/nanthai-forge
+  80 --pool-since DEPLOY_TIME` labels runs the same way, pairs each pool run with its nearest static run
+  and prints bootstrap intervals ([perf claims](../agents/perf-claims.md)). Set the mode to `on` once
+  the interval excludes zero.
 
 When the pinned recipe has exactly one execution job (no test groups plus the
 static execution), that execution runs in `hosted-plan` after planning. This includes

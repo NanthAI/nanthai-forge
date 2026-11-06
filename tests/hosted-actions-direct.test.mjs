@@ -1618,3 +1618,125 @@ test('runner contract: the checking stall alarm reconciles only an unacknowledge
   assert.equal(await call(run.actions.reservedAt + 60 * 60_000), 'none', 'acknowledged: one read, no work');
   assert.equal(s.scheduled.length, size);
 });
+
+test('shard pool: the existing plan call signs one create-only claim per unit with no extra Convex call', async t => {
+  const s = await fixture(t);
+  await s.bind();
+  const r2 = fakeSourceR2(t),
+    r2Fetch = globalThis.fetch;
+  globalThis.fetch = (url, init) =>
+    new URL(url).hostname === 'token.actions.githubusercontent.com'
+      ? Promise.resolve(jwks())
+      : r2Fetch(url, init);
+  const groups = [
+    ['tests/a.test.mjs', 'tests/b.test.mjs', 'tests/c.test.mjs'],
+    ['tests/d.test.mjs', 'tests/e.test.mjs'],
+  ];
+  const recipePins = {
+      head: s.run.request.expectedHead,
+      definition: s.run.check.definition,
+      selection: { scope: 'full', reason: 'synthetic', tests: groups.flat() },
+      groups,
+      pool: [[1, 2], [1]],
+      standard: true,
+      interaction: false,
+      command: ['node', 'scripts/forge-check.mjs'],
+    },
+    recipe = { ...recipePins, pin: checkPin(recipePins) },
+    mutations = [];
+  const ctx = {
+    runMutation: (ref, input) => {
+      const [name, method] = getFunctionName(ref).split(':');
+      mutations.push(name);
+      return s.call(
+        { projectHostedActionsSession: sessions, projectHostedActionsPlan: plans }[name],
+        method,
+        input,
+      );
+    },
+  };
+  const response = await handle._handler(
+    ctx,
+    new Request(`${audience}/checks/actions`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${oidc()}` },
+      body: JSON.stringify({
+        ...s.id,
+        command: { kind: 'plan', plan: { recipe, lockfile: 'e'.repeat(64) } },
+      }),
+    }),
+  );
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.deepEqual(mutations, ['projectHostedActionsSession', 'projectHostedActionsPlan']);
+  assert.equal(body.run.id, s.run.id);
+  assert.equal(body.claims.length, 3);
+  const execution = savePin(body.run.executionId).sha256.slice(0, 16);
+  for (const [unit, claim] of body.claims.entries()) {
+    const put = new URL(claim.put.url),
+      head = new URL(claim.head);
+    assert.equal(put.pathname, `/synthetic/v1/pool/${s.projectId}/${s.run.id}/${execution}/${unit}`);
+    assert.equal(head.pathname, put.pathname);
+    assert.equal(put.searchParams.get('X-Amz-Expires'), '7200');
+    assert.equal(claim.put.headers['if-none-match'], '*');
+    assert.equal(claim.put.headers['content-length'], String(`forge-claim-v1 ${unit}\n`.length));
+  }
+  // Signing is CPU only: no claim object is created or read by the server.
+  assert(![...r2.objects.keys()].some(key => key.includes('/v1/pool/')));
+  assert.equal(r2.objects.size, 2);
+});
+
+test('shard pool: yielded files must be reported by some shard; duplicates count once and failures win', async t => {
+  const s = await fixture(t, 3);
+  await s.bind();
+  await s.prepare();
+  const send = result => s.call(results, 'result', { ...s.input(), result: JSON.stringify(result) });
+  const pass = { durationMs: 5, failed: false },
+    fail = { durationMs: 5, failed: true, firstError: 'boom' };
+  let run = await send({
+    index: 0,
+    exitCode: 0,
+    contractReports: { 'tests/synthetic-0.test.mjs': pass },
+    pool: { yielded: ['tests/yielded-a.test.mjs', 'tests/yielded-b.test.mjs'] },
+  });
+  assert.deepEqual(run.poolPending, ['tests/yielded-a.test.mjs', 'tests/yielded-b.test.mjs']);
+  // The thief reports one yielded file, and a doubt run repeats a file that already passed, failing.
+  run = await send({
+    index: 1,
+    exitCode: 1,
+    contractReports: {
+      'tests/synthetic-1.test.mjs': pass,
+      'tests/yielded-a.test.mjs': pass,
+      'tests/synthetic-0.test.mjs': fail,
+    },
+  });
+  assert.deepEqual(run.poolPending, ['tests/yielded-b.test.mjs']);
+  assert.equal(run.contractReports['tests/synthetic-0.test.mjs'].failed, true);
+  run = await send({ index: 2, exitCode: 0 });
+  assert.equal(run.status, 'failed');
+  assert.equal(run.poolPending, undefined);
+  assert.match(run.contractReports['tests/yielded-b.test.mjs'].firstError, /^POOL_UNIT_UNREPORTED/);
+  assert.equal(run.testFiles.counts.total, 4, 'each file counted once');
+});
+
+test('shard pool: a pooled check whose yielded files were all reported passes', async t => {
+  const s = await fixture(t, 3);
+  await s.bind();
+  await s.prepare();
+  const send = result => s.call(results, 'result', { ...s.input(), result: JSON.stringify(result) });
+  const pass = { durationMs: 5, failed: false };
+  await send({
+    index: 1,
+    exitCode: 0,
+    contractReports: { 'tests/synthetic-1.test.mjs': pass, 'tests/yielded.test.mjs': pass },
+  });
+  await send({
+    index: 0,
+    exitCode: 0,
+    contractReports: { 'tests/synthetic-0.test.mjs': pass },
+    pool: { yielded: ['tests/yielded.test.mjs'] },
+  });
+  const run = await send({ index: 2, exitCode: 0 });
+  assert.equal(run.status, 'passed');
+  assert.equal(run.poolPending, undefined);
+});

@@ -9,6 +9,7 @@ import { checkSchema } from './work-types.js';
 import { digest } from './portable-hash.js';
 import { canonicalPayload } from './hosted-source-operation.js';
 import { invariant } from './errors.js';
+import { contractTestPath } from './intent-test-contract.js';
 
 export const checkHash = z.string().regex(/^[0-9a-f]{64}$/);
 export const checkNumber = z.number().safe().nonnegative();
@@ -173,6 +174,8 @@ export const hostedCheckRunSchema = z
     gate: checkGateSchema.optional(),
     semanticPlan: semanticPlanSchema.optional(),
     contractReports: semanticReportsSchema.optional(),
+    // Shard pool files yielded by a home shard and not yet reported by any shard (usually empty).
+    poolPending: z.array(contractTestPath).max(4096).optional(),
     testFiles: checkFileSummarySchema.optional(),
     checkLogs: checkLogsSchema.optional(),
     keyId: z.string().regex(/^[A-Z0-9_]+$/),

@@ -95,6 +95,34 @@ export async function presignPut(
   return { kind: 'r2', url, headers };
 }
 
+/** One shard pool claim: a create-only PUT of the fixed claim body and a HEAD, both signed for
+ * `expires` seconds (src/hosted-actions-pool.ts). */
+export async function presignPoolClaim(
+  config: R2Config,
+  key: string,
+  body: Uint8Array<ArrayBuffer>,
+  expires: number,
+) {
+  const sha256 = [...new Uint8Array(await crypto.subtle.digest('SHA-256', body))]
+    .map(byte => byte.toString(16).padStart(2, '0'))
+    .join('');
+  const headers = {
+    'content-length': String(body.length),
+    'if-none-match': '*',
+    'x-amz-checksum-sha256': base64(sha256),
+  };
+  const signed = {
+    ...target(config, key),
+    accessKeyId: config.accessKeyId,
+    secretAccessKey: config.secretAccessKey,
+    expires,
+  };
+  return {
+    put: { url: await presign({ method: 'PUT', ...signed, headers }), headers },
+    head: await presign({ method: 'HEAD', ...signed }),
+  };
+}
+
 /** Presigned GET for one object. Ranged reads send an HTTP `Range` header on the same URL. */
 export const presignGet = (config: R2Config, key: string, headers: Record<string, string> = {}) =>
   presign({

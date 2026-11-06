@@ -170,7 +170,7 @@ function executorSurface(t) {
     'FORGE_TEST_RETRY_FILES',
     'FORGE_TEST_COVERAGE_HEAD',
   ]);
-  for (const [mode, shard, selection, groups, standard] of [
+  for (const [mode, shard, selection, groups, standard, part] of [
     [
       'standard-static',
       'static',
@@ -187,13 +187,32 @@ function executorSurface(t) {
     ],
     ['docs-static', 'static', { scope: 'docs', reason: 'x', tests: [] }, [], true],
     ['command', 'static', { scope: 'full', reason: 'x', tests: [] }, [], false],
+    // Contract 2: shard pool parts (kept front, then one unit with tests only).
+    ...['kept', '0'].map(part => [
+      `standard-shard-pool-${part}`,
+      '0',
+      { scope: 'full', reason: 'x', tests: ['tests/a.test.mjs', 'tests/b.test.mjs'] },
+      [['tests/a.test.mjs', 'tests/b.test.mjs']],
+      true,
+      part,
+    ]),
   ]) {
     const root = fixture(t, undefined);
     writeFileSync(
       join(root, 'plan.json'),
-      JSON.stringify({ standard, command: ['bash', 'ci.sh'], pin: 'a', head: 'b', selection, groups }),
+      JSON.stringify({
+        standard,
+        command: ['bash', 'ci.sh'],
+        pin: 'a',
+        head: 'b',
+        selection,
+        groups,
+        ...(part ? { pool: [[1]] } : {}),
+      }),
     );
     process.env.FORGE_ACTIONS_SHARD = shard;
+    if (part) process.env.FORGE_ACTIONS_POOL_PART = part;
+    else delete process.env.FORGE_ACTIONS_POOL_PART;
     const calls = [];
     try {
       runActionsCheck((command, args, options) => {
@@ -210,6 +229,7 @@ function executorSurface(t) {
     }
     surface[mode] = calls;
   }
+  delete process.env.FORGE_ACTIONS_POOL_PART;
   return surface;
 }
 

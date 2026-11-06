@@ -14,6 +14,8 @@ import { retryActionsInfrastructure, actionsInfrastructureResponse } from './hos
 import { invariant } from './errors.js';
 import { setupActionsJob } from './hosted-actions-job-setup.js';
 import { actionsInlineLogCapability } from './hosted-actions-capabilities.js';
+import { poolUnits } from '../scripts/shard-pool.mjs';
+import { describePoolOutcome, poolClaimsSchema, runShardPool } from './hosted-actions-pool.js';
 /** Below the server's 512 KiB request window, leaving room for identity fields. */
 const inlineRequestBytes = 448 * 1024;
 /** Credentials remain in the fixed supervisor; the project receives a clean env.
@@ -50,7 +52,8 @@ async function executeActiveActionsJob(
   ];
   if (!recipe.standard && !commandOverride)
     command = semanticCheckCommand(command, run.semanticPlan, process.execPath);
-  let sourceCache: string | undefined;
+  let sourceCache: string | undefined,
+    setupFailed = false;
   try {
     sourceCache = await setupActionsJob(run, directory, planPath);
     invariant(
@@ -61,23 +64,13 @@ async function executeActiveActionsJob(
   } catch {
     // Record a failed exact check through the ordinary result callback. Never run
     // tests against changed bytes or treat a setup exit as passing evidence.
+    setupFailed = true;
     command = [
       process.execPath,
       '--eval',
       "console.error('SOURCE_HASH_MISMATCH: Actions setup verification failed.'); process.exitCode = 1;",
     ];
   }
-  const child = spawn(command[0]!, command.slice(1), {
-    cwd: directory,
-    shell: false,
-    stdio: ['ignore', 'pipe', 'pipe'],
-    env: {
-      ...childEnv({ allow: ['CI', 'PATH'] }),
-      ...(sourceCache ? { FORGE_SOURCE_CACHE_DIR: sourceCache } : {}),
-      FORGE_ACTIONS_PLAN: planPath,
-      FORGE_ACTIONS_SHARD: shard,
-    },
-  });
   let tail = Buffer.alloc(0);
   const reports = new ContractTimingReader({ secrets: [], paths: [directory, process.env.HOME ?? ''] });
   const redactor = new HostedOutputRedactor({ secrets: [], paths: [directory, process.env.HOME ?? ''] });
@@ -85,22 +78,68 @@ async function executeActiveActionsJob(
     const clean = redactor.write(bytes);
     tail = Buffer.concat([tail, clean]).subarray(-directLogBytes);
   };
-  // Decode across chunks before parsing complete machine reports.
-  child.stdout.setEncoding('utf8');
-  child.stderr.setEncoding('utf8');
-  child.stdout.on('data', (text: string) => {
-    process.stdout.write(text);
-    reports.accept(text);
-    observe(Buffer.from(text));
-  });
-  child.stderr.on('data', (text: string) => {
-    process.stderr.write(text);
-    observe(Buffer.from(text));
-  });
-  const exitCode = await new Promise<number>(resolve => {
-    child.on('error', () => resolve(127));
-    child.on('close', (code, signal) => resolve(code ?? (signal ? 128 : 1)));
-  });
+  /** One executor process. `part` is the shard pool part: kept files, or one unit (tests only). */
+  const spawnPart = (part?: string) => {
+    const child = spawn(command[0]!, command.slice(1), {
+      cwd: directory,
+      shell: false,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: {
+        ...childEnv({ allow: ['CI', 'PATH'] }),
+        ...(sourceCache ? { FORGE_SOURCE_CACHE_DIR: sourceCache } : {}),
+        FORGE_ACTIONS_PLAN: planPath,
+        FORGE_ACTIONS_SHARD: shard,
+        ...(part ? { FORGE_ACTIONS_POOL_PART: part } : {}),
+      },
+    });
+    // Decode across chunks before parsing complete machine reports.
+    child.stdout.setEncoding('utf8');
+    child.stderr.setEncoding('utf8');
+    child.stdout.on('data', (text: string) => {
+      process.stdout.write(text);
+      reports.accept(text);
+      observe(Buffer.from(text));
+    });
+    child.stderr.on('data', (text: string) => {
+      process.stderr.write(text);
+      observe(Buffer.from(text));
+    });
+    return new Promise<number>(resolve => {
+      child.on('error', () => resolve(127));
+      child.on('close', (code, signal) => resolve(code ?? (signal ? 128 : 1)));
+    });
+  };
+  // Shard pool (scripts/shard-pool.mjs): run the kept front, then claim units from the pool.
+  const units =
+    recipe.pool && recipe.standard && shard !== 'static' && !setupFailed
+      ? poolUnits(recipe.groups, recipe.pool)
+      : null;
+  let exitCode = await spawnPart(units ? 'kept' : undefined);
+  let yielded: string[] | undefined;
+  if (units) {
+    const note = (line: string) => {
+      console.log(line);
+      observe(Buffer.from(`${line}\n`));
+    };
+    // Kept files that never started (install or build failed) mean no unit can run here either.
+    if (exitCode !== 0 && !Object.keys(reports.reports).length)
+      note('Shard pool: skipped; the kept files did not run, so this shard claims nothing');
+    else {
+      const claims = poolClaimsSchema.safeParse(client.poolClaims);
+      const outcome = await runShardPool({
+        units,
+        home: index,
+        claims: claims.success ? claims.data : null,
+        request: ((url: string, init: RequestInit) => client.request(url, init)) as typeof fetch,
+        run: async unit => {
+          const code = await spawnPart(String(unit.unit));
+          if (!exitCode) exitCode = code;
+        },
+      });
+      note(describePoolOutcome(outcome, index, units));
+      yielded = outcome.yielded.flatMap(unit => units[unit]!.files);
+    }
+  }
   tail = Buffer.concat([tail, redactor.write(Buffer.alloc(0), true)]).subarray(-directLogBytes);
   const log = tail.length
     ? {
@@ -115,6 +154,8 @@ async function executeActiveActionsJob(
     contractReports: reports.reports,
     testFiles: checkFileSummary(reports.reports),
     execution: { startedAt, endedAt: new Date().toISOString() },
+    // Files this home shard yielded to another claimer; the server fails the check if none reports them.
+    ...(yielded ? { pool: { yielded } } : {}),
   };
   // One result call stores the log too, unless it would crowd the server's metadata window.
   const logBytes =

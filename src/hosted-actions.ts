@@ -2,6 +2,7 @@
 import { z } from 'zod';
 import { checkHash, checkNumber, checkObject, checkPin, type HostedCheckRun } from './hosted-check.js';
 import { invariant } from './errors.js';
+import { validPool } from '../scripts/shard-pool.mjs';
 
 export const hostedActionsRuntime = checkPin(
   'github-actions;node:24.22.1;checkout:v4;setup-node:v4;forge-check:v1',
@@ -29,11 +30,17 @@ export const hostedActionsRecipeSchema = z
       })
       .passthrough(),
     groups: z.array(z.array(z.string())),
+    // Shard pool cut indices per group (scripts/shard-pool.mjs); absent means the static plan.
+    pool: z.array(z.array(z.number().int())).optional(),
     standard: z.boolean(),
     interaction: z.boolean(),
     command: z.array(z.string()).min(1),
   })
-  .strict();
+  .strict()
+  .refine(recipe => recipe.pool === undefined || validPool(recipe.groups, recipe.pool), {
+    message: 'Shard pool cuts must lie inside their pinned groups.',
+    path: ['pool'],
+  });
 export const hostedActionsMappingSchema = z
   .object({
     schema: z.literal(1),

@@ -185,6 +185,8 @@
     "scripts/test-impact.d.mts",
     "scripts/test-shards.mjs",
     "scripts/test-shards.d.mts",
+    "scripts/shard-pool.mjs",
+    "scripts/shard-pool.d.mts",
     "scripts/test-timings-file.mjs",
     "scripts/test-timings-file.d.mts",
     "scripts/check-path-scopes.mjs",

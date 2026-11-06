@@ -7,6 +7,7 @@ import { hostedCheckCallbackSchema, type HostedCheckCallback } from './hosted-ch
 import { canonicalPayload } from './hosted-source-operation.js';
 import { semanticReportsSchema } from './intent-semantic-conflict.js';
 import { invariant } from './errors.js';
+import { contractTestPath } from './intent-test-contract.js';
 import { checkFileSummarySchema } from './check-file-summary.js';
 import { hostedActionsRecipeSchema } from './hosted-actions.js';
 export const directSourceWindow = 400;
@@ -27,6 +28,11 @@ export const directResultSchema = z
     testFiles: checkFileSummarySchema.optional(),
     // Supervisor process start to result: includes setup and tests, not earlier workflow steps.
     execution: z.object({ startedAt: z.iso.datetime(), endedAt: z.iso.datetime() }).strict().optional(),
+    // Shard pool: files this home shard yielded to another claimer (src/hosted-actions-pool.ts).
+    pool: z
+      .object({ yielded: z.array(contractTestPath).max(4096) })
+      .strip()
+      .optional(),
   })
   .strip();
 /** GitHub's job limit plus clock slack. Implausible runner clocks stay unknown, never fail a check. */

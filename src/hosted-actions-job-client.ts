@@ -28,6 +28,8 @@ export class ActionsJobClient {
   capabilities: string[] = [];
   sourcePack: SourcePackDownload | null = null;
   preflightTicket: ActionsPreflightTicket | null = null;
+  /** Shard pool claim targets from the plan bundle (unvalidated until used). */
+  poolClaims: unknown = null;
   private token = '';
   private expires = 0;
   private refreshing: Promise<void> | null = null;

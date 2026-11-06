@@ -36,6 +36,8 @@ try {
         ...result.run,
         capabilities: client.capabilities,
         preflightTicket: client.preflightTicket,
+        // Shard pool claim targets: read by the fixed supervisor only, never logged.
+        ...(result.claims ? { poolClaims: result.claims } : {}),
       }),
     );
     appendFileSync(
@@ -87,10 +89,12 @@ function restoreRun() {
   const {
     capabilities = [],
     preflightTicket = null,
+    poolClaims = null,
     ...run
   } = JSON.parse(readFileSync(resolve(process.env.RUNNER_TEMP, 'forge-actions-run.json'), 'utf8'));
   client.run = hostedCheckRunSchema.parse(run);
   client.preflightTicket = preflightTicket;
+  client.poolClaims = poolClaims;
   client.capabilities = Array.isArray(capabilities)
     ? capabilities.filter(value => typeof value === 'string')
     : [];

@@ -5,6 +5,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { runDocumentationChecks } from './check-documentation.mjs';
 import { checkPhases } from './check-phases.mjs';
+import { keptFiles, poolUnits, validPool } from './shard-pool.mjs';
 import {
   assertCheckContract,
   declaredRequirement,
@@ -19,6 +20,10 @@ export function runActionsCheck(execute = execFileSync, { install = true, build 
   );
   const plan = JSON.parse(readFileSync(process.env.FORGE_ACTIONS_PLAN, 'utf8'));
   const shard = process.env.FORGE_ACTIONS_SHARD;
+  // Shard pool part, set only by the fixed supervisor (src/hosted-actions-job-run.ts): `kept` runs
+  // the front of this shard's group; a unit number runs that pool unit's files, tests only, after
+  // the kept part has installed and built. Unset runs the whole group (the static plan).
+  const part = process.env.FORGE_ACTIONS_POOL_PART;
   const env = {
     ...childEnv({
       allow: [
@@ -52,8 +57,10 @@ export function runActionsCheck(execute = execFileSync, { install = true, build 
   // A project's own check command owns its setup (pnpm, Vite+, ...); only Forge's
   // recipe and npm-locked projects get the npm install.
   const npmLocked = existsSync('package-lock.json') || existsSync('npm-shrinkwrap.json');
+  const unitPart = part !== undefined && part !== 'kept';
   try {
-    if (install && (plan.standard || npmLocked)) phases.time('install', () => npm('ci', '--ignore-scripts'));
+    if (install && !unitPart && (plan.standard || npmLocked))
+      phases.time('install', () => npm('ci', '--ignore-scripts'));
     if (!plan.standard) {
       if (shard !== 'static') throw new Error('Arbitrary commands have only a static job.');
       phases.time('command', () => run(plan.command[0], plan.command.slice(1)));
@@ -72,6 +79,15 @@ export function runActionsCheck(execute = execFileSync, { install = true, build 
       const index = Number(shard);
       if (!Number.isInteger(index) || !plan.groups[index]) throw new Error('Unselected Actions shard.');
       if (!plan.groups[index].length) throw new Error('ZERO_SELECTION: this shard has no test file.');
+      const files = poolPart(plan, index, part);
+      if (part !== undefined && part !== 'kept') {
+        // A unit runs after this job's kept part: dependencies and build are already in place.
+        if (plan.selection.scope === 'full') env.FORGE_TEST_COVERAGE_HEAD = plan.head;
+        else delete env.FORGE_TEST_COVERAGE_HEAD;
+        env.FORGE_TEST_RETRY_FILES = JSON.stringify(plan.retryFiles ?? []);
+        phases.time('pool', () => run('node', ['scripts/test-files.mjs', ...files]));
+        return;
+      }
       if (build) {
         phases.time('build', () => {
           npm('run', 'build:core');
@@ -86,9 +102,20 @@ export function runActionsCheck(execute = execFileSync, { install = true, build 
       if (plan.selection.scope === 'full') env.FORGE_TEST_COVERAGE_HEAD = plan.head;
       else delete env.FORGE_TEST_COVERAGE_HEAD;
       env.FORGE_TEST_RETRY_FILES = JSON.stringify(plan.retryFiles ?? []);
-      phases.time('tests', () => run('node', ['scripts/test-files.mjs', ...plan.groups[index]]));
+      phases.time('tests', () => run('node', ['scripts/test-files.mjs', ...files]));
     }
   } finally {
     phases.report();
   }
+}
+
+/** Files of one shard pool part, always taken from the pinned plan (never from the caller). */
+function poolPart(plan, index, part) {
+  if (part === undefined) return plan.groups[index];
+  if (!validPool(plan.groups, plan.pool))
+    throw new Error('Shard pool part requested without a valid pinned pool.');
+  if (part === 'kept') return keptFiles(plan.groups, plan.pool, index);
+  const unit = /^\d+$/.test(part) ? poolUnits(plan.groups, plan.pool)[Number(part)] : undefined;
+  if (!unit) throw new Error('Unselected shard pool unit.');
+  return unit.files;
 }
