@@ -21,7 +21,14 @@ import type { SessionInput } from './projectHostedActionsSession';
 import { activeStoragePause } from './legacyStoragePause';
 import { presignPoolClaim, r2Config } from './r2';
 import type { HostedActionsRecipe } from '../src/hosted-actions';
-import { poolClaimBody, poolClaimExpirySeconds, poolClaimKey, poolUnits } from '../src/hosted-actions-pool';
+import {
+  poolClaimBody,
+  poolClaimExpirySeconds,
+  poolClaimKey,
+  poolClaimPrefix,
+  poolUnits,
+} from '../src/hosted-actions-pool';
+import { deleteR2Object, listR2Prefix } from './r2Operations';
 /** Refused writes that resolve on their own: the runner keeps its result and
  * retries the same request (Issue 72d50375). */
 const transientCodes = ['RUNNER_UNAVAILABLE', 'LEGACY_STORAGE_WRITES_PAUSED', 'HOSTED_CONFLICT'];
@@ -39,6 +46,37 @@ async function poolClaims(projectId: string, run: HostedCheckRun, recipe: Hosted
       ),
     ),
   );
+}
+/** Forge deletes its own claim objects, so no bucket lifecycle rule is needed: the final result
+ * deletes this run's claims, then one page of other runs' claims older than their signed URLs
+ * (a cancelled or crashed check never posts a final result), starting after this run's random id
+ * so successive checks sweep the whole prefix. Best effort and time bounded: never fails a result. */
+export async function cleanPoolClaims(projectId: string, runId: string, now = Date.now()) {
+  const config = r2Config(),
+    root = poolClaimPrefix(projectId),
+    own = `${root}${runId}/`,
+    stale = now - poolClaimExpirySeconds * 1000;
+  const remove = (keys: string[]) => Promise.all(keys.map(key => deleteR2Object(config, key)));
+  const work = Promise.allSettled([
+    (async () => {
+      // At most two pages: a run has at most maxPoolUnits (128) claims.
+      let cursor: string | null = null;
+      for (let page = 0; page < 2; page++) {
+        const listed = await listR2Prefix(config, own, cursor);
+        await remove(listed.keys);
+        if (!(cursor = listed.cursor)) break;
+      }
+    })(),
+    (async () => {
+      const listed = await listR2Prefix(config, root, null, `${own}~`);
+      await remove(
+        listed.keys.filter((key, index) => !key.startsWith(own) && listed.modified[index]! < stale),
+      );
+    })(),
+  ]);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  await Promise.race([work, new Promise(resolve => (timer = setTimeout(resolve, 10_000)))]);
+  clearTimeout(timer);
 }
 export const handle = httpAction(async (ctx, request) => {
   let reason: 'authorization' | 'validation' | 'storage' | 'cancelled' = 'authorization';
@@ -248,6 +286,20 @@ async function settleResult(
     { ...input, result: canonicalPayload(result) },
   );
   if (!hostedCheckTerminal(settled)) return settled;
+  // Runs beside the output manifest work; it never throws.
+  const cleanup = settled.poolClaimed ? cleanPoolClaims(input.projectId, settled.id) : undefined;
+  try {
+    return await finalOutput(ctx, input, settled, phase);
+  } finally {
+    await cleanup;
+  }
+}
+async function finalOutput(
+  ctx: ActionCtx,
+  input: SessionInput,
+  settled: HostedCheckRun,
+  phase: (reason: 'authorization' | 'storage') => void,
+) {
   const final = (await ctx.runMutation(
     makeFunctionReference<'mutation'>('projectHostedActionsOutput:prepare'),
     input,

@@ -1700,6 +1700,7 @@ test('shard pool: yielded files must be reported by some shard; duplicates count
     pool: { yielded: ['tests/yielded-a.test.mjs', 'tests/yielded-b.test.mjs'] },
   });
   assert.deepEqual(run.poolPending, ['tests/yielded-a.test.mjs', 'tests/yielded-b.test.mjs']);
+  assert.equal(run.poolClaimed, true, 'the final result deletes this run claims');
   // The thief reports one yielded file, and a doubt run repeats a file that already passed, failing.
   run = await send({
     index: 1,
@@ -1739,4 +1740,104 @@ test('shard pool: a pooled check whose yielded files were all reported passes', 
   const run = await send({ index: 2, exitCode: 0 });
   assert.equal(run.status, 'passed');
   assert.equal(run.poolPending, undefined);
+});
+
+const claimList = (keys, modified) =>
+  new Response(
+    `<?xml version="1.0"?><ListBucketResult><IsTruncated>false</IsTruncated>${keys
+      .map(
+        (key, index) =>
+          `<Contents><Key>${encodeURIComponent(key)}</Key><LastModified>${modified[index]}</LastModified><Size>18</Size></Contents>`,
+      )
+      .join('')}</ListBucketResult>`,
+  );
+test('shard pool: the final result deletes its run claims and sweeps stale ones, with no Convex call', async t => {
+  const s = await fixture(t, 1);
+  await s.bind();
+  await s.prepare();
+  const root = `v1/pool/${s.projectId}/`,
+    own = `${root}${s.run.id}/`,
+    fresh = new Date().toISOString(),
+    old = new Date(Date.now() - 3 * 3600_000).toISOString();
+  const ownKeys = [`${own}abcd/0`, `${own}abcd/1`],
+    staleKey = `${root}ffffffff-0000-4000-8000-000000000000/abcd/0`,
+    liveKey = `${root}ffffffff-0000-4000-8000-000000000001/abcd/0`;
+  const deleted = [],
+    lists = [];
+  t.mock.method(globalThis, 'fetch', async (url, init = {}) => {
+    if (url === `${actionsIssuer}/.well-known/jwks`) return jwks();
+    const target = new URL(url),
+      method = init.method ?? 'GET';
+    if (method === 'PUT') return new Response(null, { status: 200 });
+    if (method === 'DELETE') {
+      deleted.push(target.pathname.replace(/^\/[^/]+\//, ''));
+      return new Response(null, { status: 204 });
+    }
+    if (target.searchParams.get('list-type') === '2') {
+      const prefix = target.searchParams.get('prefix');
+      lists.push({ prefix, startAfter: target.searchParams.get('start-after') });
+      return prefix === own
+        ? claimList(ownKeys, [fresh, fresh])
+        : claimList([staleKey, liveKey], [old, fresh]);
+    }
+    assert.equal(method, 'HEAD');
+    const finalRoot = [...s.tables.projectHostedOutputHeads.values()][0];
+    const { rootForOutput } = await import(moduleUrl('../convex/projectHostedOutputStore.ts'));
+    const { canonicalPayload } = await import('../dist/hosted-source-operation.js');
+    const { digest } = await import('../dist/hash.js');
+    const rootBytes = Buffer.from(canonicalPayload(rootForOutput(s.id, '123', finalRoot)));
+    return new Response(null, {
+      status: 200,
+      headers: {
+        'content-length': String(rootBytes.length),
+        'x-amz-checksum-sha256': Buffer.from(digest(rootBytes), 'hex').toString('base64'),
+      },
+    });
+  });
+  const finalOutput = await import(moduleUrl('../convex/projectHostedActionsOutput.ts'));
+  const modules = {
+    projectHostedActionsOutput: finalOutput,
+    projectHostedActionsSession: sessions,
+    projectHostedActionsResults: results,
+  };
+  const mutations = [];
+  const ctx = {
+    runMutation: (ref, input) => {
+      const [name, method] = getFunctionName(ref).split(':');
+      mutations.push(`${name}:${method}`);
+      return s.call(modules[name], method, input);
+    },
+  };
+  const result = {
+    index: 0,
+    exitCode: 0,
+    contractReports: { 'tests/synthetic-0.test.mjs': { durationMs: 5, failed: false } },
+    pool: { yielded: [] },
+  };
+  const response = await handle._handler(
+    ctx,
+    new Request(`${audience}/checks/actions`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${oidc()}` },
+      body: JSON.stringify({ ...s.id, fence: 1, command: { kind: 'result', result } }),
+    }),
+  );
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).status, 'passed');
+  assert.deepEqual(lists, [
+    { prefix: own, startAfter: null },
+    { prefix: root, startAfter: `${own}~` },
+  ]);
+  assert.deepEqual(deleted.sort(), [...ownKeys, staleKey].sort(), 'a live run keeps its claims');
+  assert(!mutations.some(name => /pool/i.test(name)), 'cleanup adds no Convex call');
+});
+test('shard pool: claim cleanup is best effort and never throws', async t => {
+  fakeSourceR2(t);
+  const { cleanPoolClaims } = await import(moduleUrl('../convex/projectHostedActionsHttp.ts'));
+  t.mock.method(globalThis, 'fetch', async () => {
+    throw Error('storage down');
+  });
+  await cleanPoolClaims('project', '00000000-0000-4000-8000-000000000000');
+  t.mock.method(globalThis, 'fetch', async () => new Response('<Error/>', { status: 500 }));
+  await cleanPoolClaims('project', '00000000-0000-4000-8000-000000000000');
 });

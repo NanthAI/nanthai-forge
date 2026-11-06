@@ -743,9 +743,14 @@ runner's tail. The static LPT groups stay the plan of record; the pool only deci
   (no `checks.pool` capability) or `FORGE_ACTIONS_POOL_MODE=off` keeps the static groups.
 - **Budgets.** Convex calls per check unchanged. R2 per 11-shard check: about one PUT per unit plus a
   few lost races (Class A, ~35-50) and a few hundred HEADs at most (Class B), ~35 objects of 18 bytes.
-  Forge does not delete claim objects: give the bucket a lifecycle rule that expires prefix `v1/pool/`
-  after one day. Runner minutes stay flat (the same work, plus about one second of process start per
-  unit).
+  Runner minutes stay flat (the same work, plus about one second of process start per unit).
+- **Cleanup.** Forge deletes its own claims; no bucket lifecycle rule is needed. When a check's final
+  result is recorded (any shard ran the pool, `poolClaimed`), the same HTTP action lists and deletes
+  that run's `v1/pool/PROJECT/RUN/` objects, and sweeps one page (100 keys) of the project's other
+  claims older than the 2-hour URL expiry, starting after its own random run id, so claims of
+  cancelled or crashed checks go with later checks. That is 2-3 R2 lists plus one DELETE per claim,
+  no Convex call, beside the output manifest work, best effort and capped at 10 seconds: cleanup never
+  fails or holds a result. Expired claims are harmless meanwhile (18 bytes each, never read).
 - **Measurement.** `forge-check.yml` sets `FORGE_ACTIONS_POOL_MODE: 'ab'`: the pool runs on checks whose
   random run id ends in an odd hex digit. `node scripts/actions-cache-report.mjs NanthAI/nanthai-forge
   80 --pool-since DEPLOY_TIME` labels runs the same way, pairs each pool run with its nearest static run

@@ -20,9 +20,11 @@ export type PoolClaim = z.infer<typeof poolClaimSchema>;
 /** Claim URLs outlive the plan job (30 min) plus a queued shard start; a late shard that finds
  * them expired falls back to its static group. */
 export const poolClaimExpirySeconds = 2 * 3600;
-/** Run-scoped, outside project content keys, so one bucket lifecycle rule on `v1/pool/` can expire them. */
+/** Run-scoped, outside project content keys. Forge deletes them itself: the final result deletes
+ * its run's claims and sweeps stale ones (convex/projectHostedActionsHttp.ts cleanPoolClaims). */
+export const poolClaimPrefix = (projectId: string) => `v1/pool/${projectId}/`;
 export const poolClaimKey = (projectId: string, runId: string, execution: string, unit: number) =>
-  `v1/pool/${projectId}/${runId}/${execution}/${unit}`;
+  `${poolClaimPrefix(projectId)}${runId}/${execution}/${unit}`;
 /** The signed body: fixed, public and meaningless. Who won is told by the PUT status only. */
 export const poolClaimBody = (unit: number): Uint8Array<ArrayBuffer> =>
   new TextEncoder().encode(`forge-claim-v1 ${unit}\n`);

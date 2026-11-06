@@ -176,6 +176,8 @@ export const hostedCheckRunSchema = z
     contractReports: semanticReportsSchema.optional(),
     // Shard pool files yielded by a home shard and not yet reported by any shard (usually empty).
     poolPending: z.array(contractTestPath).max(4096).optional(),
+    // Some shard ran the shard pool, so claim objects may exist for this run; the final result deletes them.
+    poolClaimed: z.literal(true).optional(),
     testFiles: checkFileSummarySchema.optional(),
     checkLogs: checkLogsSchema.optional(),
     keyId: z.string().regex(/^[A-Z0-9_]+$/),

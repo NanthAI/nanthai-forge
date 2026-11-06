@@ -112,6 +112,7 @@ export const result = internalMutation({
       result.pool?.yielded ?? [],
       run.counts.completed === run.plan!.shardCount,
     );
+    if (result.pool) run.poolClaimed = true;
     if (pool.pending.length) run.poolPending = pool.pending;
     else delete run.poolPending;
     const combined = applyCheckRetryBudget(pool.reports);
