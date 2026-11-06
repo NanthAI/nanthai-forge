@@ -1991,8 +1991,11 @@ need no Git; explicit `url` plus `projectId` works from any folder.
 `FORGE_ROOT_UNAVAILABLE` names an unaddressed root and next steps.
 
 `heavy --help`, `-h`, no command and `--status` acquire no slot and use no network.
-Status shows slot, folder, elapsed time, executable and same-folder `selfHeld`;
-older holders can lack metadata. Run bounded batches under heavy, dev servers directly.
+Status lists each holder (slot, pid, Lane id, elapsed time, executable and same-folder
+`selfHeld`) and each waiter in queue order (position, pid, Lane id, executable, time waited),
+never folders or arguments; older holders can lack metadata. Slots are granted first come,
+first served, and a waiting `heavy` prints its queue position and an estimate. Run bounded
+batches under heavy, dev servers directly.
 
 Pull preserves ROOT and surviving directory inodes; see [recovery](../operations/source-exchange.md#hosted-main-client-checkout).
 `CWD_UNAVAILABLE` precedes hooks and gives `cd` advice: `cd /`, then

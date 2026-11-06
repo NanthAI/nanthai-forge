@@ -15,7 +15,7 @@ import {
 } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { acquireHeavySlot, heavySlotDirectory, tryHeavySlot } from './heavy-slots.js';
+import { acquireHeavySlot, heavySlotDirectory } from './heavy-slots.js';
 import { heavySlots, readClientSettings } from './client-settings.js';
 
 export type DependencyInstaller = (directory: string) => Promise<void>;
@@ -88,7 +88,7 @@ export async function shareDependencies(
     mkdirSync(cache, { recursive: true });
     // The per-lockfile lock reuses the heavy-slot primitive with one slot; a dead holder is reclaimed.
     const locks = join(cache, `npm-${key}.lock`);
-    const lock = tryHeavySlot(locks, 1) ?? (await acquireHeavySlot(locks, 1));
+    const lock = await acquireHeavySlot(locks, 1);
     try {
       if (!complete(entry, key)) {
         for (const name of readdirSync(cache))

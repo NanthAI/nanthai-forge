@@ -1,12 +1,23 @@
-import { canonicalRoot } from './root-paths.js';
 // SPDX-License-Identifier: Apache-2.0
+import { canonicalRoot } from './root-paths.js';
 import { spawn } from 'node:child_process';
 import { mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { constants, tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { heavySlots, readClientSettings } from './client-settings.js';
-import { watchLocal } from './local-watcher.js';
+import { watchLocal, type LocalWatcher } from './local-watcher.js';
 import { invariant } from './errors.js';
+import { processAlive } from './local-process.js';
+import {
+  estimateWaitMs,
+  joinQueue,
+  leaveQueue,
+  queuedNames,
+  readHolds,
+  readQueue,
+  recordHold,
+  startIdentity,
+} from './heavy-queue.js';
 
 /** Shared with every Lane and agent on this machine (and lane.sh's same-named slots). */
 export function heavySlotDirectory() {
@@ -23,14 +34,30 @@ const alive = (pid: number) => {
     return (error as NodeJS.ErrnoException).code === 'EPERM';
   }
 };
+/** `deep` also compares the holder's start time (PID reuse); a holder without one is checked by pid. */
+const holderAlive = (slot: string, pid: number, deep: boolean) => {
+  if (!deep || !alive(pid)) return alive(pid);
+  let startTime: string | undefined;
+  try {
+    startTime = readFileSync(join(slot, 'start'), 'utf8') || undefined;
+  } catch {}
+  return processAlive({ pid, startTime });
+};
 /** One attempt over all slots; a slot whose holder died is reclaimed. */
-export function tryHeavySlot(directory: string, slots: number, pid = process.pid): string | null {
+export function tryHeavySlot(
+  directory: string,
+  slots: number,
+  pid = process.pid,
+  deep = true,
+): string | null {
   mkdirSync(directory, { recursive: true });
   for (let index = 1; index <= slots; index++) {
     const slot = join(directory, String(index));
     try {
       mkdirSync(slot);
       writeFileSync(join(slot, 'pid'), String(pid));
+      const startTime = startIdentity(pid);
+      if (startTime) writeFileSync(join(slot, 'start'), startTime);
       return slot;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
@@ -43,7 +70,9 @@ export function tryHeavySlot(directory: string, slots: number, pid = process.pid
     } catch {}
     // A slot without a pid file is still being claimed, unless its claimer died a minute ago.
     const dead =
-      Number.isSafeInteger(holder) && holder > 0 ? !alive(holder) : Date.now() - claimedAt > 60_000;
+      Number.isSafeInteger(holder) && holder > 0
+        ? !holderAlive(slot, holder, deep)
+        : Date.now() - claimedAt > 60_000;
     if (dead) {
       rmSync(slot, { recursive: true, force: true });
       index--;
@@ -51,47 +80,94 @@ export function tryHeavySlot(directory: string, slots: number, pid = process.pid
   }
   return null;
 }
-/** Wait for a free slot: wake on a slot release, re-check stale holders every 30 s while waiting. */
-export async function acquireHeavySlot(
+export type HeavyWait = {
+  /** 1 = next to run. */
+  position: number;
+  waiting: number;
+  estimateMs: number | null;
+  medianMs: number | null;
+  samples: number;
+};
+/**
+ * Slots go first come, first served. A caller finding anyone queued joins the back of the queue;
+ * only the caller at the front tries the slots. Every change in the directory (a release, a new
+ * or departed waiter) and a `tickMs` timer re-run one synchronous attempt; the timer also compares
+ * start times, so a dead holder or waiter (even behind a reused PID) never blocks the queue.
+ */
+export function acquireHeavySlot(
   directory: string,
   slots: number,
-  onWait: () => void = () => {},
+  onWait: (wait: HeavyWait) => void = () => {},
+  info: { command?: string | null; cwd?: string | null; tickMs?: number } = {},
 ): Promise<string> {
-  let slot = tryHeavySlot(directory, slots);
-  if (slot) return slot;
-  onWait();
-  while (!(slot ??= tryHeavySlot(directory, slots)))
-    await new Promise<void>(resolve => {
-      let finished = false;
-      const watcher = watchLocal(
-        directory,
-        {
-          onReady: () =>
-            queueMicrotask(() => {
-              // Attachment is asynchronous: a release before open need not replay.
-              if (!finished && (slot = tryHeavySlot(directory, slots))) done();
-            }),
-        },
-        () => done(),
-      );
-      const timer = setTimeout(() => done(), 30_000);
-      function done() {
-        if (finished) return;
-        finished = true;
-        clearTimeout(timer);
-        void watcher.close();
-        resolve();
+  mkdirSync(directory, { recursive: true });
+  if (!queuedNames(directory).length) {
+    const slot = tryHeavySlot(directory, slots);
+    if (slot) return Promise.resolve(slot);
+  }
+  let ticket = joinQueue(directory, info),
+    reported = 0;
+  return new Promise<string>((resolve, reject) => {
+    let finished = false;
+    const handles: { watcher?: LocalWatcher; timer?: NodeJS.Timeout } = {};
+    const finish = (slot?: string, error?: unknown) => {
+      if (finished) return;
+      finished = true;
+      clearInterval(handles.timer);
+      void handles.watcher?.close();
+      leaveQueue(directory, ticket);
+      if (slot) resolve(slot);
+      else reject(error);
+    };
+    const attempt = (deep: boolean) => {
+      if (finished) return;
+      try {
+        const queue = readQueue(directory, { deep, reap: true });
+        const rank = queue.findIndex(item => item.name === ticket.name);
+        if (rank < 0) ticket = joinQueue(directory, { ...info, seq: ticket.seq });
+        else if (rank === 0) {
+          const slot = tryHeavySlot(directory, slots, process.pid, deep);
+          if (slot) return finish(slot);
+        }
+        if (rank >= 0 && rank + 1 !== reported) {
+          reported = rank + 1;
+          const running = heavyStatus(directory, slots).holders.map(holder => holder.elapsedMs);
+          const estimate = estimateWaitMs(readHolds(directory), running, slots, rank);
+          onWait({
+            position: reported,
+            waiting: queue.length,
+            estimateMs: estimate?.estimateMs ?? null,
+            medianMs: estimate?.medianMs ?? null,
+            samples: estimate?.samples ?? 0,
+          });
+        }
+      } catch (error) {
+        finish(undefined, error);
       }
-    });
-  return slot;
+    };
+    attempt(true);
+    if (finished) return;
+    // Attachment is asynchronous: a change before it opens is seen by the attempt after onReady.
+    handles.watcher = watchLocal(directory, { onReady: () => queueMicrotask(() => attempt(false)) }, () =>
+      attempt(false),
+    );
+    handles.timer = setInterval(() => attempt(true), info.tickMs ?? 3000);
+  });
 }
 
 export const HEAVY_HELP = `nforge heavy CMD [ARGS...]
 nforge heavy --status
 nforge heavy --help | -h
 Run bounded builds and test batches under the machine-wide slot limit.
+Callers wait first come, first served; a waiting caller prints its queue position and an estimate.
+--status lists the holders and the queue by Lane, command and time, never folders or arguments.
 Run long-lived servers (Vite/dev servers) directly, outside heavy.
 `;
+const LANE_FOLDER =
+  /(?:^|[\\/])lanes[\\/]([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:[\\/]|$)/i;
+/** A Lane id names who runs a command; a folder path never leaves the slot files. */
+const laneOf = (folder: string | null) =>
+  folder ? (LANE_FOLDER.exec(folder)?.[1]?.toLowerCase() ?? null) : null;
 /** Metadata contains only the executable basename, never arguments or environment. */
 export function heavyStatus(directory: string, slots: number, cwd = process.cwd()) {
   const holders = [];
@@ -99,7 +175,7 @@ export function heavyStatus(directory: string, slots: number, cwd = process.cwd(
     const slot = join(directory, String(index));
     try {
       const pid = Number(readFileSync(join(slot, 'pid'), 'utf8'));
-      if (!Number.isSafeInteger(pid) || pid <= 0 || !alive(pid)) continue;
+      if (!Number.isSafeInteger(pid) || pid <= 0 || !holderAlive(slot, pid, true)) continue;
       let metadata: { cwd?: string; startedAt?: number; command?: string } = {};
       try {
         metadata = JSON.parse(readFileSync(join(slot, 'holder.json'), 'utf8'));
@@ -108,7 +184,7 @@ export function heavyStatus(directory: string, slots: number, cwd = process.cwd(
       holders.push({
         slot: index,
         pid,
-        folder,
+        lane: laneOf(folder),
         elapsedMs: Math.max(
           0,
           Date.now() - (typeof metadata.startedAt === 'number' ? metadata.startedAt : statSync(slot).mtimeMs),
@@ -120,8 +196,38 @@ export function heavyStatus(directory: string, slots: number, cwd = process.cwd(
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
     }
   }
-  return { slots, holders, selfHeld: holders.some(holder => holder.selfHeld) };
+  const queue = readQueue(directory, { deep: true }).map((ticket, index) => ({
+    position: index + 1,
+    pid: ticket.pid,
+    lane: laneOf(ticket.cwd),
+    command: ticket.command,
+    waitedMs: Math.max(0, Date.now() - ticket.queuedAt),
+    self: ticket.pid === process.pid,
+  }));
+  const holds = readHolds(directory);
+  const medianMs = holds.length ? holds.slice().sort((a, b) => a - b)[Math.floor(holds.length / 2)]! : null;
+  return { slots, holders, queue, medianHoldMs: medianMs, selfHeld: holders.some(holder => holder.selfHeld) };
 }
+const minutes = (ms: number) =>
+  ms >= 90_000 ? `${Math.round(ms / 60_000)} min` : `${Math.max(1, Math.round(ms / 1000))} s`;
+const waitingMessage = (slots: number, directory: string, wait: HeavyWait) => {
+  const { holders } = heavyStatus(directory, slots);
+  const who = holders
+    .map(holder =>
+      `${holder.lane ? `Lane ${holder.lane.slice(0, 8)}` : 'pid ' + holder.pid} ${holder.command ?? ''} ${minutes(holder.elapsedMs)}`.replace(
+        / +/g,
+        ' ',
+      ),
+    )
+    .join('; ');
+  return (
+    `heavy: waiting for one of ${slots} machine-wide slots, first come, first served. Queue position ${wait.position} of ${wait.waiting}` +
+    (wait.estimateMs === null
+      ? '; no estimate yet (needs a few finished heavy commands on this machine)'
+      : `; estimated wait about ${minutes(wait.estimateMs)} (median heavy command ${minutes(wait.medianMs ?? 0)}, last ${wait.samples})`) +
+    `. Running: ${who || 'none seen'}. Run nforge heavy --status for the queue.\n`
+  );
+};
 
 /** nforge heavy CMD [ARGS...]: run one heavy local command under the machine-wide slot limit. */
 export async function heavyCli(
@@ -154,11 +260,13 @@ export async function heavyCli(
   const slot =
     slots === 0
       ? null
-      : await acquireHeavySlot(heavySlotDirectory(), slots, () =>
-          process.stderr.write(
-            `heavy: all ${slots} local slots busy; waiting. ${JSON.stringify(heavyStatus(heavySlotDirectory(), slots))} Run nforge heavy --status to inspect holders.\n`,
-          ),
+      : await acquireHeavySlot(
+          heavySlotDirectory(),
+          slots,
+          wait => process.stderr.write(waitingMessage(slots, heavySlotDirectory(), wait)),
+          { command: args[0]!, cwd: process.cwd() },
         );
+  const heldSince = Date.now();
   const release = () => {
     if (slot) rmSync(slot, { recursive: true, force: true });
   };
@@ -185,5 +293,6 @@ export async function heavyCli(
   } finally {
     release();
     process.removeListener('exit', release);
+    if (slot) recordHold(heavySlotDirectory(), Date.now() - heldSince);
   }
 }

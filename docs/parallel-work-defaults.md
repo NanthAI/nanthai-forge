@@ -78,10 +78,19 @@ Read: `nforge settings`; set: `nforge settings KEY VALUE`; reset:
 
 - `nforge heavy CMD [ARGS...]` runs one heavy local command (build, typecheck, lint, tests). It
   waits for a free slot, which every Lane and agent on the machine shares.
-- A slot whose holder died is reclaimed. While waiting, the command wakes when a slot is released
-  and rechecks dead holders every 30 seconds.
-- The exit code is the command's exit code. The slots live in `/tmp/forge-heavy-slots`;
-  `FORGE_HEAVY_DIR` selects another directory.
+- Slots are granted first come, first served. A caller that finds anyone waiting joins the back of
+  the queue (one small ticket file per waiter); only the caller at the front tries the slots, so a
+  newer short command never overtakes an older waiter. Waiters are woken by every release and
+  re-check every 3 seconds.
+- A waiting caller prints its queue position and, after three finished heavy commands on this
+  machine, an estimate: the median of the last 32 hold times, applied to the earliest slot to free
+  for each waiter ahead. It is a rough guide, not a promise.
+- A slot or ticket whose process died is reclaimed at the next check. Liveness compares the
+  process start time as well as the pid, so a reused pid cannot hold a slot or a place in line.
+- `nforge heavy --status` lists holders and waiters by Lane id, executable name and time; it never
+  prints folders, arguments or environment.
+- The exit code is the command's exit code. The slots, tickets and hold-time history live in
+  `/tmp/forge-heavy-slots`; `FORGE_HEAVY_DIR` selects another directory.
 - Example: `nforge heavy npm run build:core`.
 
 ### shareDependencies

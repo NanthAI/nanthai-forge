@@ -16,7 +16,7 @@ scales with changed paths (unchanged files are trusted through the stat index).
 
 The CLI lists open hosted Lanes in a single bounded page query (`agent ROOT lanes`),
 records project friction without a Lane (`friction-list` pages it with its triage status; `x friction-triage` dismisses or links an Issue), diagnoses unaddressed roots and unavailable
-cwd, and exposes local heavy-command holder status without acquiring a slot.
+cwd, queues local heavy commands first come, first served (waiters see their position and an estimate) and exposes holder and queue status by Lane without acquiring a slot.
 
 What works today, what is partial, and what is missing. Update this page when a capability changes. What we are doing about the gaps is in the [roadmap](roadmap.md).
 
