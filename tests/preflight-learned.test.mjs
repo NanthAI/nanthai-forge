@@ -9,6 +9,7 @@ import {
   learnFailures,
   learnFromLanding,
   learnedTests,
+  recentFailedTests,
   rememberLandingPaths,
 } from '../dist/preflight-learned.js';
 import { preflightPlan } from '../dist/agent-preflight.js';
@@ -104,4 +105,29 @@ test('a corrupt record is ignored, never fatal', t => {
   assert.deepEqual(learnedTests(root, ['src/a.ts']), []);
   learnFailures(root, ['src/a.ts'], ['tests/a.test.mjs']);
   assert.deepEqual(learnedTests(root, ['src/a.ts']), ['tests/a.test.mjs']);
+});
+
+test('a failure under one path is recent for every other path, for 14 days; the plan names each tier', t => {
+  const { root, files } = lane(t, {
+    'src/b.ts': 'export const m = 1;',
+    'tests/b.test.mjs': "import '../src/b.ts';",
+    'src/a.ts': "import './b.ts'; export const n = 1;",
+    'tests/barriers.test.mjs': "import '../src/a.ts';",
+  });
+  const day = 24 * 60 * 60 * 1000,
+    now = Date.now();
+  learnFailures(root, ['src/a.ts'], ['tests/barriers.test.mjs'], now - 20 * day);
+  assert.deepEqual(recentFailedTests(root, now), [], '20 days is outside the 14-day window');
+  learnFailures(root, ['src/a.ts'], ['tests/barriers.test.mjs'], now - 2 * day);
+  assert.deepEqual(learnedTests(root, ['src/b.ts']), [], 'not learned for the other path');
+  assert.deepEqual(recentFailedTests(root, now), ['tests/barriers.test.mjs']);
+  const plan = preflightPlan(root, { paths: ['src/b.ts'], complete: true }, { laneId, files });
+  assert.equal(plan.status, 'planned');
+  assert.deepEqual(
+    plan.local.tiers.find(item => item.tier === 'recent'),
+    { tier: 'recent', total: 1, local: 1 },
+  );
+  assert.deepEqual(plan.local.tierTests.recent, ['tests/barriers.test.mjs']);
+  assert.ok(plan.local.tierTests.direct.includes('tests/b.test.mjs'));
+  assert.ok(plan.tests.includes('tests/barriers.test.mjs'));
 });

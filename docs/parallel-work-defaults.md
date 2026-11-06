@@ -161,8 +161,8 @@ frozen set on 2026-11-06 broke capabilities across CLI/server versions with `HOS
   never guessed, because it may be a full verification. A check over its 120 s timeout is reported
   `timed-out`, not passed: the landing check still runs it.
 - `nforge agent ROOT preflight '{"laneId":"…"}'` always runs changed tests, explicit coverage
-  and smoke; then *learned* tests; then *direct* tests; then direct consumers of hub modules
-  (`wide`); then tests that watch a distinctive name in a changed source (any import distance);
+  and smoke; then *learned* tests; then *direct* tests; then *recent* failers; then direct consumers
+  of hub modules (`wide`); then tests that watch a distinctive name in a changed source (any import distance);
   then distance-2 consumers, nearest first. There is no file count. Mandatory, learned and direct
   tests are protected: the time budget never trims them and the run never stops them for time
   (`local.protected`; `protectedOverBudget` says when they alone exceed it).
@@ -177,7 +177,11 @@ frozen set on 2026-11-06 broke capabilities across CLI/server versions with `HOS
   test file, from the `CHECK_FAILED` response `land --save` or `wait` already holds (the finish gate
   remembers the landing's changed paths) and from failed preflight files. Learned tests run even
   where the import graph does not reach them; entries expire after 30 days, the record is bounded
-  and never uploaded, and no server call is added. A *name watcher* shares a rare path-like name with the change, such as a mkdtemp
+  and never uploaded, and no server call is added. A *recent* failer is a consumer of this change
+  that failed in a landing check within 14 days under other paths (2026-11-06: two read-budget tests
+  failed for the completion-tick change, and a sibling file of the same modules would have missed the
+  learned record). It is ranked before `wide` and trimmed by time like it, never protected, so a
+  flaky failer cannot grow the protected set. `local.tierTests` names the local tests of each tier. A *name watcher* shares a rare path-like name with the change, such as a mkdtemp
   prefix the module creates and a test that hooks `fs.open` on paths matching it; an import graph
   cannot see that link (2026-11-05: `hosted-checkout-barriers` was four edges away). A name counts
   only when at most 1% of the project's tests match it, and watchers rank by how rare their names

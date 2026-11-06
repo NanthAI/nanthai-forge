@@ -78,6 +78,17 @@ export function learnedTests(root: string, paths: string[], now = Date.now()): s
   return [...tests].sort();
 }
 
+/** Tests that failed in a landing check under any changed path within `windowMs`. A sibling file of
+ * the same module family fails the same guards, so the next change near it ranks these first (the
+ * selector keeps only those that consume the change, and the time budget still trims them). */
+const RECENT_MS = 14 * 24 * 60 * 60 * 1000;
+export function recentFailedTests(root: string, now = Date.now(), windowMs = RECENT_MS): string[] {
+  const tests = new Set<string>();
+  for (const failures of Object.values(read(root).learned))
+    for (const [test, at] of Object.entries(failures)) if (now - at <= windowMs) tests.add(test);
+  return [...tests].sort();
+}
+
 /** Remembers the changed paths of the landing a Lane is submitting (finish gates already read
  * them), so a later check failure for that Lane, seen by land or wait, can be learned. */
 export function rememberLandingPaths(root: string, laneId: string, paths: string[], now = Date.now()) {

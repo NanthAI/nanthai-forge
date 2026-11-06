@@ -240,6 +240,49 @@ test('learned tests run locally and protected, even where the import graph does 
   const fit = fitPreflightBudget({ tiers: plan.tiers, budgetSeconds: 1, secondsPerFile: 4 });
   assert.ok(fit.tests.includes('tests/watches-paths.test.mjs'));
 });
+test('a hub consumer that failed a landing check lately under other paths runs before the rest of wide (0d403d25)', () => {
+  const files = new Map([
+    ['package.json', '{"scripts":{}}'],
+    ['src/hub.ts', 'export {};'],
+    ['tests/shared.test.mjs', "import '../dist/hub.js';"],
+  ]);
+  for (let i = 0; i < 30; i++)
+    files.set(`tests/t-${String(i).padStart(2, '0')}.test.mjs`, "import '../dist/hub.js';");
+  const hubBudget = { seconds: 40, secondsFor: () => 4 };
+  const input = { files, paths: ['src/hub.ts'], hubBudget };
+  const plain = partition(files, ['src/hub.ts'], hubBudget);
+  const last = 'tests/t-29.test.mjs';
+  assert.equal(plain.tiers.find(item => item.tier === 'wide').tests.at(-1), last);
+  const plan = selectPreflightTests({
+    ...input,
+    // Unreached by this change (not a consumer) and missing files never join; the consumer does.
+    recent: [last, 'tests/unrelated.test.mjs', 'tests/gone.test.mjs'],
+  });
+  assert.deepEqual(plan.tiers.find(item => item.tier === 'recent').tests, [last]);
+  assert.ok(!plan.tiers.find(item => item.tier === 'wide').tests.includes(last));
+  assert.deepEqual(
+    plan.tiers.map(item => item.tier),
+    ['mandatory', 'learned', 'direct', 'recent', 'wide', 'watch', 'near'],
+  );
+  // Unprotected: a budget trims it, but only after the protected tiers and before wide.
+  assert.ok(!protectedTiers.has('recent'));
+  const fit = fitPreflightBudget({
+    tiers: plan.tiers,
+    budgetSeconds: 8,
+    secondsPerFile: 4,
+    secondsFor: () => 4,
+  });
+  assert.equal(
+    fit.tests.indexOf(last) < fit.tests.indexOf('tests/t-00.test.mjs') ||
+      !fit.tests.includes('tests/t-00.test.mjs'),
+    true,
+  );
+  assert.ok(fit.tests.includes(last));
+  // A test learned for this very path stays learned, not recent.
+  const both = selectPreflightTests({ ...input, learned: [last], recent: [last] });
+  assert.deepEqual(both.tiers.find(item => item.tier === 'learned').tests, [last]);
+  assert.deepEqual(both.tiers.find(item => item.tier === 'recent').tests, []);
+});
 test('no hardcoded local file count remains in the selector or the preflight planner', () => {
   for (const file of ['../scripts/test-impact.mjs', '../src/agent-preflight.ts'])
     assert.doesNotMatch(

@@ -43,7 +43,7 @@ export function selectTests(
   graphCache?: object,
 ): TestSelection;
 export type PreflightTier = {
-  tier: 'mandatory' | 'learned' | 'direct' | 'wide' | 'watch' | 'near';
+  tier: 'mandatory' | 'learned' | 'direct' | 'recent' | 'wide' | 'watch' | 'near';
   tests: string[];
 };
 export const preflightTierRule: string;
@@ -55,6 +55,9 @@ export function selectPreflightTests(
     paths: string[];
     /** Tests that failed for one of these paths in an earlier landing check or preflight. */
     learned?: string[];
+    /** Tests that failed in a landing check lately under other paths; consumers of this change
+     * among them are ranked before `wide` and trimmed by time like it (`recent`). */
+    recent?: string[];
     /** Protect direct tests module by module, most specific first, while their cost fits; the
      * rest are broad modules whose consumers are ranked (`wide`). Absent: all are protected. */
     hubBudget?: { seconds: number; secondsFor: (test: string) => number };

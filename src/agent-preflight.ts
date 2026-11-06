@@ -23,7 +23,7 @@ import {
   selectPreflightTests,
   selectionSourcePath,
 } from '../scripts/test-impact.mjs';
-import { learnFailures, learnedTests } from './preflight-learned.js';
+import { learnFailures, learnedTests, recentFailedTests } from './preflight-learned.js';
 import { spawnMeasured } from './agent-preflight-measure.js';
 import {
   runStaticChecks,
@@ -130,6 +130,9 @@ export type LocalSelection = {
   estimateSeconds: number;
   /** Per local tier: how many of its tests run here. Reused passes count as run. */
   tiers: { tier: string; total: number; local: number }[];
+  /** Which tier each local test belongs to, so a builder sees the direct consumers and the tests
+   * that failed for these paths before without guessing from one flat list (friction 0d403d25). */
+  tierTests: Record<string, string[]>;
   trimmed: { tier: string; kept: number; total: number }[];
   mandatoryOverBudget: boolean;
   /** Protected tiers (mandatory, learned, direct) alone exceed the budget; they still all run. */
@@ -367,6 +370,7 @@ export function preflightPlan(
       files,
       paths: changed.paths,
       learned: learnedTests(root, changed.paths),
+      recent: recentFailedTests(root),
       // Direct tests of the most specific changed modules are protected while they fit the budget.
       ...(trim ? { hubBudget: { seconds: budgetSeconds, secondsFor } } : {}),
     });
@@ -550,6 +554,11 @@ function localSelection(input: {
     total: item.tests.length,
     local: item.tests.filter(test => input.kept.has(test)).length,
   }));
+  const tierTests = Object.fromEntries(
+    input.selection.tiers
+      .map(item => [item.tier, item.tests.filter(test => input.kept.has(test))] as const)
+      .filter(([, tests]) => tests.length),
+  );
   const trimmed = fit.trimmed.map(({ tier, kept, total }) => ({
     tier,
     kept,
@@ -575,6 +584,7 @@ function localSelection(input: {
     basis: timing.basis,
     estimateSeconds: fit.estimateSeconds,
     tiers,
+    tierTests,
     trimmed,
     mandatoryOverBudget: fit.mandatoryOverBudget,
     ...(fit.protectedOverBudget ? { protectedOverBudget: true } : {}),
