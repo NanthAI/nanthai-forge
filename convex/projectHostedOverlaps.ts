@@ -24,7 +24,8 @@ export const read = query({
     items: v.optional(v.number()),
     /** Presence (capability presenceVersion): related open Lanes. `since` is the previous reply's `at`. */
     presence: v.optional(v.object({ since: v.optional(v.number()) })),
-    /** Board notes newer than the client's local cursor (ms); members with write access only. */
+    /** Board notes newer than the client's local cursor (ms); members with write access only.
+     * With `path` (first-write hook) the field also lists claims on that path. */
     board: v.optional(v.object({ after: v.number() })),
   },
   returns: v.string(),
@@ -217,6 +218,8 @@ export const read = query({
             laneId,
             intentId: lane.intentId,
             after: boardCursor.after,
+            // The first-write hook names its path: claims on it ride on the same read.
+            ...(path ? { path } : {}),
           })
         : undefined;
       const boardField = board ? { board } : {};

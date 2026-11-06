@@ -27,6 +27,7 @@ import { withSourceRecovery } from './hosted-agent-source-recovery.js';
 import { readHostedOverlapAdvice, recordHostedOverlapDelivery } from './hosted-overlap-client.js';
 import { presenceDelivery, presenceSince, type PresenceDelivery } from './hosted-presence-client.js';
 import { boardEnvelope, boardHostedSource, hostedBoardSchemas, readBoardCursor } from './hosted-board.js';
+import { rememberBoardServerFeatures } from './board-local.js';
 import { hostedOverlapNotice, type HostedOverlapNotice } from './hosted-overlap-notice.js';
 import { waitHostedAgentSource } from './hosted-agent-source-wait.js';
 import { recoverHostedFinish, hostedConflictAdvice } from './hosted-agent-resolution.js';
@@ -184,13 +185,13 @@ export type HostedAgentResponse = {
 export class HostedAgentTransport {
   private priorityReads: boolean | undefined;
   private defaults: EffectiveAgentDefaults | undefined;
-  /** The server advertised boardVersion:1: Lane actions ask the overlap read for new board notes. */
+  /** The server advertised feature agent-board: Lane actions ask the overlap read for new board notes. */
   private boardVersion = false;
   /** Effective project agent defaults from the latest capability read (undefined on older servers). */
   get agentDefaults() {
     return this.defaults;
   }
-  /** This dispatch asks the overlap read for presence (start/save/sync/compose/finish, presenceVersion). */
+  /** This dispatch asks the overlap read for presence (start/save/sync/compose/finish, feature agent-presence). */
   private presenceAction = false;
   private cachedAdvice:
     | {
@@ -525,8 +526,6 @@ export class HostedAgentTransport {
           defaultsVersion: 1,
           landingMessageVersion: 1,
           openLanesVersion: 1,
-          presenceVersion: 1,
-          boardVersion: 1,
         };
         for (;;) {
           try {
@@ -569,10 +568,14 @@ export class HostedAgentTransport {
         knownCapabilities(hostedAgentRoot(this.root), discovery),
       );
       this.callerActor = capabilities.actor;
-      this.presenceAction =
-        capabilities.presenceVersion === 1 && ['start', 'save', 'sync', 'compose', 'finish'].includes(action);
       this.serverFeatures = capabilities.features ?? [];
-      this.boardVersion = capabilities.boardVersion === 1;
+      // Named features (a83b6fd5); presenceVersion/boardVersion are still accepted from older CLIs.
+      this.presenceAction =
+        this.serverFeatures.includes('agent-presence') &&
+        ['start', 'save', 'sync', 'compose', 'finish'].includes(action);
+      this.boardVersion = this.serverFeatures.includes('agent-board');
+      // The first-write hook reads this marker instead of a capability call (written on change only).
+      rememberBoardServerFeatures(this.address.projectId, this.serverFeatures);
       this.receiptActor = capabilities.metricReceiptVersion === 1 ? capabilities.actor : undefined;
       metricRequesterActor({ kind: 'agent', name: capabilities.actor });
       invariant(
@@ -1117,8 +1120,17 @@ export class HostedAgentTransport {
     const laneId = previous?.values['started-lane'];
     if (previous && session === undefined)
       return typeof laneId === 'string'
-        ? { laneId, state: readLaneEntry(laneId)?.state ?? 'unknown', unscoped: true }
-        : { laneId: null, operationId: previous.operationId, state: 'unknown', unscoped: true };
+        ? {
+            laneId,
+            state: readLaneEntry(laneId)?.state ?? 'unknown',
+            unscoped: true,
+          }
+        : {
+            laneId: null,
+            operationId: previous.operationId,
+            state: 'unknown',
+            unscoped: true,
+          };
     if (typeof laneId !== 'string') return null;
     const local = readLaneEntry(laneId)?.state;
     if (local) return { laneId, state: local, unscoped: false };

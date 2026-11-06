@@ -29,11 +29,18 @@ export interface HostedRunSubscription {
 export function hostedRunSubscription(address: HostedAgentAddress): HostedRunSubscription {
   const token = resolveAuthToken(address.url, process.env.FORGE_AUTH_TOKEN);
   invariant(token, 'AUTH_REQUIRED', 'Run nforge login or supply your current Forge sign-in token.');
-  const client = deadlineConvexSubscription(address.url, { logger: false, unsavedChangesWarning: false });
+  const client = deadlineConvexSubscription(address.url, {
+    logger: false,
+    unsavedChangesWarning: false,
+  });
   client.setAuth(async () => token);
   return client;
 }
-const runSchema = z.object({ id: z.uuid(), projectId: z.string(), status: hostedCheckStatusSchema });
+const runSchema = z.object({
+  id: z.uuid(),
+  projectId: z.string(),
+  status: hostedCheckStatusSchema,
+});
 /** Only an explicit active wait creates a live client. No polling, hydration or worker wake. */
 export async function observeHostedRun(
   transport: HostedAgentTransport,
@@ -73,7 +80,10 @@ export async function observeHostedRun(
     });
     return {
       ...response,
-      result: { ...response.result, ...(response.result.status === 'timeout' ? { inProgress: true } : {}) },
+      result: {
+        ...response.result,
+        ...(response.result.status === 'timeout' ? { inProgress: true } : {}),
+      },
     };
   } finally {
     active = false;
@@ -164,5 +174,10 @@ export const hostedWaitSchema = z
     cursor: z.string().nullable().optional(),
     until: z.enum(['terminal', 'any-change', 'acceptance']).optional(),
     timeoutSeconds: z.number().nonnegative().finite().optional(),
+    /** Wait for a peer Lane (full id or 8+ character prefix) to land or close, or to post to you. */
+    peer: z
+      .string()
+      .regex(/^[0-9a-fA-F]{8}[0-9a-fA-F-]{0,28}$/, 'a Lane id or 8+ character prefix')
+      .optional(),
   })
   .strict();

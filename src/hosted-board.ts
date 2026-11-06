@@ -1,33 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
-import { dirname, join } from 'node:path';
 import { z } from 'zod';
-import { clientCacheRoot } from './root-paths.js';
 import { readHostedLaneCheckout } from './hosted-lane-checkout-marker.js';
-import { assertBoardPaths, assertBoardText, renderBoardNotice, type BoardMessageView } from './board-text.js';
+import { assertBoardPaths, assertBoardText } from './board-text.js';
+import { boardNoticeLine, readBoardCursor, writeBoardCursor } from './board-local.js';
 import { ForgeError, invariant } from './errors.js';
 import type { HostedAgentTransport } from './hosted-agent-transport.js';
 
-/** Read state stays on this machine: `ROOT.forge-client/board/<laneId>.json` holds the time of the
- * last delivered note. Delivery never writes to Forge; two machines on one Lane may each see a note. */
-const cursorFile = (root: string, laneId: string) => join(clientCacheRoot(root), 'board', `${laneId}.json`);
-export function readBoardCursor(root: string, laneId: string): number {
-  try {
-    const value = JSON.parse(readFileSync(cursorFile(root, laneId), 'utf8')) as { after?: unknown };
-    return typeof value.after === 'number' && Number.isFinite(value.after) ? value.after : 0;
-  } catch {
-    return 0;
-  }
-}
-export function writeBoardCursor(root: string, laneId: string, after: number) {
-  if (after <= readBoardCursor(root, laneId)) return;
-  const file = cursorFile(root, laneId);
-  mkdirSync(dirname(file), { recursive: true });
-  const temporary = `${file}.${process.pid}.${randomUUID()}.tmp`;
-  writeFileSync(temporary, JSON.stringify({ after }));
-  renameSync(temporary, file);
-}
+// Local read state and notice lines live in the light board-local module (first-write hook).
+export { readBoardCursor, writeBoardCursor, boardEnvelope } from './board-local.js';
 
 export const boardMessageSchema = z.looseObject({
   id: z.string(),
@@ -44,27 +25,6 @@ export const boardDeliverySchema = z.object({
   more: z.number(),
   cursor: z.number(),
 });
-const view = (message: z.infer<typeof boardMessageSchema>): BoardMessageView => ({
-  id: message.id,
-  ...(message.author ? { author: message.author } : {}),
-  ...(message.fromLaneId ? { fromLaneId: message.fromLaneId } : {}),
-  to: message.target,
-  text: message.text,
-  ...(message.replyTo ? { replyTo: message.replyTo } : {}),
-  at: message.at,
-});
-
-/** Envelope field for a Lane action: one line per note (≤240 chars each, ≤2 per reply). Writes the
- * local cursor, so the same notes are not shown again on this machine. */
-export function boardEnvelope(root: string, laneId: string, delivered: z.infer<typeof boardDeliverySchema>) {
-  writeBoardCursor(root, laneId, delivered.cursor);
-  const notices = delivered.messages.map(message => renderBoardNotice(view(message), laneId));
-  return {
-    notices: delivered.more ? [...notices, `${delivered.more}+ more: board '{}'`] : notices,
-    more: delivered.more,
-  };
-}
-
 const ref = z.string().regex(/^[0-9a-fA-F][0-9a-fA-F-]{7,35}$/, 'an id or 8+ character prefix');
 export const hostedBoardReadSchema = z
   .object({
@@ -137,7 +97,7 @@ export async function boardHostedSource(
     return {
       ...result,
       notices: [...messages, ...(Array.isArray(result.replies) ? result.replies : [])].map(message =>
-        renderBoardNotice(view(boardMessageSchema.parse(message)), laneId),
+        boardNoticeLine(boardMessageSchema.parse(message), laneId),
       ),
     };
   }

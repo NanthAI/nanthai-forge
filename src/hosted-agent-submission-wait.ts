@@ -15,6 +15,7 @@ import { hostedRunSubscription, type HostedRunSubscription } from './hosted-agen
 import type { HostedAgentTransport } from './hosted-agent-transport.js';
 import { landingRedriver } from './hosted-landing-redrive.js';
 import { rememberLandedOperations } from './landed-operations.js';
+import { boardWaker, type BoardDelivery, type BoardWaitOption } from './hosted-board-wait.js';
 
 export const hostedSubmissionWaitSchema = z
   .object({
@@ -59,6 +60,8 @@ export async function observeHostedSubmissions(
   signal?: AbortSignal,
   emit: (value: unknown) => void = () => {},
   subscribe: () => HostedRunSubscription = () => hostedRunSubscription(transport.address),
+  /** Wait delivery: the caller's own Lane. A note to it ends the wait early (status "message"). */
+  board?: BoardWaitOption,
 ) {
   const command = hostedSubmissionWaitSchema.parse(input);
   const current = new Map<string, z.infer<typeof eventSchema>>();
@@ -127,6 +130,7 @@ export async function observeHostedSubmissions(
           },
           subscribe,
           current,
+          board,
         ),
     });
     const entry = response.result.submissions.length === 1 ? response.result.submissions[0] : undefined;
@@ -136,7 +140,7 @@ export async function observeHostedSubmissions(
         ...response.result,
         ...(entry?.recovery ? { recovery: entry.recovery } : {}),
         ...(entry?.conflict ? { conflict: entry.conflict } : {}),
-        ...(response.result.status === 'timeout' ? { inProgress: true } : {}),
+        ...(['timeout', 'message'].includes(response.result.status) ? { inProgress: true } : {}),
       },
     };
   } finally {
@@ -150,6 +154,7 @@ async function observeHostedSubmissionsOnce(
   emit: (value: unknown) => void,
   subscribe: () => HostedRunSubscription,
   previous: ReadonlyMap<string, z.infer<typeof eventSchema>>,
+  board?: BoardWaitOption,
 ) {
   const command = hostedSubmissionWaitSchema.parse(input);
   const operations = [...new Set(command.operationIds)];
@@ -159,6 +164,9 @@ async function observeHostedSubmissionsOnce(
       'EXCHANGE_REQUEST_FAILED',
       'Observation is unavailable; retain the original selection.',
     );
+  // The board rides on the first operation's existing subscription, only on servers that say so.
+  const features = (discovery.result as { features?: unknown }).features;
+  const boardWait = board && Array.isArray(features) && features.includes('board-wait') ? board : undefined;
   const actor = z.object({ actor: z.string() }).parse(discovery.result).actor;
   const cursor = new HostedSubmissionWaitCursor(transport.address, actor, operations, command.cursor);
   const canonicalOperations = new Map<string, string>();
@@ -302,7 +310,12 @@ async function observeHostedSubmissionsOnce(
       if (stopped || signal.aborted) return;
       const nextVersion = cursor.versions.get(operationId) ?? 0;
       const page = pageSchema.parse(
-        decode(await transport.query('projectHostedFinishObserve:page', { operationId, nextVersion })),
+        decode(
+          await transport.query('projectHostedFinishObserve:page', {
+            operationId,
+            nextVersion,
+          }),
+        ),
       );
       invariant(
         page.projectId === transport.address.projectId &&
@@ -379,14 +392,21 @@ async function observeHostedSubmissionsOnce(
       );
     }
   };
-  const result = (status: 'terminal' | 'changed' | 'timeout' | 'cancelled') => {
+  const result = (
+    status: 'terminal' | 'changed' | 'timeout' | 'cancelled' | 'message',
+    delivery?: BoardDelivery,
+  ) => {
     const successful =
       terminal() && [...current.values()].every(e => e.submission.observation.state === 'landed');
     // A landed operation is the canary's waitable read (edcb0fc8): one local write, no call.
     if (successful) rememberLandedOperations(transport.address.projectId, operations);
-    return resultOf(status, successful);
+    return resultOf(status, successful, delivery);
   };
-  const resultOf = (status: 'terminal' | 'changed' | 'timeout' | 'cancelled', successful: boolean) => ({
+  const resultOf = (
+    status: 'terminal' | 'changed' | 'timeout' | 'cancelled' | 'message',
+    successful: boolean,
+    delivery?: BoardDelivery,
+  ) => ({
     ...discovery,
     action: 'observe' as const,
     result: {
@@ -395,8 +415,10 @@ async function observeHostedSubmissionsOnce(
       submissions: [...current.values()],
       resnapshot,
       cursor: cursor.encode() as string | null,
+      ...(delivery ? { board: delivery } : {}),
     },
   });
+  let waker: ReturnType<typeof boardWaker> | undefined;
   let stop: (() => void) | undefined;
   try {
     for (const operation of operations) await drain(operation);
@@ -429,7 +451,21 @@ async function observeHostedSubmissionsOnce(
         stop();
         return;
       }
-      for (const operationId of operations) {
+      if (boardWait) waker = boardWaker(boardWait, delivery => resolve(result('message', delivery)));
+      // Board-only changes of the page value (a note arrived) wake the waker, never a page drain.
+      let pageKey: string | undefined;
+      const update = (value: unknown) => {
+        const decoded = waker ? decode(value) : undefined;
+        if (waker && decoded && typeof decoded === 'object') {
+          const { board: note, ...page } = decoded as { board?: unknown };
+          waker.offer({ board: note });
+          const key = JSON.stringify(page);
+          if (key === pageKey) return;
+          pageKey = key;
+        }
+        refresh();
+      };
+      for (const [index, operationId] of operations.entries()) {
         unsubscribes.push(
           client!.onUpdate(
             makeFunctionReference<'query'>('projectHostedFinishObserve:page'),
@@ -437,8 +473,13 @@ async function observeHostedSubmissionsOnce(
               projectId: transport.address.projectId,
               operationId,
               nextVersion: cursor.versions.get(operationId) ?? 0,
+              ...(boardWait && index === 0
+                ? {
+                    board: { laneId: boardWait.laneId, after: boardWait.after },
+                  }
+                : {}),
             },
-            () => refresh(),
+            boardWait && index === 0 ? update : () => refresh(),
             error => reject(hostedActionError(error, 'submission observation')),
           ),
         );
@@ -451,6 +492,7 @@ async function observeHostedSubmissionsOnce(
     throw hostedActionError(error, 'submission observation');
   } finally {
     stopped = true;
+    waker?.stop();
     if (stop) signal?.removeEventListener('abort', stop);
     try {
       for (const unsubscribe of unsubscribes) unsubscribe();

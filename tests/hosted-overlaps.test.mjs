@@ -261,7 +261,8 @@ test('two separate checkout roots save the same file; second response reports pe
   assert.equal(notice.participants.find(p => p.lane === lane.id).intent, 'My change');
   // Presence (9c8490a4) rides on the same overlap read: the shared file and similar goal name the
   // first Lane once, as one bounded line; a status read asks for none.
-  assert(discovery.every(args => args.presenceVersion === 1));
+  // Named contract feature (a83b6fd5): the CLI no longer sends presenceVersion.
+  assert(discovery.every(args => args.features.includes('agent-presence') && !('presenceVersion' in args)));
   assert.equal(response.presence.notices.length, 1);
   assert.match(response.presence.notices[0], new RegExp(`Lane ${lane.id.slice(0, 8)}`));
   assert(response.presence.notices[0].length <= 240);

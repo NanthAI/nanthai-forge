@@ -315,6 +315,11 @@ test('capabilities: presenceVersion is echoed only when asked; older CLIs get th
     s.transaction('caps', capabilities.capabilities, { projectId: s.projectId, ...args }).then(JSON.parse);
   assert.equal((await ask({ presenceVersion: 1 })).presenceVersion, 1);
   assert.equal('presenceVersion' in (await ask({})), false);
+  // Current CLIs ask by named feature (a83b6fd5); the server answers with the board features it has.
+  assert.deepEqual(
+    (await ask({ features: ['agent-presence', 'agent-board', 'board-wait', 'not-yet'] })).features,
+    ['agent-presence', 'agent-board', 'board-wait'],
+  );
 });
 
 test('cost: presence adds no read to a Lane record write and skips unchanged rewrites', async () => {

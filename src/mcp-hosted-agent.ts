@@ -24,6 +24,8 @@ import { hostedAgentCli } from './hosted-agent-cli.js';
 import type { HostedAgentTransport } from './hosted-agent-transport.js';
 import { observeHostedRun, hostedWaitSchema, type HostedRunSubscription } from './hosted-agent-observe.js';
 import { observeHostedSubmissions } from './hosted-agent-submission-wait.js';
+import { boardWaitOption, boardWakeEnvelope, observePeerLane } from './hosted-board-wait.js';
+import { readHostedLaneCheckout } from './hosted-lane-checkout-marker.js';
 import { ForgeError, invariant } from './errors.js';
 import { hostedActionError } from './hosted-action-error.js';
 import { AGENT_WAIT_SECONDS, operationWait } from './agent-operation-wait.js';
@@ -250,13 +252,70 @@ export function registerHostedAgentWorkflow(
       let progress = 0;
       try {
         invariant(
-          Boolean(input.runId) !== Boolean(input.operationIds?.length),
+          input.peer
+            ? !input.runId && !input.operationIds?.length
+            : Boolean(input.runId) !== Boolean(input.operationIds?.length),
           'BAD_ARGUMENT',
-          'Choose one run or hosted landing operationIds.',
+          input.peer
+            ? 'Wait for a peer Lane in its own call, without runId or operationIds.'
+            : 'Choose one run or hosted landing operationIds.',
         );
         const response = await result(async () => {
           const budgetSeconds =
             maxWaitMs !== undefined ? maxWaitMs / 1000 : (input.timeoutSeconds ?? AGENT_WAIT_SECONDS);
+          // Wait delivery: a note to this root's own Lane ends a landing or peer wait early.
+          let board: ReturnType<typeof boardWaitOption>;
+          try {
+            board = input.runId
+              ? undefined
+              : boardWaitOption(transport.root, readHostedLaneCheckout(transport.root)?.selection.laneId);
+          } catch {
+            board = undefined;
+          }
+          const delivered = async (delivery: Parameters<typeof boardWakeEnvelope>[2]) => {
+            const envelope = boardWakeEnvelope(transport.root, board!.laneId, delivery);
+            if (typeof server.sendLoggingMessage === 'function')
+              await server
+                .sendLoggingMessage({ level: 'notice', logger: 'forge-board', data: envelope.notices })
+                .catch(() => {});
+            return envelope;
+          };
+          const resumeOf = () => {
+            const { next, command, waitCommand, inProgress } = operationWait(transport.root, {
+              ...input,
+              ...transport.address,
+            });
+            return { next, command, waitCommand, inProgress };
+          };
+          if (input.peer) {
+            const outcome = await observePeerLane(
+              transport,
+              { peer: input.peer, timeoutSeconds: budgetSeconds },
+              board,
+              controller.signal,
+              subscribe,
+            );
+            return {
+              schema: 1 as const,
+              transport: 'hosted' as const,
+              action: 'observe' as const,
+              operationId: null,
+              resolved: null,
+              result:
+                outcome.status === 'terminal'
+                  ? { status: 'terminal', reason: 'peer', peer: outcome.peer }
+                  : {
+                      status: 'IN_PROGRESS',
+                      reason: outcome.status === 'timeout' ? 'budget' : outcome.status,
+                      budgetSeconds,
+                      peer: outcome.peer,
+                      ...(outcome.status === 'message' && board
+                        ? { board: await delivered(outcome.board) }
+                        : {}),
+                      ...resumeOf(),
+                    },
+            };
+          }
           const observed = await (input.runId ? observeHostedRun : observeHostedSubmissions)(
             transport,
             { ...input, timeoutSeconds: budgetSeconds },
@@ -276,17 +335,29 @@ export function registerHostedAgentWorkflow(
               }
             },
             subscribe,
+            board,
           );
           const single =
             'submissions' in observed.result && observed.result.submissions.length === 1
               ? observed.result.submissions[0]
               : undefined;
+          if (observed.result.status === 'message' && board && 'board' in observed.result) {
+            const notes = await delivered(observed.result.board as Parameters<typeof boardWakeEnvelope>[2]);
+            return {
+              ...observed,
+              result: {
+                status: 'IN_PROGRESS',
+                reason: 'message',
+                budgetSeconds,
+                phase: (single?.submission as { phase?: string } | undefined)?.phase ?? 'pending',
+                board: notes,
+                ...('cursor' in observed.result ? { cursor: observed.result.cursor } : {}),
+                ...resumeOf(),
+              },
+            };
+          }
           if (['timeout', 'cancelled'].includes(observed.result.status)) {
-            const { next, command, waitCommand, inProgress } = operationWait(transport.root, {
-              ...input,
-              ...transport.address,
-            });
-            const resume = { next, command, waitCommand, inProgress };
+            const resume = resumeOf();
             const run = 'run' in observed.result ? (observed.result.run as { status?: string } | null) : null;
             return {
               ...observed,

@@ -19,6 +19,15 @@ export const hostedContractFeatures = [
   /** A conflict resolution records the caller's conflicted Lane (sync originLaneId) and completes it
    * when the resolution lands (36a087ea). Without it the CLI sends no originLaneId. */
   'resolution-origin',
+  /** The overlap read takes `presence` (Issue 9c8490a4, was presenceVersion:1). Without it the CLI
+   * sends no presence argument. */
+  'agent-presence',
+  /** Board notes: the overlap read takes `board`, and projectBoard:read/post exist (was
+   * boardVersion:1). Without it the CLI sends no board argument. */
+  'agent-board',
+  /** Wait delivery: the landing page subscription takes `board`, projectBoardWait:peer exists, and
+   * the overlap read lists claims on a first-write path. Without it waits carry no board argument. */
+  'board-wait',
 ] as const;
 export type HostedContractFeature = (typeof hostedContractFeatures)[number];
 

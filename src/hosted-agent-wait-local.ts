@@ -19,6 +19,7 @@ import {
   type HostedRunSubscription,
 } from './hosted-agent-observe.js';
 import type { HostedAgentTransport } from './hosted-agent-transport.js';
+import type { BoardWaitOption } from './hosted-board-wait.js';
 
 /** What this client's own records say an operation id is, when the server has no landing for it. */
 export type LocalOperation =
@@ -47,7 +48,9 @@ export function localOperation(root: string, operationId: string): LocalOperatio
 
 const progressSchema = z.object({
   terminal: z
-    .object({ outcome: z.object({ status: z.string(), result: z.unknown().optional() }) })
+    .object({
+      outcome: z.object({ status: z.string(), result: z.unknown().optional() }),
+    })
     .nullable()
     .optional(),
 });
@@ -101,7 +104,13 @@ async function observeHostedSave(
   const initial = await read();
   if (initial) return initial;
   const pending = (status: 'timeout' | 'cancelled') =>
-    response({ status, inProgress: true, successful: false, phase: 'save', operationId });
+    response({
+      status,
+      inProgress: true,
+      successful: false,
+      phase: 'save',
+      operationId,
+    });
   if (!timeoutSeconds) return pending('timeout');
   if (signal?.aborted) return pending('cancelled');
   const client = subscribe();
@@ -172,7 +181,11 @@ async function continueFinish(
   // Source still running (not retryable or failed, which carry their own recovery): the same wait resumes it.
   const preparing =
     ['save', 'compose', 'sync'].includes(String(result.phase)) && result.status === 'submitted';
-  return response({ ...result, status: preparing ? 'timeout' : 'terminal', operationId });
+  return response({
+    ...result,
+    status: preparing ? 'timeout' : 'terminal',
+    operationId,
+  });
 }
 
 /** After an operation-id wait fails with NOT_FOUND: the server has no landing for the id. A check-only
@@ -220,13 +233,18 @@ export async function followLocalOperation(
 export async function observeOperations(
   transport: HostedAgentTransport,
   root: string,
-  input: { operationIds: string[]; timeoutSeconds: number; [key: string]: unknown },
+  input: {
+    operationIds: string[];
+    timeoutSeconds: number;
+    [key: string]: unknown;
+  },
   signal?: AbortSignal,
   emit?: (value: unknown) => void,
   subscribe: () => HostedRunSubscription = () => hostedRunSubscription(transport.address),
+  board?: BoardWaitOption,
 ) {
   try {
-    return await observeHostedSubmissions(transport, input, signal, emit, subscribe);
+    return await observeHostedSubmissions(transport, input, signal, emit, subscribe, board);
   } catch (error) {
     const followed = await followLocalOperation(transport, root, input, error, signal, emit, subscribe);
     if (followed) return followed;
