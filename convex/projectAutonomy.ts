@@ -19,6 +19,7 @@ import {
   policyReadView,
   samePolicy,
   type AcceptanceActor,
+  type AutonomyPolicy,
 } from '../src/autonomy-policy';
 import { invariant } from '../src/errors';
 import { acceptancePolicyDigest } from '../src/policy-digest';
@@ -48,6 +49,9 @@ export const read = query({
     }
   },
 });
+/** The receipt shows the policy exactly as the following `policy` read does, agent defaults filled in
+ * (49760b39); the stored policy and its digests keep the stored form. */
+const receiptPolicy = (policy: AutonomyPolicy) => policyReadView(effectivePolicy({ autonomyPolicy: policy }));
 export const set = mutation({
   args: { projectId: v.id('hostedProjects'), command: v.string() },
   returns: v.object({
@@ -90,7 +94,7 @@ export const set = mutation({
         );
         return {
           operationId: command.operationId,
-          policy: original.policy,
+          policy: receiptPolicy(original.policy),
           ...(original.invalidatedLandings === undefined
             ? {}
             : { invalidatedLandings: original.invalidatedLandings }),
@@ -127,7 +131,7 @@ export const set = mutation({
         operationId: command.operationId,
         action: 'set-policy',
       });
-      return { operationId: command.operationId, policy, invalidatedLandings };
+      return { operationId: command.operationId, policy: receiptPolicy(policy), invalidatedLandings };
     } catch (error) {
       return report(error);
     }

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { randomUUID } from 'node:crypto';
+import { ConvexError } from 'convex/values';
 import { z } from 'zod';
 import { readHostedLaneCheckout } from './hosted-lane-checkout-marker.js';
 import { assertBoardPaths, assertBoardText } from './board-text.js';
@@ -10,6 +11,7 @@ import {
   writeBoardCursor,
 } from './board-local.js';
 import { ForgeError, invariant } from './errors.js';
+import { hostedActionError } from './hosted-action-error.js';
 import type { HostedAgentTransport } from './hosted-agent-transport.js';
 
 // Local read state and notice lines live in the light board-local module (first-write hook).
@@ -66,6 +68,10 @@ function unsupported(error: unknown): never {
       'HOSTED_ACTION_UNSUPPORTED',
       'This Forge server has no agent board yet (capability boardVersion). Nothing was posted or read.',
     );
+  // The server's typed refusals (LANE_NOT_ACTIVE, NOT_FOUND, BAD_ARGUMENT, ...) reach the agent
+  // with their code and message, never as INTERNAL_ERROR (fd8dc28e, ce974f90).
+  if (error instanceof ConvexError && error.data && typeof error.data === 'object')
+    throw hostedActionError(error, 'board');
   throw error;
 }
 

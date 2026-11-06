@@ -95,11 +95,20 @@ test('only members with write access post or read; readers, strangers and anonym
     ).messages.length,
     1,
   );
-  // Posting from someone else's or a closed Lane, or to a closed Lane, is refused.
+  // Posting from someone else's Lane, or to a closed Lane, is refused; your own closed Lane
+  // (a queued or accepted landing) can still post and reply (ce974f90).
   await assert.rejects(
     f.post({ to: 'project', text: 'x', laneId: f.lanes.B }, 'writer'),
     code('BAD_ARGUMENT'),
   );
+  const fromClosed = await f.post({ to: 'project', text: 'Landing queued, still here', laneId: f.lanes.C });
+  assert.equal(fromClosed.status, 'posted');
+  const answered = await f.post({
+    replyTo: fromClosed.id,
+    text: 'Answering from a closed Lane',
+    laneId: f.lanes.C,
+  });
+  assert.equal(answered.status, 'posted');
   await assert.rejects(f.post({ to: `lane:${f.lanes.C}`, text: 'x' }), code('LANE_NOT_ACTIVE'));
   await assert.rejects(f.post({ to: `lane:${randomUUID()}`, text: 'x' }), code('NOT_FOUND'));
   await assert.rejects(f.post({ text: 'x' }), code('BAD_ARGUMENT'), 'to or replyTo is required');

@@ -5,6 +5,7 @@ import { resolve } from 'node:path';
 import { hostedAgentHelp } from './hosted-agent-help.js';
 import { callerOverlaps } from './agent-caller-overlaps.js';
 import { hostedAgentAddress, hostedAgentCli } from './hosted-agent-cli.js';
+import { canonicalOperationIds } from './operation-id-case.js';
 import { agentWaitCli } from './agent-wait.js';
 import { canonicalCandidateAction, noticeViewAlias } from './candidate-names.js';
 import { aliasNotice, landSaveCommand, lowerVerb, newForm, parseVerbForm } from './agent-verbs.js';
@@ -655,7 +656,7 @@ async function runAgentCli(args: string[], options: AgentCliOptions, notices: st
       process.stderr.write(`laneId ${String(selected.laneId)} resolved to ${short.resolved}\n`);
       selected = short.selected;
     }
-    const command = landSaveCommand(form!, true, selected);
+    const command = canonicalOperationIds(root, landSaveCommand(form!, true, selected));
     try {
       if (options.beforeDispatch) {
         validateHostedCliCommand(root, action, command);

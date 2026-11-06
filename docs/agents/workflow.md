@@ -52,7 +52,7 @@ and resumes interruption. Current: 1 query, 0 GETs; idle: 0 calls.
 
 Hosted help and dispatch share schemas. `nforge docs agents/hosted` and this table use `hostedAgentHelpMarkdown` (`src/hosted-agent-help.ts`); a sync test enforces equality.
 
-Hosted `land --save` uses `--no-wait` to return after submission. Replay every original parameter, including `message`, using the printed replay command. `observe` and `landing` take exactly one `operationId` (the original landing UUID), `submissionId` or `runId`; use `status {laneId}` for a Lane. Use `wait {operationIds:[ORIGINAL_UUID]}` for a live landing wait. The same command follows a check-only finish's operation id (its run, or a clear terminal answer when it produced none) and a `save` operation id (terminal when the server's save record is), instead of `NOT_FOUND`. `preflight` first settles a retained pending save by its original operation (no new save; no call when nothing is pending), then requires the files to match the saved head before it records a receipt.
+Hosted `land --save` uses `--no-wait` to return after submission. Replay every original parameter, including `message`, using the printed replay command. `observe` and `landing` take exactly one `operationId` (the original landing UUID), `submissionId` or `runId`; use `status {laneId}` for a Lane. Use `wait {operationIds:[ORIGINAL_UUID]}` for a live landing wait. Operation ids may be typed in any case (`uuidgen` prints upper case); the CLI uses one spelling, lower case, except for an operation this checkout already journaled under another spelling, which keeps that one. The same command follows a check-only finish's operation id (its run, or a clear terminal answer when it produced none) and a `save` operation id (terminal when the server's save record is), instead of `NOT_FOUND`. `preflight` first settles a retained pending save by its original operation (no new save; no call when nothing is pending), then requires the files to match the saved head before it records a receipt.
 
 Include `overlapAnswer:"accept-order"` in `land --save` to answer the pending notices seen by that landing without a separate `ack`. The answers are recorded exactly as `ack` records them, so peers and the inbox see them, and the defaults receipt lists them. The answer does not resolve source conflicts or change project policy.
 
@@ -162,6 +162,9 @@ Issue (`issue:ISSUE_ID`), or to the whole project (`project`).
 - `board --post {"to":"lane:668252c0","text":"I am changing the args of x(); ping me before editing it"}`
   posts a note. `board --reply {"id":"NOTE_ID","text":"..."}` answers one; the
   reply goes to the Lane that wrote the note, else to the note's target.
+  Your own Lane may post and reply in any state, including while its landing is queued or
+  after it was accepted; a note to a Lane that is no longer open is refused with the typed
+  `LANE_NOT_ACTIVE`, never `INTERNAL_ERROR`.
   `board {}` lists notes for your Lane, its Issue and the project; `board {"id":"NOTE_ID"}`
   shows one note with its replies. MCP: `forge_task` actions `board-post` and
   `board-reply`, `forge_work_overview` action `board`.

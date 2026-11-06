@@ -10,6 +10,7 @@ import { agentFixture } from './hosted-agent-fixture.mjs';
 import { hostedAgentActions } from '../dist/hosted-agent-contract.js';
 import { readLaneEntry } from '../dist/lane-registry.js';
 import { submitHostedLand } from '../dist/hosted-land-cli.js';
+import { HostedAgentTransport } from '../dist/hosted-agent-transport.js';
 
 const downloads = calls => calls.filter(call => call.name.startsWith('projectObjectDownloads')).length;
 function stateHome(t) {
@@ -143,4 +144,25 @@ test('the land submitter replays its own finish while the save job runs, with id
   seen.length = 0;
   assert.equal((await submitHostedLand(root, command, address, transport)).result.progress.status, 'failed');
   assert.equal(seen.length, 1);
+});
+
+test('start from inside a Lane root places the new Lane beside it, never nested (6bde4ba6)', async t => {
+  stateHome(t);
+  const s = agentFixture(t);
+  signedDownloads(t, s);
+  const clone = join(s.root, '..', 'clone.forge-client', 'lanes'),
+    first = join(clone, s.lane.laneId);
+  await s.transport().dispatch('start', { outcome: 'First Lane', path: first });
+  assert(existsSync(join(first, '.forge', 'hosted-lane.json')));
+  // A second Lane starts from the first Lane's own folder (the shell is inside it).
+  s.lane.laneId = randomUUID();
+  const inside = Object.assign(new HostedAgentTransport(first, s.address, s.exchange), {
+    agentSession: 'fixture-agent-session',
+  });
+  // hostedRootLanePath(Lane root) is true, so the start opens a sibling even when the root is a Lane.
+  const response = await inside.dispatch('start', { outcome: 'Second Lane' });
+  const sibling = join(realpathSync(clone), s.lane.laneId);
+  assert.equal(response.result.path, sibling);
+  assert(!existsSync(join(first + '.forge-client', 'lanes', s.lane.laneId)), 'not nested');
+  assert(existsSync(join(sibling, '.forge', 'hosted-lane.json')));
 });

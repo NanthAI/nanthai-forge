@@ -123,11 +123,9 @@ export const post = mutation({
       let fromLaneId: string | undefined;
       if (input.laneId) {
         const lane = await laneRow(ctx, projectId, input.laneId.toLowerCase());
-        invariant(
-          lane.actor === actor && lane.open,
-          'BAD_ARGUMENT',
-          'laneId must be your own open Lane in this project.',
-        );
+        // Your own Lane, in any state: a queued or accepted landing closes the Lane but not the
+        // conversation about it (ce974f90). Recipients must still be open (LANE_NOT_ACTIVE below).
+        invariant(lane.actor === actor, 'BAD_ARGUMENT', 'laneId must be your own Lane in this project.');
         fromLaneId = lane.laneId;
       }
       let targetKey: string, recipients: number | null, replyTo: string | undefined;

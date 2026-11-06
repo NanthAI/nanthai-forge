@@ -7,6 +7,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { boardHostedSource, boardEnvelope, readBoardCursor } from '../dist/hosted-board.js';
 import { parseVerbForm, lowerVerb } from '../dist/agent-verbs.js';
+import { ConvexError } from 'convex/values';
+import { ForgeError } from '../dist/errors.js';
 
 function fake(t, reply) {
   const root = join(mkdtempSync(join(tmpdir(), 'forge-board-')), 'client');
@@ -74,4 +76,36 @@ test('board reads advance the local cursor; delivery renders lines; an older ser
     throw new Error("Could not find public function for 'projectBoard:read'");
   });
   await assert.rejects(boardHostedSource(old, 'board', {}), e => e.code === 'HOSTED_ACTION_UNSUPPORTED');
+});
+
+test('typed server refusals reach the agent with their code, never as INTERNAL_ERROR (fd8dc28e, ce974f90)', async t => {
+  const laneId = randomUUID();
+  for (const [data, to] of [
+    [{ code: 'LANE_NOT_ACTIVE', message: 'Lane 3c861b3c is no longer open.' }, `lane:${randomUUID()}`],
+    [{ code: 'BAD_ARGUMENT', message: 'laneId must be your own Lane in this project.' }, 'project'],
+  ]) {
+    const f = fake(t, () => {
+      throw new ConvexError(data);
+    });
+    await assert.rejects(
+      boardHostedSource(f, 'board-post', { to, text: 'Hello', laneId }),
+      error => error instanceof ForgeError && error.code === data.code && error.message === data.message,
+    );
+    await assert.rejects(
+      boardHostedSource(f, 'board-reply', { id: 'abcdef12', text: 'Hello', laneId }),
+      error => error instanceof ForgeError && error.code === data.code,
+    );
+    await assert.rejects(
+      boardHostedSource(f, 'board', { laneId }),
+      error => error instanceof ForgeError && error.code === data.code,
+    );
+  }
+  // An untyped failure is still surfaced as it was.
+  const f = fake(t, () => {
+    throw new Error('socket hang up');
+  });
+  await assert.rejects(
+    boardHostedSource(f, 'board-post', { to: 'project', text: 'Hello' }),
+    /socket hang up/,
+  );
 });

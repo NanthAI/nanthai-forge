@@ -27,6 +27,7 @@ import { recordTurnWait, settleTurnWork } from './agent-turn-work.js';
 import { HostedAgentTransport } from './hosted-agent-transport.js';
 import { waitHostedAgentSource } from './hosted-agent-source-wait.js';
 import { networkTimeout } from './network-fetch.js';
+import { canonicalOperationIds } from './operation-id-case.js';
 import { boardWaitOption, boardWakeEnvelope, observePeerLane } from './hosted-board-wait.js';
 /** Address selection precedes construction of native WorkStore/owner services. */
 export function hostedAgentAddress(
@@ -83,8 +84,11 @@ export async function hostedAgentCli(
   signal?: AbortSignal,
 ) {
   root = hostedAgentRoot(root);
-  const command = Object.fromEntries(
-    Object.entries(selected).filter(([key]) => !['url', 'projectId', 'action'].includes(key)),
+  const command = canonicalOperationIds(
+    root,
+    Object.fromEntries(
+      Object.entries(selected).filter(([key]) => !['url', 'projectId', 'action'].includes(key)),
+    ),
   );
   if (action === 'wait') {
     const selectedWait = hostedWaitSchema.parse(command);

@@ -85,6 +85,12 @@ test('set-policy merges fields in one mutation and an operationId replay changes
   assert.deepEqual(first.result.policy.checks, before.checks);
   assert.equal((await run('policy')).result.acceptance.gate, 'contract');
   assert.equal(s.tables.projectPolicyChanges.size, 1);
+  // The receipt is the same full policy a following read shows, agent defaults included (49760b39).
+  const after = (await run('policy')).result;
+  assert(after.agentDefaults && Object.keys(after.agentDefaults).length > 0, 'the read fills agentDefaults');
+  assert.deepEqual(first.result.policy, after);
+  const again = await run('set-policy', { operationId, acceptance: { gate: 'contract' } });
+  assert.deepEqual(again.result.policy, after, 'a replay receipt has the same shape');
 
   // Someone changes the gate back; replaying the first operation returns its record, not a new edit.
   await run('set-policy', { operationId: randomUUID(), acceptance: { gate: 'full' } });
