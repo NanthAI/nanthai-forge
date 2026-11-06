@@ -209,8 +209,10 @@ test('prune --scan adopts existing checkouts, including nested Lane roots and re
     apply: false,
     scan: hosted,
   });
-  assert.deepEqual(new Set(listLanes().map(entry => entry.laneId)), new Set([top, nested]));
-  assert.equal(result.pruned.length, 2);
+  // A dry scan finds both checkouts but registers nothing (41a24da0).
+  assert.deepEqual(listLanes(), []);
+  assert.equal(result.wouldPrune.length, 2);
+  assert.equal(result.pruned.length, 0);
   assert(existsSync(nestedRoot), 'dry run removes nothing');
   await laneHousekeeping({
     readStates: async (_address, laneIds) => new Map(laneIds.map(laneId => [laneId, 'abandoned'])),

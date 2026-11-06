@@ -44,8 +44,9 @@ Read: `nforge settings`; set: `nforge settings KEY VALUE`; reset:
 - Pruning removes the root, its `ROOT.forge-client` cache and its `ROOT.forge-metrics.jsonl`.
   A `node_modules` link is removed as a link; the shared install stays.
 - A deployment without the batched read prunes nothing.
-- `nforge prune` is a dry run; `--apply` removes. `--scan DIRECTORY` first registers existing
-  checkouts in DIRECTORY and in its `*.forge-client/lanes/`. With `--apply` it also removes links
+- `nforge prune` is a dry run (it lists `wouldPrune` and changes no registry, pin, link or checkout);
+  `--apply` removes and lists `pruned`. `--scan DIRECTORY` with `--apply` first registers existing
+  checkouts in DIRECTORY and in its `*.forge-client/lanes/`; a dry scan only reads them. With `--apply` it also removes links
   in DIRECTORY whose target was a `*.forge-client/lanes/` copy that no longer exists. An explicit
   prune with `autoPruneHours` set to 0 uses 3 hours.
 - One root per Lane: `open` at a new path moves the copy `start` made in

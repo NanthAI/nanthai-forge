@@ -31,7 +31,10 @@ export type LaneStateReader = (
 export type IdleLane = { laneId: string; outcome?: string; idleHours: number; root: string };
 export type LaneHousekeeping = {
   idle: IdleLane[];
+  /** Roots removed (apply only). */
   pruned: { laneId: string; root: string; bytes: number }[];
+  /** Roots a dry run would remove; they still exist. Empty when applying. */
+  wouldPrune: { laneId: string; root: string; bytes: number }[];
   kept: { laneId: string; reason: string }[];
   apply: boolean;
 };
@@ -84,15 +87,19 @@ const nestedLanes = (root: string) => {
 };
 const inside = (path: string, root: string) => path === root || path.startsWith(root + sep);
 
-/** Register hosted Lane checkouts found directly in DIRECTORY or under its ROOT.forge-client/lanes. */
-export function adoptLaneCheckouts(directory: string, now = Date.now()) {
+/** Register hosted Lane checkouts found directly in DIRECTORY or under its ROOT.forge-client/lanes.
+ * With `write` false nothing is recorded; `found` lists the unregistered checkouts instead. */
+export function adoptLaneCheckouts(directory: string, now = Date.now(), write = true) {
   const links = new Map<string, string[]>();
+  const found: LaneRegistryEntry[] = [];
   let adopted = 0;
   const adopt = (root: string) => {
     const identity = markerIdentity(root);
     if (!identity || listed.has(identity.laneId)) return;
-    const stat = exists(join(root, '.forge', 'hosted-lane.json'));
-    if (recordLane({ ...identity, root, lastActionAt: Math.min(now, stat?.mtimeMs ?? now) }, now)) adopted++;
+    const stat = exists(join(root, '.forge', 'hosted-lane.json')),
+      lastActionAt = Math.min(now, stat?.mtimeMs ?? now);
+    if (!write) found.push({ ...identity, root, openedAt: now, lastActionAt });
+    else if (recordLane({ ...identity, root, lastActionAt }, now)) adopted++;
     listed.add(identity.laneId);
   };
   const listed = new Set(listLanes().map(entry => entry.laneId));
@@ -111,7 +118,7 @@ export function adoptLaneCheckouts(directory: string, now = Date.now()) {
       for (const lane of lanes) if (uuid.test(lane)) adopt(join(path, 'lanes', lane));
     } else if (stat?.isDirectory()) adopt(path);
   }
-  return { adopted, links };
+  return { adopted, links, found };
 }
 
 /** Idle listing plus prune of finished Lane roots, from the local registry and one batched read. */
@@ -133,7 +140,9 @@ export async function laneHousekeeping(input: {
   const pruneMs = settings.autoPruneHours * hour,
     idleMs = settings.idleLaneHours * hour,
     activeMs = (settings.activeLanePruneHours ?? DEFAULT_ACTIVE_PRUNE_HOURS) * hour;
-  const links = input.scan ? adoptLaneCheckouts(input.scan, now).links : new Map<string, string[]>();
+  // A dry run (no apply) changes no registry file, pin mirror, link or checkout.
+  const scanned = input.scan ? adoptLaneCheckouts(input.scan, now, input.apply) : null;
+  const links = scanned?.links ?? new Map<string, string[]>();
   // A link whose Lane copy is gone (removed by GC or by hand) is only clutter; remove it with its target.
   if (input.apply)
     for (const [target, paths] of links)
@@ -142,14 +151,15 @@ export async function laneHousekeeping(input: {
   const excludedRoots = (input.exclude?.roots ?? []).map(root => canonicalRoot(root));
   const workingRoot = canonicalRoot(process.cwd());
   const excludedLanes = new Set(input.exclude?.laneIds ?? []);
-  const result: LaneHousekeeping = { idle: [], pruned: [], kept: [], apply: input.apply };
+  const result: LaneHousekeeping = { idle: [], pruned: [], wouldPrune: [], kept: [], apply: input.apply };
   const entries: LaneRegistryEntry[] = [];
-  for (const entry of listLanes()) {
+  for (const entry of [...listLanes(), ...(scanned?.found ?? [])]) {
     if (input.address && (entry.url !== input.address.url || entry.projectId !== input.address.projectId))
       continue;
     // A removed checkout leaves nothing to prune or list.
-    if (!exists(entry.root)) forgetLane(entry.laneId);
-    else if (!excludedLanes.has(entry.laneId)) entries.push(entry);
+    if (!exists(entry.root)) {
+      if (input.apply) forgetLane(entry.laneId);
+    } else if (!excludedLanes.has(entry.laneId)) entries.push(entry);
   }
   const thresholds = [pruneMs, idleMs].filter(value => value > 0);
   // An open Lane's root is removed only past its own, longer age, and never when pruning is off.
@@ -191,7 +201,7 @@ export async function laneHousekeeping(input: {
       idleFor = now - entry.lastActionAt;
     // The server flag wins and refreshes this client's mirror; an unreadable server keeps the last known pin.
     const pinned = pins.get(entry.laneId) ?? Boolean(entry.pinned);
-    if (pins.has(entry.laneId) && pinned !== Boolean(entry.pinned))
+    if (input.apply && pins.has(entry.laneId) && pinned !== Boolean(entry.pinned))
       recordLane({ laneId: entry.laneId, pinned, lastActionAt: entry.lastActionAt }, now);
     if (pinned) {
       result.kept.push({ laneId: entry.laneId, reason: 'pinned' });
@@ -260,7 +270,7 @@ export async function laneHousekeeping(input: {
       for (const link of links.get(root) ?? []) rmSync(link, { force: true });
       forgetLane(entry.laneId);
     }
-    result.pruned.push({ laneId: entry.laneId, root, bytes: tree.bytes });
+    (input.apply ? result.pruned : result.wouldPrune).push({ laneId: entry.laneId, root, bytes: tree.bytes });
   }
   return result;
 }

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describeIssues } from './argument-errors.js';
+import { actionRoot } from './agent-verbs.js';
 import { hostedRecordCommands } from './hosted-record-input.js';
 import { HostedAgentJournal } from './hosted-agent-journal.js';
 import { canonicalPayload } from './hosted-source-operation.js';
@@ -29,7 +30,7 @@ export async function executeHostedRecords(
     'BAD_ARGUMENT',
     `Invalid ${action} parameters: ${
       !parsed.success ? describeIssues(parsed.error.issues, parameters) : 'operationId: expected a UUID'
-    }. Run nforge agent ROOT ${action} --help, correct the named fields and retry.`,
+    }. Run ${actionRoot(action)} ${action} --help, correct the named fields and retry.`,
   );
   if (action === 'friction-triage') {
     const problem = frictionTriageProblem(parsed.data as Parameters<typeof frictionTriageProblem>[0]);

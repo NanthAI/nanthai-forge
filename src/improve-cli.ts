@@ -5,7 +5,7 @@ import { readImprovements, formatImprovements } from './improve.js';
 export function improveCli(args: string[]) {
   if (!args.length || args[0] === '--help') {
     process.stdout.write(
-      'nforge improve ROOT [--json]\nTriage: nforge agent ROOT friction-triage \'{"frictionIds":["ID"],"status":"planned","reason":"…"}\'\n',
+      'nforge improve ROOT [--json]\nTriage: nforge x ROOT friction-triage \'{"frictionIds":["ID"],"status":"planned","reason":"…"}\'\n',
     );
     return;
   }

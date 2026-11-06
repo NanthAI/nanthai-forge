@@ -207,6 +207,11 @@ export function newForm(
   return undefined;
 }
 
+/** The CLI prefix that reaches an action: operator actions live under `nforge x`, the rest under `nforge agent`. */
+export function actionRoot(action: string): string {
+  return (operatorActions as readonly string[]).includes(action) ? 'nforge x ROOT' : 'nforge agent ROOT';
+}
+
 function quote(value: string): string {
   return /^[\w./:@-]+$/.test(value) ? value : `'${value.replaceAll("'", "'\\''")}'`;
 }

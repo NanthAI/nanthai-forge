@@ -6,6 +6,7 @@ import { unknownActionError } from './hosted-agent-version.js';
 import { ForgeError, invariant } from './errors.js';
 import { frictionInputSchema } from './friction-types.js';
 import { describeIssues } from './argument-errors.js';
+import { actionRoot } from './agent-verbs.js';
 
 export function validateNativeFrictionCommand(input: Record<string, unknown>) {
   const { operationId, ...parameters } = input;
@@ -46,7 +47,7 @@ export function validateHostedCliCommand(
       invariant(
         operationId === undefined || z.uuid().safeParse(operationId).success,
         'BAD_ARGUMENT',
-        `operationId: expected a UUID. Run nforge agent ROOT ${requestedAction} --help and retry.`,
+        `operationId: expected a UUID. Run ${actionRoot(requestedAction)} ${requestedAction} --help and retry.`,
       );
       parameters = rest;
     }
@@ -66,7 +67,7 @@ export function validateHostedCliCommand(
   invariant(
     parsed.success,
     'BAD_ARGUMENT',
-    `Invalid ${requestedAction} parameters: ${parsed.success ? '' : describeIssues(parsed.error.issues, parameters)}. Run nforge agent ROOT ${requestedAction} --help, correct the named fields and retry.`,
+    `Invalid ${requestedAction} parameters: ${parsed.success ? '' : describeIssues(parsed.error.issues, parameters)}. Run ${actionRoot(requestedAction)} ${requestedAction} --help, correct the named fields and retry.`,
   );
   if (requestedAction === 'wait') {
     invariant(

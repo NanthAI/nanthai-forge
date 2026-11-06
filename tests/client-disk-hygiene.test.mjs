@@ -260,7 +260,8 @@ test('prune removes a clean active Lane idle past the active age, and keeps an e
   const states = { [ids.clean]: 'active', [ids.edited]: 'active', [ids.done]: 'completed' };
   const readStates = async (_address, laneIds) => new Map(laneIds.map(id => [id, states[id]]));
   const dry = await laneHousekeeping({ readStates, address, apply: false, now, settings });
-  assert.equal(dry.pruned.length, 2);
+  assert.equal(dry.wouldPrune.length, 2);
+  assert.equal(dry.pruned.length, 0, 'a dry run names nothing as pruned');
   assert(existsSync(cleanRoot), 'dry run removes nothing');
   const result = await laneHousekeeping({ readStates, address, apply: true, now, settings });
   assert.deepEqual(new Set(result.pruned.map(item => item.laneId)), new Set([ids.clean, ids.done]));

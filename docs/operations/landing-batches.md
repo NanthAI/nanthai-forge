@@ -576,7 +576,7 @@ An owner can reprioritise a queued Candidate submission through the existing age
 CLI or the hosted `forge_task` MCP tool:
 
 ```sh
-nforge agent ROOT prioritize '{"submissionId":"SUBMISSION_UUID","priority":"urgent","operationId":"CHANGE_UUID"}'
+nforge x ROOT prioritize '{"submissionId":"SUBMISSION_UUID","priority":"urgent","operationId":"CHANGE_UUID"}'
 ```
 
 Use `priority:"normal"` with a new operation ID to undo a promotion. Replay the same

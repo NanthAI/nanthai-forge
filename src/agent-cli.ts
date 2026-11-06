@@ -570,7 +570,7 @@ async function runAgentCli(args: string[], options: AgentCliOptions, notices: st
   invariant(
     root && action && (rest.length <= 1 || (rest.length === 2 && option === '--command-file')),
     'BAD_ARGUMENT',
-    'Use agent ROOT ACTION [JSON | --command-file FILE].',
+    'Use agent ROOT ACTION [JSON | --command-file FILE]. Operator actions (x ACTION, e.g. friction-triage) run as nforge x ROOT ACTION [JSON | --command-file FILE].',
   );
   if (option === '--help') {
     await options.beforeLocal?.();

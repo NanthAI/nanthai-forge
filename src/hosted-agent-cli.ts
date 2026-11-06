@@ -3,6 +3,7 @@ import { readSource } from './files.js';
 import { waitFailure } from './wait-failure.js';
 import { clientCacheRoot } from './root-paths.js';
 import { isNetworkPending } from './network-continuation.js';
+import { readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { hostedAgentAddressSchema, type HostedAgentAddress } from './hosted-agent-contract.js';
 import {
@@ -75,6 +76,14 @@ const sourcePending = (response: { result?: unknown } | undefined) => {
 export const sourceWaitHooks = { wait: waitHostedAgentSource };
 const waitSource = (...args: Parameters<typeof waitHostedAgentSource>) =>
   sourceWaitHooks.wait(args[0], args[1], args[2], args[3], undefined, 'Saves');
+/** True when the retained address receipt already holds exactly these bytes. */
+function receiptMatches(path: string, body: string) {
+  try {
+    return readFileSync(path, 'utf8') === body;
+  } catch {
+    return false;
+  }
+}
 export async function hostedAgentCli(
   root: string,
   action: string,
@@ -338,7 +347,12 @@ export async function hostedAgentCli(
     process.removeListener('SIGTERM', stop);
   }
   // Retain only after an authorized successful response. An invalid/incomplete
-  // address never silently turns into a local owner/listener dependency.
-  durableReplace(join(hostedAgentDirectory(root), 'address.json'), JSON.stringify(address));
+  // address never silently turns into a local owner/listener dependency. A
+  // read-only planning read writes nothing, and an unchanged receipt is not rewritten.
+  if (!(action === 'planning' && command.reconcile === false)) {
+    const receipt = join(hostedAgentDirectory(root), 'address.json'),
+      body = JSON.stringify(address);
+    if (!receiptMatches(receipt, body)) durableReplace(receipt, body);
+  }
   return result;
 }
