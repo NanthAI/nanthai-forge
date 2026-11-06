@@ -47,6 +47,11 @@ test('hosted sync after a build preserves output; remote advance/local conflict 
   const result = await s.transport().dispatch('sync', command);
   assert.equal(result.operationId, command.operationId);
   assert.equal(result.result.applied.head, remote.head);
+  // Phase split (friction 710f9028): local clock reads only, hosted wait apart from local apply.
+  const { timing } = result.result;
+  assert.deepEqual(Object.keys(timing.stepsMs), ['settle', 'submit', 'hostedWait', 'apply']);
+  for (const ms of Object.values(timing.stepsMs)) assert.ok(Number.isInteger(ms) && ms >= 0);
+  assert.ok(Math.abs(Object.values(timing.stepsMs).reduce((a, b) => a + b, 0) - timing.totalMs) <= 4);
   assert.equal(
     [...f.tables.projectHostedRecordHeads.values()].filter(row => row.kind === 'job').length,
     jobs,

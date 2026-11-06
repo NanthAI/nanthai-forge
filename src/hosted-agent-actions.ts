@@ -1,6 +1,7 @@
 import { recoverLocalApply } from './hosted-apply-recovery.js';
 import { retainSyncHandoff, clearSyncHandoff } from './hosted-sync-handoff.js';
 import { guideHostedSync, resolveHostedAgent } from './hosted-agent-resolution.js';
+import { syncTiming } from './sync-timing.js';
 import { hostedRecordSchema } from './hosted-records.js';
 import { executeHostedFinish } from './hosted-agent-finish.js';
 import { executeHostedMetrics } from './hosted-agent-metrics.js';
@@ -472,6 +473,7 @@ export async function executeHostedAgent(
   if (action === 'resolve') return resolveHostedAgent(session, input);
   if (action === 'sync') {
     const command = hostedAgentCommandSchemas.sync.parse(input);
+    const timing = syncTiming();
     // A save this client returned unfinished still pins the marker's old head: settle it (its own
     // progress, no new save) before the sync pins the Lane. No pending save means no call.
     if (
@@ -494,6 +496,7 @@ export async function executeHostedAgent(
       command.apply && !command.candidateId && session.marker()
         ? await retainSyncHandoff(session, 'sync', command)
         : null;
+    timing.mark('settle');
     let prepared;
     try {
       prepared = await syncAgentSource(session, command, operationId, () =>
@@ -506,8 +509,10 @@ export async function executeHostedAgent(
       if (error instanceof SyncPinsStale && handoff) clearSyncHandoff(session.root, operationId);
       throw error;
     }
+    timing.mark('submit');
     const result = await session.waitSource(operationId, prepared),
       completed = agentSourceOutcome(result);
+    timing.mark('hostedWait');
     if (completed?.status === 'completed') {
       const source = parseHostedResponse(syncResultSchema, completed.result);
       if (command.apply && session.marker() && source.status !== 'conflict' && source.from) {
@@ -523,11 +528,15 @@ export async function executeHostedAgent(
           new ConvexLaneTransport(session.exchange),
         );
         clearSyncHandoff(session.root, operationId);
-        return { source: result, applied };
+        timing.mark('apply');
+        return { source: result, applied, timing: timing.value() };
       }
     }
     if (completed && handoff) clearSyncHandoff(session.root, operationId);
-    return guideHostedSync(session, result, command.apply);
+    const guided = await guideHostedSync(session, result, command.apply);
+    if (guided === result) return guided;
+    timing.mark('conflict');
+    return { ...(guided as object), timing: timing.value() };
   }
   if (action === 'revert') {
     const command = hostedAgentCommandSchemas.revert.parse(input);
