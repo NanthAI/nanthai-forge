@@ -52,6 +52,7 @@ import { shareDependencies } from './shared-dependencies.js';
 import { readClientSettings } from './client-settings.js';
 import {
   knownCapabilities,
+  localShapeError,
   protocolMismatchError,
   unadvertisedActionError,
   unknownActionError,
@@ -117,7 +118,7 @@ import {
   takeCallerReceipts,
   writeCallerReceipts,
 } from './hosted-metric-outbox.js';
-import { parseHostedResponse } from './hosted-response.js';
+import { isHostedReplyError, parseHostedResponse } from './hosted-response.js';
 /** Reads and checkout creation: they neither show a Lane as working nor count as its activity. */
 const quietActions = new Set([
   'diff',
@@ -545,6 +546,15 @@ export class HostedAgentTransport {
       );
       if (!observation && operationId !== undefined)
         invariant(z.uuid().safeParse(operationId).success, 'BAD_ARGUMENT', 'operationId must be a UUID.');
+      // A bare start has nothing to start. Refuse before any journal or call exists (Issue ec7bd1b5).
+      if (action === 'start') {
+        const asked = command.data as { planningItemId?: string; intentId?: string; outcome?: string };
+        invariant(
+          asked.planningItemId || asked.intentId || asked.outcome,
+          'BAD_ARGUMENT',
+          'start needs one of: planningItemId (an Issue id), intentId (join an Intent), or outcome (a new one).',
+        );
+      }
       // Policy needs no capability discovery: the server authorizes it, so each command is one call.
       if ((hostedAgentPolicyActions as readonly string[]).includes(action)) {
         const policy = await executeHostedPolicy(
@@ -1054,7 +1064,8 @@ export class HostedAgentTransport {
     } catch (error) {
       const owner = nativeOwner(existsSync(this.root) ? realpathSync(this.root) : this.root);
       if (owner) rememberSourceAuthorityError(new WorkStore(owner), error, this.address.projectId);
-      if (error instanceof z.ZodError) throw protocolMismatchError();
+      if (error instanceof z.ZodError)
+        throw isHostedReplyError(error) ? protocolMismatchError() : localShapeError(action, error.issues);
       const safe = hostedActionError(error, `agent ${action}`);
       if (safe instanceof SourceAuthorityStaleError || safe.recovery) throw safe;
       // Version skew needs an upgrade, not a replay.

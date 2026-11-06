@@ -56,9 +56,18 @@ function without(value: unknown, strip: Strip): unknown {
  * original ZodError (the transport maps it to HOSTED_PROTOCOL_INVALID). The input is never mutated. */
 export function parseHostedResponse<S extends z.ZodType>(schema: S, value: unknown): z.output<S> {
   const parsed = safeParseHostedResponse(schema, value);
-  if (!parsed.success) throw parsed.error;
+  if (!parsed.success) {
+    replyErrors.add(parsed.error);
+    throw parsed.error;
+  }
   return parsed.data;
 }
+
+/** Errors thrown by the reply boundary. Only these say the server's reply disagrees with this CLI
+ * (version skew); a ZodError from a request or local file means something else (Issue ec7bd1b5). */
+const replyErrors = new WeakSet<object>();
+export const isHostedReplyError = (error: unknown) =>
+  typeof error === 'object' && error !== null && replyErrors.has(error);
 
 /** parseHostedResponse without throwing, for callers that report their own protocol error. */
 export function safeParseHostedResponse<S extends z.ZodType>(schema: S, value: unknown) {

@@ -1307,6 +1307,11 @@ A wait whose read fails for a reason other than its own selection (for example
 `HOSTED_PROTOCOL_INVALID` while the CLI and server versions differ) changes nothing
 on the server: its error carries `recovery.command`, the same wait to run once the
 cause is fixed. `BAD_ARGUMENT` and `NOT_FOUND` keep their own message.
+`HOSTED_PROTOCOL_INVALID` with the "upgrade nforge" step means the deployment's reply failed the
+reply boundary (unknown keys are dropped; missing, mistyped or unknown-enum fields fail). The same
+code without that step names the failing path of a request or local file; upgrading is not known to
+help. A bare `start {}` (no `planningItemId`, `intentId` or `outcome`) is refused with `BAD_ARGUMENT`
+before any call or journal exists (Issue ec7bd1b5).
 
 LANDED reports acceptance; CHECK PASSED alone does not. Follow failure/conflict
 recovery in the same Lane; inspect current Lane status after supersession.

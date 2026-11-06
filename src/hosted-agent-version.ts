@@ -71,3 +71,14 @@ export function protocolMismatchError(): ForgeError {
     `Hosted agent response does not match the contract of nforge ${CUTOVER_CLI_VERSION}; the CLI and deployment versions likely differ. ${CLI_UPGRADE_STEP}`,
   );
 }
+/** A contract failure that did not come from the reply boundary: this CLI's own request or a local
+ * file, not the deployment. Upgrading cannot fix it, so say where it failed (paths only, no values). */
+export function localShapeError(action: string, issues: readonly { path: PropertyKey[] }[]): ForgeError {
+  const where = [...new Set(issues.map(issue => issue.path.map(String).join('.') || 'parameters'))]
+    .slice(0, 5)
+    .join(', ');
+  return new ForgeError(
+    'HOSTED_PROTOCOL_INVALID',
+    `Hosted agent ${action} hit data that fails a shape check at ${where}, outside the reply boundary (not a recognised newer-deployment reply), so upgrading nforge is not known to help. Check the parameters (nforge agent ROOT ${action} --help); a replayed operation id changes nothing until they are valid.`,
+  );
+}
