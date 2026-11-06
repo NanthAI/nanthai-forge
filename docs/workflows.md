@@ -106,12 +106,28 @@ For a combined Candidate, every member must be eligible for the contract gate;
 its check covers the union of their declared tests. One full-gated member makes
 the combined check full.
 
-Main may be briefly red after a contract-gated landing. The asynchronous main
-audit detects failures; automatic recovery reverts a single clean culprit or
-opens a fix-forward Intent. It retains the culprit's Lane and records what it did
-and how to undo it. A contract attempt ready during red main waits with `MAIN_RED`
-and releases the queue without polling. Full-gated fixes continue. Green main
-releases held attempts through the audit's event-driven wake.
+Main may be briefly red after a contract-gated landing, or after a landing on
+its [first check](pre-queue-checks.md#decision) (a change whose
+admission run passed and which is path-disjoint from what main gained since).
+The asynchronous main audit detects failures. A first-check landing arms it at
+once instead of at the landing-count cadence; one audit run covers every landing
+since the last green main, in place of the rechecks they skipped. Automatic
+recovery never guesses and never loses code:
+
+- It bisects to a single proven culprit and reverts it with an ordinary landing
+  (a reverse Candidate through the same queue, on current main, with a full
+  check). Main never rewinds; later landings keep their bytes. The reverse
+  receipt says why, names the re-land command (`nforge agent ROOT start
+  '{"intentId":"…"}'` opens a Lane at the culprit's saved head) and how to undo.
+- With several suspects, unclear evidence, or a reverse that conflicts, it
+  reverts nothing and opens a fix-forward Intent.
+
+While main is red no change lands on its first check (recheck reason
+`main-red`). A contract attempt ready during red main waits with `MAIN_RED` and
+releases the queue without polling. Full-gated fixes continue. Green main
+releases held attempts through the audit's event-driven wake. First-check and
+rechecked landings carry the same receipt and CAS; the receipt's `firstCheck`
+field says which path each took.
 
 ### Trust per path per actor
 

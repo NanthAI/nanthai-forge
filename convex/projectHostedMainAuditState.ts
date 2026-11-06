@@ -213,13 +213,26 @@ export async function noteMainLanding(
   const count = (row.unaudited?.count ?? 0) + (docs ? 0 : 1);
   const firstAt = row.unaudited?.firstAt ?? (docs ? null : receipt.at);
   const settings = await auditSettings(ctx, projectId);
+  // A first-check landing (Issue 7fe54c7c) is verified promptly: one coalesced
+  // full audit of the newest main head, never one per landing, instead of the
+  // cadence that covers contract-gated landings.
+  const firstCheck =
+    receipt.crossHeadProof?.algorithm === 'clean-disjoint-v1' ? receipt.snapshot.revision : row.firstCheck;
   await ctx.db.patch(row._id, {
     unaudited: { count, firstAt: count ? firstAt : null },
     debt: auditDebt(count, firstAt, settings),
+    ...(firstCheck !== row.firstCheck ? { firstCheck } : {}),
   });
   if (count && (!row.audit || hostedCheckTerminal(row.audit)))
-    await armAudit(ctx, row, auditDue(count, firstAt, settings));
+    await armAudit(
+      ctx,
+      row,
+      promptAudit({ ...row, firstCheck }) ? Date.now() : auditDue(count, firstAt, settings),
+    );
 }
+/** An unaudited first-check landing is newer than the last green main. */
+export const promptAudit = (row: { firstCheck?: number; lastGreen?: { sequence: number } }) =>
+  (row.firstCheck ?? -1) > (row.lastGreen?.sequence ?? -1);
 export async function onGateRunTerminal(ctx: MutationCtx, run: HostedCheckRun): Promise<void> {
   if (!run.gate || !hostedCheckTerminal(run)) return;
   if (run.gate.mode === 'probe' || run.gate.reason?.startsWith('culprit-revert:')) {
@@ -270,7 +283,8 @@ export async function onGateRunTerminal(ctx: MutationCtx, run: HostedCheckRun): 
       await armAudit(
         ctx,
         { ...row, wake: undefined },
-        row.wake && row.wake.at <= Date.now()
+        (row.wake && row.wake.at <= Date.now()) ||
+          promptAudit({ firstCheck: row.firstCheck, lastGreen: { sequence: meta.sequence } })
           ? Date.now()
           : auditDue(count, firstAt, await auditSettings(ctx, projectId)),
       );

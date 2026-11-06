@@ -4,15 +4,28 @@ import { digest } from './portable-hash.js';
 const emptyBlob = digest('');
 const position = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
 const range = z.object({ start: position, end: position });
+const symbolLinksSchema = z.union([
+  z
+    .object({
+      exports: z.array(z.string().max(200)).max(64),
+      refs: z.array(z.string().max(300)).max(64),
+    })
+    .strict(),
+  z.object({ unavailable: z.literal(true) }).strict(),
+]);
 export const overlapEvidenceSchema = z
   .object({
     baseBlob: z.string().regex(/^[a-f0-9]{64}$/),
     // Zero-based half-open ranges; start === end denotes an insertion.
     ranges: z.array(range).max(256),
     symbols: z.array(z.string().max(300)).max(256),
+    // Cross-file advisory notes (3629cf24): changed exported names of this file and imported
+    // symbols (`path#name`) its changed lines use. Sent only to servers advertising the feature.
+    symbolLinks: symbolLinksSchema.optional(),
   })
   .strict();
 export type OverlapEvidence = z.infer<typeof overlapEvidenceSchema>;
+export type SymbolLinks = z.infer<typeof symbolLinksSchema>;
 export type OverlapClass = 'blocking' | 'advisory';
 type Change = {
   before: { blob: string; mode: string } | null;

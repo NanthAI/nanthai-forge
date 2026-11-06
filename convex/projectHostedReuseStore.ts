@@ -21,8 +21,21 @@ import { canonicalPayload } from '../src/hosted-source-operation';
 import { fullGate, docsGate } from '../src/main-audit';
 import { scheduleFinish } from './projectHostedFinishWake';
 const identity = { projectId: v.id('hostedProjects'), submissionId: v.string() };
+/** Why the first check cannot carry this landing before any analysis (receipt field). */
+export type ReuseIneligible =
+  | 'not-eligible'
+  | 'main-red'
+  | 'audit-debt'
+  | 'text-conflict'
+  | 'check-evidence'
+  | 'audit-baseline';
+const no = (reason: ReuseIneligible) => ({ reason }) as const;
 /** Constant-size admission; uncertainty keeps the existing exact recheck. */
 export async function reuseContext(ctx: QueryCtx | MutationCtx, input: LandingIdentity) {
+  const decision = await reuseDecision(ctx, input);
+  return 'reason' in decision ? null : decision;
+}
+export async function reuseDecision(ctx: QueryCtx | MutationCtx, input: LandingIdentity) {
   const { value } = await loadFinish(ctx, input);
   const { state } = await loadLanding(ctx, input);
   // A batch publishes multiple same-head snapshots. The existing audit culprit
@@ -36,7 +49,7 @@ export async function reuseContext(ctx: QueryCtx | MutationCtx, input: LandingId
     value.restoreBases ||
     state.request.revertOf
   )
-    return null;
+    return no('not-eligible');
   const previous = await loadLandingAttempt(ctx, {
     projectId: input.projectId,
     attemptId: value.pending.parentAttemptId,
@@ -52,7 +65,7 @@ export async function reuseContext(ctx: QueryCtx | MutationCtx, input: LandingId
     !previous.candidate.head ||
     previous.semanticPlan?.members.length
   )
-    return null;
+    return no('not-eligible');
   const checked = previous.crossHeadProof?.checked ?? {
     id: previous.candidate.id,
     head: previous.candidate.head,
@@ -60,16 +73,18 @@ export async function reuseContext(ctx: QueryCtx | MutationCtx, input: LandingId
   };
   const checkedBase = previous.crossHeadProof?.checkedBase ?? previous.main;
   const audit = await mainGate(ctx, input.projectId);
-  if (audit.status === 'red' || audit.debt) return null;
+  if (audit.status === 'red') return no('main-red');
+  if (audit.debt) return no('audit-debt');
   const source = await loadCompose(ctx, {
     projectId: input.projectId,
     actor: state.actor,
     operationId: value.pending.operations.compose,
   });
   const result = source.operation.terminal?.outcome;
-  if (result?.status !== 'completed') return null;
+  if (result?.status !== 'completed') return no('text-conflict');
   const candidate = hostedRecordSchema.options[3].parse(result.result);
-  if (candidate.result.status !== 'clean' || candidate.semanticPlan?.members.length) return null;
+  if (candidate.result.status !== 'clean' || candidate.semanticPlan?.members.length)
+    return no('text-conflict');
   let run;
   try {
     run = await requireHostedCheckEvidence(ctx, {
@@ -81,7 +96,7 @@ export async function reuseContext(ctx: QueryCtx | MutationCtx, input: LandingId
       ...previous.check,
     });
   } catch (error) {
-    if (error instanceof ForgeError) return null;
+    if (error instanceof ForgeError) return no('check-evidence');
     throw error;
   }
   if (
@@ -91,7 +106,7 @@ export async function reuseContext(ctx: QueryCtx | MutationCtx, input: LandingId
     run.check.args.join('\0') !== 'scripts/forge-check.mjs' ||
     !/(?:^|\/)node$/.test(run.check.executable)
   )
-    return null;
+    return no('check-evidence');
   const savedAudit = await auditRow(ctx, input.projectId);
   const parent = await acceptanceRow(ctx, {
     projectId: input.projectId,
@@ -109,7 +124,7 @@ export async function reuseContext(ctx: QueryCtx | MutationCtx, input: LandingId
   const green = preferReceipt ? undefined : savedAudit?.lastGreen;
   const sourceKind = green ? ('audit' as const) : ('main-receipt' as const);
   const auditId = green?.runId ?? (!receipt?.crossHeadProof ? receipt?.check?.runId : null);
-  if (!auditId) return null;
+  if (!auditId) return no('audit-baseline');
   const auditRun = preferReceipt
     ? currentRun
     : (await loadHostedCheck(ctx, { projectId: input.projectId, runId: auditId })).run;
@@ -123,7 +138,7 @@ export async function reuseContext(ctx: QueryCtx | MutationCtx, input: LandingId
     auditRun.request.expectedEnvironment !== run.request.expectedEnvironment ||
     auditRun.request.expectedHead !== (green?.head ?? value.pending.main.head)
   )
-    return null;
+    return no('audit-baseline');
   if (
     !green &&
     (!receipt ||
@@ -132,7 +147,7 @@ export async function reuseContext(ctx: QueryCtx | MutationCtx, input: LandingId
       receipt.check?.terminalDigest !== auditRun.terminalDigest ||
       receipt.check.planDigest !== auditRun.planDigest)
   )
-    return null;
+    return no('audit-baseline');
   try {
     await requireHostedCheckEvidence(ctx, {
       projectId: input.projectId,
@@ -147,7 +162,7 @@ export async function reuseContext(ctx: QueryCtx | MutationCtx, input: LandingId
       environment: run.request.expectedEnvironment,
     });
   } catch (error) {
-    if (error instanceof ForgeError) return null;
+    if (error instanceof ForgeError) return no('audit-baseline');
     throw error;
   }
   const auditProof = {
@@ -164,6 +179,8 @@ export async function reuseContext(ctx: QueryCtx | MutationCtx, input: LandingId
     actor: previous.actor.id,
     pendingId: value.pending.id,
     selection: run.plan.selection.sha256,
+    // The project's own check entry files are global-risk (any runner).
+    checkEntries: run.check.args.filter(arg => /^[\w.-]+(?:\/[\w.-]+)+$/.test(arg)),
     basis: {
       checked,
       checkedBase,
@@ -222,7 +239,7 @@ export const objects = internalQuery({
   },
 });
 export const complete = internalMutation({
-  args: { ...leased, proof: v.union(v.string(), v.null()) },
+  args: { ...leased, proof: v.union(v.string(), v.null()), reason: v.optional(v.string()) },
   returns: v.null(),
   handler: async (ctx, input) => {
     const { row, value } = await loadFinish(ctx, input);
@@ -240,13 +257,23 @@ export const complete = internalMutation({
       invariant(
         Object.entries(current.basis).every(
           ([key, value]) => canonicalPayload(proof[key as keyof typeof proof]) === canonicalPayload(value),
-        ) && proof.checkedSelection === current.selection,
+        ) &&
+          proof.checkedSelection === current.selection &&
+          (proof.algorithm !== 'clean-disjoint-v1' ||
+            canonicalPayload(proof.checkEntries) === canonicalPayload(current.checkEntries)),
         'EVIDENCE_CHANGED',
         'Complete only the original current proof analysis.',
       );
     if (row.wake) await ctx.scheduler.cancel(row.wake.taskId);
     await ctx.db.patch(row._id, { wake: null });
-    await installFinishCompose(ctx, row, value, proof || undefined);
+    await installFinishCompose(
+      ctx,
+      row,
+      value,
+      proof || undefined,
+      undefined,
+      proof ? undefined : current ? (input.reason ?? 'source-unavailable') : 'not-eligible',
+    );
     return null;
   },
 });

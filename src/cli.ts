@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { slimReceipt } from './receipt-slim.js';
+import { printedReceipt } from './receipt-slim.js';
 import { callerOverlaps, withCallerOverlaps } from './agent-caller-overlaps.js';
 import { overlapBannerOnce } from './hosted-overlap-notice.js';
 import { metricsCli } from './metrics-cli.js';
@@ -501,8 +501,12 @@ try {
   }
   if (output !== undefined) {
     // Hosted agent receipts leave the process without the facts the agent already holds; --detail keeps all.
-    const printed =
-      process.argv[2] === 'agent' && !process.argv.includes('--detail') ? slimReceipt(output) : output;
+    const printed = printedReceipt(output, {
+      agent: process.argv[2] === 'agent',
+      detail: process.argv.includes('--detail'),
+      // The land submitter's stdout is parsed by its parent, which needs the full receipt.
+      landChild: process.env.FORGE_LAND_CHILD === '1',
+    });
     process.stdout.write(
       `${JSON.stringify(printed, null, process.argv[2] === 'agent' || process.argv[2] === 'x' || (process.argv[2] === 'host' && process.argv.includes('--json')) ? undefined : 2)}\n`,
     );

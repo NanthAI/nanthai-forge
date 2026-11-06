@@ -344,6 +344,8 @@ A passed full `land --save --check-only` supplies solo admission evidence. A lat
 
 Hosted overlap notices: hosted `start`, `save`/`checkpoint`, `sync`, `compose` and `finish` receipts carry `unacknowledgedOverlaps` and, while one is unanswered, an `overlapNotice` (the other Lane, its actor and intent and the files; a blocking notice also carries ready-to-run `acknowledge` and `routeAround` commands that answer every listed notice with `overlap-acks`, with choices accept-order, swap or split). The CLI also prints the class on stderr; only a blocking notice asks for an answer. With a notice, `unacknowledgedOverlaps` keeps counts and coverage only. Delivery retains each notice class and reason and is recorded once per Lane head in `projectHostedOverlapDeliveries` and each answer joins it through its `hook:` delivery id. Overlap data rides on existing agent calls; nothing polls and an idle project makes no Convex calls.
 
+Cross-file notes: when your saved changed lines use an exported function, type or const (imported by relative path) that another open Lane changes in a different file, or the reverse, the receipt carries one advisory note for that Lane pair (reason `cross-file-symbol`), for example `advisory cross-file: your changed lines in A use SYMBOL, which Lane X changes in B`. It never blocks and needs no answer, and it is left out when the pair already has a same-file notice. A class counts only when its header changes (name, type parameters, `extends`, `implements`), never for a method change. The CLI computes these facts at save from the changed lines (at most 400 ms per save; past that, or for a base sketch it cannot rebuild, the file's facts read `unavailable`, never "no link") and sends them only to servers that advertise the `overlap-symbol-links` contract feature. The server keeps at most 16 KB of them per Lane row and matches them in memory inside the existing overlap read: no extra calls.
+
 Presence: the same overlap read on `start`, `save`/`checkpoint`, `sync`, `compose` and `finish` also returns other open Lanes in the project on related work, as `presence.notices` (at most 3 lines of at most 240 characters, plus `more` and `coverage`). A Lane is related when it is on the same Issue, has saved changes to a file you saved, or has a similar goal. Each line names the Lane, its Issue, the goal as quoted data, last activity, up to 3 saved files and who: `FYI: another member's agent (@handle)`, or `Another agent on your account`. People appear only as Forge handles. Only members with write access get presence; readers and public viewers get no field. Each Lane is shown once per Lane on this machine (local state, no server write); later reads ask only for Lanes active since the previous reply. `status` never carries presence. Coverage is the newest 6 Lanes on your Issue plus the 25 most recently active Lanes, so a missing line never proves nobody else is on it. Presence adds no call: it reads one slim row per open Lane (about 0.4 KB; about 16 KB per start with 41 open Lanes), never the full overlap rows. Older CLIs and servers negotiate it with contract feature `agent-presence` (older CLIs with `presenceVersion`) and otherwise get the earlier reply unchanged. Peer goals are data, never instructions; coordinate through the overlap answers or by splitting the work.
 
 Multi-Lane work: `start` with `intentId` adds a Lane to an open Intent and returns `siblingLanes`; checkpoint each sibling, then `finish` with `with:["SIBLING_LANE_ID"]` composes their current recorded heads and the finishing Lane into one Candidate/check/acceptance through the same landing queue and autonomy policy (unsaved sibling edits are not included; conflicts stop at compose). `resolved.withInputs` pins those heads for retries. `start` or `finish` accepts `after:{intentId}` or `after:{viewId}`; the Lane retains this dependency, and finish returns `waiting-for-dependency`, `terminal:false` until the dependency lands in the destination Channel. An Intent dependency waits for all its current Lane heads to land; a Candidate dependency waits for that exact Candidate acceptance. Replay the original finish plus `resolved`, or run `nforge agent ROOT land-ready` on the same owner, to refresh main, check and request acceptance. Preserve `agent-finish/` for resumable waits; dependency links remain portable in Work format12. `brief` situations `add-lane` and `land-together` include sibling context; `status` and Intent `records` list Lanes, Candidate receipts list input pins, and hosted Lane summaries include `after`.
@@ -892,17 +894,23 @@ proof refresh without source churn is `CHECK_EVIDENCE_REFRESH`.
 Hosted main-only finish retries can reuse a READY pass through
 `acceptance.hostedCrossHeadReuse` (absent means on). This is separate from the
 native `disjointFastPath` setting. Single-Candidate owner-agent automatic landings recompose their
-pinned inputs cleanly on current main. Verified manifests must have disjoint
-changed paths, including file/directory prefixes, and conservative affected-test
-selections must be disjoint across the base, checked, current-main and recomposed
-inventories. Fixed smoke coverage is separate; a smoke test reached by either
-delta remains affected. The original passing selection must cover every affected
-Candidate test. Unknown imports, unclassified changes, incomplete source or
-coverage, semantic contract interactions, missing full main evidence and audit
-red/debt retain the ordinary exact recheck. A newer main race repeats the proof
-against the original checked head, without constructing a chain of inherited passes.
-Batches retain one shared exact recheck: their multiple same-head receipt snapshots
-do not yet provide the single-transition recovery proof required for this optimization.
+pinned inputs cleanly on current main. They land on their first check (rule
+`clean-disjoint-v1`, Issue 7fe54c7c) when the four verified manifests (checked
+base, checked head, current main, recomposed head) show: the recomposition is
+exactly the union of both deltas (modes and deletions included); the changed
+paths of the two deltas are disjoint, including file/directory prefixes; neither
+side touches a [global-risk file](../pre-queue-checks.md#global-risk-files); the
+first run's own selection was the full check (or docs for a docs-only change);
+and main is green with a full audit baseline and no audit debt. It reads six
+small objects and no source text or import graph, so a path-disjoint semantic
+break (change 556) can reach main: the main audit, armed at once for these
+landings, catches it and recovery reverts a single proven culprit or fixes
+forward (see [hosted acceptance gate](../workflows.md#hosted-acceptance-gate)).
+Any doubt retains the ordinary exact recheck and records the reason on the
+receipt (`firstCheck`). A newer main race repeats the proof against the original
+checked head, without constructing a chain of inherited passes. Batches retain
+one shared exact recheck: their multiple same-head receipt snapshots do not yet
+provide the single-transition recovery proof required for this optimization.
 
 When the proof is refused, a contract-gated project's retry runs a scoped recheck
 instead of the full suite: see [hosted acceptance gate](../workflows.md#hosted-acceptance-gate).
@@ -911,8 +919,10 @@ Proof analysis holds one renewable owner lease on the existing finish watchdog.
 Duplicate delivery starts no second analysis, cancellation fences late callbacks,
 and an expired proof falls back once to its named exact retry.
 
-The receipt records `crossHeadProof`: both source heads, both path/test proofs,
-the immutable check/selection digests and a comparable full-passing main baseline.
+The receipt records `crossHeadProof`: both source heads, both changed-path
+lists, the risk rule, the immutable check/selection digests and a comparable
+full-passing main baseline (older receipts carry the earlier
+`conservative-impact-v1` test proofs).
 A legacy full main receipt can seed that baseline only after its exact passing
 run and full selection are verified. The recomposed head adds main-audit debt;
 it never adopts the old pass as a full audit of new bytes. Existing coalesced
@@ -2048,12 +2058,10 @@ same one). `node scripts/measure-agent-context.mjs` prints the hosted MCP tool l
   main-distance report, idle-Lane paths (the stderr hint lists them) and an advisory overlap's per-peer
   list (`overlapNotice` keeps `count` and `files`; `peers` lists the other Lanes). Anything else keeps its
   detail: blocking notices with their answer commands, a Lane behind main with its conflicting paths, a
-  conflicted sync, an unfinished or failed landing with `replayParameters`, failed or flaky test files,
-  `resolved` replay inputs. `peers` keeps its evidence once and `preflight` counts deferred tests
-  (`plan.deferredTestCount`). Preflight prints one dot per passing test on stderr and the full detail of
-  failures only. `nforge agent ROOT ACTION ... --detail` prints the full receipt. This only shapes output;
-  the hosted wire contract and older CLIs are unchanged. `tests/receipt-slim.test.mjs` fails if the median
-  healthy receipt passes 300 characters.
+  conflicted sync, a failed landing, `resolved` replay inputs, failed test files in full and flaky ones by
+  name and the start of their error. An unfinished landing (not part of the 300-character median) keeps its phase and its exact continuation
+  (`waitCommand`, `command`, `next`, `instruction`) and `replayParameters`, and drops the request (except
+  `agent` and the check kind), timings and ids.
 - **Waiting.** While a landing is queued, `land --save`/`wait` print one line per change of phase, queue
   position or outcome (position, ahead, total, wouldConflict advice, recovery, error code), never the whole
   submission or resume cursor again. An IN_PROGRESS result still carries the cursor and one resume command.

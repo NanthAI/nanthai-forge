@@ -40,6 +40,7 @@ import {
   overlapBaseBlobs,
   rememberOverlapBases,
 } from './hosted-overlap-text.js';
+import { outputRoots, SymbolBudget } from './hosted-overlap-symbols.js';
 import { workLocked } from './work-lock.js';
 import { finishPendingCheckoutDelta, settlePendingCheckoutDelta } from './hosted-checkout-delta-pending.js';
 import { canonicalPayload } from './hosted-source-operation.js';
@@ -84,6 +85,7 @@ function captureFile(
       pin: { sha256: previous.blob, size: stat.size },
       changed: false,
       sketch: null,
+      text: null,
       markers: false,
       stat,
     };
@@ -150,14 +152,16 @@ function captureFile(
   const observed = { file: { blob: pin.sha256, mode }, pin, markers: conflictMarkersFound(markerScan) };
   if (previous && previous.blob === pin.sha256 && previous.mode === mode) {
     if (!bytes) rmSync(temporary, { force: true });
-    return { ...observed, changed: false, stat, sketch: null };
+    return { ...observed, changed: false, stat, sketch: null, text: null };
   }
   if (bytes) writeFileSync(temporary, bytes, { flag: 'wx', mode: 0o600 });
   const final = join(directory, pin.sha256);
   if (checkoutPathExists(final)) rmSync(temporary);
   else renameSync(temporary, final);
   syncFile(final);
-  return { ...observed, changed: true, stat, sketch: bytes ? overlapTextSketch(bytes) : null };
+  const sketch = bytes ? overlapTextSketch(bytes) : null;
+  // Cross-file symbol facts read the changed lines of a parsed regular file; never a link target.
+  return { ...observed, changed: true, stat, sketch, text: sketch && mode !== 'symlink' ? bytes : null };
 }
 export async function captureHostedSave(
   root: string,
@@ -182,6 +186,12 @@ export async function captureHostedSave(
   const resolving = pendingConflictPaths(root, marker.selection.laneId).length > 0;
   const changes: SaveChange[] = [],
     files: { pin: { sha256: string; size: number }; path: string }[] = [];
+  const existing = new Set(local),
+    links = {
+      exists: (path: string) => existing.has(path),
+      roots: outputRoots(root),
+      budget: new SymbolBudget(),
+    };
   for (const path of local.sort()) {
     const old = baseline.get(path),
       observed = captureFile(root, path, directory, old, index);
@@ -190,11 +200,18 @@ export async function captureHostedSave(
       if (observed.markers) marked.push(path);
       const baseBlob = bases[path] ?? old?.blob ?? digest('');
       bases[path] = baseBlob;
+      const code = !path.startsWith('docs/') && /\.[cm]?[jt]sx?$/.test(path);
+      let base =
+        baseBlob === digest('') ? overlapTextSketch(Buffer.alloc(0)) : readOverlapText(cache, baseBlob);
+      // A base sketch cached by an older client lacks export facts: derive it again within the budget.
+      if (code && observed.text && base && !base.exports)
+        base = links.budget.run(() => readOverlapText(cache, baseBlob, true)) ?? base;
       const evidence = overlapTextEvidence(
         baseBlob,
-        baseBlob === digest('') ? overlapTextSketch(Buffer.alloc(0)) : readOverlapText(cache, baseBlob),
+        base,
         observed.sketch ?? null,
-        !path.startsWith('docs/') && /\.[cm]?[jt]sx?$/.test(path),
+        code,
+        observed.text ? { ...links, path, text: observed.text.toString('utf8') } : undefined,
       );
       changes.push({
         ...(evidence ? { evidence } : {}),

@@ -1,9 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 import { classifyOverlap, type OverlapEvidence, type OverlapClass } from './hosted-overlap-evidence.js';
+import { crossFileSymbolNote, symbolFacts, symbolNoteText } from './hosted-overlap-symbol-notes.js';
 import { digest } from './portable-hash.js';
 import { agentActor } from './agent-slug.js';
 
 export const OVERLAP_METADATA_BYTES = 128 * 1024;
+/** Cross-file symbol facts per Lane row, inside the row budget (replay max 9.5 KB). */
+export const SYMBOL_LINK_BYTES = 16 * 1024;
 export type OverlapFile = { blob: string; mode: string } | null;
 export type OverlapChange = {
   path: string;
@@ -47,12 +50,13 @@ export function boundOverlapChanges(changes: OverlapChange[], complete = true) {
       before: change.before && { blob: change.before.blob, mode: change.before.mode },
       after: change.after && { blob: change.after.blob, mode: change.after.mode },
     };
-    // Preserve the old preflight-availability boundary while compacting advice.
+    // Preserve the old preflight-availability boundary while compacting advice. Cross-file
+    // symbol facts have their own cap below and never change that boundary.
     legacyBytes +=
       new TextEncoder().encode(
         JSON.stringify({
           ...value,
-          ...(change.evidence ? { evidence: change.evidence } : {}),
+          ...(change.evidence ? { evidence: { ...change.evidence, symbolLinks: undefined } } : {}),
         }),
       ).length + 1;
     const size = new TextEncoder().encode(JSON.stringify(value)).length + 1;
@@ -65,11 +69,13 @@ export function boundOverlapChanges(changes: OverlapChange[], complete = true) {
     bytes += size;
   }
   complete &&= legacyBytes <= OVERLAP_METADATA_BYTES;
+  let linkBytes = 0;
   for (const { index, change } of evidence) {
     // Keep full metadata while it fits, including across successive saves.
     // Once legacy coverage is incomplete, spend bytes on ranges before unused
     // declaration names. The incomplete flag propagates through later saves.
-    const ranges = complete ? change.evidence! : { ...change.evidence!, symbols: [] };
+    const { symbolLinks, ...plain } = change.evidence!;
+    const ranges = complete ? plain : { ...plain, symbols: [] };
     const size = new TextEncoder().encode(JSON.stringify(ranges)).length + 12;
     if (bytes + size > OVERLAP_METADATA_BYTES) {
       // Preserve the previous unavailable-preflight behavior when evidence does
@@ -79,6 +85,21 @@ export function boundOverlapChanges(changes: OverlapChange[], complete = true) {
     }
     selected[index]!.evidence = ranges;
     bytes += size;
+    if (!symbolLinks) continue;
+    // Facts past the cap read as unavailable, never as "no link".
+    let links = symbolLinks,
+      extra = new TextEncoder().encode(JSON.stringify(links)).length + 16;
+    if (
+      !('unavailable' in links) &&
+      (linkBytes + extra > SYMBOL_LINK_BYTES || bytes + extra > OVERLAP_METADATA_BYTES)
+    ) {
+      links = { unavailable: true };
+      extra = 40;
+    }
+    if (bytes + extra > OVERLAP_METADATA_BYTES) continue;
+    selected[index]!.evidence = { ...ranges, symbolLinks: links };
+    bytes += extra;
+    linkBytes += extra;
   }
   return { changes: JSON.stringify(selected), complete };
 }
@@ -139,6 +160,7 @@ export function hostedOverlapAdvice(
     (JSON.parse(mine.changes) as OverlapChange[]).map(change => [change.path, change]),
   );
   const paths = new Set(mineChanges.keys());
+  const mineFacts = symbolFacts([...mineChanges.values()]);
   complete &&= mine.complete;
   const items: {
     noticeId: string;
@@ -163,7 +185,9 @@ export function hostedOverlapAdvice(
       continue;
     complete &&= peer.complete;
     const lanes = [mine.laneId, peer.laneId].sort();
-    for (const change of JSON.parse(peer.changes) as OverlapChange[]) {
+    const peerChanges = JSON.parse(peer.changes) as OverlapChange[];
+    let visible = false;
+    for (const change of peerChanges) {
       const { path } = change,
         mineChange = mineChanges.get(path);
       if (requestedPath ? path !== requestedPath : !mineChange) continue;
@@ -176,6 +200,7 @@ export function hostedOverlapAdvice(
       if (classification.reason === 'unavailable') complete = false;
       if (!requestedPath && classification.class === 'advisory' && classification.reason !== 'unavailable')
         continue;
+      visible = true;
       const priority = classification.class === 'blocking';
       // Without answers there is no need to hash every omitted display item.
       const noticeId =
@@ -208,6 +233,27 @@ export function hostedOverlapAdvice(
       if (priority) items.splice(items.findIndex(item => item.class === 'advisory') >>> 0, 0, item);
       else items.push(item);
       if (items.length > maxItems) items.pop();
+    }
+    // One advisory cross-file note per Lane pair, only when no same-file notice already names the pair.
+    const note = requestedPath || visible ? null : crossFileSymbolNote(mineFacts, symbolFacts(peerChanges));
+    const noteId = note && digest(JSON.stringify(['cross-file-symbol', lanes]));
+    if (note && noteId && !answered.has(noteId)) {
+      count++;
+      advisoryCount++;
+      if (items.length < maxItems)
+        items.push({
+          noticeId: noteId,
+          class: 'advisory',
+          reason: 'cross-file-symbol',
+          file: note.file,
+          lanes,
+          participants: [mine, peer].map(lane => ({
+            lane: lane.laneId,
+            actor: agentActor(lane.actor, lane.agent),
+            intent: lane.intent,
+          })),
+          text: symbolNoteText(note, peer.laneId, peer.intent),
+        });
     }
   }
   const knownBase = mine.baseSequence !== null;

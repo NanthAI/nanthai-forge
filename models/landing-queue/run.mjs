@@ -62,6 +62,11 @@ if (config === 'all') {
     'checkround-fixed',
     'retrykeep',
     'retrykeep-fixed',
+    'firstcheck',
+    'firstcheck-revert',
+    'firstcheck-two',
+    'firstcheck-two-fix',
+    'firstcheck-mixed',
   ]) {
     const code = await new Promise((resolve, reject) => {
       const child = spawn(process.execPath, [fileURLToPath(import.meta.url), name], { stdio: 'inherit' });

@@ -49,12 +49,23 @@ configured check (no `configure-check`) skips it and queues as before.
    its own Lane run, once:
    - on unchanged main, that run is the exact acceptance evidence and the change
      lands with no second run;
-   - on a moved main, the existing conservative-impact proof decides. If the main
-     delta and the change are independent (disjoint paths and disjoint affected
-     tests), the change lands on proved reuse; the main audit covers the new head.
-   - Otherwise the proof is refused, the change re-enters the queue as a new
-     entry and joins a cohort for one combined check. That combined check is the
-     re-check after main touched the change's import closure.
+   - on a moved main, it **lands on that first check** when all of these hold
+     (rule `clean-disjoint-v1`, Issue 7fe54c7c): the run passed the project's
+     whole check (or, for a docs-only change, its docs selection) on its base;
+     the change recomposes onto current main byte-exactly with no text conflict;
+     the paths main gained since that base are disjoint from the change's paths;
+     and no path on either side is a [global-risk file](#global-risk-files). The
+     rule reads only Forge data (manifests, the run's selection, receipts), so it
+     works with any CI. The coalesced [main audit](workflows.md#hosted-acceptance-gate)
+     is armed at once and covers the new head with one full run.
+   - Otherwise (any doubt: overlap, global-risk file, text conflict, a scoped
+     first run, red main or audit debt, unreadable evidence) the proof is refused,
+     the change re-enters the queue as a new entry and joins a cohort for one
+     combined check.
+   The receipt's `firstCheck` says which path it took: `{"landedOn":"admission-run","mainMoved":…}`
+   or `{"landedOn":"recheck","reason":…}` with the recheck reason (`path-overlap`,
+   `global-risk`, `text-conflict`, `checked-not-full`, `main-red`, `audit-debt`,
+   `cohort`, …).
    Cohorts of admitted changes use the admitted failure prior, so they are larger.
    A refused change waits for peers still deciding their own Lane run (bounded by
    the train hold, holding no queue order, with one armed wake), so the refused
@@ -64,6 +75,26 @@ configured check (no `configure-check`) skips it and queues as before.
    can move main first, so the wave recomposes in one pass instead of one change
    after another. It is the same one refusal and recomposition, earlier: no new
    check and no added Convex calls (Issue 7fe54c7c).
+
+### Global-risk files
+
+One list, in `src/first-check-risk.ts` (rule `first-check-risk-v1`). A change
+or a main delta touching any of these always rechecks:
+
+- package manifests and lockfiles (npm, pnpm, Yarn, Bun, Cargo, Go, Python,
+  Ruby, Composer, Maven, Gradle) and `.npmrc`/`.yarnrc`;
+- TypeScript, build, lint, format and test-runner configuration (`tsconfig*.json`,
+  `*.config.{js,ts,…}`, Oxlint/Oxfmt/ESLint/Prettier/Babel/SWC configs,
+  `.editorconfig`, `.nvmrc`, `.node-version`, `.tool-versions`, `Makefile`,
+  `Dockerfile`);
+- CI configuration on any provider (`.github/`, GitLab, CircleCI, Buildkite,
+  Forgejo, Woodpecker, Jenkins, Azure Pipelines, Bitbucket Pipelines);
+- this repository's check scripts, check contract and shared test runtime
+  (`scripts/forge-check`, `verify`, `check-contract`, `check-path-scopes`,
+  `test-*`, `tests/check-runtime.mjs`, …), and every file the project's check
+  definition names in its arguments (the check contract's own entry points);
+- database schema (`convex/schema.ts`, `schema.prisma`);
+- any other root-level file that is not `.md` or `.txt`.
 
 The Lane check never re-runs because main moved. Re-running it would race main
 again (model finding 5, moving-main starvation) and add a full run per move; the

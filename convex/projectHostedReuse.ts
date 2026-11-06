@@ -4,7 +4,7 @@ import { v } from 'convex/values';
 import { makeFunctionReference } from 'convex/server';
 import { internalAction } from './_generated/server';
 import { exchangeObjectReader } from './projectExchangeReader';
-import { analyzeCrossHeadReuse } from '../src/hosted-cross-head-analysis';
+import { analyzeCrossHeadReuse, type FirstCheckDecision } from '../src/hosted-cross-head-analysis';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { ForgeError } from '../src/errors';
 export const prove = internalAction({
@@ -33,40 +33,31 @@ export const prove = internalAction({
       renewedAt = Date.now();
     };
     const reader = exchangeObjectReader(ctx, false, 0);
-    let proof = null;
+    let decision: FirstCheckDecision = { reason: 'source-unavailable' };
     try {
-      proof = await analyzeCrossHeadReuse(context.basis, context.selection, async (digests, consume) => {
-        await renew();
-        const rows = await ctx.runQuery(makeFunctionReference<'query'>('projectHostedReuseStore:objects'), {
-          ...identity,
-          digests,
-        });
-        // Source remains available for the exact recheck even when too large for
-        // this optimization's analysis window.
-        if (rows.some((row: { object: { size: number } }) => row.object.size > 2 * 1024 * 1024))
-          throw new ForgeError('SOURCE_UNAVAILABLE', 'Impact analysis window unavailable.');
-        const result: Buffer[] = [];
-        for (let at = 0; at < rows.length;) {
+      decision = await analyzeCrossHeadReuse(
+        context.basis,
+        context.selection,
+        async digests => {
           await renew();
-          let end = at,
-            bytes = 0;
-          while (end < rows.length && bytes + rows[end].object.size <= 2 * 1024 * 1024)
-            bytes += rows[end++].object.size;
-          const window = await reader.read(
+          const rows = await ctx.runQuery(makeFunctionReference<'query'>('projectHostedReuseStore:objects'), {
+            ...identity,
+            digests,
+          });
+          // Six small JSON documents (four manifests, two selection pins).
+          if (rows.some((row: { object: { size: number } }) => row.object.size > 8 * 1024 * 1024))
+            throw new ForgeError('SOURCE_UNAVAILABLE', 'Proof manifest unavailable.');
+          return reader.read(
             input.projectId,
             context.actor,
-            rows.slice(at, end).map((row: { object: { sha256: string; size: number } }) => row.object),
+            rows.map((row: { object: { sha256: string; size: number } }) => row.object),
           );
-          if (consume) {
-            for (let i = at; i < end; i++) await consume(rows[i].object.sha256, window[i - at]!);
-          } else result.push(...window);
-          at = end;
-        }
-        return result;
-      });
+        },
+        context.checkEntries,
+      );
     } catch (error) {
-      // No partial certificate authorizes reuse. Transport/parse/coverage errors
-      // retain the normal exact check, rather than failing the landing.
+      // No partial certificate authorizes reuse. Transport/parse errors retain the
+      // normal recheck, rather than failing the landing.
       if (!(error instanceof Error)) throw error;
       if (error instanceof ForgeError && error.code === 'WORK_STALE') return null;
     }
@@ -74,7 +65,8 @@ export const prove = internalAction({
     await ctx.runMutation(makeFunctionReference<'mutation'>('projectHostedReuseStore:complete'), {
       ...input,
       owner,
-      proof: proof ? canonicalPayload(proof) : null,
+      proof: 'proof' in decision ? canonicalPayload(decision.proof) : null,
+      ...('reason' in decision ? { reason: decision.reason } : {}),
     });
     return null;
   },

@@ -710,176 +710,271 @@ test('accepted reverse writes reverted notice with undo receipt; re-landing clea
   assert.equal(culprit.needsFix(f.tables.hostedProjects.get(f.projectId)).length, 0);
 });
 
-test('system reverse advances from retained source results to one full-gated check and landing', async () => {
-  const operations = await import(moduleUrl('../convex/projectHostedOperations.ts'));
-  const f = await fixture(1);
-  await f.runCulprit();
-  await f.complete(f.probes()[0], true);
-  let row = f.recovery(),
-    recovery = JSON.parse(row.recovery);
-  const syncRow = [...f.tables.projectHostedSyncs.values()][0],
-    sync = JSON.parse(syncRow.value);
-  const reverseLane = {
-    kind: 'lane',
-    id: sync.resolutionLaneId,
-    version: 0,
-    sourceVersion: 0,
-    lifecycleVersion: 0,
-    at,
-    intentId: sync.intentId,
-    actor: 'owner',
-    base: sync.base,
-    head: f.heads[0],
-    state: 'active',
-    authorityEpoch: 1,
-    revert: { receiptId: recovery.target.id, previous: f.heads[0], accepted: f.heads[1] },
+/** A culprit that landed on its first check (Issue 7fe54c7c) carries this receipt shape. */
+function firstCheckCulprit(f) {
+  const row = [...f.tables.projectHostedAcceptances.values()].find(r => r.sequence === 575);
+  const receipt = JSON.parse(row.value);
+  const proof = {
+    algorithm: 'clean-disjoint-v1',
+    checked: { id: randomUUID(), head: 'b'.repeat(64), digest: hash },
+    checkedBase: { head: 'c'.repeat(64), receiptId: 'older' },
+    main: receipt.previous,
+    head: receipt.candidate.head,
+    runId: randomUUID(),
+    terminalDigest: hash,
+    planDigest: hash,
+    candidatePaths: ['src/file-1.ts'],
+    mainPaths: ['src/file-2.ts'],
+    checkedSelection: hash,
+    cleanComposition: true,
+    audit: {
+      source: 'audit',
+      head: f.heads[0],
+      runId: randomUUID(),
+      terminalDigest: hash,
+      planDigest: hash,
+      selection: hash,
+      sequence: 574,
+      coverage: 'main-audit-debt',
+    },
+    riskRule: 'first-check-risk-v1',
+    checkEntries: ['scripts/forge-check.mjs'],
+    checkedScope: 'full',
   };
-  seedRecord(f, reverseLane);
-  const completeOperation = async (id, result) => {
-    const opRow = [...f.tables.projectHostedOperations.values()].find(r => r.operationId === id),
-      op = JSON.parse(opRow.value);
+  const next = hostedAcceptanceSchema.parse({
+    ...receipt,
+    crossHeadProof: proof,
+    firstCheck: { landedOn: 'admission-run', mainMoved: true },
+  });
+  f.patch('projectHostedAcceptances', row._id, { value: JSON.stringify(next) });
+  f.receipts[574] = next;
+  return next;
+}
+for (const [firstCheck, conflict] of [
+  [false, false],
+  [true, false],
+  [true, true],
+])
+  test(`system reverse advances from retained source results to one full-gated check and landing${firstCheck ? ' (culprit landed on its first check)' : ''}${conflict ? ': a reverse that conflicts with later work reverts nothing and opens fix-forward' : ''}`, async () => {
+    const operations = await import(moduleUrl('../convex/projectHostedOperations.ts'));
+    const f = await fixture(1);
+    const culpritReceipt = firstCheck ? firstCheckCulprit(f) : f.receipts[574];
+    const receiptsBefore = [...f.tables.projectHostedAcceptances.values()].map(r => r.value);
+    const mainBefore = [...f.tables.projectHostedChannels.values()][0].selection;
+    await f.runCulprit();
+    await f.complete(f.probes()[0], true);
+    let row = f.recovery(),
+      recovery = JSON.parse(row.recovery);
+    const syncRow = [...f.tables.projectHostedSyncs.values()][0],
+      sync = JSON.parse(syncRow.value);
+    const reverseLane = {
+      kind: 'lane',
+      id: sync.resolutionLaneId,
+      version: 0,
+      sourceVersion: 0,
+      lifecycleVersion: 0,
+      at,
+      intentId: sync.intentId,
+      actor: 'owner',
+      base: sync.base,
+      head: f.heads[0],
+      state: 'active',
+      authorityEpoch: 1,
+      revert: { receiptId: recovery.target.id, previous: f.heads[0], accepted: f.heads[1] },
+    };
+    seedRecord(f, reverseLane);
+    const completeOperation = async (id, result) => {
+      const opRow = [...f.tables.projectHostedOperations.values()].find(r => r.operationId === id),
+        op = JSON.parse(opRow.value);
+      await f.transaction(
+        'sourceResult',
+        {
+          _handler: ctx =>
+            operations.finishHostedOperation(ctx, {
+              projectId: f.projectId,
+              actor: 'owner',
+              operationId: id,
+              receipt: { attemptId: op.firstAttempt.id, at, outcome: { status: 'completed', result } },
+            }),
+        },
+        {},
+      );
+    };
+    // Model terminal source publications; the separate worker test verifies source bytes.
+    await completeOperation(sync.request.operationId, { lane: { laneId: reverseLane.id }, status: 'merged' });
+    f.patch('projectHostedSyncs', syncRow._id, { value: JSON.stringify({ ...sync, status: 'completed' }) });
+    delete recovery.uploads;
+    f.patch('projectHostedOperations', row._id, { recovery: JSON.stringify(recovery) });
+    await f.transaction('advance', culprit.advance, { projectId: f.projectId, runId: f.audit.id });
+    recovery = JSON.parse(f.recovery().recovery);
+    assert.equal(recovery.stage, 'compose');
+    const transfer = JSON.parse(
+      await f.transaction('transfer', culprit.transfer, { projectId: f.projectId, runId: f.audit.id }),
+    );
+    assert.equal(transfer.uploads.length, 3);
+    assert.deepEqual(
+      JSON.parse(
+        await f.transaction('staleTransfer', culprit.transfer, {
+          projectId: f.projectId,
+          runId: f.audit.id,
+          committed: true,
+          token: 'stale',
+        }),
+      ),
+      {},
+    );
+    assert.equal(JSON.parse(f.recovery().recovery).uploads.length, 3);
+    const composeRow = [...f.tables.projectHostedComposes.values()][0],
+      compose = JSON.parse(composeRow.value);
+    const candidate = {
+      kind: 'candidate',
+      id: compose.candidateId,
+      version: 0,
+      at,
+      intentId: compose.request.intentId,
+      base: compose.request.expectedMain,
+      inputs: compose.request.inputs.root,
+      dependencies: compose.request.dependencies.root,
+      algorithm: 'native@fixture',
+      result: conflict
+        ? { status: 'conflict', conflicts: compose.request.inputs.root }
+        : { status: 'clean', head: f.heads[0] },
+    };
+    seedRecord(f, candidate);
+    f.insert('projectHostedStates', {
+      projectId: f.projectId,
+      head: f.heads[0],
+      size: [...f.tables.projectObjects.values()].find(r => r.digest === f.heads[0]).size,
+      input: hash,
+      jobId: randomUUID(),
+      output: hash,
+    });
+    await completeOperation(compose.request.operationId, candidate);
+    f.patch('projectHostedComposes', composeRow._id, {
+      value: JSON.stringify({ ...compose, status: 'completed' }),
+    });
+    delete recovery.uploads;
+    f.patch('projectHostedOperations', f.recovery()._id, { recovery: JSON.stringify(recovery) });
+    // pinLandingAttempt revalidates stored input roots, which the simulated worker uploaded.
+    for (const upload of transfer.uploads)
+      f.insert('projectObjects', {
+        projectId: f.projectId,
+        digest: upload.pin.sha256,
+        size: upload.pin.size,
+        nonce: randomUUID(),
+        removed: false,
+        location: 'r2',
+        r2Committed: true,
+        r2Key: `synthetic/${upload.pin.sha256}`,
+      });
+    f.decorateContext(ctx => {
+      ctx.scheduler = {
+        runAfter: async (_, ref, args) => {
+          f.scheduled.push({ name: getFunctionName(ref), args });
+          return ctx.db.insert('_scheduled_functions', {
+            name: getFunctionName(ref),
+            args,
+            state: { kind: 'pending' },
+          });
+        },
+        cancel: async () => {},
+      };
+      ctx.db.system = { get: async () => ({ state: { kind: 'pending' } }) };
+    });
+    await f.transaction('advanceFull', culprit.advance, { projectId: f.projectId, runId: f.audit.id });
+    if (conflict) {
+      // No blind revert: nothing is queued, main and every receipt stay as they
+      // are, and the culprit's Intent carries one fix-forward notice.
+      assert.equal(JSON.parse(f.recovery().recovery).stage, 'done');
+      assert.equal(f.tables.projectHostedLandingRequests.size, 0);
+      assert.equal(
+        [...f.tables.projectHostedCheckRuns.values()].filter(r =>
+          JSON.parse(r.value).gate?.reason?.startsWith('culprit-revert:'),
+        ).length,
+        0,
+      );
+      assert.deepEqual(
+        [...f.tables.projectHostedAcceptances.values()].map(r => r.value),
+        receiptsBefore,
+      );
+      assert.equal([...f.tables.projectHostedChannels.values()][0].selection, mainBefore);
+      assert.equal((await f.readIntent(f.intents[574].id)).needsFix.state, 'needs-fix');
+      // One new fix-forward Intent; the culprit's own notice points to it.
+      const notices = culprit.needsFix(f.tables.hostedProjects.get(f.projectId));
+      const fix = notices.find(n => n.intentId !== f.intents[574].id);
+      assert.equal(notices.length, 2);
+      assert(notices.every(n => n.state === 'needs-fix' && n.receiptId === culpritReceipt.id));
+      assert(notices.every(n => n.undo === `nforge agent ROOT start '{"intentId":"${fix.intentId}"}'`));
+      return;
+    }
+    const full = [...f.tables.projectHostedCheckRuns.values()]
+      .map(r => JSON.parse(r.value))
+      .filter(r => r.gate?.reason?.startsWith('culprit-revert:'));
+    assert.equal(full.length, 1);
+    assert.equal(full[0].request.gate.mode, 'full');
+    assert.equal([...f.tables.projectHostedLandingRequests.values()].length, 1);
+    // The reverse is an ordinary queued landing on top of current main: nothing is
+    // rewound, no accepted receipt changes, and its receipt message names how to
+    // bring the culprit back (owner 2026-11-06: no lost code).
+    const reverse = JSON.parse([...f.tables.projectHostedLandingRequests.values()][0].value);
+    assert.equal(reverse.request.revertOf, culpritReceipt.id);
+    assert.equal(reverse.request.expectedMain.head, f.heads[1], 'composed on current main');
+    assert.match(
+      reverse.request.message,
+      new RegExp(`Re-land after fixing: nforge agent ROOT start '\\{"intentId":"${f.intents[574].id}"\\}'`),
+    );
+    assert.match(reverse.request.message, /Undo: revert this receipt\.$/);
+    assert.deepEqual(
+      [...f.tables.projectHostedAcceptances.values()].map(r => r.value),
+      receiptsBefore,
+    );
+    assert.equal([...f.tables.projectHostedChannels.values()][0].selection, mainBefore);
+    assert.equal((await f.readIntent(f.intents[574].id)).status, 'active', 'the culprit work stays open');
+    await f.transaction('replayFull', culprit.advance, { projectId: f.projectId, runId: f.audit.id });
+    assert.equal(
+      [...f.tables.projectHostedCheckRuns.values()]
+        .map(r => JSON.parse(r.value))
+        .filter(r => r.gate?.reason?.startsWith('culprit-revert:')).length,
+      1,
+    );
+    const finishRow = [...f.tables.projectHostedFinishes.values()][0];
+    assert.equal(JSON.parse(finishRow.value).recoveryRunId, f.audit.id);
+    f.patch('projectHostedMainAudits', f.auditRow, { red: undefined });
+    const finishControl = await import(moduleUrl('../convex/projectHostedFinishControl.ts'));
     await f.transaction(
-      'sourceResult',
+      'cancelStaleReverse',
       {
         _handler: ctx =>
-          operations.finishHostedOperation(ctx, {
+          finishControl.finishStep(ctx, {
             projectId: f.projectId,
-            actor: 'owner',
-            operationId: id,
-            receipt: { attemptId: op.firstAttempt.id, at, outcome: { status: 'completed', result } },
+            submissionId: finishRow.submissionId,
+            wakeId: finishRow.wake.id,
           }),
       },
       {},
     );
-  };
-  // Model terminal source publications; the separate worker test verifies source bytes.
-  await completeOperation(sync.request.operationId, { lane: { laneId: reverseLane.id }, status: 'merged' });
-  f.patch('projectHostedSyncs', syncRow._id, { value: JSON.stringify({ ...sync, status: 'completed' }) });
-  delete recovery.uploads;
-  f.patch('projectHostedOperations', row._id, { recovery: JSON.stringify(recovery) });
-  await f.transaction('advance', culprit.advance, { projectId: f.projectId, runId: f.audit.id });
-  recovery = JSON.parse(f.recovery().recovery);
-  assert.equal(recovery.stage, 'compose');
-  const transfer = JSON.parse(
-    await f.transaction('transfer', culprit.transfer, { projectId: f.projectId, runId: f.audit.id }),
-  );
-  assert.equal(transfer.uploads.length, 3);
-  assert.deepEqual(
-    JSON.parse(
-      await f.transaction('staleTransfer', culprit.transfer, {
-        projectId: f.projectId,
-        runId: f.audit.id,
-        committed: true,
-        token: 'stale',
-      }),
-    ),
-    {},
-  );
-  assert.equal(JSON.parse(f.recovery().recovery).uploads.length, 3);
-  const composeRow = [...f.tables.projectHostedComposes.values()][0],
-    compose = JSON.parse(composeRow.value);
-  const candidate = {
-    kind: 'candidate',
-    id: compose.candidateId,
-    version: 0,
-    at,
-    intentId: compose.request.intentId,
-    base: compose.request.expectedMain,
-    inputs: compose.request.inputs.root,
-    dependencies: compose.request.dependencies.root,
-    algorithm: 'native@fixture',
-    result: { status: 'clean', head: f.heads[0] },
-  };
-  seedRecord(f, candidate);
-  f.insert('projectHostedStates', {
-    projectId: f.projectId,
-    head: f.heads[0],
-    size: [...f.tables.projectObjects.values()].find(r => r.digest === f.heads[0]).size,
-    input: hash,
-    jobId: randomUUID(),
-    output: hash,
-  });
-  await completeOperation(compose.request.operationId, candidate);
-  f.patch('projectHostedComposes', composeRow._id, {
-    value: JSON.stringify({ ...compose, status: 'completed' }),
-  });
-  delete recovery.uploads;
-  f.patch('projectHostedOperations', f.recovery()._id, { recovery: JSON.stringify(recovery) });
-  // pinLandingAttempt revalidates stored input roots, which the simulated worker uploaded.
-  for (const upload of transfer.uploads)
-    f.insert('projectObjects', {
-      projectId: f.projectId,
-      digest: upload.pin.sha256,
-      size: upload.pin.size,
-      nonce: randomUUID(),
-      removed: false,
-      location: 'r2',
-      r2Committed: true,
-      r2Key: `synthetic/${upload.pin.sha256}`,
-    });
-  f.decorateContext(ctx => {
-    ctx.scheduler = {
-      runAfter: async (_, ref, args) => {
-        f.scheduled.push({ name: getFunctionName(ref), args });
-        return ctx.db.insert('_scheduled_functions', {
-          name: getFunctionName(ref),
-          args,
-          state: { kind: 'pending' },
-        });
+    const failed = JSON.parse([...f.tables.projectHostedLandingRequests.values()][0].value);
+    assert.equal(failed.phase, 'terminal-failed');
+    assert.equal(failed.error.code, 'RECOVERY_SUPERSEDED');
+    await f.transaction(
+      'lateReverseCheck',
+      {
+        _handler: ctx =>
+          culprit.onCulpritRunTerminal(ctx, {
+            ...full[0],
+            status: 'failed',
+            endedAt: at,
+            terminalDigest: hash,
+          }),
       },
-      cancel: async () => {},
-    };
-    ctx.db.system = { get: async () => ({ state: { kind: 'pending' } }) };
+      {},
+    );
+    assert.equal(JSON.parse(f.recovery().recovery).stage, 'done');
+    assert.equal(
+      [...f.tables.projectHostedRecordHeads.values()].filter(r => r.kind === 'intent').length,
+      601,
+    );
   });
-  await f.transaction('advanceFull', culprit.advance, { projectId: f.projectId, runId: f.audit.id });
-  const full = [...f.tables.projectHostedCheckRuns.values()]
-    .map(r => JSON.parse(r.value))
-    .filter(r => r.gate?.reason?.startsWith('culprit-revert:'));
-  assert.equal(full.length, 1);
-  assert.equal(full[0].request.gate.mode, 'full');
-  assert.equal([...f.tables.projectHostedLandingRequests.values()].length, 1);
-  await f.transaction('replayFull', culprit.advance, { projectId: f.projectId, runId: f.audit.id });
-  assert.equal(
-    [...f.tables.projectHostedCheckRuns.values()]
-      .map(r => JSON.parse(r.value))
-      .filter(r => r.gate?.reason?.startsWith('culprit-revert:')).length,
-    1,
-  );
-  const finishRow = [...f.tables.projectHostedFinishes.values()][0];
-  assert.equal(JSON.parse(finishRow.value).recoveryRunId, f.audit.id);
-  f.patch('projectHostedMainAudits', f.auditRow, { red: undefined });
-  const finishControl = await import(moduleUrl('../convex/projectHostedFinishControl.ts'));
-  await f.transaction(
-    'cancelStaleReverse',
-    {
-      _handler: ctx =>
-        finishControl.finishStep(ctx, {
-          projectId: f.projectId,
-          submissionId: finishRow.submissionId,
-          wakeId: finishRow.wake.id,
-        }),
-    },
-    {},
-  );
-  const failed = JSON.parse([...f.tables.projectHostedLandingRequests.values()][0].value);
-  assert.equal(failed.phase, 'terminal-failed');
-  assert.equal(failed.error.code, 'RECOVERY_SUPERSEDED');
-  await f.transaction(
-    'lateReverseCheck',
-    {
-      _handler: ctx =>
-        culprit.onCulpritRunTerminal(ctx, {
-          ...full[0],
-          status: 'failed',
-          endedAt: at,
-          terminalDigest: hash,
-        }),
-    },
-    {},
-  );
-  assert.equal(JSON.parse(f.recovery().recovery).stage, 'done');
-  assert.equal([...f.tables.projectHostedRecordHeads.values()].filter(r => r.kind === 'intent').length, 601);
-});
 
 test('hosted CLI/MCP status carries notices in its existing discovery read without a follow-up call', async t => {
   const { agentFixture } = await import('./hosted-agent-fixture.mjs');

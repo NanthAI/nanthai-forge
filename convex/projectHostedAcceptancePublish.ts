@@ -19,7 +19,7 @@ import { requireHostedCheckEvidence } from './projectHostedCheckRead';
 import { saveObject } from './projectHostedSaveStore';
 import { scheduleAcceptanceCompletion } from './projectHostedAcceptanceCompletion';
 import { hostedMainV2Schema } from '../src/hosted-main';
-import { hostedAcceptanceSchema } from '../src/hosted-acceptance';
+import { hostedAcceptanceSchema, firstCheckField, firstCheckReceipt } from '../src/hosted-acceptance';
 import { hostedRecordSchema } from '../src/hosted-records';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { effectivePolicy, type AcceptanceActor } from '../src/autonomy-policy';
@@ -278,6 +278,9 @@ export async function publishAcceptance(
     policyDigest: attempt.policyDigest,
     check,
     ...(reuse ? { crossHeadProof: reuse } : {}),
+    ...firstCheckField(
+      firstCheckReceipt(row.admission, { runId: attempt.check?.runId, reused: Boolean(reuse), batch: false }),
+    ),
     snapshot: { id: identity.receiptId, previousId: main.snapshotId, revision: main.sourceRevision + 1 },
     completion: {
       root: plan.root,

@@ -32,6 +32,9 @@ export const hostedContractFeatures = [
    * `claim` (lists `touching` and says when the first-write hook should claim). Without it the
    * hook records no claim. */
   'board-claims',
+  /** Save evidence may carry `symbolLinks` (changed exports and referenced imports), which the
+   * overlap read matches into cross-file advisory notes (3629cf24). Without it the CLI strips them. */
+  'overlap-symbol-links',
   /** Capabilities carry every effective agentDefaults key, not only the frozen set older CLIs parse
    * strictly (WIRE_AGENT_DEFAULT_KEYS). Without it the reply has the frozen keys only. */
   'agent-defaults-extended',

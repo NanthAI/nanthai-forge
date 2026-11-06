@@ -174,7 +174,11 @@ const baselineFiles = [
   ['tests/project-freshness.test.mjs', "import '../convex/projectFreshness.ts';"],
   ['tests/native-projection.test.mjs', "import '../dist/native-projection.js';"],
 ];
+// Main gains the Lane's own path (the same bytes, so the composition is clean) and
+// a module importing it. A path-disjoint import overlap alone now lands on the
+// first check under the main audit (Issue 7fe54c7c): see the disjoint replay below.
 const overlapping = [
+  ['convex/projectConvexSourceOutput.ts', 'export const cost = 2;'],
   ['convex/projectFreshness.ts', "import './projectConvexSourceOutput.ts'; export const freshness = 2;"],
 ];
 const effective = (f, runId, value) => {
@@ -247,6 +251,17 @@ test('replay (a): a disjoint race transfers the proof and starts no run', async 
   assert.equal(attempt.crossHeadProof.checked.head, before.candidate.head);
   assert.equal(attempt.recheck, undefined);
   assert.equal(f.tables.projectHostedCheckRuns.size, 2, 'original Candidate check and the main pass only');
+});
+
+test('a path-disjoint import overlap lands on its first check and arms the main audit now', async t => {
+  const { f, state, before } = await race(t, { mainFiles: [overlapping[1]] });
+  for (let n = 0; n < 40 && (await f.current(state.id)).submission.phase !== 'landed'; n++) await f.execute();
+  const { attempt } = await f.status(state.id);
+  assert.equal(attempt.crossHeadProof.algorithm, 'clean-disjoint-v1');
+  assert.equal(attempt.crossHeadProof.checked.head, before.candidate.head);
+  assert.equal(f.tables.projectHostedCheckRuns.size, 2, 'original Candidate check and the main pass only');
+  const audit = [...f.tables.projectHostedMainAudits.values()][0];
+  assert.equal(audit.firstCheck, f.currentMain().sourceRevision);
 });
 
 test('replay (b): an overlapping Convex race runs one scoped recheck that lands with audit debt', async t => {

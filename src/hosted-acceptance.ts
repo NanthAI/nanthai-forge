@@ -28,6 +28,14 @@ export const hostedAcceptanceSchema = z
     memberCandidate: hostedLandingAttemptSchema.shape.candidate.optional(),
     batchId: z.uuid().optional(),
     crossHeadProof: crossHeadProofSchema.optional(),
+    /** Pre-queue admitted landings: whether the landing took its first (admission)
+     * check as acceptance evidence, or rechecked and why (Issue 7fe54c7c). */
+    firstCheck: z
+      .discriminatedUnion('landedOn', [
+        z.object({ landedOn: z.literal('admission-run'), mainMoved: z.boolean() }).strict(),
+        z.object({ landedOn: z.literal('recheck'), reason: z.string().min(1).max(64) }).strict(),
+      ])
+      .optional(),
     actor: hostedLandingAttemptSchema.shape.actor,
     policyDigest: hash,
     check: z
@@ -63,3 +71,16 @@ export type HostedAcceptance = z.infer<typeof hostedAcceptanceSchema>;
 export const EMPTY_COMPLETION_ROOT = digest('forge-hosted-landed-heads-v1');
 export const completionPageRoot = (previous: string, kind: string, index: number, page: unknown) =>
   digest(canonicalPayload({ domain: 'forge-hosted-landed-heads-v1', previous, kind, index, page }));
+
+/** Receipt `firstCheck` from the server-only admission fields of the landing row. */
+export function firstCheckReceipt(
+  admission: { runId: string; status: string; full?: true; recheck?: string } | undefined,
+  input: { runId: string | undefined; reused: boolean; batch: boolean },
+): HostedAcceptance['firstCheck'] {
+  if (!admission?.full || admission.status !== 'passed') return undefined;
+  if (!input.batch && input.runId === admission.runId)
+    return { landedOn: 'admission-run', mainMoved: input.reused };
+  return { landedOn: 'recheck', reason: admission.recheck ?? (input.batch ? 'cohort' : 'not-tried') };
+}
+export const firstCheckField = (value: HostedAcceptance['firstCheck']) =>
+  value ? { firstCheck: value } : {};

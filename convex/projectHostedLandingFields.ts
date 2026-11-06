@@ -145,6 +145,8 @@ export const hostedLandingTables = {
         retries: v.optional(v.number()),
         /** The admitted change has tried its own Lane run as acceptance evidence. */
         reuse: v.optional(v.literal('tried')),
+        /** Why that Lane run did not carry the landing (receipt `firstCheck`, 7fe54c7c). */
+        recheck: v.optional(v.string()),
         /** Its one cohort hold for peers still deciding their own Lane proof (10b0a94b). */
         hold: v.optional(
           v.object({

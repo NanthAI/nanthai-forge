@@ -57,6 +57,7 @@ export async function finishFixture(
     selectedFiles = null,
     mainFiles = null,
     beforeSourceMutation = null,
+    admission = false,
   } = {},
 ) {
   let now = Date.now();
@@ -113,7 +114,7 @@ export async function finishFixture(
       ...policyPreset('trusted'),
       acceptance: {
         ...policyPreset('trusted').acceptance,
-        admissionCheck: false,
+        ...(admission ? {} : { admissionCheck: false }),
       },
       agentDefaults: { stallAlerts: { enabled: false } },
     },
@@ -257,6 +258,7 @@ export async function finishFixture(
     [...f.tables._scheduled_functions.values()]
       .filter(x => x.state.kind === 'pending')
       .sort((a, b) => a.scheduledTime - b.scheduledTime);
+  const reuseDecisions = [];
   const runReuseAction = async (ref, args) => {
     assert.equal(getFunctionName(ref), 'projectHostedReuse:prove');
     const context = await tx('reuseContext', reuseStore.context, {
@@ -269,18 +271,23 @@ export async function finishFixture(
       owner: randomUUID(),
     });
     if (!owner) return null;
-    let proof = null;
+    let decision = { reason: 'source-unavailable' };
     try {
-      proof = await analyzeCrossHeadReuse(context.basis, context.selection, async hashes =>
-        hashes.map(hash => c.objects.get(hash)),
+      decision = await analyzeCrossHeadReuse(
+        context.basis,
+        context.selection,
+        async hashes => hashes.map(hash => c.objects.get(hash) ?? f.rawChecks?.objectBytes?.get(hash)),
+        context.checkEntries,
       );
     } catch (error) {
       if (!(error instanceof Error)) throw error;
     }
+    reuseDecisions.push(decision.proof ? 'proof' : decision.reason);
     return tx('reuseComplete', reuseStore.complete, {
       ...args,
       owner,
-      proof: proof ? JSON.stringify(proof) : null,
+      proof: decision.proof ? JSON.stringify(decision.proof) : null,
+      ...(decision.reason ? { reason: decision.reason } : {}),
     });
   };
   const execute = async (task = pending()[0], stop = null) => {
@@ -537,6 +544,7 @@ export async function finishFixture(
     runReuseAction,
     moveMain,
     metrics,
+    reuseDecisions,
     advanceClock: ms => {
       now += ms;
     },

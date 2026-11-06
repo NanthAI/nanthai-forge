@@ -16,7 +16,12 @@ import { checkoutHostedLane } from './hosted-lane-checkout.js';
 import { adoptNestedLaneCopy } from './hosted-lane-adopt.js';
 import { checkoutRequired } from './hosted-lane-location.js';
 import { ConvexLaneTransport } from './hosted-lane-transport.js';
-import { applyObservedSaveOutcome, saveHostedLane, settlePriorHostedSave } from './hosted-save-client.js';
+import {
+  applyObservedSaveOutcome,
+  overlapEvidenceLevel,
+  saveHostedLane,
+  settlePriorHostedSave,
+} from './hosted-save-client.js';
 import { transitionHostedLane } from './hosted-lifecycle-client.js';
 import { hostedLifecycleRequestSchema } from './hosted-lifecycle.js';
 import { randomUUID } from 'node:crypto';
@@ -462,7 +467,7 @@ export async function executeHostedAgent(
         ...(command.supersedeFinish ? { supersedeFinish: true } : {}),
       },
       session.exchange,
-      session.capabilities.overlapEvidenceVersion === 1,
+      overlapEvidenceLevel(session.capabilities),
       false,
       { action: 'save', parameters: { ...command, operationId: session.journal.operationId } },
       (id, pending) => waitSaveUntil(session, id, pending),

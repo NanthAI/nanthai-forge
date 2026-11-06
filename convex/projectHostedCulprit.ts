@@ -210,6 +210,17 @@ function report(
     ...(revertReceiptId ? { revertReceiptId } : {}),
   };
 }
+/** The revert receipt names how to bring the culprit back (owner 2026-11-06: no
+ * lost code). Its Lane head is retained; starting its Intent opens a Lane there. */
+export function revertMessage(summary: string, intentId: string | null) {
+  const reland = intentId
+    ? ` Re-land after fixing: nforge agent ROOT start '{"intentId":"${intentId}"}' opens a Lane at the reverted head, then land --save.`
+    : '';
+  const undo = ' Undo: revert this receipt.';
+  const room = 1024 - reland.length - undo.length;
+  const fits = new TextEncoder().encode(summary).length <= room;
+  return `${fits ? summary : `${summary.slice(0, Math.floor((room - 3) / 3))}...`}${reland}${undo}`;
+}
 async function candidateIntent(ctx: MutationCtx, project: Doc<'hostedProjects'>, receipt: HostedAcceptance) {
   const row = await readHostedRecord(ctx, {
     projectId: project._id,
@@ -905,6 +916,7 @@ async function finishSystemRevert(
       }),
     );
   const landingOperationId = culpritId({ landRevert: state.audit.id });
+  const original = await candidateIntent(ctx, project, state.target!);
   await enqueueHostedLanding(
     ctx,
     { projectId: project._id },
@@ -917,6 +929,7 @@ async function finishSystemRevert(
       expectedHead: candidate.result.head,
       agent: true,
       revertOf: state.target!.id,
+      message: revertMessage(report(state, state.target!, 'needs-fix').summary, original),
       check: { kind: 'run', runId: id },
       finish: { composeOperationId: state.composeOperationId, after: null },
     }),

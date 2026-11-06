@@ -30,7 +30,7 @@ import { savePin } from '../src/hosted-save';
 import { landingObservation } from '../src/hosted-landing';
 import type { FinishCommand } from '../src/hosted-finish';
 import { ForgeError, invariant } from '../src/errors';
-import { reuseContext } from './projectHostedReuseStore';
+import { reuseDecision } from './projectHostedReuseStore';
 import { findObject, objectRow } from './projectObjectFind';
 import { packRange, packHeaders } from '../src/object-pack-range';
 export type FinishIdentity = LandingIdentity & { wakeId: string };
@@ -97,15 +97,16 @@ export async function finishStep(ctx: MutationCtx, input: FinishIdentity): Promi
           } else {
             // Unknown proof outcome: one ordinary exact check, never a second
             // simultaneous analysis. Late callbacks are fenced by pending ID.
-            await installFinishCompose(ctx, row, value, undefined, source);
+            await installFinishCompose(ctx, row, value, undefined, source, 'analysis-expired');
           }
           return null;
         }
-        if (!value.pending.precompose && (await reuseContext(ctx, input))) {
+        const decision = value.pending.precompose ? null : await reuseDecision(ctx, input);
+        if (decision && !('reason' in decision)) {
           await scheduleFinish(ctx, row, 30_000, true);
           return { kind: 'reuse', pendingId: value.pending.id };
         }
-        await installFinishCompose(ctx, row, value, undefined, source);
+        await installFinishCompose(ctx, row, value, undefined, source, decision?.reason);
         return null;
       }
       if (source.state.status === 'submitted') {

@@ -7,7 +7,7 @@ import { hostedLandingRequestSchema, type HostedLandingState } from './hosted-la
 import { sourceWaitSnapshot } from './hosted-agent-source-wait.js';
 import { hostedCheckRequestSchema } from './hosted-check.js';
 import { hostedRecordSchema } from './hosted-records.js';
-import { saveHostedLane } from './hosted-save-client.js';
+import { overlapEvidenceLevel, saveHostedLane } from './hosted-save-client.js';
 import { composeAgentSource, selectAgentLane } from './hosted-agent-source.js';
 import { recoverHostedCandidate } from './hosted-agent-resolution.js';
 import { inPlaceResolution } from './hosted-conflict-precheck.js';
@@ -230,7 +230,7 @@ async function executeFinishWork(session: HostedAgentSession, input: unknown) {
         session.root,
         { operationId: saveOperationId, message: command.message ?? 'Agent change' },
         session.exchange,
-        session.capabilities.overlapEvidenceVersion === 1,
+        overlapEvidenceLevel(session.capabilities),
         false,
         {
           action: 'finish',

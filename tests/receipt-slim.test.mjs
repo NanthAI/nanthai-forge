@@ -2,7 +2,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { slimReceipt } from '../dist/receipt-slim.js';
+import { slimReceipt, printedReceipt } from '../dist/receipt-slim.js';
+import { markOverlapShown, overlapBannerOnce } from '../dist/hosted-overlap-notice.js';
 
 // Issue 47558a99: receipts leave the process without facts the agent already holds. Budgets are
 // characters of the printed JSON (tokens are about chars / 4); raise one only with numbers on the Issue.
@@ -310,6 +311,7 @@ const healthy = {
         request: {
           operationId: opId,
           governanceVersion: 1,
+          agent: true,
           channel: 'main',
           candidateId: randomUUID(),
           check: { kind: 'request' },
@@ -407,7 +409,7 @@ test('a healthy brief still names what the next step needs', () => {
   assert('cursor' in slimReceipt(unfinished).result, 'an unfinished wait keeps its cursor to resume');
 });
 
-test('anything that is not a healthy outcome keeps its detail', () => {
+test('anything that is not a healthy outcome keeps its detail', t => {
   // A failed test file, a landing still in progress, a conflicted sync, a Lane behind main and a failed save.
   const failed = structuredClone(healthy.land);
   failed.result.submission.testFiles = {
@@ -416,15 +418,48 @@ test('anything that is not a healthy outcome keeps its detail', () => {
     flaky: [],
   };
   assert.deepEqual(slimReceipt(failed).result.submission.testFiles.failed, ['tests/a.test.mjs']);
+  // A flaky file that passed on retry keeps its name and the start of its error, not its attempt timings.
+  const flaky = structuredClone(healthy.wait);
+  flaky.result.submissions[0].submission.testFiles = {
+    counts: { total: 3, failed: 0, flaky: 1 },
+    failed: [],
+    flaky: [
+      {
+        file: 'tests/b.test.mjs',
+        report: { firstError: 'e'.repeat(500), attempts: [{ failed: true }, { failed: false }] },
+      },
+    ],
+  };
+  const kept = slimReceipt(flaky).result.submissions[0].submission.testFiles.flaky[0];
+  assert.deepEqual(Object.keys(kept), ['file', 'firstError']);
+  assert.equal(kept.firstError.length, 160);
   const queued = structuredClone(healthy.land);
-  queued.result.submission.phase = 'queued';
+  queued.result.submission.phase = 'ready';
   delete queued.result.submission.acceptance;
-  assert.equal(
-    slimReceipt(queued).result.replayParameters.laneId,
-    laneId,
-    'recovery needs the replay parameters',
+  Object.assign(queued.result, {
+    inProgress: true,
+    waitCommand: `nforge agent '${laneRoot}' wait '{"operationIds":["${opId}"],"until":"acceptance"}'`,
+    command: `nforge agent '${laneRoot}' wait '{"operationIds":["${opId}"],"until":"acceptance"}'`,
+    instruction: 'Work is unfinished. '.repeat(12),
+    queueAheadSelection: {
+      ahead: [{ head: sha, id: laneId, inputs: { sha256: sha, size: 371 }, status: 'ready' }],
+      main: sha,
+      mine: sha,
+      more: false,
+    },
+  });
+  const pending = slimReceipt(queued).result;
+  t.diagnostic(`unfinished landing ${chars(queued)} -> ${chars(slimReceipt(queued))}`);
+  assert.equal(pending.replayParameters.laneId, laneId, 'recovery needs the replay parameters');
+  assert.match(pending.waitCommand, /wait '/);
+  assert(pending.command && pending.instruction, 'the continuation stays complete');
+  assert.deepEqual(
+    pending.submission.request,
+    { agent: true, check: { kind: 'request' } },
+    'authority facts only',
   );
-  assert.equal(slimReceipt(queued).result.submission.request.channel, 'main');
+  assert.equal(pending.submission.phase, 'ready');
+  assert.deepEqual(pending.queueAheadSelection, { ahead: 1, more: false });
   const conflict = structuredClone(healthy.sync);
   conflict.result.source.outcome.result.status = 'conflict';
   assert.equal(slimReceipt(conflict).result.source.outcome.result.status, 'conflict');
@@ -455,4 +490,18 @@ test('--detail data is only dropped from the printed copy', () => {
   const before = JSON.stringify(healthy.save);
   slimReceipt(healthy.save);
   assert.equal(JSON.stringify(healthy.save), before, 'the in-process receipt is never mutated');
+});
+
+test('the land submitter prints the full receipt its parent process parses', () => {
+  // Regression: the brief advisory notice has no `items`, and the land parent iterates them. The child's
+  // stdout is machine input, so only a process that a person or agent reads is shortened.
+  const full = save(notice(false));
+  assert.equal(printedReceipt(full, { agent: true, detail: false, landChild: true }), full);
+  assert.equal(printedReceipt(full, { agent: true, detail: true, landChild: false }), full);
+  assert.equal(printedReceipt(full, { agent: false, detail: false, landChild: false }), full);
+  const printed = printedReceipt(full, { agent: true, detail: false, landChild: false });
+  assert.notEqual(printed, full);
+  // Even a brief notice cannot crash the banner or the shown-notice bookkeeping.
+  assert.equal(overlapBannerOnce(printed.overlapNotice), '');
+  markOverlapShown(printed.overlapNotice);
 });

@@ -568,8 +568,8 @@ and each re-check attempt's
 `CHANNEL_CHANGED` message names the landings that moved main and whether they
 were submitted before or after it (core-claim incident `e4aee4fe`, 2026-11-01: a
 slow submission re-checked six times in an hour while newer ones overtook it).
-When main moved only in files disjoint from the Candidate, the cross-head proof or
-the scoped re-check keeps the work bounded; a non-source file in a `scripts/` or
+When main moved only in files disjoint from the Candidate, the first-check rule
+or the scoped re-check keeps the work bounded; a non-source file in a `scripts/` or
 `tests/` subfolder selects the code beside or naming it rather than the full suite.
 
 An owner can reprioritise a queued Candidate submission through the existing agent
@@ -679,9 +679,10 @@ the same runner minutes as without the Lane check.
   most twice; then the change enters unadmitted.
 - A passing change enters the queue and first tries its own Lane run, once. On
   unchanged main it lands on that run with no second check. On a moved main the
-  finish retry applies the [conservative-impact proof](../agents/workflow.md#check-scope):
-  an independent change lands on proved reuse; otherwise it recomposes on current
-  main and joins a cohort for one combined check, sized with the admitted prior.
+  finish retry applies the [first-check rule](../pre-queue-checks.md#decision):
+  a clean, path-disjoint change with no global-risk file lands on its Lane run
+  and the main audit runs at once; otherwise it recomposes on current main and
+  joins a cohort for one combined check, sized with the admitted prior.
 - A refused change waits for peers that entered the queue before it and are still
   deciding their own Lane run, so they form one cohort instead of one group each.
   The wait holds no queue order, ends in the transaction where the last peer

@@ -2,8 +2,9 @@
 EXTENDS Naturals, FiniteSets, Sequences, TLC
 CONSTANTS N, Cohort, Width, CrashBound, MoveBound, AllowCancel, AllowAdvice, AllowReuse, InitiallyQueued, Isolation
 \* Pre-queue Lane check (e7d27937). Red: changes whose own check fails on their
-\* base. Independent: changes the conservative-impact proof accepts after any
-\* main move. SuffixWaits is the previous claim order, in which a group also waits
+\* base. Independent: changes the first-check rule accepts after any main move
+\* (7fe54c7c: clean composition, path-disjoint from what main gained, no
+\* global-risk file). SuffixWaits is the previous claim order, in which a group also waits
 \* for older entries stacked behind it (litmus only).
 CONSTANTS PreQueue, Red, Independent, LaneInfra, SuffixWaits
 \* Cohort hold (10b0a94b). "none": the earlier shape, no tracking (state counts
@@ -15,6 +16,11 @@ CONSTANTS PreQueue, Red, Independent, LaneInfra, SuffixWaits
 \* every older entry holding order is itself refused or a refusable Lane proof of
 \* the same cohort and no other group can move main first.
 CONSTANTS Hold
+\* Breaks (7fe54c7c, change 556): Independent changes whose own check passes on
+\* their base but whose content breaks a check once anything else is beside it
+\* on main (a path-disjoint semantic break). Only the main audit sees it after a
+\* first-check landing; recovery reverts one proven culprit or fixes forward.
+CONSTANTS Breaks
 OneCohort == [e \in 1..N |-> 1]
 Entries == 1..N
 SingletonCohorts == [e \in Entries |-> e]
@@ -46,11 +52,15 @@ Init == /\ q = [phase |-> [e \in Entries |-> IF InitiallyQueued
                 lane |-> [e \in Entries |-> IF PreQueue /\ InitiallyQueued THEN "checking" ELSE "none"],
                 lbase |-> [e \in Entries |-> {}], lrev |-> [e \in Entries |-> 0],
                 lretries |-> [e \in Entries |-> 0], tried |-> {},
-                expired |-> {}, early |-> FALSE]
+                expired |-> {}, early |-> FALSE,
+                red |-> FALSE, reverted |-> {}, fixed |-> {}]
         /\ main = {} /\ stamp = 0 /\ moves = 0
         /\ counts = [e \in Entries |-> 0] /\ audit = [cas |-> TRUE, exact |-> TRUE, authorized |-> TRUE]
         /\ running = TRUE /\ crashes = 0 /\ claim = 0 /\ fence = 0
 Live == {e \in Entries : q.phase[e] \notin Terminal \cup {"new"}}
+\* A composed head fails its check when an unfixed break sits beside other content.
+Fails(h) == \E e \in (h \cap Breaks) \ q.fixed : h \ {e} # {}
+Broken == (main \cap Breaks) \ q.fixed
 \* An admitted entry deciding its own proof: not tried yet, or in its one-member
 \* Lane group (exact, proved reuse or refused). A refused member waits for them.
 Deciding == {e \in Entries : PreQueue /\ q.phase[e] = "queued" /\ q.lane[e] = "passed"
@@ -144,7 +154,8 @@ AdmissionFailure(e) == /\ running /\ q.phase[e] = "composing"
 \* queue; two platform retries, then it enters unadmitted (unknown, not red).
 LaneCheck(e, outcome) ==
   /\ PreQueue /\ running /\ q.phase[e] = "checking" /\ q.lane[e] = "checking"
-  /\ (outcome = "pass" => e \notin Red) /\ (outcome = "test" => e \in Red)
+  /\ (outcome = "pass" => e \notin Red /\ ~Fails(q.lbase[e] \cup {e}))
+  /\ (outcome = "test" => e \in Red \/ Fails(q.lbase[e] \cup {e}))
   /\ (outcome = "infra" => LaneInfra)
   /\ LET enter == [q EXCEPT !.phase[e] = "queued"] IN q' = CASE outcome = "pass" -> [enter EXCEPT !.lane[e] = "passed"]
                [] outcome = "test" -> [q EXCEPT !.phase[e] = "terminal-failed",
@@ -272,7 +283,7 @@ Unstack(g) ==
 Check(g, outcome) ==
   /\ running /\ q.batches[g].phase = "checking" /\ q.batches[g].included # {}
   /\ outcome \in {"pass", "test", "infra"}
-  /\ (outcome = "pass" => q.batches[g].included \cap Red = {})
+  /\ (outcome = "pass" => q.batches[g].included \cap Red = {} /\ ~Fails(q.batches[g].head))
   /\ LET b == q.batches[g] IN
      IF outcome = "pass" THEN
        /\ q' = [q EXCEPT !.batches[g].phase = "ready", !.batches[g].proof = Proof(b),
@@ -351,15 +362,35 @@ Crash == /\ running /\ crashes < CrashBound
          /\ UNCHANGED <<q, main, stamp, moves, counts, audit, claim, fence>>
 Restart == /\ ~running /\ running' = TRUE /\ claim' = 0 /\ fence' = fence + 1
            /\ UNCHANGED <<q, main, stamp, moves, counts, audit, crashes>>
-\* Owner-agent conservative-impact proof reuse, after a disjoint main move.
-\* Analysis/audit eligibility is a constant assumption; the old run is immutable.
-Reuse(g) == /\ AllowReuse /\ running /\ claim = 0 /\ ~Exact(g)
+\* Land on the first check (7fe54c7c, clean-disjoint-v1) after a disjoint main
+\* move. Eligibility is a constant assumption; the old run is immutable. While
+\* main is red (audit failed, not yet recovered) no change lands this way.
+Reuse(g) == /\ AllowReuse /\ running /\ claim = 0 /\ ~Exact(g) /\ ~q.red
             /\ q.batches[g].phase = "ready" /\ q.batches[g].pred = 0
             /\ q.batches[g].base \subseteq main
             /\ (PreQueue => q.batches[g].included \subseteq Independent)
             /\ q' = [q EXCEPT !.batches[g].base = main, !.batches[g].rev = stamp,
                               !.batches[g].head = main \cup q.batches[g].included]
             /\ UNCHANGED <<main, stamp, moves, counts, audit, running, crashes, claim, fence>>
+\* The coalesced main audit, armed at once after a first-check landing, finds the
+\* break on main (the audit's own CI run replaces the skipped recheck).
+AuditRed == /\ running /\ ~q.red /\ Fails(main)
+            /\ q' = [q EXCEPT !.red = TRUE]
+            /\ UNCHANGED <<main, stamp, moves, counts, audit, running, crashes, claim, fence>>
+\* One proven culprit: its reverse is an ordinary landing on current main (new
+\* receipt, same CAS) that removes only that change's content. Main never
+\* rewinds; every other landing stays. The culprit's Lane and Intent are kept.
+Revert(e) == /\ running /\ claim = 0 /\ q.red /\ Broken = {e}
+             /\ main' = main \ {e} /\ stamp' = FreshReceipt
+             /\ q' = [q EXCEPT !.reverted = @ \cup {e}, !.red = Fails(main \ {e})]
+             /\ UNCHANGED <<moves, counts, audit, running, crashes, claim, fence>>
+\* Several suspects, or a reverse that conflicts (any red main may take this
+\* path): nothing is reverted; a fix-forward lands on top, keeping every change.
+FixForward == /\ running /\ claim = 0 /\ q.red
+              /\ main' = main \cup {0} /\ stamp' = FreshReceipt
+              /\ q' = [q EXCEPT !.fixed = @ \cup Broken, !.red = FALSE]
+              /\ UNCHANGED <<moves, counts, audit, running, crashes, claim, fence>>
+Recover == AuditRed \/ (\E e \in Entries : Revert(e)) \/ FixForward
 StaleClaim(g) == /\ running /\ claim = g /\ (~Exact(g) \/ q.batches[g].phase # "ready") /\ claim' = 0
                  /\ UNCHANGED <<q, main, stamp, moves, counts, audit, running, crashes, fence>>
 \* The hold's one-shot wake at its bound (HOSTED_TRAIN_HOLD_MS). Not fair here, so
@@ -373,8 +404,8 @@ Driver(g) == Admit(g) \/ AdmissionFailure(g) \/ LaneAdopt(g) \/ LaneRefused(g)
              \/ (\E o \in {"pass", "test", "infra"} : Check(g, o))
 Next == (\E e \in Entries : Submit(e) \/ Gate(e) \/ Precompose(e) \/ Cancel(e) \/ HoldExpire(e))
         \/ (\E g \in Entries : Driver(g) \/ Reuse(g) \/ Fallback(g) \/ (\E e \in Entries : CancelBatch(g,e)))
-        \/ MoveMain \/ Crash \/ Restart
-Spec == Init /\ [][Next]_vars /\ WF_vars(Restart)
+        \/ MoveMain \/ Crash \/ Restart \/ Recover
+Spec == Init /\ [][Next]_vars /\ WF_vars(Restart) /\ WF_vars(Recover)
         /\ \A g \in Entries : WF_vars(Driver(g))
 \* Focused seven-entry scenario reaches six occupied pipeline slots, then
 \* explores pass/fail and dependent invalidation without unrelated advice/gates.
@@ -401,7 +432,20 @@ TypeOK == /\ main \subseteq Entries \cup {0} /\ stamp \in ReceiptNames
           /\ \A e \in Entries : q.lane[e] \in {"none", "checking", "passed", "unknown", "failed"}
           /\ q.tried \subseteq Entries /\ q.expired \subseteq Entries /\ q.early \in BOOLEAN
           /\ q.suspect \subseteq Entries /\ q.unstacked \subseteq Entries
-S1 == audit.cas /\ {e \in Entries : counts[e] > 0} \subseteq main
+          /\ q.red \in BOOLEAN /\ q.reverted \subseteq Entries /\ q.fixed \subseteq Entries
+S1 == audit.cas /\ {e \in Entries : counts[e] > 0} \ q.reverted \subseteq main
+\* No lost code (owner 2026-11-06): every accepted change is on main, or it was
+\* the one proven culprit of a red main and is recorded as reverted (its Lane and
+\* Intent kept to fix and re-land). First-check and rechecked landings alike.
+NoLostWork == \A e \in Entries : counts[e] > 0 =>
+                e \in main \/ (e \in q.reverted /\ e \in Breaks)
+\* Never a blind revert: only a break, and only once it is the sole suspect.
+NoBlindRevert == q.reverted \subseteq Breaks /\ q.reverted \cap q.fixed = {}
+\* Litmus witnesses (expected to fail): recovery paths are reachable.
+NeverReverted == q.reverted = {}
+NeverFixed == q.fixed = {}
+\* A red main always recovers (revert or fix-forward), and no main stays broken.
+MainRecovers == (Fails(main) \/ q.red) ~> (~Fails(main) /\ ~q.red)
 S2 == audit.exact
 AuthorizedEvidence == audit.authorized
 S3 == \A e \in Entries : counts[e] <= 1

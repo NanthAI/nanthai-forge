@@ -2,7 +2,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { spawn } from 'node:child_process';
 import { getFunctionName } from 'convex/server';
 import { analyzeCrossHeadReuse } from '../dist/hosted-cross-head-analysis.js';
 import { validCrossHeadProof } from '../dist/hosted-cross-head-proof.js';
@@ -23,8 +22,9 @@ const baselineFiles = [
   ['tests/convex-source-r2.test.mjs', "import '../convex/projectConvexSourceOutput.ts';"],
   ['tests/native-projection.test.mjs', "import '../dist/native-projection.js';"],
 ];
-async function readyRace(t, { mainFiles, extra = [], disabled = false } = {}) {
+async function readyRace(t, { mainFiles, extra = [], disabled = false, admission = false } = {}) {
   const f = await finishFixture(t, {
+    admission,
     baselineFiles: [...baselineFiles, ...extra],
     selectedFiles: [['convex/projectConvexSourceOutput.ts', 'export const cost = 2;']],
     mainFiles: mainFiles ?? [['src/native-projection.ts', 'export const old = 2;']],
@@ -64,7 +64,15 @@ async function pendingProof(f, state) {
   assert.fail('completed recomposition');
 }
 
-function fixture({ shared = false, unknown = false, overlap = false, corrupt = false, size = 0 } = {}) {
+function fixture({
+  shared = false,
+  unknown = false,
+  overlap = false,
+  corrupt = false,
+  risk = null,
+  mainRisk = null,
+  scope = 'full',
+} = {}) {
   const blobs = new Map();
   let calls = 0,
     maxWindow = 0;
@@ -75,10 +83,8 @@ function fixture({ shared = false, unknown = false, overlap = false, corrupt = f
     return sha;
   };
   const file = ([path, text]) => ({ path, blob: put(text), mode: 'file' });
-  const extra = Array.from({ length: size }, (_, i) => [`src/scale-${i}.ts`, `export const x = ${i};`]);
   const original = [
     ...baselineFiles,
-    ...extra,
     ...(shared
       ? [
           [
@@ -103,22 +109,18 @@ function fixture({ shared = false, unknown = false, overlap = false, corrupt = f
     changed = file(['convex/projectConvexSourceOutput.ts', 'export const cost = 2;']);
   const candidate = [...original.filter(f => f.path !== changed.path), changed];
   if (unknown) candidate.push(file(['unknown.config', 'unknown']));
+  if (risk) candidate.push(file([risk, 'risk']));
   const mainDelta = overlap
     ? file([changed.path, 'export const cost = 3;'])
     : file(['src/native-projection.ts', 'export const old = 2;']);
   const main = [...original.filter(f => f.path !== mainDelta.path), mainDelta];
+  if (mainRisk) main.push(file([mainRisk, 'risk']));
   const merged = [...candidate.filter(f => f.path !== mainDelta.path), mainDelta];
+  if (mainRisk) merged.push(main.at(-1));
   if (corrupt) merged.push(file(['extra.txt', 'unexpected recomposition']));
   const heads = [base, state(candidate), state(main), state(merged)];
-  const selection = put(
-    JSON.stringify({
-      scope: 'full',
-      tests: [
-        ...baselineFiles.map(([p]) => p).filter(p => p.startsWith('tests/')),
-        ...(shared ? ['tests/shared.test.mjs'] : []),
-      ],
-    }),
-  );
+  const pin = value => put(JSON.stringify(value));
+  const selection = pin({ scope, tests: ['tests/convex-source-r2.test.mjs'] });
   const basis = {
     checked: { id: randomUUID(), head: heads[1], digest: 'a'.repeat(64) },
     checkedBase: { head: heads[0], receiptId: 'before' },
@@ -133,7 +135,7 @@ function fixture({ shared = false, unknown = false, overlap = false, corrupt = f
       runId: randomUUID(),
       terminalDigest: 'd'.repeat(64),
       planDigest: 'e'.repeat(64),
-      selection,
+      selection: pin({ scope: 'full', tests: [] }),
       sequence: 1,
       coverage: 'main-audit-debt',
     },
@@ -143,31 +145,56 @@ function fixture({ shared = false, unknown = false, overlap = false, corrupt = f
     maxWindow = Math.max(maxWindow, hashes.length);
     return hashes.map(h => blobs.get(h));
   };
-  return { basis, selection, read, blobs, metrics: () => ({ calls, maxWindow }) };
+  return { basis, selection, read, blobs, pin, metrics: () => ({ calls, maxWindow }) };
 }
 
-test('disjoint conservative impact proof records both deltas and all four inventories', async () => {
+test('clean path-disjoint composition lands on its first check from six small reads, no source text', async () => {
   const f = fixture(),
-    proof = await analyzeCrossHeadReuse(f.basis, f.selection, f.read);
+    { proof } = await analyzeCrossHeadReuse(f.basis, f.selection, f.read, ['scripts/forge-check.mjs']);
   assert(proof);
   assert(validCrossHeadProof(proof));
-  assert.deepEqual(proof.candidateTests, ['tests/convex-source-r2.test.mjs']);
-  assert.deepEqual(proof.mainTests, ['tests/native-projection.test.mjs']);
-  assert.equal(proof.candidateSelections.length, 4);
-  assert.equal(proof.checked.head, f.basis.checked.head);
+  assert.equal(proof.algorithm, 'clean-disjoint-v1');
+  assert.deepEqual(proof.candidatePaths, ['convex/projectConvexSourceOutput.ts']);
+  assert.deepEqual(proof.mainPaths, ['src/native-projection.ts']);
+  assert.equal(proof.checkedScope, 'full');
   assert.equal(proof.head, f.basis.head);
+  // Four manifests, then the two selection pins: no import graph, no blobs.
+  assert.deepEqual(f.metrics(), { calls: 2, maxWindow: 4 });
 });
-for (const option of ['shared', 'unknown', 'overlap', 'corrupt'])
-  test(`${option} evidence keeps the exact recheck`, async () => {
-    const f = fixture({ [option]: true });
-    assert.equal(await analyzeCrossHeadReuse(f.basis, f.selection, f.read), null);
+test('shared affected tests no longer block a path-disjoint first-check landing (owner option A)', async () => {
+  const f = fixture({ shared: true });
+  assert((await analyzeCrossHeadReuse(f.basis, f.selection, f.read)).proof);
+});
+for (const [option, reason] of [
+  [{ overlap: true }, 'path-overlap'],
+  [{ corrupt: true }, 'composition-not-exact'],
+  [{ unknown: true }, 'global-risk'],
+  [{ risk: 'pnpm-lock.yaml' }, 'global-risk'],
+  [{ mainRisk: 'web/tsconfig.json' }, 'global-risk'],
+  [{ mainRisk: '.github/workflows/forge-check.yml' }, 'global-risk'],
+  [{ risk: 'scripts/check-contract.mjs' }, 'global-risk'],
+  [{ mainRisk: 'convex/schema.ts' }, 'global-risk'],
+  [{ risk: 'tools/run-check.mjs' }, 'global-risk'],
+  [{ scope: 'scoped' }, 'checked-not-full'],
+])
+  test(`${JSON.stringify(option)} rechecks: ${reason}`, async () => {
+    const f = fixture(option);
+    assert.deepEqual(await analyzeCrossHeadReuse(f.basis, f.selection, f.read, ['tools/run-check.mjs']), {
+      reason,
+    });
   });
-test('missing checked test coverage cannot transfer a pass', async () => {
+test('a first check without a recorded full scope cannot carry a landing', async () => {
   const f = fixture();
-  const bytes = Buffer.from('{"tests":[]}'),
-    pin = digest(bytes);
-  f.blobs.set(pin, bytes);
-  assert.equal(await analyzeCrossHeadReuse(f.basis, pin, f.read), null);
+  const pin = f.pin({ tests: [] });
+  assert.deepEqual(await analyzeCrossHeadReuse(f.basis, pin, f.read), { reason: 'checked-not-full' });
+});
+test('publication revalidates the proof: overlap or global risk invalidates a stored clean-disjoint proof', async () => {
+  const f = fixture(),
+    { proof } = await analyzeCrossHeadReuse(f.basis, f.selection, f.read);
+  assert(validCrossHeadProof(proof));
+  assert(!validCrossHeadProof({ ...proof, mainPaths: [...proof.mainPaths, 'convex'] }));
+  assert(!validCrossHeadProof({ ...proof, mainPaths: [...proof.mainPaths, 'pnpm-lock.yaml'] }));
+  assert(!validCrossHeadProof({ ...proof, checkEntries: ['src/native-projection.ts'] }));
 });
 test('source analysis unavailable falls back through the internal action, without a partial proof', async () => {
   const f = fixture(),
@@ -176,7 +203,7 @@ test('source analysis unavailable falls back through the internal action, withou
     {
       runQuery: async (_ref, args) =>
         args.digests
-          ? args.digests.map(sha256 => ({ object: { sha256, size: 3 * 1024 * 1024 } }))
+          ? args.digests.map(sha256 => ({ object: { sha256, size: 9 * 1024 * 1024 } }))
           : { pendingId: 'same-attempt', actor: 'owner', basis: f.basis, selection: f.selection },
       runMutation: async (ref, args) => {
         if (getFunctionName(ref).endsWith(':claim')) return 'analysis-owner';
@@ -189,33 +216,7 @@ test('source analysis unavailable falls back through the internal action, withou
   );
   assert.equal(mutations.length, 1);
   assert.equal(mutations[0].proof, null);
-});
-test('doubled dogfood inventory reads bounded pages and keeps source text off heap', async () => {
-  const f = fixture({ size: 6000 });
-  // The action runs compiled code, with no TypeScript compiler/test-module cache.
-  const code = `import{analyzeCrossHeadReuse}from './dist/hosted-cross-head-analysis.js';let input='';for await(const chunk of process.stdin)input+=chunk;const f=JSON.parse(input),blobs=new Map(f.blobs.map(([k,v])=>[k,Buffer.from(v,'base64')]));let calls=0,maxWindow=0;const start=performance.now();const proof=await analyzeCrossHeadReuse(f.basis,f.selection,async hashes=>{calls++;maxWindow=Math.max(maxWindow,hashes.length);return hashes.map(h=>blobs.get(h));});console.log(JSON.stringify({passed:!!proof,calls,maxWindow,rss:process.resourceUsage().maxRSS*1024,wallMs:performance.now()-start}));`;
-  const child = spawn(process.execPath, ['--input-type=module', '-e', code], {
-    stdio: ['pipe', 'pipe', 'pipe'],
-  });
-  let stdout = '',
-    stderr = '';
-  child.stdout.on('data', chunk => (stdout += chunk));
-  child.stderr.on('data', chunk => (stderr += chunk));
-  child.stdin.end(
-    JSON.stringify({
-      basis: f.basis,
-      selection: f.selection,
-      blobs: [...f.blobs].map(([k, v]) => [k, v.toString('base64')]),
-    }),
-  );
-  const exit = await new Promise(resolve => child.on('close', resolve));
-  assert.equal(exit, 0, stderr);
-  const metrics = JSON.parse(stdout);
-  assert(metrics.passed);
-  assert(metrics.calls <= 65);
-  assert(metrics.maxWindow <= 100);
-  assert(metrics.rss < 512 * 1024 * 1024);
-  console.log('cross-head scale', JSON.stringify(metrics));
+  assert.equal(mutations[0].reason, 'source-unavailable');
 });
 
 test('READY pass survives a source-and-impact-disjoint main advance: one passed check, no CHECKING retry', async t => {
@@ -337,37 +338,65 @@ test('cancellation during proof analysis fences completion and cannot revive a s
   assert.equal(f.tables.projectHostedCheckRuns.size, 2);
 });
 
-for (const incident of [true, false])
-  test(
-    incident
-      ? 'a39b1cdb READY 07:42–07:43 then B1.8 at 07:44:00: disjoint paths still recheck when their Convex impacts overlap'
-      : 'explicit hostedCrossHeadReuse:false retains the exact recheck',
-    async t => {
-      // Selected real changed path names; synthetic source bytes preserve privacy.
-      // Convex modules select their own graph, so the overlap is a real shared test.
-      const { f, state } = await readyRace(
-        t,
-        incident
-          ? {
-              extra: [
-                [
-                  'convex/projectFreshness.ts',
-                  "import './projectConvexSourceOutput.ts'; export const freshness = 1;",
-                ],
-                ['tests/project-freshness.test.mjs', "import '../convex/projectFreshness.ts';"],
-              ],
-              mainFiles: [['convex/projectFreshness.ts', null]],
-            }
-          : { disabled: true },
-      );
-      for (let n = 0; n < 80 && (await f.current(state.id)).submission.phase !== 'checking'; n++)
-        await f.execute();
-      assert.equal((await f.current(state.id)).submission.phase, 'checking');
-      assert.equal(
-        f.tables.projectHostedCheckRuns.size,
-        3,
-        'existing main pass plus original and replacement Candidate checks',
-      );
-      assert.equal((await f.status(state.id)).attempt.crossHeadProof, undefined);
-    },
+test('a39b1cdb shape (disjoint paths, overlapping Convex impact) now lands on its first check; the prompt audit verifies main', async t => {
+  // Selected real changed path names; synthetic source bytes preserve privacy.
+  // Under owner option A (2026-11-06) shared test impact no longer forces a recheck:
+  // the coalesced main audit runs at once instead and recovery handles a red result.
+  const { f, state, before } = await readyRace(t, {
+    extra: [
+      ['convex/projectFreshness.ts', "import './projectConvexSourceOutput.ts'; export const freshness = 1;"],
+      ['tests/project-freshness.test.mjs', "import '../convex/projectFreshness.ts';"],
+    ],
+    mainFiles: [['convex/projectFreshness.ts', null]],
+  });
+  for (let n = 0; n < 80 && (await f.current(state.id)).submission.phase !== 'landed'; n++) await f.execute();
+  assert.equal((await f.current(state.id)).submission.phase, 'landed');
+  assert.equal(f.tables.projectHostedCheckRuns.size, 2, 'existing main pass plus the one Candidate check');
+  const receipt = JSON.parse(
+    [...f.tables.projectHostedAcceptances.values()].find(row => row.submissionId === state.id).value,
   );
+  assert.equal(receipt.crossHeadProof.algorithm, 'clean-disjoint-v1');
+  assert.equal(receipt.check.runId, before.check.runId);
+  const audit = [...f.tables.projectHostedMainAudits.values()][0];
+  assert.equal(audit.firstCheck, receipt.snapshot.revision);
+  assert(audit.wake.at <= Date.now(), 'first-check landings arm the main audit at once');
+});
+test('a text conflict with main never lands on the first check', async t => {
+  const { f, state } = await readyRace(t, {
+    mainFiles: [['convex/projectConvexSourceOutput.ts', 'export const cost = 3;']],
+  });
+  for (let n = 0; n < 80 && f.pending().length; n++) await f.execute();
+  const current = await f.current(state.id);
+  assert.notEqual(current.submission.phase, 'landed');
+  assert.equal(current.submission.error?.code, 'COMPOSITION_CONFLICT');
+  assert.equal(f.tables.projectHostedCheckRuns.size, 2, 'no check runs for a conflicting composition');
+  assert.deepEqual(f.reuseDecisions, []);
+});
+test('a path the change and main both touch rechecks and records path-overlap', async t => {
+  // Main made the same edit: the composition is clean, but the path overlaps.
+  const { f, state } = await readyRace(t, {
+    mainFiles: [
+      ['convex/projectConvexSourceOutput.ts', 'export const cost = 2;'],
+      ['src/native-projection.ts', 'export const old = 2;'],
+    ],
+  });
+  for (let n = 0; n < 80 && (await f.current(state.id)).submission.phase !== 'checking'; n++)
+    await f.execute();
+  assert.equal((await f.current(state.id)).submission.phase, 'checking');
+  assert.equal(f.tables.projectHostedCheckRuns.size, 3, 'main pass, Candidate check and its recheck');
+  assert.equal((await f.status(state.id)).attempt.crossHeadProof, undefined);
+  assert.deepEqual(f.reuseDecisions, ['path-overlap']);
+});
+test('explicit hostedCrossHeadReuse:false retains the exact recheck', async t => {
+  const { f, state } = await readyRace(t, { disabled: true });
+  for (let n = 0; n < 80 && (await f.current(state.id)).submission.phase !== 'checking'; n++)
+    await f.execute();
+  assert.equal((await f.current(state.id)).submission.phase, 'checking');
+  assert.equal(
+    f.tables.projectHostedCheckRuns.size,
+    3,
+    'existing main pass plus original and replacement checks',
+  );
+  assert.equal((await f.status(state.id)).attempt.crossHeadProof, undefined);
+  assert.deepEqual(f.reuseDecisions, []);
+});

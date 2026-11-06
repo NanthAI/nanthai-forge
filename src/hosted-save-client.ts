@@ -38,6 +38,17 @@ import { parseHostedResponse } from './hosted-response.js';
 
 type SaveExchange = Pick<ConvexExchange, 'client' | 'projectId' | 'uploadFile' | 'upload' | 'missing'> &
   Partial<Pick<ConvexExchange, 'uploadLazyBatch' | 'downloadToFile' | 'downloadBatch' | 'prepareDownloads'>>;
+/** What the server's strict save pages accept: nothing, ranges, or ranges plus cross-file facts. */
+type OverlapEvidenceLevel = boolean | 'symbol-links';
+export const overlapEvidenceLevel = (capabilities: {
+  overlapEvidenceVersion?: 1 | undefined;
+  features?: readonly string[] | undefined;
+}): OverlapEvidenceLevel =>
+  capabilities.overlapEvidenceVersion !== 1
+    ? false
+    : capabilities.features?.includes('overlap-symbol-links')
+      ? 'symbol-links'
+      : true;
 const saveCommandSchema = z
   .object({ operationId: z.uuid(), message: z.string(), supersedeFinish: z.boolean().optional() })
   .strict();
@@ -85,7 +96,7 @@ export async function saveHostedLane(
   root: string,
   command: { operationId: string; message: string; supersedeFinish?: boolean },
   exchange: SaveExchange,
-  overlapEvidence = false,
+  overlapEvidence: OverlapEvidenceLevel = false,
   preserveConflicts = false,
   continuation: ConflictContinuation = { action: 'save', parameters: command },
   /** Wait on an earlier unfinished save of this checkout instead of refusing SAVE_PENDING. */
@@ -111,7 +122,7 @@ async function saveOnce(
   command: { operationId: string; message: string; supersedeFinish?: boolean },
   exchange: SaveExchange,
   repair: boolean,
-  overlapEvidence: boolean,
+  overlapEvidence: OverlapEvidenceLevel,
   preserveConflicts: boolean,
   continuation: ConflictContinuation,
   waitPrior?: (operationId: string, pending: unknown) => Promise<unknown>,
@@ -218,6 +229,8 @@ async function saveOnce(
     }
     // Older servers validate delta pages strictly. Reuse capability discovery; never probe per save.
     if (!overlapEvidence) for (const change of changes) delete change.evidence;
+    else if (overlapEvidence !== 'symbol-links')
+      for (const change of changes) delete change.evidence?.symbolLinks;
     const built = buildSavePages(changes),
       selection = capture.marker.selection;
     request = saveRequestSchema.parse({

@@ -253,6 +253,7 @@ export async function installFinishCompose(
   value: HostedFinish,
   proof?: CrossHeadProof,
   preparedSource?: Awaited<ReturnType<typeof loadCompose>>,
+  recheckReason?: string,
 ) {
   const input = { projectId: row.projectId, submissionId: row.submissionId };
   const { row: landing, state } = await loadLanding(ctx, input),
@@ -431,6 +432,17 @@ export async function installFinishCompose(
       'The original check proof changed.',
     );
   } else proof = undefined;
+  // The receipt names why an admitted change did not land on its first check.
+  // Only the attempt bound to the admission run records it, once, on this row.
+  if (
+    !proof &&
+    landing.admission?.status === 'passed' &&
+    !landing.admission.recheck &&
+    previous?.check?.runId === landing.admission.runId
+  )
+    await ctx.db.patch(landing._id, {
+      admission: { ...landing.admission, recheck: recheckReason ?? 'not-eligible' },
+    });
   // A main race without a transferable proof may recheck only the shared impact.
   const recheck =
     !proof && previous && candidate.result.status === 'clean'

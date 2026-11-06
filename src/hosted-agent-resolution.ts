@@ -27,7 +27,7 @@ import { composeConflictPageSchema } from './hosted-compose.js';
 import { hostedRecordSchema } from './hosted-records.js';
 import { saveExpectedSchema, saveResultSchema } from './hosted-save.js';
 import { syncRequestSchema, syncResultSchema } from './hosted-sync.js';
-import { saveHostedLane } from './hosted-save-client.js';
+import { overlapEvidenceLevel, saveHostedLane } from './hosted-save-client.js';
 import { driveAgentSource, syncAgentSource } from './hosted-agent-source.js';
 import { hostedRootLanePath } from './hosted-root-checkout.js';
 import { placeResolution } from './hosted-resolution-placement.js';
@@ -271,7 +271,7 @@ export async function resolveHostedAgent(session: HostedAgentSession, input: unk
       session.root,
       { operationId: saveOperationId, message: command.message },
       session.exchange,
-      session.capabilities.overlapEvidenceVersion === 1,
+      overlapEvidenceLevel(session.capabilities),
       false,
       { action: 'resolve', parameters: { ...command, operationId: session.journal.operationId } },
     );

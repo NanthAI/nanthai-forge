@@ -77,6 +77,17 @@ export function slimReceipt<T>(receipt: T): T {
   return brief(out) as T;
 }
 
+/**
+ * The receipt a process prints. The land submitter prints its receipt for its parent process to parse
+ * (the parent needs the full overlap notice), so only a process a human or agent reads is shortened.
+ */
+export function printedReceipt<T>(
+  receipt: T,
+  options: { agent: boolean; detail: boolean; landChild: boolean },
+): T {
+  return options.agent && !options.detail && !options.landChild ? slimReceipt(receipt) : receipt;
+}
+
 /** Budget (Issue 47558a99): a healthy receipt is about 300 characters. The facts below are dropped because
  * the agent holds them, they are constant, or one named read returns them; `--detail` prints everything. */
 const fileList = (items: Json[]): string[] => [...new Set(items.map(item => String(item.file)))].slice(0, 5);
@@ -180,21 +191,95 @@ function briefSync(result: Json): Json | undefined {
   };
 }
 
+/** A flaky file that passed on retry: its name and the start of its first error (attempt timings are --detail). */
+function briefFlaky(entry: unknown): unknown {
+  const flaky = obj(entry),
+    report = obj(flaky?.report);
+  if (!flaky || !report) return entry;
+  const error = typeof report.firstError === 'string' ? report.firstError.slice(0, 160) : undefined;
+  return { file: flaky.file, ...(error ? { firstError: error } : {}) };
+}
+
 /** A landing that reached `landed`: the receipt and State, plus failed or flaky test files if any. */
 function briefLanded(result: Json): Json | undefined {
   const submission = obj(result.submission);
   if (!submission || submission.phase !== 'landed' || !obj(submission.acceptance)) return undefined;
-  const files = obj(submission.testFiles),
-    counts = obj(files?.counts);
-  const failed = Array.isArray(files?.failed) ? files.failed : [],
-    flaky = Array.isArray(files?.flaky) ? files.flaky : [];
+  const testFiles = briefTestFiles(submission.testFiles);
   return {
     submission: {
       phase: 'landed',
       acceptance: submission.acceptance,
-      ...(counts ? { testFiles: failed.length || flaky.length ? files : { counts } } : {}),
+      ...(testFiles ? { testFiles } : {}),
     },
   };
+}
+
+/** Test file counts, failed files in full, flaky files by name and the start of their error. */
+function briefTestFiles(value: unknown): Json | undefined {
+  const files = obj(value),
+    counts = obj(files?.counts);
+  if (!counts) return undefined;
+  const failed = Array.isArray(files?.failed) ? files.failed : [],
+    flaky = Array.isArray(files?.flaky) ? files.flaky : [];
+  return {
+    counts,
+    ...(failed.length ? { failed } : {}),
+    ...(flaky.length ? { flaky: flaky.map(briefFlaky) } : {}),
+  };
+}
+
+/** An unfinished landing: where it is and the exact continuation. The request, timings and ids are
+ * dropped (`--detail` has them); the continuation, replay parameters, recovery and errors stay. */
+function briefPending(result: Json): Json | undefined {
+  const submission = obj(result.submission);
+  if (!submission || submission.phase === 'landed' || result.inProgress !== true) return undefined;
+  // `command`, `waitCommand`, `next` and `instruction` are the exact continuation (no dead ends): kept.
+  const slim: Json = result.pendingAttempt === null ? omit(result, 'pendingAttempt') : { ...result };
+  const testFiles = briefTestFiles(submission.testFiles),
+    request = obj(submission.request);
+  slim.submission = {
+    ...omit(
+      submission,
+      'schema',
+      'projectId',
+      'actor',
+      'at',
+      'request',
+      'sequence',
+      'priorityReason',
+      'priorityVersion',
+      'version',
+      'firstAttemptId',
+      'attemptId',
+      'timing',
+      'checkProgress',
+      'testFiles',
+    ),
+    ...(testFiles ? { testFiles } : {}),
+    // Who may accept and what is checked are authority facts; the rest of the request is --detail.
+    ...(request ? { request: { agent: request.agent, check: { kind: obj(request.check)?.kind } } } : {}),
+  };
+  const preflight = obj(obj(result.defaults)?.preflight);
+  if (preflight)
+    slim.defaults = {
+      preflight: omit(
+        preflight,
+        'at',
+        'rule',
+        'peakRssMb',
+        'testSeconds',
+        'trimmedTiers',
+        'reusedTests',
+        'deferredTo',
+      ),
+    };
+  const ahead = obj(result.queueAheadSelection);
+  if (ahead)
+    slim.queueAheadSelection = {
+      ahead: Array.isArray(ahead.ahead) ? ahead.ahead.length : ahead.ahead,
+      more: ahead.more,
+    };
+  return slim;
 }
 
 /** `wait`/`observe` that ended with every landing landed: the receipt and State per submission, no cursor. */
@@ -232,7 +317,7 @@ function brief(out: Json): Json {
         : action === 'sync'
           ? briefSync(result)
           : action === 'finish' || action === 'land' || action === 'wait'
-            ? briefLanded(result)
+            ? (briefLanded(result) ?? briefPending(result))
             : action === 'observe'
               ? briefObserved(result, out.operationId)
               : undefined;

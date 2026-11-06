@@ -3,18 +3,26 @@ import { lstatSync, mkdirSync, readFileSync, writeFileSync, renameSync, rmSync, 
 import { isAbsolute, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { parser } from '@lezer/javascript';
-import type { SyntaxNode } from '@lezer/common';
 import { z } from 'zod';
 import { digest } from './hash.js';
 import { attributionEdits, attributionLines } from './native-text-merge.js';
 import { durableReplace } from './native-durability.js';
 import { overlapEvidenceSchema, type OverlapEvidence } from './hosted-overlap-evidence.js';
 import { readSource } from './files.js';
+import {
+  symbolBindings,
+  symbolLinks,
+  topLevelFacts,
+  type SymbolLinkContext,
+} from './hosted-overlap-symbols.js';
 
 const limit = 1024 * 1024;
 const sketchSchema = z.object({
   lines: z.array(z.string().regex(/^[a-f0-9]{64}$/)).max(20000),
   symbols: z.record(z.string(), z.string()),
+  // Absent in sketches cached by older clients: cross-file facts are then derived again or unavailable.
+  exports: z.record(z.string(), z.string()).optional(),
+  imports: z.record(z.string(), z.tuple([z.string(), z.string()])).optional(),
 });
 type Sketch = z.infer<typeof sketchSchema>;
 /** Small, disposable summaries; no source bytes retained or sent to Convex. */
@@ -24,8 +32,10 @@ export function overlapTextSketch(bytes: Buffer): Sketch | null {
   if (!lines || lines.length > 20000) return null;
   const text = bytes.toString('utf8'),
     symbols: Record<string, string> = Object.create(null);
-  if (/\b(?:function|class|const|let|var|interface|type)\s/.test(text)) {
+  let facts: ReturnType<typeof topLevelFacts> = { exports: {}, imports: {} };
+  if (/\b(?:function|class|const|let|var|interface|type|enum|import|export)\s/.test(text)) {
     const tree = parser.configure({ dialect: 'ts jsx' }).parse(text);
+    facts = topLevelFacts(tree, text);
     tree.iterate({
       enter(node) {
         if (
@@ -60,26 +70,7 @@ export function overlapTextSketch(bytes: Buffer): Sketch | null {
       },
     });
   }
-  return { lines: lines.map(line => digest(line)), symbols };
-}
-/** Each binding owns its initializer, even when one declaration contains several names. */
-function symbolBindings(node: SyntaxNode) {
-  const bindings: { name: SyntaxNode; from: number; to: number }[] = [];
-  if (node.name === 'VariableDeclaration') {
-    for (let child = node.firstChild; child; child = child.nextSibling) {
-      if (child.name !== 'VariableDefinition') continue;
-      let end = child.nextSibling;
-      while (end && end.name !== ',' && end.name !== ';') end = end.nextSibling;
-      bindings.push({ name: child, from: child.from, to: end?.from ?? node.to });
-    }
-  } else {
-    const name =
-      node.getChild('VariableDefinition') ??
-      node.getChild('TypeDefinition') ??
-      node.getChild('PropertyDefinition');
-    if (name) bindings.push({ name, from: node.from, to: node.to });
-  }
-  return bindings;
+  return { lines: lines.map(line => digest(line)), symbols, ...facts };
 }
 const sketchPath = (cache: string, blob: string) => join(cache, 'overlap-text', `${blob}.json`);
 export function rememberOverlapText(cache: string, blob: string, bytes: Buffer) {
@@ -101,7 +92,8 @@ export function rememberOverlapSketch(cache: string, blob: string, sketch: Sketc
     /* Optional evidence never invalidates source capture. */
   }
 }
-export function readOverlapText(cache: string, blob: string): Sketch | null {
+/** `facts`: a cached sketch without cross-file facts (older client) is derived again. */
+export function readOverlapText(cache: string, blob: string, facts = false): Sketch | null {
   if (!/^[a-f0-9]{64}$/.test(blob)) return null;
   try {
     if (lstatSync(cache).isSymbolicLink()) return null;
@@ -110,7 +102,9 @@ export function readOverlapText(cache: string, blob: string): Sketch | null {
     return null;
   }
   try {
-    return sketchSchema.parse(JSON.parse(readFileSync(sketchPath(cache, blob), 'utf8')));
+    const cached = sketchSchema.parse(JSON.parse(readFileSync(sketchPath(cache, blob), 'utf8')));
+    if (facts && !cached.exports) throw Error('derive cross-file facts');
+    return cached;
   } catch {
     // Checkout retains verified immutable objects. Derive evidence only for a
     // changed path, rather than parsing every file before the Lane can open.
@@ -137,10 +131,12 @@ export function overlapTextEvidence(
   before: Sketch | null,
   after: Sketch | null,
   code: boolean,
+  links?: SymbolLinkContext,
 ): OverlapEvidence | undefined {
   if (!before || !after) return undefined;
   const edits = attributionEdits(before.lines, after.lines);
   if (!edits) return undefined;
+  const symbolFacts = code && links ? { symbolLinks: symbolLinks(before, after, edits, links) } : {};
   const symbols = code
     ? [...new Set([...Object.keys(before.symbols), ...Object.keys(after.symbols)])].filter(
         name => before.symbols[name] !== after.symbols[name],
@@ -150,6 +146,7 @@ export function overlapTextEvidence(
     baseBlob,
     ranges: edits.map(({ start, end }) => ({ start, end })),
     symbols,
+    ...symbolFacts,
   });
   return result.success ? result.data : undefined;
 }

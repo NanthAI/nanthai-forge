@@ -59,6 +59,11 @@ npm run model:landing-queue -- checkround             # expected: a checking ent
 npm run model:landing-queue -- checkround-fixed
 npm run model:landing-queue -- retrykeep              # expected: a same-head retry discards dependent checks (ea86f3fb)
 npm run model:landing-queue -- retrykeep-fixed
+npm run model:landing-queue -- firstcheck             # change 556 class: first-check break caught by the audit, recovered (7fe54c7c)
+npm run model:landing-queue -- firstcheck-revert      # expected: the single culprit is reverted (witness)
+npm run model:landing-queue -- firstcheck-two         # two suspects: nothing reverted, fixed forward
+npm run model:landing-queue -- firstcheck-two-fix     # expected: the fix-forward path is taken (witness)
+npm run model:landing-queue -- firstcheck-mixed       # two breaks among three changes
 ```
 
 An installed JDK is a **development-only** prerequisite. On the development Mac, `java`
@@ -128,7 +133,9 @@ promise. The finite model does not silently add that product policy.
 (`lbase`, `lrev`); `lretries` counts platform restarts and `tried` the entries
 that already offered their own run. The constant `Red` names changes whose own
 check fails on their base, so any check that includes one fails; `Independent`
-names changes the conservative-impact proof accepts after any main move.
+names changes the first-check rule (`clean-disjoint-v1`: clean composition,
+path-disjoint from what main gained, no global-risk file) accepts after any main
+move.
 `NoQueueCheck` says no queue group ever checks; it is checked only by the solo
 configs.
 
@@ -221,6 +228,42 @@ turn.
   `tests/hosted-landing-early-refusal.test.mjs` (one pass, one combined check, no
   more transactions than the serial path).
 
+## First-check landings and no lost work (Issue 7fe54c7c)
+
+`Reuse` is the first-check landing: an `Independent` change lands on its own
+passed Lane run after main moved. The constant `Breaks` names Independent changes
+whose content is wrong only beside other content (a path-disjoint semantic
+break, change 556): their own Lane check passes on the base they composed on,
+and `Fails(h)` makes any check of a head holding an unfixed break plus anything
+else fail. So a rechecked break fails its second check, while a first-check
+break reaches main.
+
+- `AuditRed`: the coalesced main audit, armed at once after a first-check
+  landing, finds the break and marks main red (`q.red`). `Reuse` requires green
+  main, so no change lands on its first check while main is red.
+- `Revert(e)`: only when `e` is the sole unfixed break on main. The reverse is
+  an ordinary landing on current main: a fresh receipt under the same claim
+  rule, removing only `e`'s content; `e` is recorded in `q.reverted` and its
+  Lane is kept (code: `start {intentId}` opens a Lane at its saved head).
+- `FixForward`: any red main (several suspects, or a reverse that conflicts)
+  may instead land a fix on top, keeping every change (`q.fixed`).
+- `NoLostWork`: every accepted change is on main, or is a reverted break.
+  `NoBlindRevert`: only breaks are reverted, never a fixed one. `S1` exempts
+  reverted changes. `MainRecovers` (liveness, with fair recovery): a broken or
+  red main always becomes green.
+- `firstcheck` (N=3, `Breaks = {2}`), `firstcheck-two` (both changes break
+  together: `NeverReverted` holds, nothing is reverted blindly) and
+  `firstcheck-mixed` (two breaks among three) pass; `firstcheck-revert` and
+  `firstcheck-two-fix` are witnesses that the revert and fix-forward paths are
+  reachable. Three deliberate mutations were each caught: reverting any change
+  on main (`NoLostWork`), a revert that rewinds main (`S1`), and no recovery
+  (`MainRecovers`).
+- Every `LandingQueue` configuration checks `NoLostWork` and `NoBlindRevert`
+  with `Breaks = {}`, which adds no states (their counts are unchanged). The
+  `Incidents` litmus reductions model abstract heads and entry phases, not
+  accepted content, so `NoLostWork` has no meaning there; they were re-run
+  unchanged.
+
 ## Model-to-code map and simplifications
 
 Line references are to the pinned source above. Every abstraction below is a
@@ -241,7 +284,8 @@ scope limitation; passing TLC does not verify the omitted implementation.
 | `Check(g, "infra")` retry keeps receipt and dependents, `StackPinned` | `convex/projectHostedLandingStore.ts` (`retiresSolo` keep pins), `convex/projectHostedLandingPipelineInvalidation.ts` (`keep`), `convex/projectHostedLandingBatchSplit.ts` (`retryLandingBatchCheck`), `convex/projectHostedLandingBatchStore.ts` (`keepReceipt`) | Since ea86f3fb a platform retry re-checks the same base, members and head and keeps its receipt, so groups stacked on that (head, receipt) keep their checks. A stacked group's base is its pending predecessor, not main. A changed predicted head or receipt is `Rebase`/`Unstack`/`Released`, which still invalidate. `StackPinned`: while a predecessor slot reserves a dependent's pinned receipt it predicts the pinned head. |
 | cancel/abandon | `convex/projectHostedLandingCancel.ts:35`, `convex/projectHostedBatchAbandon.ts:35` | One atomic target settlement and peer release; final publication wins or cancellation wins. Abandon discovery pages and Lane lifecycle are hidden. Shared check execution continues independently; only binding authority matters here. |
 | `Claim`, `Publish`, `MoveMain` | `convex/projectHostedLandingControl.ts:293`, `convex/projectHostedLandingBatchPublish.ts:48`, `convex/projectHostedAcceptancePublish.ts:110` | Transactional OCC/CAS is atomic; includes main receipt equality, exact proof and member counters. Policy, contributor access, full shard evidence and registration are assumed validated; this is the automatic agent path, not explicit unchecked owner acceptance (which independently also makes unrestricted literal S2 false). Main contributions are append-only ancestry tokens; legitimate file edits/reverts are outside this property. |
-| `Reuse` | `convex/projectHostedFinishCompose.ts:402`, `convex/projectHostedAcceptancePublish.ts:125`, `convex/projectHostedAcceptancePublish.ts:175`, `src/hosted-cross-head-proof.ts:46` | Eligible owner-agent cross-head proof on disjoint synthetic main change. Analysis/audit eligibility is assumed; original checked result stays different from applied result. `strict.cfg` disables this branch; the default enables it; `reuse-core` explicitly enables it. |
+| `Reuse` | `convex/projectHostedFinishCompose.ts` (`installFinishCompose`), `convex/projectHostedAcceptancePublish.ts`, `src/hosted-cross-head-analysis.ts` (`analyzeCrossHeadReuse`), `src/first-check-risk.ts`, `convex/projectHostedReuseStore.ts` (`reuseDecision`) | First-check landing (`clean-disjoint-v1`) on a disjoint synthetic main change. Path disjointness, risk list and clean composition are the constant `Independent`; red main and audit debt refuse it (`~q.red`). Original checked result stays different from applied result. `strict.cfg` disables this branch; the default enables it; `reuse-core` explicitly enables it. |
+| `AuditRed`, `Revert`, `FixForward` | `convex/projectHostedMainAuditState.ts` (`noteMainLanding`, `promptAudit`, `onGateRunTerminal`), `convex/projectHostedCulprit.ts` (`startRedClassification`, `prepareSystemRevert`, `finishSystemRevert`, `fixForward`, `revertMessage`) | The audit run, bisect probes and the reverse Candidate's own full check are atomic steps; "sole break" stands for a single proven bisect boundary. The reverse's queue turn is abstracted to an atomic landing with a fresh receipt; in code it is a normal queued landing with `revertOf`. Re-landing a fixed culprit is outside this finite episode. |
 | `LaneCheck`, `LaneAdopt`, `LaneRefused`, `Behind` | `convex/projectHostedLandingAdmission.ts` (`startLandingAdmission`, `settleLandingAdmission`, `admittedReuseFirst`), `convex/projectHostedLandingStore.ts` (`orderLive`, `batchable`), `convex/projectHostedLandingSuffix.ts`, `convex/projectHostedLandingOrder.ts` (`olderLandingAhead`) | Lane-check outcomes are fixed by `Red`; in-flight interaction failures stay nondeterministic in `Check`. Proof eligibility is the constant `Independent`, not the path/test analysis. A refused proof is reduced to returning to the pool; the code recomposes on current main first. The code walks the suffix only for entries that went through full admission: only they can enter the queue behind a younger group. |
 | `EarlyRefusal`, `RefusableLane` | `convex/projectHostedLandingEarlyRefusal.ts` (`refuseStaleLaneProofNow`, `wakeAfterLaneRefusal`, `laneRefusalCohort`), `convex/projectHostedFinishControl.ts` (`finishStep`) | The code requires the retained train to be empty of live groups (a lane-bound entry is not in the train); the model requires no non-Lane active group. The cohort class stands for the code's cohort-size limit; urgent entries and the 16-row window are not modelled. |
 | `Deciding`, `Held`, `HoldExpire` | `convex/projectHostedLandingCohortHold.ts` (`decidingSince`, `holdForPeers`, `releaseCohortHolds`, `end`, `redriveCohortHold`), `convex/projectHostedLandingStore.ts` (`writeLanding`), `convex/projectHostedLandingBatchCheck.ts` | The code waits only for peers whose admission ended before the hold began (`deciding` index), so later arrivals never extend it; the model starts with every entry admitted. A held entry outside the release window is released by its own wake. |
@@ -430,49 +474,60 @@ or production historical replay is implied.
 
 | Configuration | Generated | Distinct | Java wall time (s) | Result |
 | --- | ---: | ---: | ---: | --- |
-| `small` | 60,565 | 22,509 | 64.737 | Passed |
-| `strict` | 55,453 | 21,582 | 69.097 | Passed |
-| `races` | 46,296 | 15,030 | 20.940 | Passed |
-| `submission` | 957,613 | 306,753 | 363.927 | Passed |
-| `six-slots` | 3,655 | 3,655 | 1017.262 | Passed |
-| `reuse-core` | 205 | 115 | 0.830 | Expected S2 |
-| `isolation` | 123,429 | 33,252 | 119.388 | Passed |
-| `wait` | 4 | 4 | 0.695 | Expected FreshTerminal |
-| `wait-fixed` | 4 | 4 | 0.758 | Passed |
-| `cohort` | 6 | 6 | 0.562 | Expected NoOrphanConflict |
-| `cohort-fixed` | 22 | 22 | 0.731 | Passed; failed/cancelled/landed prefix and independent-main branches |
-| `stranded` | 2 | 2 | 0.662 | Expected liveness violation |
-| `stranded-fixed` | 4 | 4 | 0.640 | Passed |
-| `orderwake` | 4 | 4 | 0.630 | Expected liveness violation |
-| `orderwake-fixed` | 6 | 6 | 0.638 | Passed |
-| `outage` | 8 | 8 | 0.747 | Expected liveness violation |
-| `outage-fixed` | 10 | 10 | 0.548 | Passed; CI and settlement branches |
-| `moving` | 8 | 7 | 0.613 | Expected liveness violation |
-| `reuse` | 4 | 4 | 0.604 | Expected ExactCheckedHead |
-| `reuse-fixed` | 4 | 4 | 0.637 | Passed |
-| `prequeue` | 88,190 | 25,434 | 67.409 | Passed |
-| `prequeue-strict` | 70,443 | 21,720 | 55.943 | Passed |
-| `prequeue-platform` | 1,190,037 | 377,715 | 592.230 | Passed |
-| `prequeue-before` | 2 | 2 | 0.630 | Expected RedNeverQueued |
-| `prequeue-suffix` | 129,008 | 59,606 | 63.990 | Expected liveness violation |
-| `prequeue-solo` | 5 | 5 | 0.797 | Passed |
-| `prequeue-solo-moved` | 20 | 18 | 1.033 | Expected NoQueueCheck |
-| `cohorthold` | 12 | 12 | 0.575 | Expected liveness violation |
-| `cohorthold-fixed` | 28 | 28 | 0.584 | Passed; lost release, stuck peer and outage branches |
-| `prequeue-cohort` | 128,256 | 43,257 | 77.438 | Passed |
-| `prequeue-cohort-mixed` | 619 | 276 | 4.266 | Passed |
-| `prequeue-cohort-before` | 306 | 199 | 2.015 | Expected NoEarlyCohort |
-| `prequeue-early` | 152,165 | 50,065 | 90.790 | Passed |
-| `prequeue-early-mixed` | 625 | 276 | 4.121 | Passed |
-| `prequeue-hold-order` | 123,398 | 58,527 | 496.188 | Expected liveness violation |
-| `supervisor` | 13 | 10 | <1.1 | Expected liveness violation |
-| `supervisor-fixed` | 15 | 15 | <1.1 | Passed; lost step and throwing advance branches |
-| `retrykeep` | 5 | 5 | 0.677 | Expected KeepsSameHead |
-| `retrykeep-fixed` | 15 | 15 | 0.548 | Passed; same-head and changed-head retries |
+| `small` | 60,565 | 22,509 | 30.991 | Passed |
+| `strict` | 55,453 | 21,582 | 41.405 | Passed |
+| `races` | 46,296 | 15,030 | 15.064 | Passed |
+| `submission` | 378,895 | 124,875 | 115.238 | Passed |
+| `six-slots` | 3,655 | 3,655 | 854.897 | Passed |
+| `reuse-core` | 188 | 104 | 0.639 | Expected S2 |
+| `isolation` | 123,429 | 33,252 | 118.289 | Passed |
+| `wait` | 4 | 4 | 3.733 | Expected FreshTerminal |
+| `wait-fixed` | 4 | 4 | 0.560 | Passed |
+| `cohort` | 6 | 6 | 0.558 | Expected NoOrphanConflict |
+| `cohort-fixed` | 22 | 22 | 0.569 | Passed; failed/cancelled/landed prefix and independent-main branches |
+| `stranded` | 2 | 2 | 0.581 | Expected liveness violation |
+| `stranded-fixed` | 4 | 4 | 0.603 | Passed |
+| `orderwake` | 4 | 4 | 0.575 | Expected liveness violation |
+| `orderwake-fixed` | 6 | 6 | 0.590 | Passed |
+| `outage` | 8 | 8 | 0.585 | Expected liveness violation |
+| `outage-fixed` | 10 | 10 | 0.567 | Passed; CI and settlement branches |
+| `moving` | 8 | 7 | 0.568 | Expected liveness violation |
+| `reuse` | 4 | 4 | 0.550 | Expected ExactCheckedHead |
+| `reuse-fixed` | 4 | 4 | 0.551 | Passed |
+| `prequeue` | 65,653 | 19,168 | 48.217 | Passed |
+| `prequeue-strict` | 50,744 | 15,902 | 37.222 | Passed |
+| `prequeue-platform` | 633,316 | 210,876 | 237.478 | Passed |
+| `prequeue-before` | 2 | 2 | 0.681 | Expected RedNeverQueued |
+| `prequeue-suffix` | 134,297 | 62,028 | 63.863 | Expected liveness violation |
+| `prequeue-solo` | 5 | 5 | 0.693 | Passed |
+| `prequeue-solo-moved` | 20 | 18 | 0.744 | Expected NoQueueCheck |
+| `cohorthold` | 12 | 12 | 0.623 | Expected liveness violation |
+| `cohorthold-fixed` | 28 | 28 | 0.578 | Passed; lost release, stuck peer and outage branches |
+| `prequeue-cohort` | 128,256 | 43,257 | 102.475 | Passed |
+| `prequeue-cohort-mixed` | 619 | 276 | 1.436 | Passed |
+| `prequeue-cohort-before` | 306 | 199 | 1.326 | Expected NoEarlyCohort |
+| `prequeue-early` | 152,165 | 50,065 | 101.443 | Passed |
+| `prequeue-early-mixed` | 625 | 276 | 1.485 | Passed |
+| `prequeue-hold-order` | 112,613 | 53,104 | 246.360 | Expected liveness violation |
+| `supervisor` | 13 | 10 | 0.564 | Expected liveness violation |
+| `supervisor-fixed` | 15 | 15 | 0.578 | Passed; lost step and throwing advance branches |
+| `lostdispatch` | 5 | 5 | 0.555 | Expected liveness violation |
+| `lostdispatch-fixed` | 14 | 14 | 0.557 | Passed |
+| `checkround` | 6 | 6 | 0.566 | Expected liveness violation |
+| `checkround-fixed` | 9 | 9 | 0.551 | Passed |
+| `retrykeep` | 5 | 5 | 0.556 | Expected KeepsSameHead |
+| `retrykeep-fixed` | 15 | 15 | 0.554 | Passed; same-head and changed-head retries |
+| `firstcheck` | 24,977 | 10,022 | 29.827 | Passed; 556 class, NoLostWork, MainRecovers |
+| `firstcheck-revert` | 1,076 | 725 | 0.804 | Expected NeverReverted (witness) |
+| `firstcheck-two` | 97 | 70 | 0.969 | Passed; two suspects, NeverReverted holds |
+| `firstcheck-two-fix` | 90 | 67 | 0.760 | Expected NeverFixed (witness) |
+| `firstcheck-mixed` | 19,103 | 7,447 | 29.493 | Passed; two breaks among three |
 
 All 18 configurations matched their expected outcomes on the registered Java 25.0.3 JDK (2026-11-05, Lane fefd80ee). The seven `prequeue` rows and every `LandingQueue` configuration were then re-run on the spec composed with that change (2026-11-05, Issue e7d27937): all matched, and the non-`prequeue` state counts were unchanged. The `prequeue` rows are from that run. The six positive queue configurations fully exhausted their state graphs; the negative cases stopped at the named counterexample. The default remained below five minutes (94.046 s); `isolation` took 290.953 s. The six cohort-hold rows were added with Issue 10b0a94b (2026-11-05, Lane 2881e6cc). With `Hold = "none"` the `prequeue` and `small` counts were re-run and unchanged. `prequeue-cohort` and `prequeue-cohort-mixed` use `MoveBound = 0`: queue publications move main, which is what refuses the Lane proofs. With one extra external move, `prequeue-cohort` had not finished after 18 minutes and is not counted. `prequeue-hold-order` keeps that move. The two `supervisor` rows were added with Issue 19328518 (2026-11-05, Lane d3a3c850); every Incidents configuration was re-run with them and matched, with existing counts unchanged.
 
 The two `prequeue-early` rows were added with Issue 7fe54c7c (2026-11-06, Lane 6d62d7fe); all 41 configurations, Incidents included, were re-run with them and matched. `prequeue-cohort` and `prequeue-cohort-mixed` are from that run (the earlier counts predated later spec changes); `prequeue-early` explores a superset of `prequeue-cohort`'s states, as `"early"` only adds refusals.
+
+All 48 configurations, Incidents included, were re-run with the first-check change (Issue 7fe54c7c, 2026-11-06, Lane a3fed1a0) and matched; every row above is from that run. `Breaks = {}` adds no states: `submission`, `reuse-core`, `prequeue` and `prequeue-strict` were also run on an unmodified copy of the main model with identical counts, so rows that changed here had predated earlier spec changes. `prequeue-suffix` and `prequeue-hold-order` stop at their liveness counterexample; their partial counts vary between runs (the unmodified copy stopped `prequeue-suffix` at 162,842 / 74,207).
 
 With ea86f3fb (2026-11-05, Lane c1759651) `small`, `strict`, `races`, `six-slots` and `isolation` were re-run with `StackPinned`; their rows are from that run. A platform retry no longer branches into invalidation, so `small`, `strict`, `races` and `isolation` explore fewer states. `six-slots` has no platform outcome and kept its count; its wall time on current main is ~17 min (an unmodified copy of the main model ran at the same rate, friction filed). The other rows predate this change.
 

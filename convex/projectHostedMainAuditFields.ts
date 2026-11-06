@@ -42,6 +42,8 @@ export const mainAuditFields = {
     v.object({ since: v.string(), head: v.string(), runId: v.string(), culprit: v.optional(v.string()) }),
   ),
   debt: v.optional(v.boolean()),
+  /** Newest main revision that landed on its first check (7fe54c7c); audited promptly. */
+  firstCheck: v.optional(v.number()),
   wake: v.optional(v.object({ taskId: v.id('_scheduled_functions'), at: v.number() })),
 };
 export const hostedMainAuditTables = {

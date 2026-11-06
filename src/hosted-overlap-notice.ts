@@ -49,6 +49,8 @@ export function hostedOverlapNotice(root: string, laneId: string, advice: Advice
       reason: item.reason ?? 'unavailable',
       file: item.file,
       with: ((item.participants ?? []) as Participant[]).filter(p => p.lane !== laneId),
+      // A cross-file note names a symbol in another file: its text says what, `with` says who.
+      ...(item.reason === 'cross-file-symbol' && typeof item.text === 'string' ? { note: item.text } : {}),
     })),
     choices,
     acknowledge: command(root, laneId, items, 'accept-order'),
@@ -61,7 +63,8 @@ export type HostedOverlapNotice = NonNullable<ReturnType<typeof hostedOverlapNot
  * touch is named once. An advisory notice is a single short summary; a blocking one stays complete. */
 export function overlapBanner(notice: HostedOverlapNotice) {
   const byFile = new Map<string, typeof notice.items>();
-  for (const item of notice.items) byFile.set(item.file, [...(byFile.get(item.file) ?? []), item]);
+  for (const item of notice.items)
+    if (!item.note) byFile.set(item.file, [...(byFile.get(item.file) ?? []), item]);
   const summary = notice.required
     ? `${notice.count ?? notice.items.length} file overlap(s) between this Lane and other open Lanes. Blocking notices need an answer before landing; advisory notices need no answer.`
     : `${notice.count ?? notice.items.length} overlap(s) with other open Lanes; no answer needed.`;
@@ -69,6 +72,7 @@ export function overlapBanner(notice: HostedOverlapNotice) {
     '',
     notice.required ? '!!! OVERLAP NOTICE: ACTION REQUIRED !!!' : 'OVERLAP NOTICE: ADVISORY',
     summary,
+    ...notice.items.flatMap(item => (item.note ? [`  - [advisory] ${item.note}`] : [])),
     ...[...byFile].flatMap(([file, items]) => [
       `  - [${items
         .map(item => item.class)

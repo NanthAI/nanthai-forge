@@ -80,9 +80,12 @@ export async function checksFixture(source = null) {
     }
   };
   const run = (name, fn, args) => call(name, { _handler: fn }, args);
+  // Bytes behind synthetic R2 pins, for readers that verify retained objects.
+  const objectBytes = new Map();
   const put = value => {
     const bytes = Buffer.from(value),
       pin = { sha256: digest(bytes), size: bytes.length };
+    objectBytes.set(pin.sha256, bytes);
     if (![...s.tables.projectObjects.values()].some(r => r.digest === pin.sha256))
       s.insert('projectObjects', {
         projectId,
@@ -187,6 +190,8 @@ export async function checksFixture(source = null) {
     }).then(JSON.parse);
   // A registered machine runner (self-hosted, mac) claims as its session.
   let machineOwner;
+  // Runner-reported test selection bytes; real runners write JSON with a scope.
+  let planSelection = 'synthetic-test-selection';
   const prepare = async (id, shardCount = 2, overrides = {}) => {
     const owner = machineOwner ?? randomUUID(),
       claim = await control(id, { kind: 'claim', owner, leaseMs: 60000 });
@@ -196,7 +201,7 @@ export async function checksFixture(source = null) {
       runtime: runner.runtime,
       environmentFingerprint: runner.environmentFingerprint,
       lockfile: digest('synthetic-package-lock'),
-      selection: put('synthetic-test-selection'),
+      selection: put(planSelection),
       manifest: put('synthetic-full-check-plan'),
       shardCount,
       ...overrides,
@@ -302,6 +307,10 @@ export async function checksFixture(source = null) {
     runner,
     checkId,
     put,
+    objectBytes,
+    setPlanSelection: value => {
+      planSelection = value;
+    },
     selection,
     enqueue,
     configure,
