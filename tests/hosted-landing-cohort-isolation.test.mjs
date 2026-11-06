@@ -138,19 +138,28 @@ for (const history of [0, 575, 1150])
     // cancels the stall alarm armed with its wake when it lands.
     // Reads 3999 -> 4107 (0b12fcfe): the completion tick reads each landed Lane's Intent head (and its
     // sibling Lane heads) to complete the Intent with its last Lane. Calls and writes are unchanged.
+    // Reads 4107 -> 4116, writes 1200 -> 1227 (13c63abe): per landed receipt, publication schedules
+    // the completion tick's stall guard and retains both ids on the plan; the tick cancels the
+    // guard (one read, one write). Calls are unchanged: a healthy guard never runs.
     assert(
       budget.calls <= 199 &&
-        source.reduce((n, c) => n + c.documents, 0) <= 4107 &&
-        source.reduce((n, c) => n + c.writes, 0) <= 1200,
+        source.reduce((n, c) => n + c.documents, 0) <= 4116 &&
+        source.reduce((n, c) => n + c.writes, 0) <= 1227,
       JSON.stringify({
         ...budget,
         sourceReads: source.reduce((n, c) => n + c.documents, 0),
         sourceWrites: source.reduce((n, c) => n + c.writes, 0),
       }),
     );
+    // Max writes 55 -> 58 (13c63abe): the cohort publication schedules one completion guard per
+    // landed member and retains it on that member's plan (cohort size bounds it).
     assert(
-      Math.max(...source.map(c => c.documents)) <= 170 && Math.max(...source.map(c => c.writes)) <= 55,
-      JSON.stringify(budget),
+      Math.max(...source.map(c => c.documents)) <= 170 && Math.max(...source.map(c => c.writes)) <= 58,
+      JSON.stringify({
+        ...budget,
+        maxSourceReads: Math.max(...source.map(c => c.documents)),
+        maxSourceWrites: Math.max(...source.map(c => c.writes)),
+      }),
     );
     const idle = f.counts.length;
     await drain(f);

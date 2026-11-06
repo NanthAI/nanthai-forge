@@ -41,8 +41,8 @@ export const PERMANENT = {
   'projectHostedFinishDriver:drive@publish': ['LANDING_DRIVER_EXHAUSTED'],
   'projectHostedLandingDriver:checkWake@publish': [],
   'projectHostedLandingWouldConflict:mark@publish': [],
-  // Accepted work is never rewound. A lost completion tick is not replayed yet
-  // (the Lane stays active, its Intent open): Issue 13c63abe.
+  // Accepted work is never rewound. A lost completion tick is replayed once by
+  // its stall guard; failing again it ends as a typed status (Issue 13c63abe).
   'projectHostedAcceptance:complete@receipt': [],
   'projectHostedFinishDriver:drive@receipt': [],
   'projectHostedLandingWouldConflict:mark@receipt': [],
@@ -77,7 +77,7 @@ export function stepKey(f, task) {
   if (task.name.startsWith('projectConvexSource') || task.name.startsWith('projectHostedComposeJobs:'))
     return `${task.name}@compose`;
   if (task.name === 'projectHostedLandingDesired:drive') return `${task.name}@compose`;
-  if (task.name === 'projectHostedAcceptance:complete') return `${task.name}@receipt`;
+  if (task.name.startsWith('projectHostedAcceptance:')) return `${task.name}@receipt`;
   const all = states(f);
   const own = all.filter(s => s.id === task.args[0]?.submissionId);
   const live = (own.length ? own : all.filter(s => !settled(s))).map(s => entryStep(f, s));

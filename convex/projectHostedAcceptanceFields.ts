@@ -44,6 +44,22 @@ export const hostedAcceptanceTables = {
     root: v.string(),
     appliedPage: v.number(),
     appliedEntry: v.number(),
+    /** The retained completion tick and its stall guard (Issue 13c63abe); absent once complete.
+     * `replayed` is the position the guard last replayed from; `stalled` the typed end. */
+    completion: v.optional(
+      v.object({
+        tick: v.id('_scheduled_functions'),
+        guard: v.union(v.id('_scheduled_functions'), v.null()),
+        replayed: v.optional(v.object({ page: v.number(), entry: v.number() })),
+        stalled: v.optional(
+          v.object({
+            code: v.literal('ACCEPTANCE_COMPLETION_STALLED'),
+            message: v.string(),
+            at: v.string(),
+          }),
+        ),
+      }),
+    ),
   }).index('by_project_and_receipt', ['projectId', 'receiptId']),
   projectHostedAcceptancePages: defineTable({
     ...identity,

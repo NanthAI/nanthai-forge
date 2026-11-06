@@ -361,7 +361,7 @@ export async function publishAcceptance(
   await enqueueGithubMirror(ctx, project, receipt);
   // The completion tick also retires landed work from overlap, so it runs even when keepOpen or policy skips completion.
   const precompose = { receiptIds: [receipt.id] };
-  if (plan.inputPages) await scheduleAcceptanceCompletion(ctx, { ...identity, precompose });
+  if (plan.inputPages) await scheduleAcceptanceCompletion(ctx, plan._id, { ...identity, precompose });
   else
     await scheduleLandingPrecompose(ctx, {
       projectId: claim.projectId,

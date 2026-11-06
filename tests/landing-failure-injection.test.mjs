@@ -9,6 +9,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { batchesFixture, states, synthetic } from './hosted-landing-batches-fixture.mjs';
+import { api as acceptanceApi } from './hosted-acceptance-fixture.mjs';
 import { LANDING_STEPS, PERMANENT, SCENARIOS, runLanding } from './landing-fault-matrix.mjs';
 import { agentFixture } from './hosted-agent-fixture.mjs';
 import { LANDING_STALL_MS } from '../dist/landing-stall.js';
@@ -34,7 +35,11 @@ test.after(() => {
  * Split cohort halves run their ladders one after another. */
 const TRANSIENT_MS = 2 * LANDING_STALL_MS + 5 * 60_000;
 const permanentMs = entries => (4 * entries + 2) * LANDING_STALL_MS;
-const SUPERVISOR = ['projectHostedLandingStall:', 'projectHostedLandingStallAlert:'];
+const SUPERVISOR = [
+  'projectHostedLandingStall:',
+  'projectHostedLandingStallAlert:',
+  'projectHostedAcceptance:guard',
+];
 const root = '/synthetic/root';
 /** Faults already injected by another suite; this guard fails if one disappears. */
 const ELSEWHERE = [
@@ -68,8 +73,34 @@ function assertOutcome(f, run, allowed, label) {
   }
   const landed = ended.filter(s => s.phase === 'landed').length;
   assert.equal(f.tables.projectHostedAcceptances.size, landed, `${label}: each landing accepted once`);
+  // Issue 13c63abe: a completion still pending after the run ended visibly.
+  for (const plan of f.tables.projectHostedAcceptancePlans.values())
+    if (plan.completion) {
+      assert.equal(plan.completion.stalled?.code, 'ACCEPTANCE_COMPLETION_STALLED', `${label}: silent`);
+      assert(plan.completion.stalled.message.includes("nforge x ROOT complete-merged '{}'"), label);
+    }
   assert.equal(f.pending().length, 0, `${label}: idle 0, no timer left`);
   return landed;
+}
+
+/** Issue 13c63abe: after a lost completion tick, the replay applied it (the
+ * landed Lanes completed, nothing retained), or, lost every time, the Lanes
+ * stay as landed and the receipt read names the typed end. */
+async function assertCompletion(f, expected) {
+  for (const { lane } of f.entries)
+    assert.equal((await f.readLane(lane.laneId)).state, expected, `Lane ${expected}`);
+  for (const plan of f.tables.projectHostedAcceptancePlans.values()) {
+    const receipt = JSON.parse(
+      await f.transaction('acceptanceReceipt', acceptanceApi.receipt, {
+        projectId: f.projectId,
+        receiptId: plan.receiptId,
+      }),
+    );
+    if (expected === 'completed') {
+      assert.equal(plan.completion, undefined, 'the guard was cancelled with the completion');
+      assert.equal(receipt.completion.appliedPage, receipt.completion.pages);
+    } else assert.equal(receipt.completion.stalled.code, 'ACCEPTANCE_COMPLETION_STALLED');
+  }
 }
 
 const matrix = new Map();
@@ -119,6 +150,8 @@ test('step x fault matrix: transient faults land once, permanent faults end type
         );
         assert(hits > 0, 'the fault was injected');
         const landed = assertOutcome(f, run, fault === 'transient' ? [] : PERMANENT[key], `${key} ${fault}`);
+        if (key === 'projectHostedAcceptance:complete@receipt')
+          await assertCompletion(f, fault === 'transient' ? 'completed' : 'active');
         if (fault === 'transient') {
           assert.equal(landed, states(f).length, 'a transient fault lands every entry');
           assert(run.elapsedMs <= TRANSIENT_MS, `resumed after ${run.elapsedMs / 60_000} min`);
@@ -129,6 +162,40 @@ test('step x fault matrix: transient faults land once, permanent faults end type
         rows.push({ key, fault, hits, landed, minutes: Math.round(run.elapsedMs / 60_000) });
       });
   t.diagnostic(JSON.stringify(rows));
+});
+
+test('receipt completion: a lost cohort tick replays its own arguments; failing again alerts the owner once', async t => {
+  // Issue 13c63abe. Transient: the first tick of a cohort carries the precompose
+  // trigger; its replay keeps it and completes both Lanes, one guard call each lost tick.
+  const f = await batchesFixture(t, SCENARIOS['batched cohort']);
+  const lost = [];
+  const run = await runLanding(
+    f,
+    key => key === 'projectHostedAcceptance:complete@receipt' && !lost.length && lost.push(key) > 0,
+  );
+  assertOutcome(f, run, [], 'cohort completion replay');
+  await assertCompletion(f, 'completed');
+  assert.equal(run.keys.get('projectHostedAcceptance:guard@receipt'), 1, 'one guard call for one lost tick');
+  const replays = f.tables._scheduled_functions;
+  const precomposed = [...replays.values()].filter(
+    task => task.name === 'projectHostedAcceptance:complete' && task.args[0].precompose,
+  );
+  assert.equal(precomposed.length, 2, 'the replay keeps the precompose trigger');
+  // Permanent, alerts on: the owner hears once, with the next command; nothing stays scheduled.
+  const g = await batchesFixture(t, SCENARIOS['serial agent finish']);
+  const policy = g.tables.hostedProjects.get(g.projectId).autonomyPolicy;
+  g.patch('hostedProjects', g.projectId, {
+    autonomyPolicy: { ...policy, agentDefaults: { ...policy.agentDefaults, stallAlerts: { enabled: true } } },
+  });
+  const ended = await runLanding(g, key => key === 'projectHostedAcceptance:complete@receipt');
+  assertOutcome(g, ended, [], 'completion stalled');
+  await assertCompletion(g, 'active');
+  const alerts = g.metrics.stallDeliveries.filter(d =>
+    d.subject.startsWith('[Forge] Landing completion stalled'),
+  );
+  assert.equal(alerts.length, 1, 'one owner alert');
+  assert.match(alerts[0].text, /nforge x ROOT complete-merged/);
+  assert.equal(ended.keys.get('projectHostedAcceptance:guard@receipt'), 2, 'one replay, then the end');
 });
 
 test('submit: a lost reply retried with the same operationId reconciles to one landing', async t => {

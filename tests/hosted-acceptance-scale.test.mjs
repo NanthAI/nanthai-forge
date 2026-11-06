@@ -40,7 +40,9 @@ test('205 included Lanes and 10,050 retained receipts keep final CAS constant; c
     'publication retains a small trigger, not source path lists',
   );
   const source = observerProjectionBudget(final);
-  assert(source.ranges <= 40 && source.documents <= 40 && source.writes <= 15, JSON.stringify(final));
+  // Writes 15 -> 16 (13c63abe): the completion tick's stall guard is scheduled with it and both ids
+  // are retained on the plan, so a lost tick is replayed. Calls are unchanged; the tick cancels the guard.
+  assert(source.ranges <= 40 && source.documents <= 40 && source.writes <= 16, JSON.stringify(final));
   assert(source.readBytes < 40 * 1024 && source.writeBytes < 16 * 1024);
   assert(!final.touched.includes('projectHostedAcceptancePages'));
   // 40 = 39 plus the one submission-order read before claiming main (incident e4aee4fe); still constant.

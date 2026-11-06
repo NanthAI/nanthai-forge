@@ -2,6 +2,7 @@ import { settleBatchConflicts } from './projectHostedLandingCohortConflicts';
 import { scheduleLandingPrecompose } from './projectHostedLandingPrecompose';
 // SPDX-License-Identifier: Apache-2.0
 import type { MutationCtx } from './_generated/server';
+import type { Id } from './_generated/dataModel';
 import { requireLandingLease, type LandingClaim } from './projectHostedLandingControl';
 import { loadBatch, writeBatch, wakeBatch, retryLandingBatch } from './projectHostedLandingBatchStore';
 import {
@@ -222,7 +223,7 @@ export async function publishLandingBatch(ctx: MutationCtx, claim: LandingClaim,
   };
   let previousSnapshot = main.snapshotId;
   const receipts = [];
-  const completions: ReceiptIdentity[] = [];
+  const completions: { identity: ReceiptIdentity; planId: Id<'projectHostedAcceptancePlans'> }[] = [];
   const messages = [];
   for (const member of members) messages.push(await acceptedLandingMessage(ctx, member.state));
   for (const [index, member] of members.entries()) {
@@ -303,7 +304,7 @@ export async function publishLandingBatch(ctx: MutationCtx, claim: LandingClaim,
     invariant(currentRow, 'SOURCE_UNAVAILABLE', 'The batch member disappeared.');
     await writeLanding(ctx, currentRow, next, false);
     await settleLandingOperation(ctx, next);
-    if (member.plan.inputPages) completions.push(identity);
+    if (member.plan.inputPages) completions.push({ identity, planId: member.plan._id });
     receipts.push(receipt);
   }
   const last = receipts.at(-1)!;
@@ -322,8 +323,8 @@ export async function publishLandingBatch(ctx: MutationCtx, claim: LandingClaim,
   const precompose = {
     receiptIds: receipts.map(receipt => receipt.id),
   };
-  for (const [index, identity] of completions.entries())
-    await scheduleAcceptanceCompletion(ctx, { ...identity, ...(index === 0 ? { precompose } : {}) });
+  for (const [index, { identity, planId }] of completions.entries())
+    await scheduleAcceptanceCompletion(ctx, planId, { ...identity, ...(index === 0 ? { precompose } : {}) });
   if (!completions.length)
     await scheduleLandingPrecompose(ctx, {
       projectId: claim.projectId,

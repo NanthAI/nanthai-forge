@@ -96,10 +96,12 @@ for (const history of [575, 1150])
     const source = calls.map(observerProjectionBudget);
     // Reads 1329 -> 1334 (0b12fcfe): the completion tick reads the landed Lane's Intent head to complete
     // the Intent with its last Lane. Calls and writes are unchanged.
+    // Reads 1334 -> 1336, writes 410 -> 412 (13c63abe): the completion tick's stall guard, retained
+    // on the plan and cancelled by the tick. Calls are unchanged: a healthy guard never runs.
     assert(
       budget.calls <= 71 &&
-        source.reduce((n, c) => n + c.documents, 0) <= 1334 &&
-        source.reduce((n, c) => n + c.writes, 0) <= 410,
+        source.reduce((n, c) => n + c.documents, 0) <= 1336 &&
+        source.reduce((n, c) => n + c.writes, 0) <= 412,
       JSON.stringify({
         ...budget,
         sourceReads: source.reduce((n, c) => n + c.documents, 0),

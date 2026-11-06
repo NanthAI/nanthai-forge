@@ -350,6 +350,12 @@ algorithm drift: changes to these code anchors require manual model review.
    fault matrix in `tests/landing-failure-injection.test.mjs` found it and checks
    the same invariants on the code: no entry stranded (L1), each landing accepted
    once (S3), a typed end only on a permanent fault, nothing left scheduled.
+   **Follow-up (13c63abe, fixed; not modelled).** The receipt completion tick runs
+   after publication (main has moved, so no model state changes): it completes the
+   landed Lanes and their Intent. A lost tick used to stay lost. Its stall guard,
+   retained on the acceptance plan and cancelled by a healthy tick, replays it once
+   and then ends it with `ACCEPTANCE_COMPLETION_STALLED` and an owner alert
+   (`convex/projectHostedAcceptanceCompletion.ts`). The fault matrix checks it.
 5. **Moving-main starvation (51ff7e8e; historical scheduling defect and fairness
    boundary).** Recompose/check, another writer moves main, retry; repeat forever.
    The `moving` litmus finds an infinite cycle despite weakly fair driver steps.

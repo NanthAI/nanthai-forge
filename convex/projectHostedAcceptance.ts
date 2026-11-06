@@ -14,7 +14,7 @@ import {
   type AcceptanceIdentity,
 } from './projectHostedAcceptanceStore';
 import { publishAcceptance } from './projectHostedAcceptancePublish';
-import { completeAcceptedHeads } from './projectHostedAcceptanceCompletion';
+import { completeAcceptedHeads, guardAcceptanceCompletion } from './projectHostedAcceptanceCompletion';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { invariant } from '../src/errors';
 import { report } from './errors';
@@ -180,6 +180,12 @@ export const complete = internalMutation({
   returns: v.object({ complete: v.boolean() }),
   handler: completeAcceptedHeads,
 });
+/** The completion tick's stall guard (Issue 13c63abe): cancelled by a healthy tick. */
+export const guard = internalMutation({
+  args: { projectId: v.id('hostedProjects'), receiptId: v.string() },
+  returns: v.null(),
+  handler: guardAcceptanceCompletion,
+});
 export const receipt = query({
   args: { projectId: v.id('hostedProjects'), receiptId: v.string() },
   returns: v.string(),
@@ -197,6 +203,7 @@ export const receipt = query({
           appliedPage: plan.appliedPage,
           appliedEntry: plan.appliedEntry,
           pages: plan.inputPages,
+          ...(plan.completion?.stalled ? { stalled: plan.completion.stalled } : {}),
         },
       });
     } catch (error) {
