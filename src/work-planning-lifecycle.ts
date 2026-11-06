@@ -11,6 +11,10 @@ export const planningIntentStatus = (
       : status === 'proposed'
         ? 'proposed'
         : 'active';
+/** Intents an item links to. An Issue also links its planned Intent, whose id is the Issue id and which a start
+ * opens without filling the legacy `intentIds` array (0b12fcfe), so an empty array is not "no link". Static: no call. */
+export const plannedLinkIds = (item: Pick<PlanningItem, 'id' | 'kind' | 'intentIds'>): string[] =>
+  item.kind === 'issue' ? [...new Set([item.id, ...item.intentIds])] : [...item.intentIds];
 export const planningLabel = (status: PlanningItem['status']) =>
   status === 'closed'
     ? 'Done'

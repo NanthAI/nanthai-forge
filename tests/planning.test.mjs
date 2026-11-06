@@ -210,7 +210,11 @@ test('planning links validate local identities and private exports preserve comp
   assert.equal(manifest.items.length, 2);
   assert.equal(manifest.items[0].body, issue.body);
   assert.equal(manifest.items[1].title, edit.title);
-  assert.deepEqual(new Set(manifest.linkedIntents.map(item => item.id)), new Set([intent.id, other.id])); // Removed current links stay meaningful in original history.
+  assert.deepEqual(
+    new Set(manifest.linkedIntents.map(item => item.id)),
+    new Set([intent.id, other.id, issue.id]),
+  ); // The Issue's own planned Intent id counts as linked (0b12fcfe).
+  // Removed current links stay meaningful in original history.
   assert.equal(manifest.comments[0].text, input.text);
   assert.equal(manifest.comments[0].authorLabel, '');
   assert.match(manifest.coverage, /no source objects/);

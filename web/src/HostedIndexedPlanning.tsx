@@ -1,5 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
-import { planningIntentStatus, planningVersionLabel } from '../../src/work-planning-lifecycle';
+import {
+  plannedLinkIds,
+  planningIntentStatus,
+  planningVersionLabel,
+} from '../../src/work-planning-lifecycle';
 import { InitiativeConversation } from './planning/InitiativePage';
 import { usePlanningActors } from './planning/usePlanningActors';
 import { DetailsText } from './ui/DetailsText';
@@ -110,7 +114,7 @@ function Version({
       </p>
       <p>{value.body}</p>
       <p className="provenance">
-        Intent IDs: {value.intentIds.join(', ') || 'None'} · Initiative: {value.initiativeId ?? 'None'}
+        Intent IDs: {plannedLinkIds(value).join(', ') || 'None'} · Initiative: {value.initiativeId ?? 'None'}
       </p>
       <Provenance projectId={projectId} workspace={workspace} operationId={value.operationId} />
     </div>

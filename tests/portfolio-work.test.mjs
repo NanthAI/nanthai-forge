@@ -70,3 +70,57 @@ test('recent projects retain the newest View once per Intent, keeping unrelated 
     ['new', 'other'],
   );
 });
+test('an Issue with empty legacy intentIds shows its planned Intent link (0b12fcfe)', async () => {
+  const { plannedLinkIds } = await import(moduleUrl('../src/work-planning-lifecycle.ts'));
+  const { exportPlanning } = await import(moduleUrl('../src/work-planning-state.ts'));
+  const issue = {
+    id: 'issue-1',
+    kind: 'issue',
+    title: 'Issue',
+    status: 'in-progress',
+    at: '2026-01-02',
+    intentIds: [],
+  };
+  const initiative = {
+    id: 'init-1',
+    kind: 'initiative',
+    title: 'Init',
+    status: 'open',
+    at: '2026-01-01',
+    intentIds: [],
+  };
+  const legacy = { ...issue, id: 'issue-2', at: '2026-01-03', intentIds: ['old', 'issue-2'] };
+  assert.deepEqual(plannedLinkIds(issue), ['issue-1']);
+  assert.deepEqual(plannedLinkIds(initiative), []);
+  assert.deepEqual(plannedLinkIds(legacy), ['issue-2', 'old'], 'the planned id is not counted twice');
+  const detail = (...plans) =>
+    Object.fromEntries(
+      portfolioWork({ intents: [], lanes: [], views: [], plans }).recent.map(item => [
+        item.planId,
+        item.detail,
+      ]),
+    );
+  assert.deepEqual(detail(issue, initiative, legacy), {
+    'issue-1': 'issue · 1 linked Intents',
+    'init-1': 'initiative · 0 linked Intents',
+    'issue-2': 'issue · 2 linked Intents',
+  });
+  // Export: the planned Intent (id = Issue id) is listed although the stored item has no intentIds.
+  const intents = [
+    { id: 'issue-1', outcome: 'Issue', status: 'completed' },
+    { id: 'other', outcome: 'Other', status: 'active' },
+  ];
+  const manifest = JSON.parse(
+    exportPlanning({
+      revision: 1,
+      intents,
+      planningItems: [issue, initiative],
+      planningComments: [],
+      hostedEvents: [],
+    }).json,
+  );
+  assert.deepEqual(
+    manifest.linkedIntents.map(item => item.id),
+    ['issue-1'],
+  );
+});

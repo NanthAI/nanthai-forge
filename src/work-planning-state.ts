@@ -4,6 +4,7 @@ import { invariant } from './errors.js';
 import type { PlanningWrite } from './work-planning-types.js';
 import type { WorkData } from './work-types.js';
 import { isUnifiedWork } from './work-unified-types.js';
+import { plannedLinkIds } from './work-planning-lifecycle.js';
 import { resolvePlanningPut } from './work-planning-put.js';
 import { applyUnifiedPlanning, type UnifiedPlanningData } from './work-planning-unified.js';
 
@@ -102,7 +103,8 @@ export function applyPlanningMetadata(data: WorkData, command: PlanningWrite, at
   return item;
 }
 export function exportPlanning(data: WorkData, project?: { key: string; name: string }) {
-  const linked = new Set(data.planningItems.flatMap(item => item.intentIds));
+  // Issues link their planned Intent (id = Issue id) even with empty legacy intentIds; linkedIntents lists the ones that exist.
+  const linked = new Set(data.planningItems.flatMap(plannedLinkIds));
   const manifest = {
     schema: 1,
     kind: project ? 'forge-hosted-planning' : 'forge-local-planning',

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { plannedLinkIds } from '../../src/work-planning-lifecycle';
 import type { WorkData, Lane, PlanningItem } from '../../src/work-types';
 export type PortfolioItem = {
   id: string;
@@ -84,7 +85,7 @@ export function portfolioWork({ intents, lanes, views, plans }: PortfolioInput) 
       status: plan.status,
       at: plan.at,
       planId: plan.id,
-      detail: `${plan.kind} · ${plan.intentIds.length} linked Intents`,
+      detail: `${plan.kind} · ${plannedLinkIds(plan).length} linked Intents`,
     })),
   ].sort((a, b) => b.at!.localeCompare(a.at!));
   const seen = new Set<string>();

@@ -117,6 +117,8 @@ export function PlanningIntentPage({
   const pendingInput = useRef('');
   const pendingFull = useRef<PlanningItem | undefined>(undefined);
   const started = detail.row.lanes.length > 0;
+  // A started Issue is linked to its planned Intent (id = Issue id) although legacy intentIds stays empty.
+  const hasIntentLink = current.intentIds.length > 0 || (current.kind === 'issue' && started);
   const planningClosed = ['closed', 'abandoned'].includes(current.status);
   const closed =
     !started && saved && saved.version >= item.version
@@ -267,8 +269,8 @@ export function PlanningIntentPage({
                 label: current.title,
                 href: workHref(
                   planningDestination({
-                    kind: current.intentIds.length === 0 ? 'planning' : 'intent',
-                    id: current.intentIds.length === 0 ? current.id : (detail.startIntentId ?? row.id),
+                    kind: hasIntentLink ? 'intent' : 'planning',
+                    id: hasIntentLink ? (detail.startIntentId ?? row.id) : current.id,
                   }),
                 ),
               },

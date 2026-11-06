@@ -93,7 +93,11 @@ test('whole-project hosted planning creates a planned Intent, preserves versions
     assert.equal(manifest.kind, 'forge-hosted-planning');
     assert.deepEqual(manifest.items, after.data.planningItems);
     assert.deepEqual(manifest.comments, after.data.planningComments);
-    assert.equal(manifest.linkedIntents.length, 0);
+    // The planned Intent (id = Issue id) is the Issue's link although its stored intentIds is empty (0b12fcfe).
+    assert.deepEqual(
+      manifest.linkedIntents.map(item => item.id),
+      after.data.intents.map(item => item.id),
+    );
     assert.equal(manifest.events.length, 5);
     assert.match(manifest.coverage, /not offline authenticated authorship/);
     assert.deepEqual(await s.read(), after, 'Export is read-only.');
