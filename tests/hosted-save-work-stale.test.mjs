@@ -322,6 +322,28 @@ test('abandon from a clean checkout older than the Lane (its work moved on elsew
   assert.equal(readFileSync(join(s.root, 'a.txt'), 'utf8'), 'original', 'the checkout files are untouched');
 });
 
+test('replaying an abandon whose journaled pins went stale re-pins the Lane once instead of WORK_STALE forever (23429bac)', async t => {
+  const s = await fixture(t),
+    operationId = randomUUID(),
+    abandon = { operationId, action: 'abandon', reason: 'work landed through its sync draft' };
+  // First attempt: the server refuses the pins (a writer moved the Lane between journaling and sending).
+  const original = s.exchange.client.mutation;
+  let moved = false;
+  s.exchange.client.mutation = async (ref, args) => {
+    if (!moved && getFunctionName(ref) === 'projectHostedLifecycle:transition') {
+      moved = true;
+      await s.writer({ 'a.txt': 'landed elsewhere' });
+    }
+    return original.call(s.exchange.client, ref, args);
+  };
+  const result = await transitionHostedLane(s.root, abandon, s.exchange);
+  assert.equal(moved, true, 'the Lane moved under the journaled request');
+  assert.equal(result.result.status, 'applied');
+  assert.equal((await s.read(s.laneId)).state, 'abandoned');
+  // The same operation id replays to the same receipt.
+  assert.equal((await transitionHostedLane(s.root, abandon, s.exchange)).result.status, 'applied');
+});
+
 test('abandon from a checkout whose last save finished unseen settles it instead of LANE_DIRTY', async t => {
   const s = await fixture(t),
     op = randomUUID();

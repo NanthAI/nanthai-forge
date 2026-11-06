@@ -111,6 +111,56 @@ test('sync retains disjoint work and does not conflict with a later save in anot
   assert(!output.reads.some(p => p.sha256 === s.hidden.blob));
   assert.equal(s.scheduled.filter(item => item.name.includes('SyncJobs:complete')).length, 1);
 });
+test('a merged sync moves the Lane base to the main it took in, so behindMain stops counting merged commits (4f167dfd)', async () => {
+  const s = await syncFixture(),
+    lane = await s.lane(s.state([s.baseFile, s.hidden, s.file('lane', 'local')], [s.baseline.sha256]));
+  const main = s.state([s.baseFile, s.hidden, s.file('accepted', 'main')], [s.baseline.sha256]);
+  s.moveMain(main.sha256, 'new-main');
+  const before = (await s.readLane(lane.laneId)).record.base;
+  assert.notEqual(before.head, main.sha256);
+  // The Lane's saved-path evidence (what a save recorded) must survive the rebase.
+  const seeded = [...s.tables.projectHostedOverlapLanes.values()].find(row => row.laneId === lane.laneId);
+  s.patch('projectHostedOverlapLanes', seeded._id, {
+    changes: JSON.stringify([{ path: 'lane', before: null, after: { blob: s.hidden.blob, mode: 'file' } }]),
+    complete: true,
+  });
+  const r = s.request('sync', {
+    laneId: lane.laneId,
+    expected: s.pins(lane),
+    target: { kind: 'main', head: main.sha256, receiptId: 'new-main' },
+  });
+  const result = (await s.execute(r)).terminal.outcome.result;
+  assert.equal(result.status, 'merged');
+  assert.deepEqual(
+    result.lane.base,
+    { head: main.sha256, receiptId: 'new-main' },
+    'the receipt names the new base',
+  );
+  const after = (await s.readLane(lane.laneId)).record;
+  assert.deepEqual(after.base, { head: main.sha256, receiptId: 'new-main' });
+  const overlap = [...s.tables.projectHostedOverlapLanes.values()].find(row => row.laneId === lane.laneId);
+  assert.equal(overlap.baseHead, main.sha256, 'the overlap row measures behindMain from the merged main');
+  assert.equal(overlap.baseReceiptId, 'new-main');
+  assert(
+    JSON.parse(overlap.changes).some(change => change.path === 'lane'),
+    'its own saved paths stay as evidence',
+  );
+});
+test('a conflicting sync leaves the original Lane base unchanged', async () => {
+  const s = await syncFixture(),
+    { a } = await s.conflict();
+  const clean = s.state([s.file('a.txt', 'main\n'), s.hidden], [s.baseline.sha256]);
+  s.moveMain(clean.sha256, 'conflicting-main');
+  const before = (await s.readLane(a.laneId)).record.base;
+  await s.execute(
+    s.request('sync', {
+      laneId: a.laneId,
+      expected: s.pins(a),
+      target: { kind: 'main', head: clean.sha256, receiptId: 'conflicting-main' },
+    }),
+  );
+  assert.deepEqual((await s.readLane(a.laneId)).record.base, before);
+});
 test('sync conflicts create a resolution sibling without moving the original Lane', async () => {
   const s = await syncFixture(),
     { a, candidate } = await s.conflict();

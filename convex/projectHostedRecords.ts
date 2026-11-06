@@ -100,6 +100,8 @@ export async function writeHostedRecord(
       baseSequence?: number;
       intent?: string;
       agent?: string;
+      /** A sync moved the Lane's base to a newer main: keep its saved-path evidence (4f167dfd). */
+      rebased?: boolean;
     };
   },
 ) {

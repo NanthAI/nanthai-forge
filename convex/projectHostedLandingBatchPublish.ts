@@ -28,7 +28,12 @@ import { noteMainLanding } from './projectHostedMainAuditState';
 import { enqueueGithubMirror } from './projectGithubMirrorQueue';
 import { hostedMainV2Schema } from '../src/hosted-main';
 import { hostedRecordSchema } from '../src/hosted-records';
-import { hostedAcceptanceSchema, firstCheckField, firstCheckReceipt } from '../src/hosted-acceptance';
+import {
+  hostedAcceptanceSchema,
+  firstCheckField,
+  firstCheckReceipt,
+  landingCompletion,
+} from '../src/hosted-acceptance';
 import { effectivePolicy } from '../src/autonomy-policy';
 import { batchEligible } from '../src/hosted-landing-batch';
 import { canonicalPayload } from '../src/hosted-source-operation';
@@ -263,8 +268,7 @@ export async function publishLandingBatch(ctx: MutationCtx, claim: LandingClaim,
         root: member.plan.root,
         pages: member.plan.inputPages,
         lanes: member.plan.lanes,
-        enabled: policy.lifecycle.completeOnAccept && !member.state.request.keepOpen,
-        closeIntents: policy.lifecycle.closeOnLand !== 'off' && member.state.request.closes !== false,
+        ...landingCompletion(policy.lifecycle, member.state.request),
       },
       automatic: true,
       undo: { kind: 'revert', receiptId: member.attempt.operations.accept },

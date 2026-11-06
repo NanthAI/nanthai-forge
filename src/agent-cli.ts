@@ -115,7 +115,7 @@ status/peers/pending show the chain, parent movement and abandonment.
 start intentId adds a sibling Lane; land --save with:[laneId] uses saved siblings and orders high overlaps when accepting.
 after:{intentId} or after:{viewId} waits for that work to land; land --resume-ready resumes waits.
 land --save and x accept complete included Lanes; the Intent completes when all its Lanes are done (keepOpen:true keeps the Lanes open).
-Hosted landing also completes the landed Lanes' Intent (Closes #N) even if they stay open, then planning closes the Issue once its Done-when lines are ticked; closes:false makes it Refs-only, policy lifecycle.closeOnLand:"off" turns it off.
+Hosted landing also completes the landed Lanes' Intent (Closes #N) even if they stay open, then planning closes the Issue once its Done-when lines are ticked; closes:false makes it Refs-only (and keeps the Lanes open like keepOpen), policy lifecycle.closeOnLand:"off" turns it off.
 Lanes show merged:true when their head is already in a Channel; x complete-merged
 completes those. x clean is a dry run until apply:true. save --check needs only {"laneId"}; log accepts tail:BYTES, shard:N (or "static"), and attempt:N (default 1).
 start records actor:"agent-name" (or FORGE_AGENT_NAME, then FORGE_ACTOR).

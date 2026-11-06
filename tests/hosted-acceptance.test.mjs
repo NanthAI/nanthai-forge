@@ -503,12 +503,13 @@ test('a landing completes the Intent it declares whether the Lane completes, sta
   }
 });
 
-test('refs-only landings (closes:false) and closeOnLand off leave the Intent open, completing Lanes only when enabled', async () => {
+test('refs-only landings (closes:false) keep the Intent and the Lane open (87c80c4b); closeOnLand off leaves the Intent open and completes Lanes per completeOnAccept', async () => {
   for (const [name, args, laneState] of [
+    // closes:false is `Refs #N`: more edits usually follow in the same checkout, so the Lane stays open (87c80c4b).
     [
       'refs, completeOnAccept on',
       { policyEdit: { completeOnAccept: true }, request: { closes: false } },
-      'completed',
+      'active',
     ],
     [
       'refs, completeOnAccept off',

@@ -184,8 +184,28 @@ export async function publishHostedSync(ctx: MutationCtx, input: SaveIdentity & 
     invariant(lane, 'SOURCE_JOB_INVALID', 'A sync needs its original Lane.');
     const changed = lane.head !== result.state.sha256;
     const stack = state.work.mode === 'sync' ? state.work.stackAfter : undefined;
+    // A Lane that took main in (merged or already up to date; a conflict took a draft Lane above) is now based on that main: behindMain, diffs and
+    // overlap windows then count only what main did since, never the already merged commits (4f167dfd, 89166743).
+    // A stacked Lane merged its parent, not main, and a Candidate sync targets no main: both keep their base.
+    const rebase =
+      request.kind === 'sync' &&
+      request.target.kind === 'main' &&
+      (!stack || stack.detached) &&
+      (lane.base.head !== request.target.head || lane.base.receiptId !== request.target.receiptId)
+        ? { head: request.target.head, receiptId: request.target.receiptId }
+        : null;
+    // One indexed read gives the new base its main sequence, so behindMain counts from it at once.
+    const rebaseRow = rebase
+      ? await ctx.db
+          .query('projectHostedAcceptances')
+          .withIndex('by_project_and_receipt', q =>
+            q.eq('projectId', input.projectId).eq('receiptId', rebase.receiptId),
+          )
+          .unique()
+      : null;
     if (
       changed ||
+      rebase ||
       clearOwnerProvenance ||
       result.status === 'resolved' ||
       (stack && canonicalPayload(stack) !== canonicalPayload(lane.stack))
@@ -193,6 +213,7 @@ export async function publishHostedSync(ctx: MutationCtx, input: SaveIdentity & 
       lane = {
         ...lane,
         ...(stack ? { stack } : {}),
+        ...(rebase ? { base: rebase } : {}),
         head: result.state.sha256,
         version: lane.version + 1,
         sourceVersion: lane.sourceVersion + 1,
@@ -204,6 +225,10 @@ export async function publishHostedSync(ctx: MutationCtx, input: SaveIdentity & 
         authorityEpoch,
         expectedVersion: lane.version - 1,
         ownerOnly: ownerInputs,
+        // The Lane's own saved paths stay as evidence (an over-approximation against the newer base, never a miss).
+        ...(rebase
+          ? { overlap: { rebased: true, ...(rebaseRow ? { baseSequence: rebaseRow.sequence } : {}) } }
+          : {}),
         record: lane,
       });
     }

@@ -17,6 +17,7 @@ import { checkoutPathExists } from './hosted-checkout-files.js';
 import { canonicalPayload } from './hosted-source-operation.js';
 import { hostedLifecycleRequestSchema, hostedLifecycleResultSchema } from './hosted-lifecycle.js';
 import { invariant } from './errors.js';
+import { hostedActionError } from './hosted-action-error.js';
 import { finishPendingCheckoutDelta, settlePendingCheckoutDelta } from './hosted-checkout-delta-pending.js';
 import type { HostedLaneCheckoutMarker } from './hosted-lane-checkout-marker.js';
 import type { ConvexExchange } from './exchange-client.js';
@@ -101,6 +102,15 @@ export async function transitionHostedLane(
       'Lifecycle save cache must be real.',
     );
   }
+  const selectServerLane = async () =>
+    hostedLaneSelectionSchema.parse(
+      JSON.parse(
+        await exchange.client.query(makeFunctionReference<'query'>('projectHostedLanes:select'), {
+          projectId: exchange.projectId,
+          laneId: original.selection.laneId,
+        }),
+      ),
+    );
   let childProgress: Awaited<ReturnType<typeof saveHostedLane>> | null = null;
   if (original.request && parsed.action === 'abandon' && parsed.saveFirst)
     childProgress = await saveHostedLane(
@@ -130,15 +140,6 @@ export async function transitionHostedLane(
     let dirty = false,
       kept: ReturnType<typeof keepHostedEditsPatch> | undefined,
       selected: HostedLaneCheckoutMarker['selection'] | undefined;
-    const selectServerLane = async () =>
-      hostedLaneSelectionSchema.parse(
-        JSON.parse(
-          await exchange.client.query(makeFunctionReference<'query'>('projectHostedLanes:select'), {
-            projectId: exchange.projectId,
-            laneId: original.selection.laneId,
-          }),
-        ),
-      );
     if (parsed.action === 'abandon') {
       const captured = join(cache, 'saves', original.saveOperationId),
         capture = await captureHostedSave(root, captured, parsed.action === 'abandon');
@@ -223,15 +224,62 @@ export async function transitionHostedLane(
       return request;
     });
   }
-  const request = hostedLifecycleRequestSchema.parse(original.request);
-  const result = hostedLifecycleResultSchema.parse(
-    JSON.parse(
-      await exchange.client.mutation(makeFunctionReference<'mutation'>('projectHostedLifecycle:transition'), {
-        projectId: exchange.projectId,
-        request: canonicalPayload(request),
-      }),
-    ),
-  );
+  let request = hostedLifecycleRequestSchema.parse(original.request);
+  const transition = async () =>
+    hostedLifecycleResultSchema.parse(
+      JSON.parse(
+        await exchange.client.mutation(
+          makeFunctionReference<'mutation'>('projectHostedLifecycle:transition'),
+          { projectId: exchange.projectId, request: canonicalPayload(request) },
+        ),
+      ),
+    );
+  let result: Awaited<ReturnType<typeof transition>>;
+  try {
+    result = await transition();
+  } catch (error) {
+    // The server refused the retained pins (the Lane moved after this request was journaled: a sync draft's
+    // landing, another save) and began no operation, so replaying it would repeat WORK_STALE forever (23429bac).
+    // An abandon with no save-first child and no unsaved edits holds nothing the pins protect: pin the Lane as
+    // the server has it now and send the same operation once more.
+    const target = request.target;
+    if (
+      hostedActionError(error, 'lifecycle').code !== 'WORK_STALE' ||
+      request.action !== 'abandon' ||
+      target.kind !== 'lane' ||
+      target.saveOperationId !== null ||
+      target.dirty
+    )
+      throw error;
+    const server = await selectServerLane();
+    if (
+      server.head === target.expected.head &&
+      server.version === target.expected.version &&
+      server.sourceVersion === target.expected.sourceVersion &&
+      server.lifecycleVersion === target.expected.lifecycleVersion
+    )
+      throw error;
+    request = hostedLifecycleRequestSchema.parse({
+      ...request,
+      authorityEpoch: server.authority.epoch,
+      target: {
+        ...target,
+        expected: {
+          head: server.head,
+          version: server.version,
+          sourceVersion: server.sourceVersion,
+          lifecycleVersion: server.lifecycleVersion,
+        },
+      },
+    });
+    workLocked(lock, () =>
+      durableReplace(
+        path,
+        canonicalPayload({ ...original, request, ...(original.kept ? { kept: original.kept } : {}) }),
+      ),
+    );
+    result = await transition();
+  }
   // Only metadata advances. Dirty/newer local bytes and sparse materialization
   // stay untouched; a lost reply or old replay cannot rewind a later baseline.
   if (result.lane && request.target.kind === 'lane') {

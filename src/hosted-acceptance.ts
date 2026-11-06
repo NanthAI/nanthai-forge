@@ -75,6 +75,18 @@ export const hostedAcceptanceSchema = z
   })
   .strict();
 export type HostedAcceptance = z.infer<typeof hostedAcceptanceSchema>;
+/** What a landing's completion tick does. A refs-only landing (`closes:false`, GitHub `Refs #N`) names the work without finishing it,
+ * so like `keepOpen` it leaves the Lanes open for the follow-up edit that usually comes next (87c80c4b); closeOnLand "off" is
+ * project-wide and still completes Lanes only per `completeOnAccept`. */
+export function landingCompletion(
+  lifecycle: { completeOnAccept: boolean; closeOnLand?: 'declared' | 'off' | undefined },
+  request: { keepOpen?: boolean | undefined; closes?: boolean | undefined },
+) {
+  return {
+    enabled: lifecycle.completeOnAccept && !request.keepOpen && request.closes !== false,
+    closeIntents: lifecycle.closeOnLand !== 'off' && request.closes !== false,
+  };
+}
 export const EMPTY_COMPLETION_ROOT = digest('forge-hosted-landed-heads-v1');
 export const completionPageRoot = (previous: string, kind: string, index: number, page: unknown) =>
   digest(canonicalPayload({ domain: 'forge-hosted-landed-heads-v1', previous, kind, index, page }));

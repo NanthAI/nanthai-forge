@@ -19,7 +19,12 @@ import { requireHostedCheckEvidence } from './projectHostedCheckRead';
 import { saveObject } from './projectHostedSaveStore';
 import { scheduleAcceptanceCompletion } from './projectHostedAcceptanceCompletion';
 import { hostedMainV2Schema } from '../src/hosted-main';
-import { hostedAcceptanceSchema, firstCheckField, firstCheckReceipt } from '../src/hosted-acceptance';
+import {
+  hostedAcceptanceSchema,
+  firstCheckField,
+  firstCheckReceipt,
+  landingCompletion,
+} from '../src/hosted-acceptance';
 import { hostedRecordSchema } from '../src/hosted-records';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { effectivePolicy, type AcceptanceActor } from '../src/autonomy-policy';
@@ -291,8 +296,7 @@ export async function publishAcceptance(
       root: plan.root,
       pages: plan.inputPages,
       lanes: plan.lanes,
-      enabled: policy.lifecycle.completeOnAccept && !state.request.keepOpen,
-      closeIntents: policy.lifecycle.closeOnLand !== 'off' && state.request.closes !== false,
+      ...landingCompletion(policy.lifecycle, state.request),
     },
     automatic: requiresGovernedCheck(project, actor),
     undo: { kind: 'revert', receiptId: identity.receiptId },

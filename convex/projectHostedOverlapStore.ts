@@ -17,6 +17,8 @@ export async function trackHostedOverlapLane(
     intent?: string;
     /** The starting agent session's slug (c29d0780); later writes keep the stored one. */
     agent?: string;
+    /** A sync moved the base to a newer main; the Lane's saved paths still describe its own work. */
+    rebased?: boolean;
   },
 ) {
   const old = await ctx.db
@@ -24,14 +26,15 @@ export async function trackHostedOverlapLane(
     .withIndex('by_project_and_lane', q => q.eq('projectId', projectId).eq('laneId', lane.id))
     .unique();
   const sameBase = old?.baseHead === lane.base.head;
+  const keepChanges = sameBase || metadata?.rebased === true;
   const sameHead = old?.head === lane.head;
   const unchangedBase = lane.head === lane.base.head;
   const projection = unchangedBase
     ? { changes: '[]', complete: true }
     : mergeOverlapChanges(
-        sameBase && old ? JSON.parse(old.changes) : [],
+        keepChanges && old ? JSON.parse(old.changes) : [],
         metadata?.changes ?? [],
-        (sameBase && old ? old.complete : false) &&
+        (keepChanges && old ? old.complete : false) &&
           (sameHead || metadata?.changes !== undefined) &&
           metadata?.complete !== false,
       );
