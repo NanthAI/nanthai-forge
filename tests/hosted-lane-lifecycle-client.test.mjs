@@ -349,3 +349,19 @@ test('a reopen with a newer server source keeps that source and local bytes; a h
   await transitionHostedLane(h.root, { operationId: randomUUID(), action: 'reopen' }, h.exchange);
   assert.equal(h.calls.length - calls, 1, 'healthy reopen: exactly one transition call, no select');
 });
+test('pinning a Lane moves its version behind the checkout marker; reopen from the same root still succeeds and refreshes it', async t => {
+  const f = await fixture(t);
+  await transitionHostedLane(
+    f.root,
+    { operationId: randomUUID(), action: 'abandon', reason: 'pin then reopen' },
+    f.exchange,
+  );
+  const pinned = await f.changeLane(f.laneId, { pinned: true });
+  assert(pinned.version > readHostedLaneCheckout(f.root).selection.version, 'marker is behind the pin');
+  const out = await transitionHostedLane(f.root, { operationId: randomUUID(), action: 'reopen' }, f.exchange);
+  assert.equal(out.result.status, 'applied');
+  const marker = readHostedLaneCheckout(f.root).selection;
+  assert.equal(marker.state, 'active');
+  assert.equal(marker.version, pinned.version + 1);
+  assert.equal((await f.read(f.laneId)).pinned, true);
+});
