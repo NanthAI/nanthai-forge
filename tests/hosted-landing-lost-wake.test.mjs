@@ -2,6 +2,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { batchesFixture, states, synthetic } from './hosted-landing-batches-fixture.mjs';
+import { moduleUrl } from './convex-module.mjs';
+const redrive = await import(moduleUrl('../convex/projectHostedLandingRedrive.ts'));
 const prior = Object.fromEntries(Object.keys(synthetic).map(k => [k, process.env[k]]));
 test.before(() => Object.assign(process.env, synthetic));
 test.after(() => {
@@ -92,4 +94,79 @@ test('incident replay c329d191: a lost finish wake after an order wait never str
 test('incident c329d191: with the wake delivered the head lands at once and its alarm never fires', async t => {
   const f = await replay(t, { loseWake: false });
   assert(!states(f).some(s => s.observation?.stall), 'no entry was marked stalled');
+});
+
+test('incident c329d191 class: a holder that lost its completion wake and its alarm is re-driven by a parked reader', async t => {
+  // The older entry's check failed while the passed head waited in order for it.
+  // Its completion wake and every supervisor task were lost (two faults, e.g. OCC
+  // exhaustion then an outage), so nothing owns the older entry and the head is
+  // parked behind it. Only the head's reader is waiting; it asks about itself.
+  const f = await batchesFixture(t, { count: 3, batching: false, requestCheck: true });
+  const [older, head, behind] = f.entries.map(entry => entry.state.id);
+  let olderRun = null,
+    asked = null;
+  const costs = {};
+  const lostTask = task =>
+    olderRun && !asked && (task.args[0]?.submissionId === older || task.args[0]?.runId === olderRun);
+  for (let tick = 0; ; tick++) {
+    assert(tick < 800, JSON.stringify(states(f).map(s => [s.sequence, s.phase])));
+    for (const run of f.runs().filter(run => run.status === 'queued')) {
+      if (runOwner(f, run) !== older) await f.rawChecks.pass(await f.rawChecks.activate(run.id));
+      else if (requestRow(f, head)?.orderWait === older) {
+        // Healthy holder first: the same ask finds nothing lost and writes nothing.
+        const reply = JSON.parse(
+          await f.transaction('redrive', redrive.redrive, { projectId: f.projectId, submissionId: head }),
+        );
+        assert.deepEqual(reply, { redriven: [] });
+        costs.healthy = f.counts.at(-1);
+        olderRun = run.id;
+        await f.fail(run.id, 'tests/member-0.test.mjs');
+      }
+    }
+    const task = f.pending()[0];
+    if (!task && olderRun && !asked) {
+      // Stranded: nothing is scheduled while every entry is still live.
+      assert.equal(stateOf(f, older).phase, 'checking', 'the older entry never learned its run failed');
+      assert.equal(requestRow(f, head).orderWait, older, 'the passed head waits for it');
+      // Its reader's quiet-period ask (src/hosted-landing-redrive.ts) follows the order wait.
+      f.advanceClock(2 * 60_000);
+      asked = JSON.parse(
+        await f.transaction('redrive', redrive.redrive, { projectId: f.projectId, submissionId: head }),
+      );
+      costs.stranded = f.counts.at(-1);
+      continue;
+    }
+    if (!task) break;
+    if (lostTask(task)) {
+      f.advanceClock(Math.max(0, task.scheduledTime - Date.now()));
+      f.patch('_scheduled_functions', task._id, { state: { kind: 'failed' } });
+      continue;
+    }
+    await f.execute(task);
+    if (states(f).every(s => s.phase === 'landed' || s.phase === 'terminal-failed')) break;
+  }
+  assert(asked, 'the replay stranded the queue and the reader asked');
+  assert.deepEqual(asked.redriven, [], 'the parked head itself lost nothing');
+  assert.deepEqual(
+    asked.holders.map(h => h.submissionId),
+    [older],
+    'the ask re-drove the holder of its order wait',
+  );
+  assert(asked.holders[0].redriven.includes('check'), JSON.stringify(asked));
+  assert.equal(stateOf(f, older).phase, 'terminal-failed');
+  assert.equal(stateOf(f, head).phase, 'landed');
+  assert.equal(stateOf(f, behind).phase, 'landed');
+  assert.equal(f.tables.projectHostedAcceptances.size, 2, 'each landing accepted once');
+  // Ask-only cost: one hop adds a few indexed reads; a healthy holder writes nothing.
+  const cost = ({ name, documents, ranges, writes }) => ({ name, documents, ranges, writes });
+  t.diagnostic(JSON.stringify({ healthy: cost(costs.healthy), stranded: cost(costs.stranded) }));
+  assert.equal(costs.healthy.name, 'redrive');
+  assert.equal(costs.healthy.writes, 0, 'a healthy holder: no writes');
+  assert(costs.healthy.documents <= 9, `healthy ask read ${costs.healthy.documents} documents`);
+  assert(costs.stranded.documents <= 10, `stranded ask read ${costs.stranded.documents} documents`);
+  // A repeated ask replays nothing new.
+  const again = JSON.parse(
+    await f.transaction('redrive', redrive.redrive, { projectId: f.projectId, submissionId: behind }),
+  );
+  assert.deepEqual(again, { redriven: [] });
 });

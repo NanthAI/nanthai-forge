@@ -33,6 +33,10 @@ npm run model:landing-queue -- orderwake       # expected liveness violation (c3
 npm run model:landing-queue -- orderwake-fixed
 npm run model:landing-queue -- outage          # expected liveness violation (72d50375)
 npm run model:landing-queue -- outage-fixed
+npm run model:landing-queue -- orderchain      # expected: a holder that lost every driver strands its parked waiters (c329d191 class)
+npm run model:landing-queue -- orderchain-fixed
+npm run model:landing-queue -- expiry          # expected: an outage nobody ends strands a Ready head (72d50375)
+npm run model:landing-queue -- expiry-fixed
 npm run model:landing-queue -- moving
 npm run model:landing-queue -- reuse
 npm run model:landing-queue -- reuse-fixed
@@ -433,7 +437,11 @@ algorithm drift: changes to these code anchors require manual model review.
    when writes resume (`convex/projectHostedLandingRedrive.ts`: the window end,
    the first write after expiry, or a waiting reader of a quiet Ready entry).
    No timer or poll is modelled or added. `tests/hosted-landing-write-outage.test.mjs`
-   replays a 20-minute outage against the implementation.
+   replays a 20-minute outage against the implementation. `expiry` is the
+   remaining case: nobody ends the window, no reader waits and nothing writes,
+   so no event re-drives B (`HeadLands` violated). `expiry-fixed`: beginning a
+   window arms one task just after its expiry
+   (`projectHostedLandingRedrive:expired`), which is that first write.
 
 8. **Retry discards dependents (ea86f3fb; incident a7de3a93, fixed).** A platform
    retry (`interrupted`, `runner-unavailable`) of a check re-checks the same
@@ -450,6 +458,17 @@ algorithm drift: changes to these code anchors require manual model review.
    the dependent on every retry instead violates `NoStaleStack`. Replayed in
    `tests/hosted-landing-retry-keeps-stack.test.mjs` for a solo head, a batch head
    and a stacked batch.
+
+9. **Holder lost every driver (c329d191 class; 2026-11-06, fixed).** A passed
+   head B is parked in order behind an older checking entry A. A's run fails,
+   but its completion wake and its supervisor tasks are all lost (two faults),
+   so A never settles and never wakes B. B's waiting reader asks for a re-drive
+   after a quiet period, but the ask only replayed B's own steps and a parked B
+   has none. `orderchain` finds the liveness counterexample (`HeadLands`);
+   `orderchain-fixed` follows B's order wait to each holder (at most 8) and
+   replays only their lost steps (`convex/projectHostedLandingRedrive.ts`).
+   Ask-only: a healthy landing and the resume sweep add nothing.
+   `tests/hosted-landing-lost-wake.test.mjs` replays it against the implementation.
 
 `isolation.cfg` checks the 51bbbd00 isolation semantics in the core model:
 combined-failure evidence may name suspects (released with the reason, never
@@ -491,6 +510,10 @@ or production historical replay is implied.
 | `orderwake-fixed` | 6 | 6 | 0.590 | Passed |
 | `outage` | 8 | 8 | 0.585 | Expected liveness violation |
 | `outage-fixed` | 10 | 10 | 0.567 | Passed; CI and settlement branches |
+| `orderchain` | 4 | 4 | 0.667 | Expected liveness violation |
+| `orderchain-fixed` | 6 | 6 | 0.623 | Passed |
+| `expiry` | 4 | 4 | 0.704 | Expected liveness violation |
+| `expiry-fixed` | 5 | 5 | 0.774 | Passed |
 | `moving` | 8 | 7 | 0.568 | Expected liveness violation |
 | `reuse` | 4 | 4 | 0.550 | Expected ExactCheckedHead |
 | `reuse-fixed` | 4 | 4 | 0.551 | Passed |

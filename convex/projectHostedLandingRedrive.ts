@@ -138,6 +138,31 @@ async function idleReady(
   return task?.state.kind !== 'pending' && task?.state.kind !== 'inProgress';
 }
 
+/** Holders followed per ask. Each hop is strictly older, so the walk ends. */
+export const REDRIVE_ORDER_HOPS = 8;
+/** Incident c329d191 class: a parked Ready entry waits for the older entry that
+ * holds its order, and its reader only ever asks about itself. When the holder
+ * lost its step and its stall alarm too, nothing owns the chain, and every
+ * waiter behind it waits forever. The ask follows the order wait to each holder
+ * and replays only their lost steps. Ask-only: healthy landings and the sweep
+ * (which visits every live entry) add nothing. */
+async function redriveHolders(ctx: MutationCtx, row: Doc<'projectHostedLandingRequests'> | null) {
+  const holders: { submissionId: string; redriven: string[] }[] = [];
+  const seen = new Set<string>();
+  // The queue wake is read at most once per ask.
+  let queueChecked = row?.phase === 'queued' || row?.phase === 'checking';
+  for (let next = row?.orderWait; row && next && !seen.has(next) && seen.size < REDRIVE_ORDER_HOPS;) {
+    seen.add(next);
+    const holder = await landingRow(ctx, { projectId: row.projectId, submissionId: next });
+    if (!holder) break;
+    const redriven = await redriveLanding(ctx, holder, { row: holder, queueChecked });
+    queueChecked ||= holder.phase === 'queued' || holder.phase === 'checking';
+    if (redriven.length) holders.push({ submissionId: holder.submissionId, redriven });
+    next = holder.orderWait;
+  }
+  return holders;
+}
+
 /** A waiting reader asks for this when its entry stays Ready. Contributors only;
  * it never creates an attempt, a check or a new selection. */
 export const redrive = mutation({
@@ -147,7 +172,10 @@ export const redrive = mutation({
     try {
       const actor = await acceptanceActor(ctx);
       await activeProject(ctx, input.projectId, actor.id);
-      return canonicalPayload({ redriven: await redriveLanding(ctx, input) });
+      const row = await landingRow(ctx, input);
+      const redriven = await redriveLanding(ctx, input, row ? { row } : {});
+      const holders = await redriveHolders(ctx, row);
+      return canonicalPayload({ redriven, ...(holders.length ? { holders } : {}) });
     } catch (error) {
       return report(error);
     }
@@ -183,6 +211,29 @@ export const sweep = internalMutation({
           cursor: page.continueCursor,
         },
       );
+    return null;
+  },
+});
+
+/** The pause window's own expiry, armed when the window begins (72d50375). The
+ * operator normally ends the window, and the first write after expiry closes
+ * it; when the operator never returns and nothing writes, this is that write,
+ * so stranded steps resume with no waiter or operator. It runs through the
+ * pause boundary: an expired flag closes the fence there and schedules the
+ * sweep; a flag removed without an end is closed here. One task per window. */
+export const expired = internalMutation({
+  args: { operationId: v.string() },
+  returns: v.null(),
+  handler: async (ctx, { operationId }) => {
+    const window = await ctx.db
+      .query('legacyStorageCleanupWindows')
+      .withIndex('by_operation', q => q.eq('operationId', operationId))
+      .unique();
+    if (!window?.active) return null;
+    await ctx.db.patch(window._id, { active: false, endedAt: Date.now() });
+    await ctx.scheduler.runAfter(0, makeFunctionReference<'mutation'>('projectHostedLandingRedrive:sweep'), {
+      cursor: null,
+    });
     return null;
   },
 });

@@ -231,9 +231,46 @@ CheckRound == /\ Scenario = "checkround"
        [] pc = 2 /\ owner /\ inputsDone /\ applied = 2 -> /\ b' = "failed" /\ pc' = 3
                      /\ UNCHANGED <<canonical, observed, inputsDone, returned, a, main, checked, applied, owner>>
        [] OTHER -> FALSE
+\* Incident c329d191 class (w3c, 2026-11-06): b is a passed head parked in
+\* submission order behind older a, which is checking. a's run fails, but its
+\* completion wake and its supervisor tasks are all lost (owner = FALSE: two
+\* faults, e.g. OCC exhaustion then an outage), so a never learns it failed and
+\* never wakes b. b is Ready, so only b's waiting reader acts: after a quiet
+\* period it asks once (returned = TRUE). Unfixed, the ask re-drives only b's own
+\* steps, and a parked b has none. Fixed, it follows b's order wait to a and
+\* replays a's lost step.
+OrderChain == /\ Scenario = "orderchain"
+  /\ CASE pc = 0 -> /\ b' = "ready" /\ a' = "checking" /\ owner' = TRUE /\ pc' = 1
+                     /\ UNCHANGED <<canonical, observed, inputsDone, returned, main, checked, applied>>
+       [] pc = 1 -> /\ owner' = FALSE /\ pc' = 2
+                     /\ UNCHANGED <<canonical, observed, inputsDone, returned, a, b, main, checked, applied>>
+       [] pc = 2 -> /\ returned' = TRUE /\ owner' = Fixed /\ pc' = 3
+                     /\ UNCHANGED <<canonical, observed, inputsDone, a, b, main, checked, applied>>
+       [] pc = 3 /\ owner -> /\ a' = "failed" /\ pc' = 4
+                     /\ UNCHANGED <<canonical, observed, inputsDone, returned, b, main, checked, applied, owner>>
+       [] pc = 4 -> /\ b' = "landed" /\ pc' = 5
+                     /\ UNCHANGED <<canonical, observed, inputsDone, returned, a, main, checked, applied, owner>>
+       [] OTHER -> FALSE
+\* Issue 72d50375 remainder (w3c, 2026-11-06): the same write outage as
+\* `outage`, in settlement, but nobody ends it: the operator never returns,
+\* no reader waits and nothing else writes (inputsDone = writes refused,
+\* owner = b's step alive). The window simply expires. Unfixed, every
+\* re-drive needs an event (the window end, a reader, the first write after
+\* expiry), so b stays Ready. Fixed, beginning the window armed one expiry
+\* task: it is that first write, closes the fence and re-drives b.
+OutageExpiry == /\ Scenario = "expiry"
+  /\ CASE pc = 0 -> /\ b' = "ready" /\ inputsDone' = TRUE /\ pc' = 1
+                     /\ UNCHANGED <<canonical, observed, returned, a, main, checked, applied, owner>>
+       [] pc = 1 -> /\ owner' = FALSE /\ pc' = 2
+                     /\ UNCHANGED <<canonical, observed, inputsDone, returned, a, b, main, checked, applied>>
+       [] pc = 2 -> /\ inputsDone' = FALSE /\ owner' = Fixed /\ pc' = 3
+                     /\ UNCHANGED <<canonical, observed, returned, a, b, main, checked, applied>>
+       [] pc = 3 /\ owner /\ ~inputsDone -> /\ b' = "landed" /\ pc' = 4
+                     /\ UNCHANGED <<canonical, observed, inputsDone, returned, a, main, checked, applied, owner>>
+       [] OTHER -> FALSE
 Step == Wait \/ CohortConflict \/ LostWake \/ MovingMain \/ CrossHead \/ OrderWake \/ Outage \/ CohortHold \/ LostDispatch
         \/ Supervisor \/ CheckRound
-        \/ RetryKeep
+        \/ RetryKeep \/ OrderChain \/ OutageExpiry
 Spec == Init /\ [][Step]_vars /\ WF_vars(Step)
 FreshTerminal == returned => observed = canonical
 NoOrphanConflict == ~(a \in {"failed", "cancelled"} /\ b = "conflict" /\ main = 0 /\ checked = 0)

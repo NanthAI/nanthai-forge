@@ -6,6 +6,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { finishFixture, desired } from './hosted-finish-fixture.mjs';
+import { batchesFixture, states } from './hosted-landing-batches-fixture.mjs';
 import { LANDING_STALL_MS } from '../dist/landing-stall.js';
 
 const synthetic = {
@@ -90,3 +91,38 @@ test('incident a7de3a93 replay: an unacknowledged dispatch is re-checked by the 
   assert.equal(landing(f, command.operationId).phase, 'landed');
   assert.equal(f.pending().length, 0, 'idle schedules nothing');
 });
+
+for (const [name, options] of Object.entries({
+  'an admission run (pre-queue Lane check)': { count: 2, batching: true, admissionCheck: 'full' },
+  'a batched train run': { count: 2, batching: true },
+  'a request run with an entry behind it': { count: 2, batching: false, requestCheck: true },
+}))
+  test(`incident a7de3a93 shape: a lost dispatch on ${name} is re-checked and every entry lands`, async t => {
+    // 77d20db5 in the incident was an admission run, 9e7e9db0 a train recheck.
+    const f = await batchesFixture(t, options);
+    const started = Date.now();
+    let lost = null;
+    for (let tick = 0; !states(f).every(s => s.phase === 'landed'); tick++) {
+      assert(tick < 400, JSON.stringify(states(f).map(s => [s.phase, s.error?.code])));
+      for (const run of f.runs().filter(r => r.status === 'queued'))
+        if (lost) await f.rawChecks.pass(await f.rawChecks.activate(run.id));
+        else {
+          // The provider reply is lost after the reservation: unknown, no execution.
+          lost = run.id;
+          const p = await f.rawChecks.prepare(run.id);
+          await f.rawChecks.control(run.id, { kind: 'reserve', owner: p.owner, token: p.token });
+          await f.rawChecks.control(run.id, {
+            kind: 'observe',
+            owner: p.owner,
+            token: p.token,
+            result: { status: 'unknown' },
+          });
+        }
+      const task = f.pending()[0];
+      assert(task, 'never stranded: a step is always scheduled');
+      await f.execute(task);
+    }
+    assert.equal(f.runs().find(r => r.id === lost).status, 'interrupted', 'the lost run settled');
+    assert(Date.now() - started < 2 * LANDING_STALL_MS, 're-checked within the stall window, not 12 h');
+    assert.equal(f.tables.projectHostedAcceptances.size, 2, 'each entry accepted once');
+  });

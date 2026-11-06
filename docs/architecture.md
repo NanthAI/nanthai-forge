@@ -1573,6 +1573,14 @@ batch peers are re-selected. If something live still drives it, the deadline re-
 at 2, 4, 8 and 16 hours and then stops; live work is never ended. Finish the same
 Lane again to retry. See [landing workflow](agents/workflow.md).
 
+A scheduled landing step that throws (a refused write during a storage pause, OCC
+exhaustion) is not retried by Convex, so lost steps are re-driven by events, never by
+a poll (`convex/projectHostedLandingRedrive.ts`): the end of a storage pause window,
+the first write after it expires, one task armed at its expiry, and a waiting reader
+whose Ready entry stays quiet for 2 minutes. That reader's ask also follows the
+entry's order wait to each older holder (at most 8) and replays their lost steps, so
+a holder that lost every driver cannot strand the entries parked behind it.
+
 ### Hosted final acceptance
 
 `projectHostedAcceptance` consumes H13's prepared attempts. Preparation stages the

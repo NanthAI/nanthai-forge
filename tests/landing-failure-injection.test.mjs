@@ -10,7 +10,7 @@ import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { batchesFixture, states, synthetic } from './hosted-landing-batches-fixture.mjs';
 import { api as acceptanceApi } from './hosted-acceptance-fixture.mjs';
-import { LANDING_STEPS, PERMANENT, SCENARIOS, runLanding } from './landing-fault-matrix.mjs';
+import { INCIDENTS, LANDING_STEPS, PERMANENT, SCENARIOS, runLanding } from './landing-fault-matrix.mjs';
 import { agentFixture } from './hosted-agent-fixture.mjs';
 import { LANDING_STALL_MS } from '../dist/landing-stall.js';
 import { normalizeHostedFinishResult } from '../dist/hosted-agent-finish-result.js';
@@ -134,6 +134,23 @@ test('the matrix covers every declared step and every landing step of the brief'
   );
   for (const [file, name] of ELSEWHERE)
     assert(readFileSync(new URL(file, import.meta.url), 'utf8').includes(name), `${file}: ${name}`);
+});
+
+test('every landing incident keeps its replay and its TLA+ litmus pair', () => {
+  const models = new URL('../models/landing-queue/', import.meta.url);
+  const all = readFileSync(new URL('run.mjs', models), 'utf8');
+  for (const {
+    issue,
+    replay: [file, name],
+    model,
+  } of INCIDENTS) {
+    assert(readFileSync(new URL(file, import.meta.url), 'utf8').includes(name), `${issue}: ${file}: ${name}`);
+    const found = readFileSync(new URL(`${model}.cfg`, models), 'utf8');
+    assert.match(found, /\\\* Expect: /, `${model}.cfg reproduces the incident`);
+    assert.doesNotMatch(readFileSync(new URL(`${model}-fixed.cfg`, models), 'utf8'), /\\\* Expect: /);
+    for (const config of [model, `${model}-fixed`])
+      assert(all.includes(`'${config}'`), `${config} runs in all`);
+  }
 });
 
 test('step x fault matrix: transient faults land once, permanent faults end typed and bounded', async t => {

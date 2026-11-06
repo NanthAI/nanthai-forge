@@ -54,11 +54,16 @@ async function replay(t, { during, resume }) {
   const paused = () => pause && !resumed;
   const mark = (task, kind) => f.patch('_scheduled_functions', task._id, { state: { kind } });
   const run = async task => {
-    if (task.name === 'projectHostedLandingRedrive:sweep') {
+    if (
+      task.name === 'projectHostedLandingRedrive:sweep' ||
+      task.name === 'projectHostedLandingRedrive:expired'
+    ) {
       f.advanceClock(Math.max(0, task.scheduledTime - Date.now()));
       mark(task, 'inProgress');
       try {
-        await f.transaction('redriveSweep', redrive.sweep, task.args[0]);
+        if (task.name.endsWith(':expired'))
+          await f.transaction('redriveExpired', redrive.expired, task.args[0]);
+        else await f.transaction('redriveSweep', redrive.sweep, task.args[0]);
       } catch (error) {
         mark(task, 'failed');
         throw error;
@@ -175,6 +180,28 @@ test('a write outage that just expires: the waiting reader of a quiet Ready entr
     false,
     'the first resumed write closed the expired fence and scheduled the sweep',
   );
+});
+
+test('a write outage nobody ends and nobody waits on: the window expiry re-drives and every landing lands', async t => {
+  // The operator never returned (no window end) and no reader asks: before the
+  // expiry task, nothing wrote after the pause and the passed entries stayed Ready.
+  for (const during of ['settlement', 'ci']) {
+    const { f, lostTasks, redrives } = await replay(t, { during, resume: 'expire' });
+    assert(lostTasks > 0, `${during}: scheduled steps failed during the outage`);
+    assert.deepEqual(redrives, [], 'no reader asked');
+    assert.deepEqual(
+      states(f).map(s => s.phase),
+      ['landed', 'landed', 'landed'],
+      `${during}: every landing finishes with no operator or reader`,
+    );
+    const windows = [...f.tables.legacyStorageCleanupWindows.values()];
+    assert.equal(windows[0].active, false, 'the expiry closed the fence');
+    const expiry = [...f.tables._scheduled_functions.values()].filter(
+      task => task.name === 'projectHostedLandingRedrive:expired',
+    );
+    assert.equal(expiry.length, 1, 'one expiry task per window');
+    assert(expiry[0].scheduledTime > windows[0].expiresAt, 'it fires after the window, never inside it');
+  }
 });
 
 test('without a re-drive the same outage strands a passed landing (the bug this guards)', async t => {

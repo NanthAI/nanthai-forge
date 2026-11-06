@@ -48,6 +48,64 @@ export const PERMANENT = {
   'projectHostedLandingWouldConflict:mark@receipt': [],
 };
 
+/** Dogfood incidents, each replayed against the implementation (file, test name)
+ * and paired with its TLA+ litmus in models/landing-queue (`model` fails as
+ * found, `model-fixed` holds). A new incident adds a row; the guard in
+ * landing-failure-injection.test.mjs fails if a replay or a config disappears. */
+export const INCIDENTS = [
+  {
+    issue: 'c329d191',
+    shape: 'a passed head parked behind an older entry that fails; the one wake drive is lost',
+    replay: [
+      './hosted-landing-lost-wake.test.mjs',
+      'incident replay c329d191: a lost finish wake after an order wait never strands a passed head',
+    ],
+    model: 'orderwake',
+  },
+  {
+    issue: 'c329d191',
+    shape: 'the older holder lost its completion wake and every supervisor task; only a parked reader asks',
+    replay: [
+      './hosted-landing-lost-wake.test.mjs',
+      'incident c329d191 class: a holder that lost its completion wake and its alarm is re-driven by a parked reader',
+    ],
+    model: 'orderchain',
+  },
+  {
+    issue: 'a7de3a93',
+    shape: 'a check dispatch whose outcome stays unknown, with no execution bound',
+    replay: [
+      './hosted-lost-dispatch.test.mjs',
+      'incident a7de3a93 replay: an unacknowledged dispatch is re-checked by the stall alarm, then the head lands',
+    ],
+    model: 'lostdispatch',
+  },
+  {
+    issue: 'a7de3a93',
+    shape: 'the same lost dispatch on an admission run, a batched train run and a run behind a head',
+    replay: ['./hosted-lost-dispatch.test.mjs', 'incident a7de3a93 shape: a lost dispatch on ${name}'],
+    model: 'lostdispatch',
+  },
+  {
+    issue: '72d50375',
+    shape: 'a write outage in the middle of CI or settlement, ended by the operator or a reader',
+    replay: [
+      './hosted-landing-write-outage.test.mjs',
+      'write outage during ${during}: every landing lands once the operator resumes writes',
+    ],
+    model: 'outage',
+  },
+  {
+    issue: '72d50375',
+    shape: 'a write outage nobody ends: no operator, no reader, no other write',
+    replay: [
+      './hosted-landing-write-outage.test.mjs',
+      'a write outage nobody ends and nobody waits on: the window expiry re-drives and every landing lands',
+    ],
+    model: 'expiry',
+  },
+];
+
 const settled = state => state.phase === 'landed' || state.phase === 'terminal-failed';
 const order = ['admission', 'compose', 'reserve', 'check-callback', 'publish', 'receipt'];
 function entryStep(f, state) {

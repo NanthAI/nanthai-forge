@@ -20,7 +20,15 @@ export const begin = internalMutation({
       'LEGACY_STORAGE_WINDOW_ENDED',
       'A closed window cannot be reopened.',
     );
-    if (!old) await ctx.db.insert('legacyStorageCleanupWindows', { ...pause, active: true });
+    if (!old) {
+      await ctx.db.insert('legacyStorageCleanupWindows', { ...pause, active: true });
+      // If nobody ends the window or writes after it, its expiry re-drives (72d50375).
+      await ctx.scheduler.runAfter(
+        Math.max(0, pause.expiresAt - Date.now()) + 1_000,
+        makeFunctionReference<'mutation'>('projectHostedLandingRedrive:expired'),
+        { operationId },
+      );
+    }
     return { active: true as const };
   },
 });
