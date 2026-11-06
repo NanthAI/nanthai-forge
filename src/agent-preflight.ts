@@ -323,12 +323,16 @@ function laneFiles(root: string) {
   return files;
 }
 
-const testArgs = (root: string, tests: string[]) => [
-  ...(existsSync(join(root, 'tests/check-runtime.mjs')) ? ['--import', './tests/check-runtime.mjs'] : []),
-  '--test',
-  '--test-concurrency=1',
-  ...tests,
-];
+const testArgs = (root: string, tests: string[]) => {
+  // An empty list would make `node --test` discover and run the whole suite (friction e4ce373a).
+  if (!tests.length) throw new Error('No test files selected; refusing to run the default suite.');
+  return [
+    ...(existsSync(join(root, 'tests/check-runtime.mjs')) ? ['--import', './tests/check-runtime.mjs'] : []),
+    '--test',
+    '--test-concurrency=1',
+    ...tests,
+  ];
+};
 
 /** The landing check's shared selector over the saved changes (base to head). Unknown paths mean
  * no plan: missing observations never block a landing. */

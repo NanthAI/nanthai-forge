@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import { shellQuote } from '../dist/agent-brief-render.js';
+import { nodeTestWithoutPaths } from '../dist/heavy-slots.js';
 import { withSourceRecovery } from '../dist/hosted-agent-source-recovery.js';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 
 test('native heavy preserves whitespace, quotes and multiline arguments without shell splitting', t => {
   const directory = mkdtempSync(join(tmpdir(), 'forge-heavy-argv-'));
@@ -59,4 +60,57 @@ test('native save distinguishes completed receipts from pending exact-operation 
   assert.deepEqual(args.slice(0, 3), ['agent', '/synthetic', 'save']);
   assert.deepEqual(JSON.parse(args[3]), { action: 'save', ...session.address, ...command });
   assert.deepEqual(await withSourceRecovery(session, 'save', command, pending), reply);
+});
+
+test('nodeTestWithoutPaths flags only node --test commands that name no test path', () => {
+  const node = process.execPath;
+  assert.equal(nodeTestWithoutPaths(['node', '--test']), true);
+  assert.equal(nodeTestWithoutPaths([node, '--test', '--test-concurrency=1']), true);
+  assert.equal(nodeTestWithoutPaths(['node', '--import', './tests/check-runtime.mjs', '--test']), true);
+  assert.equal(nodeTestWithoutPaths(['node', '--test', '--test-reporter', 'dot']), true);
+  assert.equal(nodeTestWithoutPaths(['node', '--test', '']), true, 'an empty quoted variable');
+  assert.equal(nodeTestWithoutPaths(['node', '--test', '  ', '--']), true);
+  assert.equal(nodeTestWithoutPaths(['node', '--test', 'tests/a.test.mjs']), false);
+  assert.equal(
+    nodeTestWithoutPaths(['node', '--import', 'x.mjs', '--test', '--', 'tests/a.test.mjs']),
+    false,
+  );
+  assert.equal(nodeTestWithoutPaths(['node', 'script.mjs']), false, 'not a test run');
+  assert.equal(nodeTestWithoutPaths(['npm', 'test']), false, 'the explicit full-suite script is allowed');
+  assert.equal(nodeTestWithoutPaths(['tsc', '--test']), false);
+});
+
+test('heavy refuses node --test with an empty file list and still runs a named file', t => {
+  const directory = mkdtempSync(join(tmpdir(), 'forge-heavy-empty-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  // A directory with a failing test: if the guard fell through, Node would discover and run it.
+  writeFileSync(
+    join(directory, 'trap.test.mjs'),
+    "import test from 'node:test'; test('trap', () => { throw new Error('ran'); });",
+  );
+  // A surrounding test runner's protocol variable would swallow the child's report.
+  const env = { ...process.env, FORGE_HEAVY_DIR: join(directory, 'slots') };
+  delete env.NODE_TEST_CONTEXT;
+  const run = args =>
+    spawnSync(process.execPath, [resolve('dist/cli-entry.js'), 'heavy', process.execPath, ...args], {
+      cwd: directory,
+      encoding: 'utf8',
+      env,
+    });
+  for (const args of [['--test'], ['--test', ''], ['--test', '--test-concurrency=1']]) {
+    const result = run(args);
+    assert.notEqual(result.status, 0, 'empty list must fail');
+    assert.match(result.stderr, /no test file paths/);
+    assert.doesNotMatch(result.stdout + result.stderr, /trap|# tests/);
+  }
+  writeFileSync(join(directory, 'ok.test.mjs'), "import test from 'node:test'; test('ok', () => {});");
+  const named = run(['--test', 'ok.test.mjs']);
+  assert.equal(named.status, 0, named.stderr);
+  assert.match(named.stdout, /pass 1/);
+});
+
+test('scripts/test-files.mjs with no files runs nothing and never discovers a default suite', () => {
+  const result = spawnSync(process.execPath, ['scripts/test-files.mjs'], { encoding: 'utf8' });
+  assert.equal(result.status, 0, 'the static shard calls it with an empty list');
+  assert.match(result.stdout, /# tests 0/);
 });

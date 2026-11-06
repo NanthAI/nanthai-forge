@@ -162,6 +162,7 @@ Run bounded builds and test batches under the machine-wide slot limit.
 Callers wait first come, first served; a waiting caller prints its queue position and an estimate.
 --status lists the holders and the queue by Lane, command and time, never folders or arguments.
 Run long-lived servers (Vite/dev servers) directly, outside heavy.
+node --test with no test file path is refused (Node would run the whole suite); name the files.
 `;
 const LANE_FOLDER =
   /(?:^|[\\/])lanes[\\/]([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:[\\/]|$)/i;
@@ -229,6 +230,48 @@ const waitingMessage = (slots: number, directory: string, wait: HeavyWait) => {
   );
 };
 
+/** Node options whose value is the next argument (a bare value is not a test file). */
+const NODE_VALUE_OPTIONS = new Set([
+  '--import',
+  '--require',
+  '-r',
+  '--loader',
+  '--experimental-loader',
+  '--conditions',
+  '-C',
+  '--env-file',
+  '--test-reporter',
+  '--test-reporter-destination',
+  '--test-name-pattern',
+  '--test-skip-pattern',
+  '--test-concurrency',
+  '--test-timeout',
+  '--test-shard',
+]);
+/**
+ * True when the command is `node ... --test` with no test path: Node would then discover and run the
+ * whole suite. An empty or fully filtered list (an unquoted zsh variable never word-splits) must stop
+ * here instead of silently falling through to that default glob (friction e4ce373a).
+ */
+export function nodeTestWithoutPaths(args: string[]) {
+  const name = basename(args[0] ?? '').replace(/\.exe$/i, '');
+  if (name !== 'node' && args[0] !== process.execPath) return false;
+  let testing = false;
+  let paths = 0;
+  for (let index = 1; index < args.length; index++) {
+    const arg = args[index]!;
+    if (arg === '--') {
+      paths += args.slice(index + 1).filter(path => path.trim()).length;
+      break;
+    }
+    if (arg.startsWith('-')) {
+      if (arg === '--test') testing = true;
+      else if (NODE_VALUE_OPTIONS.has(arg)) index++;
+    } else if (arg.trim()) paths++;
+  }
+  return testing && paths === 0;
+}
+
 /** nforge heavy CMD [ARGS...]: run one heavy local command under the machine-wide slot limit. */
 export async function heavyCli(
   args: string[],
@@ -249,6 +292,11 @@ export async function heavyCli(
     args[0] !== '--status' || args.length === 1,
     'BAD_ARGUMENT',
     'heavy --status takes no command. Run nforge heavy --status.',
+  );
+  invariant(
+    !nodeTestWithoutPaths(args),
+    'BAD_ARGUMENT',
+    'heavy: node --test received no test file paths, so Node would run the whole suite. Pass the selected files as separate arguments (zsh does not word-split a plain $VAR: use an array with "${files[@]}" or ${=VAR}), or run nforge heavy npm test for the full suite on purpose.',
   );
   const slots = heavySlots(readClientSettings().localHeavySlots);
   if (args[0] === '--status') {

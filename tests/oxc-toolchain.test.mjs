@@ -5,7 +5,7 @@ import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import test from 'node:test';
-import { oxcFiles } from '../scripts/oxc.mjs';
+import { OXC_USAGE, oxcFiles, parseOxcArgs } from '../scripts/oxc.mjs';
 
 const rules = {
   'no-var': 'export var value = 1;',
@@ -127,4 +127,26 @@ test('Oxfmt detects, writes and rechecks source while preserving prose and gener
   assert.equal(run(root, 'oxfmt', ['--threads', '2', '--check', ...files]).status, 0);
   assert.equal(readFileSync(join(root, 'README.md'), 'utf8'), '  preserve   prose');
   assert.equal(readFileSync(join(root, 'convex/_generated/value.ts'), 'utf8'), '  preserve   generated');
+});
+
+test('oxc.mjs prints usage on --help/-h and rejects unknown arguments without touching files', t => {
+  const { root, write } = fixture(t);
+  const unformatted = 'export const value={x:"value"}\n';
+  write('src/value.ts', unformatted);
+  const script = resolve('scripts/oxc.mjs');
+  const oxc = args => spawnSync(process.execPath, [script, ...args], { cwd: root, encoding: 'utf8' });
+  for (const args of [['--help'], ['-h'], ['format', '--help'], ['format:check', '-h'], ['lint', '--help']]) {
+    const result = oxc(args);
+    assert.equal(result.status, 0, `${args}: ${result.stderr}`);
+    assert.equal(result.stdout, OXC_USAGE);
+  }
+  for (const args of [[], ['format', '--wat'], ['--write'], ['format', 'src/value.ts'], ['nope']]) {
+    const result = oxc(args);
+    assert.equal(result.status, 2, `${args}: ${result.stdout}`);
+    assert.match(result.stderr, /Usage: node scripts\/oxc\.mjs/);
+    assert.equal(result.stdout, '');
+  }
+  assert.equal(readFileSync(join(root, 'src/value.ts'), 'utf8'), unformatted, 'nothing was formatted');
+  assert.deepEqual(parseOxcArgs(['format']), { mode: 'format' });
+  assert.deepEqual(parseOxcArgs(['lint', '--help']), { help: true });
 });

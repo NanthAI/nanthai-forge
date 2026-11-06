@@ -257,4 +257,5 @@ export async function runFiles(
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url))
+  // An empty list runs nothing (the static shard calls it so); it never discovers a default suite.
   process.exitCode = (await runFiles(process.argv.slice(2))) ? 0 : 1;
