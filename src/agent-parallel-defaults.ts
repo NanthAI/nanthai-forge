@@ -30,6 +30,8 @@ export const agentDefaultsSchema = z
     urgentRoles: z.array(urgentRoleSchema).max(2).optional(),
     overlapGate: z.enum(['off', 'warn', 'block']).optional(),
     checkpointNudgeMinutes: z.number().int().min(0).max(1440).optional(),
+    /** First-write hook records "touching <path>" on the board (Issue 9c8490a4); absent is on. */
+    autoClaim: z.boolean().optional(),
     stallAlerts: stallAlertsSchema.optional(),
   })
   .strict();
@@ -45,6 +47,7 @@ export const effectiveAgentDefaultsSchema = z
     urgentRoles: z.array(urgentRoleSchema),
     overlapGate: z.enum(['off', 'warn', 'block']),
     checkpointNudgeMinutes: z.number().int().nonnegative(),
+    autoClaim: z.boolean(),
     stallAlerts: z
       .object({
         enabled: z.boolean(),
@@ -66,6 +69,7 @@ export function effectiveAgentDefaults(stored: AgentDefaults | undefined): Effec
     urgentRoles: [...(stored?.urgentRoles ?? AGENT_DEFAULTS.urgentRoles)],
     overlapGate: stored?.overlapGate ?? AGENT_DEFAULTS.overlapGate,
     checkpointNudgeMinutes: stored?.checkpointNudgeMinutes ?? AGENT_DEFAULTS.checkpointNudgeMinutes,
+    autoClaim: stored?.autoClaim ?? AGENT_DEFAULTS.autoClaim,
     stallAlerts: {
       enabled: alerts?.enabled ?? AGENT_DEFAULTS.stallAlerts.enabled,
       notifyAfterMinutes: alerts?.notifyAfterMinutes ?? AGENT_DEFAULTS.stallAlerts.notifyAfterMinutes,

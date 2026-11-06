@@ -83,7 +83,7 @@ const serverFile = (projectId: string) =>
     'board',
     `server-${projectId.replace(/[^A-Za-z0-9_-]/g, '')}.json`,
   );
-const boardFeatureNames = ['agent-board', 'board-wait'];
+const boardFeatureNames = ['agent-board', 'board-wait', 'board-claims'];
 export function readBoardServerFeatures(projectId: string): string[] {
   if (noState()) return [];
   const value = readJson(serverFile(projectId)) as { features?: unknown } | undefined;

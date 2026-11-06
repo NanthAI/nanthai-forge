@@ -30,6 +30,7 @@ export const autonomyPolicy = v.object({
       urgentRoles: v.optional(v.array(v.union(v.literal('owner'), v.literal('agents')))),
       overlapGate: v.optional(v.union(v.literal('off'), v.literal('warn'), v.literal('block'))),
       checkpointNudgeMinutes: v.optional(v.number()),
+      autoClaim: v.optional(v.boolean()),
       stallAlerts: v.optional(
         v.object({
           enabled: v.optional(v.boolean()),

@@ -2,6 +2,7 @@
 import type { QueryCtx, MutationCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
 import { boardStopped } from './projectBoardLimits';
+import { boardPathVisible, claimDecision, readAutoClaims, type ClaimPeers } from './projectBoardClaims';
 
 type Ctx = QueryCtx | MutationCtx;
 /** A message as returned. `author` is an auth subject here; the public function wrapper maps it to
@@ -22,14 +23,18 @@ export function boardMessageView(row: Doc<'projectBoardMessages'>) {
 /** Board content is for members with write access only (owner and contributors). Hosted projects
  * have no path-scoped read grants: every such member reads all source, so paths need no masking. */
 export async function boardWriter(ctx: Ctx, projectId: Id<'hostedProjects'>, viewer: string) {
+  return (await boardWriterProject(ctx, projectId, viewer)) !== null;
+}
+/** The project row when `viewer` may use the board, else null. */
+export async function boardWriterProject(ctx: Ctx, projectId: Id<'hostedProjects'>, viewer: string) {
   const project = await ctx.db.get(projectId);
-  if (!project || project.removal) return false;
-  if (project.owner === viewer) return true;
+  if (!project || project.removal) return null;
+  if (project.owner === viewer) return project;
   const contributor = await ctx.db
     .query('projectContributors')
     .withIndex('by_project_and_contributor', q => q.eq('projectId', projectId).eq('contributor', viewer))
     .unique();
-  return contributor !== null;
+  return contributor !== null ? project : null;
 }
 
 /** Unread notes for one Lane: its own inbox, its Issue's and the project's. Three point reads;
@@ -131,21 +136,50 @@ export async function boardDelivery(
     intentId: string;
     after: number;
     path?: string;
+    /** First-write hook with feature board-claims: decide whether to send an automatic claim, and
+     * list other Lanes' automatic claims on the path. `lane` is the caller's Lane as already read. */
+    autoClaim?: { open: boolean; saved: Set<string>; peers?: ClaimPeers };
   },
 ) {
-  if (!(await boardWriter(ctx, input.projectId, input.viewer))) return undefined;
+  const project = await boardWriterProject(ctx, input.projectId, input.viewer);
+  if (!project) return undefined;
   if (await boardStopped(ctx, input.projectId)) return undefined;
-  const inbox = await boardInbox(ctx, { ...input, limit: 2, order: 'asc' });
-  const claims = input.path
-    ? await boardClaims(ctx, {
-        projectId: input.projectId,
-        laneId: input.laneId,
-        path: input.path,
-        now: Date.now(),
-      })
-    : [];
-  if (!inbox.messages.length && !claims.length) return undefined;
-  return claims.length ? { ...inbox, claims } : inbox;
+  const { path, autoClaim, ...rest } = input;
+  const inbox = await boardInbox(ctx, { ...rest, limit: 2, order: 'asc' });
+  const now = Date.now();
+  const claims =
+    path && boardPathVisible(project, input.viewer, path)
+      ? await boardClaims(ctx, { projectId: input.projectId, laneId: input.laneId, path, now })
+      : [];
+  const touching =
+    path && autoClaim
+      ? await readAutoClaims(ctx, {
+          project,
+          viewer: input.viewer,
+          laneId: input.laneId,
+          path,
+          now,
+          ...(autoClaim.peers ? { peers: autoClaim.peers } : {}),
+        })
+      : [];
+  const claim =
+    path && autoClaim
+      ? await claimDecision(ctx, {
+          project,
+          viewer: input.viewer,
+          laneId: input.laneId,
+          open: autoClaim.open,
+          path,
+          saved: autoClaim.saved,
+        })
+      : undefined;
+  if (!inbox.messages.length && !claims.length && !touching.length && claim !== 'send') return undefined;
+  return {
+    ...inbox,
+    ...(claims.length ? { claims } : {}),
+    ...(touching.length ? { touching } : {}),
+    ...(claim === 'send' ? { claim } : {}),
+  };
 }
 
 /** Wait delivery (live subscription): watches ONLY the Lane's own inbox row, so a post elsewhere

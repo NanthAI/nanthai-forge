@@ -30,6 +30,23 @@ export const boardTables = {
     .index('by_project_and_reply', ['projectId', 'replyTo'])
     .index('by_project_and_expiry', ['projectId', 'expiresAt'])
     .index('by_author_and_at', ['author', 'at']),
+  /** Automatic file claims (Lane 4): "touching <path>", recorded the first time a session writes a
+   * file the Lane has not saved, so other agents see unsaved edits. One row per Lane and path, at
+   * most BOARD_CLAIM_LANE_CAP live per Lane. Readers hide a claim once its Lane saved the path or
+   * closed; rows are removed by the Lane's next claim (saved paths) or lazily after retention. Not
+   * notes: they never wake anyone and do not count against note rate limits or the note cap. */
+  projectBoardClaims: defineTable({
+    projectId: v.id('hostedProjects'),
+    laneId: v.string(),
+    path: v.string(),
+    /** Auth subject. Mapped to a Forge handle on every read (convex/publicPeople.ts). */
+    author: v.string(),
+    at: v.number(),
+    expiresAt: v.number(),
+  })
+    .index('by_project_and_path_and_at', ['projectId', 'path', 'at'])
+    .index('by_project_and_lane_and_path', ['projectId', 'laneId', 'path'])
+    .index('by_project_and_expiry', ['projectId', 'expiresAt']),
   /** One row per target: delivery point-reads it and reads messages only when latestAt moved. */
   projectBoardInboxes: defineTable({
     projectId: v.id('hostedProjects'),

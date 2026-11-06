@@ -127,6 +127,7 @@ export const projectPurgeTables = {
   projectBoardInboxes: 'by_project_and_key',
   projectBoardSenders: 'by_project_and_key',
   projectBoardProjects: 'by_project',
+  projectBoardClaims: 'by_project_and_lane_and_path',
   boardEvidence: 'by_project_and_at',
   projectHostedDecisions: 'by_project',
   projectHostedDecisionMaintainers: 'by_project_and_actor',

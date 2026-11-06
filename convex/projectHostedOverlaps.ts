@@ -12,6 +12,16 @@ import { report } from './errors';
 import { safeRelative } from '../src/safe-relative';
 import { boardDelivery } from './projectBoardDelivery';
 
+const savedPaths = (changes: string) => {
+  try {
+    return (JSON.parse(changes) as { path?: unknown }[])
+      .map(change => change.path)
+      .filter((path): path is string => typeof path === 'string');
+  } catch {
+    return [];
+  }
+};
+
 /** One finite agent read. No source objects, Work hydration, scheduler or subscription. */
 export const read = query({
   args: {
@@ -25,8 +35,10 @@ export const read = query({
     /** Presence (capability presenceVersion): related open Lanes. `since` is the previous reply's `at`. */
     presence: v.optional(v.object({ since: v.optional(v.number()) })),
     /** Board notes newer than the client's local cursor (ms); members with write access only.
-     * With `path` (first-write hook) the field also lists claims on that path. */
-    board: v.optional(v.object({ after: v.number() })),
+     * With `path` (first-write hook) the field also lists claims on that path. With `claim`
+     * (feature board-claims) it also lists automatic claims on the path (`touching`) and says
+     * `claim: 'send'` when the hook should record its own. */
+    board: v.optional(v.object({ after: v.number(), claim: v.optional(v.literal(true)) })),
   },
   returns: v.string(),
   handler: async (ctx, { projectId, laneId, paths, items, path, detail, presence, board: boardCursor }) => {
@@ -220,6 +232,19 @@ export const read = query({
             after: boardCursor.after,
             // The first-write hook names its path: claims on it ride on the same read.
             ...(path ? { path } : {}),
+            ...(path && boardCursor.claim
+              ? {
+                  autoClaim: {
+                    open: lane.state === 'active',
+                    saved: new Set(savedPaths(focus.changes)),
+                    // Peers already in memory: their open state and saved paths cost no read.
+                    peers: (peerLane: string) => {
+                      const peer = currentPeers.find(row => row.laneId === peerLane);
+                      return peer ? { open: peer.open, saved: new Set(savedPaths(peer.changes)) } : undefined;
+                    },
+                  },
+                }
+              : {}),
           })
         : undefined;
       const boardField = board ? { board } : {};

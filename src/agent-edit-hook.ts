@@ -12,6 +12,9 @@ import { join, relative, resolve, isAbsolute, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID, createHash } from 'node:crypto';
 
+/** XDG_STATE_HOME: the board feature marker lives there (written by Lane actions); without it a
+ * hook under a custom state directory would read the wrong marker and send no board argument. */
+const hookEnvNames = ['FORGE_AUTH_TOKEN', 'XDG_CONFIG_HOME', 'XDG_STATE_HOME', 'FORGE_CLIENT_SETTINGS'];
 let runtimeAvailable = true;
 if (isMainThread) {
   try {
@@ -35,7 +38,7 @@ export function runEditHook(
     const thread = new Worker(new URL(import.meta.url), {
       workerData: { kind: 'forge-edit-hook', owner, laneId, input, signal, port: port2 },
       transferList: [port2],
-      env: childEnv({ allow: ['FORGE_AUTH_TOKEN', 'XDG_CONFIG_HOME', 'FORGE_CLIENT_SETTINGS'] }),
+      env: childEnv({ allow: hookEnvNames }),
       execArgv: [],
     });
     thread.on('error', () => {
@@ -53,7 +56,7 @@ export function runEditHook(
     return failOpen(owner, laneId, wait === 'timed-out' ? 'timeout' : 'unreachable');
   }
   const child = spawnSync(process.execPath, [worker, '--worker', owner, laneId], {
-    env: childEnv({ allow: ['FORGE_AUTH_TOKEN', 'XDG_CONFIG_HOME', 'FORGE_CLIENT_SETTINGS'] }),
+    env: childEnv({ allow: hookEnvNames }),
     input: JSON.stringify(input),
     encoding: 'utf8',
     timeout: 1000,

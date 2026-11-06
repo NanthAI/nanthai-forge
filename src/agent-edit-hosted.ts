@@ -10,6 +10,9 @@ import {
   readBoardServerFeatures,
   type BoardNote,
 } from './board-local.js';
+import { queueBoardClaim, type ClaimTarget } from './board-claim-queue.js';
+
+export type ClaimQueue = (target: ClaimTarget) => unknown;
 
 type Evidence = {
   count: number | null;
@@ -29,7 +32,11 @@ export const incompleteEdit = () => ({
   checked: 1,
 });
 /** A single authorized query: no probes, retries, subscriptions, writes or source downloads. */
-export async function readHostedEditPeers(target: EditTarget, query?: EditQuery) {
+export async function readHostedEditPeers(
+  target: EditTarget,
+  query?: EditQuery,
+  enqueue: ClaimQueue = queueBoardClaim,
+) {
   if (!query) {
     const { deadlineConvexClient } = await import('./network-convex-client.js');
     const { makeFunctionReference } = await import('convex/server');
@@ -51,14 +58,19 @@ export async function readHostedEditPeers(target: EditTarget, query?: EditQuery)
   }
   // Board notes and claims ride on this same query, once the server advertised the board (marker
   // written by Lane actions on change; the hook makes no capability read).
-  const board = Boolean(target.url) && readBoardServerFeatures(target.project).includes('agent-board');
+  const features = target.url ? readBoardServerFeatures(target.project) : [];
+  const board = features.includes('agent-board');
+  // Automatic file claims (board-claims): the same read says whether to claim this path.
+  const claim = board && features.includes('board-claims');
   const raw = await query('projectHostedOverlaps:read', {
     projectId: target.project,
     laneId: target.laneId,
     path: target.path,
     detail: true,
     items: 5,
-    ...(board ? { board: { after: readBoardCursor(target.root, target.laneId) } } : {}),
+    ...(board
+      ? { board: { after: readBoardCursor(target.root, target.laneId), ...(claim ? { claim: true } : {}) } }
+      : {}),
   });
   const value = typeof raw === 'string' ? JSON.parse(raw) : raw;
   const evidence = (value as { peerEvidence?: Evidence })?.peerEvidence;
@@ -86,7 +98,7 @@ export async function readHostedEditPeers(target: EditTarget, query?: EditQuery)
     unsavedEdits: evidence.unsavedEdits,
     overlaps: evidence.items.slice(0, 5),
     checked: 1,
-    ...(board ? boardLines(target, (value as { board?: unknown }).board) : {}),
+    ...(board ? boardLines(target, (value as { board?: unknown }).board, enqueue) : {}),
   };
 }
 const optionalString = (value: unknown) => value === undefined || typeof value === 'string';
@@ -106,8 +118,34 @@ const isNote = (value: unknown): value is BoardNote => {
 /** Claims on the written path and unread notes for this Lane, as single quoted-data lines. Notes
  * advance the local board cursor, so the next Lane action does not repeat them. No schema library:
  * this runs on every first write. */
-function boardLines(target: EditTarget, field: unknown): { board?: { claims: string[]; notices: string[] } } {
-  const value = field as { messages?: unknown; more?: unknown; cursor?: unknown; claims?: unknown } | null;
+const isTouching = (value: unknown): value is { author?: string; fromLaneId: string; at: number } => {
+  const row = value as Record<string, unknown> | null;
+  return (
+    !!row && typeof row.fromLaneId === 'string' && typeof row.at === 'number' && optionalString(row.author)
+  );
+};
+/** Another Lane's automatic claim: it wrote this file and has not saved it yet. One line ≤240. */
+export const touchingLine = (path: string, row: { author?: string; fromLaneId: string; at: number }) => {
+  const lane = row.fromLaneId.slice(0, 8);
+  const minutes = Math.max(0, Math.round((Date.now() - row.at) / 60_000));
+  return `Claim on ${path.slice(0, 80)}: ${row.author ? `@${row.author}` : 'a member'} (Lane ${lane}) is editing it, unsaved, first write ${minutes}m ago. Coordinate: board --post {"to":"lane:${lane}","text":"…"}`.slice(
+    0,
+    240,
+  );
+};
+function boardLines(
+  target: EditTarget,
+  field: unknown,
+  enqueue: ClaimQueue,
+): { board?: { claims: string[]; notices: string[] } } {
+  const value = field as {
+    messages?: unknown;
+    more?: unknown;
+    cursor?: unknown;
+    claims?: unknown;
+    touching?: unknown;
+    claim?: unknown;
+  } | null;
   if (
     !value ||
     !Array.isArray(value.messages) ||
@@ -117,9 +155,22 @@ function boardLines(target: EditTarget, field: unknown): { board?: { claims: str
     !(value.claims === undefined || (Array.isArray(value.claims) && value.claims.every(isNote)))
   )
     return {};
-  const claims = ((value.claims as BoardNote[] | undefined) ?? [])
-    .slice(0, 2)
-    .map(claim => `Claim on ${target.path}: ${boardNoticeLine(claim, target.laneId)}`);
+  // Off the hook's path: queue this path; a detached sender batches and sends it.
+  if (value.claim === 'send' && target.url)
+    enqueue({
+      root: target.root,
+      laneId: target.laneId,
+      project: target.project,
+      url: target.url,
+      path: target.path,
+    });
+  const touching = Array.isArray(value.touching) ? value.touching.filter(isTouching).slice(0, 2) : [];
+  const claims = [
+    ...((value.claims as BoardNote[] | undefined) ?? [])
+      .slice(0, 2)
+      .map(claim => `Claim on ${target.path}: ${boardNoticeLine(claim, target.laneId)}`),
+    ...touching.map(row => touchingLine(target.path, row)),
+  ].slice(0, 3);
   const notices = value.messages.length
     ? boardEnvelope(target.root, target.laneId, {
         messages: value.messages.slice(0, 2),
@@ -130,13 +181,18 @@ function boardLines(target: EditTarget, field: unknown): { board?: { claims: str
   return claims.length || notices.length ? { board: { claims, notices } } : {};
 }
 /** Reserve before IO, so a supervisor timeout is cached too. No cached evidence grants authority. */
-export async function preEditHosted(target: EditTarget, session: string, query?: EditQuery) {
+export async function preEditHosted(
+  target: EditTarget,
+  session: string,
+  query?: EditQuery,
+  enqueue?: ClaimQueue,
+) {
   const cache = new PeersCache(target.root);
   const key = `hosted-first-edit-v1:${target.url}:${target.project}:${target.laneId}:${session}:${target.path}`;
   if (cache.read(key)) return { ...incompleteEdit(), status: 'cached', checked: 0 };
   cache.write(key, { checked: true, coverage: 'hosted-incomplete' });
   try {
-    const result = await readHostedEditPeers(target, query);
+    const result = await readHostedEditPeers(target, query, enqueue);
     cache.write(key, { checked: true, coverage: result.coverage });
     return result;
   } catch {

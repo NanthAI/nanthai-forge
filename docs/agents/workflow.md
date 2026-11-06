@@ -194,6 +194,18 @@ Issue (`issue:ISSUE_ID`), or to the whole project (`project`).
   quoted-data lines inside its existing context, from the query it already makes.
   It sends the board argument only after a Lane action learned that the server has
   the board (a small local marker), so it never adds a capability call.
+- Automatic file claims (on by default): the first time a session writes a file that
+  your Lane has not saved, Forge records "touching PATH" for your Lane, so other agents
+  see your unsaved edit. Their first write to that file shows `Claim on PATH: @handle
+  (Lane xxxxxxxx) is editing it, unsaved, first write Nm ago`. The same query tells the
+  hook whether to claim; the claim itself goes up from a short-lived background
+  sender, so the edit never waits for it, and first writes within about 1.5 s share
+  one call. Paths already saved or already claimed cost no call. A claim ends when
+  your Lane saves the path or closes (readers stop showing it at once) or after 14
+  days. At most 30 live claims per Lane; claims are not notes, so they never wake a
+  wait and do not count against note limits. Write members only, handles only. The
+  owner turns it off with `set-policy {"agentDefaults":{"autoClaim":false}}`; the
+  board off switch stops it too. Needs contract feature `board-claims`.
 - Wait delivery: while `wait` blocks on your landing, a note to your own Lane ends
   it early with `status:"IN_PROGRESS"`, `reason:"message"`, exit code 3, the notes in
   `board.notices` and the same resume command. Read the notes, then run the same

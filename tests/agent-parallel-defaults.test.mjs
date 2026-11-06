@@ -34,6 +34,7 @@ test('every default is on; absent stored fields read as the documented defaults'
     urgentRoles: ['owner'],
     overlapGate: 'block',
     checkpointNudgeMinutes: 30,
+    autoClaim: true,
     stallAlerts: { enabled: true, notifyAfterMinutes: 15, repeatAfterMinutes: 30, email: [], webhook: 'off' },
   });
   const view = policyReadView(effectivePolicy({}));

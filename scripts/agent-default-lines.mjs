@@ -7,6 +7,7 @@ export const AGENT_DEFAULTS = Object.freeze({
   urgentRoles: ['owner'],
   overlapGate: 'block',
   checkpointNudgeMinutes: 30,
+  autoClaim: true,
   stallAlerts: { enabled: true, notifyAfterMinutes: 15, repeatAfterMinutes: 30, email: [], webhook: 'off' },
 });
 
