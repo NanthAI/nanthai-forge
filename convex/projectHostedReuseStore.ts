@@ -259,7 +259,7 @@ export const complete = internalMutation({
           ([key, value]) => canonicalPayload(proof[key as keyof typeof proof]) === canonicalPayload(value),
         ) &&
           proof.checkedSelection === current.selection &&
-          (proof.algorithm !== 'clean-disjoint-v1' ||
+          (proof.algorithm === 'conservative-impact-v1' ||
             canonicalPayload(proof.checkEntries) === canonicalPayload(current.checkEntries)),
         'EVIDENCE_CHANGED',
         'Complete only the original current proof analysis.',

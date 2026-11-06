@@ -139,7 +139,9 @@ that already offered their own run. The constant `Red` names changes whose own
 check fails on their base, so any check that includes one fails; `Independent`
 names changes the first-check rule (`clean-disjoint-v1`: clean composition,
 path-disjoint from what main gained, no global-risk file) accepts after any main
-move.
+move. `clean-disjoint-v2` (a clean text merge of untested Markdown also counts)
+only widens which real changes are `Independent`: the model's content is sets of
+changes, so a clean merge is already the union, and `Reuse` is unchanged.
 `NoQueueCheck` says no queue group ever checks; it is checked only by the solo
 configs.
 

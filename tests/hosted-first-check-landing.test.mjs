@@ -38,7 +38,7 @@ async function drive(f, { until = () => false, skip = /MainAudit:start/ } = {}) 
 }
 async function wave(t, options = {}) {
   const f = await batchesFixture(t, { batchMaxSize: null, admissionCheck: 'default', ...options, count: 0 });
-  f.rawChecks.setPlanSelection(full);
+  f.rawChecks.setPlanSelection(options.selection ?? full);
   if (options.crossHeadReuse === false) {
     const project = f.tables.hostedProjects.get(f.projectId);
     const policy = project.autonomyPolicy;
@@ -69,8 +69,12 @@ test('a change whose composition is clean and path-disjoint from what main gaine
   assert.deepEqual(f.reuseDecisions, ['proof']);
   const [first, second] = receipts(f);
   assert.deepEqual(first.firstCheck, { landedOn: 'admission-run', mainMoved: false });
-  assert.deepEqual(second.firstCheck, { landedOn: 'admission-run', mainMoved: true });
-  assert.equal(second.crossHeadProof.algorithm, 'clean-disjoint-v1');
+  assert.deepEqual(second.firstCheck, {
+    landedOn: 'admission-run',
+    mainMoved: true,
+    rule: 'clean-disjoint-v2',
+  });
+  assert.equal(second.crossHeadProof.algorithm, 'clean-disjoint-v2');
   assert.deepEqual(second.crossHeadProof.candidatePaths, ['src/b.ts']);
   assert.deepEqual(second.crossHeadProof.mainPaths, ['src/a.ts']);
   assert.equal(second.check.runId, second.crossHeadProof.runId, 'the receipt names the admission run');
@@ -138,6 +142,85 @@ test('a text conflict with main never lands on the first check', async t => {
   assert.deepEqual(recheckReasons(f), [null, 'text-conflict']);
 });
 
+// Owner decision 2026-11-06 10:45Z: a text-clean Markdown merge lands on its first
+// check unless a test or script reads that file (the runner's pinned list).
+const markdown = (path, testedDocs, contents = ['A\nb\nc\n', 'a\nb\nC\n']) => ({
+  baselineFiles: [[path, 'a\nb\nc\n']],
+  memberPaths: [path, path],
+  memberContents: contents,
+  fileCount: 2,
+  selection: JSON.stringify({
+    scope: 'full',
+    tests: [],
+    ...(testedDocs ? { testedDocs: { rule: 'name-mention-v1', paths: testedDocs } } : {}),
+  }),
+});
+const fileText = (f, head, path) =>
+  f.c.objects.get(JSON.parse(f.c.objects.get(head)).files.find(file => file.path === path).blob).toString();
+
+test('a text-clean merge of Markdown no test reads lands on its admission run (clean-disjoint-v2)', async t => {
+  const f = await wave(t, markdown('docs/notes.md', ['AGENTS.md']));
+  assert.deepEqual(
+    states(f).map(s => s.phase),
+    ['landed', 'landed'],
+  );
+  assert.deepEqual(f.reuseDecisions, ['proof']);
+  const second = receipts(f)[1];
+  assert.deepEqual(second.firstCheck, {
+    landedOn: 'admission-run',
+    mainMoved: true,
+    rule: 'clean-disjoint-v2',
+  });
+  assert.deepEqual(second.crossHeadProof.docsOverlap, ['docs/notes.md']);
+  // Landed bytes are the composed Candidate on current main: both edits, one run each.
+  assert.equal(second.candidate.head, second.crossHeadProof.head);
+  assert.equal(fileText(f, second.candidate.head, 'docs/notes.md'), 'A\nb\nC\n');
+  assert.equal(runCount(f), 2);
+  // The first-check main audit is armed at once, as for a path-disjoint landing.
+  assert.equal([...f.tables.projectHostedMainAudits.values()][0].firstCheck, second.snapshot.revision);
+});
+
+test('Markdown first-check landing costs no more Convex calls or DB IO than its recheck', async t => {
+  const fast = await wave(t, markdown('docs/notes.md', []));
+  const slow = await wave(t, markdown('docs/notes.md', ['docs/notes.md']));
+  assert.deepEqual(slow.reuseDecisions, ['tested-doc']);
+  const [a, b] = [budget(fast), budget(slow)];
+  t.diagnostic(`docs first-check ${JSON.stringify(a)} recheck ${JSON.stringify(b)}`);
+  for (const key of Object.keys(a)) assert(a[key] <= b[key], `${key}: ${a[key]} <= ${b[key]}`);
+});
+
+for (const [name, options, reason] of [
+  ['a tested Markdown file (AGENTS.md)', markdown('AGENTS.md', ['AGENTS.md']), 'tested-doc'],
+  ['a run that pinned no tested-docs list', markdown('docs/notes.md', undefined), 'tested-doc'],
+  // fixture/0 is in both changes too: a code overlap beside the Markdown merge.
+  ['Markdown plus a code overlap', { ...markdown('docs/notes.md', []), fileCount: 3 }, 'path-overlap'],
+])
+  test(`a clean Markdown merge rechecks for ${name}: ${reason}`, async t => {
+    const f = await wave(t, options);
+    assert.deepEqual(
+      states(f).map(s => s.phase),
+      ['landed', 'landed'],
+    );
+    assert.deepEqual(f.reuseDecisions, [reason]);
+    assert.deepEqual(receipts(f)[1].firstCheck, { landedOn: 'recheck', reason });
+    assert.equal(receipts(f)[1].crossHeadProof, undefined);
+    assert.equal(runCount(f), 3);
+  });
+
+test('a Markdown text conflict never lands on the first check', async t => {
+  const f = await wave(t, markdown('docs/notes.md', [], ['A\nb\nc\n', 'X\nb\nc\n']));
+  assert.equal(receipts(f).length, 1);
+  assert.deepEqual(f.reuseDecisions, []);
+  assert.deepEqual(
+    states(f).map(s => [s.phase, s.error?.code ?? null]),
+    [
+      ['landed', null],
+      ['terminal-failed', 'COMPOSITION_CONFLICT'],
+    ],
+  );
+  assert.deepEqual(recheckReasons(f), [null, 'text-conflict']);
+});
+
 test('change-556 class: a path-disjoint semantic break reaches main, the prompt audit catches it and first-check landings stop', async t => {
   // A and B are each green alone and path-disjoint; B breaks a test of A only
   // when both are on main (Issue 7fe54c7c, change 556). C arrives meanwhile.
@@ -148,7 +231,11 @@ test('change-556 class: a path-disjoint semantic break reaches main, the prompt 
     until: f => receipts(f).length === 2,
   });
   const culprit = receipts(f)[1];
-  assert.deepEqual(culprit.firstCheck, { landedOn: 'admission-run', mainMoved: true });
+  assert.deepEqual(culprit.firstCheck, {
+    landedOn: 'admission-run',
+    mainMoved: true,
+    rule: 'clean-disjoint-v2',
+  });
   // The prompt audit runs on the new main head (A+B), where the break shows.
   const wake = f.pending().find(t => t.name === 'projectHostedMainAudit:start');
   assert(wake.scheduledTime <= Date.now(), 'armed at once, not at the 10-landing cadence');

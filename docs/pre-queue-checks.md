@@ -58,13 +58,17 @@ configured check (no `configure-check`) skips it and queues as before.
      rule reads only Forge data (manifests, the run's selection, receipts), so it
      works with any CI. The coalesced [main audit](workflows.md#hosted-acceptance-gate)
      is armed at once and covers the new head with one full run.
+     Rule `clean-disjoint-v2` also lands a change whose only overlap with main is a
+     clean text merge of Markdown that no test or script reads: the runner pins
+     those files in its selection (`testedDocs`, any Markdown whose file name a code,
+     JSON, HTML or YAML file mentions); a missing list means every Markdown is tested.
    - Otherwise (any doubt: overlap, global-risk file, text conflict, a scoped
      first run, red main or audit debt, unreadable evidence) the proof is refused,
      the change re-enters the queue as a new entry and joins a cohort for one
      combined check.
    The receipt's `firstCheck` says which path it took: `{"landedOn":"admission-run","mainMoved":…}`
    or `{"landedOn":"recheck","reason":…}` with the recheck reason (`path-overlap`,
-   `global-risk`, `text-conflict`, `checked-not-full`, `main-red`, `audit-debt`,
+   `tested-doc`, `global-risk`, `text-conflict`, `checked-not-full`, `main-red`, `audit-debt`,
    `cohort`, …).
    Cohorts of admitted changes use the admitted failure prior, so they are larger.
    A refused change waits for peers still deciding their own Lane run (bounded by

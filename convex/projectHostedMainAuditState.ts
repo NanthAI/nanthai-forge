@@ -17,6 +17,7 @@ import {
 } from '../src/main-audit';
 import { hostedLandingStateSchema, landingObservation } from '../src/hosted-landing';
 import { canonicalPayload } from '../src/hosted-source-operation';
+import { firstCheckProof } from '../src/hosted-cross-head-proof';
 import { recordLandingObservation, wakeLandingQueue } from './projectHostedLandingEvents';
 import { holdsLandingOrder } from './projectHostedLandingOrder';
 
@@ -216,8 +217,7 @@ export async function noteMainLanding(
   // A first-check landing (Issue 7fe54c7c) is verified promptly: one coalesced
   // full audit of the newest main head, never one per landing, instead of the
   // cadence that covers contract-gated landings.
-  const firstCheck =
-    receipt.crossHeadProof?.algorithm === 'clean-disjoint-v1' ? receipt.snapshot.revision : row.firstCheck;
+  const firstCheck = firstCheckProof(receipt.crossHeadProof) ? receipt.snapshot.revision : row.firstCheck;
   await ctx.db.patch(row._id, {
     unaudited: { count, firstAt: count ? firstAt : null },
     debt: auditDebt(count, firstAt, settings),

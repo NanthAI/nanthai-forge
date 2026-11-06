@@ -32,7 +32,14 @@ export const hostedAcceptanceSchema = z
      * check as acceptance evidence, or rechecked and why (Issue 7fe54c7c). */
     firstCheck: z
       .discriminatedUnion('landedOn', [
-        z.object({ landedOn: z.literal('admission-run'), mainMoved: z.boolean() }).strict(),
+        z
+          .object({
+            landedOn: z.literal('admission-run'),
+            mainMoved: z.boolean(),
+            /** The first-check rule that carried a moved main (crossHeadProof.algorithm). */
+            rule: z.string().min(1).max(64).optional(),
+          })
+          .strict(),
         z.object({ landedOn: z.literal('recheck'), reason: z.string().min(1).max(64) }).strict(),
       ])
       .optional(),
@@ -75,11 +82,15 @@ export const completionPageRoot = (previous: string, kind: string, index: number
 /** Receipt `firstCheck` from the server-only admission fields of the landing row. */
 export function firstCheckReceipt(
   admission: { runId: string; status: string; full?: true; recheck?: string } | undefined,
-  input: { runId: string | undefined; reused: boolean; batch: boolean },
+  input: { runId: string | undefined; reused: boolean; batch: boolean; rule?: string },
 ): HostedAcceptance['firstCheck'] {
   if (!admission?.full || admission.status !== 'passed') return undefined;
   if (!input.batch && input.runId === admission.runId)
-    return { landedOn: 'admission-run', mainMoved: input.reused };
+    return {
+      landedOn: 'admission-run',
+      mainMoved: input.reused,
+      ...(input.rule ? { rule: input.rule } : {}),
+    };
   return { landedOn: 'recheck', reason: admission.recheck ?? (input.batch ? 'cohort' : 'not-tried') };
 }
 export const firstCheckField = (value: HostedAcceptance['firstCheck']) =>

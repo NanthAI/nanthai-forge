@@ -257,7 +257,7 @@ test('a path-disjoint import overlap lands on its first check and arms the main 
   const { f, state, before } = await race(t, { mainFiles: [overlapping[1]] });
   for (let n = 0; n < 40 && (await f.current(state.id)).submission.phase !== 'landed'; n++) await f.execute();
   const { attempt } = await f.status(state.id);
-  assert.equal(attempt.crossHeadProof.algorithm, 'clean-disjoint-v1');
+  assert.equal(attempt.crossHeadProof.algorithm, 'clean-disjoint-v2');
   assert.equal(attempt.crossHeadProof.checked.head, before.candidate.head);
   assert.equal(f.tables.projectHostedCheckRuns.size, 2, 'original Candidate check and the main pass only');
   const audit = [...f.tables.projectHostedMainAudits.values()][0];

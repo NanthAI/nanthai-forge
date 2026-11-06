@@ -279,7 +279,12 @@ export async function publishAcceptance(
     check,
     ...(reuse ? { crossHeadProof: reuse } : {}),
     ...firstCheckField(
-      firstCheckReceipt(row.admission, { runId: attempt.check?.runId, reused: Boolean(reuse), batch: false }),
+      firstCheckReceipt(row.admission, {
+        runId: attempt.check?.runId,
+        reused: Boolean(reuse),
+        batch: false,
+        ...(reuse ? { rule: reuse.algorithm } : {}),
+      }),
     ),
     snapshot: { id: identity.receiptId, previousId: main.snapshotId, revision: main.sourceRevision + 1 },
     completion: {

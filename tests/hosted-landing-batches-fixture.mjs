@@ -21,6 +21,9 @@ export async function batchesFixture(
     governanceVersion = 1,
     memberContracts,
     memberPaths,
+    // Per-change file text (default `member ${i}`) and extra main files, for text merges.
+    memberContents,
+    baselineFiles,
     memberFileCount = 1,
     batching = true,
     // Mechanics tests pin the earlier fixed cohort of eight; null selects auto sizing.
@@ -35,7 +38,7 @@ export async function batchesFixture(
     runner,
   } = {},
 ) {
-  const f = await finishFixture(t, { fileCount });
+  const f = await finishFixture(t, { fileCount, ...(baselineFiles ? { baselineFiles } : {}) });
   {
     const policy = policyPreset('trusted');
     f.patch('hostedProjects', f.projectId, {
@@ -74,19 +77,18 @@ export async function batchesFixture(
   const entries = [];
   const add = async i => {
     const memberPath = memberPaths?.[i] ?? (conflict && i < 2 ? 'collision' : `member-${i}`);
-    const pin = f.c.state(
-      [
-        ...JSON.parse(f.c.objects.get(f.c.baseline.sha256)).files,
-        ...Array.from({ length: Math.max(0, fileCount - 2) }, (_, k) => f.c.file(`fixture/${k}`, 'shared')),
-        ...Array.from({ length: memberFileCount }, (_, index) =>
-          f.c.file(
-            index ? `${memberPath}-additional-${index}` : memberPath,
-            index ? `member ${i} additional ${index}` : `member ${i}`,
-          ),
+    const files = [
+      ...JSON.parse(f.c.objects.get(f.c.baseline.sha256)).files,
+      ...Array.from({ length: Math.max(0, fileCount - 2) }, (_, k) => f.c.file(`fixture/${k}`, 'shared')),
+      ...Array.from({ length: memberFileCount }, (_, index) =>
+        f.c.file(
+          index ? `${memberPath}-additional-${index}` : memberPath,
+          index ? `member ${i} additional ${index}` : (memberContents?.[i] ?? `member ${i}`),
         ),
-      ],
-      [f.c.baseline.sha256],
-    );
+      ),
+    ];
+    // A member file that edits a baseline file replaces it.
+    const pin = f.c.state([...new Map(files.map(file => [file.path, file])).values()], [f.c.baseline.sha256]);
     let intentId = f.c.intentId;
     if (memberContracts) {
       intentId = randomUUID();

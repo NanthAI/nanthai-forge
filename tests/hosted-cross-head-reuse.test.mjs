@@ -72,6 +72,10 @@ function fixture({
   risk = null,
   mainRisk = null,
   scope = 'full',
+  // A Markdown file both sides edited (text-clean merge), and the pinned tested-docs lists.
+  doc = null,
+  testedDocs,
+  auditTestedDocs,
 } = {}) {
   const blobs = new Map();
   let calls = 0,
@@ -93,6 +97,7 @@ function fixture({
           ],
         ]
       : []),
+    ...(doc ? [[doc, 'a\nb\nc\n']] : []),
   ].map(file);
   const state = files =>
     put(
@@ -110,6 +115,7 @@ function fixture({
   const candidate = [...original.filter(f => f.path !== changed.path), changed];
   if (unknown) candidate.push(file(['unknown.config', 'unknown']));
   if (risk) candidate.push(file([risk, 'risk']));
+  const edit = (files, text) => (doc ? [...files.filter(f => f.path !== doc), file([doc, text])] : files);
   const mainDelta = overlap
     ? file([changed.path, 'export const cost = 3;'])
     : file(['src/native-projection.ts', 'export const old = 2;']);
@@ -118,9 +124,15 @@ function fixture({
   const merged = [...candidate.filter(f => f.path !== mainDelta.path), mainDelta];
   if (mainRisk) merged.push(main.at(-1));
   if (corrupt) merged.push(file(['extra.txt', 'unexpected recomposition']));
-  const heads = [base, state(candidate), state(main), state(merged)];
+  const docs = paths => (paths ? { testedDocs: { rule: 'name-mention-v1', paths } } : {});
+  const heads = [
+    base,
+    state(edit(candidate, 'A\nb\nc\n')),
+    state(edit(main, 'a\nb\nC\n')),
+    state(edit(merged, 'A\nb\nC\n')),
+  ];
   const pin = value => put(JSON.stringify(value));
-  const selection = pin({ scope, tests: ['tests/convex-source-r2.test.mjs'] });
+  const selection = pin({ scope, tests: ['tests/convex-source-r2.test.mjs'], ...docs(testedDocs) });
   const basis = {
     checked: { id: randomUUID(), head: heads[1], digest: 'a'.repeat(64) },
     checkedBase: { head: heads[0], receiptId: 'before' },
@@ -135,7 +147,7 @@ function fixture({
       runId: randomUUID(),
       terminalDigest: 'd'.repeat(64),
       planDigest: 'e'.repeat(64),
-      selection: pin({ scope: 'full', tests: [] }),
+      selection: pin({ scope: 'full', tests: [], ...docs(auditTestedDocs) }),
       sequence: 1,
       coverage: 'main-audit-debt',
     },
@@ -153,7 +165,8 @@ test('clean path-disjoint composition lands on its first check from six small re
     { proof } = await analyzeCrossHeadReuse(f.basis, f.selection, f.read, ['scripts/forge-check.mjs']);
   assert(proof);
   assert(validCrossHeadProof(proof));
-  assert.equal(proof.algorithm, 'clean-disjoint-v1');
+  assert.equal(proof.algorithm, 'clean-disjoint-v2');
+  assert.deepEqual(proof.docsOverlap, []);
   assert.deepEqual(proof.candidatePaths, ['convex/projectConvexSourceOutput.ts']);
   assert.deepEqual(proof.mainPaths, ['src/native-projection.ts']);
   assert.equal(proof.checkedScope, 'full');
@@ -182,6 +195,41 @@ for (const [option, reason] of [
     assert.deepEqual(await analyzeCrossHeadReuse(f.basis, f.selection, f.read, ['tools/run-check.mjs']), {
       reason,
     });
+  });
+test('a text-clean merge of Markdown no test reads lands on its first check (clean-disjoint-v2)', async () => {
+  const f = fixture({ doc: 'docs/notes.md', testedDocs: ['AGENTS.md'] });
+  const { proof } = await analyzeCrossHeadReuse(f.basis, f.selection, f.read);
+  assert(proof, 'untested Markdown overlap lands');
+  assert.equal(proof.algorithm, 'clean-disjoint-v2');
+  assert.deepEqual(proof.docsOverlap, ['docs/notes.md']);
+  assert.equal(proof.testedDocsRule, 'name-mention-v1');
+  assert(validCrossHeadProof(proof));
+  // The same six small reads as a disjoint proof: no Markdown bytes are read.
+  assert.deepEqual(f.metrics(), { calls: 2, maxWindow: 4 });
+  // Publication revalidates: a non-Markdown or undeclared overlap is never valid.
+  assert(!validCrossHeadProof({ ...proof, docsOverlap: [] }));
+  assert(
+    !validCrossHeadProof({
+      ...proof,
+      docsOverlap: ['docs/notes.md', 'src/native-projection.ts'],
+      candidatePaths: [...proof.candidatePaths, 'src/native-projection.ts'],
+    }),
+  );
+});
+for (const [name, option, reason] of [
+  ['tested on the checked source', { doc: 'AGENTS.md', testedDocs: ['AGENTS.md'] }, 'tested-doc'],
+  [
+    'tested on the audited main',
+    { doc: 'docs/notes.md', testedDocs: [], auditTestedDocs: ['docs/notes.md'] },
+    'tested-doc',
+  ],
+  ['the run pinned no tested-docs list', { doc: 'docs/notes.md' }, 'tested-doc'],
+  ['Markdown plus a code overlap', { doc: 'docs/notes.md', testedDocs: [], overlap: true }, 'path-overlap'],
+  ['a non-Markdown text merge', { doc: 'docs/notes.txt', testedDocs: [] }, 'path-overlap'],
+])
+  test(`a clean Markdown merge rechecks when ${name}: ${reason}`, async () => {
+    const f = fixture(option);
+    assert.deepEqual(await analyzeCrossHeadReuse(f.basis, f.selection, f.read), { reason });
   });
 test('a first check without a recorded full scope cannot carry a landing', async () => {
   const f = fixture();
@@ -355,7 +403,7 @@ test('a39b1cdb shape (disjoint paths, overlapping Convex impact) now lands on it
   const receipt = JSON.parse(
     [...f.tables.projectHostedAcceptances.values()].find(row => row.submissionId === state.id).value,
   );
-  assert.equal(receipt.crossHeadProof.algorithm, 'clean-disjoint-v1');
+  assert.equal(receipt.crossHeadProof.algorithm, 'clean-disjoint-v2');
   assert.equal(receipt.check.runId, before.check.runId);
   const audit = [...f.tables.projectHostedMainAudits.values()][0];
   assert.equal(audit.firstCheck, receipt.snapshot.revision);

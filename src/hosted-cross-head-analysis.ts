@@ -9,6 +9,7 @@ import {
   type CrossHeadProof,
 } from './hosted-cross-head-proof.js';
 import { FIRST_CHECK_RISK_RULE, firstCheckRiskPaths } from './first-check-risk.js';
+import { markdownPath, pinnedTestedDocs, TESTED_DOCS_RULE } from './tested-docs.js';
 
 type Basis = Pick<
   CrossHeadProof,
@@ -18,6 +19,7 @@ type Reader = (digests: string[]) => Promise<Uint8Array[]>;
 /** Why a change rechecks instead of landing on its first check (receipt field). */
 export type FirstCheckRecheck =
   | 'path-overlap'
+  | 'tested-doc'
   | 'global-risk'
   | 'composition-not-exact'
   | 'unsupported-mode'
@@ -38,9 +40,12 @@ const json = (bytes: Uint8Array | undefined, pin: string): Record<string, unknow
   const value: unknown = JSON.parse(Buffer.from(bytes).toString('utf8'));
   return value && typeof value === 'object' ? (value as Record<string, unknown>) : null;
 };
-/** Land on the first check (clean-disjoint-v1, Issue 7fe54c7c). Reads exactly the
+/** Land on the first check (clean-disjoint-v2, Issue 7fe54c7c). Reads exactly the
  * four verified manifests and two selection pins: no source text, no import graph
- * and no repository code. Any doubt returns a recheck reason. */
+ * and no repository code. Paths both sides changed are allowed only when every one
+ * is a Markdown file that no test or script reads (the checked selection's pinned
+ * list) and the server composed it as a clean text merge. Any doubt returns a
+ * recheck reason. */
 export async function analyzeCrossHeadReuse(
   basis: Basis,
   selectionPin: string,
@@ -55,13 +60,27 @@ export async function analyzeCrossHeadReuse(
   const candidatePaths = changed(base!, checked!),
     mainPaths = changed(base!, main!);
   if (!candidatePaths.length || !mainPaths.length) return { reason: 'composition-not-exact' };
-  if (pathsOverlap(candidatePaths, mainPaths)) return { reason: 'path-overlap' };
+  // Exact paths both sides changed; a directory/file prefix collision is never a docs overlap.
+  const docsOverlap = candidatePaths.filter(path => mainPaths.includes(path));
+  const rest = (paths: string[]) => paths.filter(path => !docsOverlap.includes(path));
+  if (pathsOverlap(rest(candidatePaths), mainPaths) || pathsOverlap(candidatePaths, rest(mainPaths)))
+    return { reason: 'path-overlap' };
+  if (!docsOverlap.every(markdownPath)) return { reason: 'path-overlap' };
   if (firstCheckRiskPaths([...candidatePaths, ...mainPaths], checkEntries).length)
     return { reason: 'global-risk' };
   // The recomposition must be precisely the union of both deltas, including modes/deletions.
+  // An overlapping Markdown file is the server's clean text merge: it exists on all four
+  // sides as a plain file (no add, delete or mode change) and takes the composed bytes.
   const expected = entries(main!),
-    source = entries(checked!);
-  for (const path of candidatePaths) {
+    source = entries(checked!),
+    composed = entries(merged!),
+    original = entries(base!);
+  for (const path of docsOverlap) {
+    const sides = [original, source, expected, composed].map(side => side.get(path));
+    if (sides.some(file => file?.mode !== 'file')) return { reason: 'composition-not-exact' };
+    expected.set(path, sides[3]!);
+  }
+  for (const path of rest(candidatePaths)) {
     const file = source.get(path);
     if (file) expected.set(path, file);
     else expected.delete(path);
@@ -86,11 +105,20 @@ export async function analyzeCrossHeadReuse(
   const checkedScope = selection.scope;
   if (checkedScope !== 'full' && checkedScope !== 'docs') return { reason: 'checked-not-full' };
   if (audit.scope !== 'full') return { reason: 'audit-not-full' };
+  if (docsOverlap.length) {
+    // Tested on the checked source, or on the audited main (when its run pinned a list).
+    const checkedDocs = pinnedTestedDocs(selection),
+      auditDocs = pinnedTestedDocs(audit);
+    if (!checkedDocs || docsOverlap.some(path => checkedDocs.has(path) || auditDocs?.has(path)))
+      return { reason: 'tested-doc' };
+  }
   const proof = crossHeadProofSchema.parse({
     ...basis,
-    algorithm: 'clean-disjoint-v1',
+    algorithm: 'clean-disjoint-v2',
     candidatePaths,
     mainPaths,
+    docsOverlap,
+    testedDocsRule: TESTED_DOCS_RULE,
     checkedSelection: selectionPin,
     cleanComposition: true,
     riskRule: FIRST_CHECK_RISK_RULE,

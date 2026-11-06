@@ -21,6 +21,7 @@ import { scopedRecheckSelection } from './scoped-recheck.js';
 import type { NativeState } from './native-state-format.js';
 import { refreshSourcePack } from './source-pack.js';
 import { refreshActionsSourcePack } from './hosted-actions-job-pack.js';
+import { testedDocs } from './tested-docs.js';
 /** Keep only paths/hashes in memory. Import analysis reads one source file at a time. */
 class SourceFiles extends Map<string, string> {
   constructor(
@@ -69,10 +70,14 @@ export async function prepareActionsJob(
     standard,
     checkedBase ? changedPaths(checkedBase, base) : null,
   );
+  // Markdown that tests or scripts read: a clean merge of any other Markdown can
+  // land on its first check (Issue 7fe54c7c). Absent means every Markdown is tested.
+  const docs = standard ? testedDocs(files.keys(), path => files.get(path)) : undefined;
   const selection = {
     scope: selected.scope,
     reason: selected.reason,
     tests: selected.tests,
+    ...(docs ? { testedDocs: docs } : {}),
     ...(run.gate
       ? {
           gate: {

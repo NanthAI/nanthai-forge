@@ -2,6 +2,7 @@
 import { z } from 'zod';
 import { canonicalPayload } from './hosted-source-operation.js';
 import { FIRST_CHECK_RISK_RULE, firstCheckRiskPaths } from './first-check-risk.js';
+import { markdownPath, TESTED_DOCS_RULE } from './tested-docs.js';
 const hash = z.string().regex(/^[a-f0-9]{64}$/);
 const main = z.object({ head: hash, receiptId: z.string().min(1) }).strict();
 const selection = z
@@ -46,31 +47,55 @@ const conservativeImpactProof = z
 /** Land on the first check (owner decision 2026-11-06, Issue 7fe54c7c): a clean,
  * byte-exact composition whose paths are disjoint from main's gains and touch no
  * global-risk file. The main audit verifies the new head afterwards. */
+const cleanDisjointV1 = {
+  ...basis,
+  riskRule: z.literal(FIRST_CHECK_RISK_RULE),
+  checkEntries: z.array(z.string()),
+  checkedScope: z.enum(['full', 'docs']),
+};
+/** Retained for receipts written before clean-disjoint-v2. */
+const cleanDisjointProofV1 = z
+  .object({ algorithm: z.literal('clean-disjoint-v1'), ...cleanDisjointV1 })
+  .strict();
+/** v1, plus paths both sides changed when each is a text-clean Markdown merge that
+ * no test or script reads (owner decision 2026-11-06 10:45Z). */
 const cleanDisjointProof = z
   .object({
-    algorithm: z.literal('clean-disjoint-v1'),
-    ...basis,
-    riskRule: z.literal(FIRST_CHECK_RISK_RULE),
-    checkEntries: z.array(z.string()),
-    checkedScope: z.enum(['full', 'docs']),
+    algorithm: z.literal('clean-disjoint-v2'),
+    ...cleanDisjointV1,
+    docsOverlap: z.array(z.string()),
+    testedDocsRule: z.literal(TESTED_DOCS_RULE),
   })
   .strict();
 /** Server analysis of verified immutable bytes, never a client assertion. */
 export const crossHeadProofSchema = z.discriminatedUnion('algorithm', [
   conservativeImpactProof,
+  cleanDisjointProofV1,
   cleanDisjointProof,
 ]);
 export type CrossHeadProof = z.infer<typeof crossHeadProofSchema>;
 export type CleanDisjointProof = z.infer<typeof cleanDisjointProof>;
+/** A proof that landed a change on its first check (any clean-disjoint version). */
+export const firstCheckProof = (proof: CrossHeadProof | undefined) =>
+  proof?.algorithm === 'clean-disjoint-v1' || proof?.algorithm === 'clean-disjoint-v2';
 export function pathsOverlap(a: string[], b: string[]) {
   return a.some(x => b.some(y => x === y || x.startsWith(`${y}/`) || y.startsWith(`${x}/`)));
 }
 export function validCrossHeadProof(proof: CrossHeadProof) {
-  if (pathsOverlap(proof.candidatePaths, proof.mainPaths)) return false;
-  if (proof.algorithm === 'clean-disjoint-v1')
+  const docs = proof.algorithm === 'clean-disjoint-v2' ? proof.docsOverlap : [];
+  const rest = (paths: string[]) => paths.filter(path => !docs.includes(path));
+  if (
+    pathsOverlap(rest(proof.candidatePaths), proof.mainPaths) ||
+    pathsOverlap(proof.candidatePaths, rest(proof.mainPaths))
+  )
+    return false;
+  if (proof.algorithm !== 'conservative-impact-v1')
     return (
       proof.candidatePaths.length > 0 &&
       proof.mainPaths.length > 0 &&
+      docs.every(
+        path => markdownPath(path) && proof.candidatePaths.includes(path) && proof.mainPaths.includes(path),
+      ) &&
       firstCheckRiskPaths([...proof.candidatePaths, ...proof.mainPaths], proof.checkEntries).length === 0
     );
   const heads = [proof.checkedBase.head, proof.checked.head, proof.main.head, proof.head];
