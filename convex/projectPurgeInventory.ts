@@ -121,6 +121,7 @@ export const projectPurgeTables = {
   projectSelfMetricReceipts: 'by_project_and_key',
   projectHostedOverlapLanes: 'by_project_and_lane',
   projectHostedPresence: 'by_project_and_lane',
+  projectHostedOverlapPeers: 'by_project_and_lane',
   projectHostedOverlapDeliveries: 'by_project_and_id',
   projectHostedOverlapMain: 'by_project',
   projectBoardMessages: 'by_project_and_id',

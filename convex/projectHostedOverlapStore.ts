@@ -5,6 +5,7 @@ import type { z } from 'zod';
 import type { hostedLaneSchema } from '../src/hosted-lane';
 import { mergeOverlapChanges, advanceOverlapMain, type OverlapChange } from '../src/hosted-overlap';
 import { trackHostedPresence } from './projectHostedPresence';
+import { patchOverlapRow, syncOverlapPeer } from './projectHostedOverlapPeers';
 
 export async function trackHostedOverlapLane(
   ctx: MutationCtx,
@@ -82,6 +83,7 @@ export async function trackHostedOverlapLane(
   const stored = { ...value, ...(presenceRow ? { presenceRow } : {}) };
   if (old) await ctx.db.replace(old._id, stored);
   else await ctx.db.insert('projectHostedOverlapLanes', stored);
+  await syncOverlapPeer(ctx, stored);
 }
 
 export async function trackHostedOverlapMain(
@@ -112,7 +114,7 @@ export async function markHostedOverlapLifecycle(
     .unique();
   // A staged close hides the Lane from presence now; a later record write of a still-open Lane restores it.
   if (row?.presenceRow) await ctx.db.delete(row.presenceRow.id);
-  if (row) await ctx.db.patch(row._id, { lifecyclePlanId, presenceRow: undefined });
+  if (row) await patchOverlapRow(ctx, row, { lifecyclePlanId, presenceRow: undefined });
 }
 
 /** Retire the advisory open entry when its existing lifecycle overlay is promoted. */
@@ -128,7 +130,7 @@ export async function materializeHostedOverlapLifecycle(
     .unique();
   if (row?.presenceRow) await ctx.db.delete(row.presenceRow.id);
   if (row)
-    await ctx.db.patch(row._id, {
+    await patchOverlapRow(ctx, row, {
       open: false,
       recordVersion,
       lifecyclePlanId: undefined,

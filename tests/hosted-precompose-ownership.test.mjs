@@ -101,10 +101,12 @@ for (const history of [575, 1150])
     // Reads 1336 -> 1341 (55024d40): a landed Lane's Intent with other open unpinned Lanes costs the
     // completion tick one overlap-row read for the landed Lane and one per candidate, to supersede the
     // quiet ones. Calls and writes are unchanged.
+    // Reads 1341 -> 1345, writes 412 -> 416 (5471e31c): each overlap-row write also reads and rewrites the
+    // Lane's ~1 KB slim peer row. Calls are unchanged.
     assert(
       budget.calls <= 71 &&
-        source.reduce((n, c) => n + c.documents, 0) <= 1341 &&
-        source.reduce((n, c) => n + c.writes, 0) <= 412,
+        source.reduce((n, c) => n + c.documents, 0) <= 1345 &&
+        source.reduce((n, c) => n + c.writes, 0) <= 416,
       JSON.stringify({
         ...budget,
         sourceReads: source.reduce((n, c) => n + c.documents, 0),

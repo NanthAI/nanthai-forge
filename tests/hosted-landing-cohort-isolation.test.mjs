@@ -144,10 +144,13 @@ for (const history of [0, 575, 1150])
     // Reads 4116 -> 4179 (55024d40): for an Intent with other open unpinned Lanes the completion tick
     // reads the landed Lane's overlap row and each candidate's, to supersede the quiet ones. An Intent
     // with no other open Lane reads nothing more. Calls and writes are unchanged.
+    // Reads 4179 -> 4197, writes 1227 -> 1245 (5471e31c): each overlap-row write (landing retirement,
+    // superseding, lifecycle marks) also reads and rewrites the Lane's ~1 KB slim peer row that every
+    // overlap read loads instead of peers' evidence. Calls are unchanged.
     assert(
       budget.calls <= 199 &&
-        source.reduce((n, c) => n + c.documents, 0) <= 4179 &&
-        source.reduce((n, c) => n + c.writes, 0) <= 1227,
+        source.reduce((n, c) => n + c.documents, 0) <= 4197 &&
+        source.reduce((n, c) => n + c.writes, 0) <= 1245,
       JSON.stringify({
         ...budget,
         sourceReads: source.reduce((n, c) => n + c.documents, 0),

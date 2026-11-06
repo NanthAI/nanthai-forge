@@ -5,10 +5,12 @@ import { acceptancePage, acceptancePlan } from './projectHostedAcceptanceStore';
 import { dormantAfterDays } from '../src/agent-parallel-defaults';
 import { composeLaneSchema, validateComposePage } from '../src/hosted-compose';
 import { effectivePolicy } from '../src/autonomy-policy';
+import { PEER_WINDOW } from './projectHostedOverlapPeers';
+
+// Defined beside the peer read (a cycle otherwise); re-exported for existing callers.
+export { PEER_WINDOW };
 
 const DAY_MS = 24 * 3_600_000;
-/** Peer window of every overlap read; one more row says the window is full. */
-export const PEER_WINDOW = 51;
 type Project = { autonomyPolicy?: unknown };
 
 /** Epoch ms before which an open Lane is dormant, or null when the project turned dormancy off

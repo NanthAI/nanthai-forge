@@ -364,7 +364,8 @@ test('stamp indexes a dormant legacy Lane so later reads skip its row', async ()
   s.patch('projectHostedOverlapLanes', row._id, { lastActivityAt: undefined });
   setDormantDays(2);
   await read();
-  const legacyRead = s.counts.at(-1).readBytesByTable.projectHostedOverlapLanes;
+  // Peer reads load the slim peer row; the Lane's full overlap row is never read for a dormant Lane.
+  const legacyRead = s.counts.at(-1).readBytesByTable.projectHostedOverlapPeers;
   const done = JSON.parse(
     await s.transaction('stamp', dormant.abandon, {
       projectId: s.projectId,
@@ -376,7 +377,7 @@ test('stamp indexes a dormant legacy Lane so later reads skip its row', async ()
   assert.equal(done.results[0].result, 'stamped');
   assert(overlapRow(stale.id).lastActivityAt > 0);
   await read();
-  const stamped = s.counts.at(-1).readBytesByTable.projectHostedOverlapLanes;
+  const stamped = s.counts.at(-1).readBytesByTable.projectHostedOverlapPeers;
   assert(stamped < legacyRead, `${stamped} < ${legacyRead}`);
 });
 

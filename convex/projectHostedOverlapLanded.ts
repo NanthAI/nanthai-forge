@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { MutationCtx } from './_generated/server';
+import { patchOverlapRow } from './projectHostedOverlapPeers';
 import { acceptancePage, type ReceiptIdentity } from './projectHostedAcceptanceStore';
 import { composeLaneSchema, validateComposePage } from '../src/hosted-compose';
 
@@ -35,7 +36,7 @@ export async function retireLandedOverlapLanes(
       : undefined;
     const stamped = !stamp || row.landed?.receiptId === stamp.receiptId;
     if (!row.open && stamped) continue;
-    await ctx.db.patch(row._id, { open: false, ...(stamped ? {} : { landed: stamp }) });
+    await patchOverlapRow(ctx, row, { open: false, ...(stamped ? {} : { landed: stamp }) });
     retired++;
   }
   return retired;

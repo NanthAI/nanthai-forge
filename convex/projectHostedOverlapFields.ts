@@ -70,6 +70,35 @@ export const hostedOverlapTables = {
     .index('by_project_and_lane', ['projectId', 'laneId'])
     .index('by_project_and_at', ['projectId', 'at'])
     .index('by_project_and_intent_and_at', ['projectId', 'intentId', 'at']),
+  /** Slim peer row of each overlap row (Issue 5471e31c): scalars, saved-path fingerprints and cross-file
+   * symbol facts without the per-path evidence, so a peer read loads full rows only for peers sharing a path
+   * with the caller. A pure function of the overlap row (`overlapPeerOf`), written in the same
+   * transaction as every write of that row. Rows of closed Lanes stay with their overlap row. */
+  projectHostedOverlapPeers: defineTable({
+    projectId: v.id('hostedProjects'),
+    laneId: v.string(),
+    intentId: v.string(),
+    actor: v.string(),
+    agent: v.optional(v.string()),
+    intent: v.string(),
+    head: v.string(),
+    baseHead: v.string(),
+    resolutionLeft: v.optional(v.string()),
+    recordVersion: v.number(),
+    lifecyclePlanId: v.optional(v.id('projectHostedLifecyclePlans')),
+    open: v.boolean(),
+    supersededHead: v.optional(v.string()),
+    complete: v.boolean(),
+    lastActivityAt: v.optional(v.number()),
+    presenceAt: v.optional(v.number()),
+    /** 8 hex digits per saved path (`pathHash`): a miss is exact, a hit sends the read to the full row. */
+    pathHashes: v.string(),
+    exports: v.optional(v.array(v.string())),
+    refs: v.optional(v.array(v.array(v.string()))),
+  })
+    .index('by_project_and_lane', ['projectId', 'laneId'])
+    .index('by_project_and_open', ['projectId', 'open'])
+    .index('by_project_and_open_and_activity', ['projectId', 'open', 'lastActivityAt']),
   projectHostedOverlapMain: defineTable({
     projectId: v.id('hostedProjects'),
     sequence: v.number(),
