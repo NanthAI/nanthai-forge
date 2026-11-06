@@ -43,7 +43,6 @@ test('docs/evals and root non-Markdown files require the full suite, including d
   for (const path of [
     'docs/runtime.json',
     'docs/tool.mjs',
-    'evals/case.md',
     'evals/run.py',
     'package.json',
     'package-lock.json',
@@ -60,6 +59,38 @@ test('docs/evals and root non-Markdown files require the full suite, including d
     assert.equal(select([path]).scope, 'docs', path);
     assert.deepEqual(select([path]).tests, [], path);
   }
+});
+
+test('Markdown outside code folders selects the code naming it; product code naming it keeps full', () => {
+  const tree = new Map([
+    ...files,
+    ['scripts/bench/env.mjs', "throw new Error('see evals/bench/README.md');"],
+    ['scripts/evals.mjs', "read(join('evals/bench/', 'README.md'));"],
+    ['scripts/rules.mjs', "path.startsWith('evals/')"],
+    ['tests/bench.test.mjs', "import '../scripts/bench/env.mjs';"],
+    ['tests/evals.test.mjs', "import '../scripts/evals.mjs';"],
+    ['tests/rules.test.mjs', "import '../scripts/rules.mjs';"],
+  ]);
+  const at = (paths, inventory = tree) => selectTests({ files: inventory, paths });
+  // Named by path, or by folder and file name: those scripts' tests run.
+  const named = at(['evals/bench/README.md']);
+  assert.equal(named.scope, 'scoped', named.reason);
+  assert(named.tests.includes('tests/bench.test.mjs'), 'the script naming the file');
+  assert(named.tests.includes('tests/evals.test.mjs'), 'the script naming its folder and name');
+  // Code that only names a parent folder (a path rule) and unrelated tests stay out.
+  assert(!named.tests.includes('tests/rules.test.mjs'));
+  assert(!named.tests.includes('tests/core.test.mjs') && !named.tests.includes('tests/first.test.mjs'));
+  // Deleted, or named by nothing: still not full (static checks always run).
+  assert.equal(at(['notes/old.md']).scope, 'scoped');
+  assert.equal(select(['evals/case.md']).scope, 'scoped');
+  // Product code or the package manifest naming it may ship or load it: full.
+  const product = new Map([...tree, ['src/prompt.ts', "readFileSync('evals/bench/README.md')"]]);
+  assert.equal(at(['evals/bench/README.md'], product).scope, 'full');
+  const packaged = new Map([...tree, ['package.json', '{"files":["evals/"]}']]);
+  assert.equal(at(['evals/bench/README.md'], packaged).scope, 'full');
+  // Non-Markdown files there, and .github Markdown, keep their existing rules.
+  assert.equal(at(['evals/bench/run.py']).scope, 'full');
+  assert.equal(at(['.github/notes.md']).scope, 'full');
 });
 
 test('manual QA/browser fixtures, including deletions, select UI regression coverage', () => {

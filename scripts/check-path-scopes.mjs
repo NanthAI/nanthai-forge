@@ -32,6 +32,34 @@ function scriptAsset(path, files) {
     reason: 'Script or fixture data and the code beside or naming it',
   };
 }
+/** Markdown in a top-level folder that holds no code (evals/ and the like) is data
+ * to the code that reads it by name, as for skill documents: code naming its path,
+ * or its folder and its file name. Product code or the package manifest naming it
+ * keeps the full suite (it may ship or load it). Code folders, docs/, skills/ and
+ * .github/ keep their own rules (2026-11-06: one bench README under evals/ forced 7
+ * of 20 wave 3b impact selections to the full suite). */
+function markdownNote(path, files) {
+  if (!/^(?!(?:src|web|convex|netlify|tests|scripts|skills|docs|\.github)\/)[^/]+\/.+\.md$/.test(path))
+    return undefined;
+  const folder = path.slice(0, path.lastIndexOf('/'));
+  const name = path.slice(folder.length + 1);
+  const segments = folder.split('/');
+  const folders = segments.map((_, i) => `${segments.slice(0, i + 1).join('/')}/`);
+  const product = /^(?:src|web|convex|netlify)\/|^package(?:-lock)?\.json$/;
+  // Shipping or loading a whole folder is enough to keep the full suite.
+  if ([...files].some(([file, text]) => product.test(file) && folders.some(f => text.includes(f))))
+    return null;
+  const readers = [...files.keys()].filter(file => {
+    if (file === path) return false;
+    const text = files.get(file);
+    return text.includes(path) || (text.includes(`${folder}/`) && text.includes(name));
+  });
+  return {
+    domain: 'tooling',
+    seeds: [path, ...readers],
+    reason: 'Markdown note and the code naming it or its folder',
+  };
+}
 const manualFixture = path =>
   /^tests\/browser\/.+\.(?:html|tsx?)$/.test(path) ||
   /^tests\/fixtures\/(?:qa-|k-|s1b-|settings-polish\.|readable-url-settings\.|hosted-tree\/)/.test(path);
@@ -44,7 +72,8 @@ export function classifyCheckPath(path, files) {
   });
   // Root configuration and non-Markdown docs/evals can alter any behaviour.
   // Returning unknown selects full coverage, including for deleted files.
-  if (!path.includes('/') || path.startsWith('docs/') || path.startsWith('evals/')) return null;
+  if (!path.includes('/') || path.startsWith('docs/') || (path.startsWith('evals/') && !path.endsWith('.md')))
+    return null;
   if (['web/tsconfig.json', 'web/vite.config.ts', 'web/index.html'].includes(path))
     return domain('web', ['web/src/'], 'Web build configuration');
   if (path === 'convex/tsconfig.json')
@@ -157,6 +186,9 @@ export function classifyCheckPath(path, files) {
       ],
       reason: 'Landing queue model and the guards reading it; run the model with npm run model:landing-queue',
     };
+  // After the folder-specific rules above (skills, plans, the queue model).
+  const note = markdownNote(path, files);
+  if (note !== undefined) return note;
   const asset = scriptAsset(path, files);
   if (asset !== undefined) return asset;
   if (!files.has(path)) return null;

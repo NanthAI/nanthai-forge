@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { Doc, Id } from './_generated/dataModel';
 import type { QueryCtx } from './server';
-import { effectiveAgentDefaults } from '../src/agent-parallel-defaults';
+import { dormantAfterDays } from '../src/agent-parallel-defaults';
 import { effectivePolicy } from '../src/autonomy-policy';
 
 const DAY_MS = 24 * 3_600_000;
@@ -12,9 +12,9 @@ type Project = { autonomyPolicy?: unknown };
 /** Epoch ms before which an open Lane is dormant, or null when the project turned dormancy off
  * (agentDefaults.dormantAfterDays 0). The project row is already read by the caller's access check. */
 export function dormantCutoff(project: Project, now = Date.now()): number | null {
-  const days = effectiveAgentDefaults(
+  const days = dormantAfterDays(
     effectivePolicy(project as Parameters<typeof effectivePolicy>[0]).agentDefaults,
-  ).dormantAfterDays;
+  );
   return days > 0 ? now - days * DAY_MS : null;
 }
 

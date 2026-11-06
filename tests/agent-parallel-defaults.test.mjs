@@ -8,6 +8,7 @@ import {
   AGENT_DEFAULTS,
   agentDefaultLines,
   effectiveAgentDefaults,
+  dormantAfterDays,
   urgentAllowed,
 } from '../dist/agent-parallel-defaults.js';
 import {
@@ -35,7 +36,6 @@ test('every default is on; absent stored fields read as the documented defaults'
     overlapGate: 'block',
     checkpointNudgeMinutes: 30,
     autoClaim: true,
-    dormantAfterDays: 2,
     stallAlerts: { enabled: true, notifyAfterMinutes: 15, repeatAfterMinutes: 30, email: [], webhook: 'off' },
   });
   const view = policyReadView(effectivePolicy({}));
@@ -64,15 +64,15 @@ test('set-policy edits one field at a time, stores in the Convex validator and k
   );
 });
 
-test('dormantAfterDays: default 2, set-policy edits it, 0 turns it off, bad values are refused (Issue 433aa6ab)', () => {
-  assert.equal(effectiveAgentDefaults(undefined).dormantAfterDays, 2);
+test('dormantAfterDays: default 2, stored-only, set-policy edits it, 0 turns it off, bad values are refused (Issue 433aa6ab)', () => {
+  assert.equal(dormantAfterDays(undefined), 2);
+  // Never in the strict capabilities shape: a new effective field breaks every CLI/server pair one release apart.
+  assert.equal('dormantAfterDays' in effectiveAgentDefaults(undefined), false);
   const policy = edit(policyPreset('trusted'), { dormantAfterDays: 5 });
-  assert.equal(effectiveAgentDefaults(policy.agentDefaults).dormantAfterDays, 5);
+  assert.equal(dormantAfterDays(policy.agentDefaults), 5);
+  assert.equal('dormantAfterDays' in effectiveAgentDefaults(policy.agentDefaults), false);
   assert.equal(validate(autonomyPolicy, policy), true);
-  assert.equal(
-    effectiveAgentDefaults(edit(policy, { dormantAfterDays: 0 }).agentDefaults).dormantAfterDays,
-    0,
-  );
+  assert.equal(dormantAfterDays(edit(policy, { dormantAfterDays: 0 }).agentDefaults), 0);
   assert.throws(() => edit(policy, { dormantAfterDays: -1 }));
   assert.throws(() => edit(policy, { dormantAfterDays: 1.5 }));
   assert.throws(() => edit(policy, { dormantAfterDays: 1000 }));

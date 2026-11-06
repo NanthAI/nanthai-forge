@@ -50,7 +50,6 @@ export const effectiveAgentDefaultsSchema = z
     overlapGate: z.enum(['off', 'warn', 'block']),
     checkpointNudgeMinutes: z.number().int().nonnegative(),
     autoClaim: z.boolean(),
-    dormantAfterDays: z.number().int().nonnegative(),
     stallAlerts: z
       .object({
         enabled: z.boolean(),
@@ -64,6 +63,14 @@ export const effectiveAgentDefaultsSchema = z
   .strict();
 export type EffectiveAgentDefaults = z.infer<typeof effectiveAgentDefaultsSchema>;
 
+/** Days without a Lane record write before an open Lane is dormant. Deliberately outside the effective
+ * defaults: capabilities carry those and parse strictly in both directions, so a new effective field breaks
+ * every CLI/server pair that differs by one release (HOSTED_PROTOCOL_INVALID). It is stored-only and read
+ * by the server alone; `0` turns dormancy off. */
+export const DORMANT_AFTER_DAYS = 2;
+export const dormantAfterDays = (stored: AgentDefaults | undefined) =>
+  stored?.dormantAfterDays ?? DORMANT_AFTER_DAYS;
+
 export function effectiveAgentDefaults(stored: AgentDefaults | undefined): EffectiveAgentDefaults {
   const alerts = stored?.stallAlerts;
   return {
@@ -73,7 +80,6 @@ export function effectiveAgentDefaults(stored: AgentDefaults | undefined): Effec
     overlapGate: stored?.overlapGate ?? AGENT_DEFAULTS.overlapGate,
     checkpointNudgeMinutes: stored?.checkpointNudgeMinutes ?? AGENT_DEFAULTS.checkpointNudgeMinutes,
     autoClaim: stored?.autoClaim ?? AGENT_DEFAULTS.autoClaim,
-    dormantAfterDays: stored?.dormantAfterDays ?? AGENT_DEFAULTS.dormantAfterDays,
     stallAlerts: {
       enabled: alerts?.enabled ?? AGENT_DEFAULTS.stallAlerts.enabled,
       notifyAfterMinutes: alerts?.notifyAfterMinutes ?? AGENT_DEFAULTS.stallAlerts.notifyAfterMinutes,

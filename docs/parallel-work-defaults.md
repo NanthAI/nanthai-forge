@@ -174,8 +174,9 @@ acceptance-policy pins exclude these settings.
 - Private gzip receipts retain per-file passes, even from failed runs. Delta selection checks
   both inventories; invalid evidence or changed runtime prevents reuse. Plans name `reusedTests`
   and `deltaPaths`. No server calls or uploads are added.
-- Non-Markdown root/docs files and all `evals/` select full landing coverage; Markdown-only docs
-  retain their fast path. Near-full coverage runs on the landing runner.
+- Non-Markdown root/docs/`evals/` files select full landing coverage; Markdown-only docs
+  retain their fast path, and Markdown under `evals/` selects only the code that names it.
+  Near-full coverage runs on the landing runner.
 - Identical source trees reuse passes. Otherwise `require` demands a pass only when complete
   coverage fits `preflightMaxMinutes`; larger sets or unavailable paths remain advisory.
 - An unhealthy finite probe records `ENVIRONMENT / FILESYSTEM_EVENTS_UNHEALTHY`, the fseventsd
@@ -195,6 +196,9 @@ acceptance-policy pins exclude these settings.
 
 ### dormantAfterDays
 
+- `dormantAfterDays` is stored-only: it is not in the effective defaults that `capabilities` carries
+  (that shape parses strictly in both directions, so a new field there breaks every CLI/server pair that
+  differs by one release). Only the server reads it; absent means 2.
 - A Lane is dormant when its record was last written (save, start, sync, landing, lifecycle change) more
   than `dormantAfterDays` ago. Dormant Lanes are left out of overlap notices, presence, board signals and
   the Lanes listed at `start`. Their saved work is kept and any save or start revives them.
