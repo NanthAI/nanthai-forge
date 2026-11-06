@@ -23,6 +23,7 @@ for (const flaky of [false, true])
       'verify.mjs',
       'verify-queue.mjs',
       'selection-guard.mjs',
+      'check-contract.mjs',
       'test-files.mjs',
       'test-coverage.mjs',
       'prepare-convex-api.mjs',

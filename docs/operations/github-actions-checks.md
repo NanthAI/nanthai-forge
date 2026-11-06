@@ -43,6 +43,37 @@ code, an empty shard, or a pinned selection that names no test file fails with `
 Only docs scope and explicit partial evidence (which never lands) run without test files; arbitrary
 commands have no selection.
 
+### Check contract
+
+A hosted check runs the control plane's executor (the pinned main checkout's
+`scripts/hosted-actions-execute.mjs` and `github-actions-check.mjs`) against the
+Candidate's own check scripts (`scripts/verify.mjs`, `scripts/test-files.mjs`, package
+scripts). A Candidate that changes both could therefore be misread by the older executor, and
+fail late with a confusing test failure (frictions 80de9cc8 and a801adba). Forge does not run the
+Candidate's executor in the trusted position: the control plane keeps deciding the plan pin,
+environment, secrets, receipts and which tests count, so a Candidate cannot weaken its own check.
+Instead the two sides share a small versioned contract in `scripts/check-contract.mjs`, which
+is plain Node and CI-neutral:
+
+- The executor **provides** `CHECK_CONTRACT_PROVIDED` through `FORGE_CHECK_CONTRACT` for every
+  child it starts. Any other CI adapter sets the same variable (an Actions plan without it means an
+  executor older than the contract, which provides 0).
+- The Candidate's scripts **require** `CHECK_CONTRACT_REQUIRED`. The executor reads that line of the
+  Candidate's file as data (never executing it) before `npm ci`, build or tests, and `verify.mjs`
+  checks the same on start. A Candidate that requires more than the executor provides fails within
+  seconds with `CHECK_CONTRACT_MISMATCH` and the next step, with no test run.
+- A direct local run has no executor and is accepted.
+- `tests/check-contract.test.mjs` fails the build when the executor's commands or environment change
+  without raising `CHECK_CONTRACT_PROVIDED` and the recorded surface digest, and when a tree
+  requires more than it provides.
+
+Changing what the executor gives check scripts takes two Lanes: Lane A changes the executor and
+raises `PROVIDED` (check scripts must not use it yet, so its own check passes under the older
+executor); once Lane A is on main, Lane B changes the scripts that use it and raises `REQUIRED`.
+The contract only grows: to remove something, first stop requiring it, then remove it. Plan
+recipe fields written by the planner and read by the executor belong to the same surface. Runtime
+pins (Node) are provided by the control workflow: raise the pin through the executor Lane first.
+
 For this repository, code verification runs document validation and the installed
 package smoke in the shared `scripts/verify.mjs` entry point. Native-owner landing
 checks, hosted landing checks and the public mirror therefore exercise the same

@@ -5,7 +5,18 @@ import { existsSync, readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { runDocumentationChecks } from './check-documentation.mjs';
 import { checkPhases } from './check-phases.mjs';
+import {
+  assertCheckContract,
+  declaredRequirement,
+  CHECK_CONTRACT_ENV,
+  CHECK_CONTRACT_PROVIDED,
+} from './check-contract.mjs';
 export function runActionsCheck(execute = execFileSync, { install = true, build = true } = {}) {
+  // First, before install or build: the Candidate's scripts must not need more than this executor provides.
+  assertCheckContract(
+    { ...process.env, [CHECK_CONTRACT_ENV]: String(CHECK_CONTRACT_PROVIDED) },
+    declaredRequirement(),
+  );
   const plan = JSON.parse(readFileSync(process.env.FORGE_ACTIONS_PLAN, 'utf8'));
   const shard = process.env.FORGE_ACTIONS_SHARD;
   const env = {
@@ -27,6 +38,7 @@ export function runActionsCheck(execute = execFileSync, { install = true, build 
         'XDG_DATA_HOME',
       ],
     }),
+    [CHECK_CONTRACT_ENV]: String(CHECK_CONTRACT_PROVIDED),
     FORGE_TEST_WORKERS: '2',
     FORGE_MAX_CONCURRENT_CHECKS: '2',
     FORGE_TEST_EVENTS: '1',

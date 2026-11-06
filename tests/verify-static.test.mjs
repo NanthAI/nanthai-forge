@@ -29,7 +29,13 @@ for (const failure of [
       'node_modules/@typescript/native/bin',
     ])
       mkdirSync(join(root, directory), { recursive: true });
-    for (const name of ['verify.mjs', 'verify-queue.mjs', 'selection-guard.mjs', 'prepare-convex-api.mjs'])
+    for (const name of [
+      'verify.mjs',
+      'verify-queue.mjs',
+      'selection-guard.mjs',
+      'check-contract.mjs',
+      'prepare-convex-api.mjs',
+    ])
       write(`scripts/${name}`, readFileSync(`scripts/${name}`));
     write('scripts/check-schema-compat.mjs', `process.exit(${failure === 'schema' ? 9 : 0});`);
     write('scripts/check-convex-runtime.mjs', 'process.exit(0);');

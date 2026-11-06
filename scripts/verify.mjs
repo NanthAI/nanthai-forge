@@ -12,6 +12,15 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { existsSync, readdirSync, realpathSync } from 'node:fs';
 import { prepareConvexApi } from './prepare-convex-api.mjs';
+import { assertCheckContract } from './check-contract.mjs';
+
+// Fail in seconds, before any build, when this tree's scripts need more than the executor provides.
+try {
+  assertCheckContract();
+} catch (error) {
+  console.error(error.message);
+  process.exit(1);
+}
 
 // Prepare once before parallel compilers; this file is deliberately not tracked.
 prepareConvexApi(fileURLToPath(new URL('../', import.meta.url)));

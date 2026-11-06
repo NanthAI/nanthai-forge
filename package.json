@@ -168,6 +168,8 @@
     "scripts/hosted-actions-execute.mjs",
     "scripts/hosted-actions-job.mjs",
     "scripts/test-impact.mjs",
+    "scripts/check-contract.mjs",
+    "scripts/check-contract.d.mts",
     "scripts/selection-guard.mjs",
     "scripts/selection-guard.d.mts",
     "scripts/agent-default-lines.mjs",
