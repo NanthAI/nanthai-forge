@@ -124,6 +124,8 @@ export function boardFixture() {
     );
   const read = (args = {}, actor = 'owner') =>
     invoke(board.read, 'projectBoard:read', { projectId: 'project', ...args }, actor);
+  const resolve = (args, actor = 'owner') =>
+    invoke(board.resolve, 'projectBoard:resolve', { projectId: 'project', ...args }, actor);
   const op = (name, args) => invoke(operator[name], `projectBoardOperator:${name}`, args, null);
-  return { ...s, invoke, post, read, op, alerts, lanes, issue, project, lane };
+  return { ...s, invoke, post, read, resolve, op, alerts, lanes, issue, project, lane };
 }

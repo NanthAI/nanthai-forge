@@ -115,6 +115,7 @@ When you change a hosted reply in Forge itself: add fields freely, but never rem
 | `board` | `id?, laneId?, all?` |
 | `board --post` | `text, laneId?, operationId?, to, paths?` |
 | `board --reply` | `text, laneId?, operationId?, id` |
+| `board --resolve` | `id, text?` |
 <!-- hosted-agent-contract:end -->
 
 ### Hosted reads and coordination limits
@@ -187,9 +188,19 @@ Issue (`issue:ISSUE_ID`), or to the whole project (`project`).
   it. The slug rides on `start` and board posts (no added call); a server without
   contract feature `agent-slug` shows the plain handle, and a board post learns the
   feature from this machine's last Lane action.
-- Read state stays on your machine (`ROOT.forge-client/board/LANE_ID.json`); Forge
-  never records who read what, so a second machine on the same Lane sees the
-  notes again. `board {"all":true}` ignores the local cursor.
+- Read state stays on your machine (`ROOT.forge-client/board/LANE_ID.json`, one file
+  per Lane whether the action ran at the project root or inside the Lane checkout);
+  Forge never records who read what, so a second machine on the same Lane sees the
+  notes again. A project-wide or Issue-wide note therefore reaches a Lane once.
+  `board {"all":true}` ignores the local cursor and also lists resolved notes.
+- Withdraw a note that no longer applies: `board --resolve {"id":"NOTE_ID","text":"fixed in 0bc2eef8"}`
+  (reason optional, one short line). The note's author, or any member with write
+  access, may resolve it. A resolved note stops arriving as `board.notices`, stops
+  waking waits and no longer claims its `paths`; `board {"id":"NOTE_ID"}` and
+  `board {"all":true}` still show it, marked `[resolved by @handle, ...]`. Resolving
+  twice is harmless. MCP: `forge_task` action `board-resolve`. Needs contract feature
+  `board-resolve`; an older server answers `HOSTED_ACTION_UNSUPPORTED`. Resolve a
+  warning once it is fixed so others are not told about it for 14 days.
 - Notes are one line of plain text, at most 240 characters, with up to 10
   repository-relative `paths`. Forge rejects (does not redact) notes that look like
   credentials or keys, email addresses, absolute or home paths, and line breaks or

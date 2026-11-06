@@ -314,3 +314,119 @@ test('delivery reads three inbox rows when nothing is new and returns oldest-fir
   assert.equal(second.more, 0);
   assert.equal(await delivery.boardDelivery(f.ctx, { ...input, after: second.cursor }), undefined);
 });
+
+test('a resolved note stops arriving and waking, stays readable, and only writers can resolve (friction 9d7bd94f)', async () => {
+  const f = boardFixture();
+  f.tables.projectHostedPresence ??= new Map();
+  const input = { projectId: 'project', viewer: 'owner', laneId: f.lanes.B, intentId: f.issue, after: 0 };
+  const stale = await f.post({ to: 'project', text: 'Heads up: land is failing' }, 'writer');
+  const laneNote = await f.post(
+    { to: `lane:${f.lanes.B}`, text: 'Please leave tests/x.test.mjs', laneId: f.lanes.A },
+    'writer',
+  );
+  const texts = value => (value?.messages ?? []).map(m => m.text);
+
+  // Before: both arrive. Resolving needs write access: readers and strangers get nothing.
+  assert.deepEqual(texts(await delivery.boardDelivery(f.ctx, input)), [
+    'Heads up: land is failing',
+    'Please leave tests/x.test.mjs',
+  ]);
+  for (const actor of ['reader', 'outsider', null])
+    await assert.rejects(f.resolve({ id: stale.id }, actor), code('PROJECT_UNAVAILABLE'));
+  assert.equal(rows(f, 'projectBoardMessages').filter(row => row.resolvedAt).length, 0);
+  await assert.rejects(
+    f.resolve({ id: stale.id, text: 'token ghp_abcdefghijklmnopqrstuvwxyz0123' }, 'owner'),
+    code('BOARD_TEXT_SECRET'),
+  );
+  await assert.rejects(f.resolve({ id: randomUUID() }), code('NOT_FOUND'));
+
+  // The author resolves with a reason (an 8-character prefix is enough); a replay changes nothing.
+  const done = await f.resolve({ id: stale.id.slice(0, 8), text: 'fixed in 0bc2eef8' }, 'writer');
+  assert.deepEqual([done.status, done.id], ['resolved', stale.id]);
+  assert(f.invoke.reads <= 12, `resolve reads ${f.invoke.reads}`);
+  assert.equal((await f.resolve({ id: stale.id }, 'owner')).status, 'already-resolved');
+  const row = rows(f, 'projectBoardMessages').find(item => item.id === stale.id);
+  assert.equal(row.resolvedText, 'fixed in 0bc2eef8');
+
+  // After: the resolved project note is gone from delivery; the Lane note is unchanged.
+  const after = await delivery.boardDelivery(f.ctx, input);
+  assert.deepEqual(texts(after), ['Please leave tests/x.test.mjs']);
+  assert.equal(after.more, 0);
+  assert.deepEqual(texts(await f.read({ laneId: f.lanes.B })), ['Please leave tests/x.test.mjs']);
+
+  // Explicit reads still show it, marked resolved with a Forge handle (never the account id).
+  const all = await f.read({ laneId: f.lanes.B, all: true });
+  const shown = all.messages.find(m => m.id === stale.id);
+  assert.deepEqual(
+    [shown.resolved.by, shown.resolved.text, all.messages.length],
+    ['writer-h', 'fixed in 0bc2eef8', 2],
+  );
+  const single = await f.read({ id: stale.id.slice(0, 8) });
+  assert.equal(single.message.resolved.by, 'writer-h');
+  assert(!JSON.stringify([all, single]).includes('"writer"'), 'no account id in the reply');
+
+  // Waiting: resolving the only note for a Lane wakes nobody; an unresolved one still does.
+  const wake = { projectId: 'project', viewer: 'owner', laneId: f.lanes.B, after: 0 };
+  assert.deepEqual(texts(await delivery.boardWake(f.ctx, wake)), ['Please leave tests/x.test.mjs']);
+  await f.resolve({ id: laneNote.id }, 'owner');
+  assert.equal(await delivery.boardWake(f.ctx, wake), undefined);
+  assert.equal(await delivery.boardDelivery(f.ctx, input), undefined);
+
+  // A withdrawn note can be said again (the 24 h duplicate rule ignores it).
+  const again = await f.post({ to: 'project', text: 'Heads up: land is failing' }, 'writer');
+  assert.equal(again.status, 'posted');
+  assert.notEqual(again.id, stale.id);
+});
+
+test('resolved notes never fill a page or stall the cursor, and a project note reaches a Lane once', async () => {
+  const f = boardFixture();
+  const input = { projectId: 'project', viewer: 'owner', laneId: f.lanes.B, intentId: f.issue, after: 0 };
+  const ids = [];
+  for (let n = 0; n < 5; n++) ids.push((await f.post({ to: 'project', text: `old ${n}` }, 'writer')).id);
+  for (const id of ids) await f.resolve({ id }, 'writer');
+  const live = await f.post({ to: 'project', text: 'still true' }, 'writer');
+  f.invoke.reads = 0;
+  const first = await delivery.boardDelivery(f.ctx, input);
+  assert.deepEqual(
+    first.messages.map(m => m.id),
+    [live.id],
+    'five resolved notes ahead of it are skipped by the index',
+  );
+  assert.equal(first.more, 0);
+  // Delivered once: the cursor the client keeps asks for nothing new, with only the inbox reads.
+  const next = await delivery.boardDelivery(f.ctx, { ...input, after: first.cursor });
+  assert.equal(next, undefined);
+  // A new Lane (cursor 0) of the same Issue gets it exactly once more.
+  const other = await delivery.boardDelivery(f.ctx, { ...input, viewer: 'writer', laneId: f.lanes.A });
+  assert.deepEqual(
+    other.messages.map(m => m.id),
+    [live.id],
+  );
+  assert.equal(
+    await delivery.boardDelivery(f.ctx, {
+      ...input,
+      viewer: 'writer',
+      laneId: f.lanes.A,
+      after: other.cursor,
+    }),
+    undefined,
+  );
+});
+
+test('a resolved note no longer claims its paths', async () => {
+  const f = boardFixture();
+  const claim = await f.post(
+    { to: 'project', text: 'Editing x', paths: ['src/x.ts'], laneId: f.lanes.A },
+    'writer',
+  );
+  const ask = () =>
+    delivery.boardClaims(f.ctx, {
+      projectId: 'project',
+      laneId: f.lanes.B,
+      path: 'src/x.ts',
+      now: Date.now(),
+    });
+  assert.equal((await ask()).length, 1);
+  await f.resolve({ id: claim.id }, 'writer');
+  assert.deepEqual(await ask(), []);
+});

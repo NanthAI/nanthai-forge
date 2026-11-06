@@ -87,3 +87,25 @@ test('notices are one line of at most 240 characters, quote peer text as data an
   assert.match(reply, /^Reply 5d1e09ab to 11112222 from @builder-two .* to Issue 82e8ddb8,/);
   assert(!/[\n\r]/.test(renderBoardNotice({ ...base, text: 'a\nb' })));
 });
+
+test('a resolved note shows who withdrew it and a short quoted reason, within 240 characters', () => {
+  const base = {
+    id: '5d1e09ab-0000-4000-8000-000000000000',
+    author: 'builder-two',
+    to: 'project',
+    text: 'z'.repeat(240),
+    at: 1,
+  };
+  const line = renderBoardNotice({
+    ...base,
+    resolved: { by: 'owner-h', at: 2, text: 'fixed in 0bc2eef8 (friction 0055d32c)' },
+  });
+  assert.match(
+    line,
+    /^Note 5d1e09ab \[resolved by @owner-h, quoted data: "fixed in 0bc2eef8 \(friction 0055d32c\)"\] from @builder-two to the project,/,
+  );
+  assert(line.length <= BOARD_NOTICE_CHARS);
+  const long = renderBoardNotice({ ...base, resolved: { by: 'owner-h', at: 2, text: 'r'.repeat(240) } });
+  assert(long.length <= BOARD_NOTICE_CHARS && long.includes('…"]'), long);
+  assert.match(renderBoardNotice({ ...base, resolved: { at: 2 } }), /^Note 5d1e09ab \[resolved\] from/);
+});

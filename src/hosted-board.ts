@@ -26,6 +26,9 @@ export const boardMessageSchema = z.looseObject({
   paths: z.array(z.string()).optional(),
   replyTo: z.string().optional(),
   at: z.number(),
+  resolved: z
+    .looseObject({ by: z.string().optional(), at: z.number(), text: z.string().optional() })
+    .optional(),
 });
 export const boardDeliverySchema = z.object({
   messages: z.array(boardMessageSchema),
@@ -55,14 +58,22 @@ export const hostedBoardPostSchema = z
   })
   .strict();
 export const hostedBoardReplySchema = z.object({ ...writeFields, id: ref }).strict();
+/** Withdraw a note that no longer applies; the reason is one short line (same 240-character rule). */
+export const hostedBoardResolveSchema = z.object({ id: ref, text: z.string().min(1).optional() }).strict();
 export const hostedBoardSchemas = {
   board: hostedBoardReadSchema,
   'board-post': hostedBoardPostSchema,
   'board-reply': hostedBoardReplySchema,
+  'board-resolve': hostedBoardResolveSchema,
 } as const;
 
-function unsupported(error: unknown): never {
+function unsupported(error: unknown, resolving = false): never {
   const message = error instanceof Error ? error.message : '';
+  if (resolving && /Could not find public function/i.test(message))
+    throw new ForgeError(
+      'HOSTED_ACTION_UNSUPPORTED',
+      'This Forge server cannot resolve board notes yet (capability board-resolve). Nothing was changed.',
+    );
   if (/Could not find public function|ArgumentValidationError[\s\S]*board/i.test(message))
     throw new ForgeError(
       'HOSTED_ACTION_UNSUPPORTED',
@@ -75,7 +86,7 @@ function unsupported(error: unknown): never {
   throw error;
 }
 
-/** board, board --post, board --reply. One Convex call each; no capability probe (the server
+/** board, board --post, board --reply, board --resolve. One Convex call each; no capability probe (the server
  * authorizes every call). Posts without an operationId get a new one; a retried identical note
  * to the same target within 24 h returns the original id (server dedupe). */
 export async function boardHostedSource(
@@ -89,6 +100,11 @@ export async function boardHostedSource(
   const command = parsed.data as Record<string, unknown>;
   const laneId =
     (command.laneId as string | undefined) ?? readHostedLaneCheckout(transport.root)?.selection.laneId;
+  // The features this process read, else the ones this machine last saw (board writes make no
+  // capability read).
+  const features =
+    transport.advertisedFeatures ??
+    (transport.address ? readBoardServerFeatures(transport.address.projectId) : []);
   if (action === 'board') {
     const id = command.id as string | undefined;
     const after = id || command.all || !laneId ? 0 : readBoardCursor(transport.root, laneId);
@@ -97,6 +113,8 @@ export async function boardHostedSource(
         ...(id ? { id: id.toLowerCase() } : {}),
         ...(laneId && !id ? { laneId } : {}),
         after,
+        // Resolved notes are listed only on request, and only a server that knows the flag gets it.
+        ...(command.all && !id && features.includes('board-resolve') ? { all: true } : {}),
       })
       .catch(unsupported);
     if (!id && laneId && typeof result.cursor === 'number')
@@ -113,6 +131,19 @@ export async function boardHostedSource(
       ),
     };
   }
+  // The note names this agent session (c29d0780) once the server takes it.
+  const agent = features.includes('agent-slug') ? transport.agentSlug?.() : undefined;
+  if (action === 'board-resolve') {
+    const reason = command.text as string | undefined;
+    if (reason !== undefined) assertBoardText(reason);
+    return transport
+      .mutation('projectBoard:resolve', {
+        id: (command.id as string).toLowerCase(),
+        ...(reason ? { text: reason } : {}),
+        ...(agent ? { agent } : {}),
+      })
+      .catch((error: unknown) => unsupported(error, true));
+  }
   const text = command.text as string;
   // Same checks as the server, so a refusal costs no call; the server re-checks every post.
   assertBoardText(text);
@@ -124,12 +155,6 @@ export async function boardHostedSource(
     ...(command.paths ? { paths: command.paths } : {}),
     ...(laneId ? { laneId } : {}),
   };
-  // The note names this agent session (c29d0780) once the server takes it: the features this
-  // process read, else the ones this machine last saw (board posts make no capability read).
-  const features =
-    transport.advertisedFeatures ??
-    (transport.address ? readBoardServerFeatures(transport.address.projectId) : []);
-  const agent = features.includes('agent-slug') ? transport.agentSlug?.() : undefined;
   return transport
     .mutation('projectBoard:post', agent ? { ...post, agent } : post)
     .catch((error: unknown) => {

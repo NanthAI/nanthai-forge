@@ -157,16 +157,20 @@ export const post = mutation({
         }
       }
       const bodyHash = digest(JSON.stringify([targetKey, input.text, input.paths ?? []]));
-      const [same] = await ctx.db
-        .query('projectBoardMessages')
-        .withIndex('by_project_and_author_and_hash_and_at', q =>
-          q
-            .eq('projectId', projectId)
-            .eq('author', actor)
-            .eq('bodyHash', bodyHash)
-            .gt('at', now - day),
-        )
-        .take(1);
+      const same = (
+        await ctx.db
+          .query('projectBoardMessages')
+          .withIndex('by_project_and_author_and_hash_and_at', q =>
+            q
+              .eq('projectId', projectId)
+              .eq('author', actor)
+              .eq('bodyHash', bodyHash)
+              .gt('at', now - day),
+          )
+          .order('desc')
+          .take(2)
+      ).find(row => !row.resolvedAt);
+      // A withdrawn note does not block saying it again.
       if (same)
         return canonicalPayload({ status: 'duplicate', id: same.id, target: same.targetKey, at: same.at });
       await chargeWindow(ctx, projectId, fromLaneId ? `lane:${fromLaneId}` : `member:${actor}`, {
@@ -251,6 +255,45 @@ export const post = mutation({
   },
 });
 
+/** Withdraw a note (friction 9d7bd94f): the author or any member with write access, the same access
+ * as post. A resolved note stops arriving as board.notices and stops waking waits; `board {id}` and
+ * `board {all:true}` still show it, marked resolved by a Forge handle with the optional reason.
+ * Idempotent. Reads: access, 3 switches, the note (≈6 rows); writes: one patch (≈0.4 KB). */
+export const resolve = mutation({
+  args: {
+    projectId: v.id('hostedProjects'),
+    id: v.string(),
+    text: v.optional(v.string()),
+    agent: v.optional(v.string()),
+  },
+  returns: v.string(),
+  handler: async (ctx, input) => {
+    try {
+      const { actor } = await recordCaller(ctx, input.projectId, true);
+      assertBoardOpen(await boardStopped(ctx, input.projectId, actor));
+      if (input.text !== undefined) assertBoardText(input.text);
+      invariant(
+        input.agent === undefined || isAgentSlug(input.agent),
+        'BAD_ARGUMENT',
+        'agent must be a Forge agent slug (two words from the fixed list).',
+      );
+      const note = await messageRow(ctx, input.projectId, input.id);
+      if (note.resolvedAt)
+        return canonicalPayload({ status: 'already-resolved', id: note.id, at: note.resolvedAt });
+      const at = Date.now();
+      await ctx.db.patch(note._id, {
+        resolvedAt: at,
+        resolvedBy: actor,
+        ...(input.agent ? { resolvedAgent: input.agent } : {}),
+        ...(input.text ? { resolvedText: input.text } : {}),
+      });
+      return canonicalPayload({ status: 'resolved', id: note.id, at });
+    } catch (error) {
+      return report(error);
+    }
+  },
+});
+
 /** One bounded query. Inbox: 3 inbox point reads + ≤3×11 message rows (~10 KB at most).
  * One message: 1 range read + ≤21 replies. Members with write access only. */
 export const read = query({
@@ -260,6 +303,8 @@ export const read = query({
     after: v.optional(v.number()),
     id: v.optional(v.string()),
     limit: v.optional(v.number()),
+    /** Include resolved notes (marked `resolved`). Sent only with `board {all:true}`. */
+    all: v.optional(v.boolean()),
   },
   returns: v.string(),
   handler: async (ctx, input) => {
@@ -295,6 +340,7 @@ export const read = query({
         after: input.after ?? 0,
         limit,
         order: 'desc',
+        ...(input.all ? { includeResolved: true } : {}),
       });
       return canonicalPayload({ status: 'ok', ...inbox });
     } catch (error) {

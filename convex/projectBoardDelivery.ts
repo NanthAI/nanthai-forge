@@ -19,6 +19,16 @@ export function boardMessageView(row: Doc<'projectBoardMessages'>) {
     ...(row.paths?.length ? { paths: row.paths } : {}),
     ...(row.replyTo ? { replyTo: row.replyTo } : {}),
     at: row.at,
+    // Only on a note an explicit read returns after it was withdrawn (friction 9d7bd94f).
+    ...(row.resolvedAt && row.resolvedBy
+      ? {
+          resolved: {
+            by: agentActor(row.resolvedBy, row.resolvedAgent),
+            at: row.resolvedAt,
+            ...(row.resolvedText ? { text: row.resolvedText } : {}),
+          },
+        }
+      : {}),
   };
 }
 
@@ -41,7 +51,9 @@ export async function boardWriterProject(ctx: Ctx, projectId: Id<'hostedProjects
 
 /** Unread notes for one Lane: its own inbox, its Issue's and the project's. Three point reads;
  * message rows are read only for a target whose latestAt moved past the cursor. Oldest first, so
- * a cursor at the last delivered note never skips one. The caller's own Lane's notes are left out. */
+ * a cursor at the last delivered note never skips one. The caller's own Lane's notes are left out.
+ * Resolved notes are skipped through the index (never read, so they cannot fill a page or stall
+ * the cursor) unless `includeResolved` (an explicit `board {all:true}`). */
 export async function boardInbox(
   ctx: Ctx,
   input: {
@@ -51,6 +63,7 @@ export async function boardInbox(
     after: number;
     limit: number;
     order: 'asc' | 'desc';
+    includeResolved?: boolean;
   },
 ) {
   const keys = [
@@ -69,11 +82,22 @@ export async function boardInbox(
   const hot = inboxes.filter(row => row !== null && row.latestAt > input.after);
   const pages = await Promise.all(
     hot.map(row =>
-      ctx.db
-        .query('projectBoardMessages')
-        .withIndex('by_project_and_target_and_at', q =>
-          q.eq('projectId', input.projectId).eq('targetKey', row!.key).gt('at', input.after),
-        )
+      (input.includeResolved
+        ? ctx.db
+            .query('projectBoardMessages')
+            .withIndex('by_project_and_target_and_at', q =>
+              q.eq('projectId', input.projectId).eq('targetKey', row!.key).gt('at', input.after),
+            )
+        : ctx.db
+            .query('projectBoardMessages')
+            .withIndex('by_project_and_target_and_resolved_and_at', q =>
+              q
+                .eq('projectId', input.projectId)
+                .eq('targetKey', row!.key)
+                .eq('resolvedAt', undefined)
+                .gt('at', input.after),
+            )
+      )
         .order(input.order)
         .take(input.limit + 1),
     ),
@@ -121,7 +145,7 @@ export async function boardClaims(
     .order('desc')
     .take(BOARD_CLAIM_SCAN);
   return rows
-    .filter(row => row.fromLaneId !== input.laneId && row.paths?.includes(input.path))
+    .filter(row => !row.resolvedAt && row.fromLaneId !== input.laneId && row.paths?.includes(input.path))
     .slice(0, 2)
     .map(boardMessageView);
 }

@@ -44,6 +44,7 @@ test('hosted help and packaged docs are generated from every enforced schema', a
       'board',
       'board-post',
       'board-reply',
+      'board-resolve',
     ],
   );
   for (const entry of hostedAgentHelpEntries)

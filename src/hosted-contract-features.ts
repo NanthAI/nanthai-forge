@@ -41,6 +41,10 @@ export const hostedContractFeatures = [
   /** Agent session identities (c29d0780): start and projectBoard:post take `agent` (a word-list
    * slug), and actor/author values may read `handle/slug`. Without it the CLI sends no `agent`. */
   'agent-slug',
+  /** projectBoard:resolve exists and projectBoard:read takes `all` (friction 9d7bd94f): `board
+   * --resolve` withdraws a note, and `board {all:true}` lists resolved ones. Without it the CLI
+   * sends neither. */
+  'board-resolve',
 ] as const;
 export type HostedContractFeature = (typeof hostedContractFeatures)[number];
 

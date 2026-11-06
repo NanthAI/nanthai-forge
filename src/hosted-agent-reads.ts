@@ -105,7 +105,7 @@ export const hostedClientReadSchemas = {
   queue: hostedQueueSchema,
   wait: hostedWaitSchema,
   show: hostedSourceShowSchema.omit({ action: true }),
-  /** The board verbs are client actions too: `board --post`/`--reply` write one note each. */
+  /** The board verbs are client actions too: `board --post`/`--reply` write one note each, `--resolve` withdraws one. */
   ...hostedBoardSchemas,
 } as const;
 /** Immutable manifests and selected blobs live in R2, never in a Convex response. */

@@ -6,7 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { clientCacheRoot } from './root-paths.js';
+import { clientCacheRoot, retainedRootSibling } from './root-paths.js';
 import { renderBoardNotice } from './board-text.js';
 
 const writeJson = (file: string, value: unknown) => {
@@ -24,11 +24,23 @@ const readJson = (file: string): unknown => {
 };
 
 /** Read state stays on this machine: `ROOT.forge-client/board/<laneId>.json` holds the time of the
- * last delivered note. Delivery never writes to Forge; two machines on one Lane may each see a note. */
-const cursorFile = (root: string, laneId: string) => join(clientCacheRoot(root), 'board', `${laneId}.json`);
-export function readBoardCursor(root: string, laneId: string): number {
-  const value = readJson(cursorFile(root, laneId)) as { after?: unknown } | undefined;
+ * last delivered note. Delivery never writes to Forge; two machines on one Lane may each see a note.
+ * It belongs to the Lane, not to the path an action ran from: `start` runs at the project root and
+ * later actions inside the Lane checkout (`ROOT.forge-client/lanes/<id>`), and each kept its own
+ * cursor, so a project-wide note showed again once per path (friction 9d7bd94f). The outermost
+ * root's cache holds it for every path; the nested cache is read only so an old cursor still counts. */
+const boardDir = (root: string) => join(retainedRootSibling(root, '.forge-client'), 'board');
+const cursorFile = (root: string, laneId: string) => join(boardDir(root), `${laneId}.json`);
+const nestedCursorFile = (root: string, laneId: string) =>
+  join(clientCacheRoot(root), 'board', `${laneId}.json`);
+const cursorAt = (file: string) => {
+  const value = readJson(file) as { after?: unknown } | undefined;
   return typeof value?.after === 'number' && Number.isFinite(value.after) ? value.after : 0;
+};
+export function readBoardCursor(root: string, laneId: string): number {
+  const shared = cursorFile(root, laneId);
+  const nested = nestedCursorFile(root, laneId);
+  return Math.max(cursorAt(shared), nested === shared ? 0 : cursorAt(nested));
 }
 export function writeBoardCursor(root: string, laneId: string, after: number) {
   if (after <= readBoardCursor(root, laneId)) return;
@@ -44,6 +56,8 @@ export type BoardNote = {
   text: string;
   replyTo?: string | undefined;
   at: number;
+  /** Set only on a withdrawn note an explicit read returned. */
+  resolved?: { by?: string | undefined; at: number; text?: string | undefined } | undefined;
 };
 export type BoardDeliveryValue = { messages: BoardNote[]; more: number; cursor: number };
 export const boardNoticeLine = (message: BoardNote, laneId?: string) =>
@@ -56,6 +70,7 @@ export const boardNoticeLine = (message: BoardNote, laneId?: string) =>
       text: message.text,
       ...(message.replyTo ? { replyTo: message.replyTo } : {}),
       at: message.at,
+      ...(message.resolved ? { resolved: message.resolved } : {}),
     },
     laneId,
   );
@@ -83,7 +98,7 @@ const serverFile = (projectId: string) =>
     'board',
     `server-${projectId.replace(/[^A-Za-z0-9_-]/g, '')}.json`,
   );
-const boardFeatureNames = ['agent-board', 'board-wait', 'board-claims', 'agent-slug'];
+const boardFeatureNames = ['agent-board', 'board-wait', 'board-claims', 'agent-slug', 'board-resolve'];
 export function readBoardServerFeatures(projectId: string): string[] {
   if (noState()) return [];
   const value = readJson(serverFile(projectId)) as { features?: unknown } | undefined;
@@ -103,8 +118,7 @@ export function rememberBoardServerFeatures(projectId: string, advertised: reado
 }
 
 /** Per-Lane early-return time, beside the board cursor (ROOT.forge-client/board/). */
-const wakeFile = (root: string, laneId: string) =>
-  join(clientCacheRoot(root), 'board', `${laneId}.wake.json`);
+const wakeFile = (root: string, laneId: string) => join(boardDir(root), `${laneId}.wake.json`);
 export function readBoardWokeAt(root: string, laneId: string): number {
   const value = readJson(wakeFile(root, laneId)) as { at?: unknown } | undefined;
   return typeof value?.at === 'number' && Number.isFinite(value.at) ? value.at : 0;

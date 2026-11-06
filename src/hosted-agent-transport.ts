@@ -164,7 +164,16 @@ export type HostedAgentResponse = {
   cliCommit?: string;
   schema: 1;
   transport: 'hosted';
-  action: HostedAgentAction | 'diff' | 'peers' | 'lanes' | 'queue' | 'board' | 'board-post' | 'board-reply';
+  action:
+    | HostedAgentAction
+    | 'diff'
+    | 'peers'
+    | 'lanes'
+    | 'queue'
+    | 'board'
+    | 'board-post'
+    | 'board-reply'
+    | 'board-resolve';
   sourceContext?: unknown;
   operationId: string | null;
   resolved: { operationId: string } | null;

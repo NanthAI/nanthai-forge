@@ -22,6 +22,7 @@ const minimal = {
   board: {},
   'board-post': { to: 'project', text: 'Synthetic note' },
   'board-reply': { id: 'abcdef12', text: 'Synthetic reply' },
+  'board-resolve': { id: 'abcdef12' },
 };
 
 // 60720390: `queue` was advertised in help but unknown to validation, so it failed before dispatch.

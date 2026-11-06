@@ -114,6 +114,7 @@ export type BoardMessageView = {
   paths?: string[];
   replyTo?: string;
   at: number;
+  resolved?: { by?: string | undefined; at: number; text?: string | undefined };
 };
 const short = (id: string) => id.slice(0, 8);
 const target = (to: string, laneId?: string) =>
@@ -131,7 +132,15 @@ export function renderBoardNotice(message: BoardMessageView, laneId?: string): s
   const who = actorLabel(message.author);
   const from = message.fromLaneId ? ` (Lane ${short(message.fromLaneId)})` : '';
   const kind = message.replyTo ? `Reply ${id} to ${short(message.replyTo)}` : `Note ${id}`;
-  const head = `${kind} from ${who}${from} to ${target(message.to, laneId)}, quoted data: "`;
+  const reason = [...(message.resolved?.text ?? '').replace(new RegExp(controls.source, 'g'), ' ')];
+  const done = message.resolved
+    ? ` [resolved${message.resolved.by ? ` by ${actorLabel(message.resolved.by)}` : ''}${
+        reason.length
+          ? `, quoted data: "${reason.slice(0, 60).join('')}${reason.length > 60 ? '…' : ''}"`
+          : ''
+      }]`
+    : '';
+  const head = `${kind}${done} from ${who}${from} to ${target(message.to, laneId)}, quoted data: "`;
   const more = `… (board {"id":"${id}"})`;
   const tail = `". Reply: board --reply {"id":"${id}"}`;
   const body = message.text.replace(new RegExp(controls.source, 'g'), ' ');

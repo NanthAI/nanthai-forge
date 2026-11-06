@@ -25,9 +25,18 @@ export const boardTables = {
     bodyHash: v.string(),
     at: v.number(),
     expiresAt: v.number(),
+    /** Withdrawn by `projectBoard:resolve` (friction 9d7bd94f): no longer delivered or waking anyone;
+     * explicit reads still show it, marked resolved. Absent while the note is live. */
+    resolvedAt: v.optional(v.number()),
+    /** Auth subject of the resolver. Mapped to a Forge handle on every read. */
+    resolvedBy: v.optional(v.string()),
+    resolvedAgent: v.optional(v.string()),
+    resolvedText: v.optional(v.string()),
   })
     .index('by_project_and_id', ['projectId', 'id'])
     .index('by_project_and_target_and_at', ['projectId', 'targetKey', 'at'])
+    /** Delivery reads only live notes: `resolvedAt` undefined sorts first, so one equality range. */
+    .index('by_project_and_target_and_resolved_and_at', ['projectId', 'targetKey', 'resolvedAt', 'at'])
     .index('by_project_and_author_and_hash_and_at', ['projectId', 'author', 'bodyHash', 'at'])
     .index('by_project_and_reply', ['projectId', 'replyTo'])
     .index('by_project_and_expiry', ['projectId', 'expiresAt'])

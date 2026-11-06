@@ -33,6 +33,7 @@ export const verbModes: Readonly<Record<Verb, Readonly<Record<string, string>>>>
 export const boardModes: Readonly<Record<string, string>> = {
   '--post': 'board-post',
   '--reply': 'board-reply',
+  '--resolve': 'board-resolve',
 };
 
 /** Operator and repair actions, reached with `nforge x ROOT ACTION`. Same schemas and authority. */
