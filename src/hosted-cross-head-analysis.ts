@@ -28,12 +28,15 @@ export type FirstCheckRecheck =
   | 'source-unavailable';
 export type FirstCheckDecision = { proof: CleanDisjointProof } | { reason: FirstCheckRecheck };
 const entries = (state: NativeState) => new Map(state.files.map(file => [file.path, file]));
+// Entries are strict {path, blob, mode} records, so equal blob and mode is the whole equality; comparing
+// the fields avoids a schema-validated canonical encoding of every entry of every manifest.
+type Entry = NativeState['files'][number];
+const same = (a: Entry | undefined, b: Entry | undefined) =>
+  a === b || (!!a && !!b && a.blob === b.blob && a.mode === b.mode);
 const changed = (before: NativeState, after: NativeState) => {
   const a = entries(before),
     b = entries(after);
-  return [...new Set([...a.keys(), ...b.keys()])]
-    .filter(path => canonicalPayload(a.get(path) ?? null) !== canonicalPayload(b.get(path) ?? null))
-    .sort();
+  return [...new Set([...a.keys(), ...b.keys()])].filter(path => !same(a.get(path), b.get(path))).sort();
 };
 const json = (bytes: Uint8Array | undefined, pin: string): Record<string, unknown> | null => {
   if (!bytes || digest(bytes) !== pin) return null;
@@ -61,8 +64,10 @@ export async function analyzeCrossHeadReuse(
     mainPaths = changed(base!, main!);
   if (!candidatePaths.length || !mainPaths.length) return { reason: 'composition-not-exact' };
   // Exact paths both sides changed; a directory/file prefix collision is never a docs overlap.
-  const docsOverlap = candidatePaths.filter(path => mainPaths.includes(path));
-  const rest = (paths: string[]) => paths.filter(path => !docsOverlap.includes(path));
+  const mainSet = new Set(mainPaths),
+    docsOverlap = candidatePaths.filter(path => mainSet.has(path)),
+    docsSet = new Set(docsOverlap);
+  const rest = (paths: string[]) => paths.filter(path => !docsSet.has(path));
   if (pathsOverlap(rest(candidatePaths), mainPaths) || pathsOverlap(candidatePaths, rest(mainPaths)))
     return { reason: 'path-overlap' };
   if (!docsOverlap.every(markdownPath)) return { reason: 'path-overlap' };
@@ -85,9 +90,11 @@ export async function analyzeCrossHeadReuse(
     if (file) expected.set(path, file);
     else expected.delete(path);
   }
+  // Paths are unique per manifest (parseNativeState), so the recomposition is exact when both sides
+  // hold the same paths with the same blob and mode; order is not part of it.
   if (
-    canonicalPayload([...expected.values()].sort((a, b) => a.path.localeCompare(b.path))) !==
-    canonicalPayload([...merged!.files].sort((a, b) => a.path.localeCompare(b.path)))
+    expected.size !== composed.size ||
+    [...expected].some(([path, file]) => !same(file, composed.get(path)))
   )
     return { reason: 'composition-not-exact' };
   if (

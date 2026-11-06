@@ -68,14 +68,17 @@ export type HostedAttempt = z.infer<typeof hostedAttemptSchema>;
 export type HostedOperation = z.infer<typeof hostedOperationSchema>;
 export type HostedTerminalReceipt = z.infer<typeof hostedTerminalReceiptSchema>;
 
+// One stateless schema: z.json() builds a new recursive schema on every call, which cost about a fifth of
+// the first-check proof (called per manifest entry) before it was shared.
+const jsonValue = z.json();
 /** JSON values only: recursively sorted object keys, preserved array order and exact strings. */
 export function canonicalPayload(value: unknown, validated = false): string {
-  const parsed: unknown = validated ? value : z.json().parse(value);
+  const parsed: unknown = validated ? value : jsonValue.parse(value);
   function encode(item: unknown): string {
     if (Array.isArray(item)) return `[${item.map(encode).join(',')}]`;
     if (item && typeof item === 'object') {
       const prototype = Object.getPrototypeOf(item);
-      if (prototype !== Object.prototype && prototype !== null) return encode(z.json().parse(item));
+      if (prototype !== Object.prototype && prototype !== null) return encode(jsonValue.parse(item));
       const record = item as Record<string, unknown>;
       return `{${Object.keys(record)
         .sort()
@@ -91,7 +94,7 @@ export function canonicalPayload(value: unknown, validated = false): string {
       return JSON.stringify(item);
     // Schema-validated metadata avoids a second deep clone. The encoder still
     // rejects unsupported nested values rather than dropping or coercing them.
-    return encode(z.json().parse(item));
+    return encode(jsonValue.parse(item));
   }
   return encode(parsed);
 }

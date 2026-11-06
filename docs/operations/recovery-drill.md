@@ -82,7 +82,7 @@ import {makeFunctionReference} from 'convex/server';
 import {coordinationClient} from './dist/coordination-client.js';
 const request = JSON.parse(readFileSync(join(process.env.FIXTURE_PARENT,'later-note.json'),'utf8'));
 const client = coordinationClient(process.env.DEPLOYMENT_URL);
-console.log(JSON.stringify(await client.action(makeFunctionReference('projectWorkActions:command'), {
+console.log(JSON.stringify(await client.action(makeFunctionReference('projectWorkActionsV8:command'), {
   projectId:process.env.PROJECT_ID,operationId:request.operationId,revision:request.revision,
   command:JSON.stringify(request.command),
 })));

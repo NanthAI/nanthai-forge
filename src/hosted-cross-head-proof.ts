@@ -78,8 +78,17 @@ export type CleanDisjointProof = z.infer<typeof cleanDisjointProof>;
 /** A proof that landed a change on its first check (any clean-disjoint version). */
 export const firstCheckProof = (proof: CrossHeadProof | undefined) =>
   proof?.algorithm === 'clean-disjoint-v1' || proof?.algorithm === 'clean-disjoint-v2';
+/** True when a path of one list equals, contains or sits inside a path of the other. Linear in the
+ * total path depth: each path checks its own ancestors against the other list's set. */
 export function pathsOverlap(a: string[], b: string[]) {
-  return a.some(x => b.some(y => x === y || x.startsWith(`${y}/`) || y.startsWith(`${x}/`)));
+  const inA = new Set(a),
+    inB = new Set(b);
+  const underAny = (path: string, set: Set<string>) => {
+    for (let slash = path.indexOf('/'); slash !== -1; slash = path.indexOf('/', slash + 1))
+      if (set.has(path.slice(0, slash))) return true;
+    return false;
+  };
+  return a.some(x => inB.has(x) || underAny(x, inB)) || b.some(y => underAny(y, inA));
 }
 export function validCrossHeadProof(proof: CrossHeadProof) {
   const docs = proof.algorithm === 'clean-disjoint-v2' ? proof.docsOverlap : [];

@@ -2,22 +2,20 @@
 // SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
 import { action, type ActionCtx } from './cliServer';
+import { internalAction } from './_generated/server';
 import { internal } from './_generated/api';
-import type { Doc } from './_generated/dataModel';
+import type { Doc, Id } from './_generated/dataModel';
 import { exportPlanning as planningExport } from '../src/work-planning-state';
 import { invariant } from '../src/errors';
-import { metadataCommandSchema } from '../src/work-types';
-import { metadataRequest, workDigest } from '../src/work-metadata';
+import { workDigest } from '../src/work-metadata';
 import { report } from './errors';
 import { actionPublicPeople } from './publicPeople';
 import { indexedCommand } from './projectWorkIndexedCommand';
+import { nodeCommandHooks } from './projectWorkIndexedNode';
+import { caller, runWorkCommand } from './projectWorkCommandRun';
 import { projectDocument, hostedWorkEventDocument } from './schema';
 
-export async function caller(ctx: ActionCtx) {
-  const user = await ctx.auth.getUserIdentity();
-  invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to use your Forge project.');
-  return user.subject;
-}
+export { caller };
 export { source, load } from './projectWorkLoad';
 import { source, load } from './projectWorkLoad';
 import { exchangeObjectReader } from './projectExchangeReader';
@@ -49,68 +47,40 @@ export const initialize = action({
     }
   },
 });
+const commandArgs = {
+  projectId: v.id('hostedProjects'),
+  operationId: v.string(),
+  revision: v.number(),
+  command: v.string(),
+};
+const nodeCommand = (
+  ctx: ActionCtx,
+  input: { projectId: Id<'hostedProjects'>; operationId: string; revision: number; command: string },
+  owner: string,
+) =>
+  runWorkCommand(ctx, input, owner, (command, request) =>
+    indexedCommand(ctx, input, owner, command, request, nodeCommandHooks),
+  );
+/** Full Node implementation. Current clients call `projectWorkActionsV8:command`, which runs the
+ * commands that fit the 64 MiB V8 runtime and hands the rest to `commandNode`; this public name stays
+ * for older clients and keeps the exact same behaviour. */
 export const command = action({
-  args: {
-    projectId: v.id('hostedProjects'),
-    operationId: v.string(),
-    revision: v.number(),
-    command: v.string(),
-  },
+  args: commandArgs,
   returns: hostedWorkEventDocument,
   handler: async (ctx, input): Promise<Doc<'projectWorkEvents'>> => {
     try {
-      const owner = await caller(ctx);
-      let parsed;
-      try {
-        parsed = metadataCommandSchema.safeParse(JSON.parse(input.command));
-      } catch {
-        invariant(false, 'BAD_ARGUMENT', 'Send a supported hosted Work command.');
-      }
-      invariant(parsed.success, 'BAD_ARGUMENT', 'Send a supported hosted Work command.');
-      const command = parsed.data,
-        request = metadataRequest(command);
-      if (command.action === 'put-planning-item' || command.action === 'comment-planning-item') {
-        await ctx.runQuery(internal.projectWork.owner, { projectId: input.projectId, owner });
-        invariant(
-          command.operationId === input.operationId,
-          'BAD_ARGUMENT',
-          'Use the planning command’s original operation UUID.',
-        );
-      }
-      invariant(
-        /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(input.operationId) &&
-          Number.isSafeInteger(input.revision) &&
-          input.revision >= 0,
-        'BAD_ARGUMENT',
-        'Use an original operation UUID and Work revision.',
-      );
-      const original: Doc<'projectWorkEvents'> | null = await ctx.runQuery(internal.projectWork.find, {
-        projectId: input.projectId,
-        owner,
-        operationId: input.operationId,
-      });
-      if (original) {
-        invariant(
-          original.request === request && original.previousRevision === input.revision,
-          'WORK_OPERATION_CHANGED',
-          'Reconcile this operation’s original command and revision.',
-        );
-        return original;
-      }
-      const projection = await indexedCommand(ctx, input, owner, command, request);
-      return await ctx.runMutation(internal.projectWork.append, {
-        projectId: input.projectId,
-        owner,
-        operationId: input.operationId,
-        request,
-        previousRevision: input.revision,
-        command: JSON.stringify(command),
-        projection,
-      });
+      return await nodeCommand(ctx, input, await caller(ctx));
     } catch (error) {
       return report(error);
     }
   },
+});
+/** Node fallback of the V8 action: the owner was resolved there, from the same caller. */
+export const commandNode = internalAction({
+  args: { ...commandArgs, owner: v.string() },
+  returns: hostedWorkEventDocument,
+  handler: async (ctx, { owner, ...input }): Promise<Doc<'projectWorkEvents'>> =>
+    nodeCommand(ctx, input, owner),
 });
 export const exportJournal = action({
   args: { projectId: v.id('hostedProjects') },

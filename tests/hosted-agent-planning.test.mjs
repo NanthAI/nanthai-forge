@@ -17,6 +17,7 @@ import { ConvexError } from 'convex/values';
 
 const index = await import(moduleUrl('../convex/projectWorkIndex.ts'));
 const actions = await import(moduleUrl('../convex/projectWorkActions.ts'));
+const actionsV8 = await import(moduleUrl('../convex/projectWorkActionsV8.ts'));
 const search = await import(moduleUrl('../convex/projectHostedPlanningSearch.ts'));
 const planningModule = await import(moduleUrl('../convex/projectHostedPlanning.ts'));
 const code = expected => error => (error.data?.code ?? error.code) === expected;
@@ -35,10 +36,11 @@ function port(s, states = new Map(), serverFeatures = [...hostedContractFeatures
         Object.fromEntries(args.ids.filter(id => states.has(id)).map(id => [id, states.get(id)])),
       );
     const [module, fn] = name.split(':');
-    if (name === 'projectWorkActions:command' && intercept) await intercept(args);
+    if (name === 'projectWorkActionsV8:command' && intercept) await intercept(args);
     const handler = {
       projectWorkIndex: index,
       projectWorkActions: actions,
+      projectWorkActionsV8: actionsV8,
       projectHostedPlanningSearch: search,
       projectHostedPlanning: planningModule,
     }[module][fn];
@@ -100,6 +102,39 @@ const run = (p, action, input, operationId) =>
   executeHostedPlanning(p, 'owner', action, hostedAgentCommandSchemas[action].parse(input), operationId);
 const put = (p, input) => run(p, 'put-planning-item', input);
 const list = (p, input = {}) => run(p, 'planning', input).then(response => response.result);
+
+test('a server without the V8 command receives the same original operation on the Node command', async t => {
+  const s = await setup(t),
+    p = port(s);
+  const invoke = p.exchange.client.action;
+  const names = [];
+  p.exchange.client.action = async (ref, args) => {
+    names.push(getFunctionName(ref));
+    if (getFunctionName(ref) === 'projectWorkActionsV8:command')
+      throw new Error(
+        '[Request ID: x] Server Error Could not find public function for projectWorkActionsV8:command',
+      );
+    return invoke(ref, args);
+  };
+  const operationId = randomUUID();
+  const created = (
+    await run(p, 'put-planning-item', { kind: 'issue', title: 'Older server', status: 'open' }, operationId)
+  ).result;
+  assert.equal(created.version, 1);
+  assert.deepEqual(
+    names.filter(name => name.includes(':command')),
+    ['projectWorkActionsV8:command', 'projectWorkActions:command'],
+  );
+  // A refusal from a server that does have the function is not retried elsewhere.
+  names.length = 0;
+  p.exchange.client.action = async (ref, args) => {
+    names.push(getFunctionName(ref));
+    throw new ConvexError({ code: 'WORK_STALE', message: 'Hosted Work changed.' });
+  };
+  await assert.rejects(put(p, { kind: 'issue', title: 'Refused', status: 'open' }));
+  assert.equal(names.filter(name => name.includes(':command')).length >= 1, true);
+  assert(!names.includes('projectWorkActions:command'));
+});
 
 test('agents create an Initiative and Issue, comment, and read them filtered and paged', async t => {
   const s = await setup(t),
@@ -183,7 +218,7 @@ test('a put keeps every stored field it omits; clearing needs an explicit empty 
     status: 'open',
     reason: 'triaged',
   });
-  assert.deepEqual(p.calls, ['projectWorkIndex:workspace', 'projectWorkActions:command']);
+  assert.deepEqual(p.calls, ['projectWorkIndex:workspace', 'projectWorkActionsV8:command']);
   assert.equal(moved.result.status, 'open');
   let item = await stored();
   assert.equal(item.body, body);
@@ -260,7 +295,7 @@ test('new CLI against the previous server (no planning-put-keeps-omitted): a put
     'projectWorkIndex:workspace',
     'projectWorkIndex:detail',
     'projectWorkIndex:workspace',
-    'projectWorkActions:command',
+    'projectWorkActionsV8:command',
   ]);
   assert.deepEqual(
     (({ kind, title, body: sentBody, status, intentIds, initiativeId, reason }) => ({
@@ -310,14 +345,14 @@ test('new CLI against the previous server (no planning-put-keeps-omitted): a put
     'projectWorkIndex:workspace',
     'projectWorkIndex:detail',
     'projectWorkIndex:workspace',
-    'projectWorkActions:command',
+    'projectWorkActionsV8:command',
   ]);
   item = await stored(started);
   assert.deepEqual([item.status, item.body, item.initiativeId], ['in-progress', body, initiative]);
   // Creating needs no stored read.
   p.calls.length = 0;
   await put(p, { kind: 'issue', title: 'New', initiativeId: null });
-  assert.deepEqual(p.calls, ['projectWorkIndex:workspace', 'projectWorkActions:command']);
+  assert.deepEqual(p.calls, ['projectWorkIndex:workspace', 'projectWorkActionsV8:command']);
 });
 
 test('searching by an 8-character id or a full UUID returns that item first, then text mentions', async t => {
@@ -737,7 +772,7 @@ test('start {planningItemId} starts the Issue as a planned Intent and links it o
     return query(ref, args);
   };
   s.exchange.client.action = async (ref, args) => {
-    assert.equal(getFunctionName(ref), 'projectWorkActions:command');
+    assert.equal(getFunctionName(ref), 'projectWorkActionsV8:command');
     commands.push(JSON.parse(args.command));
     return { revision: 6 };
   };
@@ -1024,7 +1059,7 @@ test('Issue filing returns candidates without another call and retries retain th
   const input = { kind: 'issue', title: 'Sync failure diagnostics' };
   const filed = await put(p, input);
   assert(filed.result.likelyDuplicates.items.some(item => item.id === prior.itemId));
-  assert.deepEqual(p.calls, ['projectWorkIndex:workspace', 'projectWorkActions:command']);
+  assert.deepEqual(p.calls, ['projectWorkIndex:workspace', 'projectWorkActionsV8:command']);
   await s.send(s.item({ title: 'Sync failure diagnostics' }));
   const replay = await run(p, 'put-planning-item', input, filed.operationId);
   assert.deepEqual(replay.result.likelyDuplicates, filed.result.likelyDuplicates);

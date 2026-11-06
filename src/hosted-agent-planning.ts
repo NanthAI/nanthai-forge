@@ -12,7 +12,7 @@ import type { HostedAgentSession } from './hosted-agent-transport.js';
 import type { PlanningItem, PlanningWrite } from './work-planning-types.js';
 
 /** Planning is the hosted Work journal's Issues and Initiatives. This file only drives the existing
- * indexed reads and the existing owner `projectWorkActions:command`; it adds no storage. */
+ * indexed reads and the owner Work command `projectWorkActionsV8:command`; it adds no storage. */
 export type PlanningPort = Pick<HostedAgentSession, 'query' | 'address' | 'exchange' | 'root'> & {
   retainOperation?: (id: string) => void;
   /** Contract features the server advertised (a83b6fd5); unknown means none. */
@@ -188,15 +188,22 @@ async function writePlanning(
     const revision = observed.revision;
     if (hints && 'likelyDuplicates' in observed) hints.likelyDuplicates = observed.likelyDuplicates;
     try {
-      const event = (await port.exchange.client.action(
-        makeFunctionReference<'action'>('projectWorkActions:command'),
-        {
-          projectId: port.address.projectId,
-          operationId: command.operationId,
-          revision,
-          command: JSON.stringify(command),
-        },
-      )) as { revision: number };
+      const args = {
+        projectId: port.address.projectId,
+        operationId: command.operationId,
+        revision,
+        command: JSON.stringify(command),
+      };
+      const call = (name: string) =>
+        port.exchange.client.action(makeFunctionReference<'action'>(name), args) as Promise<{
+          revision: number;
+        }>;
+      // The 64 MiB V8 command (Issue 85801d6f). A server deployed before it has no such function, and a
+      // call that never found its function ran nothing: the same original operation goes to the Node one.
+      const event = await call('projectWorkActionsV8:command').catch(error => {
+        if (!/Could not find public function/.test(error instanceof Error ? error.message : '')) throw error;
+        return call('projectWorkActions:command');
+      });
       return event.revision;
     } catch (error) {
       const safe = hostedActionError(error, 'planning write');

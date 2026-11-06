@@ -25,6 +25,7 @@ const emailAllowed = new Set([
   'projectBriefings.ts:brief',
   'projectWork.ts:state',
   'projectWorkActions.ts:command',
+  'projectWorkActionsV8.ts:command',
   'projectWorkActions.ts:initialize',
   'projectWorkCommand.ts:command',
 ]);
