@@ -13,7 +13,11 @@ import { mapExchange } from '../src/exchange-parallel';
 import { invariant } from '../src/errors';
 import { importPageBytes, importPageFiles } from '../src/github-import-pages';
 import type { ObjectPack } from '../src/object-pack-range';
-export type Completions = { id: Id<'projectObjects'>; storageId?: Id<'_storage'>; key?: string }[];
+export type Completions = {
+  id: Id<'projectObjects'>;
+  storageId?: Id<'_storage'>;
+  key?: string;
+}[];
 export type Recipes = {
   digest: string;
   size: number;
@@ -39,6 +43,10 @@ export class ImportUpload {
   private objects = new Map<string, Buffer>();
   private bytes = 0;
   peakBufferedBytes = 0;
+  /** Bytes staged for the next drain, so callers can size a fetch window. */
+  get stagedBytes() {
+    return this.bytes;
+  }
   private completions: Completions = [];
   private recipes: Recipes = [];
   private entries: CatalogEntry[] = [];
@@ -79,7 +87,10 @@ export class ImportUpload {
       const prepared = await this.ctx.runMutation(internal.projectGithubImportBatch.prepare, {
         projectId: this.projectId,
         actor: this.actor,
-        objects: page.map(([digest, bytes]) => ({ digest, size: bytes.length })),
+        objects: page.map(([digest, bytes]) => ({
+          digest,
+          size: bytes.length,
+        })),
       });
       await mapExchange(page, this.concurrency, async ([digest, bytes], i) => {
         const target = prepared[i]!;
@@ -88,7 +99,10 @@ export class ImportUpload {
         // Every import object uploads to R2; prepare always returns its key.
         invariant(target.key, 'R2_REQUIRED', 'Import objects upload to R2 only.');
         const config = r2Config(),
-          put = await presignPut(config, target.key, { digest, size: bytes.length });
+          put = await presignPut(config, target.key, {
+            digest,
+            size: bytes.length,
+          });
         const response = await exchangeFetch('R2 import page upload', put.url, {
           method: 'PUT',
           headers: put.headers,
@@ -136,7 +150,10 @@ export class ImportUpload {
         group.length > 1 ? bytes.length * 2 : bytes.length,
       );
       const key = r2Key(this.projectId, packDigest),
-        put = await presignPut(config, key, { digest: packDigest, size: bytes.length });
+        put = await presignPut(config, key, {
+          digest: packDigest,
+          size: bytes.length,
+        });
       const { value: response } = await withExchangeObservation(async () => {
         try {
           return await exchangeFetch('R2 import page upload', put.url, {

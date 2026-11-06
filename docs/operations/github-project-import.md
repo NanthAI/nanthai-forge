@@ -48,9 +48,11 @@ supported files stream through the existing bounded chunk recipes. This is a
 provider boundary, not a new repository quota.
 
 Ordinary archive members drain the source buffer at the 8 MiB/1,000-object
-thresholds; a final member can cross the byte threshold. Git-blob fallback first
-fetches a bounded page of up to 100 small blobs, which can exceed 8 MiB, before
-draining. Large members stream through chunk recipes. Upload holds the staged
+thresholds; a final member can cross the byte threshold. Git-blob fallback
+fetches windows of up to 100 small blobs, each sized by listed bytes to the room
+left before the 8 MiB threshold (an empty window still takes one blob), stages each
+verified blob as it arrives and drains after every window, so staging stays within
+about 8 MiB plus one blob. Large members stream through chunk recipes. Upload holds the staged
 source and one pack copy. Each window becomes one immutable, SHA-256-verified R2
 object; singleton and empty objects can stay raw. The sorted
 catalog retains logical digests, sizes, byte offsets and pack identities, with up

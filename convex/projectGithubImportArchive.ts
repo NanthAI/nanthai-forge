@@ -18,7 +18,7 @@ import {
   githubArchiveFiles,
   gitBlobId,
 } from '../src/github-archive-source';
-import { archiveCursorSchema, importPathKey } from '../src/github-import-pages';
+import { archiveCursorSchema, importPathKey, importPageBytes } from '../src/github-import-pages';
 import { ObjectRecipeBuilder, objectChunkBytes } from '../src/object-chunks';
 import { mapExchange } from '../src/exchange-parallel';
 import { digest } from '../src/hash';
@@ -149,27 +149,16 @@ export async function runArchiveImport(ctx: ActionCtx, job: Doc<'projectGithubIm
     upload.put(pointer);
     record(entry, { blob: digest(pointer), size: pointer.length });
   }
-  const small = missing.filter(file => file.mode !== '160000' && file.size <= objectChunkBytes);
-  for (let at = 0; at < small.length && !over(); at += 100) {
-    const page = small.slice(at, at + 100);
-    const fetched = await mapExchange(page, 8, async entry => {
-      const parts: Buffer[] = [];
-      const pin = await streamGithubSourceBlob(
-        job.repository,
-        entry,
-        async part => {
-          parts.push(part);
-        },
-        token,
-      );
-      return { pin, bytes: Buffer.concat(parts) };
-    });
-    for (const [index, entry] of page.entries()) {
-      upload.put(fetched[index]!.bytes);
-      record(entry, fetched[index]!.pin);
-    }
-    await drain();
-  }
+  await stageFallbackBlobs(
+    missing.filter(file => file.mode !== '160000' && file.size <= objectChunkBytes),
+    {
+      upload,
+      fetchBlob: (entry, consume) => streamGithubSourceBlob(job.repository, entry, consume, token),
+      record,
+      drain,
+      over,
+    },
+  );
   for (const entry of missing.filter(file => file.mode !== '160000' && file.size > objectChunkBytes)) {
     if (over()) break;
     const matched = await streamLarge(entry, async consume => {
@@ -205,11 +194,59 @@ export async function runArchiveImport(ctx: ActionCtx, job: Doc<'projectGithubIm
     const value = imported.get(file.path)!;
     rows.imported.push({
       key: importPathKey(file.path),
-      value: JSON.stringify({ path: value.path, blob: value.blob, size: value.size, mode: value.mode }),
+      value: JSON.stringify({
+        path: value.path,
+        blob: value.blob,
+        size: value.size,
+        mode: value.mode,
+      }),
     });
     blobs.set(value.blob, value.size);
   }
   for (const [sha256, size] of [...blobs].sort(([a], [b]) => (a < b ? -1 : 1)))
     rows.blobs.push({ key: sha256, value: JSON.stringify({ sha256, size }) });
   await publishImport(ctx, { ...job, ...counters(), totalKnown: true }, rows, catalog);
+}
+
+/** Fallback blobs (omitted or rewritten archive members) are fetched in windows
+ * sized by listed bytes as well as count: a window only fills the room left
+ * before the normal 8 MiB drain threshold, plus at most one blob when it is
+ * empty. Each blob is verified against its Git object, staged as soon as it
+ * arrives, then drained, so staging never holds a whole 100-blob page. */
+export async function stageFallbackBlobs(
+  entries: GithubSourceEntry[],
+  io: {
+    upload: Pick<ImportUpload, 'put' | 'stagedBytes'>;
+    fetchBlob: (
+      entry: GithubSourceEntry,
+      consume: (part: Buffer) => Promise<void>,
+    ) => Promise<{ blob: string; size: number }>;
+    record: (entry: GithubSourceEntry, pin: { blob: string; size: number }) => void;
+    drain: () => Promise<void>;
+    over: () => boolean;
+  },
+  concurrency = 8,
+  pageFiles = 100,
+) {
+  for (let at = 0; at < entries.length && !io.over();) {
+    const room = importPageBytes - io.upload.stagedBytes;
+    let end = at,
+      listed = 0;
+    while (
+      end < entries.length &&
+      end - at < pageFiles &&
+      (end === at || listed + entries[end]!.size <= room)
+    )
+      listed += entries[end++]!.size;
+    await mapExchange(entries.slice(at, end), concurrency, async entry => {
+      const parts: Buffer[] = [];
+      const pin = await io.fetchBlob(entry, async part => {
+        parts.push(part);
+      });
+      io.upload.put(Buffer.concat(parts));
+      io.record(entry, pin);
+    });
+    at = end;
+    await io.drain();
+  }
 }
