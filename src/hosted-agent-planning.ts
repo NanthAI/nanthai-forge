@@ -100,10 +100,16 @@ async function fullItem(port: PlanningPort, ws: Workspace, id: string) {
   );
   return (detail.value as PlanningItem | null) ?? null;
 }
-const compact = (item: PlanningItem, intent?: string) => ({
-  ...planningSummary(item),
-  ...(intent ? { intent } : {}),
-});
+/** The link every planning read shows for an Issue (30a4d75d). Starting an Issue opens the Intent that has the
+ * Issue's own id and never fills the legacy `intentIds` array, so an empty array is not "no link". This is the
+ * Intent a start opens or opened: static text from the item, no call. `intent` is its state, present once started. */
+const withPlannedLink = <T extends { id: string; kind?: string }>(item: T) =>
+  item.kind === 'issue' ? { ...item, plannedIntentId: item.id } : item;
+const compact = (item: PlanningItem, intent?: string) =>
+  withPlannedLink({
+    ...planningSummary(item),
+    ...(intent ? { intent } : {}),
+  });
 function decode(cursor: string | null, ws: Workspace): string | null {
   if (cursor === null) return null;
   invariant(cursor.startsWith(cursorPrefix), 'BAD_ARGUMENT', 'Use the returned planning cursor.');
@@ -305,6 +311,7 @@ async function intentStates(port: PlanningPort, ids: string[]) {
     );
   return states;
 }
+const holdMarker = (openLines: number) => `Intent completed; ${openLines} Done-when line(s) still open`;
 /** An Issue whose Intent finished is closed (or abandoned) in planning, and the read says so. */
 async function reconcile(
   port: PlanningPort,
@@ -328,7 +335,7 @@ async function reconcile(
       const openLines = status === 'closed' ? openDoneWhenLines(item.body) : [];
       const unmet = openLines.length;
       if (unmet) {
-        const marker = `Intent completed; ${unmet} Done-when line(s) still open`;
+        const marker = holdMarker(unmet);
         // The hold's own reason write bumps the version once; a read that finds the marker already there
         // names the current version.
         const advice = holdAdvice(
@@ -339,6 +346,7 @@ async function reconcile(
         held.push({
           id: item.id,
           openLines: unmet,
+          version: item.reason === marker ? item.version : item.version + 1,
           lines: advice.lines,
           close: advice.close,
           reason: `${marker.replace('still open', 'are not ticked')}. ${advice.text}`,
@@ -450,14 +458,18 @@ async function readPlanning(
   if (input.search !== undefined) {
     const terms = planningSearchTerms(input.search);
     try {
-      return await port.query('projectHostedPlanningSearch:search', {
-        ...terms,
-        status: input.status ?? 'active',
-        ...(input.kind ? { kind: input.kind } : {}),
-        ...(input.initiativeId ? { initiativeId: input.initiativeId } : {}),
-        cursor: input.cursor,
-        limit: input.limit,
-      });
+      const found = await port.query<{ items?: { id: string; kind?: string }[] }>(
+        'projectHostedPlanningSearch:search',
+        {
+          ...terms,
+          status: input.status ?? 'active',
+          ...(input.kind ? { kind: input.kind } : {}),
+          ...(input.initiativeId ? { initiativeId: input.initiativeId } : {}),
+          cursor: input.cursor,
+          limit: input.limit,
+        },
+      );
+      return Array.isArray(found?.items) ? { ...found, items: found.items.map(withPlannedLink) } : found;
     } catch (error) {
       if (
         error instanceof Error &&
@@ -483,12 +495,25 @@ async function readPlanning(
     });
     const states = item.kind === 'issue' ? await intentStates(port, [item.id]) : {};
     const sync = input.reconcile ? await reconcile(port, ws, [item], states) : undefined;
+    // The item shows what the reconcile just wrote (the list read does the same): a closed Issue reads closed at its
+    // new version, and a held one carries the version the printed close command names.
+    const closed = (sync?.changed as { id: string; to: PlanningItem['status'] }[] | undefined)?.find(
+      change => change.id === item.id,
+    );
+    const held = (sync?.held as { id: string; version: number; openLines: number }[] | undefined)?.find(
+      entry => entry.id === item.id,
+    );
+    const settled = closed
+      ? { ...item, status: closed.to, version: item.version + 1, reason: `Intent ${states[item.id]}` }
+      : held
+        ? { ...item, version: held.version, reason: holdMarker(held.openLines) }
+        : item;
     return {
       workRevision: ws.revision,
-      item: {
-        ...item,
+      item: withPlannedLink({
+        ...settled,
         ...(states[item.id] ? { intent: states[item.id] } : {}),
-      },
+      }),
       comments: comments.page.map(row => JSON.parse(row.value)).reverse(),
       ...(comments.isDone ? {} : { commentsMore: true }),
       ...(sync?.changed.length || sync?.failed || sync?.held?.length ? { reconciled: sync } : {}),

@@ -103,9 +103,11 @@ for (const history of [575, 1150])
     // quiet ones. Calls and writes are unchanged.
     // Reads 1341 -> 1345, writes 412 -> 416 (5471e31c): each overlap-row write also reads and rewrites the
     // Lane's ~1 KB slim peer row. Calls are unchanged.
+    // Reads 1345 -> 1347 (0b12fcfe): one overlap-row read per open sibling at the landing, to see whether
+    // it already landed at its head (landed siblings no longer hold the Intent open). Calls and writes unchanged.
     assert(
       budget.calls <= 71 &&
-        source.reduce((n, c) => n + c.documents, 0) <= 1345 &&
+        source.reduce((n, c) => n + c.documents, 0) <= 1347 &&
         source.reduce((n, c) => n + c.writes, 0) <= 416,
       JSON.stringify({
         ...budget,

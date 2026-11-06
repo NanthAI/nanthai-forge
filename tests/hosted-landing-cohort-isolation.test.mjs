@@ -147,9 +147,12 @@ for (const history of [0, 575, 1150])
     // Reads 4179 -> 4197, writes 1227 -> 1245 (5471e31c): each overlap-row write (landing retirement,
     // superseding, lifecycle marks) also reads and rewrites the Lane's ~1 KB slim peer row that every
     // overlap read loads instead of peers' evidence. Calls are unchanged.
+    // Reads 4197 -> 4206 (0b12fcfe): an Intent whose other Lane is still open at the landing costs the
+    // completion tick one overlap-row read for that sibling, to see whether it already landed at its head
+    // (landed siblings no longer hold the Intent open). Calls and writes are unchanged.
     assert(
       budget.calls <= 199 &&
-        source.reduce((n, c) => n + c.documents, 0) <= 4197 &&
+        source.reduce((n, c) => n + c.documents, 0) <= 4206 &&
         source.reduce((n, c) => n + c.writes, 0) <= 1245,
       JSON.stringify({
         ...budget,
