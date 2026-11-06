@@ -17,7 +17,7 @@ import {
   hostedCheckShardSchema,
   verifyHostedCheckCallback,
 } from '../src/hosted-check-evidence';
-import { hostedCheckTerminal, checkPin } from '../src/hosted-check';
+import { hostedCheckTerminal, checkPin, type HostedCheckRun } from '../src/hosted-check';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { invariant } from '../src/errors';
 import { recordHostedTestTimings } from './projectHostedTestTimings';
@@ -31,13 +31,18 @@ export async function receiveHostedCheckCallback(
     projectId: Id<'hostedProjects'>;
     callback: unknown;
     signature: string;
+    /** Runs on a new (non-replayed) callback just before the one run write. */
+    beforeWrite?: (run: HostedCheckRun) => Promise<void>;
   },
   key: (keyId: string) => string,
   now = Date.now(),
 ) {
   const callback = hostedCheckCallbackSchema.parse(input.callback);
   invariant(callback.projectId === input.projectId, 'EVIDENCE_CHANGED', 'Callback project differs.');
-  const { row, run } = await writableHostedCheck(ctx, { projectId: input.projectId, runId: callback.runId });
+  const { row, run } = await writableHostedCheck(ctx, {
+    projectId: input.projectId,
+    runId: callback.runId,
+  });
   verifyHostedCheckCallback(callback, input.signature, key(run.keyId));
   assertHostedCheckActive(run);
   const plan = run.plan,
@@ -194,6 +199,7 @@ export async function receiveHostedCheckCallback(
     digest,
     value: callbackReceipt(callback),
   });
+  await input.beforeWrite?.(run);
   await writeHostedCheck(ctx, row._id, run);
   await notifyActionsProgress(ctx, run, now);
   return run;

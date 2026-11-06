@@ -1,6 +1,7 @@
 import { onGateRunTerminal } from './projectHostedMainAuditState';
 import { semanticPayload } from '../src/semantic-payload';
 import { wakeExpiredLogs } from './projectCheckLogRetention';
+import { restoreShardReports } from './projectHostedActionsReports';
 // SPDX-License-Identifier: Apache-2.0
 import { ConvexError } from 'convex/values';
 import type { QueryCtx, MutationCtx } from './_generated/server';
@@ -35,7 +36,10 @@ export const checkSetting = (
 export async function checkCaller(ctx: QueryCtx | MutationCtx, projectId: Id<'hostedProjects'>) {
   const user = await ctx.auth.getUserIdentity();
   invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to use hosted checks.');
-  return { actor: user.subject, project: await activeProject(ctx, projectId, user.subject) };
+  return {
+    actor: user.subject,
+    project: await activeProject(ctx, projectId, user.subject),
+  };
 }
 export async function beginCheckOperation(
   ctx: MutationCtx,
@@ -78,7 +82,10 @@ export const completeCheckOperation = (ctx: MutationCtx, operation: HostedOperat
     receipt: {
       attemptId: operation.firstAttempt.id,
       at: new Date().toISOString(),
-      outcome: { status: 'completed', result: JSON.parse(canonicalPayload(result)) },
+      outcome: {
+        status: 'completed',
+        result: JSON.parse(canonicalPayload(result)),
+      },
     },
   });
 export async function loadHostedCheck(ctx: QueryCtx | MutationCtx, input: CheckIdentity) {
@@ -120,6 +127,7 @@ export async function writeHostedCheck(
   });
 }
 export async function completeHostedCheck(ctx: MutationCtx, run: HostedCheckRun) {
+  await restoreShardReports(ctx, run);
   await onGateRunTerminal(ctx, run);
   await wakeExpiredLogs(ctx, run.projectId as Id<'hostedProjects'>);
   const row = await hostedOperationRow(

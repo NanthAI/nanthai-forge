@@ -1712,7 +1712,12 @@ test('shard pool: yielded files must be reported by some shard; duplicates count
     },
   });
   assert.deepEqual(run.poolPending, ['tests/yielded-b.test.mjs']);
-  assert.equal(run.contractReports['tests/synthetic-0.test.mjs'].failed, true);
+  // Progress carries the summary; the full reports join the run row once it settles (Issue d0f8472a).
+  assert.equal(run.contractReports, undefined);
+  assert.deepEqual(
+    run.testFiles.failed.map(item => item.file),
+    ['tests/synthetic-0.test.mjs'],
+  );
   run = await send({ index: 2, exitCode: 0 });
   assert.equal(run.status, 'failed');
   assert.equal(run.poolPending, undefined);

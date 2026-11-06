@@ -21,6 +21,12 @@ export const hostedCheckTables = {
     runId: v.string(),
     index: v.number(),
     digest: v.string(),
+    // Issue d0f8472a (convex/projectHostedActionsReports.ts): arrival order, raw shard reports until
+    // the run is terminal, and on the progress row (index -1) the compact progress state.
+    sequence: v.optional(v.number()),
+    complete: v.optional(v.boolean()),
+    reports: v.optional(v.string()),
+    state: v.optional(v.string()),
   }).index('by_project_and_run_and_index', ['projectId', 'runId', 'index']),
   projectHostedCheckWorkers: defineTable({
     projectId: v.id('hostedProjects'),

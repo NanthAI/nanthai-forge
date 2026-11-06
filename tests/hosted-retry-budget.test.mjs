@@ -110,7 +110,17 @@ test('27 shards requesting flaky passes honour three per run with no extra calls
   assert(failed.every(report => report.firstError.includes('RETRY_BUDGET_EXCEEDED')));
   const meters = s.counts.slice(before).filter(m => m.name === 'retry-budget-result');
   assert.equal(meters.length, 29, '27 results, one replay, one changed-input refusal; no retry claim call');
-  assert(meters.every(m => !m.touched.includes('projectHostedActionsResults') || m.documents < 40));
+  // Shard results stay bounded; only the completing result reads the run's shard rows (one per
+  // shard, once) to replay the full reports (Issue d0f8472a).
+  const last = meters.at(-1);
+  assert(
+    meters.slice(0, -1).every(m => !m.touched.includes('projectHostedActionsResults') || m.documents < 40),
+  );
+  assert(
+    last.readDocumentsByTable.projectHostedActionsResults <= 27 + 2,
+    'shard rows, progress row, own index',
+  );
+  assert(last.documents - last.readDocumentsByTable.projectHostedActionsResults < 40);
   const documentsRead = meters.reduce((n, m) => n + m.documents, 0),
     documentsWritten = meters.reduce((n, m) => n + m.writes, 0);
   assert(documentsRead <= 29 * 40);

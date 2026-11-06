@@ -16,15 +16,19 @@ import { presignPut, r2Config } from './r2';
 import { outputKey } from '../src/hosted-check-output';
 import { receiveHostedCheckCallback } from './projectHostedCheckCallbacks';
 import { signHostedCheckCallback } from '../src/hosted-check-evidence';
-import { checkPin, hostedCheckTerminal } from '../src/hosted-check';
+import { checkPin, hostedCheckTerminal, type HostedCheckRun } from '../src/hosted-check';
 import { writeHostedCheck } from './projectHostedCheckStore';
-import { applyCheckRetryBudget, capCheckReports } from '../src/check-report-cap';
 import { checkFileSummary } from '../src/check-file-summary';
 import { invariant } from '../src/errors';
-import { mergeShardReports, settlePoolPending } from '../src/hosted-actions-pool';
+import { recordShardReports } from './projectHostedActionsReports';
 export const output = internalMutation({
   // withRun: an inline-log result also needs the session run to verify the stored object.
-  args: { ...sessionArgs, index: v.number(), log: v.string(), withRun: v.optional(v.boolean()) },
+  args: {
+    ...sessionArgs,
+    index: v.number(),
+    log: v.string(),
+    withRun: v.optional(v.boolean()),
+  },
   returns: v.any(),
   handler: async (ctx, input) => {
     const { run } = await actionsSession(ctx, input),
@@ -89,45 +93,36 @@ export const result = internalMutation({
         ...(execution ? { execution } : {}),
       },
     });
+    // One run write per shard: the shard bookkeeping and this result's report fold share it.
+    const record = async (current: HostedCheckRun) => {
+      // Counted once per index: replays return before this point.
+      if (execution)
+        current.execution = {
+          seconds: (current.execution?.seconds ?? 0) + execution.seconds,
+          shards: (current.execution?.shards ?? 0) + 1,
+        };
+      if (result.pool) current.poolClaimed = true;
+      // A file run by two shards (shard pool doubt run) counts once; a pass never hides a failure.
+      current.testFiles = checkFileSummary(await recordShardReports(ctx, current, { ...result, digest }));
+    };
+    let recorded = false;
     run = await receiveHostedCheckCallback(
       ctx,
       {
         projectId: input.projectId,
         callback,
         signature: signHostedCheckCallback(callback, outputSigningKey(run.keyId)),
+        beforeWrite: current => ((recorded = true), record(current)),
       },
       outputSigningKey,
     );
-    // Counted once per index: replays return before this point.
-    if (execution)
-      run.execution = {
-        seconds: (run.execution?.seconds ?? 0) + execution.seconds,
-        shards: (run.execution?.shards ?? 0) + 1,
-      };
-    // A file run by two shards (shard pool doubt run) counts once; a pass never hides a failure.
-    const merged = mergeShardReports(run.contractReports ?? {}, result.contractReports ?? {});
-    const pool = settlePoolPending(
-      merged,
-      run.poolPending ?? [],
-      result.pool?.yielded ?? [],
-      run.counts.completed === run.plan!.shardCount,
-    );
-    if (result.pool) run.poolClaimed = true;
-    if (pool.pending.length) run.poolPending = pool.pending;
-    else delete run.poolPending;
-    const combined = applyCheckRetryBudget(pool.reports);
-    run.contractReports = capCheckReports(combined).reports;
-    run.testFiles = checkFileSummary(run.contractReports);
-    await writeHostedCheck(ctx, row._id, run);
-    await ctx.db.insert('projectHostedActionsResults', {
-      projectId: input.projectId,
-      runId: run.id,
-      index: result.index,
-      digest,
-    });
+    if (!recorded) {
+      await record(run);
+      await writeHostedCheck(ctx, row._id, run);
+    }
     if (run.counts.completed === run.plan!.shardCount) {
       const failed =
-        run.counts.failed > 0 || Object.values(run.contractReports).some(report => report.failed);
+        run.counts.failed > 0 || Object.values(run.contractReports!).some(report => report.failed);
       const complete = directCallback(run, {
         kind: 'complete',
         status: run.cancelRequested ? 'cancelled' : failed ? 'failed' : 'passed',
