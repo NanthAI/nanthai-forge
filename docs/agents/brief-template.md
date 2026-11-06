@@ -16,6 +16,7 @@ Use this portable template for one finite slice. The [standard builder block](br
 - Scale: `<current records/bytes and growth>`.
 - Cost: `<calls per record/operation, total Convex calls, DB documents read/written, byte placement, peak memory and wall time>`; idle = zero calls; batch by page.
 - Docs-only alternative: runtime calls, DB I/O, memory behavior and byte placement do not change. State the planning-read/write and landing budget instead.
+- Disk floor: `<GiB free required before start, builds and tests>`.
 - Time box: `<time and a concrete handoff checkpoint if incomplete>`.
 - Done when: `<behavior, failure cases, evidence per line, required repeats and noise allowance>`.
 - Must not regress: `<metric and comparison method>`.

@@ -113,3 +113,5 @@ budget, time box, acceptance bar and metrics that must not regress.
     remove only your own regenerable temporary output.
 
 Docs-only work changes no runtime usage; no live billing benchmark is needed.
+
+Before delegating, lint the brief: `npm run check:brief -- BRIEF.md` (`-` reads stdin). It exits 1 and names each missing field: full Issue UUID, safety block, scale budget, disk floor with a number, checkpoint cadence, no-end-turn rule. The standard-block pointer covers safety, cadence and no-end-turn; local common-rules `.md` files the brief names count too. Output never echoes the brief.
