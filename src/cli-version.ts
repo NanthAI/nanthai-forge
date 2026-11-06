@@ -47,6 +47,7 @@ const READ_ACTIONS = new Set([
   'decisions',
   'queue',
   'landings',
+  'lane-history',
   'doctor',
   'candidate',
   'candidates',

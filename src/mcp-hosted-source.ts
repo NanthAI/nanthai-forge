@@ -96,7 +96,7 @@ export async function selectHostedSource(transport: HostedAgentTransport, input:
   return selection;
 }
 /** Main's current State, read fresh and authorized; never a Lane working copy. */
-async function selectHostedMain(transport: HostedAgentTransport) {
+export async function selectHostedMain(transport: HostedAgentTransport) {
   const value = await transport.query('projectHostedChannels:current', {});
   const main = sourceProtocol(() => hostedMainV2Schema.parse(value));
   invariant(

@@ -255,7 +255,7 @@ export function registerHostedAgentWorkflow(
       }),
   );
   prose.forge_review =
-    'show: exact Lane/main/state/candidateId file; force permits binary/large bytes. diff: pinned Lane base to saved head, paths/byteBudget/cursor. peers: laneId/path/detail saved overlap evidence; incomplete coverage never proves independence. queue: landing queue entries (Lane, Intent, phase, failing tests, recompose count). Unsaved bytes excluded.';
+    'show: exact Lane/main/state/candidateId file; force permits binary/large bytes. diff: pinned Lane base to saved head, paths/byteBudget/cursor; summary:true returns per path equal|absent|different against current main with no hunks. peers: laneId/path/detail saved overlap evidence; incomplete coverage never proves independence. queue: landing queue entries (Lane, Intent, phase, failing tests, recompose count). Unsaved bytes excluded.';
   server.registerTool(
     'forge_wait',
     {

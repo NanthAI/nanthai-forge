@@ -207,6 +207,16 @@ moved), `mainMoved` (they differ), the receipt's `firstCheck`, `landedHead`,
 in retained compose results (R2), so `conflictPaths` is null today. Follow `nextCursor`
 until it is null. Nothing in it depends on GitHub.
 
+`lane-history {laneId?}` is the matching per-Lane read: one query, six indexed reads
+(Lane head and record, its first version, the overlap row), a few hundred bytes, no
+writes. It gives `openedAt`, `startBase` and `lastSyncedBase` (main at start and main now),
+and `landing` (receipt, commit, saved head, time) for open, landed and abandoned Lanes.
+`diff {laneId,summary:true}` reports per changed path whether current main is `equal`,
+`absent` or `different`, from the base, saved-head and main State manifests only: no hunks and
+no blob reads. A friction id given to `comment-planning-item` fails with a pointer: friction
+records take no comments, so comment on the Issue the record was triaged to (one indexed read,
+only on that failure).
+
 Quarantined tests continue to run. A check passes with quarantine only when all
 remaining failures are named, quarantined and unrelated, and every non-test step
 passed. Run details name each ignored test; landing receipts retain

@@ -272,6 +272,29 @@ export async function resolvePlanningId(
   return ids[0]!;
 }
 
+/** Friction records take no comments (6d815aa9). When a comment fails and the id is a friction record,
+ * say so and name the Issue to comment on. One indexed read, only on this failure; any lookup problem
+ * leaves the original error. */
+async function frictionCommentPointer(port: PlanningPort, itemId: string, error: unknown) {
+  if (!(error instanceof ForgeError) || ['WORK_STALE', 'WORK_OPERATION_CHANGED'].includes(error.code)) return;
+  try {
+    const found = await port.query<{ found: boolean; status?: string; planningItemId?: string }>(
+      'projectHostedFriction:lookup',
+      { id: itemId },
+    );
+    if (!found.found) return;
+    return new ForgeError(
+      'BAD_ARGUMENT',
+      `${itemId} is a friction record, not an Issue; friction records take no comments. ` +
+        (found.planningItemId
+          ? `It is triaged to Issue ${found.planningItemId}: comment-planning-item with itemId ${found.planningItemId}.`
+          : `It has no Issue yet: search planning for the matching Issue and comment there, or file one and link this record with friction-triage {frictionIds:["${itemId}"],status:"planned",planningItemId}.`),
+    );
+  } catch {
+    return;
+  }
+}
+
 /** Issue states from started Intents, one indexed read per Issue in a single call. */
 async function intentStates(port: PlanningPort, ids: string[]) {
   const states: Record<string, string> = {};
@@ -541,7 +564,9 @@ export async function executeHostedPlanning(
         authorLabel: comment.authorLabel || process.env.FORGE_AGENT_NAME || process.env.FORGE_ACTOR || '',
       },
       journal,
-    );
+    ).catch(async error => {
+      throw (await frictionCommentPointer(port, itemId, error)) ?? error;
+    });
     return {
       operationId: journal.operationId,
       result: {

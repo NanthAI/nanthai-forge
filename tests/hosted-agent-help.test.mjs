@@ -40,6 +40,7 @@ test('hosted help and packaged docs are generated from every enforced schema', a
       'peers',
       'queue',
       'landings',
+      'lane-history',
       'wait',
       'show',
       'board',
@@ -100,7 +101,7 @@ test('hosted coordination entry points retain supported reads and their coverage
   }
   const text = hostedAgentHelp();
   assert.match(text, /peers \{laneId\?,path\?,detail\?\}/);
-  assert.match(text, /diff \{laneId\?,paths\?,byteBudget\?,cursor\?\}/);
+  assert.match(text, /diff \{laneId\?,paths\?,byteBudget\?,summary\?,cursor\?\}/);
   assert.match(text, /unacknowledgedOverlaps and behindMain/);
   assert.match(text, /excludes unsaved peer edits/);
   assert.match(text, /compares pinned base to saved head/);

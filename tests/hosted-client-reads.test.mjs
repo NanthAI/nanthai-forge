@@ -17,6 +17,7 @@ const minimal = {
   diff: {},
   peers: {},
   queue: {},
+  'lane-history': {},
   landings: { from: '2026-11-05T21:00:00Z', to: '2026-11-05T23:20:00Z' },
   wait: { runId: randomUUID() },
   show: { path: 'a.ts' },
@@ -59,6 +60,15 @@ test('every client-side read passes CLI validation, appears in help and dispatch
     reply.result.yourLane.entries.map(e => e.position),
     [2],
   );
+  // lane-history defaults to the checkout's Lane or a given laneId; one query, laneId only.
+  f.calls.length = 0;
+  const history = await transport.dispatch('lane-history', { laneId });
+  assert.deepEqual(history.result, { schema: 1, laneId });
+  assert.deepEqual(
+    f.calls.map(c => c.name),
+    ['projectHostedLaneHistory:read'],
+  );
+  await assert.rejects(transport.dispatch('lane-history', {}), e => e.code === 'BAD_ARGUMENT');
   f.queueView.entries.pop();
   f.queueView.more = true;
   const absent = await transport.dispatch('queue', { laneId });
@@ -113,6 +123,85 @@ test('show at:"base" reads the pinned Lane base and at:"main" reads current main
   // The base is immutable, but access is rechecked before bytes return.
   f.allow(false);
   await assert.rejects(show({ laneId: f.lane.laneId, at: 'base' }), e => e.code === 'PROJECT_UNAVAILABLE');
+});
+
+// ef45884e: "are this Lane's saved changes already on main" without hunks or blob reads.
+test('diff summary:true says equal/absent/different against main from manifests only', async t => {
+  const f = agentFixture(t);
+  const put = text => {
+    const bytes = Buffer.from(text);
+    const id = digest(bytes);
+    f.objects.set(id, bytes);
+    return id;
+  };
+  const state = files => {
+    const bytes = Buffer.from(
+      JSON.stringify({
+        schema: 1,
+        kind: 'forge-source-state',
+        parents: [],
+        files: Object.entries(files).map(([path, text]) => ({ path, blob: put(text), mode: 'file' })),
+        message: 'Synthetic',
+        at: '2026-01-01T00:00:00.000Z',
+      }),
+    );
+    const id = digest(bytes);
+    f.objects.set(id, bytes);
+    return id;
+  };
+  f.lane.base.head = state({ 'a.ts': 'a0', 'b.ts': 'b0', 'c.ts': 'c0', 'g.ts': 'g0', 'h.ts': 'h0' });
+  f.lane.head = state({ 'a.ts': 'a1', 'c.ts': 'c0', 'e.ts': 'e1', 'f.ts': 'f1', 'g.ts': 'g1' });
+  f.main.head = state({ 'a.ts': 'a1', 'c.ts': 'c0', 'f.ts': 'fX', 'g.ts': 'gX', 'h.ts': 'h0' });
+  const manifests = new Set([f.lane.base.head, f.lane.head, f.main.head]);
+  const touched = [];
+  for (const name of ['downloadToFile', 'downloadBatch', 'objects']) {
+    const original = f.exchange[name];
+    f.exchange[name] = async (first, ...rest) => {
+      for (const item of [first].flat()) touched.push(item?.sha256 ?? item);
+      return original(first, ...rest);
+    };
+  }
+  const reply = await f.transport().dispatch('diff', { laneId: f.lane.laneId, summary: true });
+  const { result } = reply;
+  assert.deepEqual(
+    result.items.map(item => [item.path, item.status, item.main]),
+    [
+      ['a.ts', 'modified', 'equal'],
+      ['b.ts', 'deleted', 'equal'],
+      ['e.ts', 'added', 'absent'],
+      ['f.ts', 'added', 'different'],
+      ['g.ts', 'modified', 'different'],
+      ['h.ts', 'deleted', 'different'],
+    ],
+  );
+  assert.deepEqual(result.counts, { equal: 2, absent: 1, different: 3 });
+  assert.equal(result.total, 6);
+  assert.equal(result.nextCursor, null);
+  assert.equal(result.main, f.main.head);
+  assert(
+    result.items.every(item => !('hunks' in item) && !('before' in item)),
+    'no hunks, no file bodies',
+  );
+  assert.equal(result.cost.sourceBytes, 0);
+  assert.equal(result.cost.metadataPages, 0);
+  assert(touched.length > 0 && touched.every(id => manifests.has(id)), 'only the three manifests were read');
+  // Paths filter and a one-path budget page: the cursor resumes at the pinned pair.
+  const page = (
+    await f.transport().dispatch('diff', { laneId: f.lane.laneId, summary: true, byteBudget: 1024 })
+  ).result;
+  assert.equal(page.items.length, 6, 'a small budget still fits these short rows');
+  const only = (
+    await f.transport().dispatch('diff', { laneId: f.lane.laneId, summary: true, paths: ['g.ts', 'e.ts'] })
+  ).result;
+  assert.deepEqual(
+    only.items.map(item => item.path),
+    ['e.ts', 'g.ts'],
+  );
+  f.allow(false);
+  await assert.rejects(
+    f.transport().dispatch('diff', { laneId: f.lane.laneId, summary: true }),
+    e => e.code === 'PROJECT_UNAVAILABLE',
+  );
 });
 
 // c3e6ce8b: doctor refused every Forge clone and Lane with a Git error.

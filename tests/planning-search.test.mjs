@@ -158,6 +158,25 @@ test('50a26ac4/700de905 reproduction: source-worker body finds the existing sync
     await friction.capture._handler(s.ctx, { projectId: s.projectId, request: JSON.stringify(capture) }),
   );
   assert.deepEqual(replay, filed);
+  // 6d815aa9: a failed comment on a friction id asks what the id is and where it was triaged.
+  const lookup = async id =>
+    JSON.parse(await friction.lookup._handler(s.ctx, { projectId: s.projectId, id }));
+  assert.deepEqual(await lookup(filed.id), { found: true, status: 'open' });
+  assert.deepEqual(await lookup(randomUUID()), { found: false });
+  await friction.triage._handler(s.ctx, {
+    projectId: s.projectId,
+    request: JSON.stringify({
+      operationId: randomUUID(),
+      frictionIds: [filed.id],
+      status: 'planned',
+      planningItemId: existing.itemId,
+    }),
+  });
+  assert.deepEqual(await lookup(filed.id), {
+    found: true,
+    status: 'planned',
+    planningItemId: existing.itemId,
+  });
 });
 
 test('lexical candidates flag four historical duplicate classes (synthetic fixtures; provider recall unmeasured)', async t => {

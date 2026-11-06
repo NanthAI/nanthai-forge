@@ -332,6 +332,7 @@ export function agentFixture(t) {
     )
       result = { pending: true, version: args.version ?? 0 };
     else if (name === 'projectHostedQueueView:read') result = queueView;
+    else if (name === 'projectHostedLaneHistory:read') result = { schema: 1, laneId: args.laneId };
     else assert.fail(`Unexpected API call ${name}`);
     if (fail === name) {
       fail = null;

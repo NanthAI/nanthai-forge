@@ -10,12 +10,14 @@ import { reviewPaths } from './source-review-format.js';
 import { contextualHunks } from './review-hunks.js';
 import { safeRelative } from './safe-relative.js';
 import { invariant } from './errors.js';
-import { selectHostedSource, hostedSourceShowSchema } from './mcp-hosted-source.js';
+import { selectHostedSource, selectHostedMain, hostedSourceShowSchema } from './mcp-hosted-source.js';
+import { summarizeAgainstMain } from './hosted-diff-summary.js';
 import { hostedWaitSchema } from './hosted-agent-observe.js';
 import { readHostedLaneCheckout } from './hosted-lane-checkout-marker.js';
 import type { HostedAgentTransport } from './hosted-agent-transport.js';
 import { QUEUE_VIEW_LIMIT } from './hosted-queue-view.js';
 import { hostedLandingsSchema } from './hosted-agent-landings.js';
+import { hostedLaneHistorySchema } from './hosted-agent-lane-history.js';
 import { liveLanesInput } from './hosted-live-lanes.js';
 import { hostedBoardSchemas } from './hosted-board.js';
 const hash = z.string().regex(/^[0-9a-f]{64}$/);
@@ -31,6 +33,8 @@ export const hostedDiffSchema = z
     laneId: z.uuid().optional(),
     paths: z.array(z.string().refine(safeRelative)).optional(),
     byteBudget: z.number().int().min(1024).safe().default(48000),
+    /** Per changed path: equal / absent / different against current main. No hunks, no blob reads. */
+    summary: z.boolean().default(false),
     cursor: z
       .object({
         base: hash,
@@ -105,6 +109,7 @@ export const hostedClientReadSchemas = {
   peers: hostedPeersSchema,
   queue: hostedQueueSchema,
   landings: hostedLandingsSchema,
+  'lane-history': hostedLaneHistorySchema,
   wait: hostedWaitSchema,
   show: hostedSourceShowSchema.omit({ action: true }),
   /** The board verbs are client actions too: `board --post`/`--reply` write one note each, `--resolve` withdraws one. */
@@ -140,6 +145,52 @@ export async function diffHostedSource(transport: HostedAgentTransport, input: u
   );
   const offset = cursor?.offset ?? 0;
   invariant(offset <= changes.length, 'BAD_ARGUMENT', 'Diff cursor is beyond the pinned paths.');
+  if (command.summary) {
+    // One more manifest (current main's State); every standing is decided from manifest entries.
+    const main = await selectHostedMain(transport);
+    await cache.ensure([main.head]);
+    const page = summarizeAgainstMain(
+      changes,
+      parseNativeState(read(main.head)).files,
+      offset,
+      command.byteBudget,
+    );
+    // Cache access and an old cursor never grant current project access.
+    await transport.query('projectHostedLanes:select', { laneId: lane.laneId });
+    const next =
+      page.end < changes.length
+        ? {
+            base,
+            head,
+            offset: page.end,
+            laneId: lane.laneId,
+            ...(command.paths ? { paths: command.paths } : {}),
+          }
+        : null;
+    return {
+      sourceContext: { laneId: lane.laneId, base, head, scope: 'saved' },
+      result: {
+        summary: true,
+        base,
+        head,
+        main: main.head,
+        items: page.items,
+        counts: page.counts,
+        total: changes.length,
+        nextCursor: next,
+        truncated: next !== null,
+        cost: {
+          sourceBytes: 0,
+          outputBytes: page.outputBytes,
+          downloadedBytes: cache.downloadedBytes,
+          metadataPages: 0,
+          manifestBytes: [base, head, main.head]
+            .filter((id, index, ids) => ids.indexOf(id) === index)
+            .reduce((sum, id) => sum + read(id).length, 0),
+        },
+      },
+    };
+  }
   const window = changes.slice(offset, offset + 50);
   const ids = [
     ...new Set(

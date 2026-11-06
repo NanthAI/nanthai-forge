@@ -107,10 +107,11 @@ When you change a hosted reply in Forge itself: add fields freely, but never rem
 | `put-planning-item` | `expectedVersion?, kind?, title?, body?, status?, reason?, intentIds?, initiativeId?, itemId?, operationId?` |
 | `comment-planning-item` | `itemId, authorLabel?, text, operationId?` |
 | `lanes` | `cursor?, limit?, view?` |
-| `diff` | `laneId?, paths?, byteBudget?, cursor?` |
+| `diff` | `laneId?, paths?, byteBudget?, summary?, cursor?` |
 | `peers` | `laneId?, path?, detail?` |
 | `queue` | `limit?, laneId?` |
 | `landings` | `from, to, limit?, cursor?` |
+| `lane-history` | `laneId?` |
 | `wait` | `runId?, operationIds?, cursor?, until?, timeoutSeconds?, peer?` |
 | `show` | `laneId?, state?, candidateId?, expected?, channel?, at?, path, force?` |
 | `board` | `id?, laneId?, all?` |
@@ -132,7 +133,19 @@ MCP `forge_review` exposes hosted `show`, `diff` and `peers`.
   Defaults: 48,000 source/hunk bytes plus path metadata, 50 paths/page. Continue
   `result.nextCursor` with the same Lane/paths, retaining the pair after saves.
   `omitted`/`requiredByteBudget` and `truncated` disclose shortened output;
-  increase the budget or use exact show for remaining bytes.
+  increase the budget or use exact show for remaining bytes. `summary:true`
+  answers "are this Lane's saved changes already on main": per changed path its
+  `status` (added|deleted|modified) and `main` (`equal`: main holds the saved
+  bytes and mode, or the Lane deleted a path main lacks; `absent`: main has no
+  such path; `different`: both have it and differ, or main still has a path the
+  Lane deleted), plus whole-set `counts`. No hunks, no blob reads: it reads the
+  base, saved-head and current-main State manifests (`cost.manifestBytes`) and
+  pages by the same `nextCursor` (up to 500 paths or `byteBudget` bytes a page).
+- `lane-history {laneId?}` is one query from stored rows for an open, landed or
+  abandoned Lane: `openedAt`, `startBase` (the main it started from),
+  `lastSyncedBase` (the main its base is now), `synced`, `state`, `head`,
+  `lastActivityAt` and `landing {receiptId,commit,head,at,current}` (null when
+  nothing landed or the Lane landed before the landing stamp). No writes.
 - `show` selects one exact `{laneId,path}`, `{channel:"main",path}`, `{state,path}`
   or `{candidateId,path}`. `at:"base"` reads the file at this Lane's pinned base (the
   main it started from; use it instead of the project clone to compare with what

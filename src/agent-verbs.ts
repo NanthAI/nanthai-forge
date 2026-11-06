@@ -87,6 +87,7 @@ export const namedReads = [
   'peers',
   'queue',
   'landings',
+  'lane-history',
   'board',
   'handoff-read',
   'making-of',

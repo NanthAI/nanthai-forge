@@ -96,6 +96,29 @@ export const list = query({
   },
 });
 
+/** One indexed read: what a friction id is and where it was triaged. Only a failed planning comment
+ * asks (the CLI points the caller at the Issue to comment on); nothing calls this on a healthy path. */
+export const lookup = query({
+  args: { projectId: v.id('hostedProjects'), id: v.string() },
+  returns: v.string(),
+  handler: async (ctx, { projectId, id }) => {
+    try {
+      await recordCaller(ctx, projectId);
+      const row = await frictionRow(ctx, projectId, id);
+      const event = row ? frictionEventSchema.safeParse(JSON.parse(row.value)) : null;
+      if (!row || !event?.success || event.data.kind !== 'capture') return canonicalPayload({ found: false });
+      const state: FrictionTriageState | undefined = row.triage ? JSON.parse(row.triage) : undefined;
+      return canonicalPayload({
+        found: true,
+        status: state?.status ?? 'open',
+        ...(state?.planningItemId ? { planningItemId: state.planningItemId } : {}),
+      });
+    } catch (error) {
+      return report(error);
+    }
+  },
+});
+
 const parseRequest = <T extends z.ZodType>(schema: T, input: string, what: string): z.infer<T> => {
   let value: unknown;
   try {

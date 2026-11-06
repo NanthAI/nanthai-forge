@@ -5,6 +5,7 @@ import { cloneFreshness, mainCheckoutTransport, pullHostedProject } from './host
 import { readHostedMainSelection } from './hosted-main-marker.js';
 import { diffHostedSource, peersHostedSource, queueHostedSource } from './hosted-agent-reads.js';
 import { landingsHostedSource } from './hosted-agent-landings.js';
+import { laneHistoryHostedSource } from './hosted-agent-lane-history.js';
 import { hostedObservationContinuation } from './hosted-agent-finish-result.js';
 // SPDX-License-Identifier: Apache-2.0
 import {
@@ -122,6 +123,7 @@ const quietActions = new Set([
   'peers',
   'queue',
   'landings',
+  'lane-history',
   'capabilities',
   'metrics',
   'check-settings',
@@ -173,6 +175,7 @@ export type HostedAgentResponse = {
     | 'lanes'
     | 'queue'
     | 'landings'
+    | 'lane-history'
     | 'board'
     | 'board-post'
     | 'board-reply'
@@ -301,6 +304,15 @@ export class HostedAgentTransport {
         operationId: null,
         resolved: null,
         result: await landingsHostedSource(this, input),
+      };
+    if (requestedAction === 'lane-history')
+      return {
+        schema: 1,
+        transport: 'hosted',
+        action: 'lane-history',
+        operationId: null,
+        resolved: null,
+        result: await laneHistoryHostedSource(this, input),
       };
     if (requestedAction === 'queue')
       return {

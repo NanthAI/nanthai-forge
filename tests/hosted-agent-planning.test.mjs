@@ -27,10 +27,16 @@ const code = expected => error => (error.data?.code ?? error.code) === expected;
  * omitted put fields, so the port advertises that by default, as the transport does after discovery. */
 function port(s, states = new Map(), serverFeatures = [...hostedContractFeatures]) {
   installPlanningSearch(s);
-  const calls = [];
+  const calls = [],
+    frictions = new Map();
   let intercept;
   const invoke = async (name, args) => {
     calls.push(name);
+    // The friction record lookup (6d815aa9) is stubbed; its own query is tested with the friction handlers.
+    if (name === 'projectHostedFriction:lookup')
+      return JSON.stringify(
+        frictions.has(args.id) ? { found: true, ...frictions.get(args.id) } : { found: false },
+      );
     if (name === 'projectHostedPlanning:intentStates')
       return JSON.stringify(
         Object.fromEntries(args.ids.filter(id => states.has(id)).map(id => [id, states.get(id)])),
@@ -50,6 +56,7 @@ function port(s, states = new Map(), serverFeatures = [...hostedContractFeatures
   const result = {
     calls,
     states,
+    frictions,
     root: join(s.directory, 'checkout'),
     address: { url: 'https://fixture.invalid', projectId: s.projectId },
     exchange: {
@@ -1398,4 +1405,33 @@ test('a server without resolveId answers a short id with a typed error that asks
       : query(name, args);
   await assert.rejects(list(p, { id: issue.itemId.slice(0, 8) }), code('HOSTED_ACTION_UNSUPPORTED'));
   assert.equal((await list(p, { id: issue.itemId, reconcile: false })).item.id, issue.itemId);
+});
+
+// 6d815aa9: friction records take no comments; a comment on a friction id points at the Issue instead.
+test('a comment on a friction id names the Issue it was triaged to; other failures keep their error', async t => {
+  const s = await setup(t),
+    p = port(s);
+  const issue = (await put(p, { kind: 'issue', title: 'Triaged home', body: 'x' })).result;
+  const triaged = randomUUID(),
+    untriaged = randomUUID(),
+    unknown = randomUUID();
+  p.frictions.set(triaged, { status: 'planned', planningItemId: issue.itemId });
+  p.frictions.set(untriaged, { status: 'open' });
+  await assert.rejects(
+    run(p, 'comment-planning-item', { itemId: triaged, text: 'repeat evidence' }),
+    error =>
+      error.code === 'BAD_ARGUMENT' &&
+      /friction record, not an Issue/.test(error.message) &&
+      error.message.includes(`itemId ${issue.itemId}`),
+  );
+  await assert.rejects(
+    run(p, 'comment-planning-item', { itemId: untriaged, text: 'repeat evidence' }),
+    error => error.code === 'BAD_ARGUMENT' && /friction-triage/.test(error.message),
+  );
+  // Not a friction record either: the original NOT_FOUND stays.
+  await assert.rejects(run(p, 'comment-planning-item', { itemId: unknown, text: 'x' }), code('NOT_FOUND'));
+  // A healthy comment makes no friction lookup.
+  p.calls.length = 0;
+  await run(p, 'comment-planning-item', { itemId: issue.itemId, text: 'fine' });
+  assert(!p.calls.includes('projectHostedFriction:lookup'));
 });
