@@ -10,7 +10,9 @@ source revision distance. Pull refuses local tracked edits, preserves disjoint
 ignored outputs/dependency links, resumes interrupted publication, reuses cached
 and unchanged local bytes, and fetches no source packs. Current pulls cost one
 head query and no R2 GETs; receipts report requests and transferred bytes. Pull
-preserves the root and surviving directory inodes for existing shells/editors.
+preserves the root and surviving directory inodes for existing shells/editors and
+applies through the Lane checkout's in-place delta journal, so its file work
+scales with changed paths (unchanged files are trusted through the stat index).
 
 The CLI lists open hosted Lanes in a single bounded page query (`agent ROOT lanes`),
 records project friction without a Lane (`friction-list` pages it with its triage status; `x friction-triage` dismisses or links an Issue), diagnoses unaddressed roots and unavailable

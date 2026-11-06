@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { lstatSync, readFileSync, readlinkSync } from 'node:fs';
+import { lstatSync, readdirSync, readFileSync, readlinkSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { z } from 'zod';
@@ -63,13 +63,17 @@ const ancestors = (files: readonly { path: string }[]) => {
 /** Spelling-insensitive identity: case-insensitive and normalization-insensitive filesystems
  * (default APFS, Windows) give these one directory entry. */
 const fold = (path: string) => path.normalize('NFC').toLowerCase();
-/** Changed paths between the installed materialized files and the target. Null when a path turns
- * from a file into a directory or back, or when an incoming path or parent differs from an
- * installed one only by case or Unicode normalization: those rare shapes keep the full
- * private-stage install, which publishes the exact spelling. */
+/** Changed paths between the installed materialized files and the target. Null when an incoming
+ * path or parent differs from an installed one only by case or Unicode normalization, and (unless
+ * `transitions`) when a path turns from a file into a directory or back: those rare shapes keep
+ * the full private-stage install, which publishes the exact spelling. With `transitions` (the
+ * clone root, which never swaps its directory) a flip applies in place: the old file moves aside
+ * before the new directory is made, and a directory emptied by removals goes before a file takes
+ * its name. */
 export function checkoutDelta(
   prior: readonly NativeFile[],
   target: readonly NativeFile[],
+  options: { transitions?: boolean } = {},
 ): CheckoutDelta | null {
   const before = new Map(prior.map(file => [file.path, file])),
     after = new Set(target.map(file => file.path));
@@ -82,8 +86,9 @@ export function checkoutDelta(
   const priorDirectories = ancestors(prior),
     targetDirectories = ancestors(target);
   if (
-    install.some(file => priorDirectories.has(file.path)) ||
-    remove.some(file => targetDirectories.has(file.path))
+    !options.transitions &&
+    (install.some(file => priorDirectories.has(file.path)) ||
+      remove.some(file => targetDirectories.has(file.path)))
   )
     return null;
   const spelled = new Map<string, string>();
@@ -94,8 +99,20 @@ export function checkoutDelta(
   }
   return { install, remove };
 }
+/** True when every non-directory under `path` is a removed source file, so the removals leave
+ * only empty directories there (a file-to-directory flip in reverse). */
+function emptiedBy(root: string, path: string, removed: ReadonlySet<string>): boolean {
+  for (const name of readdirSync(join(root, path))) {
+    const child = `${path}/${name}`,
+      stat = lstatSync(join(root, child));
+    if (stat.isDirectory() && !stat.isSymbolicLink() ? !emptiedBy(root, child, removed) : !removed.has(child))
+      return false;
+  }
+  return true;
+}
 /** Disk shapes the in-place install cannot take without moving untracked content: an incoming
- * path held by a directory, or an incoming parent held by a non-directory that is not replaced. */
+ * path held by a directory that the removals do not empty, or an incoming parent held by a
+ * non-directory that is not replaced. */
 export function deltaObstructed(root: string, delta: CheckoutDelta) {
   const removed = new Set(delta.remove.map(file => file.path));
   for (const file of delta.install) {
@@ -110,7 +127,7 @@ export function deltaObstructed(root: string, delta: CheckoutDelta) {
         throw error;
       }
       if (i === parts.length) {
-        if (stat.isDirectory() && !stat.isSymbolicLink()) return path;
+        if (stat.isDirectory() && !stat.isSymbolicLink() && !emptiedBy(root, path, removed)) return path;
       } else if ((!stat.isDirectory() || stat.isSymbolicLink()) && !removed.has(path)) return path;
     }
   }
@@ -131,6 +148,26 @@ export function deltaMatches(path: string, file: DeltaPin) {
       ? file.mode === 'symlink'
       : file.mode !== 'symlink' && Boolean(stat.mode & 0o111) === (file.mode === 'executable')),
   );
+}
+/** Every path whose current bytes move aside, pinned to the bytes the caller verified there:
+ * removed files and incoming paths a file or link already holds (its prior blob, or the incoming
+ * one for a path the baseline did not have). A directory at an incoming path is emptied by the
+ * removals instead (see deltaObstructed), never moved. */
+export function deltaDisplacement(root: string, delta: CheckoutDelta, prior: readonly NativeFile[]) {
+  const before = new Map(prior.map(file => [file.path, file]));
+  const held = (path: string) => {
+    try {
+      const stat = lstatSync(join(root, path));
+      return !stat.isDirectory() || stat.isSymbolicLink();
+    } catch (error) {
+      if (['ENOENT', 'ENOTDIR'].includes((error as NodeJS.ErrnoException).code ?? '')) return false;
+      throw error;
+    }
+  };
+  return [
+    ...delta.remove,
+    ...delta.install.filter(file => held(file.path)).map(file => before.get(file.path) ?? file),
+  ].map(({ path, blob, mode }) => ({ path, blob, mode }));
 }
 /** Journal an in-place install of a private, already durable stage. `displace` names every path
  * whose current bytes move aside, with the bytes the caller verified there. */
@@ -166,7 +203,7 @@ export function deltaPendingError(reason: string, path: string, next: string) {
     'WORK_CONFLICT',
     `An interrupted local apply in this checkout cannot finish: ${reason} Nothing more was changed; the apply journal (.forge-client/${deltaJournalName}) and its staged files are kept. ${next}`,
     undefined,
-    { obstruction: { kind: 'delta-apply-pending', path } },
+    { obstruction: { kind: 'delta-apply-pending', path }, reason },
   );
 }
 export function readDeltaJournal(path: string): DeltaJournal {

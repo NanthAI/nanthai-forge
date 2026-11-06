@@ -6,20 +6,18 @@ import {
   readFileSync,
   readlinkSync,
   readdirSync,
-  renameSync,
   rmSync,
   rmdirSync,
   symlinkSync,
 } from 'node:fs';
-import { basename, dirname, join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { z } from 'zod';
 import { checkoutPathExists as exists } from './hosted-checkout-files.js';
-import { durableReplace, syncDirectory } from './native-durability.js';
+import { syncDirectory } from './native-durability.js';
 import { digest } from './hash.js';
 import { nativeFile } from './native-file.js';
 import { safeRelative } from './safe-relative.js';
 import { invariant } from './errors.js';
-import type { NativeFile } from './native-state-format.js';
 const file = z.object({ path: z.string().refine(safeRelative), blob: z.string(), mode: z.string() });
 const journalSchema = z.object({
   before: z.array(file),
@@ -75,9 +73,10 @@ function parents(root: string, path: string) {
     );
   }
 }
-/** Recover a partial per-file publication before checkout validation. A completed
- * marker commits the tree; otherwise restore only our changed paths from backup.
- * Occupied paths with different bytes are never silently overwritten. */
+/** Recover a partial per-file publication written by an older client (publish.json) before
+ * checkout validation; current clients publish through the shared delta journal
+ * (hosted-checkout-delta.ts). A completed marker commits the tree; otherwise restore only our
+ * changed paths from backup. Occupied paths with different bytes are never silently overwritten. */
 export function recoverMainPublication(root: string, cache: string) {
   const path = join(cache, 'publish.json'),
     backup = join(cache, 'publish-backup');
@@ -139,66 +138,4 @@ export function recoverMainPublication(root: string, cache: string) {
   rmSync(join(cache, journal.stage), { recursive: true, force: true });
   rmSync(path);
   syncDirectory(cache);
-}
-/** Keep ROOT and all surviving directories in place. Stage and backup are local
- * regenerable data; the marker is published last and an interrupted apply rolls back. */
-export function publishMainInPlace(
-  root: string,
-  cache: string,
-  stage: string,
-  before: NativeFile[],
-  after: NativeFile[],
-) {
-  const old = new Map(before.map(item => [item.path, item]));
-  const next = new Map(after.map(item => [item.path, item]));
-  const changedBefore = before.filter(
-    item => next.get(item.path)?.blob !== item.blob || next.get(item.path)?.mode !== item.mode,
-  );
-  const changedAfter = after.filter(
-    item => old.get(item.path)?.blob !== item.blob || old.get(item.path)?.mode !== item.mode,
-  );
-  const backup = join(cache, 'publish-backup'),
-    journal = join(cache, 'publish.json');
-  const marker = readFileSync(join(stage, '.forge/hosted-main.json'), 'utf8');
-  invariant(
-    !exists(journal) && !exists(backup),
-    'WORK_CONFLICT',
-    'Resume the interrupted nforge pull before publishing another checkout.',
-  );
-  mkdirSync(backup);
-  durableReplace(
-    journal,
-    JSON.stringify({ before: changedBefore, after: changedAfter, marker, stage: basename(stage) }),
-  );
-  try {
-    for (const item of changedBefore) {
-      parents(backup, item.path);
-      renameSync(join(root, item.path), join(backup, item.path));
-      syncDirectory(dirname(join(root, item.path)));
-      syncDirectory(dirname(join(backup, item.path)));
-      invariant(
-        matches(backup, item),
-        'WORK_CONFLICT',
-        `Local edits at ${JSON.stringify(item.path)} changed during pull. They are restored; move edits into a Lane and rerun the original nforge pull command.`,
-      );
-    }
-    for (const item of changedAfter) {
-      const target = join(root, item.path);
-      emptyDirectory(target);
-      invariant(
-        !exists(target),
-        'WORK_CONFLICT',
-        `Pull destination ${JSON.stringify(item.path)} changed. Preserve the obstruction and rerun nforge pull ROOT.`,
-      );
-      parents(root, item.path);
-      publishFile(join(stage, item.path), target);
-      syncDirectory(dirname(target));
-    }
-    durableReplace(join(root, '.forge/hosted-main.json'), marker);
-    syncDirectory(root);
-  } catch (error) {
-    recoverMainPublication(root, cache);
-    throw error;
-  }
-  recoverMainPublication(root, cache);
 }

@@ -1218,10 +1218,10 @@ export class HostedAgentTransport {
       'Save first: preflight records a result for the saved head, and these files have unsaved edits.',
     );
     // File times can miss an edit made while a save was uploading (the marker is rewritten after it).
-    // The receipt must name the bytes under test, so confirm them against the saved baseline: a local,
-    // read-only digest pass that skips files the stat index vouches for.
+    // The receipt must name the bytes under test, so confirm them against the saved baseline: a local
+    // digest pass that skips files the stat index vouches for (and refreshes its racy entries).
     invariant(
-      !hostedLaneDirty(root),
+      !hostedLaneDirty(root, { refresh: true }),
       'LANE_DIRTY',
       'Save first: preflight records a result for the saved head, and the files here differ from it.',
     );

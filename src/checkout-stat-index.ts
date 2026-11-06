@@ -22,18 +22,22 @@ export type CheckoutStatIndex = { since: number; entries: Map<string, Entry> };
 
 const path = (root: string) => join(clientCacheRoot(root), checkoutStatIndexName);
 
-/** The index for this checkout, or an empty one when absent or unreadable (everything hashes). */
+/** The index for this checkout, or an empty one when absent or unreadable (everything hashes).
+ * `since` is the client clock when the observations began; it is also bounded by the index file's
+ * own mtime, the file system's clock after every observation (Git's racy rule), so a client clock
+ * ahead of a network file system's clock never makes a fresh timestamp look old. */
 export function readCheckoutStatIndex(root: string): CheckoutStatIndex {
   try {
     const file = path(root);
     if (!checkoutPathExists(file)) return { since: 0, entries: new Map() };
+    const written = lstatSync(file).mtimeMs;
     const value = JSON.parse(readFileSync(file, 'utf8')) as {
       schema: number;
       since: number;
       entries: Record<string, Entry>;
     };
     if (value.schema !== 1 || typeof value.since !== 'number') return { since: 0, entries: new Map() };
-    return { since: value.since, entries: new Map(Object.entries(value.entries)) };
+    return { since: Math.min(value.since, written), entries: new Map(Object.entries(value.entries)) };
   } catch {
     return { since: 0, entries: new Map() };
   }
@@ -76,6 +80,40 @@ export function writeCheckoutStatIndex(root: string, since: number, entries: Map
   } catch {
     /* Speed only. */
   }
+}
+
+/** Git-style refresh of racily clean entries. A file changed shortly before it was indexed (an
+ * install, a save) stays "racy" and is re-read by every check, because a second write inside the
+ * same timestamp tick would leave its lstat unchanged. A complete check pass records the lstat of
+ * every file it saw: entries the index already trusted as they are, and files it re-read and found
+ * to hold their baseline blob. When the pass found no difference and at least one re-read file is
+ * now safely older than the pass start, the index is rewritten with the pass start as `since`.
+ * Every rewritten entry was observed after that `since`, so the racy rule still holds for each; a
+ * file written inside the window stays racy and is read again, never trusted on its lstat alone.
+ * Create it before the first lstat of the pass. */
+export function statIndexRefresh(root: string) {
+  const since = Date.now(),
+    entries = new Map<string, Entry>();
+  let refreshable = 0;
+  return {
+    /** A file the index already vouches for at this lstat. */
+    kept(file: string, stat: Pick<Stats, 'size' | 'mtimeMs' | 'ctimeMs' | 'ino' | 'mode'>, blob: string) {
+      entries.set(file, statEntry(stat, blob));
+    },
+    /** A file read in this pass (lstat taken before reading) that held `blob`. */
+    read(file: string, stat: Pick<Stats, 'size' | 'mtimeMs' | 'ctimeMs' | 'ino' | 'mode'>, blob: string) {
+      entries.set(file, statEntry(stat, blob));
+      const margin = racyMarginMs(stat);
+      if (stat.mtimeMs < since - margin && stat.ctimeMs < since - margin) refreshable++;
+    },
+    /** After a complete pass with no difference: persist the refresh when it trusts something new.
+     * Returns how many re-read files the rewrite now vouches for (0 when nothing was written). */
+    commit() {
+      if (!refreshable) return 0;
+      writeCheckoutStatIndex(root, since, entries);
+      return refreshable;
+    },
+  };
 }
 
 /** Index freshly installed files (a private stage before it becomes the checkout). */

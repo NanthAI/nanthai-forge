@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { lstatSync, mkdirSync, readFileSync, renameSync, rmdirSync, rmSync } from 'node:fs';
+import { lstatSync, mkdirSync, readdirSync, readFileSync, renameSync, rmdirSync, rmSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import { digest } from './hash.js';
@@ -86,14 +86,40 @@ const backupDirectories = (backup: string, journal: DeltaJournal) => [
   backup,
 ];
 
+/** Remove a directory tree that holds only directories; anything else stays and throws ENOTEMPTY.
+ * Never follows a link. */
+function removeEmptyTree(path: string) {
+  for (const name of readdirSync(path)) {
+    const child = join(path, name),
+      stat = lstatSync(child);
+    if (stat.isDirectory() && !stat.isSymbolicLink()) removeEmptyTree(child);
+  }
+  rmdirSync(path);
+}
+function removeEmptied(root: string, directory: string, track: (path: string) => void) {
+  track(directory);
+  try {
+    rmdirSync(join(root, directory));
+  } catch (error) {
+    if (!['ENOENT', 'ENOTEMPTY', 'EEXIST', 'ENOTDIR'].includes((error as NodeJS.ErrnoException).code ?? ''))
+      throw error;
+  }
+}
+
 /** Finish or undo an interrupted (or this process's) in-place install, under the work lock.
  * - Root marker is the target: the install published; only bookkeeping remains.
  * - Root marker is the prior one and the stage is whole: roll forward. A local edit found before
  *   anything was installed restores every moved path and refuses, from any command.
  * - Stage marker missing, or a decided rollback: remove installed bytes that are exactly ours and
  *   restore moved-aside bytes; a later edit to an installed path refuses and keeps the journal.
- * - Any other marker: refuse and keep everything; finishing would vouch for unknown bytes. */
-export function settleCheckoutDelta(root: string, cacheRoot: string): DeltaSettlement | null {
+ * - Any other marker: refuse and keep everything; finishing would vouch for unknown bytes.
+ * `abort` (the clone root after an in-process failure) rolls an unpublished apply back now, so the
+ * working tree is never left half-applied while no command runs. */
+export function settleCheckoutDelta(
+  root: string,
+  cacheRoot: string,
+  options: { abort?: boolean } = {},
+): DeltaSettlement | null {
   const journalPath = join(cacheRoot, deltaJournalName);
   if (!exists(journalPath)) return null;
   const journal = readDeltaJournal(journalPath);
@@ -112,9 +138,12 @@ export function settleCheckoutDelta(root: string, cacheRoot: string): DeltaSettl
       throw deltaPendingError(
         'the checkout marker changed after it started.',
         `.forge/${journal.marker}`,
-        'Copy out any edits you need, then open this Lane in a new directory (start or open with a path).',
+        journal.marker === 'hosted-main.json'
+          ? 'Copy out any edits you need, then nforge clone the project into a new directory.'
+          : 'Copy out any edits you need, then open this Lane in a new directory (start or open with a path).',
       );
-    if (journal.aborting || !exists(stageMarker)) return rollBack(steps, path => (at = path));
+    if (options.abort || journal.aborting || !exists(stageMarker))
+      return rollBack(steps, path => (at = path));
     return rollForward({ ...steps, stageMarker, rootMarker }, path => (at = path));
   } catch (error) {
     // A filesystem refusal names its path and keeps the journal; anything else is a defect.
@@ -156,6 +185,11 @@ function rollForward(
       renameSync(from, to);
     }
   }
+  // A directory taking a file's place (or holding an incoming file's name) is emptied first.
+  const installPaths = journal.install.map(file => file.path);
+  const flipped = (directory: string) =>
+    installPaths.some(path => directory === path || directory.startsWith(`${path}/`));
+  for (const directory of journal.directories) if (flipped(directory)) removeEmptied(root, directory, track);
   const changed = journal.displace.filter(
     file => exists(join(backup, file.path)) && !matches(join(backup, file.path), file),
   );
@@ -196,13 +230,7 @@ function rollForward(
   }
   const parents = [...journal.install, ...journal.displace].map(file => dirname(join(root, file.path)));
   for (const directory of journal.directories) {
-    track(directory);
-    try {
-      rmdirSync(join(root, directory));
-    } catch (error) {
-      if (!['ENOENT', 'ENOTEMPTY', 'EEXIST', 'ENOTDIR'].includes((error as NodeJS.ErrnoException).code ?? ''))
-        throw error;
-    }
+    if (!flipped(directory)) removeEmptied(root, directory, track);
     parents.push(dirname(join(root, directory)));
   }
   // Every parent the journal touched, including renames done before an interruption, is durable
@@ -213,8 +241,9 @@ function rollForward(
   return finish(steps);
 }
 function finish(steps: Steps): DeltaSettlement {
-  const { journal, root, cacheRoot, stage, backup } = steps;
-  // Unchanged entries keep vouching for unchanged inodes; installed ones are re-read once.
+  const { journal, root, backup } = steps;
+  // Unchanged entries keep vouching for unchanged inodes. Installed ones are racy (just renamed)
+  // until a later clean check or dirty check re-reads them once and refreshes the index.
   const index = readCheckoutStatIndex(root);
   for (const file of journal.displace) index.entries.delete(file.path);
   for (const file of journal.install)
@@ -227,15 +256,22 @@ function finish(steps: Steps): DeltaSettlement {
   const kept =
     exists(join(backup, 'occupied')) ||
     journal.displace.some(file => exists(join(backup, file.path)) && !matches(join(backup, file.path), file));
+  return retire(steps, kept, 'published');
+}
+/** Regenerable folders go before the journal, so an interruption here leaves the journal to finish
+ * the cleanup on the next command instead of an untracked moved-aside folder. Kept bytes are
+ * flushed and listed first. */
+function retire(steps: Steps, kept: boolean, outcome: DeltaSettlement['outcome'], conflict?: ForgeError) {
+  const { journal, cacheRoot, stage, backup } = steps;
   if (kept) {
     syncAll(backupDirectories(backup, journal));
     retainedDeltaBackups(cacheRoot, backup);
   }
-  rmSync(steps.journalPath, { force: true });
-  syncDirectory(cacheRoot);
   rmSync(stage, { recursive: true, force: true });
   if (!kept) rmSync(backup, { recursive: true, force: true });
-  return { outcome: 'published', retained: kept ? [backup] : [] };
+  rmSync(steps.journalPath, { force: true });
+  syncDirectory(cacheRoot);
+  return { outcome, retained: kept ? [backup] : [], ...(conflict ? { conflict } : {}) };
 }
 /** Return the checkout to its prior baseline. Installed paths are removed only while they hold
  * exactly the incoming bytes; moved-aside bytes go back wherever the path is free. */
@@ -260,6 +296,15 @@ function rollBack(steps: Steps, track: (path: string) => void, conflict?: ForgeE
     if (!exists(from)) continue;
     track(file.path);
     guard(file.path);
+    // A directory the install made at a file's name goes once only directories remain in it.
+    const directory = exists(to) && lstatSync(to).isDirectory();
+    if (directory)
+      try {
+        removeEmptyTree(to);
+        touched.push(dirname(to));
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOTEMPTY') throw error;
+      }
     if (exists(to)) {
       kept = true;
       continue;
@@ -269,15 +314,7 @@ function rollBack(steps: Steps, track: (path: string) => void, conflict?: ForgeE
     touched.push(dirname(to));
   }
   syncAll(touched);
-  if (kept) {
-    syncAll(backupDirectories(backup, journal));
-    retainedDeltaBackups(cacheRoot, backup);
-  }
-  rmSync(steps.journalPath, { force: true });
-  syncDirectory(cacheRoot);
-  rmSync(stage, { recursive: true, force: true });
-  if (!kept) rmSync(backup, { recursive: true, force: true });
-  return { outcome: 'rolled-back', retained: kept ? [backup] : [], ...(conflict ? { conflict } : {}) };
+  return retire(steps, kept, 'rolled-back', conflict);
 }
 /** An installed path is ours to remove only while it holds exactly the incoming bytes. Anything
  * else was written after the interruption and refuses, keeping the journal for a rerun. */

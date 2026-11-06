@@ -700,9 +700,16 @@ identify the event, revision, action and expected/actual Work digest prefixes.
 `nforge pull ROOT` (agent `pull {}`, existing MCP `forge_task`) refreshes a clone
 through `checkoutHostedMain`, using the shared clean/stage/artifact-preservation
 engine. Its sibling operation journal automatically resumes an interrupted pull;
-refresh preserves the root and surviving directory inodes, renames changed files
-from a verified stage, and publishes the baseline marker last. A sibling journal
-retains old changed files and restores interrupted publication before validation.
+refresh preserves the root and surviving directory inodes and applies through the
+same in-place delta journal as a Lane checkout (below): only changed paths are
+fetched, verified, staged and flushed, the checkout is validated through its stat
+index, and the baseline marker is published last. File/directory flips apply in
+place too (the old file moves aside before the directory is made; a directory
+emptied by removals goes before a file takes its name). A pull killed mid-apply is
+finished, rolled back or refused by the next pull exactly as in a Lane; an error
+inside a live pull rolls the root back at once, because people read the clone
+between commands. A `publish.json` journal left by an older client still rolls back
+before validation.
 Local
 tracked edits refuse with a Lane next step. Ignored build outputs and dependency
 links survive disjoint changes; occupied incoming paths are refused. Completion
@@ -1215,7 +1222,14 @@ precedence over exclusions: changed saved bytes/modes and incoming path or paren
 collisions remain structured conflicts. Matching untracked incoming source is
 safe to install. Ignored directories without source intersections are pruned;
 link targets and ignored output bytes are never scanned. The clean check skips
-reading saved files whose exact lstat the checkout stat index vouches for.
+reading saved files whose exact lstat the checkout stat index vouches for. Like
+Git's index, an entry whose file changed within the racy window before it was
+indexed (a fresh install or save) is re-read until a complete clean check, or the
+dirty check of a command working in that Lane, sees it safely older than the pass
+start and rewrites the index with that start; every rewritten entry was observed
+after it, and a file written inside the window stays racy. The window is measured
+against both the client clock and the index file's own mtime (the filesystem
+clock). Housekeeping probes never write the index.
 
 When the checkout already has a trusted installed marker, apply is in place and
 proportional to changed paths: only paths whose bytes or mode differ are fetched,
@@ -1238,7 +1252,8 @@ the preserved checkout. A journal from a newer client asks for an upgrade. Bytes
 moved aside after installing began (an edit or a recreated incoming path) are kept,
 listed in `displacedRecovery` with a `warning`, and refuse a save once. Every
 parent directory the journal touched is flushed before the marker is published,
-and kept folders before the journal is removed. Unchanged files keep their inodes,
+and kept folders before the journal is removed; the stage and verified backup are
+removed before the journal, so the journal is the last record to go. Unchanged files keep their inodes,
 ignored output stays where it is, and emptied directories are removed. Without a
 trusted marker, when a path changes between file and directory, or when an incoming
 path or parent differs from an installed one only by case or Unicode
@@ -1247,7 +1262,7 @@ journal names are swept. A local artifact-path
 journal precedes that directory swap. Artifacts move from the retained previous
 checkout only after publication, and original-operation replay resumes those
 renames without overwriting an occupied destination. Main checkout uses the same
-validation and preservation functions. Server source
+validation and preservation functions and, for a pull, the same delta journal. Server source
 publication and optional local installation have separate outcomes.
 
 ### Hosted check definitions and provider evidence

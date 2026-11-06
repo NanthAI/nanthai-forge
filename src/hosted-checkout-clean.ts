@@ -7,7 +7,7 @@ import type { NativeFile } from './native-state-format.js';
 import { readSource, sourceExclusion } from './files.js';
 import { preserveLegacyCacheUse } from './client-cache-use.js';
 import { ignoredBy, ignoreLayer } from './source-ignore.js';
-import { indexedBlob, type CheckoutStatIndex } from './checkout-stat-index.js';
+import { indexedBlob, statIndexRefresh, type CheckoutStatIndex } from './checkout-stat-index.js';
 
 /** Validate saved source even when ignored. Return only disjoint local artifacts
  * to carry across publication; never follow links or read ignored output bytes.
@@ -31,6 +31,8 @@ export function cleanHostedCheckout(
     'UNSAFE_PATH',
     'Checkout directory must be real.',
   );
+  // Started before the first lstat of saved files, so its `since` precedes every observation.
+  const refresh = options.index ? statIndexRefresh(root) : null;
   const sourceRoot = realpathSync(root);
   const allowed = new Map(files.map(file => [file.path, file]));
   const target = new Map(options.target?.map(file => [file.path, file]) ?? []);
@@ -98,6 +100,7 @@ export function cleanHostedCheckout(
       const file = saved ?? incoming;
       // Like save and dirty checks: an exact lstat match with this baseline is not re-read.
       if (saved && options.index && indexedBlob(options.index, path, stat, saved.blob)) {
+        refresh?.kept(path, stat, saved.blob);
         allowed.delete(path);
         continue;
       }
@@ -138,6 +141,7 @@ export function cleanHostedCheckout(
             },
           },
         );
+      if (saved) refresh?.read(path, stat, saved.blob);
       allowed.delete(path);
     }
   }
@@ -149,5 +153,7 @@ export function cleanHostedCheckout(
       undefined,
       { obstruction: { kind: 'deletion', path: allowed.keys().next().value } },
     );
+  // Clean: entries re-read only because they were racy are trusted from now on (Git's refresh).
+  refresh?.commit();
   return preserved;
 }

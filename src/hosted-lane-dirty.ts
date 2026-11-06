@@ -5,20 +5,23 @@ import { readHostedLaneCheckout } from './hosted-lane-checkout-marker.js';
 import { forgeCachePath } from './forge-cache-paths.js';
 import { digest } from './hash.js';
 import { nativePaths } from './source-paths.js';
-import { indexedBlob, readCheckoutStatIndex } from './checkout-stat-index.js';
+import { indexedBlob, readCheckoutStatIndex, statIndexRefresh } from './checkout-stat-index.js';
 import { deltaApplyPending } from './hosted-checkout-delta-pending.js';
 
 const LARGE_FILE = 256 * 1024 * 1024;
 /** True when the checkout differs from its saved baseline, or when that cannot be established
  * (an in-place apply is running or was interrupted: the marker may not describe the bytes yet).
- * Read-only and local: it hashes files in place (skipping those the checkout stat index vouches
- * for) and writes nothing, unlike a save capture. */
-export function hostedLaneDirty(root: string): boolean {
+ * Local: it hashes files in place (skipping those the checkout stat index vouches for). With
+ * `refresh` (a command working in this Lane), a clean pass also refreshes racy stat-index entries,
+ * as Git status does, so files installed or saved inside the racy window are read once more, not on
+ * every check. Housekeeping probes leave it off: they write nothing, so they never look like use. */
+export function hostedLaneDirty(root: string, options: { refresh?: boolean } = {}): boolean {
   try {
     if (deltaApplyPending(root)) return true;
     const marker = readHostedLaneCheckout(root);
     if (!marker) return true;
     const baseline = new Map(marker.state.files.map(file => [file.path, file]));
+    const refresh = statIndexRefresh(root);
     const local = nativePaths(root, [...baseline.keys()]),
       index = readCheckoutStatIndex(root);
     for (const path of local) {
@@ -34,14 +37,20 @@ export function hostedLaneDirty(root: string): boolean {
           : stat.mode & 0o111
             ? 'executable'
             : 'file';
-      if (mode === old.mode && indexedBlob(index, path, stat, old.blob)) continue;
+      if (mode === old.mode && indexedBlob(index, path, stat, old.blob)) {
+        refresh.kept(path, stat, old.blob);
+        continue;
+      }
       const bytes = stat.isSymbolicLink()
         ? readlinkSync(absolute, { encoding: 'buffer' })
         : readFileSync(absolute);
       if (mode !== old.mode || digest(bytes) !== old.blob) return true;
+      refresh.read(path, stat, old.blob);
     }
     const present = new Set(local);
-    return marker.materialized.some(path => !forgeCachePath(path) && !present.has(path));
+    if (marker.materialized.some(path => !forgeCachePath(path) && !present.has(path))) return true;
+    if (options.refresh) refresh.commit();
+    return false;
   } catch {
     return true;
   }

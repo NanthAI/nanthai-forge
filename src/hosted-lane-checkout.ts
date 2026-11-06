@@ -19,6 +19,7 @@ import { workLocked } from './work-lock.js';
 import { indexInstalledFiles, readCheckoutStatIndex, writeCheckoutStatIndex } from './checkout-stat-index.js';
 import {
   checkoutDelta,
+  deltaDisplacement,
   deltaJournalName,
   deltaObstructed,
   journalCheckoutDelta,
@@ -398,7 +399,6 @@ async function checkout(
                           { obstruction: { kind: 'extra-source', path: obstruction } },
                         );
                       // Ignored artifacts stay where they are; only changed paths move.
-                      const prior = new Map(materializedFiles(current).map(file => [file.path, file]));
                       const pin = ({ path, blob, mode }: NativeFile) => ({ path, blob, mode });
                       sweepCheckoutStages(cache.root);
                       journalCheckoutDelta(cache.root, {
@@ -408,12 +408,7 @@ async function checkout(
                         priorMarker: beforeDigest,
                         targetMarker: digest(readFileSync(join(stage, '.forge', hostedLaneMarkerName))),
                         install: delta.install.map(pin),
-                        displace: [
-                          ...delta.remove,
-                          ...delta.install
-                            .filter(file => checkoutPathExists(join(root, file.path)))
-                            .map(file => prior.get(file.path) ?? file),
-                        ].map(pin),
+                        displace: deltaDisplacement(root, delta, materializedFiles(current)),
                         targetFiles: files,
                       });
                       const settled = settleCheckoutDelta(root, cache.root);

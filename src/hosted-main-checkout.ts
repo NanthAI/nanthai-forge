@@ -1,5 +1,5 @@
-import { publishMainInPlace, recoverMainPublication } from './hosted-main-publish.js';
 // SPDX-License-Identifier: Apache-2.0
+import { recoverMainPublication } from './hosted-main-publish.js';
 import { readHostedMainMarker } from './hosted-main-marker.js';
 import { reuseMainSource } from './hosted-main-reuse.js';
 import { canonicalRoot, clientCacheRoot } from './root-paths.js';
@@ -7,10 +7,10 @@ import { preserveMisplacedReadCaches } from './hosted-legacy-cache.js';
 import { planCheckoutPreservation, preserveCheckoutArtifacts } from './hosted-checkout-preserve.js';
 import { recordMetricCache } from './self-metrics-source-observations.js';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, lstatSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { z } from 'zod';
 import { digest } from './hash.js';
-import { invariant } from './errors.js';
+import { ForgeError, invariant } from './errors.js';
 import { parseNativeState, parseNativeStateValue } from './native-state-format.js';
 import { hostedMainSchema, type HostedMain, type MainExpectation } from './hosted-main.js';
 import { durableReplace, syncDirectory } from './native-durability.js';
@@ -20,6 +20,17 @@ import {
   flushHostedCheckoutFiles,
 } from './hosted-checkout-files.js';
 import { workLocked } from './work-lock.js';
+import { indexInstalledFiles, readCheckoutStatIndex, writeCheckoutStatIndex } from './checkout-stat-index.js';
+import {
+  checkoutDelta,
+  deltaDisplacement,
+  deltaJournalName,
+  deltaObstructed,
+  journalCheckoutDelta,
+  type CheckoutDelta,
+} from './hosted-checkout-delta.js';
+import { retainedDeltaBackups, settleCheckoutDelta } from './hosted-checkout-delta-settle.js';
+import { sweepCheckoutStages } from './hosted-checkout-delta-pending.js';
 import { readSource } from './files.js';
 import { HostedCheckoutCache, type CheckoutObjectTransport } from './hosted-checkout-cache.js';
 import { parseHostedResponse } from './hosted-response.js';
@@ -81,12 +92,29 @@ export async function checkoutHostedMain(root: string, input: unknown, transport
   const preservationPath = join(cache, `preserve-${request.operationId}.json`);
   const receiptPath = join(cache, `${request.operationId}.json`),
     previous = join(cache, 'previous');
+  // An interrupted publication settles before anything reads the marker: a legacy per-file journal
+  // (publish.json, older clients) rolls back; an in-place delta journal finishes from its durable
+  // private stage, rolls back, or refuses, exactly as in a Lane checkout.
+  const recover = () => {
+    recoverMainPublication(root, cache);
+    if (existsSync(previous) && !existsSync(root)) renameSync(previous, root);
+    const settled = settleCheckoutDelta(root, cache);
+    if (settled?.conflict) throw settled.conflict;
+  };
+  const displaced = () => {
+    const kept = retainedDeltaBackups(cache);
+    return kept.length
+      ? {
+          displacedRecovery: kept,
+          warning: `Local bytes that differed from the clone's baseline were moved out of the working tree during an interrupted pull and kept at ${kept.join(', ')}. Copy back what you need, then delete the folder.`,
+        }
+      : {};
+  };
   // Recheck current access even on cache hits and completed-operation retries.
   const observed = parseHostedResponse(hostedMainSchema, await transport.current());
   invariant(observed.projectId === request.projectId, 'PROJECT_UNAVAILABLE', 'Select this project.');
   let operation = workLocked(lock, () => {
-    recoverMainPublication(root, cache);
-    if (existsSync(previous) && !existsSync(root)) renameSync(previous, root);
+    recover();
     const original = existsSync(receiptPath) ? json(receiptPath) : undefined;
     if (original) {
       invariant(
@@ -118,7 +146,10 @@ export async function checkoutHostedMain(root: string, input: unknown, transport
         'PROJECT_UNAVAILABLE',
         'Select this clone’s project.',
       );
-      cleanHostedCheckout(root, marker.state.files, 'hosted-main.json', true, { deferExtras: true });
+      cleanHostedCheckout(root, marker.state.files, 'hosted-main.json', true, {
+        deferExtras: true,
+        index: readCheckoutStatIndex(root),
+      });
     }
     const next = {
       request,
@@ -145,6 +176,7 @@ export async function checkoutHostedMain(root: string, input: unknown, transport
       downloadedBytes: 0,
       replayed: true,
       ...localRecovery(),
+      ...displaced(),
     };
   // Refresh never uses a full source pack, even for a thousand-file delta.
   const objects = new HostedCheckoutCache(
@@ -153,34 +185,39 @@ export async function checkoutHostedMain(root: string, input: unknown, transport
   );
   await objects.ensure([selection.head]);
   const state = parseNativeState(readFileSync(join(objects.objects, selection.head)));
-  let stagedFiles = state.files;
+  // A pull changes the clone root in place (it never swaps the directory a shell may be in): only
+  // changed paths are fetched, verified, staged, flushed and journaled, and the checkout is validated
+  // through the stat index. A first checkout, or a case/normalization-only rename or an untracked
+  // obstruction, keeps the full private-stage install.
+  let delta: CheckoutDelta | null = null,
+    baselineDigest: string | null = null;
   if (request.refresh) {
-    const baseline = readHostedMainMarker(root);
-    if (baseline) {
-      // In-place publication only needs changed bytes. Keep validating the full
-      // checkout before publication, without cloning or queuing unchanged files.
-      const before = new Map(baseline.state.files.map(file => [file.path, file]));
-      stagedFiles = state.files.filter(file => {
-        const old = before.get(file.path);
-        return old?.blob !== file.blob || old?.mode !== file.mode;
-      });
-      reuseMainSource(root, objects.objects, baseline.state.files, stagedFiles);
+    const bytes = readSource(root, '.forge/hosted-main.json', Number.MAX_SAFE_INTEGER);
+    const baseline = bytes ? readHostedMainMarker(root) : null;
+    if (bytes && baseline) {
+      baselineDigest = digest(bytes);
+      delta = checkoutDelta(baseline.state.files, state.files, { transitions: true });
+      if (delta && deltaObstructed(root, delta)) delta = null;
+      if (delta) reuseMainSource(root, objects.objects, baseline.state.files, delta.install);
     }
   }
+  const stagedFiles = delta ? delta.install : state.files;
   await objects.ensure(stagedFiles.map(file => file.blob));
-  const stage = mkdtempSync(join(cache, 'checkout-'));
+  const stage = mkdtempSync(join(cache, delta ? 'delta-' : 'checkout-'));
   try {
     await installHostedFiles(stage, objects.objects, stagedFiles);
     mkdirSync(join(stage, '.forge'), { mode: 0o700 });
     save(join(stage, '.forge', 'hosted-main.json'), { selection, state });
     await flushHostedCheckoutFiles(stage, stagedFiles);
+    // Stats of the private stage carry over the rename, so later checks read only edited files.
+    const installedIndex = delta ? null : indexInstalledFiles(stage, stagedFiles);
     // Reauthorize after transfer and staging, immediately before publication.
     const authorized = await transport.current();
     invariant(authorized.projectId === request.projectId, 'PROJECT_UNAVAILABLE', 'Select this project.');
     workLocked(lock, () => {
       operation = json(receiptPath);
       if (operation.complete) return;
-      if (existsSync(previous) && !existsSync(root)) renameSync(previous, root);
+      recover();
       const markerBytes = existsSync(root)
         ? readSource(root, '.forge/hosted-main.json', Number.MAX_SAFE_INTEGER)
         : null;
@@ -219,15 +256,64 @@ export async function checkoutHostedMain(root: string, input: unknown, transport
       preserveCaches([...beforeFiles, ...state.files]);
       const artifacts = cleanHostedCheckout(root, beforeFiles, 'hosted-main.json', Boolean(marker), {
         target: state.files,
+        index: readCheckoutStatIndex(root),
       });
-      if (!installed && request.refresh && marker) {
-        publishMainInPlace(root, cache, stage, beforeFiles, state.files);
+      if (!installed && delta) {
+        invariant(
+          markerBytes !== null && digest(markerBytes) === baselineDigest,
+          'CHANNEL_CHANGED',
+          'Another pull updated this client while the selected head was downloading.',
+        );
+        const obstruction = deltaObstructed(root, delta);
+        if (obstruction)
+          throw new ForgeError(
+            'WORK_CONFLICT',
+            `Local checkout content at ${JSON.stringify(obstruction)} is preserved.`,
+            undefined,
+            { obstruction: { kind: 'extra-source', path: obstruction } },
+          );
+        sweepCheckoutStages(cache);
+        journalCheckoutDelta(cache, {
+          operationId: request.operationId,
+          stage: basename(stage),
+          marker: 'hosted-main.json',
+          priorMarker: baselineDigest,
+          targetMarker: digest(readFileSync(join(stage, '.forge', 'hosted-main.json'))),
+          install: delta.install.map(({ path, blob, mode }) => ({ path, blob, mode })),
+          displace: deltaDisplacement(root, delta, beforeFiles),
+          targetFiles: state.files,
+        });
+        let settled;
+        try {
+          settled = settleCheckoutDelta(root, cache);
+        } catch (error) {
+          // People read the clone root between commands, so a failed pull is undone now rather
+          // than left half-applied until the next one. If even that fails, the journal stays
+          // (marked aborting when possible) and the next pull resumes it.
+          let undone = false;
+          try {
+            undone = settleCheckoutDelta(root, cache, { abort: true })?.outcome === 'rolled-back';
+          } catch {
+            /* Kept for the next pull. */
+          }
+          const recovery = error instanceof ForgeError ? error.recovery : undefined;
+          if (undone && typeof recovery?.reason === 'string')
+            throw new ForgeError(
+              'WORK_CONFLICT',
+              `This pull could not finish: ${recovery.reason} It was undone, so the clone is back at its previous head. Fix that path, then rerun the same command.`,
+              undefined,
+              { obstruction: recovery.obstruction },
+            );
+          throw error;
+        }
+        if (settled?.conflict) throw settled.conflict;
       } else if (!installed) {
         invariant(!existsSync(previous), 'WORK_CONFLICT', 'An earlier checkout backup is preserved.');
         planCheckoutPreservation(preservationPath, artifacts);
         if (existsSync(root)) renameSync(root, previous);
         renameSync(stage, root);
         preserveArtifacts();
+        if (installedIndex) writeCheckoutStatIndex(root, installedIndex.since, installedIndex.entries);
       }
       syncDirectory(dirname(root));
       syncDirectory(cache);
@@ -237,7 +323,15 @@ export async function checkoutHostedMain(root: string, input: unknown, transport
       recordMetricCache(cache, selection, 'replica', request.operationId);
     });
   } finally {
-    rmSync(stage, { recursive: true, force: true });
+    // A journaled in-place install still owns its stage until it settles.
+    const owned = () => {
+      try {
+        return json(join(cache, deltaJournalName)).stage === basename(stage);
+      } catch {
+        return false; // No journal (or another process just settled it).
+      }
+    };
+    if (existsSync(stage) && !owned()) rmSync(stage, { recursive: true, force: true });
   }
   return {
     ...selection,
@@ -246,5 +340,6 @@ export async function checkoutHostedMain(root: string, input: unknown, transport
     downloadedBytes: objects.downloadedBytes,
     replayed: false,
     ...localRecovery(),
+    ...displaced(),
   };
 }

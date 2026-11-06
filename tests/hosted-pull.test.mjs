@@ -64,7 +64,7 @@ test('refresh stages only changed files, including modes and renamed reused byte
     const cache = clientCacheRoot(f.root);
     const stage = join(
       cache,
-      fs.readdirSync(cache).find(name => name.startsWith('checkout-')),
+      fs.readdirSync(cache).find(name => name.startsWith('delta-') && !name.endsWith('-displaced')),
     );
     staged = fs
       .readdirSync(stage, { recursive: true })
@@ -134,8 +134,14 @@ test('interrupted transfer resumes pinned head with the same plain command', asy
   await pull(f);
   assert.equal(readHostedMainMarker(f.root).selection.head, f.main().head);
 });
-for (const point of ['old-file-backed-up', 'new-file-linked', 'marker-installed', 'backup-removed'])
-  test(`crash at ${point} resumes without mixed files or lost artifacts`, async t => {
+const deltaDirectories = f =>
+  fs.readdirSync(clientCacheRoot(f.root)).filter(name => name.startsWith('delta-'));
+const fromStage = from =>
+  /\/delta-[A-Za-z0-9]+\//.test(String(from)) && !String(from).includes('-displaced/');
+// An error inside the pull process undoes the clone root at once (people read it between commands);
+// the same plain command then applies the pinned head.
+for (const point of ['old-file-moved-aside', 'new-file-installed', 'marker-installed', 'journal-removed'])
+  test(`failure at ${point} resumes without mixed files or lost artifacts`, async t => {
     const f = pullFixture(t);
     fs.mkdirSync(join(f.root, 'dist'));
     fs.writeFileSync(join(f.root, 'dist/out'), 'keep');
@@ -144,15 +150,16 @@ for (const point of ['old-file-backed-up', 'new-file-linked', 'marker-installed'
       ['src/1.txt', 'new one'],
     ]);
     const rename = fs.renameSync,
-      remove = fs.rmSync,
-      link = fs.linkSync;
+      remove = fs.rmSync;
     let injected = false;
     fs.renameSync = (from, to) => {
       const value = rename(from, to);
       if (
         !injected &&
-        ((point === 'old-file-backed-up' &&
-          to === join(clientCacheRoot(f.root), 'publish-backup/src/0.txt')) ||
+        ((point === 'old-file-moved-aside' &&
+          String(from) === join(f.root, 'src/0.txt') &&
+          String(to).includes('-displaced/')) ||
+          (point === 'new-file-installed' && fromStage(from) && to === join(f.root, 'src/0.txt')) ||
           (point === 'marker-installed' && to === join(f.root, '.forge/hosted-main.json')))
       ) {
         injected = true;
@@ -160,21 +167,9 @@ for (const point of ['old-file-backed-up', 'new-file-linked', 'marker-installed'
       }
       return value;
     };
-    fs.linkSync = (from, to) => {
-      const result = link(from, to);
-      if (!injected && point === 'new-file-linked' && to === join(f.root, 'src/0.txt')) {
-        injected = true;
-        throw Error('simulated crash');
-      }
-      return result;
-    };
     fs.rmSync = (path, options) => {
       const value = remove(path, options);
-      if (
-        !injected &&
-        point === 'backup-removed' &&
-        path === join(clientCacheRoot(f.root), 'publish-backup')
-      ) {
+      if (!injected && point === 'journal-removed' && String(path).endsWith('/delta-apply.json')) {
         injected = true;
         throw Error('simulated crash');
       }
@@ -187,14 +182,16 @@ for (const point of ['old-file-backed-up', 'new-file-linked', 'marker-installed'
     } finally {
       fs.renameSync = rename;
       fs.rmSync = remove;
-      fs.linkSync = link;
       syncBuiltinESMExports();
     }
+    const published = ['marker-installed', 'journal-removed'].includes(point);
+    assert.equal(fs.readFileSync(join(f.root, 'src/0.txt'), 'utf8'), published ? 'new zero' : 'source 0\n');
+    assert(!fs.existsSync(join(clientCacheRoot(f.root), 'delta-apply.json')));
     await pull(f);
     assert.equal(fs.readFileSync(join(f.root, 'src/0.txt'), 'utf8'), 'new zero');
     assert.equal(fs.readFileSync(join(f.root, 'src/1.txt'), 'utf8'), 'new one');
     assert.equal(fs.readFileSync(join(f.root, 'dist/out'), 'utf8'), 'keep');
-    assert(!fs.existsSync(join(clientCacheRoot(f.root), 'publish-backup')));
+    assert.deepEqual(deltaDirectories(f), []);
   });
 test('unauthorized no-op, revoked after transfer, and completed replay all refuse', async t => {
   const f = pullFixture(t);
@@ -292,20 +289,20 @@ test('interrupted per-file publication restores the old tree before validating a
     ['src/0.txt', 'first replacement'],
     ['src/1.txt', 'second replacement'],
   ]);
-  const link = fs.linkSync;
+  const rename = fs.renameSync;
   let interrupted = false;
-  fs.linkSync = (from, to) => {
-    if (!interrupted && String(from).includes('checkout-') && String(to) === join(f.root, 'src/1.txt')) {
+  fs.renameSync = (from, to) => {
+    if (!interrupted && fromStage(from) && String(to) === join(f.root, 'src/1.txt')) {
       interrupted = true;
       throw new Error('synthetic publication interruption');
     }
-    return link(from, to);
+    return rename(from, to);
   };
   syncBuiltinESMExports();
   try {
     await assert.rejects(pull(f), /synthetic publication interruption/);
   } finally {
-    fs.linkSync = link;
+    fs.renameSync = rename;
     syncBuiltinESMExports();
   }
   assert(interrupted);
@@ -322,7 +319,7 @@ test('pull retains concurrent edits observed after moving an old file to backup'
   let edited = false;
   fs.renameSync = (from, to) => {
     const result = rename(from, to);
-    if (!edited && String(from) === join(f.root, 'src/0.txt') && String(to).includes('publish-backup')) {
+    if (!edited && String(from) === join(f.root, 'src/0.txt') && String(to).includes('-displaced/')) {
       edited = true;
       fs.writeFileSync(to, 'concurrent local edit');
     }
@@ -350,11 +347,11 @@ test('interrupted dangling-symlink publication restores its prior link and repla
   f.select([['link', 'old-missing-target', 'symlink']]);
   await pull(f);
   f.select([['link', 'new-missing-target', 'symlink']]);
-  const symlink = fs.symlinkSync;
+  const rename = fs.renameSync;
   let interrupted = false;
-  fs.symlinkSync = (target, path, ...rest) => {
-    const value = symlink(target, path, ...rest);
-    if (!interrupted && path === join(f.root, 'link')) {
+  fs.renameSync = (from, to) => {
+    const value = rename(from, to);
+    if (!interrupted && fromStage(from) && String(to) === join(f.root, 'link')) {
       interrupted = true;
       throw Error('synthetic symlink publication interruption');
     }
@@ -364,7 +361,7 @@ test('interrupted dangling-symlink publication restores its prior link and repla
   try {
     await assert.rejects(pull(f), /synthetic symlink publication interruption/);
   } finally {
-    fs.symlinkSync = symlink;
+    fs.renameSync = rename;
     syncBuiltinESMExports();
   }
   assert(interrupted);
