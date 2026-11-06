@@ -129,9 +129,13 @@ import { WorkStore } from ${JSON.stringify(new URL('../dist/work-store.js', impo
 import { watchLandingWorker } from ${JSON.stringify(new URL('../dist/landing-worker.js', import.meta.url).href)};
 const c=new AbortController();process.on('SIGTERM',()=>c.abort());
 await watchLandingWorker(new WorkStore(process.argv[1]),c.signal);`;
+  // check-runtime.mjs sets zero lock patience for synthetic locks held by the test process. A real owner
+  // worker shares its Work with the detached main-audit driver and check controllers, so under load a
+  // zero wait turns routine contention into WORK_BUSY errors (observed in landing-lifecycle). Give the
+  // worker the same bounded wait as landing-batch-fixture; callers that pass their own env keep control.
   const child = spawn(process.execPath, ['--input-type=module', '-e', script, f.root], {
     stdio: ['ignore', 'ignore', 'pipe'],
-    env,
+    env: env === process.env ? { ...env, FORGE_WORK_LOCK_WAIT_MS: '10000' } : env,
   });
   const controller = new AbortController();
   let errors = '';

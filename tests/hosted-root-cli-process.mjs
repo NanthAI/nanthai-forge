@@ -4,8 +4,17 @@
 import { readFileSync } from 'node:fs';
 const nativeFetch = globalThis.fetch;
 let peak = { rss: 0 },
+  peakLive = 0,
   rpcCalls = 0;
+// Live memory (V8 heap + external Buffers/ArrayBuffers) is independent of allocator slack, thread
+// arenas and young-generation sizing, which make RSS differ by tens of MiB between identical runs.
+const sampleLive = () => {
+  const { heapUsed, external } = process.memoryUsage();
+  if (heapUsed + external > peakLive) peakLive = heapUsed + external;
+};
+setInterval(sampleLive, 2).unref();
 const sample = phase => {
+  sampleLive();
   const rss = process.memoryUsage.rss();
   if (rss > peak.rss) peak = { ...process.memoryUsage(), phase };
 };
@@ -25,8 +34,12 @@ globalThis.fetch = async (input, init) => {
 process.once('beforeExit', () => {
   sample('exit');
   process.stderr.write(
-    JSON.stringify({ peakRssMiB: process.resourceUsage().maxRSS / 1024, rpcCalls, sampledMemory: peak }) +
-      '\n',
+    JSON.stringify({
+      peakRssMiB: process.resourceUsage().maxRSS / 1024,
+      peakLiveMiB: peakLive / 1048576,
+      rpcCalls,
+      sampledMemory: peak,
+    }) + '\n',
   );
 });
 const manifest = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));

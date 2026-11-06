@@ -82,6 +82,7 @@ export async function measureRootBudget(t, f, { nodeArgs = [] } = {}) {
     cloneCalls: cloned.rpcCalls,
     cloneMs: cloned.wallMs,
     clonePeakRssMiB: cloned.peakRssMiB,
+    clonePeakLiveMiB: cloned.peakLiveMiB,
     cloneSampledMemory: cloned.sampledMemory,
     startCalls: started.rpcCalls,
     startMs: started.wallMs,

@@ -57,12 +57,21 @@ function setup(t, native) {
   }
   return { root: realpathSync(root), env, called };
 }
+// Work commands start detached presence workers that auto-snapshot Lane edits into the Work objects after a
+// 5 s debounce. These tests assert that MCP reads add no Work bytes, so the snapshot debounce must not be able
+// to elapse during a slow run (it did on loaded hosted runners); snapshots have their own tests.
+const noAutoSnapshot = env => ({
+  ...env,
+  FORGE_AUTO_SNAPSHOT_DEBOUNCE_MS: '3600000',
+  FORGE_AUTO_SNAPSHOT_MAX_WAIT_MS: '3600000',
+  FORGE_AUTO_SNAPSHOT_INTERVAL_MS: '3600000',
+});
 async function connect(t, root, env, work = true) {
   const client = new Client({ name: 'forge-lane-source-test', version: '1.0.0' });
   const transport = new StdioClientTransport({
     command: process.execPath,
     args: [resolve('dist/cli.js'), 'mcp', root, ...(work ? ['--work'] : [])],
-    env,
+    env: noAutoSnapshot(env),
     stderr: 'pipe',
   });
   let stderr = '';

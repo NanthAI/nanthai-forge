@@ -107,25 +107,23 @@ for (const count of [2538, 5076])
     assert(!f.calls.some(c => /downloadPart|downloadBatch|signDownloads|projectMain:objects/.test(c.name)));
   });
 
-// Deterministic live-data guard: with the young generation pinned to 1 MiB the V8 slack that spreads
-// default-flag RSS from 219 to 312 MiB disappears, so peak RSS reflects retained memory. The flag is
-// passed only to the child node process of this test; the product sets no V8 flags.
-// RSS is allocator- and platform-dependent, so the bound is per platform; both are ~20% above the observed max.
-// macOS, 2026-11-05, 8 runs under `nforge heavy` on a busy 16 GB Mac: 159.4, 154.3, 154.8, 156.9, 156.1,
-// 157.6, 158.2, 153.8 MiB (max 159.4; the earlier builder saw 156-160) -> 190 MiB (+19%).
-// Linux (ubuntu-latest hosted check, same day): 196.4 MiB in the first failing attempt of the landing check
-// (a single sample; the Mac bound of 190 failed there) -> 235 MiB (+20%). Re-tighten once more hosted
-// samples exist (each run prints the semi-space-1 RSS diagnostic).
-// A retained 60 MiB fails the macOS bound (measured 232 MiB); the 380 MiB default-flag check above cannot
-// see it (338 MiB). Retention under ~30 MiB (one extra copy of the 24 MiB source set) stays within the bound.
-const SEMI_SPACE_1_RSS_BOUND_MIB = process.platform === 'darwin' ? 190 : 235;
-test('2538-file clone peak RSS stays bounded with a 1 MiB semi-space (live-data guard)', async t => {
+// Deterministic live-data guard. Peak RSS is not a stable measure of retained data: on the Linux hosted
+// runner identical runs of this test measured 196-248 MiB (glibc thread arenas and allocator slack), so an
+// RSS bound either flaked (235) or was too wide to see a 30 MiB leak. The CLI child therefore samples live
+// memory (V8 heapUsed + external Buffers/ArrayBuffers, every 2 ms and at every fetch), which does not depend
+// on allocator, platform or young-generation sizing. The semi-space flag stays so the heap holds no
+// uncollected garbage; it is passed only to the child node process of this test, the product sets no V8 flags.
+// macOS, 2026-11-06, 4 runs idle and 4 runs under 24 busy loops on `nforge heavy`: live 50.96-52.86 MiB
+// (RSS over the same runs 134-158 MiB). Bound 70 MiB (+32%): one extra copy of the 24 MiB source set
+// (about 76 MiB live) fails it, where the old RSS bounds could not see that. The RSS stays a diagnostic.
+const SEMI_SPACE_1_LIVE_BOUND_MIB = 70;
+test('2538-file clone peak live memory stays bounded with a 1 MiB semi-space (live-data guard)', async t => {
   const f = await rootFixture(t, 2538, 24 * 1024 * 1024, 10);
   const metrics = await measureRootBudget(t, f, { nodeArgs: ['--max-semi-space-size=1'] });
-  t.diagnostic(`semi-space-1 clone RSS ${metrics.clonePeakRssMiB} MiB`);
+  t.diagnostic(`semi-space-1 clone RSS ${metrics.clonePeakRssMiB} MiB, live ${metrics.clonePeakLiveMiB} MiB`);
   assert(
-    metrics.clonePeakRssMiB <= SEMI_SPACE_1_RSS_BOUND_MIB,
-    `${metrics.clonePeakRssMiB} MiB RSS with --max-semi-space-size=1 (bound ${SEMI_SPACE_1_RSS_BOUND_MIB})`,
+    metrics.clonePeakLiveMiB <= SEMI_SPACE_1_LIVE_BOUND_MIB,
+    `${metrics.clonePeakLiveMiB} MiB live memory with --max-semi-space-size=1 (bound ${SEMI_SPACE_1_LIVE_BOUND_MIB})`,
   );
 });
 

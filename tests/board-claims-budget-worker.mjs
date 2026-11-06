@@ -74,7 +74,9 @@ export default async function claimBudget() {
     };
     const hook = fileURLToPath(new URL('../dist/agent-edit-hook.js', import.meta.url));
     const times = [];
-    const runs = 12;
+    // 12 samples made the nearest-rank "p95" the maximum, so one descheduled spawn failed the claim. With 20
+    // samples p95 is the 19th: the claim stays strict (a second slow spawn fails it) but one outlier cannot.
+    const runs = 20;
     for (let i = -1; i < runs; i++) {
       const before = Atomics.load(server.counts, 0);
       const child = spawnSync(process.execPath, ['--import', memoryModule, hook, '--worker', '--auto'], {

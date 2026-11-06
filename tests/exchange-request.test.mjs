@@ -87,8 +87,12 @@ test('continuous body progress resets idle time but cannot evade the total cap',
     timers.push(timer);
     res.on('close', () => clearInterval(timer));
   });
+  // The server shares this event loop, so a loaded runner can stall the 20 ms
+  // writer. Idle must tolerate that stall (30x the write interval) while still
+  // being shorter than the total cap, or the idle timer wins the race instead
+  // of the total cap this test asserts.
   await assert.rejects(
-    exchangeFetch('stream', f.url, {}, { ...deadlines, totalTimeoutMs: 300 }),
+    exchangeFetch('stream', f.url, {}, { ...deadlines, idleTimeoutMs: 600, totalTimeoutMs: 900 }),
     timedOut('stream', 'total request'),
   );
   assert.equal(f.requests.length, 2);

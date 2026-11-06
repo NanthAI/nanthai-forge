@@ -1829,10 +1829,15 @@ test('shard pool: the final result deletes its run claims and sweeps stale ones,
   );
   assert.equal(response.status, 200);
   assert.equal((await response.json()).status, 'passed');
-  assert.deepEqual(lists, [
-    { prefix: own, startAfter: null },
-    { prefix: root, startAfter: `${own}~` },
-  ]);
+  // The own-claims page and the stale sweep run concurrently and each signs before it fetches, so their
+  // arrival order is not defined; both exact list calls are still required.
+  assert.deepEqual(
+    lists.sort((a, b) => a.prefix.length - b.prefix.length),
+    [
+      { prefix: root, startAfter: `${own}~` },
+      { prefix: own, startAfter: null },
+    ],
+  );
   assert.deepEqual(deleted.sort(), [...ownKeys, staleKey].sort(), 'a live run keeps its claims');
   assert(!mutations.some(name => /pool/i.test(name)), 'cleanup adds no Convex call');
 });

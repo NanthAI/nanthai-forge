@@ -876,6 +876,9 @@ test('cancelled same-head landing admits a fresh operation while the cancelled r
   const batch = f.store.select('landingBatches', f.store.select('landingEntries', entryId).batchId);
   const prefix = batch.prefixes[0];
   const { batchAcceptanceId } = await import('../dist/landing-batch-step.js');
+  // The second landing's detached main audit legitimately holds the Work lock, and this direct dispatch
+  // has zero lock patience (check-runtime.mjs): let the audit finish so only the cancelled entry decides.
+  await drainPostAccept(f.store);
   await assert.rejects(
     f.agent.work.dispatch(
       {
