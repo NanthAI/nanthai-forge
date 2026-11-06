@@ -82,10 +82,31 @@ The structural tool declares **GPL-3.0-only**; Forge's portable code is Apache-2
 
 **Outcome: do not select or bundle M, and do not productionise S on these data. Retain the current merge behavior.** No self-metric changed: after-fixer landings and operator interventions per landing were not measured in production, and dropped landings and red-`main` minutes were not exercised because no landing occurred. No speed or cost gain is claimed.
 
+## Dogfood conflict classification (different-declaration measured)
+
+The question the spike left open: how many real conflicts are two Lanes editing different declarations, or adjacent import lines, of one file, and what do they cost? `scripts/conflict-classify.mjs` answers it per conflicted file from the retained base, left and right bytes, using the TypeScript parser Forge already uses (declaration lineage across States does not exist, so it keys top-level statements by import module, declaration name or named test call; it merges nothing). Classes: *same-declaration* (both sides changed one unit), *different-declaration* (disjoint units), *import-block-only*, and *other* (add/add, delete-vs-edit, non-JS/TS such as prose and models, unparseable). A conflict takes its hardest file's class. Flags: `weak-identity` (an unnamed statement changed, so disjointness is not trusted), `plus-imports`, `same-import-edited`, `nested-disjoint` (the units overlap but the edits sit in different members; informational). `tests/conflict-classify.test.mjs` is the synthetic replay fixture.
+
+Hosted landings from the cutover day to the measurement day (2026-10-28 to 2026-11-06 UTC): 59 conflicted landing requests (92 conflict attempts, 324 landings, so 18% of landings hit a conflict) with retained conflict pages, 118 conflicted files.
+
+| Class | Conflicts | Share | Attempts | Failed-attempt minutes |
+|---|---:|---:|---:|---:|
+| same-declaration | 38 | 64% | 57 | 123.6 |
+| different-declaration | 7 | 12% | 11 | 25.9 |
+| import-block-only | 0 | 0% | 0 | 0 |
+| other | 14 | 24% | 24 | 79.6 |
+
+- *Other* is 7 delete-vs-edit (8 requests touched the generated Convex API file in one burst while it was being removed), 7 prose or model files. Files: 73 same-declaration, 16 different-declaration, 29 other. Only 1 conflict was same-declaration solely through members a finer merge could separate.
+- Of the 7 different-declaration conflicts, 1 is pure; 6 also edit imports and 5 carry `weak-identity` or `same-import-edited`. Under "ambiguous cases stay conflicts" a safe declaration-plus-import merge would take about 2 of 59 (3%).
+- Since the parse gate and wave 3b (2026-11-05 21:00Z onward): 7 conflicts, 6 same-declaration, 0 different-declaration.
+- Failed-attempt minutes are submission to conflict, from the metrics read. Resolve plus re-check per conflict is not readable from bounded queries, so it is estimated from the B1.5d call logs: median 10.8 min (15 scored episodes, 145 min) and 7.3 min (71 dry episodes, 508 min). Seven different-declaration conflicts then cost about 50-75 minutes over ten days, against about 7-11 hours for all 59 (E).
+- B1.5d file cases from the replay above, for scale: different-declaration 3 of 77 (4%); the 28 *cheap* cases include additive tests, inventories, registrations and Markdown, not only imports.
+
+**Reading.** Different-declaration is about 12% of conflicts and 2% of landings, import-only is absent, and the dominant class is the same declaration in a few hot files. Neither the import-block quick win nor a declaration merge is material on this evidence.
+
 ## Next evidence needed
 
 - Retain and export exact base, pre-sync, target and repair tuples with conflict paths and the proving-test selection, so cases need no inference.
-- Collect a real set of different-declaration conflicts and replay it through the same contract gate; the existing planning work on measuring same-file, different-declaration conflicts decides whether this is worth doing at all.
+- Different-declaration conflicts are now measured (previous section) and rare. Replay them through the contract gate only if a later window shows them material.
 - If a third-party tool is evaluated further, keep it external, pinned and optional. If the in-house route is pursued, reuse the existing TypeScript and Lezer boundary and implement explicit declaration alignment instead of treating current graph ids or absent edges as proof.
 - Treat the earlier retrospective gate as a floor: a full historical contract closure per episode would be needed before any wrong-merge rate is quoted.
 
