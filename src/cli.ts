@@ -384,7 +384,11 @@ async function main(args: string[]): Promise<unknown> {
     args = args.slice(0, flag);
   }
   const [command, root, subject, first, last] = args;
-  invariant(root && !root.startsWith('--'), 'BAD_ARGUMENT', 'A Git worktree root is required. Use --help.');
+  invariant(
+    root && !root.startsWith('--'),
+    'BAD_ARGUMENT',
+    'A ROOT is required: a Forge clone, a Lane checkout or a Git worktree ("." for the current folder). Use --help.',
+  );
   invariant(!args.some(a => a.startsWith('--')), 'BAD_ARGUMENT', 'Unknown option. Use --help.');
   const sizes: Record<string, [number, number]> = {
     mcp: [2, 2],

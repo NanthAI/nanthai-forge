@@ -13,6 +13,7 @@ import { hostedAgentCommandSchemas, type HostedAgentAction } from './hosted-agen
 import { hostedStartSchema, hostedStartResultSchema } from './hosted-lane.js';
 import { checkoutHostedLane } from './hosted-lane-checkout.js';
 import { adoptNestedLaneCopy } from './hosted-lane-adopt.js';
+import { checkoutRequired } from './hosted-lane-location.js';
 import { ConvexLaneTransport } from './hosted-lane-transport.js';
 import { applyObservedSaveOutcome, saveHostedLane, settlePriorHostedSave } from './hosted-save-client.js';
 import { transitionHostedLane } from './hosted-lifecycle-client.js';
@@ -323,12 +324,12 @@ async function configureRunnerRequest(
 }
 function checkLocalLane(session: HostedAgentSession, laneId?: string) {
   const marker = session.marker();
-  invariant(
-    marker && (!laneId || marker.selection.laneId === laneId),
-    'HOSTED_CHECKOUT_REQUIRED',
+  if (marker && (!laneId || marker.selection.laneId === laneId)) return marker;
+  throw checkoutRequired(
+    session,
+    laneId,
     'Open this Lane into ROOT before saving local files or changing its local lifecycle.',
   );
-  return marker;
 }
 const CANCEL_COST =
   "Cancelling discards this submission's queue place, its checks and the retry link. To recover from a failed check, fix the same Lane and land again (it resubmits with retry); a new Lane starts from zero.";

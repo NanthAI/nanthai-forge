@@ -56,6 +56,8 @@ Hosted `land --save` uses `--no-wait` to return after submission. Replay every o
 
 Include `overlapAnswer:"accept-order"` in `land --save` to answer the pending notices seen by that landing without a separate `ack`. The answers are recorded exactly as `ack` records them, so peers and the inbox see them, and the defaults receipt lists them. The answer does not resolve source conflicts or change project policy.
 
+`save --overlap-answers` takes `answers:[{operationId,laneId,noticeId,choice,text?}]`: every answer needs its own UUID `operationId` (a replay reuses it), beside the optional top-level one.
+
 <!-- hosted-agent-contract:start -->
 | Hosted command | Accepted parameters (`?` = optional) |
 | --- | --- |

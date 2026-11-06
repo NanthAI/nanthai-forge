@@ -318,6 +318,33 @@ test('save-first without local source fails clearly instead of silently abandoni
   assert(!s.calls.some(call => call.name === 'projectHostedLifecycle:transition'));
 });
 
+test('save from the project folder names the open Lane checkout (friction fa11c1bc, d05335ff, cb3ce3e4)', async t => {
+  const s = agentFixture(t),
+    previous = process.env.XDG_STATE_HOME;
+  process.env.XDG_STATE_HOME = join(s.root, '..', 'registry');
+  t.after(() => {
+    if (previous === undefined) delete process.env.XDG_STATE_HOME;
+    else process.env.XDG_STATE_HOME = previous;
+  });
+  await s.transport().dispatch('open', { laneId: s.lane.laneId });
+  recordLane({ laneId: s.lane.laneId, root: s.root, ...s.address });
+  const folder = join(s.root, '..', 'project-folder');
+  mkdirSync(folder, { recursive: true });
+  const other = new HostedAgentTransport(folder, s.address, s.exchange);
+  await assert.rejects(other.dispatch('save', { laneId: s.lane.laneId }), error => {
+    assert.equal(error.code, 'HOSTED_CHECKOUT_REQUIRED');
+    assert.equal(error.recovery.root, s.root);
+    assert(error.message.includes(s.root));
+    return true;
+  });
+  // A Lane this machine has not opened keeps the plain message and names no path.
+  await assert.rejects(other.dispatch('save', { laneId: randomUUID() }), error => {
+    assert.equal(error.code, 'HOSTED_CHECKOUT_REQUIRED');
+    assert.equal(error.recovery, undefined);
+    return true;
+  });
+});
+
 test('finish with explicit saved inputs preserves local drafts without starting a save', async t => {
   const s = agentFixture(t);
   await s.transport().dispatch('open', { laneId: s.lane.laneId });
