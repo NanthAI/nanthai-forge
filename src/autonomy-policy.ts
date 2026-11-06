@@ -8,6 +8,7 @@ import {
   agentDefaultsSchema,
   effectiveAgentDefaults,
   mergeAgentDefaults,
+  wireAgentDefaults,
 } from './agent-parallel-defaults.js';
 export const autoExchangeSchema = z.object({
   enabled: z.boolean().default(false),
@@ -131,7 +132,15 @@ export function effectivePolicy(data: { autonomyPolicy?: AutonomyPolicy | undefi
  * Landing evidence keeps the stored policy, so digests do not change when a default does. */
 export const policyReadView = (policy: AutonomyPolicy): AutonomyPolicy => ({
   ...policy,
-  agentDefaults: effectiveAgentDefaults(policy.agentDefaults),
+  agentDefaults: {
+    // Older CLIs parse this strictly: the frozen keys always, later keys only when stored (absent
+    // means the documented default). See WIRE_AGENT_DEFAULT_KEYS.
+    ...wireAgentDefaults(effectiveAgentDefaults(policy.agentDefaults), false),
+    ...(policy.agentDefaults?.autoClaim !== undefined ? { autoClaim: policy.agentDefaults.autoClaim } : {}),
+    ...(policy.agentDefaults?.dormantAfterDays !== undefined
+      ? { dormantAfterDays: policy.agentDefaults.dormantAfterDays }
+      : {}),
+  },
 });
 /** Compare-and-swap accepts the stored form or the read view (filled agent defaults). */
 /** Key order is not meaningful: a policy copied from a read and re-parsed reorders its fields. */

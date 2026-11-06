@@ -16,7 +16,7 @@ import { invariant } from '../src/errors';
 import { report } from './errors';
 import { requireCutoverVersion } from '../src/cutover-version';
 import { effectivePolicy } from '../src/autonomy-policy';
-import { effectiveAgentDefaults } from '../src/agent-parallel-defaults';
+import { effectiveAgentDefaults, wireAgentDefaults } from '../src/agent-parallel-defaults';
 import { advertisedFeatures, MAX_CONTRACT_FEATURES } from '../src/hosted-contract-features';
 /** Discovery is a current-authority read, never a worker wake or an availability promise. */
 export const capabilities = query({
@@ -81,7 +81,12 @@ export const capabilities = query({
           ...(overlapEvidenceVersion === 1 ? { overlapEvidenceVersion: 1 } : {}),
           ...(metricReceiptVersion === 1 ? { metricReceiptVersion: 1 } : {}),
           ...(defaultsVersion === 1
-            ? { agentDefaults: effectiveAgentDefaults(effectivePolicy(project).agentDefaults) }
+            ? {
+                agentDefaults: wireAgentDefaults(
+                  effectiveAgentDefaults(effectivePolicy(project).agentDefaults),
+                  Boolean(features?.includes('agent-defaults-extended')),
+                ),
+              }
             : {}),
           ...(noticeVersion === 1 ? { needsFix: needsFix(project) } : {}),
           ...(mirrorVersion === 1 ? { githubMirror: await githubMirrorStatus(ctx, project) } : {}),

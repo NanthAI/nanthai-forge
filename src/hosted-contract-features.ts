@@ -32,6 +32,9 @@ export const hostedContractFeatures = [
    * `claim` (lists `touching` and says when the first-write hook should claim). Without it the
    * hook records no claim. */
   'board-claims',
+  /** Capabilities carry every effective agentDefaults key, not only the frozen set older CLIs parse
+   * strictly (WIRE_AGENT_DEFAULT_KEYS). Without it the reply has the frozen keys only. */
+  'agent-defaults-extended',
 ] as const;
 export type HostedContractFeature = (typeof hostedContractFeatures)[number];
 

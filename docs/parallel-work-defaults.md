@@ -119,6 +119,14 @@ nforge hosted-work ROOT '{"action":"set-policy","operationId":"UUID","agentDefau
 Only named fields change. `agentDefaults` edits do not invalidate queued landings: their
 acceptance-policy pins exclude these settings.
 
+Capabilities and the policy read carry a frozen key set (`preflight`, `preflightMaxMinutes`,
+`urgentRoles`, `overlapGate`, `checkpointNudgeMinutes`, `stallAlerts`) because CLIs before
+2026-11-06 parse that object strictly. `autoClaim` and `dormantAfterDays` are stored-only: the server
+reads them itself, the policy read shows them only when set, and capabilities never carry them. A
+later key that agents must read goes to capabilities only for CLIs that ask for contract feature
+`agent-defaults-extended`; current CLIs drop keys they do not know. Adding `autoClaim` to the
+frozen set on 2026-11-06 broke capabilities across CLI/server versions with `HOSTED_PROTOCOL_INVALID`.
+
 | Setting | Default | Why | Change |
 | --- | --- | --- | --- |
 | `preflight` | `require` | About 30% of first landing checks failed (2026-10-30), and every failure costs a full landing round on the project runner. A local run of the affected tests catches most of them first. | `advise` prints the set without refusing; `off` removes it. |

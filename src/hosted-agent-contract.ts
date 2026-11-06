@@ -1,5 +1,5 @@
 import { finishRetryReasonSchema } from './hosted-landing.js';
-import { effectiveAgentDefaultsSchema } from './agent-parallel-defaults.js';
+import { effectiveAgentDefaultsWireSchema } from './agent-parallel-defaults.js';
 import { hostedRecordCommands } from './hosted-record-input.js';
 import { hostedMirrorStatusSchema } from './hosted-github-mirror-status.js';
 import { contractTestsInput } from './intent-test-contract.js';
@@ -85,7 +85,7 @@ export const hostedAgentCapabilitiesSchema = z
     /** Deferred caller outcome/delivery receipts may ride on CLI mutations. */
     metricReceiptVersion: z.literal(1).optional(),
     /** Effective parallel-work defaults (project policy), when the client asks with defaultsVersion:1. */
-    agentDefaults: effectiveAgentDefaultsSchema.optional(),
+    agentDefaults: effectiveAgentDefaultsWireSchema.optional(),
     needsFix: z.array(z.record(z.string(), z.json())).optional(),
     githubMirror: hostedMirrorStatusSchema.nullable().optional(),
     schema: z.literal(1),

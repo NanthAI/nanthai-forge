@@ -5,7 +5,6 @@ export type AgentDefaultValues = {
   urgentRoles: ('owner' | 'agents')[];
   overlapGate: 'off' | 'warn' | 'block';
   checkpointNudgeMinutes: number;
-  autoClaim: boolean;
   stallAlerts: {
     enabled: boolean;
     notifyAfterMinutes: number;

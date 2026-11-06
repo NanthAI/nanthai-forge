@@ -18,8 +18,13 @@ import {
 } from '../dist/board-claim-queue.js';
 import { runClaimSender } from '../dist/board-claim-sender.js';
 import { clientCacheRoot } from '../dist/root-paths.js';
-import { effectiveAgentDefaults, AGENT_DEFAULTS } from '../dist/agent-parallel-defaults.js';
-import { editedPolicy, policyPreset } from '../dist/autonomy-policy.js';
+import {
+  effectiveAgentDefaults,
+  effectiveAgentDefaultsWireSchema,
+  wireAgentDefaults,
+  WIRE_AGENT_DEFAULT_KEYS,
+} from '../dist/agent-parallel-defaults.js';
+import { editedPolicy, policyPreset, policyReadView } from '../dist/autonomy-policy.js';
 import { runResourceWorker } from './resource-budget.mjs';
 import { saveFixture } from './hosted-saves-fixture.mjs';
 
@@ -206,16 +211,56 @@ test('first-write read (server): other Lanes claims as touching, hidden once sav
   assert.equal(old, undefined);
 });
 
-test('policy: agentDefaults.autoClaim defaults on and set-policy turns it off', () => {
-  assert.equal(AGENT_DEFAULTS.autoClaim, true);
-  assert.equal(effectiveAgentDefaults(undefined).autoClaim, true);
+test('policy: agentDefaults.autoClaim is stored-only; the wire key set stays frozen for older CLIs', () => {
+  // Older CLIs parse capabilities agentDefaults and the policy read strictly: this set must not grow.
+  const frozen = [
+    'checkpointNudgeMinutes',
+    'overlapGate',
+    'preflight',
+    'preflightMaxMinutes',
+    'stallAlerts',
+    'urgentRoles',
+  ];
+  assert.deepEqual([...WIRE_AGENT_DEFAULT_KEYS].sort(), frozen);
   const policy = editedPolicy(policyPreset('trusted'), {
     action: 'set-policy',
     operationId: randomUUID(),
     agentDefaults: { autoClaim: false },
   });
   assert.equal(policy.agentDefaults.autoClaim, false);
-  assert.equal(effectiveAgentDefaults(policy.agentDefaults).autoClaim, false);
+  const effective = effectiveAgentDefaults(policy.agentDefaults);
+  assert.equal('autoClaim' in effective, false, 'never in effective defaults');
+  assert.deepEqual(
+    Object.keys(wireAgentDefaults(effective, false)).sort(),
+    frozen,
+    'capabilities for older CLIs',
+  );
+  assert.deepEqual(
+    wireAgentDefaults(effective, true),
+    effective,
+    'capabilities with agent-defaults-extended',
+  );
+  // The policy read shows later keys only when stored.
+  assert.deepEqual(Object.keys(policyReadView(policyPreset('trusted')).agentDefaults).sort(), frozen);
+  assert.equal(policyReadView(policy).agentDefaults.autoClaim, false);
+  // The server reads the stored value: absent is on.
+  assert.equal(claims.autoClaimOn({ autonomyPolicy: policy }), false);
+  assert.equal(claims.autoClaimOn({}), true);
+});
+
+test('capabilities contract: this CLI parses replies from older and newer servers', () => {
+  const effective = effectiveAgentDefaults(undefined);
+  // A newer server (or the 8d28c25f deploy) sends keys this CLI does not know: dropped.
+  const newer = {
+    ...effective,
+    stallAlerts: { ...effective.stallAlerts, later: 1 },
+    autoClaim: true,
+    later: 'x',
+  };
+  assert.deepEqual(effectiveAgentDefaultsWireSchema.parse(newer), effective);
+  // An older server sends only the frozen keys: later keys take their documented defaults.
+  assert.deepEqual(effectiveAgentDefaultsWireSchema.parse(wireAgentDefaults(effective, false)), effective);
+  assert.throws(() => effectiveAgentDefaultsWireSchema.parse({ ...effective, preflight: 'maybe' }));
 });
 
 function hookTarget(root) {
