@@ -502,7 +502,13 @@ payloads or credentials. From a JSON error reply it keeps only GitHub's
 stripped, token-shaped text redacted and at most 500 characters, so a 4xx
 such as a rejected tree is diagnosable from status without a replay. HTTP 5xx and 429 schedule retries of
 that cursor after 1, 2, 4 and 8 minutes. Verified blob replies before a failed
-request are checkpointed so retry does not repeat the whole window. Five
+request are checkpointed so retry does not repeat the whole window. GitHub can
+accept a blob POST and still answer a later tree POST with HTTP 422
+"tree.sha X is not a valid blob" (for example when the object already existed,
+unreachable, from a deleted check ref). The mirror then re-uploads exactly the
+named blobs of that tree from verified Forge bytes and retries the identical
+tree once in the same step; a second failure stays terminal with GitHub's
+message and a note that the retry ran. Five
 consecutive failures without checkpointed progress end in a terminal failure.
 A fully successful step or a durable advance to a different blob resets the
 budget; an unsuccessful cursor save does not. Failure details retain validated

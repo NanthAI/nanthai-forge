@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { NativeFile, NativeState } from './native-state-format.js';
 import type { GithubSyncCommit } from './github-sync-types.js';
-import type { GithubRequest } from './hosted-github-api.js';
+import { GithubMirrorApiError, type GithubRequest } from './hosted-github-api.js';
 import { gitlinkCommit } from './gitlink.js';
 import { gitHash, gitTree, gitMode, githubCommit } from './hosted-github-git.js';
 import { sourceExclusion } from './files.js';
@@ -30,7 +30,12 @@ export type MirrorPlan = {
   phase: 'bootstrap' | 'blobs' | 'done';
   index: number;
   hashes: GitFile[];
-  changes: { path: string; mode: string; type: 'blob' | 'commit'; sha: string | null }[];
+  changes: {
+    path: string;
+    mode: string;
+    type: 'blob' | 'commit';
+    sha: string | null;
+  }[];
   pending: NativeFile[];
   entry: GithubSyncCommit | null;
 };
@@ -99,6 +104,57 @@ function diffPlan(
     entry: null,
   };
 }
+/** Blob SHAs a tree POST 422 rejected as "tree.sha X is not a valid blob". */
+export function invalidTreeBlobs(error: unknown): string[] {
+  if (
+    !(error instanceof GithubMirrorApiError) ||
+    error.status !== 422 ||
+    error.operation !== 'POST git/trees'
+  )
+    return [];
+  const named = (error.githubError ?? '').matchAll(/\btree\.sha ([0-9a-f]{40}) is not a valid blob\b/g);
+  return [...new Set([...named].map(match => match[1]!))];
+}
+/** GitHub can accept a blob POST (201, same SHA) yet reject that SHA in a later
+ * tree POST, for example when the object already existed unreachable from a
+ * deleted check ref (incident 8568bc76). Re-upload exactly the named blobs of
+ * this tree from verified Forge bytes, then retry the identical tree once.
+ * Bounded by the tree's own entries; a second failure stays terminal. */
+async function createTree(plan: MirrorPlan, io: MirrorIO, prefix: string): Promise<string> {
+  const body = { base_tree: plan.baseTree, tree: plan.changes };
+  try {
+    return (await io.api<{ sha: string }>(`${prefix}/trees`, 'POST', body)).sha;
+  } catch (error) {
+    const named = invalidTreeBlobs(error);
+    const sources = named.map(sha => {
+      const change = plan.changes.find(entry => entry.type === 'blob' && entry.sha === sha);
+      return change && plan.pending.find(file => file.path === change.path && file.mode !== 'gitlink');
+    });
+    if (!named.length || sources.some(file => !file)) throw error;
+    const objects = await io.blobs(sources.map(file => file!.blob));
+    invariant(objects.length === named.length, 'SOURCE_UNAVAILABLE', 'Mirror blob window is incomplete.');
+    for (let i = 0; i < named.length; i++) {
+      const content = await objects[i]!.read();
+      invariant(
+        gitHash('blob', content) === named[i],
+        'GITHUB_SYNC_HASH',
+        'Forge source differs from the tree entry.',
+      );
+      const result = await io.api<{ sha: string }>(`${prefix}/blobs`, 'POST', {
+        content: content.toString('base64'),
+        encoding: 'base64',
+      });
+      invariant(result.sha === named[i], 'GITHUB_SYNC_HASH', 'GitHub returned different blob bytes.');
+    }
+    try {
+      return (await io.api<{ sha: string }>(`${prefix}/trees`, 'POST', body)).sha;
+    } catch (retry) {
+      if (retry instanceof GithubMirrorApiError)
+        retry.message += ` Forge re-uploaded ${named.length} named blob(s) and retried the tree once; not retried again.`;
+      throw retry;
+    }
+  }
+}
 /** Every tick creates at most 100 blobs / 8 MiB (or one larger logical file).
  * Metadata is a compact tree/diff cursor, never a Work snapshot or history scan. */
 export async function stepMirror(plan: MirrorPlan, io: MirrorIO, now = Date.now): Promise<MirrorPlan> {
@@ -122,14 +178,24 @@ export async function stepMirror(plan: MirrorPlan, io: MirrorIO, now = Date.now)
         if (plan.phase === 'bootstrap') plan.hashes.push({ ...file, sha });
         else {
           if (file.mode === 'gitlink') {
-            plan.changes.push({ path: file.path, mode: '160000', type: 'commit', sha });
+            plan.changes.push({
+              path: file.path,
+              mode: '160000',
+              type: 'commit',
+              sha,
+            });
           } else {
             const result = await io.api<{ sha: string }>(`${prefix}/blobs`, 'POST', {
               content: content.toString('base64'),
               encoding: 'base64',
             });
             invariant(result.sha === sha, 'GITHUB_SYNC_HASH', 'GitHub returned different blob bytes.');
-            plan.changes.push({ path: file.path, mode: gitMode(file.mode), type: 'blob', sha });
+            plan.changes.push({
+              path: file.path,
+              mode: gitMode(file.mode),
+              type: 'blob',
+              sha,
+            });
           }
         }
         count++;
@@ -153,13 +219,7 @@ export async function stepMirror(plan: MirrorPlan, io: MirrorIO, now = Date.now)
       continue;
     }
     let tree = plan.baseTree;
-    if (plan.changes.length) {
-      const result = await io.api<{ sha: string }>(`${prefix}/trees`, 'POST', {
-        base_tree: plan.baseTree,
-        tree: plan.changes,
-      });
-      tree = result.sha;
-    }
+    if (plan.changes.length) tree = await createTree(plan, io, prefix);
     const seed = plan.seed;
     const entry = {
       operationId: seed.operationId,
@@ -194,7 +254,10 @@ export async function stepMirror(plan: MirrorPlan, io: MirrorIO, now = Date.now)
         'GITHUB_SYNC_HASH',
         'GitHub commit differs from the deterministic mirror commit.',
       );
-      await io.api(`${prefix}/refs/heads/main`, 'PATCH', { sha: commit, force: false });
+      await io.api(`${prefix}/refs/heads/main`, 'PATCH', {
+        sha: commit,
+        force: false,
+      });
     }
     plan.entry = { ...entry, commit };
     plan.phase = 'done';
