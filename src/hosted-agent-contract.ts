@@ -224,6 +224,8 @@ export const hostedAgentCommandSchemas = {
       ...lane,
       run: z.boolean().default(true),
       budgetSeconds: z.number().int().min(1).max(3600).optional(),
+      /** false: run every ranked local tier without the time budget (the receipt's rerun command). */
+      trim: z.boolean().optional(),
     })
     .strict(),
   /** Client-composed operator repair: pack the current hosted main and publish it to R2. */

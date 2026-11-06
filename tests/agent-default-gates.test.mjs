@@ -175,6 +175,31 @@ test('checkpoint nudge: unsavedFor from local file times, nudge past the thresho
   assert.equal(unsavedMinutes(join(root, 'missing')), null, 'no checkout marker: nothing to say');
 });
 
+test('build outputs and other ignored files written after a save are never unsaved edits (c338ef0d)', t => {
+  // A first build:core after a save writes the gitignored convex/_generated/api.d.ts (and tsc may
+  // write *.tsbuildinfo). Preflight then refused with LANE_DIRTY until a no-op save moved the marker.
+  const root = repo(t, {
+    '.forge/hosted-lane.json': '{}',
+    '.gitignore': 'convex/_generated/api.d.ts\n*.tsbuildinfo\nbuild/\n',
+    'convex/_generated/api.d.ts': 'generated',
+    'tsconfig.tsbuildinfo': '{}',
+    'build/out.js': '',
+    'dist/cli.js': '',
+  });
+  const saved = Date.parse('2026-11-06T06:00:00.000Z') / 1000,
+    now = (saved + 10 * 60) * 1000;
+  utimesSync(join(root, '.forge/hosted-lane.json'), saved, saved);
+  for (const path of ['package.json', 'tests/b.test.mjs', '.gitignore'])
+    utimesSync(join(root, path), saved - 60, saved - 60);
+  for (const path of ['convex/_generated/api.d.ts', 'tsconfig.tsbuildinfo', 'build/out.js', 'dist/cli.js'])
+    utimesSync(join(root, path), saved + 60, saved + 60);
+  assert.equal(unsavedMinutes(root, now), null, 'ignored and generated files are not edits');
+  // A real new source file still is.
+  writeFileSync(join(root, 'tests/new.test.mjs'), 'new');
+  utimesSync(join(root, 'tests/new.test.mjs'), saved + 2 * 60, saved + 2 * 60);
+  assert.equal(unsavedMinutes(root, now), 8);
+});
+
 test('preflight survives a different saved head with identical content; content, path and mode changes refuse', t => {
   const root = repo(t);
   const files = [
@@ -351,7 +376,7 @@ test('slow learned timings trim by time, and the advisory names the rule, the cu
   assert.equal(result.preflight.estimateMinutes, 3);
   assert.equal(result.preflight.totalEstimateMinutes, 14);
   assert.match(result.preflight.local, /direct consumers/);
-  assert.match(result.preflight.local, /Trimmed direct 18 of 80/);
+  assert.match(result.preflight.local, /Trimmed wide 18 of 80/);
   assert.match(
     result.preflight.local,
     /62 test file\(s\) deferred; they run in the pre-queue Lane check \(on by default/,

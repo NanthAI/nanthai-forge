@@ -20,6 +20,7 @@ import { invariant } from './errors.js';
 import { withLaneCommand } from './lane-registry.js';
 import { markerIdentity } from './lane-prune.js';
 import { landSummary } from './hosted-land-summary.js';
+import { learnFromLanding } from './preflight-learned.js';
 import { operationLine } from './hosted-land-wait.js';
 import { AGENT_WAIT_SECONDS, operationWait } from './agent-operation-wait.js';
 import { recordTurnWait, settleTurnWork } from './agent-turn-work.js';
@@ -273,11 +274,14 @@ export async function hostedAgentCli(
       // finish -> wait -> outcome without another read or a finish replay.
       const selected = submissions?.length === 1 ? submissions[0] : undefined;
       if (!selectedWait.runId && status === 'terminal')
-        for (const entry of submissions ?? [])
+        for (const entry of submissions ?? []) {
           for (const line of landSummary({
             result: { phase: 'finish', ...entry },
           } as never))
             process.stderr.write(`${line}\n`);
+          // A failed check of this checkout's landing teaches the next preflight its failing tests.
+          if (submissions?.length === 1) learnFromLanding(root, entry);
+        }
       return { ...response, result: { ...response.result, ...selected } };
     } finally {
       process.removeListener('SIGINT', stop);

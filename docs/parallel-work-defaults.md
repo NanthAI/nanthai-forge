@@ -161,9 +161,23 @@ frozen set on 2026-11-06 broke capabilities across CLI/server versions with `HOS
   never guessed, because it may be a full verification. A check over its 120 s timeout is reported
   `timed-out`, not passed: the landing check still runs it.
 - `nforge agent ROOT preflight '{"laneId":"…"}'` always runs changed tests, explicit coverage
-  and smoke, then all direct consumers, then tests that watch a distinctive name in a changed
-  source (any import distance), then distance-2 consumers, nearest first. There is no
-  file count. A *name watcher* shares a rare path-like name with the change, such as a mkdtemp
+  and smoke; then *learned* tests; then *direct* tests; then direct consumers of hub modules
+  (`wide`); then tests that watch a distinctive name in a changed source (any import distance);
+  then distance-2 consumers, nearest first. There is no file count. Mandatory, learned and direct
+  tests are protected: the time budget never trims them and the run never stops them for time
+  (`local.protected`; `protectedOverBudget` says when they alone exceed it).
+  A *direct* test imports a changed module, also through test-only helpers (a fixture under
+  `tests/` that wraps the module adds no distance), or is named for it (`tests/NAME.test.mjs` for
+  a changed `NAME.ts`). A changed module whose direct tests alone would overrun the budget on this
+  machine (more files than the budget over the per-file estimate) is a *hub*: its consumers are
+  ranked as `wide` instead, and its own named test stays protected. A *learned* test failed in a
+  landing check or a preflight while one of the changed paths was changed (2026-11-06: the
+  disk-hygiene prune test and the delta behaviour tests were trimmed and the regression surfaced
+  only by hand). The record is `preflight-learned.json` beside the timings: changed path to failing
+  test file, from the `CHECK_FAILED` response `land --save` or `wait` already holds (the finish gate
+  remembers the landing's changed paths) and from failed preflight files. Learned tests run even
+  where the import graph does not reach them; entries expire after 30 days, the record is bounded
+  and never uploaded, and no server call is added. A *name watcher* shares a rare path-like name with the change, such as a mkdtemp
   prefix the module creates and a test that hooks `fs.open` on paths matching it; an import graph
   cannot see that link (2026-11-05: `hosted-checkout-barriers` was four edges away). A name counts
   only when at most 1% of the project's tests match it, and watchers rank by how rare their names
@@ -180,9 +194,13 @@ frozen set on 2026-11-06 broke capabilities across CLI/server versions with `HOS
   which join the deferred set. A failure ends the run the same way (`stoppedForFailure`): the rest
   is not started, passes are kept, fix and run again. A cut trims the farthest
   tier first, never leaves a nearer consumer out while a farther one runs, and never touches
-  changed tests, explicit coverage or smoke. The plan's `local.summary` and the receipt
+  protected tests. The plan's `local.summary` and the receipt
   (`rule`, `budgetSeconds`, `trimmedTiers`, `deferredTests`, `deferredTo: "pre-queue"`, `slowest`)
-  say what was trimmed and why and which files were slowest. Trimmed and farther consumers (three
+  say what was trimmed and why and which files were slowest. Every file skipped for time is named
+  (`local.trimmedTests` in the plan; `skipped` in the receipt, trimmed plus not started), with one
+  command that runs exactly those files (`rerun`): `preflight '{"laneId":"…","trim":false}'` runs
+  every ranked local tier with no budget and no filler, and reused passes make it run only what
+  was skipped, so its results are recorded and learned like any other run. Trimmed and farther consumers (three
   or more edges, dynamic) are
   `deferredTests`: they run in the pre-queue Lane check (`acceptance.admissionCheck`, on by
   default; with `false` they run first in the queue check). The receipt also reports build and

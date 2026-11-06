@@ -57,6 +57,7 @@ import { enrichHostedQueueAhead } from './queue-ahead-hosted.js';
 import { ackAnswers, checkpointNudge, finishGates, unsavedMinutes } from './agent-default-gates.js';
 import { liveLanding, ownsLiveLanding } from './landing-freeze.js';
 import { preflightPlan, runPreflight } from './agent-preflight.js';
+import { rememberLandingPaths } from './preflight-learned.js';
 import { hostedLaneDirty } from './hosted-lane-dirty.js';
 import { deltaApplyPending, finishPendingCheckoutDelta } from './hosted-checkout-delta-pending.js';
 import { agentDefaultLines, type EffectiveAgentDefaults } from './agent-parallel-defaults.js';
@@ -798,6 +799,8 @@ export class HostedAgentTransport {
                   ),
                 }
               : read;
+          // The paths this landing carries, so its check failure can teach the next preflight.
+          if (advice.changedPaths?.complete) rememberLandingPaths(root, laneId, advice.changedPaths.paths);
           const gates = finishGates(
             root,
             capabilities.agentDefaults,
@@ -1212,7 +1215,7 @@ export class HostedAgentTransport {
         advice.changedPaths,
       ),
       { laneId, files: marker.state.files },
-      { budgetSeconds: command.budgetSeconds },
+      { budgetSeconds: command.budgetSeconds, trim: command.trim },
     );
     const head = marker.selection.head;
     if (plan.status === 'unavailable' || !command.run)

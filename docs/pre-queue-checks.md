@@ -77,13 +77,15 @@ Each tier answers a different question. None depends on a particular CI provider
    closest to the change first (the changed tests, then direct and nearer
    transitive consumers), with a measured time estimate instead of a fixed cut.
    Issue c14f4065 replaced the former fixed 25-file cap for nearby consumers with
-   this: tiers in order (changed tests, explicit coverage and smoke; direct
-   consumers; distance-2 consumers), trimmed only by a local time budget (180 s by
-   default, `budgetSeconds` overrides). The plan, the receipt and the builder
-   output name the rule, the trimmed tier, the estimate and the number of tests
-   left for this pre-queue tier. The local tier **may leave out** any consumer test of the change that is
-   not itself a changed or added test file, plus the near-full set that preflight
-   already hands to the runner. It never decides acceptance.
+   this: tiers in order (changed tests, explicit coverage and smoke; tests that
+   failed for these paths before; direct tests of a changed module; hub, name-watch
+   and distance-2 consumers), with only the last three trimmed by a local time
+   budget (180 s by default, `budgetSeconds` overrides). The plan, the receipt and
+   the builder output name the rule, the trimmed tier and files, the one command
+   that runs them (`trim:false`), the estimate and the number of tests left for this
+   pre-queue tier. The local tier **may leave out** any hub, name-watch or farther
+   consumer of the change, plus the near-full set that preflight already hands to
+   the runner. It never decides acceptance.
 2. **Pre-queue Lane check (project runner, any CI): the complete consumer set,
    off the builder's machine.** It runs the project's configured check on the
    project's runner. Forge's `verify` selects either the full suite or every

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-import { existsSync, lstatSync, readdirSync, readFileSync, statSync } from 'node:fs';
-import { join, relative, sep } from 'node:path';
+import { existsSync, lstatSync, readFileSync, statSync } from 'node:fs';
+import { join } from 'node:path';
+import { scanSourcePaths } from './source-paths.js';
+import { canonicalRoot } from './root-paths.js';
 import { digest } from './hash.js';
 import { indexedBlob, readCheckoutStatIndex } from './checkout-stat-index.js';
 import { readHostedLaneCheckout } from './hosted-lane-checkout-marker.js';
@@ -136,12 +138,12 @@ export function ackAnswers(laneId: string, advice: Advice, choice: string, text?
   }));
 }
 
-const IGNORED = new Set(['node_modules', 'dist', '.forge', '.git', '.turbo', 'coverage']);
 /** Files newer than the save whose bytes are confirmed against the saved baseline per call. */
 const VERIFY_FILES = 256,
   VERIFY_BYTES = 64 * 1024 * 1024;
 /** Minutes the oldest unsaved edit has waited. File times against the checkout marker's save time
- * pick candidates (local stat walk); a candidate whose bytes and mode still equal the saved
+ * pick candidates among the paths a save would capture (the same walk and ignore rules as save, so
+ * build outputs and other ignored or generated files are never edits); a candidate whose bytes and mode still equal the saved
  * baseline (a rewrite with the same content, a lazily materialized file) is not an edit. The stat
  * index skips reads it vouches for; at most VERIFY_FILES/VERIFY_BYTES are read, anything past that
  * counts as unsaved. No server call; null when nothing differs from the save. */
@@ -149,35 +151,25 @@ export function unsavedMinutes(root: string, now = Date.now()) {
   const marker = join(root, '.forge', 'hosted-lane.json');
   if (!existsSync(marker)) return null;
   const savedAt = statSync(marker).mtimeMs;
-  const newer: { path: string; at: number }[] = [];
-  let visited = 0;
-  const walk = (dir: string) => {
-    for (const entry of readdirSync(dir, { withFileTypes: true })) {
-      if (++visited > 20_000) return;
-      if (IGNORED.has(entry.name)) continue;
-      const path = join(dir, entry.name);
-      if (entry.isDirectory()) walk(path);
-      else if (entry.isFile()) {
-        const at = lstatSync(path).mtimeMs;
-        if (at > savedAt) newer.push({ path, at });
-      }
-    }
-  };
-  walk(root);
-  if (!newer.length) return null;
-  const minutes = (at: number) => Math.max(0, Math.floor((now - at) / 60_000));
   let baseline: Map<string, { blob: string; mode: string }> | null = null;
   try {
     baseline = new Map(readHostedLaneCheckout(root)?.state.files.map(file => [file.path, file]) ?? []);
   } catch {
     /* An unreadable marker vouches for nothing: every newer file counts. */
   }
+  // Saved paths stay candidates even where an ignore rule now covers them, exactly as save keeps them.
+  const newer: { path: string; at: number }[] = [];
+  const scan = { retained: [...(baseline?.keys() ?? [])], validate: false };
+  for (const path of scanSourcePaths(canonicalRoot(root), scan)) {
+    const at = lstatSync(join(root, path)).mtimeMs;
+    if (at > savedAt) newer.push({ path, at });
+  }
+  if (!newer.length) return null;
+  const minutes = (at: number) => Math.max(0, Math.floor((now - at) / 60_000));
   const index = baseline ? readCheckoutStatIndex(root) : null;
   const budget = { files: VERIFY_FILES, bytes: VERIFY_BYTES };
-  for (const file of newer.sort((a, b) => a.at - b.at)) {
-    const path = relative(root, file.path).split(sep).join('/');
-    if (!baseline || !index || !savedBytes(root, path, baseline, index, budget)) return minutes(file.at);
-  }
+  for (const file of newer.sort((a, b) => a.at - b.at))
+    if (!baseline || !index || !savedBytes(root, file.path, baseline, index, budget)) return minutes(file.at);
   return null;
 }
 /** True when the file at path still holds its saved baseline bytes and mode. */

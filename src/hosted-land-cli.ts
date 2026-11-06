@@ -20,6 +20,7 @@ import { readClientSettings } from './client-settings.js';
 import { withLaneCommand } from './lane-registry.js';
 import { markerIdentity } from './lane-prune.js';
 import { landPhase, landSummary, resultOf, landTerminal } from './hosted-land-summary.js';
+import { learnFromLanding } from './preflight-learned.js';
 import {
   landAnnouncement,
   landResumeCommand,
@@ -270,6 +271,7 @@ export async function hostedLandCli(
   ) {
     const lines = landSummary(submitted);
     for (const line of lines) process.stderr.write(`${line}\n`);
+    learnFromLanding(hostedAgentRoot(root), resultOf(submitted), command.laneId);
     // Not waiting here: an unfinished landing still names the one command that waits for it.
     const next = lines[0]?.startsWith('FAILED')
       ? undefined
@@ -346,6 +348,7 @@ export async function hostedLandCli(
   };
   const lines = landSummary(final);
   for (const line of lines) process.stderr.write(`${line}\n`);
+  learnFromLanding(hostedAgentRoot(transport.root ?? root), resultOf(final), command.laneId);
   const resumeWith = landWaitContinuation(transport.root ?? root, final)?.next;
   if (resumeWith) recordTurnWait(transport.root ?? root, resumeWith, null);
   else

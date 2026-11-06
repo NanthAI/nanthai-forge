@@ -43,19 +43,28 @@ export function selectTests(
   graphCache?: object,
 ): TestSelection;
 export type PreflightTier = {
-  tier: 'mandatory' | 'direct' | 'watch' | 'near';
+  tier: 'mandatory' | 'learned' | 'direct' | 'wide' | 'watch' | 'near';
   tests: string[];
 };
 export const preflightTierRule: string;
+/** Tiers the time budget never trims or stops. */
+export const protectedTiers: Set<string>;
 export function selectPreflightTests(
   input: {
     files: Map<string, string>;
     paths: string[];
+    /** Tests that failed for one of these paths in an earlier landing check or preflight. */
+    learned?: string[];
+    /** Protect direct tests module by module, most specific first, while their cost fits; the
+     * rest are broad modules whose consumers are ranked (`wide`). Absent: all are protected. */
+    hubBudget?: { seconds: number; secondsFor: (test: string) => number };
   },
   graphCache?: object,
 ): TestSelection & {
   deferredTests: string[];
   tiers: PreflightTier[];
+  /** Changed modules whose direct tests were ranked (`wide`) instead of protected. */
+  broadModules: string[];
   /** Distinctive names each promoted `watch` test shares with a changed source. */
   watchedNames: Record<string, string[]>;
 };
@@ -76,6 +85,8 @@ export function fitPreflightBudget(input: {
   }[];
   estimateSeconds: number;
   mandatoryOverBudget: boolean;
+  /** Protected tiers alone exceed the budget; they still all run. */
+  protectedOverBudget: boolean;
 };
 export function selectImpactPair(files: Map<string, string>, comparisons: string[][]): TestSelection[];
 export const smokeTests: string[];

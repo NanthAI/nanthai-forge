@@ -4,16 +4,19 @@ import test from 'node:test';
 import { readFileSync } from 'node:fs';
 import {
   fitPreflightBudget,
+  protectedTiers,
   selectTests,
   selectPreflightTests,
   sourceFiles,
 } from '../scripts/test-impact.mjs';
 
-const partition = (files, paths) => {
+// The default 180 s budget at the default 4 s per file.
+const budget = { seconds: 180, secondsFor: () => 4 };
+const partition = (files, paths, hubBudget = budget) => {
   // Both selections read one inventory and path list, so they share a single parsed import graph.
   const graphCache = {};
   const complete = selectTests({ files, paths }, graphCache);
-  const plan = selectPreflightTests({ files, paths }, graphCache);
+  const plan = selectPreflightTests({ files, paths, hubBudget }, graphCache);
   assert.deepEqual([...plan.tests, ...plan.deferredTests].sort(), complete.tests);
   assert.equal(new Set([...plan.tests, ...plan.deferredTests]).size, complete.tests.length);
   return plan;
@@ -46,7 +49,7 @@ test('local selection follows import distance; every distant and uncertain consu
   assert.deepEqual(grown.tests, plan.tests);
   assert.equal(grown.deferredTests.length, 10002);
 });
-test('wide direct-consumer hubs stay whole in the ranked set; the time budget, not a count, trims them', () => {
+test('hub direct consumers stay whole in the ranked set; the time budget, not a count, trims them', () => {
   const files = new Map([
     ['package.json', '{"scripts":{}}'],
     ['src/hub.ts', 'export {};'],
@@ -54,8 +57,10 @@ test('wide direct-consumer hubs stay whole in the ranked set; the time budget, n
   for (let i = 0; i < 300; i++) files.set(`tests/consumer-${i}.test.mjs`, "import '../dist/hub.js';");
   const changed = ['src/hub.ts', 'tests/consumer-299.test.mjs'];
   const plan = partition(files, changed);
-  // Every direct consumer is in the ranked local set: no count drops one silently.
-  assert.equal(plan.tiers.find(item => item.tier === 'direct').tests.length, 299);
+  // The hub's direct tests alone overrun the budget, so they are ranked (`wide`), not protected; no
+  // count drops one silently.
+  assert.equal(plan.tiers.find(item => item.tier === 'wide').tests.length, 299);
+  assert.equal(plan.tiers.find(item => item.tier === 'direct').tests.length, 0);
   assert.ok(plan.tests.includes('tests/consumer-299.test.mjs'));
   const fit = fitPreflightBudget({
     tiers: plan.tiers,
@@ -66,7 +71,7 @@ test('wide direct-consumer hubs stay whole in the ranked set; the time budget, n
   assert.equal(fit.tests.length, 45);
   assert.deepEqual(
     fit.trimmed.map(item => item.tier),
-    ['direct'],
+    ['wide'],
   );
   const [direct] = fit.trimmed;
   assert.equal(direct.kept + direct.deferred.length, direct.total);
@@ -80,7 +85,10 @@ test('wide direct-consumer hubs stay whole in the ranked set; the time budget, n
   assert.equal(fast.tests.length, 180);
   assert.deepEqual(fast.tests.slice(0, 45), fit.tests);
   // Mandatory tests never trim, even over budget, and the report says so.
-  const many = partition(files, ['src/hub.ts', ...plan.tiers[1].tests.slice(0, 60)]);
+  const many = partition(files, [
+    'src/hub.ts',
+    ...plan.tiers.find(item => item.tier === 'wide').tests.slice(0, 60),
+  ]);
   const over = fitPreflightBudget({
     tiers: many.tiers,
     budgetSeconds: 180,
@@ -90,14 +98,14 @@ test('wide direct-consumer hubs stay whole in the ranked set; the time budget, n
   assert.equal(over.tests.length, many.tiers[0].tests.length);
   assert.deepEqual(
     over.trimmed.map(item => item.tier),
-    ['direct'],
+    ['wide'],
   );
   assert.equal(over.trimmed[0].kept, 0);
 });
 test('a farther tier never runs while a nearer consumer is deferred; reused passes cost nothing', () => {
   const tiers = [
     { tier: 'mandatory', tests: ['m'] },
-    { tier: 'direct', tests: ['d1', 'd2', 'd3'] },
+    { tier: 'wide', tests: ['d1', 'd2', 'd3'] },
     { tier: 'near', tests: ['n1', 'n2'] },
   ];
   const fit = fitPreflightBudget({
@@ -109,7 +117,7 @@ test('a farther tier never runs while a nearer consumer is deferred; reused pass
   assert.deepEqual(
     fit.trimmed.map(item => [item.tier, item.kept, item.deferred.length]),
     [
-      ['direct', 1, 2],
+      ['wide', 1, 2],
       ['near', 0, 2],
     ],
   );
@@ -124,6 +132,113 @@ test('a farther tier never runs while a nearer consumer is deferred; reused pass
     free.trimmed.map(item => item.tier),
     ['near'],
   );
+});
+test('protected tiers (mandatory, learned, direct) are never trimmed, even far over budget', () => {
+  assert.deepEqual([...protectedTiers].sort(), ['direct', 'learned', 'mandatory']);
+  const tiers = [
+    { tier: 'mandatory', tests: ['m'] },
+    { tier: 'learned', tests: ['l'] },
+    { tier: 'direct', tests: ['d1', 'd2', 'd3'] },
+    { tier: 'wide', tests: ['w'] },
+    { tier: 'near', tests: ['n'] },
+  ];
+  const fit = fitPreflightBudget({ tiers, budgetSeconds: 1, secondsPerFile: 4 });
+  assert.deepEqual(fit.tests, ['m', 'l', 'd1', 'd2', 'd3']);
+  assert.equal(fit.protectedOverBudget, true);
+  assert.deepEqual(
+    fit.trimmed.map(item => item.tier),
+    ['wide', 'near'],
+  );
+});
+test('behaviour tests that reach a changed module through a test fixture, or are named for it, are direct (b8b53ea0)', () => {
+  const files = new Map(
+    Object.entries({
+      'package.json': '{"scripts":{}}',
+      'src/delta.ts': 'export const n = 1;',
+      'src/sync.ts': "import './delta.js';",
+      'tests/delta-fixture.mjs': "import '../dist/delta.js';",
+      'tests/through-fixture.test.mjs': "import './delta-fixture.mjs';",
+      'tests/delta.test.mjs': "import '../dist/sync.js';",
+      'tests/near.test.mjs': "import '../dist/sync.js';",
+      'tests/unrelated.test.mjs': '',
+    }),
+  );
+  const plan = partition(files, ['src/delta.ts']);
+  const tier = name => plan.tiers.find(item => item.tier === name).tests;
+  assert.deepEqual(tier('direct'), ['tests/delta.test.mjs', 'tests/through-fixture.test.mjs']);
+  assert.deepEqual(tier('near'), ['tests/near.test.mjs']);
+  const fit = fitPreflightBudget({ tiers: plan.tiers, budgetSeconds: 1, secondsPerFile: 4 });
+  assert.ok(fit.tests.includes('tests/through-fixture.test.mjs'), 'never trimmed under budget pressure');
+  assert.ok(fit.tests.includes('tests/delta.test.mjs'));
+  assert.ok(!fit.tests.includes('tests/near.test.mjs'));
+});
+test('a module is broad only when its direct tests overrun the budget; its named test stays protected', () => {
+  const build = consumers => {
+    const files = new Map([
+      ['package.json', '{"scripts":{}}'],
+      ['src/shared.ts', 'export {};'],
+      ['tests/shared.test.mjs', "import '../dist/shared.js';"],
+    ]);
+    for (let i = 0; i < 100; i++)
+      files.set(`tests/t-${i}.test.mjs`, i < consumers ? "import '../dist/shared.js';" : '');
+    return partition(files, ['src/shared.ts'], { seconds: 40, secondsFor: () => 4 });
+  };
+  const tier = (plan, name) => plan.tiers.find(item => item.tier === name).tests;
+  // Small projects never have hubs: a few direct tests always fit.
+  const at = build(9);
+  assert.equal(tier(at, 'direct').length, 10);
+  assert.deepEqual(tier(at, 'wide'), []);
+  const past = build(10);
+  assert.deepEqual(tier(past, 'direct'), ['tests/shared.test.mjs']);
+  assert.equal(tier(past, 'wide').length, 10);
+  // Without a budget (preflight trim:false) nothing is broad.
+  const files = new Map([...Array(30)].map((_, i) => [`tests/t-${i}.test.mjs`, "import '../dist/s.js';"]));
+  files.set('package.json', '{"scripts":{}}').set('src/s.ts', 'export {};');
+  assert.equal(
+    selectPreflightTests({ files, paths: ['src/s.ts'] }).tiers.find(item => item.tier === 'direct').tests
+      .length,
+    30,
+  );
+});
+test('the most specific changed modules keep their direct tests protected; the broadest are ranked', () => {
+  const files = new Map([
+    ['package.json', '{"scripts":{}}'],
+    ['src/dirty.ts', 'export {};'],
+    ['src/transport.ts', 'export {};'],
+    ['tests/fixture.mjs', "import '../dist/transport.js';"],
+    ['tests/hygiene.test.mjs', "import '../dist/dirty.js'; import './fixture.mjs';"],
+  ]);
+  for (let i = 0; i < 40; i++) files.set(`tests/agent-${i}.test.mjs`, "import './fixture.mjs';");
+  // Real costs: the hygiene test is slow, the harness users are quick, yet transport is broader.
+  const secondsFor = test => (test === 'tests/hygiene.test.mjs' ? 60 : 3);
+  const plan = partition(files, ['src/transport.ts', 'src/dirty.ts'], { seconds: 100, secondsFor });
+  const tier = name => plan.tiers.find(item => item.tier === name).tests;
+  assert.deepEqual(tier('direct'), ['tests/hygiene.test.mjs']);
+  assert.equal(tier('wide').length, 40);
+  assert.deepEqual(plan.broadModules, ['src/transport.ts']);
+  const fit = fitPreflightBudget({ tiers: plan.tiers, budgetSeconds: 100, secondsPerFile: 3, secondsFor });
+  assert.ok(fit.tests.includes('tests/hygiene.test.mjs'));
+  assert.equal(fit.trimmed[0].tier, 'wide');
+});
+test('learned tests run locally and protected, even where the import graph does not reach them', () => {
+  const files = new Map(
+    Object.entries({
+      'package.json': '{"scripts":{}}',
+      'src/a.ts': 'export const n = 1;',
+      'tests/a.test.mjs': "import '../dist/a.js';",
+      'tests/watches-paths.test.mjs': '',
+      'tests/gone.test.mjs': '',
+    }),
+  );
+  const plan = selectPreflightTests({
+    files,
+    paths: ['src/a.ts'],
+    learned: ['tests/watches-paths.test.mjs', 'tests/missing.test.mjs'],
+  });
+  assert.deepEqual(plan.tiers.find(item => item.tier === 'learned').tests, ['tests/watches-paths.test.mjs']);
+  assert.ok(!plan.deferredTests.includes('tests/watches-paths.test.mjs'));
+  const fit = fitPreflightBudget({ tiers: plan.tiers, budgetSeconds: 1, secondsPerFile: 4 });
+  assert.ok(fit.tests.includes('tests/watches-paths.test.mjs'));
 });
 test('no hardcoded local file count remains in the selector or the preflight planner', () => {
   for (const file of ['../scripts/test-impact.mjs', '../src/agent-preflight.ts'])
@@ -208,20 +323,57 @@ test('real bench, incident and pull slices cannot regress into near-full local r
       ],
       consumer: 'tests/hosted-pull.test.mjs',
     },
+    {
+      // Friction 8288e7f5: the stat-index write in hosted-lane-dirty broke the disk-hygiene prune
+      // test, which imports that module directly, and the budget had trimmed it.
+      name: 'delta-followups',
+      paths: [
+        'docs/architecture.md',
+        'docs/status.md',
+        'src/checkout-stat-index.ts',
+        'src/hosted-agent-transport.ts',
+        'src/hosted-checkout-clean.ts',
+        'src/hosted-checkout-delta-settle.ts',
+        'src/hosted-checkout-delta.ts',
+        'src/hosted-lane-checkout.ts',
+        'src/hosted-lane-dirty.ts',
+        'src/hosted-main-checkout.ts',
+        'src/hosted-main-publish.ts',
+        'tests/checkout-stat-index-refresh.test.mjs',
+        'tests/hosted-main-delta-recovery.test.mjs',
+        'tests/hosted-pull.test.mjs',
+      ],
+      consumer: 'tests/client-disk-hygiene.test.mjs',
+      protect: ['tests/client-disk-hygiene.test.mjs'],
+    },
+    {
+      // Friction b8b53ea0: the behaviour tests of the new delta modules sat in the trimmed near tier.
+      name: 'deltafix',
+      paths: [
+        'src/hosted-checkout-delta-settle.ts',
+        'src/hosted-checkout-delta.ts',
+        'src/hosted-lane-checkout.ts',
+      ],
+      consumer: 'tests/hosted-checkout-delta.test.mjs',
+      protect: ['tests/hosted-checkout-delta.test.mjs', 'tests/hosted-checkout-preservation.test.mjs'],
+    },
   ];
-  for (const { name, paths, consumer } of cases) {
+  for (const { name, paths, consumer, protect = [] } of cases) {
     const plan = partition(files, paths);
     assert.ok(plan.tests.includes(consumer), `${consumer} must be in the ranked local set`);
-    // Replay: every direct consumer is in the ranked local set or the named deferred set,
-    // and the budget cut (if any) names the tier it trimmed.
-    const direct = plan.tiers.find(item => item.tier === 'direct').tests;
+    // Replay: every protected test runs locally even under budget pressure, every ranked consumer
+    // is local or in the named deferred set, and the budget cut (if any) names the tier it trimmed.
+    const guarded = plan.tiers.filter(item => protectedTiers.has(item.tier)).flatMap(item => item.tests);
+    for (const test of protect) assert.ok(guarded.includes(test), `${name}: ${test} must be protected`);
     const fit = fitPreflightBudget({
       tiers: plan.tiers,
       budgetSeconds: 180,
       secondsPerFile: 4,
     });
     const cut = fit.trimmed.flatMap(item => item.deferred);
-    for (const test of direct)
+    for (const test of guarded) assert.ok(fit.tests.includes(test), `${name}: ${test} was trimmed`);
+    const direct = plan.tiers.find(item => item.tier === 'direct').tests;
+    for (const test of plan.tests)
       assert.ok(
         fit.tests.includes(test) || cut.includes(test),
         `${name}: ${test} neither local nor scheduled`,
