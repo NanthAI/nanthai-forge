@@ -478,6 +478,8 @@ advances its mapping without an empty commit. Native-owner and shadow projects
 keep the local worker described below; server bindings and a pending server
 cutover stop that Mac worker.
 
+Each pushed mirror commit that touches Convex paths starts `.github/workflows/convex-deploy.yml` (dev deploy). Its first job skips, ending green with a notice, any run whose commit has a newer deploy-path commit on `main`, so a drained mirror backlog deploys only the newest head.
+
 Messages retain trailer order, are capped at 1 KiB UTF-8, have controls stripped
 and reserved Forge trailers escaped. [Message metadata](architecture.md#landing-message-metadata)
 describes cohort ordering, legacy finish recovery and byte bounds. Existing

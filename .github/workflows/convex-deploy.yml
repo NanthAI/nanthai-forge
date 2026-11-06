@@ -15,12 +15,42 @@ permissions:
   contents: read
 
 # One deploy at a time; a newer main replaces a queued one, never interrupts a running one.
+# The check job below then skips a run whose commit a newer deploy-relevant main commit has passed.
 concurrency:
   group: convex-deploy-benevolent-wildebeest-974
   cancel-in-progress: false
 
 jobs:
+  # Runs after the concurrency queue, so a mirror backlog drain deploys only the newest head.
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      deploy: ${{ steps.tip.outputs.deploy }}
+    steps:
+      - id: tip
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          # Compare this commit with the current main: skip only when a newer commit changed a path
+          # this workflow watches (a newer docs-only commit starts no deploy and must not hide this one).
+          # An unreadable or truncated (300 file) comparison deploys, as before this check existed.
+          if ! out=$(gh api "repos/$REPO/compare/$SHA...main" --jq '[.status, ([(.files // [])[].filename | select(test("^(convex/|src/|package\\.json$|package-lock\\.json$|\\.github/workflows/convex-deploy\\.yml$)"))] | length), ((.files // []) | length)] | @tsv'); then
+            out="unknown 0 0"
+            echo "::warning::Could not compare $SHA with main; deploying."
+          fi
+          read -r status watched total <<< "$out"
+          if [ "$status" = ahead ] && [ "$watched" -gt 0 ] && [ "$total" -lt 300 ]; then
+            echo "deploy=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Skipped: a newer main commit changes deploy paths, so its own run deploys instead of $SHA."
+          else
+            echo "deploy=true" >> "$GITHUB_OUTPUT"
+          fi
   deploy:
+    needs: check
+    if: needs.check.outputs.deploy == 'true'
     runs-on: ubuntu-latest
     # The deploy key lives only in this environment; it deploys from main alone, so forks and PRs never see it.
     environment: convex-dev
