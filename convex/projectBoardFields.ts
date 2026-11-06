@@ -12,6 +12,8 @@ export const boardTables = {
     id: v.string(),
     /** Auth subject. Mapped to a Forge handle on every read (convex/publicPeople.ts). */
     author: v.string(),
+    /** The posting agent session's word-list slug (c29d0780); absent for a person. Shown as `handle/slug`. */
+    agent: v.optional(v.string()),
     fromLaneId: v.optional(v.string()),
     /** `lane:<uuid>`, `issue:<uuid>` or `project`. */
     targetKey: v.string(),
@@ -41,6 +43,8 @@ export const boardTables = {
     path: v.string(),
     /** Auth subject. Mapped to a Forge handle on every read (convex/publicPeople.ts). */
     author: v.string(),
+    /** The claiming Lane's agent slug, copied from its presence row (c29d0780). */
+    agent: v.optional(v.string()),
     at: v.number(),
     expiresAt: v.number(),
   })

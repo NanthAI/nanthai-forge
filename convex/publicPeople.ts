@@ -3,6 +3,7 @@ import { v } from 'convex/values';
 import { internalQuery, type ActionCtx, type MutationCtx, type QueryCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import { makeFunctionReference } from 'convex/server';
+import { splitAgentActor } from '../src/agent-slug';
 
 /** Public identity rule: a person is shown as a Forge handle, never as an auth
  * subject (account id), provider display name or email. Every public function
@@ -97,6 +98,13 @@ function blank(value: unknown): unknown {
 async function mapNode(view: View, node: unknown, person: boolean, shape?: Shape): Promise<unknown> {
   if (typeof node === 'string') {
     if (person) {
+      // An agent session (c29d0780) reads `ACCOUNT/slug`: the account follows the same rule and
+      // the word-list slug is kept, so readers who may not see the person see neither.
+      const agent = splitAgentActor(node);
+      if (agent) {
+        const mapped = await mapNode(view, agent.actor, true);
+        return typeof mapped === 'string' && mapped ? `${mapped}/${agent.agent}` : mapped;
+      }
       const found = await view.lookup(node);
       if (!found.person) return node;
       if (node === view.viewer) return found.handle ?? REMOVE;
@@ -322,7 +330,7 @@ const resolveRef = makeFunctionReference<
 
 function personStrings(node: unknown, person: boolean, into: Set<string>, keys: Set<string>) {
   if (typeof node === 'string') {
-    if (person) into.add(node);
+    if (person) into.add(splitAgentActor(node)?.actor ?? node);
     else if (node.length > 2 && (node[0] === '{' || node[0] === '[') && keyPattern.test(node))
       try {
         personStrings(JSON.parse(node), false, into, keys);

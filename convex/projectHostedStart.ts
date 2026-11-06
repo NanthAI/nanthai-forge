@@ -27,6 +27,8 @@ const args = {
   operationId: v.string(),
   noticeVersion: v.optional(v.literal(1)),
   openLanesVersion: v.optional(v.literal(1)),
+  /** The calling agent session's slug (feature agent-slug, c29d0780); not part of the payload. */
+  agent: v.optional(v.string()),
   authorityEpoch: v.number(),
   expectedMain: v.object({ head: v.string(), receiptId: v.string() }),
   initialHead: v.optional(v.string()),
@@ -48,6 +50,7 @@ type Input = {
   operationId: string;
   noticeVersion?: 1;
   openLanesVersion?: 1;
+  agent?: string;
   authorityEpoch: number;
   expectedMain: { head: string; receiptId: string };
   initialHead?: string;
@@ -84,7 +87,8 @@ async function execute(ctx: MutationCtx, input: Input, action: 'start' | 'intent
     'BAD_ARGUMENT',
     'Send a hosted start with an operation UUID and exact main pins.',
   );
-  const { noticeVersion, openLanesVersion, ...semanticRequest } = validated.data;
+  // The agent slug only labels the Lane for other agents: a retry from another session is the same start.
+  const { noticeVersion, openLanesVersion, agent, ...semanticRequest } = validated.data;
   const payload = { action, ...semanticRequest };
   invariant(action === 'start' || payload.intent.kind === 'new', 'BAD_ARGUMENT', 'Create a new Intent.');
   let overlapIntent = payload.intent.kind === 'existing' ? payload.intent.intentId : payload.intent.outcome;
@@ -246,7 +250,7 @@ async function execute(ctx: MutationCtx, input: Input, action: 'start' | 'intent
       authorityEpoch: expected.authorityEpoch,
       expectedVersion: null,
       ownerOnly,
-      overlap: { baseSequence: main.sourceRevision, intent: overlapIntent },
+      overlap: { baseSequence: main.sourceRevision, intent: overlapIntent, ...(agent ? { agent } : {}) },
       record: {
         kind: 'lane',
         id: laneId,

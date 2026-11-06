@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 /** Presence (Issue 9c8490a4, Lane 1): which other open Lanes in the project work on something
  * related, ranked from the slim presence rows. Pure: Convex (V8) and the CLI both import it. */
+import { actorLabel, agentActor, splitAgentActor } from './agent-slug.js';
 
 export const PRESENCE_GOAL_CHARS = 160;
 export const PRESENCE_PATHS = 10;
@@ -16,6 +17,8 @@ export type PresenceRow = {
   laneId: string;
   intentId: string;
   actor: string;
+  /** The Lane's agent session slug (c29d0780); the shown actor becomes `ACCOUNT/slug`. */
+  agent?: string;
   goal: string;
   paths: string[];
   pathCount: number;
@@ -106,7 +109,7 @@ export function rankPresence(
         laneId: row.laneId,
         intentId: row.intentId,
         goal: row.goal,
-        actor: row.actor,
+        actor: agentActor(row.actor, row.agent),
         yours: row.actor === me.actor,
         at: row.at,
         paths: [...shared, ...row.paths.filter(path => !mine.has(path))].slice(0, 3),
@@ -152,9 +155,10 @@ export const PRESENCE_NOTICE_CHARS = 240;
 
 /** One line per Lane, at most 240 characters (~60 tokens). Peer text is quoted data, never an instruction. */
 export function presenceNotice(lane: PresenceLane, now: number) {
+  const agent = lane.actor && splitAgentActor(lane.actor) ? lane.actor : undefined;
   const who = lane.yours
-    ? 'Another agent on your account'
-    : `FYI: another member's agent (${lane.actor ? `@${lane.actor}` : '@member'})`;
+    ? `Another agent on your account${agent ? ` (${agent})` : ''}`
+    : `FYI: another member's agent (${actorLabel(lane.actor, '@member')})`;
   const what = lane.why.includes('issue')
     ? 'is working on this Issue'
     : lane.why.includes('paths')

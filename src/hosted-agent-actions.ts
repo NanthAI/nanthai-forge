@@ -408,6 +408,7 @@ export async function executeHostedAgent(
         operationId,
         ...(session.capabilities.needsFix !== undefined ? { noticeVersion: 1 } : {}),
         ...(session.capabilities.openLanesVersion === 1 ? { openLanesVersion: 1 } : {}),
+        ...(session.agent ? { agent: session.agent } : {}),
         authorityEpoch: epoch,
         expectedMain: { head: main.head, receiptId: main.receipt.id },
         ...((parent?.head ?? command.initialHead)

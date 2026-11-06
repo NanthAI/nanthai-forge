@@ -9,6 +9,7 @@ import type { Doc, Id } from './_generated/dataModel';
 import { recordCaller } from './projectHostedFrictionStore';
 import { BOARD_CLEANUP_BATCH, BOARD_RETENTION_MS, boardStopped } from './projectBoardLimits';
 import { assertBoardPaths } from '../src/board-text';
+import { agentActor } from '../src/agent-slug';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { safeRelative } from '../src/safe-relative';
 import { invariant } from '../src/errors';
@@ -43,7 +44,7 @@ async function laneState(ctx: Ctx, projectId: Id<'hostedProjects'>, laneId: stri
     .withIndex('by_project_and_lane', q => q.eq('projectId', projectId).eq('laneId', laneId))
     .unique();
   if (presence && presence.pathCount <= presence.paths.length)
-    return { actor: presence.actor, saved: new Set(presence.paths) };
+    return { actor: presence.actor, agent: presence.agent, saved: new Set(presence.paths) };
   const row = await ctx.db
     .query('projectHostedOverlapLanes')
     .withIndex('by_project_and_lane', q => q.eq('projectId', projectId).eq('laneId', laneId))
@@ -57,6 +58,7 @@ async function laneState(ctx: Ctx, projectId: Id<'hostedProjects'>, laneId: stri
   }
   return {
     actor: row.actor,
+    agent: row.agent,
     saved: new Set(changes.map(change => change.path).filter(path => typeof path === 'string')),
   };
 }
@@ -126,6 +128,7 @@ export const claim = mutation({
           laneId: input.laneId,
           path,
           author: actor,
+          ...(lane.agent ? { agent: lane.agent } : {}),
           at: now,
           expiresAt: now + BOARD_RETENTION_MS,
         });
@@ -169,7 +172,7 @@ export async function readAutoClaims(
     if (row.laneId === input.laneId || row.expiresAt <= input.now) continue;
     const peer = input.peers?.(row.laneId) ?? (await laneState(ctx, input.project._id, row.laneId));
     if (!peer || ('open' in peer && !peer.open) || peer.saved.has(row.path)) continue;
-    shown.push({ author: row.author, fromLaneId: row.laneId, at: row.at });
+    shown.push({ author: agentActor(row.author, row.agent), fromLaneId: row.laneId, at: row.at });
   }
   return shown;
 }

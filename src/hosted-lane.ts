@@ -4,6 +4,7 @@ import { mainExpectationSchema } from './hosted-main.js';
 import { sourceAuthoritySchema } from './hosted-source-authority.js';
 import { hostedRecordSchema } from './hosted-records.js';
 import { intentCreateSchema } from './work-intent-types.js';
+import { isAgentSlug } from './agent-slug.js';
 
 export const hostedIntentInputSchema = z.discriminatedUnion('kind', [
   z
@@ -29,6 +30,8 @@ export const hostedStartSchema = z
     noticeVersion: z.literal(1).optional(),
     /** The client reads openLanes in the reply (capability openLanesVersion); never part of the payload hash. */
     openLanesVersion: z.literal(1).optional(),
+    /** The calling agent session's slug (feature agent-slug, c29d0780); never part of the payload hash. */
+    agent: z.string().refine(isAgentSlug, 'agent must be a Forge agent slug').optional(),
     operationId: z.uuid(),
     authorityEpoch: sourceAuthoritySchema.shape.epoch,
     expectedMain: mainExpectationSchema,

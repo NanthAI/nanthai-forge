@@ -3,7 +3,12 @@ import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { readHostedLaneCheckout } from './hosted-lane-checkout-marker.js';
 import { assertBoardPaths, assertBoardText } from './board-text.js';
-import { boardNoticeLine, readBoardCursor, writeBoardCursor } from './board-local.js';
+import {
+  boardNoticeLine,
+  readBoardCursor,
+  readBoardServerFeatures,
+  writeBoardCursor,
+} from './board-local.js';
 import { ForgeError, invariant } from './errors.js';
 import type { HostedAgentTransport } from './hosted-agent-transport.js';
 
@@ -68,7 +73,8 @@ function unsupported(error: unknown): never {
  * authorizes every call). Posts without an operationId get a new one; a retried identical note
  * to the same target within 24 h returns the original id (server dedupe). */
 export async function boardHostedSource(
-  transport: Pick<HostedAgentTransport, 'root' | 'query' | 'mutation'>,
+  transport: Pick<HostedAgentTransport, 'root' | 'query' | 'mutation'> &
+    Partial<Pick<HostedAgentTransport, 'address' | 'advertisedFeatures' | 'agentSlug'>>,
   action: keyof typeof hostedBoardSchemas,
   input: unknown,
 ) {
@@ -105,13 +111,26 @@ export async function boardHostedSource(
   // Same checks as the server, so a refusal costs no call; the server re-checks every post.
   assertBoardText(text);
   assertBoardPaths(command.paths as string[] | undefined);
+  const post = {
+    operationId: (command.operationId as string | undefined) ?? randomUUID(),
+    text,
+    ...(action === 'board-reply' ? { replyTo: (command.id as string).toLowerCase() } : { to: command.to }),
+    ...(command.paths ? { paths: command.paths } : {}),
+    ...(laneId ? { laneId } : {}),
+  };
+  // The note names this agent session (c29d0780) once the server takes it: the features this
+  // process read, else the ones this machine last saw (board posts make no capability read).
+  const features =
+    transport.advertisedFeatures ??
+    (transport.address ? readBoardServerFeatures(transport.address.projectId) : []);
+  const agent = features.includes('agent-slug') ? transport.agentSlug?.() : undefined;
   return transport
-    .mutation('projectBoard:post', {
-      operationId: (command.operationId as string | undefined) ?? randomUUID(),
-      text,
-      ...(action === 'board-reply' ? { replyTo: (command.id as string).toLowerCase() } : { to: command.to }),
-      ...(command.paths ? { paths: command.paths } : {}),
-      ...(laneId ? { laneId } : {}),
+    .mutation('projectBoard:post', agent ? { ...post, agent } : post)
+    .catch((error: unknown) => {
+      // A server rolled back past agent-slug: post once more without the slug (people see @handle).
+      if (agent && error instanceof Error && /extra field\s+[`'"]?agent\b/i.test(error.message))
+        return transport.mutation('projectBoard:post', post);
+      throw error;
     })
     .catch(unsupported);
 }

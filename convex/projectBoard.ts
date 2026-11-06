@@ -18,6 +18,7 @@ import {
   sendBoardAlerts,
 } from './projectBoardLimits';
 import { assertBoardPaths, assertBoardText, boardIdPrefix, parseBoardTarget } from '../src/board-text';
+import { isAgentSlug } from '../src/agent-slug';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { digest } from '../src/portable-hash';
 import { invariant } from '../src/errors';
@@ -84,6 +85,8 @@ export const post = mutation({
     replyTo: v.optional(v.string()),
     laneId: v.optional(v.string()),
     paths: v.optional(v.array(v.string())),
+    /** The posting agent session's slug (feature agent-slug, c29d0780); absent for a person. */
+    agent: v.optional(v.string()),
   },
   returns: v.string(),
   handler: async (ctx, input) => {
@@ -106,6 +109,11 @@ export const post = mutation({
       assertBoardOpen(await boardStopped(ctx, projectId, actor));
       assertBoardText(input.text);
       assertBoardPaths(input.paths);
+      invariant(
+        input.agent === undefined || isAgentSlug(input.agent),
+        'BAD_ARGUMENT',
+        'agent must be a Forge agent slug (two words from the fixed list).',
+      );
       invariant(
         (input.to === undefined) !== (input.replyTo === undefined),
         'BAD_ARGUMENT',
@@ -200,6 +208,7 @@ export const post = mutation({
         projectId,
         id,
         author: actor,
+        ...(input.agent ? { agent: input.agent } : {}),
         ...(fromLaneId ? { fromLaneId } : {}),
         targetKey,
         ...(replyTo ? { replyTo } : {}),

@@ -3,14 +3,16 @@ import type { QueryCtx, MutationCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
 import { boardStopped } from './projectBoardLimits';
 import { boardPathVisible, claimDecision, readAutoClaims, type ClaimPeers } from './projectBoardClaims';
+import { agentActor } from '../src/agent-slug';
 
 type Ctx = QueryCtx | MutationCtx;
-/** A message as returned. `author` is an auth subject here; the public function wrapper maps it to
- * a Forge handle for members with write access and removes it for anyone else. */
+/** A message as returned. `author` is an auth subject here (`subject/slug` for an agent session,
+ * c29d0780); the public function wrapper maps it to a Forge handle (`handle/slug`) for members with
+ * write access and removes it for anyone else. */
 export function boardMessageView(row: Doc<'projectBoardMessages'>) {
   return {
     id: row.id,
-    author: row.author,
+    author: agentActor(row.author, row.agent),
     ...(row.fromLaneId ? { fromLaneId: row.fromLaneId } : {}),
     target: row.targetKey,
     text: row.body,

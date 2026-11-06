@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { classifyOverlap, type OverlapEvidence, type OverlapClass } from './hosted-overlap-evidence.js';
 import { digest } from './portable-hash.js';
+import { agentActor } from './agent-slug.js';
 
 export const OVERLAP_METADATA_BYTES = 128 * 1024;
 export type OverlapFile = { blob: string; mode: string } | null;
@@ -15,6 +16,8 @@ export type OverlapLane = {
   intentId: string;
   intent: string;
   actor: string;
+  /** The Lane's agent session slug (c29d0780): participants then read `ACCOUNT/slug`. */
+  agent?: string;
   head: string;
   baseHead: string;
   baseSequence: number | null;
@@ -194,7 +197,7 @@ export function hostedOverlapAdvice(
         lanes,
         participants: [mine, peer].map(lane => ({
           lane: lane.laneId,
-          actor: lane.actor,
+          actor: agentActor(lane.actor, lane.agent),
           intent: lane.intent,
         })),
         text: `${classification.class} overlap: ${path}; Lane ${peer.laneId} (${peer.intent.slice(0, 160)}); ${classification.reason}.`.slice(

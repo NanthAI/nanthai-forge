@@ -11,7 +11,14 @@ import {
   type PresenceRow,
 } from '../src/hosted-presence';
 
-type PresenceValue = { intentId: string; actor: string; goal: string; changes: string; at: number };
+type PresenceValue = {
+  intentId: string;
+  actor: string;
+  agent?: string;
+  goal: string;
+  changes: string;
+  at: number;
+};
 type Pointer = { id: Id<'projectHostedPresence'>; at: number };
 /** A Lane whose presence data is unchanged rewrites its row at most this often (activity time only). */
 export const PRESENCE_REFRESH_MS = 10 * 60_000;
@@ -25,7 +32,14 @@ export async function trackHostedPresence(
   ctx: MutationCtx,
   projectId: Id<'hostedProjects'>,
   laneId: string,
-  old: { pointer?: Pointer; intentId: string; actor: string; goal: string; changes: string } | null,
+  old: {
+    pointer?: Pointer;
+    intentId: string;
+    actor: string;
+    agent?: string;
+    goal: string;
+    changes: string;
+  } | null,
   value: PresenceValue | null,
 ): Promise<Pointer | undefined> {
   const pointer = old?.pointer;
@@ -38,6 +52,7 @@ export async function trackHostedPresence(
     laneId,
     intentId: value.intentId,
     actor: value.actor,
+    ...(value.agent ? { agent: value.agent } : {}),
     goal: value.goal.slice(0, PRESENCE_GOAL_CHARS),
     ...presencePaths(value.changes),
     at: value.at,
@@ -47,6 +62,7 @@ export async function trackHostedPresence(
     if (
       old.intentId === row.intentId &&
       old.actor === row.actor &&
+      old.agent === value.agent &&
       old.goal.slice(0, PRESENCE_GOAL_CHARS) === row.goal &&
       before.pathCount === row.pathCount &&
       same(before.paths, row.paths) &&
@@ -96,6 +112,7 @@ export async function readHostedPresence(
     laneId: row.laneId,
     intentId: row.intentId,
     actor: row.actor,
+    ...(row.agent ? { agent: row.agent } : {}),
     goal: row.goal,
     paths: row.paths,
     pathCount: row.pathCount,

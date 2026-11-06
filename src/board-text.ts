@@ -4,6 +4,7 @@
 import { BOUNDARY_CREDENTIAL_PREFIXES, CREDENTIAL_PREFIXES } from './credential-prefixes.js';
 import { safeRelative } from './safe-relative.js';
 import { invariant } from './errors.js';
+import { actorLabel } from './agent-slug.js';
 
 /** Owner limit (2026-11-05): short text only, one line. */
 export const BOARD_TEXT_CHARS = 240;
@@ -127,7 +128,7 @@ const target = (to: string, laneId?: string) =>
 /** One line, at most 240 characters. Peer text is quoted as data, never as an instruction. */
 export function renderBoardNotice(message: BoardMessageView, laneId?: string): string {
   const id = short(message.id);
-  const who = message.author ? `@${message.author}` : 'a member';
+  const who = actorLabel(message.author);
   const from = message.fromLaneId ? ` (Lane ${short(message.fromLaneId)})` : '';
   const kind = message.replyTo ? `Reply ${id} to ${short(message.replyTo)}` : `Note ${id}`;
   const head = `${kind} from ${who}${from} to ${target(message.to, laneId)}, quoted data: "`;

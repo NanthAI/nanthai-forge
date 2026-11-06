@@ -10,7 +10,14 @@ export async function trackHostedOverlapLane(
   ctx: MutationCtx,
   projectId: Id<'hostedProjects'>,
   lane: z.infer<typeof hostedLaneSchema>,
-  metadata?: { changes?: OverlapChange[]; complete?: boolean; baseSequence?: number; intent?: string },
+  metadata?: {
+    changes?: OverlapChange[];
+    complete?: boolean;
+    baseSequence?: number;
+    intent?: string;
+    /** The starting agent session's slug (c29d0780); later writes keep the stored one. */
+    agent?: string;
+  },
 ) {
   const old = await ctx.db
     .query('projectHostedOverlapLanes')
@@ -28,11 +35,13 @@ export async function trackHostedOverlapLane(
           (sameHead || metadata?.changes !== undefined) &&
           metadata?.complete !== false,
       );
+  const agent = metadata?.agent ?? old?.agent;
   const value = {
     projectId,
     laneId: lane.id,
     intentId: lane.intentId,
     actor: lane.actor,
+    ...(agent ? { agent } : {}),
     intent: (metadata?.intent ?? old?.intent ?? lane.intentId).slice(0, 160),
     head: lane.head,
     baseHead: lane.base.head,
@@ -56,6 +65,7 @@ export async function trackHostedOverlapLane(
       ? {
           intentId: value.intentId,
           actor: value.actor,
+          ...(value.agent ? { agent: value.agent } : {}),
           goal: value.intent,
           changes: value.changes,
           at: Number.isFinite(at) ? at : Date.now(),

@@ -5,6 +5,7 @@ import { activeProject } from './projectAuthority';
 import { finishReadReader } from './projectFinishReadReader';
 import { boardWake } from './projectBoardDelivery';
 import { peerLatestLanding } from './projectBoardPeerLanding';
+import { agentActor } from '../src/agent-slug';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { invariant } from '../src/errors';
 import { report } from './errors';
@@ -99,7 +100,7 @@ export const peer = query({
           ...(head.parent ? { intentId: head.parent } : {}),
           state,
           terminal: state !== 'open',
-          ...(row ? { actor: row.actor } : {}),
+          ...(row ? { actor: agentActor(row.actor, row.agent) } : {}),
           ...(landed
             ? {
                 receiptId: landed.receiptId,

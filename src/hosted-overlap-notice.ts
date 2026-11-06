@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { createHash } from 'node:crypto';
 import { shellQuote } from './agent-brief-render.js';
+import { actorLabel } from './agent-slug.js';
 
 type Item = {
   noticeId: string;
@@ -74,7 +75,7 @@ export function overlapBanner(notice: HostedOverlapNotice) {
         .filter((v, i, all) => all.indexOf(v) === i)
         .join('/')}] ${file} (${items[0]!.reason})`,
       ...items.flatMap(item =>
-        item.with.map(p => `      also changed in Lane ${p.lane} by ${p.actor}: ${p.intent}`),
+        item.with.map(p => `      also changed in Lane ${p.lane} by ${actorLabel(p.actor)}: ${p.intent}`),
       ),
     ]),
     ...(notice.count !== null && notice.count > notice.items.length
@@ -94,13 +95,17 @@ export function overlapBanner(notice: HostedOverlapNotice) {
 }
 
 const shown = new Set<string>();
+/** A printed receipt's advisory notice is brief (receipt-slim: count and files, no items); a land
+ * parent reads that receipt back from its detached child, so it may hold no items (c29d0780). */
+const itemsOf = (notice: HostedOverlapNotice) => (Array.isArray(notice.items) ? notice.items : []);
 /** The banner for notices this process has not printed yet, so an early print is never repeated at exit. */
 export function overlapBannerOnce(notice: HostedOverlapNotice) {
-  const fresh = notice.items.filter(item => !shown.has(item.noticeId));
-  for (const item of notice.items) shown.add(item.noticeId);
+  const items = itemsOf(notice);
+  const fresh = items.filter(item => !shown.has(item.noticeId));
+  for (const item of items) shown.add(item.noticeId);
   return fresh.length ? overlapBanner({ ...notice, items: fresh }) : '';
 }
 /** Record notices another path already printed (a relayed child process), without printing. */
 export function markOverlapShown(notice: HostedOverlapNotice) {
-  for (const item of notice.items) shown.add(item.noticeId);
+  for (const item of itemsOf(notice)) shown.add(item.noticeId);
 }

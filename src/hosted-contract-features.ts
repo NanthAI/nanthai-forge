@@ -35,6 +35,9 @@ export const hostedContractFeatures = [
   /** Capabilities carry every effective agentDefaults key, not only the frozen set older CLIs parse
    * strictly (WIRE_AGENT_DEFAULT_KEYS). Without it the reply has the frozen keys only. */
   'agent-defaults-extended',
+  /** Agent session identities (c29d0780): start and projectBoard:post take `agent` (a word-list
+   * slug), and actor/author values may read `handle/slug`. Without it the CLI sends no `agent`. */
+  'agent-slug',
 ] as const;
 export type HostedContractFeature = (typeof hostedContractFeatures)[number];
 

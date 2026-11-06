@@ -94,7 +94,13 @@ export async function writeHostedRecord(
     restoreBases?: string;
     /** Trusted input aggregate; false clears Lane provenance, true seeds a new resolution/Candidate. */
     ownerOnly?: boolean;
-    overlap?: { changes?: OverlapChange[]; complete?: boolean; baseSequence?: number; intent?: string };
+    overlap?: {
+      changes?: OverlapChange[];
+      complete?: boolean;
+      baseSequence?: number;
+      intent?: string;
+      agent?: string;
+    };
   },
 ) {
   const project = await activeProject(ctx, input.projectId, input.actor);

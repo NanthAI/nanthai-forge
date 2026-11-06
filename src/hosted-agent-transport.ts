@@ -86,6 +86,7 @@ import { gcNestedLanesHourly } from './client-cache-gc.js';
 import { hostedStartResultSchema } from './hosted-lane.js';
 import { readHostedLaneCheckout } from './hosted-lane-checkout-marker.js';
 import { HostedAgentJournal, agentSessionKey, hostedAgentRoot } from './hosted-agent-journal.js';
+import { sessionAgentSlug } from './agent-slug-session.js';
 import { detectedClientProcess } from './agent-client-process.js';
 import {
   hostedAgentAction,
@@ -174,6 +175,8 @@ export type HostedAgentResponse = {
   overlapNotice?: HostedOverlapNotice;
   /** Present only when board notes arrived since this machine's cursor: one line each (≤240 chars). */
   board?: { notices: string[]; more: number };
+  /** This agent session's public identity, `handle/slug` (start, save and land receipts). */
+  as?: string;
   /** start only: your idle open Lanes and finished Lane roots pruned on this machine. */
   localLanes?: { idle: unknown[]; pruned: { count: number; bytes: number } };
   /** land --save only: where the submitting process spent its time before submission. */
@@ -228,6 +231,13 @@ export class HostedAgentTransport {
   /** The client process an identical start replays within, with the session id; undefined detects
    * it (agentClientProcess, cached per process), null declares none. */
   agentProcess?: string | null;
+  /** This session's agent slug (c29d0780), sent only to a server that advertised agent-slug. */
+  agentSlug() {
+    return sessionAgentSlug(this.agentSession);
+  }
+  private sentAgent() {
+    return this.serverFeatures?.includes('agent-slug') ? this.agentSlug() : undefined;
+  }
   private startScope(): string | undefined {
     const session = this.agentSession === undefined ? agentSessionKey() : this.agentSession;
     if (!session) return undefined;
@@ -760,6 +770,7 @@ export class HostedAgentTransport {
         exchange: this.exchange,
         capabilities,
         journal,
+        ...(this.sentAgent() ? { agent: this.sentAgent()! } : {}),
         query: this.query.bind(this),
         mutation: this.mutation.bind(this),
         main: async () => {
@@ -1089,8 +1100,14 @@ export class HostedAgentTransport {
         ? { board: boardEnvelope(this.root, overlapLaneId, advice.board) }
         : {}),
       ...this.nudge(action, result),
+      ...this.identity(action),
       ...(missing.length ? { serverContract: { missing } } : {}),
     };
+  }
+  /** Who this session shows as to other agents (c29d0780), on Lane-changing receipts only. */
+  private identity(action: string): { as?: string } {
+    const slug = ['start', 'save', 'finish'].includes(action) ? this.sentAgent() : undefined;
+    return slug && this.callerActor ? { as: `${this.callerActor}/${slug}` } : {};
   }
   /** A read keeps its canonical terminal outcome even when recovery metadata is unreadable or
    * belongs to another attempt; wait and finish still surface that refusal. */
@@ -1352,6 +1369,8 @@ export type HostedAgentSession = {
   exchange: HostedAgentExchange;
   capabilities: HostedAgentCapabilities;
   journal: HostedAgentJournal;
+  /** This agent session's slug when the server takes it (feature agent-slug); absent for a person. */
+  agent?: string;
   waitSource: (
     operationId: string,
     initial: unknown,
