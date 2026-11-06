@@ -316,11 +316,17 @@ export class ConvexExchange implements ExchangeTransport {
   }
   private async fetchBatch(all: ContentPin[]): Promise<Buffer[]> {
     // Committed R2 objects come straight from R2; everything else uses the Convex paths below.
+    // Pins a bulk prepareDownloads already found not to be R2 objects are not asked about again.
     const direct = all.some(pin => this.logicalMetadata.has(pin.sha256))
       ? new Map<string, Buffer>()
-      : await this.blobs.getSigned(this.projectId, all);
+      : await this.blobs.getSigned(
+          this.projectId,
+          all.filter(pin => !this.unsigned.has(pin.sha256)),
+        );
     const pins = all.filter(pin => !direct.has(pin.sha256));
-    for (const pin of pins) if (pin.size > 2 * 1024 * 1024) this.unsigned.add(pin.sha256);
+    for (const pin of pins)
+      if (pin.size > 2 * 1024 * 1024) this.unsigned.add(pin.sha256);
+      else this.unsigned.delete(pin.sha256);
     const rest = pins.length ? await this.fetchConvexBatch(pins) : [];
     let next = 0;
     return all.map(pin => direct.get(pin.sha256) ?? rest[next++]!);
@@ -430,14 +436,18 @@ export class ConvexExchange implements ExchangeTransport {
     );
     return bytes;
   }
-  /** Prepare bounded signature windows without loading the selected object bytes. */
+  /** Prepare bounded signature windows without loading the selected object bytes. Pages of at most 100
+   * digests, a few in flight; pins that are not R2 objects are remembered so no read asks again. */
   async prepareDownloads(pins: ContentPin[]) {
     let cache = this.signedDownloads.get(this.client);
     if (!cache) this.signedDownloads.set(this.client, (cache = new SignedDownloadCache()));
-    const missing = pins.filter(pin => !cache.get(this.projectId, pin));
-    for (let at = 0; at < missing.length; at += 100) {
-      const page = missing.slice(at, at + 100),
-        wanted = new Map(page.map(pin => [pin.sha256, pin]));
+    const missing = pins.filter(
+        pin => !this.logicalMetadata.has(pin.sha256) && !cache.get(this.projectId, pin),
+      ),
+      pages: ContentPin[][] = [];
+    for (let at = 0; at < missing.length; at += 100) pages.push(missing.slice(at, at + 100));
+    await mapExchange(pages, 4, async page => {
+      const wanted = new Map(page.map(pin => [pin.sha256, pin]));
       const signed: SignedObject[] = await this.client.mutation(
         mutation('projectObjectDownloads:signDownloads'),
         {
@@ -456,7 +466,7 @@ export class ConvexExchange implements ExchangeTransport {
         wanted.delete(object.digest);
       }
       for (const id of wanted.keys()) this.unsigned.add(id);
-    }
+    });
   }
   async downloadToFile(pin: ContentPin, path: string): Promise<void> {
     const logical = this.logicalMetadata.get(pin.sha256);

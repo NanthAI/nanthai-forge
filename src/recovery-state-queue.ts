@@ -209,10 +209,9 @@ export class RecoveryStateQueue {
         } else missing.push(id);
       }
       const pins = [...local, ...(missing.length ? await this.resolve(missing) : [])];
-      const large = pins.filter(
-        pin => pin.size > 2 * 1024 * 1024 && !existsSync(join(this.source.directory, pin.sha256)),
-      );
-      if (large.length) await this.transport.prepareDownloads?.(large);
+      // Sign the whole page of pins once (large streams and small prefetch windows alike).
+      const wanted = pins.filter(pin => !existsSync(join(this.source.directory, pin.sha256)));
+      if (wanted.length) await this.transport.prepareDownloads?.(wanted);
       await this.prefetch(pins);
       for (const pin of pins) include(await this.retained.retain(pin, false, false), true);
     }

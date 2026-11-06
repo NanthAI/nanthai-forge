@@ -7,6 +7,7 @@ import {
   realpathSync,
   renameSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -14,6 +15,7 @@ import { z } from 'zod';
 import { portableCheckPath } from './check-log-policy.js';
 import { invariant } from './errors.js';
 import { mapExchange } from './exchange-parallel.js';
+import { signAhead } from './exchange-sign-ahead.js';
 import { fingerprintPrivateFile, readSource, safeRelative } from './files.js';
 import { digest } from './hash.js';
 import { withValidatedNativeArchive } from './native-archive-validation.js';
@@ -42,6 +44,8 @@ export interface ExchangeTransport {
   download(pin: ContentPin): Promise<Buffer>;
   downloadBatch?(pins: ContentPin[]): Promise<Buffer[]>;
   downloadToFile?(pin: ContentPin, path: string): Promise<void>;
+  /** Sign the pins' downloads in bulk (at most 100 per call) ahead of per-batch reads. Optional hint. */
+  prepareDownloads?(pins: ContentPin[]): Promise<void>;
 }
 export async function pullNativeExchange(
   backupId: string,
@@ -115,10 +119,26 @@ export async function pullNativeExchange(
       }
       batches.push(batch);
     }
+    // Sign what the network will serve in 100-digest pages, not once per 8-object batch. A pin that
+    // looks cached (right size on disk) is left out; if it fails verification it signs on its own.
+    const networkPins = batches
+      .flat()
+      .filter(files => {
+        const sourceFile = files.find(item => item.path.startsWith('objects/'));
+        if (files[0]!.sha256 === workPin.sha256) return false;
+        return !(
+          cache &&
+          sourceFile &&
+          statSync(join(cache.directory, sourceFile.path), { throwIfNoEntry: false })?.size === files[0]!.size
+        );
+      })
+      .map(files => ({ sha256: files[0]!.sha256, size: files[0]!.size }));
+    const signed = signAhead(networkPins, transport.prepareDownloads?.bind(transport));
     await mapExchange(
       batches,
       2,
       async batch => {
+        await signed(batch.map(files => ({ sha256: files[0]!.sha256, size: files[0]!.size })));
         const content = new Map<string, Buffer>(),
           streamed = new Map<string, string>(),
           missing: ContentPin[] = [];
