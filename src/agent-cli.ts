@@ -515,7 +515,14 @@ export async function agentCli(args: string[], options: AgentCliOptions = {}): P
       | { result?: { inProgress?: boolean; waitCommand?: string; next?: Record<string, unknown> } }
       | undefined
   )?.result;
-  if (options.process && args[1] !== 'wait' && pending?.inProgress && pending.waitCommand)
+  // The land submitter already printed this command in its announcement line; repeating it costs context.
+  if (
+    options.process &&
+    args[1] !== 'wait' &&
+    pending?.inProgress &&
+    pending.waitCommand &&
+    process.env[LAND_CHILD_ENV] !== '1'
+  )
     process.stderr.write(`Forge work is unfinished; keep this turn active and run: ${pending.waitCommand}\n`);
   // Unfinished work this agent session owns, for its turn-end hook (one local write).
   if (options.process && pending?.inProgress && args[0] && ['land', 'finish', 'wait'].includes(args[1] ?? ''))

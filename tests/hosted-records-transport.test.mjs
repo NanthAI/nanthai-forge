@@ -225,7 +225,7 @@ test('hosted MCP exposes record writes and paged decision reads through the shar
       response = await tool.call(parsed);
     assert.ok(!response.isError, response.content[0].text);
     assert.equal(s.calls.length - before, 1);
-    assert.equal(JSON.parse(response.content[0].text).transport, 'hosted');
+    assert.equal(JSON.parse(response.content[0].text).action, command.action);
   }
 });
 

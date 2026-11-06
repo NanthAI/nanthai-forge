@@ -56,15 +56,26 @@ export function hostedOverlapNotice(root: string, laneId: string, advice: Advice
 }
 export type HostedOverlapNotice = NonNullable<ReturnType<typeof hostedOverlapNotice>>;
 
-/** Human banner for stderr; stdout stays one JSON receipt. */
+/** Human banner for stderr; stdout stays one JSON receipt. One block per file, so a file three Lanes
+ * touch is named once. An advisory notice is a single short summary; a blocking one stays complete. */
 export function overlapBanner(notice: HostedOverlapNotice) {
+  const byFile = new Map<string, typeof notice.items>();
+  for (const item of notice.items) byFile.set(item.file, [...(byFile.get(item.file) ?? []), item]);
+  const summary = notice.required
+    ? `${notice.count ?? notice.items.length} file overlap(s) between this Lane and other open Lanes. Blocking notices need an answer before landing; advisory notices need no answer.`
+    : `${notice.count ?? notice.items.length} overlap(s) with other open Lanes; no answer needed.`;
   const lines = [
     '',
     notice.required ? '!!! OVERLAP NOTICE: ACTION REQUIRED !!!' : 'OVERLAP NOTICE: ADVISORY',
-    notice.summary,
-    ...notice.items.flatMap(item => [
-      `  - [${item.class}] ${item.file} (${item.reason})`,
-      ...item.with.map(p => `      also changed in Lane ${p.lane} by ${p.actor}: ${p.intent}`),
+    summary,
+    ...[...byFile].flatMap(([file, items]) => [
+      `  - [${items
+        .map(item => item.class)
+        .filter((v, i, all) => all.indexOf(v) === i)
+        .join('/')}] ${file} (${items[0]!.reason})`,
+      ...items.flatMap(item =>
+        item.with.map(p => `      also changed in Lane ${p.lane} by ${p.actor}: ${p.intent}`),
+      ),
     ]),
     ...(notice.count !== null && notice.count > notice.items.length
       ? [`  (${notice.count - notice.items.length} more; read Lane status for details)`]

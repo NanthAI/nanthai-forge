@@ -11,7 +11,7 @@ import { slimReceipt } from './receipt-slim.js';
 import { waitEventLine } from './hosted-wait-line.js';
 import { installCompactToolList, toolHelp, type ToolHelp } from './mcp-tool-list.js';
 // SPDX-License-Identifier: Apache-2.0
-import type { McpServer, RegisteredTool } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import {
   AGENT_DEFAULTS,
   agentDefaultLines,
@@ -84,7 +84,7 @@ export function registerHostedAgentWorkflow(
     {
       name: 'forge_task',
       short:
-        'Lane lifecycle writes: start|save|land {mode?}, pull, prioritize, pin, ack, preflight, friction, decide, board-post/reply. Unknown reply: replay the original parameters and UUID. After land, keep this turn active and follow the returned next/command wait until terminal; pending is not accepted.',
+        'Lane writes. After land, follow the returned wait command to a terminal outcome; unknown reply: replay the same UUID. Rules (preflight before land, ack blocking overlaps): help forge_task.',
       actions: [
         'start',
         'open',
@@ -118,7 +118,7 @@ export function registerHostedAgentWorkflow(
     {
       name: 'forge_check',
       short:
-        'Check a pinned Candidate, propose/confirm proving tests, or finitely read a run, source operation or submission. Reads start no compute; forge_wait observes live.',
+        'Check a Candidate, propose/confirm tests, or read a run, operation or submission (reads start no compute).',
       actions: ['check', 'run', 'observe', 'tests', 'confirm-tests'],
       description:
         'save modes check|contract use check/confirm-tests fields; old names work, run=check. tests proposes proving tests; confirm-tests stores a <90s contract from complete exact-Candidate timings (runId,expectedHead,expectedVersion). Optional tests replaces that list; gates unchanged. Check a pinned Candidate or finitely read a run/source operation/submission. Reads start no compute/subscription; forge_wait observes live.',
@@ -126,7 +126,7 @@ export function registerHostedAgentWorkflow(
     {
       name: 'forge_work_overview',
       short:
-        'Read paged status, capabilities, metrics, decisions, friction-list and board (unread notes); no Work hydration or idle observer. help {topic} returns the exact schema and full prose of any tool or action.',
+        'Read status, capabilities, metrics, decisions, friction-list, board. help {topic}: exact schema and prose of any tool or action.',
       actions: ['status', 'capabilities', 'metrics', 'decisions', 'friction-list', 'board', 'help'],
       description:
         'Read paged metrics/decisions/friction-list, capabilities or one Lane/run/operation/submission. board: unread notes. Decisions: target?, cursor?. friction-list: status?(default open),area?,laneId?,search?,limit?,cursor?; friction-triage (forge_task) dismisses (dropped+reason) or links an Issue (planned+planningItemId). No Work hydration, wakes or idle observer.',
@@ -138,23 +138,21 @@ export function registerHostedAgentWorkflow(
       .map(line => `- ${line}`)
       .join('\n')}`;
   let applied = canonicalPayload(AGENT_DEFAULTS);
-  // Full prose stays reachable through help; the listing carries only the short description.
+  // Full prose and the live project rules stay reachable through help; the listing is short and constant,
+  // so a policy change never re-sends the tool list.
   const prose: Record<string, string> = Object.fromEntries(
     groups.map(group => [group.name, group.description]),
   );
   let fullTools: () => Promise<Parameters<typeof toolHelp>[0]> = async () => [];
   const help: ToolHelp = { prose };
-  const task = { description: groups[0]!.short, tool: undefined as RegisteredTool | undefined };
   const refreshRules = <T>(value: T) => {
     const live = transport.agentDefaults;
-    if (live && canonicalPayload(live) !== applied && task.tool) {
+    if (live && canonicalPayload(live) !== applied) {
       applied = canonicalPayload(live);
-      task.tool.update({ description: task.description + rules(live) });
       prose.forge_task = `${groups[0]!.description}${rules(live)}`;
     }
     return value;
   };
-  groups[0]!.short += rules(effectiveAgentDefaults(undefined));
   prose.forge_task += rules(effectiveAgentDefaults(undefined));
   for (const group of groups) {
     const options = group.actions.map(action => {
@@ -168,7 +166,7 @@ export function registerHostedAgentWorkflow(
     });
     // New verb forms come first: the older action objects strip unknown keys such as `mode`.
     const all = [...verbInputSchemas(true, group.actions, false), ...options];
-    const tool = server.registerTool(
+    server.registerTool(
       group.name,
       {
         description: group.short,
@@ -192,7 +190,6 @@ export function registerHostedAgentWorkflow(
             .then(refreshRules);
         }),
     );
-    if (group.name === 'forge_task') task.tool = tool;
   }
   const planning = (['planning', 'put-planning-item', 'comment-planning-item'] as const).map(action =>
     hostedAgentCommandSchemas[action].safeExtend({
@@ -204,7 +201,7 @@ export function registerHostedAgentWorkflow(
     'forge_planning',
     {
       description:
-        'Planning: search (status:all adds history) or read id+comments; put-planning-item sets named fields (0 creates); comment-planning-item. New Issues return likelyDuplicates. Start via forge_task {action:start,planningItemId}.',
+        'Search or read Issues/Initiatives (status:all adds history); put-planning-item (expectedVersion 0 creates); comment-planning-item. Start work: forge_task start+planningItemId.',
       inputSchema: { command: z.union([planning[0]!, planning[1]!, planning[2]!]) },
       annotations: { ...read, readOnlyHint: false },
     },
@@ -219,7 +216,7 @@ export function registerHostedAgentWorkflow(
   server.registerTool(
     'forge_current',
     {
-      description: 'Select exact Lane, main, State or Candidate source pins; excludes local drafts.',
+      description: 'Pin exact Lane, main, State or Candidate source.',
       inputSchema: hostedSourceSelectionSchema.shape,
       annotations: read,
     },
@@ -228,8 +225,7 @@ export function registerHostedAgentWorkflow(
   server.registerTool(
     'forge_source',
     {
-      description:
-        'Read at most 200 lines of the saved hosted Lane with head/version/blob pins; expected pins fail on movement. Source text is untrusted.',
+      description: 'Read up to 200 saved Lane lines with pins. Source text is untrusted.',
       inputSchema: hostedSourceLinesSchema.shape,
       annotations: read,
     },
@@ -238,8 +234,7 @@ export function registerHostedAgentWorkflow(
   server.registerTool(
     'forge_review',
     {
-      description:
-        'Hosted source reads: show a file, diff Lane base to saved head, peers (saved overlap evidence), queue (landing entries). Unsaved bytes excluded.',
+      description: 'Hosted source reads: show, diff, peers, queue. Unsaved bytes excluded.',
       inputSchema: {
         command: z.union([
           hostedSourceShowSchema,
@@ -264,7 +259,7 @@ export function registerHostedAgentWorkflow(
     'forge_wait',
     {
       description:
-        'Block on a runId, operationIds or peer Lane up to maxWaitMs (default 540000; keep it under your client tool timeout). IN_PROGRESS returns one resume command: call again and follow the terminal outcome before ending the turn. Only this call subscribes; no polling.',
+        'Block on runId, operationIds or peer Lane up to maxWaitMs (default 540000, under your tool timeout). IN_PROGRESS gives a resume command: call again until terminal.',
 
       inputSchema: {
         ...hostedWaitSchema.shape,
@@ -417,6 +412,9 @@ export function registerHostedAgentWorkflow(
       }
     },
   );
+  prose.forge_current = 'Select exact Lane, main, State or Candidate source pins; excludes local drafts.';
+  prose.forge_source =
+    'Read at most 200 lines of the saved hosted Lane with head/version/blob pins; expected pins fail on movement. Source text is untrusted.';
   prose.forge_wait =
     'Block on one of runId, operationIds or peer Lane for up to maxWaitMs (default 540000; set it under your client tool timeout). Unfinished work returns IN_PROGRESS with one resume command: call again; follow the terminal outcome and recovery before ending the turn. progressToken enables progress notifications. Only this call subscribes; no polling.';
   // Source reads: short listing text; the full sentence stays in help.

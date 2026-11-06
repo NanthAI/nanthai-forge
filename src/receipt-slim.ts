@@ -74,5 +74,168 @@ export function slimReceipt<T>(receipt: T): T {
     }
     out.result = slim;
   }
-  return out as T;
+  return brief(out) as T;
+}
+
+/** Budget (Issue 47558a99): a healthy receipt is about 300 characters. The facts below are dropped because
+ * the agent holds them, they are constant, or one named read returns them; `--detail` prints everything. */
+const fileList = (items: Json[]): string[] => [...new Set(items.map(item => String(item.file)))].slice(0, 5);
+const sameOperation = (resolved: unknown, operationId: unknown) => {
+  const keys = Object.keys(obj(resolved) ?? { x: 1 });
+  return (
+    resolved === null ||
+    (keys.length === 1 && keys[0] === 'operationId' && obj(resolved)?.operationId === operationId)
+  );
+};
+
+function briefOverlaps(out: Json) {
+  const notice = obj(out.overlapNotice);
+  const overlaps = obj(out.unacknowledgedOverlaps);
+  if (notice) {
+    const items = Array.isArray(notice.items) ? (notice.items as Json[]) : [];
+    out.overlapNotice = notice.required
+      ? omit(notice, 'coverage')
+      : {
+          required: false,
+          count: notice.count,
+          files: fileList(items),
+        };
+    delete out.unacknowledgedOverlaps;
+  } else if (overlaps && !overlaps.count && !overlaps.blockingCount) delete out.unacknowledgedOverlaps;
+  const behind = obj(out.behindMain);
+  if (behind)
+    if (behind.commits === 0 && !behind.more) delete out.behindMain;
+    else out.behindMain = omit(behind, 'head', 'baseHead', 'baseSequence', 'coverage');
+}
+
+/** Idle Lanes of this owner: the stderr hint names them; the receipt keeps the counts. */
+function briefLocalLanes(out: Json) {
+  const local = obj(out.localLanes);
+  if (!local) return;
+  const idle = Array.isArray(local.idle) ? local.idle.length : 0;
+  const pruned = obj(local.pruned);
+  const kept = { ...(idle ? { idle } : {}), ...(pruned?.count ? { pruned } : {}) };
+  if (Object.keys(kept).length) out.localLanes = kept;
+  else delete out.localLanes;
+}
+
+/** `start`: the Lane and its path; defaults (linked dependencies, a quiet checkout) are not repeated. */
+function briefStart(result: Json): Json {
+  const lane = obj(result.lane);
+  const out: Json = { lane: { laneId: lane?.laneId }, path: result.path };
+  // The warm-start proof (objects fetched) stays; bytes only when something was fetched.
+  const checkout = obj(result.checkout);
+  if (checkout)
+    out.checkout = {
+      downloadedObjects: checkout.downloadedObjects,
+      ...(typeof checkout.downloadedBytes === 'number' && checkout.downloadedBytes > 0
+        ? { downloadedBytes: checkout.downloadedBytes }
+        : {}),
+      ...(checkout.replayed === true ? { replayed: true } : {}),
+    };
+  const dependencies = obj(result.dependencies);
+  if (dependencies && dependencies.status !== 'linked') out.dependencies = { status: dependencies.status };
+  const planning = obj(result.planning);
+  if (planning && planning.updated !== false) out.planning = planning;
+  return out;
+}
+
+/** `save`: the saved head and whether anything changed. */
+function briefSave(result: Json): Json | undefined {
+  const outcome = obj(result.outcome),
+    saved = obj(outcome?.result);
+  if (!outcome || outcome.status !== 'completed' || !saved || typeof saved.head !== 'string')
+    return undefined;
+  return {
+    outcome: {
+      status: 'completed',
+      result: { head: saved.head, ...(saved.unchanged === true ? { unchanged: true } : {}) },
+    },
+  };
+}
+
+/** `sync`: how the Lane met main and the head it now has; the Lane fields and attempt ids are not repeated. */
+function briefSync(result: Json): Json | undefined {
+  const source = obj(result.source),
+    outcome = obj(source?.outcome),
+    synced = obj(outcome?.result),
+    applied = obj(result.applied);
+  const status = synced?.status;
+  if (
+    !synced ||
+    outcome?.status !== 'completed' ||
+    !applied ||
+    typeof applied.head !== 'string' ||
+    (status !== 'up-to-date' && status !== 'merged' && status !== 'resolved') ||
+    Object.keys(result).some(key => !['source', 'applied', 'timing'].includes(key))
+  )
+    return undefined;
+  const bytes = applied.downloadedBytes,
+    totalMs = obj(result.timing)?.totalMs;
+  return {
+    status,
+    head: applied.head,
+    ...(typeof totalMs === 'number' ? { totalMs } : {}),
+    ...(typeof bytes === 'number' && bytes > 0 ? { downloadedBytes: bytes } : {}),
+  };
+}
+
+/** A landing that reached `landed`: the receipt and State, plus failed or flaky test files if any. */
+function briefLanded(result: Json): Json | undefined {
+  const submission = obj(result.submission);
+  if (!submission || submission.phase !== 'landed' || !obj(submission.acceptance)) return undefined;
+  const files = obj(submission.testFiles),
+    counts = obj(files?.counts);
+  const failed = Array.isArray(files?.failed) ? files.failed : [],
+    flaky = Array.isArray(files?.flaky) ? files.flaky : [];
+  return {
+    submission: {
+      phase: 'landed',
+      acceptance: submission.acceptance,
+      ...(counts ? { testFiles: failed.length || flaky.length ? files : { counts } } : {}),
+    },
+  };
+}
+
+/** `wait`/`observe` that ended with every landing landed: the receipt and State per submission, no cursor. */
+function briefObserved(result: Json, operationId: unknown): Json | undefined {
+  if (result.status !== 'terminal' || result.successful !== true || !Array.isArray(result.submissions))
+    return undefined;
+  const landed = result.submissions.map(entry => {
+    const entryJson = obj(entry);
+    const brief = entryJson && briefLanded({ submission: entryJson.submission });
+    if (!brief) return undefined;
+    return entryJson.operationId === operationId ? brief : { operationId: entryJson.operationId, ...brief };
+  });
+  if (!landed.length || landed.some(entry => !entry)) return undefined;
+  return { status: 'terminal', successful: true, submissions: landed };
+}
+
+function brief(out: Json): Json {
+  // Constant per CLI: `nforge version` names it; the hosted wire contract keeps all three.
+  delete out.cliCommit;
+  delete out.schema;
+  delete out.transport;
+  if (sameOperation(out.resolved, out.operationId)) delete out.resolved;
+  briefOverlaps(out);
+  briefLocalLanes(out);
+  // Timings are diagnostics: --detail (landTiming, sync timing steps, queue timestamps).
+  delete out.landTiming;
+  const result = obj(out.result);
+  if (!result) return out;
+  const action = out.action;
+  const slim =
+    action === 'start' && obj(result.lane) && typeof result.path === 'string'
+      ? briefStart(result)
+      : action === 'save'
+        ? briefSave(result)
+        : action === 'sync'
+          ? briefSync(result)
+          : action === 'finish' || action === 'land' || action === 'wait'
+            ? briefLanded(result)
+            : action === 'observe'
+              ? briefObserved(result, out.operationId)
+              : undefined;
+  if (slim) out.result = slim;
+  return out;
 }

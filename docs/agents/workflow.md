@@ -2017,20 +2017,31 @@ What Forge costs an agent's context is measured in characters of what it sends, 
 as characters / 4 (a stable proxy for both Claude and Codex tokenizers; compare before and after with the
 same one). `node scripts/measure-agent-context.mjs` prints the hosted MCP tool list per tool.
 
-- **Tool list.** The hosted agent MCP lists eight tools. The listing carries a short description, a flat
-  field table and one required-fields signature per action, about 11.7k characters (about 2.9k tokens;
-  it was 54.6k, 13.6k tokens, because Zod repeated every shared field and regex once per action). The
-  strict Zod schemas still validate every call. `forge_work_overview {action:"help"}` lists tools and
-  actions; `{action:"help",topic:"<action>"}` returns the exact schema of that action and the long prose
-  of its tool; `topic:"forge_task"` includes the live project rules. A change that adds an action or field
-  must keep `tests/mcp-tool-list.test.mjs` inside its budget or record why the budget moves.
-- **Receipts.** The CLI prints, and MCP replies carry, the receipt without facts the agent already holds:
-  overlap participants appear once in `overlapNotice`, an advisory notice has no answer commands, a start
-  receipt's `checkout` lists only what differs from its `lane`, a Lane that is not behind main reports
-  `commits: 0`, a healthy mirror reports `status: synced`, `peers` keeps its evidence once and `preflight`
-  counts deferred tests (`plan.deferredTestCount`) instead of listing them. Preflight prints one dot per
-  passing test on stderr and the full detail of failures only (TAP printed every subtest). `nforge agent ROOT ACTION ... --detail` prints
-  the full receipt. This only shapes output; the hosted wire contract and older CLIs are unchanged.
+- **Tool list.** The hosted agent MCP lists eight tools in about 5.9k characters (about 1.5k tokens, the
+  Issue target; it was 54.6k, then 11.7k). A command tool carries a short description, the `action` enum and
+  one description string: required fields per action (`check/run(checkId,candidateId)`, modes as
+  `save:sync|candidate`), then every field by name with `:b`/`:n`/`:o`/`:a` for a non-string type and
+  `name=a|b` for a short enum. Flat tools list their fields the same way. Strict Zod schemas still
+  validate every call, so a wrong field or type is refused with its error. `forge_work_overview
+  {action:"help"}` lists tools and actions; `{action:"help",topic:"<action>"}` returns the exact schema of
+  that action and the long prose of its tool; `topic:"forge_task"` includes the live project rules (the
+  listing is constant, so a policy change never re-sends it). Claude Code and Codex receive the same
+  listing (`scripts/measure-agent-context.mjs` prints each harness's view). A change that adds an action
+  or field must keep `tests/mcp-tool-list.test.mjs` inside its budget or record why the budget moves.
+- **Receipts.** The CLI prints, and MCP replies carry, a brief receipt of about 300 characters when
+  healthy: `action`, `operationId` and the next step's facts. `start`: Lane id and path; `save`: the saved
+  head; `sync`: `up-to-date|merged|resolved` and the head; a landed landing: the acceptance receipt, State
+  and test counts. Dropped as constant or derivable: `cliCommit`, a `resolved` that
+  is only the operation id, timings (`landTiming`, sync steps), Lane versions, an empty overlap or
+  main-distance report, idle-Lane paths (the stderr hint lists them) and an advisory overlap's per-peer
+  list (`overlapNotice` keeps `count` and `files`; `peers` lists the other Lanes). Anything else keeps its
+  detail: blocking notices with their answer commands, a Lane behind main with its conflicting paths, a
+  conflicted sync, an unfinished or failed landing with `replayParameters`, failed or flaky test files,
+  `resolved` replay inputs. `peers` keeps its evidence once and `preflight` counts deferred tests
+  (`plan.deferredTestCount`). Preflight prints one dot per passing test on stderr and the full detail of
+  failures only. `nforge agent ROOT ACTION ... --detail` prints the full receipt. This only shapes output;
+  the hosted wire contract and older CLIs are unchanged. `tests/receipt-slim.test.mjs` fails if the median
+  healthy receipt passes 300 characters.
 - **Waiting.** While a landing is queued, `land --save`/`wait` print one line per change of phase, queue
   position or outcome (position, ahead, total, wouldConflict advice, recovery, error code), never the whole
   submission or resume cursor again. An IN_PROGRESS result still carries the cursor and one resume command.

@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Usage: node scripts/measure-agent-context.mjs   (after npm run build:core)
 // Prints the hosted agent MCP tool list per tool: description, input schema and total characters, with
-// tokens approximated as characters / 4. Receipts: compare `nforge agent ROOT ACTION` with `--detail`.
+// tokens approximated as characters / 4. Receipts: compare `nforge agent ROOT ACTION` with `--detail`;
+// `tests/receipt-slim.test.mjs` holds the healthy-receipt budget.
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
@@ -24,4 +25,25 @@ const rows = (await client.listTools()).tools.map(tool => ({
 const total = rows.reduce((n, row) => n + row.total, 0);
 console.table(rows);
 console.log(`tools/list ${total} characters, about ${Math.ceil(total / 4)} tokens (characters / 4)`);
+// What each harness puts in context: Claude Code lists name, description and input_schema; Codex sends a
+// function definition (name, description, parameters). Both use the server name as a tool-name prefix.
+const tools = (await client.listTools()).tools;
+const claude = tools.map(t => ({
+  name: `mcp__nanthai-forge__${t.name}`,
+  description: t.description,
+  input_schema: t.inputSchema,
+}));
+const codex = tools.map(t => ({
+  type: 'function',
+  name: `mcp__nanthai-forge__${t.name}`,
+  description: t.description,
+  parameters: t.inputSchema,
+}));
+for (const [harness, list] of [
+  ['Claude Code', claude],
+  ['Codex', codex],
+]) {
+  const size = JSON.stringify(list).length;
+  console.log(`${harness}: ${size} characters, about ${Math.ceil(size / 4)} tokens (characters / 4)`);
+}
 process.exit(0);

@@ -9,9 +9,21 @@ import { agentFixture } from './hosted-agent-fixture.mjs';
 
 // Issue 47558a99: the advertised tool list is per-session context. Budgets are in characters of the
 // tools/list JSON; tokens are about chars / 4. Raise one only with before/after numbers on the Issue.
-const LIST_CHARS = 12_000; // 2026-11-06: 11,725 (was 54,565)
-const DESCRIPTION_CHARS = 2_400; // 2026-11-06: 2,259 (was 3,955)
+const LIST_CHARS = 6_000; // 1.5k tokens, the Issue target. 2026-11-06: ~5,950 (was 11,725, before that 54,565)
+const DESCRIPTION_CHARS = 1_400; // 2026-11-06: ~1,150 of the 6,000 (was 2,259, then 3,955)
 const body = response => JSON.parse(response.content[0].text);
+// The listing names fields in a description ("Fields: a b:n c=x|y ...") and required fields per action.
+function listing(tool) {
+  const text = (tool.inputSchema.properties.command ?? tool.inputSchema).description;
+  const fields = new Set(
+    /Fields: (.*?) \(:b bool/
+      .exec(text)[1]
+      .split(' ')
+      .map(token => token.replace(/[:=(].*$/, '')),
+  );
+  const required = /Required: (.*?)\. Fields:/.exec(text)?.[1] ?? '';
+  return { fields, required: required.split(/[ (),/:|]+/) };
+}
 
 async function connect(t) {
   const s = agentFixture(t),
@@ -44,6 +56,16 @@ test('the hosted tool list stays inside its context budget', async t => {
   const descriptions = tools.reduce((n, tool) => n + tool.description.length, 0);
   t.diagnostic(`tools/list ${chars} chars (~${Math.ceil(chars / 4)} tokens); descriptions ${descriptions}`);
   assert(chars <= LIST_CHARS, `tool list characters: ${chars}`);
+  // Codex sends each tool as a function definition under a server-prefixed name: same budget.
+  const codex = JSON.stringify(
+    tools.map(tool => ({
+      type: 'function',
+      name: `mcp__nanthai-forge__${tool.name}`,
+      description: tool.description,
+      parameters: tool.inputSchema,
+    })),
+  ).length;
+  assert(codex <= LIST_CHARS, `Codex function definitions: ${codex}`);
   assert(descriptions <= DESCRIPTION_CHARS, `description characters: ${descriptions}`);
 });
 
@@ -62,12 +84,15 @@ test('every action stays reachable: listed, with its exact schema and fields beh
       assert(detail.variants?.length, `${tool.name} ${action} has no help`);
       // The verb forms (start, save, land) exist on more than one tool: judge each variant on its own tool.
       for (const { tool: owner, schema } of detail.variants) {
-        const listed = tools.find(candidate => candidate.name === owner).inputSchema.properties.command;
+        const listed = listing(tools.find(candidate => candidate.name === owner));
         for (const key of Object.keys(schema.properties))
-          assert(Object.hasOwn(listed.properties, key), `${owner} ${action} field ${key} is not listed`);
+          if (key !== 'action' && key !== 'mode')
+            assert(listed.fields.has(key), `${owner} ${action} field ${key} is not listed`);
+        for (const mode of schema.properties.mode?.enum ?? [])
+          assert(listed.required.includes(mode), `${owner} ${action} mode ${mode} is not listed`);
         for (const key of schema.required ?? [])
           if (key !== 'action' && key !== 'mode')
-            assert(listed.description.includes(key), `${owner} ${action} required ${key} is not listed`);
+            assert(listed.required.includes(key), `${owner} ${action} required ${key} is not listed`);
       }
     }
   }

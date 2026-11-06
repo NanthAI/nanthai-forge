@@ -62,7 +62,8 @@ const modeOf = (variant: Json): string | undefined => {
   return isObject(mode) && Array.isArray(mode.enum) ? mode.enum.join('|') : undefined;
 };
 
-/** `save:sync|candidate(laneId)`: the action, its mode if any and the fields it requires. */
+/** `save:sync|candidate(laneId)`: the action, its mode if any and the fields it requires. Actions with
+ * neither (bare `pull`) are only in the `action` enum. */
 function signature(variant: Json): string | undefined {
   const action = actionOf(variant);
   if (!action) return undefined;
@@ -70,35 +71,94 @@ function signature(variant: Json): string | undefined {
   const required = ((variant.required as string[] | undefined) ?? []).filter(
     key => key !== 'action' && key !== 'mode',
   );
-  return `${action}${mode ? `:${mode}` : ''}(${required.join(',')})`;
+  if (!mode && !required.length) return undefined;
+  return `${action}${mode ? `:${mode}` : ''}${required.length ? `(${required.join(',')})` : ''}`;
 }
 
-/** Shallow type of one field across every variant that names it; nested detail lives behind help. */
-function flatProperty(seen: Json[]): Json {
-  const first = seen[0]!;
-  const type =
-    new Set(seen.map(schema => schema.type)).size === 1 && first.type !== undefined
-      ? { type: first.type }
-      : {};
-  const values = seen.flatMap(schema =>
-    Array.isArray(schema.enum) ? schema.enum : schema.const !== undefined ? [schema.const] : [],
-  );
+/** Required-field signatures; actions with identical required fields share one entry (`check/run(checkId)`). */
+function groupSignatures(variants: Json[]): string[] {
+  const out: string[] = [];
+  const shared = new Map<string, string[]>();
+  for (const variant of variants) {
+    const text = signature(variant);
+    if (!text) continue;
+    const at = text.indexOf('(');
+    if (modeOf(variant) || at < 0) {
+      if (!out.includes(text)) out.push(text);
+    } else {
+      const key = text.slice(at);
+      shared.set(key, [...(shared.get(key) ?? []), text.slice(0, at)]);
+    }
+  }
+  for (const [key, names] of shared) out.push(`${[...new Set(names)].join('/')}${key}`);
+  return out;
+}
+
+const TYPE_MARK: Record<string, string> = {
+  boolean: ':b',
+  integer: ':n',
+  number: ':n',
+  object: ':o',
+  array: ':a',
+};
+/** One field as a token: `name`, `name:b|n|o|a` for a non-string type, `name=a|b` for a short enum. */
+function fieldToken(key: string, seen: Json[]): string {
+  const values = [
+    ...new Set(
+      seen.flatMap(schema =>
+        Array.isArray(schema.enum) ? schema.enum : schema.const !== undefined ? [schema.const] : [],
+      ),
+    ),
+  ];
   const listed = seen.every(schema => schema.enum !== undefined || schema.const !== undefined);
-  const unique = [...new Set(values)];
-  return listed && unique.length > 0 && unique.length <= 40 ? { ...type, enum: unique } : type;
+  if (listed && values.length > 0 && values.length <= 6) return `${key}=${values.join('|')}`;
+  const types = new Set(seen.map(schema => schema.type));
+  const type = types.size === 1 ? [...types][0] : undefined;
+  return `${key}${typeof type === 'string' ? (TYPE_MARK[type] ?? '') : ''}`;
 }
 
+const LEGEND = ':b bool :n num :o obj :a arr';
+/** Required fields of a nested object, as `head,sourceVersion?`: the names, not its schema. */
+const nestedKeys = (value: Json): string => {
+  const required = Array.isArray(value.required) ? (value.required as string[]) : [];
+  return Object.keys(value.properties as Json)
+    .map(key => key + (required.includes(key) ? '' : '?'))
+    .join(',');
+};
+const withNested = (schema: Json, token: string): string =>
+  isObject(schema.properties) ? `${token}(${nestedKeys(schema)})` : token;
+
+/** A flat tool lists its fields by name in one description, like a command tool; the strict Zod schema
+ * still validates every call. */
+function flatSchema(schema: Json): Json {
+  const stripped = stripSchemaNoise(schema) as Json;
+  if (!isObject(stripped.properties)) return stripped;
+  const fields = Object.entries(stripped.properties).map(([key, value]) =>
+    withNested(isObject(value) ? value : {}, fieldToken(key, [isObject(value) ? value : {}])),
+  );
+  const required = Array.isArray(stripped.required) ? (stripped.required as string[]) : [];
+  return {
+    type: 'object',
+    description: `Fields: ${fields.join(' ')} (${LEGEND})${required.length ? `. Required: ${required.join(',')}` : ''}`,
+    properties: {},
+    ...(required.length ? { required } : {}),
+  };
+}
+
+/** The listing carries names, not a schema: the action enum, required fields per action and one field
+ * line. Types are marked only when they are not strings; exact per-action schemas are behind help. */
 function compactCommand(tool: Tool): Tool {
   const variants = variantsOf(tool);
-  if (!variants) return { ...tool, inputSchema: stripSchemaNoise(tool.inputSchema) as Json };
+  if (!variants) return { ...tool, inputSchema: flatSchema(tool.inputSchema) };
   const properties = new Map<string, Json[]>();
   for (const variant of variants)
     for (const [key, schema] of Object.entries((variant.properties as Json | undefined) ?? {}))
       if (isObject(schema)) properties.set(key, [...(properties.get(key) ?? []), schema]);
   const actions = [...new Set(variants.map(actionOf).filter((value): value is string => Boolean(value)))];
-  const signatures = [...new Set(variants.map(signature).filter((value): value is string => Boolean(value)))];
-  const flat: Json = { action: { type: 'string', enum: actions } };
-  for (const [key, seen] of properties) if (key !== 'action') flat[key] = flatProperty(seen);
+  const signatures = groupSignatures(variants);
+  const fields = [...properties]
+    .filter(([key]) => key !== 'action' && key !== 'mode')
+    .map(([key, seen]) => fieldToken(key, seen));
   const command = (tool.inputSchema.properties as Json).command as Json;
   const rest = Object.fromEntries(Object.entries(command).filter(([key]) => key !== 'anyOf'));
   return {
@@ -109,8 +169,8 @@ function compactCommand(tool: Tool): Tool {
         command: {
           ...(stripSchemaNoise(rest) as Json),
           type: 'object',
-          description: `Required fields per action: ${signatures.join(' ')}. Other fields optional; exact schema: forge_work_overview {action:"help",topic:ACTION}.`,
-          properties: flat,
+          description: `${signatures.length ? `Required: ${signatures.join(' ')}. ` : ''}Fields: ${fields.join(' ')} (${LEGEND}). Schema: forge_work_overview help`,
+          properties: { action: { enum: actions } },
           required: ['action'],
         },
       },
@@ -126,7 +186,19 @@ export type ToolHelp = {
 
 /** The advertised, compact form of one tool. */
 export function compactTool(tool: Tool): Tool {
-  return compactCommand(tool);
+  const { execution: _forbidden, annotations, ...compact } = compactCommand(tool);
+  void _forbidden;
+  // MCP defaults are readOnlyHint false, idempotentHint false, openWorldHint true: list only a read tool.
+  const hints = annotations as Record<string, unknown> | undefined;
+  if (!hints) return compact as Tool;
+  const kept = Object.fromEntries(
+    Object.entries(hints).filter(
+      ([key, value]) =>
+        (key === 'readOnlyHint' && value === true) || (key === 'openWorldHint' && value === false),
+    ),
+  );
+  if (!Object.keys(kept).length) return compact as Tool;
+  return { ...compact, annotations: kept } as Tool;
 }
 
 /** Exact schema and prose for a tool name or action name; no topic lists what exists. */

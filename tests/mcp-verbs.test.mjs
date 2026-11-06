@@ -163,9 +163,9 @@ const modesOf = tools =>
       .flatMap(option =>
         (option.properties.mode?.enum ?? []).map(mode => `${option.properties.action.const}/${mode}`),
       );
-    const signed = [...(command?.description ?? '').matchAll(/\b(start|save|land):([a-z|-]+)\(/g)].flatMap(
-      ([, verb, modes]) => modes.split('|').map(mode => `${verb}/${mode}`),
-    );
+    const signed = [
+      ...(command?.description ?? '').matchAll(/\b(start|save|land):([a-z|-]+)(?=[( ])/g),
+    ].flatMap(([, verb, modes]) => modes.split('|').map(mode => `${verb}/${mode}`));
     return [...variants, ...signed];
   });
 
