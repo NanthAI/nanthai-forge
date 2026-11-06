@@ -18,6 +18,7 @@ import { ConvexError } from 'convex/values';
 const index = await import(moduleUrl('../convex/projectWorkIndex.ts'));
 const actions = await import(moduleUrl('../convex/projectWorkActions.ts'));
 const search = await import(moduleUrl('../convex/projectHostedPlanningSearch.ts'));
+const planningModule = await import(moduleUrl('../convex/projectHostedPlanning.ts'));
 const code = expected => error => (error.data?.code ?? error.code) === expected;
 
 /** The agent's port over the real Convex handlers; Intent states are the one stub (tested with
@@ -39,6 +40,7 @@ function port(s, states = new Map(), serverFeatures = [...hostedContractFeatures
       projectWorkIndex: index,
       projectWorkActions: actions,
       projectHostedPlanningSearch: search,
+      projectHostedPlanning: planningModule,
     }[module][fn];
     return handler._handler(s.ctx, args);
   };
@@ -1045,4 +1047,126 @@ test('hosted planning CLI reads and writes from an explicitly addressed non-Git 
   assert(read.result.items.some(item => item.id === created.result.itemId));
   assert.equal(existsSync(join(current.p.root, '.git')), false);
   assert.equal(existsSync(join(current.p.root, '.forge')), false);
+});
+
+test('a unique 8+ character id prefix resolves in the same call; full ids stay byte-for-byte unchanged and add no call (ce863deb)', async t => {
+  const s = await setup(t),
+    p = port(s);
+  const issue = (await put(p, { kind: 'issue', title: 'Short ids', body: 'Done when:\n- [ ] x' })).result;
+  await run(p, 'comment-planning-item', { itemId: issue.itemId, text: 'first note' });
+  p.calls.length = 0;
+  const full = await list(p, { id: issue.itemId, reconcile: false });
+  const fullCalls = [...p.calls];
+  assert(!fullCalls.includes('projectHostedPlanning:resolveId'));
+  p.calls.length = 0;
+  const short = await list(p, { id: issue.itemId.slice(0, 8), reconcile: false });
+  assert.equal(JSON.stringify(short), JSON.stringify(full));
+  assert.deepEqual(
+    p.calls.filter(name => name !== 'projectHostedPlanning:resolveId'),
+    fullCalls,
+  );
+  assert.equal(p.calls.filter(name => name === 'projectHostedPlanning:resolveId').length, 1);
+  // Longer prefixes, with or without a dash, and upper case resolve too.
+  for (const prefix of [
+    issue.itemId.slice(0, 13),
+    issue.itemId.slice(0, 12),
+    issue.itemId.slice(0, 8).toUpperCase(),
+  ])
+    assert.equal((await list(p, { id: prefix, reconcile: false })).item.id, issue.itemId);
+  // Writes resolve once, act on the full id and echo it.
+  p.calls.length = 0;
+  const commented = await run(p, 'comment-planning-item', {
+    itemId: issue.itemId.slice(0, 8),
+    text: 'by prefix',
+  });
+  assert.equal(commented.result.itemId, issue.itemId);
+  assert.equal(p.calls.filter(name => name === 'projectHostedPlanning:resolveId').length, 1);
+  const moved = await put(p, { itemId: issue.itemId.slice(0, 8), expectedVersion: 1, status: 'in-progress' });
+  assert.equal(moved.result.itemId, issue.itemId);
+  const after = await list(p, { id: issue.itemId, reconcile: false });
+  assert.equal(after.item.status, 'in-progress');
+  assert.deepEqual(
+    after.comments.map(c => c.text),
+    ['first note', 'by prefix'],
+  );
+  // A full-id write adds no resolve call.
+  p.calls.length = 0;
+  await run(p, 'comment-planning-item', { itemId: issue.itemId, text: 'full' });
+  assert(!p.calls.includes('projectHostedPlanning:resolveId'));
+  // Start from a prefix resolves the Issue and returns its full id as the Intent.
+  const planned = await plannedIntent(p, issue.itemId.slice(0, 8));
+  assert.equal(planned.intentId, issue.itemId);
+});
+
+test('an ambiguous prefix lists at most 5 full candidate ids; an unknown one is NOT_FOUND; creating needs a full id', async t => {
+  const s = await setup(t),
+    p = port(s);
+  const ids = Array.from({ length: 7 }, (_, n) => `deadbeef-000${n}-4000-8000-000000000000`);
+  for (const [n, itemId] of ids.entries()) await put(p, { itemId, kind: 'issue', title: `Twin ${n}` });
+  await put(p, { itemId: 'deadbee0-0000-4000-8000-000000000000', kind: 'issue', title: 'Near miss' });
+  const ambiguous = await list(p, { id: 'deadbeef', reconcile: false }).catch(error => error);
+  assert.equal(ambiguous.code, 'AMBIGUOUS_ID');
+  assert.deepEqual(ambiguous.recovery.candidates, ids.slice(0, 5));
+  for (const id of ids.slice(0, 5)) assert.match(ambiguous.message, new RegExp(id));
+  assert.doesNotMatch(ambiguous.message, new RegExp(ids[5]));
+  // Writes refuse the same way and write nothing.
+  await assert.rejects(
+    run(p, 'comment-planning-item', { itemId: 'deadbeef', text: 'x' }),
+    error => error.code === 'AMBIGUOUS_ID',
+  );
+  await assert.rejects(
+    put(p, { itemId: 'deadbeef', expectedVersion: 1, status: 'closed' }),
+    error => error.code === 'AMBIGUOUS_ID',
+  );
+  // Two candidates are listed in full and a longer prefix picks one.
+  assert.equal((await list(p, { id: ids[3].slice(0, 13), reconcile: false })).item.id, ids[3]);
+  assert.equal((await list(p, { id: 'deadbee0', reconcile: false })).item.title, 'Near miss');
+  await assert.rejects(list(p, { id: 'cafebabe', reconcile: false }), code('NOT_FOUND'));
+  await assert.rejects(
+    put(p, { itemId: 'cafebabe', expectedVersion: 0, kind: 'issue', title: 'new' }),
+    code('BAD_ARGUMENT'),
+  );
+});
+
+test('a prefix shorter than 8 characters or not hex is refused by the schema before any call; every planning id field takes the same shape', async t => {
+  const s = await setup(t),
+    p = port(s);
+  for (const bad of ['deadbee', 'deadbeeg', '', 'dead-beef', 'deadbeef--00', 'x'.repeat(40)]) {
+    for (const [action, field] of [
+      ['planning', 'id'],
+      ['comment-planning-item', 'itemId'],
+      ['put-planning-item', 'itemId'],
+      ['start', 'planningItemId'],
+    ]) {
+      const extra = action === 'comment-planning-item' ? { text: 'x' } : {};
+      const result = hostedAgentCommandSchemas[action].safeParse({ [field]: bad, ...extra });
+      assert.equal(result.success, false, `${action}.${field} ${JSON.stringify(bad)}`);
+      assert.match(result.error.message, /at least 8 characters/);
+    }
+  }
+  assert.deepEqual(p.calls, []);
+  const full = randomUUID();
+  for (const [action, field] of [
+    ['planning', 'id'],
+    ['put-planning-item', 'itemId'],
+    ['start', 'planningItemId'],
+  ])
+    assert.equal(hostedAgentCommandSchemas[action].parse({ [field]: full })[field], full);
+  assert.equal(
+    hostedAgentCommandSchemas['comment-planning-item'].parse({ itemId: 'deadbeef', text: 'x' }).itemId,
+    'deadbeef',
+  );
+});
+
+test('a server without resolveId answers a short id with a typed error that asks for the full id', async t => {
+  const s = await setup(t),
+    p = port(s);
+  const issue = (await put(p, { kind: 'issue', title: 'Old server' })).result;
+  const query = p.query;
+  p.query = (name, args) =>
+    name === 'projectHostedPlanning:resolveId'
+      ? Promise.reject(new Error(`Could not find public function for '${name}'`))
+      : query(name, args);
+  await assert.rejects(list(p, { id: issue.itemId.slice(0, 8) }), code('HOSTED_ACTION_UNSUPPORTED'));
+  assert.equal((await list(p, { id: issue.itemId, reconcile: false })).item.id, issue.itemId);
 });

@@ -222,9 +222,12 @@ for (const size of [1000, 10000])
 
 test('CLI/MCP share search schema and briefings require it; validation names id UUID shape', () => {
   assert.equal(hostedAgentCommandSchemas.planning.parse({ search: 'sync', status: 'all' }).search, 'sync');
-  const bad = hostedAgentCommandSchemas.planning.safeParse({ id: '50a26ac4' });
+  // An 8-character prefix is valid (ce863deb); a shorter one names the accepted shapes.
+  assert.equal(hostedAgentCommandSchemas.planning.safeParse({ id: '50a26ac4' }).success, true);
+  const bad = hostedAgentCommandSchemas.planning.safeParse({ id: '50a26ac' });
   assert.equal(bad.success, false);
-  assert.match(bad.error.message, /id must be a complete planning UUID/);
+  assert.match(bad.error.message, /a complete planning UUID \(xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx\)/);
+  assert.match(bad.error.message, /unique hex prefix of at least 8 characters/);
   assert.equal(
     hostedAgentCommandSchemas.planning.safeParse({ search: 'sync', id: randomUUID() }).success,
     false,

@@ -7,6 +7,7 @@ import { hostedAgentCommandSchemas } from './hosted-agent-contract.js';
 import { hostedActionError } from './hosted-action-error.js';
 import { readIndexedWorkDetail } from './hosted-work-client.js';
 import { ForgeError, invariant } from './errors.js';
+import { isPlanningPrefix, planningIdMaxCandidates } from './planning-id.js';
 import type { HostedAgentSession } from './hosted-agent-transport.js';
 import type { PlanningItem, PlanningWrite } from './work-planning-types.js';
 
@@ -219,6 +220,51 @@ const putFrom = (
   ...(reason === undefined ? {} : { reason }),
 });
 
+/** A unique hex prefix of a planning id (8+ characters) becomes the full id in the same call. One
+ * bounded index range read on the existing key index (`projectHostedPlanning:resolveId`, at most
+ * six keys, no scan, no search). A complete UUID is returned untouched with no call. An ambiguous
+ * prefix lists at most five full candidates; an unknown one is NOT_FOUND. The result is retained in
+ * the journal when there is one, so a replay writes to the same item. */
+export async function resolvePlanningId(
+  port: Pick<PlanningPort, 'query'>,
+  id: string,
+  journal?: HostedAgentJournal,
+): Promise<string> {
+  if (!isPlanningPrefix(id)) return id;
+  const prefix = id.toLowerCase();
+  const find = async () => {
+    let found: { ids: string[]; more?: boolean };
+    try {
+      found = await port.query<{ ids: string[]; more?: boolean }>('projectHostedPlanning:resolveId', {
+        prefix,
+      });
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        /(?:Could not find (?:public )?function|No (?:public )?function found|Function .* not found)/i.test(
+          error.message,
+        )
+      )
+        throw new ForgeError(
+          'HOSTED_ACTION_UNSUPPORTED',
+          `This server cannot resolve a short planning id yet. Pass the full id (planning '{"search":"${prefix}"}' lists it).`,
+        );
+      throw error;
+    }
+    return found;
+  };
+  const { ids, more } = journal ? await journal.retain('planning-id-prefix', find) : await find();
+  invariant(ids.length > 0, 'NOT_FOUND', `No planning item starts with "${prefix}".`);
+  if (ids.length > 1 || more)
+    throw new ForgeError(
+      'AMBIGUOUS_ID',
+      `"${prefix}" starts ${ids.length > planningIdMaxCandidates || more ? 'more than ' + planningIdMaxCandidates : ids.length} planning items: ${ids.slice(0, planningIdMaxCandidates).join(', ')}${more ? ', …' : ''}. Pass more characters or the full id.`,
+      undefined,
+      { candidates: ids.slice(0, planningIdMaxCandidates) },
+    );
+  return ids[0]!;
+}
+
 /** Issue states from started Intents, one indexed read per Issue in a single call. */
 async function intentStates(port: PlanningPort, ids: string[]) {
   const states: Record<string, string> = {};
@@ -319,10 +365,11 @@ async function readPlanning(
   }
   const ws = await workspace(port);
   if (input.id) {
-    const item = await fullItem(port, ws, input.id);
+    const id = await resolvePlanningId(port, input.id);
+    const item = await fullItem(port, ws, id);
     invariant(item, 'NOT_FOUND', 'Planning item not found.');
     const comments = await page(port, ws, 'planningComments', null, 50, {
-      parentId: input.id,
+      parentId: id,
       newestFirst: true,
     });
     const states = item.kind === 'issue' ? await intentStates(port, [item.id]) : {};
@@ -397,12 +444,14 @@ export async function executeHostedPlanning(
   port.retainOperation?.(journal.operationId);
   if (action === 'comment-planning-item') {
     const comment = hostedAgentCommandSchemas['comment-planning-item'].parse(input);
+    const itemId = await resolvePlanningId(port, comment.itemId, journal);
     const revision = await writePlanning(
       port,
       {
         action,
         operationId: journal.operationId,
         ...comment,
+        itemId,
         authorLabel: comment.authorLabel || process.env.FORGE_AGENT_NAME || process.env.FORGE_ACTOR || '',
       },
       journal,
@@ -410,7 +459,7 @@ export async function executeHostedPlanning(
     return {
       operationId: journal.operationId,
       result: {
-        itemId: comment.itemId,
+        itemId,
         commentId: journal.operationId,
         workRevision: revision,
       },
@@ -422,7 +471,12 @@ export async function executeHostedPlanning(
     'BAD_ARGUMENT',
     'Creating a planning item (expectedVersion 0) needs `kind` and `title`.',
   );
-  const itemId = put.itemId ?? (await journal.id('item'));
+  invariant(
+    put.expectedVersion > 0 || !put.itemId || !isPlanningPrefix(put.itemId),
+    'BAD_ARGUMENT',
+    'Creating a planning item (expectedVersion 0) needs a complete itemId UUID, or none.',
+  );
+  const itemId = put.itemId ? await resolvePlanningId(port, put.itemId, journal) : await journal.id('item');
   const hints: { likelyDuplicates?: unknown } = {};
   const revision = await writePlanning(
     port,
@@ -445,7 +499,7 @@ export async function executeHostedPlanning(
 /** The Intent a planned Issue starts: it shares the Issue's id, so repeated starts add Lanes to it. */
 export async function plannedIntent(port: PlanningPort, itemId: string) {
   const ws = await workspace(port);
-  const item = await fullItem(port, ws, itemId);
+  const item = await fullItem(port, ws, await resolvePlanningId(port, itemId));
   invariant(item, 'NOT_FOUND', 'Planning item not found.');
   invariant(
     item.kind === 'issue',

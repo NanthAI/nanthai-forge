@@ -13,6 +13,7 @@ import { saveExpectedSchema } from './hosted-save.js';
 import { safeRelative } from './safe-relative.js';
 import { planningCommentCommandSchema, planningPutSchema } from './work-planning-types.js';
 import { invariant } from './errors.js';
+import { isPlanningRef, planningIdHelp } from './planning-id.js';
 import { policyWriteObject } from './autonomy-policy.js';
 import { hostedCheckCommandSchema, hostedCheckRunnerSchema } from './hosted-check.js';
 export const hostedAgentActions = [
@@ -104,6 +105,9 @@ export type HostedAgentCapabilities = z.infer<typeof hostedAgentCapabilitiesSche
 const planningStatuses = ['proposed', 'open', 'in-progress', 'closed', 'abandoned'] as const;
 const uuid = z.uuid(),
   hash = z.string().regex(/^[0-9a-f]{64}$/);
+/** A planning id: a complete UUID (used as given) or a unique hex prefix of 8+ characters, which the
+ * transport resolves to the full id in the same call (ce863deb). */
+const planningRef = z.string().refine(isPlanningRef, `must be ${planningIdHelp}`);
 const lane = { laneId: uuid.optional() };
 const message = { message: z.string().default('Agent change') };
 const selection = {
@@ -138,7 +142,7 @@ export const hostedAgentCommandSchemas = {
       stackOn: uuid.optional(),
       stackEntry: uuid.optional(),
       /** Start from a planned Issue: its title and body become the Intent, and it moves to in-progress. */
-      planningItemId: uuid.optional(),
+      planningItemId: planningRef.optional(),
     })
     .strict(),
   open: z
@@ -329,7 +333,7 @@ export const hostedAgentCommandSchemas = {
   /** Finite page of the backlog (Initiatives and Issues). id reads one item with its comments. */
   planning: z
     .object({
-      id: z.uuid('id must be a complete planning UUID (xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx).').optional(),
+      id: planningRef.optional(),
       search: z.string().trim().min(1).optional(),
       kind: z.enum(['issue', 'initiative']).optional(),
       status: z.enum([...planningStatuses, 'all']).optional(),
@@ -343,9 +347,12 @@ export const hostedAgentCommandSchemas = {
     .refine(input => !(input.id && input.search), 'Use id or search, not both.'),
   'put-planning-item': planningPutSchema
     .omit({ action: true, operationId: true, itemId: true })
-    .extend({ itemId: uuid.optional() })
+    .extend({ itemId: planningRef.optional() })
     .strict(),
-  'comment-planning-item': planningCommentCommandSchema.omit({ action: true, operationId: true }).strict(),
+  'comment-planning-item': planningCommentCommandSchema
+    .omit({ action: true, operationId: true })
+    .extend({ itemId: planningRef })
+    .strict(),
 };
 export type HostedAgentAction = keyof typeof hostedAgentCommandSchemas;
 export function hostedAgentAction(action: string): HostedAgentAction {

@@ -215,7 +215,7 @@ export function registerHostedAgentWorkflow(
       }),
   );
   prose.forge_planning =
-    'Planning: indexed title/body search; active by default, status:all includes history. Filter kind/status/initiativeId; cursor pages or id+comments. reconcile:false skips Intent updates. New Issues/friction return advisory likelyDuplicates. put-planning-item sets only named fields (0 creates); comment-planning-item adds discussion. Start via forge_task {action:start,planningItemId}.';
+    'Planning: indexed title/body search; active by default, status:all includes history. Filter kind/status/initiativeId; cursor pages or id+comments. reconcile:false skips Intent updates. New Issues/friction return advisory likelyDuplicates. put-planning-item sets only named fields (0 creates); comment-planning-item adds discussion. Ids (id, itemId, planningItemId) take a full UUID or a unique 8+ character hex prefix. Start via forge_task {action:start,planningItemId}.';
   server.registerTool(
     'forge_current',
     {

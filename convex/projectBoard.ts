@@ -219,7 +219,8 @@ export const post = mutation({
         at,
         bytes,
         recipients,
-        expiresAt: now + BOARD_EVIDENCE_MS,
+        // From the stored `at` (bumped past the counter's lastAt when posts share a millisecond).
+        expiresAt: at + BOARD_EVIDENCE_MS,
       });
       const inbox = await ctx.db
         .query('projectBoardInboxes')

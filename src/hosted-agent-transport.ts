@@ -41,6 +41,7 @@ import {
 } from './hosted-agent-contract.js';
 import { executeHostedPolicy } from './hosted-agent-policy.js';
 import { executeHostedPlanning, markPlanningStarted } from './hosted-agent-planning.js';
+import { isPlanningPrefix } from './planning-id.js';
 import { executeHostedMetrics } from './hosted-agent-metrics.js';
 import { laneLiveness, readLaneEntry, recordLane, withLaneCommand } from './lane-registry.js';
 import { convexLaneStates, laneHousekeeping, markerIdentity } from './lane-prune.js';
@@ -840,8 +841,13 @@ export class HostedAgentTransport {
       } else {
         if (action === 'finish') markLandStep('ready');
         result = await executeHostedAgent(session, action, command.data);
-        const planningItemId =
+        const askedItemId =
           action === 'start' && (command.data as { planningItemId?: string }).planningItemId;
+        // A short id was resolved by the start itself: the Intent it started carries the full id.
+        const planningItemId =
+          askedItemId && isPlanningPrefix(askedItemId)
+            ? (result as { intentId?: string }).intentId
+            : askedItemId;
         const planning = planningItemId
           ? await markPlanningStarted(
               {

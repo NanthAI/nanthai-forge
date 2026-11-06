@@ -274,7 +274,7 @@ Hosted projects keep their backlog as planning: Initiatives group Issues, and an
 ```sh
 nforge agent ROOT planning '{"search":"sync source worker","limit":50}'    # ranked title/body search, active items by default
 nforge agent ROOT planning '{"status":"open","limit":50}'                 # one page; filters: kind, status, initiativeId; cursor continues
-nforge agent ROOT planning '{"id":"ITEM_ID"}'                             # one item, full body, newest 50 comments
+nforge agent ROOT planning '{"id":"ITEM_ID"}'                             # one item, full body, newest 50 comments; ITEM_ID is the full UUID or a unique 8+ character prefix
 nforge agent ROOT put-planning-item '{"kind":"initiative","title":"Phase 6","status":"open"}'
 nforge agent ROOT put-planning-item '{"kind":"issue","title":"Fix X","body":"Why and acceptance","status":"open","initiativeId":"INITIATIVE_ID"}'
 nforge agent ROOT comment-planning-item '{"itemId":"ITEM_ID","text":"Decision: use A, because B"}'
