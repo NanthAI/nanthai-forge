@@ -8,7 +8,6 @@ import {
   type ReceiptIdentity,
 } from './projectHostedAcceptanceStore';
 import { readHostedRecord, recordHead, writeHostedRecord } from './projectHostedRecords';
-import { sameSaveLane } from './projectHostedSaveStore';
 import { retireLandedOverlapLanes } from './projectHostedOverlapLanded';
 import { completeIntentWhenLanesDone } from './projectHostedIntentCompletion';
 import { completeResolutionOrigins } from './projectHostedResolutionOrigin';
@@ -86,7 +85,17 @@ export async function completeAcceptedHeads(ctx: MutationCtx, input: CompletionI
     });
     invariant(current, 'SOURCE_UNAVAILABLE', 'An accepted Lane is unavailable.');
     const lane = hostedLaneSchema.parse(JSON.parse(current.value));
-    if (lane.state !== 'active' || lane.pinned || !sameSaveLane(lane, entry)) continue;
+    // The landed work is the saved head, its source version and its lifecycle (a reopened Lane stays open).
+    // A later record write that carries none of those (a bare version bump) must not leave an accepted
+    // Lane open forever, producing overlap notices.
+    if (
+      lane.state !== 'active' ||
+      lane.pinned ||
+      lane.head !== entry.head ||
+      lane.sourceVersion !== entry.sourceVersion ||
+      lane.lifecycleVersion !== entry.lifecycleVersion
+    )
+      continue;
     await writeHostedRecord(ctx, {
       projectId: input.projectId,
       actor: project.owner,

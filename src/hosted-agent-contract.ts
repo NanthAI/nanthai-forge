@@ -51,6 +51,7 @@ export const hostedAgentOwnerActions = [
   'configure-runner',
   'check-settings',
   'metrics',
+  'abandon-dormant',
 ] as const;
 // Kept outside the strictly parsed advertised capability list.
 export const hostedAgentRecordActions = [
@@ -249,6 +250,10 @@ export const hostedAgentCommandSchemas = {
   pin: z.object({ ...lane, pinned: z.boolean().default(true) }).strict(),
   /** Close every active Lane whose exact saved head an accepted receipt landed. */
   'complete-merged': z.object({}).strict(),
+  /** Dormant open Lanes with nothing unlanded: dry run lists them; apply abandons up to `limit` per call. */
+  'abandon-dormant': z
+    .object({ apply: z.boolean().default(false), limit: z.number().int().min(1).max(25).default(25) })
+    .strict(),
   reopen: z
     .object({
       ...lane,

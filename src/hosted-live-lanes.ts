@@ -7,6 +7,8 @@ export const liveLanesInput = z
   .object({
     cursor: z.string().startsWith('forge-lanes-v1:').nullable().default(null),
     limit: z.number().int().min(1).max(100).default(50),
+    /** `live` hides dormant Lanes; `dormant` lists only them, each with `abandonable`; default lists all. */
+    view: z.enum(['all', 'live', 'dormant']).optional(),
   })
   .strict();
 export async function liveLanes(transport: HostedAgentTransport, input: Record<string, unknown>) {

@@ -84,7 +84,7 @@ export const list = query({
   returns: v.string(),
   handler: async (ctx, { projectId, cursor, signals }) => {
     try {
-      await recordCaller(ctx, projectId);
+      const { project } = await recordCaller(ctx, projectId);
       const page = await ctx.db
         .query('projectHostedOverlapAcks')
         .withIndex('by_project_and_id', q => q.eq('projectId', projectId))
@@ -92,7 +92,7 @@ export const list = query({
       return canonicalPayload({
         ...page,
         page: page.page.map(row => ({ ...JSON.parse(row.value), ...(signals ? { actor: row.actor } : {}) })),
-        ...(signals ? { signals: await readNowOverlaps(ctx, projectId) } : {}),
+        ...(signals ? { signals: await readNowOverlaps(ctx, projectId, project) } : {}),
       });
     } catch (error) {
       return report(error);

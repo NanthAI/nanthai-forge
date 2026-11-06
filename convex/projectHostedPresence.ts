@@ -67,13 +67,16 @@ export async function readHostedPresence(
   projectId: Id<'hostedProjects'>,
   me: { laneId: string; intentId: string; goal: string; paths: string[]; actor: string },
   since?: number,
+  /** Dormant Lanes (no record write since this epoch ms) are not read. */
+  cutoff: number | null = null,
 ): Promise<Presence> {
   const now = Date.now();
+  const from = Math.max(since ?? -Infinity, cutoff ?? -Infinity);
   const [recent, sameIssue] = await Promise.all([
     ctx.db
       .query('projectHostedPresence')
       .withIndex('by_project_and_at', q =>
-        since === undefined ? q.eq('projectId', projectId) : q.eq('projectId', projectId).gt('at', since),
+        from === -Infinity ? q.eq('projectId', projectId) : q.eq('projectId', projectId).gt('at', from),
       )
       .order('desc')
       .take(PRESENCE_WINDOW),
@@ -81,7 +84,9 @@ export async function readHostedPresence(
       ? ctx.db
           .query('projectHostedPresence')
           .withIndex('by_project_and_intent_and_at', q =>
-            q.eq('projectId', projectId).eq('intentId', me.intentId),
+            cutoff === null
+              ? q.eq('projectId', projectId).eq('intentId', me.intentId)
+              : q.eq('projectId', projectId).eq('intentId', me.intentId).gt('at', cutoff),
           )
           .order('desc')
           .take(PRESENCE_SAME_ISSUE)
@@ -102,3 +107,16 @@ export async function readHostedPresence(
     coverage: `same-issue-newest-${PRESENCE_SAME_ISSUE},active-newest-${PRESENCE_WINDOW}`,
   };
 }
+
+/** Ids of the open Lanes known dormant: slim presence rows idle since `cutoff`, newest first, at most 101.
+ * A completeness check excuses these active heads: dormant Lanes are left out of peer reads on purpose. */
+export const dormantHostedPresence = async (ctx: QueryCtx, projectId: Id<'hostedProjects'>, cutoff: number) =>
+  new Set(
+    (
+      await ctx.db
+        .query('projectHostedPresence')
+        .withIndex('by_project_and_at', q => q.eq('projectId', projectId).lte('at', cutoff))
+        .order('desc')
+        .take(101)
+    ).map(row => row.laneId),
+  );

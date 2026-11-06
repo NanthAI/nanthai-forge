@@ -7,12 +7,20 @@ import { hostedLaneSchema } from '../src/hosted-lane';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { ForgeError, invariant } from '../src/errors';
 import { report } from './errors';
+import { abandonClass, dormantCutoff } from './projectHostedDormancy';
 
 /** One bounded indexed page, selected metadata only; no source objects or idle work. */
 export const list = query({
-  args: { projectId: v.id('hostedProjects'), cursor: v.union(v.string(), v.null()), limit: v.number() },
+  args: {
+    projectId: v.id('hostedProjects'),
+    cursor: v.union(v.string(), v.null()),
+    limit: v.number(),
+    /** `live` leaves out dormant Lanes, `dormant` lists only them with whether each is abandonable;
+     * `all` (default) lists every open Lane and marks the dormant ones. */
+    view: v.optional(v.union(v.literal('all'), v.literal('live'), v.literal('dormant'))),
+  },
   returns: v.string(),
-  handler: async (ctx, { projectId, cursor, limit }) => {
+  handler: async (ctx, { projectId, cursor, limit, view }) => {
     try {
       invariant(
         Number.isInteger(limit) && limit >= 1 && limit <= 100,
@@ -25,7 +33,8 @@ export const list = query({
         'cursor: expected the continueCursor from lanes. Run lanes {} to restart the page.',
       );
       const providerCursor = cursor === null ? null : cursor.slice('forge-lanes-v1:'.length);
-      const { actor } = await recordCaller(ctx, projectId);
+      const { actor, project } = await recordCaller(ctx, projectId);
+      const cutoff = dormantCutoff(project);
       const page = await ctx.db
         .query('projectHostedRecordHeads')
         .withIndex('by_project_and_kind_and_status', q =>
@@ -40,6 +49,30 @@ export const list = query({
         if (!row) continue;
         const lane = hostedLaneSchema.parse(JSON.parse(row.value));
         if (lane.state !== 'active') continue;
+        // Dormant: no record write (save, start, sync, landing) within the project's dormantAfterDays.
+        const dormant = cutoff !== null && Date.parse(lane.at) <= cutoff;
+        if ((view === 'live' && dormant) || (view === 'dormant' && !dormant)) continue;
+        const overlap =
+          dormant && view === 'dormant'
+            ? await ctx.db
+                .query('projectHostedOverlapLanes')
+                .withIndex('by_project_and_lane', q => q.eq('projectId', projectId).eq('laneId', lane.id))
+                .unique()
+            : undefined;
+        const stale = dormant
+          ? {
+              dormant: true,
+              lastActivityAt: lane.at,
+              ...(view === 'dormant'
+                ? {
+                    abandonable: abandonClass(lane, overlap ?? null),
+                    pinned: lane.pinned === true,
+                    // False: the Lane's overlap row predates the activity index; abandon-dormant stamps it.
+                    indexed: overlap ? overlap.lastActivityAt !== undefined : null,
+                  }
+                : {}),
+            }
+          : {};
         const intent = await readHostedRecord(ctx, { projectId, actor, kind: 'intent', key: lane.intentId });
         const [saved] = await ctx.db
           .query('projectHostedRecords')
@@ -75,6 +108,7 @@ export const list = query({
           landing: landing
             ? { submissionId: landing.submissionId, state: landing.phase, scope: 'intent' }
             : null,
+          ...stale,
         });
       }
       return canonicalPayload({

@@ -436,6 +436,24 @@ test('completeOnAccept skips a pinned Lane and still completes its unpinned sibl
   assert.equal((await f.readLane(pinned.laneId)).state, 'active', 'a pinned Lane is never completed');
 });
 
+test('a bare record bump after finish does not leave an accepted Lane open (Issue 433aa6ab)', async () => {
+  const f = await acceptanceFixture(),
+    bumped = await f.lane(),
+    saved = await f.lane();
+  const item = await f.makeCandidate([bumped, saved], [], {
+    governance: { version: 1, paths: ['src/leaf.ts'], ownerInputs: false },
+  });
+  const { state } = await checked(f, item);
+  // A write that carries no new work (version only) lands between the pins and the completion tick.
+  await f.changeLane(bumped.laneId, {});
+  // A later save moves head and sourceVersion: new work, so that Lane stays open.
+  await f.changeLane(saved.laneId, { head: 'e'.repeat(64), sourceVersion: 1 });
+  const { receipt } = await f.accept(state);
+  await f.materialize(receipt.id);
+  assert.equal((await f.readLane(bumped.laneId)).state, 'completed');
+  assert.equal((await f.readLane(saved.laneId)).state, 'active');
+});
+
 test('disabled completion policy preserves all Lane state; only the declared Intent completes', async () => {
   const f = await acceptanceFixture(),
     lane = await f.lane(),

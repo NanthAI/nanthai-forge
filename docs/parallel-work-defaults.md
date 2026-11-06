@@ -127,6 +127,7 @@ acceptance-policy pins exclude these settings.
 | `urgentRoles` | `["owner"]` | Builders marked routine landings urgent, which pushed every other landing back. Urgent is for a red main or an incident the owner names. | `["owner","agents"]` lets agents on the owner's login use it again. |
 | `autoClaim` | `true` | An agent's unsaved edits were invisible to others ("unsaved edits unavailable"), and a clash on one file cost about an hour (2026-11-05). The first-write hook records "touching PATH" on the agent board so other agents' first writes to that file show it. | `false` stops new automatic claims and hides live ones. |
 | `checkpointNudgeMinutes` | `30` | A builder that stops unexpectedly loses everything unsaved. Saves take under a minute. | Any number of minutes; `0` turns the nudge off. |
+| `dormantAfterDays` | `2` | Lanes nobody saved, started or landed for days stayed active (60 on the dogfood project, 52 idle) and kept raising overlap notices, presence entries and board signals for work long on main. | Any whole number of days; `0` never marks a Lane dormant. |
 | `stallAlerts` | on, 15 and 30 min | A check outage (2026-10-30, every result upload refused from 18:35 to 21:05) stalled landings for hours before anyone looked. | `{"stallAlerts":{"enabled":false}}`, thresholds, recipients and webhook preset below. |
 
 ### preflight
@@ -167,6 +168,23 @@ acceptance-policy pins exclude these settings.
   the `ack` command. Disjoint same-file or documentation hunks are advisory and need no answer.
   Each notice records its class and reason. Missing range evidence remains advisory;
   exact landing composition still catches conflicts. The check uses the overlap read that the land receipt already makes.
+
+### dormantAfterDays
+
+- A Lane is dormant when its record was last written (save, start, sync, landing, lifecycle change) more
+  than `dormantAfterDays` ago. Dormant Lanes are left out of overlap notices, presence, board signals and
+  the Lanes listed at `start`. Their saved work is kept and any save or start revives them.
+- No scan runs. Overlap reads use an index on the Lane's last activity, so dormant Lanes' rows are never
+  read. Open Lanes saved before this field existed are judged by their presence time (a row with no time
+  at all counts as live) until they next write or `abandon-dormant` indexes them.
+- `nforge agent ROOT lanes '{"view":"dormant"}'` lists dormant Lanes with `abandonable` (`landed`: an
+  accepted receipt landed the saved head; `empty`: nothing was ever saved; `null`: other saved work).
+  `view:"live"` hides them; the default lists all and marks `dormant`.
+- `nforge x ROOT abandon-dormant '{}'` is the owner's dry run; `{"apply":true}` abandons up to 25
+  `landed`/`empty` Lanes per call (never pinned Lanes or other saved work), indexes the remaining dormant
+  Lanes, and says how many are left. The saved head is kept; `start --reopen` undoes it.
+- A landing also completes an accepted Lane when only its record version changed after the pins were taken;
+  a new save or a reopen after the pins still keeps it open.
 
 ### urgentRoles
 

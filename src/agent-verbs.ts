@@ -45,6 +45,7 @@ export const operatorActions = [
   'abandon',
   'complete',
   'complete-merged',
+  'abandon-dormant',
   'pin',
   'clean',
   'take',

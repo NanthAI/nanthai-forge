@@ -20,6 +20,7 @@ import { report } from './errors';
 import { isStored } from './projectObjectFields';
 import { findObject } from './projectObjectFind';
 import { openSiblingLanes } from './projectHostedStartPeers';
+import { dormantCutoff } from './projectHostedDormancy';
 
 const args = {
   projectId: v.id('hostedProjects'),
@@ -267,7 +268,7 @@ async function execute(ctx: MutationCtx, input: Input, action: 'start' | 'intent
   // A new Intent has no other Lanes: no read.
   const openLanes =
     lane && (payload.intent.kind === 'existing' || plannedExists)
-      ? await openSiblingLanes(ctx, projectId, intentId, laneId, actor)
+      ? await openSiblingLanes(ctx, projectId, intentId, laneId, actor, dormantCutoff(project))
       : [];
   const result = hostedStartResultSchema.parse({
     schema: 1,

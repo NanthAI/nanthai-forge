@@ -50,7 +50,7 @@ export function hostedAgentHelp(action?: string) {
     'land --save waits; --no-wait returns after submission. Use --check-only to check without landing.',
     'land --save overlapAnswer:"accept-order" answers the pending notices for this landing and records them like ack, so peers see the answer.',
     'pull {} refreshes a clean clone root to main; a repeat resumes interruption. Root status {} reports clone freshness.',
-    'lanes {limit?,cursor?} lists open hosted Lanes with Intent, actor, last save and latest Intent landing context in one bounded query. Follow continueCursor; idle makes zero calls.',
+    'lanes {limit?,cursor?,view?} lists open hosted Lanes with Intent, actor, last save and latest Intent landing context in one bounded query; view "live" hides and "dormant" lists only Lanes idle past the project\'s dormantAfterDays (default 2), each with abandonable "landed"|"empty"|null. Follow continueCursor; idle makes zero calls. x abandon-dormant {apply?,limit?} dry-runs, or with apply:true abandons at most 25 abandonable dormant Lanes per call.',
     'status accepts laneId; observe/landing select operationId (original landing UUID), submissionId or runId.',
     'peers {laneId?,path?,detail?} reads current saved overlap evidence in one query. Coverage excludes unsaved peer edits and never proves independence. start/save/status retain unacknowledgedOverlaps and behindMain.',
     "queue {limit?,laneId?} lists the landing queue in dispatch order: Lane, Intent title, phase, suspect, last failing test files and recompose count per entry; yourLane names this checkout's (or laneId's) position when it is in the page. One bounded read, no idle cost.",

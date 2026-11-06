@@ -41,6 +41,7 @@ export async function trackHostedOverlapLane(
     baseSequence: metadata?.baseSequence ?? (sameBase ? (old?.baseSequence ?? null) : null),
     recordVersion: lane.version,
     open: ['active', 'paused', 'ready'].includes(lane.state),
+    lastActivityAt: Number.isFinite(Date.parse(lane.at)) ? Date.parse(lane.at) : Date.now(),
     // Landing evidence belongs to the head that landed and survives later records of the Lane.
     ...(old?.landed ? { landed: old.landed } : {}),
     ...projection,

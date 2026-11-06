@@ -23,6 +23,7 @@ import { hostedOverlapNotifications } from '../dist/mcp-hosted-overlaps.js';
 import { rememberOverlapText } from '../dist/hosted-overlap-text.js';
 import { finishGates } from '../dist/agent-default-gates.js';
 import { effectiveAgentDefaults } from '../dist/agent-parallel-defaults.js';
+import { policyPreset } from '../dist/autonomy-policy.js';
 import { mergeNativeText } from '../dist/native-text-merge.js';
 import { preEditHosted } from '../dist/agent-edit-hosted.js';
 import { hostedAgentCli } from '../dist/hosted-agent-cli.js';
@@ -48,6 +49,10 @@ async function setup(t, options = {}) {
   options = { base: 'original', ...options };
   const file = options.file ?? 'a.txt';
   const s = await saveFixture(options.base ?? 'original', file);
+  // These fixtures use synthetic dated Lanes and test open-peer reads, not dormancy (tests/hosted-dormant.test.mjs).
+  s.patch('hostedProjects', s.projectId, {
+    autonomyPolicy: { ...policyPreset('trusted'), agentDefaults: { dormantAfterDays: 0 } },
+  });
   const lane = JSON.parse(
     [...s.tables.projectHostedRecordBodies.values()].find(row => JSON.parse(row.value).kind === 'lane').value,
   );

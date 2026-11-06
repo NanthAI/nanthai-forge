@@ -88,6 +88,7 @@ Include `overlapAnswer:"accept-order"` in `land --save` to answer the pending no
 | `x complete` | `laneId?, operationId?` |
 | `x pin` | `laneId?, pinned?, operationId?` |
 | `x complete-merged` | `operationId?` |
+| `x abandon-dormant` | `apply?, limit?, operationId?` |
 | `start --reopen` | `laneId?, target?, operationId?` |
 | `status` | `laneId?, kind?, operationId?, submissionId?, runId?, version?` |
 | `observe` | `kind?, operationId?, submissionId?, runId?, version?` |
@@ -101,7 +102,7 @@ Include `overlapAnswer:"accept-order"` in `land --save` to answer the pending no
 | `planning` | `id?, search?, kind?, status?, initiativeId?, limit?, cursor?, reconcile?, operationId?` |
 | `put-planning-item` | `expectedVersion?, kind?, title?, body?, status?, reason?, intentIds?, initiativeId?, itemId?, operationId?` |
 | `comment-planning-item` | `itemId, authorLabel?, text, operationId?` |
-| `lanes` | `cursor?, limit?` |
+| `lanes` | `cursor?, limit?, view?` |
 | `diff` | `laneId?, paths?, byteBudget?, cursor?` |
 | `peers` | `laneId?, path?, detail?` |
 | `queue` | `limit?, laneId?` |
@@ -248,7 +249,7 @@ Agents use three verbs: `start`, `save` and `land`. Reads keep their names (`sta
 | `finish` with `accept` (native) / hosted `finish` | `land --save` |
 | `finish` without `accept` (native) / hosted `accept:false` | `land --save --check-only` |
 | `land-ready` (native only) | `land --resume-ready` (native only) |
-| `accept`, `cancel`, `revert`, `undo-revert`, `undo-sync`, `abandon`, `complete`, `complete-merged`, `pin`, `clean`, `take`, `guidance`, `pre-edit`, `install-hooks`, `uninstall-hooks`, `friction-triage`, `set-policy`, `define-check`, `configure-check`, `configure-runner`, `prioritize`, `source-pack` | `nforge x ROOT ACTION` |
+| `accept`, `cancel`, `revert`, `undo-revert`, `undo-sync`, `abandon`, `complete`, `complete-merged`, `abandon-dormant`, `pin`, `clean`, `take`, `guidance`, `pre-edit`, `install-hooks`, `uninstall-hooks`, `friction-triage`, `set-policy`, `define-check`, `configure-check`, `configure-runner`, `prioritize`, `source-pack` | `nforge x ROOT ACTION` |
 
 Old names keep working for at least one released version and print their new form once on stderr; stdout, JSON and replay identity do not change. Later sections still name the underlying actions (for example `finish`, `checkpoint`) where they describe receipts and wire fields; those are the actions the verbs above run. MCP tools keep their current names and arguments in this release.
 
@@ -630,6 +631,8 @@ with `state`, optional `laneId`, `path`, `blob`, `mode`, `size`, `encoding`, `co
 Encoding is `utf8` or lossless `base64`.
 
 Local source exclusions use nested `.gitignore` and `.forgeignore` files; Forge rules follow Git rules in each directory. `nforge status ROOT --ignored`, or `pending-status` with `ignored:true`, reports local excluded paths and matching rules without their contents or remote calls. Ignored working files are not stored, backed up or shared; historical States remain intact. See [source exclusions](../operations.md#source-exclusions).
+
+Dormant Lanes (hosted). An open Lane with no record write for `agentDefaults.dormantAfterDays` (default 2) is dormant: overlap, presence, board and start reads skip it, and any save or start revives it. `lanes {view:"dormant"}` lists them with `abandonable`; `nforge x ROOT abandon-dormant {}` dry-runs and `{apply:true}` abandons at most 25 landed or never-saved ones per call (see [parallel-work defaults](../parallel-work-defaults.md#dormantafterdays)).
 
 Pinned Lanes (hosted, owner only). `nforge x ROOT pin '{"laneId":"…"}'` (or `forge_task` `pin`) sets one optional flag on the Lane record, mirrored on its head row, so reads add no calls; `pinned:false` clears it. Any Lane state can be pinned, including a completed one, and `reopen` works on it. A pinned Lane is skipped by `complete-merged`, completeOnAccept, the Intent cascade (`abandon` with `cascade:true`), `nforge prune` and client cache GC; an explicit `complete` or `abandon` returns `LANE_PINNED` until it is unpinned. Pinning writes one new Lane version (head and source versions are unchanged); a repeat is a no-op. The client keeps a machine-local mirror in the Lane registry, refreshed by every prune read, so prune and cache GC keep the checkout even when the server is unreachable. Pin the Lanes whose roots must survive cleanup (the lead's own); there is no other protected list.
 

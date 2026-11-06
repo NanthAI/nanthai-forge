@@ -2,7 +2,8 @@
 import { v } from 'convex/values';
 import { query } from './cliServer';
 import { accessibleProject, activeProject } from './projectAuthority';
-import { readHostedPresence } from './projectHostedPresence';
+import { readHostedPresence, dormantHostedPresence } from './projectHostedPresence';
+import { dormantCutoff, liveOpenOverlapLanes } from './projectHostedDormancy';
 import { hostedStartMain } from './projectHostedChannels';
 import { readHostedRecord } from './projectHostedRecords';
 import { hostedLaneSchema } from '../src/hosted-lane';
@@ -46,7 +47,9 @@ export const read = query({
       invariant(path === undefined || safeRelative(path), 'BAD_ARGUMENT', 'Select a repository path.');
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to read hosted overlaps.');
-      await accessibleProject(ctx, projectId, user.subject);
+      const project = await accessibleProject(ctx, projectId, user.subject);
+      // Lanes idle past the project's dormantAfterDays are left out of every peer read below.
+      const cutoff = dormantCutoff(project);
       const record = await readHostedRecord(ctx, {
         projectId,
         actor: user.subject,
@@ -100,11 +103,7 @@ export const read = query({
       const idle = !path && focus.complete && focus.changes === '[]';
       const readPeers = () =>
         Promise.all([
-          ctx.db
-            .query('projectHostedOverlapLanes')
-            .withIndex('by_project_and_open', q => q.eq('projectId', projectId).eq('open', true))
-            .order('desc')
-            .take(51),
+          liveOpenOverlapLanes(ctx, projectId, cutoff),
           ctx.db
             .query('projectHostedOverlapAcks')
             .withIndex('by_project_and_lane_and_notice', q =>
@@ -152,12 +151,17 @@ export const read = query({
           versions.get(peer.laneId) === peer.recordVersion &&
           (!peer.lifecyclePlanId || plans.get(peer.lifecyclePlanId)?.status !== 'applied'),
       );
+      const unmatched = headers.filter(
+        header => !peers.some(peer => peer.laneId === header.key && peer.recordVersion === header.version),
+      );
+      // Dormant Lanes stay active heads but are left out of the peers on purpose: their slim presence
+      // rows excuse them. Read only when an active head has no peer row.
+      const dormantLanes =
+        cutoff !== null && unmatched.length ? await dormantHostedPresence(ctx, projectId, cutoff) : null;
       const complete =
         peers.length <= 50 &&
         headers.length <= 50 &&
-        headers.every(header =>
-          peers.some(peer => peer.laneId === header.key && peer.recordVersion === header.version),
-        );
+        unmatched.every(header => dormantLanes?.has(header.key));
       const answered = new Set(acks.map(ack => ack.noticeId));
       const compute = () =>
         hostedOverlapAdvice(
@@ -191,6 +195,7 @@ export const read = query({
                 actor: user.subject,
               },
               presence.since,
+              cutoff,
             ),
           }
         : {};

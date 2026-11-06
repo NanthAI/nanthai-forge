@@ -18,6 +18,8 @@ export async function openSiblingLanes(
   intentId: string,
   exclude: string,
   caller: string,
+  /** Epoch ms before which a Lane is dormant and not listed; null lists all. */
+  cutoff: number | null = null,
 ): Promise<StartOpenLane[]> {
   const heads = await ctx.db
     .query('projectHostedRecordHeads')
@@ -39,7 +41,7 @@ export async function openSiblingLanes(
     } catch {
       continue; // Advisory: an unreadable record is left out, never fails the start.
     }
-    if (lane.state !== 'active') continue;
+    if (lane.state !== 'active' || (cutoff !== null && Date.parse(lane.at) <= cutoff)) continue;
     if (!handles.has(lane.actor))
       handles.set(
         lane.actor,

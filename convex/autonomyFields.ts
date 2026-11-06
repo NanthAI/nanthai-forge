@@ -31,6 +31,7 @@ export const autonomyPolicy = v.object({
       overlapGate: v.optional(v.union(v.literal('off'), v.literal('warn'), v.literal('block'))),
       checkpointNudgeMinutes: v.optional(v.number()),
       autoClaim: v.optional(v.boolean()),
+      dormantAfterDays: v.optional(v.number()),
       stallAlerts: v.optional(
         v.object({
           enabled: v.optional(v.boolean()),

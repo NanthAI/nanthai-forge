@@ -58,6 +58,7 @@ const rows = [
   ['reopen', 'start --reopen', 'reopen', 'reopen'],
   ['complete', 'x complete'],
   ['complete-merged', 'x complete-merged'],
+  ['abandon-dormant', 'x abandon-dormant'],
   ['pin', 'x pin'],
   ['clean', 'x clean'],
   ['take', 'x take'],

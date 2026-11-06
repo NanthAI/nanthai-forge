@@ -102,7 +102,7 @@ Reads: tests, status, landing, observe, wait, log, link,
        handoff-read, making-of, metrics, improve, decisions, friction-list, policy, check-settings, capabilities,
        planning (hosted backlog; writes: put-planning-item, comment-planning-item; start planningItemId).
 Operator (nforge x ROOT ACTION): accept, cancel, revert, undo-revert, undo-sync, abandon,
-       complete, complete-merged, pin, clean, take, guidance, pre-edit, install-hooks, uninstall-hooks,
+       complete, complete-merged, abandon-dormant, pin, clean, take, guidance, pre-edit, install-hooks, uninstall-hooks,
        friction-triage, set-policy, define-check, configure-check, configure-runner, prioritize.
 Old action names (checkpoint, sync, compose, run, check, finish, open, reopen, land-ready,
 confirm-tests, handoff, report, friction, decide, peer-ack, integrate, and operator actions under
@@ -264,6 +264,7 @@ const examples: Record<string, unknown> = {
   },
   reopen: { laneId: 'LANE_ID' },
   'complete-merged': { channel: 'main' },
+  'abandon-dormant': { apply: false },
   pin: { laneId: 'LANE_ID', pinned: true },
   clean: { apply: false, kinds: ['check-workspaces', 'lane-deps', 'lanes'] },
   status: { laneId: 'LANE_ID' },
@@ -377,6 +378,9 @@ function actionHelp(action: string): string {
   if (action === 'pin')
     result +=
       'Hosted owner command: x ROOT pin {laneId?,pinned?:true|false}. A pinned Lane is skipped by complete-merged, completeOnAccept, Intent cascade, prune and client cache GC, and an explicit complete or abandon refuses it (LANE_PINNED) until you unpin it with pinned:false. Reopen still works. Any state can be pinned, including a completed Lane. A repeat is a no-op.\n';
+  if (action === 'abandon-dormant')
+    result +=
+      'Hosted owner command: x ROOT abandon-dormant {apply?:false,limit?:25}. A Lane is dormant after agentDefaults.dormantAfterDays (default 2) without a save, start, sync or landing; dormant Lanes are out of overlap, presence and board reads, and any save revives one. The default is a dry run: it lists dormant Lanes that can be abandoned (abandonable "landed": an accepted receipt landed the saved head; "empty": nothing was ever saved) and those kept (has-saved-work, pinned). apply:true abandons at most limit (25) per call and says how many remain; repeat until none. Saved heads are kept; reopen undoes it. Pinned Lanes are never touched.\n';
   if (action === 'ack')
     result +=
       'Hosted: ack {laneId?,choice?:"accept-order"|"swap"|"split",text?} answers every pending overlap notice on the Lane (stable answer ids, so a repeat replays). accept-order keeps your change and lands in order; split records that you routed around.\n';

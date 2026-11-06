@@ -35,6 +35,7 @@ test('every default is on; absent stored fields read as the documented defaults'
     overlapGate: 'block',
     checkpointNudgeMinutes: 30,
     autoClaim: true,
+    dormantAfterDays: 2,
     stallAlerts: { enabled: true, notifyAfterMinutes: 15, repeatAfterMinutes: 30, email: [], webhook: 'off' },
   });
   const view = policyReadView(effectivePolicy({}));
@@ -61,6 +62,20 @@ test('set-policy edits one field at a time, stores in the Convex validator and k
     () => edit(policy, { stallAlerts: { webhookUrl: 'https://ntfy.sh/secret' } }),
     'no URL field',
   );
+});
+
+test('dormantAfterDays: default 2, set-policy edits it, 0 turns it off, bad values are refused (Issue 433aa6ab)', () => {
+  assert.equal(effectiveAgentDefaults(undefined).dormantAfterDays, 2);
+  const policy = edit(policyPreset('trusted'), { dormantAfterDays: 5 });
+  assert.equal(effectiveAgentDefaults(policy.agentDefaults).dormantAfterDays, 5);
+  assert.equal(validate(autonomyPolicy, policy), true);
+  assert.equal(
+    effectiveAgentDefaults(edit(policy, { dormantAfterDays: 0 }).agentDefaults).dormantAfterDays,
+    0,
+  );
+  assert.throws(() => edit(policy, { dormantAfterDays: -1 }));
+  assert.throws(() => edit(policy, { dormantAfterDays: 1.5 }));
+  assert.throws(() => edit(policy, { dormantAfterDays: 1000 }));
 });
 
 test('compare-and-swap accepts the read view; landing pins ignore agent defaults', () => {

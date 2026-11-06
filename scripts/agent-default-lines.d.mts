@@ -6,6 +6,7 @@ export type AgentDefaultValues = {
   overlapGate: 'off' | 'warn' | 'block';
   checkpointNudgeMinutes: number;
   autoClaim: boolean;
+  dormantAfterDays: number;
   stallAlerts: {
     enabled: boolean;
     notifyAfterMinutes: number;

@@ -24,9 +24,15 @@ export const hostedOverlapTables = {
     complete: v.boolean(),
     /** This Lane's presence row and the activity time it last wrote, so presence costs no read. */
     presenceRow: v.optional(v.object({ id: v.id('projectHostedPresence'), at: v.number() })),
+    /** Last Lane record write (ms): save, start, sync or landing. A Lane idle past the project's
+     * dormantAfterDays leaves overlap, presence and board reads through this index range. Absent on
+     * rows written before the field existed; reads cover them through presenceRow.at until the Lane's
+     * next write sets it. */
+    lastActivityAt: v.optional(v.number()),
   })
     .index('by_project_and_lane', ['projectId', 'laneId'])
-    .index('by_project_and_open', ['projectId', 'open']),
+    .index('by_project_and_open', ['projectId', 'open'])
+    .index('by_project_and_open_and_activity', ['projectId', 'open', 'lastActivityAt']),
   // One row per Lane head whose agent response carried at least one overlap notice (metric 5.4 delivered).
   projectHostedOverlapDeliveries: defineTable({
     projectId: v.id('hostedProjects'),

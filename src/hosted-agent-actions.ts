@@ -40,6 +40,7 @@ import { invariant } from './errors.js';
 import { plannedIntent } from './hosted-agent-planning.js';
 import { unadvertisedActionError } from './hosted-agent-version.js';
 import { completeMergedLanes } from './hosted-agent-complete.js';
+import { abandonDormantLanes } from './hosted-agent-dormant.js';
 import { recordLane, readLaneEntry } from './lane-registry.js';
 import { saveExpectedSchema } from './hosted-save.js';
 import type { HostedAgentSession } from './hosted-agent-transport.js';
@@ -545,6 +546,8 @@ export async function executeHostedAgent(
     if (known) recordLane({ laneId, pinned: command.pinned, lastActionAt: known.lastActionAt });
     return { phase: 'pin', ...result };
   }
+  if (action === 'abandon-dormant')
+    return abandonDormantLanes(session, epoch, hostedAgentCommandSchemas['abandon-dormant'].parse(input));
   if (action === 'complete-merged') {
     hostedAgentCommandSchemas['complete-merged'].parse(input);
     return completeMergedLanes(session, epoch);

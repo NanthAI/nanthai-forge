@@ -8,6 +8,7 @@ export const AGENT_DEFAULTS = Object.freeze({
   overlapGate: 'block',
   checkpointNudgeMinutes: 30,
   autoClaim: true,
+  dormantAfterDays: 2,
   stallAlerts: { enabled: true, notifyAfterMinutes: 15, repeatAfterMinutes: 30, email: [], webhook: 'off' },
 });
 
