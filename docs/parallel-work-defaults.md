@@ -161,8 +161,10 @@ frozen set on 2026-11-06 broke capabilities across CLI/server versions with `HOS
   formatter script (`format:check`, `check:format`, `fmt:check`) runs; an unknown `check` script is
   never guessed, because it may be a full verification. A check over its 120 s timeout is reported
   `timed-out`, not passed: the landing check still runs it.
-- `nforge agent ROOT preflight '{"laneId":"…"}'` always runs changed tests, explicit coverage
-  and smoke; then *learned* tests; then *direct* tests; then *recent* failers; then direct consumers
+- `nforge agent ROOT preflight '{"laneId":"…"}'` always runs changed tests, explicit coverage,
+  smoke and the project's declared *guards* (`forge.preflight.guards` in `package.json`, filtered by
+  path rules, protected like mandatory tests, cost in `local.guards`; see
+  [workflows](workflows.md#local-preflight-guards)); then *learned* tests; then *direct* tests; then *recent* failers; then direct consumers
   of hub modules (`wide`); then tests that watch a distinctive name in a changed source (any import distance);
   then distance-2 consumers, nearest first. There is no file count. Mandatory, learned and direct
   tests are protected: the time budget never trims them and the run never stops them for time

@@ -15,7 +15,9 @@ import {
 } from '../dist/agent-preflight.js';
 import {
   globRegExp,
+  preflightGuards,
   runStaticChecks,
+  selectGuards,
   selectStaticChecks,
   staticChecks,
 } from '../dist/agent-preflight-static.js';
@@ -306,4 +308,72 @@ test('budget the ranked tiers leave over runs the cheapest timed deferred tests,
   assert.ok(!plan.deferredTests.includes('tests/d1.test.mjs'));
   assert.equal(plan.local.filler, 2);
   assert.match(plan.local.summary, /2 cheap test file\(s\) timed in earlier runs use the leftover budget/);
+});
+
+const guardManifest = guards =>
+  JSON.stringify({ type: 'module', scripts: {}, forge: { preflight: { guards } } });
+const runtimeGuard = {
+  name: 'runtime',
+  tests: ['tests/runtime-guard.test.mjs'],
+  inputs: ['src/**'],
+};
+// Stands in for convex-runtime-imports: it finds the offence by reading source, not by importing it.
+const runtimeGuardTest = `import test from 'node:test'; import assert from 'node:assert/strict'; import { readFileSync } from 'node:fs';
+test('no Node global in src', () => assert.doesNotMatch(readFileSync(new URL('../src/' + 'size.ts', import.meta.url), 'utf8'), /Buffer\\./));`;
+
+test('guards are declared once with path rules; a malformed one or a missing test fails loudly', () => {
+  const has = path => path === 'tests/runtime-guard.test.mjs';
+  const guards = preflightGuards(guardManifest([runtimeGuard]), has);
+  assert.deepEqual(guards, [runtimeGuard]);
+  assert.deepEqual(selectGuards(guards, ['src/x.ts']).selected, guards);
+  assert.deepEqual(selectGuards(guards, ['docs/x.json']), { selected: [], untouched: ['runtime'] });
+  assert.deepEqual(preflightGuards('{"scripts":{}}', has), []);
+  assert.deepEqual(preflightGuards('not json', has), []);
+  assert.throws(
+    () => preflightGuards(guardManifest([{ name: 'gone', tests: ['tests/gone.test.mjs'] }]), has),
+    /cannot run/,
+  );
+  assert.throws(
+    () => preflightGuards(guardManifest([{ tests: ['tests/runtime-guard.test.mjs'] }]), has),
+    /cannot run/,
+  );
+});
+
+test('a triggered guard runs first and the time budget never trims it, even where no import reaches it', t => {
+  const f = fixture(t, [], {
+    'package.json': guardManifest([
+      runtimeGuard,
+      { name: 'docs only', tests: ['tests/b.test.mjs'], inputs: ['docs/**'] },
+    ]),
+    'src/size.ts': 'export const size = (s: string) => s.length;',
+    'tests/runtime-guard.test.mjs': runtimeGuardTest,
+  });
+  const plan = f.plan(['src/a.ts'], { budgetSeconds: 0 });
+  assert.equal(plan.tests[0], 'tests/runtime-guard.test.mjs');
+  assert.ok(plan.tests.includes('tests/a.test.mjs') || plan.deferredTests.includes('tests/a.test.mjs'));
+  assert.equal(plan.local.mandatory >= 1, true);
+  assert.deepEqual(
+    plan.local.guards.map(item => item.name),
+    ['runtime'],
+  );
+  assert.equal(typeof plan.local.guards[0].seconds, 'number');
+  assert.match(plan.local.summary, /Guards always run first, never trimmed: runtime ~\d/);
+  assert.ok(!plan.local.tierTests.mandatory.includes('tests/b.test.mjs'), 'an untouched guard stays out');
+});
+
+test('replay (b78ca196): a Node global in a Convex-loaded src file fails preflight locally, before the budget', t => {
+  const f = fixture(t, [], {
+    'package.json': guardManifest([runtimeGuard]),
+    'src/size.ts': 'export const size = (s: string) => Buffer.byteLength(s);',
+    'tests/runtime-guard.test.mjs': runtimeGuardTest,
+  });
+  const plan = f.plan(['src/size.ts'], { budgetSeconds: 0 });
+  assert.deepEqual(plan.tests, ['tests/runtime-guard.test.mjs']);
+  const receipt = f.run(plan);
+  assert.equal(receipt.passed, false);
+  assert.equal(receipt.stoppedForTime, undefined);
+  assert.deepEqual(
+    receipt.slowest.map(item => item.file),
+    ['tests/runtime-guard.test.mjs'],
+  );
 });

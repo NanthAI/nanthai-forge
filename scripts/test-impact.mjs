@@ -67,7 +67,7 @@ export function selectImpactPair(files, comparisons) {
   );
 }
 /** Local execution is a partition of complete landing coverage, never an independence proof.
- * Tiers, most relevant first: mandatory (changed tests, explicit coverage, smoke); learned (tests
+ * Tiers, most relevant first: mandatory (changed tests, explicit coverage, smoke, declared guards); learned (tests
  * that failed in a landing check or preflight for a changed path); direct (tests that import a
  * changed module, through test-only helpers too, or are named for it); recent (consumers of this
  * change that failed in a landing check under other paths lately, trimmed by time but before wide);
@@ -113,7 +113,9 @@ export function selectPreflightTests(input, graphCache = {}) {
   const allTests = [...input.files.keys()].filter(testFile).sort();
   const kind = test => consumers.reasons?.[test]?.kind;
   const distance = test => consumers.reasons?.[test]?.edges?.length ?? Infinity;
-  const mandatory = test => changed.has(test) || smokeTests.includes(test) || kind(test) === 'explicit';
+  const guards = new Set((input.guards ?? []).filter(test => input.files.has(test)));
+  const mandatory = test =>
+    changed.has(test) || smokeTests.includes(test) || guards.has(test) || kind(test) === 'explicit';
   const learned = new Set((input.learned ?? []).filter(test => input.files.has(test) && !mandatory(test)));
   const covered = new Set(selection.tests);
   // Tests that failed in a landing check under other paths, not these: the failure proves the test
@@ -192,7 +194,13 @@ export function selectPreflightTests(input, graphCache = {}) {
                   : null;
   const ranked = tier => {
     // A learned test may sit outside this path's graph selection: that miss is why it was learned.
-    const pool = tier === 'learned' ? [...learned].sort() : selection.tests;
+    // A project-declared guard runs even where the import graph does not reach it: that is why it is declared.
+    const pool =
+      tier === 'learned'
+        ? [...learned].sort()
+        : tier === 'mandatory'
+          ? [...new Set([...selection.tests, ...guards])]
+          : selection.tests;
     const tests = pool.filter(test => tierOf(test) === tier);
     return tier === 'watch'
       ? tests.sort((a, b) => watchers.get(b).score - watchers.get(a).score || (a < b ? -1 : 1))

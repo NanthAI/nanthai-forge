@@ -316,6 +316,20 @@ flake verdicts within seven days quarantine the exact test; it continues running
 Twenty consecutive clean passes or an explicit fix release quarantine. Actions
 retains each attempt and retries unfinished infrastructure jobs, not test failures.
 
+### Local preflight guards
+
+`nforge agent ROOT preflight` runs a project's declared **guards** before its 180 s test budget applies, so the budget can never cut them. A guard is a cheap, broad test that catches a class of mistake the import graph cannot see. It is declared once in the project's `package.json` as `forge.preflight.guards`: `{name, tests: [path, ...], inputs?: [glob, ...]}`. A guard runs when the change touches its `inputs` (no `inputs`: every change), joins the protected mandatory tier, and is shown in the plan with its cost (`local.guards`, seconds measured on this machine where known). A guard naming a test the project lacks makes the plan unavailable instead of silently skipping. Static checks (`forge.preflight.static`) still run before any build or test; a guard is for tests that need the build.
+
+This project declares three:
+
+| Guard | Test | Runs when the change touches | Cost |
+| --- | --- | --- | --- |
+| convex runtime imports | `tests/convex-runtime-imports.test.mjs` | `src/**`, `convex/**`, `scripts/check-convex-*.mjs`, `package.json` | about 2 s |
+| hot storage invariant | `tests/hot-storage-invariant.test.mjs` | `convex/**` | about 1 s |
+| agent response contract | `tests/hosted-response-contract.test.mjs` | hosted contract and response sources, `scripts/response-compat*`, `convex/projectHostedAgent*.ts` | about 1 s |
+
+The hosted check stays the full run. See [parallel work defaults](parallel-work-defaults.md#preflight) for the rest of the selection rule.
+
 ## Channels and releases
 
 Post-accept main audits retain one covering-run selection on the audited acceptance. Status, making-of and accounting derive the covering run for earlier requests in that Channel; a new audit does not rewrite those earlier acceptance records. Legacy per-request pointers remain readable.

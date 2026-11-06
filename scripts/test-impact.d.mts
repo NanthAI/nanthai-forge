@@ -58,6 +58,8 @@ export function selectPreflightTests(
     /** Tests that failed in a landing check lately under other paths; consumers of this change
      * among them are ranked before `wide` and trimmed by time like it (`recent`). */
     recent?: string[];
+    /** Project-declared guard tests this change triggers; mandatory, so never trimmed. */
+    guards?: string[];
     /** Protect direct tests module by module, most specific first, while their cost fits; the
      * rest are broad modules whose consumers are ranked (`wide`). Absent: all are protected. */
     hubBudget?: { seconds: number; secondsFor: (test: string) => number };

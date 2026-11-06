@@ -69,6 +69,47 @@ export function staticChecks(packageJson: string | undefined): StaticCheck[] {
   return script ? [{ name: script, command: npm(script), inputs: CODE_INPUTS, source: 'conventional' }] : [];
 }
 
+/** A cheap guard test the project always wants run first when a change touches its `inputs`
+ * (declared as `forge.preflight.guards`: `{name, tests: [path, ...], inputs?: [glob, ...]}`).
+ * Guards join the protected mandatory tier: the local time budget never trims or stops them. */
+export type PreflightGuard = { name: string; tests: string[]; inputs: string[] | null };
+
+/** The project's declared guards. A malformed entry or a test file the project lacks throws, so a
+ * renamed guard test cannot silently stop guarding. */
+export function preflightGuards(packageJson: string | undefined, hasFile: (path: string) => boolean) {
+  let manifest: unknown;
+  try {
+    manifest = JSON.parse(packageJson ?? '');
+  } catch {
+    return [];
+  }
+  const forge = record(manifest) && record(manifest.forge) ? manifest.forge : {};
+  const declared = record(forge.preflight) ? forge.preflight.guards : undefined;
+  if (!Array.isArray(declared)) return [];
+  return declared.map((item): PreflightGuard => {
+    const entry = record(item) ? item : {};
+    const tests = strings(entry.tests);
+    if (typeof entry.name !== 'string' || !entry.name || !tests?.every(test => hasFile(test)))
+      throw new Error(
+        `forge.preflight.guards names a guard that cannot run: ${JSON.stringify(item).slice(0, 120)}`,
+      );
+    return { name: entry.name, tests, inputs: strings(entry.inputs) };
+  });
+}
+
+/** Guards whose inputs the saved change touches (no `inputs`: every change), and the ones it does not. */
+export function selectGuards(guards: PreflightGuard[], changedPaths: string[]) {
+  const selected: PreflightGuard[] = [];
+  const untouched: string[] = [];
+  for (const guard of guards) {
+    const patterns = guard.inputs?.map(globRegExp);
+    if (!patterns || changedPaths.some(path => patterns.some(pattern => pattern.test(path))))
+      selected.push(guard);
+    else untouched.push(guard.name);
+  }
+  return { selected, untouched };
+}
+
 /** Glob with `**`, `*`, `?` and `{a,b}`; `/` separates segments. Enough for path scoping. */
 export function globRegExp(glob: string): RegExp {
   let source = '';

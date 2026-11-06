@@ -75,6 +75,42 @@
             "scripts/check-convex-runtime.mjs"
           ]
         }
+      ],
+      "guards": [
+        {
+          "name": "convex runtime imports",
+          "tests": [
+            "tests/convex-runtime-imports.test.mjs"
+          ],
+          "inputs": [
+            "src/**",
+            "convex/**",
+            "scripts/check-convex-*.mjs",
+            "package.json"
+          ]
+        },
+        {
+          "name": "hot storage invariant",
+          "tests": [
+            "tests/hot-storage-invariant.test.mjs"
+          ],
+          "inputs": [
+            "convex/**"
+          ]
+        },
+        {
+          "name": "agent response contract",
+          "tests": [
+            "tests/hosted-response-contract.test.mjs"
+          ],
+          "inputs": [
+            "src/hosted-*contract*.ts",
+            "src/hosted-response*.ts",
+            "src/agent-response-*.ts",
+            "scripts/response-compat*",
+            "convex/projectHostedAgent*.ts"
+          ]
+        }
       ]
     }
   },

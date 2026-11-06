@@ -27,7 +27,9 @@ import { learnFailures, learnedTests, recentFailedTests } from './preflight-lear
 import { spawnMeasured } from './agent-preflight-measure.js';
 import {
   runStaticChecks,
+  selectGuards,
   selectStaticChecks,
+  preflightGuards,
   staticChecks,
   type StaticCheckResult,
 } from './agent-preflight-static.js';
@@ -148,6 +150,9 @@ export type LocalSelection = {
   /** false: run every ranked local tier, no time budget (the rerun command). */
   trim?: false;
   deferred: number;
+  /** Declared guards this change triggered: always run first, never trimmed; `seconds` is the cost
+   * (measured on this machine where known, else the per-file estimate). */
+  guards?: { name: string; tests: string[]; seconds: number }[];
   /** Cheap tests an earlier run timed, added last with budget the ranked tiers left over. */
   filler?: number;
   deferredTo: 'pre-queue';
@@ -366,9 +371,12 @@ export function preflightPlan(
     const budgetSeconds = options?.budgetSeconds ?? PREFLIGHT_LOCAL_BUDGET_SECONDS;
     const trim = options?.trim !== false;
     const secondsFor = (test: string) => (stats[test] ? stats[test].ms / 1000 : timing.secondsPerFile);
+    const declaredGuards = preflightGuards(files.get('package.json'), path => files.has(path));
+    const guards = selectGuards(declaredGuards, changed.paths);
     const selection = selectPreflightTests({
       files,
       paths: changed.paths,
+      guards: guards.selected.flatMap(guard => guard.tests),
       learned: learnedTests(root, changed.paths),
       recent: recentFailedTests(root),
       // Direct tests of the most specific changed modules are protected while they fit the budget.
@@ -415,6 +423,9 @@ export function preflightPlan(
           if (!paths.length) continue;
           for (const test of selectTests({ files: inventory, paths }).tests) impacted.add(test);
         }
+        // A guard whose inputs the delta touches runs again: its passes are not reused across them.
+        for (const guard of selectGuards(declaredGuards, delta).selected)
+          for (const test of guard.tests) impacted.add(test);
         const covered = new Set(previous.covered);
         reusedTests = tests.filter(test => covered.has(test) && !impacted.has(test));
         tests = tests.filter(test => !reusedTests.includes(test));
@@ -468,6 +479,11 @@ export function preflightPlan(
       mandatory: tests.filter(test => selection.tiers[0]?.tests.includes(test)).length,
       protected: tests.filter(test => guarded.has(test)).length,
       deferred: deferredTests.length,
+      guards: guards.selected.map(guard => ({
+        name: guard.name,
+        tests: guard.tests,
+        seconds: Math.round(guard.tests.reduce((sum, test) => sum + secondsFor(test), 0) * 10) / 10,
+      })),
       filler: filler.length,
       trimmedTests: cut.filter(test => !filled.has(test)).sort(),
       rerun: context ? rerunCommand(root, context.laneId) : undefined,
@@ -543,6 +559,7 @@ function localSelection(input: {
   mandatory: number;
   protected: number;
   deferred: number;
+  guards: { name: string; tests: string[]; seconds: number }[];
   filler: number;
   trimmedTests: string[];
   rerun: string | undefined;
@@ -591,13 +608,18 @@ function localSelection(input: {
     mandatory: input.mandatory,
     protected: input.protected,
     deferred: input.deferred,
+    ...(input.guards.length ? { guards: input.guards } : {}),
     ...(input.filler ? { filler: input.filler } : {}),
     ...(input.trimmedTests.length ? { trimmedTests: input.trimmedTests } : {}),
     ...(input.trimmedTests.length && input.rerun ? { rerun: input.rerun } : {}),
     ...(input.trim ? {} : { trim: false as const }),
     deferredTo: 'pre-queue',
     summary:
-      `Local rule: ${preflightTierRule}.${cutNote}${over}${skippedNote}` +
+      `Local rule: ${preflightTierRule}.` +
+      (input.guards.length
+        ? ` Guards always run first, never trimmed: ${input.guards.map(guard => `${guard.name} ~${guard.seconds} s`).join(', ')}.`
+        : '') +
+      `${cutNote}${over}${skippedNote}` +
       (input.filler
         ? ` ${input.filler} cheap test file(s) timed in earlier runs use the leftover budget, last.`
         : '') +
