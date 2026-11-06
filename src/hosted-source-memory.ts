@@ -8,6 +8,7 @@ import { digest } from './hash.js';
 import { invariant } from './errors.js';
 import type { WorkerObject, WorkerPin } from './hosted-source-worker-format.js';
 import { sourceValidation } from './hosted-source-validation.js';
+import { mapSourceOrdered } from './hosted-source-parallel.js';
 
 /** Parents are compact, verified metadata. A file tree is loaded only when the
  * native merge actually requests it, rather than for every ancestor visited. */
@@ -141,7 +142,8 @@ export class MemorySourceReader extends SourceWorkerReader {
     for (let offset = 0; offset < refs.length; offset += 100) {
       const window = refs.slice(offset, offset + 100);
       await this.io.prepareRead?.(window.filter(ref => !ref.recipe).map(ref => ref.object));
-      for (const ref of window) await this.bytes(ref);
+      // Every byte of this window is retained either way; only the round trips overlap.
+      await mapSourceOrdered(window, ref => this.bytes(ref));
     }
   }
   override async resolveMany(ids: readonly string[]) {

@@ -18,6 +18,7 @@ import { buildHostedSyncState } from './hosted-sync-worker.js';
 import { readJson, sourceStepBytes, full, type StepMeter } from './hosted-source-step-verify.js';
 import type { SourceStepCursor, StepTransport } from './hosted-source-step.js';
 import { sourceWindows, stateSummary } from './hosted-source-fanout.js';
+import { mapSourceOrdered } from './hosted-source-parallel.js';
 import { ForgeError, invariant } from './errors.js';
 import { sourceValidation } from './hosted-source-validation.js';
 import { sourceAncestryCut, sourceAncestryFrontier } from './hosted-source-ancestry-cut.js';
@@ -134,9 +135,11 @@ export async function prepareMergeStep(c: SourceStepCursor, io: StepTransport, m
     }
     await io.prepareRead?.(tips.map(id => c.inventory[id]!.object));
     const files = new Map<string, NativeFile[]>();
-    for (const id of tips) {
-      const reader = new MemorySourceReader(new MemoryMergeSource({}), io),
-        state = parseNativeState(await reader.bytes(c.inventory[id]!));
+    const tipStates = await mapSourceOrdered(tips, async id =>
+      parseNativeState(await new MemorySourceReader(new MemoryMergeSource({}), io).bytes(c.inventory[id]!)),
+    );
+    for (const [index, id] of tips.entries()) {
+      const state = tipStates[index]!;
       c.parents[id] = state.parents;
       const generation = io.stateGeneration?.(id);
       if (generation !== undefined) (c.generations ??= {})[id] = generation;
@@ -279,8 +282,7 @@ export async function prepareMergeStep(c: SourceStepCursor, io: StepTransport, m
     return;
   }
   await io.prepareRead?.(window.filter(r => !r.recipe).map(r => r.object));
-  for (const ref of window) {
-    const state = await stateSummary(ref, false, io);
+  for (const state of await mapSourceOrdered(window, ref => stateSummary(ref, false, io))) {
     if (state.error) (c.ancestryFailures ??= {})[state.id] = state.error;
     else {
       c.parents[state.id] = state.parents;

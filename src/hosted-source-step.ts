@@ -19,6 +19,7 @@ import {
   readJson,
   verifySourceObject,
   sourceStepBytes,
+  sourceStepObjects,
   type VerifyCursor,
   type StepMeter,
 } from './hosted-source-step-verify.js';
@@ -35,6 +36,7 @@ import {
   SourceCalculationsPending,
 } from './hosted-source-merge-journal.js';
 import { prepareMergeStep, computeMergeStep } from './hosted-source-step-merge.js';
+import { mapSourceOrdered } from './hosted-source-parallel.js';
 export interface StepTransport extends SourceWorkerTransport {
   /** One descriptor page; unavailable graph probes stay pending until the cut
    * or the exact merge proves whether their bytes are needed. */
@@ -122,6 +124,14 @@ async function verifyQueue(c: SourceStepCursor, io: StepTransport, m: StepMeter)
   // frontiers prepare their own bounded windows in the transport.
   await io.prepareRead?.(refs.filter(ref => !ref.recipe).map(ref => ref.object));
   while (c.queueIndex < c.queue.length && !full(m)) {
+    // The raw objects the one-at-a-time loop would verify next are fetched
+    // concurrently; the same meter bounds select them, so the cursor is unchanged.
+    const run = rawVerifyRun(c, m);
+    if (run.length > 1) {
+      await mapSourceOrdered(run, ref => verifySourceObject(io, ref, m, null));
+      c.queueIndex += run.length;
+      continue;
+    }
     const id = c.queue[c.queueIndex]!,
       ref = c.inventory[id];
     invariant(ref, 'SOURCE_CLOSURE_INVALID', 'Required source object is absent from inventory.');
@@ -133,6 +143,24 @@ async function verifyQueue(c: SourceStepCursor, io: StepTransport, m: StepMeter)
     if (c.verify) break;
     c.queueIndex++;
   }
+}
+/** The prefix of raw objects the sequential loop reads before it yields: it stops
+ * at a recipe or resumed partial verification, and at the step's object/byte bounds. */
+function rawVerifyRun(c: SourceStepCursor, m: StepMeter) {
+  const run: WorkerObject[] = [];
+  if (c.verify) return run;
+  let objects = m.objects,
+    bytes = m.bytes;
+  for (let index = c.queueIndex; index < c.queue.length; index++) {
+    const ref = c.inventory[c.queue[index]!];
+    if (!ref || ref.recipe) break;
+    if (objects + m.outputObjects >= sourceStepObjects || bytes + m.outputBytes >= sourceStepBytes) break;
+    if (objects && bytes + ref.object.size > sourceStepBytes) break;
+    run.push(ref);
+    objects++;
+    bytes += ref.object.size;
+  }
+  return run;
 }
 export function enqueueSourceObject(c: SourceStepCursor, ref: WorkerObject) {
   const id = ref.object.sha256,

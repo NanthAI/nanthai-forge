@@ -2,7 +2,8 @@
 import { makeFunctionReference } from 'convex/server';
 import type { ActionCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
-import type { WorkerObject } from '../src/hosted-source-worker-format';
+import type { WorkerObject, WorkerPin } from '../src/hosted-source-worker-format';
+import { mapSourceOrdered } from '../src/hosted-source-parallel';
 import type { StepTransport } from '../src/hosted-source-step';
 import type { SourceOutput } from './projectConvexSourceOutput';
 import { digest } from '../src/portable-hash';
@@ -30,7 +31,8 @@ export function convexSourceTransport(
   // Fan-out tasks pass their wider identity; the object validator accepts only these fields.
   const input = { projectId, jobId, step };
   const locations = new Map<string, ObjectLocation>(initial.map(row => [row.descriptor.object.sha256, row])),
-    outputs: SourceOutput[] = [];
+    outputs: SourceOutput[] = [],
+    reads = { objects: 0, bytes: 0 };
   const durable = sourceStorage(ctx, projectId);
   const generations = new Map<string, number>();
   const remember = (rows: ObjectLocation[]) => {
@@ -131,6 +133,8 @@ export function convexSourceTransport(
         'SOURCE_HASH_MISMATCH',
         'Source physical size changed.',
       );
+      reads.objects++;
+      reads.bytes += pin.size;
       const blob = !row.url && row.storageId ? await ctx.storage.get(row.storageId) : null;
       if (blob)
         return (async function* () {
@@ -170,48 +174,15 @@ export function convexSourceTransport(
       })();
     },
     upload: async (pin, stream) => {
-      const parts: Uint8Array[] = [];
-      let size = 0;
-      for await (const part of stream) {
-        size += part.length;
-        invariant(size <= pin.size, 'SOURCE_HASH_MISMATCH', 'Source output exceeded exact pin.');
-        parts.push(new Uint8Array(part));
-      }
-      const bytes = new Uint8Array(size);
-      let offset = 0;
-      for (const part of parts) {
-        bytes.set(part, offset);
-        offset += part.length;
-      }
-      invariant(
-        bytes.length === pin.size && digest(bytes) === pin.sha256,
-        'SOURCE_HASH_MISMATCH',
-        'Source output changed.',
-      );
-      // These are hash-verified worker outputs. Only the exact State parent
-      // list can select a generation; plans, display hints and uploads cannot.
-      let stateGeneration: number | undefined;
-      const prefix = new TextDecoder().decode(bytes.subarray(0, 256));
-      if (prefix.includes('"kind":"forge-source-state"')) {
-        try {
-          const state = parseNativeState(bytes);
-          stateGeneration = nextStateGeneration(state.parents, id => generations.get(id));
-          if (stateGeneration !== undefined) generations.set(pin.sha256, stateGeneration);
-        } catch (error) {
-          // An ordinary source blob may begin with State-looking JSON.
-          if (!(error instanceof ForgeError) || error.code !== 'INVALID_NATIVE_SOURCE') throw error;
-        }
-      }
-      const ref = await durable.store(bytes),
-        r2 = sourceR2Pin(ref);
-      outputs.push({
-        ...pin,
-        ...(stateGeneration === undefined ? {} : { stateGeneration }),
-        ...(r2 ? { r2Key: r2Key(projectId, r2.sha256) } : { storageId: ref as Id<'_storage'> }),
-      });
+      const output = await prepareOutput(pin, stream);
+      outputs.push(await output.store());
     },
     uploadBatch: async objects => {
-      for (const object of objects) await io.upload(object.pin, object.bytes);
+      // Digest checks and State generations stay in input order (a child State may
+      // name a parent from this same batch); only the immutable R2 writes overlap.
+      const prepared: { store(): Promise<SourceOutput> }[] = [];
+      for (const object of objects) prepared.push(await prepareOutput(object.pin, object.bytes));
+      outputs.push(...(await mapSourceOrdered(prepared, output => output.store())));
       while (outputs.length >= 100)
         await ctx.runMutation(reference('projectConvexSourceStore:stage'), {
           ...input,
@@ -219,5 +190,50 @@ export function convexSourceTransport(
         });
     },
   };
-  return { io, outputs, locations };
+  async function prepareOutput(pin: WorkerPin, stream: AsyncIterable<Uint8Array>) {
+    const parts: Uint8Array[] = [];
+    let size = 0;
+    for await (const part of stream) {
+      size += part.length;
+      invariant(size <= pin.size, 'SOURCE_HASH_MISMATCH', 'Source output exceeded exact pin.');
+      parts.push(new Uint8Array(part));
+    }
+    const bytes = new Uint8Array(size);
+    let offset = 0;
+    for (const part of parts) {
+      bytes.set(part, offset);
+      offset += part.length;
+    }
+    invariant(
+      bytes.length === pin.size && digest(bytes) === pin.sha256,
+      'SOURCE_HASH_MISMATCH',
+      'Source output changed.',
+    );
+    // These are hash-verified worker outputs. Only the exact State parent
+    // list can select a generation; plans, display hints and uploads cannot.
+    let stateGeneration: number | undefined;
+    const prefix = new TextDecoder().decode(bytes.subarray(0, 256));
+    if (prefix.includes('"kind":"forge-source-state"')) {
+      try {
+        const state = parseNativeState(bytes);
+        stateGeneration = nextStateGeneration(state.parents, id => generations.get(id));
+        if (stateGeneration !== undefined) generations.set(pin.sha256, stateGeneration);
+      } catch (error) {
+        // An ordinary source blob may begin with State-looking JSON.
+        if (!(error instanceof ForgeError) || error.code !== 'INVALID_NATIVE_SOURCE') throw error;
+      }
+    }
+    return {
+      async store(): Promise<SourceOutput> {
+        const ref = await durable.store(bytes),
+          r2 = sourceR2Pin(ref);
+        return {
+          ...pin,
+          ...(stateGeneration === undefined ? {} : { stateGeneration }),
+          ...(r2 ? { r2Key: r2Key(projectId, r2.sha256) } : { storageId: ref as Id<'_storage'> }),
+        };
+      },
+    };
+  }
+  return { io, outputs, locations, reads };
 }

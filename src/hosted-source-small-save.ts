@@ -9,6 +9,7 @@ import type { SourceWorkerTransport } from './hosted-source-worker-reader.js';
 import { canonicalPayload } from './hosted-source-operation.js';
 import { invariant } from './errors.js';
 import { sourceValidation } from './hosted-source-validation.js';
+import { mapSourceOrdered } from './hosted-source-parallel.js';
 
 // Runtime routing bounds, not source limits: larger/recipe saves use the Node worker.
 export const smallSaveStateBytes = 4 * 1024 * 1024;
@@ -47,7 +48,10 @@ export async function runSmallSourceSave(
   )
     return null;
   await io.prepareRead?.([plan.baseline.object, plan.pages]);
-  const pageBytes = await readExact(io, plan.pages);
+  // Both pins are known and prepared together: one round trip, not two.
+  const [pageBytes, baselineBytes] = await mapSourceOrdered([plan.pages, plan.baseline.object], pin =>
+    readExact(io, pin),
+  );
   const page = sourceValidation(
     'SOURCE_JOB_INVALID',
     () => validateSavePage(JSON.parse(new TextDecoder().decode(pageBytes)), null).page,
@@ -65,7 +69,7 @@ export async function runSmallSourceSave(
   const after = page.changes.flatMap(change => (change.after ? [change.after.content] : []));
   if (after.some(ref => ref.recipe) || after.reduce((n, ref) => n + ref.object.size, 0) > windowBytes)
     return null;
-  const baseline = parseNativeState(await readExact(io, plan.baseline.object)),
+  const baseline = parseNativeState(baselineBytes!),
     files = new Map(baseline.files.map(file => [file.path, file])),
     seen = new Set(baseline.files.map(file => file.blob));
   const verify = [
@@ -74,8 +78,9 @@ export async function runSmallSourceSave(
     ).values(),
   ];
   await io.prepareRead?.(verify);
-  // Descriptors are prepared in one window; changed bytes are streamed and discarded.
-  for (const pin of verify) {
+  // Descriptors are prepared in one window; changed bytes are streamed and
+  // discarded, several in flight (each read is a round trip, not CPU).
+  await mapSourceOrdered(verify, async pin => {
     const hash = sha256.create();
     let size = 0;
     for await (const part of await io.read(pin)) {
@@ -88,7 +93,7 @@ export async function runSmallSourceSave(
       'SOURCE_HASH_MISMATCH',
       'Source bytes differ from their exact pin.',
     );
-  }
+  });
   let changed = false;
   for (const change of page.changes) {
     const old = files.get(change.path);

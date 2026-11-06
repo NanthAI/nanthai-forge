@@ -91,6 +91,41 @@ export function logSourceFailure(
     }),
   );
 }
+/** One bounded line per completed source step so the existing log-stream
+ * instrument can split source memory-time by job kind and phase without a
+ * metrics read. Counts and identifiers only; never URLs, messages or bytes. */
+export function logSourceStep(
+  identity: { jobId: string; step: number },
+  fields: {
+    runtime: 'v8' | 'node';
+    kind: string | null;
+    from: string | null;
+    to: string | null;
+    objects: number;
+    bytes: number;
+    outputs: number;
+    started: number;
+  },
+) {
+  const count = (value: number) => (Number.isSafeInteger(value) && value >= 0 ? value : null);
+  const name = (value: string | null) => (value && /^[a-z-]{1,32}$/.test(value) ? value : null);
+  // Same channel as forge-source-failure: never mixed into CLI/result stdout.
+  console.warn(
+    JSON.stringify({
+      event: 'forge-source-step',
+      job: identity.jobId,
+      step: identity.step,
+      runtime: fields.runtime,
+      kind: name(fields.kind),
+      from: name(fields.from),
+      to: name(fields.to),
+      objects: count(fields.objects),
+      bytes: count(fields.bytes),
+      outputs: count(fields.outputs),
+      elapsedMs: Math.min(600000, Math.max(0, Math.round(performance.now() - fields.started))),
+    }),
+  );
+}
 export function sourceFailureCause(error: unknown, stage: string, started: number): SourceFailure {
   const io = error instanceof SourceIoError ? error : null;
   const selected = io?.stage ?? stage;

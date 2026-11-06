@@ -20,7 +20,7 @@ import {
 } from '../src/hosted-source-step-progress';
 import { invariant } from '../src/errors';
 import { sourceDomainError } from './projectConvexSourceErrors';
-import { logSourceFailure, withSourceFailureLog } from '../src/hosted-source-io-error';
+import { logSourceFailure, logSourceStep, withSourceFailureLog } from '../src/hosted-source-io-error';
 const identity = { projectId: v.id('hostedProjects'), jobId: v.string() };
 const reference = (name: string) => makeFunctionReference<'mutation'>(name);
 export const step = internalAction({
@@ -68,7 +68,20 @@ export const step = internalAction({
             for (const ref of joined.outputs) if (ref) results.push(await loadTaskData(ref, durable.read));
             applySourceFanout(cursor, joined, results, ref => enqueueSourceObject(cursor, ref));
           }
+          const from = cursor.phase;
           result = await runSourceStep(cursor, io);
+          const outputCount = outputs.length;
+          const logStep = () =>
+            logSourceStep(input, {
+              runtime: 'node',
+              kind: state.jobKind ?? null,
+              from,
+              to: fanout ? 'fanout' : result!.cursor.phase,
+              objects: result!.metrics.objects,
+              bytes: result!.metrics.bytes,
+              outputs: outputCount,
+              started,
+            });
           const saved =
             result.cursor.phase === 'done'
               ? null
@@ -89,6 +102,7 @@ export const step = internalAction({
               end: plan.end,
               tasks: plan.tasks.map(task => JSON.stringify(task)),
             });
+            logStep();
             return null;
           }
           await ctx.runMutation(reference('projectConvexSourceStore:commit'), {
@@ -98,6 +112,7 @@ export const step = internalAction({
             output: result.cursor.output,
             failure: null,
           });
+          logStep();
           return null;
         } catch (error) {
           // Platform failures stay retryable; a fenced step has nothing to settle.

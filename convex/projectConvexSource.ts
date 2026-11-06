@@ -5,7 +5,7 @@ import { internalAction } from './_generated/server';
 import { convexSourceTransport } from './projectConvexSourceTransport';
 import { runSmallSourceSave } from '../src/hosted-source-small-save';
 import { sourceDomainError } from './projectConvexSourceErrors';
-import { logSourceFailure, withSourceFailureLog } from '../src/hosted-source-io-error';
+import { logSourceFailure, logSourceStep, withSourceFailureLog } from '../src/hosted-source-io-error';
 export { dispatch } from './projectConvexSourceStore';
 export { convexSourceTransport } from './projectConvexSourceTransport';
 const reference = (name: string) => makeFunctionReference<'mutation'>(name);
@@ -49,12 +49,23 @@ export const step = internalAction({
             });
             return null;
           }
+          const outputCount = transport.outputs.length;
           await ctx.runMutation(reference('projectConvexSourceStore:commit'), {
             ...input,
             cursor: null,
             objects: transport.outputs,
             output,
             failure: null,
+          });
+          logSourceStep(input, {
+            runtime: 'v8',
+            kind: state.jobKind ?? null,
+            from: 'input',
+            to: 'done',
+            objects: transport.reads.objects,
+            bytes: transport.reads.bytes,
+            outputs: outputCount,
+            started,
           });
           return null;
         } catch (error) {
