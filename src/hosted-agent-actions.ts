@@ -45,6 +45,7 @@ import { abandonDormantLanes } from './hosted-agent-dormant.js';
 import { recordLane, readLaneEntry } from './lane-registry.js';
 import { saveExpectedSchema } from './hosted-save.js';
 import type { HostedAgentSession } from './hosted-agent-transport.js';
+import { parseHostedResponse } from './hosted-response.js';
 const pinResultSchema = z
   .object({
     laneId: z.uuid(),
@@ -265,7 +266,8 @@ async function configureRunnerRequest(
     'BAD_ARGUMENT',
     'Choose provider:"self-hosted" (optional machineId and labels; mac is a legacy alias), provider:"github-actions" (repository, optional runsOn), or a full configuration for another provider.',
   );
-  const current = currentSettings.parse(
+  const current = parseHostedResponse(
+    currentSettings,
     await session.query('projectHostedCheckDefinitions:current', { checkId: '' }),
   );
   if (command.provider === 'github-actions') {
@@ -423,7 +425,10 @@ export async function executeHostedAgent(
               },
       });
     });
-    return hostedStartResultSchema.parse(await session.mutation('projectHostedStart:start', request));
+    return parseHostedResponse(
+      hostedStartResultSchema,
+      await session.mutation('projectHostedStart:start', request),
+    );
   }
   if (action === 'open') {
     const command = hostedAgentCommandSchemas.open.parse(input);
@@ -504,7 +509,7 @@ export async function executeHostedAgent(
     const result = await session.waitSource(operationId, prepared),
       completed = agentSourceOutcome(result);
     if (completed?.status === 'completed') {
-      const source = syncResultSchema.parse(completed.result);
+      const source = parseHostedResponse(syncResultSchema, completed.result);
       if (command.apply && session.marker() && source.status !== 'conflict' && source.from) {
         const applied = await applyHostedSync(
           session.root,
@@ -535,7 +540,8 @@ export async function executeHostedAgent(
     const command = hostedAgentCommandSchemas.pin.parse(input);
     const laneId = command.laneId ?? session.marker()?.selection.laneId;
     invariant(laneId, 'BAD_ARGUMENT', 'Select laneId or open a hosted Lane.');
-    const result = pinResultSchema.parse(
+    const result = parseHostedResponse(
+      pinResultSchema,
       await session.mutation('projectHostedLanePin:setPin', {
         authorityEpoch: epoch,
         laneId,

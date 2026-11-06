@@ -29,6 +29,7 @@ import { recordTurnWait, settleTurnWork } from './agent-turn-work.js';
 import { markOverlapShown, overlapBannerOnce, type HostedOverlapNotice } from './hosted-overlap-notice.js';
 import { LAND_INVOKED_ENV, landTiming, landTimingLine, startLandTiming } from './land-timing.js';
 import { AGENT_WAIT_SECONDS } from './agent-operation-wait.js';
+import { waitFailure } from './wait-failure.js';
 
 export { landPhase, landSummary };
 
@@ -226,7 +227,8 @@ async function waitLanding(
           emit,
         );
         if (followed) return followed;
-        throw error;
+        const resume = landWaitContinuation(root, response);
+        throw resume ? waitFailure(error, resume) : error;
       }
     }
   } finally {

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { readSource } from './files.js';
+import { waitFailure } from './wait-failure.js';
 import { clientCacheRoot } from './root-paths.js';
 import { isNetworkPending } from './network-continuation.js';
 import { join, resolve } from 'node:path';
@@ -214,7 +215,9 @@ export async function hostedAgentCli(
               undefined,
               board,
             ),
-      );
+      ).catch(error => {
+        throw waitFailure(error, continuation);
+      });
       const { submissions, status, run } = response.result as {
         submissions?: {
           submission: { phase?: string };

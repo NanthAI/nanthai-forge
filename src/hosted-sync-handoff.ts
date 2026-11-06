@@ -16,6 +16,7 @@ import { hostedRecoveryCommand } from './hosted-agent-resolution.js';
 import { invariant } from './errors.js';
 import { hostedActionError } from './hosted-action-error.js';
 import type { HostedAgentSession, HostedAgentExchange } from './hosted-agent-transport.js';
+import { parseHostedResponse } from './hosted-response.js';
 
 const handoffSchema = z.object({
   operationId: z.uuid(),
@@ -86,7 +87,7 @@ export async function reconcileHostedSync(root: string, exchange: HostedAgentExc
     return { ...continuation(), source: progress.terminal };
   }
   if (outcome?.status !== 'completed') return continuation();
-  const source = syncResultSchema.parse(outcome.result);
+  const source = parseHostedResponse(syncResultSchema, outcome.result);
   // A sync conflict creates a sibling: its original sync continuation opens
   // that exact draft rather than trying to install it into the source Lane.
   if (source.status === 'conflict')

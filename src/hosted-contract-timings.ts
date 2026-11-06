@@ -5,6 +5,7 @@ import { hostedCheckRunSchema } from './hosted-check.js';
 import { outputStreamSchema, outputSealSchema } from './hosted-check-output.js';
 import { invariant } from './errors.js';
 import { z } from 'zod';
+import { parseHostedResponse } from './hosted-response.js';
 /** Read existing H12 output through its authorized, paged accessors. No new
  * measurement/evidence store, runner invocation or raw run-history dependency. */
 export async function hostedContractTimings(input: {
@@ -16,7 +17,10 @@ export async function hostedContractTimings(input: {
   download(url: string): Promise<Uint8Array>;
 }) {
   const identity = { runId: input.runId };
-  const run = hostedCheckRunSchema.parse(await input.query('projectHostedCheckRead:status', identity));
+  const run = parseHostedResponse(
+    hostedCheckRunSchema,
+    await input.query('projectHostedCheckRead:status', identity),
+  );
   invariant(
     run.request.candidateId === input.candidateId &&
       run.request.expectedHead === input.head &&

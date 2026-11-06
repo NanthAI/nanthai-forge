@@ -10,6 +10,7 @@ import { ForgeError, invariant } from './errors.js';
 import { hostedActionError } from './hosted-action-error.js';
 import type { HostedAgentAddress } from './hosted-agent-contract.js';
 import type { HostedAgentTransport } from './hosted-agent-transport.js';
+import { safeParseHostedResponse } from './hosted-response.js';
 
 export const hostedRunWaitSchema = z
   .object({
@@ -105,7 +106,7 @@ async function observeHostedRunOnce(
     );
   function run(value: unknown) {
     value = typeof value === 'string' ? JSON.parse(value) : value;
-    const parsed = runSchema.safeParse(value);
+    const parsed = safeParseHostedResponse(runSchema, value);
     invariant(
       parsed.success &&
         parsed.data.id === command.runId &&

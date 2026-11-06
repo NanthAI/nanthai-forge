@@ -58,6 +58,8 @@ Include `overlapAnswer:"accept-order"` in `land --save` to answer the pending no
 
 `save --overlap-answers` takes `answers:[{operationId,laneId,noticeId,choice,text?}]`: every answer needs its own UUID `operationId` (a replay reuses it), beside the optional top-level one.
 
+When you change a hosted reply in Forge itself: add fields freely, but never remove, retype, make optional or add enum values to one without a contract feature, because released CLIs lag the server. The CLI parses replies with `parseHostedResponse` (unknown keys dropped, all else checked), and `tests/hosted-response-contract.test.mjs` fails the landing on a breaking reply change. Rule: [server replies](../operations/cli-update.md#server-replies-cli-behind-the-deploy).
+
 <!-- hosted-agent-contract:start -->
 | Hosted command | Accepted parameters (`?` = optional) |
 | --- | --- |
@@ -1241,6 +1243,10 @@ Native operations use `until:"terminal"`. Hosted check-only and harness checks u
 source preparation keeps the full original replay command.
 Retryable source work follows its returned recovery; a child failure does not settle a pending landing.
 `--no-wait` returns with an unfinished-work warning and the blocking continuation.
+A wait whose read fails for a reason other than its own selection (for example
+`HOSTED_PROTOCOL_INVALID` while the CLI and server versions differ) changes nothing
+on the server: its error carries `recovery.command`, the same wait to run once the
+cause is fixed. `BAD_ARGUMENT` and `NOT_FOUND` keep their own message.
 
 LANDED reports acceptance; CHECK PASSED alone does not. Follow failure/conflict
 recovery in the same Lane; inspect current Lane status after supersession.

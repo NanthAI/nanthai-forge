@@ -34,6 +34,7 @@ import type { SaveChange, SaveRequest } from './hosted-save.js';
 import type { ContentPin } from './native-exchange.js';
 import { markLandStep } from './land-timing.js';
 import { operationWait } from './agent-operation-wait.js';
+import { parseHostedResponse } from './hosted-response.js';
 
 type SaveExchange = Pick<ConvexExchange, 'client' | 'projectId' | 'uploadFile' | 'upload' | 'missing'> &
   Partial<Pick<ConvexExchange, 'uploadLazyBatch' | 'downloadToFile' | 'downloadBatch' | 'prepareDownloads'>>;
@@ -356,7 +357,7 @@ function applyHostedSaveReceipt(
       clearPending();
       return;
     }
-    const result = saveResultSchema.parse(terminal.outcome.result),
+    const result = parseHostedResponse(saveResultSchema, terminal.outcome.result),
       current = readHostedLaneCheckout(root),
       old = capture.marker;
     if (!current || canonicalPayload(current) !== canonicalPayload(old)) {

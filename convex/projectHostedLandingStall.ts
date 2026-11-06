@@ -85,7 +85,8 @@ export const repair = internalMutation({
   args: { ...identity, mode: repairMode, reason: v.optional(v.string()) },
   returns: v.null(),
   handler: async (ctx, input) => {
-    return repairStalledLanding(ctx, input);
+    await repairStalledLanding(ctx, input);
+    return null;
   },
 });
 
@@ -137,9 +138,11 @@ export async function raiseLandingAlarm(ctx: MutationCtx, input: Stalled, now = 
   if (project) await scheduleStallAlert(ctx, token, project);
   if (canonical) {
     await writeLanding(ctx, canonical, next, canonical.runnable);
-    if (inline) await repairStalledLanding(ctx, { ...token, mode: 'alarm' }, now);
-    // A check keeps its own run lease and execution watchdog: no round follows.
-    if (canonical.phase === 'checking') return null;
+    const redriven = inline ? await repairStalledLanding(ctx, { ...token, mode: 'alarm' }, now) : null;
+    // A live check keeps its own run lease and execution watchdog: no round follows.
+    // A replayed driver (lost check wake or queue step after the run ended) has no
+    // such owner, so one round sees the replay take or ends the entry (d910db6b).
+    if (canonical.phase === 'checking' && !redriven?.some(kind => kind !== 'alarm')) return null;
     // This alarm fires once per progress time. One retained supervisor round
     // follows its repair (Issue 108a24e3: an owner that stopped after the alarm
     // left two entries queued for 36 h; 19328518: a Ready head nobody drove).
@@ -191,8 +194,8 @@ export async function repairStalledLanding(
     const finish = await finishRow(ctx, input);
     if (finish) await scheduleFinish(ctx, finish);
   }
-  await redriveLanding(ctx, input);
-  if (canonical.phase !== 'queued') return null;
+  const redriven = await redriveLanding(ctx, input);
+  if (canonical.phase !== 'queued') return redriven;
   const loaded = await loadLanding(ctx, input);
   if (input.mode === 'alarm') {
     if (loaded.state.phase === 'queued') await redriveQueued(ctx, input, loaded.row, loaded.state);

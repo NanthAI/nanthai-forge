@@ -18,6 +18,7 @@ import type { RetainedBoundSubmission } from './hosted-agent-bound.js';
 import { canonicalPayload } from './hosted-source-operation.js';
 import { z } from 'zod';
 import type { HostedAgentTransport } from './hosted-agent-transport.js';
+import { parseHostedResponse } from './hosted-response.js';
 
 /** A cold Mac has only selected States. Resolve ancestry through verified objects
  * on demand instead of treating an absent local parent as a divergent Lane. */
@@ -55,7 +56,8 @@ export async function saveBoundInput(
     source = new NativeSource(store.root);
   mkdirSync(parent, { recursive: true });
   if (!existsSync(root)) {
-    const selection = hostedLaneSelectionSchema.parse(
+    const selection = parseHostedResponse(
+      hostedLaneSelectionSchema,
       await transport.query('projectHostedLanes:select', { laneId: input.laneId }),
     );
     if (selection.authority.mode !== 'server') throw new SourceAuthorityStaleError(selection.authority);

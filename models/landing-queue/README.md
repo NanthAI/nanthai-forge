@@ -55,6 +55,8 @@ npm run model:landing-queue -- lostdispatch           # expected: a lost check d
 npm run model:landing-queue -- lostdispatch-fixed
 npm run model:landing-queue -- supervisor             # expected: a driver that fails every time strands the head (19328518)
 npm run model:landing-queue -- supervisor-fixed
+npm run model:landing-queue -- checkround             # expected: a checking entry whose replayed driver fails again is stranded (d910db6b)
+npm run model:landing-queue -- checkround-fixed
 npm run model:landing-queue -- retrykeep              # expected: a same-head retry discards dependent checks (ea86f3fb)
 npm run model:landing-queue -- retrykeep-fixed
 ```
@@ -338,6 +340,16 @@ algorithm drift: changes to these code anchors require manual model review.
    (`LANDING_LEASE_RETRIES`). The rounds are timers that exist only after a stall
    alarm fired for a pending entry, so an empty queue schedules nothing.
    `tests/hosted-landing-supervisor.test.mjs` replays the incidents per driver.
+   **Follow-up (d910db6b, fixed).** `checkround`: a checking entry whose run
+   already ended loses its completion wake or the queue step after it. The stall
+   alarm replayed it once inline but never armed a round for a checking entry (the
+   run lease was assumed to own it), so a replay that failed again left the entry
+   pending with nothing scheduled and `HeadSettles` fails. `checkround-fixed` arms
+   the round when the alarm replayed a driver; it lands, or ends after two failed
+   re-drives (`FailsOnlyPermanent`). A live check still gets no round. The step x
+   fault matrix in `tests/landing-failure-injection.test.mjs` found it and checks
+   the same invariants on the code: no entry stranded (L1), each landing accepted
+   once (S3), a typed end only on a permanent fault, nothing left scheduled.
 5. **Moving-main starvation (51ff7e8e; historical scheduling defect and fairness
    boundary).** Recompose/check, another writer moves main, retry; repeat forever.
    The `moving` litmus finds an infinite cycle despite weakly fair driver steps.

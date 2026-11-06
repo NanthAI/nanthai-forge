@@ -54,6 +54,15 @@ its field path; it does not execute a migration. Before releasing, run
 source. Refresh refuses undeclared breaking changes and never runs in verify.
 The initial baseline comes from the installed CLI release's matching schemas.
 
+### Hosted reply compatibility
+
+Hosted replies follow the other direction: released CLIs must accept what a newer
+server sends. `tests/hosted-response-contract.test.mjs` compares the exported reply
+schemas listed in `scripts/response-compat.mjs` with
+`scripts/response-compat/released.json`; unknown keys are ignored (the CLI's reply
+boundary drops them), while new required fields, new enum values and narrowed types
+fail. Rule and declaration steps: [server replies](operations/cli-update.md#server-replies-cli-behind-the-deploy).
+
 The extractor supports explicit Zod declarations, shapes, imports, unions and
 standard scalar validators. Unknown expressions fail explicitly. Arbitrary
 `refine`/`superRefine` predicates are not executed or compared; transforms and

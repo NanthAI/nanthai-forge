@@ -19,6 +19,10 @@ selecting the accepted State to release. The command checks declared migrations
 before updating `scripts/schema-compat/released.json`; see
 [shared schema compatibility](../development.md#shared-schema-compatibility).
 
+In the same Lane, run `npm run build:core && npm run response:snapshot` to refresh
+`scripts/response-compat/released.json`, the reply contract released CLIs accept; it
+refuses undeclared breaking reply changes ([hosted reply compatibility](../development.md#hosted-reply-compatibility)).
+
 ## Configure once per release
 
 Save a private request file containing paths, not credential values. Use a fresh

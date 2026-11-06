@@ -189,6 +189,33 @@ log line `Forge CLI canary held HEAD: the server does not yet advertise ...; nex
 HH:MM UTC`). The next attempt after the deploy switches. Add a feature name in the same change
 that implements the behaviour on the server; never rename or reuse one.
 
+### Server replies (CLI behind the deploy)
+
+The other direction: a published or not-yet-updated CLI talks to a newer server (Issue
+3205f7e6; on 2026-11-06 an added `agentDefaults.autoClaim` broke planning and wait on the
+installed CLI for 9 minutes). One rule: **a server may add reply fields; it never removes,
+retypes, makes optional or adds enum values to a field without a contract feature.**
+
+- CLI side: every hosted reply is parsed with `parseHostedResponse` (src/hosted-response.ts).
+  It drops object keys this CLI does not know, at any depth, and still rejects a missing
+  required field, a wrong type or an unknown enum value (`HOSTED_PROTOCOL_INVALID`). Response
+  schemas stay `.strict()` so tests catch typos; request schemas never use the helper.
+- Server side: a change that alters meaning (not just adds) answers the old shape unless the
+  client advertised the matching feature of `src/hosted-contract-features.ts`. Example: the
+  capability reply's `agentDefaults` keeps the frozen keys of `WIRE_AGENT_DEFAULT_KEYS`; newer
+  keys go only to a CLI that asks for `agent-defaults-extended` (State fe3b6292).
+- New CLI, older server: a reply field the CLI adds must be optional or take a `.default()`
+  (the server it talks to may not have deployed yet), or sit behind a feature.
+- Guard: `tests/hosted-response-contract.test.mjs` (part of the landing check's full run)
+  compares the Candidate's reply schemas with `scripts/response-compat/released.json`, the
+  released CLI's contract, and parses the Candidate server's capability reply with that
+  released contract. A failure names the field; declare a feature-gated change in
+  `scripts/response-compat/declared.json` with the printed `path` and `change`. Refresh the
+  baseline at release with `npm run build:core && npm run response:snapshot`.
+
+CLIs built before this rule parse replies strictly, so any added field still breaks them;
+they recover when the updater installs a current build.
+
 Exactly one previous build is kept, the exception to pruning (the one-CLI rule otherwise
 stands; older builds retire as before). `nforge cli rollback [--directory DIR]` switches
 `current` (and `manager`) to it with one atomic rename, makes the build it left the new

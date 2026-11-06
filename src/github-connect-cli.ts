@@ -9,6 +9,7 @@ import { HostedAgentTransport } from './hosted-agent-transport.js';
 import { HostedAgentJournal } from './hosted-agent-journal.js';
 import { hostedRunSubscription, type HostedRunSubscription } from './hosted-agent-observe.js';
 import { ForgeError, invariant } from './errors.js';
+import { parseHostedResponse } from './hosted-response.js';
 const statusSchema = z.object({
   operationId: z.uuid(),
   status: z.enum(['waiting', 'processing', 'completed', 'failed']),
@@ -40,7 +41,10 @@ export async function waitForGithubConnection(
           { projectId: address.projectId, operationId },
           value => {
             try {
-              const status = statusSchema.parse(typeof value === 'string' ? JSON.parse(value) : value);
+              const status = parseHostedResponse(
+                statusSchema,
+                typeof value === 'string' ? JSON.parse(value) : value,
+              );
               invariant(
                 status.operationId === operationId,
                 'HOSTED_PROTOCOL_INVALID',

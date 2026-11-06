@@ -17,6 +17,7 @@ import { shellQuote } from './agent-brief-render.js';
 import type { HostedAgentSession } from './hosted-agent-transport.js';
 import { hostedRecordSchema } from './hosted-records.js';
 import { hostedAgentCommandSchemas } from './hosted-agent-contract.js';
+import { parseHostedResponse } from './hosted-response.js';
 export type SourceProgress = {
   terminal?: { outcome: { status: string; result?: unknown } } | null;
   input?: unknown;
@@ -24,7 +25,10 @@ export type SourceProgress = {
 export async function selectAgentLane(session: HostedAgentSession, laneId?: string) {
   laneId ??= session.marker()?.selection.laneId;
   invariant(laneId, 'BAD_ARGUMENT', 'Select laneId or open a hosted Lane.');
-  const lane = hostedLaneSelectionSchema.parse(await session.query('projectHostedLanes:select', { laneId }));
+  const lane = parseHostedResponse(
+    hostedLaneSelectionSchema,
+    await session.query('projectHostedLanes:select', { laneId }),
+  );
   invariant(
     lane.projectId === session.address.projectId,
     'PROJECT_UNAVAILABLE',

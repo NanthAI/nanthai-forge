@@ -111,6 +111,7 @@ import {
   takeCallerReceipts,
   writeCallerReceipts,
 } from './hosted-metric-outbox.js';
+import { parseHostedResponse } from './hosted-response.js';
 /** Reads and checkout creation: they neither show a Lane as working nor count as its activity. */
 const quietActions = new Set([
   'diff',
@@ -565,7 +566,8 @@ export class HostedAgentTransport {
           'Hosted agent capability discovery is unavailable at this deployment. A compatible hosted agent API is required; no native owner or local listener fallback was attempted.',
         );
       }
-      const capabilities = hostedAgentCapabilitiesSchema.parse(
+      const capabilities = parseHostedResponse(
+        hostedAgentCapabilitiesSchema,
         knownCapabilities(hostedAgentRoot(this.root), discovery),
       );
       this.callerActor = capabilities.actor;
@@ -759,7 +761,10 @@ export class HostedAgentTransport {
         query: this.query.bind(this),
         mutation: this.mutation.bind(this),
         main: async () => {
-          const main = hostedMainV2Schema.parse(await this.query('projectHostedChannels:current', {}));
+          const main = parseHostedResponse(
+            hostedMainV2Schema,
+            await this.query('projectHostedChannels:current', {}),
+          );
           invariant(
             main.projectId === this.address.projectId,
             'PROJECT_UNAVAILABLE',
@@ -852,7 +857,7 @@ export class HostedAgentTransport {
           : undefined;
         if (action === 'finish') result = await recoverHostedFinish(session, result);
         if (action === 'start') {
-          const started = hostedStartResultSchema.parse(result);
+          const started = parseHostedResponse(hostedStartResultSchema, result);
           const into =
             placement.open === false || !started.lane
               ? null

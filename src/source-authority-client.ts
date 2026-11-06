@@ -17,6 +17,7 @@ import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { durableReplace } from './native-durability.js';
 import { canonicalPayload } from './hosted-source-operation.js';
+import { parseHostedResponse } from './hosted-response.js';
 
 /** Only call with feedback from this binding's authenticated transport. Never rewind a pin. */
 export function rememberSourceAuthorityError(store: WorkStore, error: unknown, projectId: string): void {
@@ -99,7 +100,8 @@ export async function transitionBoundSourceAuthority(
     const client = supplied ?? coordinationClient(binding.deployment, process.env.FORGE_AUTH_TOKEN);
     const { deployment: _deployment, ...args } = request;
     void _deployment;
-    const authority = sourceAuthoritySchema.parse(
+    const authority = parseHostedResponse(
+      sourceAuthoritySchema,
       await client.mutation(makeFunctionReference<'mutation'>('projectSourceAuthority:transition'), args),
     );
     updateHostState(store, state => {

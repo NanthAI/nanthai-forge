@@ -21,6 +21,7 @@ import { digest } from './hash.js';
 import { buildObjectRecipe, ObjectRecipeBuilder } from './object-chunks.js';
 import { SourceFileReader } from './source-file-reader.js';
 import { downloadExchangeFile } from './exchange-download-file.js';
+import { parseHostedResponse } from './hosted-response.js';
 const query = (name: string) => makeFunctionReference<'query'>(name);
 const mutation = (name: string) => makeFunctionReference<'mutation'>(name);
 const action = (name: string) => makeFunctionReference<'action'>(name);
@@ -95,7 +96,10 @@ export class ConvexExchange implements ExchangeTransport {
         ...(server ? {} : { maxSchema: 2, ...(expected ? { expected } : {}) }),
       },
     );
-    const main = hostedMainSchema.parse(typeof selected === 'string' ? JSON.parse(selected) : selected);
+    const main = parseHostedResponse(
+      hostedMainSchema,
+      typeof selected === 'string' ? JSON.parse(selected) : selected,
+    );
     invariant(
       !server ||
         (main.schema === 2 && main.authority.mode === 'server' && main.authority.epoch === authority.epoch),

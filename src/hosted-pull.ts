@@ -16,6 +16,7 @@ import { ForgeError, invariant } from './errors.js';
 import { shellQuote } from './shell-quote.js';
 import type { HostedAgentAddress } from './hosted-agent-contract.js';
 import type { HostedAgentExchange } from './hosted-agent-transport.js';
+import { parseHostedResponse } from './hosted-response.js';
 
 /** The marker chooses the protocol, never authorizes access. The selected API
  * checks current authority on every read; no discovery call or silent fallback. */
@@ -139,7 +140,7 @@ export async function pullHostedProject(
 export async function cloneFreshness(root: string, transport: Pick<MainTransport, 'current'>) {
   const marker = readHostedMainSelection(root);
   invariant(marker, 'WORK_CONFLICT', 'Status requires a Forge clone root.');
-  const main = hostedMainSchema.parse(await transport.current());
+  const main = parseHostedResponse(hostedMainSchema, await transport.current());
   invariant(main.projectId === marker.projectId, 'PROJECT_UNAVAILABLE', 'Select this clone’s project.');
   const current = marker.head === main.head && marker.receipt.id === main.receipt.id;
   return {

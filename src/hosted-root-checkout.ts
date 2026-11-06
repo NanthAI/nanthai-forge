@@ -16,6 +16,7 @@ import type { z } from 'zod';
 import type { hostedAgentCommandSchemas } from './hosted-agent-contract.js';
 import type { HostedAgentAddress } from './hosted-agent-contract.js';
 import type { HostedAgentExchange } from './hosted-agent-transport.js';
+import { parseHostedResponse } from './hosted-response.js';
 /** Main stays at ROOT; each editing directory and its receipt/lock lives beside it.
  * Single-Lane roots retain their original directory for that Lane. */
 export function hostedRootLanePath(root: string, address: HostedAgentAddress): boolean;
@@ -80,7 +81,10 @@ export async function openHostedRootLane(
             laneId,
           },
         );
-        return hostedLaneSelectionSchema.parse(typeof value === 'string' ? JSON.parse(value) : value);
+        return parseHostedResponse(
+          hostedLaneSelectionSchema,
+          typeof value === 'string' ? JSON.parse(value) : value,
+        );
       },
     },
     join(clientCacheRoot(root), 'objects'),

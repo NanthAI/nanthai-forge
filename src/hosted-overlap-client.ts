@@ -4,6 +4,7 @@ import { hostedActionError } from './hosted-action-error.js';
 import type { HostedAgentTransport } from './hosted-agent-transport.js';
 import { presenceSchema } from './hosted-presence-client.js';
 import { boardDeliverySchema } from './hosted-board.js';
+import { parseHostedResponse } from './hosted-response.js';
 
 const advice = z.object({
   unacknowledgedOverlaps: z.object({
@@ -50,7 +51,8 @@ export async function readHostedOverlapAdvice(
   board?: { after: number },
 ) {
   try {
-    return advice.parse(
+    return parseHostedResponse(
+      advice,
       await transport.query('projectHostedOverlaps:read', {
         laneId,
         ...(paths ? { paths: true } : {}),

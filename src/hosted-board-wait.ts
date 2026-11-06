@@ -8,6 +8,7 @@ import { hostedActionError } from './hosted-action-error.js';
 import { isNetworkPending } from './network-continuation.js';
 import { hostedRunSubscription, type HostedRunSubscription } from './hosted-agent-observe.js';
 import type { HostedAgentTransport } from './hosted-agent-transport.js';
+import { parseHostedResponse, safeParseHostedResponse } from './hosted-response.js';
 
 /** Replaceable in tests; production subscribes with the live Convex client. */
 export const peerWaitHooks: {
@@ -43,7 +44,10 @@ export function boardWaker(option: BoardWaitOption, wake: (delivery: BoardDelive
   let timer: ReturnType<typeof setTimeout> | undefined;
   return {
     offer(value: unknown) {
-      const parsed = boardDeliverySchema.safeParse((value as { board?: unknown } | undefined)?.board);
+      const parsed = safeParseHostedResponse(
+        boardDeliverySchema,
+        (value as { board?: unknown } | undefined)?.board,
+      );
       if (!parsed.success || !parsed.data.messages.length) return;
       latest = parsed.data;
       if (timer) return;
@@ -149,7 +153,10 @@ export async function observePeerLane(
         },
         value => {
           try {
-            const parsed = peerSchema.parse(typeof value === 'string' ? JSON.parse(value) : value);
+            const parsed = parseHostedResponse(
+              peerSchema,
+              typeof value === 'string' ? JSON.parse(value) : value,
+            );
             latest = parsed.peer;
             if (parsed.peer.terminal) settle({ status: 'terminal', peer: parsed.peer });
             else waker?.offer(parsed);

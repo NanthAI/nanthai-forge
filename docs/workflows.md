@@ -35,7 +35,12 @@ A hosted landing with no progress for 15 minutes gets a stall alarm naming the
 step and the missing owner. If it still makes no progress 60 minutes after its last
 progress and nothing is left to drive it, Forge ends it as `terminal-failed` with
 `LANDING_STALLED`, so the requester gets an outcome; an entry waiting for review or
-a dependency is never dropped this way. See the [landing queue](agents/workflow.md#landing-queue).
+a dependency is never dropped this way. A step that keeps failing (its task lost or
+crashing on every retry, including the completion of a check that already ended) is
+re-driven by supervisor rounds; after two failed re-drives Forge ends the landing with
+`LANDING_DRIVER_EXHAUSTED`, and the finish result names the retry command.
+`tests/landing-failure-injection.test.mjs` injects a transient and a permanent fault at
+every landing step. See the [landing queue](agents/workflow.md#landing-queue).
 **Ask for changes** opens inline, keeps a draft per Candidate during the browser
 session, and records feedback in the Intent and selected Lane conversation. It is
 advisory and adds no acceptance gate. Accepted versions links to this same review

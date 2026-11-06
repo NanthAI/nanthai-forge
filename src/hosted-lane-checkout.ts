@@ -44,6 +44,7 @@ import {
   readHostedLaneCheckout,
   type HostedLaneCheckoutMarker,
 } from './hosted-lane-checkout-marker.js';
+import { parseHostedResponse } from './hosted-response.js';
 export interface LaneTransport extends CheckoutObjectTransport {
   select(laneId: string): Promise<HostedLaneSelection>;
 }
@@ -157,7 +158,7 @@ async function checkout(
     return marker;
   };
   // Access is checked even on verified cache hits and completed original-operation retries.
-  const observed = hostedLaneSelectionSchema.parse(await transport.select(request.laneId));
+  const observed = parseHostedResponse(hostedLaneSelectionSchema, await transport.select(request.laneId));
   identity(observed);
   let cooperative = true;
   return withCheckoutMaterialization(
@@ -295,7 +296,7 @@ async function checkout(
         ),
       );
       cooperative = !(await checkoutIo(async () => smallCheckout(staged, cache.objects)));
-      identity(hostedLaneSelectionSchema.parse(await transport.select(request.laneId)));
+      identity(parseHostedResponse(hostedLaneSelectionSchema, await transport.select(request.laneId)));
       await withCheckoutWritePass(
         cache.root,
         async () => {

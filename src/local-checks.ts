@@ -7,6 +7,7 @@ import { AgentWorkflow } from './agent-workflow.js';
 import { ForgeError, invariant } from './errors.js';
 import { runReceipt } from './agent-receipts.js';
 import type { CheckRun } from './work-types.js';
+import { parseHostedResponse } from './hosted-response.js';
 
 export const localCheckRequest = z.object({
   projectId: z.string(),
@@ -51,7 +52,8 @@ export async function executeLocalCheck(
   selection: Selection,
   signal?: AbortSignal,
 ): Promise<void> {
-  const claimed = localCheckRequest.parse(
+  const claimed = parseHostedResponse(
+    localCheckRequest,
     await client.mutation(checkReference('mutation', 'claim'), selection),
   );
   if (
@@ -114,7 +116,8 @@ export async function executeLocalCheck(
   }
   for (;;) {
     signal?.throwIfAborted();
-    const current = localCheckRequest.parse(
+    const current = parseHostedResponse(
+      localCheckRequest,
       await client.query(checkReference('query', 'observe'), selection),
     );
     invariant(

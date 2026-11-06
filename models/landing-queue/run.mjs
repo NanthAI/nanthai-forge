@@ -58,6 +58,8 @@ if (config === 'all') {
     'lostdispatch-fixed',
     'supervisor',
     'supervisor-fixed',
+    'checkround',
+    'checkround-fixed',
     'retrykeep',
     'retrykeep-fixed',
   ]) {

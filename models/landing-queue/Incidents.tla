@@ -207,8 +207,32 @@ Supervisor == /\ Scenario = "supervisor"
        [] pc = 1 /\ applied = 2 -> /\ b' = "failed" /\ pc' = 2
                      /\ UNCHANGED <<canonical, observed, inputsDone, returned, a, main, checked, applied, owner>>
        [] OTHER -> FALSE
+\* Issue d910db6b (failure injection): b is a checking entry whose run already
+\* ended; its completion wake or the queue step after it was lost. The stall alarm
+\* replays it once, inline. inputsDone = the replayed driver fails every time; a
+\* transient one may fail once more. owner = a supervisor round is armed.
+\* applied = failed replays, cap 2. Unfixed: no round ever follows an alarm for a
+\* checking entry (the run lease was assumed to own it), so a replay that fails
+\* leaves b pending with nothing scheduled. Fixed: a replay at the alarm arms the
+\* round, which re-drives it and ends b after the cap.
+CheckRound == /\ Scenario = "checkround"
+  /\ CASE pc = 0 -> /\ b' = "checking" /\ inputsDone' \in BOOLEAN /\ owner' = FALSE /\ pc' = 1
+                     /\ UNCHANGED <<canonical, observed, returned, a, main, checked, applied>>
+       [] pc = 1 -> \E fails \in (IF inputsDone THEN {TRUE} ELSE BOOLEAN) :
+                     IF fails
+                     THEN /\ applied' = 1 /\ owner' = Fixed /\ pc' = 2
+                          /\ UNCHANGED <<canonical, observed, inputsDone, returned, a, b, main, checked>>
+                     ELSE /\ b' = "landed" /\ pc' = 3
+                          /\ UNCHANGED <<canonical, observed, inputsDone, returned, a, main, checked, applied, owner>>
+       [] pc = 2 /\ owner /\ ~inputsDone -> /\ b' = "landed" /\ pc' = 3
+                     /\ UNCHANGED <<canonical, observed, inputsDone, returned, a, main, checked, applied, owner>>
+       [] pc = 2 /\ owner /\ inputsDone /\ applied < 2 -> /\ applied' = applied + 1
+                     /\ UNCHANGED <<canonical, observed, inputsDone, returned, a, b, main, checked, owner, pc>>
+       [] pc = 2 /\ owner /\ inputsDone /\ applied = 2 -> /\ b' = "failed" /\ pc' = 3
+                     /\ UNCHANGED <<canonical, observed, inputsDone, returned, a, main, checked, applied, owner>>
+       [] OTHER -> FALSE
 Step == Wait \/ CohortConflict \/ LostWake \/ MovingMain \/ CrossHead \/ OrderWake \/ Outage \/ CohortHold \/ LostDispatch
-        \/ Supervisor
+        \/ Supervisor \/ CheckRound
         \/ RetryKeep
 Spec == Init /\ [][Step]_vars /\ WF_vars(Step)
 FreshTerminal == returned => observed = canonical
@@ -222,7 +246,7 @@ HeadLands == <>(b = "landed")
 CohortForms == <>(b = "cohort")
 HeadSettles == <>(b \in {"landed", "failed"})
 \* A transient fault never ends a landing; only the cap on a permanent one does.
-FailsOnlyPermanent == Scenario = "supervisor" /\ b = "failed" => inputsDone /\ applied = 2
+FailsOnlyPermanent == Scenario \in {"supervisor", "checkround"} /\ b = "failed" => inputsDone /\ applied = 2
 \* ea86f3fb: no live dependent is pinned to a stale predecessor generation, none
 \* lands on one, and a dependent check is discarded only when the head changed.
 NoStaleStack == Scenario = "retrykeep" /\ pc \in 2..4 /\ b \in {"checking", "ready"} => checked = main

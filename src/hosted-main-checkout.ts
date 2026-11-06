@@ -22,6 +22,7 @@ import {
 import { workLocked } from './work-lock.js';
 import { readSource } from './files.js';
 import { HostedCheckoutCache, type CheckoutObjectTransport } from './hosted-checkout-cache.js';
+import { parseHostedResponse } from './hosted-response.js';
 export interface MainTransport extends CheckoutObjectTransport {
   current(expected?: MainExpectation): Promise<HostedMain>;
   /** Actual Convex requests, including recipe metadata when available. */
@@ -81,7 +82,7 @@ export async function checkoutHostedMain(root: string, input: unknown, transport
   const receiptPath = join(cache, `${request.operationId}.json`),
     previous = join(cache, 'previous');
   // Recheck current access even on cache hits and completed-operation retries.
-  const observed = hostedMainSchema.parse(await transport.current());
+  const observed = parseHostedResponse(hostedMainSchema, await transport.current());
   invariant(observed.projectId === request.projectId, 'PROJECT_UNAVAILABLE', 'Select this project.');
   let operation = workLocked(lock, () => {
     recoverMainPublication(root, cache);

@@ -16,6 +16,7 @@ import type { RetainedBoundSubmission } from './hosted-agent-bound.js';
 import type { WorkStore } from './work-store.js';
 import type { Lane } from './work-types.js';
 import type { HostedAgentTransport } from './hosted-agent-transport.js';
+import { parseHostedResponse } from './hosted-response.js';
 export type CachedOperation = RetainedBoundSubmission & {
   address: { url: string; projectId: string };
   startSource?: {
@@ -40,7 +41,8 @@ async function selectStartSource(
     (command.stackOn || command.channel === null || (command.channel && command.channel !== 'main'))
   ) {
     if (command.stackOn) {
-      const parent = hostedLaneSelectionSchema.parse(
+      const parent = parseHostedResponse(
+        hostedLaneSelectionSchema,
         await transport.query('projectHostedLanes:select', { laneId: command.stackOn }),
       );
       invariant(
@@ -110,10 +112,13 @@ export async function startCache(
     constraints: command.constraints,
     ...(command.intentId ? { intentId: command.intentId } : {}),
   });
-  const started = hostedStartResultSchema.parse(response.result),
+  const started = parseHostedResponse(hostedStartResultSchema, response.result),
     lane = started.lane;
   invariant(lane, 'SOURCE_UNAVAILABLE', 'Hosted start has no Lane source.');
-  const main = hostedMainV2Schema.parse(await transport.query('projectHostedChannels:current', {}));
+  const main = parseHostedResponse(
+    hostedMainV2Schema,
+    await transport.query('projectHostedChannels:current', {}),
+  );
   recordMetricCache(store.directory, main, 'authority', operationId);
   const source = new NativeSource(store.root);
   await cacheHostedState(
@@ -121,7 +126,8 @@ export async function startCache(
     new HostedObjectStore(join(store.directory, 'hosted-objects'), transport.exchange),
     lane.head,
   );
-  const authorized = hostedLaneSelectionSchema.parse(
+  const authorized = parseHostedResponse(
+    hostedLaneSelectionSchema,
     await transport.query('projectHostedLanes:select', { laneId: lane.laneId }),
   );
   invariant(

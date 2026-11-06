@@ -16,6 +16,7 @@ import type { HostedAgentTransport } from './hosted-agent-transport.js';
 import { landingRedriver } from './hosted-landing-redrive.js';
 import { rememberLandedOperations } from './landed-operations.js';
 import { boardWaker, type BoardDelivery, type BoardWaitOption } from './hosted-board-wait.js';
+import { parseHostedResponse } from './hosted-response.js';
 
 export const hostedSubmissionWaitSchema = z
   .object({
@@ -309,7 +310,8 @@ async function observeHostedSubmissionsOnce(
     for (;;) {
       if (stopped || signal.aborted) return;
       const nextVersion = cursor.versions.get(operationId) ?? 0;
-      const page = pageSchema.parse(
+      const page = parseHostedResponse(
+        pageSchema,
         decode(
           await transport.query('projectHostedFinishObserve:page', {
             operationId,

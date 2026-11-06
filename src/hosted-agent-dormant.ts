@@ -2,6 +2,7 @@
 import { z } from 'zod';
 import { invariant } from './errors.js';
 import type { HostedAgentSession } from './hosted-agent-transport.js';
+import { parseHostedResponse } from './hosted-response.js';
 
 const PAGE = 100;
 /** A project with more dormant Lanes than this lists the first of them; a repeat reaches the rest as these close. */
@@ -36,7 +37,8 @@ export async function abandonDormantLanes(
   let cursor: string | null = null,
     done = false;
   for (let pages = 0; pages < MAX_PAGES && !done; pages++) {
-    const page: z.infer<typeof pageSchema> = pageSchema.parse(
+    const page: z.infer<typeof pageSchema> = parseHostedResponse(
+      pageSchema,
       await session.query('projectHostedLiveLanes:list', { cursor, limit: PAGE, view: 'dormant' }),
     );
     dormant.push(...page.page);
@@ -74,7 +76,8 @@ export async function abandonDormantLanes(
     .slice(0, command.limit - batch.length);
   if (!batch.length && !stamp.length)
     return { phase: 'abandon-dormant', dryRun: false, ...base, abandoned: [], remaining: 0 };
-  const done_ = resultSchema.parse(
+  const done_ = parseHostedResponse(
+    resultSchema,
     await session.mutation('projectHostedDormant:abandon', {
       authorityEpoch,
       abandon: batch.map(lane => lane.laneId),

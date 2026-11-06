@@ -21,6 +21,7 @@ import { withQueueSlot } from './landing-queue.js';
 import { digest } from './hash.js';
 import { invariant } from './errors.js';
 import type { WorkStore } from './work-store.js';
+import { parseHostedResponse } from './hosted-response.js';
 
 type Command = Extract<AgentAction, { action: 'start' | 'checkpoint' }>;
 type Retained = CachedOperation;
@@ -140,7 +141,8 @@ export async function boundAgentCache(
         receipt.head,
       );
       // Recheck authority and Lane identity after transfer; newer saved work stays hosted.
-      const selected = hostedLaneSelectionSchema.parse(
+      const selected = parseHostedResponse(
+        hostedLaneSelectionSchema,
         await transport.query('projectHostedLanes:select', { laneId: command.laneId }),
       );
       invariant(

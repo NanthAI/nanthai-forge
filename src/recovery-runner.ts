@@ -22,6 +22,7 @@ import { writeRecoveryState } from './recovery-state.js';
 import { validateRunnerRecovery } from './recovery-runner-cache.js';
 import { syncDirectory } from './native-durability.js';
 import { runnerRecoveryTransport, type RunnerRecoveryTransport } from './recovery-runner-transport.js';
+import { parseHostedResponse } from './hosted-response.js';
 
 export type HostedMacRunner = z.infer<typeof hostedMachineRunnerSchema>;
 const requestSchema = recoveryRequestSchema.omit({ archivePath: true, cacheRoot: true });
@@ -130,7 +131,7 @@ export async function recoverRunner(target: string, input: unknown, supplied?: R
           'WORK_STALE',
           'Hosted recovery pins changed; original staged files remain preserved.',
         );
-        const main = hostedMainSchema.parse(await transport.current());
+        const main = parseHostedResponse(hostedMainSchema, await transport.current());
         invariant(
           main.projectId === request.projectId &&
             (!selected.hostedMain || JSON.stringify(main) === JSON.stringify(selected.hostedMain)),

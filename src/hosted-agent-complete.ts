@@ -2,6 +2,7 @@
 import { z } from 'zod';
 import { invariant } from './errors.js';
 import type { HostedAgentSession } from './hosted-agent-transport.js';
+import { parseHostedResponse } from './hosted-response.js';
 const stepSchema = z
   .object({
     completed: z.array(z.uuid()),
@@ -17,7 +18,8 @@ export async function completeMergedLanes(session: HostedAgentSession, authority
     calls = 0;
   for (;;) {
     invariant(calls < 1000, 'SOURCE_UNAVAILABLE', 'Sweep did not finish; run complete-merged again.');
-    const step = stepSchema.parse(
+    const step = parseHostedResponse(
+      stepSchema,
       await session.mutation('projectHostedLifecycleMerged:completeMerged', { authorityEpoch, ...next }),
     );
     calls++;
