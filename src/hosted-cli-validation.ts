@@ -70,9 +70,10 @@ export function validateHostedCliCommand(
   );
   if (requestedAction === 'wait') {
     invariant(
-      Boolean(input.runId) !== Boolean((input.operationIds as unknown[] | undefined)?.length),
+      [input.runId, (input.operationIds as unknown[] | undefined)?.length, input.peer].filter(Boolean)
+        .length === 1,
       'BAD_ARGUMENT',
-      'Choose one run or hosted landing operationIds. Run nforge agent ROOT wait --help.',
+      'Choose exactly one of runId, operationIds or peer. Run nforge agent ROOT wait --help.',
     );
   }
 }

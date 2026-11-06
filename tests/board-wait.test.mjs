@@ -511,3 +511,82 @@ test('first-write hook: claims and unread notes ride on its one query, once the 
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+// Issue 544b3375: a peer whose latest landing fails or is cancelled is done for a waiter.
+test('peer wait (server): the peer latest landing ends the wait through three bounded reads, no writes', async () => {
+  const { f, peer, laneRow } = peerFixture();
+  for (const name of [
+    'projectHostedComposeSelections',
+    'projectHostedComposes',
+    'projectHostedLandingRequests',
+  ])
+    f.tables[name] ??= new Map();
+  const candidateId = randomUUID();
+  const operationId = randomUUID();
+  const settledAt = '2026-11-06T01:00:00.000Z';
+  f.tables.projectHostedComposeSelections.set('sel', {
+    _id: 'sel',
+    _creationTime: Date.now(),
+    projectId: 'project',
+    actor: 'owner',
+    operationId: 'compose-op',
+    kind: 'inputs',
+    key: f.lanes.B,
+  });
+  f.tables.projectHostedComposes.set('compose', {
+    _id: 'compose',
+    _creationTime: Date.now(),
+    projectId: 'project',
+    actor: 'owner',
+    operationId: 'compose-op',
+    value: JSON.stringify({ candidateId }),
+  });
+  const request = (phase, error = null) => ({
+    _id: 'landing',
+    _creationTime: Date.now(),
+    projectId: 'project',
+    candidateId,
+    operationId,
+    sequence: 1,
+    phase,
+    value: JSON.stringify({ at: '2026-11-06T00:50:00.000Z', timing: { settledAt }, error }),
+  });
+  // No landing yet, and a landing still in the queue: the wait goes on.
+  assert.equal((await peer({ peer: f.lanes.B })).peer.state, 'open');
+  f.tables.projectHostedLandingRequests.set('landing', request('checking'));
+  assert.equal((await peer({ peer: f.lanes.B })).peer.state, 'open');
+  // Failed, cancelled and landed-without-closing all end it; they read compose selection, compose, landing.
+  f.tables.projectHostedLandingRequests.set(
+    'landing',
+    request('terminal-failed', { code: 'CHECK_NOT_PASSED' }),
+  );
+  const failed = await peer({ peer: f.lanes.B });
+  assert.equal(f.invoke.reads, 10, `peer reads with a landing ${f.invoke.reads}`);
+  assert.equal(failed.peer.state, 'failed');
+  assert.equal(failed.peer.terminal, true);
+  assert.deepEqual(failed.peer.landing, {
+    operationId,
+    phase: 'terminal-failed',
+    code: 'CHECK_NOT_PASSED',
+  });
+  f.tables.projectHostedLandingRequests.set(
+    'landing',
+    request('terminal-failed', { code: 'LANDING_CANCELLED' }),
+  );
+  assert.equal((await peer({ peer: f.lanes.B })).peer.state, 'cancelled');
+  f.tables.projectHostedLandingRequests.set('landing', request('landed'));
+  assert.equal((await peer({ peer: f.lanes.B })).peer.state, 'accepted');
+  // The peer saved again after the failure: it is working, so the old failure no longer counts.
+  f.tables.projectHostedLandingRequests.set(
+    'landing',
+    request('terminal-failed', { code: 'CHECK_NOT_PASSED' }),
+  );
+  laneRow('B').presenceRow = { id: 'p', at: Date.parse(settledAt) + 1000 };
+  assert.equal((await peer({ peer: f.lanes.B })).peer.state, 'open');
+  laneRow('B').presenceRow = { id: 'p', at: Date.parse(settledAt) - 1000 };
+  assert.equal((await peer({ peer: f.lanes.B })).peer.state, 'failed');
+  // A closed Lane never reads the landing at all.
+  laneRow('B').open = false;
+  assert.equal((await peer({ peer: f.lanes.B })).peer.state, 'closed');
+  assert(f.invoke.reads <= 7, `closed peer reads ${f.invoke.reads}`);
+});

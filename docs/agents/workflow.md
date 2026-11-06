@@ -204,15 +204,19 @@ Issue (`issue:ISSUE_ID`), or to the whole project (`project`).
   project-wide notes arrive on your next Lane action. The note rides on the wait's
   existing subscription, which watches only your Lane's inbox row.
 - Wait for a peer Lane: after agreeing an order (for example in overlap answers),
-  `wait {"peer":"8826ba84"}` blocks until that Lane lands (`state:"accepted"`, with
-  its receipt and State), is completed, abandoned or closed, or until a note reaches
-  your Lane (`reason:"message"`). It holds one live subscription and nothing else: no
-  polling, nothing left behind after it returns. Exit 0 on a terminal peer, exit 3 on
-  budget or message (run it again). A failed peer landing keeps its Lane open, so
-  the wait continues; to follow a known landing instead, wait on its operation id
-  (`wait {"operationIds":["PEER_LANDING_ID"]}`), which also ends on failure or
-  cancellation. Write members only; the peer is named by Forge handle. MCP:
-  `forge_wait {"peer":...}`. Needs contract feature `board-wait`.
+  `wait {"peer":"8826ba84"}` (a Lane id or 8+ character prefix; exactly one of
+  `runId`, `operationIds` or `peer`) blocks until that Lane lands (`state:"accepted"`,
+  with its receipt and State), its latest landing fails (`state:"failed"`) or is
+  cancelled (`state:"cancelled"`), or the Lane is completed, abandoned or closed, or
+  until a note reaches your Lane (`reason:"message"`). Landing outcomes carry
+  `peer.landing {operationId,phase,code?}`. It works from a clone root or a Lane
+  root. It holds one live subscription and nothing else: no polling, nothing left
+  behind after it returns. Exit 0 on a terminal peer, exit 3 on budget or message
+  (run it again). A peer that saves again after a failed landing is working again,
+  so the wait continues. The server finds the landing through the Lane's newest
+  compose selection and that Candidate's newest landing request (three bounded
+  reads, no new field or write). Write members only; the peer is named by Forge
+  handle. MCP: `forge_wait {"peer":...}`. Needs contract feature `board-wait`.
 
 ## Verbs
 

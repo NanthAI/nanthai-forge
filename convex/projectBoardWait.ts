@@ -4,6 +4,7 @@ import { query } from './cliServer';
 import { activeProject } from './projectAuthority';
 import { finishReadReader } from './projectFinishReadReader';
 import { boardWake } from './projectBoardDelivery';
+import { peerLatestLanding } from './projectBoardPeerLanding';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { invariant } from '../src/errors';
 import { report } from './errors';
@@ -18,7 +19,8 @@ const prefix = /^[0-9a-f]{8}[0-9a-f-]{0,28}$/;
  * the caller's own inbox row. Members with write access only, as presence; people as handles.
  *
  * Reads per run: access (finish-read projection, 1-2 rows), ≤2 head rows (prefix range), 1 overlap
- * row, and with `laneId` 1 inbox row (+ the ≤2-note delivery only when a note is new).
+ * row, for an open Lane its latest landing (≤3 rows: compose selection, compose, landing request),
+ * and with `laneId` 1 inbox row (+ the ≤2-note delivery only when a note is new).
  */
 export const peer = query({
   args: {
@@ -60,6 +62,17 @@ export const peer = query({
         .withIndex('by_project_and_lane', q => q.eq('projectId', input.projectId).eq('laneId', head.key))
         .unique();
       const landed = row?.landed && row.landed.laneHead === row.head ? row.landed : undefined;
+      const closed = head.status === 'abandoned' || head.status === 'completed' || (row && !row.open);
+      // An open Lane whose latest landing failed or was cancelled (or landed without closing it) is
+      // done for a waiter too. Three bounded index reads, no new field or write.
+      const landing =
+        landed || closed
+          ? null
+          : await peerLatestLanding(rawCtx, {
+              projectId: input.projectId,
+              laneId: head.key,
+              recordedAt: row?.presenceRow?.at,
+            });
       const state = landed
         ? 'accepted'
         : head.status === 'abandoned'
@@ -68,7 +81,9 @@ export const peer = query({
             ? 'completed'
             : row && !row.open
               ? 'closed'
-              : 'open';
+              : landing?.phase === 'landed'
+                ? 'accepted'
+                : (landing?.outcome ?? 'open');
       const board =
         input.laneId && input.after !== undefined
           ? await boardWake(ctx, {
@@ -90,6 +105,15 @@ export const peer = query({
                 receiptId: landed.receiptId,
                 commit: landed.commit,
                 at: landed.at,
+              }
+            : {}),
+          ...(landing
+            ? {
+                landing: {
+                  operationId: landing.operationId,
+                  phase: landing.phase,
+                  ...(landing.code ? { code: landing.code } : {}),
+                },
               }
             : {}),
         },

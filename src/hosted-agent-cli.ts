@@ -184,7 +184,10 @@ export async function hostedAgentCli(
                   status: 'terminal',
                   reason: 'peer',
                   peer: outcome.peer,
-                  next: `Peer Lane ${outcome.peer.laneId.slice(0, 8)} is ${outcome.peer.state}. Sync if it landed, then continue.`,
+                  next:
+                    outcome.peer.state === 'failed' || outcome.peer.state === 'cancelled'
+                      ? `Peer Lane ${outcome.peer.laneId.slice(0, 8)}'s latest landing ${outcome.peer.state}; the Lane is still open. Do not wait for it to land; continue or check its status.`
+                      : `Peer Lane ${outcome.peer.laneId.slice(0, 8)} is ${outcome.peer.state}. Sync if it landed, then continue.`,
                 }
               : {
                   status: 'IN_PROGRESS',

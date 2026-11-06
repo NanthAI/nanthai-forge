@@ -234,7 +234,7 @@ export function registerHostedAgentWorkflow(
     'forge_wait',
     {
       description:
-        'Block on the original run or landing operationIds for up to maxWaitMs (default 540000; set it under your client tool timeout). Unfinished work returns IN_PROGRESS with one resume command: call again; follow the terminal outcome and recovery before ending the turn. progressToken enables progress notifications. Only this call subscribes; no polling.',
+        'Block on one of runId, operationIds or peer Lane for up to maxWaitMs (default 540000; set it under your client tool timeout). Unfinished work returns IN_PROGRESS with one resume command: call again; follow the terminal outcome and recovery before ending the turn. progressToken enables progress notifications. Only this call subscribes; no polling.',
 
       inputSchema: {
         ...hostedWaitSchema.shape,

@@ -174,7 +174,7 @@ export const hostedWaitSchema = z
     cursor: z.string().nullable().optional(),
     until: z.enum(['terminal', 'any-change', 'acceptance']).optional(),
     timeoutSeconds: z.number().nonnegative().finite().optional(),
-    /** Wait for a peer Lane (full id or 8+ character prefix) to land or close, or to post to you. */
+    /** Wait for a peer Lane (full id or 8+ character prefix) to land, fail or be cancelled, or close, or to post to you. Exclusive with runId and operationIds. */
     peer: z
       .string()
       .regex(/^[0-9a-fA-F]{8}[0-9a-fA-F-]{0,28}$/, 'a Lane id or 8+ character prefix')

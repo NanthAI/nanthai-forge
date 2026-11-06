@@ -9,6 +9,10 @@ import { isNetworkPending } from './network-continuation.js';
 import { hostedRunSubscription, type HostedRunSubscription } from './hosted-agent-observe.js';
 import type { HostedAgentTransport } from './hosted-agent-transport.js';
 
+/** Replaceable in tests; production subscribes with the live Convex client. */
+export const peerWaitHooks: {
+  subscribe?: (address: HostedAgentTransport['address']) => HostedRunSubscription;
+} = {};
 export type BoardDelivery = z.infer<typeof boardDeliverySchema>;
 /** At most one early wait return per Lane per this window; later notes wait for the next return. */
 export const BOARD_WAKE_WINDOW_MS = 60_000;
@@ -65,12 +69,15 @@ const peerSchema = z.object({
   peer: z.looseObject({
     laneId: z.string(),
     intentId: z.string().optional(),
-    state: z.enum(['open', 'accepted', 'completed', 'abandoned', 'closed']),
+    state: z.enum(['open', 'accepted', 'completed', 'abandoned', 'closed', 'failed', 'cancelled']),
     terminal: z.boolean(),
     actor: z.string().optional(),
     receiptId: z.string().optional(),
     commit: z.string().optional(),
     at: z.string().optional(),
+    landing: z
+      .looseObject({ operationId: z.string(), phase: z.string(), code: z.string().optional() })
+      .optional(),
   }),
   board: z.unknown().optional(),
 });
@@ -94,7 +101,7 @@ type PeerOutcome =
     };
 
 /**
- * Wait until a peer Lane lands or closes, or a note reaches the caller's own Lane. One capability
+ * Wait until a peer Lane lands, its latest landing fails or is cancelled, or the Lane closes, or a note reaches the caller's own Lane. One capability
  * read (as every wait), then ONE live subscription to projectBoardWait:peer for the length of the
  * wait: it re-runs only when the peer's head/overlap row or the caller's inbox row changes. No
  * polling, no other query, nothing after the process exits.
@@ -104,7 +111,8 @@ export async function observePeerLane(
   input: { peer: string; timeoutSeconds: number },
   board: BoardWaitOption | undefined,
   signal?: AbortSignal,
-  subscribe: () => HostedRunSubscription = () => hostedRunSubscription(transport.address),
+  subscribe: () => HostedRunSubscription = () =>
+    (peerWaitHooks.subscribe ?? hostedRunSubscription)(transport.address),
 ): Promise<PeerOutcome> {
   const discovery = await transport.dispatch('capabilities', {});
   if (isNetworkPending(discovery))
