@@ -11,6 +11,7 @@ import { githubSyncCommitSchema, githubSyncSchema } from '../src/github-sync-typ
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { invariant } from '../src/errors';
 import { mirrorMessage } from '../src/landing-message';
+import { missingObjectDelays } from '../src/hosted-github-retry';
 const identity = { jobId: v.id('projectGithubMirrorJobs'), step: v.number() };
 async function seed(ctx: MutationCtx, input: { jobId: Id<'projectGithubMirrorJobs'>; step: number }) {
   const active = await mirrorJob(ctx, input);
@@ -172,6 +173,7 @@ export const failed = internalMutation({
     apiOperation: v.optional(v.string()),
     requestBytes: v.optional(v.number()),
     cursor: v.optional(v.string()),
+    missingObject: v.optional(v.boolean()),
   },
   returns: v.null(),
   handler: async (ctx, input) => {
@@ -182,12 +184,22 @@ export const failed = internalMutation({
     // A checkpointed advance selects a different immutable request. Bound
     // consecutive failures of that request, not failures accumulated while
     // successfully publishing other blobs in the same window.
-    const failures = (input.cursor ? 0 : (job.failures ?? 0)) + 1;
+    let failures = (input.cursor ? 0 : (job.failures ?? 0)) + 1;
+    // GitHub read-after-write lag on this job's own objects (adff6f58): its own
+    // short budget, counted only across consecutive such 422s of this request.
+    const lag = input.missingObject === true && input.httpStatus === 422;
+    if (lag)
+      failures =
+        (!input.cursor && job.status === 'retrying' && job.httpStatus === 422 ? (job.failures ?? 0) : 0) + 1;
     const transient =
       input.code === 'GITHUB_SYNC_API' &&
       (input.httpStatus === 429 ||
         (input.httpStatus !== undefined && input.httpStatus >= 500 && input.httpStatus <= 599));
-    const delay = transient && failures < 5 ? 60_000 * 2 ** (failures - 1) : null;
+    const delay = lag
+      ? (missingObjectDelays[failures - 1] ?? null)
+      : transient && failures < 5
+        ? 60_000 * 2 ** (failures - 1)
+        : null;
     // Advance the worker fence, retaining the exact cursor/seed. Duplicate or
     // late callbacks cannot spend another attempt or overwrite newer progress.
     const step = job.step + 1;

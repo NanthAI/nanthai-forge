@@ -1,7 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { prepareMirror, stepMirror, invalidTreeBlobs } from '../dist/hosted-github-mirror.js';
+import {
+  prepareMirror,
+  stepMirror,
+  invalidTreeBlobs,
+  missingObjectError,
+} from '../dist/hosted-github-mirror.js';
+import { isMissingObject, missingObjectDelays } from '../dist/hosted-github-retry.js';
+import { GithubMirrorApiError } from '../dist/hosted-github-api.js';
 import { githubRequest, githubErrorSummary, githubErrorChars } from '../dist/hosted-github-api.js';
 import { mirrorFixture } from './hosted-github-mirror-fixture.mjs';
 import { gitHash } from '../dist/hosted-github-git.js';
@@ -205,7 +212,7 @@ test('a second tree failure stays terminal with GitHub message; unnamed or forei
     assert.equal(e.code, 'GITHUB_SYNC_API');
     assert.equal(e.status, 422);
     assert.match(e.message, new RegExp(`GitHub error: "tree.sha ${r.named} is not a valid blob"`));
-    assert.match(e.message, /re-uploaded 1 named blob\(s\) and retried the tree once; not retried again\./);
+    assert.match(e.message, /re-uploaded 1 named blob\(s\) and retried the tree once in this step\./);
     return true;
   });
   assert.equal(r.trees.length, 2, 'one retry, no loop');
@@ -217,4 +224,25 @@ test('a second tree failure stays terminal with GitHub message; unnamed or forei
   await assert.rejects(stepMirror(cursor, r.io), e => e.status === 422 && !/re-uploaded/.test(e.message));
   assert.equal(r.trees.length, 3);
   assert.equal(blobs(), 13);
+});
+
+test('shared missing-object policy: only the two 2026-11-06 messages on trees/commits are retryable', () => {
+  assert.deepEqual(missingObjectDelays, [2_000, 10_000]);
+  const sha = 'a'.repeat(40);
+  assert(isMissingObject(422, 'POST git/commits', 'Tree SHA does not exist'));
+  assert(isMissingObject(422, 'POST git/trees', `tree.sha ${sha} is not a valid blob`));
+  assert(!isMissingObject(422, 'POST git/commits', 'Parent SHA does not exist'));
+  assert(!isMissingObject(422, 'POST git/trees', 'GitRPC::BadObjectState'));
+  assert(!isMissingObject(422, 'POST git/blobs', 'Tree SHA does not exist'));
+  assert(!isMissingObject(409, 'POST git/commits', 'Tree SHA does not exist'));
+  assert(!isMissingObject(422, 'POST git/commits', undefined));
+  const err = (status, operation, text) => new GithubMirrorApiError(status, operation, 10, undefined, text);
+  const plan = { changes: [{ type: 'blob', sha }] };
+  assert(missingObjectError(err(422, 'POST git/commits', 'Tree SHA does not exist'), undefined));
+  assert(missingObjectError(err(422, 'POST git/trees', `tree.sha ${sha} is not a valid blob`), plan));
+  assert(
+    !missingObjectError(err(422, 'POST git/trees', `tree.sha ${'b'.repeat(40)} is not a valid blob`), plan),
+  );
+  assert(!missingObjectError(err(422, 'POST git/trees', `tree.sha ${sha} is not a valid blob`), undefined));
+  assert(!missingObjectError(new Error('x'), plan));
 });

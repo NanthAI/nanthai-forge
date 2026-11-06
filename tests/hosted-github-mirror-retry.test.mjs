@@ -11,6 +11,7 @@ import { policyPreset } from '../dist/autonomy-policy.js';
 import { digest } from '../dist/hash.js';
 import { prepareMirror } from '../dist/hosted-github-mirror.js';
 import { githubRequest } from '../dist/hosted-github-api.js';
+import { gitHash } from '../dist/hosted-github-git.js';
 import { hostedMirrorStatusText } from '../dist/hosted-github-mirror-status.js';
 import { readHostedCliStatus } from '../dist/hosted-cli-status.js';
 import { interceptDefaultR2 } from './default-r2.mjs';
@@ -225,6 +226,110 @@ test('real action: GitHub 422 on trees fails once with its bounded message in jo
   const status = await f.status();
   assert.equal(status.detail, `Job for State ${f.github.head.slice(0, 8)}: ${job.detail}`);
   assert.match(hostedMirrorStatusText(status, Date.now()), /GitRPC::BadObjectState/);
+});
+
+// adff6f58: GitHub read-after-write lag on objects this job just created.
+const treeSha = gitHash('blob', Buffer.from('new'));
+const commitReply = () =>
+  Response.json(
+    { message: 'Tree SHA does not exist', documentation_url: 'https://docs.github.com/rest' },
+    { status: 422 },
+  );
+const treeReply = sha =>
+  Response.json({ message: `tree.sha ${sha} is not a valid blob`, status: '422' }, { status: 422 });
+
+test('real action: 422 "Tree SHA does not exist" on commits retries after 2 s, then drains with one commit', async t => {
+  let lag = 1;
+  const f = await fixture(
+    t,
+    () => false,
+    undefined,
+    url => (url.endsWith('/git/commits') && lag-- > 0 ? commitReply() : undefined),
+  );
+  await f.step();
+  assert.equal(f.job().status, 'retrying');
+  assert.equal(f.job().httpStatus, 422);
+  assert.equal(f.job().apiOperation, 'POST git/commits');
+  assert.match(f.job().detail, /GitHub error: "Tree SHA does not exist"/);
+  assert.equal(f.job().failures, 1);
+  assert.equal(f.scheduled.at(-1).delay, 2_000);
+  assert(f.job().nextAttemptAt > Date.now());
+  await f.step();
+  assert.equal(f.job().status, 'done');
+  assert.equal(f.job().failures, 0);
+  assert.equal(f.job().error, undefined);
+  assert.equal(f.scheduled.length, 2, 'one scheduled retry, no timer after recovery');
+  assert.equal(f.github.commits.size, 2, 'exactly one commit for the State');
+  assert.equal(f.github.remote(), JSON.parse(f.job().mapping).commit);
+});
+
+test('real action: 422 "is not a valid blob" on trees re-uploads in step, retries on schedule and drains', async t => {
+  let lag = 2; // the first try and its in-step retry both fail
+  const f = await fixture(
+    t,
+    () => false,
+    undefined,
+    url => (url.endsWith('/git/trees') && lag-- > 0 ? treeReply(treeSha) : undefined),
+  );
+  await f.step();
+  assert.equal(f.job().status, 'retrying');
+  assert.equal(f.job().apiOperation, 'POST git/trees');
+  assert.match(f.job().detail, new RegExp(`tree.sha ${treeSha} is not a valid blob`));
+  assert.equal(f.scheduled.at(-1).delay, 2_000);
+  await f.step();
+  assert.equal(f.job().status, 'done');
+  assert.equal(f.scheduled.length, 2);
+  assert.equal(f.github.remote(), JSON.parse(f.job().mapping).commit);
+});
+
+test('real action: a persistent missing-object 422 gets exactly two scheduled retries, then ends terminal with GitHub message', async t => {
+  const f = await fixture(
+    t,
+    () => false,
+    undefined,
+    url => (url.endsWith('/git/commits') ? commitReply() : undefined),
+  );
+  const commits = () =>
+    f.github.calls.filter(call => call.path.endsWith('/commits') && call.method === 'POST');
+  for (let i = 0; i < 3; i++) await f.step();
+  assert.deepEqual(
+    f.scheduled.map(s => s.delay),
+    [0, 2_000, 10_000],
+  );
+  assert.equal(f.job().status, 'failed');
+  assert.equal(f.job().failures, 3);
+  assert.match(f.job().detail, /GitHub error: "Tree SHA does not exist"/);
+  assert.equal(f.job().nextAttemptAt, undefined);
+  assert.equal(f.scheduled.length, 3, 'terminal: nothing scheduled after the budget');
+  assert.equal(commits().length, 0, 'rejected commits never reach the store');
+  assert.equal(f.github.remote(), f.github.root.commit, 'no ref change');
+  const status = await f.status();
+  assert.equal(status.status, 'failed');
+  assert.match(status.detail, /Tree SHA does not exist/);
+});
+
+test('real action: a persistent tree 422 for a SHA outside this job, or any other 422, stays terminal at once', async t => {
+  const foreign = await fixture(
+    t,
+    () => false,
+    undefined,
+    url => (url.endsWith('/git/trees') ? treeReply('f'.repeat(40)) : undefined),
+  );
+  await foreign.step();
+  assert.equal(foreign.job().status, 'failed');
+  assert.equal(foreign.scheduled.length, 1);
+  const other = await fixture(
+    t,
+    () => false,
+    undefined,
+    url =>
+      url.endsWith('/git/commits')
+        ? Response.json({ message: 'Parent SHA does not exist' }, { status: 422 })
+        : undefined,
+  );
+  await other.step();
+  assert.equal(other.job().status, 'failed');
+  assert.equal(other.scheduled.length, 1);
 });
 
 for (const kind of ['foreign', 'unknown']) {

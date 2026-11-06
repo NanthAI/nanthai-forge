@@ -6,7 +6,13 @@ import { internalAction, type ActionCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import { installationToken } from './githubAppToken';
 import { githubRequest, GithubMirrorApiError } from '../src/hosted-github-api';
-import { prepareMirror, stepMirror, type MirrorPlan, type MirrorIO } from '../src/hosted-github-mirror';
+import {
+  prepareMirror,
+  stepMirror,
+  missingObjectError,
+  type MirrorPlan,
+  type MirrorIO,
+} from '../src/hosted-github-mirror';
 import { MemorySourceReader, MemoryMergeSource } from '../src/hosted-source-memory';
 import { parseNativeState } from '../src/native-state-format';
 import type { WorkerObject, WorkerPin } from '../src/hosted-source-worker-format';
@@ -137,6 +143,7 @@ export const step = internalAction({
         ...(error instanceof GithubMirrorApiError
           ? { httpStatus: error.status, apiOperation: error.operation, requestBytes: error.requestBytes }
           : {}),
+        ...(missingObjectError(error, plan) ? { missingObject: true } : {}),
         detail:
           (error instanceof ForgeError
             ? error.message

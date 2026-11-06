@@ -509,8 +509,14 @@ accept a blob POST and still answer a later tree POST with HTTP 422
 "tree.sha X is not a valid blob" (for example when the object already existed,
 unreachable, from a deleted check ref). The mirror then re-uploads exactly the
 named blobs of that tree from verified Forge bytes and retries the identical
-tree once in the same step; a second failure stays terminal with GitHub's
-message and a note that the retry ran. Five
+tree once in the same step. That failure and GitHub's other read-after-write lag
+(`POST git/commits` 422 "Tree SHA does not exist" for the tree this job just
+created) share one bounded policy: a 422 on `git/trees` or `git/commits` whose
+message names a missing or invalid SHA this job created or uploaded is retried
+by a scheduled step after 2 s and then 10 s (no busy wait, no call on the
+healthy path). A third failure ends terminal with GitHub's message kept; every
+other 422 is terminal at once. The job keeps its place at the head of the queue
+while it retries, so later jobs wait as before. Five
 consecutive failures without checkpointed progress end in a terminal failure.
 A fully successful step or a durable advance to a different blob resets the
 budget; an unsuccessful cursor save does not. Failure details retain validated

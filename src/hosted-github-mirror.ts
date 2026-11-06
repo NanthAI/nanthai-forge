@@ -3,6 +3,7 @@ import type { NativeFile, NativeState } from './native-state-format.js';
 import type { GithubSyncCommit } from './github-sync-types.js';
 import { GithubMirrorApiError, type GithubRequest } from './hosted-github-api.js';
 import { gitlinkCommit } from './gitlink.js';
+import { isMissingObject, treeBlobPattern } from './hosted-github-retry.js';
 import { gitHash, gitTree, gitMode, githubCommit } from './hosted-github-git.js';
 import { sourceExclusion } from './files.js';
 import { invariant } from './errors.js';
@@ -112,14 +113,32 @@ export function invalidTreeBlobs(error: unknown): string[] {
     error.operation !== 'POST git/trees'
   )
     return [];
-  const named = (error.githubError ?? '').matchAll(/\btree\.sha ([0-9a-f]{40}) is not a valid blob\b/g);
+  const named = (error.githubError ?? '').matchAll(new RegExp(treeBlobPattern.source, 'g'));
   return [...new Set([...named].map(match => match[1]!))];
+}
+/** Shared scheduled-retry gate (hosted-github-retry.ts): a 422 on git/trees or
+ * git/commits naming a missing/invalid SHA this job created or uploaded. A tree
+ * entry naming a SHA outside this plan's own blobs is not ours: terminal. */
+export function missingObjectError(error: unknown, plan: MirrorPlan | undefined): boolean {
+  if (
+    !(error instanceof GithubMirrorApiError) ||
+    !isMissingObject(error.status, error.operation, error.githubError)
+  )
+    return false;
+  if (error.operation !== 'POST git/trees') return true;
+  const named = invalidTreeBlobs(error);
+  return (
+    !!plan &&
+    named.length > 0 &&
+    named.every(sha => plan.changes.some(entry => entry.type === 'blob' && entry.sha === sha))
+  );
 }
 /** GitHub can accept a blob POST (201, same SHA) yet reject that SHA in a later
  * tree POST, for example when the object already existed unreachable from a
  * deleted check ref (incident 8568bc76). Re-upload exactly the named blobs of
  * this tree from verified Forge bytes, then retry the identical tree once.
- * Bounded by the tree's own entries; a second failure stays terminal. */
+ * Bounded by the tree's own entries; a second failure throws to the shared
+ * scheduled policy (hosted-github-retry.ts), which ends terminal. */
 async function createTree(plan: MirrorPlan, io: MirrorIO, prefix: string): Promise<string> {
   const body = { base_tree: plan.baseTree, tree: plan.changes };
   try {
@@ -150,7 +169,7 @@ async function createTree(plan: MirrorPlan, io: MirrorIO, prefix: string): Promi
       return (await io.api<{ sha: string }>(`${prefix}/trees`, 'POST', body)).sha;
     } catch (retry) {
       if (retry instanceof GithubMirrorApiError)
-        retry.message += ` Forge re-uploaded ${named.length} named blob(s) and retried the tree once; not retried again.`;
+        retry.message += ` Forge re-uploaded ${named.length} named blob(s) and retried the tree once in this step.`;
       throw retry;
     }
   }
