@@ -5,18 +5,26 @@ import { stepExcerptChars } from './hosted-landing-suspect.js';
 type FailedRun = {
   testFiles?: { counts?: { failed: number }; failed: { file: string }[] } | undefined;
   contractReports?:
-    | Record<string, { failed: boolean; flaky?: boolean | undefined; firstError?: string | undefined }>
+    | Record<
+        string,
+        {
+          failed: boolean;
+          flaky?: boolean | undefined;
+          firstError?: string | undefined;
+        }
+      >
     | undefined;
 };
 const line = (text: string, max: number) => scrubText(text.replace(/\s+/g, ' ').trim(), max);
 
 /** What a settled failed check names, in one bounded, secret-safe sentence: the
- * first failing files with their first error, else the failing job and its most
+ * first failing file with its first error and a count of the rest (the land output and
+ * `status --detail` list each file with its first error), else the failing job and its most
  * specific line. Reads only what the run already retained; never a log fetch. */
 export function checkFailureDetail(
   run: FailedRun,
   step?: { job: string; excerpt: string } | null,
-  files = 3,
+  files = 1,
 ): string {
   const reports = run.contractReports ?? {};
   const failed = [
@@ -43,7 +51,7 @@ export function checkFailureDetail(
       return `${line(file, 200)}${error ? ` (${line(error, 240)})` : ''}`;
     });
     const total = Math.max(failed.length, run.testFiles?.counts?.failed ?? 0);
-    return `Failing: ${shown.join('; ')}${total > shown.length ? `; +${total - shown.length} more` : ''}.${flakyNote}`;
+    return `Failing: ${shown.join('; ')}${total > shown.length ? `; +${total - shown.length} more failed file${total - shown.length === 1 ? '' : 's'}` : ''}.${flakyNote}`;
   }
   if (step) return `Failing ${line(step.job, 60)}: ${line(step.excerpt, stepExcerptChars)}${flakyNote}`;
   return 'No failing test file or job step was reported; open the check run log.';

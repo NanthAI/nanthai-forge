@@ -99,7 +99,10 @@ test('CHECK_FAILED names the failing step and first error, with the next step', 
     contractReports: reports,
     testFiles: { counts: { failed: 5 }, failed: Object.keys(reports).map(file => ({ file })) },
   });
-  assert.match(files, /^Failing: tests\/f0\.test\.mjs \(expected 0 token=\[redacted\]\); .*; \+2 more\.$/);
+  assert.match(
+    files,
+    /^Failing: tests\/f0\.test\.mjs \(expected 0 token=\[redacted\]\); \+4 more failed files\.$/,
+  );
   assert.equal(
     checkFailureDetail({}),
     'No failing test file or job step was reported; open the check run log.',

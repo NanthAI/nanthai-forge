@@ -324,7 +324,7 @@ test('land summary names the outcome, each failing file and its first error', ()
         testFiles: { counts: { total: 30, failed: 22, flaky: 0 }, failed, flaky: [] },
       }),
     ).at(-1),
-    '  ... 2 more failing files',
+    '  ... 2 more failing files; all names: status --detail',
   );
 });
 

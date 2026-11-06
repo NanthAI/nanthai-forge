@@ -7,9 +7,10 @@ import {
   capCheckReports,
   checkCallbackReceiptBytes,
   checkReportExcerptBytes,
+  encodedBytes,
 } from '../dist/check-report-cap.js';
 import { canonicalPayload } from '../dist/hosted-source-operation.js';
-import { checkFileSummary } from '../dist/check-file-summary.js';
+import { checkFileSummary, failedErrorBytes } from '../dist/check-file-summary.js';
 import { semanticReportsSchema } from '../dist/intent-semantic-conflict.js';
 import { hostedCheckRunSchema } from '../dist/hosted-check.js';
 import { checksFixture } from './hosted-checks-fixture.mjs';
@@ -42,7 +43,16 @@ test('1,000 failed file identities survive a deterministic, idempotent UTF-8 exc
   const summary = checkFileSummary(capped.reports);
   assert.equal(summary.failed.length, 1000);
   assert.equal(summary.truncated, 1000);
-  assert(summary.failed.every(({ report }) => !('firstError' in report)));
+  // Issue 58236de6: the first failedErrors failed files keep a bounded first error; the rest are names only.
+  // Emoji errors are 7+ JSON-escaped bytes per character, so the 6 KiB byte budget ends the list before 20.
+  const named = summary.failed.filter(({ report }) => 'firstError' in report);
+  assert(named.length >= 1 && named.length <= 20);
+  assert.equal(
+    named.length,
+    summary.failed.slice(0, named.length).filter(({ report }) => 'firstError' in report).length,
+  );
+  assert(named.reduce((n, { report }) => n + encodedBytes(report.firstError), 0) <= failedErrorBytes);
+  assert(summary.failed.every(({ report }) => (report.firstError?.length ?? 0) <= 240));
   assert(input[Object.keys(input)[0]].firstError.length === 2048, 'input unchanged');
   const heapGrowthBytes = process.memoryUsage().heapUsed - before;
   assert(heapGrowthBytes < 32 * 1024 * 1024);
@@ -61,23 +71,37 @@ test('1,000 failed file identities survive a deterministic, idempotent UTF-8 exc
 test('small reports keep original excerpts and verdicts, including flaky passes', () => {
   const input = {
     ...failures(2, 'assertion failed'),
-    'tests/flaky.test.mjs': { failed: false, flaky: true, firstError: 'first attempt' },
+    'tests/flaky.test.mjs': {
+      failed: false,
+      flaky: true,
+      firstError: 'first attempt',
+    },
   };
   assert.deepEqual(capCheckReports(input), { reports: input, truncated: 0 });
-  assert.deepEqual(checkFileSummary(input).counts, { total: 3, failed: 2, flaky: 1 });
+  assert.deepEqual(checkFileSummary(input).counts, {
+    total: 3,
+    failed: 2,
+    flaky: 1,
+  });
 });
 test('a complete valid hosted run document stays within 256 KiB for 1,000 failures', async t => {
   const s = await checksFixture();
   const run = await s.activate((await s.enqueue(s.selection())).id, 1);
   const reports = failures(1000);
   const capped = capCheckReports(reports).reports;
-  const terminal = { ...run, contractReports: capped, testFiles: checkFileSummary(capped) };
+  const terminal = {
+    ...run,
+    contractReports: capped,
+    testFiles: checkFileSummary(capped),
+  };
   hostedCheckRunSchema.parse(terminal);
   const row = [...s.tables.projectHostedCheckRuns.values()].find(row => row.runId === run.id);
   // Fake database validates the full real Convex document, not a partial fixture.
   await s.transaction(
     'report-cap-scale',
-    { _handler: ctx => ctx.db.patch(row._id, { value: JSON.stringify(terminal) }) },
+    {
+      _handler: ctx => ctx.db.patch(row._id, { value: JSON.stringify(terminal) }),
+    },
     {},
   );
   const saved = s.tables.projectHostedCheckRuns.get(row._id);
@@ -85,7 +109,11 @@ test('a complete valid hosted run document stays within 256 KiB for 1,000 failur
   const beforeBytes = Buffer.byteLength(
     JSON.stringify({
       ...row,
-      value: JSON.stringify({ ...run, contractReports: reports, testFiles: checkFileSummary(reports) }),
+      value: JSON.stringify({
+        ...run,
+        contractReports: reports,
+        testFiles: checkFileSummary(reports),
+      }),
     }),
   );
   assert(documentBytes <= 256 * 1024, `${documentBytes} byte run document`);
@@ -98,7 +126,9 @@ test('a complete valid hosted run document stays within 256 KiB for 1,000 failur
     });
     await s.transaction(
       'report-cap-escaped',
-      { _handler: ctx => ctx.db.patch(row._id, { value: JSON.stringify(escapedRun) }) },
+      {
+        _handler: ctx => ctx.db.patch(row._id, { value: JSON.stringify(escapedRun) }),
+      },
       {},
     );
     assert(Buffer.byteLength(JSON.stringify(s.tables.projectHostedCheckRuns.get(row._id))) <= 256 * 1024);
@@ -162,7 +192,9 @@ test('the retained callback receipt of a callback over 1 MiB stays under the rec
   const s = await checksFixture();
   const run = await s.activate((await s.enqueue(s.selection())).id, 1);
   await s.callback(s.shard(run, 0, 'failed'));
-  const callback = s.complete(run, 'failed', { contractReports: failures(1000) });
+  const callback = s.complete(run, 'failed', {
+    contractReports: failures(1000),
+  });
   assert(Buffer.byteLength(JSON.stringify(callback)) > 1024 * 1024);
   const { receiveHostedCheckCallback } = await import(
     (await import('./convex-module.mjs')).moduleUrl('../convex/projectHostedCheckCallbacks.ts')
@@ -193,8 +225,15 @@ test('the retained callback receipt of a callback over 1 MiB stays under the rec
 });
 
 test('callback receipts keep small callbacks verbatim and fall back to a file count when names alone are too large', () => {
-  const base = { schema: 1, eventId: 'e', result: { kind: 'complete', status: 'failed', exitCode: 1 } };
-  const small = { ...base, result: { ...base.result, contractReports: failures(3, 'boom') } };
+  const base = {
+    schema: 1,
+    eventId: 'e',
+    result: { kind: 'complete', status: 'failed', exitCode: 1 },
+  };
+  const small = {
+    ...base,
+    result: { ...base.result, contractReports: failures(3, 'boom') },
+  };
   assert.equal(callbackReceipt(small), canonicalPayload(small));
   const names = Object.fromEntries(
     Array.from({ length: 4000 }, (_, i) => [`tests/${'n'.repeat(120)}-${i}.test.mjs`, { failed: true }]),
@@ -208,7 +247,11 @@ test('callback receipts keep small callbacks verbatim and fall back to a file co
 
 test('the first 32 failed files keep excerpts ahead of recovered flakes', () => {
   const input = {
-    'tests/a-flaky.test.mjs': { failed: false, flaky: true, firstError: 'flaky assertion' },
+    'tests/a-flaky.test.mjs': {
+      failed: false,
+      flaky: true,
+      firstError: 'flaky assertion',
+    },
     ...failures(32, 'failed assertion'),
   };
   const capped = capCheckReports(input);

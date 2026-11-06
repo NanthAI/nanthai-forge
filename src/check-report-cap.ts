@@ -11,7 +11,7 @@ const marker = '\n[excerpt truncated]';
 const encoder = new TextEncoder();
 // Reports are JSON inside the run document's string value. Count both levels
 // of escaping so quotes/control characters cannot amplify the stored document.
-const encodedBytes = (text: string) => encoder.encode(JSON.stringify(JSON.stringify(text))).length - 6;
+export const encodedBytes = (text: string) => encoder.encode(JSON.stringify(JSON.stringify(text))).length - 6;
 function excerpt(text: string) {
   if (encodedBytes(text) <= excerptBytes) return text;
   let prefix = '',

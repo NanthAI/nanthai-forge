@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { HostedAgentResponse } from './hosted-agent-transport.js';
+import { scrubText } from './client-error-text.js';
+import { failedErrorChars, failedErrors } from './check-file-summary.js';
 import { retryableFinishSource } from './hosted-agent-finish-result.js';
 
 export const terminalPhases = new Set(['landed', 'terminal-failed']);
@@ -84,15 +86,22 @@ export function landSummary(response: HostedAgentResponse): string[] {
   else if (result.retryCommand) lines.push(`Retry: ${result.retryCommand}`);
   if (!lines.length && ['save', 'compose', 'sync'].includes(result.phase ?? ''))
     return ['SOURCE PENDING', ...(result.command ? [`Continue: ${result.command}`] : [])];
-  // The failure message already names its first files and errors; list the rest.
-  for (const file of submission?.testFiles?.failed
-    ?.filter(item => !error?.message.includes(item.file))
-    .slice(0, 20) ?? [])
+  // The failure message names its first file and counts the rest; list every other failing file with
+  // its first error, bounded (failedErrors files of failedErrorChars), then one "N more" line.
+  const failedFiles = submission?.testFiles?.failed ?? [];
+  const others = failedFiles.filter(item => !error?.message.includes(item.file));
+  const named = failedFiles.length - others.length,
+    shown = others.slice(0, Math.max(failedErrors - named, 0));
+  for (const file of shown)
     lines.push(
-      `  ${file.file}${file.report?.firstError ? ` :: ${file.report.firstError.replace(/\s+/g, ' ').slice(0, 300)}` : ''}`,
+      `  ${scrubText(file.file, 200)}${file.report?.firstError ? ` :: ${scrubText(file.report.firstError.replace(/\s+/g, ' '), failedErrorChars)}` : ''}`,
     );
-  const more = (submission?.testFiles?.counts?.failed ?? 0) - 20;
-  if (more > 0) lines.push(`  ... ${more} more failing files`);
+  const more =
+    Math.max(failedFiles.length, submission?.testFiles?.counts?.failed ?? 0) - named - shown.length;
+  if (more > 0)
+    lines.push(
+      `  ... ${more} more failing file${more === 1 ? '' : 's'}${response.operationId ? `; all names: nforge agent ROOT status '{"operationId":"${response.operationId}"}' --detail` : '; all names: status --detail'}`,
+    );
   return lines;
 }
 
