@@ -58,16 +58,24 @@ export const read = query({
       });
       invariant(record, 'NOT_FOUND', 'Hosted Lane not found on this project.');
       const lane = hostedLaneSchema.parse(JSON.parse(record.value));
+      const channel = hostedStartMain(ctx, projectId);
+      // The compact main path history (up to 128 KB, grows with project history) only feeds
+      // `behindMain`, and hostedOverlapAdvice ignores it for a Lane based on the current main head
+      // (no conflicts, coverage complete). Level Lanes therefore never read it.
       const [mine, main, latest] = await Promise.all([
         ctx.db
           .query('projectHostedOverlapLanes')
           .withIndex('by_project_and_lane', q => q.eq('projectId', projectId).eq('laneId', laneId))
           .unique(),
-        hostedStartMain(ctx, projectId),
-        ctx.db
-          .query('projectHostedOverlapMain')
-          .withIndex('by_project', q => q.eq('projectId', projectId))
-          .unique(),
+        channel,
+        channel.then(current =>
+          lane.base.head === current.head
+            ? null
+            : ctx.db
+                .query('projectHostedOverlapMain')
+                .withIndex('by_project', q => q.eq('projectId', projectId))
+                .unique(),
+        ),
       ]);
       let baseSequence = mine?.baseSequence ?? null;
       if (baseSequence === null) {

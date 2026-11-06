@@ -1176,3 +1176,114 @@ test('board notes arrive on a Lane action once per machine; old clients and read
   );
   assert.equal('board' in reader, false, 'readers never see board content');
 });
+
+/** A busy project at dogfood scale: 8 open Lanes of 25 saved paths each, a long main history. Returns
+ * the Lane under test, which has saved changes and sits behind or level with main. */
+async function busyProject(t, { behind }) {
+  const { s, lane, main, channel } = await setup(t);
+  const paths = Array.from({ length: 25 }, (_, i) => delta(`src/area-${i}/file.ts`));
+  await trackChange(s, lane, paths);
+  const rows = [...s.tables.projectHostedOverlapLanes.values()];
+  const mineRow = rows.find(row => row.laneId === lane.id);
+  for (let i = 0; i < 7; i++) {
+    const peerId = randomUUID();
+    s.insert('projectHostedRecordHeads', {
+      projectId: s.projectId,
+      kind: 'lane',
+      key: peerId,
+      parent: randomUUID(),
+      status: 'active',
+      version: 0,
+      recordId: 'synthetic',
+    });
+    const own = paths.map((change, n) => ({
+      ...change,
+      // Two shared paths per peer, the rest private to that peer.
+      path: n < 2 ? change.path : `src/peer-${i}/file-${n}.ts`,
+      after: { ...change.after, blob: digest(peerId + n) },
+    }));
+    const { _id, _creationTime, presenceRow, ...template } = mineRow;
+    s.insert('projectHostedOverlapLanes', {
+      ...template,
+      laneId: peerId,
+      intentId: randomUUID(),
+      actor: 'owner',
+      recordVersion: 0,
+      intent: 'Synthetic peer',
+      head: 'b'.repeat(64),
+      ...mergeOverlapChanges([], own),
+    });
+  }
+  // A long main history: 1,500 touched paths, the shape the compact summary keeps.
+  const history = advanceOverlapMain(
+    null,
+    5,
+    Array.from({ length: 1500 }, (_, i) => `src/old/module-${i}/index.ts`),
+  );
+  s.insert('projectHostedOverlapMain', { projectId: s.projectId, ...history });
+  // Level with main means based on the current head, so its base sequence is the current revision.
+  if (!behind) s.patch('projectHostedOverlapLanes', mineRow._id, { baseSequence: 5 });
+  s.patch('projectHostedChannels', channel, {
+    selection: JSON.stringify({
+      ...main,
+      sourceRevision: 5,
+      head: behind ? 'c'.repeat(64) : lane.base.head,
+    }),
+  });
+  return { s, lane };
+}
+
+const metered = async (s, lane, name) => {
+  const response = JSON.parse(
+    await s.transaction(name, overlaps.read, { projectId: s.projectId, laneId: lane.id }),
+  );
+  return { response, meter: s.counts.at(-1) };
+};
+
+test('overlap read: a Lane level with main never reads the main path history; a Lane behind main still does', async t => {
+  const level = await busyProject(t, { behind: false });
+  const { response: levelResponse, meter: levelMeter } = await metered(level.s, level.lane, 'level');
+  const behind = await busyProject(t, { behind: true });
+  const { response: behindResponse, meter: behindMeter } = await metered(behind.s, behind.lane, 'behind');
+  t.diagnostic(
+    JSON.stringify({
+      level: {
+        documents: levelMeter.documents,
+        readBytes: levelMeter.readBytes,
+        byTable: levelMeter.readBytesByTable,
+      },
+      behind: {
+        documents: behindMeter.documents,
+        readBytes: behindMeter.readBytes,
+        byTable: behindMeter.readBytesByTable,
+      },
+    }),
+  );
+  assert(!levelMeter.touched.includes('projectHostedOverlapMain'), 'level Lane skips the path history');
+  assert(
+    behindMeter.touched.includes('projectHostedOverlapMain'),
+    'a Lane behind main reads the path history',
+  );
+  assert(
+    behindMeter.readBytes - levelMeter.readBytes > 40 * 1024,
+    'the 1,500-path history is the difference',
+  );
+  // Same answer as when the history is present: level means no commits behind, no conflicts, complete.
+  assert.equal(levelResponse.behindMain.commits, 0);
+  assert.deepEqual(levelResponse.behindMain.conflictingPaths, []);
+  assert.equal(levelResponse.behindMain.coverage, 'hosted');
+  assert.equal(levelResponse.unacknowledgedOverlaps.count, behindResponse.unacknowledgedOverlaps.count);
+  // Behind main with a touched path still reports the conflict.
+  const touched = [...behind.s.tables.projectHostedOverlapMain.values()][0];
+  behind.s.patch('projectHostedOverlapMain', touched._id, {
+    ...advanceOverlapMain(touched, 6, ['src/area-3/file.ts']),
+  });
+  behind.s.patch('projectHostedChannels', [...behind.s.tables.projectHostedChannels.keys()][0], {
+    selection: JSON.stringify({
+      ...JSON.parse([...behind.s.tables.projectHostedChannels.values()][0].selection),
+      sourceRevision: 6,
+    }),
+  });
+  const { response } = await metered(behind.s, behind.lane, 'behind-conflict');
+  assert.deepEqual(response.behindMain.conflictingPaths, ['src/area-3/file.ts']);
+});
