@@ -15,6 +15,7 @@ code at the same time. Start with the guide that matches your task.
 - [Architecture](architecture.md) and [decisions](decisions.md): how Forge is built.
 - [Operations](operations.md): hosting, source exchange and check runners.
 - [Hosted landing ownership contract](operations/hosted-landing-contract.md): shared submission/fencing rules and deferred native-owner migration gaps.
+- [Story: parallel builders coordinate](stories/2026-11-05-parallel-builders-coordinate.md): the real overlap answers, board notes and peer wait 13 agents used on one night.
 - [Security](security.md): trust boundaries and authorization.
 - [Development](development.md): contributing and verification.
 - [Status](status.md), [roadmap](roadmap.md) and [backlog](backlog.md): public development tracking.
