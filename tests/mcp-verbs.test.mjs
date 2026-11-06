@@ -153,14 +153,21 @@ async function connect(t, register) {
   };
   return { client, call };
 }
+// Native listings carry one schema variant per form; the hosted listing is compact and names each
+// form in the command's per-action signature ("save:sync|candidate(laneId)").
 const modesOf = tools =>
-  tools.flatMap(tool =>
-    (tool.inputSchema.properties?.command?.anyOf ?? [])
+  tools.flatMap(tool => {
+    const command = tool.inputSchema.properties?.command;
+    const variants = (command?.anyOf ?? [])
       .filter(option => ['start', 'save', 'land'].includes(option.properties?.action?.const))
       .flatMap(option =>
         (option.properties.mode?.enum ?? []).map(mode => `${option.properties.action.const}/${mode}`),
-      ),
-  );
+      );
+    const signed = [...(command?.description ?? '').matchAll(/\b(start|save|land):([a-z|-]+)\(/g)].flatMap(
+      ([, verb, modes]) => modes.split('|').map(mode => `${verb}/${mode}`),
+    );
+    return [...variants, ...signed];
+  });
 
 async function nativeFixture(t) {
   const root = mkdtempSync(join(tmpdir(), 'forge-mcp-verbs-'));

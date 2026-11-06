@@ -1,0 +1,100 @@
+// SPDX-License-Identifier: Apache-2.0
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
+import { registerAgentWorkflow } from '../dist/mcp-agent-workflow.js';
+import { agentFixture } from './hosted-agent-fixture.mjs';
+
+// Issue 47558a99: the advertised tool list is per-session context. Budgets are in characters of the
+// tools/list JSON; tokens are about chars / 4. Raise one only with before/after numbers on the Issue.
+const LIST_CHARS = 12_000; // 2026-11-06: 11,725 (was 54,565)
+const DESCRIPTION_CHARS = 2_400; // 2026-11-06: 2,259 (was 3,955)
+const body = response => JSON.parse(response.content[0].text);
+
+async function connect(t) {
+  const s = agentFixture(t),
+    server = new McpServer({ name: 'nanthai-forge', version: 'test' }),
+    close = registerAgentWorkflow(server, s.root, s.transport()),
+    client = new Client({ name: 'test', version: '1' }),
+    [a, b] = InMemoryTransport.createLinkedPair();
+  await server.connect(a);
+  await client.connect(b);
+  t.after(async () => {
+    close();
+    await client.close();
+    await server.close();
+  });
+  const help = async topic =>
+    body(
+      await client.callTool({
+        name: 'forge_work_overview',
+        arguments: { command: topic === undefined ? { action: 'help' } : { action: 'help', topic } },
+      }),
+    );
+  return { s, client, help };
+}
+
+test('the hosted tool list stays inside its context budget', async t => {
+  const { client } = await connect(t);
+  const tools = (await client.listTools()).tools;
+  assert.equal(tools.length, 8);
+  const chars = JSON.stringify(tools).length;
+  const descriptions = tools.reduce((n, tool) => n + tool.description.length, 0);
+  t.diagnostic(`tools/list ${chars} chars (~${Math.ceil(chars / 4)} tokens); descriptions ${descriptions}`);
+  assert(chars <= LIST_CHARS, `tool list characters: ${chars}`);
+  assert(descriptions <= DESCRIPTION_CHARS, `description characters: ${descriptions}`);
+});
+
+test('every action stays reachable: listed, with its exact schema and fields behind help', async t => {
+  const { client, help } = await connect(t);
+  const tools = (await client.listTools()).tools;
+  const index = await help();
+  assert.deepEqual(index.topics.map(topic => topic.tool).sort(), tools.map(tool => tool.name).sort());
+  let actions = 0;
+  for (const tool of tools) {
+    const command = tool.inputSchema.properties.command;
+    if (!command) continue;
+    for (const action of command.properties.action.enum) {
+      actions++;
+      const detail = await help(action);
+      assert(detail.variants?.length, `${tool.name} ${action} has no help`);
+      // The verb forms (start, save, land) exist on more than one tool: judge each variant on its own tool.
+      for (const { tool: owner, schema } of detail.variants) {
+        const listed = tools.find(candidate => candidate.name === owner).inputSchema.properties.command;
+        for (const key of Object.keys(schema.properties))
+          assert(Object.hasOwn(listed.properties, key), `${owner} ${action} field ${key} is not listed`);
+        for (const key of schema.required ?? [])
+          if (key !== 'action' && key !== 'mode')
+            assert(listed.description.includes(key), `${owner} ${action} required ${key} is not listed`);
+      }
+    }
+  }
+  assert(actions >= 40, `listed actions: ${actions}`);
+});
+
+test('long tool prose and the project rules moved to help, not lost', async t => {
+  const { help } = await connect(t);
+  const task = await help('forge_task');
+  assert.match(task.description, /Finish always requests agent acceptance/);
+  assert.match(task.description, /Pinned Lanes skip/);
+  assert.match(task.description, /Project rules:/);
+  assert((await help('forge_wait')).description.includes('progressToken'));
+  assert.equal((await help('no-such-topic')).error.code, 'BAD_ARGUMENT');
+});
+
+test('the compact listing changes nothing about validation', async t => {
+  const { s, client } = await connect(t);
+  for (const command of [
+    { action: 'ack', laneId: s.lane.laneId, unknownField: true },
+    { action: 'finish', laneId: s.lane.laneId, agent: false },
+    { action: 'help', topic: 'x'.repeat(65) },
+  ])
+    assert.equal(
+      (await client.callTool({ name: 'forge_task', arguments: { command } })).isError,
+      true,
+      JSON.stringify(command),
+    );
+  assert.equal(s.calls.length, 0, 'invalid commands reach no remote function');
+});

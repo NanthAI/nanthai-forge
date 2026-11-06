@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { waitEventLine } from './hosted-wait-line.js';
 import { clientCacheRoot } from './root-paths.js';
 import { isNetworkPending } from './network-continuation.js';
 import { normalizeHostedFinishResult, retryableFinishSource } from './hosted-agent-finish-result.js';
@@ -198,8 +199,13 @@ async function waitLanding(
   process.once('SIGINT', stop);
   process.once('SIGTERM', stop);
   try {
+    let lastKey = '';
     const emit = (event: unknown) => {
-      process.stdout.write(`${JSON.stringify(event)}\n`);
+      const compact = waitEventLine(event);
+      if (compact && compact.key !== lastKey) {
+        lastKey = compact.key;
+        process.stdout.write(`${JSON.stringify(compact.line)}\n`);
+      }
       if ((event as { type?: string }).type === 'observation-retry')
         process.stderr.write(
           'land: observation unavailable; landing still in progress. Continuing to wait.\n',

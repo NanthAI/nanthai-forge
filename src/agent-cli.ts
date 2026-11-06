@@ -493,7 +493,7 @@ function clientOptions(tail: string[]) {
         'Use --message-file FILE once (- reads stdin).',
       );
       messageFile = tail[++index];
-    } else rest.push(arg);
+    } else if (arg !== '--detail') rest.push(arg); // --detail: print the full receipt (handled where it prints)
   }
   return { rest, wait, messageFile, budget };
 }

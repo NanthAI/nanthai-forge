@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { slimReceipt } from './receipt-slim.js';
 import { callerOverlaps, withCallerOverlaps } from './agent-caller-overlaps.js';
 import { overlapBannerOnce } from './hosted-overlap-notice.js';
 import { metricsCli } from './metrics-cli.js';
@@ -499,8 +500,11 @@ try {
     if (overlaps) process.stderr.write(JSON.stringify({ unacknowledgedOverlaps: overlaps }) + '\n');
   }
   if (output !== undefined) {
+    // Hosted agent receipts leave the process without the facts the agent already holds; --detail keeps all.
+    const printed =
+      process.argv[2] === 'agent' && !process.argv.includes('--detail') ? slimReceipt(output) : output;
     process.stdout.write(
-      `${JSON.stringify(output, null, process.argv[2] === 'agent' || process.argv[2] === 'x' || (process.argv[2] === 'host' && process.argv.includes('--json')) ? undefined : 2)}\n`,
+      `${JSON.stringify(printed, null, process.argv[2] === 'agent' || process.argv[2] === 'x' || (process.argv[2] === 'host' && process.argv.includes('--json')) ? undefined : 2)}\n`,
     );
     // The JSON receipt on stdout carries overlapNotice too; the banner keeps it from being missed in a log.
     const notice = (output as { overlapNotice?: Parameters<typeof overlapBannerOnce>[0] } | null)

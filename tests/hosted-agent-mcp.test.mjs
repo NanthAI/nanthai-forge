@@ -19,6 +19,7 @@ import { hostedAgentCommandSchemas, hostedAgentAction } from '../dist/hosted-age
 import { startMcp } from '../dist/mcp.js';
 import { agentCli } from '../dist/agent-cli.js';
 import { agentFixture } from './hosted-agent-fixture.mjs';
+import { slimReceipt } from '../dist/receipt-slim.js';
 
 function syntheticAuth(t) {
   const previous = process.env.FORGE_AUTH_TOKEN;
@@ -112,7 +113,7 @@ for (const action of [
     const response = await tool.call({ command: parsed });
     assert(!response.isError, response.content[0].text);
     const actual = body(response);
-    assert.deepEqual(actual, await s.transport().dispatch(requested, input));
+    assert.deepEqual(actual, slimReceipt(await s.transport().dispatch(requested, input)));
     const { operationId, ...data } = input;
     const expected = hostedAgentCommandSchemas[hostedAgentAction(action)].parse(
       ['status', 'observe'].includes(action) ? input : data,
@@ -166,7 +167,8 @@ for (const [action, api] of [
         ? original.operationId
         : JSON.parse(original.request).operationId,
     );
-    assert.deepEqual(body(await tool.call({ command: { action, ...input } })), cli);
+    // MCP replies carry the same receipt as the CLI prints: without the facts the agent already holds.
+    assert.deepEqual(body(await tool.call({ command: { action, ...input } })), slimReceipt(cli));
     assert.deepEqual(s.calls.filter(call => call.name === api).at(-1).args, original);
     if (action === 'finish') assert.equal(cli.result.submission.request.agent, true);
   });
@@ -198,11 +200,18 @@ test('real MCP discovery preserves agent-only authority with strict schemas and 
   // Decision conversation attribution has a legitimate nested agent field.
   // Acceptance authority must remain absent from the finish command itself.
   const task = tools.find(tool => tool.name === 'forge_task');
-  const variants = task.inputSchema.properties.command.anyOf;
-  assert.ok(Array.isArray(variants));
-  const finish = variants.find(option => option.properties?.action?.const === 'finish');
+  // The listing is compact; help serves the exact schema of an action.
+  const help = body(
+    await client.callTool({
+      name: 'forge_work_overview',
+      arguments: { command: { action: 'help', topic: 'finish' } },
+    }),
+  );
+  const finish = help.variants.find(variant => variant.tool === 'forge_task')?.schema;
   assert.ok(finish);
   assert(!Object.hasOwn(finish.properties, 'agent'));
+  assert(!Object.hasOwn(task.inputSchema.properties.command.properties, 'agent'));
+  // Acceptance authority must remain absent from the finish command itself.
   for (const command of [
     { action: 'accept', candidateId: s.candidate.id },
     { action: 'finish', laneId: s.lane.laneId, agent: false },

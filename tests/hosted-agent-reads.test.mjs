@@ -132,7 +132,7 @@ test('CLI and MCP show exact Candidate/State bytes, with no revision substitutio
       .inputSchema.command.safeParse({ action: 'peers', laneId: f.lane.laneId, path: selected.path }).success,
   );
   const descriptions = [...tools.values()].reduce((n, tool) => n + tool.description.length, 0);
-  assert(descriptions <= 3963, `total description characters: ${descriptions}`);
+  assert(descriptions <= 2400, `total description characters: ${descriptions}`);
   f.allow(false);
   await assert.rejects(
     showHostedSource(transport, { ...selected, action: 'show' }),

@@ -642,7 +642,9 @@ export function runPreflight(
         const run = spawnMeasured(
           process.execPath,
           [
-            '--test-reporter=tap',
+            // dot: one character per passing test and the full detail of failures only (TAP printed every
+            // subtest, about 150 KB of an agent's context per preflight).
+            '--test-reporter=dot',
             '--test-reporter-destination=stderr',
             `--test-reporter=${new URL('./agent-preflight-reporter.js', import.meta.url).href}`,
             '--test-reporter-destination=stdout',

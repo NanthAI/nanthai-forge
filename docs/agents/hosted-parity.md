@@ -72,7 +72,9 @@ actions that dispatch as unsupported. These remain implementation acceptance wor
 
 Under 47558a99, total tool-description size may grow slightly, but stays reasonable
 and measured, including loaded schemas and project-rule text in Claude Code and
-Codex. Receipt sizes are measured separately; this page claims no token result.
+Codex. Budgets and their measurements are in
+[workflow: context budget](workflow.md#context-budget-issue-47558a99); a parity slice that adds an
+action keeps the budget test passing or records the new number on that Issue.
 
 Reads stay paged, current-authorized and source-pinned, with explicit incomplete
 coverage, bounded calls per page and zero idle calls. Retry identity and all

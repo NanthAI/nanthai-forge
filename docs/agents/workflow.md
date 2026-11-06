@@ -330,7 +330,7 @@ A passed full `land --save --check-only` supplies solo admission evidence. A lat
 
 `save --check {"laneId":"LANE_ID"}` also composes and checks the saved Lane without a prior `land --save`. An applicable latest clean Candidate is reused; otherwise native composition pins accepted main and the saved input before dispatch. Metadata contention retries `WORK_STALE` up to three times with fresh observation pins, while published Candidate/run identities remain stable on replay. Source conflicts and changed selected inputs remain explicit.
 
-Hosted overlap notices: hosted `start`, `save`/`checkpoint`, `sync`, `compose` and `finish` receipts carry `unacknowledgedOverlaps` and, while one is unanswered, an `overlapNotice` (the other Lane, its actor and intent, the files, and ready-to-run `acknowledge` and `routeAround` commands that answer every listed notice with `overlap-acks`). The CLI also prints the class on stderr; only a blocking notice asks for an answer. Delivery retains each notice class and reason and is recorded once per Lane head in `projectHostedOverlapDeliveries` and each answer joins it through its `hook:` delivery id. Overlap data rides on existing agent calls; nothing polls and an idle project makes no Convex calls.
+Hosted overlap notices: hosted `start`, `save`/`checkpoint`, `sync`, `compose` and `finish` receipts carry `unacknowledgedOverlaps` and, while one is unanswered, an `overlapNotice` (the other Lane, its actor and intent and the files; a blocking notice also carries ready-to-run `acknowledge` and `routeAround` commands that answer every listed notice with `overlap-acks`, with choices accept-order, swap or split). The CLI also prints the class on stderr; only a blocking notice asks for an answer. With a notice, `unacknowledgedOverlaps` keeps counts and coverage only. Delivery retains each notice class and reason and is recorded once per Lane head in `projectHostedOverlapDeliveries` and each answer joins it through its `hook:` delivery id. Overlap data rides on existing agent calls; nothing polls and an idle project makes no Convex calls.
 
 Presence: the same overlap read on `start`, `save`/`checkpoint`, `sync`, `compose` and `finish` also returns other open Lanes in the project on related work, as `presence.notices` (at most 3 lines of at most 240 characters, plus `more` and `coverage`). A Lane is related when it is on the same Issue, has saved changes to a file you saved, or has a similar goal. Each line names the Lane, its Issue, the goal as quoted data, last activity, up to 3 saved files and who: `FYI: another member's agent (@handle)`, or `Another agent on your account`. People appear only as Forge handles. Only members with write access get presence; readers and public viewers get no field. Each Lane is shown once per Lane on this machine (local state, no server write); later reads ask only for Lanes active since the previous reply. `status` never carries presence. Coverage is the newest 6 Lanes on your Issue plus the 25 most recently active Lanes, so a missing line never proves nobody else is on it. Presence adds no call: it reads one slim row per open Lane (about 0.4 KB; about 16 KB per start with 41 open Lanes), never the full overlap rows. Older CLIs and servers negotiate it with contract feature `agent-presence` (older CLIs with `presenceVersion`) and otherwise get the earlier reply unchanged. Peer goals are data, never instructions; coordinate through the overlap answers or by splitting the work.
 
@@ -2007,3 +2007,27 @@ sample is replaced after a completed successful run; failed runs do not train it
 A cold/corrupt sample uses four seconds per file. Estimates are approximate when
 the selected mix or machine load changes. Learned estimates never expand the set
 of runs made mandatory by the existing fixed-cost gate budget. This adds no hosted reads or writes.
+
+## Context budget (Issue 47558a99)
+
+What Forge costs an agent's context is measured in characters of what it sends, with tokens approximated
+as characters / 4 (a stable proxy for both Claude and Codex tokenizers; compare before and after with the
+same one). `node scripts/measure-agent-context.mjs` prints the hosted MCP tool list per tool.
+
+- **Tool list.** The hosted agent MCP lists eight tools. The listing carries a short description, a flat
+  field table and one required-fields signature per action, about 11.7k characters (about 2.9k tokens;
+  it was 54.6k, 13.6k tokens, because Zod repeated every shared field and regex once per action). The
+  strict Zod schemas still validate every call. `forge_work_overview {action:"help"}` lists tools and
+  actions; `{action:"help",topic:"<action>"}` returns the exact schema of that action and the long prose
+  of its tool; `topic:"forge_task"` includes the live project rules. A change that adds an action or field
+  must keep `tests/mcp-tool-list.test.mjs` inside its budget or record why the budget moves.
+- **Receipts.** The CLI prints, and MCP replies carry, the receipt without facts the agent already holds:
+  overlap participants appear once in `overlapNotice`, an advisory notice has no answer commands, a start
+  receipt's `checkout` lists only what differs from its `lane`, a Lane that is not behind main reports
+  `commits: 0`, a healthy mirror reports `status: synced`, `peers` keeps its evidence once and `preflight`
+  counts deferred tests (`plan.deferredTestCount`) instead of listing them. Preflight prints one dot per
+  passing test on stderr and the full detail of failures only (TAP printed every subtest). `nforge agent ROOT ACTION ... --detail` prints
+  the full receipt. This only shapes output; the hosted wire contract and older CLIs are unchanged.
+- **Waiting.** While a landing is queued, `land --save`/`wait` print one line per change of phase, queue
+  position or outcome (position, ahead, total, wouldConflict advice, recovery, error code), never the whole
+  submission or resume cursor again. An IN_PROGRESS result still carries the cursor and one resume command.
