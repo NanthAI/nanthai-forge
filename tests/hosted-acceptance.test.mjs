@@ -710,3 +710,41 @@ test('completion materialization rolls back a failed page and resumes without re
   assert.deepEqual(f.currentMain(), main);
   assert.equal(f.tables.projectHostedAcceptances.size, 1);
 });
+
+test('a landing supersedes the quiet open siblings of its Intent on their overlap rows (friction b7f93deb)', async () => {
+  const f = await acceptanceFixture(),
+    intentId = await seedIntent(f);
+  const landed = await f.lane({ intentId }),
+    quiet = await f.lane({ intentId }),
+    busy = await f.lane({ intentId }),
+    pinned = await f.lane({ intentId, pinned: true });
+  // Every Lane record write already keeps an open overlap row: set the activity the case needs.
+  const rowOf = (lane, activityMs) => {
+    const [id, found] = [...f.tables.projectHostedOverlapLanes].find(([, r]) => r.laneId === lane.laneId);
+    f.patch('projectHostedOverlapLanes', id, { lastActivityAt: activityMs });
+    return id;
+  };
+  const landedRow = rowOf(landed, Date.now());
+  // The landed Lane started an hour ago; the quiet sibling was last written before that, the busy one since.
+  f.tables.projectHostedOverlapLanes.get(landedRow)._creationTime = Date.now() - 3_600_000;
+  const rows = {
+    quiet: rowOf(quiet, Date.now() - 5 * 3_600_000),
+    busy: rowOf(busy, Date.now() - 600_000),
+    pinned: rowOf(pinned, Date.now() - 5 * 3_600_000),
+  };
+  const item = await f.makeCandidate([landed]);
+  const { state } = await f.ready(item, {});
+  const { receipt } = await f.accept(state);
+  await f.materialize(receipt.id);
+  const read = id => f.tables.projectHostedOverlapLanes.get(id);
+  assert.equal(read(rows.quiet).superseded.by, landed.laneId);
+  assert.equal(read(rows.quiet).superseded.receiptId, receipt.id);
+  assert.equal(read(rows.quiet).open, true, 'superseded is not completed or abandoned');
+  assert.equal((await f.readLane(quiet.laneId)).state, 'active', 'the Lane record is untouched');
+  assert.equal(
+    read(rows.busy).superseded,
+    undefined,
+    'a sibling written since the landed Lane started stays live',
+  );
+  assert.equal(read(rows.pinned).superseded, undefined, 'a pinned Lane is never touched');
+});

@@ -22,6 +22,12 @@ export const hostedOverlapTables = {
     landed: v.optional(
       v.object({ receiptId: v.string(), commit: v.string(), laneHead: v.string(), at: v.string() }),
     ),
+    /** A Lane of the same Intent landed after this Lane went quiet (Issue 55024d40): the Lane keeps its
+     * saved work and stays open, but leaves presence and advisory notices; blocking notices stay. It
+     * names the head it was set on and ends at the Lane's next save or reopen. */
+    superseded: v.optional(
+      v.object({ by: v.string(), receiptId: v.string(), laneHead: v.string(), at: v.string() }),
+    ),
     changes: v.string(),
     complete: v.boolean(),
     /** This Lane's presence row and the activity time it last wrote, so presence costs no read. */

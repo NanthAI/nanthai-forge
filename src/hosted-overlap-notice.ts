@@ -50,7 +50,11 @@ export function hostedOverlapNotice(root: string, laneId: string, advice: Advice
       file: item.file,
       with: ((item.participants ?? []) as Participant[]).filter(p => p.lane !== laneId),
       // A cross-file note names a symbol in another file: its text says what, `with` says who.
-      ...(item.reason === 'cross-file-symbol' && typeof item.text === 'string' ? { note: item.text } : {}),
+      // The idle-Lanes summary has no single peer: its text is the whole notice.
+      ...((item.reason === 'cross-file-symbol' || item.reason === 'idle-lanes') &&
+      typeof item.text === 'string'
+        ? { note: item.text }
+        : {}),
     })),
     choices,
     acknowledge: command(root, laneId, items, 'accept-order'),

@@ -12,12 +12,18 @@ const records = await import(moduleUrl('../convex/projectHostedRecords.ts'));
 const dormant = await import(moduleUrl('../convex/projectHostedDormant.ts'));
 const live = await import(moduleUrl('../convex/projectHostedLiveLanes.ts'));
 const nowOverlaps = await import(moduleUrl('../convex/projectNowOverlaps.ts'));
+const superseded = await import(moduleUrl('../convex/projectHostedSuperseded.ts'));
 
 const PEER = 'user_PEERACCOUNT01';
 const DAY = 24 * 3_600_000;
 const shared = 'src/shared.ts';
-const changeFor = (path, seed) => [
-  { path, before: null, after: { blob: digest(path + seed), mode: 'file' } },
+const changeFor = (path, seed, advisory = false) => [
+  {
+    path,
+    // A base file with no range evidence reads as an advisory 'unavailable' pair; two additions block.
+    before: advisory ? { blob: digest(path + 'base'), mode: 'file' } : null,
+    after: { blob: digest(path + seed), mode: 'file' },
+  },
 ];
 
 /** The caller's Lane plus peers, written through the real Lane record path. */
@@ -78,7 +84,7 @@ async function project() {
       )
       .then(JSON.parse);
   /** A Lane with saved changes on `path` whose last record write was `idleMs` ago. */
-  const lane = async (intent, { idleMs = 0, path = shared, extra = {} } = {}) => {
+  const lane = async (intent, { idleMs = 0, path = shared, extra = {}, advisory = false } = {}) => {
     const first = {
       ...mine,
       id: randomUUID(),
@@ -90,7 +96,7 @@ async function project() {
     };
     await write(first, { baseSequence: 0, intent });
     const saved = { ...first, head: digest(first.id), version: 1, sourceVersion: 1 };
-    await write(saved, { baseSequence: 0, intent, changes: changeFor(path, first.id) }, 0);
+    await write(saved, { baseSequence: 0, intent, changes: changeFor(path, first.id, advisory) }, 0);
     return saved;
   };
   /** The Lane saves again `idleMs` ago (0: now). */
@@ -507,4 +513,148 @@ test('abandon-dormant: the list carries the changed paths for the CLI main compa
   assert.equal((await readLane(onMain.id)).state, 'abandoned');
   assert.equal((await readLane(onMain.id)).head, onMain.head, 'the saved head is kept');
   assert.equal((await readLane(moved.id)).state, 'active');
+});
+
+const HOUR = 3_600_000;
+const advice = reply => JSON.parse(reply).unacknowledgedOverlaps;
+
+test('advisory notices from Lanes idle over 6 hours collapse into one summary line; blocking ones stay', async () => {
+  const { read, lane } = await project();
+  const fresh = await lane('Fresh advisory peer', { advisory: true, idleMs: 60_000 });
+  const idle = [];
+  for (let i = 0; i < 4; i++)
+    idle.push(await lane(`Idle advisory peer ${i}`, { advisory: true, idleMs: 8 * HOUR + i * HOUR }));
+  const idleBlocking = await lane('Idle but its additions block', { idleMs: 9 * HOUR });
+  const summary = advice(await read());
+  const reasons = summary.items.map(item => item.reason);
+  assert.equal(reasons.filter(reason => reason === 'idle-lanes').length, 1, 'one summary line');
+  const line = summary.items.find(item => item.reason === 'idle-lanes');
+  assert.equal(line.class, 'advisory');
+  assert.match(line.text, /4 Lane\(s\) idle over 6 h/);
+  const named = new Set(summary.items.filter(item => item !== line).flatMap(item => item.lanes));
+  assert(named.has(fresh.id), 'a Lane idle under 6 h keeps its own notice');
+  assert(named.has(idleBlocking.id), 'a blocking notice from an idle Lane is never hidden');
+  for (const peer of idle) assert(!named.has(peer.id), 'idle advisory Lanes have no notice of their own');
+  assert.equal(summary.blockingCount, 1);
+  assert.equal(summary.advisoryCount, 2, 'the fresh Lane plus the one summary');
+  assert.equal(summary.count, 3);
+  // detail and path reads list every Lane.
+  const detail = advice(await read({ detail: true }));
+  assert(!detail.items.some(item => item.reason === 'idle-lanes'));
+  for (const peer of idle) assert(detail.items.some(item => item.lanes.includes(peer.id)));
+});
+
+test('start/peers bytes with 15 idle advisory Lanes are not up', async () => {
+  const { read, lane, s, mine } = await project();
+  for (let i = 0; i < 15; i++)
+    await lane(`Idle advisory peer ${i} with a plain sentence of intent`, {
+      advisory: true,
+      idleMs: (7 + i) * HOUR,
+    });
+  const after = await read();
+  const { hostedOverlapAdvice } = await import('../dist/hosted-overlap.js');
+  const rows = [...s.tables.projectHostedOverlapLanes.values()];
+  const own = rows.find(row => row.laneId === mine.id);
+  const peers = rows.filter(row => row.laneId !== mine.id);
+  const main = { head: own.baseHead, sourceRevision: 0 };
+  const before = JSON.stringify(
+    hostedOverlapAdvice(own, peers, null, main, new Set(), true, 5, undefined, undefined),
+  );
+  console.log(
+    `15 idle Lanes: unacknowledgedOverlaps items ${JSON.parse(before).unacknowledgedOverlaps.items.length} -> ${advice(after).items.length}; ` +
+      `response bytes ${before.length} -> ${after.length}`,
+  );
+  assert(after.length < before.length, 'the summary is smaller than the listed notices');
+  assert.equal(advice(after).items.length, 1);
+});
+
+test('a landed Lane supersedes its quiet same-Intent siblings: no presence, no advisory notice, blocking stays', async () => {
+  const { read, lane, save, s, overlapRow, readLane, write } = await project();
+
+  const intentId = randomUUID();
+  const sameIntent = { intentId };
+  const quietAdvisory = await lane('Earlier attempt, advisory', {
+    advisory: true,
+    idleMs: 10 * HOUR,
+    extra: sameIntent,
+  });
+  const quietBlocking = await lane('Earlier attempt, blocking additions', {
+    idleMs: 10 * HOUR,
+    extra: sameIntent,
+  });
+  const pinned = await lane('Pinned attempt', {
+    advisory: true,
+    idleMs: 10 * HOUR,
+    extra: { intentId, pinned: true },
+  });
+  const recent = await lane('Sibling still being worked', {
+    advisory: true,
+    idleMs: HOUR,
+    extra: sameIntent,
+  });
+  const other = await lane('Other Intent', { advisory: true, idleMs: 10 * HOUR });
+  const landed = await lane('Successor that landed', { idleMs: 0, extra: sameIntent });
+  // The successor started three hours ago: only siblings last written before that are earlier attempts.
+  overlapRow(landed.id)._creationTime = Date.now() - 3 * HOUR;
+  const run = () =>
+    s.transaction(
+      'supersede',
+      {
+        _handler: ctx =>
+          superseded.supersedeQuietSiblings(ctx, {
+            projectId: s.projectId,
+            siblings: [...s.tables.projectHostedRecordHeads.values()].filter(
+              head => head.kind === 'lane' && head.parent === intentId,
+            ),
+            laneId: landed.id,
+            receiptId: 'receipt-1',
+            at: new Date().toISOString(),
+          }),
+      },
+      {},
+    );
+  assert.equal(await run(), 2, 'the two quiet, unpinned siblings');
+  assert.equal(await run(), 0, 'idempotent');
+  for (const peer of [quietAdvisory, quietBlocking]) {
+    const row = overlapRow(peer.id);
+    assert.equal(row.superseded.laneHead, row.head);
+    assert.equal(row.superseded.by, landed.id);
+    assert.equal(row.open, true, 'superseded is not abandoned: the Lane stays open with its work');
+    assert.equal(row.presenceRow, undefined);
+  }
+  for (const peer of [pinned, recent, other, landed]) assert.equal(overlapRow(peer.id).superseded, undefined);
+  // Presence skips them; the advisory notice is gone; the blocking notice stays.
+  const reply = JSON.parse(await read({ presence: {} }));
+  const present = reply.presence.lanes.map(entry => entry.laneId);
+  assert(!present.includes(quietAdvisory.id) && !present.includes(quietBlocking.id));
+  assert(present.includes(recent.id));
+  const named = noticeLanes(JSON.stringify(reply));
+  assert(!named.has(quietAdvisory.id), 'advisory notice from a superseded Lane is gone');
+  assert(named.has(quietBlocking.id), 'a blocking notice from a superseded Lane with unlanded work stays');
+  assert(named.has(recent.id));
+  // A bare record write at the same head keeps it superseded and does not bring presence back.
+  const current = await readLane(quietAdvisory.id);
+  await write(
+    { ...current, version: current.version + 1 },
+    { baseSequence: 0, intent: 'again' },
+    current.version,
+  );
+  assert(overlapRow(quietAdvisory.id).superseded, 'same head stays superseded');
+  assert.equal(overlapRow(quietAdvisory.id).presenceRow, undefined);
+  // A new save makes the Lane live again.
+  await save(quietAdvisory);
+  assert.equal(overlapRow(quietAdvisory.id).superseded, undefined);
+  assert(overlapRow(quietAdvisory.id).presenceRow, 'presence is back after a save');
+  assert(
+    JSON.parse(await read({ presence: {} })).presence.lanes.some(entry => entry.laneId === quietAdvisory.id),
+  );
+  // Abandon then reopen at the same head also ends it.
+  const again = await readLane(quietBlocking.id);
+  await write({ ...again, version: again.version + 1, state: 'abandoned' }, undefined, again.version);
+  await write(
+    { ...again, version: again.version + 2, state: 'active' },
+    { baseSequence: 0, intent: 'reopened' },
+    again.version + 1,
+  );
+  assert.equal(overlapRow(quietBlocking.id).superseded, undefined, 'reopen ends supersession');
 });

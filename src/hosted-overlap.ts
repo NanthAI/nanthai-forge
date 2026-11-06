@@ -5,6 +5,8 @@ import { digest } from './portable-hash.js';
 import { agentActor } from './agent-slug.js';
 
 export const OVERLAP_METADATA_BYTES = 128 * 1024;
+/** Advisory notices from open Lanes idle longer than this collapse into one summary line per read. */
+export const IDLE_NOTICE_MS = 6 * 3_600_000;
 /** Cross-file symbol facts per Lane row, inside the row budget (replay max 9.5 KB). */
 export const SYMBOL_LINK_BYTES = 16 * 1024;
 export type OverlapFile = { blob: string; mode: string } | null;
@@ -29,6 +31,12 @@ export type OverlapLane = {
   resolutionLeft?: string;
   changes: string;
   complete: boolean;
+  /** Last Lane record write (ms), or the presence time of a row older than that field. */
+  lastActivityAt?: number;
+  presenceRow?: { at: number };
+  /** Set when a Lane of the same Intent landed after this Lane went quiet: no presence, no advisory
+   * notices, blocking ones stay. Counts only while it names the Lane's current head. */
+  superseded?: { laneHead: string };
 };
 export type OverlapMain = {
   sequence: number;
@@ -155,6 +163,8 @@ export function hostedOverlapAdvice(
   complete = true,
   maxItems = 5,
   requestedPath?: string,
+  /** Collapse advisory notices of Lanes idle since before `idleBefore` (ms) into one summary item. */
+  idleBefore?: number,
 ) {
   const mineChanges = new Map(
     (JSON.parse(mine.changes) as OverlapChange[]).map(change => [change.path, change]),
@@ -174,8 +184,15 @@ export function hostedOverlapAdvice(
   let count = 0,
     blockingCount = 0,
     advisoryCount = 0;
+  const idleLanes = new Set<string>(),
+    idleFiles = new Set<string>();
   for (const peer of peers) {
     if (!peer.open || peer.laneId === mine.laneId) continue;
+    const quiet = peer.superseded?.laneHead === peer.head;
+    const idle =
+      idleBefore !== undefined &&
+      !requestedPath &&
+      (peer.lastActivityAt ?? peer.presenceRow?.at ?? Infinity) < idleBefore;
     if (
       mine.intentId === peer.intentId &&
       ((mine.resolutionLeft &&
@@ -197,10 +214,16 @@ export function hostedOverlapAdvice(
       // Known clean pairs are quiet. Missing evidence remains visible and incomplete,
       // so older clients, different bases and non-text files cannot create new misses.
       // Explicit peers(path) still shows saved activity before a first write.
+      if (!requestedPath && classification.class === 'advisory' && quiet) continue;
       if (classification.reason === 'unavailable') complete = false;
       if (!requestedPath && classification.class === 'advisory' && classification.reason !== 'unavailable')
         continue;
       visible = true;
+      if (classification.class === 'advisory' && idle) {
+        idleLanes.add(peer.laneId);
+        idleFiles.add(path);
+        continue;
+      }
       const priority = classification.class === 'blocking';
       // Without answers there is no need to hash every omitted display item.
       const noticeId =
@@ -235,9 +258,13 @@ export function hostedOverlapAdvice(
       if (items.length > maxItems) items.pop();
     }
     // One advisory cross-file note per Lane pair, only when no same-file notice already names the pair.
-    const note = requestedPath || visible ? null : crossFileSymbolNote(mineFacts, symbolFacts(peerChanges));
+    const note =
+      requestedPath || visible || quiet ? null : crossFileSymbolNote(mineFacts, symbolFacts(peerChanges));
     const noteId = note && digest(JSON.stringify(['cross-file-symbol', lanes]));
-    if (note && noteId && !answered.has(noteId)) {
+    if (note && idle) {
+      idleLanes.add(peer.laneId);
+      idleFiles.add(note.file);
+    } else if (note && noteId && !answered.has(noteId)) {
       count++;
       advisoryCount++;
       if (items.length < maxItems)
@@ -254,6 +281,32 @@ export function hostedOverlapAdvice(
           })),
           text: symbolNoteText(note, peer.laneId, peer.intent),
         });
+    }
+  }
+  if (idleLanes.size) {
+    // One advisory line for every idle Lane, in place of one notice per file and Lane.
+    const ids = [...idleLanes].sort(),
+      files = [...idleFiles].sort();
+    const noticeId = digest(JSON.stringify(['idle-lanes', mine.laneId, ids]));
+    if (!answered.has(noticeId)) {
+      count++;
+      advisoryCount++;
+      const hours = IDLE_NOTICE_MS / 3_600_000;
+      const item = {
+        noticeId,
+        class: 'advisory' as const,
+        reason: 'idle-lanes',
+        file: files[0]!,
+        lanes: ids.slice(0, 3),
+        participants: [],
+        text: `advisory: ${ids.length} Lane(s) idle over ${hours} h also touch ${files.length} of your files (${files[0]}${files.length > 1 ? ', ...' : ''}); their work may already be on main. No answer needed.`,
+      };
+      // A full list gives up its last advisory item; blocking ones are never displaced.
+      if (items.length >= maxItems) {
+        const last = items.map(entry => entry.class).lastIndexOf('advisory');
+        if (last >= 0) items.splice(last, 1);
+      }
+      if (items.length < maxItems) items.push(item);
     }
   }
   const knownBase = mine.baseSequence !== null;

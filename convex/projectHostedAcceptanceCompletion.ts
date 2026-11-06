@@ -149,6 +149,9 @@ export async function completeAcceptedHeads(ctx: MutationCtx, input: CompletionI
   // canonical records per tick; counters are transaction windows, not Lane caps.
   const end = Math.min(entries.length, plan.appliedEntry + 20);
   const finished = new Set<string>();
+  // The first landed Lane of each Intent: earlier quiet attempts of that Intent leave presence and
+  // advisory notices when the Intent completion reads its sibling heads (friction b7f93deb).
+  const supersededBy = new Map<string, string>();
   for (const value of entries.slice(plan.appliedEntry, end)) {
     const entry = composeLaneSchema.parse(value);
     if (!lanesDone) {
@@ -190,6 +193,7 @@ export async function completeAcceptedHeads(ctx: MutationCtx, input: CompletionI
       },
     });
     finished.add(lane.intentId);
+    if (!supersededBy.has(lane.intentId)) supersededBy.set(lane.intentId, lane.id);
     // A resolution Lane carries its conflicted original's work: complete that Lane too.
     if (lane.resolution?.origin)
       for (const intentId of await completeResolutionOrigins(
@@ -215,6 +219,9 @@ export async function completeAcceptedHeads(ctx: MutationCtx, input: CompletionI
       intentId,
       at: receipt.at,
       ...(lanesDone ? {} : { landed: pageLanes }),
+      ...(supersededBy.has(intentId)
+        ? { supersededBy: { laneId: supersededBy.get(intentId)!, receiptId: input.receiptId } }
+        : {}),
     });
   const appliedPage = end === entries.length ? plan.appliedPage + 1 : plan.appliedPage;
   const position = { appliedPage, appliedEntry: end === entries.length ? 0 : end };

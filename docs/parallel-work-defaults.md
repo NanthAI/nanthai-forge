@@ -252,6 +252,11 @@ frozen set on 2026-11-06 broke capabilities across CLI/server versions with `HOS
 - A landing also completes an accepted Lane when only its record version changed after the pins were taken;
   a new save or a reopen after the pins still keeps it open.
 
+- Below `dormantAfterDays` an idle Lane costs one line: advisory notices from Lanes idle more than 6 h
+  collapse into one `idle-lanes` summary per start/peers read, and a Lane whose Intent was landed by a
+  later Lane is superseded (no presence, no advisory notices; blocking notices stay). A dormant window
+  shorter than one day was therefore not needed (Issue 55024d40); keep `dormantAfterDays` at its default.
+
 ### urgentRoles
 
 - `owner` is the project owner acting in person: a signed-in session, or the owner's CLI with

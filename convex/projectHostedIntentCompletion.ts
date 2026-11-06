@@ -3,6 +3,7 @@ import type { MutationCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import { readHostedRecord, recordHead, writeHostedRecord } from './projectHostedRecords';
 import { hostedIntentSchema } from '../src/hosted-lane';
+import { supersedeQuietSiblings } from './projectHostedSuperseded';
 
 /** One page of sibling Lane heads; an Intent with more Lanes than this stays open. */
 const SIBLINGS = 100;
@@ -22,6 +23,9 @@ export async function completeIntentWhenLanesDone(
     /** Lanes of a landing that stay active (keepOpen, completeOnAccept off): they declared this Intent and do
      * not keep it open. A pinned Lane always does. */
     landed?: ReadonlySet<string>;
+    /** A Lane of this Intent that just landed: its quiet open siblings are superseded from the same
+     * sibling page (friction b7f93deb). */
+    supersededBy?: { laneId: string; receiptId: string };
   },
 ) {
   // Head rows carry the status, so a settled or missing Intent and any open sibling cost no record body read.
@@ -33,6 +37,14 @@ export async function completeIntentWhenLanesDone(
       q.eq('projectId', input.projectId).eq('kind', 'lane').eq('parent', input.intentId),
     )
     .take(SIBLINGS + 1);
+  if (siblings.length <= SIBLINGS && input.supersededBy)
+    await supersedeQuietSiblings(ctx, {
+      projectId: input.projectId,
+      siblings,
+      ...input.supersededBy,
+      at: input.at,
+      ...(input.landed ? { landed: input.landed } : {}),
+    });
   if (
     siblings.length > SIBLINGS ||
     siblings.some(row => row.status === 'active' && (row.pinned || !input.landed?.has(row.key)))

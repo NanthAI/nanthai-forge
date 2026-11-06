@@ -141,9 +141,12 @@ for (const history of [0, 575, 1150])
     // Reads 4107 -> 4116, writes 1200 -> 1227 (13c63abe): per landed receipt, publication schedules
     // the completion tick's stall guard and retains both ids on the plan; the tick cancels the
     // guard (one read, one write). Calls are unchanged: a healthy guard never runs.
+    // Reads 4116 -> 4179 (55024d40): for an Intent with other open unpinned Lanes the completion tick
+    // reads the landed Lane's overlap row and each candidate's, to supersede the quiet ones. An Intent
+    // with no other open Lane reads nothing more. Calls and writes are unchanged.
     assert(
       budget.calls <= 199 &&
-        source.reduce((n, c) => n + c.documents, 0) <= 4116 &&
+        source.reduce((n, c) => n + c.documents, 0) <= 4179 &&
         source.reduce((n, c) => n + c.writes, 0) <= 1227,
       JSON.stringify({
         ...budget,

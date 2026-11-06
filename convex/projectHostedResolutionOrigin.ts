@@ -4,6 +4,7 @@ import type { MutationCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import { readHostedRecord, writeHostedRecord } from './projectHostedRecords';
 import { hostedLaneSchema } from '../src/hosted-lane';
+import { supersedeLane } from './projectHostedSuperseded';
 
 /** A conflict inside a resolution makes a short chain; the walk stays bounded. */
 const DEPTH = 4;
@@ -38,13 +39,19 @@ export async function completeResolutionOrigins(
     });
     if (!row) break;
     const current = hostedLaneSchema.parse(JSON.parse(row.value));
-    if (
-      current.state !== 'active' ||
-      current.pinned ||
-      current.head !== origin.head ||
-      current.sourceVersion !== origin.sourceVersion
-    )
+    if (current.state !== 'active' || current.pinned) break;
+    if (current.head !== origin.head || current.sourceVersion !== origin.sourceVersion) {
+      // Saved again after the conflict: it keeps its work and stays open, but its original source
+      // reached main through this resolution, so it stops producing advisory notices.
+      await supersedeLane(ctx, {
+        projectId: input.projectId,
+        laneId: current.id,
+        by: lane.id,
+        receiptId: input.receiptId,
+        at: input.at,
+      });
       break;
+    }
     await writeHostedRecord(ctx, {
       projectId: input.projectId,
       actor: input.owner,

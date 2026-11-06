@@ -7,7 +7,7 @@ import { dormantCutoff, liveOpenOverlapLanes } from './projectHostedDormancy';
 import { hostedStartMain } from './projectHostedChannels';
 import { readHostedRecord } from './projectHostedRecords';
 import { hostedLaneSchema } from '../src/hosted-lane';
-import { hostedOverlapAdvice } from '../src/hosted-overlap';
+import { hostedOverlapAdvice, IDLE_NOTICE_MS } from '../src/hosted-overlap';
 import { invariant } from '../src/errors';
 import { report } from './errors';
 import { safeRelative } from '../src/safe-relative';
@@ -181,6 +181,8 @@ export const read = query({
           complete,
           Math.min(50, Math.max(1, Math.floor(items ?? (detail ? 50 : 5)))),
           path,
+          // The default read summarizes idle Lanes in one line; detail and path reads list them all.
+          detail || path ? undefined : Date.now() - IDLE_NOTICE_MS,
         );
       let advice = compute();
       // Presence is for members with write access only; readers and public viewers get no field.

@@ -98,9 +98,12 @@ for (const history of [575, 1150])
     // the Intent with its last Lane. Calls and writes are unchanged.
     // Reads 1334 -> 1336, writes 410 -> 412 (13c63abe): the completion tick's stall guard, retained
     // on the plan and cancelled by the tick. Calls are unchanged: a healthy guard never runs.
+    // Reads 1336 -> 1341 (55024d40): a landed Lane's Intent with other open unpinned Lanes costs the
+    // completion tick one overlap-row read for the landed Lane and one per candidate, to supersede the
+    // quiet ones. Calls and writes are unchanged.
     assert(
       budget.calls <= 71 &&
-        source.reduce((n, c) => n + c.documents, 0) <= 1336 &&
+        source.reduce((n, c) => n + c.documents, 0) <= 1341 &&
         source.reduce((n, c) => n + c.writes, 0) <= 412,
       JSON.stringify({
         ...budget,

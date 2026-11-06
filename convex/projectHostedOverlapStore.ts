@@ -39,6 +39,9 @@ export async function trackHostedOverlapLane(
           metadata?.complete !== false,
       );
   const agent = metadata?.agent ?? old?.agent;
+  const open = ['active', 'paused', 'ready'].includes(lane.state);
+  // Superseded lasts while the Lane stays open at the head it was set on; a save or reopen ends it.
+  const superseded = old?.open && open && old.superseded?.laneHead === lane.head ? old.superseded : undefined;
   const value = {
     projectId,
     laneId: lane.id,
@@ -52,7 +55,8 @@ export async function trackHostedOverlapLane(
     baseReceiptId: lane.base.receiptId,
     baseSequence: metadata?.baseSequence ?? (sameBase ? (old?.baseSequence ?? null) : null),
     recordVersion: lane.version,
-    open: ['active', 'paused', 'ready'].includes(lane.state),
+    open,
+    ...(superseded ? { superseded } : {}),
     lastActivityAt: Number.isFinite(Date.parse(lane.at)) ? Date.parse(lane.at) : Date.now(),
     // Landing evidence belongs to the head that landed and survives later records of the Lane.
     ...(old?.landed ? { landed: old.landed } : {}),
@@ -64,7 +68,7 @@ export async function trackHostedOverlapLane(
     projectId,
     lane.id,
     old ? { ...old, pointer: old.presenceRow, goal: old.intent } : null,
-    value.open
+    value.open && !superseded
       ? {
           intentId: value.intentId,
           actor: value.actor,
