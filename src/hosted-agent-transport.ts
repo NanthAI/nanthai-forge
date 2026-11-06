@@ -857,10 +857,12 @@ export class HostedAgentTransport {
         result = await executeHostedAgent(session, action, command.data);
         const askedItemId =
           action === 'start' && (command.data as { planningItemId?: string }).planningItemId;
-        // A short id was resolved by the start itself: the Intent it started carries the full id.
+        // A short id was resolved by the start itself: the journal holds the Issue it started. (The
+        // started Intent can be a follow-up with its own id, e4a71127.)
         const planningItemId =
           askedItemId && isPlanningPrefix(askedItemId)
-            ? (result as { intentId?: string }).intentId
+            ? (journal.get<{ intentId?: string }>('start-planned-intent')?.intentId ??
+              (result as { intentId?: string }).intentId)
             : askedItemId;
         const planning = planningItemId
           ? await markPlanningStarted(
@@ -924,6 +926,16 @@ export class HostedAgentTransport {
           }
         }
         if (planning) result = { ...(result as object), planning };
+        const startedIntent = (result as { intentId?: string }).intentId;
+        if (action === 'start' && planningItemId && startedIntent && startedIntent !== planningItemId)
+          result = {
+            ...(result as object),
+            continued: {
+              issueId: planningItemId,
+              intentId: startedIntent,
+              note: `Intent ${startedIntent} continues Issue ${planningItemId}: the Issue's earlier Intent already finished, so this start opened a follow-up Intent (new or joined) for the same Issue.`,
+            },
+          };
         if (action === 'start' && previousStart) {
           const { unscoped, ...previousLane } = previousStart;
           result = {

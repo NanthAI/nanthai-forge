@@ -21,6 +21,7 @@ import { isStored } from './projectObjectFields';
 import { findObject } from './projectObjectFind';
 import { openSiblingLanes } from './projectHostedStartPeers';
 import { dormantCutoff } from './projectHostedDormancy';
+import { intentFinished, maxIntentChain, successorIntentId } from '../src/hosted-intent-chain';
 
 const args = {
   projectId: v.id('hostedProjects'),
@@ -94,6 +95,10 @@ async function execute(ctx: MutationCtx, input: Input, action: 'start' | 'intent
   let overlapIntent = payload.intent.kind === 'existing' ? payload.intent.intentId : payload.intent.outcome;
   let recovery: import('../src/culprit-bisect').NeedsFix | undefined;
   let plannedExists = false;
+  // The Intent a planned/existing start joins, or the successor it creates after the Issue's earlier
+  // Intent finished (e4a71127). Absent for a new outcome.
+  let targetIntentId = payload.intent.kind === 'new' ? undefined : payload.intent.intentId;
+  let successor = false;
   if (payload.intent.kind === 'existing' || payload.intent.kind === 'planned') {
     const row = await readHostedRecord(ctx, {
       projectId,
@@ -108,14 +113,30 @@ async function execute(ctx: MutationCtx, input: Input, action: 'start' | 'intent
       'Hosted Intent not found on this project.',
     );
     if (row) {
-      const intent = hostedIntentSchema.parse(JSON.parse(row.value));
-      overlapIntent = intent.outcome;
-      invariant(
-        payload.intent.kind === 'existing' || !['abandoned', 'completed'].includes(intent.status),
-        'INTENT_CLOSED',
-        'This planned Issue already finished. Reopen the Issue to start new work.',
-      );
-      if (!['abandoned', 'completed'].includes(intent.status)) recovery = intent.needsFix;
+      let intent = hostedIntentSchema.parse(JSON.parse(row.value));
+      if (payload.intent.kind === 'planned') {
+        // A finished Intent never restarts: the Issue continues on the next Intent in its chain, joined
+        // when it exists, created by this start when it does not.
+        for (let hop = 0; intentFinished(intent.status); hop++) {
+          invariant(
+            hop < maxIntentChain,
+            'INTENT_CLOSED',
+            'This Issue already continued on many finished Intents. Open a new Issue for the next piece of work.',
+          );
+          const nextId = successorIntentId(intent.id);
+          const next = await readHostedRecord(ctx, { projectId, actor, kind: 'intent', key: nextId });
+          if (!next) {
+            successor = true;
+            targetIntentId = nextId;
+            break;
+          }
+          intent = hostedIntentSchema.parse(JSON.parse(next.value));
+          targetIntentId = intent.id;
+        }
+      }
+      if (successor) plannedExists = false;
+      else overlapIntent = intent.outcome;
+      if (!intentFinished(intent.status)) recovery = intent.needsFix;
       invariant(
         project.owner === actor ||
           intent.creatorAccountId === actor ||
@@ -148,7 +169,7 @@ async function execute(ctx: MutationCtx, input: Input, action: 'start' | 'intent
       at,
       expected,
       ids: {
-        intent: payload.intent.kind === 'new' ? crypto.randomUUID() : payload.intent.intentId,
+        intent: targetIntentId ?? crypto.randomUUID(),
         lane: crypto.randomUUID(),
       },
     },

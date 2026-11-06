@@ -6,6 +6,7 @@ import { moduleUrl } from './convex-module.mjs';
 import { lanesFixture } from './hosted-lanes-fixture.mjs';
 import { canonicalPayload } from '../dist/hosted-source-operation.js';
 import { hostedLaneSelectionSchema } from '../dist/hosted-lane.js';
+import { successorIntentId } from '../dist/hosted-intent-chain.js';
 const start = await import(moduleUrl('../convex/projectHostedStart.ts'));
 const reads = await import(moduleUrl('../convex/projectHostedLanes.ts'));
 const channels = await import(moduleUrl('../convex/projectHostedChannels.ts'));
@@ -545,7 +546,7 @@ test('explicit initial source is committed before hosted start; main receipt CAS
   await assert.rejects(s.begin({ ...input, operationId: randomUUID() }), code('CHANNEL_CHANGED'));
 });
 
-test('planned start gives the Intent the Issue id, adds sibling Lanes, and reports Intent state per Issue', async () => {
+test('planned start gives the Intent the Issue id, adds sibling Lanes, continues a finished Intent, and reports Intent state per Issue', async () => {
   const s = await setup(),
     issue = randomUUID(),
     planned = { kind: 'planned', intentId: issue, outcome: 'Planned Issue', constraints: 'Acceptance' };
@@ -588,25 +589,98 @@ test('planned start gives the Intent the Issue id, adds sibling Lanes, and repor
     code('PROJECT_UNAVAILABLE'),
   );
 
-  // A finished Intent is not restarted; the Issue must be reopened.
-  const original = JSON.parse(
-    await s.invoke('intent', reads.intent, { projectId: s.projectId, intentId: issue }),
+  // A finished Intent never restarts: the Issue continues on a new Intent whose id derives from it (e4a71127).
+  const finish = async id => {
+    const current = JSON.parse(
+      await s.invoke('intent', reads.intent, { projectId: s.projectId, intentId: id }),
+    );
+    await s.call('complete', {
+      _handler: ctx =>
+        records.writeHostedRecord(ctx, {
+          projectId: s.projectId,
+          actor: 'owner',
+          authorityEpoch: 1,
+          expectedVersion: current.version,
+          record: { ...current, version: current.version + 1, status: 'completed' },
+        }),
+    });
+  };
+  const intents = () => [
+    ...new Set(
+      [...s.tables.projectHostedRecords.values()].filter(row => row.kind === 'intent').map(row => row.key),
+    ),
+  ];
+  await finish(issue);
+  assert.deepEqual(
+    JSON.parse(await s.invoke('states', planning.intentStates, { projectId: s.projectId, ids: [issue] })),
+    { [issue]: 'completed' },
   );
-  await s.call('complete', {
+  const followId = successorIntentId(issue);
+  assert.notEqual(followId, issue);
+  const followOp = s.input(planned);
+  const follow = await s.begin(followOp);
+  assert.equal(follow.intentId, followId);
+  assert.equal(follow.lane.intentId, followId);
+  assert.deepEqual(follow.openLanes ?? [], []);
+  assert.equal(intents().length, 2, 'exactly one new Intent record');
+  const followIntent = JSON.parse(
+    await s.invoke('intent', reads.intent, { projectId: s.projectId, intentId: followId }),
+  );
+  assert.equal(followIntent.status, 'active');
+  assert.equal(followIntent.outcome, 'Planned Issue');
+  assert.equal(followIntent.constraints, 'Acceptance');
+  // The earlier Intent stays completed history; the Issue now reports the follow-up's state.
+  assert.equal(
+    JSON.parse(await s.invoke('intent', reads.intent, { projectId: s.projectId, intentId: issue })).status,
+    'completed',
+  );
+  assert.deepEqual(
+    JSON.parse(await s.invoke('states', planning.intentStates, { projectId: s.projectId, ids: [issue] })),
+    { [issue]: 'active' },
+  );
+  // Replaying the same operation returns the same result and adds no Intent or Lane.
+  const lanes = () =>
+    new Set(
+      [...s.tables.projectHostedRecords.values()].filter(row => row.kind === 'lane').map(row => row.key),
+    ).size;
+  const before = lanes();
+  assert.deepEqual(await s.begin(followOp), follow);
+  assert.equal(intents().length, 2);
+  assert.equal(lanes(), before);
+  // A second builder starting the same Issue joins the follow-up Intent as a sibling Lane.
+  const joined = await s.begin(s.input(planned));
+  assert.equal(joined.intentId, followId);
+  assert.notEqual(joined.lane.laneId, follow.lane.laneId);
+  assert.equal(intents().length, 2, 'joining adds no Intent');
+  // Finishing the follow-up continues the chain: a third Intent, again linked by id alone.
+  await finish(followId);
+  assert.deepEqual(
+    JSON.parse(await s.invoke('states', planning.intentStates, { projectId: s.projectId, ids: [issue] })),
+    { [issue]: 'completed' },
+  );
+  const third = await s.begin(s.input(planned));
+  assert.equal(third.intentId, successorIntentId(followId));
+  assert.equal(intents().length, 3);
+  // An abandoned Intent continues the same way.
+  const other = randomUUID();
+  const abandonedStart = await s.begin(s.input({ ...planned, intentId: other }));
+  const abandoned = JSON.parse(
+    await s.invoke('intent', reads.intent, { projectId: s.projectId, intentId: other }),
+  );
+  await s.call('abandon', {
     _handler: ctx =>
       records.writeHostedRecord(ctx, {
         projectId: s.projectId,
         actor: 'owner',
         authorityEpoch: 1,
-        expectedVersion: 0,
-        record: { ...original, version: 1, status: 'completed' },
+        expectedVersion: abandoned.version,
+        record: { ...abandoned, version: abandoned.version + 1, status: 'abandoned' },
       }),
   });
-  assert.deepEqual(
-    JSON.parse(await s.invoke('states', planning.intentStates, { projectId: s.projectId, ids: [issue] })),
-    { [issue]: 'completed' },
+  assert.equal(
+    (await s.begin(s.input({ ...planned, intentId: other }))).intentId,
+    successorIntentId(abandonedStart.intentId),
   );
-  await assert.rejects(s.begin(s.input(planned)), code('INTENT_CLOSED'));
   // Another account cannot attach Lanes to someone else's Intent by naming its Issue id.
   await assert.rejects(s.begin(s.input({ ...planned, intentId: first.intentId }), 'stranger'));
 });

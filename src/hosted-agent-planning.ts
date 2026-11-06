@@ -506,11 +506,20 @@ export async function plannedIntent(port: PlanningPort, itemId: string) {
     'BAD_ARGUMENT',
     'Start from an Issue. An Initiative groups Issues; start one of them.',
   );
-  invariant(
-    open.includes(item.status),
-    'INTENT_CLOSED',
-    `This Issue is ${item.status}. Reopen it with put-planning-item before starting work.`,
-  );
+  if (!open.includes(item.status))
+    throw new ForgeError(
+      'INTENT_CLOSED',
+      `This Issue is ${item.status}. The project owner reopens it with: nforge agent . put-planning-item '{"itemId":"${item.id}","expectedVersion":${item.version},"status":"open"}', then starts it again. Anyone else starts a plain outcome instead: nforge agent . start '{"outcome":"..."}'.`,
+      undefined,
+      {
+        reopen: {
+          action: 'put-planning-item',
+          input: { itemId: item.id, expectedVersion: item.version, status: 'open' },
+          needs: 'project owner',
+        },
+        plainStart: { action: 'start', input: { outcome: item.title.slice(0, 500) } },
+      },
+    );
   return {
     kind: 'planned' as const,
     intentId: item.id,

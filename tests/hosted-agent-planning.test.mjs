@@ -535,7 +535,16 @@ test('start from an Issue: planned Intent shares the Issue id, the Issue becomes
 
   // Closed Issues must be reopened first.
   const closed = (await put(p, { kind: 'issue', title: 'Finished', status: 'closed' })).result.itemId;
-  await assert.rejects(plannedIntent(p, closed), code('INTENT_CLOSED'));
+  await assert.rejects(plannedIntent(p, closed), error => {
+    assert.equal(error.code, 'INTENT_CLOSED');
+    // The error names the one command that reopens it and the plain-outcome start (e4a71127).
+    assert.match(error.message, /put-planning-item/);
+    assert.match(error.message, new RegExp(`"itemId":"${closed}"`));
+    assert.deepEqual(error.recovery.reopen.input.status, 'open');
+    assert.equal(error.recovery.reopen.input.expectedVersion, 1);
+    assert.equal(error.recovery.plainStart.input.outcome, 'Finished');
+    return true;
+  });
 });
 
 test('a 100-item backlog reads in three Convex calls and idle reads nothing', async t => {
@@ -844,6 +853,37 @@ test('a follow-up start after the Issue landed opens a new Lane; a first start a
   s.lane.state = 'active';
   const again = await s.transport().dispatch('start', { planningItemId: item.id });
   assert.equal(again.operationId, followUp.operationId);
+});
+
+// e4a71127: an open Issue whose first Intent landed starts a follow-up Intent (the server answers with a
+// different Intent id); the start says so, and the Issue (full or short id) is still marked in progress.
+test('a start on an Issue whose earlier Intent landed reports the follow-up Intent and marks the Issue in progress', async t => {
+  const { s, item, starts } = plannedStartFixture(t);
+  const followId = randomUUID(),
+    mutation = s.exchange.client.mutation;
+  s.exchange.client.mutation = async (ref, args) => {
+    const value = await mutation(ref, args);
+    if (getFunctionName(ref) !== 'projectHostedStart:start') return value;
+    return JSON.stringify({ ...JSON.parse(value), intentId: followId });
+  };
+  s.exchange.client.query = (
+    query => async (ref, args) =>
+      getFunctionName(ref) === 'projectHostedPlanning:resolveId'
+        ? JSON.stringify({ ids: [item.id], more: false })
+        : query(ref, args)
+  )(s.exchange.client.query);
+  const writes = [];
+  s.exchange.client.action = async (ref, args) => (writes.push(args.command), { revision: 6 });
+  const started = await s.transport().dispatch('start', { planningItemId: item.id.slice(0, 8) });
+  assert.equal(starts().length, 1);
+  assert.equal(starts()[0].args.intent.intentId, item.id, 'the start asks for the Issue, not the follow-up');
+  assert.equal(started.result.intentId, followId);
+  assert.equal(started.result.continued.issueId, item.id);
+  assert.equal(started.result.continued.intentId, followId);
+  assert.match(started.result.continued.note, /continues Issue/);
+  // The Issue (resolved from its short id, not the follow-up Intent id) moves to in-progress.
+  assert.equal(started.result.planning.updated, true);
+  assert.equal(JSON.parse(writes.at(-1)).itemId, item.id);
 });
 
 // Incident replay 20b91e86 (issue b6ba9219): two builders on one machine with one account and one clone
