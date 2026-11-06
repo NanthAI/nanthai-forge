@@ -111,6 +111,7 @@ export function coordinationOf(args, output) {
 export function startBroker(cli, callLog, { now = () => new Date().toISOString() } = {}) {
   const admin = randomUUID();
   const agents = new Map(); // token -> { root, env, task }
+  const running = new Set(); // CLI children whose call has not completed
   // The agent's workspace and its own client folder: a sync conflict opens a resolve Lane at
   // <root>.forge-client/lanes/<id>, where the agent edits and runs resolve and finish.
   const inside = (root, p) => p === root || p.startsWith(root + '/') || p.startsWith(root + '.forge-client/');
@@ -200,10 +201,12 @@ export function startBroker(cli, callLog, { now = () => new Date().toISOString()
             }) + '\n',
           );
           progress({ endedAt });
+          running.delete(child);
           // Output already reached the caller; the last frame carries only the exit status.
           reply({ code });
         },
       );
+      running.add(child);
       // Keep execFile's existing audit capture/buffer budget; forward the same bytes now,
       // including partial lines, instead of withholding progress until the callback.
       for (const stream of ['stdout', 'stderr'])
@@ -215,15 +218,21 @@ export function startBroker(cli, callLog, { now = () => new Date().toISOString()
   server.requestTimeout = 0;
   server.headersTimeout = 0;
   return new Promise(done =>
-    server.listen(0, '127.0.0.1', () => done({ server, admin, port: server.address().port })),
+    server.listen(0, '127.0.0.1', () => done({ server, admin, port: server.address().port, running })),
   );
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === resolve(new URL(import.meta.url).pathname)) {
   const [cli, callLog] = process.argv.slice(2);
-  const { server, admin, port } = await startBroker(cli, callLog);
+  const { server, admin, port, running } = await startBroker(cli, callLog);
   process.stdout.write(JSON.stringify({ port, admin }) + '\n');
   // Stop admission with the harness, but retain outstanding child callbacks/journals.
   process.stdin.resume();
   process.stdin.on('end', () => server.close());
+  // An explicit abort (a timed-out test, never the harness's normal teardown) ends the CLI
+  // calls still running: their receipts are not wanted, and a live child keeps its parent alive.
+  process.once('SIGTERM', () => {
+    for (const child of running) child.kill('SIGKILL');
+    process.exit(143);
+  });
 }

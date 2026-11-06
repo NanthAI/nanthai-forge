@@ -19,7 +19,7 @@ import { initNative } from '../dist/native-work.js';
 import { NativeSource } from '../dist/native-source.js';
 import { nativeObjects } from '../dist/native-objects.js';
 import { watchLanePresence } from '../dist/presence-worker.js';
-import { readAutoSnapshot, snapshotLane } from '../dist/lane-auto-snapshot.js';
+import { readAutoSnapshot, snapshotLane, withAutoSnapshotLock } from '../dist/lane-auto-snapshot.js';
 
 async function fixture(t, files = { 'file.txt': 'one\n' }) {
   const root = mkdtempSync(join(tmpdir(), 'forge-auto-snapshot-'));
@@ -202,7 +202,26 @@ test('snapshots never take the owner lock and hold the publication lock briefly'
   assert.ok(!holds.some(hold => hold.path === join(store.directory, 'lock')), 'owner lock never taken');
   const publication = holds.filter(hold => hold.operation === 'auto-snapshot publication');
   assert.equal(publication.length, 5);
-  for (const hold of publication) assert.ok(hold.holdMs < 250, `publication held ${hold.holdMs}ms`);
+  t.diagnostic(`publication holds ms: ${publication.map(hold => hold.holdMs).join(' ')}`);
+  // A wall-clock hold also counts every moment the OS keeps this process off the CPU or stalls the lock
+  // file's fsync (one 270 ms hold was seen in a hosted shard; 200 holds under 18 busy loops here peak at
+  // 33 ms). Judge the typical hold, and against the bare lock's own cost measured in the same run, so a
+  // single scheduler stall cannot decide it while a publication that grew real work still fails.
+  const sorted = hold => [...hold].sort((a, b) => a - b)[Math.floor(hold.length / 2)];
+  for (let i = 0; i < 5; i++) withAutoSnapshotLock(store, () => {});
+  const bare = readFileSync(trace, 'utf8')
+    .trim()
+    .split('\n')
+    .map(line => JSON.parse(line))
+    .filter(hold => hold.operation === 'auto-snapshot publication')
+    .slice(publication.length)
+    .map(hold => hold.holdMs);
+  assert.equal(bare.length, 5);
+  t.diagnostic(`bare lock holds ms: ${bare.join(' ')}`);
+  const typical = sorted(publication.map(hold => hold.holdMs)),
+    floor = sorted(bare);
+  assert.ok(typical < 250, `typical publication hold ${typical}ms`);
+  assert.ok(typical - floor < 100, `publication held ${typical}ms against ${floor}ms for the bare lock`);
 });
 
 test('collection retains the latest auto-snapshot and frees a superseded one', async t => {

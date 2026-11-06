@@ -4,7 +4,15 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:http';
 import { once } from 'node:events';
-import { mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { forgeArm, readCalls } from '../scripts/bench-t3code/forge-arm.mjs';
@@ -79,7 +87,9 @@ process.exitCode = 7;
     t.after(() => {
       release?.();
       child?.kill();
-      arm.stopBroker();
+      // A drain would wait for a CLI that is stuck; a timed-out test must end the whole tree
+      // (a live CLI child kept the test file running to the shard bound, Issue e34799dc).
+      arm.abortBroker();
       gate.closeAllConnections();
       gate.close();
       rmSync(dir, { recursive: true, force: true });
@@ -96,8 +106,22 @@ process.exitCode = 7;
     let out = '',
       err = '';
     await new Promise((done, fail) => {
+      // Name where a stalled handshake stopped before the test's own timeout reports only a time.
+      const stalled = setTimeout(
+        () =>
+          fail(
+            Error(
+              `handshake stalled: stdout ${Buffer.byteLength(out)}/${Buffer.byteLength(stdout)} bytes, stderr ${Buffer.byteLength(err)}/${Buffer.byteLength(stderr)} bytes, gate ${release ? 'reached' : 'not reached'}, CLI exit ${child.exitCode}`,
+            ),
+          ),
+        12_000,
+      );
+      stalled.unref();
       const progress = () => {
-        if (out === stdout && err === stderr) done();
+        if (out === stdout && err === stderr) {
+          clearTimeout(stalled);
+          done();
+        }
       };
       child.stdout.on('data', d => {
         out += d;
@@ -141,6 +165,60 @@ process.exitCode = 7;
     );
   },
 );
+
+test('relay broker abort ends a CLI call that never finishes', async t => {
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), 'forge-test-relay-abort-')));
+  const root = join(dir, 'ws');
+  mkdirSync(root);
+  const cli = join(dir, 'cli.mjs'),
+    pidFile = join(dir, 'cli.pid');
+  writeFileSync(
+    cli,
+    `import { writeFileSync } from 'node:fs';
+writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));
+await new Promise(() => setInterval(() => {}, 1000));
+`,
+  );
+  const arm = forgeArm({ cli }, { callLog: join(dir, 'calls.jsonl'), ws: dir });
+  let child, cliPid;
+  t.after(() => {
+    child?.kill();
+    arm.abortBroker();
+    if (cliPid) {
+      try {
+        process.kill(cliPid, 'SIGKILL');
+      } catch {}
+    }
+    rmSync(dir, { recursive: true, force: true });
+  });
+  const bin = join(dir, 'bin');
+  const broker = await arm.binDir(bin);
+  const brokerExit = new Promise(done => broker.child.once('exit', done));
+  const env = await arm.agentEnv(root, 'abort', {});
+  child = spawn(join(bin, 'nforge'), ['agent', '.', 'land', '{}'], {
+    cwd: root,
+    env: { ...process.env, ...env },
+    stdio: 'ignore',
+  });
+  for (const start = Date.now(); !existsSync(pidFile);) {
+    assert.ok(Date.now() - start < 10_000, 'the relay started the CLI');
+    await new Promise(done => setTimeout(done, 20));
+  }
+  cliPid = Number(readFileSync(pidFile, 'utf8'));
+  arm.abortBroker();
+  await brokerExit;
+  const alive = () => {
+    try {
+      process.kill(cliPid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  for (const start = Date.now(); alive() && Date.now() - start < 5_000;)
+    await new Promise(done => setTimeout(done, 20));
+  assert.equal(alive(), false, 'abort leaves no CLI child behind');
+});
 
 test('relay client: fragmented UTF-8 frames, refusal and truncated/error responses', async t => {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), 'forge-test-relay-wire-')));

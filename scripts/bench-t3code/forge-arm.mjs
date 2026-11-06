@@ -305,6 +305,10 @@ export function forgeArm(config, { callLog, ws, ledger = null, cellDir = dirname
       if (!(await res.json()).ok) throw Error('BENCH_BROKER_REGISTER');
       return { BENCH_NFORGE_URL: `${base}/`, BENCH_NFORGE_TOKEN: token };
     },
+    /** Test cleanup only: end the relay and any CLI call it still runs (stopBroker drains them). */
+    abortBroker() {
+      broker?.child.kill('SIGTERM');
+    },
     stopBroker() {
       broker?.child.stdin.end();
       // Let outstanding CLI children publish their receipts even after abnormal exit.
