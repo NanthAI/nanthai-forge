@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { Doc, Id } from './_generated/dataModel';
 import type { QueryCtx } from './server';
+import { acceptancePage, acceptancePlan } from './projectHostedAcceptanceStore';
 import { dormantAfterDays } from '../src/agent-parallel-defaults';
+import { composeLaneSchema, validateComposePage } from '../src/hosted-compose';
 import { effectivePolicy } from '../src/autonomy-policy';
 
 const DAY_MS = 24 * 3_600_000;
@@ -60,9 +62,79 @@ export async function liveOpenOverlapLanes(
     .slice(0, PEER_WINDOW);
 }
 
+/** Input pages of one receipt read to find a Lane; a receipt past this is not searched further. */
+const RECEIPT_PAGES = 3;
+/** The accepted receipt whose inputs carry this Lane's exact saved head, found through the Lane's
+ * Intent: its newest Candidate, that Candidate's landed request, the receipt's input pages. At most
+ * 4 indexed reads plus RECEIPT_PAGES page reads, no scan. It covers a Lane whose own completion tick
+ * never ran (nothing stamped the overlap row), so the Lane still reads as unfinished work. */
+export async function landedByReceipt(
+  ctx: QueryCtx,
+  projectId: Id<'hostedProjects'>,
+  lane: { id: string; intentId: string; head: string },
+): Promise<string | null> {
+  const [candidate] = await ctx.db
+    .query('projectHostedRecordHeads')
+    .withIndex('by_project_and_kind_and_parent', q =>
+      q.eq('projectId', projectId).eq('kind', 'candidate').eq('parent', lane.intentId),
+    )
+    .order('desc')
+    .take(1);
+  if (!candidate) return null;
+  const [landed] = await ctx.db
+    .query('projectHostedLandingRequests')
+    .withIndex('by_project_and_candidate_and_phase_and_sequence', q =>
+      q.eq('projectId', projectId).eq('candidateId', candidate.key).eq('phase', 'landed'),
+    )
+    .order('desc')
+    .take(1);
+  let receiptId: unknown;
+  try {
+    receiptId = (JSON.parse(landed?.value ?? 'null') as { acceptance?: { receiptId?: unknown } } | null)
+      ?.acceptance?.receiptId;
+  } catch {
+    return null;
+  }
+  if (typeof receiptId !== 'string') return null;
+  const plan = await acceptancePlan(ctx, { projectId, receiptId });
+  for (let index = 0; plan && index < Math.min(plan.inputPages, RECEIPT_PAGES); index++) {
+    const page = await acceptancePage(ctx, { projectId, receiptId, kind: 'inputs', index });
+    if (!page) return null;
+    for (const entry of validateComposePage(JSON.parse(page.value)).entries) {
+      const input = composeLaneSchema.safeParse(entry);
+      if (input.success && input.data.laneId === lane.id && input.data.head === lane.head) return receiptId;
+    }
+  }
+  return null;
+}
+
+/** What a Lane's overlap row says it changed, when the row holds the complete list for its current
+ * head and the list is small enough to compare: one entry per path with the bytes it ends with
+ * (`after`, null = deleted). Null when the evidence is partial, stale or too large to send. */
+export const COMPARE_PATHS = 200;
+export function overlapEvidence(
+  lane: { head: string },
+  row: Pick<Doc<'projectHostedOverlapLanes'>, 'head' | 'complete' | 'changes'> | null,
+): { path: string; after: { blob: string; mode: string } | null }[] | null {
+  if (!row || row.head !== lane.head || !row.complete) return null;
+  try {
+    const changes = JSON.parse(row.changes) as {
+      path: string;
+      after: { blob: string; mode: string } | null;
+    }[];
+    return changes.length <= COMPARE_PATHS
+      ? changes.map(change => ({ path: change.path, after: change.after }))
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Why a dormant open Lane can be abandoned without losing saved work, or null when it cannot:
  * `empty` nothing was ever saved (head is still its base); `landed` an accepted receipt landed this
- * exact saved head (the overlap row's landing stamp). Any other saved head may hold unlanded work. */
+ * exact saved head (the overlap row's landing stamp; `landedByReceipt` finds the same through the
+ * receipt when the stamp is missing). Any other saved head may hold unlanded work; the CLI can still
+ * prove it is on main (`on-main`). */
 export function abandonClass(
   lane: { head: string; base: { head: string } },
   overlap: Pick<Doc<'projectHostedOverlapLanes'>, 'landed' | 'head'> | null,

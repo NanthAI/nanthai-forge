@@ -130,6 +130,15 @@ export async function transitionHostedLane(
     let dirty = false,
       kept: ReturnType<typeof keepHostedEditsPatch> | undefined,
       selected: HostedLaneCheckoutMarker['selection'] | undefined;
+    const selectServerLane = async () =>
+      hostedLaneSelectionSchema.parse(
+        JSON.parse(
+          await exchange.client.query(makeFunctionReference<'query'>('projectHostedLanes:select'), {
+            projectId: exchange.projectId,
+            laneId: original.selection.laneId,
+          }),
+        ),
+      );
     if (parsed.action === 'abandon') {
       const captured = join(cache, 'saves', original.saveOperationId),
         capture = await captureHostedSave(root, captured, parsed.action === 'abandon');
@@ -149,15 +158,13 @@ export async function transitionHostedLane(
         // abandon pins the server's current Lane (a stale checkout cannot block it).
         kept = keepHostedEditsPatch(root, parsed.operationId, capture, captured);
         dirty = false;
-        selected = hostedLaneSelectionSchema.parse(
-          JSON.parse(
-            await exchange.client.query(makeFunctionReference<'query'>('projectHostedLanes:select'), {
-              projectId: exchange.projectId,
-              laneId: original.selection.laneId,
-            }),
-          ),
-        );
+        selected = await selectServerLane();
       }
+      // A clean checkout holds nothing the abandon could lose, and the saved head is kept either way.
+      // Its marker may be older than the Lane (a sync, a resolution Lane's landing or another save moved
+      // the record), and those old pins would be refused as WORK_STALE on every retry: pin the Lane
+      // as the server has it now.
+      if (!dirty && !selected && !parsed.saveFirst) selected = await selectServerLane();
       if (parsed.saveFirst) {
         childProgress = await saveHostedLane(
           root,

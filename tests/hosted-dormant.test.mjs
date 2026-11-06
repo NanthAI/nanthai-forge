@@ -373,3 +373,138 @@ test('stamp indexes a dormant legacy Lane so later reads skip its row', async ()
   const stamped = s.counts.at(-1).readBytesByTable.projectHostedOverlapLanes;
   assert(stamped < legacyRead, `${stamped} < ${legacyRead}`);
 });
+
+/** A dormant Lane's work reaches main without its own completion tick (the tick was lost) or through another Lane. */
+test('abandon-dormant: a receipt that names the Lane head retires it although no completion stamped it', async () => {
+  const { s, lane } = await project();
+  const landedLate = await lane('Landed, tick lost', { idleMs: 3 * DAY });
+  const other = await lane('Other Intent, same file', { idleMs: 3 * DAY });
+  const candidateId = randomUUID();
+  const receiptId = randomUUID();
+  s.insert('projectHostedRecordHeads', {
+    projectId: s.projectId,
+    kind: 'candidate',
+    key: candidateId,
+    parent: landedLate.intentId,
+    status: 'clean',
+    version: 1,
+    recordId: [...s.tables.projectHostedRecords.keys()][0],
+  });
+  s.insert('projectHostedLandingRequests', {
+    projectId: s.projectId,
+    candidateId,
+    channel: 'main',
+    submissionId: randomUUID(),
+    operationId: randomUUID(),
+    attemptId: randomUUID(),
+    actor: PEER,
+    runnable: false,
+    runId: null,
+    phase: 'landed',
+    sequence: 1,
+    value: JSON.stringify({ acceptance: { receiptId, head: 'd'.repeat(64) } }),
+  });
+  s.insert('projectHostedAcceptancePlans', {
+    projectId: s.projectId,
+    receiptId,
+    submissionId: randomUUID(),
+    attemptId: randomUUID(),
+    actor: PEER,
+    inputsNext: null,
+    dependenciesNext: null,
+    inputPages: 1,
+    dependencyPages: 0,
+    lanes: 1,
+    root: 'r'.repeat(8),
+    appliedPage: 0,
+    appliedEntry: 0,
+  });
+  const page = head => ({
+    schema: 1,
+    kind: 'forge-hosted-compose-page',
+    entries: [
+      {
+        laneId: landedLate.id,
+        head,
+        version: landedLate.version,
+        sourceVersion: landedLate.sourceVersion,
+        lifecycleVersion: landedLate.lifecycleVersion,
+        state: { object: { sha256: 'e'.repeat(64), size: 1 }, recipe: null },
+      },
+    ],
+    next: null,
+  });
+  s.insert('projectHostedAcceptancePages', {
+    projectId: s.projectId,
+    receiptId,
+    kind: 'inputs',
+    index: 0,
+    digest: 'a'.repeat(64),
+    root: 'r'.repeat(8),
+    value: JSON.stringify(page(landedLate.head)),
+  });
+  const rows = JSON.parse(
+    await s.transaction('lanes', live.list, {
+      projectId: s.projectId,
+      cursor: null,
+      limit: 100,
+      view: 'dormant',
+    }),
+  ).page;
+  const byId = new Map(rows.map(entry => [entry.laneId, entry]));
+  assert.equal(byId.get(landedLate.id).abandonable, 'landed', 'the receipt names this exact head');
+  assert.equal(byId.get(other.id).abandonable, null, 'a Lane no receipt names stays');
+  const done = JSON.parse(
+    await s.transaction('abandon', dormant.abandon, {
+      projectId: s.projectId,
+      authorityEpoch: 1,
+      abandon: [landedLate.id, other.id],
+    }),
+  );
+  assert.deepEqual(Object.fromEntries(done.results.map(entry => [entry.laneId, entry.result])), {
+    [landedLate.id]: 'abandoned',
+    [other.id]: 'has-saved-work',
+  });
+});
+
+test('abandon-dormant: the list carries the changed paths for the CLI main comparison; onMain rechecks the compared head', async () => {
+  const { s, lane, readLane, save } = await project();
+  const onMain = await lane('Work already on main', { idleMs: 3 * DAY });
+  const moved = await lane('Saved again after the CLI looked', { idleMs: 3 * DAY });
+  const list = async () =>
+    JSON.parse(
+      await s.transaction('lanes', live.list, {
+        projectId: s.projectId,
+        cursor: null,
+        limit: 100,
+        view: 'dormant',
+      }),
+    ).page;
+  const byId = new Map((await list()).map(entry => [entry.laneId, entry]));
+  assert.equal(byId.get(onMain.id).abandonable, null);
+  assert.deepEqual(byId.get(onMain.id).changes, [
+    { path: shared, after: { blob: digest(shared + onMain.id), mode: 'file' } },
+  ]);
+  assert.equal(byId.get(onMain.id).head, onMain.head);
+  // The Lane is saved again (and still idle) between the list and the sweep: its compared head is gone.
+  const resaved = await save(moved, 3 * DAY);
+  assert.notEqual(resaved.head, moved.head);
+  const done = JSON.parse(
+    await s.transaction('abandon', dormant.abandon, {
+      projectId: s.projectId,
+      authorityEpoch: 1,
+      abandon: [],
+      onMain: [
+        { laneId: onMain.id, head: onMain.head },
+        { laneId: moved.id, head: moved.head },
+      ],
+    }),
+  );
+  assert.deepEqual(Object.fromEntries(done.results.map(entry => [entry.laneId, entry.result])), {
+    [onMain.id]: 'abandoned',
+    [moved.id]: 'has-saved-work',
+  });
+  assert.equal((await readLane(onMain.id)).state, 'abandoned');
+  assert.equal((await readLane(onMain.id)).head, onMain.head, 'the saved head is kept');
+  assert.equal((await readLane(moved.id)).state, 'active');
+});

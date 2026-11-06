@@ -214,10 +214,13 @@ frozen set on 2026-11-06 broke capabilities across CLI/server versions with `HOS
   read. Open Lanes saved before this field existed are judged by their presence time (a row with no time
   at all counts as live) until they next write or `abandon-dormant` indexes them.
 - `nforge agent ROOT lanes '{"view":"dormant"}'` lists dormant Lanes with `abandonable` (`landed`: an
-  accepted receipt landed the saved head; `empty`: nothing was ever saved; `null`: other saved work).
+  accepted receipt landed the saved head, stamped on the Lane or named in a landed receipt's inputs; `empty`:
+  nothing was ever saved; `null`: other saved work). The dry run also compares the paths a `null` Lane
+  changed with main's bytes (one State read; only when some Lane has a complete change list of at most 200
+  paths): all equal, a deleted path absent, and the Lane reports `abandonable:"on-main"`.
   `view:"live"` hides them; the default lists all and marks `dormant`.
 - `nforge x ROOT abandon-dormant '{}'` is the owner's dry run; `{"apply":true}` abandons up to 25
-  `landed`/`empty` Lanes per call (never pinned Lanes or other saved work), indexes the remaining dormant
+  `landed`/`on-main`/`empty` Lanes per call (never pinned Lanes or other saved work), indexes the remaining dormant
   Lanes, and says how many are left. The saved head is kept; `start --reopen` undoes it.
 - A landing also completes an accepted Lane when only its record version changed after the pins were taken;
   a new save or a reopen after the pins still keeps it open.

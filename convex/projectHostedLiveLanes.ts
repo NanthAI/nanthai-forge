@@ -7,7 +7,7 @@ import { hostedLaneSchema } from '../src/hosted-lane';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { ForgeError, invariant } from '../src/errors';
 import { report } from './errors';
-import { abandonClass, dormantCutoff } from './projectHostedDormancy';
+import { abandonClass, dormantCutoff, landedByReceipt, overlapEvidence } from './projectHostedDormancy';
 
 /** One bounded indexed page, selected metadata only; no source objects or idle work. */
 export const list = query({
@@ -59,13 +59,21 @@ export const list = query({
                 .withIndex('by_project_and_lane', q => q.eq('projectId', projectId).eq('laneId', lane.id))
                 .unique()
             : undefined;
+        // Saved work with no landing stamp: ask the receipts (a lost completion tick leaves no stamp).
+        const stamped = abandonClass(lane, overlap ?? null);
+        const receipt =
+          overlap !== undefined && !stamped ? await landedByReceipt(ctx, projectId, lane) : null;
+        const evidence =
+          overlap !== undefined && !stamped && !receipt ? overlapEvidence(lane, overlap) : null;
         const stale = dormant
           ? {
               dormant: true,
               lastActivityAt: lane.at,
               ...(view === 'dormant'
                 ? {
-                    abandonable: abandonClass(lane, overlap ?? null),
+                    abandonable: receipt ? ('landed' as const) : stamped,
+                    // Paths this Lane changed and the bytes it ends with: the CLI proves them against main.
+                    ...(evidence ? { changes: evidence } : {}),
                     pinned: lane.pinned === true,
                     // False: the Lane's overlap row predates the activity index; abandon-dormant stamps it.
                     indexed: overlap ? overlap.lastActivityAt !== undefined : null,

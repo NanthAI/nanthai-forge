@@ -306,6 +306,22 @@ test('a rebase that would overwrite a local edit changes nothing and names one r
   assert.equal(replay.kept.patch, result.kept.patch);
 });
 
+test('abandon from a clean checkout older than the Lane (its work moved on elsewhere) pins the Lane as the server has it, not WORK_STALE forever', async t => {
+  const s = await fixture(t);
+  // Another writer (a sync, a resolution Lane landing, a save) moved the Lane; this checkout is clean but old.
+  await s.writer({ 'a.txt': 'theirs' });
+  const stale = readHostedLaneCheckout(s.root);
+  assert.notEqual((await s.read(s.laneId)).version, stale.selection.version, 'the marker is older');
+  const result = await transitionHostedLane(
+    s.root,
+    { operationId: randomUUID(), action: 'abandon', reason: 'work landed elsewhere' },
+    s.exchange,
+  );
+  assert.equal(result.result.status, 'applied');
+  assert.equal((await s.read(s.laneId)).state, 'abandoned');
+  assert.equal(readFileSync(join(s.root, 'a.txt'), 'utf8'), 'original', 'the checkout files are untouched');
+});
+
 test('abandon from a checkout whose last save finished unseen settles it instead of LANE_DIRTY', async t => {
   const s = await fixture(t),
     op = randomUUID();

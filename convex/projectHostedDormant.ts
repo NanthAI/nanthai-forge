@@ -2,7 +2,7 @@
 import { v } from 'convex/values';
 import { mutation } from './cliServer';
 import { activeOwnedProject } from './projectAuthority';
-import { abandonClass, dormantCutoff } from './projectHostedDormancy';
+import { abandonClass, dormantCutoff, landedByReceipt } from './projectHostedDormancy';
 import { hostedWriteProject, readHostedRecord, writeHostedRecord } from './projectHostedRecords';
 import { hostedLaneSchema } from '../src/hosted-lane';
 import { canonicalPayload } from '../src/hosted-source-operation';
@@ -18,6 +18,9 @@ export const DORMANT_BATCH = 25;
  * - `abandon`: the Lane is dormant and its saved head is fully on main (`landed`) or was never saved
  *   (`empty`). It is abandoned like any Lane; `reopen` or `start --reopen` brings it back, and its
  *   saved head is kept.
+ * - `onMain`: the owner's CLI compared the paths this Lane changed with main's bytes and found them all
+ *   there. The Lane is abandoned only while its saved head is still the one compared and its overlap row
+ *   still holds the complete change list for that head. Same undo as `abandon`.
  * - `stamp`: a dormant Lane with other saved work stays open; only its overlap row gets the activity
  *   time it lacked, so later reads skip it through the activity index instead of reading its row.
  * Retry-safe: a repeat finds nothing left to change. No scan, scheduler or idle work. */
@@ -27,6 +30,7 @@ export const abandon = mutation({
     authorityEpoch: v.number(),
     abandon: v.array(v.string()),
     stamp: v.optional(v.array(v.string())),
+    onMain: v.optional(v.array(v.object({ laneId: v.string(), head: v.string() }))),
   },
   returns: v.string(),
   handler: async (ctx, input) => {
@@ -36,8 +40,9 @@ export const abandon = mutation({
       const project = await activeOwnedProject(ctx, input.projectId, user.subject);
       await hostedWriteProject(ctx, input.projectId, user.subject, input.authorityEpoch);
       const stamp = input.stamp ?? [];
+      const onMain = new Map((input.onMain ?? []).map(entry => [entry.laneId, entry.head]));
       invariant(
-        input.abandon.length + stamp.length <= DORMANT_BATCH,
+        input.abandon.length + stamp.length + onMain.size <= DORMANT_BATCH,
         'BAD_ARGUMENT',
         `Send at most ${DORMANT_BATCH} Lanes per call.`,
       );
@@ -45,6 +50,7 @@ export const abandon = mutation({
       const results: { laneId: string; result: string }[] = [];
       const targets = [
         ...[...new Set(input.abandon)].map(id => [id, 'abandon'] as const),
+        ...[...onMain.keys()].map(id => [id, 'on-main'] as const),
         ...[...new Set(stamp)].map(id => [id, 'stamp'] as const),
       ];
       for (const [laneId, intent] of targets) {
@@ -72,7 +78,12 @@ export const abandon = mutation({
             if (row && row.lastActivityAt === undefined)
               await ctx.db.patch(row._id, { lastActivityAt: Date.parse(lane.at) });
             skip(row ? 'stamped' : 'no-overlap-row');
-          } else if (!abandonClass(lane, row)) skip('has-saved-work');
+          } else if (
+            intent === 'on-main'
+              ? !(row && row.head === lane.head && row.complete && onMain.get(laneId) === lane.head)
+              : !(abandonClass(lane, row) || (await landedByReceipt(ctx, input.projectId, lane)))
+          )
+            skip('has-saved-work');
           else {
             await writeHostedRecord(ctx, {
               projectId: input.projectId,
