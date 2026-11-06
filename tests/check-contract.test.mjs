@@ -131,7 +131,13 @@ test('the Candidate declaration is read as data and is never executed', t => {
 
 test('verify.mjs run by an executor older than the contract refuses a newer requirement in seconds', t => {
   const root = fixture(t, CHECK_CONTRACT_PROVIDED + 1);
-  for (const name of ['verify.mjs', 'verify-queue.mjs', 'selection-guard.mjs', 'prepare-convex-api.mjs'])
+  for (const name of [
+    'verify.mjs',
+    'verify-queue.mjs',
+    'verify-failure-digest.mjs',
+    'selection-guard.mjs',
+    'prepare-convex-api.mjs',
+  ])
     copyFileSync(join(repo, 'scripts', name), join(root, 'scripts', name));
   mkdirSync(join(root, 'convex'), { recursive: true });
   writeFileSync(join(root, 'scripts/test-files.mjs'), 'export const fileTimeout = () => 1000;');

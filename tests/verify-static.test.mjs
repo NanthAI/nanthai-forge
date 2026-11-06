@@ -32,6 +32,7 @@ for (const failure of [
     for (const name of [
       'verify.mjs',
       'verify-queue.mjs',
+      'verify-failure-digest.mjs',
       'selection-guard.mjs',
       'check-contract.mjs',
       'prepare-convex-api.mjs',

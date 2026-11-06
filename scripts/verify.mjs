@@ -10,9 +10,10 @@ import { fileTimeout } from './test-files.mjs';
 import { assertRunnableSelection } from './selection-guard.mjs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { existsSync, readdirSync, realpathSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
 import { prepareConvexApi } from './prepare-convex-api.mjs';
 import { assertCheckContract } from './check-contract.mjs';
+import { describeStep, failureDigest, firstErrorLines } from './verify-failure-digest.mjs';
 
 // Fail in seconds, before any build, when this tree's scripts need more than the executor provides.
 try {
@@ -41,6 +42,12 @@ function findNpmCli() {
 }
 
 const npmCli = findNpmCli();
+let packageScripts = {};
+try {
+  packageScripts = JSON.parse(readFileSync('package.json', 'utf8')).scripts ?? {};
+} catch {
+  /* A missing package.json only shortens the reproduction hint. */
+}
 // Local Git commands in tests get a load-tolerant ceiling: several checks routinely share one machine.
 const env = {
   FORGE_GIT_TIMEOUT_MS: '240000',
@@ -49,6 +56,7 @@ const env = {
 };
 const started = Date.now();
 const timings = [];
+const failedSteps = [];
 let outOfMemory = false;
 const selection = process.env.FORGE_SELECTED_TESTS ? JSON.parse(process.env.FORGE_SELECTED_TESTS) : null;
 console.log(
@@ -131,7 +139,15 @@ function runCommand(name, command, args) {
           .filter(line => /^(?:ℹ |# )(tests|pass|fail|cancelled|skipped|todo) /.test(line));
         process.stdout.write(`[${name}] ok (${seconds}s)\n${summary.map(line => `  ${line}\n`).join('')}`);
       } else {
-        process.stdout.write(`[${name}] FAILED (${seconds}s)\n${Buffer.concat(chunks)}\n`);
+        const output = Buffer.concat(chunks).toString();
+        process.stdout.write(`[${name}] FAILED (${seconds}s)\n${output}\n`);
+        failedSteps.push({
+          name,
+          command: describeStep({ command, args, npmCli, scripts: packageScripts, cwd: process.cwd() }),
+          lines: failures.length
+            ? failures.slice(0, 3).map(line => line.slice(0, 200))
+            : firstErrorLines(output),
+        });
         // Repeat early failure names at the tail for bounded run-summary readers.
         for (const line of failures) process.stdout.write(`[test] ${line}\n`);
       }
@@ -220,5 +236,7 @@ const testPassed = await tests;
 // before exercising the installed archive, for local and Actions checks.
 if (results.every(Boolean)) results.push(await npm('smoke:package', 'smoke:package'));
 console.log(`\n${timings.join('\n')}\ntotal ${((Date.now() - started) / 1000).toFixed(1)}s`);
+// The hosted summary keeps only the log tail: name each failed step, its reproduction and first errors there.
+for (const row of failureDigest(failedSteps)) console.log(row);
 console.log(`__FORGE_STATIC__${JSON.stringify({ passed: results.every(Boolean) })}`);
 process.exit(results.every(Boolean) && testPassed ? 0 : outOfMemory ? 137 : 1);

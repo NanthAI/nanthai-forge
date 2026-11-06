@@ -1,9 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 import { scrubText } from './client-error-text.js';
+import { stepExcerptChars } from './hosted-landing-suspect.js';
 
 type FailedRun = {
   testFiles?: { counts?: { failed: number }; failed: { file: string }[] } | undefined;
-  contractReports?: Record<string, { failed: boolean; firstError?: string | undefined }> | undefined;
+  contractReports?:
+    | Record<string, { failed: boolean; flaky?: boolean | undefined; firstError?: string | undefined }>
+    | undefined;
 };
 const line = (text: string, max: number) => scrubText(text.replace(/\s+/g, ' ').trim(), max);
 
@@ -22,15 +25,27 @@ export function checkFailureDetail(
       ...Object.keys(reports).filter(file => reports[file]!.failed),
     ]),
   ];
+  // A file that failed then passed on retry is not the cause, but its first failed attempt
+  // (test name and message) is the lead when the failure is hard to reproduce.
+  const flaky = Object.keys(reports).filter(file => reports[file]!.flaky && !reports[file]!.failed);
+  const flakyNote = flaky.length
+    ? ` Flaky, passed on retry: ${flaky
+        .slice(0, 2)
+        .map(
+          file =>
+            `${line(file, 200)}${reports[file]!.firstError ? ` (${line(reports[file]!.firstError!, 240)})` : ''}`,
+        )
+        .join('; ')}${flaky.length > 2 ? `; +${flaky.length - 2} more` : ''}.`
+    : '';
   if (failed.length) {
     const shown = failed.slice(0, files).map(file => {
       const error = reports[file]?.firstError;
       return `${line(file, 200)}${error ? ` (${line(error, 240)})` : ''}`;
     });
     const total = Math.max(failed.length, run.testFiles?.counts?.failed ?? 0);
-    return `Failing: ${shown.join('; ')}${total > shown.length ? `; +${total - shown.length} more` : ''}.`;
+    return `Failing: ${shown.join('; ')}${total > shown.length ? `; +${total - shown.length} more` : ''}.${flakyNote}`;
   }
-  if (step) return `Failing ${line(step.job, 60)}: ${line(step.excerpt, 240)}`;
+  if (step) return `Failing ${line(step.job, 60)}: ${line(step.excerpt, stepExcerptChars)}${flakyNote}`;
   return 'No failing test file or job step was reported; open the check run log.';
 }
 

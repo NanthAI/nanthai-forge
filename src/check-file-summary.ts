@@ -17,12 +17,25 @@ export const checkFileSummarySchema = z
     flaky: z.array(file),
   })
   .strict();
+const flakyErrors = 5;
+const flakyErrorChars = 240;
 /** Derived from the existing result; no log fetch or additional result mutation. */
 export function checkFileSummary(reports: z.infer<typeof semanticReportsSchema>) {
   const files = Object.entries(reports).map(([file, { firstError: _excerpt, ...report }]) => {
     void _excerpt;
     return { file, report };
   });
+  // A flaky file names its test and first error (the failed first attempt), bounded like the
+  // failing-file detail: at most flakyErrors files of flakyErrorChars each. Failed files keep
+  // their first error in the retained contractReports instead.
+  let named = 0;
+  for (const item of files) {
+    const error = reports[item.file]?.firstError;
+    if (item.report.flaky && !item.report.failed && error && named++ < flakyErrors)
+      (item.report as { firstError?: string }).firstError = error
+        .replace(/\s+/g, ' ')
+        .slice(0, flakyErrorChars);
+  }
   const { truncated } = capCheckReports(reports);
   const failed = files.filter(item => item.report.failed);
   const flaky = files.filter(item => item.report.flaky && !item.report.failed);

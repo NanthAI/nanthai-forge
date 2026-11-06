@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ContractTimingReader } from '../dist/contract-test-timings.js';
 import { checkFileSummary } from '../dist/check-file-summary.js';
+import { checkFailureDetail } from '../dist/check-failure-detail.js';
 import { compactCheckText } from '../dist/check-compact-output.js';
 import { summarizeCheckLines } from '../dist/check-report-summary.js';
 import { semanticReportsSchema } from '../dist/intent-semantic-conflict.js';
@@ -85,6 +86,22 @@ test('fail once passes the check, reports flakiness and both attempt timings, ev
   assert.equal(summary.counts.flaky, 1);
   assert.equal(summary.counts.failed, 0);
   assert.equal(summary.flaky[0].report.attempts.length, 2);
+  // Issue 58236de6: a flaky file names its failing test and message, bounded, not durations alone.
+  assert.match(report.retry.firstError, /^result: .*first assertion/s);
+  assert.match(summary.flaky[0].report.firstError, /^result: .*first assertion/);
+  assert.ok(summary.flaky[0].report.firstError.length <= 240);
+  const detail = checkFailureDetail({
+    contractReports: {
+      ...reader.reports,
+      'tests/other.test.mjs': { failed: true, firstError: 'boom token=abcdef123456' },
+    },
+    testFiles: { counts: { failed: 1 }, failed: [{ file: 'tests/other.test.mjs' }] },
+  });
+  assert.match(
+    detail,
+    /^Failing: tests\/other\.test\.mjs \(boom token=\[redacted\]\)\. Flaky, passed on retry: .*flake-0\.mjs \(result: .*first assertion/,
+  );
+  assert.doesNotMatch(detail, /abcdef123456/);
   const reports = testReports(retained.split('\n'));
   const verdicts = testExecutionVerdicts(
     {
@@ -98,6 +115,15 @@ test('fail once passes the check, reports flakiness and both attempt timings, ev
   );
   assert.equal(verdicts.unknownFailure, false);
   assert.ok(verdicts.verdicts.some(item => item.verdict === 'flake'));
+});
+
+test('a persistent assertion failure names its failing test and message in the first error', async t => {
+  const f = fixture(t, ['always']);
+  const result = await run(f.files, 0);
+  assert.equal(result.code, 1, result.text);
+  const [report] = result.reports;
+  assert.equal(report.failed, true);
+  assert.match(report.firstError, /^result: .*first assertion/s);
 });
 
 test('a file that cannot load keeps its compile error, not the generic file-level failure', async t => {

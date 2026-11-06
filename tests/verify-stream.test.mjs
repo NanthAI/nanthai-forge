@@ -22,6 +22,7 @@ for (const flaky of [false, true])
     for (const name of [
       'verify.mjs',
       'verify-queue.mjs',
+      'verify-failure-digest.mjs',
       'selection-guard.mjs',
       'check-contract.mjs',
       'test-files.mjs',

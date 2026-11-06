@@ -104,6 +104,7 @@ export async function runFiles(
       let timedOut = false,
         firstError = '',
         captureError = false,
+        errorTest = '',
         // A file that fails to load (SyntaxError, missing export) prints the real error as
         // top-level TAP comments; its file-level result says only `error: 'test failed'`.
         loadError = [];
@@ -129,7 +130,11 @@ export async function runFiles(
             firstError = errorExcerpt(loadError.join('\n'));
             loadError = [];
           }
-          if (/^\s*error:/.test(line) && !firstError) captureError = true;
+          if (/^\s*error:/.test(line) && !firstError) {
+            captureError = true;
+            // TAP prints a result before its YAML block: the latest failing result owns this error.
+            errorTest = results.findLast(item => !item.passed)?.name ?? '';
+          }
           if (captureError && firstError.length < 2048) {
             if (/^\s*(?:code|stack|operator|failureType):/.test(line)) captureError = false;
             else firstError = errorExcerpt(firstError + line.trim() + '\n');
@@ -189,6 +194,9 @@ export async function runFiles(
           complete:
             !timedOut && !signal && (code === 0 || (code === 1 && results.some(item => !item.passed))),
         };
+        // Name the failing test with its message: `test name: message` (still the 2 KiB firstError).
+        if (report.firstError && errorTest && !report.firstError.startsWith(`${errorTest}: `))
+          report.firstError = errorExcerpt(`${errorTest}: ${report.firstError}`);
         if (report.failed && !report.firstError)
           report.firstError = signal ? `Process terminated by ${signal}` : `Process exited with code ${code}`;
         const previous = reports.get(file);
