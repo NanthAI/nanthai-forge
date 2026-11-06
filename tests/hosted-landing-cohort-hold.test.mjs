@@ -34,6 +34,26 @@ const mark = (f, task, kind) => f.patch('_scheduled_functions', task._id, { stat
 /** Three changes pass their Lane checks together. The first lands on its own run
  * and moves main; the other two are refused and recompose. `hook(task)` may drop
  * a task (returns a state kind) to replay a lost step. Every run passes. */
+/** The last change's finish runs late: each of its drives due after main moved,
+ * before the second change held, runs one second later. Without the delay it
+ * would be refused beside the second (early refusal, 7fe54c7c) and no hold would
+ * be needed; with it, the second holds while the last is still deciding. */
+const lateLastChange = () => {
+  const delayed = new Set();
+  return (task, f, ids) => {
+    if (
+      task.name !== 'projectHostedFinishDriver:drive' ||
+      task.args[0].submissionId !== ids[2] ||
+      states(f)[0].phase !== 'landed' ||
+      row(f, ids[1])?.admission?.hold ||
+      delayed.has(task._id)
+    )
+      return null;
+    delayed.add(task._id);
+    f.patch('_scheduled_functions', task._id, { scheduledTime: Date.now() + 1000 });
+    return 'pending';
+  };
+};
 async function wave(t, hook = () => null, stop = () => false) {
   const count = 3;
   const f = await batchesFixture(t, {
@@ -67,13 +87,25 @@ async function wave(t, hook = () => null, stop = () => false) {
   return { f, ids, events };
 }
 
+test('a refused change holds for a peer still deciding and they form one cohort', async t => {
+  const { f, ids, events } = await wave(t, lateLastChange());
+  assert(states(f).every(s => s.phase === 'landed'));
+  assert.equal(queueRuns(f).length, 1, 'one combined check, not one per refused change');
+  const [cohort] = batches(f);
+  assert.deepEqual(new Set(cohort.members.map(m => m.submissionId)), new Set(ids.slice(1)));
+  assert.equal(events.filter(e => e.held).length, 1, 'only the earlier refused change held');
+  assert.equal(f.pending().length, 0, 'idle after settling: no timers or polling');
+});
+
 test('admitted changes that miss proved reuse wait for each other and form one cohort', async t => {
   const { f, ids, events } = await wave(t);
   assert(states(f).every(s => s.phase === 'landed'));
   assert.equal(queueRuns(f).length, 1, 'one combined check, not one per refused change');
   const [cohort] = batches(f);
   assert.deepEqual(new Set(cohort.members.map(m => m.submissionId)), new Set(ids.slice(1)));
-  assert.equal(events.filter(e => e.held).length, 1, 'only the earlier refused change held');
+  // Both stale Lane proofs are refused in one pass (early refusal), so they
+  // recompose together and neither needs to hold for the other.
+  assert.equal(events.filter(e => e.held).length, 0, 'refused together: no hold');
   assert(
     rows(f).every(r => r.deciding === undefined),
     'no decision left open',
@@ -83,6 +115,7 @@ test('admitted changes that miss proved reuse wait for each other and form one c
 
 test('a lost release wake is re-driven by the hold’s own wake at its bound (c329d191 class)', async t => {
   let lost = false;
+  const late = lateLastChange();
   const { f, events } = await wave(t, (task, f, ids) => {
     // The peer's decision released the hold and scheduled one queue drive; that
     // drive fails (OCC exhaustion) and nothing of it commits.
@@ -91,7 +124,7 @@ test('a lost release wake is re-driven by the hold’s own wake at its bound (c3
       lost = true;
       return 'failed';
     }
-    return null;
+    return late(task, f, ids);
   });
   assert(lost, 'the release wake was dropped');
   assert(states(f).every(s => s.phase === 'landed'));
@@ -103,10 +136,11 @@ test('a lost release wake is re-driven by the hold’s own wake at its bound (c3
 
 test('a peer that never decides holds a refused change for the bound only', async t => {
   const { f, ids, events } = await wave(t, (task, f, ids) =>
-    // The last peer's publication attempt never runs (a stuck step, cancelled).
+    // The last peer's publication attempt never runs once main moved (a stuck
+    // step, cancelled).
     task.name === 'projectHostedFinishDriver:drive' &&
     task.args[0].submissionId === ids[2] &&
-    row(f, ids[1])?.admission?.hold
+    states(f)[0].phase === 'landed'
       ? 'canceled'
       : null,
   );
@@ -124,7 +158,11 @@ test('a hold wake refused by a write outage is re-driven when writes resume (72d
   const { f, ids } = await wave(
     t,
     (task, f, ids) => {
-      if (task.name === 'projectHostedFinishDriver:drive' && task.args[0].submissionId === ids[2])
+      if (
+        task.name === 'projectHostedFinishDriver:drive' &&
+        task.args[0].submissionId === ids[2] &&
+        states(f)[0].phase === 'landed'
+      )
         return 'canceled';
       if (!thrown && task.name === 'projectHostedLandingCohortHold:end') {
         thrown = task;

@@ -10,7 +10,10 @@ CONSTANTS PreQueue, Red, Independent, LaneInfra, SuffixWaits
 \* unchanged). "before": today's code, tracked: a refused member forms its cohort
 \* while peers still decide their own proof. "hold": it waits, holding no queue
 \* order, until no peer is deciding or its bounded hold expires. "keep-order":
-\* the same hold, but it keeps its queue order (litmus only).
+\* the same hold, but it keeps its queue order (litmus only). "early" (7fe54c7c,
+\* today's code): "hold", and a stale Lane proof is refused before its turn while
+\* every older entry holding order is itself refused or a refusable Lane proof of
+\* the same cohort and no other group can move main first.
 CONSTANTS Hold
 OneCohort == [e \in 1..N |-> 1]
 Entries == 1..N
@@ -57,7 +60,7 @@ Deciding == {e \in Entries : PreQueue /\ q.phase[e] = "queued" /\ q.lane[e] = "p
 \* Held: a refused member (tried, batchable, free) while a peer is deciding and its
 \* bounded hold has not expired. Released in the transaction that ends the last
 \* decision (derived state); a lost wake is the Incidents `cohorthold` litmus.
-Held == IF Hold \in {"hold", "keep-order"}
+Held == IF Hold \in {"hold", "keep-order", "early"}
         THEN {e \in Entries : q.phase[e] = "queued" /\ e \in q.tried /\ e \notin q.expired
                               /\ (\A g \in Entries : q.batches[g].phase \in {"composing", "checking", "ready"}
                                    => e \notin q.batches[g].members)
@@ -162,6 +165,17 @@ LaneAdopt(g) ==
      IN q' = [q EXCEPT !.batches[g] = [b EXCEPT !.proof = Proof(b)], !.phase[e] = "ready",
                        !.tried = @ \cup {e}, !.advice = @ \ {e}, !.train = Append(@, g)]
   /\ UNCHANGED <<main, stamp, moves, counts, audit, running, crashes, claim, fence>>
+\* Early refusal (7fe54c7c): every older order holder is a refused, batchable
+\* member or in a Lane group that publication must refuse, all of one cohort,
+\* and no non-Lane group is active (none can move main before that cohort).
+RefusableLane(h) == q.batches[h].lane /\ q.batches[h].phase = "ready"
+                    /\ ~Exact(h) /\ ~(q.batches[h].included \subseteq Independent)
+EarlyRefusal(g, older) ==
+  /\ Hold = "early"
+  /\ ~\E h \in Active : ~q.batches[h].lane
+  /\ \A e \in older : /\ Cohort[e] = Cohort[Earliest(q.batches[g].included)]
+                     /\ \/ e \in Free \cap q.tried
+                        \/ \E h \in Active : RefusableLane(h) /\ e \in q.batches[h].members
 \* A refused proof returns the member to the batchable pool for one combined
 \* check, keeping its rank; Claim never waits for its own speculative suffix.
 LaneRefused(g) ==
@@ -169,8 +183,10 @@ LaneRefused(g) ==
   /\ ~Exact(g) /\ ~(q.batches[g].included \subseteq Independent)
   \* In code the refusal happens at publication, after the order claim. The
   \* earlier configurations ("none") keep the simpler unordered refusal.
-  /\ (Hold # "none" => ~\E e \in QueueLive \ (q.batches[g].members \cup Suspects \cup Behind(g)) :
-                         q.rank[e] < q.rank[Earliest(q.batches[g].included)])
+  /\ (Hold # "none" =>
+        LET older == {e \in QueueLive \ (q.batches[g].members \cup Suspects \cup Behind(g)) :
+                        q.rank[e] < q.rank[Earliest(q.batches[g].included)]}
+        IN older = {} \/ EarlyRefusal(g, older))
   /\ LET b == q.batches[g] invalid == Invalidated(g) IN
      q' = [invalid EXCEPT !.batches[g] = Empty,
            !.phase = [x \in Entries |-> IF x \in b.members \cap Live THEN "queued"

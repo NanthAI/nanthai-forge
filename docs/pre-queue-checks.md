@@ -59,6 +59,11 @@ configured check (no `configure-check`) skips it and queues as before.
    A refused change waits for peers still deciding their own Lane run (bounded by
    the train hold, holding no queue order, with one armed wake), so the refused
    changes of one wave share one cohort check (Issue 10b0a94b).
+   A Lane run that a moved main has made stale is refused before its turn when
+   every older change holding order is itself refused or stale and nothing else
+   can move main first, so the wave recomposes in one pass instead of one change
+   after another. It is the same one refusal and recomposition, earlier: no new
+   check and no added Convex calls (Issue 7fe54c7c).
 
 The Lane check never re-runs because main moved. Re-running it would race main
 again (model finding 5, moving-main starvation) and add a full run per move; the

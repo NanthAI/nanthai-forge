@@ -20,6 +20,7 @@ import {
   settleLandingOperation,
   landingRow,
   type LandingChannel,
+  type LandingRow,
 } from './projectHostedLandingStore';
 import { nextTrainLandingRow, scheduleLandingWake, releaseLandingQueue } from './projectHostedLandingWake';
 import { olderLandingAhead } from './projectHostedLandingOrder';
@@ -334,7 +335,7 @@ export async function claimReadyLanding(
   },
   now = Date.now(),
   watchdog = true,
-): Promise<LandingClaim | { waitingFor: string; until: number | null } | null> {
+): Promise<LandingClaim | { waitingFor: string; until: number | null; ahead: LandingRow } | null> {
   const queue = await landingQueue(ctx, input);
   invariant(queue, 'NOT_FOUND', 'Hosted landing queue not found.');
   const { state, row } = await loadLanding(ctx, input);
@@ -361,7 +362,7 @@ export async function claimReadyLanding(
     if (row.orderWait !== ahead.row.submissionId || row.alarm)
       await ctx.db.patch(row._id, { orderWait: ahead.row.submissionId, alarm: null });
     if (!ahead.row.orderWaited) await ctx.db.patch(ahead.row._id, { orderWaited: true });
-    return { waitingFor: ahead.row.submissionId, until: ahead.until };
+    return { waitingFor: ahead.row.submissionId, until: ahead.until, ahead: ahead.row };
   }
   if (row.orderWait) await ctx.db.patch(row._id, { orderWait: undefined });
   if (leased) return null;

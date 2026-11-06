@@ -47,6 +47,8 @@ npm run model:landing-queue -- prequeue-cohort        # cohort hold: refused cha
 npm run model:landing-queue -- prequeue-cohort-mixed  # the same with a red and an independent change
 npm run model:landing-queue -- prequeue-cohort-before # expected: a cohort forms while peers decide
 npm run model:landing-queue -- prequeue-hold-order    # expected: a hold that keeps its order deadlocks
+npm run model:landing-queue -- prequeue-early         # early refusal: stale Lane proofs refused together
+npm run model:landing-queue -- prequeue-early-mixed   # the same with a red and an independent change
 npm run model:landing-queue -- cohorthold             # expected: lost release wake (10b0a94b)
 npm run model:landing-queue -- cohorthold-fixed
 npm run model:landing-queue -- lostdispatch           # expected: a lost check dispatch strands the head (a7de3a93)
@@ -199,6 +201,24 @@ counts; `OneCohort` puts every entry in one cohort class.
   re-drives it after the outage (`redriveCohortHold`). Replayed against the
   implementation in `tests/hosted-landing-cohort-hold.test.mjs`.
 
+### Early refusal
+
+`Hold = "early"` (Issue 7fe54c7c) is today's code: the cohort hold, and a Lane
+group that publication must refuse (`~Exact`, not `Independent`) is refused
+before its turn (`EarlyRefusal`) when every older entry holding order is a
+refused batchable member or in such a Lane group, all of one cohort class, and no
+non-Lane group is active. Without it the refusals ran one per recomposition (wave
+3b: four in 4.3 minutes before one cohort formed). The code bounds it further:
+the older window is at most 16 rows and positions past the cohort size keep their
+turn.
+
+- `prequeue-early` and `prequeue-early-mixed` hold the same invariants and
+  liveness as `prequeue-cohort`, including `NoEarlyCohort`: the early-refused
+  member is held while an older peer still decides.
+- Replayed against the implementation in
+  `tests/hosted-landing-early-refusal.test.mjs` (one pass, one combined check, no
+  more transactions than the serial path).
+
 ## Model-to-code map and simplifications
 
 Line references are to the pinned source above. Every abstraction below is a
@@ -221,6 +241,7 @@ scope limitation; passing TLC does not verify the omitted implementation.
 | `Claim`, `Publish`, `MoveMain` | `convex/projectHostedLandingControl.ts:293`, `convex/projectHostedLandingBatchPublish.ts:48`, `convex/projectHostedAcceptancePublish.ts:110` | Transactional OCC/CAS is atomic; includes main receipt equality, exact proof and member counters. Policy, contributor access, full shard evidence and registration are assumed validated; this is the automatic agent path, not explicit unchecked owner acceptance (which independently also makes unrestricted literal S2 false). Main contributions are append-only ancestry tokens; legitimate file edits/reverts are outside this property. |
 | `Reuse` | `convex/projectHostedFinishCompose.ts:402`, `convex/projectHostedAcceptancePublish.ts:125`, `convex/projectHostedAcceptancePublish.ts:175`, `src/hosted-cross-head-proof.ts:46` | Eligible owner-agent cross-head proof on disjoint synthetic main change. Analysis/audit eligibility is assumed; original checked result stays different from applied result. `strict.cfg` disables this branch; the default enables it; `reuse-core` explicitly enables it. |
 | `LaneCheck`, `LaneAdopt`, `LaneRefused`, `Behind` | `convex/projectHostedLandingAdmission.ts` (`startLandingAdmission`, `settleLandingAdmission`, `admittedReuseFirst`), `convex/projectHostedLandingStore.ts` (`orderLive`, `batchable`), `convex/projectHostedLandingSuffix.ts`, `convex/projectHostedLandingOrder.ts` (`olderLandingAhead`) | Lane-check outcomes are fixed by `Red`; in-flight interaction failures stay nondeterministic in `Check`. Proof eligibility is the constant `Independent`, not the path/test analysis. A refused proof is reduced to returning to the pool; the code recomposes on current main first. The code walks the suffix only for entries that went through full admission: only they can enter the queue behind a younger group. |
+| `EarlyRefusal`, `RefusableLane` | `convex/projectHostedLandingEarlyRefusal.ts` (`refuseStaleLaneProofNow`, `wakeAfterLaneRefusal`, `laneRefusalCohort`), `convex/projectHostedFinishControl.ts` (`finishStep`) | The code requires the retained train to be empty of live groups (a lane-bound entry is not in the train); the model requires no non-Lane active group. The cohort class stands for the code's cohort-size limit; urgent entries and the 16-row window are not modelled. |
 | `Deciding`, `Held`, `HoldExpire` | `convex/projectHostedLandingCohortHold.ts` (`decidingSince`, `holdForPeers`, `releaseCohortHolds`, `end`, `redriveCohortHold`), `convex/projectHostedLandingStore.ts` (`writeLanding`), `convex/projectHostedLandingBatchCheck.ts` | The code waits only for peers whose admission ended before the hold began (`deciding` index), so later arrivals never extend it; the model starts with every entry admitted. A held entry outside the release window is released by its own wake. |
 | crash/restart, fair driver | `convex/projectHostedLandingControl.ts:43`, `convex/projectHostedLandingControl.ts:123`, `convex/projectHostedLandingDriver.ts:46`, `convex/projectHostedFinishWake.ts:48` | Finite crashes between transactions; durable watchdog eventually runs, lease fence rises on restart. Expiry alone creates no new run. Timers become fair events; physical durations and stale worker payloads are not simulated. |
 | stall/hold repair | `convex/projectHostedLandingWake.ts:112`, `convex/projectHostedLandingStall.ts:90`, `convex/projectHostedLandingStall.ts:157` | Fair source failure/fallback stands in for 5-minute hold release and 15/60-minute stall events. Real drop deadlines only cancel structurally ownerless work and eventually stop rearming live work. Permanent transaction faults are outside successful-driver fairness; the stranded litmus tests the missing-recovery shape, not all six historic incidents. |
@@ -420,9 +441,11 @@ or production historical replay is implied.
 | `prequeue-solo-moved` | 20 | 18 | 1.033 | Expected NoQueueCheck |
 | `cohorthold` | 12 | 12 | 0.575 | Expected liveness violation |
 | `cohorthold-fixed` | 28 | 28 | 0.584 | Passed; lost release, stuck peer and outage branches |
-| `prequeue-cohort` | 210,470 | 69,900 | 168.934 | Passed |
-| `prequeue-cohort-mixed` | 620 | 278 | 1.476 | Passed |
+| `prequeue-cohort` | 128,256 | 43,257 | 77.438 | Passed |
+| `prequeue-cohort-mixed` | 619 | 276 | 4.266 | Passed |
 | `prequeue-cohort-before` | 306 | 199 | 2.015 | Expected NoEarlyCohort |
+| `prequeue-early` | 152,165 | 50,065 | 90.790 | Passed |
+| `prequeue-early-mixed` | 625 | 276 | 4.121 | Passed |
 | `prequeue-hold-order` | 123,398 | 58,527 | 496.188 | Expected liveness violation |
 | `supervisor` | 13 | 10 | <1.1 | Expected liveness violation |
 | `supervisor-fixed` | 15 | 15 | <1.1 | Passed; lost step and throwing advance branches |
@@ -430,6 +453,8 @@ or production historical replay is implied.
 | `retrykeep-fixed` | 15 | 15 | 0.548 | Passed; same-head and changed-head retries |
 
 All 18 configurations matched their expected outcomes on the registered Java 25.0.3 JDK (2026-11-05, Lane fefd80ee). The seven `prequeue` rows and every `LandingQueue` configuration were then re-run on the spec composed with that change (2026-11-05, Issue e7d27937): all matched, and the non-`prequeue` state counts were unchanged. The `prequeue` rows are from that run. The six positive queue configurations fully exhausted their state graphs; the negative cases stopped at the named counterexample. The default remained below five minutes (94.046 s); `isolation` took 290.953 s. The six cohort-hold rows were added with Issue 10b0a94b (2026-11-05, Lane 2881e6cc). With `Hold = "none"` the `prequeue` and `small` counts were re-run and unchanged. `prequeue-cohort` and `prequeue-cohort-mixed` use `MoveBound = 0`: queue publications move main, which is what refuses the Lane proofs. With one extra external move, `prequeue-cohort` had not finished after 18 minutes and is not counted. `prequeue-hold-order` keeps that move. The two `supervisor` rows were added with Issue 19328518 (2026-11-05, Lane d3a3c850); every Incidents configuration was re-run with them and matched, with existing counts unchanged.
+
+The two `prequeue-early` rows were added with Issue 7fe54c7c (2026-11-06, Lane 6d62d7fe); all 41 configurations, Incidents included, were re-run with them and matched. `prequeue-cohort` and `prequeue-cohort-mixed` are from that run (the earlier counts predated later spec changes); `prequeue-early` explores a superset of `prequeue-cohort`'s states, as `"early"` only adds refusals.
 
 With ea86f3fb (2026-11-05, Lane c1759651) `small`, `strict`, `races`, `six-slots` and `isolation` were re-run with `StackPinned`; their rows are from that run. A platform retry no longer branches into invalidation, so `small`, `strict`, `races` and `isolation` explore fewer states. `six-slots` has no platform outcome and kept its count; its wall time on current main is ~17 min (an unmodified copy of the main model ran at the same rate, friction filed). The other rows predate this change.
 

@@ -15,6 +15,11 @@ import { prepareAcceptance, stageAcceptance } from './projectHostedAcceptanceSto
 import { releaseLandingQueue } from './projectHostedLandingWake';
 import { landingQueue } from './projectHostedLandingStore';
 import { claimReadyLanding } from './projectHostedLandingControl';
+import {
+  laneRefusalCohort,
+  refuseStaleLaneProofNow,
+  wakeAfterLaneRefusal,
+} from './projectHostedLandingEarlyRefusal';
 import { publishAcceptance } from './projectHostedAcceptancePublish';
 import { hostedWriteProject } from './projectHostedRecords';
 import { blobStore } from './blobStore';
@@ -198,6 +203,15 @@ export async function finishStep(ctx: MutationCtx, input: FinishIdentity): Promi
     // An older submission takes main first; its next transition wakes this finish,
     // or the end of its hold when nothing dispatches it yet (one wake, no poll).
     if ('waitingFor' in claim) {
+      // A certainly stale Lane proof recomposes now, beside the refused peers
+      // ahead of it, instead of after each of them in turn.
+      const early = await refuseStaleLaneProofNow(ctx, { row: landing, state, waitingOn: claim.ahead });
+      if (early) {
+        // Recomposing writes the entry queued, which clears its order wait.
+        await reserveFinishRetry(ctx, (await ctx.db.get(row._id))!, value);
+        await wakeAfterLaneRefusal(ctx, input, early);
+        return null;
+      }
       if (claim.until !== null)
         await scheduleFinish(ctx, (await ctx.db.get(row._id))!, Math.max(0, claim.until - Date.now()));
       return null;
@@ -211,6 +225,9 @@ export async function finishStep(ctx: MutationCtx, input: FinishIdentity): Promi
         const queue = await landingQueue(ctx, { projectId: input.projectId, channel: 'main' });
         if (queue) await releaseLandingQueue(ctx, queue);
         await reserveFinishRetry(ctx, (await ctx.db.get(row._id))!, value);
+        const cohort =
+          error.code === 'CHANNEL_CHANGED' ? await laneRefusalCohort(ctx, { row: landing, state }) : null;
+        if (cohort) await wakeAfterLaneRefusal(ctx, input, cohort);
       } else throw error;
     }
     return null;

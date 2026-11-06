@@ -49,6 +49,8 @@ if (config === 'all') {
     'prequeue-cohort',
     'prequeue-cohort-mixed',
     'prequeue-cohort-before',
+    'prequeue-early',
+    'prequeue-early-mixed',
     'prequeue-hold-order',
     'cohorthold',
     'cohorthold-fixed',

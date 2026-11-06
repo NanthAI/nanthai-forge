@@ -688,6 +688,16 @@ the same runner minutes as without the Lane check.
   decides, and lasts at most the train hold (5 minutes); one wake at that bound is
   armed with the hold, and a write outage that refuses it is re-driven when
   writes resume.
+- Early refusal (Issue 7fe54c7c): a change waiting for its turn whose Lane run is
+  bound to an older main is refused at once, without waiting, while every older
+  change holding order is itself refused or stale, of one cohort, and no retained
+  group can move main first. It recomposes beside them; its first order waiter is
+  driven once, so the wave's refusals chain in one pass instead of one per
+  recomposition. Each change still recomposes once and no check is added. It reads
+  one indexed window of at most 16 older rows and their attempts, only while a
+  change is waiting; positions past the cohort size keep their turn. On the
+  five-change fixture wave the cohort formed 1.5 s (three refusal steps) sooner
+  with 215 instead of 221 transactions.
 - The Lane check never re-runs because main moved; the combined check is that
   re-check, once per cohort.
 - A group never waits for an older entry stacked behind it in the pipeline: that
