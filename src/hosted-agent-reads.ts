@@ -18,6 +18,7 @@ import type { HostedAgentTransport } from './hosted-agent-transport.js';
 import { QUEUE_VIEW_LIMIT } from './hosted-queue-view.js';
 import { hostedLandingsSchema } from './hosted-agent-landings.js';
 import { hostedLaneHistorySchema } from './hosted-agent-lane-history.js';
+import { hostedOverlapAnswersSchema } from './hosted-agent-overlap-answers.js';
 import { liveLanesInput } from './hosted-live-lanes.js';
 import { hostedBoardSchemas } from './hosted-board.js';
 const hash = z.string().regex(/^[0-9a-f]{64}$/);
@@ -110,6 +111,7 @@ export const hostedClientReadSchemas = {
   queue: hostedQueueSchema,
   landings: hostedLandingsSchema,
   'lane-history': hostedLaneHistorySchema,
+  'overlap-answers': hostedOverlapAnswersSchema,
   wait: hostedWaitSchema,
   show: hostedSourceShowSchema.omit({ action: true }),
   /** The board verbs are client actions too: `board --post`/`--reply` write one note each, `--resolve` withdraws one. */

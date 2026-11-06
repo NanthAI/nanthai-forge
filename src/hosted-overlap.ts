@@ -9,6 +9,20 @@ export const OVERLAP_METADATA_BYTES = 128 * 1024;
 export const IDLE_NOTICE_MS = 6 * 3_600_000;
 /** Cross-file symbol facts per Lane row, inside the row budget (replay max 9.5 KB). */
 export const SYMBOL_LINK_BYTES = 16 * 1024;
+/** Overlap answers (what one builder answered on an overlap notice) stay readable this long after
+ * they were written, whether their Lanes landed, were abandoned or are still open. Owner decision
+ * 2026-11-06 (Issue b78ca196): 90 days, the same as the board evidence value. Older rows are deleted
+ * in small batches by the next answer write; no cron, no polling. */
+export const OVERLAP_ANSWER_RETENTION_MS = 90 * 24 * 3_600_000;
+/** Expired answer rows (and answer batch records) deleted per answer write. */
+export const OVERLAP_ANSWER_CLEANUP_BATCH = 10;
+/** `overlap-answers` read: rows per page (default, max), reply bytes a page may reach (limit 64 KB),
+ * DB bytes a page may read (limit 1 MB) and the answer text shown per row (longer text is cut and flagged). */
+export const OVERLAP_ANSWERS_DEFAULT_LIMIT = 20;
+export const OVERLAP_ANSWERS_MAX_LIMIT = 50;
+export const OVERLAP_ANSWERS_OUTPUT_BYTES = 56 * 1024;
+export const OVERLAP_ANSWERS_READ_BYTES = 800 * 1024;
+export const OVERLAP_ANSWER_TEXT_CHARS = 4_000;
 export type OverlapFile = { blob: string; mode: string } | null;
 export type OverlapChange = {
   path: string;

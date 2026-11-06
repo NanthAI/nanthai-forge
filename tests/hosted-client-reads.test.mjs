@@ -18,6 +18,7 @@ const minimal = {
   peers: {},
   queue: {},
   'lane-history': {},
+  'overlap-answers': { laneId: randomUUID() },
   landings: { from: '2026-11-05T21:00:00Z', to: '2026-11-05T23:20:00Z' },
   wait: { runId: randomUUID() },
   show: { path: 'a.ts' },
@@ -69,6 +70,25 @@ test('every client-side read passes CLI validation, appears in help and dispatch
     ['projectHostedLaneHistory:read'],
   );
   await assert.rejects(transport.dispatch('lane-history', {}), e => e.code === 'BAD_ARGUMENT');
+  // overlap-answers: one query per page; a Lane or a window is required, and both bounds of a window.
+  f.calls.length = 0;
+  const answers = await transport.dispatch('overlap-answers', {
+    from: '2026-11-05T21:00:00Z',
+    to: '2026-11-05T23:00:00Z',
+    limit: 5,
+  });
+  assert.deepEqual(
+    f.calls.map(c => c.name),
+    ['projectHostedOverlapAnswers:read'],
+  );
+  assert.deepEqual(answers.result.args, {
+    projectId: 'project',
+    limit: 5,
+    from: '2026-11-05T21:00:00.000Z',
+    to: '2026-11-05T23:00:00.000Z',
+  });
+  for (const bad of [{}, { from: '2026-11-05T21:00:00Z' }, { laneId: 'not-a-uuid' }])
+    await assert.rejects(transport.dispatch('overlap-answers', bad), e => e.code === 'BAD_ARGUMENT');
   f.queueView.entries.pop();
   f.queueView.more = true;
   const absent = await transport.dispatch('queue', { laneId });

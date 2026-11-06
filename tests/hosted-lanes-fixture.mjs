@@ -137,7 +137,15 @@ export function lanesFixture() {
           },
           insert: async (table, value) => {
             const id = `${table}-${++serial}`;
-            put(table, id, insertedDocument(schema, table, value, id, serial));
+            // Real creation times are wall-clock; retention checks (Issue b78ca196) compare them with Date.now().
+            // Answer retention (Issue b78ca196) compares creation times with Date.now(), so answer rows get
+            // wall-clock times like real ones; every other table keeps its serial order.
+            const at = table === 'projectHostedOverlapAcks' || table === 'projectHostedAckBatches';
+            put(
+              table,
+              id,
+              insertedDocument(schema, table, value, id, at ? Date.now() + serial / 1000 : serial),
+            );
             return id;
           },
           replace: async (id, value) => {
@@ -158,27 +166,29 @@ export function lanesFixture() {
                 const index = schema.tables[table].export().indexes.find(i => i.indexDescriptor === name);
                 assert(index, `${table}.${name}`);
                 indexFields = index.fields;
+                // Every provider index ends in the implicit _creationTime, which a range may bound.
+                const keyFields = [...index.fields, '_creationTime'];
                 const terms = [];
                 let lower = null,
                   upper = null;
                 const bounds = {
                   lte(field, value) {
-                    assert.equal(field, index.fields[terms.length], 'index upper-bound order');
+                    assert.equal(field, keyFields[terms.length], 'index upper-bound order');
                     upper = [field, value, true];
                     return bounds;
                   },
                   lt(field, value) {
-                    assert.equal(field, index.fields[terms.length], 'index upper-bound order');
+                    assert.equal(field, keyFields[terms.length], 'index upper-bound order');
                     upper = [field, value, false];
                     return bounds;
                   },
                   gt(field, value) {
-                    assert.equal(field, index.fields[terms.length], 'index lower-bound order');
+                    assert.equal(field, keyFields[terms.length], 'index lower-bound order');
                     lower = [field, value];
                     return bounds;
                   },
                   eq(field, value) {
-                    assert.equal(field, index.fields[terms.length], 'index order');
+                    assert.equal(field, keyFields[terms.length], 'index order');
                     terms.push([field, value]);
                     return bounds;
                   },

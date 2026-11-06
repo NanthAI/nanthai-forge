@@ -6,6 +6,7 @@ import { readHostedMainSelection } from './hosted-main-marker.js';
 import { diffHostedSource, peersHostedSource, queueHostedSource } from './hosted-agent-reads.js';
 import { landingsHostedSource } from './hosted-agent-landings.js';
 import { laneHistoryHostedSource } from './hosted-agent-lane-history.js';
+import { overlapAnswersHostedSource } from './hosted-agent-overlap-answers.js';
 import { hostedObservationContinuation } from './hosted-agent-finish-result.js';
 // SPDX-License-Identifier: Apache-2.0
 import {
@@ -124,6 +125,7 @@ const quietActions = new Set([
   'queue',
   'landings',
   'lane-history',
+  'overlap-answers',
   'capabilities',
   'metrics',
   'check-settings',
@@ -176,6 +178,7 @@ export type HostedAgentResponse = {
     | 'queue'
     | 'landings'
     | 'lane-history'
+    | 'overlap-answers'
     | 'board'
     | 'board-post'
     | 'board-reply'
@@ -313,6 +316,15 @@ export class HostedAgentTransport {
         operationId: null,
         resolved: null,
         result: await laneHistoryHostedSource(this, input),
+      };
+    if (requestedAction === 'overlap-answers')
+      return {
+        schema: 1,
+        transport: 'hosted',
+        action: 'overlap-answers',
+        operationId: null,
+        resolved: null,
+        result: await overlapAnswersHostedSource(this, input),
       };
     if (requestedAction === 'queue')
       return {

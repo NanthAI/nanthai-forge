@@ -112,6 +112,7 @@ When you change a hosted reply in Forge itself: add fields freely, but never rem
 | `queue` | `limit?, laneId?` |
 | `landings` | `from, to, limit?, cursor?` |
 | `lane-history` | `laneId?` |
+| `overlap-answers` | `laneId?, from?, to?, limit?, cursor?` |
 | `wait` | `runId?, operationIds?, cursor?, until?, timeoutSeconds?, peer?` |
 | `show` | `laneId?, state?, candidateId?, expected?, channel?, at?, path, force?` |
 | `board` | `id?, laneId?, all?` |
@@ -146,6 +147,13 @@ MCP `forge_review` exposes hosted `show`, `diff` and `peers`.
   `lastSyncedBase` (the main its base is now), `synced`, `state`, `head`,
   `lastActivityAt` and `landing {receiptId,commit,head,at,current}` (null when
   nothing landed or the Lane landed before the landing stamp). No writes.
+- `overlap-answers {laneId?,from?,to?,limit?,cursor?}` reads the stored overlap
+  answers (`choice`, `text`, `noticeId`, `disposition`, `storedAt`) by Lane or by the
+  UTC window [from,to), oldest first, at most 50 a page (default 20), under 64 KB; text
+  over 4000 characters is cut and flagged `textTruncated`. Answers stay readable for
+  90 days after they were written (`OVERLAP_ANSWER_RETENTION_MS` in
+  `src/hosted-overlap.ts`), whether the Lane landed, was abandoned or is still open.
+  One query per page, no writes. Follow `nextCursor` until null.
 - `show` selects one exact `{laneId,path}`, `{channel:"main",path}`, `{state,path}`
   or `{candidateId,path}`. `at:"base"` reads the file at this Lane's pinned base (the
   main it started from; use it instead of the project clone to compare with what

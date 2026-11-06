@@ -7,6 +7,7 @@ import { hostedAckBatchSchema } from '../src/hosted-record-input';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { digest } from '../src/portable-hash';
 import { invariant } from '../src/errors';
+import { pruneExpiredOverlapAnswers } from './projectHostedOverlapAnswers';
 import { report } from './errors';
 export const append = mutation({
   args: { projectId: v.id('hostedProjects'), request: v.string() },
@@ -31,6 +32,7 @@ export const append = mutation({
         return old.value;
       }
       const answers = [];
+      let inserted = 0;
       for (const answer of batch.answers) {
         const original = await ctx.db
           .query('projectHostedOverlapAcks')
@@ -60,7 +62,10 @@ export const append = mutation({
           noticeId: answer.noticeId,
         });
         answers.push(record);
+        inserted++;
       }
+      // Expired answers go on the next answer write, in one small batch: no cron, nothing on idle.
+      if (inserted) await pruneExpiredOverlapAnswers(ctx, projectId, Date.now());
       const value = canonicalPayload({ status: 'recorded', answers });
       await ctx.db.insert('projectHostedAckBatches', {
         projectId,

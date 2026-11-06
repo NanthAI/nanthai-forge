@@ -8,6 +8,7 @@ export const modules = Object.fromEntries(
       'projectHostedFriction',
       'projectHostedDecisions',
       'projectHostedOverlapAcks',
+      'projectHostedOverlapAnswers',
       'projectHostedFrictionImport',
     ].map(async name => [name, await import(moduleUrl(`../convex/${name}.ts`))]),
   ),

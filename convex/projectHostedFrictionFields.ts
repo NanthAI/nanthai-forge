@@ -26,9 +26,11 @@ export const hostedFrictionTables = {
     noticeId: v.string(),
   })
     .index('by_project_and_id', ['projectId', 'id'])
-    .index('by_project_and_lane_and_notice', ['projectId', 'laneId', 'noticeId']),
-  projectHostedAckBatches: defineTable({ ...record, actor: v.string() }).index('by_project_and_id', [
-    'projectId',
-    'id',
-  ]),
+    .index('by_project_and_lane_and_notice', ['projectId', 'laneId', 'noticeId'])
+    // Creation-time order serves the answer window read and the 90-day cleanup (Issue b78ca196).
+    .index('by_project', ['projectId'])
+    .index('by_project_and_lane', ['projectId', 'laneId']),
+  projectHostedAckBatches: defineTable({ ...record, actor: v.string() })
+    .index('by_project_and_id', ['projectId', 'id'])
+    .index('by_project', ['projectId']),
 };
