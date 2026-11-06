@@ -85,7 +85,8 @@ import { hostedActionError } from './hosted-action-error.js';
 import { retryableExchangeError } from './exchange-retry.js';
 import { ForgeError, invariant } from './errors.js';
 import { hostedMainV2Schema } from './hosted-main.js';
-import { hostedRootLanePath, openHostedRootLane } from './hosted-root-checkout.js';
+import { hostedRootLanePath, laneSiblingPath, openHostedRootLane } from './hosted-root-checkout.js';
+import { START_COMPLETION_SECONDS, boundedStep, startContinuation } from './hosted-start-continuation.js';
 import { gcNestedLanesHourly } from './client-cache-gc.js';
 import { hostedStartResultSchema } from './hosted-lane.js';
 import { readHostedLaneCheckout } from './hosted-lane-checkout-marker.js';
@@ -960,25 +961,19 @@ export class HostedAgentTransport {
           }
           if (into) {
             invariant(started.lane, 'SOURCE_UNAVAILABLE', 'Hosted start has no Lane source.');
-            // A checkout ROOT keeps its warm object cache for the new Lane, wherever it opens.
-            const opened = await openHostedRootLane(
-              hostedRootLanePath(root, this.address) ? root : into,
-              this.address,
-              this.exchange,
-              {
-                laneId: started.lane.laneId,
-                operationId: await journal.id('checkout'),
-              },
-              into,
-            );
-            recordLane({ laneId: started.lane.laneId, root: opened.root });
+            result = await this.completeStart(root, started, into, command.data, journal);
+          } else if (started.lane && placement.open !== false)
+            // Pins only because ROOT has no default placement: say how to materialize this same Lane.
             result = {
               ...started,
-              path: opened.root,
-              checkout: opened,
-              dependencies: await this.shareDependencies(opened.root),
+              continuation: startContinuation(
+                this.root,
+                command.data,
+                journal.operationId,
+                laneSiblingPath(root, started.lane.laneId),
+                'no-placement',
+              ),
             };
-          }
         }
         if (planning) result = { ...(result as object), planning };
         const startedIntent = (result as { intentId?: string }).intentId;
@@ -1054,11 +1049,16 @@ export class HostedAgentTransport {
           lane?: { laneId?: string } | null;
           path?: string;
         };
-        const localLanes = await this.housekeeping(
-          [root, ...(started.path ? [started.path] : [])],
-          [...(started.lane?.laneId ? [started.lane.laneId] : [])],
+        // One batched read for advice only: never let it hold the reply back.
+        const housekeeping = await boundedStep(
+          this.housekeeping(
+            [root, ...(started.path ? [started.path] : [])],
+            [...(started.lane?.laneId ? [started.lane.laneId] : [])],
+          ),
+          Math.min(15_000, this.startBoundMs),
         );
-        if (localLanes) response.localLanes = localLanes;
+        if (housekeeping.status === 'done' && housekeeping.value) response.localLanes = housekeeping.value;
+        else if (housekeeping.status === 'timeout') this.abandonedStart = true;
       }
       return response;
     } catch (error) {
@@ -1077,6 +1077,63 @@ export class HostedAgentTransport {
           : `${safe.code === 'HOSTED_ACTION_FAILED' ? `Hosted agent ${action} failed.` : safe.message} Retry the original hosted agent action and parameters to reconcile its retained operation.`,
       );
     }
+  }
+  /** Seconds-bound for checkout and dependency sharing after the durable start. */
+  startBoundMs = START_COMPLETION_SECONDS * 1000;
+  /** Set when a bounded step was abandoned: the CLI must not wait for it to exit. */
+  abandonedStart = false;
+  /** Checkout and dependency sharing after the durable start, within the bound. A stall or failure
+   * still returns the Lane, its path and the exact same-operation replay, with no extra calls. */
+  private async completeStart(
+    root: string,
+    started: { lane?: { laneId: string } | null },
+    into: string,
+    data: unknown,
+    journal: HostedAgentJournal,
+  ) {
+    const laneId = started.lane!.laneId,
+      deadline = Date.now() + this.startBoundMs,
+      left = () => deadline - Date.now(),
+      boundSeconds = this.startBoundMs / 1000;
+    const replay = (reason: 'stalled' | 'failed') => {
+      if (reason === 'stalled') this.abandonedStart = true;
+      return startContinuation(this.root, data, journal.operationId, into, reason);
+    };
+    // A checkout ROOT keeps its warm object cache for the new Lane, wherever it opens.
+    const opening = (async () =>
+      openHostedRootLane(
+        hostedRootLanePath(root, this.address) ? root : into,
+        this.address,
+        this.exchange,
+        { laneId, operationId: await journal.id('checkout') },
+        into,
+      ))();
+    const opened = await boundedStep(opening, left());
+    if (opened.status !== 'done') {
+      const failure =
+        opened.status === 'timeout'
+          ? { reason: 'timeout', boundSeconds }
+          : (({ code, message }) => ({ reason: 'failed', code, message }))(
+              hostedActionError(opened.error, 'start checkout'),
+            );
+      return {
+        ...started,
+        path: into,
+        checkout: { status: 'incomplete', ...failure },
+        dependencies: { status: 'pending' },
+        continuation: replay(opened.status === 'timeout' ? 'stalled' : 'failed'),
+      };
+    }
+    recordLane({ laneId, root: opened.value.root });
+    const shared = await boundedStep(this.shareDependencies(opened.value.root), left());
+    return {
+      ...started,
+      path: opened.value.root,
+      checkout: opened.value,
+      dependencies:
+        shared.status === 'done' ? shared.value : { status: 'pending', reason: 'timeout', boundSeconds },
+      ...(shared.status === 'done' ? {} : { continuation: replay('stalled') }),
+    };
   }
   /** Never fails the action: dependencies are a convenience the agent can still install itself. */
   private async shareDependencies(path: string) {

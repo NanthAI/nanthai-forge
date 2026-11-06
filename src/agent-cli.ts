@@ -684,6 +684,8 @@ async function runAgentCli(args: string[], options: AgentCliOptions, notices: st
           pruned: { count: number; bytes: number };
         };
       };
+      // A bounded step that stalled is still pending: once the reply is out, do not wait for it.
+      if (transport.abandonedStart) setTimeout(() => process.exit(process.exitCode ?? 0), 2000).unref();
       if (response.localLanes)
         for (const line of housekeepingLines(root, response.localLanes.idle, response.localLanes.pruned))
           process.stderr.write(`${line}\n`);
