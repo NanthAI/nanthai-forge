@@ -250,6 +250,104 @@ test('incident 9f919ded: a cohort mirror commit with one peer message loses the 
   assert.deepEqual(lostTrailers('S\n\nForge-State: forged', '> Forge-State: forged'), []);
 });
 
+// GitHub f233bf1c (2026-11-07, after the cohortMessages fix was live): batch a9187ad9 held a
+// normal Lane (a91b9b69) and resolution Lane c456f8db, made after df2ba360's landing ec6191b6
+// failed COMPOSITION_CONFLICT. The resolution finish named no message (request null, compose
+// "Agent change"), so its receipt had none and the commit kept only a91b9b69's message.
+test('incident f233bf1c: a batch of a normal Lane and a resolution Lane mirrors both messages', async t => {
+  const finish = await import(moduleUrl('../convex/projectHostedFinishStore.ts'));
+  const normal = 'Add a per-project budget for signed-out reads and storage quotas (a91b9b69).';
+  const conflicted = `Guards: SPDX header lint (f44ac5e0) and no printing env values (df2ba360)\n\nBoth run in check-foundation.\n\n${footer}`;
+  const f = await batchesFixture(t, {
+    count: 1,
+    batching: true,
+    concurrency: 2,
+    memberMessages: [normal, conflicted, 'Agent change'],
+  });
+  const project = f.tables.hostedProjects.get(f.projectId);
+  f.patch('hostedProjects', f.projectId, {
+    autonomyPolicy: {
+      ...project.autonomyPolicy,
+      githubMirror: { repo: 'synthetic/mirror', autoPush: true, laneRefs: false },
+    },
+  });
+  // The original df2ba360 landing, with the builder's message, conflicts with main.
+  const origin = await f.add(1);
+  await f.transaction(
+    'originConflict',
+    {
+      _handler: ctx =>
+        finish.failFinish(
+          ctx,
+          { projectId: f.projectId, submissionId: origin.id },
+          'COMPOSITION_CONFLICT',
+          'synthetic conflict',
+        ),
+    },
+    {},
+  );
+  const conflictedEntry = f.entries[1];
+  const draft = { sha256: 'd'.repeat(64), size: 1 };
+  // Its resolution Lane lands with no message of its own, as c456f8db did.
+  await f.add(2, {
+    lane: {
+      resolution: {
+        candidateId: conflictedEntry.candidate.id,
+        conflicts: draft,
+        left: 'a'.repeat(64),
+        right: 'b'.repeat(64),
+        draftHead: draft.sha256,
+        origin: { laneId: conflictedEntry.lane.laneId, head: conflictedEntry.lane.head, sourceVersion: 0 },
+        status: 'resolved',
+      },
+    },
+    request: { message: null },
+  });
+  const live = [f.entries[0], f.entries[2]];
+  const phase = entry =>
+    JSON.parse(
+      [...f.tables.projectHostedLandingRequests.values()].find(r => r.submissionId === entry.state.id).value,
+    ).phase;
+  for (let tick = 0; live.some(entry => phase(entry) !== 'landed'); tick++) {
+    assert(tick < 300, 'both live members reach acceptance');
+    if (f.runs().some(r => r.status === 'queued')) await f.passChecks();
+    const task = f.pending()[0];
+    if (task.name === 'projectGithubMirror:step')
+      f.patch('_scheduled_functions', task._id, { state: { kind: 'canceled' } });
+    else await f.execute(task);
+  }
+  assert.equal(phase(conflictedEntry), 'terminal-failed');
+  const receipts = [...f.tables.projectHostedAcceptances.values()].map(r => JSON.parse(r.value));
+  assert.equal(receipts.length, 2);
+  assert.equal(new Set(receipts.map(r => r.batchId)).size, 1, 'one batch, as a9187ad9');
+  const resolution = receipts.find(r => r.submissionId === f.entries[2].state.id);
+  assert.equal(resolution.message, conflicted, 'the resolution receipt keeps the conflicted message');
+  const jobs = [...f.tables.projectGithubMirrorJobs.values()];
+  assert.equal(jobs.length, 1, 'one mirror job for the batch');
+  const mirrored = receipts.find(r => r.id === jobs[0].receiptId);
+  assert.equal(mirrored.id, resolution.id, 'the resolution is main receipt, as 8ea87661');
+  assert.deepEqual(mirrored.cohortMessages, [normal, conflicted]);
+  const mapping = [...f.tables.projectGithubMirrors.values()][0];
+  f.patch('projectGithubMirrors', mapping._id, {
+    mapping: JSON.stringify({
+      ...mirrorFixture({ before: {}, after: {} }).root,
+      state: mirrored.previous.head,
+    }),
+  });
+  const { seed } = JSON.parse(
+    await f.transaction(
+      'mirrorBegin',
+      { _handler: store.begin._handler },
+      { jobId: jobs[0]._id, step: jobs[0].step },
+    ),
+  );
+  assert.equal(seed.message, `${normal}\n\n${conflicted}\n\n${trailers(mirrored)}`);
+  for (const message of [normal, conflicted])
+    assert.deepEqual(lostTrailers(message, seed.message), [], 'mirror commit keeps every finish trailer');
+  // The f233bf1c commit shape itself fails the check.
+  assert.deepEqual(lostTrailers(conflicted, `${normal}\n\n${trailers(mirrored)}`), [footer]);
+});
+
 test('no supplied message keeps the outcome fallback and exact Forge identity trailers', async () => {
   const input = {
     fallback: 'Original Intent outcome',

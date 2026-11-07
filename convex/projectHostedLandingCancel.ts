@@ -39,6 +39,8 @@ export async function cancelHostedLanding(
     drop?: true;
     /** The supervisor's typed outcome for a drop (19328518): defaults to LANDING_STALLED. */
     code?: 'LANDING_DRIVER_EXHAUSTED';
+    /** Agent withdraw (78a97771): the Lane whose live landing this cancels, kept in the receipt. */
+    withdrawLaneId?: string;
   },
 ) {
   const { projectId, actor, request } = input;
@@ -54,6 +56,7 @@ export async function cancelHostedLanding(
     request,
     ...(input.abandonOperationId ? { parentOperationId: input.abandonOperationId } : {}),
     ...(input.reason ? { reason: input.reason } : {}),
+    ...(input.withdrawLaneId ? { withdraw: { laneId: input.withdrawLaneId } } : {}),
   };
   const { operation } = await beginHostedOperation(ctx, {
     projectId,

@@ -30,6 +30,9 @@ export const syncRequestSchema = z.discriminatedUnion('kind', [
       ...lane,
       kind: z.literal('sync'),
       ontoMain: z.boolean().optional(),
+      /** Automatic restack onto the stack parent's newest saved head (Issue f61e9339): a conflict
+       * changes nothing (no resolution Lane) and is marked so it is not retried for that head. */
+      cleanOnly: z.literal(true).optional(),
       target: z.discriminatedUnion('kind', [
         z
           .object({ kind: z.literal('main'), head: object.shape.sha256, receiptId: z.string().min(1) })

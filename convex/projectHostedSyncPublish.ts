@@ -3,6 +3,7 @@ import type { MutationCtx } from './_generated/server';
 import { loadSync, hostedSyncInput, writeSyncState } from './projectHostedSyncStore';
 import { finishHostedOperation } from './projectHostedOperations';
 import { writeHostedRecord } from './projectHostedRecords';
+import { markRestackConflict } from './projectHostedStackNotice';
 import { saveObjects, saveLaneRecord, sameSaveLane, type SaveIdentity } from './projectHostedSaveStore';
 import { loadSourceJob } from './projectSourceJobs';
 import { syncOutputSchema, syncResultSchema } from '../src/hosted-sync';
@@ -123,7 +124,16 @@ export async function publishHostedSync(ctx: MutationCtx, input: SaveIdentity & 
       output: job.output.sha256,
     });
   const authorityEpoch = request.authorityEpoch;
-  if (result.status === 'conflict') {
+  if (result.status === 'conflict' && request.kind === 'sync' && request.cleanOnly) {
+    // An automatic restack that would conflict changes nothing: the Lane keeps its head and stack, no
+    // resolution Lane is made, and the parent head is marked so later saves do not retry it.
+    invariant(
+      lane && state.work.mode === 'sync' && state.work.stackAfter,
+      'SOURCE_JOB_INVALID',
+      'A restack needs its stacked Lane.',
+    );
+    await markRestackConflict(ctx, input.projectId, lane.id, state.work.stackAfter.head);
+  } else if (result.status === 'conflict') {
     // Preserve the conflicted Lane (if any); resolution always gets an isolated sibling.
     lane = {
       kind: 'lane',

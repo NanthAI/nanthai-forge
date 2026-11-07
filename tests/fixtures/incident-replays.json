@@ -127,6 +127,12 @@
       "what": "2026-11-05 88-minute landing: a Ready finish stopped without scheduling its next step",
       "file": "tests/hosted-landing-supervisor.test.mjs",
       "test": "replay 2026-11-05 88-minute landing: a Ready head whose finish stopped without a next step is re-driven"
+    },
+    {
+      "incident": "f233bf1c",
+      "what": "Core claim: batch a9187ad9 (normal Lane + resolution Lane c456f8db) mirrored as GitHub f233bf1c with only one member's message; the resolution landing named no message",
+      "file": "tests/landing-message-mirror.test.mjs",
+      "test": "incident f233bf1c: a batch of a normal Lane and a resolution Lane mirrors both messages"
     }
   ]
 }

@@ -59,6 +59,15 @@ export const hostedLandingRequestSchema = z
 export const hostedLandingCancelSchema = z
   .object({ operationId: z.uuid(), authorityEpoch: checkNumber, submissionId: z.uuid() })
   .strict();
+/** Agent withdraw (78a97771): cancel the live landing of one Lane, named by the Lane. */
+export const hostedLandingWithdrawSchema = z
+  .object({
+    operationId: z.uuid(),
+    authorityEpoch: checkNumber,
+    laneId: z.uuid(),
+    reason: z.string().min(1).max(500).optional(),
+  })
+  .strict();
 export const hostedLandingAttemptSchema = z
   .object({
     crossHeadProof: crossHeadProofSchema.optional(),

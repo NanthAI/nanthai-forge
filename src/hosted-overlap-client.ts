@@ -5,6 +5,7 @@ import type { HostedAgentTransport } from './hosted-agent-transport.js';
 import { presenceSchema } from './hosted-presence-client.js';
 import { boardDeliverySchema } from './hosted-board.js';
 import { parseHostedResponse } from './hosted-response.js';
+import { stackHintSchema } from './hosted-stack-restack.js';
 
 const advice = z.object({
   unacknowledgedOverlaps: z.object({
@@ -42,6 +43,8 @@ const advice = z.object({
   presence: presenceSchema.optional(),
   /** Board notes since the client's cursor, when asked (board:{after}) and any arrived. */
   board: boardDeliverySchema.optional(),
+  /** A stacked Lane whose parent saved newer work (Issue f61e9339): the next save restacks when `ready`. */
+  stack: stackHintSchema.optional(),
 });
 /** Advice never changes a save receipt; observation failures remain explicitly unknown. */
 export async function readHostedOverlapAdvice(

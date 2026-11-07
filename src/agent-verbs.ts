@@ -26,7 +26,7 @@ export const verbModes: Readonly<Record<Verb, Readonly<Record<string, string>>>>
     '--decision': 'decide',
     '--preview': 'integrate',
   },
-  land: { '--save': 'finish', '--resume-ready': 'land-ready' },
+  land: { '--save': 'finish', '--resume-ready': 'land-ready', '--withdraw': 'withdraw' },
 };
 
 /** Hosted board (Issue 9c8490a4): `board` reads, `board --post`/`--reply` write. Client actions. */

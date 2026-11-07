@@ -15,6 +15,7 @@ import { report } from './errors';
 import { safeRelative } from '../src/safe-relative';
 import { boardDelivery } from './projectBoardDelivery';
 import { mayActFor } from './projectLaneAuthority';
+import { stackRestackHint } from './projectHostedStackNotice';
 
 const savedPaths = (changes: string) => {
   try {
@@ -335,6 +336,13 @@ export const read = query({
           })
         : undefined;
       const boardField = board ? { board } : {};
+      // A stacked Lane whose parent saved newer work (Issue f61e9339): one point read, none without a stack.
+      const hint = await stackRestackHint(ctx, projectId, {
+        id: laneId,
+        state: lane.state,
+        stack: lane.stack,
+      });
+      const stackField = hint ? { stack: hint } : {};
       if (acks.length > 100) {
         // A large old inbox stays bounded. Verify every displayed item against the
         // exact answer index, so an answer outside the window can never repeat.
@@ -376,6 +384,7 @@ export const read = query({
           ...evidence,
           ...present,
           ...boardField,
+          ...stackField,
           unacknowledgedOverlaps: {
             ...advice.unacknowledgedOverlaps,
             count: null,
@@ -383,7 +392,14 @@ export const read = query({
           },
         });
       }
-      return JSON.stringify({ ...advice, ...changedPaths, ...evidence, ...present, ...boardField });
+      return JSON.stringify({
+        ...advice,
+        ...changedPaths,
+        ...evidence,
+        ...present,
+        ...boardField,
+        ...stackField,
+      });
     } catch (error) {
       return report(error);
     }

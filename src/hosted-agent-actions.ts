@@ -5,6 +5,7 @@ import { guideHostedSync, resolveHostedAgent } from './hosted-agent-resolution.j
 import { syncTiming } from './sync-timing.js';
 import { hostedRecordSchema } from './hosted-records.js';
 import { executeHostedFinish } from './hosted-agent-finish.js';
+import { executeHostedWithdraw } from './hosted-agent-withdraw.js';
 import { executeHostedMetrics } from './hosted-agent-metrics.js';
 import { isMachineRunner, machineRunnerDescription } from './hosted-machine-runner.js';
 import { z } from 'zod';
@@ -539,6 +540,8 @@ export async function executeHostedAgent(
       }
     }
     if (completed && handoff) clearSyncHandoff(session.root, operationId);
+    // An automatic restack that would conflict changed nothing: no conflict files, no resolution Lane.
+    if (command.cleanOnly) return result;
     const guided = await guideHostedSync(session, result, command.apply);
     if (guided === result) return guided;
     timing.mark('conflict');
@@ -682,6 +685,7 @@ export async function executeHostedAgent(
     // Item 4 of the agent defaults: the cheap path after a failure is the same Lane, not a new one.
     return typeof cancelled === 'object' && cancelled ? { ...cancelled, cost: CANCEL_COST } : cancelled;
   }
+  if (action === 'withdraw') return executeHostedWithdraw(session, input);
   invariant(action === 'finish', 'HOSTED_ACTION_UNSUPPORTED', 'Unsupported hosted action.');
   return executeHostedFinish(session, input);
 }

@@ -75,7 +75,8 @@ export async function batchesFixture(
     }
   }
   const entries = [];
-  const add = async i => {
+  // `member` overrides one Lane record or landing request (a resolution Lane, an explicit null message).
+  const add = async (i, member = {}) => {
     const memberPath = memberPaths?.[i] ?? (conflict && i < 2 ? 'collision' : `member-${i}`);
     const files = [
       ...JSON.parse(f.c.objects.get(f.c.baseline.sha256)).files,
@@ -132,7 +133,7 @@ export async function batchesFixture(
         },
       });
     }
-    const lane = await f.c.lane(pin, { intentId }),
+    const lane = await f.c.lane(pin, { intentId, ...member.lane }),
       selection = f.c.selection([lane]);
     selection.request.intentId = intentId;
     if (memberMessages?.[i] !== undefined) selection.request.message = memberMessages[i];
@@ -158,6 +159,7 @@ export async function batchesFixture(
             },
           }
         : {}),
+      ...member.request,
     });
     const state = await f.enqueue(request);
     entries.push({ lane, selection, candidate, request, state });

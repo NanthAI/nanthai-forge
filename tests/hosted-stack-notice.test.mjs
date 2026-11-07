@@ -91,7 +91,10 @@ test('a parent save tells its dependent once, with the restack command, and wake
   const [note, ...rest] = await f.inbox(child);
   assert.equal(rest.length, 0);
   assert.equal(note.fromLaneId, parent);
-  assert.match(note.text, /^Stack: parent Lane \w{8} saved new work \(head 22222222\)\. Restack onto it: /);
+  assert.match(
+    note.text,
+    /^Stack: parent Lane \w{8} saved new work \(head 22222222\)\. Your next save restacks onto it if clean; now: /,
+  );
   assert.ok(note.text.includes(`nforge agent . sync '{"laneId":"${child}"}'`));
   assert.equal(boardTextProblem(note.text), null);
   assert.ok(note.text.length <= 240);

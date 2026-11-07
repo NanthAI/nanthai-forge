@@ -37,6 +37,7 @@ const rows = [
   ['save', 'friction', 'friction', 'friction'],
   ['save', 'decision', 'decide', 'decide'],
   ['land', 'resume-ready', 'land-ready', null],
+  ['land', 'withdraw', null, 'withdraw'],
 ];
 
 test('lowering: every start/save/land form maps to its existing wire action and keeps fields', () => {

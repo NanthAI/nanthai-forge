@@ -61,6 +61,12 @@ export const hostedOverlapTables = {
     ended: v.optional(v.literal('abandoned')),
     /** The parent's failed/cancelled landing was announced; cleared by a parent save or a restack. */
     landingNoticed: v.optional(v.literal(true)),
+    /** The parent's newest saved head, set by each parent save after this child's pin (Issue f61e9339).
+     * The child's next save restacks onto it automatically when that applies cleanly. */
+    latestHead: v.optional(v.string()),
+    /** A parent head whose automatic restack conflicted: later saves do not retry it; the next parent
+     * save (a new latestHead) or the child's own restack re-arms it. */
+    restackConflict: v.optional(v.string()),
   })
     .index('by_project_and_parent', ['projectId', 'parentLaneId'])
     .index('by_project_and_lane', ['projectId', 'laneId']),

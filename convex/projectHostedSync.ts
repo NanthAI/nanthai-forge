@@ -179,12 +179,23 @@ export const prepare = receiptMutation({
               parent.state === 'abandoned' ||
               entry?.phase === 'landed' ||
               entry?.phase === 'terminal-failed';
+            // An automatic restack only follows a live parent; a landed or abandoned one has its own notice.
+            invariant(
+              !request.cleanOnly || !detached,
+              'STACK_PARENT_CHANGED',
+              'The stack parent landed or was abandoned: follow its board notice instead of an automatic restack.',
+            );
             right = detached ? target.head : parent.head;
             ownerInputs =
               ownerInputs && (detached || (parent.actor === project.owner && parentRow.ownerOnly === true));
             stackBase = await saveObject(ctx, auth.projectId, { sha256: lane.stack.head });
             stackAfter = { ...lane.stack, head: right, ...(detached ? { detached: true } : {}) };
           }
+          invariant(
+            !request.cleanOnly || stackAfter,
+            'BAD_ARGUMENT',
+            'cleanOnly restacks a stacked Lane onto its parent; this Lane is not stacked.',
+          );
           work = {
             mode: 'sync',
             left,

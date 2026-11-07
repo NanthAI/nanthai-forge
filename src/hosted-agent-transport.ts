@@ -25,6 +25,7 @@ import { networkFailure } from './network-fetch.js';
 import { networkContinuation } from './network-continuation.js';
 import { reconcileHostedSync, hasHostedSyncHandoff } from './hosted-sync-handoff.js';
 import { supersededSync } from './hosted-sync-retained.js';
+import { withdrawDone } from './hosted-agent-withdraw.js';
 import { AGENT_WAIT_SECONDS } from './agent-operation-wait.js';
 import { sourceTree } from './source-tree.js';
 import { withSourceRecovery } from './hosted-agent-source-recovery.js';
@@ -32,6 +33,7 @@ import { readHostedOverlapAdvice, recordHostedOverlapDelivery } from './hosted-o
 import { presenceDelivery, presenceSince, type PresenceDelivery } from './hosted-presence-client.js';
 import { boardEnvelope, boardHostedSource, hostedBoardSchemas, readBoardCursor } from './hosted-board.js';
 import { rememberBoardServerFeatures } from './board-local.js';
+import { restackAfterSave, type StackHint } from './hosted-stack-restack.js';
 import { hostedOverlapNotice, type HostedOverlapNotice } from './hosted-overlap-notice.js';
 import { waitHostedAgentSource } from './hosted-agent-source-wait.js';
 import { recoverHostedFinish, hostedConflictAdvice } from './hosted-agent-resolution.js';
@@ -99,6 +101,7 @@ import {
   hostedAgentAddressSchema,
   hostedAgentCapabilitiesSchema,
   hostedAgentOwnerActions,
+  hostedAgentLandingActions,
   hostedAgentClientActions,
   hostedAgentCommandSchemas,
   type HostedAgentAddress,
@@ -196,6 +199,10 @@ export type HostedAgentResponse = {
   overlapNotice?: HostedOverlapNotice;
   /** Present only when board notes arrived since this machine's cursor: one line each (≤240 chars). */
   board?: { notices: string[]; more: number };
+  /** Stacked Lane whose parent saved newer work (Issue f61e9339); a save replaces it with `restack`. */
+  stack?: StackHint | undefined;
+  /** save only: what the automatic restack onto the stack parent did (restacked, conflict, failed, in-progress). */
+  restack?: Record<string, unknown>;
   /** This agent session's public identity, `handle/slug` (start, save and land receipts). */
   as?: string;
   /** start only: your idle open Lanes and finished Lane roots pruned on this machine. */
@@ -356,10 +363,16 @@ export class HostedAgentTransport {
         resolved: null,
         result: await peersHostedSource(this, input),
       };
-    return this.operationContext.run(
+    const response = await this.operationContext.run(
       { id: typeof input.operationId === 'string' ? input.operationId : null },
       () => this.dispatchScoped(requestedAction, input, signal),
     );
+    // A stacked Lane's save restacks onto its parent's newer saved work when that applies cleanly.
+    return requestedAction === 'save'
+      ? restackAfterSave(response, readHostedLaneCheckout(this.root)?.selection.laneId, (action, data) =>
+          this.dispatch(action, data, signal),
+        )
+      : response;
   }
   private async dispatchScoped(
     requestedAction: string,
@@ -665,7 +678,9 @@ export class HostedAgentTransport {
         !capabilities.actions.includes(action as (typeof capabilities.actions)[number]) &&
         !(
           capabilities.authority.mode !== 'native-owner' &&
-          [...hostedAgentOwnerActions, ...hostedAgentClientActions].includes(action as never)
+          [...hostedAgentOwnerActions, ...hostedAgentClientActions, ...hostedAgentLandingActions].includes(
+            action as never,
+          )
         )
       )
         throw unadvertisedActionError(action);
@@ -799,6 +814,11 @@ export class HostedAgentTransport {
         action === 'sync' &&
         !operationId &&
         supersededSync(root, this.address, capabilities.actor, command.data);
+      // A withdraw whose receipt arrived ended that landing; the same request later targets the next one.
+      const doneWithdraw =
+        action === 'withdraw' &&
+        !operationId &&
+        withdrawDone(root, this.address, capabilities.actor, command.data);
       const journal =
         action === 'finish'
           ? await selectHostedFinish(
@@ -822,7 +842,7 @@ export class HostedAgentTransport {
               action,
               command.data,
               operationId as string | undefined,
-              previousStart !== null || movedSync,
+              previousStart !== null || movedSync || doneWithdraw,
               startSession,
             );
       metricOperationId(journal.operationId);

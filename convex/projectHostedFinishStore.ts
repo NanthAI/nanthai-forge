@@ -10,6 +10,7 @@ import {
   type LandingIdentity,
 } from './projectHostedLandingStore';
 import { finishRow, scheduleFinish } from './projectHostedFinishWake';
+import { resolutionMessage } from './projectHostedLandingMessage';
 import { landingMessage } from '../src/landing-message';
 import { hostedFinishSchema, type HostedFinish } from '../src/hosted-finish';
 import { landingObservation, type HostedLandingState } from '../src/hosted-landing';
@@ -131,6 +132,20 @@ export async function initializeFinish(ctx: MutationCtx, state: HostedLandingSta
   // Negotiated requests use null for omission, retaining an explicit identical subject.
   if (state.request.message === undefined && !state.request.finish.reviewedSource)
     state.message = source.message === 'Agent change' ? null : landingMessage(source.message);
+  // No message of its own: a resolution Lane keeps the conflicted landing's message.
+  const composeOperationId = state.request.finish.composeOperationId;
+  if (
+    composeOperationId &&
+    source.inputs.count === 1 &&
+    (state.request.message === undefined ? state.message : state.request.message) == null
+  ) {
+    const inherited = await resolutionMessage(ctx, {
+      projectId: input.projectId,
+      actor: state.actor,
+      composeOperationId,
+    });
+    if (inherited !== undefined) state.message = inherited;
+  }
   const after = state.request.finish.after;
   if (after) await loadLanding(ctx, { projectId: input.projectId, submissionId: after });
   const check = attempt.deferredCheck

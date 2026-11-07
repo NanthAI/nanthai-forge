@@ -68,6 +68,9 @@ export const hostedAgentRecordActions = [
 /** Project policy: one Convex call each, served before capability discovery. Not advertised;
  * the server enforces owner authority on set-policy. */
 export const hostedAgentPolicyActions = ['policy', 'set-policy'] as const;
+/** Landing recovery (78a97771): `land --withdraw` ends the Lane's live landing. Not advertised (released
+ * clients parse the capability list strictly); the server feature `landing-withdraw` gates it. */
+export const hostedAgentLandingActions = ['withdraw'] as const;
 /** Composed by the client from existing reads and mutations; never advertised in capabilities. */
 export const hostedAgentClientActions = ['ack', 'preflight', 'source-pack', 'recover-apply', 'pull'] as const;
 export { hostedAgentAddressSchema, type HostedAgentAddress } from './hosted-address.js';
@@ -180,6 +183,8 @@ export const hostedAgentCommandSchemas = {
         .optional(),
       ontoMain: z.boolean().optional(),
       apply: z.boolean().default(true),
+      /** Restack onto the stack parent only if it applies cleanly; a conflict changes nothing (save runs it). */
+      cleanOnly: z.literal(true).optional(),
     })
     .strict(),
   'recover-apply': z.object({ applyOperationId: uuid }).strict(),
@@ -234,6 +239,8 @@ export const hostedAgentCommandSchemas = {
   /** Client-composed operator repair: pack the current hosted main and publish it to R2. */
   'source-pack': z.object({}).strict(),
   cancel: z.object({ submissionId: uuid }).strict(),
+  /** land --withdraw: cancel this Lane's live landing; the Lane, saves and check evidence stay. */
+  withdraw: z.object({ ...lane, reason: z.string().min(1).max(500).optional() }).strict(),
   revert: z.object({ ...message, target: revertTargetSchema }).strict(),
   abandon: z
     .object({

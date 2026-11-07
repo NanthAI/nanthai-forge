@@ -21,7 +21,7 @@ const unstack = (child: string) => `nforge agent . sync '{"laneId":"${child}","o
 export function stackNoticeText(event: StackEvent, parentLaneId: string, childLaneId: string) {
   const parent = `Stack: parent Lane ${short(parentLaneId)}`;
   if (event.kind === 'saved')
-    return `${parent} saved new work (head ${short(event.head)}). Restack onto it: ${restack(childLaneId)}`;
+    return `${parent} saved new work (head ${short(event.head)}). Your next save restacks onto it if clean; now: ${restack(childLaneId)}`;
   if (event.kind === 'abandoned')
     return `${parent} was abandoned. Unstack onto main: ${unstack(childLaneId)}`;
   const what = event.outcome === 'cancelled' ? 'landing was cancelled' : 'landing failed';

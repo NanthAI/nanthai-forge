@@ -240,6 +240,7 @@ async function syncAgentSourceOnce(
     return syncRequestSchema.parse({
       kind: 'sync',
       ...(command.ontoMain === undefined ? {} : { ontoMain: command.ontoMain }),
+      ...(command.cleanOnly ? { cleanOnly: true } : {}),
       operationId,
       authorityEpoch: session.capabilities.authority.epoch,
       laneId: lane.laneId,

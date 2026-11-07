@@ -25,7 +25,7 @@ or report `submission.phase:"terminal-failed"` as the actual failure.
 Conflict receipts supply one recovery continuation. Edit the named hunks first;
 land/save reject them locally before compose/check, with zero added Convex calls.
 Resolve accepts the Lane root or a subdirectory; separator-only text is valid. Recovery preserves check-only intent and check pins.
-When the conflict was made from the folder you run in (your own Lane checkout at the saved head the conflict used), that folder becomes the resolution Lane in place: main is merged into its whole tree with markers in the listed files, its marker and conflict record name the resolution Lane and its origin, and you resolve, check and land from the same folder. Unsaved edits on paths the merge leaves alone stay as they are; an unsaved edit on a path main also changed is copied to `FOLDER.forge-client/resolution-kept/ID/` (receipt `kept`) before the file takes the merge. Otherwise (run from the clone root, a different folder, or a folder saved again since) the resolution opens with the whole tree as a sibling folder (`ROOT.forge-client/lanes/ID`, or `FOLDER-ID8` beside a Lane folder at a chosen path), never nested in a Lane folder; `open` and `start` from a Lane folder place new Lanes the same way. The receipt's `workIn` line (printed on stderr) names the folder to work in now and why. Commands that still name the original Lane from the in-place folder follow the resolution instead of composing the original again. When it lands, Forge completes the original Lane it was made for (only at the recorded source: a Lane saved again after the conflict stays open; reopen undoes it), so its Intent and Issue close without a manual `complete`. Syntax conflicts (both sides parse, the line merge does not) list `reasons`, and the resolve instruction names them.
+When the conflict was made from the folder you run in (your own Lane checkout at the saved head the conflict used), that folder becomes the resolution Lane in place: main is merged into its whole tree with markers in the listed files, its marker and conflict record name the resolution Lane and its origin, and you resolve, check and land from the same folder. Unsaved edits on paths the merge leaves alone stay as they are; an unsaved edit on a path main also changed is copied to `FOLDER.forge-client/resolution-kept/ID/` (receipt `kept`) before the file takes the merge. Otherwise (run from the clone root, a different folder, or a folder saved again since) the resolution opens with the whole tree as a sibling folder (`ROOT.forge-client/lanes/ID`, or `FOLDER-ID8` beside a Lane folder at a chosen path), never nested in a Lane folder; `open` and `start` from a Lane folder place new Lanes the same way. The receipt's `workIn` line (printed on stderr) names the folder to work in now and why. Commands that still name the original Lane from the in-place folder follow the resolution instead of composing the original again. When it lands, Forge completes the original Lane it was made for (only at the recorded source: a Lane saved again after the conflict stays open; reopen undoes it), so its Intent and Issue close without a manual `complete`. A resolution landing that names no `message` keeps the message (and trailers) of the landing that conflicted, so the GitHub mirror commit still carries it. Syntax conflicts (both sides parse, the line merge does not) list `reasons`, and the resolve instruction names them.
 Replaying the original `land --save` or `finish` after a conflict follows the resolution's real state: unresolved, the same `resolve`; resolved, that resolution Lane's exact `finish` (one landing, never two); landed, `RESOLVED in Lane ID` and no step; abandoned, one `sync` with a fresh `operationId`. A `landing` or `status` read of a terminal conflict names the same `sync` recovery as `wait` (one landing-status read), never a wait on the ended operation. When source preparation outlives the land budget, land names `wait` (as for every landing); `wait` replays that unsubmitted finish by its id within its budget and then waits on the submission.
 
 After a landing wait, its authoritative observation replaces pending-source
@@ -79,7 +79,7 @@ When you change a hosted reply in Forge itself: add fields freely, but never rem
 | `start --open` | `laneId, expected?, paths?, operationId?` |
 | `save` | `laneId?, message?, supersedeFinish?, operationId?` |
 | `save --candidate` | `laneId?, message?, intentId?, inputs?, dependencies?, operationId?` |
-| `save --sync` | `laneId?, message?, candidateId?, target?, ontoMain?, apply?, operationId?` |
+| `save --sync` | `laneId?, message?, candidateId?, target?, ontoMain?, apply?, cleanOnly?, operationId?` |
 | `recover-apply` | `applyOperationId, operationId?` |
 | `resolve` | `laneId?, message?, operationId?` |
 | `save --check` | `checkId, expectedDefinition?, expectedConfiguration?, expectedEnvironment?, candidateId, expectedHead?, operationId?` |
@@ -89,6 +89,7 @@ When you change a hosted reply in Forge itself: add fields freely, but never rem
 | `preflight` | `laneId?, run?, budgetSeconds?, trim?, operationId?` |
 | `x source-pack` | `operationId?` |
 | `x cancel` | `submissionId, operationId?` |
+| `land --withdraw` | `laneId?, reason?, operationId?` |
 | `x revert` | `message?, target, operationId?` |
 | `x abandon` | `laneId?, reason, saveFirst?, keepPatch?, target?, operationId?` |
 | `x complete` | `laneId?, operationId?` |
@@ -373,7 +374,11 @@ Lane's latest saved head.
 
 Then run `nforge agent ROOT land --save '{"laneId":"LANE_ID","message":"Describe the change"}'`. `land --save` saves, updates from main when policy permits, composes a Candidate, runs the `verify` check (or the only check) and requests acceptance under the project policy. New supervised projects return `awaiting-review`, `terminal:false`, `complete:false`, `readyToReview:true` and “Waiting for review by a person; not in main yet”. The Intent is ready; the Candidate and passing run remain available for a person to accept. Read `policy` and the policy section of `brief` before delivery. Use `land --save --check-only` for check-only work. With no new edits (for example right after `save --sync`) it reuses the Lane head. From inside a Lane directory the CLI fills `laneId`.
 
-A hosted finish freezes its source. While a Lane has a live finish (composing, queued, checking or ready), a `checkpoint`/`save` that would move the Lane head is refused with `LANE_FINISH_ACTIVE`, naming the submission and its phase; nothing is saved or superseded and the finish keeps its checks. Wait for it to land or fail, then save again. A checkpoint with no changes still succeeds and keeps the finish and its proof. To replace the finish on purpose, save with `supersedeFinish:true`; the receipt returns `supersededFinish` with the replaced submission. Resubmit a failed finish with the same Lane rather than cancelling and recreating it. Hosted landing order: a READY entry accepts before any new check starts, including an urgent one, so a passed proof is never aged by a new main move; urgent still leads every other queued entry.
+A hosted finish freezes its source. While a Lane has a live finish (composing, queued, checking or ready), a `checkpoint`/`save` that would move the Lane head is refused with `LANE_FINISH_ACTIVE`, naming the submission and its phase; nothing is saved or superseded and the finish keeps its checks. Wait for it to land or fail, then save again. A checkpoint with no changes still succeeds and keeps the finish and its proof. To replace the finish on purpose, save with `supersedeFinish:true`; the receipt returns `supersededFinish` with the replaced submission. Resubmit a failed finish with the same Lane rather than cancelling and recreating it.
+
+**Withdraw a known failing landing.** When you know your live landing's check will fail (a test you broke, a wrong assertion), do not wait for it: from the Lane checkout run `nforge agent LANE_ROOT land --withdraw '{"reason":"…"}'` (`laneId` selects another Lane; only its author or the project owner may withdraw). It is one call: the server finds the Lane's live landing and cancels it with the existing cancellation (`LANDING_CANCELLED`). The Lane, its saves, Candidates and recorded check results stay; its unfinished check stops once no other landing needs it, a late provider reply for it is refused, and peers stacked on its speculative source recompose without it, so a known failure no longer repeats through the queue. The receipt's `confirm.waitCommand` is the original landing's canonical wait: run it and it returns the terminal cancellation at once (this also ends the open landing in your turn). Then fix, save and `land --save` again, a new operation on the same Lane. A replay of the same withdraw `operationId` returns its first receipt and never cancels a later landing; a landing that was already accepted stays on main (`LANDING_NOT_LIVE`). Cost: you lose that submission's queue place and its unfinished check; nothing else. Undo is the re-land. Native projects stop a check with `x cancel {operationId:CHECK_RUN_ID}`.
+
+Hosted landing order: a READY entry accepts before any new check starts, including an urgent one, so a passed proof is never aged by a new main move; urgent still leads every other queued entry.
 
 Recommended reviewed flow:
 
@@ -1514,18 +1519,36 @@ the latest parent handoff. Missing handoffs are reported as absent.
 Hosted parent notices (Issue dc62b120). A Lane stacked on another is told when its parent changes,
 so it never lands on or waits for a parent that moved. Each direct dependent gets one board note from
 the parent (`board.notices` on its next Lane action, and a blocked `wait` returns early with
-`reason:"message"`), naming the event and the exact command: the parent **saved** a new head (`Restack
-onto it: nforge agent . sync '{"laneId":"CHILD"}'`), was **abandoned** (`Unstack onto main: ... sync
+`reason:"message"`), naming the event and the exact command: the parent **saved** a new head (`Your next
+save restacks onto it if clean; now: nforge agent . sync '{"laneId":"CHILD"}'`), was **abandoned** (`Unstack onto main: ... sync
 '{"laneId":"CHILD","ontoMain":true}'`), or its **landing failed or was cancelled** (unstack, or restack
 after the fix). One note per event per dependent: further parent saves stay quiet until the child
 restacks, an abandonment is announced once (the landing it cancels adds nothing), and a landing failure
 is announced once until the parent is saved again. A two-deep chain is told level by level: the middle
-Lane's restack is a save, which tells the newest. There is no auto-restack, polling or timer; a stopped
-board (operator switch) sends none. Cost: a Lane nobody stacked on pays nothing new on save or abandon.
+Lane's restack is a save, which tells the newest. There is no polling or timer; a stopped board
+(operator switch) sends none. Cost: a Lane nobody stacked on pays nothing new on save or abandon.
 A stacked start adds one dependents row and a flag on the parent's overlap row; a parent event reads
 that parent's dependents (at most 20) and writes about 5 rows per dependent. A failed or cancelled
 landing reads one empty dependents range in a project without stacks; only a project that has stacks
 resolves the landing's Lanes.
+
+Hosted automatic restack (Issue f61e9339). When the parent saved newer work, the child's next `save`
+restacks it with no extra step: after the save completes in the child's own checkout, Forge runs the
+ordinary hosted `sync` with `cleanOnly:true` (operation id derived from the Lane, its saved head and the
+parent head, so a retried save replays it). If it applies cleanly, the child's head and stack pin move
+onto the parent's newest saved head and the checkout installs it; at that moment the working copy equals
+the just-saved head, so no unsaved work is at stake. The save receipt reports `restack` with `status`
+(`restacked`, `conflict`, `failed` or `in-progress`), the parent Lane and head, the previous head
+(`from`, kept in `lane-history`) and the new `head`. If it would conflict, nothing changes: no conflict
+files and no resolution Lane, the receipt names the manual `sync`, and later saves do not retry that
+parent head; the parent's next save re-arms it. `sync` without `cleanOnly` keeps the normal conflict
+flow. An abandoned, landed or failed parent is never followed automatically: its notice above names the
+command. Other Lane actions show the pending restack as `stack` (`restack:"ready"` or `"conflict"`).
+`land --save` does not restack: landing already composes the child onto its parent or onto main. Cost: a
+Lane without a stack reads nothing new; a stacked Lane's action adds one point read of its dependents row;
+a parent save also writes its newest head to each dependent's row (one small patch per dependent, at
+most 20); one sync operation runs per parent change per dependent, only on that child's save. Idle costs
+nothing.
 
 Stacked owners use Work format 21 (legacy Intents) or 22 (unified Intents).
 Readers capped at 20 reject these owners before writing, preserving stack pins.

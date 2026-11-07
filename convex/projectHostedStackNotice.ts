@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { MutationCtx } from './_generated/server';
+import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
 import { patchOverlapRow } from './projectHostedOverlapPeers';
 import { postSystemLaneNote } from './projectBoardSystem';
@@ -50,6 +50,46 @@ export async function trackStackDependent(
   if (parent && !parent.stacked) await patchOverlapRow(ctx, parent, { stacked: true });
 }
 
+type Reader = Pick<MutationCtx, 'db'> | Pick<QueryCtx, 'db'>;
+const dependentRow = (ctx: Reader, projectId: Id<'hostedProjects'>, laneId: string) =>
+  ctx.db
+    .query('projectHostedStackDependents')
+    .withIndex('by_project_and_lane', q => q.eq('projectId', projectId).eq('laneId', laneId))
+    .unique();
+
+/** What a stacked Lane's next save does about its parent (Issue f61e9339), from one point read of its
+ * dependents row; a Lane without an attached stack reads nothing. `ready`: the parent saved newer work,
+ * so the save restacks onto `parentHead` when that applies cleanly. `conflict`: that restack already
+ * conflicted, so nothing runs until the parent saves again; the board notice names the sync command.
+ * None while the parent is abandoned: its notice says to unstack instead. */
+export async function stackRestackHint(
+  ctx: Reader,
+  projectId: Id<'hostedProjects'>,
+  lane: { id: string; state: string; stack?: { laneId: string; head: string; detached?: boolean } },
+) {
+  if (!lane.stack || lane.stack.detached || lane.state !== 'active') return null;
+  const row = await dependentRow(ctx, projectId, lane.id);
+  if (!row || row.ended || !row.latestHead || row.latestHead === row.parentHead) return null;
+  if (row.parentHead !== lane.stack.head || row.parentLaneId !== lane.stack.laneId) return null;
+  return {
+    laneId: lane.id,
+    parentLaneId: row.parentLaneId,
+    parentHead: row.latestHead,
+    restack: row.restackConflict === row.latestHead ? ('conflict' as const) : ('ready' as const),
+  };
+}
+
+/** An automatic (cleanOnly) restack onto `parentHead` conflicted: mark it so later saves skip it. */
+export async function markRestackConflict(
+  ctx: MutationCtx,
+  projectId: Id<'hostedProjects'>,
+  laneId: string,
+  parentHead: string,
+) {
+  const row = await dependentRow(ctx, projectId, laneId);
+  if (row && row.restackConflict !== parentHead) await ctx.db.patch(row._id, { restackConflict: parentHead });
+}
+
 /**
  * One board note per dependent for one parent event, delivered like any Lane note (`board.notices`
  * on the next Lane action, early return of a blocked `wait`). Bounded to the parent's direct
@@ -95,11 +135,12 @@ async function announce(
       key = `saved:${event.head}`;
       if (row.parentHead === event.head) continue;
       // Any parent save re-arms a later landing notice; only the first unanswered save is announced.
+      // The newest head is always kept: the child's next save restacks onto it (Issue f61e9339).
       if (row.savedNoticed && !row.ended) {
-        if (row.landingNoticed) await ctx.db.patch(row._id, { landingNoticed: undefined });
+        await ctx.db.patch(row._id, { latestHead: event.head, landingNoticed: undefined });
         continue;
       }
-      mark = { savedNoticed: true, ended: undefined, landingNoticed: undefined };
+      mark = { savedNoticed: true, ended: undefined, landingNoticed: undefined, latestHead: event.head };
     } else if (event.kind === 'abandoned') {
       key = `abandoned:${event.key}`;
       if (row.ended) continue;

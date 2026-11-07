@@ -21,6 +21,7 @@ import {
   hostedAgentActions,
   hostedAgentOwnerActions,
   hostedAgentRecordActions,
+  hostedAgentLandingActions,
 } from '../dist/hosted-agent-contract.js';
 import { agentActionSchema } from '../dist/agent-workflow-schema.js';
 import { initNative } from '../dist/native-work.js';
@@ -46,6 +47,7 @@ const rows = [
   ['finish', 'land --save', 'finish', 'finish'],
   ['land', null],
   ['land-ready', 'land --resume-ready', 'land-ready', 'land-ready'],
+  ['withdraw', 'land --withdraw', 'withdraw', 'withdraw'],
   ['accept', 'x accept'],
   ['landing', null],
   ['observe', null],
@@ -171,6 +173,7 @@ test('every current agent, hosted, owner and record action has exactly one V1 ho
     ...hostedAgentActions,
     ...hostedAgentOwnerActions,
     ...hostedAgentRecordActions,
+    ...hostedAgentLandingActions,
     'save',
     'wait',
     'integrate',

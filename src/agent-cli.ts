@@ -53,6 +53,7 @@ Three verbs:
     --save            save, sync if main moved, compose, check and land (accept:true)
     --save --check-only   the same without landing
     --resume-ready    resume landings waiting on dependencies
+    --withdraw        hosted: end this Lane's live landing (known failing check), keep the Lane
 
 land --save waits for the outcome (--no-wait returns after submission; a killed client never stops it).
 --message-file FILE|- reads message text; --command-file - reads the JSON from stdin.
@@ -362,6 +363,9 @@ function actionHelp(action: string): string {
   if (action === 'cancel')
     result +=
       'Hosted cancel takes {submissionId,operationId?}: submissionId selects a landing request and operationId identifies this cancellation. An already accepted request returns its receipt; Lane lifecycle stays independent; an unneeded hosted check is cancelled when its last live submission leaves.\n';
+  if (action === 'withdraw')
+    result +=
+      "Hosted: land --withdraw {laneId?,reason?,operationId?} ends this Lane's live landing (composing, queued, checking or ready) when you know its check will fail. One call; Lane author or project owner. The Lane, its saves, Candidates and recorded check results stay; the unfinished check stops once no other landing needs it, and peers stacked on it recompose without it. The receipt's confirm.waitCommand (the original landing wait) returns LANDING_CANCELLED at once; then fix, save and land --save again (a new operation). A replay of the same operationId returns the first receipt. Already accepted: nothing changes.\n";
   if (action === 'peer-ack')
     result +=
       'Use noticeId from peers detail:true. choice is accept-order, swap or split; optional text explains the advisory proposal. Reuse operationId and inputs after an unknown outcome. This records an answer; it does not resolve source conflicts.\n';
@@ -694,6 +698,11 @@ async function runAgentCli(args: string[], options: AgentCliOptions, notices: st
       throw actionableNotFound(error, action, command);
     }
   }
+  invariant(
+    action !== 'withdraw',
+    'HOSTED_ACTION_UNSUPPORTED',
+    'land --withdraw ends a hosted landing. Native checks stop with nforge x ROOT cancel {operationId:CHECK_RUN_ID}.',
+  );
   invariant(
     client.wait === undefined || action === 'finish',
     'BAD_ARGUMENT',

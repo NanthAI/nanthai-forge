@@ -18,6 +18,8 @@ const LIVE = new Set(['composing', 'queued', 'checking', 'ready']);
 export async function liveLaneFinish(
   ctx: QueryCtx | MutationCtx,
   input: { projectId: Id<'hostedProjects'>; laneId: string; headWrittenAt: string },
+  /** Withdraw also selects a queued entry marked wouldConflict: it still holds a queue place. */
+  options: { queuedConflicts?: true } = {},
 ) {
   const selections = await ctx.db
     .query('projectHostedComposeSelections')
@@ -47,7 +49,7 @@ export async function liveLaneFinish(
           .take(1);
     const rows = [
       // A queued entry marked wouldConflict is replaced in place by the Lane's next land (sync + save).
-      ...requests.filter(row => !row.wouldConflict).map(row => row.value),
+      ...requests.filter(row => options.queuedConflicts || !row.wouldConflict).map(row => row.value),
       ...(desired && !(await landingRow(ctx, desired)) ? [desired.value] : []),
     ];
     for (const value of rows) {
@@ -63,7 +65,8 @@ export async function liveLaneFinish(
 export const laneFinishActiveMessage = (laneId: string, finish: { submissionId: string; phase: string }) =>
   `Lane ${laneId} has an active finish (submission ${finish.submissionId}, ${finish.phase}). ` +
   'Saving new changes now would supersede it and throw away its checks. Wait for it to land or fail, ' +
-  'then save again. To replace it on purpose, save with supersedeFinish:true.';
+  'then save again. If you know its check will fail, end it with land --withdraw, then save and land again. ' +
+  'To replace it on purpose, save with supersedeFinish:true.';
 
 export async function refuseLiveLaneFinish(
   ctx: QueryCtx | MutationCtx,

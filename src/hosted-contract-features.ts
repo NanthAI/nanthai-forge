@@ -45,6 +45,9 @@ export const hostedContractFeatures = [
    * --resolve` withdraws a note, and `board {all:true}` lists resolved ones. Without it the CLI
    * sends neither. */
   'board-resolve',
+  /** projectHostedLandingWithdraw:withdraw exists (78a97771): `land --withdraw` cancels a Lane's
+   * live landing by Lane. Without it the CLI refuses and names `x cancel {submissionId}`. */
+  'landing-withdraw',
 ] as const;
 export type HostedContractFeature = (typeof hostedContractFeatures)[number];
 
