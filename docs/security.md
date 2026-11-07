@@ -67,6 +67,12 @@ CLI credentials expire after 30 days and are revocable from account settings or 
 
 New public Convex functions must use `convex/cliServer.ts` registration helpers (coordination variants only for coordination endpoints). The registration contract has a negative test to catch bypasses. Keep the private CLI signing key server-side; replacing it invalidates outstanding credentials once Convex refreshes its JWKS cache. Expired device-login rows are deleted, up to four per new login start, so pending login storage stays proportional to recent logins without a scheduled job. Issued credentials and account approval-attempt rows are not deleted automatically.
 
+The `/device` approval page shows only facts the server knows (access, lifetime, code, expiry) first. The device name is chosen by the terminal, so it is shown last, quoted and marked as not verified, with control and direction characters removed and a length cap. When the code arrives in a link, Approve stays disabled until the code from the terminal is typed again; Deny is never gated.
+
+## Web response headers
+
+The hosted web app is sent with `X-Frame-Options: DENY`, an enforced `Content-Security-Policy: frame-ancestors 'none'; base-uri 'self'; object-src 'none'`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, HSTS and a restrictive `Permissions-Policy`, set in `netlify.toml`. The full resource policy ships as `Content-Security-Policy-Report-Only` so a missing host shows in the browser console instead of breaking sign-in; make it enforcing once a release shows no violations. `tests/web-headers.test.mjs` checks the block and that the inline theme script's hash matches `web/index.html`.
+
 ## Autonomy authority
 
 Local CLI and MCP Channel acceptance, including the legacy Work command, is classified as an agent action. Embedded `WorkService` callers supply a trusted `AcceptanceActor` constructor context; command JSON cannot promote itself to a person. Direct native/Git acceptance uses the same policy checks. Local settings are owned by the OS user: any process with that user's filesystem authority can change them. `FORGE_ACTOR` is a self-declared label for local allowlists, not authentication or a sandbox. Use scoped device credentials for agents that require hosted policy enforcement.

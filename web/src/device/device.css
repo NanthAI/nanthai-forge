@@ -265,3 +265,9 @@
     flex-wrap: wrap;
   }
 }
+
+/* Text the terminal chose: shown quoted and quiet, never as a trusted fact. */
+.fx-dv-untrusted {
+  overflow-wrap: anywhere;
+  font-weight: 400;
+}

@@ -3,7 +3,7 @@ import { ErrorToast } from '../ui/Toast';
 import type { ReactNode } from 'react';
 import { Glyph } from '../ui/Glyph';
 import { Button, Callout } from '../ui/primitives';
-import { CODE_LENGTH, codeComplete, expiresIn, formatCode, scopeWords } from './code';
+import { CODE_LENGTH, codeComplete, expiresIn, formatCode, scopeWords, shownDeviceName } from './code';
 
 export type DeviceRequest = { name: string; scope: string; expiresAt: number; state: string };
 export type DevicePhase =
@@ -32,6 +32,9 @@ export function DeviceApproval({
   signIn,
   now,
   settingsHref = '/?surface=account&settings=account',
+  requireTyped = false,
+  typed = '',
+  setTyped = () => undefined,
 }: {
   phase: DevicePhase;
   code: string;
@@ -45,6 +48,10 @@ export function DeviceApproval({
   signIn: ReactNode;
   now: number;
   settingsHref?: string;
+  /** The code arrived in a link: approving needs the code typed from the terminal first. */
+  requireTyped?: boolean;
+  typed?: string;
+  setTyped?: (typed: string) => void;
 }) {
   const head = (title: string, lead?: ReactNode, tone: 'brand' | 'passed' | 'plain' = 'brand') => (
     <header className="fx-dv-head">
@@ -131,16 +138,11 @@ export function DeviceApproval({
       break;
     case 'review': {
       const { request } = phase;
+      const matches = !requireTyped || formatCode(typed) === formatCode(code);
       body = (
         <>
           {head('Approve this terminal?', 'Only approve if you just ran nforge login yourself.')}
           <dl className="fx-dv-facts">
-            <div>
-              <dt>Device</dt>
-              <dd>
-                <b>{request.name}</b>
-              </dd>
-            </div>
             <div>
               <dt>Access</dt>
               <dd>{scopeWords(request.scope)}</dd>
@@ -156,16 +158,41 @@ export function DeviceApproval({
                 <span className="fx-faint">expires {expiresIn(request.expiresAt, now)}</span>
               </dd>
             </div>
+            <div>
+              <dt>Name</dt>
+              <dd className="fx-dv-untrusted" data-untrusted="true">
+                <q>{shownDeviceName(request.name)}</q>{' '}
+                <span className="fx-faint">chosen by the terminal, not verified</span>
+              </dd>
+            </div>
           </dl>
           {request.state === 'pending' ? (
-            <div className="fx-dv-actions">
-              <Button variant="primary" size="lg" disabled={busy} onClick={() => decide(true)}>
-                Approve
-              </Button>
-              <Button size="lg" disabled={busy} onClick={() => decide(false)}>
-                Deny
-              </Button>
-            </div>
+            <>
+              {requireTyped && (
+                <div className="fx-dv-form">
+                  <label htmlFor="fx-dv-confirm">Type the code your terminal printed</label>
+                  <input
+                    id="fx-dv-confirm"
+                    className="fx-dv-input"
+                    value={formatCode(typed)}
+                    onChange={event => setTyped(formatCode(event.target.value))}
+                    placeholder="XXXXX-XXXXX"
+                    maxLength={CODE_LENGTH + 1}
+                    autoCapitalize="characters"
+                    autoComplete="off"
+                    spellCheck={false}
+                  />
+                </div>
+              )}
+              <div className="fx-dv-actions">
+                <Button variant="primary" size="lg" disabled={busy || !matches} onClick={() => decide(true)}>
+                  Approve
+                </Button>
+                <Button size="lg" disabled={busy} onClick={() => decide(false)}>
+                  Deny
+                </Button>
+              </div>
+            </>
           ) : (
             <Callout tone="info">This code already has a decision.</Callout>
           )}
@@ -179,7 +206,8 @@ export function DeviceApproval({
           {head(
             'Approved',
             <>
-              <b>{phase.name}</b> is signed in. You can return to your terminal.
+              The terminal named <q>{shownDeviceName(phase.name)}</q> is signed in. You can return to your
+              terminal.
             </>,
             'passed',
           )}
@@ -192,7 +220,13 @@ export function DeviceApproval({
     case 'denied':
       body = (
         <>
-          {head('Denied', <>The terminal on {phase.name} will not be signed in.</>, 'plain')}
+          {head(
+            'Denied',
+            <>
+              The terminal named <q>{shownDeviceName(phase.name)}</q> will not be signed in.
+            </>,
+            'plain',
+          )}
           <div className="fx-dv-actions">
             <Button onClick={restart}>Enter another code</Button>
           </div>

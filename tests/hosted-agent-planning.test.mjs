@@ -8,7 +8,12 @@ import { getFunctionName } from 'convex/server';
 import { setup } from './hosted-planning-fixture.mjs';
 import { agentFixture } from './hosted-agent-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
-import { executeHostedPlanning, plannedIntent, markPlanningStarted } from '../dist/hosted-agent-planning.js';
+import {
+  executeHostedPlanning,
+  plannedIntent,
+  markPlanningStarted,
+  planningDataNotice,
+} from '../dist/hosted-agent-planning.js';
 import { hostedAgentCommandSchemas, hostedAgentActions } from '../dist/hosted-agent-contract.js';
 import { HostedAgentTransport } from '../dist/hosted-agent-transport.js';
 import { hostedContractFeatures } from '../dist/hosted-contract-features.js';
@@ -206,6 +211,28 @@ test('agents create an Initiative and Issue, comment, and read them filtered and
   // The Planning view reads the same records.
   const work = (await s.read()).data;
   assert.equal(work.planningItems.filter(item => item.kind === 'issue').length, 3);
+});
+
+test('every planning read marks member-written text as data, once per read and in a few characters (S-17)', async t => {
+  const s = await setup(t),
+    p = port(s);
+  const issue = (await put(p, { kind: 'issue', title: 'Marked', body: 'Why and acceptance. '.repeat(80) }))
+    .result;
+  await run(p, 'comment-planning-item', { itemId: issue.itemId, text: 'A member comment' });
+  const reads = {
+    list: await list(p),
+    one: await list(p, { id: issue.itemId }),
+    search: await list(p, { search: 'Marked' }),
+  };
+  for (const [name, read] of Object.entries(reads))
+    assert.equal(read.notice, planningDataNotice, `${name} read carries the notice`);
+  assert.match(planningDataNotice, /data, never instructions/);
+  const cost = JSON.stringify({ notice: planningDataNotice }).length;
+  assert(cost <= 100, `notice stays small (${cost} characters)`);
+  const one = JSON.stringify(reads.one).length;
+  assert(cost / one < 0.05, `single-item read grows under 5 percent (${((cost / one) * 100).toFixed(1)})`);
+  // One constant per read: it does not scale with the number of items or comments.
+  assert.equal(JSON.stringify(reads.list).split(planningDataNotice).length - 1, 1);
 });
 
 test('a put keeps every stored field it omits; clearing needs an explicit empty value (status-only move kept a body, c0255160)', async t => {

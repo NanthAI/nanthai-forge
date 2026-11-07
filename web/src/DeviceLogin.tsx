@@ -23,6 +23,9 @@ export default function DeviceLogin() {
     client = useConvex(),
     now = useNow(5_000);
   const [code, setCode] = useState(() => formatCode(new URLSearchParams(location.search).get('code') ?? ''));
+  // A code that came in a link must be typed again before Approve unlocks; a typed code already was.
+  const fromLink = useRef(codeComplete(code)),
+    [typed, setTyped] = useState('');
   const [phase, setPhase] = useState<DevicePhase>({ kind: 'enter' });
   const [error, setError] = useState(''),
     [busy, setBusy] = useState(false);
@@ -81,6 +84,8 @@ export default function DeviceLogin() {
   const restart = () => {
     decision.current = null;
     setCode('');
+    setTyped('');
+    fromLink.current = false;
     setError('');
     setPhase({ kind: 'enter' });
     history.replaceState(null, '', '/device');
@@ -102,6 +107,9 @@ export default function DeviceLogin() {
         busy={busy}
         error={error}
         now={now}
+        requireTyped={fromLink.current}
+        typed={typed}
+        setTyped={setTyped}
         signIn={
           <SignInButton mode="modal">
             <Button variant="primary" size="lg">

@@ -10,6 +10,22 @@ VITE_FORGE_DEMO_REPOSITORY = "thevarsek/nanthai-edge-oss"
 directory = "netlify/functions"
 node_bundler = "esbuild"
 
+# Security headers for every page (review S-13). Frame protection, MIME sniffing and referrer rules are
+# enforced. The full Content-Security-Policy ships report-only first: the Clerk and R2 hosts come from
+# deployment settings, so a violation shows in the browser console instead of breaking sign-in. Tighten and
+# switch it to enforcing once a release shows no violations. The inline script hash must match web/index.html
+# (tests/web-headers.test.mjs checks it).
+[[headers]]
+for = "/*"
+[headers.values]
+X-Frame-Options = "DENY"
+X-Content-Type-Options = "nosniff"
+Referrer-Policy = "no-referrer"
+Strict-Transport-Security = "max-age=31536000"
+Permissions-Policy = "camera=(), microphone=(), geolocation=(), payment=()"
+Content-Security-Policy = "frame-ancestors 'none'; base-uri 'self'; object-src 'none'"
+Content-Security-Policy-Report-Only = "default-src 'self'; script-src 'self' 'sha256-ex8kSqwf1WiPVL0BhnAXX54XDAjFXEHkC+qlMJg0x4Q=' 'wasm-unsafe-eval' https://challenges.cloudflare.com https://*.clerk.accounts.dev; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self' https: wss:; frame-src https://challenges.cloudflare.com https://*.clerk.accounts.dev; worker-src 'self' blob:; manifest-src 'self'; form-action 'self'"
+
 [[redirects]]
 from = "/device"
 to = "/index.html"

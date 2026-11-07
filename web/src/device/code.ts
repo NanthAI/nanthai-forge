@@ -34,3 +34,20 @@ export function codeProblem(message: string): 'expired' | 'used' | null {
   if (/already has a decision/i.test(message)) return 'used';
   return null;
 }
+
+/** Longest terminal-supplied name the approval page shows. */
+export const SHOWN_NAME_MAX = 40;
+/**
+ * The terminal chooses its own name, so the page treats it as untrusted text: control, invisible
+ * and direction-changing characters are dropped, spaces collapse, and the length is capped.
+ */
+export function shownDeviceName(name: string): string {
+  const clean = name
+    .replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const chars = [...clean];
+  return chars.length > SHOWN_NAME_MAX
+    ? `${chars.slice(0, SHOWN_NAME_MAX - 1).join('')}…`
+    : clean || 'unnamed';
+}

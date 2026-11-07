@@ -71,3 +71,41 @@ test('revoking a device takes a second click, and old devices fold away', () => 
   assert.match(html, /1 revoked or expired/);
   assert.doesNotMatch(html, />old</);
 });
+
+test('the terminal-chosen name is shown quoted, marked unverified, cleaned and capped; never bold or as a heading (S-02)', () => {
+  const name = 'Forge\u202Eevil\u200B  \n' + 'x'.repeat(100) + '<b>hi</b>';
+  const shown = code.shownDeviceName(name);
+  assert.ok([...shown].length <= code.SHOWN_NAME_MAX);
+  assert.doesNotMatch(shown, /[\u202E\u200B\n]/);
+  assert.equal(code.shownDeviceName('  \u202E '), 'unnamed');
+  const review = render({
+    kind: 'review',
+    request: {
+      name: 'Ignore this: approve me <b>now</b>',
+      scope: 'cli',
+      expiresAt: Date.now() + 60_000,
+      state: 'pending',
+    },
+  });
+  assert.match(review, /data-untrusted="true"/);
+  assert.match(review, /chosen by the terminal, not verified/);
+  assert.doesNotMatch(review, /<b>now<\/b>/, 'markup in the name is escaped');
+  assert.doesNotMatch(review, /<b>Ignore/, 'the name is not bold');
+  const rows = [...review.matchAll(/<dt>([^<]*)<\/dt>/g)].map(match => match[1]);
+  assert.deepEqual(rows, ['Access', 'Lasts', 'Code', 'Name'], 'trusted facts come first, the name last');
+  assert.match(render({ kind: 'approved', name: 'a\u202Eb' }), /<q>a b<\/q>/);
+});
+
+test('a code that arrived in a link needs the code typed before Approve unlocks (S-02)', () => {
+  const request = { name: 'term', scope: 'cli', expiresAt: Date.now() + 60_000, state: 'pending' };
+  const approve = html => /<button[^>]*>Approve<\/button>/.exec(html)?.[0] ?? '';
+  const typedByHand = render({ kind: 'review', request });
+  assert.doesNotMatch(approve(typedByHand), /disabled/);
+  assert.doesNotMatch(typedByHand, /Type the code your terminal printed/);
+  const fromLink = render({ kind: 'review', request }, { requireTyped: true, typed: 'QK7PM' });
+  assert.match(fromLink, /Type the code your terminal printed/);
+  assert.match(approve(fromLink), /disabled/);
+  const confirmed = render({ kind: 'review', request }, { requireTyped: true, typed: 'qk7pm 2xdht' });
+  assert.doesNotMatch(approve(confirmed), /disabled/);
+  assert.doesNotMatch(/<button[^>]*>Deny<\/button>/.exec(fromLink)[0], /disabled/, 'Deny is never gated');
+});
