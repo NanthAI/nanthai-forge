@@ -111,8 +111,20 @@ async function fullItem(port: PlanningPort, ws: Workspace, id: string) {
 /** The link every planning read shows for an Issue (30a4d75d). Starting an Issue opens the Intent that has the
  * Issue's own id and never fills the legacy `intentIds` array, so an empty array is not "no link". This is the
  * Intent a start opens or opened: static text from the item, no call. `intent` is its state, present once started. */
-const withPlannedLink = <T extends { id: string; kind?: string }>(item: T) =>
-  item.kind === 'issue' ? { ...item, plannedIntentId: item.id } : item;
+const withPlannedLink = <T extends { id: string; kind?: string; author?: string | undefined }>(raw: T) => {
+  const item = shownAuthor(raw);
+  return item.kind === 'issue' ? { ...item, plannedIntentId: item.id } : item;
+};
+/** The body's author reaches an agent only as a public Forge handle (public-identities rule, S-17). The server
+ * maps the stored account to its handle before the row leaves it (convex/publicPeople.ts); anything that is
+ * not handle-shaped (an unmapped account id, a name, an email) is dropped here, so no raw id can pass. */
+const handleShape = /^[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])$/;
+function shownAuthor<T extends { author?: string | undefined }>(item: T): T {
+  if (item.author === undefined || handleShape.test(item.author)) return item;
+  const rest: T = { ...item };
+  delete rest.author;
+  return rest;
+}
 const compact = (item: PlanningItem, intent?: string) =>
   withPlannedLink({
     ...planningSummary(item),

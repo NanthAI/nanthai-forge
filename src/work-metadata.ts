@@ -7,7 +7,7 @@ import { hostedIntentMigrationSchema } from './work-hosted-intents.js';
 import { validateAnchorView } from './work-source-anchor.js';
 import { intentLifecycle } from './work-lifecycle.js';
 import type { IntentMetadataCommand } from './work-intent-types.js';
-import { applyPlanningMetadata, planningRequest } from './work-planning-state.js';
+import { applyPlanningMetadata, planningRequest, stampPlanningAuthor } from './work-planning-state.js';
 import { digest, digestChunks } from './portable-hash.js';
 import { jsonChunks } from './json-chunks.js';
 import { invariant } from './errors.js';
@@ -229,7 +229,9 @@ export function applyHostedEvent(
       'INVALID_WORK_JOURNAL',
       'Planning identity differs from its original hosted operation.',
     );
+    const count = data.planningItems.length;
     applyPlanningMetadata(data, event.command, event.at);
+    stampPlanningAuthor(data, count, event.command, event.actor);
   } else applyIntentMetadata(data, event.command, { id: event.id, at: event.at, ...options });
   if (isUnifiedWork(data) && creatingId) {
     const created = data.intents.find(intent => intent.id === creatingId);

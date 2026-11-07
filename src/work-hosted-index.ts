@@ -148,6 +148,7 @@ export function indexedRecord(
         'body',
         'text',
         'authorLabel',
+        'author',
         'status',
         'at',
         'createdAt',

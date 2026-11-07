@@ -235,6 +235,67 @@ test('every planning read marks member-written text as data, once per read and i
   assert.equal(JSON.stringify(reads.list).split(planningDataNotice).length - 1, 1);
 });
 
+test('every planning read shows the body author as a public handle, with no extra call and no raw account id (S-17)', async t => {
+  const s = await setup(t);
+  s.tables.forgeAccounts.set('account', {
+    _id: 'account',
+    _creationTime: 1,
+    owner: 'owner',
+    handle: 'ada-builder',
+  });
+  const p = port(s);
+  const issue = (await put(p, { kind: 'issue', title: 'Authored', body: 'Why and acceptance.' })).result;
+  const reads = async () => ({
+    list: await list(p),
+    one: await list(p, { id: issue.itemId }),
+    search: await list(p, { search: 'Authored' }),
+  });
+  const authors = read => ({
+    list: read.list.items.find(item => item.id === issue.itemId).author,
+    one: read.one.item.author,
+    search: read.search.items.find(item => item.id === issue.itemId).author,
+  });
+  assert.deepEqual(authors(await reads()), {
+    list: 'ada-builder',
+    one: 'ada-builder',
+    search: 'ada-builder',
+  });
+  // A move that keeps the body keeps the author; the account id never appears in any read.
+  await put(p, { itemId: issue.itemId, expectedVersion: 1, status: 'proposed' });
+  const after = await reads();
+  assert.deepEqual(authors(after), { list: 'ada-builder', one: 'ada-builder', search: 'ada-builder' });
+  assert.equal(after.one.item.version, 2);
+  assert.doesNotMatch(JSON.stringify(after), /"author":"owner"|\\"author\\":\\"owner/);
+  // The author is on the row already: the list read makes the same calls as before the field existed
+  // (workspace, one records page, Intent states), and a one-item read adds none.
+  p.calls.length = 0;
+  await list(p);
+  assert.deepEqual(p.calls, [
+    'projectWorkIndex:workspace',
+    'projectWorkIndex:records',
+    'projectHostedPlanning:intentStates',
+  ]);
+  // Token cost per item: the handle adds one short field.
+  const item = JSON.stringify(after.list.items.find(entry => entry.id === issue.itemId));
+  const field = JSON.stringify({ author: 'ada-builder' });
+  assert(field.length / item.length < 0.15, `author field is ${field.length} of ${item.length} characters`);
+  // Anything that is not handle-shaped is dropped before an agent sees it, whatever the server sent.
+  const rawId = 'user_AbCdEf123456';
+  const raw = value => JSON.parse(JSON.stringify(value).replaceAll('ada-builder', rawId));
+  const wrapped = {
+    ...p,
+    exchange: { client: { query: async (ref, args) => raw(await p.exchange.client.query(ref, args)) } },
+    query: async (name, args) => raw(await p.query(name, args)),
+  };
+  const leaked = {
+    list: await list(wrapped),
+    one: await list(wrapped, { id: issue.itemId }),
+    search: await list(wrapped, { search: 'Authored' }),
+  };
+  assert.doesNotMatch(JSON.stringify(leaked), /user_AbCdEf123456/);
+  assert.equal(leaked.one.item.author, undefined);
+});
+
 test('a put keeps every stored field it omits; clearing needs an explicit empty value (status-only move kept a body, c0255160)', async t => {
   const s = await setup(t),
     p = port(s);

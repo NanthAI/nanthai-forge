@@ -33,6 +33,9 @@ export const planningItemSchema = z.object({
   version: z.number().int().positive(),
   previousVersion: z.number().int().nonnegative(),
   ...planningFields,
+  /** The account that last wrote this body, recorded by the hosted journal replay (S-17). Public reads
+   * map it to a Forge handle (convex/publicPeople.ts); absent on local Work and on older rows. */
+  author: z.string().min(1).max(200).optional(),
   at: z.string(),
   provenance: z.literal('user-declared-local'),
 });

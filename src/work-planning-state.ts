@@ -102,6 +102,23 @@ export function applyPlanningMetadata(data: WorkData, command: PlanningWrite, at
   data.planningItems.push(item);
   return item;
 }
+/** Hosted replay only: the put that appended a version (`count` = planningItems.length before it) records the
+ * server-observed `actor` as the body's author when it wrote the body (or created the item); a put that
+ * keeps the body (status move, reason, reopen) carries the earlier author. */
+export function stampPlanningAuthor(data: WorkData, count: number, command: PlanningWrite, actor: string) {
+  if (command.action !== 'put-planning-item' || data.planningItems.length !== count + 1) return;
+  const item = data.planningItems[count]!;
+  let author: string | undefined = actor;
+  if (command.body === undefined && item.version > 1) {
+    author = undefined;
+    for (let index = count - 1; index >= 0; index--)
+      if (data.planningItems[index]!.id === item.id) {
+        author = data.planningItems[index]!.author;
+        break;
+      }
+  }
+  if (author) item.author = author;
+}
 export function exportPlanning(data: WorkData, project?: { key: string; name: string }) {
   // Issues link their planned Intent (id = Issue id) even with empty legacy intentIds; linkedIntents lists the ones that exist.
   const linked = new Set(data.planningItems.flatMap(plannedLinkIds));
