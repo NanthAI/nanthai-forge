@@ -533,3 +533,98 @@ test('hosted audit status and check-settings expose the same audit payload', asy
     error => error.data?.code === 'PROJECT_UNAVAILABLE',
   );
 });
+
+const removeRunner = f => {
+  const row = [...f.tables.projectHostedCheckSettings.values()].find(
+    item => item.kind === 'runner' && item.key === 'runner',
+  );
+  f.tables.projectHostedCheckSettings.delete(row._id);
+  return () => f.tables.projectHostedCheckSettings.set(row._id, row);
+};
+const dueAudit = async () => {
+  const f = await auditFixture();
+  await f.land('full');
+  for (let i = 0; i < 12; i++) await f.land();
+  return f;
+};
+
+test('a start that throws RUNNER_UNAVAILABLE retries with back-off, names the cause and runs once the runner is set (53b07031)', async () => {
+  const f = await dueAudit();
+  const setRunner = removeRunner(f);
+  let task = f.pending()[0];
+  for (const [attempt, minutes] of [
+    [1, 5],
+    [2, 15],
+    [3, 60],
+  ]) {
+    await f.tick(task); // resolves: the failed start commits instead of rolling its wake back
+    assert.equal(f.row().startFailure.attempts, attempt);
+    assert.equal(f.row().startFailure.code, 'RUNNER_UNAVAILABLE');
+    assert.equal(f.pending().length, 1, 'exactly one retry is pending');
+    assert.equal(f.row().wake.taskId, f.pending()[0]._id, 'the wake never points at a finished task');
+    assert.equal(Math.round((f.pending()[0].scheduledTime - task.scheduledTime) / 60_000), minutes);
+    const alarm = (await readStatus(f)).alarm;
+    if (attempt === 1) assert.equal(alarm, null, 'one failure is not yet a notice');
+    else {
+      assert.equal(alarm.code, 'MAIN_AUDIT_STALLED');
+      assert.equal(alarm.step, 'RUNNER_UNAVAILABLE');
+      assert.match(alarm.message, /No runner is set/);
+    }
+    task = f.pending()[0];
+  }
+  setRunner(); // the owner configures the runner; nothing else is done by hand
+  await f.tick(task);
+  assert.equal(f.currentRun().gate.mode, 'audit', 'the scheduled retry runs the audit');
+  assert.equal(f.row().startFailure, undefined);
+  assert.equal((await readStatus(f)).alarm, null);
+  assert.equal(f.pending().length, 0);
+  await f.terminal();
+  assert.equal(f.row().unaudited.count, 0);
+  assert.equal(f.row().lastGreen.sequence, 13);
+  assert.equal(f.pending().length, 0);
+});
+
+test('a missing check on the newest receipt is named; retries stop at the cap and a full-gated landing clears the notice (53b07031)', async () => {
+  const f = await dueAudit();
+  const accepted = [...f.tables.projectHostedAcceptances.values()].find(row => row.sequence === 13);
+  const receipt = JSON.parse(accepted.value);
+  receipt.check = null;
+  f.patch('projectHostedAcceptances', accepted._id, { value: JSON.stringify(receipt) });
+  let task = f.pending()[0];
+  const waits = [];
+  for (let attempt = 1; attempt <= 7; attempt++) {
+    await f.tick(task);
+    assert.equal(f.row().startFailure.attempts, attempt);
+    const next = f.pending();
+    if (attempt === 7) assert.equal(next.length, 0, 'no retry beyond the cap of six');
+    else {
+      assert.equal(next.length, 1);
+      waits.push(Math.round((next[0].scheduledTime - task.scheduledTime) / 60_000));
+      task = next[0];
+    }
+  }
+  assert.deepEqual(waits, [5, 15, 60, 60, 60, 60]);
+  assert.equal(f.row().wake, undefined);
+  const alarm = (await readStatus(f)).alarm;
+  assert.equal(alarm.step, 'RUNNER_UNAVAILABLE');
+  assert.match(alarm.message, /no check/);
+  await f.land('full'); // a full-gated landing makes the debt moot and clears the notice
+  assert.equal(f.row().startFailure, undefined);
+  assert.equal((await readStatus(f)).alarm, null);
+  assert.equal(f.pending().length, 0);
+});
+
+test('a start that fails for any other reason cannot leave a finished wake that blocks re-arming (53b07031)', async () => {
+  const f = await auditFixture();
+  await f.land('full');
+  await f.land();
+  const task = f.pending()[0];
+  const past = Date.now() - 10 * 60_000;
+  f.patch('_scheduled_functions', task._id, { state: { kind: 'failed' }, scheduledTime: past });
+  f.patch('projectHostedMainAudits', f.row()._id, { wake: { taskId: task._id, at: past } });
+  await f.land();
+  const pending = f.pending();
+  assert.equal(pending.length, 1, 'the next landing re-arms past a finished wake');
+  assert.notEqual(pending[0]._id, task._id);
+  assert.equal(f.row().wake.taskId, pending[0]._id);
+});

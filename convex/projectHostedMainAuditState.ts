@@ -10,6 +10,7 @@ import {
   auditDue,
   auditMetadata,
   mainAuditStallMs,
+  mainAuditStartNoticeAttempts,
   defaultMainAuditSettings,
   docsGate,
   fullGate,
@@ -67,14 +68,25 @@ export async function mainGate(
 export async function mainRed(ctx: QueryCtx | MutationCtx, projectId: Id<'hostedProjects'>) {
   return Boolean((await auditRow(ctx, projectId))?.red);
 }
+/**
+ * A wake whose task already ran (a start that threw rolls back its own wake
+ * clear) must not look pending forever. Only a wake overdue by a minute is
+ * looked up, so the normal path reads nothing extra.
+ */
+async function wakeFinished(ctx: MutationCtx, wake: { taskId: Id<'_scheduled_functions'>; at: number }) {
+  if (wake.at > Date.now() - 60_000) return false;
+  const task = await ctx.db.system.get(wake.taskId);
+  return !task || (task.state.kind !== 'pending' && task.state.kind !== 'inProgress');
+}
 export async function armAudit(
   ctx: MutationCtx,
   row: Doc<'projectHostedMainAudits'>,
   at: number,
   extra: { retry?: boolean } = {},
 ) {
-  if (row.wake && row.wake.at <= at) return;
-  if (row.wake) await ctx.scheduler.cancel(row.wake.taskId);
+  const finished = row.wake ? await wakeFinished(ctx, row.wake) : false;
+  if (row.wake && row.wake.at <= at && !finished) return;
+  if (row.wake && !finished) await ctx.scheduler.cancel(row.wake.taskId);
   const taskId = await ctx.scheduler.runAfter(
     Math.max(0, at - Date.now()),
     makeFunctionReference<'mutation'>('projectHostedMainAudit:start'),
@@ -170,6 +182,7 @@ export async function noteMainLanding(
       unaudited: { count: 0, firstAt: null },
       debt: false,
       wake: undefined,
+      startFailure: undefined,
     };
     await ctx.db.patch(row._id, patch);
     row = { ...row, ...patch };
@@ -182,6 +195,7 @@ export async function noteMainLanding(
       red: undefined,
       debt: false,
       wake: undefined,
+      startFailure: undefined,
     });
     if (row.red) {
       await auditEvent(
@@ -276,6 +290,7 @@ export async function onGateRunTerminal(ctx: MutationCtx, run: HostedCheckRun): 
       unaudited: { count, firstAt },
       red: undefined,
       debt: false,
+      ...(count ? {} : { startFailure: undefined }),
     });
     await auditEvent(ctx, row, 'green', at, run.request.expectedHead, run.id, meta.sequence);
     await releaseMainHolds(ctx, projectId);
@@ -364,6 +379,13 @@ export async function mainAuditStatus(ctx: QueryCtx | MutationCtx, projectId: Id
     if (firstAt && (!pending.firstAt || firstAt < pending.firstAt)) pending.firstAt = firstAt;
   }
   const green = row?.lastGreen && row.lastGreen.sequence >= (row.audit?.sequence ?? -1);
+  const failedStart =
+    row?.startFailure &&
+    row.startFailure.attempts >= mainAuditStartNoticeAttempts &&
+    row.unaudited?.count &&
+    !active
+      ? row.startFailure
+      : null;
   return {
     head: green ? row!.lastGreen!.head : (row?.audit?.head ?? null),
     result: green ? 'passed' : (active?.status ?? row?.audit?.status ?? null),
@@ -371,8 +393,9 @@ export async function mainAuditStatus(ctx: QueryCtx | MutationCtx, projectId: Id
     redMinutes: row?.red ? Math.max(0, Date.now() - Date.parse(row.red.since)) / 60_000 : 0,
     lastGreen: row?.lastGreen ?? null,
     unaudited: pending,
-    alarm:
-      retainedStall || overdue
+    alarm: failedStart
+      ? { code: 'MAIN_AUDIT_STALLED', step: failedStart.code, runId: null, message: failedStart.message }
+      : retainedStall || overdue
         ? {
             code: 'MAIN_AUDIT_STALLED',
             step:

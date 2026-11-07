@@ -45,6 +45,10 @@ export const mainAuditFields = {
   /** Newest main revision that landed on its first check (7fe54c7c); audited promptly. */
   firstCheck: v.optional(v.number()),
   wake: v.optional(v.object({ taskId: v.id('_scheduled_functions'), at: v.number() })),
+  /** Consecutive audit starts that could not run (53b07031); cleared once one does. */
+  startFailure: v.optional(
+    v.object({ attempts: v.number(), code: v.string(), message: v.string(), at: v.string() }),
+  ),
 };
 export const hostedMainAuditTables = {
   projectHostedMainAudits: defineTable(mainAuditFields).index('by_project', ['projectId']),

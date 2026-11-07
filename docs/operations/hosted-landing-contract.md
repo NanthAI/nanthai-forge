@@ -466,6 +466,17 @@ It preserves the last green boundary, red state, debt and counted landings,
 including their original age. It schedules no immediate retry; the next landing
 re-evaluates the normal cadence for a full audit of the latest main.
 
+An audit start that cannot run (no runner set, the newest main receipt has no
+check, no callback key, a changed authority or Candidate) commits instead of
+throwing, so its wake never stays pointing at a finished task. It re-arms the
+one wake with back-off of 5, 15, then 60 minutes (six retries in all, then it
+stops). From the second consecutive failure, status carries a
+`MAIN_AUDIT_STALLED` alarm whose `step` is the failure code and `message` names
+the cause, until an audit starts or a full-passed landing covers the debt. The
+next landing re-arms one bounded attempt. A start that throws for any other
+reason is recovered the same way: a wake overdue by a minute is checked and
+replaced once its task has finished.
+
 The single owned wake is used for pending audit cadence. Active audits use the
 existing provider watchdogs, with no additional audit timer. Status reports
 `MAIN_AUDIT_STALLED` and the current step after 15 minutes without observed

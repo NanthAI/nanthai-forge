@@ -34,6 +34,7 @@ import {
   auditMetadata,
   auditReason,
   mainAuditKey,
+  mainAuditStartRetryMs,
   mainAuditSettingsSchema,
   fullGate,
 } from '../src/main-audit';
@@ -199,28 +200,36 @@ export const start = internalMutation({
     if (row.wake && input.wakeAt === undefined) await ctx.scheduler.cancel(row.wake.taskId);
     if (row.wake) await ctx.db.patch(row._id, { wake: undefined });
     if (!row.unaudited?.count || (row.audit && !hostedCheckTerminal(row.audit))) return null;
+    // A start that cannot run must commit, not throw: a rollback would restore the
+    // wake that just fired and leave it looking pending (53b07031). Retry with
+    // back-off up to the cap; the row's start failure becomes the owner notice.
+    const blocked = async (code: string, message: string) => {
+      const attempts = (row.startFailure?.attempts ?? 0) + 1;
+      await ctx.db.patch(row._id, {
+        startFailure: { attempts, code, message, at: new Date().toISOString() },
+      });
+      const delay = mainAuditStartRetryMs[attempts - 1];
+      if (delay !== undefined) await armAudit(ctx, { ...row, wake: undefined }, Date.now() + delay);
+      return null;
+    };
     const project = await ctx.db.get(input.projectId);
-    invariant(
-      project?.sourceAuthority?.mode === 'server',
-      'SOURCE_AUTHORITY_CHANGED',
-      'Main audits require the current hosted source authority.',
-    );
+    if (project?.sourceAuthority?.mode !== 'server')
+      return blocked('SOURCE_AUTHORITY_CHANGED', 'Main audits require the current hosted source authority.');
     const latest = await ctx.db
       .query('projectHostedAcceptances')
       .withIndex('by_project_and_sequence', q => q.eq('projectId', input.projectId))
       .order('desc')
       .take(1);
-    invariant(latest[0], 'SOURCE_UNAVAILABLE', 'Main audit requires an accepted main receipt.');
+    if (!latest[0]) return blocked('SOURCE_UNAVAILABLE', 'Main audit requires an accepted main receipt.');
     const receipt = hostedAcceptanceSchema.parse(JSON.parse(latest[0].value));
     const definition = receipt.check
       ? await checkSetting(ctx, input.projectId, 'definition', receipt.check.checkId)
       : null;
     const configuration = await checkSetting(ctx, input.projectId, 'runner', 'runner');
-    invariant(
-      definition && configuration,
-      'RUNNER_UNAVAILABLE',
-      'Configure the accepted main check and runner before its audit.',
-    );
+    if (!configuration)
+      return blocked('RUNNER_UNAVAILABLE', 'No runner is set; configure one before the main audit.');
+    if (!definition)
+      return blocked('RUNNER_UNAVAILABLE', 'The newest accepted main receipt has no check to audit with.');
     const runner = hostedCheckRunnerSchema.parse(JSON.parse(configuration.value));
     const key = mainAuditKey({
       projectId: input.projectId,
@@ -253,6 +262,7 @@ export const start = internalMutation({
           sequence: receipt.snapshot.revision,
           status: 'queued',
         },
+        startFailure: undefined,
       });
       if (hostedCheckTerminal(run)) {
         // Reuse evidence on the current occurrence of this same content key.
@@ -278,22 +288,20 @@ export const start = internalMutation({
       kind: 'candidate',
       key: receipt.candidate.id,
     });
-    invariant(candidateRow, 'SOURCE_UNAVAILABLE', 'The accepted Candidate is unavailable.');
+    if (!candidateRow) return blocked('SOURCE_UNAVAILABLE', 'The accepted Candidate is unavailable.');
     const candidate = hostedRecordSchema.parse(JSON.parse(candidateRow.value));
-    invariant(
-      candidate.kind === 'candidate' &&
+    if (
+      !(
+        candidate.kind === 'candidate' &&
         candidate.result.status === 'clean' &&
         candidate.result.head === receipt.candidate.head &&
-        candidateRow.digest === receipt.candidate.digest,
-      'EVIDENCE_CHANGED',
-      'Main audit must pin the exact accepted Candidate.',
-    );
+        candidateRow.digest === receipt.candidate.digest
+      )
+    )
+      return blocked('EVIDENCE_CHANGED', 'Main audit must pin the exact accepted Candidate.');
     const keyId = process.env.FORGE_HOSTED_CHECK_KEY_ID;
-    invariant(
-      keyId && /^[A-Z0-9_]+$/.test(keyId),
-      'RUNNER_UNAVAILABLE',
-      'Trusted hosted check callback configuration is unavailable.',
-    );
+    if (!(keyId && /^[A-Z0-9_]+$/.test(keyId)))
+      return blocked('RUNNER_UNAVAILABLE', 'Trusted hosted check callback configuration is unavailable.');
     const request = {
       operationId,
       authorityEpoch: project.sourceAuthority.epoch,
@@ -367,6 +375,7 @@ export const start = internalMutation({
         status: 'queued',
       },
       unaudited: { count: row.unaudited.count, firstAt: null },
+      startFailure: undefined,
     });
     return null;
   },

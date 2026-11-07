@@ -14,6 +14,10 @@ export const mainAuditSettingsSchema = z
   .strict();
 export const defaultMainAuditSettings = mainAuditSettingsSchema.parse({});
 export const mainAuditStallMs = 15 * 60_000;
+/** Back-off before each retry of an audit start that could not run; its length is the cap. */
+export const mainAuditStartRetryMs = [5, 15, 60, 60, 60, 60].map(minutes => minutes * 60_000);
+/** A start failure becomes an owner-visible notice from this attempt on. */
+export const mainAuditStartNoticeAttempts = 2;
 export type MainAuditSettings = z.infer<typeof mainAuditSettingsSchema>;
 export function auditDebt(
   count: number,
