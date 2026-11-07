@@ -45,6 +45,10 @@ export const hostedContractFeatures = [
    * --resolve` withdraws a note, and `board {all:true}` lists resolved ones. Without it the CLI
    * sends neither. */
   'board-resolve',
+  /** Agent run on receipts (d730121f): projectHostedLanding:enqueue and
+   * projectHostedLandingDesired:submit take `agent` (the session slug), kept outside the request, and
+   * the acceptance receipt records it as `agentRun`. Without it the CLI sends no `agent`. */
+  'landing-agent-run',
   /** projectHostedLandingWithdraw:withdraw exists (78a97771): `land --withdraw` cancels a Lane's
    * live landing by Lane. Without it the CLI refuses and names `x cancel {submissionId}`. */
   'landing-withdraw',

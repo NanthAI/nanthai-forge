@@ -63,6 +63,10 @@ export function hostedOverlapNotice(root: string, laneId: string, advice: Advice
 }
 export type HostedOverlapNotice = NonNullable<ReturnType<typeof hostedOverlapNotice>>;
 
+/** Missing range evidence means both Lanes changed this file and Forge cannot say where; the bare
+ * code read as if the file or the peer were unknown (d730121f). */
+const reasonLabel = (reason: string) =>
+  reason === 'unavailable' ? 'same file; line ranges unknown' : reason;
 /** Human banner for stderr; stdout stays one JSON receipt. One block per file, so a file three Lanes
  * touch is named once. An advisory notice is a single short summary; a blocking one stays complete. */
 export function overlapBanner(notice: HostedOverlapNotice) {
@@ -81,7 +85,7 @@ export function overlapBanner(notice: HostedOverlapNotice) {
       `  - [${items
         .map(item => item.class)
         .filter((v, i, all) => all.indexOf(v) === i)
-        .join('/')}] ${file} (${items[0]!.reason})`,
+        .join('/')}] ${file} (${reasonLabel(items[0]!.reason)})`,
       ...items.flatMap(item =>
         item.with.map(p => `      also changed in Lane ${p.lane} by ${actorLabel(p.actor)}: ${p.intent}`),
       ),

@@ -275,6 +275,10 @@ export const read = query({
                 goal: mine?.intent ?? '',
                 paths: (JSON.parse(focus.changes) as { path: string }[]).map(change => change.path),
                 actor: user.subject,
+                // This agent run's own earlier Lanes and the Lane a resolution resolves are not
+                // "another agent" (d730121f): both ride rows already read, no added read.
+                ...(mine?.agent ? { agent: mine.agent } : {}),
+                ...(lane.resolution?.origin ? { origin: lane.resolution.origin.laneId } : {}),
               },
               presence.since,
               cutoff,

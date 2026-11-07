@@ -38,6 +38,7 @@ import { hostedAgentCommandSchemas } from './hosted-agent-contract.js';
 import { readSource } from './files.js';
 import { safeRelative } from './safe-relative.js';
 import { readLaneEntry, recordLane } from './lane-registry.js';
+import { sessionAgentSlug } from './agent-slug-session.js';
 import { ForgeError, invariant } from './errors.js';
 import type { HostedAgentSession } from './hosted-agent-transport.js';
 /** Why Forge reports a file the line merge accepted (it no longer parses) or declined (too large). */
@@ -115,7 +116,8 @@ export async function guideHostedSync(session: HostedAgentSession, value: unknow
   }
   const placed = await placeResolution(session, source);
   const { root } = placed;
-  recordLane({ laneId: source.lane.laneId, root, ...session.address });
+  // The run that resolves owns the resolution Lane's idle listing (d730121f).
+  recordLane({ laneId: source.lane.laneId, root, ...session.address, agent: sessionAgentSlug() ?? null });
   const dependencies = await shareDependencies(root).catch((error: unknown) => ({
     status: 'failed' as const,
     message: error instanceof Error ? error.message : String(error),

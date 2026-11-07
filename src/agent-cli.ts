@@ -22,7 +22,7 @@ import { invariant } from './errors.js';
 import { hostedLandCli, LAND_CHILD_ENV } from './hosted-land-cli.js';
 import { hostedShowCli } from './hosted-show-cli.js';
 import { HostedAgentTransport } from './hosted-agent-transport.js';
-import { housekeepingLines, type IdleLane } from './lane-prune.js';
+import { housekeepingLines, type IdleLane, type OtherRunLane } from './lane-prune.js';
 
 export const AGENT_HELP = `Forge native owner agent workflow
 Hosted checkout help is generated from its enforced contract: nforge agent HOSTED_ROOT --help.
@@ -685,13 +685,20 @@ async function runAgentCli(args: string[], options: AgentCliOptions, notices: st
       const response = (await hostedAgentCli(root, action, command, hosted, transport)) as {
         localLanes?: {
           idle: IdleLane[];
+          otherRuns?: OtherRunLane[];
           pruned: { count: number; bytes: number };
         };
       };
       // A bounded step that stalled is still pending: once the reply is out, do not wait for it.
       if (transport.abandonedStart) setTimeout(() => process.exit(process.exitCode ?? 0), 2000).unref();
       if (response.localLanes)
-        for (const line of housekeepingLines(root, response.localLanes.idle, response.localLanes.pruned))
+        for (const line of housekeepingLines(
+          root,
+          response.localLanes.idle,
+          response.localLanes.pruned,
+          true,
+          response.localLanes.otherRuns,
+        ))
           process.stderr.write(`${line}\n`);
       return response;
     } catch (error) {

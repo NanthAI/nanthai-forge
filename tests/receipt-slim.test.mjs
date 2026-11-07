@@ -94,8 +94,14 @@ test('a save with advisory overlaps keeps every decision fact once', t => {
     slim = slimReceipt(full);
   t.diagnostic(`save with 3 advisory overlaps: ${chars(full)} -> ${chars(slim)} chars`);
   assert(chars(slim) <= SAVE_WITH_ADVISORY_OVERLAPS, `${chars(slim)} chars`);
-  // The count, the files and the saved head survive; per-peer detail is one `peers` read away.
-  assert.deepEqual(slim.overlapNotice, { required: false, count: 3, files: ['src/a.ts'] });
+  // The count, the files, who they are with (d730121f) and the saved head survive; the rest of the
+  // per-peer detail is one `peers` read away.
+  assert.deepEqual(slim.overlapNotice, {
+    required: false,
+    count: 3,
+    files: ['src/a.ts'],
+    with: full.overlapNotice.items.map(item => `${item.with[0].lane.slice(0, 8)} someone: src/a.ts`),
+  });
   assert(!('unacknowledgedOverlaps' in slim), 'the notice carries the count');
   assert.equal(slim.result.outcome.result.head, sha);
   assert.equal(slim.result.outcome.status, 'completed');

@@ -61,6 +61,8 @@ export const hostedLandingTables = {
     selectionKey: v.string(),
     request: v.string(),
     value: v.string(),
+    /** The submitting agent run's slug (d730121f); server-only, copied to the landing row. */
+    agentRun: v.optional(v.string()),
     wake: v.union(v.object({ id: v.string(), taskId: v.id('_scheduled_functions') }), v.null()),
   })
     .index('by_project_and_actor_and_operation', ['projectId', 'actor', 'operationId'])
@@ -126,6 +128,8 @@ export const hostedLandingTables = {
     submissionId: v.string(),
     operationId: v.string(),
     candidateId: v.optional(v.string()),
+    /** The submitting agent run's slug (d730121f); server-only, the receipt records it. */
+    agentRun: v.optional(v.string()),
     batchSelection: v.optional(v.string()),
     batchable: v.optional(v.boolean()),
     /** Server-only admission run of this submission's own Candidate (not in the state body). */

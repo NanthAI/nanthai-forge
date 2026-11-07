@@ -281,6 +281,7 @@ export async function publishAcceptance(
     previous: attempt.main,
     candidate: attempt.candidate,
     actor,
+    ...(row.agentRun ? { agentRun: row.agentRun } : {}),
     policyDigest: attempt.policyDigest,
     check,
     ...(reuse ? { crossHeadProof: reuse } : {}),

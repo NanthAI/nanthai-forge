@@ -20,6 +20,9 @@ export const laneRegistryEntrySchema = z.object({
   state: z.enum(['completed', 'abandoned']).optional(),
   /** Owner pin as this client last saw it: prune and cache GC keep the checkout. The server decides; housekeeping refreshes it. */
   pinned: z.boolean().optional(),
+  /** The agent run that started or resolved the Lane here (session slug, c29d0780); null for a person.
+   * Absent on older entries and adopted or reopened checkouts: unknown run, never offered for abandon. */
+  agent: z.string().max(64).nullable().optional(),
   /** The Forge command this machine is running in the Lane now; a dead pid means it is stale. */
   running: z.object({ action: z.string(), pid: z.number(), since: z.number() }).nullable().optional(),
 });

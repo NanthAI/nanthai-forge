@@ -40,7 +40,18 @@ export async function trackHostedOverlapLane(
           (sameHead || metadata?.changes !== undefined) &&
           metadata?.complete !== false,
       );
-  const agent = metadata?.agent ?? old?.agent;
+  // A resolution Lane is the same agent run's work as the Lane it resolves (d730121f): its first row
+  // takes the origin's run slug, one indexed read once per resolution Lane.
+  const origin =
+    !old && !metadata?.agent && lane.resolution?.origin
+      ? await ctx.db
+          .query('projectHostedOverlapLanes')
+          .withIndex('by_project_and_lane', q =>
+            q.eq('projectId', projectId).eq('laneId', lane.resolution!.origin!.laneId),
+          )
+          .unique()
+      : null;
+  const agent = metadata?.agent ?? old?.agent ?? (origin?.actor === lane.actor ? origin.agent : undefined);
   const open = ['active', 'paused', 'ready'].includes(lane.state);
   // Superseded lasts while the Lane stays open at the head it was set on; a save or reopen ends it.
   const superseded = old?.open && open && old.superseded?.laneHead === lane.head ? old.superseded : undefined;

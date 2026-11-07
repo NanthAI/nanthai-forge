@@ -43,6 +43,7 @@ async function replayFinish(session: HostedAgentSession) {
   if (desired) {
     const submission = await session.mutation<HostedLandingState>('projectHostedLandingDesired:submit', {
       request: canonicalPayload(desired),
+      ...(session.landingAgent ? { agent: session.landingAgent } : {}),
     });
     // Only a still-preparing submission needs source recovery. Terminal replay
     // remains discovery plus the original admission, without probing old jobs.
@@ -75,6 +76,7 @@ async function replayFinish(session: HostedAgentSession) {
   }
   const submission = await session.mutation<HostedLandingState>('projectHostedLanding:enqueue', {
     request: canonicalPayload(request),
+    ...(session.landingAgent ? { agent: session.landingAgent } : {}),
   });
   return {
     phase: 'finish',
@@ -366,6 +368,8 @@ async function executeFinishWork(session: HostedAgentSession, input: unknown) {
       );
       const submission = await session.mutation('projectHostedLandingDesired:submit', {
         request: canonicalPayload({ ...desired, governanceVersion: 1 }),
+        // The receipt records the agent run that landed it (d730121f); outside the replayed request.
+        ...(session.landingAgent ? { agent: session.landingAgent } : {}),
       });
       markLandStep('submitted');
       return {
@@ -436,6 +440,7 @@ async function executeFinishWork(session: HostedAgentSession, input: unknown) {
   // Account JWTs still make agent requests. Person authority is never selected by CLI input.
   const result = await session.mutation('projectHostedLanding:enqueue', {
     request: canonicalPayload({ ...request, governanceVersion: 1 }),
+    ...(session.landingAgent ? { agent: session.landingAgent } : {}),
   });
   markLandStep('submitted');
   return {

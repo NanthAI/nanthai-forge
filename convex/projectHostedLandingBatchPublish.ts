@@ -261,6 +261,7 @@ export async function publishLandingBatch(ctx: MutationCtx, claim: LandingClaim,
         firstCheckReceipt(member.row.admission, { runId: check.runId, reused: false, batch: true }),
       ),
       actor: member.attempt.actor,
+      ...(member.row.agentRun ? { agentRun: member.row.agentRun } : {}),
       policyDigest: member.attempt.policyDigest,
       check,
       snapshot: {

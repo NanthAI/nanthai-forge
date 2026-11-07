@@ -91,6 +91,25 @@ export function printedReceipt<T>(
 /** Budget (Issue 47558a99): a healthy receipt is about 300 characters. The facts below are dropped because
  * the agent holds them, they are constant, or one named read returns them; `--detail` prints everything. */
 const fileList = (items: Json[]): string[] => [...new Set(items.map(item => String(item.file)))].slice(0, 5);
+/** Who an advisory notice is with (d730121f): up to 3 peer Lanes as `LANE8 handle/slug: file, file`,
+ * so a peer agent run and its files are named without a follow-up read. */
+const peerList = (items: Json[]): string[] => {
+  const peers = new Map<string, { actor: string; files: string[] }>();
+  for (const item of items)
+    for (const peer of Array.isArray(item.with) ? (item.with as Json[]) : []) {
+      if (typeof peer.lane !== 'string') continue;
+      const entry = peers.get(peer.lane) ?? { actor: String(peer.actor ?? ''), files: [] };
+      const file = String(item.file);
+      if (!entry.files.includes(file)) entry.files.push(file);
+      peers.set(peer.lane, entry);
+    }
+  return [...peers]
+    .slice(0, 3)
+    .map(
+      ([lane, peer]) =>
+        `${lane.slice(0, 8)} ${peer.actor}: ${peer.files.slice(0, 3).join(', ')}${peer.files.length > 3 ? ', ...' : ''}`,
+    );
+};
 const sameOperation = (resolved: unknown, operationId: unknown) => {
   const keys = Object.keys(obj(resolved) ?? { x: 1 });
   return (
@@ -104,12 +123,14 @@ function briefOverlaps(out: Json) {
   const overlaps = obj(out.unacknowledgedOverlaps);
   if (notice) {
     const items = Array.isArray(notice.items) ? (notice.items as Json[]) : [];
+    const peers = notice.required ? [] : peerList(items);
     out.overlapNotice = notice.required
       ? omit(notice, 'coverage')
       : {
           required: false,
           count: notice.count,
           files: fileList(items),
+          ...(peers.length ? { with: peers } : {}),
         };
     delete out.unacknowledgedOverlaps;
   } else if (overlaps && !overlaps.count && !overlaps.blockingCount) delete out.unacknowledgedOverlaps;
@@ -119,13 +140,19 @@ function briefOverlaps(out: Json) {
     else out.behindMain = omit(behind, 'head', 'baseHead', 'baseSequence', 'coverage');
 }
 
-/** Idle Lanes of this owner: the stderr hint names them; the receipt keeps the counts. */
+/** Idle Lanes of this agent run, and of other runs on the account (d730121f): the stderr hint names
+ * them; the receipt keeps the counts. */
 function briefLocalLanes(out: Json) {
   const local = obj(out.localLanes);
   if (!local) return;
   const idle = Array.isArray(local.idle) ? local.idle.length : 0;
+  const otherRuns = Array.isArray(local.otherRuns) ? local.otherRuns.length : 0;
   const pruned = obj(local.pruned);
-  const kept = { ...(idle ? { idle } : {}), ...(pruned?.count ? { pruned } : {}) };
+  const kept = {
+    ...(idle ? { idle } : {}),
+    ...(otherRuns ? { otherRuns } : {}),
+    ...(pruned?.count ? { pruned } : {}),
+  };
   if (Object.keys(kept).length) out.localLanes = kept;
   else delete out.localLanes;
 }

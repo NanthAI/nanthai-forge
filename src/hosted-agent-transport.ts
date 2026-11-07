@@ -206,7 +206,7 @@ export type HostedAgentResponse = {
   /** This agent session's public identity, `handle/slug` (start, save and land receipts). */
   as?: string;
   /** start only: your idle open Lanes and finished Lane roots pruned on this machine. */
-  localLanes?: { idle: unknown[]; pruned: { count: number; bytes: number } };
+  localLanes?: { idle: unknown[]; otherRuns?: unknown[]; pruned: { count: number; bytes: number } };
   /** land --save only: where the submitting process spent its time before submission. */
   landTiming?: LandTiming;
   /** Lane-changing actions: other open Lanes on related work not shown before (≤3 lines, ~60 tokens each). */
@@ -855,6 +855,9 @@ export class HostedAgentTransport {
         capabilities,
         journal,
         ...(this.sentAgent() ? { agent: this.sentAgent()! } : {}),
+        ...(this.serverFeatures?.includes('landing-agent-run') && this.agentSlug()
+          ? { landingAgent: this.agentSlug()! }
+          : {}),
         query: this.query.bind(this),
         mutation: this.mutation.bind(this),
         main: async () => {
@@ -981,6 +984,8 @@ export class HostedAgentTransport {
               root: into ?? root,
               url: this.address.url,
               projectId: this.address.projectId,
+              // This run started it: only this run's start lists it as its own idle Lane (d730121f).
+              agent: this.agentSlug() ?? null,
               ...(command.data && typeof (command.data as { outcome?: unknown }).outcome === 'string'
                 ? { outcome: (command.data as { outcome: string }).outcome }
                 : {}),
@@ -1199,10 +1204,12 @@ export class HostedAgentTransport {
         apply: settings.autoPruneHours > 0,
         settings,
         exclude: { roots, laneIds },
+        run: this.agentSlug() ?? null,
       });
-      if (!value.idle.length && !value.pruned.length) return undefined;
+      if (!value.idle.length && !value.otherRuns.length && !value.pruned.length) return undefined;
       return {
         idle: value.idle,
+        ...(value.otherRuns.length ? { otherRuns: value.otherRuns } : {}),
         pruned: {
           count: value.pruned.length,
           bytes: value.pruned.reduce((sum, lane) => sum + lane.bytes, 0),
@@ -1530,6 +1537,9 @@ export type HostedAgentSession = {
   journal: HostedAgentJournal;
   /** This agent session's slug when the server takes it (feature agent-slug); absent for a person. */
   agent?: string;
+  /** The same slug for landing submissions, when the server records it on receipts (feature
+   * landing-agent-run, d730121f); absent for a person or an older server. */
+  landingAgent?: string;
   waitSource: (
     operationId: string,
     initial: unknown,

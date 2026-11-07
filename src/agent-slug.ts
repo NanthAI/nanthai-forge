@@ -354,3 +354,7 @@ export function splitAgentActor(value: string): { actor: string; agent: string }
 /** How a public actor reads in a line: `handle/slug` for an agent, `@handle` for a person. */
 export const actorLabel = (actor: string | undefined, fallback = 'a member') =>
   !actor ? fallback : splitAgentActor(actor) ? actor : `@${actor}`;
+
+/** The receipt's agent run (d730121f) from a client-sent slug: anything not from the fixed lists is dropped. */
+export const landingAgentRun = (agent: unknown): { agentRun?: string } =>
+  isAgentSlug(agent) ? { agentRun: agent } : {};

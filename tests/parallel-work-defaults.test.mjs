@@ -130,7 +130,7 @@ test('start lists idle open Lanes and prunes finished roots after one batched re
   assert.equal(result.idle[0].idleHours, 5);
   assert(existsSync(roots[5]));
   const lines = housekeepingLines('/root', result.idle, { count: 5, bytes: 5e9 });
-  assert.equal(lines[0], 'Idle Lanes (yours, no Forge action): 245. Land or abandon them:');
+  assert.equal(lines[0], "Idle Lanes (this agent run's, no Forge action): 245. Land or abandon them:");
   assert.equal(lines.length, 13);
   assert.match(lines.at(-1), /^Pruned 5 finished Lane root\(s\), 5\.00 GB\.$/);
   // Settings 0 turn each behaviour off; nothing is read when nothing is due.

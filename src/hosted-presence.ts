@@ -71,9 +71,24 @@ export function goalSimilarity(a: string, b: string) {
   return shared / (left.size + right.size - shared);
 }
 
+/** The caller's Lane. `agent` is its agent run (session slug); `origin` the Lane it resolves. */
+export type PresenceMe = {
+  laneId: string;
+  intentId: string;
+  goal: string;
+  paths: string[];
+  actor: string;
+  agent?: string;
+  origin?: string;
+};
+/** A Lane of the caller's own agent run (same account and slug), or the Lane the caller's resolution
+ * Lane resolves, is the run's own earlier work, never "another agent" (d730121f). */
+const ownRun = (me: PresenceMe, row: PresenceRow) =>
+  row.laneId === me.origin || (me.agent !== undefined && row.actor === me.actor && row.agent === me.agent);
+
 /** Rank candidates against the caller's Lane. A missing match never proves independence. */
 export function rankPresence(
-  me: { laneId: string; intentId: string; goal: string; paths: string[]; actor: string },
+  me: PresenceMe,
   rows: PresenceRow[],
   now: number,
 ): { lanes: PresenceLane[]; more: number } {
@@ -83,6 +98,7 @@ export function rankPresence(
   for (const row of rows) {
     if (seen.has(row.laneId)) continue;
     seen.add(row.laneId);
+    if (ownRun(me, row)) continue;
     const why: PresenceReason[] = [];
     let score = 0;
     if (row.intentId === me.intentId) {

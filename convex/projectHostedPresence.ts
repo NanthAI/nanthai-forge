@@ -8,6 +8,7 @@ import {
   presencePaths,
   rankPresence,
   type Presence,
+  type PresenceMe,
   type PresenceRow,
 } from '../src/hosted-presence';
 
@@ -81,7 +82,7 @@ export async function trackHostedPresence(
 export async function readHostedPresence(
   ctx: QueryCtx,
   projectId: Id<'hostedProjects'>,
-  me: { laneId: string; intentId: string; goal: string; paths: string[]; actor: string },
+  me: PresenceMe,
   since?: number,
   /** Dormant Lanes (no record write since this epoch ms) are not read. */
   cutoff: number | null = null,

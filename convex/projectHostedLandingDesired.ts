@@ -7,6 +7,7 @@ import { v } from 'convex/values';
 import { makeFunctionReference } from 'convex/server';
 import { receiptMutation, internalMutation, internalAction } from './cliServer';
 import { acceptanceActor } from './projectAutonomy';
+import { landingAgentRun } from '../src/agent-slug';
 import { activeProject } from './projectAuthority';
 import { hostedWriteProject } from './projectHostedRecords';
 import { loadCompose } from './projectHostedComposeStore';
@@ -26,7 +27,12 @@ const identity = { projectId: v.id('hostedProjects'), submissionId: v.string() }
 /** Register the goal while the first source job runs. The selected source pages
  * are already staged; no Mac, client journal or further client mutation is needed. */
 export const submit = receiptMutation({
-  args: { projectId: v.id('hostedProjects'), request: v.string() },
+  args: {
+    projectId: v.id('hostedProjects'),
+    request: v.string(),
+    /** The calling agent run's slug (feature landing-agent-run, d730121f); not part of the request. */
+    agent: v.optional(v.string()),
+  },
   returns: v.string(),
   handler: async (ctx, input) => {
     try {
@@ -178,6 +184,8 @@ export const submit = receiptMutation({
         selectionKey,
         request,
         value: canonicalPayload(state),
+        // The enqueue below receives this row as its input and copies the run to the landing row.
+        ...landingAgentRun(input.agent),
         wake: null,
       });
       // A source job still running cannot finish this goal: its completion wakes

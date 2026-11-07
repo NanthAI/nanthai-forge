@@ -30,8 +30,14 @@ export type LaneStateReader = (
   laneIds: string[],
 ) => Promise<Map<string, string | { state: string; pinned?: boolean }> | null>;
 export type IdleLane = { laneId: string; outcome?: string; idleHours: number; root: string };
+/** An idle Lane on this machine that another agent run (or an unknown, older run) of the account
+ * started (d730121f): listed so nobody is surprised, never offered for abandon. */
+export type OtherRunLane = { laneId: string; idleHours: number; run: 'other' | 'unknown'; agent?: string };
 export type LaneHousekeeping = {
+  /** Idle Lanes this agent run started (all idle Lanes when no run is given, e.g. `nforge prune`). */
   idle: IdleLane[];
+  /** Idle Lanes of other agent runs on the same account; only when a run is given. */
+  otherRuns: OtherRunLane[];
   /** Roots removed (apply only). */
   pruned: { laneId: string; root: string; bytes: number }[];
   /** Roots a dry run would remove; they still exist. Empty when applying. */
@@ -136,6 +142,9 @@ export async function laneHousekeeping(input: {
   apply: boolean;
   settings?: Pick<ClientSettings, 'autoPruneHours' | 'idleLaneHours'> &
     Partial<Pick<ClientSettings, 'activeLanePruneHours'>>;
+  /** The calling agent run (session slug; null for a person). Given: `idle` lists only this run's
+   * Lanes and the rest go to `otherRuns`. Omitted: every idle Lane is listed as before. */
+  run?: string | null;
   /** Never removed: the caller's own root and Lane. */
   exclude?: { roots?: string[]; laneIds?: string[] };
   scan?: string;
@@ -159,7 +168,14 @@ export async function laneHousekeeping(input: {
   const excludedRoots = (input.exclude?.roots ?? []).map(root => canonicalRoot(root));
   const workingRoot = canonicalRoot(process.cwd());
   const excludedLanes = new Set(input.exclude?.laneIds ?? []);
-  const result: LaneHousekeeping = { idle: [], pruned: [], wouldPrune: [], kept: [], apply: input.apply };
+  const result: LaneHousekeeping = {
+    idle: [],
+    otherRuns: [],
+    pruned: [],
+    wouldPrune: [],
+    kept: [],
+    apply: input.apply,
+  };
   const entries: LaneRegistryEntry[] = [];
   for (const entry of [...listLanes(), ...(scanned?.found ?? [])]) {
     if (input.address && (entry.url !== input.address.url || entry.projectId !== input.address.projectId))
@@ -215,13 +231,23 @@ export async function laneHousekeeping(input: {
       result.kept.push({ laneId: entry.laneId, reason: 'pinned' });
       continue;
     }
+    const idleHours = Math.round((idleFor / hour) * 10) / 10;
+    // Yours only when this run recorded the Lane: an entry with no run (older client, adopted or
+    // reopened checkout) is the same account but an unknown run, and is never offered for abandon.
     const listIdle = () =>
-      result.idle.push({
-        laneId: entry.laneId,
-        ...(entry.outcome ? { outcome: entry.outcome } : {}),
-        idleHours: Math.round((idleFor / hour) * 10) / 10,
-        root: entry.root,
-      });
+      input.run === undefined || (entry.agent !== undefined && entry.agent === input.run)
+        ? result.idle.push({
+            laneId: entry.laneId,
+            ...(entry.outcome ? { outcome: entry.outcome } : {}),
+            idleHours,
+            root: entry.root,
+          })
+        : result.otherRuns.push({
+            laneId: entry.laneId,
+            idleHours,
+            run: entry.agent === undefined ? 'unknown' : 'other',
+            ...(entry.agent ? { agent: entry.agent } : {}),
+          });
     // An active Lane idle past the active prune age loses its root only when nothing in it is unsaved
     // and no command runs in it; `open` restores it from the saved head.
     const activeIdle = state === 'active' && activeLimit > 0 && idleFor >= activeLimit;
@@ -321,16 +347,28 @@ export function housekeepingLines(
   idle: IdleLane[],
   pruned: { count: number; bytes: number },
   apply = true,
+  otherRuns: OtherRunLane[] = [],
 ): string[] {
   const lines: string[] = [];
   if (idle.length) {
-    lines.push(`Idle Lanes (yours, no Forge action): ${idle.length}. Land or abandon them:`);
+    lines.push(`Idle Lanes (this agent run's, no Forge action): ${idle.length}. Land or abandon them:`);
     for (const lane of idle.slice(0, 10))
       lines.push(
         `  ${lane.laneId} ${lane.idleHours}h ${lane.outcome ? JSON.stringify(lane.outcome.slice(0, 60)) : ''}`.trimEnd(),
       );
     lines.push(`  nforge x ${root} abandon '{"laneId":"LANE_ID","reason":"..."}'`);
   }
+  // Same account, another agent run: never an abandon offer (d730121f); their owner decides.
+  if (otherRuns.length)
+    lines.push(
+      `Idle Lanes of other agent runs on this account (not yours; leave them): ${otherRuns.length}: ${otherRuns
+        .slice(0, 5)
+        .map(
+          lane =>
+            `${lane.laneId.slice(0, 8)} ${lane.idleHours}h${lane.run === 'unknown' ? ' (unknown run)' : ''}`,
+        )
+        .join(', ')}${otherRuns.length > 5 ? ', ...' : ''}`,
+    );
   if (pruned.count)
     lines.push(
       `${apply ? 'Pruned' : 'Would prune'} ${pruned.count} finished Lane root(s), ${(pruned.bytes / 1e9).toFixed(2)} GB.`,

@@ -17,6 +17,7 @@ import { preQueueCheck } from '../src/hosted-landing-admission';
 import { v } from 'convex/values';
 import { mutation, query, receiptMutation } from './cliServer';
 import { acceptanceActor } from './projectAutonomy';
+import { landingAgentRun } from '../src/agent-slug';
 import { activeProject, accessibleProject } from './projectAuthority';
 import { beginHostedOperation } from './projectHostedOperations';
 import {
@@ -68,13 +69,25 @@ export const cancel = mutation({
 });
 
 export const enqueue = receiptMutation({
-  args: { projectId: v.id('hostedProjects'), request: v.string() },
+  args: {
+    projectId: v.id('hostedProjects'),
+    request: v.string(),
+    /** The calling agent run's slug (feature landing-agent-run, d730121f); not part of the request. */
+    agent: v.optional(v.string()),
+  },
   returns: v.string(),
   handler: async (ctx, input) => {
     try {
       const request = hostedLandingRequestSchema.parse(JSON.parse(input.request));
       const actor = await acceptanceActor(ctx, request.agent);
-      return canonicalPayload(await enqueueHostedLanding(ctx, input, request, actor));
+      return canonicalPayload(
+        await enqueueHostedLanding(
+          ctx,
+          { projectId: input.projectId, ...landingAgentRun(input.agent) },
+          request,
+          actor,
+        ),
+      );
     } catch (error) {
       return report(error);
     }
@@ -209,7 +222,7 @@ export const attempts = query({
 
 export async function enqueueHostedLanding(
   ctx: import('./_generated/server').MutationCtx,
-  input: { projectId: import('./_generated/dataModel').Id<'hostedProjects'> },
+  input: { projectId: import('./_generated/dataModel').Id<'hostedProjects'>; agentRun?: string | undefined },
   request: import('../src/hosted-landing').HostedLandingRequest,
   actor: import('../src/autonomy-policy').AcceptanceActor,
   reserved?: {
@@ -320,6 +333,7 @@ export async function enqueueHostedLanding(
     submissionId,
     operationId: request.operationId,
     candidateId: request.candidateId,
+    ...(input.agentRun ? { agentRun: input.agentRun } : {}),
     ...(attempt.deferredCheck ? { batchSelection: canonicalPayload(attempt), batchable: !admission } : {}),
     ...(admission
       ? {

@@ -13,7 +13,7 @@ Read: `nforge settings`; set: `nforge settings KEY VALUE`; reset:
 | --- | --- | --- | --- |
 | `autoPruneHours` | `3` | Finished Lanes left full checkouts behind. On the dogfood Mac, 127 Lane roots used 38 GB, and the disk filled at 1.2 GB free. `start` removes the local roots of your landed or abandoned Lanes once they have had no Forge action and no file change for this long. | `nforge settings autoPruneHours 0` turns it off. `nforge prune` still works on demand. |
 | `activeLanePruneHours` | `168` | A builder waiting on a long landing or review must keep its Lane folder; a 3-hour limit removed idle open Lanes. An open (`active`) Lane's root is removed only after this long with no Forge action and no unsaved edits. | `nforge settings activeLanePruneHours 0` never removes an open Lane's root. |
-| `idleLaneHours` | `1` | Agents forgot open Lanes, which kept counting as active work and kept their disk. `start` lists your open Lanes on this machine that have had no Forge action for this long. | `nforge settings idleLaneHours 0` stops the list. |
+| `idleLaneHours` | `1` | Agents forgot open Lanes, which kept counting as active work and kept their disk. `start` lists the open Lanes this agent run started on this machine that have had no Forge action for this long. | `nforge settings idleLaneHours 0` stops the list. |
 | `localHeavySlots` | `auto` | About 20 agents shared a 16 GB laptop. Unlimited parallel builds and test runs swapped the machine; 3 at a time kept it responsive. `auto` allows one heavy command per 5 GB of RAM, capped at half the cores and never below 1 (16 GB with 8 cores gives 3). | A number sets the slots; `0` turns the limit off. |
 | `shareDependencies` | `true` | Each Lane needs `node_modules` (261 MB for Forge itself), and every agent ran `npm ci`. When a Lane opens, its `node_modules` becomes a link to one install per exact lockfile. | `nforge settings shareDependencies false`. |
 | `clientCacheMaxGB` | `2` | `ROOT.forge-client/lanes` collected full ~100 MB copies of other Lanes that nothing removed (262 copies, 5.8 GB in one client directory). They are a cache now: past this size, the least recently used copies are removed. | `nforge settings clientCacheMaxGB 0` removes the size cap. |
@@ -44,6 +44,11 @@ Read: `nforge settings`; set: `nforge settings KEY VALUE`; reset:
 - Pruning removes the root, its `ROOT.forge-client` cache and its `ROOT.forge-metrics.jsonl`.
   A `node_modules` link is removed as a link; the shared install stays.
 - A deployment without the batched read prunes nothing.
+- The idle list on `start` is per agent run (Issue d730121f). Each index entry records the agent
+  session slug of the run that started or resolved the Lane (`null` for a person). Only Lanes of the
+  calling run are listed with the `abandon` command. Idle Lanes that other runs of the same account
+  started, and older entries with no run recorded ("unknown run"), get one line naming them, with
+  no abandon offer. `nforge prune` (the operator asking) still lists every idle Lane.
 - `nforge prune` is a dry run (it lists `wouldPrune` and changes no registry, pin, link or checkout);
   `--apply` removes and lists `pruned`. `--scan DIRECTORY` with `--apply` first registers existing
   checkouts in DIRECTORY and in its `*.forge-client/lanes/`; a dry scan only reads them. With `--apply` it also removes links
