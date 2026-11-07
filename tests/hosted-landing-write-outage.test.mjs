@@ -21,6 +21,8 @@ test.after(() => {
   }
 });
 const OUTAGE_MS = 20 * 60_000;
+// The Done-when names a 5-minute outage; the 20-minute one nears the 30-minute cap.
+const OUTAGES_MS = [5 * 60_000, OUTAGE_MS];
 const terminal = s => s.phase === 'landed' || s.phase === 'terminal-failed';
 /** Pass every check and run steps until the entry is Ready (settling). */
 async function untilReady(f) {
@@ -37,7 +39,7 @@ async function untilReady(f) {
  * not retry it and the row keeps pointing at the failed task. This replays an
  * N-minute outage in the middle of CI or of settlement, then ends it the way
  * it really ends, and requires every landing to finish with no operator action. */
-async function replay(t, { during, resume }) {
+async function replay(t, { during, resume, outageMs = OUTAGE_MS }) {
   const f = await batchesFixture(t, { count: 3, batching: false, requestCheck: true });
   const operationId = randomUUID();
   let pause = null,
@@ -47,7 +49,7 @@ async function replay(t, { during, resume }) {
   const held = new Map(); // runner-side results kept while writes are refused
   const begin = async () => {
     const now = Date.now();
-    pause = { deployment, operationId, startedAt: now, expiresAt: now + OUTAGE_MS };
+    pause = { deployment, operationId, startedAt: now, expiresAt: now + outageMs };
     process.env.FORGE_LEGACY_STORAGE_PAUSE = JSON.stringify(pause);
     await f.transaction('windowBegin', windowApi.begin, { operationId });
   };
@@ -149,19 +151,20 @@ async function replay(t, { during, resume }) {
   return { f, lostTasks, redrives, resumed };
 }
 
-for (const during of ['settlement', 'ci'])
-  test(`a ${OUTAGE_MS / 60_000}-minute write outage during ${during}: every landing lands once the operator resumes writes`, async t => {
-    const { f, lostTasks, resumed } = await replay(t, { during, resume: 'operator' });
-    assert(resumed, 'the replay reached the outage');
-    assert(lostTasks > 0, 'scheduled steps failed during the outage');
-    assert.deepEqual(
-      states(f).map(s => s.phase),
-      ['landed', 'landed', 'landed'],
-      'every landing finishes with no operator action on the queue',
-    );
-    const window = [...f.tables.legacyStorageCleanupWindows.values()][0];
-    assert.equal(window.active, false, 'the operator closed the fence');
-  });
+for (const outageMs of OUTAGES_MS)
+  for (const during of ['settlement', 'ci'])
+    test(`a ${outageMs / 60_000}-minute write outage during ${during}: every landing lands once the operator resumes writes`, async t => {
+      const { f, lostTasks, resumed } = await replay(t, { during, resume: 'operator', outageMs });
+      assert(resumed, 'the replay reached the outage');
+      assert(lostTasks > 0, 'scheduled steps failed during the outage');
+      assert.deepEqual(
+        states(f).map(s => s.phase),
+        ['landed', 'landed', 'landed'],
+        'every landing finishes with no operator action on the queue',
+      );
+      const window = [...f.tables.legacyStorageCleanupWindows.values()][0];
+      assert.equal(window.active, false, 'the operator closed the fence');
+    });
 
 test('a write outage that just expires: the waiting reader of a quiet Ready entry asks once and it lands', async t => {
   const { f, lostTasks, redrives } = await replay(t, { during: 'settlement', resume: 'reader' });
@@ -185,23 +188,24 @@ test('a write outage that just expires: the waiting reader of a quiet Ready entr
 test('a write outage nobody ends and nobody waits on: the window expiry re-drives and every landing lands', async t => {
   // The operator never returned (no window end) and no reader asks: before the
   // expiry task, nothing wrote after the pause and the passed entries stayed Ready.
-  for (const during of ['settlement', 'ci']) {
-    const { f, lostTasks, redrives } = await replay(t, { during, resume: 'expire' });
-    assert(lostTasks > 0, `${during}: scheduled steps failed during the outage`);
-    assert.deepEqual(redrives, [], 'no reader asked');
-    assert.deepEqual(
-      states(f).map(s => s.phase),
-      ['landed', 'landed', 'landed'],
-      `${during}: every landing finishes with no operator or reader`,
-    );
-    const windows = [...f.tables.legacyStorageCleanupWindows.values()];
-    assert.equal(windows[0].active, false, 'the expiry closed the fence');
-    const expiry = [...f.tables._scheduled_functions.values()].filter(
-      task => task.name === 'projectHostedLandingRedrive:expired',
-    );
-    assert.equal(expiry.length, 1, 'one expiry task per window');
-    assert(expiry[0].scheduledTime > windows[0].expiresAt, 'it fires after the window, never inside it');
-  }
+  for (const outageMs of OUTAGES_MS)
+    for (const during of ['settlement', 'ci']) {
+      const { f, lostTasks, redrives } = await replay(t, { during, resume: 'expire', outageMs });
+      assert(lostTasks > 0, `${during}: scheduled steps failed during the outage`);
+      assert.deepEqual(redrives, [], 'no reader asked');
+      assert.deepEqual(
+        states(f).map(s => s.phase),
+        ['landed', 'landed', 'landed'],
+        `${during}: every landing finishes with no operator or reader`,
+      );
+      const windows = [...f.tables.legacyStorageCleanupWindows.values()];
+      assert.equal(windows[0].active, false, 'the expiry closed the fence');
+      const expiry = [...f.tables._scheduled_functions.values()].filter(
+        task => task.name === 'projectHostedLandingRedrive:expired',
+      );
+      assert.equal(expiry.length, 1, 'one expiry task per window');
+      assert(expiry[0].scheduledTime > windows[0].expiresAt, 'it fires after the window, never inside it');
+    }
 });
 
 test('without a re-drive the same outage strands a passed landing (the bug this guards)', async t => {

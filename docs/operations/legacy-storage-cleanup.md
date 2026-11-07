@@ -178,13 +178,19 @@ conflicts and retries against the closed fence rather than committing after
 writes resume. If the flag expires, the first ordinary resumed writer closes
 the fence in its own transaction. With no flag, ordinary writes still add zero
 DB calls. A refused write is `LEGACY_STORAGE_WRITES_PAUSED` with the pause end as
-`retryAt`; the CLI marks it retryable and says when to retry. Landing steps that
+`retryAt`; the CLI marks it retryable and says when to retry. The CLI does the
+same for a platform 429 or 503 (its `Retry-After` becomes `retryAt`); a timeout
+or other 5xx is retryable too, but its outcome stays unknown until the same
+operation is replayed. Landing steps that
 fire during the pause fail and are never retried by Convex, so closing the
-window (by `end` or by the first write after expiry) schedules one
-`projectHostedLandingRedrive` sweep: one project per transaction, at most 64
-live entries per phase, re-scheduling only lost steps (Issue 72d50375). A `resume`
-after `end` waits for the flag to be removed before sweeping. Idle cost stays
-zero. See Convex’s [transaction model](https://stack.convex.dev/how-convex-works). Queries
+window schedules one `projectHostedLandingRedrive` sweep: one project per
+transaction, at most 64 live entries per phase, re-scheduling only lost steps
+(Issue 72d50375). Closing happens at `end`, at the first write after expiry, or,
+when nobody ends or writes, at the one `expired` task that `begin` arms for
+1 second after the window. A `resume` after `end` waits for the flag to be
+removed before sweeping. A waiting CLI whose entry stays Ready with no new
+version for 2 minutes also asks `redrive` once, then backs off 4, 8 and 15
+minutes. Healthy landings and idle add zero calls. See Convex’s [transaction model](https://stack.convex.dev/how-convex-works). Queries
 and byte reads remain available. New R2 write signatures are also paused.
 Already-issued external PUT URLs cannot be revoked, but their database
 publication is paused. The mechanical cleanup test rejects mutation-builder
@@ -323,6 +329,25 @@ An unknown page result is reconciled by replaying its exact original request;
 an uncommitted page cannot delete outside a newly approved active window.
 Any failure means resume writes first. Do not investigate while leaving flags
 set, extend the deadline, start another window, or expand the approved classes.
+
+### Bounded quiet check before arming
+
+Do not page the whole landing queue and every scheduled function before a pause:
+at dev scale that read 170,000+ rows and took about 13 minutes. A bounded check
+is enough and cheap to repeat:
+
+1. Read the project's non-terminal landing requests (`queued`, `checking`,
+   `ready`) through the project, channel and phase index. Expect only landings
+   the lead opened on purpose (for example the live outage check of 72d50375).
+2. Read `_scheduled_functions` newest first and stop at rows created more than
+   2 hours ago. Refuse while a landing step (finish drive, desired or claim wake,
+   stall alarm) is in progress; a step due inside the window is re-driven after it.
+3. Read both flag names (names only) and `projectLegacyStorageCleanup:status`:
+   it must show `paused: false` and `sourceActive: 0`.
+
+Measured on dev (2026-11-05): 6 to 8 Convex calls and 10 to 19 seconds per check,
+at most 2,048 scheduled-function rows. Arm within about a minute of a clean result.
+A submission in that gap fails fast with `LEGACY_STORAGE_WRITES_PAUSED`.
 
 ## Remaining-only run
 

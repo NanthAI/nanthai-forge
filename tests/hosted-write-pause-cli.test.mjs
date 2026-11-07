@@ -2,8 +2,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import { createServer } from 'node:http';
 import { ConvexError } from 'convex/values';
-import { retryExchange, retryableExchangeError } from '../dist/exchange-retry.js';
+import { ConvexHttpClient } from 'convex/browser';
+import { makeFunctionReference } from 'convex/server';
+import { exchangeConvexFetch } from '../dist/exchange-convex-fetch.js';
+import { refusedWait, retryExchange, retryableExchangeError } from '../dist/exchange-retry.js';
 import { hostedActionError } from '../dist/hosted-action-error.js';
 import { landingRedriver } from '../dist/hosted-landing-redrive.js';
 import { ForgeError } from '../dist/errors.js';
@@ -132,4 +136,68 @@ test('a paused re-drive waits for the pause end (at most 5 minutes per ask) and 
   stopped = true;
   await tick(t, 60 * 60_000);
   assert.equal(later.length, 0, 'a finished wait never asks');
+});
+
+/** A Convex outage or rate limit reaches the CLI as plain HTTP: the SDK drops
+ * its status and Retry-After. Keep both, wait them out with the same request,
+ * and never tell a user that an unknown outcome changed nothing. */
+async function convexServer(t, statuses) {
+  const seen = [];
+  const server = createServer((req, res) => {
+    req.resume();
+    req.on('end', () => {
+      seen.push(Date.now());
+      const [status, headers = {}] = statuses[seen.length - 1] ?? [200];
+      res.writeHead(status, { 'content-type': 'application/json', ...headers });
+      res.end(status === 200 ? JSON.stringify({ status: 'success', value: 'ok', logLines: [] }) : 'busy');
+    });
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise(resolve => server.close(resolve)));
+  const client = new ConvexHttpClient(`http://127.0.0.1:${server.address().port}`, {
+    skipConvexDeploymentUrlCheck: true,
+    logger: false,
+    fetch: exchangeConvexFetch({ retries: 0 }),
+  });
+  const save = () => client.mutation(makeFunctionReference('projectHostedAgent:save'), { request: '{}' });
+  return { seen, save };
+}
+
+test('a rate-limited Forge keeps its Retry-After and the same request waits it out', async t => {
+  const { seen, save } = await convexServer(t, [[429, { 'retry-after': '1' }], [200]]);
+  assert.equal(await retryExchange('save', randomUUID(), save), 'ok');
+  assert.equal(seen.length, 2);
+  assert(seen[1] - seen[0] >= 900, `waited ${seen[1] - seen[0]} ms, not the 100 ms backoff`);
+});
+
+test('an unavailable Forge is retryable; only a refusal says nothing changed', async t => {
+  const operationId = randomUUID();
+  for (const [status, outcome] of [
+    [503, /could not accept this write right now; nothing was changed/],
+    [504, /could not be reached or did not answer; the outcome is not known yet/],
+  ]) {
+    const { save } = await convexServer(t, [[status, { 'retry-after': '120' }]]);
+    const raw = await save().catch(error => error);
+    assert.equal(raw.code, 'EXCHANGE_REQUEST_FAILED');
+    assert(raw.retryAt > Date.now() + 100_000, 'Retry-After becomes retryAt');
+    const error = retryableExchangeError(hostedActionError(raw, 'save'), operationId);
+    assert.match(error.message, outcome);
+    assert.match(error.message, new RegExp(`Retry the same command after .* \\(operation ${operationId}\\)`));
+    assert.equal(error.recovery.retryable, true);
+    if (status === 504) assert.doesNotMatch(error.message, /nothing was changed/);
+  }
+  const timeout = retryableExchangeError(new ForgeError('EXCHANGE_REQUEST_TIMEOUT', 'deadline'));
+  assert.match(timeout.message, /outcome is not known yet/);
+});
+
+test('the write transport resends only a refusal, and only for a short Retry-After', () => {
+  const refused = (retryAt, outcome = 'refused') =>
+    new ForgeError('EXCHANGE_REQUEST_FAILED', 'HTTP 429', retryAt, { httpStatus: 429, outcome });
+  assert.equal(refusedWait(refused(undefined), 0), 500);
+  assert.equal(refusedWait(refused(undefined), 2), 2000);
+  const soon = refusedWait(refused(Date.now() + 30_000), 0);
+  assert(soon > 29_000 && soon <= 30_000, String(soon));
+  assert.equal(refusedWait(refused(Date.now() + 20 * 60_000), 0), null, 'a long one is reported, not slept');
+  assert.equal(refusedWait(refused(undefined, 'unknown'), 0), null, 'a 504 may have run: no blind resend');
+  assert.equal(refusedWait(new ForgeError('EXCHANGE_REQUEST_TIMEOUT', 'deadline'), 0), null);
 });

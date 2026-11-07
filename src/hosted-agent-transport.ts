@@ -83,7 +83,7 @@ import { makeFunctionReference } from 'convex/server';
 import { z } from 'zod';
 import { ConvexExchange } from './exchange-client.js';
 import { hostedActionError } from './hosted-action-error.js';
-import { retryableExchangeError } from './exchange-retry.js';
+import { refusedWait, retryableExchangeError } from './exchange-retry.js';
 import { ForgeError, invariant } from './errors.js';
 import { hostedMainV2Schema } from './hosted-main.js';
 import { hostedRootLanePath, laneSiblingPath, openHostedRootLane } from './hosted-root-checkout.js';
@@ -1447,9 +1447,11 @@ export class HostedAgentTransport {
         // Provider OCC exhaustion has no committed mutation. Reconcile the same
         // receipt-pinned payload; never rediscover main, source or the epoch.
         const typed = hostedActionError(error, name);
-        if (typed.code !== 'HOSTED_CONFLICT' || retry >= 3)
+        // A 429/503 refusal also ran nothing; wait out a short Retry-After (72d50375).
+        const wait = refusedWait(typed, retry);
+        if ((typed.code !== 'HOSTED_CONFLICT' && wait === null) || retry >= 3)
           throw retryableExchangeError(typed, this.callerOperationId) ?? error;
-        await new Promise(resolve => setTimeout(resolve, 25 * 2 ** retry));
+        await new Promise(resolve => setTimeout(resolve, wait ?? 25 * 2 ** retry));
       }
     }
     if (pending) clearCallerReceipts(pending.files);

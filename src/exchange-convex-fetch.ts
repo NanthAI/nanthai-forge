@@ -86,10 +86,7 @@ export function exchangeConvexFetch(
           retries: safe ? (options.retries ?? 3) : 0,
         });
         if (response.status === 429 || (response.status >= 500 && response.status !== 560))
-          throw new ForgeError(
-            'EXCHANGE_REQUEST_FAILED',
-            `${name} returned HTTP ${response.status} after bounded retries. Retry the original operation to reconcile its outcome.`,
-          );
+          throw unavailable(name, response);
         if (continuable && response.ok) {
           const envelope = await response
             .clone()
@@ -114,6 +111,22 @@ export function exchangeConvexFetch(
       onCall?.(name, false);
     }
   };
+}
+
+/** The SDK drops the status and Retry-After of a refused request; keep both so
+ * the CLI says when to retry and waits instead of retrying at once (72d50375).
+ * 429/503 refused the request; other 5xx may have run it, so its outcome stays
+ * unknown until the same operation is replayed. */
+function unavailable(name: string, response: Response) {
+  void response.body?.cancel().catch(() => {});
+  const seconds = Number(response.headers.get('retry-after'));
+  const refused = response.status === 429 || response.status === 503;
+  return new ForgeError(
+    'EXCHANGE_REQUEST_FAILED',
+    `${name} returned HTTP ${response.status} after bounded retries. Retry the original operation to reconcile its outcome.`,
+    Number.isFinite(seconds) && seconds > 0 ? Date.now() + Math.min(seconds, 15 * 60) * 1000 : undefined,
+    { httpStatus: response.status, outcome: refused ? 'refused' : 'unknown' },
+  );
 }
 
 function replayableOperation(name: string, args: Record<string, unknown> | undefined) {

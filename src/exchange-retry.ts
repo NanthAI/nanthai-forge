@@ -23,16 +23,27 @@ export function retryableExchangeError(error: ForgeError, operationId?: string |
   if (!transientWriteCodes.includes(error.code)) return null;
   const retryAt = error.retryAt && error.retryAt > Date.now() ? error.retryAt : undefined;
   const when = retryAt ? `after ${new Date(retryAt).toISOString()}` : 'in a moment';
+  // Only a refusal proves nothing ran; a timeout or gateway error may have
+  // committed, and replaying the same operation reconciles either way.
   const reason =
     error.code === 'LEGACY_STORAGE_WRITES_PAUSED'
-      ? 'Forge is not accepting writes during approved maintenance'
-      : 'Forge could not accept this write right now';
+      ? 'Forge is not accepting writes during approved maintenance; nothing was changed'
+      : error.code === 'HOSTED_CONFLICT' || error.recovery?.outcome === 'refused'
+        ? 'Forge could not accept this write right now; nothing was changed'
+        : 'Forge could not be reached or did not answer; the outcome is not known yet';
   return new ForgeError(
     error.code,
-    `${reason}; nothing was changed. Retry the same command ${when}${operationId ? ` (operation ${operationId})` : ''}. ${error.message}`,
+    `${reason}. Retry the same command ${when}${operationId ? ` (operation ${operationId})` : ''}. ${error.message}`,
     retryAt,
     { retryable: true, ...(retryAt ? { retryAt: new Date(retryAt).toISOString() } : {}) },
   );
+}
+/** Delay before resending a 429/503 refusal, or null when it is not one or its
+ * Retry-After is too long to wait in this process (the caller reports it). */
+export function refusedWait(error: ForgeError, attempt: number, maxWaitMs = 60_000) {
+  if (error.code !== 'EXCHANGE_REQUEST_FAILED' || error.recovery?.outcome !== 'refused') return null;
+  const wait = Math.max(500 * 2 ** attempt, (error.retryAt ?? 0) - Date.now());
+  return wait > maxWaitMs ? null : wait;
 }
 /** Only use for receipt-reconciled mutations or reads. The closure must retain
  * its original operation ID and payload across every attempt, including unknown replies. */
@@ -63,7 +74,9 @@ export async function retryExchange<T>(
           'WORK_CHANGED_DURING_PUSH',
           `Local Work changed during ${phase}. Prepared operation ${operationId} bytes and any uploaded checkpoint remain retained. Retry to reconcile its receipt; if the snapshot was never prepared, start a push from the current Work revision.`,
         );
-      if (!retryable.has(error.code) && !options.retryCodes?.includes(error.code)) throw error;
+      // A 429/503 refusal ran nothing, so it is as safe to resend as a conflict.
+      const refused = refusedWait(error, attempt, Number.POSITIVE_INFINITY) !== null;
+      if (!refused && !retryable.has(error.code) && !options.retryCodes?.includes(error.code)) throw error;
       const backoff = (options.delayMs ?? 100) * 2 ** attempt;
       const until = error.retryAt ? error.retryAt - Date.now() : 0;
       if (attempt >= retries || until > (options.maxWaitMs ?? 60_000))
