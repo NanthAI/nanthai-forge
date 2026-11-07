@@ -1,9 +1,9 @@
+// SPDX-License-Identifier: Apache-2.0
 import { candidateOwnerInputs } from './projectHostedProvenance';
 import { fixGate } from '../src/culprit-bisect';
 import { batchEligible } from '../src/hosted-landing-batch';
 import { semanticMember, mergeSemanticMembers } from './projectSemanticContracts';
 import type { SemanticPlan } from '../src/intent-semantic-conflict';
-// SPDX-License-Identifier: Apache-2.0
 import type { MutationCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import { requireMemberAuthority } from './projectLaneAuthority';

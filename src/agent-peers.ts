@@ -1,8 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
 import { readEditPeers } from './agent-edit-peers.js';
 import { withPeerLanding } from './peer-landing.js';
 import { retainIndexedPeers } from './agent-receipt-peers.js';
 import { integrationPreviewStatus } from './integration-preview-auto.js';
-// SPDX-License-Identifier: Apache-2.0
 import { stackStatus } from './agent-stack.js';
 import { readHandoff } from './agent-handoff.js';
 import { handoffSummary } from './agent-handoff-types.js';

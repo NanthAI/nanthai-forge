@@ -1,6 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 import { exhaustedWorkRetries } from './friction-retry.js';
 import { workProgressIdentity } from './work-progress.js';
-// SPDX-License-Identifier: Apache-2.0
 import { ForgeError } from './errors.js';
 import { workLockWaitMs } from './work-lock.js';
 import type { WorkStore } from './work-store.js';

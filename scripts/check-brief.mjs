@@ -6,6 +6,7 @@
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { basename, dirname, isAbsolute, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { envPrintFindings } from './check-env-print.mjs';
 
 const UUID = /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i;
 const POINTER = /briefings\.md#standard-builder-block|standard\s+(?:builder|safety)[^\n]{0,40}\bblock/i;
@@ -86,10 +87,20 @@ export function rulesFiles(brief, briefDir = '.') {
   return [...found];
 }
 
+// Hazards are instructions a brief must not give; they fail like a missing field.
+export const briefHazards = [
+  {
+    name: 'unsafe-command',
+    need: 'an instruction to run a command that prints environment values or process listings (env, printenv, npx convex env list, pgrep -fl, ps -E); say "never run" or use a name-only helper',
+    // The brief and its common-rules text are both instructions to the agent.
+    ok: ({ all }) => !envPrintFindings('brief.md', all).length,
+  },
+];
+
 /** Names of required fields the brief lacks; `rules` is extra text from common-rules files. */
 export function briefFindings(brief, rules = '') {
   const context = { brief, all: `${brief}\n${rules}` };
-  return briefFields.filter(field => !field.ok(context)).map(field => field.name);
+  return [...briefFields, ...briefHazards].filter(field => !field.ok(context)).map(field => field.name);
 }
 
 export function lintBrief(brief, briefDir = '.') {
@@ -117,6 +128,9 @@ function main(args) {
   }
   for (const field of briefFields) {
     if (missing.has(field.name)) console.error(`check-brief: missing ${field.name}: ${field.need}`);
+  }
+  for (const hazard of briefHazards) {
+    if (missing.has(hazard.name)) console.error(`check-brief: ${hazard.name}: ${hazard.need}`);
   }
   console.error('See docs/agents/brief-template.md and docs/agents/briefings.md#standard-builder-block.');
   return 1;

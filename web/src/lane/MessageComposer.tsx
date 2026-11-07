@@ -1,6 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 import { ErrorToast } from '../ui/Toast';
 import { useDraft } from './draft';
-// SPDX-License-Identifier: Apache-2.0
 import { useState } from 'react';
 import type { CoordinationCommand } from '../../../src/coordination-types';
 import type { Session } from '../coordination-view';

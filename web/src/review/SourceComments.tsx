@@ -1,8 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
 import { useSourceReview } from '../use-source-review';
 import { useReadRetry } from '../ui/read-retry';
 import { ErrorToast } from '../ui/Toast';
 import { SyntaxLine } from '../SourceTokens';
-// SPDX-License-Identifier: Apache-2.0
 import { memo, Profiler, useCallback, useEffect, useState } from 'react';
 import type { Id } from '../../../convex/_generated/dataModel';
 import type { ReviewPath, reviewTextPage } from '../../../src/native-source-review';

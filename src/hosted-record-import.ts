@@ -1,9 +1,9 @@
+// SPDX-License-Identifier: Apache-2.0
 import { pageHashes, readRecordValue, readWorkFile, recordManifest } from './work-records.js';
 import { readFileSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { nativeOwner } from './native-source.js';
 import { hostedAgentAddressSchema } from './hosted-agent-contract.js';
-// SPDX-License-Identifier: Apache-2.0
 import { HostedAgentTransport } from './hosted-agent-transport.js';
 import { canonicalPayload } from './hosted-source-operation.js';
 import { invariant } from './errors.js';

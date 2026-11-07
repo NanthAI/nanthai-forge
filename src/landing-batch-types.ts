@@ -1,5 +1,5 @@
-import { semanticConflictsSchema } from './intent-semantic-conflict.js';
 // SPDX-License-Identifier: Apache-2.0
+import { semanticConflictsSchema } from './intent-semantic-conflict.js';
 import { z } from 'zod';
 import { landingMessageSchema } from './landing-message.js';
 import { landingStallSchema } from './landing-stall.js';

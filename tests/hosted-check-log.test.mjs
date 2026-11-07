@@ -1,6 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 import { commitValidatedCheckpoint } from './project-exchange-fixture.mjs';
 import { effectivePolicy } from '../dist/autonomy-policy.js';
-// SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';

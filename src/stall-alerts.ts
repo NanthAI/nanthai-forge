@@ -1,5 +1,5 @@
-import { networkFetch, networkTimeout } from './network-fetch.js';
 // SPDX-License-Identifier: Apache-2.0
+import { networkFetch, networkTimeout } from './network-fetch.js';
 import type { HostedLandingState } from './hosted-landing.js';
 import type { EffectiveAgentDefaults } from './agent-parallel-defaults.js';
 

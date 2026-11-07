@@ -1,5 +1,5 @@
-import { networkFetch } from './network-fetch.js';
 // SPDX-License-Identifier: Apache-2.0
+import { networkFetch } from './network-fetch.js';
 import { actionsPreflightTicketSchema, type ActionsPreflightTicket } from './hosted-actions-preflight.js';
 import type { HostedCheckRun } from './hosted-check.js';
 import type { SourceWorkerTransport } from './hosted-source-worker-reader.js';

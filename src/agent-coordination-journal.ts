@@ -1,6 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 import { retainEditNotices } from './agent-edit-notices.js';
 import type { PreviewMeasurement } from './train-accounting.js';
-// SPDX-License-Identifier: Apache-2.0
 import { decorateRepair } from './agent-repair-lineage.js';
 import { landingRepairNotices } from './landing-repair-notice.js';
 import { previewAdviceCurrent } from './integration-preview-inputs.js';

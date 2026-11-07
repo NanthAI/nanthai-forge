@@ -1,5 +1,5 @@
-import { readQueueStatus } from './projectHostedQueueStatus';
 // SPDX-License-Identifier: Apache-2.0
+import { readQueueStatus } from './projectHostedQueueStatus';
 import { v } from 'convex/values';
 import { makeFunctionReference } from 'convex/server';
 import { internalMutation } from './server';

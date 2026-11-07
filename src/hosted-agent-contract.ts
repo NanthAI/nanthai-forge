@@ -1,9 +1,9 @@
+// SPDX-License-Identifier: Apache-2.0
 import { finishRetryReasonSchema } from './hosted-landing.js';
 import { effectiveAgentDefaultsWireSchema } from './agent-parallel-defaults.js';
 import { hostedRecordCommands } from './hosted-record-input.js';
 import { hostedMirrorStatusSchema } from './hosted-github-mirror-status.js';
 import { contractTestsInput } from './intent-test-contract.js';
-// SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
 import { landingMessageSchema } from './landing-message.js';
 import { githubActionsRunsOnSchema } from './github-actions-runner-label.js';

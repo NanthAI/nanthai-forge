@@ -1,5 +1,5 @@
-import { runDetails } from '../dist/work-detail-store.js';
 // SPDX-License-Identifier: Apache-2.0
+import { runDetails } from '../dist/work-detail-store.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs';

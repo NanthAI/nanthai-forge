@@ -1,7 +1,7 @@
+// SPDX-License-Identifier: Apache-2.0
 import { batchDiagnosticSchema } from './hosted-batch-diagnosis.js';
 import { checkFileSummarySchema } from './check-file-summary.js';
 import { semanticConflictsSchema, semanticPlanSchema } from './intent-semantic-conflict.js';
-// SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
 import { landingMessageSchema } from './landing-message.js';
 import { landingStallSchema } from './landing-stall.js';

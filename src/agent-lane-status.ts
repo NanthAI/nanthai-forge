@@ -1,5 +1,5 @@
-import { checkFileSummary } from './check-file-summary.js';
 // SPDX-License-Identifier: Apache-2.0
+import { checkFileSummary } from './check-file-summary.js';
 import { readLaneSubmissions } from './landing-submission-read.js';
 import { stackStatus } from './agent-stack.js';
 import { latestHandoff, handoffSummary } from './agent-handoff-types.js';

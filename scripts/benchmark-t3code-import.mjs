@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// SPDX-License-Identifier: Apache-2.0
 // B1.5c live big-repository import, run under the scheduled-import guard.
 // Usage: node scripts/benchmark-t3code-import.mjs DIR '{"repository":"o/r","ref":"SHA","name":"..."}'
 // DIR receives journal.json (resume pins), progress.jsonl and report.json. Run it again

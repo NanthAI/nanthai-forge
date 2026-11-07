@@ -1,5 +1,5 @@
-import type { HostedQueueStatus } from './hosted-queue-status.js';
 // SPDX-License-Identifier: Apache-2.0
+import type { HostedQueueStatus } from './hosted-queue-status.js';
 import { latestLandingProgress, landingStall } from './landing-stall.js';
 import type { HostedLandingState } from './hosted-landing.js';
 export const hostedLandingProgressAt = (state: HostedLandingState) =>

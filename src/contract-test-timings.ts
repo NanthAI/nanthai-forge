@@ -1,5 +1,5 @@
-import { HostedOutputRedactor } from './hosted-output-redactor.js';
 // SPDX-License-Identifier: Apache-2.0
+import { HostedOutputRedactor } from './hosted-output-redactor.js';
 import { semanticReportsSchema } from './intent-semantic-conflict.js';
 import type { z } from 'zod';
 /** Failure attribution survives incomplete files; only complete files supply timings. */

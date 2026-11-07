@@ -1,6 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 import { settleBatchConflicts } from './projectHostedLandingCohortConflicts';
 import { scheduleLandingPrecompose } from './projectHostedLandingPrecompose';
-// SPDX-License-Identifier: Apache-2.0
 import type { MutationCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import { requireLandingLease, type LandingClaim } from './projectHostedLandingControl';

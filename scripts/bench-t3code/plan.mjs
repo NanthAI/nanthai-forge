@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// SPDX-License-Identifier: Apache-2.0
 // B1.5d pre-registered design (PLAN.md). Everything a cell's order depends on is derived
 // here from fixed inputs, so the schedule is known before the first cell runs:
 //   node scripts/bench-t3code/plan.mjs json   -> the machine-readable plan (batches; rep-3 candidates)

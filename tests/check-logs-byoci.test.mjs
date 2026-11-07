@@ -1,6 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 import { transferArchiveFixture } from './native-archive-fixture.mjs';
 import { captureNativeArchive } from './native-archive-fixture.mjs';
-// SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {

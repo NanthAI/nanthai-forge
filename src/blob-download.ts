@@ -1,5 +1,5 @@
-import { networkFetch } from './network-fetch.js';
 // SPDX-License-Identifier: Apache-2.0
+import { networkFetch } from './network-fetch.js';
 import { verifiedBytes } from './verified-blob.js';
 import { ForgeError, invariant } from './errors.js';
 import { packHeaders, verifyPackRange } from './object-pack-range.js';

@@ -1,6 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 import { deadlineConvexClient } from './network-convex-client.js';
 import { exchangeConvexFetch } from './exchange-convex-fetch.js';
-// SPDX-License-Identifier: Apache-2.0
 import { createHash } from 'node:crypto';
 import type { ConvexHttpClient } from 'convex/browser';
 import { makeFunctionReference } from 'convex/server';

@@ -1,6 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 import { hostedLandingStateSchema } from '../src/hosted-landing';
 import { report } from './errors';
-// SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
 import { internalMutation, internalQuery, type QueryCtx, type MutationCtx } from './server';
 import { query } from './cliServer';

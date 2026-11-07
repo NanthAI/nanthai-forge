@@ -1,5 +1,5 @@
-import { ErrorToast } from '../ui/Toast';
 // SPDX-License-Identifier: Apache-2.0
+import { ErrorToast } from '../ui/Toast';
 import { Component, lazy, Suspense, type ReactNode } from 'react';
 import type { Id } from '../../../convex/_generated/dataModel';
 import type { WorkIndexWorkspace } from '../hosted-work-index';

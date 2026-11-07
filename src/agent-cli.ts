@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 import { requireAgentRoot } from './agent-root.js';
 import { validateHostedCliCommand, validateNativeFrictionCommand } from './hosted-cli-validation.js';
 import { actionableNotFound, resolveShortLaneId } from './argument-errors.js';
@@ -9,7 +10,6 @@ import { canonicalOperationIds } from './operation-id-case.js';
 import { agentWaitCli } from './agent-wait.js';
 import { canonicalCandidateAction, noticeViewAlias } from './candidate-names.js';
 import { aliasNotice, landSaveCommand, lowerVerb, newForm, parseVerbForm } from './agent-verbs.js';
-// SPDX-License-Identifier: Apache-2.0
 import { parseWaitBudget } from './agent-operation-wait.js';
 import { recordTurnWait } from './agent-turn-work.js';
 import { readFileSync, realpathSync } from 'node:fs';

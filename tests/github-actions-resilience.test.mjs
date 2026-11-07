@@ -1,5 +1,5 @@
-import { compactCheckText } from '../dist/check-compact-output.js';
 // SPDX-License-Identifier: Apache-2.0
+import { compactCheckText } from '../dist/check-compact-output.js';
 // Actions controller under GitHub-side stress: rate limits, lagging job lists, OOM diagnosis.
 import test from 'node:test';
 import assert from 'node:assert/strict';

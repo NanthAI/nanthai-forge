@@ -1,5 +1,5 @@
-import { portableCheckPath } from './check-log-policy.js';
 // SPDX-License-Identifier: Apache-2.0
+import { portableCheckPath } from './check-log-policy.js';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { withWorkArchive } from './work-backup-archive.js';

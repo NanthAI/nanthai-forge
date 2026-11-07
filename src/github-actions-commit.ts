@@ -1,5 +1,5 @@
-import { gitlinkCommit } from './gitlink.js';
 // SPDX-License-Identifier: Apache-2.0
+import { gitlinkCommit } from './gitlink.js';
 import { readFileSync, readlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { digest } from './hash.js';

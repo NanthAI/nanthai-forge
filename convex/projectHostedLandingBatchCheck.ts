@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 import { withQueueStatusBatch } from './projectHostedQueueStatusWrite';
 import { diagnoseBatchFailure } from '../src/hosted-batch-diagnosis';
 import { advanceBatchFallback } from './projectHostedLandingBatchFallback';
@@ -16,7 +17,6 @@ import { ForgeError, invariant } from '../src/errors';
 import { readHostedRecord } from './projectHostedRecords';
 import { hostedRecordSchema } from '../src/hosted-records';
 import { semanticVerdict } from '../src/intent-semantic-conflict';
-// SPDX-License-Identifier: Apache-2.0
 import type { MutationCtx } from './_generated/server';
 import type { LandingClaim, requireLandingLease } from './projectHostedLandingControl';
 import {

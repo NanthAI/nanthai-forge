@@ -1,6 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 import { hasConflictMarkers } from './conflict-markers.js';
 import { composeStack } from './native-stack-compose.js';
-// SPDX-License-Identifier: Apache-2.0
 import { NativeSource, overlappingPaths, type NativeFile } from './native-source.js';
 import { compensatingState } from './compensating-revert.js';
 import { conflictPlan } from './agent-sync.js';

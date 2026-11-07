@@ -1,5 +1,5 @@
-import { cleanupOwner, waitForOwnerChildren } from './owner-cleanup.mjs';
 // SPDX-License-Identifier: Apache-2.0
+import { cleanupOwner, waitForOwnerChildren } from './owner-cleanup.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs, { mkdtempSync, writeFileSync, readFileSync } from 'node:fs';

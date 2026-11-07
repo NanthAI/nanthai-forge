@@ -1,6 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 import { candidateOwnerInputs } from './projectHostedProvenance';
 import { activeProject } from './projectAuthority';
-// SPDX-License-Identifier: Apache-2.0
 import type { MutationCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import type { HostedLandingAttempt } from '../src/hosted-landing';

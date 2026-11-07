@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 // B1.5d scoring shared by run-cell (live) and rescore (recorded agent output).
 
 /** Epoch ms a task reached main, from an arm's landing() result. */

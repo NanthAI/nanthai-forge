@@ -1,5 +1,5 @@
-import { ContractTimingReader } from './contract-test-timings.js';
 // SPDX-License-Identifier: Apache-2.0
+import { ContractTimingReader } from './contract-test-timings.js';
 import { checkEvidenceLines } from './check-compact-output.js';
 import { testReports } from './check-test-report.js';
 import { checkQuarantineResult } from './check-quarantine.js';

@@ -1,7 +1,7 @@
+// SPDX-License-Identifier: Apache-2.0
 import { withLandingAttempt } from './landing-attempt-timing.js';
 import { pendingActionsInfra, PENDING_ACTIONS_INFRA } from './github-actions-infra.js';
 import { previewLanding, previewExclusionMessage } from './integration-preview-landing.js';
-// SPDX-License-Identifier: Apache-2.0
 import { finishChild } from './agent-finish-journal.js';
 import { ForgeError } from './errors.js';
 import { waitForAgentRun } from './agent-run-observer.js';

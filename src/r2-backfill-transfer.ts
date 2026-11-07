@@ -1,5 +1,5 @@
-import { networkFetch } from './network-fetch.js';
 // SPDX-License-Identifier: Apache-2.0
+import { networkFetch } from './network-fetch.js';
 import { createHash } from 'node:crypto';
 import { createReadStream, createWriteStream, existsSync, renameSync, rmSync } from 'node:fs';
 import { open } from 'node:fs/promises';

@@ -1,5 +1,5 @@
-import { ContractTimingReader } from './contract-test-timings.js';
 // SPDX-License-Identifier: Apache-2.0
+import { ContractTimingReader } from './contract-test-timings.js';
 import { digest } from './hash.js';
 import { hostedActionsRecipeSchema } from './hosted-actions.js';
 import { randomUUID } from 'node:crypto';

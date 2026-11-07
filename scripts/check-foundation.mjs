@@ -1,7 +1,7 @@
-import { networkBoundaryFindings } from './check-network-boundaries.mjs';
 // SPDX-License-Identifier: Apache-2.0
+import { networkBoundaryFindings } from './check-network-boundaries.mjs';
 import { readdirSync, readFileSync, existsSync, statSync } from 'node:fs';
-import { resolve, dirname, relative, extname } from 'node:path';
+import { resolve, dirname, relative, extname, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { renderDependencyLicenses } from './render-dependency-licenses.mjs';
 import { localPathFindings } from './check-local-paths.mjs';
@@ -9,6 +9,8 @@ import { landingModelFindings } from './check-landing-model.mjs';
 import { idleQueryFindings } from './check-idle-queries.mjs';
 import { recoveryAdviceFindings } from './check-recovery-advice.mjs';
 import { actionPinFindings, isWorkflowPath } from './check-action-pins.mjs';
+import { spdxFindings } from './check-spdx.mjs';
+import { envPrintFindings } from './check-env-print.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const errors = [];
@@ -49,7 +51,14 @@ for (const file of files) {
     errors.push(...networkBoundaryFindings(path, source));
     if (['.ts', '.tsx'].includes(extname(file))) errors.push(...idleQueryFindings(path, source));
     errors.push(...recoveryAdviceFindings(path, source));
+    errors.push(...spdxFindings(path.split(sep).join('/'), source));
   }
+  if (
+    ['.md', '.sh', '.yml', '.yaml', '.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs'].includes(
+      extname(file),
+    )
+  )
+    errors.push(...envPrintFindings(relative(root, file).split(sep).join('/'), readFileSync(file, 'utf8')));
   if (extname(file) === '.json') {
     try {
       JSON.parse(readFileSync(file, 'utf8'));
@@ -101,7 +110,7 @@ if (errors.length) {
   process.exitCode = 1;
 } else {
   console.log(
-    `Foundation checks passed: ${files.length} files; JSON parses, Markdown links resolve, license inventory is current, no machine-specific home paths.`,
+    `Foundation checks passed: ${files.length} files; JSON parses, Markdown links resolve, license inventory is current, no machine-specific home paths, SPDX headers lead every source file, nothing prints environment values.`,
   );
   console.log(
     'Application behavior, external URLs and authenticated/local runtime integration are not tested by this command.',

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 import { summarizeExecutions } from './check-report-summary.js';
 import { portableCheckEvidence } from './check-compact-output.js';
 import {
@@ -7,7 +8,6 @@ import {
   portableRunFiles,
   runLogRecord,
 } from './check-log-policy.js';
-// SPDX-License-Identifier: Apache-2.0
 import { retainRecoveryCapture } from './recovery-capture.js';
 import {
   chmodSync,

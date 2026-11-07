@@ -1,5 +1,5 @@
-import { semanticReportsSchema } from './intent-semantic-conflict.js';
 // SPDX-License-Identifier: Apache-2.0
+import { semanticReportsSchema } from './intent-semantic-conflict.js';
 import { z } from 'zod';
 import { invariant } from './errors.js';
 import { legacyCheckCredentialsRefSchema } from './legacy-check-credentials.js';

@@ -1,8 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
 import { AccountHandle } from './AccountHandle';
 import type { GithubSyncBinding, GithubAutoPush } from '../../../src/github-sync-types';
 import { useWorkRecords } from '../hosted-work-index';
 import { GithubStatus } from './GithubStatus';
-// SPDX-License-Identifier: Apache-2.0
 import { useEffect, useState, type ReactNode } from 'react';
 import { useAction, useMutation, useQuery } from 'convex/react';
 import type { Id } from '../../../convex/_generated/dataModel';

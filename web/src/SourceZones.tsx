@@ -1,6 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 import { useInventory } from './useInventory';
 import { ErrorToast } from './ui/Toast';
-// SPDX-License-Identifier: Apache-2.0
 import { DetailPanel } from './DetailPanel';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useConvex, usePaginatedQuery } from 'convex/react';

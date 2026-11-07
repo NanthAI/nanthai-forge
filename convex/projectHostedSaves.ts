@@ -1,5 +1,5 @@
-import { sourceProgress } from './projectSourceProgress';
 // SPDX-License-Identifier: Apache-2.0
+import { sourceProgress } from './projectSourceProgress';
 import { boundOverlapChanges, type OverlapChange } from '../src/hosted-overlap';
 import { v } from 'convex/values';
 import { mutation, query } from './cliServer';

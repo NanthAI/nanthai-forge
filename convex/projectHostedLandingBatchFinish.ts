@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 import { exhaustFinishCompose } from './projectHostedComposeExhaustion';
 import { predecessorStatus } from './projectHostedLandingPipeline';
 import { settleBatchConflicts, retainSurvivorTrain } from './projectHostedLandingCohortConflicts';
@@ -5,7 +6,6 @@ import { deferSpeculativeConflict } from './projectHostedLandingSpeculativeConfl
 import { wakeLandingQueue } from './projectHostedLandingEvents';
 import { advanceBatchFallback } from './projectHostedLandingBatchFallback';
 import { splitLandingBatch } from './projectHostedLandingBatchSplit';
-// SPDX-License-Identifier: Apache-2.0
 import { releaseUnstartedBatchForPriority } from './projectHostedLandingBatchPriority';
 import type { Doc } from './_generated/dataModel';
 import type { MutationCtx } from './_generated/server';

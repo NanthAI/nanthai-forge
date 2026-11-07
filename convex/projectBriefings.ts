@@ -1,6 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 import { needsFix } from '../src/culprit-bisect';
 import { hostedPaths } from '../src/hosted-paths';
-// SPDX-License-Identifier: Apache-2.0
 import { effectivePolicy } from '../src/autonomy-policy';
 import { trustBrief } from './projectHostedTrust';
 import { v } from 'convex/values';

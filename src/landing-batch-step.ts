@@ -1,8 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
 import { settleSupersededLanding, supersededLandingInputs } from './landing-superseded.js';
 import { reserveBoundaryConfirmation } from './landing-confirmation.js';
 import { currentChannelHead } from './agent-defaults.js';
 import { validatePassingPrefix, diagnosticStatus } from './landing-diagnosis.js';
-// SPDX-License-Identifier: Apache-2.0
 import { finishChild } from './agent-finish-journal.js';
 import { ForgeError, invariant } from './errors.js';
 import { retryWorkPhase } from './work-retry.js';

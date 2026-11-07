@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 import type { SemanticConflict } from '../../../src/intent-semantic-conflict';
 import { readTestContract } from '../lane/test-contract-api';
 import { candidateTestContract, type IntentTestContract } from '../../../src/intent-test-contract';
@@ -5,7 +6,6 @@ import { OwnerDecisionsDisclosure } from '../decisions/OwnerDecisionsPanel';
 import { Breadcrumbs, workHref } from '../shell/Breadcrumbs';
 import { useReadRetry } from '../ui/read-retry';
 import { ConversationScope } from '../lane/ConversationScope';
-// SPDX-License-Identifier: Apache-2.0
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAction, useConvex, useQuery } from 'convex/react';
 import type { FunctionArgs } from 'convex/server';

@@ -1,5 +1,5 @@
-import { rebuildWorkIndex } from './work-index-client.js';
 // SPDX-License-Identifier: Apache-2.0
+import { rebuildWorkIndex } from './work-index-client.js';
 import { hostedActionError } from './hosted-action-error.js';
 import { SourceAuthorityStaleError } from './hosted-source-authority.js';
 import { assembleIndexValue } from './work-index-value.js';

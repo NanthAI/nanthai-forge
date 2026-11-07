@@ -1,6 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 import { resolveLandEntry } from './land-request-identity.js';
 import { readLandingProgress } from './land-progress.js';
-// SPDX-License-Identifier: Apache-2.0
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { finishChild, laneFinishes, type FinishAttempt } from './agent-finish-journal.js';

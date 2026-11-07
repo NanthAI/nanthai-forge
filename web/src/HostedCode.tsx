@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 import { SubmodulePointerView } from './Submodules';
 import type { SubmodulePointer } from '../../src/gitlink';
 import { useSourceReview } from './use-source-review';
@@ -12,7 +13,6 @@ import { useWorkRecords, type IntentHeader } from './hosted-work-index';
 import type { HostedRunSummary, HostedViewSummary } from '../../src/work-hosted-summary';
 import { publishedMoves, type MoveRecord } from './cockpit/now-model';
 import { useDestination } from './WorkspaceUI';
-// SPDX-License-Identifier: Apache-2.0
 import './code.css';
 import { useConvex, useQuery } from 'convex/react';
 import { workIndex } from './hosted-work-index';

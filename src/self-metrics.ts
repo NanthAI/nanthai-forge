@@ -1,5 +1,5 @@
-import { firstAttemptLandRate } from './first-attempt-land-rate.js';
 // SPDX-License-Identifier: Apache-2.0
+import { firstAttemptLandRate } from './first-attempt-land-rate.js';
 import { calculateOverlapMetrics, calculateAuthorityMetrics } from './self-metrics-joins.js';
 import { calculateBillingMetrics } from './self-metrics-billing.js';
 import { calculateRedMainMetrics } from './self-metrics-red-main.js';

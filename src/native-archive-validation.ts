@@ -1,6 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 import { optionalCheckPath } from './check-log-policy.js';
 import { existsSync } from 'node:fs';
-// SPDX-License-Identifier: Apache-2.0
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { z } from 'zod';

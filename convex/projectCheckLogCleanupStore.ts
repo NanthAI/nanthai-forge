@@ -1,6 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 import { projectGuard } from './projectCheckLogCleanupGuard';
 import { canonicalPayload } from '../src/hosted-source-operation';
-// SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
 import { query } from './cliServer';
 import { internalMutation, internalQuery } from './server';

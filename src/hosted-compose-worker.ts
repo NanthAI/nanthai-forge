@@ -1,5 +1,5 @@
-import type { BatchDropped } from './hosted-landing-batch.js';
 // SPDX-License-Identifier: Apache-2.0
+import type { BatchDropped } from './hosted-landing-batch.js';
 import { composeStack } from './native-stack-compose.js';
 import { NativeSource, overlappingPaths } from './native-source.js';
 import type { NativeFile } from './native-state-format.js';

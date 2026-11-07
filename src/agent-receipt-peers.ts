@@ -1,5 +1,5 @@
-import { withPeerLanding } from './peer-landing.js';
 // SPDX-License-Identifier: Apache-2.0
+import { withPeerLanding } from './peer-landing.js';
 import { recordMetricOverlapSave } from './self-metrics-overlap.js';
 import { changedPaths } from './agent-sync.js';
 import { PeersCache } from './agent-peers-cache.js';

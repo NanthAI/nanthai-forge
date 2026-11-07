@@ -1,5 +1,5 @@
-import { CUTOVER_UPGRADE } from './cutover-version.js';
 // SPDX-License-Identifier: Apache-2.0
+import { CUTOVER_UPGRADE } from './cutover-version.js';
 import { workerPath } from './worker-install.js';
 import { transitionBoundSourceAuthority } from './source-authority-client.js';
 import { cutoverBoundProject, boundCutoverPins } from './source-cutover-client.js';

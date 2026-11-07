@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 import { withCallerOverlaps } from './agent-caller-overlaps.js';
 import { candidateActionSchema } from './candidate-names.js';
 import { hostedAgentAddress } from './hosted-agent-cli.js';
@@ -5,7 +6,6 @@ import { HostedAgentTransport } from './hosted-agent-transport.js';
 import { recordAgentActivity } from './agent-activity.js';
 import { policyWriteSchema } from './autonomy-policy.js';
 import { localAgent } from './work-autonomy.js';
-// SPDX-License-Identifier: Apache-2.0
 import { localActor } from './work-actor.js';
 import { inputAssessmentCommandSchema } from './work-input-types.js';
 import { nativeObjectCommandSchema } from './native-objects.js';

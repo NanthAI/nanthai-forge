@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 import { callerOverlaps, withCallerOverlaps } from './agent-caller-overlaps.js';
 import { drainAgentAdvisories } from './agent-advisory-worker.js';
 import { registerAgentWait } from './mcp-agent-wait.js';
@@ -6,7 +7,6 @@ import { overlapNotifications } from './mcp-overlap-notifications.js';
 import { candidateActionSchema } from './candidate-names.js';
 import { retainedFinishCommand } from './agent-finish-journal.js';
 import { lowerMcpCommand, verbInputSchemas } from './mcp-verbs.js';
-// SPDX-License-Identifier: Apache-2.0
 import { peersInputSchema } from './agent-peers.js';
 import { controlQueue } from './queue-control.js';
 import { registerHostedWorkTools } from './mcp-hosted-work.js';

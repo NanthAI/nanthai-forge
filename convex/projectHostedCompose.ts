@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 import { sourceProgress } from './projectSourceProgress';
 import { semanticPayload } from '../src/semantic-payload';
 import {
@@ -6,7 +7,6 @@ import {
   semanticMember,
   semanticBaseSequence,
 } from './projectSemanticContracts';
-// SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
 import { mutation, query, type MutationCtx, type QueryCtx } from './cliServer';
 import type { Id } from './_generated/dataModel';

@@ -1,6 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 import { checkEvidenceLines } from './check-compact-output.js';
 import { runOutputDirectory } from './work-run.js';
-// SPDX-License-Identifier: Apache-2.0
 import { runReceipt } from './agent-receipts.js';
 import { runWork } from './work-run.js';
 import type { WorkStore } from './work-store.js';

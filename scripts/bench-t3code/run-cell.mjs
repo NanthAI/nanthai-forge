@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// SPDX-License-Identifier: Apache-2.0
 // B1.5d cell: N concurrent agents land the 10 frozen tasks on one arm in the PLAN.md order,
 // then the oracle grades the exact final main. Usage:
 //   node scripts/bench-t3code/run-cell.mjs ARM N REP [--dry | --model-check] [--attempt K] [--pin FILE] [--batch DIR] [--unpinned] [--tasks K]

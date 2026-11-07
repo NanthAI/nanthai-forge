@@ -1,6 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 import { semanticPlanSchema } from './intent-semantic-conflict.js';
 import { conversationSchema, overlapAnswerSchema } from './agent-edit-types.js';
-// SPDX-License-Identifier: Apache-2.0
 import { intentTestContractSchema } from './intent-test-contract.js';
 import { decisionRecordSchema } from './decision-types.js';
 import { frictionEventSchema } from './friction-types.js';

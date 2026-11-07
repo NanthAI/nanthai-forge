@@ -1,5 +1,5 @@
-import { recordCollectionFence } from './work-record-staging.js';
 // SPDX-License-Identifier: Apache-2.0
+import { recordCollectionFence } from './work-record-staging.js';
 import { lstatSync, readdirSync, unlinkSync, type Stats } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';

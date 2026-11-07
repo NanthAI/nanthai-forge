@@ -1,5 +1,5 @@
-import { conversationSchema } from './agent-edit-types.js';
 // SPDX-License-Identifier: Apache-2.0
+import { conversationSchema } from './agent-edit-types.js';
 import { z } from 'zod';
 import { safeRelative } from './safe-relative.js';
 import { ForgeError, invariant } from './errors.js';

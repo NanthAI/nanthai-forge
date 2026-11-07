@@ -1,7 +1,7 @@
+// SPDX-License-Identifier: Apache-2.0
 import { artifactMetadata } from './artifactStorage';
 import { removeDerived } from './derivedArtifacts';
 import { blobStore } from './blobStore';
-// SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
 import { paginationOptsValidator } from 'convex/server';
 import { query, mutation, internalMutation, internalQuery } from './cliServer';

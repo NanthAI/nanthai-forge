@@ -1,5 +1,5 @@
-import { hostedActionError } from './hosted-action-error.js';
 // SPDX-License-Identifier: Apache-2.0
+import { hostedActionError } from './hosted-action-error.js';
 import { z } from 'zod';
 import { ForgeError, invariant } from './errors.js';
 import type { HostedAgentTransport } from './hosted-agent-transport.js';

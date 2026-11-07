@@ -1,5 +1,5 @@
-import { publishLandingBatch } from './projectHostedLandingBatchPublish';
 // SPDX-License-Identifier: Apache-2.0
+import { publishLandingBatch } from './projectHostedLandingBatchPublish';
 import { v } from 'convex/values';
 import { mutation, query, internalMutation, type MutationCtx } from './cliServer';
 import { acceptanceActor } from './projectAutonomy';

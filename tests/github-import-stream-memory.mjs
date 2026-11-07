@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 // Measure the production transfer runtime in its own process. The compiler,
 // coverage collector and complete fake backend belong to the parent test runner,
 // not the Convex action. RPC/storage stubs retain only external receipt metadata.

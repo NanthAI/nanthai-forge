@@ -1,8 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
 import { ErrorToast } from './ui/Toast';
 import { ObjectActions } from './shell/ObjectActions';
 import { routeUrlState } from './shell/location';
 import { SyntaxLine } from './SourceTokens';
-// SPDX-License-Identifier: Apache-2.0
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { PageTabs } from './WorkspaceUI';
 import Markdown from 'react-markdown';

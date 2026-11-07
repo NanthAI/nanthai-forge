@@ -1,8 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
 import { pendingActionsInfra } from './github-actions-infra.js';
 import { staleLandingResult } from './landing-stale.js';
 import { admitFinish } from './landing-admission.js';
 import { previewLanding, previewExclusionMessage } from './integration-preview-landing.js';
-// SPDX-License-Identifier: Apache-2.0
 import { finishSubmissions } from './landing-submission-read.js';
 import { strandedActionsRun } from './github-actions-recovery.js';
 import { land } from './land.js';

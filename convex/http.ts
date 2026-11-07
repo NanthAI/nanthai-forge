@@ -1,7 +1,7 @@
+// SPDX-License-Identifier: Apache-2.0
 import { callback as githubOAuthCallback } from './githubBindingOAuth';
 import { handle as actionsHttp } from './projectHostedActionsHttp';
 import { makeFunctionReference } from 'convex/server';
-// SPDX-License-Identifier: Apache-2.0
 import { httpRouter } from 'convex/server';
 import { httpAction } from './_generated/server';
 import { internal } from './_generated/api';

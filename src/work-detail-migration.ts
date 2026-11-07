@@ -1,5 +1,5 @@
-import { digest } from './hash.js';
 // SPDX-License-Identifier: Apache-2.0
+import { digest } from './hash.js';
 import { invariant } from './errors.js';
 import { compactDetailPage, slimWorkFormat } from './work-record-details.js';
 import { detailWriter } from './work-detail-store.js';

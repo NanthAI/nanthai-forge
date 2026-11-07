@@ -1,6 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 import { trustAgents } from './autonomy-fixture.mjs';
 import { scratchDir } from './helpers.mjs';
-// SPDX-License-Identifier: Apache-2.0
 import nodeTest from 'node:test';
 // A fixture must fail with its test name instead of waiting for the ten-minute file watchdog.
 const test = (name, fn) => nodeTest(name, { timeout: 30_000 }, fn);

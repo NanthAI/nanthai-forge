@@ -1,5 +1,5 @@
-import { automaticResult } from '../dist/work-detail-store.js';
 // SPDX-License-Identifier: Apache-2.0
+import { automaticResult } from '../dist/work-detail-store.js';
 import './check-runtime.mjs';
 import test from 'node:test';
 import { mockProcessCoverage } from './cleanup-process-fixture.mjs';

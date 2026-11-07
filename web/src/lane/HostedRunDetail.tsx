@@ -1,5 +1,5 @@
-import { readBrowserLog } from '../browser-log';
 // SPDX-License-Identifier: Apache-2.0
+import { readBrowserLog } from '../browser-log';
 import { useCallback } from 'react';
 import { useConvex } from 'convex/react';
 import type { Id } from '../../../convex/_generated/dataModel';

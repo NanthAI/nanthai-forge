@@ -1,6 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 import { gitlinkCommit } from './gitlink.js';
 import type { Conversation } from './agent-edit-context.js';
-// SPDX-License-Identifier: Apache-2.0
 import {
   closeSync,
   existsSync,

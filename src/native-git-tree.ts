@@ -1,6 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 import { gitlinkCommit } from './gitlink.js';
 import { gitMode } from './hosted-github-git.js';
-// SPDX-License-Identifier: Apache-2.0
 import { createHash } from 'node:crypto';
 import { NativeSource, type NativeFile } from './native-source.js';
 import { workGit } from './work-git.js';

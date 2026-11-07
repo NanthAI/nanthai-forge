@@ -1,6 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 import { ErrorToast } from '../ui/Toast';
 import { useDestination, useSection } from '../WorkspaceUI';
-// SPDX-License-Identifier: Apache-2.0
 import { Profiler, useEffect, useState, type ReactNode } from 'react';
 import { ChangeMapToggle, type MapSource } from './ChangeMapToggle';
 import { PathLabel } from './PathLabel';

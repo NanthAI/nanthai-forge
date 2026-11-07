@@ -1,5 +1,5 @@
-import { planningSummary, planningSearchTerms } from './planning-search.js';
 // SPDX-License-Identifier: Apache-2.0
+import { planningSummary, planningSearchTerms } from './planning-search.js';
 import { createHash } from 'node:crypto';
 import { makeFunctionReference } from 'convex/server';
 import { HostedAgentJournal } from './hosted-agent-journal.js';

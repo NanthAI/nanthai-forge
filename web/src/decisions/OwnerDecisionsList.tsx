@@ -1,5 +1,5 @@
-import { InlineWorkNav, useWorkHeader } from '../shell/WorkHeader';
 // SPDX-License-Identifier: Apache-2.0
+import { InlineWorkNav, useWorkHeader } from '../shell/WorkHeader';
 import { useState } from 'react';
 import type { DecisionRecord } from '../../../src/decision-types';
 import { Panel, Segmented, Button } from '../ui/primitives';

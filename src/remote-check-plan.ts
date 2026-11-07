@@ -1,5 +1,5 @@
-import { semanticCheckCommand } from './semantic-check-command.js';
 // SPDX-License-Identifier: Apache-2.0
+import { semanticCheckCommand } from './semantic-check-command.js';
 import { runDetails } from './work-detail-store.js';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';

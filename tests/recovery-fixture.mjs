@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 import { effectivePolicy } from '../dist/autonomy-policy.js';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, copyFileSync } from 'node:fs';
 import { join } from 'node:path';

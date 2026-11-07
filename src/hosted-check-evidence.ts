@@ -1,5 +1,5 @@
-import { semanticReportsSchema } from './intent-semantic-conflict.js';
 // SPDX-License-Identifier: Apache-2.0
+import { semanticReportsSchema } from './intent-semantic-conflict.js';
 import { z } from 'zod';
 import { hmac } from '@noble/hashes/hmac.js';
 import { sha256 } from '@noble/hashes/sha2.js';

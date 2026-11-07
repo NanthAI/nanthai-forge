@@ -1,5 +1,5 @@
-import { capture as captureAnalysis } from '../dist/snapshot.js';
 // SPDX-License-Identifier: Apache-2.0
+import { capture as captureAnalysis } from '../dist/snapshot.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {

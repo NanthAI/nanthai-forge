@@ -1,6 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 import { sourceProgress } from './projectSourceProgress';
 import { loadLanding } from './projectHostedLandingStore';
-// SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
 import { receiptMutation, query, type QueryCtx, type MutationCtx } from './cliServer';
 import type { Id } from './_generated/dataModel';

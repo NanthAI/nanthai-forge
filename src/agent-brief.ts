@@ -1,6 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 import { sourceAuthority } from './hosted-source-authority.js';
 import { readHostState } from './host-binding.js';
-// SPDX-License-Identifier: Apache-2.0
 import { makeFunctionReference } from 'convex/server';
 import { ConvexError } from 'convex/values';
 import { localBrief } from './agent-brief-local.js';

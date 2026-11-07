@@ -1,5 +1,5 @@
-import { readLandingAttempts } from './land-attempts.js';
 // SPDX-License-Identifier: Apache-2.0
+import { readLandingAttempts } from './land-attempts.js';
 import { landingPositions, landingMatch } from './landing-records-index.js';
 import { finishChild } from './agent-finish-journal.js';
 import { orderLandingEntries } from './landing-batch-order.js';

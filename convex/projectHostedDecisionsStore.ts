@@ -1,5 +1,5 @@
-import { recordPageOptions } from './projectHostedFrictionStore';
 // SPDX-License-Identifier: Apache-2.0
+import { recordPageOptions } from './projectHostedFrictionStore';
 import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import type { DecisionRecord, DecisionTarget } from '../src/decision-types';

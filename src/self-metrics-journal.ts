@@ -1,5 +1,5 @@
-import { snapshotMetricWeek } from './self-metrics-weekly.js';
 // SPDX-License-Identifier: Apache-2.0
+import { snapshotMetricWeek } from './self-metrics-weekly.js';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { appendFileSync, readFileSync, openSync, closeSync } from 'node:fs';
 import { join } from 'node:path';

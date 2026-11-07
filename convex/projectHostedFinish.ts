@@ -1,7 +1,7 @@
+// SPDX-License-Identifier: Apache-2.0
 import { readQueueStatus, queueAwareLandingState } from './projectHostedQueueStatus';
 import { landingStateForReader } from './projectHostedLandingOrder';
 import { hostedQueueAheadSelection } from './projectHostedQueueAhead';
-// SPDX-License-Identifier: Apache-2.0
 import { finishPendingForReader } from '../src/hosted-finish';
 import { v } from 'convex/values';
 import { mutation, query } from './cliServer';

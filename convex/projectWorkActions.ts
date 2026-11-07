@@ -1,5 +1,5 @@
-'use node';
 // SPDX-License-Identifier: Apache-2.0
+'use node';
 import { v } from 'convex/values';
 import { action, type ActionCtx } from './cliServer';
 import { internalAction } from './_generated/server';

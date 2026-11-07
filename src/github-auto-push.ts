@@ -1,8 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
 import { serverRecoveryAuthority } from './recovery-authority.js';
 import { readHostState } from './host-binding.js';
 import { workerPath } from './worker-install.js';
 import { retryWorkEdit } from './work-edit.js';
-// SPDX-License-Identifier: Apache-2.0
 import { checkServiceEnv } from './worker-environment.js';
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';

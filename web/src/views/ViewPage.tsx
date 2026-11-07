@@ -1,7 +1,7 @@
+// SPDX-License-Identifier: Apache-2.0
 import { Breadcrumbs } from '../shell/Breadcrumbs';
 import { ErrorToast } from '../ui/Toast';
 import { ObjectActions } from '../shell/ObjectActions';
-// SPDX-License-Identifier: Apache-2.0
 import { useState, type ReactNode } from 'react';
 import { ChangeMapToggle, type MapSource } from '../lane/ChangeMapToggle';
 import { Glyph } from '../ui/Glyph';

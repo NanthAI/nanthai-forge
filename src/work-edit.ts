@@ -1,5 +1,5 @@
-import { stageWorkEdit } from './work-edit-records.js';
 // SPDX-License-Identifier: Apache-2.0
+import { stageWorkEdit } from './work-edit-records.js';
 import { ForgeError } from './errors.js';
 import { retryWorkPhase } from './work-retry.js';
 import { readWorkFile, prepareRecordPublication } from './work-records.js';

@@ -1,5 +1,5 @@
-import { assertLandingWorkerActive } from './landing-worker-context.js';
 // SPDX-License-Identifier: Apache-2.0
+import { assertLandingWorkerActive } from './landing-worker-context.js';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { setImmediate as yieldTurn } from 'node:timers/promises';

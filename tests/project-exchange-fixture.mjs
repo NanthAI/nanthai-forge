@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 import { captureNativeArchive } from './native-archive-fixture.mjs';
 import { randomUUID } from 'node:crypto';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from 'node:fs';

@@ -1,7 +1,7 @@
+// SPDX-License-Identifier: Apache-2.0
 import { useInventory } from './useInventory';
 import { usePageCritical } from './ui/page-critical';
 import { ErrorToast } from './ui/Toast';
-// SPDX-License-Identifier: Apache-2.0
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useConvex, usePaginatedQuery, useQuery } from 'convex/react';
 import { useUser } from '@clerk/react';

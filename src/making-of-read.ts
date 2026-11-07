@@ -1,7 +1,7 @@
+// SPDX-License-Identifier: Apache-2.0
 import { postAcceptMoves } from './post-accept-coverage.js';
 import { previewMeasurements } from './preview-accounting.js';
 import { accountingContext } from './accounting-records.js';
-// SPDX-License-Identifier: Apache-2.0
 import { readHostState, updateHostState } from './host-binding.js';
 import { localActor } from './work-actor.js';
 import { invariant } from './errors.js';

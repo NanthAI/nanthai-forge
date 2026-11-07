@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 import { conversationSchema } from './agent-edit-types.js';
 import { contractTestsInput } from './intent-test-contract.js';
 import { decideInputSchema, decisionsInputSchema } from './decision-types.js';
@@ -6,7 +7,6 @@ import { frictionInputSchema, frictionTriageSchema } from './friction-types.js';
 import { landSchema } from './land-schema.js';
 import { metricPagingFields } from './self-metrics-page.js';
 import { peerAckSchema } from './agent-coordination-journal.js';
-// SPDX-License-Identifier: Apache-2.0
 import { viewReadSchemas } from './view-reads.js';
 import { policyWriteSchema } from './autonomy-policy.js';
 import { briefInputSchema } from './agent-brief-types.js';

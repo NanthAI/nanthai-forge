@@ -1,8 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
 import { wakeLandingWorker } from './landing-worker-wake.js';
 import { waitingDependencies } from './agent-dependencies.js';
 import { readLandCheckController } from './land-check-progress.js';
 import { runReceiptWithFailure } from './agent-run-failure.js';
-// SPDX-License-Identifier: Apache-2.0
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { FinishJournal } from './agent-finish-journal.js';

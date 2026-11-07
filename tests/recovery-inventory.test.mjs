@@ -1,7 +1,7 @@
+// SPDX-License-Identifier: Apache-2.0
 import { retainRecoveryCapture } from '../dist/recovery-capture.js';
 import { prepareHostedSeed } from '../dist/hosted-seed-capture.js';
 import { captureNativeArchive } from './native-archive-fixture.mjs';
-// SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {

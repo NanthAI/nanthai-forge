@@ -1,5 +1,5 @@
-import { networkFetch, networkFailure, networkDeadline, networkCancellation } from './network-fetch.js';
 // SPDX-License-Identifier: Apache-2.0
+import { networkFetch, networkFailure, networkDeadline, networkCancellation } from './network-fetch.js';
 import { currentExchangeProgress } from './exchange-progress-hooks.js';
 import { ForgeError } from './errors.js';
 import { observeExchangeRequest, observeExchangeResponse } from './exchange-observation-hooks.js';

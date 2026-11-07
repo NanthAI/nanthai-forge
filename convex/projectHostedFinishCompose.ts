@@ -1,8 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
 import { candidateOwnerInputs } from './projectHostedProvenance';
 import { semanticPayload } from '../src/semantic-payload';
 import { mainSemanticMembers, mergeSemanticMembers, semanticBaseSequence } from './projectSemanticContracts';
 import { readHostedRecord, hostedWriteProject } from './projectHostedRecords';
-// SPDX-License-Identifier: Apache-2.0
 import type { MutationCtx } from './_generated/server';
 import type { Doc } from './_generated/dataModel';
 import { hostedStartMain } from './projectHostedChannels';

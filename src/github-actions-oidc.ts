@@ -1,5 +1,5 @@
-import { networkFetch, networkTimeout } from './network-fetch.js';
 // SPDX-License-Identifier: Apache-2.0
+import { networkFetch, networkTimeout } from './network-fetch.js';
 import { z } from 'zod';
 import { invariant } from './errors.js';
 export const actionsIssuer = 'https://token.actions.githubusercontent.com';

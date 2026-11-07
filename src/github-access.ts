@@ -1,5 +1,5 @@
-import { networkFetch, networkTimeout } from './network-fetch.js';
 // SPDX-License-Identifier: Apache-2.0
+import { networkFetch, networkTimeout } from './network-fetch.js';
 import { githubRepository, type GithubFetch, type GithubRepository } from './github.js';
 import { ForgeError, invariant } from './errors.js';
 

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 import {
   hostedDiffSchema,
   hostedPeersSchema,
@@ -10,7 +11,6 @@ import { hostedOverlapNotifications } from './mcp-hosted-overlaps.js';
 import { slimReceipt } from './receipt-slim.js';
 import { waitEventLine } from './hosted-wait-line.js';
 import { installCompactToolList, toolHelp, type ToolHelp } from './mcp-tool-list.js';
-// SPDX-License-Identifier: Apache-2.0
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import {
   AGENT_DEFAULTS,

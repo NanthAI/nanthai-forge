@@ -1,5 +1,5 @@
-import { previewMeasurements } from '../dist/preview-accounting.js';
 // SPDX-License-Identifier: Apache-2.0
+import { previewMeasurements } from '../dist/preview-accounting.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync, readFileSync, readdirSync, rmSync } from 'node:fs';

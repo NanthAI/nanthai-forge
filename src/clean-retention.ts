@@ -1,5 +1,5 @@
-import { retainCompactCheckReports } from './check-compact-output.js';
 // SPDX-License-Identifier: Apache-2.0
+import { retainCompactCheckReports } from './check-compact-output.js';
 import {
   closeSync,
   constants,

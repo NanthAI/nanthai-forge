@@ -1,5 +1,5 @@
-import { retainSemanticConflict } from './landing-semantic-conflict.js';
 // SPDX-License-Identifier: Apache-2.0
+import { retainSemanticConflict } from './landing-semantic-conflict.js';
 import { batchEntries, lostLandingCheckController } from './landing-check-recovery.js';
 import { admitLandingCheck } from './landing-check-admission.js';
 import { waitForAgentRun } from './agent-run-observer.js';

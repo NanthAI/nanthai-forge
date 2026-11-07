@@ -1,5 +1,5 @@
-import { readSubmodulePointers } from '../../src/gitlink';
 // SPDX-License-Identifier: Apache-2.0
+import { readSubmodulePointers } from '../../src/gitlink';
 import { verifiedBytes } from './verified-blob';
 import { ObjectDownloadReader } from '../../src/blob-download';
 import { parseNativeState } from '../../src/native-state-format';

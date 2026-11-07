@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 // B1.5d agent runner: one agent CLI, model and flag set for both arms (config.agent), in a
 // macOS sandbox. Codex (GPT) is the run's agent; Claude Code stays selectable. Writes are
 // limited to the workspace (plus the CLI's own caches); bench data (tasks, oracle, results,

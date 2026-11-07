@@ -1,6 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 import { withExchangeProgress } from './exchange-progress.js';
 import { networkDeadline, networkFailure } from './network-fetch.js';
-// SPDX-License-Identifier: Apache-2.0
 import { ForgeError } from './errors.js';
 
 export const actionsInfrastructureAttempts = 3;

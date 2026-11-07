@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 import { countLabel } from './ui/count';
 import { useViewerHandle } from './shell/viewer';
 import { ReadableRoute } from './shell/ReadableRoute';
@@ -5,7 +6,6 @@ import { AccountHandle } from './settings/AccountHandle';
 import { useReadRetry } from './ui/read-retry';
 import { ErrorToast } from './ui/Toast';
 import { routeSearch } from './shell/location';
-// SPDX-License-Identifier: Apache-2.0
 import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
 import './legacy-hosted.css';
 import { ClerkProvider, SignInButton, SignOutButton, useAuth, useUser, useClerk } from '@clerk/react';

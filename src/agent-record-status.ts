@@ -1,9 +1,9 @@
+// SPDX-License-Identifier: Apache-2.0
 import { checkQuarantine } from './check-quarantine.js';
 import { recordStatusMetrics } from './self-metrics-status-records.js';
 import { readLaneSubmissions } from './landing-submission-read.js';
 import { agentLaneStatus } from './agent-lane-status.js';
 import { agentCostSummary } from './agent-cost-summary.js';
-// SPDX-License-Identifier: Apache-2.0
 import { readPolicy } from './work-autonomy.js';
 import type { WorkStore } from './work-store.js';
 import type { WorkRecordTransaction, WorkCollection, WorkRecord } from './work-record-transaction.js';

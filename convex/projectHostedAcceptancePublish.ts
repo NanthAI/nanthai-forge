@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 import { scheduleLandingPrecompose } from './projectHostedLandingPrecompose';
 import { trackHostedOverlapMain } from './projectHostedOverlapStore';
 import { hostedAcceptGate, holdMainRed } from './projectHostedGate';
@@ -5,7 +6,6 @@ import { protectedGatePaths } from '../src/contract-gate-policy';
 import { noteMainLanding, mainGate } from './projectHostedMainAuditState';
 import { noteTrustLanding } from './projectHostedTrust';
 import type { HostedCheckRun } from '../src/hosted-check';
-// SPDX-License-Identifier: Apache-2.0
 import { enqueueGithubMirror } from './projectGithubMirrorQueue';
 import type { MutationCtx } from './_generated/server';
 import { activeProject } from './projectAuthority';

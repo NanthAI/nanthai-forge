@@ -1,5 +1,5 @@
-import { latestTestContract, type IntentTestContract } from '../../../src/intent-test-contract';
 // SPDX-License-Identifier: Apache-2.0
+import { latestTestContract, type IntentTestContract } from '../../../src/intent-test-contract';
 import { intentProgress } from '../../../src/work-intent-progress';
 import type { CockpitLane } from '../cockpit/model';
 import { attentionRank, toneLabel, type Tone } from '../ui/status';

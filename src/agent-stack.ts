@@ -1,5 +1,5 @@
-import { stackParentFailed } from './stack-parent-outcome.js';
 // SPDX-License-Identifier: Apache-2.0
+import { stackParentFailed } from './stack-parent-outcome.js';
 import { NativeSource } from './native-source.js';
 import { allRecords } from './agent-lifecycle.js';
 import { noopLandingViews } from './agent-landed-views.js';

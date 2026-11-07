@@ -1,10 +1,10 @@
+// SPDX-License-Identifier: Apache-2.0
 import { CoordinationJournal } from './agent-coordination-journal.js';
 import { PeersCache } from './agent-peers-cache.js';
 import { digest } from './hash.js';
 import { readdirSync, readFileSync, lstatSync } from 'node:fs';
 import { join } from 'node:path';
 import { invariant } from './errors.js';
-// SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
 import { checkCostSchema } from './check-cost.js';
 import type { WorkStore } from './work-store.js';

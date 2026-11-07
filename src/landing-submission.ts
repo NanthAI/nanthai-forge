@@ -1,7 +1,7 @@
+// SPDX-License-Identifier: Apache-2.0
 import { nativeQueueAhead } from './queue-ahead-native.js';
 import { entryStall } from './landing-entry-stall.js';
 import { checkingWait } from './landing-waiting.js';
-// SPDX-License-Identifier: Apache-2.0
 import { landingDiagnosis } from './landing-diagnosis.js';
 import { projectSubmission, queueObservation } from './landing-observation.js';
 export { projectSubmission, queueObservation, landingAttemptId } from './landing-observation.js';

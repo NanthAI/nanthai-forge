@@ -1,7 +1,7 @@
+// SPDX-License-Identifier: Apache-2.0
 import { readLandingJournals, observeLandingJournals } from './landing-journal-reads.js';
 import { landingPins, landingPinsSchema } from './landing-environment.js';
 import { wakeLandingWorker } from './landing-worker-wake.js';
-// SPDX-License-Identifier: Apache-2.0
 import { mkdirBelow } from './mkdir-below.js';
 import {
   closeSync,

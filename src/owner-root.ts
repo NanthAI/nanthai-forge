@@ -1,5 +1,5 @@
-import { workLocked } from './work-lock.js';
 // SPDX-License-Identifier: Apache-2.0
+import { workLocked } from './work-lock.js';
 import { randomUUID } from 'node:crypto';
 import { lstatSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';

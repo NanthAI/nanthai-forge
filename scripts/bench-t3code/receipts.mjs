@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 // CLI envelopes are evidence of executed actions; nested advice and printed commands are not.
 export function cliReplies(text) {
   return String(text ?? '')

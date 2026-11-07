@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// SPDX-License-Identifier: Apache-2.0
 // B1.5d preflight: local watcher signals, one Convex read (meter), one commit status
 // on the fixed base commit (GitHub clock offset), and otherwise read-only checks.
 //   node scripts/bench-t3code/preflight.mjs [--dry]

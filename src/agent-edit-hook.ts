@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 import { cliPackageRoot, retainCliRuntime } from './cli-installation.js';
 import { canonicalEditPath, editTarget } from './agent-edit-target.js';
 import { mkdirBelow } from './mkdir-below.js';
@@ -5,7 +6,6 @@ import { Worker, MessageChannel, receiveMessageOnPort, isMainThread, workerData 
 import { recordEditDelivery } from './agent-edit-metrics.js';
 import type { MetricObservation } from './self-metrics-observations.js';
 import { childEnv } from '../scripts/child-env.mjs';
-// SPDX-License-Identifier: Apache-2.0
 import { spawnSync } from 'node:child_process';
 import { readFileSync, appendFileSync, realpathSync } from 'node:fs';
 import { join, relative, resolve, isAbsolute, sep } from 'node:path';

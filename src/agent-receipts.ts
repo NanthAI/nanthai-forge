@@ -1,6 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 import { checkFileSummary } from './check-file-summary.js';
 import { providerLogUrl } from './check-log-policy.js';
-// SPDX-License-Identifier: Apache-2.0
 import type { CheckRun, Lane, WorkView, WorkData } from './work-types.js';
 export const laneReceipt = (lane: Lane, path: string) => ({
   laneId: lane.id,

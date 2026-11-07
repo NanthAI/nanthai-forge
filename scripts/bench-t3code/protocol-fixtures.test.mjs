@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 // Local synthetic fixtures only; never import or execute the cell/benchmark driver.
 import test from 'node:test';
 import assert from 'node:assert/strict';

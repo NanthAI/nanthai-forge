@@ -1,7 +1,7 @@
+// SPDX-License-Identifier: Apache-2.0
 import { isMachineRunner } from '../src/hosted-machine-runner';
 import { checkFileSummary } from '../src/check-file-summary';
 import { callbackReceipt, capCheckReports } from '../src/check-report-cap';
-// SPDX-License-Identifier: Apache-2.0
 import { notifyActionsProgress } from './projectHostedActionsWake';
 import { requireMacMachine } from './projectHostedCheckMachines';
 import type { MutationCtx } from './_generated/server';

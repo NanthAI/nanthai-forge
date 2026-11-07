@@ -1,9 +1,9 @@
+// SPDX-License-Identifier: Apache-2.0
 import { likelyPlanningDuplicates } from './projectHostedPlanningSearch';
 import { needsFix } from '../src/culprit-bisect';
 import { githubMirrorStatus } from './projectGithubMirrorStatus';
 import { hostedRecordValue } from './hostedRecordValue';
 import { hostedPaths } from '../src/hosted-paths';
-// SPDX-License-Identifier: Apache-2.0
 import { generationHead } from './projectWorkHead';
 import { cockpitSummary, hostedMain } from './projectWorkIndexSummary';
 import { effectivePolicy } from '../src/autonomy-policy';

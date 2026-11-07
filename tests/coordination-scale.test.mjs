@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 import { dispatchCoordination } from '../dist/coordination-dispatch.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';

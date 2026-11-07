@@ -1,6 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 import { semanticTests } from './intent-semantic-conflict.js';
 import { landingCheckPrefix } from './landing-records.js';
-// SPDX-License-Identifier: Apache-2.0
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { NativeSource } from './native-source.js';

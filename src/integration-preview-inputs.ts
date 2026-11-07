@@ -1,5 +1,5 @@
-import { landingPreviewRecords, hasPreviewSave } from './landing-preview-records.js';
 // SPDX-License-Identifier: Apache-2.0
+import { landingPreviewRecords, hasPreviewSave } from './landing-preview-records.js';
 import { checkEnvironment } from './check-environment.js';
 import { previewChecks } from './integration-preview-checks.js';
 import { PeersCache } from './agent-peers-cache.js';

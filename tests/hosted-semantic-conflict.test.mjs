@@ -1,7 +1,7 @@
+// SPDX-License-Identifier: Apache-2.0
 import { execFileSync } from 'node:child_process';
 import { fixture } from './semantic-conflict-fixture.mjs';
 import { hostedLandingProgressSchema } from '../dist/hosted-landing.js';
-// SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { landingFixture } from './hosted-landing-fixture.mjs';

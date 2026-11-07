@@ -1,7 +1,7 @@
+// SPDX-License-Identifier: Apache-2.0
 import { NativeSource } from './native-source.js';
 import { nativeDiff } from './native-diff.js';
 import type { WorkView } from './work-types.js';
-// SPDX-License-Identifier: Apache-2.0
 import { commandSchema, type WorkData } from './work-types.js';
 import { prepareNativeComposition } from './native-composition-candidate.js';
 import { digest } from './hash.js';

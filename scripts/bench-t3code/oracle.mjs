@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 // B1.5d oracle: each task's own PR tests (original versions) plus the existing suites of
 // the check's scope (oracle.sh SUITES: five packages and apps/server/src/preview), run on the
 // exact final main of a cell, on GitHub Actions in the fork

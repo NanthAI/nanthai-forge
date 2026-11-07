@@ -1,10 +1,10 @@
+// SPDX-License-Identifier: Apache-2.0
 import { readIgnoredStatus } from './ignored-status.js';
 import { runLogRecord } from './check-log-policy.js';
 import { statusMetrics } from './self-metrics-status.js';
 import { readSelfMetricDisk } from './self-metrics-disk.js';
 import { integrationPreviewStatus } from './integration-preview-auto.js';
 import { readLandingWorkerStatus } from './landing-worker-status.js';
-// SPDX-License-Identifier: Apache-2.0
 import { readLaneSubmissions } from './landing-submission-read.js';
 import { savedOverlapPlan } from './agent-overlap-plan.js';
 import { statSync } from 'node:fs';

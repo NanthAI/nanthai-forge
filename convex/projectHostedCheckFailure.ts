@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 import type { MutationCtx } from './server';
 import type { Id } from './_generated/dataModel';
 import { failingStep } from '../src/hosted-landing-suspect';

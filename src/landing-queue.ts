@@ -1,5 +1,5 @@
-import { assertLandingWorkerActive, landingWaitMs } from './landing-worker-context.js';
 // SPDX-License-Identifier: Apache-2.0
+import { assertLandingWorkerActive, landingWaitMs } from './landing-worker-context.js';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { join } from 'node:path';
 import { workProgress, workProgressIdentity } from './work-progress.js';

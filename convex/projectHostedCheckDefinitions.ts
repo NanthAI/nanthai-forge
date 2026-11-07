@@ -1,5 +1,5 @@
-import { mainAuditStatus } from './projectHostedMainAuditState';
 // SPDX-License-Identifier: Apache-2.0
+import { mainAuditStatus } from './projectHostedMainAuditState';
 import { bindingInstallation, requireStoredRepositoryBinding } from './githubBindingAccess';
 import { z } from 'zod';
 import { v } from 'convex/values';

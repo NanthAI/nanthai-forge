@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// SPDX-License-Identifier: Apache-2.0
 import { printedReceipt } from './receipt-slim.js';
 import { callerOverlaps, withCallerOverlaps } from './agent-caller-overlaps.js';
 import { overlapBannerOnce, refusalOverlapBanner } from './hosted-overlap-notice.js';
@@ -8,7 +9,6 @@ import { improveCli } from './improve-cli.js';
 import { noticeViewAlias } from './candidate-names.js';
 import { refreshOwnerRoot } from './owner-root.js';
 import { recoveryCli } from './recovery-cli.js';
-// SPDX-License-Identifier: Apache-2.0
 import { ghCli, forgeVersion } from './gh-cli.js';
 import { queueCli } from './queue-control.js';
 import { githubConnectCli } from './github-connect-cli.js';

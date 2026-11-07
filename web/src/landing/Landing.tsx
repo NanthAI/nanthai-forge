@@ -1,6 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 import { countLabel } from '../ui/count';
 import { ErrorToast } from '../ui/Toast';
-// SPDX-License-Identifier: Apache-2.0
 import { useId, useState, type ReactNode } from 'react';
 import { AliveHero } from './AliveHero';
 import { GitHubGlyph } from './GitHubGlyph';

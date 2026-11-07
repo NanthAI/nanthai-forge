@@ -1,6 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 import { assertHostedCheckActive } from './projectHostedCheckStore';
 import { isMachineRunner } from '../src/hosted-machine-runner';
-// SPDX-License-Identifier: Apache-2.0
 import { macMachine, requireMacMachine } from './projectHostedCheckMachines';
 import { macHeartbeatSchema, verifyMacHeartbeat } from '../src/hosted-mac-lease';
 import { watchMacLease, macLeaseMs } from './projectHostedCheckLease';

@@ -1,5 +1,5 @@
-import { candidateTestContract } from './intent-test-contract.js';
 // SPDX-License-Identifier: Apache-2.0
+import { candidateTestContract } from './intent-test-contract.js';
 import type { WorkData, WorkView, Lane } from './work-types.js';
 
 export function saveChain(lane: Lane, head: string, base: string, at?: string) {

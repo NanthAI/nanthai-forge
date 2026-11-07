@@ -1,10 +1,10 @@
+// SPDX-License-Identifier: Apache-2.0
 import { readEditContext } from './agent-edit-context.js';
 import { prepareReceiptSource } from './agent-receipt-peers.js';
 import { readStartReceipt, stageStartReceipt } from './agent-start-receipt.js';
 import { citeFriction } from './friction.js';
 import { workLockWaitMs } from './work-lock.js';
 import { preparedRecordCommit } from './work-prepared-commit.js';
-// SPDX-License-Identifier: Apache-2.0
 import { applyPlanningMetadata } from './work-planning-state.js';
 import { finishChild } from './agent-finish-journal.js';
 import { syncDirectory } from './native-durability.js';

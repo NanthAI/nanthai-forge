@@ -1,5 +1,5 @@
-import { passedReuseCandidates } from './landing-check-reuse-records.js';
 // SPDX-License-Identifier: Apache-2.0
+import { passedReuseCandidates } from './landing-check-reuse-records.js';
 import { checkToolFence } from './check-tool-fence.js';
 import { validatePrefixRun } from './landing-diagnosis.js';
 import { hostname } from 'node:os';

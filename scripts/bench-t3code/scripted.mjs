@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 // B1.5d no-model protocol/stress driver: dry edits exercise real coordination.
 import { writeFileSync, chmodSync, copyFileSync } from 'node:fs';
 import { join } from 'node:path';

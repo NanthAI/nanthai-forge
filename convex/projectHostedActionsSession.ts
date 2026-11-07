@@ -1,5 +1,5 @@
-import { assertHostedCheckActive } from './projectHostedCheckStore';
 // SPDX-License-Identifier: Apache-2.0
+import { assertHostedCheckActive } from './projectHostedCheckStore';
 import { v } from 'convex/values';
 import { internalMutation, type MutationCtx } from './server';
 import type { Id } from './_generated/dataModel';

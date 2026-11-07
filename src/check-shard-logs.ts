@@ -1,5 +1,5 @@
-import { CompactCheckWriter } from './check-compact-output.js';
 // SPDX-License-Identifier: Apache-2.0
+import { CompactCheckWriter } from './check-compact-output.js';
 import { mkdirBelow } from './mkdir-below.js';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';

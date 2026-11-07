@@ -1,5 +1,5 @@
-import { semanticPayload } from '../src/semantic-payload';
 // SPDX-License-Identifier: Apache-2.0
+import { semanticPayload } from '../src/semantic-payload';
 import type { MutationCtx } from './_generated/server';
 import { loadCompose, hostedComposeInput, writeComposeState } from './projectHostedComposeStore';
 import { finishHostedOperation } from './projectHostedOperations';

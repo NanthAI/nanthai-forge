@@ -1,6 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 import { readLandCheckController } from './land-check-progress.js';
 import { landingWaitMs, assertLandingWorkerActive } from './landing-worker-context.js';
-// SPDX-License-Identifier: Apache-2.0
 import { CheckQueue, queueHolder } from './check-queue.js';
 import { workProgress, workProgressIdentity, observeWorkProgress } from './work-progress.js';
 import { ForgeError, invariant } from './errors.js';

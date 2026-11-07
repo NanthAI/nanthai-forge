@@ -1,5 +1,5 @@
-import { recordObject } from '../dist/work-records.js';
 // SPDX-License-Identifier: Apache-2.0
+import { recordObject } from '../dist/work-records.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID, createHash } from 'node:crypto';

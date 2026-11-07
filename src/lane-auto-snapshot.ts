@@ -1,7 +1,7 @@
+// SPDX-License-Identifier: Apache-2.0
 import { gitlinkCommit } from './gitlink.js';
 import { readEditContext } from './agent-edit-context.js';
 import { conversationSchema } from './agent-edit-types.js';
-// SPDX-License-Identifier: Apache-2.0
 import { existsSync, lstatSync, readFileSync, readdirSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';

@@ -1,6 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 import { hostedPaths, hostedJson } from '../src/hosted-paths';
 import { actorSummary } from './projectActorNames';
-// SPDX-License-Identifier: Apache-2.0
 import { generationHead } from './projectWorkHead';
 import { v } from 'convex/values';
 import { paginationOptsValidator } from 'convex/server';

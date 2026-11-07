@@ -1,6 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 import { TestContract } from '../lane/TestContract';
 import { ErrorToast } from '../ui/Toast';
-// SPDX-License-Identifier: Apache-2.0
 import { useMemo, useState, type ReactNode } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { Button, Panel } from '../ui/primitives';

@@ -1,10 +1,10 @@
+// SPDX-License-Identifier: Apache-2.0
 import { decisionDate } from "../../web/src/decisions/model";
 import {
   useProjectedDecisions,
   type WorkIndexWorkspace,
 } from "../../web/src/hosted-work-index";
 import type { Id } from "../../convex/_generated/dataModel";
-// SPDX-License-Identifier: Apache-2.0
 // Local immutable owner-record fixtures plus one illustrative Intent. No backend or credentials.
 import { createRoot } from "react-dom/client";
 import { useState } from "react";

@@ -1,5 +1,5 @@
-import { readIgnoredStatus } from './ignored-status.js';
 // SPDX-License-Identifier: Apache-2.0
+import { readIgnoredStatus } from './ignored-status.js';
 import { loadArtifact } from './artifact.js';
 import { capture, normalizeRoot } from './snapshot.js';
 import { GraphQuery } from './graph-query.js';

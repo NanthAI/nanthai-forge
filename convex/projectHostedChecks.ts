@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 import { fixGate } from '../src/culprit-bisect';
 import { isMachineRunner } from '../src/hosted-machine-runner';
 import { cancelHostedCheck } from './projectHostedCheckCancel';
@@ -10,7 +11,6 @@ import {
 } from '../src/scoped-recheck-policy';
 import { semanticPayload } from '../src/semantic-payload';
 import { mergeSemanticMembers, semanticMember } from './projectSemanticContracts';
-// SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
 import { watchMacLease, macLeaseMs } from './projectHostedCheckLease';
 import { v } from 'convex/values';

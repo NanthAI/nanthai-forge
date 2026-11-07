@@ -1,5 +1,5 @@
-import { finishChild } from './finish-child.js';
 // SPDX-License-Identifier: Apache-2.0
+import { finishChild } from './finish-child.js';
 /** Advisory work window only; never limits admission or changes queue order. */
 export const QUEUE_AHEAD_LIMIT = 8;
 export type QueueAheadEntry = {

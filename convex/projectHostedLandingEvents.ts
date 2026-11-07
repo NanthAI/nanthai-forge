@@ -1,5 +1,5 @@
-import { retainQueueStatus } from './projectHostedQueueStatus';
 // SPDX-License-Identifier: Apache-2.0
+import { retainQueueStatus } from './projectHostedQueueStatus';
 import { makeFunctionReference } from 'convex/server';
 import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';

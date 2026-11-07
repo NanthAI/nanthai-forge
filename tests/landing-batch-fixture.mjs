@@ -1,6 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 import { actionsRunnerFixture } from './actions-runner-fixture.mjs';
 import { cleanupOwner } from './owner-cleanup.mjs';
-// SPDX-License-Identifier: Apache-2.0
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';

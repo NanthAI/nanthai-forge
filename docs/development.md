@@ -14,7 +14,7 @@ npm run format               # oxfmt --write; run before committing
 
 | Command | What it does |
 | --- | --- |
-| `npm run check` | Validates JSON, Markdown links, license inventory freshness and required root files; rejects machine-specific home paths and live-query arguments or `refreshKey` values driven by the clock (idle tabs must cost nothing); rejects network calls in `src/` and `scripts/` that bypass `networkFetch`, `networkTimeout` or `deadlineConvexClient` (scripts import them from `dist/`) |
+| `npm run check` | Validates JSON, Markdown links, license inventory freshness and required root files; rejects machine-specific home paths, JS/TS sources whose first line (after any shebang) is not the SPDX header, scripts/docs/workflows that print environment values or process listings, and live-query arguments or `refreshKey` values driven by the clock (idle tabs must cost nothing); rejects network calls in `src/` and `scripts/` that bypass `networkFetch`, `networkTimeout` or `deadlineConvexClient` (scripts import them from `dist/`) |
 | `npm run typecheck` | Native TypeScript for all four scopes, including web JSX |
 | `npm run typecheck:tsc` | Explicit tsc 5.9.3 fallback for all four projects |
 | `npm run build:core` | Native TypeScript JavaScript and published declarations |
@@ -740,6 +740,8 @@ reconstruction of historical Lane heads or a timing measurement.
 ## Public source paths
 
 The foundation check (`npm run check`, also part of verification) rejects machine-specific home paths in source text. Use relative paths, `~`, `<workspace>` or environment variables such as `$FORGE_OWNER` in documentation; derive executable paths from the environment or `import.meta.url`. It skips binary files and generated build/runtime directories. Diagnostics report only the file and line, never the matched contents.
+
+The same check requires `// SPDX-License-Identifier: Apache-2.0` (or `AGPL-3.0-only`) as the first line of every JS/TS source outside `convex/_generated/`, before any import; `node scripts/check-spdx.mjs --fix` moves or adds it. It also rejects scripts, workflows and docs that run or instruct `env`, `printenv`, `npx convex env list`, `pgrep -fl`, `ps -E` or print `process.env` values (`scripts/check-env-print.mjs`). Sentences that forbid those commands pass. Tests are out of scope because their fixtures are synthetic. A helper that prints names only carries a `forge-env-print: name-only` comment on or above the line.
 
 Synthetic test cases in `tests/*.test.mjs` or `tests/fixtures/` may exempt exactly one following line with a comment `// forge-path-fixture: synthetic` (`#` and HTML comment forms also work). This marker has no effect in application source or docs. Prefer constructing synthetic home paths from path segments so fixtures contain no literal machine paths.
 

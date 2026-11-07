@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 import { ForgeError } from './errors.js';
 import { PreparedWorkSource } from './native-work-preparation.js';
 import { editWork } from './work-edit.js';
@@ -9,7 +10,6 @@ import { readHostState } from './host-binding.js';
 import { pendingStatus } from './pending-status.js';
 import { decorateRepair } from './agent-repair-lineage.js';
 import { landingRepairNotices } from './landing-repair-notice.js';
-// SPDX-License-Identifier: Apache-2.0
 import { finishChild } from './agent-finish-journal.js';
 import { scopedPostAccept } from './post-accept-request.js';
 import { wakeGithubPush } from './github-auto-push.js';

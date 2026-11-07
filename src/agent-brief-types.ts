@@ -1,5 +1,5 @@
-import type { DecisionRecord, DecisionContext } from './decision-types.js';
 // SPDX-License-Identifier: Apache-2.0
+import type { DecisionRecord, DecisionContext } from './decision-types.js';
 import type { DeliveryHandoff } from './agent-handoff-types.js';
 import type { AutonomyPolicy } from './autonomy-policy.js';
 import { z } from 'zod';

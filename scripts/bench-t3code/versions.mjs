@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 // B1.5d version record (B2/B3/S6): everything that defines the system under test, read at
 // cell start and end. Any difference voids the cell; the driver also holds every cell of a
 // run to the first cell's record (the run pin), so cells compare like with like.

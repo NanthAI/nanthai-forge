@@ -1,8 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
 import { downloadObjectArchive } from './object-archive';
 import { countLabel } from './ui/count';
 import { ErrorToast } from './ui/Toast';
 import { projectIdentity, routeSearch, routeUrlState } from './shell/location';
-// SPDX-License-Identifier: Apache-2.0
 import ProjectHome from './ProjectHome';
 import { DetailPanel } from './DetailPanel';
 import { useEffect, useState } from 'react';

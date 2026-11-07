@@ -1,5 +1,5 @@
-import { noticeViewAlias, canonicalCandidateAction } from './candidate-names.js';
 // SPDX-License-Identifier: Apache-2.0
+import { noticeViewAlias, canonicalCandidateAction } from './candidate-names.js';
 import { readFileSync, existsSync, lstatSync } from 'node:fs';
 import { AgentWorkflow } from './agent-workflow.js';
 import { invariant } from './errors.js';

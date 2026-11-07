@@ -1,7 +1,7 @@
+// SPDX-License-Identifier: Apache-2.0
 import { ErrorToast } from '../ui/Toast';
 import { OwnerDecisionsContext, ownerDecisionLinks } from '../decisions/context';
 import { queueStatus, queueFacts } from '../cockpit/queue-model';
-// SPDX-License-Identifier: Apache-2.0
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useReadsAsleep } from '../live-reads';
 import { AcceptedToast, type Accepted } from '../ui/signals';

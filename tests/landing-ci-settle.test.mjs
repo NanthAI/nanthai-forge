@@ -1,6 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 import { landingPreviewRecords } from '../dist/landing-preview-records.js';
 import { previewTuple } from '../dist/integration-preview-inputs.js';
-// SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, statSync } from 'node:fs';

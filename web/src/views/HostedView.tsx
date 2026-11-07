@@ -1,6 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 import { HostedConversation } from '../lane/HostedConversation';
 import { ConversationScope } from '../lane/ConversationScope';
-// SPDX-License-Identifier: Apache-2.0
 import type { Id } from '../../../convex/_generated/dataModel';
 import { useWorkRecords, type WorkIndexWorkspace } from '../hosted-work-index';
 import type { HostedLaneSummary, HostedViewSummary } from '../../../src/work-hosted-summary';

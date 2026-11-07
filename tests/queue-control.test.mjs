@@ -1,5 +1,5 @@
-import { postAcceptMoves } from '../dist/post-accept-coverage.js';
 // SPDX-License-Identifier: Apache-2.0
+import { postAcceptMoves } from '../dist/post-accept-coverage.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, existsSync, rmSync } from 'node:fs';

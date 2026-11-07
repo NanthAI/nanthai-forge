@@ -1,6 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 import { networkFetch, networkTimeout } from './network-fetch.js';
 import { CUTOVER_CLI_VERSION } from './cutover-version.js';
-// SPDX-License-Identifier: Apache-2.0
 import { deliverMacCallback } from './hosted-mac-delivery.js';
 import { randomUUID } from 'node:crypto';
 import { lstatSync, readFileSync } from 'node:fs';

@@ -1,5 +1,5 @@
-import { childWorker } from './landing-worker-fixture.mjs';
 // SPDX-License-Identifier: Apache-2.0
+import { childWorker } from './landing-worker-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { writeFileSync, readFileSync, rmSync } from 'node:fs';

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 import { keptApplyEnvelope } from './hosted-apply-kept.js';
 import { cliBuildCommit } from './cli-installation.js';
 import { describeIssues } from './argument-errors.js';
@@ -9,7 +10,6 @@ import { landingsHostedSource } from './hosted-agent-landings.js';
 import { laneHistoryHostedSource } from './hosted-agent-lane-history.js';
 import { overlapAnswersHostedSource } from './hosted-agent-overlap-answers.js';
 import { hostedObservationContinuation } from './hosted-agent-finish-result.js';
-// SPDX-License-Identifier: Apache-2.0
 import {
   precheckPendingConflicts,
   pendingConflictLane,

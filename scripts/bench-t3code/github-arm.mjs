@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 // B1.5d GitHub arm: public NanthAI fork, merge queue (HEADGREEN, 10/10, squash),
 // required check `bench-check` = `bash .bench/ci.sh` on ubuntu-latest.
 // All GitHub reads are finite harness observations; nothing polls while idle.

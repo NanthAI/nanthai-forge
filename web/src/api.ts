@@ -1,6 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 import { useReadRetry } from './ui/read-retry';
 import { routeSearch } from './shell/location';
-// SPDX-License-Identifier: Apache-2.0
 import { useEffect, useState } from 'react';
 import type { FileRecord, ImportEdge, QueryResult, ReferenceEdge, SymbolNode } from '../../src/types';
 export type { FileRecord, ImportEdge, QueryResult, ReferenceEdge, SymbolNode };

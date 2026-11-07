@@ -1,6 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 import { decisionContext } from './decision-types.js';
 import { decisionRecords } from './decisions.js';
-// SPDX-License-Identifier: Apache-2.0
 import { CoordinationJournal } from './agent-coordination-journal.js';
 import { digest } from './hash.js';
 import { invariant } from './errors.js';

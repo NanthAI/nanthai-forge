@@ -1,5 +1,5 @@
-import { retainMembership } from './projectActorNames';
 // SPDX-License-Identifier: Apache-2.0
+import { retainMembership } from './projectActorNames';
 import { report } from './errors';
 import { v } from 'convex/values';
 import { internalMutation, type MutationCtx } from './server';

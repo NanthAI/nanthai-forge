@@ -1,7 +1,7 @@
+// SPDX-License-Identifier: Apache-2.0
 import { SourcePinContext } from './ObjectActions';
 import { HandlePrompt } from './HandlePrompt';
 import { routeUrlState } from './location';
-// SPDX-License-Identifier: Apache-2.0
 import { type ReactNode } from 'react';
 import { useQuery } from 'convex/react';
 import { ProjectSearch } from './ProjectSearch';

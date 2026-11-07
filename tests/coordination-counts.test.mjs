@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 import { activityFields } from '../dist/work-hosted-index.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';

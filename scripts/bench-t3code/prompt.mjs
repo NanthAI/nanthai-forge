@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 // B1.5d prompt: identical template in both arms except the SOURCE WORKFLOW paragraph.
 export const WORKFLOW_SLOT = '\u0000WORKFLOW\u0000';
 

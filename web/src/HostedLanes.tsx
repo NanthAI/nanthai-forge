@@ -1,5 +1,5 @@
-import { useAttention } from './shell/attention-context';
 // SPDX-License-Identifier: Apache-2.0
+import { useAttention } from './shell/attention-context';
 import { PagedList, ScaleGroups } from './cockpit/ScaleList';
 import { groupByInitiative, initiativeLinks, SCALE_AFTER } from './cockpit/scale-model';
 import type { PlanningItem } from '../../src/work-planning-types';

@@ -1,5 +1,5 @@
-import { allRecords } from './agent-lifecycle.js';
 // SPDX-License-Identifier: Apache-2.0
+import { allRecords } from './agent-lifecycle.js';
 import { stackLanding } from './agent-stack.js';
 import { composeStack } from './native-stack-compose.js';
 import { resolveDocsComposition } from './native-docs-resolve.js';

@@ -1,7 +1,7 @@
+// SPDX-License-Identifier: Apache-2.0
 import type { PendingStatus } from '../../../src/pending-status';
 import { serviceLastSeen } from '../cockpit/queue-model';
 import { ConnectionToast } from '../ui/Toast';
-// SPDX-License-Identifier: Apache-2.0
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Glyph } from '../ui/Glyph';
 import { AutoTag } from '../ui/signals';

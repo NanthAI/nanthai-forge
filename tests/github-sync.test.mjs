@@ -1,8 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
 import { cleanupOwner } from './owner-cleanup.mjs';
 import { until as untilWorker } from './landing-worker-fixture.mjs';
 import { drainPostAccept } from '../dist/post-accept-main.js';
 import { withQueueSlot } from '../dist/landing-queue.js';
-// SPDX-License-Identifier: Apache-2.0
 import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync, spawn } from 'node:child_process';

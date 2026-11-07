@@ -1,5 +1,5 @@
-import { compactProviderOutput } from './check-compact-output.js';
 // SPDX-License-Identifier: Apache-2.0
+import { compactProviderOutput } from './check-compact-output.js';
 import { spawn } from 'node:child_process';
 import { collectHostedOutput, type OutputSink } from './hosted-output-collector.js';
 import { actionsMappingMatches, type HostedActionsMapping } from './hosted-actions.js';

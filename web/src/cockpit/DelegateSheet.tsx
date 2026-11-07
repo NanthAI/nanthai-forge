@@ -1,6 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 import { useReadRetry } from '../ui/read-retry';
 import { ErrorToast } from '../ui/Toast';
-// SPDX-License-Identifier: Apache-2.0
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Glyph } from '../ui/Glyph';
 import { Avatar, Button, StatusPill } from '../ui/primitives';

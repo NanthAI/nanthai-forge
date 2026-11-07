@@ -1,5 +1,5 @@
-import { networkFailure } from './network-fetch.js';
 // SPDX-License-Identifier: Apache-2.0
+import { networkFailure } from './network-fetch.js';
 import { ConvexError } from 'convex/values';
 import { sourceAuthoritySchema, SourceAuthorityStaleError } from './hosted-source-authority.js';
 import { ForgeError } from './errors.js';

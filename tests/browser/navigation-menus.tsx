@@ -1,6 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 import { SourcePicker } from '../../web/src/shell/SourcePicker';
 import { currentSource, sourceOptions } from '../../web/src/shell/source-options';
-// SPDX-License-Identifier: Apache-2.0
 // Synthetic records, production detail views and primitives. No hosted credentials or writes.
 import { createRoot } from 'react-dom/client';
 import { useState } from 'react';

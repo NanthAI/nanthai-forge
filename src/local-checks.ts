@@ -1,5 +1,5 @@
-import { hostedPaths } from './hosted-paths.js';
 // SPDX-License-Identifier: Apache-2.0
+import { hostedPaths } from './hosted-paths.js';
 import { z } from 'zod';
 import { makeFunctionReference } from 'convex/server';
 import type { CoordinationTransport } from './coordination-client.js';

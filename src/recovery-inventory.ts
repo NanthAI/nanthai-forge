@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 import { portableCheckEvidence } from './check-compact-output.js';
 import { summarizeExecutions } from './check-report-summary.js';
 import { readSource } from './files.js';
@@ -8,7 +9,6 @@ import {
   isCheckLogPath,
   isCheckReportPath,
 } from './check-log-policy.js';
-// SPDX-License-Identifier: Apache-2.0
 import { existsSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { fingerprintPrivateFile, safeRelative } from './files.js';

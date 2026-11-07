@@ -1,5 +1,5 @@
-import { providerLogUrl } from './check-log-policy.js';
 // SPDX-License-Identifier: Apache-2.0
+import { providerLogUrl } from './check-log-policy.js';
 import { pendingActionsInfra } from './github-actions-infra.js';
 import { runWork } from './work-run.js';
 import { ForgeError } from './errors.js';

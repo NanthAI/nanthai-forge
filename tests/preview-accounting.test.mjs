@@ -1,5 +1,5 @@
-import { digest } from '../dist/hash.js';
 // SPDX-License-Identifier: Apache-2.0
+import { digest } from '../dist/hash.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, writeFileSync, readFileSync } from 'node:fs';

@@ -1,5 +1,5 @@
-import { semanticPayload } from '../src/semantic-payload';
 // SPDX-License-Identifier: Apache-2.0
+import { semanticPayload } from '../src/semantic-payload';
 import { requireSourceAuthority, type SourceAuthority } from '../src/hosted-source-authority';
 import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';

@@ -1,9 +1,9 @@
+// SPDX-License-Identifier: Apache-2.0
 import { wakeIntegrationPreview } from './integration-preview-wake.js';
 import { wakeLandingWorker } from './landing-worker-wake.js';
 import { captureTransactionFriction } from './friction-auto.js';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { indexPeerRecords } from './agent-peers-index.js';
-// SPDX-License-Identifier: Apache-2.0
 import { assertCurrentWorkFormat } from './work-format.js';
 import { workLocked, workLockedAsync, type WorkLockOptions } from './work-lock.js';
 import { mkdirBelow } from './mkdir-below.js';

@@ -1,6 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 import { deadlineConvexClient } from './network-convex-client.js';
 import { CUTOVER_CLI_VERSION } from './cutover-version.js';
-// SPDX-License-Identifier: Apache-2.0
 
 import { ExchangeDownloadCache } from './exchange-download-cache.js';
 import { SignedDownloadCache, type SignedObject } from './exchange-r2-read.js';

@@ -1,9 +1,9 @@
+// SPDX-License-Identifier: Apache-2.0
 import { landingPreviewRecords, hasPreviewSave } from './landing-preview-records.js';
 import { randomUUID } from 'node:crypto';
 import { localCost } from './check-cost.js';
 import { retainPreviewMeasurement } from './preview-accounting.js';
 import { publishedOverlap } from './agent-coordination-events.js';
-// SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
 import { join } from 'node:path';
 import { CoordinationJournal } from './agent-coordination-journal.js';

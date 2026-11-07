@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 import { AutoTag } from '../ui/signals';
 import { StatusPill } from '../ui/primitives';
 import { queueHref } from '../cockpit/queue-model';
@@ -15,7 +16,6 @@ import { Menu } from '../ui/Menu';
 import { Glyph } from '../ui/Glyph';
 import { routeUrlState } from '../shell/location';
 import { useAttention } from '../shell/attention-context';
-// SPDX-License-Identifier: Apache-2.0
 import type { LifecycleParts } from './LifecycleParts';
 import { hostedViewHref } from '../views/links';
 import { useCallback, useMemo, useState, type ReactNode } from 'react';

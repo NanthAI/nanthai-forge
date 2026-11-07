@@ -1,5 +1,5 @@
-import { networkFetch, networkTimeout } from './network-fetch.js';
 // SPDX-License-Identifier: Apache-2.0
+import { networkFetch, networkTimeout } from './network-fetch.js';
 import { ForgeError } from './errors.js';
 export type GithubRequest = <T>(path: string, method?: string, body?: unknown) => Promise<T>;
 function responseDiagnostics(headers?: Headers): string {

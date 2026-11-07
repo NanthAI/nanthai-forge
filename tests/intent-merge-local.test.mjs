@@ -1,5 +1,5 @@
-import { exportNativeWork } from '../dist/native-backup.js';
 // SPDX-License-Identifier: Apache-2.0
+import { exportNativeWork } from '../dist/native-backup.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';

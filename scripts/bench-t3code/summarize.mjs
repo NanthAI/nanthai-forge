@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// SPDX-License-Identifier: Apache-2.0
 // B1.5d summary across cells (PLAN.md "Analysis"): per arm and N, the median and range over
 // reps; per overlap class, landed-clean rate and added minutes (a task's time to main in the
 // cell minus its median time to main at N = 1 in the same arm). Every cell is listed, void

@@ -1,6 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 import { lstatSync } from 'node:fs';
 import { providerLogUrl } from './check-log-policy.js';
-// SPDX-License-Identifier: Apache-2.0
 import { join } from 'node:path';
 import { fingerprintPrivateFile } from './files.js';
 import { digest } from './hash.js';

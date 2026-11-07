@@ -1,5 +1,5 @@
-import type { ConflictContinuation } from './hosted-conflict-precheck.js';
 // SPDX-License-Identifier: Apache-2.0
+import type { ConflictContinuation } from './hosted-conflict-precheck.js';
 import { clientCacheRoot } from './root-paths.js';
 import { sourceTree } from './source-tree.js';
 import { hostedActionError } from './hosted-action-error.js';

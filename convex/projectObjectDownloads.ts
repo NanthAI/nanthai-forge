@@ -15,6 +15,7 @@ import { invariant } from '../src/errors';
 import { report } from './errors';
 import { hostedDownloadPageSize, type HostedDownloadDescriptor } from '../src/hosted-download-page';
 import { findObject } from './projectObjectFind';
+import { chargeAnonymousRead } from './abuseLimits';
 import { packRange, packHeaders } from '../src/object-pack-range';
 const rangeValue = v.optional(v.object({ offset: v.number(), total: v.number() }));
 
@@ -27,6 +28,7 @@ export async function readableProject(ctx: MutationCtx, projectId: Id<'hostedPro
     'PROJECT_UNAVAILABLE',
     'This Forge project is unavailable with the current account.',
   );
+  await chargeAnonymousRead(ctx, projectId);
   return project;
 }
 
@@ -35,8 +37,8 @@ export async function readableProject(ctx: MutationCtx, projectId: Id<'hostedPro
  * else (unknown, pending, another project's, or stored in Convex) is simply absent from the result,
  * so the caller learns nothing beyond what it can already list. A mutation so that results are never
  * cached across calls and a URL is always freshly signed. It writes nothing. Public projects sign
- * without sign-in. Without the R2 settings this fails closed.
- * TODO(owner): anonymous signing for public projects has no budget counter yet (docs/r2-storage-plan.md). */
+ * without sign-in, within the signed-out budget in convex/abuseLimits.ts. Without the R2 settings
+ * this fails closed. */
 export const signDownloads = mutation({
   args: { projectId: v.id('hostedProjects'), digests: v.array(v.string()) },
   returns: v.array(v.object({ digest: v.string(), size: v.number(), url: v.string(), range: rangeValue })),

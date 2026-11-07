@@ -1,7 +1,7 @@
+// SPDX-License-Identifier: Apache-2.0
 import { checkGateSchema } from './bet2-gate.js';
 import { checkFileSummarySchema } from './check-file-summary.js';
 import { semanticPlanSchema, semanticReportsSchema } from './intent-semantic-conflict.js';
-// SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
 import { githubActionsRunsOnSchema } from './github-actions-runner-label.js';
 import { checkLogsSchema } from './check-log-policy.js';

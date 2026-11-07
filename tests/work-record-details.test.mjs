@@ -1,5 +1,5 @@
-import { NativeSource } from '../dist/native-source.js';
 // SPDX-License-Identifier: Apache-2.0
+import { NativeSource } from '../dist/native-source.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';

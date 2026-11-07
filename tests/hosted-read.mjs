@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 // Test-only oracle: the full Work snapshot the removed `projectWorkActions.read`
 // action used to return. Production reads go through the Work index instead.
 import { moduleUrl } from './convex-module.mjs';

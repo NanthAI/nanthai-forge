@@ -1,5 +1,5 @@
-import { canonicalPayload } from '../dist/hosted-source-operation.js';
 // SPDX-License-Identifier: Apache-2.0
+import { canonicalPayload } from '../dist/hosted-source-operation.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';

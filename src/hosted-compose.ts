@@ -1,5 +1,5 @@
-import { batchComposeSchema, batchDroppedSchema } from './hosted-landing-batch.js';
 // SPDX-License-Identifier: Apache-2.0
+import { batchComposeSchema, batchDroppedSchema } from './hosted-landing-batch.js';
 import { z } from 'zod';
 import {
   saveObjectSchema as object,

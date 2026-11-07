@@ -1,5 +1,5 @@
-import { networkFetch, networkTimeout } from './network-fetch.js';
 // SPDX-License-Identifier: Apache-2.0
+import { networkFetch, networkTimeout } from './network-fetch.js';
 import { createHash } from 'node:crypto';
 import { Readable } from 'node:stream';
 import { z } from 'zod';

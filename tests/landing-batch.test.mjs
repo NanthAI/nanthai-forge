@@ -1,6 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 import { trainAccounting } from '../dist/train-accounting.js';
 import { readMakingOf } from '../dist/making-of-read.js';
-// SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { writeFileSync } from 'node:fs';

@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// SPDX-License-Identifier: Apache-2.0
 // B1.5d driver: runs the PLAN.md batches end to end and resumes by itself.
 //   node scripts/bench-t3code/drive.mjs [--dry] [--reps 1|2] [--only n3-r1] [--tasks K] [--unpinned]
 //                                       [--fake-version-change]   (dry only: proves the batch guard)

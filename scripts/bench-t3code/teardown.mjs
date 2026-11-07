@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// SPDX-License-Identifier: Apache-2.0
 // Remove what `setup` created, and only that (the manifest BENCH_ROOT/setup-manifest.json).
 //   scripts/bench-t3code/teardown --dry            list what would go
 //   scripts/bench-t3code/teardown --live [--keep deps,meta]

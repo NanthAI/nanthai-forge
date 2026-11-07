@@ -1,5 +1,5 @@
-import { ErrorToast } from './ui/Toast';
 // SPDX-License-Identifier: Apache-2.0
+import { ErrorToast } from './ui/Toast';
 import { DetailPanel } from './DetailPanel';
 import type { SourceRequest, ImportEdge, Page, ReferenceEdge, SymbolNode } from './api';
 import { PointField } from './PointField';

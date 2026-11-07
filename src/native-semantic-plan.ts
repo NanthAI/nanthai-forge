@@ -1,5 +1,5 @@
-import { landingPositions } from './landing-records-index.js';
 // SPDX-License-Identifier: Apache-2.0
+import { landingPositions } from './landing-records-index.js';
 import { latestTestContract } from './intent-test-contract.js';
 import { NativeSource } from './native-source.js';
 import type { WorkStore } from './work-store.js';

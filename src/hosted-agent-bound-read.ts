@@ -1,6 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 import { observedConflictRecovery } from './hosted-observed-conflict.js';
 import { enrichHostedQueueAhead } from './queue-ahead-hosted.js';
-// SPDX-License-Identifier: Apache-2.0
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { observeHostedSubmissions } from './hosted-agent-submission-wait.js';

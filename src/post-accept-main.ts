@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 import { workerPath } from './worker-install.js';
 import { detachedWorker } from './detached-worker-shutdown.js';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -7,7 +8,6 @@ import { readMainAuditState } from './post-accept-state.js';
 import { MainAuditWatchdog } from './post-accept-watchdog.js';
 import { selectPostAccept } from './post-accept-edit.js';
 import { observePostAcceptRecords } from './post-accept-records.js';
-// SPDX-License-Identifier: Apache-2.0
 import { postAcceptMoves } from './post-accept-coverage.js';
 import { WorkService } from './work.js';
 import { reuseMainCheck } from './landing-check-reuse.js';

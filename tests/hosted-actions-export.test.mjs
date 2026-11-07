@@ -1,5 +1,5 @@
-import { randomUUID } from 'node:crypto';
 // SPDX-License-Identifier: Apache-2.0
+import { randomUUID } from 'node:crypto';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile, writeFile } from 'node:fs/promises';

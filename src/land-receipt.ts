@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 import { nativeFirstAttemptLandRate } from './first-attempt-native.js';
 import { setImmediate as yieldTurn } from 'node:timers/promises';
 import { landingMatch, prepareLandingRecords } from './landing-records-index.js';
@@ -9,7 +10,6 @@ import { landingAdmission } from './landing-admission.js';
 import { resolveLandEntry } from './land-request-identity.js';
 import { readLandingProgress } from './land-progress.js';
 import { phaseSummary } from './land-phases.js';
-// SPDX-License-Identifier: Apache-2.0
 import { landSubmissions } from './landing-submission-read.js';
 import { submissionLine, queuedOutcome } from './landing-submission.js';
 import type { LandEntry } from './land-journal.js';

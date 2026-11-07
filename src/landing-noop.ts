@@ -1,7 +1,7 @@
+// SPDX-License-Identifier: Apache-2.0
 import { landingPositions, prepareLandingRecords } from './landing-records-index.js';
 import { setImmediate as yieldTurn } from 'node:timers/promises';
 import { assertLandingWorkerActive } from './landing-worker-context.js';
-// SPDX-License-Identifier: Apache-2.0
 import { optimisticLanding } from './autonomy-policy.js';
 import { readPolicy } from './work-autonomy.js';
 import { completeAccepted } from './agent-lifecycle.js';

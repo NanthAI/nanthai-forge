@@ -1,6 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 import { deadlineConvexClient } from './network-convex-client.js';
 import { exchangeConvexFetch } from './exchange-convex-fetch.js';
-// SPDX-License-Identifier: Apache-2.0
 import { makeFunctionReference } from 'convex/server';
 import { ConvexError } from 'convex/values';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';

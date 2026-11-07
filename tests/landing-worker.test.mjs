@@ -1,5 +1,5 @@
-import { watchOwnerPresence } from '../dist/presence-worker.js';
 // SPDX-License-Identifier: Apache-2.0
+import { watchOwnerPresence } from '../dist/presence-worker.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { once } from 'node:events';

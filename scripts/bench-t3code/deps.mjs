@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 // B1.5d shared dependency reuse: one filtered install per lockfile under BENCH_ROOT/deps,
 // reused by every agent checkout without a per-task `vp install`.
 // Per checkout: root node_modules/.pnpm (the immutable package store) is a symlink to the

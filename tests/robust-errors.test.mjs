@@ -1,6 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 import { landingWorkerStates } from '../dist/landing-worker-status.js';
 import { WorkStore } from '../dist/work-store.js';
-// SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { once } from 'node:events';

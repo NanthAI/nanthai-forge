@@ -1,5 +1,5 @@
-import { networkFetch, networkTimeout } from './network-fetch.js';
 // SPDX-License-Identifier: Apache-2.0
+import { networkFetch, networkTimeout } from './network-fetch.js';
 import { sourceLanguage } from './languages.js';
 import { ignoreLayer, ignoredBy, ignoreNames } from './source-ignore.js';
 import { posix } from 'node:path';

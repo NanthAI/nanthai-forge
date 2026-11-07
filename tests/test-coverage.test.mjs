@@ -1,5 +1,5 @@
-import { compactCheckText } from '../dist/check-compact-output.js';
 // SPDX-License-Identifier: Apache-2.0
+import { compactCheckText } from '../dist/check-compact-output.js';
 import test from 'node:test';
 import ts from 'typescript';
 import assert from 'node:assert/strict';

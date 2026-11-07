@@ -1,5 +1,5 @@
-import { ErrorToast } from '../ui/Toast';
 // SPDX-License-Identifier: Apache-2.0
+import { ErrorToast } from '../ui/Toast';
 import { useState } from 'react';
 import { Button } from '../ui/primitives';
 export function CopyCommand({ command }: { command: string }) {

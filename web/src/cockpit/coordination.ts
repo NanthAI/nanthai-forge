@@ -1,6 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 import { useOverlapAnswers } from './overlap-answers';
 import { useToast } from '../ui/Toast';
-// SPDX-License-Identifier: Apache-2.0
 import { createContext, useContext, useRef } from 'react';
 import { PendingWrite } from '../pending-write';
 import { activityAt, collapseSessions } from '../../../src/presence';

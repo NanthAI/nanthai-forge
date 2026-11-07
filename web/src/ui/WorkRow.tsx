@@ -1,5 +1,5 @@
-import { queueHref } from '../cockpit/queue-model';
 // SPDX-License-Identifier: Apache-2.0
+import { queueHref } from '../cockpit/queue-model';
 import { Fragment, type MouseEvent, type ReactNode } from 'react';
 import { Glyph, type GlyphName } from './Glyph';
 import type { LaneFact } from './lane-facts';

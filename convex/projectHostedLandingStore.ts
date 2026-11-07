@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 export { landingAttemptRow, loadLandingAttempt } from './projectHostedLandingAttemptRead';
 import { landingAttemptRow, loadLandingAttempt, pinsFor } from './projectHostedLandingAttemptRead';
 import { holdsLandingOrder, landingPriorityState } from './projectHostedLandingOrder';
@@ -9,7 +10,6 @@ import { hostedLandingProgressAt } from '../src/hosted-landing-stall';
 import { landingAlarmPatch } from './projectHostedLandingStallWake';
 import { releaseAdmissionWaiters } from './projectHostedLandingAdmissionWake';
 import { cohortHeld, decidingSince, releaseCohortHolds } from './projectHostedLandingCohortHold';
-// SPDX-License-Identifier: Apache-2.0
 import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
 import {

@@ -1,7 +1,7 @@
+// SPDX-License-Identifier: Apache-2.0
 import type { PaginationResult } from 'convex/server';
 import { inventoryPage } from './inventoryPage';
 import { action } from './cliServer';
-// SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
 import { paginationOptsValidator, paginationResultValidator } from 'convex/server';
 import { query, internalQuery, internalMutation, type QueryCtx, type MutationCtx } from './cliServer';

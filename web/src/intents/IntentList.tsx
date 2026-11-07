@@ -1,5 +1,5 @@
-import { ErrorToast } from '../ui/Toast';
 // SPDX-License-Identifier: Apache-2.0
+import { ErrorToast } from '../ui/Toast';
 import { PagedList, ScaleGroups, ScaleStatusCounts } from '../cockpit/ScaleList';
 import { groupByInitiative, SCALE_AFTER, type InitiativeLinks } from '../cockpit/scale-model';
 import { useUnsavedInput } from '../ui/NavigationGuard';

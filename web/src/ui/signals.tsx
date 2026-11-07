@@ -1,5 +1,5 @@
-import { useToast } from './Toast';
 // SPDX-License-Identifier: Apache-2.0
+import { useToast } from './Toast';
 import { useEffect, useId, useState, type ReactNode } from 'react';
 import { Glyph } from './Glyph';
 

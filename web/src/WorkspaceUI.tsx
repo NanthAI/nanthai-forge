@@ -1,5 +1,5 @@
-import { routeSearch, routeUrlState } from './shell/location';
 // SPDX-License-Identifier: Apache-2.0
+import { routeSearch, routeUrlState } from './shell/location';
 import { Suspense, useEffect, useState, type ReactNode } from 'react';
 import { AppLoader } from './ui/AppLoader';
 import { requestNavigation } from './ui/navigation';

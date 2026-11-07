@@ -1,9 +1,9 @@
+// SPDX-License-Identifier: Apache-2.0
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { withQueueSlot } from './landing-queue.js';
 import { mkdirBelow } from './mkdir-below.js';
 import { writeRecoveryState } from './recovery-state.js';
-// SPDX-License-Identifier: Apache-2.0
 import { indexedReceiptPeers, retainIndexedPeers, recordIndexedOverlapSave } from './agent-receipt-peers.js';
 import { scheduleIntegrationPreview } from './integration-preview-auto.js';
 import { frictionReceipt } from './friction-auto.js';

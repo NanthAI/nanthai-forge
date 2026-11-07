@@ -1,7 +1,7 @@
+// SPDX-License-Identifier: Apache-2.0
 import { checkQuarantineResult } from './check-quarantine.js';
 import { appendControllerSummary } from './check-controller-summary.js';
 import { discardFullCheckReports } from './check-compact-output.js';
-// SPDX-License-Identifier: Apache-2.0
 import { actionsCheckRuntime } from './check-backend.js';
 import { wakeLandingWorker } from './landing-worker-wake.js';
 import { retainCheckCoverage } from './check-coverage.js';

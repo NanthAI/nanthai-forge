@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 // B1.5d outside-load record (S7/S8), identical in both arms: Mac load and memory every 30 s,
 // the GitHub API budget before and after, and clock offsets to GitHub and Convex.
 import { appendFileSync } from 'node:fs';

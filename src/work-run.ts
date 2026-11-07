@@ -1,5 +1,5 @@
-import { semanticCheckCommand } from './semantic-check-command.js';
 // SPDX-License-Identifier: Apache-2.0
+import { semanticCheckCommand } from './semantic-check-command.js';
 import { nativeQuarantine } from './check-native-quarantine.js';
 import { runDetails } from './work-detail-store.js';
 import { cleanLocalCheckLogs } from './check-log-cleanup.js';

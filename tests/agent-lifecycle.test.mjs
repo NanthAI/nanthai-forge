@@ -1,6 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 import { trustAgents } from './autonomy-fixture.mjs';
 import { scratchDir } from './helpers.mjs';
-// SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { writeFileSync } from 'node:fs';

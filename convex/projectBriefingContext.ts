@@ -1,6 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 import { hostedBriefDecisions } from './projectHostedDecisionsStore';
 import { sourceAuthority } from '../src/hosted-source-authority';
-// SPDX-License-Identifier: Apache-2.0
 import { planningBriefIntent } from '../src/work-planning-lifecycle';
 import type { PlanningItem } from '../src/work-planning-types';
 import type { QueryCtx } from './_generated/server';

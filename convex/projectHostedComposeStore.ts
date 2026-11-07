@@ -1,8 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
 import { batchComposeSchema, batchDroppedSchema } from '../src/hosted-landing-batch';
 import { semanticPayload } from '../src/semantic-payload';
 import { semanticPlanSchema } from '../src/intent-semantic-conflict';
 import { notifyDesiredCompose } from './projectHostedLandingDesiredWake';
-// SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
 import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';

@@ -1,8 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
 import { readHostState } from './host-binding.js';
 import { serverRecoveryAuthority } from './recovery-authority.js';
 import { retryWorkEdit } from './work-edit.js';
 import { waitPushAudit } from './push-audit-wait.js';
-// SPDX-License-Identifier: Apache-2.0
 import { workProgress } from './work-progress.js';
 import { requestPushAudit } from './pre-push-audit.js';
 import { drainPostAccept } from './post-accept-main.js';

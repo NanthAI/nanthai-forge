@@ -1,5 +1,5 @@
-import { feedbackError } from './InlineError';
 // SPDX-License-Identifier: Apache-2.0
+import { feedbackError } from './InlineError';
 export type ToastInput = {
   message: string;
   accepted?: boolean;

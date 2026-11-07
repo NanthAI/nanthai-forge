@@ -1,5 +1,5 @@
-import { preparedRecordCommit } from './work-prepared-commit.js';
 // SPDX-License-Identifier: Apache-2.0
+import { preparedRecordCommit } from './work-prepared-commit.js';
 import { existsSync, lstatSync, realpathSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { digest } from './hash.js';

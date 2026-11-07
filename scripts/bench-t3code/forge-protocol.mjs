@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 // Dry-agent protocol driver. Only public replies select recovery commands and roots.
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';

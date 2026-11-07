@@ -1,7 +1,7 @@
+// SPDX-License-Identifier: Apache-2.0
 import { formatIgnoredStatus, type IgnoredStatus } from './ignored-status.js';
 import { formatMetricsHeadline } from './self-metrics-format.js';
 import { hostedMirrorStatusText, type HostedMirrorStatus } from './hosted-github-mirror-status.js';
-// SPDX-License-Identifier: Apache-2.0
 import { submissionLine } from './landing-submission.js';
 import type { PendingStatus } from './pending-status.js';
 const pin = (head: string | null) => head?.slice(0, 12) ?? 'unknown';

@@ -1,5 +1,5 @@
-import { observerProjectionBudget } from './observer-projection-budget.mjs';
 // SPDX-License-Identifier: Apache-2.0
+import { observerProjectionBudget } from './observer-projection-budget.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';

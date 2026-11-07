@@ -1,5 +1,5 @@
-import { decisionContext } from './decision-types.js';
 // SPDX-License-Identifier: Apache-2.0
+import { decisionContext } from './decision-types.js';
 import { latestHandoff } from './agent-handoff-types.js';
 import { invariant } from './errors.js';
 import { overlappingPaths } from './coordination-paths.js';

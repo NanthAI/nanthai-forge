@@ -1,5 +1,5 @@
-import { postAcceptMoves } from './post-accept-coverage.js';
 // SPDX-License-Identifier: Apache-2.0
+import { postAcceptMoves } from './post-accept-coverage.js';
 import { previewMeasurements } from './preview-accounting.js';
 import { PeersCache } from './agent-peers-cache.js';
 import { pageSize } from './work-records.js';

@@ -1,6 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 import { sourceRetryFailureMessage } from '../src/hosted-source-retry';
 import { sourceProgress } from './projectSourceProgress';
-// SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
 import { sourceWorkerPlan } from '../src/convex-source-provider';
 import { wakeLifecycleSave } from './projectHostedLifecycleCascade';

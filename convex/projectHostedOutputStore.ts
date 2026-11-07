@@ -1,6 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 import { isMachineRunner } from '../src/hosted-machine-runner';
 import { retainLogExpiry } from './projectCheckLogRetention';
-// SPDX-License-Identifier: Apache-2.0
 import type { QueryCtx, MutationCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
 import { writableHostedCheck, type LoadedHostedCheck } from './projectHostedCheckStore';

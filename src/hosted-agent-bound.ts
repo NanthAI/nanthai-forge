@@ -1,6 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 import { finishRetryContinuation } from './hosted-agent-finish-result.js';
 import { finishRetryReasonSchema } from './hosted-landing.js';
-// SPDX-License-Identifier: Apache-2.0
 import { boundLandingStatus, watchBoundLanding } from './hosted-agent-bound-read.js';
 import { automaticFinishId, indexedFinish, nativeFinishReplay } from './native-finish-replay.js';
 import { existsSync, mkdirSync, readFileSync, readdirSync } from 'node:fs';

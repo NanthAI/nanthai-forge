@@ -1,5 +1,5 @@
-import { exhaustedWorkRetries } from './friction-retry.js';
 // SPDX-License-Identifier: Apache-2.0
+import { exhaustedWorkRetries } from './friction-retry.js';
 import { ForgeError } from './errors.js';
 import { workLockWaitMs } from './work-lock.js';
 

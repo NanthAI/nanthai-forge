@@ -1,6 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 import { AutoTag } from '../ui/signals';
 import { queueHref } from './queue-model';
-// SPDX-License-Identifier: Apache-2.0
 import { Glyph, type GlyphName } from '../ui/Glyph';
 import { Avatar, DiffStat, Dot, StatusPill } from '../ui/primitives';
 import { Rail } from '../ui/Rail';

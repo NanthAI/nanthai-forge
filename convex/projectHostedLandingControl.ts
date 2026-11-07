@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 import { passedAlone } from '../src/hosted-landing-suspect';
 import { describeCheckFailure } from './projectHostedCheckFailure';
 import { CHECK_FAILED_NEXT } from '../src/check-failure-detail';
@@ -10,7 +11,6 @@ import {
   semanticBudgetMessage,
 } from '../src/intent-semantic-conflict';
 import { retainCheckProgress } from './projectHostedLandingCheckProgress';
-// SPDX-License-Identifier: Apache-2.0
 import type { MutationCtx } from './_generated/server';
 import {
   landingQueue,

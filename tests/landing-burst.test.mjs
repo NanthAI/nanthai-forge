@@ -1,5 +1,5 @@
-import { actionsRunnerFixture } from './actions-runner-fixture.mjs';
 // SPDX-License-Identifier: Apache-2.0
+import { actionsRunnerFixture } from './actions-runner-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';

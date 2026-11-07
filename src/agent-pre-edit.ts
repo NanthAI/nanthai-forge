@@ -1,5 +1,5 @@
-import type { MetricObservation } from './self-metrics-observations.js';
 // SPDX-License-Identifier: Apache-2.0
+import type { MetricObservation } from './self-metrics-observations.js';
 import { join } from 'node:path';
 import { realpathSync } from 'node:fs';
 import { mkdirBelow } from './mkdir-below.js';

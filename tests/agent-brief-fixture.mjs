@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 import { briefInputSchema } from '../dist/agent-brief-types.js';
 import { briefingContext } from '../dist/agent-brief-context.js';
 import { renderBriefing } from '../dist/agent-brief-render.js';

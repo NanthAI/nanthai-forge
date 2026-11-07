@@ -1,6 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 import { readOverlapInbox } from './overlap-inbox.js';
 import { readEditContext } from './agent-edit-context.js';
-// SPDX-License-Identifier: Apache-2.0
 import { lstatSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { peersFileStamp } from './agent-peers-cache.js';

@@ -1,5 +1,5 @@
-import { sourceTree } from '../dist/source-tree.js';
 // SPDX-License-Identifier: Apache-2.0
+import { sourceTree } from '../dist/source-tree.js';
 // Incident replay (2026-10-30/31, Lanes 259ea29d and a2dced54): a checkpoint's
 // source job finished after the client returned, so the checkout marker kept the
 // old head. Every later save captured against that head and the server refused

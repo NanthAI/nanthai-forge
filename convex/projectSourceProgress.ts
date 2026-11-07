@@ -1,5 +1,5 @@
-import { sourceRetryFailureMessage } from '../src/hosted-source-retry';
 // SPDX-License-Identifier: Apache-2.0
+import { sourceRetryFailureMessage } from '../src/hosted-source-retry';
 import type { QueryCtx, MutationCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import { loadSourceJob, type SourceJob } from './projectSourceJobs';

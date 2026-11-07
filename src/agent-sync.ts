@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 import { hasConflictMarkers } from './conflict-markers.js';
 import { composeStack } from './native-stack-compose.js';
 import {
@@ -8,7 +9,6 @@ import {
 import { stackSyncTarget } from './agent-stack.js';
 import { workLockWaitMs } from './work-lock.js';
 import { preparedRecordCommit } from './work-prepared-commit.js';
-// SPDX-License-Identifier: Apache-2.0
 import { existsSync, lstatSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import {

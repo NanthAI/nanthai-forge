@@ -1,5 +1,5 @@
-import { formatDecisionContext } from './decision-brief.js';
 // SPDX-License-Identifier: Apache-2.0
+import { formatDecisionContext } from './decision-brief.js';
 import { legacyPolicy } from './autonomy-policy.js';
 import type { BriefInput, BriefContext, Briefing } from './agent-brief-types.js';
 export const COPY_TEXT_CAP = 1200,

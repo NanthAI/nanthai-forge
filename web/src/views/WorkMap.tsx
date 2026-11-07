@@ -1,5 +1,5 @@
-import { countLabel } from '../ui/count';
 // SPDX-License-Identifier: Apache-2.0
+import { countLabel } from '../ui/count';
 import { useEffect, useRef, useState } from 'react';
 import { Panel } from '../ui/primitives';
 import { Tooltip } from '../ui/signals';

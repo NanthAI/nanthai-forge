@@ -1,5 +1,5 @@
-import { hostedAgentHelp, hostedAgentHelpMarkdown } from './hosted-agent-help.js';
 // SPDX-License-Identifier: Apache-2.0
+import { hostedAgentHelp, hostedAgentHelpMarkdown } from './hosted-agent-help.js';
 import { readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { invariant } from './errors.js';

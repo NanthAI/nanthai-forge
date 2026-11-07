@@ -1,5 +1,5 @@
-import { effectivePolicy } from '../dist/autonomy-policy.js';
 // SPDX-License-Identifier: Apache-2.0
+import { effectivePolicy } from '../dist/autonomy-policy.js';
 import test from 'node:test';
 import { randomUUID } from 'node:crypto';
 import assert from 'node:assert/strict';

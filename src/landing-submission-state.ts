@@ -1,5 +1,5 @@
-import type { LandingDiagnosisReport } from './landing-diagnosis.js';
 // SPDX-License-Identifier: Apache-2.0
+import type { LandingDiagnosisReport } from './landing-diagnosis.js';
 export type SubmissionState = 'pending' | 'terminal-failed' | 'landed' | 'superseded';
 export type PendingReason =
   | 'queued'

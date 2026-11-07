@@ -1,6 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 import { orderLandingEntries } from './landing-batch-order.js';
 import { join } from 'node:path';
-// SPDX-License-Identifier: Apache-2.0
 import { PeersSource } from './agent-peers-source.js';
 import { PeersCache } from './agent-peers-cache.js';
 import { landingPositions } from './landing-records-index.js';

@@ -1,5 +1,5 @@
-import { postAcceptMoves } from './post-accept-coverage.js';
 // SPDX-License-Identifier: Apache-2.0
+import { postAcceptMoves } from './post-accept-coverage.js';
 import { retainedRunCost, type CheckCost } from './check-cost.js';
 import type { CheckRun, ChannelMove, WorkView } from './work-types.js';
 import type { LandingBatch, LandingEntry } from './landing-batch-types.js';

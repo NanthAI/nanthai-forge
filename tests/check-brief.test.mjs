@@ -131,3 +131,18 @@ test('CLI exits 0 on a valid brief, 1 on a gap, 2 on misuse, and never echoes br
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('unsafe-command: a brief that tells an agent to print env values or process listings fails', () => {
+  // Replays the 2026-10-22 leak: a process listing printed a dev key.
+  for (const line of [
+    'Find the stuck worker with `pgrep -fl convex` and report it.',
+    'Check the deployment with `npx convex env list | grep KEY`.',
+    'Run `env` to confirm the variables are set.',
+    'Debug with `ps -E -p PID`.',
+  ])
+    assert.deepEqual(briefFindings(`${brief()}\n${line}`), ['unsafe-command']);
+  // Forbidding the commands is the safety block itself, so it passes.
+  assert.deepEqual(briefFindings(brief(), 'Do not run `env`, `printenv`, `pgrep -fl` or `ps -E`.'), []);
+  // Common-rules text counts too.
+  assert.deepEqual(briefFindings(brief(), 'Inspect workers with `pgrep -fl node`.'), ['unsafe-command']);
+});

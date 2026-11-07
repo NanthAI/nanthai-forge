@@ -1,8 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
 import { routeUrlState } from './shell/location';
 import { ErrorToast } from './ui/Toast';
 import { useDestination } from './WorkspaceUI';
 import { requestNavigation } from './ui/navigation';
-// SPDX-License-Identifier: Apache-2.0
 import './legacy-app.css';
 import './code.css';
 import { CodeFileTree } from './CodeFileTree';

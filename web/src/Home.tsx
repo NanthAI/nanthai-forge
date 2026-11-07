@@ -1,6 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 import { countLabel } from './ui/count';
 import { ErrorToast } from './ui/Toast';
-// SPDX-License-Identifier: Apache-2.0
 import { DetailPanel } from './DetailPanel';
 import { Children, createContext, isValidElement, useContext } from 'react';
 import type { ReactNode } from 'react';

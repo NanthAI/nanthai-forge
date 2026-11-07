@@ -1,6 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 import { providerLogUrl } from '../../../src/check-log-policy';
 import type { CheckRun } from '../../../src/work-types';
-// SPDX-License-Identifier: Apache-2.0
 import { useState, type ReactNode } from 'react';
 import { Button, ExactRecord, StatusPill } from '../ui/primitives';
 import { RunLog } from './RunLog';

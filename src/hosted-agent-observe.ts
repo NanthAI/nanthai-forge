@@ -1,5 +1,5 @@
-import { isNetworkPending } from './network-continuation.js';
 // SPDX-License-Identifier: Apache-2.0
+import { isNetworkPending } from './network-continuation.js';
 import { retryHostedObservation } from './hosted-observation-retry.js';
 import { deadlineConvexSubscription } from './network-convex-client.js';
 import { makeFunctionReference, type FunctionReference } from 'convex/server';

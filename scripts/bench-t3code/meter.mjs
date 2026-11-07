@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 // B1.5d Convex meter: project-attributed usage during a cell, from the provider log stream
 // (`npx convex logs`). It must never under-report quietly (S3): it is proven live before the
 // cell (one own execution seen), and any coverage gap, early stream close or schema problem

@@ -1,10 +1,10 @@
+// SPDX-License-Identifier: Apache-2.0
 import { withLandingAttempt, recordAttemptLock } from './landing-attempt-timing.js';
 import { withWorkLockOptions, observeWorkLocks, type WorkLockSpan } from './work-lock.js';
 import { recordLandingWaits } from './landing-wait-record.js';
 import { observeLandingQueue } from './landing-records.js';
 import { landingWorkerSignal } from './landing-worker-context.js';
 import { observeWorkProgress } from './work-progress.js';
-// SPDX-License-Identifier: Apache-2.0
 import { withQueueSlot } from './landing-queue.js';
 import { batchDirectory, batchEdit, composeBatch, landingShape, selectBatch } from './landing-batch-store.js';
 import type { WorkService } from './work.js';

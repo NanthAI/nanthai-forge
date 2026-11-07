@@ -1,10 +1,10 @@
+// SPDX-License-Identifier: Apache-2.0
 import { isMachineRunner } from './hosted-machine-runner.js';
 import { semanticCheckCommand } from './semantic-check-command.js';
 import { ContractTimingReader } from './contract-test-timings.js';
 import { semanticTests } from './intent-semantic-conflict.js';
 import { localMacLogFiles } from './check-local-log-files.js';
 import { compactProviderOutput } from './check-compact-output.js';
-// SPDX-License-Identifier: Apache-2.0
 import { deliverMacCallback } from './hosted-mac-delivery.js';
 import { createReadStream } from 'node:fs';
 import { captureArtifacts } from './work-artifacts.js';

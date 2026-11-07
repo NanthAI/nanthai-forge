@@ -1,5 +1,5 @@
-import { checkLogsCli } from './check-logs-cli.js';
 // SPDX-License-Identifier: Apache-2.0
+import { checkLogsCli } from './check-logs-cli.js';
 import { makeFunctionReference } from 'convex/server';
 import { resolve } from 'node:path';
 import { createHash } from 'node:crypto';

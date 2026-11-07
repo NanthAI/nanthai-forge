@@ -1,7 +1,7 @@
+// SPDX-License-Identifier: Apache-2.0
 import { networkFetch, networkTimeout } from './network-fetch.js';
 import { checkoutReadStream, checkoutWriteStream } from './checkout-io-streams.js';
 import { checkoutIo } from './checkout-io.js';
-// SPDX-License-Identifier: Apache-2.0
 import { writeFile, stat, rm, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { Readable, Transform } from 'node:stream';

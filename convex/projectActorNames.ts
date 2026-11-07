@@ -1,5 +1,5 @@
-import { hostedPaths } from '../src/hosted-paths';
 // SPDX-License-Identifier: Apache-2.0
+import { hostedPaths } from '../src/hosted-paths';
 import { v } from 'convex/values';
 import { internalMutation, internalQuery, type QueryCtx, type MutationCtx } from './server';
 import type { Doc, Id } from './_generated/dataModel';

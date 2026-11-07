@@ -1,5 +1,5 @@
-import type { Conversation } from './agent-edit-context.js';
 // SPDX-License-Identifier: Apache-2.0
+import type { Conversation } from './agent-edit-context.js';
 import { randomUUID } from 'node:crypto';
 import type { z } from 'zod';
 import {

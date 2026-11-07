@@ -1,5 +1,5 @@
-import { scheduleAbandonedBatchReselection } from './projectHostedBatchAbandon';
 // SPDX-License-Identifier: Apache-2.0
+import { scheduleAbandonedBatchReselection } from './projectHostedBatchAbandon';
 import { completeIntentWhenLanesDone } from './projectHostedIntentCompletion';
 import { cancelAbandonedLaneLandings } from './projectHostedLifecycleCancel';
 import { landingQueue } from './projectHostedLandingEvents';

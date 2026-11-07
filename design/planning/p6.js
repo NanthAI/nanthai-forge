@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 // Mockup-only: theme toggle. ?theme=dark|light, remembered in localStorage.
 (function () {
   var q = new URLSearchParams(location.search).get('theme');

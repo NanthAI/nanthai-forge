@@ -1,5 +1,5 @@
-import { WorkService } from '../dist/work.js';
 // SPDX-License-Identifier: Apache-2.0
+import { WorkService } from '../dist/work.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';

@@ -1,10 +1,10 @@
+// SPDX-License-Identifier: Apache-2.0
 import { HOSTED_FINISH_COMPOSE_WATCH_WINDOW_MS } from '../src/hosted-finish';
 import { candidateOwnerInputs } from './projectHostedProvenance';
 import { activeProject } from './projectAuthority';
 import { loadLanding, loadLandingAttempt } from './projectHostedLandingStore';
 import { predecessorStatus } from './projectHostedLandingPipeline';
 import type { BatchMemberDetail } from '../src/hosted-batch-diagnosis';
-// SPDX-License-Identifier: Apache-2.0
 import type { MutationCtx } from './_generated/server';
 import { beginHostedOperation } from './projectHostedOperations';
 import { composeRow, loadCompose, hostedComposeInput, type ComposeState } from './projectHostedComposeStore';

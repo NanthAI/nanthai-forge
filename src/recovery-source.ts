@@ -1,8 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
 import { optionalCheckPath, portableCheckPath, runLogRecord } from './check-log-policy.js';
 import { foldHostedRecovery } from './recovery-hosted.js';
 import type { HostedRecoveryPage, RecoveryTable } from './recovery-hosted-protocol.js';
 import type { ContentPin } from './native-exchange.js';
-// SPDX-License-Identifier: Apache-2.0
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { restoreNativeExchangeStage } from './native-backup.js';

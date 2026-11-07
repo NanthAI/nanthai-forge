@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 import { semanticCompositionPlan } from './native-semantic-plan.js';
 import { prepareLandingRecords } from './landing-records-index.js';
 import { editWork } from './work-edit.js';
@@ -7,7 +8,6 @@ import { editLandingRecords, type LandingRecordSelection } from './landing-recor
 import { previewLanding, previewExclusionMessage } from './integration-preview-landing.js';
 import { assertLandingWorkerActive } from './landing-worker-context.js';
 import { interruptStaleLandingInputs } from './landing-stale.js';
-// SPDX-License-Identifier: Apache-2.0
 import { landingConflictPeers } from './landing-conflict-peers.js';
 import { composeLandingSource } from './landing-compose-source.js';
 import { join } from 'node:path';

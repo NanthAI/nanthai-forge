@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 import { readQueueStatus, queueAwareLandingState } from './projectHostedQueueStatus';
 import { finishPendingForReader } from '../src/hosted-finish';
 import {
@@ -11,7 +12,6 @@ import { scheduleLandingAlarm } from './projectHostedLandingStallWake';
 import { readWouldConflict } from './projectHostedLandingWouldConflict';
 import { latestStallAlert } from './projectHostedLandingStallAlert';
 import { reuseHostedLanding } from './projectHostedLandingIdentity';
-// SPDX-License-Identifier: Apache-2.0
 import { startLandingAdmission } from './projectHostedLandingAdmission';
 import { preQueueCheck } from '../src/hosted-landing-admission';
 import { v } from 'convex/values';

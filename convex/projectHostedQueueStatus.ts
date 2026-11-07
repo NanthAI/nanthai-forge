@@ -1,7 +1,7 @@
+// SPDX-License-Identifier: Apache-2.0
 import { finishReadCheck } from './projectFinishReadPins';
 import { hostedCheckTerminal } from '../src/hosted-check';
 import { hostedLandingStall } from '../src/hosted-landing-stall';
-// SPDX-License-Identifier: Apache-2.0
 import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import type { HostedLandingState } from '../src/hosted-landing';

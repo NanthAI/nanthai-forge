@@ -1,8 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
 import { withWorkProgressReporter } from './work-progress.js';
 import { landProgressReporter } from './land-progress-live.js';
 import { currentChannelHead } from './agent-defaults.js';
 import type { LandEntry } from './land-journal.js';
-// SPDX-License-Identifier: Apache-2.0
 import { ForgeError } from './errors.js';
 import { workProgress } from './work-progress.js';
 import { diagnosticCause } from './landing-observation.js';

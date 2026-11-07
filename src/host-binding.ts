@@ -1,5 +1,5 @@
-import { hostIndexProgressSchema } from './work-index-build-progress.js';
 // SPDX-License-Identifier: Apache-2.0
+import { hostIndexProgressSchema } from './work-index-build-progress.js';
 import {
   statSync,
   existsSync,

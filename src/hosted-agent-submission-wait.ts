@@ -1,5 +1,5 @@
-import { isNetworkPending } from './network-continuation.js';
 // SPDX-License-Identifier: Apache-2.0
+import { isNetworkPending } from './network-continuation.js';
 import { observedConflictRecovery } from './hosted-observed-conflict.js';
 import { makeFunctionReference } from 'convex/server';
 import { z } from 'zod';

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 import { readTestContract } from '../lane/test-contract-api';
 import type { IntentTestContract } from '../../../src/intent-test-contract';
 import { planningVersionLabel } from '../../../src/work-planning-lifecycle';
@@ -5,7 +6,6 @@ import { usePlanningActors } from '../planning/usePlanningActors';
 import type { AttributedPlanningItem } from '../planning/attribution';
 import { usePageCritical } from '../ui/page-critical';
 import { useAttention } from '../shell/attention-context';
-// SPDX-License-Identifier: Apache-2.0
 import type { ReactNode } from 'react';
 import type { LifecycleParts } from '../lane/LifecycleParts';
 import { initiativeLinks } from '../cockpit/scale-model';

@@ -1,5 +1,5 @@
-import { materializeHostedOverlapLifecycle } from './projectHostedOverlapStore';
 // SPDX-License-Identifier: Apache-2.0
+import { materializeHostedOverlapLifecycle } from './projectHostedOverlapStore';
 import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
 import { invariant } from '../src/errors';

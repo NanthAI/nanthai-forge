@@ -1,5 +1,5 @@
-import { networkFetch, networkTimeout } from './network-fetch.js';
 // SPDX-License-Identifier: Apache-2.0
+import { networkFetch, networkTimeout } from './network-fetch.js';
 import { ActionsApiError, type ActionsApi } from './github-actions-api.js';
 import { actionsAccessMessage, type HostedActionsMapping } from './hosted-actions.js';
 import type { HostedCheckRun } from './hosted-check.js';

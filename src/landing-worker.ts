@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 import type { FinishAction } from './agent-workflow-schema.js';
 import type { AgentWorkflow } from './agent-workflow.js';
 import { land } from './land.js';
@@ -8,7 +9,6 @@ import { observeLandingQueue } from './landing-records.js';
 import { watchLandingStalls } from './landing-stall-watch.js';
 import { resumeLegacyLand } from './landing-worker-journals.js';
 import { wakeLandingWorker } from './landing-worker-wake.js';
-// SPDX-License-Identifier: Apache-2.0
 import { randomUUID } from 'node:crypto';
 import { statSync } from 'node:fs';
 import { join } from 'node:path';

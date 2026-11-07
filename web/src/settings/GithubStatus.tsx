@@ -1,7 +1,7 @@
+// SPDX-License-Identifier: Apache-2.0
 import './github-status.css';
 import { useNow } from '../shell/StatusBar';
 import { age } from '../ui/status';
-// SPDX-License-Identifier: Apache-2.0
 import type { GithubSyncBinding, GithubAutoPush } from '../../../src/github-sync-types';
 import { CopyCommand } from './CopyCommand';
 import { ExactRecord, Panel } from '../ui/primitives';

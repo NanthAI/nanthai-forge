@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 import { recoverLocalApply } from './hosted-apply-recovery.js';
 import { retainSyncHandoff, clearSyncHandoff } from './hosted-sync-handoff.js';
 import { guideHostedSync, resolveHostedAgent } from './hosted-agent-resolution.js';
@@ -6,7 +7,6 @@ import { hostedRecordSchema } from './hosted-records.js';
 import { executeHostedFinish } from './hosted-agent-finish.js';
 import { executeHostedMetrics } from './hosted-agent-metrics.js';
 import { isMachineRunner, machineRunnerDescription } from './hosted-machine-runner.js';
-// SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
 import { githubActionsRunsOnSchema, githubActionsRunnerDescription } from './github-actions-runner-label.js';
 import { makeFunctionReference } from 'convex/server';

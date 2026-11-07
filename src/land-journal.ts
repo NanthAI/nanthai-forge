@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 import { readLandingJournals, observeLandingJournals } from './landing-journal-reads.js';
 import { observeWorkProgress } from './work-progress.js';
 import { reuseLandSelection } from './land-request-identity.js';
@@ -9,7 +10,6 @@ import {
 import { landingPins, type LandingPins } from './landing-environment.js';
 import { wakeLandingWorker } from './landing-worker-wake.js';
 import { landFrictionCounts } from './friction-auto.js';
-// SPDX-License-Identifier: Apache-2.0
 import { savedOverlapPlan, highOverlap, orderOverlapGroups } from './agent-overlap-plan.js';
 import { closeSync, existsSync, fsyncSync, openSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';

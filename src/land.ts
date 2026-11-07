@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 import { resolveLandEntry } from './land-request-identity.js';
 import { prepareLandingRecords } from './landing-records-index.js';
 import { wakeLandingWorker } from './landing-worker-wake.js';
@@ -5,7 +6,6 @@ import { waitForLand, retrySingleInfrastructure, recoverLandInfrastructure } fro
 import { landingWorkerSignal, landingController } from './landing-worker-context.js';
 import { staleLandingResult } from './landing-stale.js';
 import { landingDiagnosis } from './landing-diagnosis.js';
-// SPDX-License-Identifier: Apache-2.0
 import { observeLandReceipt, readLandingHandle } from './land-receipt.js';
 import { landingAdmission } from './landing-admission.js';
 import { existsSync } from 'node:fs';

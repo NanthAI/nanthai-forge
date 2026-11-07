@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 import { invariant } from '../src/errors';
 import {
   finishReadAttempt,
@@ -7,7 +8,6 @@ import {
   finishReadAheadQueue,
 } from './projectFinishReadPins';
 import type { LandingOrder } from './projectHostedLandingOrder';
-// SPDX-License-Identifier: Apache-2.0
 import type { QueryCtx, MutationCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import { type HostedLandingState } from '../src/hosted-landing';

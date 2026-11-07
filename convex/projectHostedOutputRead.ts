@@ -1,5 +1,5 @@
-import { isMachineRunner } from '../src/hosted-machine-runner';
 // SPDX-License-Identifier: Apache-2.0
+import { isMachineRunner } from '../src/hosted-machine-runner';
 import { v } from 'convex/values';
 import { query, mutation, type QueryCtx, type MutationCtx } from './cliServer';
 import type { Id } from './_generated/dataModel';
@@ -17,6 +17,7 @@ import { canonicalPayload } from '../src/hosted-source-operation';
 import { presignGet, r2Config } from './r2';
 import { invariant } from '../src/errors';
 import { report } from './errors';
+import { chargeAnonymousRead } from './abuseLimits';
 
 const identity = { projectId: v.id('hostedProjects'), runId: v.string() };
 export async function outputReader(ctx: QueryCtx | MutationCtx, projectId: Id<'hostedProjects'>) {
@@ -136,6 +137,7 @@ export const download = mutation({
   handler: async (ctx, input) => {
     try {
       await outputReader(ctx, input.projectId);
+      await chargeAnonymousRead(ctx, input.projectId);
       await loadHostedCheck(ctx, input);
       const object = await downloadableOutput(ctx, input);
       return canonicalPayload({
@@ -218,6 +220,7 @@ export const downloads = mutation({
   handler: async (ctx, input) => {
     try {
       await outputReader(ctx, input.projectId);
+      await chargeAnonymousRead(ctx, input.projectId);
       await loadHostedCheck(ctx, input);
       invariant(
         input.entries.length > 0 && input.entries.length <= 100,

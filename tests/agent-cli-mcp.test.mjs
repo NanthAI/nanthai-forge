@@ -1,5 +1,5 @@
-import { cleanupOwner } from './owner-cleanup.mjs';
 // SPDX-License-Identifier: Apache-2.0
+import { cleanupOwner } from './owner-cleanup.mjs';
 import { readWorkBytes } from './work-store-fixture.mjs';
 import test from 'node:test';
 import { callTool, mcpTestEnvironment, requestOptions } from './mcp-runtime.mjs';

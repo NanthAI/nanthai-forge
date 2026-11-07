@@ -1,6 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 import { useInventory, useInterest } from './useInventory';
 import { ErrorToast } from './ui/Toast';
-// SPDX-License-Identifier: Apache-2.0
 import { DetailPanel } from './DetailPanel';
 import { useRef, useState } from 'react';
 import { SignInButton, useUser } from '@clerk/react';

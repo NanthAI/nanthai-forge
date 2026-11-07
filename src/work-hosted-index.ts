@@ -1,6 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 import { planningSearchEntries } from './planning-search.js';
 import { latestTestContract } from './intent-test-contract.js';
-// SPDX-License-Identifier: Apache-2.0
 import { handoffSummary, latestHandoff } from './agent-handoff-types.js';
 import { sourceTreeEntries } from './source-tree-index.js';
 import { stateParentEntries } from './source-state-parent-index.js';

@@ -1,5 +1,5 @@
-import { loadLandingAttempt } from './projectHostedLandingAttemptRead';
 // SPDX-License-Identifier: Apache-2.0
+import { loadLandingAttempt } from './projectHostedLandingAttemptRead';
 import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import { isFinishReadReader } from './projectFinishReadReader';

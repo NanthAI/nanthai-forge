@@ -1,10 +1,10 @@
+// SPDX-License-Identifier: Apache-2.0
 import { checkoutHostedLane } from './hosted-lane-checkout.js';
 import { hostedLaneCheckoutSchema } from './hosted-lane-checkout-marker.js';
 import { ConvexLaneTransport } from './hosted-lane-transport.js';
 
 import { checkoutHostedMain } from './hosted-main-checkout.js';
 import { mainExpectationSchema } from './hosted-main.js';
-// SPDX-License-Identifier: Apache-2.0
 import { rememberSourceAuthorityError } from './source-authority-client.js';
 import { nativeOwner } from './native-source.js';
 import { hostedActionError } from './hosted-action-error.js';

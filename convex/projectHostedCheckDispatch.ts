@@ -1,6 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 import { assertHostedCheckActive } from './projectHostedCheckStore';
 import { isMachineRunner } from '../src/hosted-machine-runner';
-// SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
 import { watchMacLease, expireMacLease, macLeaseMs } from './projectHostedCheckLease';
 import type { MutationCtx } from './_generated/server';

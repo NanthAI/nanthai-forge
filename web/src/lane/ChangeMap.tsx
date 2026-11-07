@@ -1,7 +1,7 @@
+// SPDX-License-Identifier: Apache-2.0
 import { readBrowserSource } from '../browser-source';
 import { useReadRetry } from '../ui/read-retry';
 import { ErrorToast } from '../ui/Toast';
-// SPDX-License-Identifier: Apache-2.0
 import { useEffect, useState, useRef } from 'react';
 import { useConvex } from 'convex/react';
 import type { ChangeMapData } from '../../../src/change-map';

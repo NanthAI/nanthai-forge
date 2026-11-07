@@ -1,5 +1,5 @@
-import { runCost, intentAccounting, type AccountingContext } from './train-accounting.js';
 // SPDX-License-Identifier: Apache-2.0
+import { runCost, intentAccounting, type AccountingContext } from './train-accounting.js';
 import { z } from 'zod';
 import { PRESENCE } from './presence.js';
 import type { WorkActor } from './work-actor-types.js';

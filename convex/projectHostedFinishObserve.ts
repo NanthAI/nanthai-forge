@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 import { finishReadReader } from './projectFinishReadReader';
 import { readWouldConflict } from './projectHostedLandingWouldConflict';
 import { readQueueStatus, queueAwareLandingState } from './projectHostedQueueStatus';
@@ -6,7 +7,6 @@ import { hostedQueueAheadSelection } from './projectHostedQueueAhead';
 import { desiredLanding } from './projectHostedLandingDesiredWake';
 import { hostedLandingStateSchema } from '../src/hosted-landing';
 import { landingAlias } from './projectHostedLandingIdentity';
-// SPDX-License-Identifier: Apache-2.0
 import { finishPendingForReader } from '../src/hosted-finish';
 import { ConvexError, v } from 'convex/values';
 import { query, type QueryCtx } from './cliServer';

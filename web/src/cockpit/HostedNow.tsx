@@ -1,8 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
 import { NowSubmodules } from '../Submodules';
 import { OwnerDecisionsPointer } from '../decisions/OwnerDecisionsPanel';
 import { usePageCritical } from '../ui/page-critical';
 import { ErrorToast } from '../ui/Toast';
-// SPDX-License-Identifier: Apache-2.0
 import { WorkReferenceContext, workReferences } from './WorkReferences';
 import { initiativeLinks } from '../cockpit/scale-model';
 import type { PlanningItem } from '../../../src/work-planning-types';

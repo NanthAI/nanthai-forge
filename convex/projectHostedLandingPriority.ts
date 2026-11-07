@@ -1,5 +1,5 @@
-import { retainQueueStatus } from './projectHostedQueueStatus';
 // SPDX-License-Identifier: Apache-2.0
+import { retainQueueStatus } from './projectHostedQueueStatus';
 import { v } from 'convex/values';
 import { mutation } from './cliServer';
 import { acceptanceActor } from './projectAutonomy';

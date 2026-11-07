@@ -1,5 +1,5 @@
-import { isMachineRunner } from './hosted-machine-runner.js';
 // SPDX-License-Identifier: Apache-2.0
+import { isMachineRunner } from './hosted-machine-runner.js';
 import { randomUUID } from 'node:crypto';
 import { hostedCheckTerminal, type HostedCheckRun } from './hosted-check.js';
 import { signMacHeartbeat } from './hosted-mac-lease.js';

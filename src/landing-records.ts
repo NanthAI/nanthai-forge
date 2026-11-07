@@ -1,9 +1,9 @@
+// SPDX-License-Identifier: Apache-2.0
 import { editRecordProjection } from './work-record-edit.js';
 import type { z } from 'zod';
 import { landingPositions, prepareLandingRecords } from './landing-records-index.js';
 import { finishChild } from './finish-child.js';
 import { invariant } from './errors.js';
-// SPDX-License-Identifier: Apache-2.0
 import { readFragment } from './work-records.js';
 import { batchPrefixSchema, landingEntrySchema, landingBatchSchema } from './landing-batch-types.js';
 import type { WorkStore } from './work-store.js';

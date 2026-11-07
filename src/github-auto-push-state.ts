@@ -1,5 +1,5 @@
-import { postAcceptMoves } from './post-accept-coverage.js';
 // SPDX-License-Identifier: Apache-2.0
+import { postAcceptMoves } from './post-accept-coverage.js';
 import { effectivePolicy } from './autonomy-policy.js';
 import type { WorkData } from './work-types.js';
 export const latestMain = (data: WorkData) =>

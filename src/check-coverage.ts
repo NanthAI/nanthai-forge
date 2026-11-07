@@ -1,6 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 import { checkEvidenceLines } from './check-compact-output.js';
 import { postAcceptMoves } from './post-accept-coverage.js';
-// SPDX-License-Identifier: Apache-2.0
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { coverageArtifact, type CoverageInput } from '../scripts/test-coverage.mjs';

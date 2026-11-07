@@ -1,5 +1,5 @@
-import { ErrorToast } from './ui/Toast';
 // SPDX-License-Identifier: Apache-2.0
+import { ErrorToast } from './ui/Toast';
 import { useDestination } from './WorkspaceUI';
 import { DetailPanel } from './DetailPanel';
 import { useEffect, useRef, useState } from 'react';

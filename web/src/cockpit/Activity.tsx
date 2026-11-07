@@ -1,5 +1,5 @@
-import { AutoTag } from '../ui/signals';
 // SPDX-License-Identifier: Apache-2.0
+import { AutoTag } from '../ui/signals';
 import { useState } from 'react';
 import { Glyph } from '../ui/Glyph';
 import { activityBursts } from './activity-groups';

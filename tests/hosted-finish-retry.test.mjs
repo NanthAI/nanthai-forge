@@ -1,5 +1,5 @@
-import { ForgeError } from '../dist/errors.js';
 // SPDX-License-Identifier: Apache-2.0
+import { ForgeError } from '../dist/errors.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';

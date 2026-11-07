@@ -1,5 +1,5 @@
-import { recordRoots } from './work-record-reachability.js';
 // SPDX-License-Identifier: Apache-2.0
+import { recordRoots } from './work-record-reachability.js';
 import { recordCollectionFence } from './work-record-staging.js';
 import { existsSync, lstatSync, readdirSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';

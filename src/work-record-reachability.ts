@@ -1,6 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 import { hostname } from 'node:os';
 import { processAlive } from './local-process.js';
-// SPDX-License-Identifier: Apache-2.0
 import { existsSync, lstatSync, readdirSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { readSource } from './files.js';

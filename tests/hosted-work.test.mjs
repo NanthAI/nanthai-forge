@@ -1,6 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 import { effectivePolicy } from '../dist/autonomy-policy.js';
 import { workArchiveMetadata } from '../dist/work-archive-metadata.js';
-// SPDX-License-Identifier: Apache-2.0
 import { currentOwnerDisplay } from './project-exchange-fixture.mjs';
 import { readWorkBytes } from './work-store-fixture.mjs';
 import test from 'node:test';

@@ -1,6 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 import { landingDiagnosis } from './landing-diagnosis.js';
 import { pendingActionsInfra } from './github-actions-infra.js';
-// SPDX-License-Identifier: Apache-2.0
 import type { LandingPins } from './landing-environment.js';
 import { prepareOptimistic } from './optimistic-landing.js';
 import { batchEligible, enqueueLanding } from './landing-batch-store.js';

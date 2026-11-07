@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 // B1.5d coordination section (R3 folded in, PLAN.md): per task, how the arm handled other
 // agents' work on the same code. Forge: overlap notices raised/delivered/acknowledged (metric
 // 4), conflict episodes, failed checks, extra land attempts. GitHub: conflict episodes, rejected

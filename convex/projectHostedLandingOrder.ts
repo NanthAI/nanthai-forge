@@ -1,5 +1,5 @@
-import { readQueueStatus } from './projectHostedQueueStatus';
 // SPDX-License-Identifier: Apache-2.0
+import { readQueueStatus } from './projectHostedQueueStatus';
 import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { LandingChannel, LandingRow } from './projectHostedLandingStore';
 import type { HostedLandingState } from '../src/hosted-landing';

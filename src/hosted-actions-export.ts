@@ -1,6 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 import { gitlinkCommit } from './gitlink.js';
 import { semanticCheckCommand } from './semantic-check-command.js';
-// SPDX-License-Identifier: Apache-2.0
 import { createReadStream } from 'node:fs';
 import { mkdtemp, mkdir, readFile, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';

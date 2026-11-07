@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 import { getFunctionName, makeFunctionReference } from 'convex/server';
 import { moduleUrl } from './convex-module.mjs';
 import { state } from './hosted-fixture.mjs';

@@ -1,6 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 import { InfoTip } from '../ui/signals';
 import { ErrorToast } from '../ui/Toast';
-// SPDX-License-Identifier: Apache-2.0
 import { useRef, useState } from 'react';
 import { policyPreset, type AutonomyPolicy, type PolicyWrite } from '../../../src/autonomy-policy';
 import { Button, Panel, Segmented, Switch } from '../ui/primitives';

@@ -1,5 +1,5 @@
-import { readSubmodulePointers } from './gitlink.js';
 // SPDX-License-Identifier: Apache-2.0
+import { readSubmodulePointers } from './gitlink.js';
 import { readChangeMap } from './change-map.js';
 import { sourceFilePage } from './source-file-page.js';
 import type { SourceAnchor } from './work-intent-types.js';

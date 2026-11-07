@@ -1,10 +1,10 @@
+// SPDX-License-Identifier: Apache-2.0
 import {
   conflictMarkerScan,
   scanConflictMarkers,
   conflictMarkersFound,
   type ConflictMarkerScan,
 } from './conflict-markers.js';
-// SPDX-License-Identifier: Apache-2.0
 import type { WorkerObject } from './hosted-source-worker-format.js';
 import type { SourceStepCursor, StepTransport } from './hosted-source-step.js';
 import type { VerifyCursor } from './hosted-source-step-verify.js';

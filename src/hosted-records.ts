@@ -1,8 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
 import { needsFixSchema } from './culprit-bisect.js';
 import { semanticPayload } from './semantic-payload.js';
 import { semanticPlanSchema } from './intent-semantic-conflict.js';
 import { intentTestContractSchema } from './intent-test-contract.js';
-// SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
 import { canonicalPayload } from './hosted-source-operation.js';
 import { digest } from './portable-hash.js';

@@ -1,5 +1,5 @@
-import { ErrorToast } from './ui/Toast';
 // SPDX-License-Identifier: Apache-2.0
+import { ErrorToast } from './ui/Toast';
 import { DetailPanel } from './DetailPanel';
 import { useCallback, useEffect, useState } from 'react';
 import { useConvex, usePaginatedQuery } from 'convex/react';

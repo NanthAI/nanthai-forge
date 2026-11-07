@@ -1,6 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 import { useNativeValidationToasts } from './validation-toasts';
 import { retryReads } from './read-retry';
-// SPDX-License-Identifier: Apache-2.0
 import {
   Children,
   createContext,

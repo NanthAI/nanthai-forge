@@ -1,6 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 import { ErrorToast } from '../ui/Toast';
 import { useDraft } from './draft';
-// SPDX-License-Identifier: Apache-2.0
 import { useUnsavedInput } from '../ui/NavigationGuard';
 import { useId, useState, type ReactNode } from 'react';
 import {

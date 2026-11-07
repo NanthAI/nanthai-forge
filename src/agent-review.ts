@@ -1,6 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 import { readSemanticConflicts } from './native-semantic-plan.js';
 import { latestTestContract, candidateTestContract } from './intent-test-contract.js';
-// SPDX-License-Identifier: Apache-2.0
 import { handoffSummary } from './agent-handoff-types.js';
 import { readHandoff } from './agent-handoff.js';
 import { existsSync, lstatSync, realpathSync } from 'node:fs';

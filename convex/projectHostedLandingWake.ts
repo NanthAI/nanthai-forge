@@ -1,5 +1,5 @@
-import { withQueueStatusBatch } from './projectHostedQueueStatusWrite';
 // SPDX-License-Identifier: Apache-2.0
+import { withQueueStatusBatch } from './projectHostedQueueStatusWrite';
 import { checkWakeRow, scheduleCheckWake } from './projectHostedLandingCheckWake';
 export { notifyLandingCheck } from './projectHostedLandingCheckWake';
 import type { MutationCtx } from './_generated/server';

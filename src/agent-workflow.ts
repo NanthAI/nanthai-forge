@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 import { cliBuildCommit } from './cli-installation.js';
 import { rememberCaller } from './agent-caller-overlaps.js';
 import { readAgentTurn } from './agent-edit-context.js';
@@ -43,7 +44,6 @@ import { undoOptimisticRevert } from './optimistic-undo.js';
 import { CoordinationJournal } from './agent-coordination-journal.js';
 import { agentPeers, RECEIPT_PEER_LIMIT } from './agent-peers.js';
 import { cancelLandingEntry } from './landing-batch-cancel.js';
-// SPDX-License-Identifier: Apache-2.0
 import { retryWorkPhase } from './work-retry.js';
 import { withWorkProgress } from './work-progress.js';
 import { withWorkLockOptions } from './work-lock.js';

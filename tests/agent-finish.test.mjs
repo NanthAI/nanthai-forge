@@ -1,7 +1,7 @@
+// SPDX-License-Identifier: Apache-2.0
 import { cleanupOwner, waitForOwnerChildren } from './owner-cleanup.mjs';
 import { processAlive, processStartTime } from '../dist/local-process.js';
 import { trustAgents } from './autonomy-fixture.mjs';
-// SPDX-License-Identifier: Apache-2.0
 import { readWorkBytes } from './work-store-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';

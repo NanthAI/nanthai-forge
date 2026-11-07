@@ -9,6 +9,7 @@ import { invariant } from '../src/errors';
 import { report } from './errors';
 import { r2Config, r2Key, presignPut, type R2Config } from './r2';
 import { findObject, objectRow } from './projectObjectFind';
+import { chargeStorage, checkObjectSize } from './abuseLimits';
 const pin = v.object({ digest: v.string(), size: v.number() });
 const valid = (digest: string, size: number) =>
   /^[0-9a-f]{64}$/.test(digest) && Number.isSafeInteger(size) && size >= 0;
@@ -74,6 +75,7 @@ async function prepareObject(
     );
     const created = !row;
     if (!row) {
+      checkObjectSize(size);
       const id = await ctx.db.insert('projectObjects', {
         projectId,
         digest,
@@ -128,7 +130,15 @@ async function prepareObject(
 export const prepare = mutation({
   args: { projectId: v.id('hostedProjects'), ...pin.fields },
   returns: preparedObject,
-  handler: (ctx, args) => prepareObject(ctx, args),
+  handler: async (ctx, args) => {
+    const prepared = await prepareObject(ctx, args);
+    try {
+      if (prepared.created) await chargeStorage(ctx, (await ctx.db.get(args.projectId))!, [args.size]);
+      return prepared;
+    } catch (error) {
+      return report(error);
+    }
+  },
 });
 export const prepareBatch = mutation({
   args: { projectId: v.id('hostedProjects'), objects: v.array(pin) },
@@ -147,8 +157,15 @@ export const prepareBatch = mutation({
       // Every project writes R2, including legacy projects created before R2 was the only path.
       const r2 = r2Config();
       if (!project.r2StorageUsed) await ctx.db.patch(projectId, { r2StorageUsed: true });
-      const result = [];
-      for (const pin of objects) result.push(await prepareObject(ctx, { projectId, ...pin }, true, r2));
+      const result = [],
+        reserved: number[] = [];
+      for (const pin of objects) {
+        const prepared = await prepareObject(ctx, { projectId, ...pin }, true, r2);
+        if (prepared.created) reserved.push(pin.size);
+        result.push(prepared);
+      }
+      // A batch over quota throws here, so none of its reservations are kept.
+      await chargeStorage(ctx, project, reserved);
       return result;
     } catch (error) {
       return report(error);
