@@ -1,9 +1,12 @@
 #!/usr/bin/env node
 // B1.5d nforge relay, in its own process so nothing the harness does (observe, abandon,
-// deleting a 29k-file Lane folder) can delay an agent's call. Agents' `nforge` posts here:
-// macOS sandboxes cannot exec setuid /bin/ps, which the CLI needs for its process identity.
-// The relay runs the real CLI only when the call's cwd and ROOT are inside the calling
-// agent's own workspace (one token per agent), with that agent's PATH and toolchain env.
+// deleting a 29k-file Lane folder) can delay an agent's call. Agents' `nforge` posts here.
+// It has two jobs: (1) a trusted call log for scoring (operations, coordination notices and
+// answers, contamination ids), written outside the agent sandbox so the agent cannot edit it;
+// (2) workspace confinement: it runs the real CLI only when the call's cwd and ROOT are inside
+// the calling agent's own workspace (one token per agent), with that agent's PATH and env.
+// nforge itself now runs inside macOS sandboxes (5909318b); kept so the Phase 6 exit bench
+// matches the B1.5d setup (owner decision 2026-11-07, Issue 98280932, option b).
 // Usage (harness only): node broker.mjs CLI CALL_LOG -> prints {"port","admin"} then serves.
 import { execFile } from 'node:child_process';
 import { appendFileSync } from 'node:fs';

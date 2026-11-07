@@ -14,17 +14,17 @@ export const BOARD_RETENTION_MS = 14 * day;
 export const BOARD_PROJECT_LIVE_CAP = 5_000;
 export const BOARD_LANE_WINDOW = { ms: 10 * minute, posts: 10 };
 export const BOARD_MEMBER_DAY_POSTS = 300;
-/** PLACEHOLDERS, PENDING OWNER APPROVAL (abuse controls, 2026-11-05): conservative starting
- * values. Change them only with the owner's numbers. Accounts younger than `establishedAfterDays`
+/** Abuse controls, owner-approved 2026-11-06 (kept as proposed 2026-11-05). Change them only
+ * with the owner's numbers. Accounts younger than `establishedAfterDays`
  * get the `new` caps. A linked GitHub login cannot raise the tier yet: accounts have no such field. */
 export const BOARD_ACCOUNT_CAPS = {
   establishedAfterDays: 7,
   new: { posts: 100, bytes: 24_000 },
   established: { posts: 1_000, bytes: 240_000 },
 } as const;
-/** PENDING OWNER APPROVAL: metadata without bodies kept this long for abuse investigation. */
+/** Owner-approved 2026-11-06: metadata without bodies kept this long for abuse investigation. */
 export const BOARD_EVIDENCE_MS = 90 * day;
-/** PLACEHOLDERS, PENDING OWNER APPROVAL: alert when one account posts into this many projects in
+/** Owner-approved 2026-11-06: alert when one account posts into this many projects in
  * a day, or starts board use in this many projects younger than a day. */
 export const BOARD_ALERTS = { projectsPerDay: 5, newProjectsPerDay: 3 } as const;
 /** Expired rows deleted per post: small batches, no cron. */
