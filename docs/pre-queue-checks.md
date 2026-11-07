@@ -124,7 +124,10 @@ Each tier answers a different question. None depends on a particular CI provider
    that runs them (`trim:false`), the estimate and the number of tests left for this
    pre-queue tier. The local tier **may leave out** any hub, name-watch or farther
    consumer of the change, plus the near-full set that preflight already hands to
-   the runner. It never decides acceptance.
+   the runner. It never decides acceptance. A docs-only change parses no import
+   graph: the local tier runs only the tests that read a changed document, beside
+   the static checks. Those readers are extra local coverage: the docs scope of
+   tiers 2 and 3 runs the documents checks and no test file.
 2. **Pre-queue Lane check (project runner, any CI): the complete consumer set,
    off the builder's machine.** It runs the project's configured check on the
    project's runner. Forge's `verify` selects either the full suite or every
