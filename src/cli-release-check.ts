@@ -79,7 +79,6 @@ export async function checkCliRelease(
     nextRetryAt: now() + (pending ? CLI_RELEASE_SIGNATURE_RETRY_MS : cliCanaryBackoffMs(attempts)),
     ...(pending ? { signaturePending: true } : {}),
     ...(same?.alerted ? { alerted: true } : {}),
-    ...(same?.noticed && same.reason === verdict.reason ? { noticed: true } : {}),
   };
   writeCliCanaryRefusal(installation, record);
   if (!pending && !record.alerted) {

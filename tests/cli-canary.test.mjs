@@ -29,6 +29,7 @@ import { cliRollback } from '../dist/cli-rollback.js';
 import {
   activeCliCanaryRefusal,
   cliCanaryBackoffMs,
+  cliCanaryClearlySlower,
   CLI_CANARY_DEPLOY_RETRY_MS,
   CLI_CANARY_DEPLOY_WINDOW_MS,
   cliCanaryPreSwitch,
@@ -45,7 +46,7 @@ const hash = path => createHash('sha256').update(readFileSync(path)).digest('hex
 
 /** An entry that behaves like a CLI build: `mode` (a file in the build) says how it fails. */
 const fakeEntry = `
-import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 const build = new URL('..', import.meta.url).pathname.replace(/\\/$/, '');
 const installation = join(build, '..', '..');
@@ -59,7 +60,13 @@ writeFileSync(join(installation, 'canary-env-' + head.slice(0, 8) + '.json'), JS
 // A build that tried to write the user's hook files would hit this private HOME instead.
 mkdirSync(join(process.env.HOME, '.claude'), { recursive: true });
 writeFileSync(join(process.env.HOME, '.claude', 'settings.json'), '{"tripwire":true}');
-const [kind, target] = readFileSync(join(build, 'mode'), 'utf8').trim().split(':');
+const [kind, target, delay] = readFileSync(join(build, 'mode'), 'utf8').trim().split(':');
+// slow:STEP:MS always takes MS on that step (a slow build or a busy host); slowonce only the first
+// time on this build (a hosted wait that was slow for a moment under load, 2a0557b6).
+if (target === step && (kind === 'slow' || (kind === 'slowonce' && !existsSync(join(build, 'slow-' + step))))) {
+  writeFileSync(join(build, 'slow-' + step), '');
+  await new Promise(done => setTimeout(done, Number(delay)));
+}
 if (target === step) {
   if (kind === 'exit') process.exit(3);
   if (kind === 'notfound') { process.stderr.write('{"error":{"code":"NOT_FOUND"}}\\n'); process.exit(1); }
@@ -531,6 +538,67 @@ test('incident replay e28539cf: a still-running or blocking wait never refuses; 
   );
 });
 
+// 2a0557b6 replay: main 28af3efe and cf5b149c were refused on "canary step wait timed out" while
+// ~15 builders ran hosted checks; the hosted wait was slow, not the build.
+test('incident replay 2a0557b6: a slow hosted wait that slows both builds does not refuse; a clearly slower or failing build still does', async t => {
+  const f = fixture(t);
+  const lines = [],
+    alerts = [];
+  const canary = cliCanaryPreSwitch(f.installation, {
+    home: f.home,
+    timeoutMs: 6_000,
+    stepMs: 1_000,
+    log: line => lines.push(line),
+    alert: async record => alerts.push(record),
+  });
+  // The new build's first wait is slow (the host is busy), the current build then passes it: one
+  // retry, judged against the current build's time from the same run, passes and switches.
+  f.build(b, 'slowonce:wait:1500');
+  assert.equal((await run(f, b, canary)).status, 'updated');
+  assert.equal(current(f), b);
+  assert.deepEqual(calls(f), ['version', 'status', 'planning', 'wait', 'wait', 'wait']);
+  assert.match(
+    lines.join('\n'),
+    /canary passed for bbbbbbbb .*wait \d+ms \(on its one retry after a slow first run; current build \d+ms\)/,
+  );
+  assert.equal(readCliCanaryRefusal(f.installation), null);
+  // Both builds slowed alike past the step cap: compared, not a regression, switched; no retry.
+  writeFileSync(join(f.installation, 'builds', b, 'mode'), 'slow:wait:1500');
+  f.build(c, 'slow:wait:1500');
+  writeFileSync(join(f.installation, 'canary-calls.log'), '');
+  lines.length = 0;
+  assert.equal((await run(f, c, canary)).status, 'updated');
+  assert.deepEqual(calls(f), ['version', 'status', 'planning', 'wait', 'wait']);
+  assert.match(lines.join('\n'), /step wait fails on both builds, not a regression/);
+  // A candidate that is clearly slower (slow again on its retry while the current build is fast)
+  // is still refused, with both timings in the reason; the retry is spent once, never looped.
+  writeFileSync(join(f.installation, 'builds', c, 'mode'), 'ok');
+  const d = 'd'.repeat(64);
+  f.build(d, 'slow:wait:1500');
+  writeFileSync(join(f.installation, 'canary-calls.log'), '');
+  lines.length = 0;
+  await assert.rejects(run(f, d, canary), { code: 'CLI_CANARY_FAILED' });
+  assert.equal(current(f), c);
+  assert.deepEqual(calls(f), ['version', 'status', 'planning', 'wait', 'wait', 'wait']);
+  assert.match(
+    readCliCanaryRefusal(f.installation).reason,
+    /canary step wait timed out after 1\.0s, then on its retry timed out after 1\.0s; the current build cccccccc passes the same step in [\d.]+s/,
+  );
+  assert.equal(alerts.length, 1);
+  // A build that fails outright is refused as before (no retry for a failure).
+  const g = '9'.repeat(64);
+  f.build(g, 'fail:planning');
+  writeFileSync(join(f.installation, 'canary-calls.log'), '');
+  await assert.rejects(run(f, g, canary), { code: 'CLI_CANARY_FAILED' });
+  assert.deepEqual(calls(f), ['version', 'status', 'planning', 'planning']);
+  // "Clearly slower" is relative to the current build's time from the same run.
+  assert.equal(cliCanaryClearlySlower(900, 400), false, 'noise under load');
+  assert.equal(cliCanaryClearlySlower(5_000, 400), false, 'inside the absolute margin');
+  assert.equal(cliCanaryClearlySlower(5_500, 400), true);
+  assert.equal(cliCanaryClearlySlower(20_000, 6_000), true);
+  assert.equal(cliCanaryClearlySlower(17_000, 6_000), false);
+});
+
 test('differential canary: a step both builds fail is logged with both results and does not refuse (edcb0fc8)', async t => {
   const f = fixture(t);
   writeFileSync(join(f.old, 'mode'), 'exit:planning');
@@ -673,7 +741,7 @@ async function until(condition, what, ms = 20_000) {
 }
 
 for (const outcome of ['fail', 'pass']) {
-  test(`12 concurrent calls while the canary runs are never refused (canary ${outcome}s)`, async t => {
+  test(`12 concurrent calls while the canary runs all run at once on the working build (canary ${outcome}s)`, async t => {
     const f = fixture(t),
       counter = await releaseFixture(t, f, b),
       main = f.build(b);
@@ -697,48 +765,88 @@ for (const outcome of ['fail', 'pass']) {
       ['agent', d, 'comment-planning-item'],
       ['land', d],
     ];
-    // Writes start first: one runs the foreground updater, which stops in the canary on the gate;
-    // the others wait for that updater instead of being refused.
-    const writeReplies = writes.map(args => launch(f, args));
-    await until(() => existsSync(join(f.installation, 'canary-runs.log')), 'the canary to start');
-    const readReplies = await Promise.all(reads.map(args => launch(f, args)));
-    for (const [index, reply] of readReplies.entries()) {
-      assert.equal(reply.status, 0, reply.stderr);
-      assert.deepEqual(JSON.parse(reply.stdout), { build: 'old', ran: reads[index] });
-      assert.doesNotMatch(reply.stderr, refusals);
-    }
-    assert.equal(current(f), a, 'reads ran on the current build during the canary');
-    writeFileSync(join(f.installation, 'canary-gate'), outcome === 'fail' ? 'fail' : 'pass');
-    const replies = await Promise.all(writeReplies);
+    // Incident 2a0557b6: a landing waited ~100 s on another updater's canary. Now every call returns
+    // while the detached updater's canary is still stopped on its gate: none waits on it.
+    const all = [...writes, ...reads];
+    const replies = await Promise.all(all.map(args => launch(f, args)));
     for (const [index, reply] of replies.entries()) {
       assert.equal(reply.status, 0, reply.stderr);
       assert.equal(reply.stdout.trim().split('\n').length, 1);
-      assert.deepEqual(JSON.parse(reply.stdout), {
-        build: outcome === 'fail' ? 'old' : 'main',
-        ran: writes[index],
-      });
+      assert.deepEqual(JSON.parse(reply.stdout), { build: 'old', ran: all[index] });
+      assert.match(
+        reply.stderr,
+        /main bbbbbbbb is installing( \(already running\))?; this (read|write) ran on aaaaaaaa/,
+      );
+      assert.doesNotMatch(reply.stderr, /waiting for it/);
       assert.doesNotMatch(reply.stderr, refusals);
     }
-    const log = readFileSync(join(f.installation, 'canary-runs.log'), 'utf8').trim().split('\n');
-    assert.equal(log.length, 1, 'one canary run; a waiter never repeats it');
+    assert.equal(current(f), a, 'every call ran on the current build during the canary');
+    await until(() => existsSync(join(f.installation, 'canary-runs.log')), 'the canary to start');
+    writeFileSync(join(f.installation, 'canary-gate'), outcome === 'fail' ? 'fail' : 'pass');
+    await until(
+      () =>
+        !existsSync(join(f.installation, 'update-lock', '1')) &&
+        (outcome === 'fail' ? !!readCliCanaryRefusal(f.installation) : current(f) === b),
+      'the background canary to finish',
+    );
+    const runs = () => readFileSync(join(f.installation, 'canary-runs.log'), 'utf8').trim().split('\n');
+    assert.equal(runs().length, 1, 'one canary run; other updaters never repeat it');
     assert.equal(current(f), outcome === 'fail' ? a : b);
     if (outcome === 'fail') {
       const record = readCliCanaryRefusal(f.installation);
       assert.equal(record.head, b);
       assert.equal(record.attempts, 1);
-      // The next call (a read or a write) still runs on the working build, with one notice line.
+      // 10 commands of one script (reads and writes) with a standing refusal: all run on the working
+      // build; the full notice prints at most once, then one short line each.
+      const ten = [...writes, ...reads.slice(0, 4)];
+      const notices = [];
+      for (const args of ten) {
+        const next = await launch(f, args);
+        assert.equal(next.status, 0, next.stderr);
+        assert.deepEqual(JSON.parse(next.stdout), { build: 'old', ran: args });
+        notices.push(next.stderr.trim());
+      }
+      const full = notices.filter(line => line.includes('Details:'));
+      assert.equal(full.length, 1, notices.join('\n'));
+      assert.match(full[0], /refused by its pre-switch canary \(.+\); running on aaaaaaaa, next retry after/);
+      for (const line of notices.filter(line => !line.includes('Details:'))) {
+        assert.equal(
+          line,
+          'Forge CLI main bbbbbbbb was refused by its pre-switch canary; running on aaaaaaaa.',
+        );
+        assert.equal(line.split('\n').length, 1);
+      }
+      assert.equal(runs().length, 1, 'commands never start a canary inside the back-off');
+    } else {
       const next = await launch(f, ['agent', d, 'save']);
-      assert.equal(next.status, 0, next.stderr);
-      assert.deepEqual(JSON.parse(next.stdout), { build: 'old', ran: ['agent', d, 'save'] });
-      assert.match(next.stderr, /refused by its pre-switch canary/);
-      assert.equal(
-        readFileSync(join(f.installation, 'canary-runs.log'), 'utf8').trim().split('\n').length,
-        1,
-      );
+      assert.deepEqual(JSON.parse(next.stdout), { build: 'main', ran: ['agent', d, 'save'] });
     }
-    assert.ok(Atomics.load(counter, 0) >= 1);
+    assert.ok(Atomics.load(counter, 0) >= all.length);
   });
 }
+
+test('the full refusal notice is claimed by exactly one of many concurrent callers per head', async t => {
+  const f = fixture(t);
+  const { cliCanaryNotice, writeCliCanaryRefusal, clearCliCanaryRefusal } =
+    await import('../dist/cli-canary.js');
+  const record = {
+    head: b,
+    at: new Date().toISOString(),
+    step: 'wait',
+    reason: 'canary step wait exited 3',
+    attempts: 1,
+    nextRetryAt: Date.now() + 60_000,
+  };
+  writeCliCanaryRefusal(f.installation, record);
+  const lines = Array.from({ length: 10 }, () => cliCanaryNotice(f.installation, record, a));
+  assert.equal(lines.filter(line => line.includes('Details:')).length, 1);
+  // A different refused head gets its own one full notice; clearing the refusal forgets both.
+  const other = { ...record, head: c };
+  assert.match(cliCanaryNotice(f.installation, other, a), /Details:/);
+  assert.doesNotMatch(cliCanaryNotice(f.installation, other, a), /Details:/);
+  clearCliCanaryRefusal(f.installation);
+  assert.match(cliCanaryNotice(f.installation, other, a), /Details:/);
+});
 
 test('the canary child makes no release read and starts no update', async t => {
   const f = fixture(t),
@@ -775,11 +883,15 @@ test('rollback switches atomically to the one previous build and holds main unti
   await assert.rejects(cliRollback(f.installation, { migrate: () => {}, lockWaitMs: 0 }), {
     code: 'CLI_ROLLBACK_UNAVAILABLE',
   });
-  // A normal call updates through a passing canary: main is current, the old build is previous.
+  // A normal call runs on the working build and its detached updater switches through a passing
+  // canary: main is current, the old build is previous.
   const first = await launch(f, ['agent', f.directory, 'save']);
   assert.equal(first.status, 0, first.stderr);
-  assert.deepEqual(JSON.parse(first.stdout), { build: 'main', ran: ['agent', f.directory, 'save'] });
-  assert.equal(current(f), b);
+  assert.deepEqual(JSON.parse(first.stdout), { build: 'old', ran: ['agent', f.directory, 'save'] });
+  await until(
+    () => current(f) === b && !existsSync(join(f.installation, 'update-lock', '1')),
+    'the background update',
+  );
   assert.equal(realpathSync(join(f.installation, 'previous')), f.old);
   const reads = Atomics.load(counter, 0);
   const result = await cliRollback(f.installation, {
@@ -796,15 +908,16 @@ test('rollback switches atomically to the one previous build and holds main unti
   assert.equal(realpathSync(join(f.installation, 'previous')), main, 'the build left becomes the previous');
   assert.deepEqual(migrated, [join(f.installation, 'current', 'dist', 'agent-edit-hook.js')]);
   assert.equal(existsSync(join(f.installation, 'update-lock', '1')), false, 'update lock released');
-  // The next calls (read and write) run on the rolled-back build and do not install main again.
-  for (const args of [
-    ['agent', f.directory, 'status'],
-    ['agent', f.directory, 'save'],
+  // The next calls (read and write) run on the rolled-back build and do not install main again;
+  // the full notice prints once, then one short line.
+  for (const [args, notice] of [
+    [['agent', f.directory, 'status'], /was rolled back .*held until main moves/],
+    [['agent', f.directory, 'save'], /^Forge CLI main bbbbbbbb was rolled back; running on aaaaaaaa\.$/],
   ]) {
     const reply = await launch(f, args);
     assert.equal(reply.status, 0, reply.stderr);
     assert.deepEqual(JSON.parse(reply.stdout), { build: 'old', ran: args });
-    assert.match(reply.stderr, /was rolled back .*held until main moves/);
+    assert.match(reply.stderr.trim(), notice);
     assert.doesNotMatch(reply.stderr, refusals);
   }
   assert.equal(current(f), a);

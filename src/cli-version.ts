@@ -32,7 +32,8 @@ export function cliDeferredCommand(args: string[]) {
   return ['agent', 'x', 'heavy', 'pull', 'clone'].includes(args[0]!);
 }
 /** Commands that never write to Forge. While main moves they keep running on the current build
- * and start the install in the background; anything not listed waits for the new build. */
+ * and start the install in the background, even when the last install failed. Writes do the same
+ * unless the last background install failed: then they install in the foreground and report it. */
 const READ_ACTIONS = new Set([
   'status',
   'planning',
@@ -225,10 +226,16 @@ export async function cliStartup(
       process.stderr.write(`${cliCanaryNotice(installation, refused, installed)}\n`);
       return true;
     }
-    // Reads never wait for, or fail because of, an install: they run on this complete build while
-    // the next one installs beside it. Writes below still run only on main (enforced).
-    if (cliReadOnlyCommand(args) && expectedCurrent !== null) {
-      const state = existsSync(join(installation, '.freeze'))
+    // No command waits for an install or its canary (2a0557b6: a landing waited ~100 s on another
+    // updater's canary). Reads and writes run on this complete, vetted build while the next one
+    // installs and is smoke-tested beside it in one detached updater; the switch follows its
+    // canary, and the next command runs on main. Only a failed background install makes a write
+    // install in the foreground, so a broken update never leaves writes silently on old code.
+    // An explicit historical rollback (restoreMain) still restores main before any write.
+    const reading = cliReadOnlyCommand(args);
+    const frozen = existsSync(join(installation, '.freeze'));
+    if (expectedCurrent !== null && (reading || (!restoreMain && !frozen))) {
+      const state = frozen
         ? 'held by a measurement hold'
         : await startBackgroundCliUpdate(installation, root, released, args).then(
             started =>
@@ -237,14 +244,16 @@ export async function cliStartup(
                 running: 'is installing (already running)',
                 failed: `last install failed (${join(installation, 'update.log')}); the next write retries it`,
               })[started],
-            () => 'could not start installing; the next write installs it',
+            () => 'could not start installing; the next command tries again',
           );
-      process.stderr.write(
-        `Forge CLI main ${released.slice(0, 8)} ${state}; this read ran on ${installed.slice(0, 8)}.\n`,
-      );
-      return true;
+      if (reading || !state.startsWith('last install failed')) {
+        process.stderr.write(
+          `Forge CLI main ${released.slice(0, 8)} ${state}; this ${reading ? 'read' : 'write'} ran on ${installed.slice(0, 8)}.\n`,
+        );
+        return true;
+      }
     }
-    if (existsSync(join(installation, '.freeze')))
+    if (frozen)
       throw new ForgeError(
         'CLI_UPDATE_FROZEN',
         `CLI selection ${expectedCurrent} differs from main ${released}; measurement hold ${join(installation, '.freeze')} prevents updating. Remove the hold, then run ${next}.`,

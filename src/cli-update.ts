@@ -187,6 +187,16 @@ export async function updateCli(
       );
     if (options.skipIfCurrent && cliCurrentCommit(installation) === options.skipIfCurrent)
       return { status: 'current', cliCommit: options.skipIfCurrent, installation, removed: [] };
+    // A detached updater that got the lock just after another one refused this head (several
+    // commands start one at once) does not repeat its canary inside the back-off.
+    if (options.skipIfCurrent && !options.rollback) {
+      const refused = activeCliCanaryRefusal(installation, options.skipIfCurrent);
+      if (refused)
+        throw new ForgeError(
+          'CLI_CANARY_FAILED',
+          `Pre-switch canary refused build ${options.skipIfCurrent.slice(0, 8)}: ${refused.reason}.`,
+        );
+    }
     // After waiting: when the other updater moved current, use what it installed from main (no
     // second release read; the next command's own check still sees any newer main). When it
     // failed, current is unchanged and this updater installs the release it already read.

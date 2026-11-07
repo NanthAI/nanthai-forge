@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { spawn } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { childEnv } from '../scripts/child-env.mjs';
@@ -10,10 +10,18 @@ import { cliBuildCommit } from './cli-installation.js';
 import { landedOperations } from './landed-operations.js';
 import { deliverStallAlert, STALL_ALERT_ENV } from './stall-alerts.js';
 
-/** Hard total limit for one canary run (all steps together). */
-export const CLI_CANARY_TIMEOUT_MS = 20_000;
-/** The wait step's own cap inside that limit (it is a non-blocking read). */
-export const CLI_CANARY_WAIT_STEP_MS = 10_000;
+/** Total limit for the new build's steps in one canary run. The canary runs only in the detached
+ * background updater, so no command waits on it (2a0557b6); the limits only bound how long it holds
+ * the update lock. */
+export const CLI_CANARY_TIMEOUT_MS = 60_000;
+/** Each step's own cap inside that limit; the current build's comparison run and the one retry get
+ * the same cap of their own. */
+export const CLI_CANARY_STEP_MS = 20_000;
+/** A step the new build passes only on its retry still refuses when it is clearly slower than the
+ * current build timed in the same run: more than 3x, and more than this margin, slower. */
+export const CLI_CANARY_SLOW_MARGIN_MS = 5_000;
+export const cliCanaryClearlySlower = (retryMs: number, currentMs: number) =>
+  retryMs > Math.max(3 * currentMs, currentMs + CLI_CANARY_SLOW_MARGIN_MS);
 /** After a refusal the same build is retried no sooner than this, doubling per attempt. */
 export const CLI_CANARY_BACKOFF_MS = 10 * 60_000;
 export const CLI_CANARY_BACKOFF_MAX_MS = 6 * 60 * 60_000;
@@ -38,7 +46,12 @@ const CHILD_ENV = [
 const refusalPath = (installation: string) => join(installation, 'canary-refused.json');
 const clonePath = (installation: string) => join(installation, 'canary-clone.json');
 
-export type CanaryStep = { name: string; ms: number };
+export type CanaryStep = {
+  name: string;
+  ms: number;
+  /** Passed on its one retry after a slow first run; the current build's time on the same step. */
+  retry?: { currentMs: number };
+};
 export type CanaryRefusal = {
   head: string;
   at: string;
@@ -56,7 +69,6 @@ export type CanaryRefusal = {
   /** A release-signature hold: signatures are required and this State has none yet. */
   signaturePending?: boolean;
   alerted?: boolean;
-  noticed?: boolean;
 };
 type CloneRecord = { root: string; operationId?: string; operationKind?: 'landing' };
 /** The canary step name of a hold for a server that is behind the build (not a broken build). */
@@ -98,11 +110,14 @@ class CanaryFailure extends Error {
     readonly detail = '',
     /** The wait found its operation still running: says nothing about the build (edcb0fc8). */
     readonly inProgress = false,
+    /** The step ran out of time: slow, maybe only because the host is busy (2a0557b6). */
+    readonly timedOut = false,
   ) {
     super(message);
   }
 }
 type Run = { code: number | null; stdout: string; stderr: string };
+const seconds = (ms: number) => `${(ms / 1000).toFixed(1)}s`;
 
 /** One child of the new build, killed (with its process group) when the shared deadline passes. */
 function runChild(
@@ -139,7 +154,10 @@ function runChild(
         stop(
           new CanaryFailure(
             step,
-            `canary step ${step} timed out (limit ${CLI_CANARY_TIMEOUT_MS / 1000}s in total)`,
+            `canary step ${step} timed out after ${seconds(remaining)}`,
+            '',
+            false,
+            true,
           ),
         ),
       remaining,
@@ -199,6 +217,8 @@ export type CanaryInput = {
   build: string;
   head: string;
   timeoutMs?: number;
+  /** Per-step cap; defaults to CLI_CANARY_STEP_MS, never above timeoutMs. */
+  stepMs?: number;
   /** Test seam: replaces the real home for private state. */
   home?: string;
 };
@@ -227,11 +247,15 @@ const cloneProject = (root: string) =>
  * The child runs with a private HOME, so the real agent hook files are unreachable by
  * construction; credentials and caches come from the real XDG directories. A failing step is run
  * again on the current build (differential, edcb0fc8): only a step the current build passes
- * refuses the new one; a step both fail is logged with both results and skipped. */
+ * refuses the new one; a step both fail is logged with both results and skipped. A step that only
+ * timed out on the new build while the current build passes it gets one retry per run (2a0557b6):
+ * a busy host slows both builds alike, so only a retry that fails, times out again or is clearly
+ * slower than the current build's timed run refuses. */
 export async function runCliCanary(input: CanaryInput): Promise<CanaryResult> {
   const { installation, build, head } = input;
   const entry = join(build, 'dist', 'cli-entry.js');
   const timeoutMs = input.timeoutMs ?? CLI_CANARY_TIMEOUT_MS;
+  const stepMs = Math.min(input.stepMs ?? CLI_CANARY_STEP_MS, timeoutMs);
   const deadline = Date.now() + timeoutMs;
   const realHome = input.home ?? homedir();
   const privateHome = mkdtempSync(join(tmpdir(), 'forge-canary-'));
@@ -254,11 +278,9 @@ export async function runCliCanary(input: CanaryInput): Promise<CanaryResult> {
   const current = join(installation, 'current');
   const currentEntry = join(current, 'dist', 'cli-entry.js');
   const currentHead = existsSync(currentEntry) ? cliBuildCommit(current) : undefined;
-  let baselineDeadline: number | undefined;
-  // The wait is one non-blocking status read (timeoutSeconds 0) with its own short cap, so a slow
-  // or still-running operation can never use up the whole canary.
-  const stepDeadline = (name: string, limit: number) =>
-    name === 'wait' ? Math.min(limit, Date.now() + CLI_CANARY_WAIT_STEP_MS) : limit;
+  // Every step has its own cap inside the total, so one slow step never uses up the whole canary.
+  const stepDeadline = (limit = Infinity) => Math.min(limit, Date.now() + stepMs);
+  let retried = false;
   const waitJson = (run: Run, expected: string) => {
     if (run.code === 3 && /"status"\s*:\s*"IN_PROGRESS"/.test(run.stdout))
       throw new CanaryFailure('wait', 'canary step wait found the operation still running', '', true);
@@ -268,36 +290,58 @@ export async function runCliCanary(input: CanaryInput): Promise<CanaryResult> {
     skipped: string[] = [],
     compared: NonNullable<CanaryResult['compared']> = [];
   type Check<T> = (run: Run, expected: string) => T;
+  /** Outcomes that say nothing about the build and go to the caller unchanged. */
+  const passThrough = (name: string, error: CanaryFailure) =>
+    error.step === SERVER_BEHIND_STEP ||
+    (name === 'wait' && (error.inProgress || UNUSABLE_OPERATION.has(failureCode(error) ?? '')));
   /** One step on the new build; on a failure, the same step on the current build (only then). */
   const step = async <T>(name: string, args: string[], check: Check<T>): Promise<T | undefined> => {
     const started = Date.now();
     try {
-      const value = check(await runChild(entry, args, env, stepDeadline(name, deadline), name), head);
+      const value = check(await runChild(entry, args, env, stepDeadline(deadline), name), head);
       steps.push({ name, ms: Date.now() - started });
       return value;
     } catch (error) {
-      if (!(error instanceof CanaryFailure) || error.step === SERVER_BEHIND_STEP) throw error;
-      if (name === 'wait' && (error.inProgress || UNUSABLE_OPERATION.has(failureCode(error) ?? '')))
-        throw error;
+      if (!(error instanceof CanaryFailure) || passThrough(name, error)) throw error;
       if (!currentHead || currentHead === head) throw error;
-      baselineDeadline ??= Date.now() + timeoutMs;
       let baseline: CanaryFailure | undefined;
+      const baselineStarted = Date.now();
       try {
         check(
-          await runChild(
-            currentEntry,
-            args,
-            environment(currentHead),
-            stepDeadline(name, baselineDeadline),
-            name,
-          ),
+          await runChild(currentEntry, args, environment(currentHead), stepDeadline(), name),
           currentHead,
         );
       } catch (other) {
         if (!(other instanceof CanaryFailure)) throw error;
         baseline = other;
       }
+      const currentMs = Date.now() - baselineStarted;
       const label = `current build ${currentHead.slice(0, 8)}`;
+      // Slow, not failed, while the current build passes: a busy host, or a slower build. One retry
+      // per run, judged against the current build's time from this same run.
+      if (!baseline && error.timedOut && !retried) {
+        retried = true;
+        const again = Date.now();
+        let value: T;
+        try {
+          value = check(await runChild(entry, args, env, stepDeadline(), name), head);
+        } catch (retry) {
+          if (!(retry instanceof CanaryFailure) || passThrough(name, retry)) throw retry;
+          throw new CanaryFailure(
+            retry.step,
+            `${error.message}, then on its retry ${retry.message.replace(/^canary step \S+ /, '')}; the ${label} passes the same step in ${seconds(currentMs)}`,
+            retry.detail,
+          );
+        }
+        const ms = Date.now() - again;
+        if (cliCanaryClearlySlower(ms, currentMs))
+          throw new CanaryFailure(
+            name,
+            `canary step ${name} timed out, then took ${seconds(ms)} on its retry; the ${label} passes the same step in ${seconds(currentMs)} (clearly slower)`,
+          );
+        steps.push({ name, ms, retry: { currentMs } });
+        return value;
+      }
       if (!baseline)
         throw new CanaryFailure(
           error.step,
@@ -418,8 +462,33 @@ export function writeCliCanaryRefusal(installation: string, record: CanaryRefusa
 }
 export const clearCliCanaryRefusal = (installation: string, head?: string) => {
   const record = readCliCanaryRefusal(installation);
-  if (!head || record?.head === head) rmSync(refusalPath(installation), { force: true });
+  if (!head || record?.head === head) {
+    rmSync(refusalPath(installation), { force: true });
+    clearNoticeMarks(installation);
+  }
 };
+/** One marker per refused head records that its full notice was shown (2a0557b6). */
+const NOTICE_MARK = 'canary-noticed-';
+function clearNoticeMarks(installation: string, keep?: string) {
+  try {
+    for (const name of readdirSync(installation))
+      if (name.startsWith(NOTICE_MARK) && name !== keep) rmSync(join(installation, name), { force: true });
+  } catch {
+    /* advisory */
+  }
+}
+/** True for exactly one caller per head on this installation, even when many start together: the
+ * marker is created exclusively. Any other outcome (already shown, unwritable) is not first. */
+function claimFullNotice(installation: string, head: string) {
+  const name = `${NOTICE_MARK}${head.slice(0, 16)}`;
+  try {
+    writeFileSync(join(installation, name), '', { flag: 'wx', mode: 0o600 });
+  } catch {
+    return false;
+  }
+  clearNoticeMarks(installation, name);
+  return true;
+}
 /** A refusal that still keeps main's head off this machine: inside its back-off, or held until
  * main moves (explicit rollback). Another head, or an elapsed back-off, never matches. */
 export function activeCliCanaryRefusal(installation: string, released: string, now = Date.now()) {
@@ -427,19 +496,10 @@ export function activeCliCanaryRefusal(installation: string, released: string, n
   return record && record.head === released && (record.hold || now < record.nextRetryAt) ? record : null;
 }
 const clock = (at: number) => new Date(at).toISOString().slice(11, 16) + ' UTC';
-/** One stderr line per call while a refusal is active; the first call carries the detail. */
+/** While a refusal is active: the full notice once per head on this installation (the first
+ * command to claim it), then a short one-line hint. The full reason stays in canary-refused.json
+ * and the updater's update.log (2a0557b6: 10 commands of one script printed it 10 times). */
 export function cliCanaryNotice(installation: string, record: CanaryRefusal, runningOn: string) {
-  const first = !record.noticed;
-  if (first) {
-    try {
-      writeCliCanaryRefusal(installation, { ...record, noticed: true });
-    } catch {
-      /* advisory */
-    }
-  }
-  const retry = record.hold
-    ? 'held until main moves (explicit rollback)'
-    : `next retry after ${clock(record.nextRetryAt)}`;
   const verdict = record.hold
     ? 'rolled back'
     : record.step === RELEASE_SIGNATURE_STEP
@@ -450,11 +510,14 @@ export function cliCanaryNotice(installation: string, record: CanaryRefusal, run
         ? 'held by its pre-switch canary'
         : 'refused by its pre-switch canary';
   const head = `Forge CLI main ${record.head.slice(0, 8)} was ${verdict}`;
+  if (!claimFullNotice(installation, record.head)) return `${head}; running on ${runningOn.slice(0, 8)}.`;
+  const retry = record.hold
+    ? 'held until main moves (explicit rollback)'
+    : `next retry after ${clock(record.nextRetryAt)}`;
   return (
     `${head} (${record.reason}); running on ${runningOn.slice(0, 8)}, ${retry}.` +
-    (first
-      ? ` Details: ${join(installation, 'canary-refused.json')}. Switch builds by hand: nforge cli rollback | nforge update.`
-      : '')
+    ` Details: ${join(installation, 'canary-refused.json')} and update.log; later commands print one short line.` +
+    ' Switch builds by hand: nforge cli rollback | nforge update.'
   );
 }
 
@@ -500,6 +563,7 @@ export type CanaryHooks = {
   now?: () => number;
   log?: (line: string) => void;
   timeoutMs?: number;
+  stepMs?: number;
   home?: string;
 };
 /** The updater's `preSwitch`: throws CLI_CANARY_FAILED (after recording and alerting once) so the
@@ -516,12 +580,21 @@ export const cliCanaryPreSwitch =
         build,
         head,
         ...(hooks.timeoutMs ? { timeoutMs: hooks.timeoutMs } : {}),
+        ...(hooks.stepMs ? { stepMs: hooks.stepMs } : {}),
         ...(hooks.home ? { home: hooks.home } : {}),
       });
       clearCliCanaryRefusal(installation);
       log(
         `Forge CLI canary passed for ${head.slice(0, 8)} in ${((now() - started) / 1000).toFixed(1)}s: ` +
-          result.steps.map(step => `${step.name} ${step.ms}ms`).join(', ') +
+          result.steps
+            .map(
+              step =>
+                `${step.name} ${step.ms}ms` +
+                (step.retry
+                  ? ` (on its one retry after a slow first run; current build ${step.retry.currentMs}ms)`
+                  : ''),
+            )
+            .join(', ') +
           (result.skipped.length ? `; skipped: ${result.skipped.join('; ')}` : '') +
           '.',
       );
@@ -547,7 +620,6 @@ export const cliCanaryPreSwitch =
         ...(pendingSince !== undefined ? { deployPendingSince: pendingSince } : {}),
         ...(pending ? { deployPending: true } : {}),
         ...(same?.alerted ? { alerted: true } : {}),
-        ...(same?.noticed && same.reason === (failure?.message ?? '') ? { noticed: true } : {}),
       };
       writeCliCanaryRefusal(installation, record);
       const behind = record.step === SERVER_BEHIND_STEP;

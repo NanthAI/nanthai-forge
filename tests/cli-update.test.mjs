@@ -448,6 +448,11 @@ test('installed help and targeted argument errors make zero release or work call
 test('freshness redispatch preserves stdin already consumed by local argument validation', async t => {
   const f = fixture(t);
   await releaseFixture(t, f, b);
+  // A write installs in the foreground (and re-runs itself) only after a failed background install.
+  writeFileSync(
+    join(f.installation, 'update-failed.json'),
+    JSON.stringify({ code: 'CLI_UPDATE_BUILD_FAILED' }),
+  );
   const next = f.build(b),
     output = join(f.directory, 'replayed-input');
   writeFileSync(
@@ -855,9 +860,13 @@ if (await cliStartup(process.argv.slice(2), ${JSON.stringify(main)})) process.st
 }
 const refusals = /CLI_UPDATE_REQUIRED|CLI_UPDATE_SOURCE_REQUIRED|CLI_UPDATE_BUSY|CLI_RUNTIME_BUSY/;
 
-test('a JSON action while an update is pending keeps stdout one JSON document and runs once', async t => {
+test('a write after a failed background install installs in the foreground: one JSON document, runs once', async t => {
   const f = fixture(t),
     { main } = await pendingUpdate(t, f);
+  writeFileSync(
+    join(f.installation, 'update-failed.json'),
+    JSON.stringify({ code: 'CLI_UPDATE_BUILD_FAILED' }),
+  );
   const reply = await launch(f, ['save', '--json']);
   assert.equal(reply.status, 0, reply.stderr);
   assert.deepEqual(JSON.parse(reply.stdout), { ok: true, ran: ['save', '--json'] });
@@ -868,44 +877,31 @@ test('a JSON action while an update is pending keeps stdout one JSON document an
   assert.doesNotMatch(reply.stderr, refusals);
   assert.equal(cliBuildCommit(join(f.installation, 'current')), b);
   assert.ok(existsSync(main));
+  assert.equal(existsSync(join(f.installation, 'update-failed.json')), false, 'success clears the mark');
 });
 
-test('two parallel writes during an update both run; the second waits instead of being refused', async t => {
-  const f = fixture(t);
-  await pendingUpdate(t, f);
-  // A live updater (this process) holds the update lock while both commands start.
+test('incident replay 2a0557b6: two parallel writes during an update both run at once on the working build, never waiting', async t => {
+  const f = fixture(t),
+    { calls } = await pendingUpdate(t, f);
+  // A live updater (this process) holds the update lock, as a detached updater in its canary does.
   const held = join(f.installation, 'update-lock', '1');
   mkdirSync(held, { recursive: true });
   writeFileSync(join(held, 'pid'), String(process.pid));
-  // Release the held update only once both commands are provably waiting on it (no timing guess).
-  let waiting = 0;
-  let release;
-  const bothWaiting = new Promise(done => (release = done));
-  const seen = new Set();
-  const watch = name => stderr => {
-    if (!seen.has(name) && /update is installing; waiting for it/.test(stderr)) {
-      seen.add(name);
-      if (++waiting === 2) release();
-    }
-  };
-  const replies = Promise.all([
-    launch(f, ['save', '--one'], watch('one')),
-    launch(f, ['save', '--two'], watch('two')),
-  ]);
-  await bothWaiting;
-  rmSync(join(f.installation, 'update-lock'), { recursive: true, force: true });
-  const [one, two] = await replies;
-  for (const [reply, flag] of [
-    [one, '--one'],
-    [two, '--two'],
-  ]) {
+  const started = Date.now();
+  const [one, two] = await Promise.all([launch(f, ['save', '--one']), launch(f, ['save', '--two'])]);
+  for (const reply of [one, two]) {
     assert.equal(reply.status, 0, reply.stderr);
-    assert.deepEqual(JSON.parse(reply.stdout), { ok: true, ran: ['save', flag] });
+    assert.equal(reply.stdout, 'old-ran\n');
+    assert.match(reply.stderr, /main bbbbbbbb is installing \(already running\); this write ran on aaaaaaaa/);
+    assert.doesNotMatch(reply.stderr, /waiting for it/);
     assert.doesNotMatch(reply.stderr, refusals);
   }
-  assert.match(one.stderr, /Another Forge CLI update is installing; waiting for it\./);
-  assert.match(two.stderr, /Another Forge CLI update is installing; waiting for it\./);
-  assert.equal(cliBuildCommit(join(f.installation, 'current')), b);
+  // The lock was never released: both returned while the updater still ran.
+  assert.ok(existsSync(held));
+  assert.ok(Date.now() - started < 20_000);
+  assert.equal(cliBuildCommit(join(f.installation, 'current')), a);
+  assert.equal(Atomics.load(calls, 0), 2, 'one release read per command, no added calls');
+  rmSync(join(f.installation, 'update-lock'), { recursive: true, force: true });
 });
 
 test('a runtime-lock holder is waited for by commands and the updater, but never by hooks', async t => {
@@ -1065,7 +1061,7 @@ async function until(condition, what, ms = 20_000) {
   }
 }
 
-test('12 concurrent calls during an update: reads run on the current build, writes run on main, none refused, one release read each', async t => {
+test('12 concurrent calls during an update: reads and writes run on the current build at once, none refused or waiting, one release read each', async t => {
   const f = fixture(t),
     calls = await releaseFixture(t, f, b),
     main = f.build(b),
@@ -1090,31 +1086,26 @@ test('12 concurrent calls during an update: reads run on the current build, writ
     ['agent', d, 'comment-planning-item'],
     ['land', d],
   ];
-  let waiting = 0,
-    allWaiting;
-  const writersWaiting = new Promise(done => (allWaiting = done));
-  const writeReplies = Promise.all(
-    writes.map(args => {
-      let seen = false;
-      return launch(f, args, stderr => {
-        if (!seen && /update is installing; waiting for it/.test(stderr)) {
-          seen = true;
-          if (++waiting === writes.length) allWaiting();
-        }
-      });
-    }),
-  );
-  // Reads finish while the install is still running: they never wait for it.
-  const readReplies = await Promise.all(reads.map(args => launch(f, args)));
-  readReplies.forEach((reply, index) => {
+  // All finish while the install is still running: no command waits for it or its canary.
+  const all = [...reads, ...writes];
+  const replies = await Promise.all(all.map(args => launch(f, args)));
+  replies.forEach((reply, index) => {
+    const kind = index < reads.length ? 'read' : 'write';
     assert.equal(reply.status, 0, reply.stderr);
-    assert.deepEqual(JSON.parse(reply.stdout), { build: 'current', ran: reads[index] });
-    assert.match(reply.stderr, /main bbbbbbbb is installing \(already running\); this read ran on aaaaaaaa/);
+    assert.deepEqual(JSON.parse(reply.stdout), { build: 'current', ran: all[index] });
+    assert.equal(reply.stdout.trim().split('\n').length, 1);
+    assert.match(
+      reply.stderr,
+      new RegExp(`main bbbbbbbb is installing \\(already running\\); this ${kind} ran on aaaaaaaa`),
+    );
+    assert.doesNotMatch(reply.stderr, /waiting for it/);
     assert.doesNotMatch(reply.stderr, refusals);
   });
   assert.equal(cliBuildCommit(join(f.installation, 'current')), a);
-  await writersWaiting;
-  // The concurrent updater publishes main atomically and releases the update lock.
+  // One release read per CLI call; running on the current build adds none.
+  assert.equal(Atomics.load(calls, 0), all.length);
+  release();
+  // Once the updater has switched, the next write runs on main.
   const { publishCliBuild } = await import('../dist/cli-update-install.js');
   publishCliBuild({
     installation: f.installation,
@@ -1124,16 +1115,9 @@ test('12 concurrent calls during an update: reads run on the current build, writ
     expectedCurrent: a,
     migrate: () => {},
   });
-  release();
-  const replies = await writeReplies;
-  replies.forEach((reply, index) => {
-    assert.equal(reply.status, 0, reply.stderr);
-    assert.deepEqual(JSON.parse(reply.stdout), { build: 'main', ran: writes[index] });
-    assert.equal(reply.stdout.trim().split('\n').length, 1);
-    assert.doesNotMatch(reply.stderr, refusals);
-  });
-  // One release read per CLI call; neither waiting nor re-running on main adds another.
-  assert.equal(Atomics.load(calls, 0), reads.length + writes.length);
+  const next = await launch(f, ['agent', d, 'save']);
+  assert.equal(next.status, 0, next.stderr);
+  assert.equal(JSON.parse(next.stdout).build, 'main');
   assert.ok(existsSync(f.old), 'replaced build stays during the retirement grace');
 });
 function readCliSourceFile(f) {
