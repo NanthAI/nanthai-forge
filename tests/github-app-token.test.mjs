@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { generateKeyPairSync, verify } from 'node:crypto';
 import { moduleUrl } from './convex-module.mjs';
-const { installationToken } = await import(moduleUrl('../convex/githubAppToken.ts'));
+const { installationToken, mirrorPermissions } = await import(moduleUrl('../convex/githubAppToken.ts'));
 const { githubRequest } = await import('../dist/hosted-github-api.js');
 test('App JWT uses RS256 and short expiry, then mints a token for the selected repository', async t => {
   const keys = generateKeyPairSync('rsa', { modulusLength: 2048 });
@@ -28,7 +28,7 @@ test('App JWT uses RS256 and short expiry, then mints a token for the selected r
     {},
     'p1',
     'synthetic/mirror',
-    undefined,
+    mirrorPermissions,
     async (url, init) => {
       calls.push({ url, init });
       const jwt = init.headers.Authorization.slice(7),
@@ -52,8 +52,14 @@ test('App JWT uses RS256 and short expiry, then mints a token for the selected r
   assert.equal(token, 'synthetic-only-token');
   assert.equal(calls.length, 2);
   assert.equal(calls[1].url, 'https://api.github.com/app/installations/42/access_tokens');
-  assert.deepEqual(JSON.parse(calls[1].init.body), { repositories: ['mirror'] });
-  await assert.rejects(installationToken({}, 'p1', '../mirror'), e => e.code === 'BAD_REPOSITORY');
+  assert.deepEqual(JSON.parse(calls[1].init.body), {
+    repositories: ['mirror'],
+    permissions: { contents: 'write' },
+  });
+  await assert.rejects(
+    installationToken({}, 'p1', '../mirror', mirrorPermissions),
+    e => e.code === 'BAD_REPOSITORY',
+  );
 });
 test('API failures never expose response bodies or tokens and redirects are disabled', async () => {
   await assert.rejects(

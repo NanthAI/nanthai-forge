@@ -113,7 +113,11 @@ async function fixture(t, fail, source, respond = () => undefined) {
   globalThis.fetch = async (url, init) => {
     if (new URL(url).hostname.endsWith('.r2.cloudflarestorage.com')) return originalFetch(url, init);
     if (url.endsWith('/installation')) return Response.json({ id: 42 });
-    if (url.includes('/access_tokens')) return Response.json({ token: 'synthetic-token' });
+    if (url.includes('/access_tokens')) {
+      // The mirror push token must carry an explicit contents-write-only request.
+      assert.deepEqual(JSON.parse(init.body).permissions, { contents: 'write' });
+      return Response.json({ token: 'synthetic-token' });
+    }
     const response = respond(url, init);
     if (response) return response;
     if (url.endsWith('/blobs') && fail()) return new Response('synthetic private response', { status: 500 });

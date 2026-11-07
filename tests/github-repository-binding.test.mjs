@@ -463,7 +463,7 @@ test('binding survives rename by id; recreated/public repository and other proje
     revision: 0,
   });
   await assert.rejects(
-    tokens.installationToken(f.ctx, other, 'synthetic/repo'),
+    tokens.installationToken(f.ctx, other, 'synthetic/repo', tokens.mirrorPermissions),
     code('GITHUB_REPOSITORY_UNBOUND'),
   );
 });
@@ -520,7 +520,7 @@ test('removal and uninstall invalidate bindings and in-flight proof; duplicate w
   });
   github(t);
   await assert.rejects(
-    tokens.installationToken(f.ctx, f.projectId, 'synthetic/repo'),
+    tokens.installationToken(f.ctx, f.projectId, 'synthetic/repo', tokens.mirrorPermissions),
     code('GITHUB_REPOSITORY_UNBOUND'),
   );
   assert.equal(JSON.parse(await f.call('list', { cursor: null })).page[0].active, false);
@@ -542,13 +542,16 @@ test('operator override works without OAuth; unbound mint never creates a token'
   const f = fixture(t),
     provider = github(t);
   await assert.rejects(
-    tokens.installationToken(f.ctx, f.projectId, 'synthetic/repo'),
+    tokens.installationToken(f.ctx, f.projectId, 'synthetic/repo', tokens.mirrorPermissions),
     code('GITHUB_REPOSITORY_UNBOUND'),
   );
   assert.equal(provider.calls.filter(c => c.method === 'POST').length, 0);
   process.env.FORGE_GITHUB_REPO_BINDINGS = `${f.projectId}=synthetic/repo`;
-  await tokens.installationToken(f.ctx, f.projectId, 'synthetic/repo');
-  assert.deepEqual(provider.calls.at(-1).body, { repositories: ['repo'] });
+  await tokens.installationToken(f.ctx, f.projectId, 'synthetic/repo', tokens.mirrorPermissions);
+  assert.deepEqual(provider.calls.at(-1).body, {
+    repositories: ['repo'],
+    permissions: { contents: 'write' },
+  });
 });
 test('policy and direct runner-setting mutation refuse unbound names', async t => {
   const f = fixture(t);
@@ -623,7 +626,7 @@ test('dogfood fixture: 600 bindings use six 100-row pages, zero idle work and bo
       return value;
     },
   };
-  await tokens.installationToken(ctx, f.projectId, 'synthetic/renamed');
+  await tokens.installationToken(ctx, f.projectId, 'synthetic/renamed', tokens.mirrorPermissions);
   assert(maxBindingPageBytes < 64 * 1024);
   const reads = f.s.counts.reduce((n, row) => n + row.documents, 0),
     writes = f.s.counts.reduce((n, row) => n + row.writes, 0);

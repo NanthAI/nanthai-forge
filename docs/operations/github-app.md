@@ -122,7 +122,7 @@ this repository, so the table shows what Forge asks of each token.
 | Import read | `contents: read`, `metadata: read`, one numeric repository ID | A user starts a project import | `importReadToken`; `projectGithubImport.ts`, `projectGithubImportArchive.ts` |
 | Check dispatch, run lookup, cancel | `actions: write`, `contents: read` | A hosted check on an App runner (dispatch `forge-check.yml` on `main`, list its runs, cancel a run) | `actionsPermissions`; `projectHostedActionsDirect.ts`, `projectHostedActionsWebhook.ts` |
 | Runner setup preflight | None minted; reads the installation's accepted permissions | `configure-runner` | `requireInstallationPermissions`; `projectHostedActionsConfigure.ts` |
-| Mirror push | None requested, so the token carries all accepted installation permissions on that one repository | One job per accepted landing | `projectGithubMirror.ts` `step`, `src/hosted-github-mirror.ts` |
+| Mirror push | `contents: write` (Git data API only; GitHub adds `metadata: read`), one repository | One job per accepted landing | `projectGithubMirror.ts` `step`, `src/hosted-github-mirror.ts` |
 
 The mirror is the only operation that writes source to GitHub. Check dispatch
 writes only Actions state (a workflow run); Forge checks themselves run with
@@ -163,11 +163,14 @@ All of these must hold:
   retained `GITHUB_SYNC_API` failure. That last point is GitHub behavior this
   repository does not test.
 
-### Known gap
+### Token guard
 
-The mirror token requests no `permissions` object, so it is not narrowed to
-`contents: write`. Check tokens are narrowed (`actionsPermissions`), the mirror's
-is not. Scope to one repository ID still holds.
+Every installation token request names an explicit permissions object
+(`mirrorPermissions`, `actionsPermissions`, the import read set and the
+binding-discovery probe). `mintInstallationToken` refuses a request without one,
+and `tests/github-token-permissions.test.mjs` asserts the request body for the
+mirror, check and import uses. No App settings change is needed: the mirror asks
+only for `contents: write`, which the installation already accepts.
 
 ## Operator override
 

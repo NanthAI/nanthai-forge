@@ -4,7 +4,7 @@ import { v } from 'convex/values';
 import { makeFunctionReference } from 'convex/server';
 import { internalAction, type ActionCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
-import { installationToken } from './githubAppToken';
+import { installationToken, mirrorPermissions } from './githubAppToken';
 import { githubRequest, GithubMirrorApiError } from '../src/hosted-github-api';
 import {
   prepareMirror,
@@ -105,7 +105,7 @@ export const step = internalAction({
       if (!raw) return null;
       const loaded = JSON.parse(raw);
       durable = sourceStorage(ctx, loaded.projectId);
-      const token = await installationToken(ctx, loaded.projectId, loaded.repository);
+      const token = await installationToken(ctx, loaded.projectId, loaded.repository, mirrorPermissions);
       const io: MirrorIO = { ...mirrorSource(ctx, input), api: githubRequest(token) };
       if (loaded.cursor) {
         plan = JSON.parse(Buffer.from(await durable.read(loaded.cursor)).toString('utf8'));

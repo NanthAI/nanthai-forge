@@ -11,6 +11,9 @@ import { ForgeError, invariant } from '../src/errors';
 export type GithubAppPermissions = Record<string, 'read' | 'write'>;
 /** Least privilege for check dispatch/cancel; checks create no refs or commits. */
 export const actionsPermissions: GithubAppPermissions = { actions: 'write', contents: 'read' };
+/** The mirror push uses only the Git data API (blobs, trees, commits, refs), which
+ * needs contents write; GitHub always adds metadata read. Nothing else is asked. */
+export const mirrorPermissions: GithubAppPermissions = { contents: 'write' };
 const encoder = new TextEncoder();
 const bytes = (value: string) => Uint8Array.from(atob(value), c => c.charCodeAt(0));
 const base64url = (value: Uint8Array) => {
@@ -76,11 +79,18 @@ async function mintInstallationToken(
   api: ReturnType<typeof githubRequest>,
   installationId: number,
   scope: { repository_ids: number[] } | { repositories: string[] },
-  permissions?: GithubAppPermissions,
+  permissions: GithubAppPermissions,
 ): Promise<string> {
+  // A request without a permissions object would carry every permission the
+  // installation holds, so it is refused rather than sent.
+  invariant(
+    permissions && Object.keys(permissions).length > 0,
+    'GITHUB_APP_CONFIG',
+    'GitHub App token requests must name explicit permissions.',
+  );
   const result = await api<{ token: string }>(`/app/installations/${installationId}/access_tokens`, 'POST', {
     ...scope,
-    ...(permissions ? { permissions } : {}),
+    permissions,
   });
   invariant(
     typeof result.token === 'string' && result.token.length > 0,
@@ -218,7 +228,7 @@ export async function installationToken(
   ctx: ActionCtx,
   projectId: string,
   repo: string,
-  permissions?: GithubAppPermissions,
+  permissions: GithubAppPermissions,
   request: typeof fetch = fetch,
   now = Date.now(),
 ): Promise<string> {

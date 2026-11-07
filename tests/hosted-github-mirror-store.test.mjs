@@ -346,6 +346,7 @@ for (const { files, gitlinks = false } of [
         return new Response(JSON.stringify({ id: 42 }));
       }
       if (url.includes('/access_tokens')) {
+        assert.deepEqual(JSON.parse(init.body).permissions, { contents: 'write' });
         authCalls.push(url);
         return new Response(JSON.stringify({ token: 'synthetic-token' }));
       }
