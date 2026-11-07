@@ -18,6 +18,7 @@ import {
   type Session,
 } from '../coordination-view';
 import { hostedError } from '../snapshot';
+import { useExpiringCounts } from '../countsExpiry';
 import { useSafePaginatedQuery, useSafeQuery } from '../safe-query';
 import { freshness } from '../ui/status';
 
@@ -61,6 +62,8 @@ export function useLiveCoordination(projectId: Id<'hostedProjects'>, enabled: bo
     enabled ? { projectId, limit: 20 } : 'skip',
   );
   const counts = useSafeQuery(api.projectCoordination.counts, enabled ? { projectId } : 'skip');
+  // One local timer drops the counts (unknown) once their last window ends; no poll, no new read.
+  const liveCounts = useExpiringCounts(counts.value);
   const claims = useSafeQuery(api.projectCoordinationReads.claims, enabled ? { projectId } : 'skip');
   const answers = useSafeQuery(
     api.projectHostedOverlapAcks.list,
@@ -110,7 +113,7 @@ export function useLiveCoordination(projectId: Id<'hostedProjects'>, enabled: bo
     unacked: unacked.value?.items ?? [],
     unackedComplete: !unacked.error && (unacked.value?.complete ?? true),
     claims: claims.value?.claims ?? [],
-    ...(counts.value ? { counts: counts.value } : {}),
+    ...(liveCounts ? { counts: liveCounts } : {}),
     initialLoading: !settled(unacked) || !settled(claims) || !settled(answers),
     loading: !settled(unacked) || !settled(claims) || !settled(answers) || sessionsLoading,
   };
