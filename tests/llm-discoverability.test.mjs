@@ -61,7 +61,9 @@ test('the hosted Vite build emits linked LLM files, every packaged doc and crawl
   assert.match(llms, /Keep this turn active on unfinished work/);
   assert.match(llms, /operationIds:\[ORIGINAL_UUID\],until:"acceptance"\}`; it blocks up to its budget/);
   assert.match(llms, /repeat on IN PROGRESS/);
-  assert.match(llms, /Hosted peers and diff are unavailable/);
+  // Hosted peers and diff exist (docs/agents/workflow.md); the text once said they were unavailable.
+  assert.match(llms, /Hosted `peers \{laneId,path\?,detail\?\}` reads the same saved overlap evidence/);
+  assert.doesNotMatch(llms, /peers and diff are unavailable/);
   assert.match(llms, /saved-path windows exclude unsaved peer edits/);
   for (const section of [
     'Start here',

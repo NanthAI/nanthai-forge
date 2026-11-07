@@ -184,7 +184,7 @@ export function plan(options, setup) {
       `BURST ${k}: prepare ${k} disjoint code+test changes per side; release all at one barrier; repeat ${options.runs} times; record per-change and set all-landed time, landings/hour, check count, red-main, retries`,
     );
   steps.push(
-    `merge: ${options.ghMergeQueue ? 'use merge queue when configured; otherwise squash after required checks' : 'squash after required checks'}; costs: Actions timing API, Blacksmith job minutes`,
+    `merge: ${options.ghMergeQueue ? 'use merge queue when configured; otherwise squash after required checks' : 'squash after required checks'}; costs: Actions timing API; job minutes when a runner label names a non-GitHub-hosted provider`,
   );
   steps.push(
     options.cleanup

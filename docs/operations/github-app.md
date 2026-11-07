@@ -97,6 +97,68 @@ has been removed. Already issued tokens cannot be recalled by removing a Forge
 binding; the next mint is refused. GitHub permissions and webhook delivery still
 need operational qualification.
 
+## What the App can push, and when
+
+The App never holds a standing credential. Each operation mints a short-lived
+installation token for one repository and discards it
+(`convex/githubAppToken.ts`, `installationToken`). GitHub caps a token at the
+permissions the installation accepted: Metadata read, Contents write, Actions
+write. The App's permission set is configured in GitHub's App settings, not in
+this repository, so the table shows what Forge asks of each token.
+
+| Operation | Requested permissions | Trigger | Code |
+| --- | --- | --- | --- |
+| Binding discovery | `metadata: read`, only the project's proven repository IDs (one page of 100) | Any token mint below, and runner configuration | `githubAppToken.ts` `repositoryScope` |
+| Import read | `contents: read`, `metadata: read`, one numeric repository ID | A user starts a project import | `importReadToken`; `projectGithubImport.ts`, `projectGithubImportArchive.ts` |
+| Check dispatch, run lookup, cancel | `actions: write`, `contents: read` | A hosted check on an App runner (dispatch `forge-check.yml` on `main`, list its runs, cancel a run) | `actionsPermissions`; `projectHostedActionsDirect.ts`, `projectHostedActionsWebhook.ts` |
+| Runner setup preflight | None minted; reads the installation's accepted permissions | `configure-runner` | `requireInstallationPermissions`; `projectHostedActionsConfigure.ts` |
+| Mirror push | None requested, so the token carries all accepted installation permissions on that one repository | One job per accepted landing | `projectGithubMirror.ts` `step`, `src/hosted-github-mirror.ts` |
+
+The mirror is the only operation that writes source to GitHub. Check dispatch
+writes only Actions state (a workflow run); Forge checks themselves run with
+`contents: read` (`.github/workflows/forge-check.yml`) and the workflows in this
+repository do not push.
+
+### When the mirror pushes
+
+All of these must hold:
+
+- The project policy has `githubMirror.autoPush: true` for a repository
+  (`laneRefs` is fixed `false`). Enabling it needs the stored binding
+  (`projectAutonomy.ts`, `requireStoredRepositoryBinding`). Disabling stops
+  future jobs without a binding.
+- The project's source authority is `server` (hosted). The check is in
+  `enqueueGithubMirror` and again when each step starts (`mirrorJob`).
+- A landing is accepted onto `main`. The job is created in the same transaction
+  as the acceptance (`projectHostedAcceptancePublish.ts`,
+  `projectHostedLandingBatchPublish.ts`), one per receipt, run in order with one
+  active job per project (`projectGithubMirrorQueue.ts`). There is no timer,
+  watcher or idle job.
+- The binding is current when the token is minted (`githubBindingStore:requireId`).
+
+### What it pushes
+
+- **Branch:** only `refs/heads/main`, by `PATCH` with `force: false`. Lane refs,
+  other branches, tags and deletions are never written.
+- **Contents:** blobs, trees and one deterministic commit per accepted State
+  (`src/hosted-github-mirror.ts`). It carries the landing message and a
+  `Forge-State` trailer.
+- **Not pushed:** paths excluded by `sourceExclusion` (`src/files.ts`): `.git`,
+  `.forge`, `node_modules`, build output, key and credential files, `.env` files
+  except exact templates.
+- **Refusals:** the push stops, changes no ref and retains the job when GitHub
+  `main` is not the mirror's recorded parent (`GITHUB_SYNC_CHANGED`) or its tree
+  differs from the matching State (`GITHUB_SYNC_BOOTSTRAP_TREE`). GitHub's own
+  branch protection on `main` also applies to the `PATCH`; a block surfaces as a
+  retained `GITHUB_SYNC_API` failure. That last point is GitHub behavior this
+  repository does not test.
+
+### Known gap
+
+The mirror token requests no `permissions` object, so it is not narrowed to
+`contents: write`. Check tokens are narrowed (`actionsPermissions`), the mirror's
+is not. Scope to one repository ID still holds.
+
 ## Operator override
 
 Self-hosters may configure `FORGE_GITHUB_REPO_BINDINGS` as comma-separated
