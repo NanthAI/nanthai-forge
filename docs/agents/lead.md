@@ -32,6 +32,7 @@ product settings, not permission to introduce a new policy.
   again. Calendar waits become dated planning re-checks with a metric and failure
   action; they do not by themselves block a stage or phase close.
 - Prioritize core-claim incidents and structural blockers to cheap, fast landing.
+  Each core-claim incident gets a replay on the [regression ladder](regression-ladder.md#rung-3-incident-replays).
   Rank removal of dependence on an operator's machine highly. Measure single
   operations against the GitHub equivalent within measurement noise; the intended
   advantage is concurrent work. Keep fast paths Forge-native, independent of Git

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { overlappingPaths } from '../../../src/coordination-paths';
+import { noticeKey } from '../../../src/now-overlap-view';
 import type { CockpitLane } from './model';
 
 export type OverlapParty = { label: string; laneId?: string; agent?: boolean; main?: boolean };
@@ -13,6 +14,8 @@ export type OverlapRow = {
   detail: string;
   /** What will happen, in one sentence. */
   meaning: string;
+  /** Files this row stands for when it summarises several (a capped "changed on main" list); default 1. */
+  files?: number;
   /** The one action that helps: open a Lane to compare, or tell a session to wait. */
   action?: { label: string; laneId?: string; tell?: { recipient: string; name: string; laneId?: string } };
 };
@@ -51,7 +54,7 @@ const party = (lane: CockpitLane): OverlapParty => ({
 export function overlapRows(
   edits: readonly Edit[],
   claims: readonly Claim[] = [],
-  behindMain: readonly { lane: CockpitLane; paths: readonly string[] }[] = [],
+  behindMain: readonly { lane: CockpitLane; paths: readonly string[]; more?: number }[] = [],
 ): OverlapRow[] {
   const rows = new Map<string, OverlapRow>();
   const byPath = new Map<string, { lane: CockpitLane; lines?: readonly [number, number][] }[]>();
@@ -108,7 +111,7 @@ export function overlapRows(
         });
       }
     }
-  for (const { lane, paths } of behindMain)
+  for (const { lane, paths, more } of behindMain) {
     for (const path of paths) {
       if (rows.has(path)) continue;
       rows.set(path, {
@@ -120,9 +123,26 @@ export function overlapRows(
         action: { label: 'Open Lane', laneId: lane.id },
       });
     }
+    if (more) {
+      const path = `+${more} more ${more === 1 ? 'file' : 'files'} in ${lane.name}`;
+      rows.set(path, {
+        path,
+        kind: 'main',
+        files: more,
+        who: [party(lane), { label: 'main', main: true }],
+        detail: 'changed on main since this Lane started',
+        meaning: `${lane.name} is behind main in these files too. The Lane lists them.`,
+        action: { label: 'Open Lane', laneId: lane.id },
+      });
+    }
+  }
   const order = { edited: 0, main: 1, claimed: 2 };
   return [...rows.values()].sort((a, b) => order[a.kind] - order[b.kind] || a.path.localeCompare(b.path));
 }
+
+/** Files the rows stand for: a summary row counts every file it stands for. */
+export const overlapFileCount = (rows: readonly OverlapRow[]) =>
+  rows.reduce((sum, row) => sum + (row.files ?? 1), 0);
 
 /** How many other Lanes share a file with each Lane. */
 export function overlapCounts(rows: readonly OverlapRow[]): Map<string, number> {
@@ -152,7 +172,8 @@ export function unansweredOverlaps(
   const answered = new Map<string, Set<string>>();
   for (const answer of answers) {
     const ids = answered.get(answer.laneId) ?? new Set<string>();
-    ids.add(answer.noticeId);
+    // The Now read sends notice keys (id prefixes); native answers carry full ids. Compare keys.
+    ids.add(noticeKey(answer.noticeId));
     answered.set(answer.laneId, ids);
   }
   const byLane = new Map<string, Map<string, UnansweredNotice>>();
@@ -180,9 +201,10 @@ export function unansweredOverlaps(
   }
   const result = new Map<string, UnansweredNotice[]>();
   for (const [id, items] of byLane) {
-    const pending = [...items.values()].filter(
-      item => !item.noticeIds.some(noticeId => answered.get(id)?.has(noticeId)),
-    );
+    const keys = answered.get(id);
+    const pending = keys
+      ? [...items.values()].filter(item => !item.noticeIds.some(noticeId => keys.has(noticeKey(noticeId))))
+      : [...items.values()];
     if (pending.length) result.set(id, pending);
   }
   return result;

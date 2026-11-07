@@ -2039,7 +2039,11 @@ hosted peer coverage. Bound roots retain a local answer receipt so existing loca
 hooks can observe the hosted acknowledgement without appending native Work.
 Hosted peer selection uses the existing overlap read; hook installation remains separate work; this API adds
 no network call to the edit hook and no idle timer. Metric readers can page
-`projectHostedOverlapAcks:list`. Hosted briefs read a bounded window of the latest
+`projectHostedOverlapAcks:list`. The web Now page subscribes to
+`projectHostedOverlapAcks:now` instead: answered notice keys for open Lanes, the
+viewer's own answer times and the current signals cut to rendered paths (shared
+saved paths, at most 20 behind-main paths per Lane plus a count), under 20 KB
+per view. Hosted briefs read a bounded window of the latest
 100 hosted decisions and state incomplete coverage when more exist. The web
 Decisions page still reads the native Work projection and needs separate hosted
 query/version wiring.

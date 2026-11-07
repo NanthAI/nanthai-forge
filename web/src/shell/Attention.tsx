@@ -93,7 +93,15 @@ export function hostedAttention(
         ),
         [],
         current.behindMain.flatMap(edit =>
-          pinned(edit.laneId) ? [{ lane: laneById.get(edit.laneId)!, paths: edit.paths }] : [],
+          pinned(edit.laneId)
+            ? [
+                {
+                  lane: laneById.get(edit.laneId)!,
+                  paths: edit.paths,
+                  ...(edit.more ? { more: edit.more } : {}),
+                },
+              ]
+            : [],
         ),
       )
     : [];

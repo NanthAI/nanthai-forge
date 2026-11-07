@@ -30,6 +30,7 @@ import { hostedOutputTables } from './projectHostedOutputFields';
 import { hostedActionsTables } from './projectHostedActionsFields';
 import { hostedFinishTables } from './projectHostedFinishFields';
 import { hostedLandingTables } from './projectHostedLandingFields';
+import { landingSpeedTables } from './projectLandingSpeedFields';
 import { hostedSaveTables } from './projectHostedSaveFields';
 import { hostedSnapshotTables } from './projectHostedSnapshotFields';
 import { checkTables } from './projectCheckFields';
@@ -561,6 +562,7 @@ export default defineSchema({
   ...hostedOutputTables,
   ...hostedActionsTables,
   ...hostedLandingTables,
+  ...landingSpeedTables,
   ...hostedFinishTables,
   ...hostedAcceptanceTables,
   ...hostedLifecycleTables,

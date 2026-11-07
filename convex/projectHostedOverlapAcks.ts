@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import { readNowOverlaps } from './projectNowOverlaps';
+import { readNowOverlapWindow, readNowOverlaps } from './projectNowOverlaps';
+import { nowOverlapView } from '../src/now-overlap-view';
 import { v } from 'convex/values';
 import { mutation, query } from './cliServer';
 import { recordCaller, recordRequest, replayRequest, recordPageOptions } from './projectHostedFrictionStore';
@@ -99,6 +100,45 @@ export const list = query({
         page: page.page.map(row => ({ ...JSON.parse(row.value), ...(signals ? { actor: row.actor } : {}) })),
         ...(signals ? { signals: await readNowOverlaps(ctx, projectId, project) } : {}),
       });
+    } catch (error) {
+      return report(error);
+    }
+  },
+});
+
+/** Answers read per open Lane; a Lane answers at most 20 current notices per peer pair. */
+const NOW_ANSWERS_PER_LANE = 100;
+
+/**
+ * The Now page's one reactive overlap read (Issue 1b66b35a): answered notice keys for open Lanes only,
+ * the caller's answer times, and signals cut to rendered paths. One function call per view, no writes;
+ * an answer on a closed Lane does not invalidate it. `list` stays for paged records and older pages.
+ */
+export const now = query({
+  args: { projectId: v.id('hostedProjects') },
+  returns: v.string(),
+  handler: async (ctx, { projectId }) => {
+    try {
+      const { project, actor } = await recordCaller(ctx, projectId);
+      const window = await readNowOverlapWindow(ctx, projectId, project);
+      const pages = await Promise.all(
+        window.openLaneIds.map(laneId =>
+          ctx.db
+            .query('projectHostedOverlapAcks')
+            .withIndex('by_project_and_lane', q => q.eq('projectId', projectId).eq('laneId', laneId))
+            .take(NOW_ANSWERS_PER_LANE + 1),
+        ),
+      );
+      const rows = pages.flatMap(page =>
+        page.slice(0, NOW_ANSWERS_PER_LANE).map(row => ({
+          laneId: row.laneId,
+          noticeId: row.noticeId,
+          actor: row.actor,
+          at: (JSON.parse(row.value) as { at: string }).at,
+        })),
+      );
+      const complete = window.openLanesComplete && pages.every(page => page.length <= NOW_ANSWERS_PER_LANE);
+      return canonicalPayload(nowOverlapView(window.signals, rows, actor, complete));
     } catch (error) {
       return report(error);
     }

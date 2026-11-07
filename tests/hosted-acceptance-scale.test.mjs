@@ -42,11 +42,14 @@ test('205 included Lanes and 10,050 retained receipts keep final CAS constant; c
   const source = observerProjectionBudget(final);
   // Writes 15 -> 16 (13c63abe): the completion tick's stall guard is scheduled with it and both ids
   // are retained on the plan, so a lost tick is replayed. Calls are unchanged; the tick cancels the guard.
-  assert(source.ranges <= 40 && source.documents <= 40 && source.writes <= 16, JSON.stringify(final));
+  // Ranges/documents 40 -> 41, writes 16 -> 17 (45f49fb7): the landing reads and rewrites the project's
+  // landing-speed row (regression ladder rung 1, under 16 KB); still constant in history.
+  assert(source.ranges <= 41 && source.documents <= 41 && source.writes <= 17, JSON.stringify(final));
   assert(source.readBytes < 40 * 1024 && source.writeBytes < 16 * 1024);
   assert(!final.touched.includes('projectHostedAcceptancePages'));
-  // 40 = 39 plus the one submission-order read before claiming main (incident e4aee4fe); still constant.
-  assert(!final.touched.includes('projectHostedRecordHeads') || source.documents <= 40);
+  // 41 = 39 plus the one submission-order read before claiming main (incident e4aee4fe) and the
+  // landing-speed row (45f49fb7); still constant.
+  assert(!final.touched.includes('projectHostedRecordHeads') || source.documents <= 41);
   let ticks = 0;
   while (f.pendingTasks().some(t => t.name === 'projectHostedAcceptance:complete')) {
     assert(++ticks < 30, 'only outstanding finite completion work schedules itself');

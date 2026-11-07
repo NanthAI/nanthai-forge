@@ -11,6 +11,7 @@ export { hostedHref } from './hosted-links';
 import { Activity } from './Activity';
 import { activityItems } from './activity-model';
 import { hostedFeed } from './coordination';
+import { overlapFileCount } from './overlap-model';
 import { useMemo, useState } from 'react';
 import { useViewerHandle } from '../shell/viewer';
 import { useConvex } from 'convex/react';
@@ -80,6 +81,8 @@ type Live = {
   loadMoreEvents?: () => void;
   counts?: ActivityCounts;
   overlapAnswers?: import('./overlap-model').OverlapAnswer[];
+  /** The viewer's own overlap answer times, newest first (the server matches the caller). */
+  myOverlapAnswerTimes?: string[];
   overlapSignals?: import('../../../src/now-overlap-signals').NowOverlapSignals;
   overlapsComplete?: boolean;
 };
@@ -203,7 +206,7 @@ export function HostedNowView({
                     lane => !lane.accepted && (facts.get(lane.id)?.tone ?? lane.tone) !== 'stale',
                   ).length,
                   acceptedToday: today.length,
-                  overlaps: overlaps.length,
+                  overlaps: overlapFileCount(overlaps),
                   unanswered: [...unanswered.values()].reduce((sum, notices) => sum + notices.length, 0),
                   working,
                 }}
@@ -240,7 +243,7 @@ export function HostedNowView({
                   live.events,
                   viewer,
                   startOfDay(now),
-                  live.overlapAnswers ?? [],
+                  (live.myOverlapAnswerTimes ?? []).map(at => ({ actor: viewer ?? '', at })),
                   live.eventsComplete === true && live.overlapsComplete !== false,
                 )}
                 {...(working.total ? { quiet: `${working.total} working.` } : {})}

@@ -302,6 +302,9 @@ frozen set on 2026-11-06 broke capabilities across CLI/server versions with `HOS
   variables, never in the policy, the repository, logs, receipts or alert text. Delivery logs carry
   the channel and HTTP status only.
 - Example: `{"agentDefaults":{"stallAlerts":{"email":["you@example.com"],"webhook":"ntfy"}}}`.
+- The same channels carry the landing speed alert: a sustained jump in time to main or check
+  minutes over the project's 7-day median, at most once a metric a day
+  ([regression ladder](agents/regression-ladder.md#rung-1-landing-speed-alert)).
 
 ## Always on
 

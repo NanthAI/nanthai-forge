@@ -28,6 +28,7 @@ import {
 import { hostedOperationRow } from './projectHostedOperations';
 import { notifyFinish, wakeLandingOrderWaiters } from './projectHostedFinishWake';
 import { notifyStackedLandingEnded } from './projectHostedStackNotice';
+import { recordLandingSpeed } from './projectLandingSpeed';
 import { invariant } from '../src/errors';
 export type { LandingChannel } from './projectHostedLandingEvents';
 export { landingQueue, ensureLandingQueue, recordLandingObservation } from './projectHostedLandingEvents';
@@ -266,6 +267,7 @@ export async function writeLanding(
       runId: row.runId,
     });
   if (state.phase === 'landed' && previous.phase !== 'landed' && state.acceptance) {
+    await recordLandingSpeed(ctx, row.projectId, state);
     const project = await ctx.db.get(row.projectId);
     if (project?.needsFix)
       await ctx.scheduler.runAfter(0, makeFunctionReference<'mutation'>('projectHostedCulprit:accepted'), {

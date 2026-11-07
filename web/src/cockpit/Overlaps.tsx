@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { Glyph } from '../ui/Glyph';
 import { Avatar, Panel } from '../ui/primitives';
 import { InfoTip } from '../ui/signals';
-import type { OverlapRow } from './overlap-model';
+import { overlapFileCount, type OverlapRow } from './overlap-model';
 
 type Tell = NonNullable<NonNullable<OverlapRow['action']>['tell']>;
 
@@ -101,7 +101,7 @@ export function Overlaps({
   return (
     <Panel
       title="Where work overlaps"
-      count={rows.length}
+      count={overlapFileCount(rows)}
       labelId="fx-overlaps"
       actions={
         <InfoTip label="About overlaps">

@@ -23,7 +23,8 @@ import { useSafePaginatedQuery, useSafeQuery } from '../safe-query';
 import { freshness } from '../ui/status';
 
 import type { DecisionItem, FeedItem } from './attention';
-import { overlapRows, type OverlapRow } from './overlap-model';
+import { overlapRows, type OverlapAnswer, type OverlapRow } from './overlap-model';
+import { readViewSignals } from '../../../src/now-overlap-view';
 import type { CockpitLane, CockpitWork } from './model';
 
 /** Presence needs every descendant, without expanding any branch in a server transaction. */
@@ -65,10 +66,7 @@ export function useLiveCoordination(projectId: Id<'hostedProjects'>, enabled: bo
   // One local timer drops the counts (unknown) once their last window ends; no poll, no new read.
   const liveCounts = useExpiringCounts(counts.value);
   const claims = useSafeQuery(api.projectCoordinationReads.claims, enabled ? { projectId } : 'skip');
-  const answers = useSafeQuery(
-    api.projectHostedOverlapAcks.list,
-    enabled ? { projectId, cursor: null, signals: true } : 'skip',
-  );
+  const answers = useSafeQuery(api.projectHostedOverlapAcks.now, enabled ? { projectId } : 'skip');
   const rawAnswers = answers.value;
   const unavailable = [
     ...(sessions.failed ? ['sessions'] : []),
@@ -81,21 +79,20 @@ export function useLiveCoordination(projectId: Id<'hostedProjects'>, enabled: bo
   const sessionsLoading = !sessions.failed && sessions.status !== 'Exhausted';
   const settled = (read: { value: unknown; error: Error | undefined }) =>
     read.value !== undefined || read.error !== undefined;
-  const overlaps = useMemo(
-    () =>
-      rawAnswers
-        ? (JSON.parse(rawAnswers) as {
-            page: import('./overlap-model').OverlapAnswer[];
-            isDone: boolean;
-            signals?: import('../../../src/now-overlap-signals').NowOverlapSignals;
-          })
-        : undefined,
-    [rawAnswers],
-  );
+  const overlaps = useMemo(() => {
+    if (!rawAnswers) return undefined;
+    const view = JSON.parse(rawAnswers) as import('../../../src/now-overlap-view').NowOverlapView;
+    const page: OverlapAnswer[] = Object.entries(view.answered).flatMap(([laneId, keys]) =>
+      keys.map(noticeId => ({ laneId, noticeId })),
+    );
+    return { ...view, page, signals: readViewSignals(view.signals) };
+  }, [rawAnswers]);
   return {
     overlapAnswers: overlaps?.page ?? [],
+    /** When the viewer answered overlap notices on open Lanes, newest first; undefined until read. */
+    myOverlapAnswerTimes: overlaps?.mine,
     overlapSignals: overlaps?.signals,
-    overlapsComplete: !answers.error && overlaps?.isDone !== false && overlaps?.signals?.complete !== false,
+    overlapsComplete: !answers.error && overlaps?.complete !== false && overlaps?.signals?.complete !== false,
     unavailable,
     sessions: sessions.results as Session[],
     sessionsLoading: sessionsLoading,

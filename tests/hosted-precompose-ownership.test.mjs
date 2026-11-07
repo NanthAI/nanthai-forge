@@ -107,10 +107,12 @@ for (const history of [575, 1150])
     // it already landed at its head (landed siblings no longer hold the Intent open). Calls and writes unchanged.
     // Reads 1347 -> 1349 (8dfede85): one main path-history row read per landed receipt, to add the landing
     // to its 50-entry log for the drift nudge. Calls are unchanged.
+    // Reads 1349 -> 1351, writes 416 -> 418 (45f49fb7): each of the 2 landings reads and rewrites the
+    // project's landing-speed row (regression ladder rung 1) in its own accept mutation. Calls are unchanged.
     assert(
       budget.calls <= 71 &&
-        source.reduce((n, c) => n + c.documents, 0) <= 1349 &&
-        source.reduce((n, c) => n + c.writes, 0) <= 416,
+        source.reduce((n, c) => n + c.documents, 0) <= 1351 &&
+        source.reduce((n, c) => n + c.writes, 0) <= 418,
       JSON.stringify({
         ...budget,
         sourceReads: source.reduce((n, c) => n + c.documents, 0),

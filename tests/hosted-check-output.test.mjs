@@ -272,3 +272,66 @@ test('verified transfer uses exact namespace and rejects missing, failed, size o
   assert(calls.every(key => key === outputKey(s.projectId, s.check.id, message.body.chunk.object)));
   assert.equal(rows(s), 0, 'verification alone never publishes metadata');
 });
+
+test('log verification retries one transient 403 HEAD with backoff and nothing else', async () => {
+  const s = await outputFixture();
+  const message = outputMessage(s.check, chunk(s, 0, 'a'));
+  const checksum = Buffer.from(message.body.chunk.object.sha256, 'hex').toString('base64');
+  const run = async replies => {
+    const waits = [];
+    let heads = 0;
+    const result = await api
+      .verifyOutputObject(
+        s.projectId,
+        message,
+        {},
+        async () => replies[heads++],
+        async ms => waits.push(ms),
+      )
+      .then(
+        () => 'verified',
+        error => error.code ?? error.data?.code,
+      );
+    return { result, heads, waits };
+  };
+  const ok = { status: 'ok', size: 1, checksum };
+  const denied = { status: 'error', detail: 'HTTP 403', httpStatus: 403 };
+  assert.deepEqual(await run([ok]), { result: 'verified', heads: 1, waits: [] }, 'healthy: one HEAD');
+  const retried = await run([denied, ok]);
+  assert.equal(retried.result, 'verified');
+  assert.equal(retried.heads, 2);
+  assert.equal(retried.waits.length, 1);
+  assert.equal(
+    (await run([denied, denied, ok])).heads,
+    2,
+    'a persistent 403 stops after exactly one retry and stays a storage (infra) refusal',
+  );
+  assert.equal((await run([denied, denied])).result, 'R2_VERIFY_FAILED');
+  const other = { status: 'error', detail: 'HTTP 500', httpStatus: 500 };
+  assert.equal((await run([other, ok])).heads, 1, 'only 403 is retried here');
+});
+
+test('log PUT retries one transient 403 once and a second 403 is a storage refusal', async () => {
+  const target = { url: 'https://output.invalid/log', headers: {} };
+  const run = async statuses => {
+    const waits = [];
+    let puts = 0;
+    const result = await api
+      .storeOutputObject(
+        target,
+        new Uint8Array(1),
+        async () => new Response(null, { status: statuses[puts++] }),
+        async ms => waits.push(ms),
+      )
+      .then(
+        () => 'stored',
+        error => error.code ?? error.data?.code,
+      );
+    return { result, puts, waits: waits.length };
+  };
+  assert.deepEqual(await run([200]), { result: 'stored', puts: 1, waits: 0 });
+  assert.deepEqual(await run([412]), { result: 'stored', puts: 1, waits: 0 });
+  assert.deepEqual(await run([403, 200]), { result: 'stored', puts: 2, waits: 1 });
+  assert.deepEqual(await run([403, 403, 200]), { result: 'R2_VERIFY_FAILED', puts: 2, waits: 1 });
+  assert.deepEqual(await run([500]), { result: 'R2_VERIFY_FAILED', puts: 1, waits: 0 });
+});

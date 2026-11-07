@@ -170,15 +170,22 @@ async function executeActiveActionsJob(
       headers: Record<string, string>;
     };
     await retryActionsInfrastructure(async signal => {
-      const response = await actionsInfrastructureResponse(
-        await client.request(target.url, {
-          method: 'PUT',
-          headers: target.headers,
-          body: tail,
-          redirect: 'error',
-          signal,
-        }),
-      );
+      const put = async () =>
+        actionsInfrastructureResponse(
+          await client.request(target.url, {
+            method: 'PUT',
+            headers: target.headers,
+            body: tail,
+            redirect: 'error',
+            signal,
+          }),
+        );
+      // One 403 from log storage may be transient: retry once after a short backoff.
+      let response = await put();
+      if (response.status === 403) {
+        await new Promise(resolve => setTimeout(resolve, 300));
+        response = await put();
+      }
       invariant(response.ok || response.status === 412, 'R2_VERIFY_FAILED', 'Output upload failed.');
     });
   }

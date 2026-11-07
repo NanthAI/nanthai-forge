@@ -135,6 +135,7 @@ export const projectPurgeTables = {
   projectHostedDecisions: 'by_project',
   projectHostedDecisionMaintainers: 'by_project_and_actor',
   projectHostedTrust: 'by_project_and_actor',
+  projectLandingSpeed: 'by_project',
 } as const satisfies Record<string, string | { index: string; scope: string }>;
 export type ProjectPurgeTable = keyof typeof projectPurgeTables;
 export const projectPurgeOrder = Object.keys(projectPurgeTables) as ProjectPurgeTable[];

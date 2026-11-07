@@ -57,6 +57,15 @@ export async function readNowOverlaps(
   /** The project row the caller already read for its access check. */
   project: { autonomyPolicy?: unknown },
 ) {
+  return (await readNowOverlapWindow(ctx, projectId, project)).signals;
+}
+
+/** The signals plus the open Lane ids they were judged against (at most 101 per open status). */
+export async function readNowOverlapWindow(
+  ctx: QueryCtx,
+  projectId: Id<'hostedProjects'>,
+  project: { autonomyPolicy?: unknown },
+) {
   const cutoff = dormantCutoff(project);
   const [page, headers, latest, channel] = await Promise.all([
     openLanePage(ctx, projectId, cutoff),
@@ -93,5 +102,9 @@ export async function readNowOverlaps(
   const dormantLanes =
     cutoff !== null && unmatched.length ? await dormantHostedPresence(ctx, projectId, cutoff) : null;
   const complete = page.isDone && headers.length <= 100 && unmatched.every(row => dormantLanes?.has(row.key));
-  return nowOverlapSignals(lanes, latest, channel ? JSON.parse(channel.selection) : null, complete);
+  return {
+    signals: nowOverlapSignals(lanes, latest, channel ? JSON.parse(channel.selection) : null, complete),
+    openLaneIds: [...new Set(headers.map(row => row.key))],
+    openLanesComplete: headers.length <= 100,
+  };
 }

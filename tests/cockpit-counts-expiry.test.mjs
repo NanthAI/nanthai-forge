@@ -29,10 +29,11 @@ function backend(value) {
       if (args.paginationOpts) return { page: [], isDone: true, continueCursor: '' };
       if (name.endsWith(':unacked')) return { items: [], complete: true };
       if (name.endsWith(':claims')) return { claims: [], complete: true };
-      if (name.endsWith('OverlapAcks:list'))
+      if (name.endsWith('OverlapAcks:now'))
         return JSON.stringify({
-          page: [],
-          isDone: true,
+          answered: {},
+          mine: [],
+          complete: true,
           signals: { edits: [], notices: [], behindMain: [], complete: true },
         });
       return null;

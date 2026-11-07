@@ -87,15 +87,49 @@ export const authorize = internalMutation({
     }
   },
 });
+/** One 403 from log storage (clock skew at the edge, a stale signature, a brief credential
+ * propagation lag) is retried once after a short backoff; a second 403 is a storage outage.
+ * Healthy requests make no extra call. Every storage failure is infrastructure: the HTTP
+ * handler answers 503 (reason storage), never a test failure. */
+export const outputStorageRetryMs = 300;
+const pause = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
+export async function storeOutputObject(
+  target: { url: string; headers: Record<string, string> },
+  body: BodyInit,
+  send: typeof fetch = fetch,
+  wait = pause,
+) {
+  const put = () =>
+    send(target.url, {
+      method: 'PUT',
+      headers: target.headers,
+      body,
+      redirect: 'error',
+      signal: AbortSignal.timeout(20_000),
+    });
+  let stored = await put();
+  if (stored.status === 403) {
+    await wait(outputStorageRetryMs);
+    stored = await put();
+  }
+  // The signed create-only PUT enforces the sha256; 412 means this object is already stored.
+  invariant(stored.ok || stored.status === 412, 'R2_VERIFY_FAILED', 'Output upload failed.');
+}
 export async function verifyOutputObject(
   projectId: string,
   message: OutputMessage,
   config = r2Config(),
   head = headObject,
+  wait = pause,
 ) {
   const object = outputMessageObject(message);
   if (!object) return;
-  const observed = await head(config, outputKey(projectId, message.runId, object));
+  const key = outputKey(projectId, message.runId, object);
+  let observed = await head(config, key);
+  if (observed.status === 'error' && 'httpStatus' in observed && observed.httpStatus === 403) {
+    await wait(outputStorageRetryMs);
+    observed = await head(config, key);
+  }
   invariant(
     observed.status !== 'missing',
     'R2_OBJECT_MISSING',

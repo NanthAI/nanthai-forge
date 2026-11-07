@@ -11,7 +11,7 @@ import { readOverlapInbox } from '../dist/overlap-inbox.js';
 import { digest } from '../dist/portable-hash.js';
 const acks = await import(moduleUrl('../convex/projectHostedOverlapAcks.ts'));
 
-function fixture(count = 20) {
+function fixture(count = 20, shared = count) {
   const s = lanesFixture();
   const projectId = s.insert('hostedProjects', {
     key: 'synthetic',
@@ -39,7 +39,7 @@ function fixture(count = 20) {
       open,
       changes: JSON.stringify(
         Array.from({ length: 200 }, (_, j) => ({
-          path: j < 2 ? `shared-${j}.ts` : `${i}/file-${j}.ts`,
+          path: j < 2 && i < shared ? `shared-${j}.ts` : `${i}/file-${j}.ts`,
           before: null,
           after: { blob: 'b'.repeat(64), mode: 'file' },
         })),
@@ -223,4 +223,61 @@ test('signals share one query function with the ack page: only one paginate() ru
   );
   assert.equal(withCursor.page.length, 50);
   assert.deepEqual(withCursor.signals, first.signals);
+});
+test('the Now read: one call, no writes, answers of open Lanes only, the caller’s times, under the byte budget', async t => {
+  // Two of the 20 open Lanes share files, as on dev; every Lane saved 200 paths.
+  const s = fixture(20, 2);
+  const { NOW_OVERLAP_VIEW_BUDGET, readViewSignals, noticeKey } = await import(
+    moduleUrl('../src/now-overlap-view.ts')
+  );
+  const legacy = await s.call('list', acks.list, { projectId: s.projectId, cursor: null, signals: true });
+  const raw = await s.call('Now', acks.now, { projectId: s.projectId });
+  const measured = s.counts.at(-1);
+  const reply = JSON.parse(raw);
+  t.diagnostic(
+    JSON.stringify({ listBytes: Buffer.byteLength(legacy), nowBytes: Buffer.byteLength(raw), ...measured }),
+  );
+  assert.ok(Buffer.byteLength(legacy) > NOW_OVERLAP_VIEW_BUDGET, 'the old read replays the incident size');
+  assert.ok(Buffer.byteLength(raw) < NOW_OVERLAP_VIEW_BUDGET);
+  assert.equal(measured.writes, 0);
+  // 20 open Lanes: their 20 answers are read; the 80 answers on closed Lanes are not.
+  assert.deepEqual(
+    Object.keys(reply.answered).sort(),
+    Array.from({ length: 20 }, (_, i) => `lane-${i}`).sort(),
+  );
+  assert.deepEqual(reply.answered['lane-0'], [noticeKey('old')]);
+  assert.equal(reply.mine.length, 20, 'every answer here is the owner’s');
+  assert.equal(reply.complete, true);
+  assert.equal(reply.signals.edits.length, 20, 'every open Lane keeps its pin');
+  assert.deepEqual(
+    reply.signals.paths.sort(),
+    ['shared-0.ts', 'shared-1.ts'],
+    'only paths two Lanes share are sent',
+  );
+  assert.deepEqual(readViewSignals(reply.signals).notices, JSON.parse(legacy).signals.notices);
+  assert.equal(reply.signals.notices.length, 2, 'two shared files, one pair each');
+  // The busiest synthetic shape (all 20 Lanes share both files) still sends far less than the old read.
+  const busy = fixture(20);
+  const busyLegacy = await busy.call('list', acks.list, {
+    projectId: busy.projectId,
+    cursor: null,
+    signals: true,
+  });
+  const busyNow = await busy.call('Now', acks.now, { projectId: busy.projectId });
+  t.diagnostic(
+    JSON.stringify({
+      busyListBytes: Buffer.byteLength(busyLegacy),
+      busyNowBytes: Buffer.byteLength(busyNow),
+    }),
+  );
+  assert.ok(Buffer.byteLength(busyNow) * 3 < Buffer.byteLength(busyLegacy));
+  const reader = 'reader';
+  s.insert('projectReaders', { projectId: s.projectId, reader });
+  const read = JSON.parse(await s.call('reader', acks.now, { projectId: s.projectId }, reader));
+  assert.deepEqual(read.answered, reply.answered);
+  assert.deepEqual(read.mine, [], 'another viewer’s answers are not theirs');
+  await assert.rejects(
+    s.call('outsider', acks.now, { projectId: s.projectId }, 'outsider'),
+    error => error.data?.code === 'PROJECT_UNAVAILABLE',
+  );
 });

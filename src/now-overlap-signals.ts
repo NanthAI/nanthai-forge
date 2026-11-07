@@ -6,9 +6,13 @@ export type DetectedOverlap = { laneId: string; noticeId: string; file: string; 
 export type NowOverlapSignals = {
   notices: DetectedOverlap[];
   edits: { laneId: string; head: string; paths: string[] }[];
-  behindMain: { laneId: string; head: string; paths: string[] }[];
+  /** `more`: paths left out of a capped view (src/now-overlap-view.ts). */
+  behindMain: { laneId: string; head: string; paths: string[]; more?: number }[];
   complete: boolean;
 };
+/** A detection's id: the same two sorted Lanes and file always name the same notice. */
+export const firstWriteNoticeId = (lanes: readonly string[], file: string) =>
+  digest(JSON.stringify(['first-write', lanes, file]));
 /** One bounded project window; current detections are never delivery receipts. */
 export function nowOverlapSignals(
   lanes: readonly OverlapLane[],
@@ -58,7 +62,7 @@ export function nowOverlapSignals(
           result.complete = false;
           continue;
         }
-        const noticeId = digest(JSON.stringify(['first-write', lanes, file]));
+        const noticeId = firstWriteNoticeId(lanes, file);
         for (const laneId of lanes) {
           const count = counts.get(laneId) ?? 0;
           if (count === 20) {

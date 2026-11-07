@@ -1,0 +1,48 @@
+{
+  "schema": 1,
+  "about": "Regression ladder rung 3 (docs/agents/regression-ladder.md): each core-claim incident and B1.5d case study names the normal-suite test that replays it. tests/incident-replays.test.mjs fails if a named test is renamed, removed, skipped or moved out of tests/*.test.mjs.",
+  "replays": [
+    {
+      "incident": "n3-r3-a1",
+      "what": "B1.5d n3-r3 attempt 1: a land --save ran 1555 s and ended LANDING_STALLED; the agent hunted for its landing state",
+      "file": "tests/hosted-conflict-precheck.test.mjs",
+      "test": "B1.5d n3-r3 t23938: stall alarm remains pending; terminal stall has one successful retry"
+    },
+    {
+      "incident": "n3-r3-a1",
+      "what": "B1.5d n3-r3 attempt 1: resolve from the wrong folder sent t19456 help hunting",
+      "file": "tests/hosted-conflict-precheck.test.mjs",
+      "test": "B1.5d n3-r3 t19456: wrong editing root names one exact resolve location without help hunting"
+    },
+    {
+      "incident": "n3-r3-a1",
+      "what": "B1.5d n3-r3 attempt 1: a cell 3x slower than its norm raised no alert",
+      "file": "tests/landing-speed-alerts.test.mjs",
+      "test": "incident replay n3-r3 a1: three slow landings in a day alert once on time to main, naming the next step"
+    },
+    {
+      "incident": "t27456",
+      "what": "B1.5d t27456 conflict recovery: re-land with markers, resolve from a subdirectory, overtaken during its check",
+      "file": "tests/hosted-conflict-precheck.test.mjs",
+      "test": "B1.5d t27456 ${cell}: rejected re-land, resolve from subdirectory, followed continuation lands"
+    },
+    {
+      "incident": "a930de4c",
+      "what": "Core claim: land --save by Lane id from a foreign folder landed an empty Lane and reported LANDED",
+      "file": "tests/hosted-finish-empty.test.mjs",
+      "test": "incident replay: land by Lane id with head == base and unsaved edits is refused, naming count and command"
+    },
+    {
+      "incident": "c329d191",
+      "what": "Core claim: the dev queue stalled ~30 min after a lost finish wake stranded a passed head",
+      "file": "tests/hosted-landing-lost-wake.test.mjs",
+      "test": "incident replay c329d191: a lost finish wake after an order wait never strands a passed head"
+    },
+    {
+      "incident": "c329d191",
+      "what": "Core claim: every running-check progress event woke the queue (OCC contention behind the stall)",
+      "file": "tests/hosted-landing-progress-wake.test.mjs",
+      "test": "incident c329d191: running-check progress writes the queue row at most once a minute"
+    }
+  ]
+}

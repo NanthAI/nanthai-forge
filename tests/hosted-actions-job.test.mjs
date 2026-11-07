@@ -683,6 +683,40 @@ test('a result too large to carry its log falls back to the separate output uplo
   assert.equal(Object.keys(posted[1].result.contractReports).length, 300);
 });
 
+for (const [name, statuses, uploadCalls, failure] of [
+  ['one transient 403 on the log PUT is retried once', [403, 200], 2, false],
+  ['two 403s on the log PUT stop at one retry', [403, 403, 200], 2, true],
+]) {
+  test(`separate output upload: ${name}`, async t => {
+    const s = fixture(t),
+      candidate = join(s.directory, 'candidate'),
+      prepared = await prepareActionsJob(s.client, candidate, join(s.directory, 'objects'));
+    const path = join(s.directory, 'plan.json');
+    writeFileSync(path, JSON.stringify(prepared.recipe));
+    const posted = [];
+    s.client.call = async command => {
+      posted.push(command);
+      return command.kind === 'output' ? { url: 'https://output.invalid/log', headers: {} } : {};
+    };
+    const replies = [...statuses];
+    const uploads = t.mock.method(
+      globalThis,
+      'fetch',
+      async () => new Response(null, { status: replies.shift() }),
+    );
+    t.mock.method(process.stdout, 'write', () => true);
+    const program = `for(let i=0;i<300;i++)console.log('__FORGE_TESTS__'+JSON.stringify({file:'tests/wide-'+i+'.test.mjs',complete:true,durationMs:5,failed:true,firstError:'e'.repeat(1500),results:[{name:'n',passed:false}]}));`;
+    const run = executeActionsJob(s.client, candidate, path, 'static', [process.execPath, '--eval', program]);
+    if (failure) await assert.rejects(run, { code: 'R2_VERIFY_FAILED' });
+    else assert.equal(await run, 0);
+    assert.equal(uploads.mock.callCount(), uploadCalls);
+    assert.equal(
+      posted.some(command => command.kind === 'result'),
+      !failure,
+    );
+  });
+}
+
 test('workflow keeps the native plan branch and uses OIDC without GitHub secrets for hosted jobs', () => {
   const workflow = readFileSync(new URL('../.github/workflows/forge-check.yml', import.meta.url), 'utf8');
   assert.match(workflow, /inputs.deployment == '' && inputs.plan != '\[\]'/);

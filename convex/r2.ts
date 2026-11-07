@@ -137,7 +137,7 @@ export const presignGet = (config: R2Config, key: string, headers: Record<string
 export type HeadResult =
   | { status: 'ok'; size: number; checksum: string | null }
   | { status: 'missing' }
-  | { status: 'error'; detail: string };
+  | { status: 'error'; detail: string; httpStatus?: number };
 export async function headObject(config: R2Config, key: string, repairable = false): Promise<HeadResult> {
   try {
     const url = await presign({
@@ -156,7 +156,8 @@ export async function headObject(config: R2Config, key: string, repairable = fal
     if (response.status === 404) return { status: 'missing' };
     if (repairable && transientSourceStatus(response.status))
       throw new SourceIoError(null, 'source-head', key.split('/').at(-1) ?? null, response.status);
-    if (!response.ok) return { status: 'error', detail: `HTTP ${response.status}` };
+    if (!response.ok)
+      return { status: 'error', detail: `HTTP ${response.status}`, httpStatus: response.status };
     const length = response.headers.get('content-length');
     if (length === null) return { status: 'error', detail: 'R2 HEAD returned no content length' };
     return {

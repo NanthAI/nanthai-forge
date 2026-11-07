@@ -157,10 +157,13 @@ for (const history of [0, 575, 1150])
     // Reads 4215 -> 4216 (dc62b120): a landing that ends failed or cancelled reads one dependents range to
     // learn whether any Lane is stacked in the project; it is empty here, so the Lane lookup never runs.
     // Writes and calls are unchanged. Only the failure transition pays it, once per failed landing.
+    // Reads 4216 -> 4225, writes 1245 -> 1254 (45f49fb7): each of the 9 landings reads and rewrites the
+    // project's landing-speed row (regression ladder rung 1) inside its own accept mutation. Calls
+    // are unchanged.
     assert(
       budget.calls <= 199 &&
-        source.reduce((n, c) => n + c.documents, 0) <= 4216 &&
-        source.reduce((n, c) => n + c.writes, 0) <= 1245,
+        source.reduce((n, c) => n + c.documents, 0) <= 4225 &&
+        source.reduce((n, c) => n + c.writes, 0) <= 1254,
       JSON.stringify({
         ...budget,
         sourceReads: source.reduce((n, c) => n + c.documents, 0),
@@ -169,8 +172,10 @@ for (const history of [0, 575, 1150])
     );
     // Max writes 55 -> 58 (13c63abe): the cohort publication schedules one completion guard per
     // landed member and retains it on that member's plan (cohort size bounds it).
+    // Max writes 58 -> 60 (45f49fb7): each landed member of that publication also rewrites the
+    // project's one landing-speed row (cohort size bounds it); max reads are unchanged.
     assert(
-      Math.max(...source.map(c => c.documents)) <= 170 && Math.max(...source.map(c => c.writes)) <= 58,
+      Math.max(...source.map(c => c.documents)) <= 170 && Math.max(...source.map(c => c.writes)) <= 60,
       JSON.stringify({
         ...budget,
         maxSourceReads: Math.max(...source.map(c => c.documents)),

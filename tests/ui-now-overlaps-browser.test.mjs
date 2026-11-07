@@ -60,7 +60,7 @@ test('Now overlaps match A-C in light, dark and mobile; one shared subscription,
       assert.match(await first().innerText(), /41 min/);
       const initial = await calls();
       assert.equal(
-        initial.filter(call => call.name === 'projectHostedOverlapAcks:list').length,
+        initial.filter(call => call.name === 'projectHostedOverlapAcks:now').length,
         1,
         'shared child does not subscribe twice',
       );
