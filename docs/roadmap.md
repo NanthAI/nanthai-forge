@@ -1,6 +1,6 @@
 # Roadmap
 
-What we are doing, in what order, and why. Eight phases. Phases 1–5 are done (Phase 5 closed on 2026-11-04). Phase 6 makes Forge solid, Phase 7 is the public beta, Phase 8 is growth. Open work items live in Forge planning (see the [backlog](backlog.md) page); what works today is in [status](status.md). Keep this page current: update the status lines when a stage changes.
+What we are doing, in what order, and why. Nine phases. Phases 1–5 are done (Phase 5 closed on 2026-11-04). Phase 6 makes Forge solid, Phase 7 is the product and design people see, Phase 8 is the public beta (onboarding, permissions and production), Phase 9 is growth (owner re-bucket, 2026-11-07). Open work items live in Forge planning (see the [backlog](backlog.md) page); what works today is in [status](status.md). Keep this page current: update the status lines when a stage changes.
 
 Last updated: 2026-11-04.
 
@@ -122,24 +122,33 @@ Bench-harness fixes d8cf81b4, 02ee5788, 108a4883 and 97c7a123 land before the ex
   - **Long-lived drift**: a Lane far behind `main` on paths others keep changing gets a nudge naming those landings.
   - **Queue order**: priority and reordering, with fairness between agents.
 - **6.3 Every friction and bug.** Cluster triage sets the work, then builders fix it in parallel batches or the owner drops it, under the exit freeze rule above. It replaces the pending owner friction-triage session. Issues are measured or tested now, or dropped; none wait for an arbitrary count. 82e8ddb8 is reshaped on that basis.
-- **6.4 Cost and agent surface.** Attribute billed Convex cost before optimizing toward the agreed exit target above, in-Convex first; any hosted worker or vendor comes with a monthly cost estimate and owner approval first. The agent context budget, CLI verbs V2b and V3 (alias removal, CLI generated from the MCP surface), Lane undo (e7812d8f), and enforced trust per path per actor. Lane undo and clone refresh (73ed4d28) stay in Phase 6 as core source-host behaviour.
-- **6.5 Engineering health**: a codebase health pass, mechanical guards for repeat bug classes, a TLA+ model of the landing queue and a real-user scenario matrix.
+- **6.4 Cost and agent surface.** Attribute billed Convex cost before optimizing toward the agreed exit target above, in-Convex first; any hosted worker or vendor comes with a monthly cost estimate and owner approval first. The agent context budget, CLI verbs V2b and V3 (alias removal, CLI generated from the MCP surface), and enforced trust per path per actor. Clone refresh (73ed4d28) stays in Phase 6 as core source-host behaviour; Lane undo (e7812d8f) moved to Phase 7 (owner, 2026-11-07).
+- **6.5 Engineering health and regression guards**: a codebase health pass, mechanical guards for repeat bug classes (custom lint rules and check scripts for product-specific regressions), a regression ladder for landing-loop speed and cost, Convex preview deployments in landing checks (moved from Phase 7), and a TLA+ model of the landing queue. Owner 2026-11-07: finish Phase 6 fast; its gate is a core that is stable, reliable, fast and cheap, with enough checks that work built on top cannot badly regress it.
 - **In parallel, no product changes**: art direction, the design system and mockups for the Phase 7 design pass.
 
-## Phase 7: public beta (planned)
+## Phase 7: product and design (planned)
+
+Goal: the product people see is fast, coherent and designed; the site is redone from scratch with Fable art direction.
+
+**Exit:** the redesigned site and product views ship on dev, the marketing story is ready for the Phase 8 beta, and nothing is published that the owner has not approved.
+
+- **7.1 Product people see**: a design pass (fast highlighted diffs, Lane change speed, onboarding and project navigation), planning for agents and humans (design pack: [planning](design/planning/README.md)), the Now view, a dependency graph, the web board view, Initiative progress and rich discussions with Markdown and images.
+- **7.2 Moved from Phase 6** (owner, 2026-11-07): Lane undo, a failure log and on-demand health report, landing discipline as shipped defaults (skills, MCP, settings) and symbol-level overlap notices.
+- **7.3 Story**: the hero and story, a visual signature, design tooling and LLM discoverability (`llms.txt`).
+- **Landing page redesign (tentative)**: the 2026-10-27 landing-page-skill trial ([study](design/landing-study/README.md); outside [references](design/references.md)) produced a mockup with on-page proof, how it works, a FAQ, a final call to action and corrected title, description and repository links. Accept it as a tentative direction only. Before the public beta, assess critically whether it is better overall than today's page, and make the page striking, not only complete. Aim for something unique to Forge rather than a template: the owner's style references are [daoho.dev](https://www.daoho.dev), whose strength is one living element tied to its metaphor, an editorial type voice and restraint, and [nusretuzman.com](https://nusretuzman.com/), with a personal voice, a simple stacked layout and work shown as real product screens rather than described. Find Forge's own signature (for example Lanes flowing into `main`), animated on the client only, paused when hidden and never costing Convex calls. Keep `DESIGN.md` as the visual authority and never invent testimonials or logos.
+
+## Phase 8: public beta (planned)
 
 Goal: Forge live as a beta on a proper domain and on production, usable by a stranger with only the setup link.
 
-**Exit:** Forge runs as a beta on its own domain, on production; onboarding works for a stranger with only the setup link; nothing is published that the owner has not approved.
+**Exit:** Forge runs as a beta on its own domain, on production; onboarding works for a stranger with only the setup link; sharing, permissions and trust and safety are in place; nothing is published that the owner has not approved.
 
-- **7.1 Product people see**: a design pass (fast highlighted diffs, Lane change speed, onboarding and project navigation), planning for agents and humans (design pack: [planning](design/planning/README.md)), the Now view, a dependency graph and rich discussions with Markdown and images.
-- **7.2 Fresh-user path and GitHub**: install prerequisites stated plainly, an agent-followable setup page, no background process for normal users, two-way GitHub sync, and the CLI as a package (owner-gated).
-- **7.3 Production, domain and the move of Forge itself**: production setup with a spend limit first, the domain, then moving Forge's own project from Convex dev and R2 dev to production (dry run on a copy, a rollback point, idle at 0 after, and a billed-cost check). Forge's repository becomes a public project on Forge from then on. Every secret is rotated at the move; protected `main`; an internal cost view; Convex preview deployments in checks (spend approval).
-- **7.4 Sharing and permissions**: project visibility (private, public read), members and roles, invites by link or GitHub account, what agents may do with each role, and public reads served from R2 through the edge cache. GitHub norms: frictionless but secure.
-- **7.5 Launch**: LLM discoverability (`llms.txt`), the landing page and marketing, the gate-time and cost figures (G8), and inviting people when the owner decides who and when.
-- **Landing page redesign (tentative)**: the 2026-10-27 landing-page-skill trial ([study](design/landing-study/README.md); outside [references](design/references.md)) produced a mockup with on-page proof, how it works, a FAQ, a final call to action and corrected title, description and repository links. Accept it as a tentative direction only. Before the public beta, assess critically whether it is better overall than today's page, and make the page striking, not only complete. Aim for something unique to Forge rather than a template: the owner's style references are [daoho.dev](https://www.daoho.dev), whose strength is one living element tied to its metaphor, an editorial type voice and restraint, and [nusretuzman.com](https://nusretuzman.com/), with a personal voice, a simple stacked layout and work shown as real product screens rather than described. Find Forge's own signature (for example Lanes flowing into `main`), animated on the client only, paused when hidden and never costing Convex calls. Keep `DESIGN.md` as the visual authority and never invent testimonials or logos.
+- **8.1 Fresh-user path and GitHub**: install prerequisites stated plainly, an agent-followable setup page, no background process for normal users, GitHub import, two-way GitHub sync, CLI release channels and the CLI as a package (owner-gated).
+- **8.2 Production, domain and the move of Forge itself**: production setup with a spend limit first, the domain, then moving Forge's own project from Convex dev and R2 dev to production (dry run on a copy, a rollback point, idle at 0 after, and a billed-cost check). Forge's repository becomes a public project on Forge from then on. Every secret is rotated at the move; protected `main`; an internal cost view.
+- **8.3 Sharing and permissions**: project visibility (private, public read), members and roles, invites by link or GitHub account, what agents may do with each role, hosted versions of the agent commands, and public reads served from R2 through the edge cache. GitHub norms: frictionless but secure.
+- **8.4 Launch**: the gate-time and cost figures (G8), a real-user scenario matrix, and inviting people when the owner decides who and when.
 
-## Phase 8: grow (planned)
+## Phase 9: grow (planned)
 
 Moves up only if the public beta needs it: open-source mode (proposal limits, anonymous visibility, an optional CLA), monetisation with a free core (any limit or price needs an owner decision), cross-repo coordination with shared usage pools, Git serving from hosted Forge with Lane refs, deploy after landing, per-path visibility, bring-your-own CI, the making-of view, a compute pool view and an extension framework.
 

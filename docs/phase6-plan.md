@@ -1,6 +1,6 @@
 # Phase 6 lead plan
 
-Read this plan, the [lead rules](agents/lead.md), [Phase 5 close](phase5-close.md), [roadmap](roadmap.md) and the full linked Forge planning Issues. The roadmap is the authority for current stage names; historical drafts and old Issue stage labels are superseded. Phase 5 is closed. Phase 6 makes it solid; Phase 7 is the public beta; Phase 8 is growth. No outside-user count is a Phase 6 exit.
+Read this plan, the [lead rules](agents/lead.md), [Phase 5 close](phase5-close.md), [roadmap](roadmap.md) and the full linked Forge planning Issues. The roadmap is the authority for current stage names; historical drafts and old Issue stage labels are superseded. Phase 5 is closed. Phase 6 makes it solid; Phase 7 is product and design; Phase 8 is the public beta; Phase 9 is growth (owner re-bucket, 2026-11-07). No outside-user count is a Phase 6 exit.
 
 ## Stage map
 
@@ -42,7 +42,7 @@ Only **6.1 is ordered**. Cluster triage sets the later sequence, not a fixed ord
 6. Attribute Convex cost under 9db58ca6-1bc3-4cac-8786-2c6f5e515c21 before optimization, using the agreed billed-dollar target and at least 200 accepted dogfood landings.
 7. Then 6.2: conflict recovery 36a087ea-e1df-4120-8fac-08a8f85b7bdb, notice precision ee9d5738-0272-4cb4-b03c-ca35b34966ee before push delivery 11ba7bb9-bca1-4251-ad5a-cca9243b6add, sync apply blocked by ignored build outputs 1ad05526-bc33-4b17-a90d-7f31e94b7164, no-dead-ends d910db6b and the remaining contention work.
 
-The cluster triage and numeric cost target are agreed. Phase 7 production, publication, spend and outside-user decisions remain separately owner-gated.
+The cluster triage and numeric cost target are agreed. Phase 8 production, publication, spend and outside-user decisions remain separately owner-gated.
 
 ## Duplicate groups in planning
 
@@ -59,10 +59,10 @@ These cross-linked groups are being merged in planning. Merged items remain as a
 
 ## Open contradictions and supersession
 
-- Two-way GitHub sync 27e13362-bb4b-4eba-bb16-22cda0bd6942 still says **OPEN DESIGN** for inbound failure, although the Phase 7 overview says decided. Branch protection, revert and divergence remain unselected options. Neither overview wording nor this handover authorizes enforcement.
+- Two-way GitHub sync 27e13362-bb4b-4eba-bb16-22cda0bd6942 still says **OPEN DESIGN** for inbound failure, although the Phase 8 overview says decided. Branch protection, revert and divergence remain unselected options. Neither overview wording nor this handover authorizes enforcement.
 - Old stage titles in Issue bodies lose to the current roadmap/parent and dated notes. Do not restore friends or production into Phase 6 or revive dropped CI adapter breadth.
 - Trust thresholds 25/100 were chosen, but enablement still needs score-distribution/latency review on 7f085ec9-38fc-462e-883f-6e724817e09d and 5f673c14-5d50-4ab3-9814-554b303b54c5. This is not authorization to tighten unrelated policy.
-- Old Phase 3 candidates are in the Phase 8 holding Issue below, for disposition only. Slack/Netlify-preview/WebMCP/Lakebed and sparse-checkout ideas already have abandoned planning records; they are not missing active commitments. Early no-custom-field language predates the later arbitrary-field planning vision.
+- Old Phase 3 candidates are in the Phase 9 holding Issue below, for disposition only. Slack/Netlify-preview/WebMCP/Lakebed and sparse-checkout ideas already have abandoned planning records; they are not missing active commitments. Early no-custom-field language predates the later arbitrary-field planning vision.
 - Old local lead/preamble/common rules contain obsolete stop-before-finish, model routing, fixed test caps and all-overlap instructions. Current repo self-finish, profile and blocking/advisory rules win; use the [portable brief](agents/brief-template.md).
 
 ## Read planning from a fresh checkout
