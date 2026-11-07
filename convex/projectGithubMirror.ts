@@ -5,8 +5,8 @@ import { v } from 'convex/values';
 import { makeFunctionReference } from 'convex/server';
 import { internalAction, type ActionCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
-import { installationToken, mirrorPermissions } from './githubAppToken';
-import { githubRequest, GithubMirrorApiError } from '../src/hosted-github-api';
+import { installationTokenMinter, mirrorPermissionsFor } from './githubAppToken';
+import { githubRequest, GithubMirrorApiError, type GithubRequest } from '../src/hosted-github-api';
 import {
   prepareMirror,
   stepMirror,
@@ -106,11 +106,19 @@ export const step = internalAction({
       if (!raw) return null;
       const loaded = JSON.parse(raw);
       durable = sourceStorage(ctx, loaded.projectId);
-      const token = await installationToken(ctx, loaded.projectId, loaded.repository, mirrorPermissions);
-      const io: MirrorIO = { ...mirrorSource(ctx, input), api: githubRequest(token) };
+      // The binding is proved before any source read. The one token per step is
+      // minted once the plan names the changed paths (708b6943), or on the first
+      // GitHub call of an unverified bootstrap, which needs GitHub main to diff.
+      const mint = await installationTokenMinter(ctx, loaded.projectId, loaded.repository);
+      let client: Promise<GithubRequest> | undefined;
+      const connect = () => (client ??= mint(mirrorPermissionsFor(plan)).then(token => githubRequest(token)));
+      const api: GithubRequest = async <T>(path: string, method?: string, body?: unknown): Promise<T> =>
+        (await connect())<T>(path, method, body);
+      const io: MirrorIO = { ...mirrorSource(ctx, input), api };
       if (loaded.cursor) {
         plan = JSON.parse(Buffer.from(await durable.read(loaded.cursor)).toString('utf8'));
       } else plan = await prepareMirror(loaded.seed, io);
+      await connect();
       invariant(plan, 'SOURCE_UNAVAILABLE', 'Mirror continuation is unavailable.');
       started = { phase: plan.phase, index: plan.index };
       plan = await stepMirror(plan, io);

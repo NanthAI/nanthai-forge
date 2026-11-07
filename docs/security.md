@@ -62,7 +62,7 @@ need migration before resumption. This legacy check costs at most one indexed
 lookup and one internal query per read. Project-scoped `r2source:` reads retain
 their digest/size verification and add no Convex calls.
 
-What the GitHub App can write to a repository, and when, is in [GitHub App](operations/github-app.md#what-the-app-can-push-and-when). Forge sign-in, GitHub App installation and a person's repository entitlement are separate. Every read of private imported source, graph or export checks current policy and current provider entitlement. Policy is rechecked after provider calls. A saved snapshot, an old grant or a download never creates new access.
+What the GitHub App can write to a repository, and when, is in [GitHub App](operations/github-app.md#what-the-app-can-push-and-when). Each token names explicit permissions; the mirror adds `workflows: write` only to a step whose plan touches `.github/workflows/`, or to an unverified bootstrap step whose changed paths are not yet known (requesting both there costs no extra GitHub call, while a contents-only token would stop the mirror on a workflow change). Forge sign-in, GitHub App installation and a person's repository entitlement are separate. Every read of private imported source, graph or export checks current policy and current provider entitlement. Policy is rechecked after provider calls. A saved snapshot, an old grant or a download never creates new access.
 
 Paths, counts, search results and relationships derived from source are part of the visibility boundary.
 

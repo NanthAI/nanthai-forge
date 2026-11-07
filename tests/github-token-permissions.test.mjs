@@ -61,3 +61,21 @@ test('only the shared token module requests installation tokens', () => {
         owners.push(`${dir}/${file}`);
   assert.deepEqual(owners, ['convex/githubAppToken.ts']);
 });
+
+test('mirror permissions follow the plan: workflows write only for workflow paths, both when unplanned', () => {
+  const plan = (changes, pending = []) => ({
+    changes: changes.map(path => ({ path })),
+    pending: pending.map(path => ({ path })),
+  });
+  const both = { contents: 'write', workflows: 'write' };
+  assert.deepEqual(tokens.mirrorPermissionsFor(undefined), both);
+  assert.deepEqual(tokens.mirrorPermissionsFor(plan([], ['.github/workflows/sign.yml'])), both);
+  assert.deepEqual(tokens.mirrorPermissionsFor(plan(['.github/workflows/old.yml'])), both);
+  assert.deepEqual(
+    tokens.mirrorPermissionsFor(plan(['docs/a.md'], ['.github/CODEOWNERS', 'github/workflows/x'])),
+    {
+      contents: 'write',
+    },
+  );
+  assert.deepEqual(tokens.mirrorPermissionsFor(plan([])), { contents: 'write' });
+});

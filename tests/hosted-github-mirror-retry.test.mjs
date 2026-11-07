@@ -2,6 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { generateKeyPairSync } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import { getFunctionName } from 'convex/server';
 import { moduleUrl } from './convex-module.mjs';
 import { lanesFixture } from './hosted-lanes-fixture.mjs';
@@ -99,7 +100,8 @@ async function fixture(t, fail, source, respond = () => undefined) {
     storageReads = [];
   assert.equal(await run(ownership.owns, { projectId, ref: cursor }), true);
   for (const [id, bytes] of github.objects) storage.set(id, new Blob([bytes]));
-  const originalFetch = globalThis.fetch;
+  const originalFetch = globalThis.fetch,
+    tokenPermissions = [];
   const values = {
     FORGE_GITHUB_REPO_BINDINGS: `${projectId}=synthetic/mirror`,
     GITHUB_APP_ID: '123',
@@ -114,9 +116,26 @@ async function fixture(t, fail, source, respond = () => undefined) {
     if (new URL(url).hostname.endsWith('.r2.cloudflarestorage.com')) return originalFetch(url, init);
     if (url.endsWith('/installation')) return Response.json({ id: 42 });
     if (url.includes('/access_tokens')) {
-      // The mirror push token must carry an explicit contents-write-only request.
-      assert.deepEqual(JSON.parse(init.body).permissions, { contents: 'write' });
-      return Response.json({ token: 'synthetic-token' });
+      // The mirror push token names contents write, plus workflows write only
+      // for workflow changes; never anything else.
+      const permissions = JSON.parse(init.body).permissions;
+      assert(
+        [{ contents: 'write' }, { contents: 'write', workflows: 'write' }].some(set =>
+          isDeepStrictEqual(set, permissions),
+        ),
+      );
+      tokenPermissions.push(permissions);
+      return Response.json({ token: `synthetic-token-${tokenPermissions.length - 1}` });
+    }
+    // GitHub's own rule (incident 708b6943): a tree touching .github/workflows/
+    // needs the workflows permission, else 403 on POST git/trees.
+    if (url.endsWith('/git/trees') && init.method === 'POST') {
+      const granted = tokenPermissions[Number(init.headers.Authorization.split('-').at(-1))];
+      if (
+        !granted?.workflows &&
+        JSON.parse(init.body).tree.some(entry => entry.path.startsWith('.github/workflows/'))
+      )
+        return Response.json({ message: 'Resource not accessible by integration' }, { status: 403 });
     }
     const response = respond(url, init);
     if (response) return response;
@@ -164,6 +183,7 @@ async function fixture(t, fail, source, respond = () => undefined) {
   return {
     ...f,
     github,
+    tokenPermissions,
     projectId,
     run,
     input,
@@ -558,3 +578,45 @@ test('API diagnostics count exact UTF-8 request bytes without printing credentia
     },
   );
 });
+
+// Incident 708b6943: a narrowed contents-only token stopped the mirror on the
+// first workflow-file landing. Every path class the mirror pushes is replayed.
+for (const [name, source, workflows] of [
+  [
+    'adds a workflow',
+    { before: { 'a.md': 'a' }, after: { 'a.md': 'a', '.github/workflows/sign.yml': 'on: push' } },
+    true,
+  ],
+  [
+    'changes a workflow',
+    { before: { '.github/workflows/sign.yml': 'v1' }, after: { '.github/workflows/sign.yml': 'v2' } },
+    true,
+  ],
+  [
+    'removes a workflow',
+    { before: { 'a.md': 'a', '.github/workflows/sign.yml': 'v1' }, after: { 'a.md': 'a' } },
+    true,
+  ],
+  [
+    'changes docs only',
+    {
+      before: { 'docs/a.md': 'a', '.github/workflows/sign.yml': 'v1' },
+      after: { 'docs/a.md': 'b', '.github/workflows/sign.yml': 'v1' },
+    },
+    false,
+  ],
+  [
+    'changes .github outside workflows',
+    { before: {}, after: { '.github/CODEOWNERS': '* @x', 'src/a.ts': '1' } },
+    false,
+  ],
+])
+  test(`real action: a mirror job that ${name} ${workflows ? 'asks for' : 'does not ask for'} workflows write`, async t => {
+    const f = await fixture(t, () => false, source);
+    await f.step();
+    assert.equal(f.job().status, 'done', f.job().error);
+    assert.deepEqual(f.tokenPermissions, [
+      workflows ? { contents: 'write', workflows: 'write' } : { contents: 'write' },
+    ]);
+    assert.equal(f.github.commits.size, 2);
+  });

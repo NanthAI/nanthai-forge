@@ -13,8 +13,27 @@ export type GithubAppPermissions = Record<string, 'read' | 'write'>;
 /** Least privilege for check dispatch/cancel; checks create no refs or commits. */
 export const actionsPermissions: GithubAppPermissions = { actions: 'write', contents: 'read' };
 /** The mirror push uses only the Git data API (blobs, trees, commits, refs), which
- * needs contents write; GitHub always adds metadata read. Nothing else is asked. */
+ * needs contents write; GitHub always adds metadata read. */
 export const mirrorPermissions: GithubAppPermissions = { contents: 'write' };
+/** GitHub refuses (403 on POST git/trees) any tree that adds, changes or removes
+ * a path under .github/workflows/ without the workflows permission (incident
+ * 708b6943). Those jobs alone also ask for it. */
+export const mirrorWorkflowPermissions: GithubAppPermissions = { contents: 'write', workflows: 'write' };
+const workflowPath = (path: string) => path.startsWith('.github/workflows/');
+/** Token permissions for one mirror step. The plan (prepared from States or
+ * read from the retained cursor) lists every changed and removed path. With no
+ * plan yet (the unverified bootstrap reads GitHub main before it can diff),
+ * the paths are unknown, so both are requested rather than spending an extra
+ * GitHub mint or failing a workflow change. */
+export function mirrorPermissionsFor(
+  plan: { changes: { path: string }[]; pending: { path: string }[] } | undefined,
+): GithubAppPermissions {
+  if (!plan) return mirrorWorkflowPermissions;
+  return plan.changes.some(file => workflowPath(file.path)) ||
+    plan.pending.some(file => workflowPath(file.path))
+    ? mirrorWorkflowPermissions
+    : mirrorPermissions;
+}
 const encoder = new TextEncoder();
 const bytes = (value: string) => Uint8Array.from(atob(value), c => c.charCodeAt(0));
 const base64url = (value: Uint8Array) => {
@@ -224,6 +243,29 @@ export async function requireRepositoryBinding(ctx: ActionCtx, projectId: string
   const { api, installation } = await appInstallation(repo, convexFetch, Date.now());
   await repositoryScope(ctx, projectId, repo, api, installation.id, convexFetch);
 }
+/** Proves the installation and the repository binding first, then mints tokens
+ * for that one repository. The mirror picks its permissions after the proof,
+ * once its plan names the changed paths. */
+export async function installationTokenMinter(
+  ctx: ActionCtx,
+  projectId: string,
+  repo: string,
+  request: typeof fetch = convexFetch,
+  now = Date.now(),
+): Promise<(permissions: GithubAppPermissions) => Promise<string>> {
+  const { api, installation } = await appInstallation(repo, request, now);
+  const scope = await repositoryScope(ctx, projectId, repo, api, installation.id, request);
+  return async permissions => {
+    const token = await mintInstallationToken(api, installation.id, scope, permissions);
+    if (scope.repository_ids)
+      await ctx.runQuery(makeFunctionReference<'query'>('githubBindingStore:requireId'), {
+        projectId,
+        installationId: installation.id,
+        repoId: scope.repository_ids[0],
+      });
+    return token;
+  };
+}
 /** Stable shared API for mirror, Actions dispatch and cancellation. */
 export async function installationToken(
   ctx: ActionCtx,
@@ -233,16 +275,7 @@ export async function installationToken(
   request: typeof fetch = convexFetch,
   now = Date.now(),
 ): Promise<string> {
-  const { api, installation } = await appInstallation(repo, request, now);
-  const scope = await repositoryScope(ctx, projectId, repo, api, installation.id, request);
-  const token = await mintInstallationToken(api, installation.id, scope, permissions);
-  if (scope.repository_ids)
-    await ctx.runQuery(makeFunctionReference<'query'>('githubBindingStore:requireId'), {
-      projectId,
-      installationId: installation.id,
-      repoId: scope.repository_ids[0],
-    });
-  return token;
+  return (await installationTokenMinter(ctx, projectId, repo, request, now))(permissions);
 }
 /** Raw App-authenticated request for endpoints whose status matters (dispatch
  * returns 200 with run details or 204). Bodies are never echoed in errors. */

@@ -28,7 +28,8 @@ These are manual steps for the GitHub App owner and deployment operator:
    [event reference](https://docs.github.com/en/webhooks/webhook-events-and-payloads#installation_repositories). Check deliveries for `installation` and
    `installation_repositories` when qualifying the setup.
 5. Install the App on the selected repositories and approve its permissions:
-   Metadata read, Contents write for mirroring, Actions write for check dispatch.
+   Metadata read, Contents and Workflows write for mirroring, Actions write for
+   check dispatch.
    The connecting GitHub user must have repository admin or maintain permission,
    and must be a GitHub account linked to the Forge account that runs connect.
 
@@ -112,8 +113,8 @@ need operational qualification.
 The App never holds a standing credential. Each operation mints a short-lived
 installation token for one repository and discards it
 (`convex/githubAppToken.ts`, `installationToken`). GitHub caps a token at the
-permissions the installation accepted: Metadata read, Contents write, Actions
-write. The App's permission set is configured in GitHub's App settings, not in
+permissions the installation accepted: Metadata read, Contents write, Workflows
+write, Actions write. The App's permission set is configured in GitHub's App settings, not in
 this repository, so the table shows what Forge asks of each token.
 
 | Operation | Requested permissions | Trigger | Code |
@@ -122,7 +123,7 @@ this repository, so the table shows what Forge asks of each token.
 | Import read | `contents: read`, `metadata: read`, one numeric repository ID | A user starts a project import | `importReadToken`; `projectGithubImport.ts`, `projectGithubImportArchive.ts` |
 | Check dispatch, run lookup, cancel | `actions: write`, `contents: read` | A hosted check on an App runner (dispatch `forge-check.yml` on `main`, list its runs, cancel a run) | `actionsPermissions`; `projectHostedActionsDirect.ts`, `projectHostedActionsWebhook.ts` |
 | Runner setup preflight | None minted; reads the installation's accepted permissions | `configure-runner` | `requireInstallationPermissions`; `projectHostedActionsConfigure.ts` |
-| Mirror push | `contents: write` (Git data API only; GitHub adds `metadata: read`), one repository | One job per accepted landing | `projectGithubMirror.ts` `step`, `src/hosted-github-mirror.ts` |
+| Mirror push | `contents: write` (Git data API only; GitHub adds `metadata: read`), one repository; also `workflows: write` when the step's plan adds, changes or removes a path under `.github/workflows/`, or when no plan exists yet (unverified bootstrap) | One job per accepted landing | `mirrorPermissionsFor`; `projectGithubMirror.ts` `step`, `src/hosted-github-mirror.ts` |
 
 The mirror is the only operation that writes source to GitHub. Check dispatch
 writes only Actions state (a workflow run); Forge checks themselves run with
@@ -169,8 +170,15 @@ Every installation token request names an explicit permissions object
 (`mirrorPermissions`, `actionsPermissions`, the import read set and the
 binding-discovery probe). `mintInstallationToken` refuses a request without one,
 and `tests/github-token-permissions.test.mjs` asserts the request body for the
-mirror, check and import uses. No App settings change is needed: the mirror asks
-only for `contents: write`, which the installation already accepts.
+mirror, check and import uses. GitHub refuses a tree that touches
+`.github/workflows/` without `workflows: write` (403 on `POST git/trees`), so the
+mirror proves the binding, reads the step's plan (retained cursor or a diff of
+two States), then mints one token: workflow changes get `workflows: write`, every other step
+contents-only. Before an unverified bootstrap has diffed, the paths are unknown
+and both are requested; this costs no extra GitHub call.
+`tests/hosted-github-mirror-retry.test.mjs` replays the incident (add, change,
+remove a workflow; docs-only; other `.github/` paths). A token permission change must be tested against all
+of them.
 
 ## Operator override
 
