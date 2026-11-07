@@ -42,7 +42,8 @@ export const deviceTables = {
   deviceCodes: defineTable(deviceFields)
     .index('by_deviceHash', ['deviceHash'])
     .index('by_userHash', ['userHash'])
-    .index('by_operationId', ['operationId']),
+    .index('by_operationId', ['operationId'])
+    .index('by_expiresAt', ['expiresAt']),
   cliCredentials: defineTable(credentialFields)
     .index('by_credentialId', ['credentialId'])
     .index('by_owner', ['owner']),

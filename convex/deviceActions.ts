@@ -40,33 +40,42 @@ async function browserOwner(ctx: import('./_generated/server').ActionCtx) {
   invariant(allowed, 'AUTH_SLOW_DOWN', 'Try again in a minute.');
   return user.subject;
 }
+/** Returned instead of a login when too many device logins started this minute. */
+export const startSlowDown = { error: 'slow_down' as const, interval: 60 };
 export const start = internalAction({
   args: { operationId: v.string(), clientNonce: v.string(), name: v.string(), scope: deviceScope },
-  returns: v.object({
-    device_code: v.string(),
-    user_code: v.string(),
-    verification_uri: v.string(),
-    verification_uri_complete: v.string(),
-    expires_in: v.number(),
-    interval: v.number(),
-  }),
+  returns: v.union(
+    v.object({
+      device_code: v.string(),
+      user_code: v.string(),
+      verification_uri: v.string(),
+      verification_uri_complete: v.string(),
+      expires_in: v.number(),
+      interval: v.number(),
+    }),
+    v.object({ error: v.literal('slow_down'), interval: v.number() }),
+  ),
   handler: async (
     ctx,
     args,
-  ): Promise<{
-    device_code: string;
-    user_code: string;
-    verification_uri: string;
-    verification_uri_complete: string;
-    expires_in: number;
-    interval: number;
-  }> => {
+  ): Promise<
+    | {
+        device_code: string;
+        user_code: string;
+        verification_uri: string;
+        verification_uri_complete: string;
+        expires_in: number;
+        interval: number;
+      }
+    | typeof startSlowDown
+  > => {
     const { key, web } = config();
     uuid(args.operationId);
+    const name = args.name.trim();
     invariant(
-      /^[0-9a-f]{64}$/.test(args.clientNonce) && args.name.trim().length > 0,
+      /^[0-9a-f]{64}$/.test(args.clientNonce) && name.length > 0 && name.length <= 80,
       'BAD_ARGUMENT',
-      'Use a login nonce and device name.',
+      'Use a login nonce and a device name of 1 to 80 characters.',
     );
     const deviceCode = deviceSecret(key, args.operationId, args.clientNonce);
     const code = userCode(key, args.operationId, deviceCode),
@@ -84,6 +93,7 @@ export const start = internalAction({
       credentialId: randomUUID(),
       // The bearer secret is never persisted.
     });
+    if (!row) return startSlowDown;
     return {
       device_code: deviceCode,
       user_code: code,

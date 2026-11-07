@@ -36,6 +36,11 @@ async function request(origin: string, operation: string, input: unknown) {
     throw new ForgeError('AUTH_NETWORK', 'Device login could not reach Forge.');
   }
   invariant(
+    response.status !== 429,
+    'AUTH_SLOW_DOWN',
+    'Too many device logins were started on this Forge deployment. Try again in a minute.',
+  );
+  invariant(
     response.ok,
     'AUTH_REQUEST_FAILED',
     'Forge could not process device login. Check the deployment configuration.',
@@ -141,6 +146,11 @@ export async function authCli(command: string, args: string[]): Promise<unknown>
     };
   }
   invariant(command === 'login', 'BAD_ARGUMENT', help);
+  invariant(
+    name.trim().length > 0 && name.trim().length <= 80,
+    'BAD_ARGUMENT',
+    'Use a device name of 1 to 80 characters.',
+  );
   const clientNonce = randomBytes(32).toString('hex'),
     operationId = randomUUID(),
     origin = httpOrigin(deployment);

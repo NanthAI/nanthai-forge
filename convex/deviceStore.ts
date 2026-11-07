@@ -3,9 +3,13 @@ import { v } from 'convex/values';
 import { internalMutation, internalQuery } from './server';
 import { deviceDocument, deviceFields, credentialDocument, credentialFields } from './deviceFields';
 import { invariant } from '../src/errors';
+/** New device logins per minute for the whole deployment, and expired login rows
+ * removed by each new start. Retries of an existing start are not counted. */
+export const deviceStartLimit = { perMinute: 30, cleanup: 4 };
+/** Returns null when the start limit is reached. */
 export const start = internalMutation({
   args: deviceFields,
-  returns: deviceDocument,
+  returns: v.union(deviceDocument, v.null()),
   handler: async (ctx, args) => {
     const old = await ctx.db
       .query('deviceCodes')
@@ -19,6 +23,18 @@ export const start = internalMutation({
       );
       return old;
     }
+    const now = Date.now();
+    const recent = await ctx.db
+      .query('deviceCodes')
+      .withIndex('by_creation_time', q => q.gt('_creationTime', now - 60_000))
+      .take(deviceStartLimit.perMinute);
+    if (recent.length >= deviceStartLimit.perMinute) return null;
+    // Expired login rows are removed a few at a time by later starts; no scheduled job runs.
+    const expired = await ctx.db
+      .query('deviceCodes')
+      .withIndex('by_expiresAt', q => q.lte('expiresAt', now))
+      .take(deviceStartLimit.cleanup);
+    for (const row of expired) await ctx.db.delete(row._id);
     const collision = await ctx.db
       .query('deviceCodes')
       .withIndex('by_userHash', q => q.eq('userHash', args.userHash))

@@ -110,6 +110,11 @@ for (const operation of ['start', 'poll'] as const)
     handler: httpAction(async (ctx, request) => {
       try {
         const result = await ctx.runAction(internal.deviceActions[operation], await request.json());
+        if ('error' in result)
+          return Response.json(
+            { ...result, error_description: 'Too many device logins started. Try again in a minute.' },
+            { status: 429, headers: { 'Cache-Control': 'no-store', 'Retry-After': String(result.interval) } },
+          );
         return Response.json(result, { headers: { 'Cache-Control': 'no-store' } });
       } catch {
         return Response.json(

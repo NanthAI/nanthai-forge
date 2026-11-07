@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
 import { paginationOptsValidator, paginationResultValidator } from 'convex/server';
-import { query, coordinationQuery, isDeviceIdentity } from './cliServer';
-// Self-revocation remains retryable after revocation; this endpoint only removes authority.
-import { mutation } from './server';
+import { query, mutation, coordinationQuery, isDeviceIdentity } from './cliServer';
+// Reviewed exception: self-revocation remains retryable after revocation and only removes
+// authority. Every other export uses the guarded cliServer builders.
+import { mutation as revocationMutation } from './server';
 import { deviceScope } from './deviceFields';
 import { accountFor } from './urlIdentity';
 import { invariant } from '../src/errors';
@@ -39,7 +40,7 @@ export const list = query({
     };
   },
 });
-export const revoke = mutation({
+export const revoke = revocationMutation({
   args: { credentialId: v.string(), operationId: v.string() },
   returns: v.null(),
   handler: async (ctx, args) => {

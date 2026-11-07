@@ -10,6 +10,7 @@ const cli = new URL('../dist/cli.js', import.meta.url).pathname;
 test('real CLI login, saved authentication, env override, denial, logout and status never print the credential', async t => {
   const directory = mkdtempSync(join(tmpdir(), 'forge-device-cli-'));
   let decision = 'approved',
+    limited = false,
     revoked = false,
     seenAuth = '',
     startName = '',
@@ -21,7 +22,10 @@ test('real CLI login, saved authentication, env override, denial, logout and sta
     for await (const chunk of request) chunks.push(chunk);
     const input = JSON.parse(Buffer.concat(chunks).toString());
     response.setHeader('Content-Type', 'application/json');
-    if (request.url === '/auth/device/start') {
+    if (request.url === '/auth/device/start' && limited) {
+      response.statusCode = 429;
+      response.end(JSON.stringify({ error: 'slow_down', interval: 60 }));
+    } else if (request.url === '/auth/device/start') {
       assert.match(input.clientNonce, /^[0-9a-f]{64}$/);
       assert.equal(input.scope, 'cli');
       startName = input.name;
@@ -127,6 +131,14 @@ test('real CLI login, saved authentication, env override, denial, logout and sta
   assert.match(denied.stderr, /nforge auth rename NAME/);
   assert.match(denied.stderr, /denied/);
   assert.equal(JSON.parse(readFileSync(file, 'utf8')).deployments[deployment].token, token);
+  limited = true;
+  const slowed = await run(['login', deployment, '--no-browser']);
+  assert.equal(slowed.code, 1);
+  assert.match(slowed.stderr, /Too many device logins/);
+  limited = false;
+  const longName = await run(['login', deployment, '--name', 'n'.repeat(81), '--no-browser']);
+  assert.equal(longName.code, 1);
+  assert.match(longName.stderr, /1 to 80 characters/);
   const cached = JSON.parse(readFileSync(file, 'utf8'));
   cached.deployments[deployment].expiresAt = 0;
   writeFileSync(file, JSON.stringify(cached), { mode: 0o600 });

@@ -403,3 +403,63 @@ test('issuer reconfiguration cannot widen a device scope or bypass revocation/br
     rejected('AUTH_REQUIRED'),
   );
 });
+
+test('device-login starts are limited per minute and a limited start writes nothing', async t => {
+  const s = fixture(t),
+    { perMinute } = store.deviceStartLimit;
+  const first = await start(s);
+  for (let i = 1; i < perMinute; i++) await start(s);
+  assert.equal(s.tables.deviceCodes.size, perMinute);
+  const limited = await actions.start._handler(s.ctx, {
+    operationId: randomUUID(),
+    clientNonce: randomBytes(32).toString('hex'),
+    name: 'Synthetic CLI',
+    scope: 'cli',
+  });
+  assert.deepEqual(limited, { error: 'slow_down', interval: 60 });
+  assert.equal(s.tables.deviceCodes.size, perMinute);
+  // A retry of an accepted start still reconciles while the limit holds.
+  assert.equal((await actions.start._handler(s.ctx, first.input)).device_code, first.flow.device_code);
+  const { default: http } = await import(moduleUrl('../convex/http.ts'));
+  const route = http.getRoutes().find(([value]) => value === '/auth/device/start')[2];
+  const ctx = { runAction: (ref, args) => actions[getFunctionName(ref).split(':')[1]]._handler(s.ctx, args) };
+  const response = await route._handler(
+    ctx,
+    new Request('https://forge.example/auth/device/start', {
+      method: 'POST',
+      body: JSON.stringify({ ...first.input, operationId: randomUUID() }),
+    }),
+  );
+  assert.equal(response.status, 429);
+  assert.equal(response.headers.get('Retry-After'), '60');
+  assert.equal(response.headers.get('Cache-Control'), 'no-store');
+  assert.equal((await response.json()).error, 'slow_down');
+  // Starts older than a minute no longer count.
+  for (const row of s.tables.deviceCodes.values()) row._creationTime -= 61_000;
+  assert.match((await start(s)).flow.user_code, /^[A-Z2-9]{5}-[A-Z2-9]{5}$/);
+});
+
+test('expired device-login rows are deleted in small batches by later starts', async t => {
+  const s = fixture(t),
+    { cleanup } = store.deviceStartLimit;
+  const logins = [];
+  for (let i = 0; i < cleanup + 2; i++) logins.push(await start(s));
+  const live = await start(s);
+  for (const { row } of logins) s.tables.deviceCodes.get(row._id).expiresAt = Date.now() - 1;
+  await start(s);
+  const left = [...s.tables.deviceCodes.values()];
+  assert.equal(left.filter(row => row.expiresAt <= Date.now()).length, 2);
+  assert.ok(left.some(row => row._id === live.row._id));
+  await start(s);
+  assert.equal([...s.tables.deviceCodes.values()].filter(row => row.expiresAt <= Date.now()).length, 0);
+  assert.equal(s.tables.deviceCodes.size, 3);
+  assert.equal((await poll(s, logins[0].pollInput)).status, 'expired_token');
+});
+
+test('device-login start rejects device names longer than 80 characters', async t => {
+  const s = fixture(t);
+  await assert.rejects(start(s, { name: 'n'.repeat(81) }), rejected('BAD_ARGUMENT'));
+  await assert.rejects(start(s, { name: '   ' }), rejected('BAD_ARGUMENT'));
+  assert.equal(s.tables.deviceCodes.size, 0);
+  assert.equal((await start(s, { name: 'n'.repeat(80) })).row.name.length, 80);
+});

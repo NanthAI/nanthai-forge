@@ -61,19 +61,53 @@ test('no public return validator returns an auth subject, display name or unrevi
   assert.deepEqual(found, []);
 });
 
-// Reviewed exceptions: self-revocation must work with a revoked credential and returns null.
-const builderExceptions = new Set(['cliServer.ts', 'server.ts', 'deviceCredentials.ts']);
+// Builder modules themselves, and reviewed exports by name: self-revocation must work
+// with a revoked credential and returns null.
+const builderFiles = new Set(['cliServer.ts', 'server.ts']);
+const builderExports = new Set(['deviceCredentials.ts:revoke']);
+/** Names every use of an unguarded public builder outside the reviewed exports. */
+function unguarded(file, text) {
+  const found = [];
+  for (const match of text.matchAll(/import\s*\{([^}]*)\}\s*from\s*'\.\/(?:_generated\/)?server'/g))
+    for (const binding of match[1].split(',')) {
+      const [imported, local = imported] = binding.trim().split(/\s+as\s+/);
+      if (!['query', 'mutation', 'action'].includes(imported)) continue;
+      const uses = [...text.matchAll(new RegExp(`\\b${local}\\b`, 'g'))].length - 1;
+      const reviewed = [...text.matchAll(new RegExp(`export const (\\w+) = ${local}\\(`, 'g'))].filter(m =>
+        builderExports.has(`${file}:${m[1]}`),
+      ).length;
+      if (uses !== reviewed) found.push(`${file}:${local}`);
+    }
+  return found;
+}
 test('every public function is built by cliServer, which applies the identity mapping', async () => {
   const bypass = [];
   const revoke = (await import(moduleUrl('../convex/deviceCredentials.ts'))).revoke;
   assert.equal(JSON.parse(revoke.exportReturns()).type, 'null');
-  for (const file of files) {
-    if (builderExceptions.has(file)) continue;
-    const text = readFileSync(new URL(file, directory), 'utf8');
-    for (const match of text.matchAll(/import\s*\{([^}]*)\}\s*from\s*'\.\/(?:_generated\/)?server'/g))
-      if (/(?:^|[\s,])(?:query|mutation|action)(?:\s+as\s+\w+)?\s*(?:,|$)/m.test(match[1])) bypass.push(file);
-  }
+  for (const file of files)
+    if (!builderFiles.has(file))
+      bypass.push(...unguarded(file, readFileSync(new URL(file, directory), 'utf8')));
   assert.deepEqual(bypass, []);
+});
+
+test('the builder guard names each export outside the reviewed list, not just each file', () => {
+  const header = "import { mutation as revocationMutation } from './server';\n";
+  assert.deepEqual(
+    unguarded('deviceCredentials.ts', `${header}export const revoke = revocationMutation({});\n`),
+    [],
+  );
+  assert.deepEqual(
+    unguarded(
+      'deviceCredentials.ts',
+      `${header}export const revoke = revocationMutation({});\nexport const rename = revocationMutation({});\n`,
+    ),
+    ['deviceCredentials.ts:revocationMutation'],
+  );
+  assert.deepEqual(
+    unguarded('example.ts', "import { query } from './_generated/server';\nexport const read = query({});\n"),
+    ['example.ts:query'],
+  );
+  assert.deepEqual(unguarded('example.ts', "import { internalMutation } from './server';\n"), []);
 });
 
 test('a required person field is blanked, not removed, so the declared result still validates', async () => {
