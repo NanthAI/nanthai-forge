@@ -129,7 +129,8 @@ Each tier answers a different question. None depends on a particular CI provider
    the static checks. Tiers 2 and 3 select the same readers (one shared selector,
    `scripts/docs-readers.mjs`) beside the documents checks, and nothing more: a document
    no test reads still runs no test file, and the docs scope keeps its rules (no full
-   re-check, the main-audit skip).
+   re-check, the main-audit skip: a docs-only pass that also passes its readers still
+   inherits a green parent).
 2. **Pre-queue Lane check (project runner, any CI): the complete consumer set,
    off the builder's machine.** It runs the project's configured check on the
    project's runner. Forge's `verify` selects either the full suite or every

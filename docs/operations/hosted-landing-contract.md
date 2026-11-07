@@ -446,7 +446,9 @@ landing policy and exact-Candidate evidence are still checked separately.
 
 Hosted main keeps one audit row per project. A passed full-gated landing adopts
 its exact run as green evidence, clears red main and cancels the pending audit
-wake. A docs-only pass inherits an already green parent. Contract and scoped
+wake. A docs-only pass inherits an already green parent: the check first runs the
+test files that read a changed document (`scripts/docs-readers.mjs`), and a reader that fails
+keeps the landing off main. Contract and scoped
 landings count toward an audit of the newest accepted Candidate: **10 counted
 landings or 24 hours**, whichever comes first. A full-gate failure requests an
 early audit when counted landings are outstanding. Repeated requests coalesce.
