@@ -66,3 +66,34 @@ test('committed, generated and benchmark workflows pin every action', () => {
     assert.deepEqual(actionPinFindings(path, text), [], path);
   }
 });
+
+/** Jobs that can mint a GitHub OIDC token: `id-token: write` on the job, or on the whole workflow. */
+function oidcJobs(path, text) {
+  const [head, body = ''] = text.split(/^jobs:\s*$/m);
+  const everyJob = /^\s*id-token:\s*write\b/m.test(head);
+  return body
+    .split(/^(?=  [\w-]+:\s*$)/m)
+    .filter(block => /^  [\w-]+:/.test(block))
+    .filter(block => everyJob || /^\s+id-token:\s*write\b/m.test(block))
+    .map(block => ({ job: `${path} ${block.match(/^  ([\w-]+):/)[1]}`, block }));
+}
+
+test('every OIDC job pins every action it runs', () => {
+  const jobs = readdirSync('.github/workflows')
+    .filter(name => /\.ya?ml$/.test(name))
+    .flatMap(name =>
+      oidcJobs(`.github/workflows/${name}`, readFileSync(`.github/workflows/${name}`, 'utf8')),
+    );
+  // forge-check.yml hosted-plan/hosted-check/hosted-pack and foundation.yml native-selfhost today.
+  assert(jobs.length >= 4, `found ${jobs.map(j => j.job).join(', ')}`);
+  for (const { job, block } of jobs) {
+    assert.match(block, /uses: /, job);
+    assert.deepEqual(actionPinFindings(job, block), [], job);
+  }
+  // The job finder sees an unpinned action in an OIDC job, and workflow-wide permissions too.
+  const unpinned = `permissions:\n  id-token: write\njobs:\n  a:\n    steps:\n      - uses: actions/checkout@v4\n`;
+  const [found] = oidcJobs('w.yml', unpinned);
+  assert.equal(found.job, 'w.yml a');
+  assert.equal(actionPinFindings(found.job, found.block).length, 1);
+  assert.deepEqual(oidcJobs('w.yml', unpinned.replace('id-token', 'contents')), []);
+});

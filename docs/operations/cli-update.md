@@ -144,12 +144,15 @@ The owner's steps (only public material is printed):
 
 ```sh
 nforge cli release-key --out KEY_FILE                  # once per key; mode 0600, never overwritten
-nforge cli release-sign --key KEY_FILE [--state STATE] # after a release lands; default: current main
+nforge cli release-sign --key KEY_FILE [--state STATE --release N] # default: current main
 ```
 
-`release-sign` signs the statement `forge-cli-release/v1`, project id and State hash, and stores
-the 64-byte signature with the project (`projectReleaseSignatures`, owner-only, insert-only, at
-most 4 per State). The store is untrusted: a row can make a signature present, never valid.
+`release-sign` signs the statement `forge-cli-release/v2`, project id, State hash and release
+number, and stores the 64-byte signature with its number (`projectReleaseSignatures`,
+owner-only, insert-only, at most 4 per State). The release number defaults to main's source
+revision, which grows with every accepted State; `--state` needs an explicit `--release`. The
+store refuses a number that is not above every other State's, or that differs from the number
+the State already has. The store is untrusted: a row can make a signature present, never valid.
 
 When main moves, the updater makes one small signature read for that State, after the release
 read and before any download, dependency install or build. Nothing is read when main has not
@@ -158,18 +161,28 @@ moved, and idle costs nothing. The verdict is written to `DIR/release-signature.
 - A signature from a listed key that verifies: the update continues (canary, two-step switch).
 - A listed key's signature that does not verify: the State is refused like a canary failure. The
   current build keeps serving every call, one alert goes out, and the canary back-off applies.
+- A valid signature whose release number is below the highest one installed on this machine
+  (`DIR/release-number.json`), or the same number on another State: refused the same way, as a
+  downgrade (an earlier signed State put back on main). Only `--state` installs it.
 - No signature from a listed key (none yet, unknown keys only, or the read failed): while
   `CLI_RELEASE_SIGNATURES_REQUIRED` is `false` (the transition) the update continues as before.
   Once it is `true`, the updater holds on the current build without an alert and looks again
   after `CLI_RELEASE_SIGNATURE_RETRY_MS` (1 minute) until the signature appears or main moves.
-- An explicit `nforge update --state STATE` selection skips the check; it is the owner's own
-  recovery path.
+- An explicit `nforge update --state STATE` selection skips the check and leaves the recorded
+  release number as it is; it is the owner's own rollback and recovery path.
+
+Migration from v1 signatures (no release number, made before numbers): while signing is optional
+they verify as before and set no release number, so nothing is compared. Once
+`CLI_RELEASE_SIGNATURES_REQUIRED` is `true`, a v1 signature counts as missing (held), because it
+cannot be checked for a downgrade. Builds from before release numbers cannot read numbered rows
+and treat them as unsigned, which installs during the transition. A machine records its first
+release number at the first numbered release its own (new) updater installs.
 
 The first release key is listed (key id `f3b8ac47a969d73d`). Signing is still optional:
 `CLI_RELEASE_SIGNATURES_REQUIRED` stays `false` until the first signed release is installed.
 
 Turning the switch on: after the first signed release, confirm `release-signature.json` says
-`verified` on every machine, then land `CLI_RELEASE_SIGNATURES_REQUIRED = true` and sign that
+`verified` with a `release` number on every machine, then land `CLI_RELEASE_SIGNATURES_REQUIRED = true` and sign that
 landing too. A test refuses `true` with an empty key list.
 
 Rotation: land the new public key in a release signed with an old key, sign with every listed key

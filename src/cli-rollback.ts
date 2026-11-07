@@ -96,7 +96,7 @@ export async function cliManageCli(args: string[]) {
       usage:
         'nforge cli rollback [--directory DIR]\nSwitches atomically to the one retained previous CLI build; run it again to switch back.\n' +
         'nforge cli release-key --out FILE\nOwner: creates an Ed25519 release key (mode 0600) and prints its public key.\n' +
-        'nforge cli release-sign --key FILE [--state STATE] [--directory DIR]\nOwner: signs released main (or STATE) and stores the signature.',
+        'nforge cli release-sign --key FILE [--state STATE --release N] [--directory DIR]\nOwner: signs released main (or STATE) with its release number and stores the signature.',
     };
   if (args[0] !== 'rollback') {
     const { cliReleaseCommand } = await import('./cli-release-sign.js');

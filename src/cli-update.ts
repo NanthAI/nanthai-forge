@@ -39,7 +39,7 @@ import {
   clearCliCanaryRefusal,
   rememberCanaryClone,
 } from './cli-canary.js';
-import { checkCliRelease, type ReleaseCheckHooks } from './cli-release-check.js';
+import { checkCliRelease, recordCliReleaseNumber, type ReleaseCheckHooks } from './cli-release-check.js';
 
 const sourceSchema = z.object({ url: z.url(), projectId: z.string().min(1) }).strict();
 /** How long a write command waits for a live concurrent updater (a dead one is reclaimed at once).
@@ -248,16 +248,17 @@ export async function updateCli(
     }
     // Signed releases: checked with this (already installed) build's keys before the new State is
     // downloaded, provisioned or built. Explicit --state selection is the owner's own recovery path.
-    if (!options.rollback)
-      await checkCliRelease(
-        installation,
-        {
-          projectId: address.projectId,
-          head: release.head,
-          ...(dependencies.source.signatures ? { signatures: dependencies.source.signatures } : {}),
-        },
-        dependencies.releaseCheck,
-      );
+    const verdict = options.rollback
+      ? null
+      : await checkCliRelease(
+          installation,
+          {
+            projectId: address.projectId,
+            head: release.head,
+            ...(dependencies.source.signatures ? { signatures: dependencies.source.signatures } : {}),
+          },
+          dependencies.releaseCheck,
+        );
     const publish = async (prepared?: string) => {
       const input = {
         installation,
@@ -281,6 +282,13 @@ export async function updateCli(
       const value = await result;
       rmSync(failureMark(installation), { force: true });
       clearCliCanaryRefusal(installation, release.head);
+      // Anti-downgrade floor: the highest verified release number now installed here.
+      if (verdict)
+        try {
+          recordCliReleaseNumber(installation, release.head, verdict);
+        } catch {
+          /* the next verified update records it */
+        }
       return value;
     };
     if (

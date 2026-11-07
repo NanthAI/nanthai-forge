@@ -517,9 +517,13 @@ export default defineSchema({
     head: v.string(),
     keyId: v.string(),
     signature: v.string(),
+    /** Signed release number (v2 signatures); absent on v1 rows made before release numbers. */
+    release: v.optional(v.number()),
     actor: v.string(),
     at: v.number(),
-  }).index('by_project_and_head', ['projectId', 'head']),
+  })
+    .index('by_project_and_head', ['projectId', 'head'])
+    .index('by_project_and_release', ['projectId', 'release']),
   projectReturnSupersessions: defineTable({
     projectId: v.id('hostedProjects'),
     operationId: v.string(),

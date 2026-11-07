@@ -35,7 +35,11 @@ export const forState = query({
         .take(CLI_RELEASE_SIGNATURES_PER_STATE);
       return JSON.stringify({
         head,
-        signatures: rows.map(row => ({ keyId: row.keyId, signature: row.signature })),
+        signatures: rows.map(row => ({
+          keyId: row.keyId,
+          signature: row.signature,
+          ...(row.release === undefined ? {} : { release: row.release }),
+        })),
       });
     } catch (error) {
       return report(error);
@@ -44,9 +48,17 @@ export const forState = query({
 });
 
 /** One write per signing. Repeating an identical signature is a no-op; a different signature for
- * the same State and key, or more than the per-State limit, is refused. */
+ * the same State and key, or more than the per-State limit, is refused. A release number must be
+ * above every other State's (one more indexed read) and equal to any number this State already
+ * has: this catches signer mistakes. The updater's own floor, not this check, stops downgrades. */
 export const put = mutation({
-  args: { projectId: v.id('hostedProjects'), head: v.string(), keyId: v.string(), signature: v.string() },
+  args: {
+    projectId: v.id('hostedProjects'),
+    head: v.string(),
+    keyId: v.string(),
+    signature: v.string(),
+    release: v.optional(v.number()),
+  },
   returns: v.string(),
   handler: async (ctx, input) => {
     try {
@@ -54,8 +66,16 @@ export const put = mutation({
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to sign a release.');
       await activeOwnedProject(ctx, input.projectId, user.subject);
       const head = state(input.head);
-      const parsed = cliReleaseSignatureSchema.safeParse({ keyId: input.keyId, signature: input.signature });
-      invariant(parsed.success, 'BAD_ARGUMENT', 'Send a 16-hex key id and a base64 Ed25519 signature.');
+      const parsed = cliReleaseSignatureSchema.safeParse({
+        keyId: input.keyId,
+        signature: input.signature,
+        ...(input.release === undefined ? {} : { release: input.release }),
+      });
+      invariant(
+        parsed.success,
+        'BAD_ARGUMENT',
+        'Send a 16-hex key id, a base64 Ed25519 signature and a whole release number.',
+      );
       const signed = parsed.data;
       const rows = await ctx.db
         .query('projectReleaseSignatures')
@@ -70,6 +90,26 @@ export const put = mutation({
         );
         return JSON.stringify({ head, keyId: signed.keyId, stored: false });
       }
+      if (signed.release !== undefined) {
+        const numbered = rows.find(row => row.release !== undefined);
+        invariant(
+          !numbered || numbered.release === signed.release,
+          'RELEASE_NUMBER_MISMATCH',
+          `This State is release ${numbered?.release}; sign it with that number.`,
+        );
+        const latest = numbered
+          ? null
+          : await ctx.db
+              .query('projectReleaseSignatures')
+              .withIndex('by_project_and_release', q => q.eq('projectId', input.projectId))
+              .order('desc')
+              .first();
+        invariant(
+          latest?.release === undefined || latest.release < signed.release,
+          'RELEASE_NUMBER_NOT_NEWER',
+          `Release ${signed.release} is not above the latest signed release ${latest?.release}.`,
+        );
+      }
       invariant(
         rows.length < CLI_RELEASE_SIGNATURES_PER_STATE,
         'RELEASE_SIGNATURE_LIMIT',
@@ -80,10 +120,16 @@ export const put = mutation({
         head,
         keyId: signed.keyId,
         signature: signed.signature,
+        ...(signed.release === undefined ? {} : { release: signed.release }),
         actor: user.subject,
         at: Date.now(),
       });
-      return JSON.stringify({ head, keyId: signed.keyId, stored: true });
+      return JSON.stringify({
+        head,
+        keyId: signed.keyId,
+        ...(signed.release === undefined ? {} : { release: signed.release }),
+        stored: true,
+      });
     } catch (error) {
       return report(error);
     }

@@ -57,25 +57,37 @@ export function cliReleasePublicKey(key: KeyObject) {
   return der.subarray(12).toString('base64');
 }
 
-/** Sign one State with a PKCS#8 PEM private key (the owner's step; the key stays in memory). */
-export function signCliRelease(privateKeyPem: string, projectId: string, head: string): CliReleaseSignature {
+/** Sign one State with a PKCS#8 PEM private key (the owner's step; the key stays in memory).
+ * `release` makes a v2 signature that carries the release number; `nforge cli release-sign`
+ * always passes one. Without it the result is a v1 signature (made before release numbers). */
+export function signCliRelease(
+  privateKeyPem: string,
+  projectId: string,
+  head: string,
+  release?: number,
+): CliReleaseSignature {
   const key = createPrivateKey(privateKeyPem);
   const publicKey = cliReleasePublicKey(key);
   return {
     keyId: cliReleaseKeyId(publicKey),
-    signature: sign(null, Buffer.from(cliReleaseStatement(projectId, head)), key).toString('base64'),
+    signature: sign(null, Buffer.from(cliReleaseStatement(projectId, head, release)), key).toString('base64'),
+    ...(release === undefined ? {} : { release }),
   };
 }
 
 export type CliReleaseVerdict =
-  | { status: 'verified'; keyId: string }
+  /** `release` is the signed release number; absent for a v1 signature (no number). */
+  | { status: 'verified'; keyId: string; release?: number }
   /** No signature from a listed key (none stored, unknown keys only, or the read failed). */
   | { status: 'unsigned'; reason: string }
   /** A listed key's signature that does not match this State. */
-  | { status: 'invalid'; reason: string };
+  | { status: 'invalid'; reason: string }
+  /** A valid signature whose release number is below the highest this machine installed. */
+  | { status: 'downgrade'; reason: string; release: number; installed: number };
 
 /** Pure decision for one State. Signatures from keys this build does not list are ignored: storage
- * is untrusted, so they count as missing, never as valid or as a reason to refuse. */
+ * is untrusted, so they count as missing, never as valid or as a reason to refuse. A numbered (v2)
+ * signature wins over a v1 one; a stored number is only trusted because it is signed. */
 export function verifyCliRelease(input: {
   projectId: string;
   head: string;
@@ -83,10 +95,11 @@ export function verifyCliRelease(input: {
   keys: readonly CliReleaseKey[];
 }): CliReleaseVerdict {
   if (!input.signatures) return { status: 'unsigned', reason: 'release signatures could not be read' };
-  const statement = Buffer.from(cliReleaseStatement(input.projectId, input.head));
-  let invalid: string | null = null;
+  let invalid: string | null = null,
+    legacy: CliReleaseVerdict | null = null;
   for (const key of input.keys) {
     for (const signed of input.signatures.filter(s => s.keyId === key.id)) {
+      const statement = Buffer.from(cliReleaseStatement(input.projectId, input.head, signed.release));
       const bytes = Buffer.from(signed.signature, 'base64');
       let ok = false;
       try {
@@ -94,10 +107,13 @@ export function verifyCliRelease(input: {
       } catch {
         ok = false;
       }
-      if (ok) return { status: 'verified', keyId: key.id };
-      invalid = `the signature from release key ${key.id} does not match this State`;
+      if (ok && signed.release !== undefined)
+        return { status: 'verified', keyId: key.id, release: signed.release };
+      if (ok) legacy ??= { status: 'verified', keyId: key.id };
+      else invalid = `the signature from release key ${key.id} does not match this State`;
     }
   }
+  if (legacy) return legacy;
   if (invalid) return { status: 'invalid', reason: invalid };
   return {
     status: 'unsigned',

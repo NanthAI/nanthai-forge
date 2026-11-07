@@ -38,6 +38,15 @@ function context(subject) {
             reads.index++;
             return match().slice(0, n);
           },
+          order: direction => ({
+            first: async () => {
+              assert.equal(name, 'by_project_and_release');
+              assert.equal(direction, 'desc');
+              reads.index++;
+              const sorted = match().sort((x, y) => (x.release ?? -1) - (y.release ?? -1));
+              return sorted.at(-1) ?? null;
+            },
+          }),
           unique: async () => null,
         };
       },
@@ -49,9 +58,10 @@ function context(subject) {
     ctx: { db, auth: { getUserIdentity: async () => (subject ? { subject } : null) } },
   };
 }
-const put = (s, projectId, signed) =>
-  store.put._handler(s.ctx, { projectId, head, ...signed }).then(JSON.parse);
-const read = (s, projectId) => store.forState._handler(s.ctx, { projectId, head }).then(JSON.parse);
+const put = (s, projectId, signed, at = head) =>
+  store.put._handler(s.ctx, { projectId, head: at, ...signed }).then(JSON.parse);
+const read = (s, projectId, at = head) =>
+  store.forState._handler(s.ctx, { projectId, head: at }).then(JSON.parse);
 
 test('release signatures: owner-only, insert-only and bounded per State, one indexed read per call', async () => {
   const s = context('owner');
@@ -85,4 +95,31 @@ test('release signatures: others cannot write; private reads need access, public
   assert.deepEqual(await read(s, 'public'), { head, signatures: [] });
   const anonymous = context(null);
   await assert.rejects(read(anonymous, 'public'), /PROJECT_UNAVAILABLE/);
+});
+
+test('release signatures: numbers round-trip, rise across States and stay one per State', async () => {
+  const s = context('owner');
+  const other = 'c'.repeat(64),
+    third = 'd'.repeat(64);
+  // A v1 row (no number) does not block numbered ones.
+  assert.equal((await put(s, 'project', signature(1))).stored, true);
+  assert.deepEqual(await put(s, 'project', { ...signature(2), release: 7 }), {
+    head,
+    keyId: signature(2).keyId,
+    release: 7,
+    stored: true,
+  });
+  assert.deepEqual((await read(s, 'project')).signatures, [signature(1), { ...signature(2), release: 7 }]);
+  // Another key for the same State keeps its number; a different number is refused.
+  await assert.rejects(put(s, 'project', { ...signature(3), release: 8 }), /RELEASE_NUMBER_MISMATCH/);
+  assert.equal((await put(s, 'project', { ...signature(3), release: 7 })).stored, true);
+  // Another State needs a higher number (one more indexed read).
+  const before = s.reads.index;
+  await assert.rejects(put(s, 'project', { ...signature(1), release: 7 }, other), /RELEASE_NUMBER_NOT_NEWER/);
+  await assert.rejects(put(s, 'project', { ...signature(1), release: 3 }, other), /RELEASE_NUMBER_NOT_NEWER/);
+  assert.equal(s.reads.index - before, 4);
+  assert.equal((await put(s, 'project', { ...signature(1), release: 8 }, other)).release, 8);
+  assert.equal((await put(s, 'project', { ...signature(1), release: 9 }, third)).stored, true);
+  await assert.rejects(put(s, 'project', { ...signature(4), release: 1.5 }, 'e'.repeat(64)), /BAD_ARGUMENT/);
+  assert.equal(s.rows.length, 5);
 });
