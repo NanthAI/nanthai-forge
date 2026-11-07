@@ -86,19 +86,38 @@ test('every signed-out read path of a public project shares the budget; private 
   assert.equal(budgetRows(s)[0].count, 2);
 });
 
-test('a pack-less signed-out checkout of a 29k-file public project fits in one window', async t => {
+test('a pack-less signed-out checkout of a 29k-file public project needs three windows', async t => {
   const { s } = await setup(t);
   publicProject(s);
   s.caller(undefined);
-  // 29,000 files in 100-pin describe pages, with the real random shard choice.
-  for (let page = 0; page < 290; page++)
-    await s.transaction(() => downloads.describe._handler(s.ctx, { projectId: 'project', digests: [] }));
-  const counts = budgetRows(s).map(row => row.count);
-  assert.equal(
-    counts.reduce((sum, count) => sum + count, 0),
-    290,
+  // Spread calls evenly over the counter shards, so a full window admits exactly `calls`.
+  let call = 0,
+    now = 7 * ANONYMOUS_READ_BUDGET.windowMs;
+  t.mock.method(
+    Math,
+    'random',
+    () => ((call++ % ANONYMOUS_READ_BUDGET.shards) + 0.5) / ANONYMOUS_READ_BUDGET.shards,
   );
-  assert.ok(counts.length <= ANONYMOUS_READ_BUDGET.shards);
+  t.mock.method(Date, 'now', () => now);
+  // 29,000 files in 100-pin describe pages; a refused page waits for the next window.
+  const pages = 290;
+  let windows = 1;
+  for (let page = 0; page < pages;) {
+    try {
+      await s.transaction(() => downloads.describe._handler(s.ctx, { projectId: 'project', digests: [] }));
+      page++;
+    } catch (error) {
+      assert.ok(code('RATE_LIMITED')(error));
+      now += ANONYMOUS_READ_BUDGET.windowMs;
+      windows++;
+    }
+  }
+  assert.equal(windows, Math.ceil(pages / ANONYMOUS_READ_BUDGET.calls));
+  assert.ok(budgetRows(s).length <= ANONYMOUS_READ_BUDGET.shards);
+  assert.equal(
+    budgetRows(s).reduce((sum, row) => sum + row.count, 0),
+    pages - (windows - 1) * ANONYMOUS_READ_BUDGET.calls,
+  );
 });
 
 const prepare = (s, list, projectId = 'project') =>
@@ -111,7 +130,7 @@ test('one object over the size limit is refused before anything is reserved', as
   const before = objectCount(s);
   await assert.rejects(
     prepare(s, [{ digest: 'a'.repeat(64), size: STORAGE_QUOTA.objectBytes + 1 }]),
-    error => code('QUOTA_EXCEEDED')(error) && /at most 1 GiB/.test(error.data?.message ?? error.message),
+    error => code('QUOTA_EXCEEDED')(error) && /at most 100 MiB/.test(error.data?.message ?? error.message),
   );
   assert.equal(objectCount(s), before);
   assert.equal(usage(s, 'projectStorageUsage').length, 0);
@@ -199,7 +218,7 @@ test('project byte quota and the owner account quota across projects are both en
   assert.equal(s.tables.projectStorageUsage.get('u0').objects, 1_000);
 });
 
-test('a dogfood-sized project (115,028 objects, 9.22 GB) stays far below every quota', async t => {
+test('a dogfood-sized project (115,028 objects, 9.22 GB) stays well below every quota', async t => {
   const { s } = await setup(t);
   const project = s.tables.hostedProjects.get('project');
   const total = { objects: 115_028, bytes: 9_217_586_347 };
@@ -224,8 +243,11 @@ test('a dogfood-sized project (115,028 objects, 9.22 GB) stays far below every q
   assert.equal(account.objects + rows.reduce((sum, row) => sum + row.pendingObjects, 0), total.objects);
   for (const row of rows) {
     assert.ok(row.objects < perShard(STORAGE_QUOTA.project.objects, STORAGE_QUOTA.shards) / 10);
-    assert.ok(row.bytes < perShard(STORAGE_QUOTA.project.bytes, STORAGE_QUOTA.shards) / 10);
+    assert.ok(row.bytes < perShard(STORAGE_QUOTA.project.bytes, STORAGE_QUOTA.shards) / 2);
   }
-  // Largest object seen in the dogfood project is about 26 MB.
-  assert.ok(total.bytes < STORAGE_QUOTA.project.bytes / 20 && 26 * 1024 ** 2 < STORAGE_QUOTA.objectBytes);
+  // The whole project uses under a fifth of the byte quota and a thirtieth of the object quota.
+  assert.ok(total.bytes < STORAGE_QUOTA.project.bytes / 5);
+  assert.ok(total.objects < STORAGE_QUOTA.project.objects / 30);
+  // Largest object seen in the dogfood project is about 26 MB, under half the object limit.
+  assert.ok(26 * 1024 ** 2 < STORAGE_QUOTA.objectBytes / 2);
 });

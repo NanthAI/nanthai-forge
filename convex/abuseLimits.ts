@@ -9,15 +9,16 @@ const minute = 60_000,
 
 /** Signed-out reads and signing on one public project (Issue a91b9b69). Convex does not
  * expose a client address, so signed-out callers share one budget per public project;
- * signed-in callers are never counted. Proposed defaults, pending owner approval. */
-export const ANONYMOUS_READ_BUDGET = { windowMs: minute, calls: 600, shards: 4 } as const;
+ * signed-in callers are never counted. Owner-set 2026-11-07: 120 calls a minute. */
+export const ANONYMOUS_READ_BUDGET = { windowMs: minute, calls: 120, shards: 4 } as const;
 
 /** Reserved storage (Issue a91b9b69). Counted when a new object is reserved, from the
- * first reservation after this change. Proposed defaults, pending owner approval. */
+ * first reservation after this change. Owner-set 2026-11-07: 100 MiB per object, 50 GiB per
+ * project, 100 GiB per account. The object-count caps are unchanged. */
 export const STORAGE_QUOTA = {
-  objectBytes: 1 * GiB,
-  project: { bytes: 200 * GiB, objects: 4_000_000 },
-  account: { bytes: 500 * GiB, objects: 10_000_000 },
+  objectBytes: 100 * MiB,
+  project: { bytes: 50 * GiB, objects: 4_000_000 },
+  account: { bytes: 100 * GiB, objects: 10_000_000 },
   shards: 8,
   /** A project shard adds its new usage to the account total once it reaches this, so the
    * account check costs one read and one write per roll-up rather than per batch. */
@@ -26,7 +27,8 @@ export const STORAGE_QUOTA = {
 
 const pickShard = (shards: number) => Math.min(shards - 1, Math.floor(Math.random() * shards));
 const share = (total: number, shards: number) => Math.ceil(total / shards);
-const gib = (bytes: number) => `${Math.round(bytes / GiB)} GiB`;
+const humanBytes = (bytes: number) =>
+  bytes >= GiB ? `${Math.round(bytes / GiB)} GiB` : `${Math.round(bytes / MiB)} MiB`;
 
 /** One point read and one write on a random shard; signed-in callers cost nothing.
  * Over budget it throws RATE_LIMITED and the calling mutation writes and signs nothing. */
@@ -61,7 +63,7 @@ export function checkObjectSize(size: number) {
   if (size > STORAGE_QUOTA.objectBytes)
     throw new ForgeError(
       'QUOTA_EXCEEDED',
-      `A stored object can be at most ${gib(STORAGE_QUOTA.objectBytes)}; this one is ${size} bytes.`,
+      `A stored object can be at most ${humanBytes(STORAGE_QUOTA.objectBytes)}; this one is ${size} bytes.`,
     );
 }
 
@@ -73,7 +75,7 @@ function overQuota(scope: string, used: Usage, add: Usage, cap: Usage, shards = 
   )
     throw new ForgeError(
       'QUOTA_EXCEEDED',
-      `This ${scope} has reached its storage quota (${gib(cap.bytes)} or ${cap.objects.toLocaleString('en-US')} objects). Nothing was reserved.`,
+      `This ${scope} has reached its storage quota (${humanBytes(cap.bytes)} or ${cap.objects.toLocaleString('en-US')} objects). Nothing was reserved.`,
     );
 }
 
