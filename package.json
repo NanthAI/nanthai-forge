@@ -150,6 +150,7 @@
     "@lezer/python": "1.1.19",
     "@lezer/rust": "1.0.3",
     "@modelcontextprotocol/sdk": "1.30.0",
+    "@noble/curves": "2.0.1",
     "@noble/hashes": "2.0.1",
     "convex": "1.46.0",
     "convex-helpers": "0.1.126",

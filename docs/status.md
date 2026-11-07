@@ -68,7 +68,9 @@ Managed CLI work checks accepted Forge main once per process. When main moved,
 commands keep running on the working build while one detached updater stages,
 canary-tests and atomically selects the new one; after a failed install, writes
 install in the foreground or refuse with a typed recovery command. First-write hooks follow current and survive old-build pruning;
-in-flight runtime leases protect lazy imports. See [CLI updates](operations/cli-update.md).
+in-flight runtime leases protect lazy imports. Releases are signed (Ed25519, release-numbered)
+by the owner or the automated `release-sign` GitHub job; signatures stay optional until
+`CLI_RELEASE_SIGNATURES_REQUIRED` is on. See [CLI updates](operations/cli-update.md).
 Live release adoption and billed-usage qualification remain unverified.
 
 - Hosted CLI diff pins Lane base/saved-head source with byte-budgeted pages.

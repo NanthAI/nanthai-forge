@@ -12,6 +12,10 @@ const exempt = new Map([
   // Copied alone beside a benchmark agent's nforge shim (no repo imports). It
   // streams one local loopback command whose own wait is bounded (540 s).
   ['scripts/bench-t3code/relay-client.mjs', 'primitive'],
+  // Runs in the release-sign GitHub job from a sparse checkout with plain Node (no install or
+  // build, so no dist/ helper). Two Convex calls, each with its own 20 s deadline, in a job
+  // capped at 5 minutes.
+  ['scripts/release-sign-ci.mjs', 'standalone'],
 ]);
 
 /** Server-side code that must reach the network through the shared helper.
@@ -44,7 +48,8 @@ export function networkBoundaryFindings(path, text) {
     if (
       ts.isCallExpression(node) &&
       node.expression.getText(source) === 'AbortSignal.timeout' &&
-      path !== 'src/network-fetch.ts'
+      path !== 'src/network-fetch.ts' &&
+      exempt.get(path) !== 'standalone'
     )
       fail(node, 'Use networkTimeout so explicit request budgets reach the shared transport.');
     if (ts.isIdentifier(node) && node.text === 'fetch' && path !== 'src/network-fetch.ts') {
@@ -56,7 +61,7 @@ export function networkBoundaryFindings(path, text) {
       const accessor =
         ts.isPropertyAccessExpression(parent) &&
         parent.name === node &&
-        (exempt.get(path) === 'intercept' ||
+        (['intercept', 'standalone'].includes(exempt.get(path)) ||
           !['globalThis', 'window', 'self'].includes(parent.expression.getText(source)));
       if (!property && !type && !accessor)
         fail(node, 'Use networkFetch; bare or aliased fetch bypasses shared deadlines.');

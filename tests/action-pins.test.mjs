@@ -57,7 +57,11 @@ test('committed, generated and benchmark workflows pin every action', () => {
   const workflows = readdirSync('.github/workflows')
     .filter(name => /\.ya?ml$/.test(name))
     .map(name => [`.github/workflows/${name}`, readFileSync(`.github/workflows/${name}`, 'utf8')]);
-  assert(workflows.length >= 5);
+  assert(workflows.length >= 6);
+  // The release signer holds the release key: every action it runs must be pinned.
+  const signer = workflows.find(([path]) => path === '.github/workflows/release-sign.yml');
+  assert(signer, 'release-sign.yml is covered');
+  assert.equal((signer[1].match(/uses: /g) ?? []).length, 2);
   for (const runsOn of ['ubuntu-latest', ['self-hosted', 'linux']])
     workflows.push([`generated ${runsOn}`, githubActionsWorkflow(runsOn)]);
   workflows.push(['benchmark', githubWorkflow({ ghShards: 2 })]);

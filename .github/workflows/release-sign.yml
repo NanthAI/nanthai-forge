@@ -1,0 +1,67 @@
+name: Sign CLI release
+
+# Automated signer for Forge CLI releases (docs/operations/cli-update.md, "Automated signer").
+# One job per signing on a GitHub-hosted runner; the release key exists only in the
+# `release-sign` environment, which deploys from main alone.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One signer at a time; a newer main replaces a queued run, never interrupts a running one. The
+# tip step then skips a run whose commit a newer main commit has passed, so a mirror backlog
+# drain signs only the newest head.
+concurrency:
+  group: release-sign
+  cancel-in-progress: false
+
+jobs:
+  sign:
+    # Off until the lead sets the repository variable (and with it the environment and its key).
+    if: github.ref == 'refs/heads/main' && vars.FORGE_RELEASE_PROJECT != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: release-sign
+    steps:
+      - id: tip
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          # Skip only when main is strictly ahead of this commit. An unreadable comparison signs:
+          # the Forge read still refuses a State that is no longer main's newest.
+          status=$(gh api "repos/$REPO/compare/$SHA...main" --jq .status 2>/dev/null || echo unknown)
+          if [ "$status" = ahead ]; then
+            echo "sign=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Skipped: a newer main commit has passed $SHA; its own run signs."
+          else
+            echo "sign=true" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.tip.outputs.sign == 'true'
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            package.json
+            scripts/release-sign-ci.mjs
+            src/cli-release-keys.ts
+            src/cli-release-statement.ts
+          sparse-checkout-cone-mode: false
+      - if: steps.tip.outputs.sign == 'true'
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24.22.1'
+      - name: Sign main's State
+        if: steps.tip.outputs.sign == 'true'
+        # The key reaches this one step only, as an environment value the script deletes before it
+        # runs anything else; it is never printed or written to disk.
+        env:
+          FORGE_RELEASE_URL: ${{ vars.FORGE_RELEASE_URL }}
+          FORGE_RELEASE_PROJECT: ${{ vars.FORGE_RELEASE_PROJECT }}
+          FORGE_RELEASE_SIGNING_KEY: ${{ secrets.FORGE_RELEASE_SIGNING_KEY }}
+        run: node scripts/release-sign-ci.mjs

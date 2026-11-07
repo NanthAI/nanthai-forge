@@ -135,12 +135,13 @@ usage, platform qualification and installation adoption require release evidence
 ## Signed releases
 
 Landing on main decides what main is; a release signature decides what the updater installs.
-The project owner signs released States with an Ed25519 key that is created and kept outside
-Forge (never in Convex, this repository, CI or environment files). The public keys live in
-`src/cli-release-trust.ts` (`CLI_RELEASE_KEYS`). The updater checks a new release with the keys
+Released States are signed with an Ed25519 key created outside Forge. A private key is never
+stored in Convex, this repository or environment files; the automated signer (below) holds one as
+a GitHub environment secret. The public keys live in `src/cli-release-keys.ts`
+(`CLI_RELEASE_KEYS`), which the CLI and the Convex store share. The updater checks a new release with the keys
 of the build that is already installed, never with keys from the build it is about to install.
 
-The owner's steps (only public material is printed):
+The owner's manual steps (only public material is printed):
 
 ```sh
 nforge cli release-key --out KEY_FILE                  # once per key; mode 0600, never overwritten
@@ -149,7 +150,10 @@ nforge cli release-sign --key KEY_FILE [--state STATE --release N] # default: cu
 
 `release-sign` signs the statement `forge-cli-release/v2`, project id, State hash and release
 number, and stores the 64-byte signature with its number (`projectReleaseSignatures`,
-owner-only, insert-only, at most 4 per State). The release number defaults to main's source
+insert-only, at most 4 per State). The owner may store a signature while signed in; anyone else
+only without a sign-in and only a v2 signature that the server verifies against
+`CLI_RELEASE_KEYS` for exactly that project, State and release number. Anything else is refused
+before any database read, so a wrong signature costs one refused call and writes nothing. The release number defaults to main's source
 revision, which grows with every accepted State; `--state` needs an explicit `--release`. The
 store refuses a number that is not above every other State's, or that differs from the number
 the State already has. The store is untrusted: a row can make a signature present, never valid.
@@ -180,6 +184,53 @@ release number at the first numbered release its own (new) updater installs.
 
 The first release key is listed (key id `f3b8ac47a969d73d`). Signing is still optional:
 `CLI_RELEASE_SIGNATURES_REQUIRED` stays `false` until the first signed release is installed.
+
+### Automated signer
+
+`.github/workflows/release-sign.yml` signs main on every push of the GitHub mirror (and on
+`workflow_dispatch`), so no one signs by hand. It runs one job on a GitHub-hosted runner in the
+`release-sign` environment, which deploys from `main` only and holds the key as the secret
+`FORGE_RELEASE_SIGNING_KEY`. The job has `contents: read`, pins every action by SHA, and runs
+`scripts/release-sign-ci.mjs` with plain Node from a sparse checkout (no install, no build):
+
+1. Skip when a newer main commit has passed this one (GitHub compare, no Convex call). The
+   workflow's concurrency group keeps one run going and one queued, and a newer push replaces the
+   queued run, so a mirror backlog drain signs only the newest head.
+2. Read the commit's `Forge-State` trailer (none: nothing to sign).
+3. One Convex read, `projectReleaseSignatures:signerMain`, without a sign-in: the job signs a
+   short read proof (`forge-cli-release-read/v1`, project, State, time within 5 minutes) with
+   the release key, and the server answers only if a listed key made it. It returns main's head,
+   its release number (the source revision) and whether this State already has a v2 signature
+   from this key. A State that is no longer main's newest, or is already signed, is skipped.
+4. Sign `forge-cli-release/v2` with that number and store it with `projectReleaseSignatures:put`.
+
+Cost: two Convex calls per signing (one when skipped at step 3, none at step 1), one job of about
+30 s on a free public runner, nothing when main does not move. The key reaches only the signing
+step, as an environment value the script removes before it starts any child process; it stays in
+memory and is never printed or written to disk. The read proof and the store refuse wrong
+signatures before any database read.
+
+The trade-off: CI holds a release key, so anyone who can run code in the `release-sign`
+environment can sign. That is limited to workflow runs on `main`, so keep `main` writable only by the Forge
+mirror. The store is still untrusted: the updater verifies every signature
+with its installed keys and refuses lower release numbers. If the key is exposed, rotate it as
+below and replace the secret.
+
+One-time setup (repository admin; replace `OWNER/REPO`, the URL and the project id):
+
+```sh
+gh api -X PUT repos/OWNER/REPO/environments/release-sign --input - <<'JSON'
+{"deployment_branch_policy":{"protected_branches":false,"custom_branch_policies":true}}
+JSON
+gh api -X POST repos/OWNER/REPO/environments/release-sign/deployment-branch-policies -f name=main -f type=branch
+gh secret set FORGE_RELEASE_SIGNING_KEY --env release-sign --repo OWNER/REPO < KEY_FILE
+gh variable set FORGE_RELEASE_URL --repo OWNER/REPO --body https://DEPLOYMENT.convex.cloud
+gh variable set FORGE_RELEASE_PROJECT --repo OWNER/REPO --body PROJECT_ID
+```
+
+The URL and project id are the ones the CLI release source uses (`source.json` in the CLI
+installation). The job stays off (skipped, no runner) until
+`FORGE_RELEASE_PROJECT` is set. `gh secret set` reads the key from the file without printing it.
 
 Turning the switch on: after the first signed release, confirm `release-signature.json` says
 `verified` with a `release` number on every machine, then land `CLI_RELEASE_SIGNATURES_REQUIRED = true` and sign that

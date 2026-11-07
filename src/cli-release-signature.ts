@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 // Wire format of signed CLI releases, shared by the CLI and the Convex store (no Node built-ins).
 import { z } from 'zod';
+export {
+  CLI_RELEASE_READ_PROOF_SECONDS,
+  cliReleaseReadStatement,
+  cliReleaseStatement,
+} from './cli-release-statement.js';
 
 /** Rows one State may hold: room for every listed key during a rotation, nothing unbounded. */
 export const CLI_RELEASE_SIGNATURES_PER_STATE = 4;
@@ -25,9 +30,3 @@ export const cliReleaseSignaturesSchema = z
     signatures: z.array(cliReleaseSignatureSchema).max(CLI_RELEASE_SIGNATURES_PER_STATE),
   })
   .strict();
-/** The exact bytes a release key signs: one project's accepted source State and, from v2, its
- * release number. v1 (no number) is what signatures made before release numbers cover. */
-export const cliReleaseStatement = (projectId: string, head: string, release?: number) =>
-  release === undefined
-    ? `forge-cli-release/v1\nproject ${projectId}\nstate ${head}\n`
-    : `forge-cli-release/v2\nproject ${projectId}\nstate ${head}\nrelease ${release}\n`;

@@ -260,6 +260,15 @@ test('system actors are never looked up', async () => {
 
 // Collector-signed input is never authority on its own: every public function that
 // accepts a signature must resolve the signed-in caller before it reads any record.
+// The one exception is a release-key signature (docs/operations/cli-update.md, "Automated
+// signer"): the server verifies it against the compiled CLI_RELEASE_KEYS, so it must refuse a
+// forged one with RELEASE_SIGNATURE_INVALID, still before any record, scheduler or storage use.
+const releaseKeyVerified = new Map([
+  [
+    'projectReleaseSignatures.ts:put',
+    { head: 'a'.repeat(64), keyId: 'f3b8ac47a969d73d', signature: `${'A'.repeat(86)}==`, release: 1 },
+  ],
+]);
 test('every public function taking a collector signature refuses an anonymous caller first', async () => {
   const touched = name => () => {
     throw new Error(`${name} used before the caller check`);
@@ -281,14 +290,15 @@ test('every public function taking a collector signature refuses an anonymous ca
       if (!fn?.isPublic || !(fn.isMutation || fn.isAction)) continue;
       const args = JSON.parse(fn.exportArgs());
       if (!/"signature":/.test(JSON.stringify(args))) continue;
-      const input = { projectId: 'hostedProjects-1', signature: '0'.repeat(64) };
+      const forged = releaseKeyVerified.get(`${file}:${name}`);
+      const input = { projectId: 'hostedProjects-1', signature: '0'.repeat(64), ...forged };
       for (const key of Object.keys(args.value)) input[key] ??= key === 'entries' ? [] : '{}';
       try {
         await fn._handler(ctx, input);
         open.push(`${file}:${name} accepted an anonymous caller`);
       } catch (error) {
         const data = error?.data ?? {};
-        if (data.code !== 'PROJECT_UNAVAILABLE')
+        if (data.code !== (forged ? 'RELEASE_SIGNATURE_INVALID' : 'PROJECT_UNAVAILABLE'))
           open.push(`${file}:${name} ${data.code ?? error?.message ?? 'failed'} before the caller check`);
       }
       checked.push(`${file}:${name}`);
@@ -302,6 +312,7 @@ test('every public function taking a collector signature refuses an anonymous ca
     'projectHostedOutputBatch.ts:workerCommit',
     'projectHostedCheckWorker.ts:callback',
     'projectHostedCheckWorker.ts:heartbeat',
+    ...releaseKeyVerified.keys(),
   ])
     assert(checked.includes(name), `${name} is guarded`);
   assert.deepEqual(open, []);
