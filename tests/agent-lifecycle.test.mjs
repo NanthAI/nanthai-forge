@@ -9,6 +9,7 @@ import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { AgentWorkflow } from '../dist/agent-workflow.js';
 import { initNative } from '../dist/native-work.js';
+import { recordLane } from '../dist/lane-registry.js';
 
 const git = (root, args) =>
   execFileSync('git', ['-C', root, ...args], {
@@ -359,4 +360,25 @@ test('abandon retains long reasons in full without introducing a reason-length p
   assert.equal(saved.state, 'abandoned');
   assert.equal(saved.lifecycle[0].reason, reason);
   assert.equal(saved.checkpoints.length, 1);
+});
+
+test('native complete-merged skips a pinned Lane and reports LANE_PINNED', async t => {
+  const saved = process.env.XDG_STATE_HOME;
+  process.env.XDG_STATE_HOME = scratchDir('forge-test-lifecycle-state-');
+  t.after(() => {
+    if (saved === undefined) delete process.env.XDG_STATE_HOME;
+    else process.env.XDG_STATE_HOME = saved;
+  });
+  const { agent } = await setup(true);
+  const b = await work(agent, true, 'b.txt', 'b\n', { accept: true, keepOpen: true });
+  assert.equal((await b.finish()).result.status, 'accepted');
+  recordLane({ laneId: b.lane.laneId, root: b.lane.path, pinned: true });
+  const held = (await dispatch(agent, 'complete-merged')).result;
+  assert.deepEqual([held.lanes, held.intents], [[], []]);
+  assert.deepEqual(held.skipped, [{ laneId: b.lane.laneId, code: 'LANE_PINNED' }]);
+  assert.equal((await lanes(agent, { state: 'active' })).items.length, 1, 'pinned Lane stays open');
+  recordLane({ laneId: b.lane.laneId, pinned: false });
+  const swept = (await dispatch(agent, 'complete-merged')).result;
+  assert.deepEqual(swept.lanes, [b.lane.laneId]);
+  assert.deepEqual(swept.skipped, []);
 });

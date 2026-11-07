@@ -20,6 +20,7 @@ import { nativeObjects } from './native-objects.js';
 import { channelHeads, mergedChecker, allRecords } from './agent-lifecycle.js';
 import { recoverRecordRuns } from './work-record-runs.js';
 import { invariant } from './errors.js';
+import { lanePinned } from './lane-registry.js';
 import type { WorkStore } from './work-store.js';
 import type { CheckRun, Lane } from './work-types.js';
 
@@ -188,6 +189,10 @@ function laneDirectories(
           wantLanes ? 'lanes' : 'lane-deps',
           `Merged into ${into} but still ${lane.state}; complete it first (complete-merged).`,
         );
+      continue;
+    }
+    if (lanePinned(lane.id)) {
+      skip(wantLanes ? 'lanes' : 'lane-deps', 'Lane is pinned; unpin it to clean it.');
       continue;
     }
     const why = `Lane ${lane.state}${into ? ` and merged into ${into}` : ''}`;

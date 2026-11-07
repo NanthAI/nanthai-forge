@@ -40,6 +40,10 @@ export function readLaneEntry(laneId: string): LaneRegistryEntry | null {
     return null;
   }
 }
+/** Owner pin as this client last saw it. Cleanup of any kind (complete-merged, native or hosted clean) skips a pinned Lane. */
+export function lanePinned(laneId: string): boolean {
+  return readLaneEntry(laneId)?.pinned === true;
+}
 function write(entry: LaneRegistryEntry) {
   const directory = laneRegistryDirectory(),
     temporary = join(directory, `.${entry.laneId}.${randomUUID()}`);

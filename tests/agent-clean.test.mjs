@@ -9,6 +9,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { AgentWorkflow } from '../dist/agent-workflow.js';
 import { initNative } from '../dist/native-work.js';
+import { recordLane } from '../dist/lane-registry.js';
 
 async function setup(script = "console.log('ok')") {
   const root = scratchDir('forge-test-agent-clean-');
@@ -149,4 +150,30 @@ test('objects kind wraps native object inspection and only runs when named', asy
   assert.equal(dry.mode, 'dry-run');
   assert.equal(dry.kinds[0], 'objects');
   assert.equal((await clean(agent, { apply: true, kinds: ['objects'] })).mode, 'applied');
+});
+
+test('a pinned Lane is skipped by native clean, never removed, and cleaned once unpinned', async t => {
+  const saved = process.env.XDG_STATE_HOME;
+  process.env.XDG_STATE_HOME = scratchDir('forge-test-agent-clean-state-');
+  t.after(() => {
+    if (saved === undefined) delete process.env.XDG_STATE_HOME;
+    else process.env.XDG_STATE_HOME = saved;
+  });
+  const { agent } = await setup();
+  const lane = await finishedLane(agent);
+  recordLane({ laneId: lane.laneId, root: lane.path, pinned: true });
+  const dry = await clean(agent, { kinds: ['lane-deps', 'lanes'] });
+  assert.equal(group(dry, 'lanes'), undefined);
+  assert.equal(group(dry, 'lane-deps'), undefined);
+  assert.ok(
+    dry.skipped.some(item => item.laneId === lane.laneId && /pinned/.test(item.reason)),
+    'pin reported as the skip reason',
+  );
+  const applied = await clean(agent, { apply: true, kinds: ['lane-deps', 'lanes'] });
+  assert.equal(group(applied, 'lanes', 'removed'), undefined);
+  assert.ok(existsSync(join(lane.path, 'node_modules')), 'pinned Lane keeps its dependencies');
+  assert.ok(existsSync(lane.path), 'pinned Lane directory stays');
+  recordLane({ laneId: lane.laneId, pinned: false });
+  assert.equal(group(await clean(agent, { apply: true, kinds: ['lanes'] }), 'lanes', 'removed').count, 1);
+  assert.ok(!existsSync(lane.path));
 });

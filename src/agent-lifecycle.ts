@@ -6,6 +6,7 @@ import { channelStatus } from './work-channel.js';
 import { NativeSource } from './native-source.js';
 import { ForgeError, invariant } from './errors.js';
 import { laneReceipt } from './agent-receipts.js';
+import { lanePinned } from './lane-registry.js';
 import type { WorkService } from './work.js';
 import type { WorkStore } from './work-store.js';
 import type { Lane, WorkData } from './work-types.js';
@@ -81,6 +82,10 @@ async function completeLane(
   cleanup: Cleanup[] = [],
 ) {
   if (!OPEN.includes(lane.state)) return lane.state === 'completed';
+  if (lanePinned(lane.id)) {
+    skipped.push({ laneId: lane.id, code: 'LANE_PINNED' });
+    return false;
+  }
   try {
     const response = await setState(work, {
       action: 'lane-status',
