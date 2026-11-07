@@ -61,6 +61,72 @@
       "what": "Core claim: the workflow_dispatch call threw after outcome=unknown; only the 12 h watchdog would have ended the run",
       "file": "tests/hosted-actions-direct.test.mjs",
       "test": "incident a7de3a93 replay: a dispatch that throws is reconciled by run-name at 5 min instead of waiting 12 h"
+    },
+    {
+      "incident": "c329d191",
+      "what": "Core claim class: the older holder lost its completion wake and every supervisor task, so six Ready waiters could not unstick it",
+      "file": "tests/hosted-landing-lost-wake.test.mjs",
+      "test": "incident c329d191 class: a holder that lost its completion wake and its alarm is re-driven by a parked reader"
+    },
+    {
+      "incident": "19328518",
+      "what": "Stall 2026-10-26 10:20: the landing worker parked on an error while settling a passed head; nothing woke it",
+      "file": "tests/hosted-landing-supervisor.test.mjs",
+      "test": "incident replay 2026-10-26 10:20: a Ready head whose settlement step died is re-driven by the stall alarm"
+    },
+    {
+      "incident": "19328518",
+      "what": "Stalls 2026-10-26 11:16 and 12:2x: a lost check callback left the entry checking until the 12 h watchdog",
+      "file": "tests/hosted-landing-supervisor.test.mjs",
+      "test": "incident replay 2026-10-26 11:16/12:2x: a lost check callback is replayed by the supervisor, not the 12 h watchdog"
+    },
+    {
+      "incident": "19328518",
+      "what": "Stall 2026-10-27 05:56: a release restart killed the controller after its claim and cancelled a checking entry",
+      "file": "tests/hosted-landing-supervisor.test.mjs",
+      "test": "incident replay 2026-10-27 05:56: a controller killed once after its claim resumes; nothing is cancelled"
+    },
+    {
+      "incident": "19328518",
+      "what": "Stall 2026-10-30 00:29/00:39: batch members stranded after a fallback with no owner",
+      "file": "tests/hosted-batch-orphan.test.mjs",
+      "test": "replay 108a24e3: the deadline re-drives a member orphaned after fallback and it lands"
+    },
+    {
+      "incident": "19328518",
+      "what": "Stall 2026-10-30 13:23: a step failed on every retry and the entry stayed pending forever",
+      "file": "tests/hosted-landing-supervisor.test.mjs",
+      "test": "incident replay 2026-10-30 13:23/14:20: a step that fails on every retry ends with a typed reason and an alert"
+    },
+    {
+      "incident": "19328518",
+      "what": "Stall 2026-10-30 14:20: the 15-minute alarm retry crashed the same way as the step it repaired",
+      "file": "tests/hosted-landing-supervisor.test.mjs",
+      "test": "incident replay 2026-10-30 14:20: the supervisor survives its own repair crashing"
+    },
+    {
+      "incident": "19328518",
+      "what": "Stall 2026-10-29 17:04: abandoning a Lane left its landing checking until an explicit cancel",
+      "file": "tests/hosted-abandon-landing.test.mjs",
+      "test": "abandon cancels the Lane ${phase} submission through the ordinary cancellation path; replay is inert"
+    },
+    {
+      "incident": "19328518",
+      "what": "Stall 2026-10-31 04:32: one GitHub HTTP 500 stopped the mirror with no retry and held deploys",
+      "file": "tests/hosted-github-mirror-retry.test.mjs",
+      "test": "real action: HTTP 500 retains the cursor, schedules one backoff, then succeeds and goes idle"
+    },
+    {
+      "incident": "19328518",
+      "what": "Stall 2026-10-31 04:32: a mirror 500 that persists ends terminal and visible instead of pending",
+      "file": "tests/hosted-github-mirror-retry.test.mjs",
+      "test": "real action: five persistent 500s end terminal, visible in CLI and Now, with zero idle retries"
+    },
+    {
+      "incident": "19328518",
+      "what": "2026-11-05 88-minute landing: a Ready finish stopped without scheduling its next step",
+      "file": "tests/hosted-landing-supervisor.test.mjs",
+      "test": "replay 2026-11-05 88-minute landing: a Ready head whose finish stopped without a next step is re-driven"
     }
   ]
 }

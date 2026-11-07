@@ -72,6 +72,15 @@ export const INCIDENTS = [
     model: 'orderchain',
   },
   {
+    issue: '19328518',
+    shape: 'a step that fails on every retry, and the supervisor repair that crashes the same way',
+    replay: [
+      './hosted-landing-supervisor.test.mjs',
+      'incident replay 2026-10-30 13:23/14:20: a step that fails on every retry ends with a typed reason and an alert',
+    ],
+    model: 'supervisor',
+  },
+  {
     issue: 'a7de3a93',
     shape: 'a check dispatch whose outcome stays unknown, with no execution bound',
     replay: [
