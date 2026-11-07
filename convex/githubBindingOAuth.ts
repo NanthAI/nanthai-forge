@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { convexFetch, networkTimeout } from './networkFetch';
 import { ConvexError, v } from 'convex/values';
 import { makeFunctionReference } from 'convex/server';
 import { action } from './cliServer';
@@ -30,13 +31,13 @@ async function challenge(verifier: string) {
 }
 /** Verified GitHub account ids linked to this Forge account (identity provider
  * lookup, one call per new connection). The callback binds only for one of them. */
-export async function linkedGithubAccounts(subject: string, request: typeof fetch = fetch) {
+export async function linkedGithubAccounts(subject: string, request: typeof fetch = convexFetch) {
   const secret = process.env.CLERK_SECRET_KEY;
   invariant(secret, 'GITHUB_APP_CONFIG', 'Forge identity is not configured.');
   const response = await request(`https://api.clerk.com/v1/users/${encodeURIComponent(subject)}`, {
     headers: { Authorization: `Bearer ${secret}` },
     redirect: 'error',
-    signal: AbortSignal.timeout(30_000),
+    signal: networkTimeout(30_000),
   });
   invariant(response.ok, 'GITHUB_UNAVAILABLE', 'Forge could not check this account. Try again.');
   const person = (await response.json()) as {
@@ -118,7 +119,7 @@ export async function proveRepository(
   repository: string,
   githubAccounts: readonly string[],
   installation: () => Promise<number>,
-  request: typeof fetch = fetch,
+  request: typeof fetch = convexFetch,
 ) {
   const api = githubRequest(userToken, request);
   const account = await api<{ id: number }>('/user');
@@ -179,10 +180,10 @@ export const callback = httpAction(async (ctx, request) => {
     const clientId = process.env.GITHUB_APP_CLIENT_ID,
       clientSecret = process.env.GITHUB_APP_CLIENT_SECRET;
     invariant(clientId && clientSecret, 'GITHUB_APP_CONFIG', 'GitHub user authorization is not configured.');
-    const response = await fetch('https://github.com/login/oauth/access_token', {
+    const response = await convexFetch('https://github.com/login/oauth/access_token', {
       method: 'POST',
       redirect: 'error',
-      signal: AbortSignal.timeout(30000),
+      signal: networkTimeout(30000),
       headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
       body: JSON.stringify({
         client_id: clientId,
@@ -200,7 +201,7 @@ export const callback = httpAction(async (ctx, request) => {
       'GitHub authorization exchange failed.',
     );
     const proof = await proveRepository(value.access_token, op.repository, op.githubAccounts, async () => {
-      const { installation } = await appInstallation(op.repository, fetch, Date.now());
+      const { installation } = await appInstallation(op.repository, convexFetch, Date.now());
       await ctx.runMutation(mutation('pin'), { state, installationId: installation.id });
       return installation.id;
     });

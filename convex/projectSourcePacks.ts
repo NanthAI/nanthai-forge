@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { convexFetch, networkTimeout } from './networkFetch';
 import { v } from 'convex/values';
 import { makeFunctionReference } from 'convex/server';
 import { internalMutation, type MutationCtx, type ActionCtx } from './server';
@@ -148,10 +149,10 @@ export async function sourcePackFlow(
   if (phase === 'prepare') {
     let result = await steps.prepare();
     if (result?.cleanup) {
-      const response = await fetch(await presignDelete(r2Config(), result.cleanup), {
+      const response = await convexFetch(await presignDelete(r2Config(), result.cleanup), {
         method: 'DELETE',
         redirect: 'error',
-        signal: AbortSignal.timeout(20_000),
+        signal: networkTimeout(20_000),
       });
       invariant(response.ok || response.status === 404, 'R2_VERIFY_FAILED', 'Old pack deletion failed.');
       result = await steps.prepare(result.cleanup);

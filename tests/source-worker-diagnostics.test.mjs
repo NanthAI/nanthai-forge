@@ -42,6 +42,7 @@ test('worker canonical diagnostics retain the object and size across nested wrap
   assert.equal(failure.size, f.object.size);
   assert.equal(failure.objects, f.input.refs.length);
   assert.equal(failure.stage, 'source-headers');
-  assert.equal(failure.code, 'SOURCE_RUNTIME_ERROR');
+  // convexFetch types the thrown transport fault (aabe52a7); its URL never reaches the cause.
+  assert.equal(failure.code, 'EXCHANGE_REQUEST_FAILED');
   assert(!JSON.stringify(failure).includes('private'));
 });

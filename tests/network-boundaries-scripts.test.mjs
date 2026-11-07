@@ -61,3 +61,59 @@ test('exemptions stay narrow: interceptors may replace the global but not call f
     'the primitive exemption covers node:http only',
   );
 });
+
+// Issue aabe52a7: the guard covers convex/ and netlify/; web/ is decided out.
+const fixture = name => readFileSync(new URL(`./fixtures/network-boundary/${name}`, import.meta.url), 'utf8');
+test('guard rejects the replayed bare fetches under convex/ and netlify/', () => {
+  for (const [path, name] of [
+    ['convex/r2Operations.ts', 'convex-r2-list-bare.mjs'],
+    ['netlify/functions/analyze-background.mts', 'netlify-callback-bare.mjs'],
+  ]) {
+    const findings = networkBoundaryFindings(path, fixture(name));
+    assert(
+      findings.some(line => /Use networkFetch/.test(line)),
+      `${path}: bare fetch passes: ${findings}`,
+    );
+    assert(
+      findings.some(line => /Use networkTimeout/.test(line)),
+      `${path}: AbortSignal.timeout passes`,
+    );
+  }
+  const convex = networkBoundaryFindings('convex/r2Operations.ts', fixture('convex-r2-list-bare.mjs'));
+  assert(
+    convex.some(line => /:10: /.test(line)),
+    `default request = fetch passes: ${convex}`,
+  );
+});
+
+test('guard accepts convexFetch in convex/ and skips generated code and web/', () => {
+  const safe = [
+    "import { convexFetch, networkTimeout } from './networkFetch';",
+    'await convexFetch(url, { signal: networkTimeout(20_000) });',
+    'export function request(send: typeof fetch = convexFetch) { return send(url); }',
+  ].join('\n');
+  assert.deepEqual(networkBoundaryFindings('convex/projectPeople.ts', safe), []);
+  assert.deepEqual(networkBoundaryFindings('convex/_generated/api.js', 'await fetch(url);'), []);
+  // web/ is out by decision: browser requests are user-cancellable, strand no server
+  // work, and archive transfers are sized by the user's file (see the guard header).
+  assert.deepEqual(networkBoundaryFindings('web/src/snapshot.ts', 'await fetch(url);'), []);
+});
+
+test('every convex/ and netlify/ module passes the guard', async () => {
+  const { readdirSync } = await import('node:fs');
+  const root = new URL('../', import.meta.url);
+  const walk = dir =>
+    readdirSync(new URL(dir, root), { withFileTypes: true }).flatMap(entry =>
+      entry.name === '_generated' || entry.name === 'node_modules'
+        ? []
+        : entry.isDirectory()
+          ? walk(`${dir}${entry.name}/`)
+          : [`${dir}${entry.name}`],
+    );
+  const files = [...walk('convex/'), ...walk('netlify/')];
+  assert(files.length > 100);
+  assert.deepEqual(
+    files.flatMap(path => networkBoundaryFindings(path, readFileSync(new URL(path, root), 'utf8'))),
+    [],
+  );
+});

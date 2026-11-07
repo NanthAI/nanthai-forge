@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { invariant } from '../src/errors';
+import { convexFetch, networkTimeout } from './networkFetch';
 import { readR2Exact } from '../src/hosted-r2-retry';
 import { packHeaders, verifyPackRange, type PackRange } from '../src/object-pack-range';
 
@@ -15,9 +16,9 @@ export function readExactObject(
 ): Promise<Uint8Array> {
   return readR2Exact(
     () =>
-      fetch(grant.url, {
+      convexFetch(grant.url, {
         headers: { 'accept-encoding': 'identity', ...packHeaders(grant.range, grant.size) },
-        signal: AbortSignal.timeout(10_000),
+        signal: networkTimeout(10_000),
       }),
     async response => {
       invariant(response.ok && response.body, 'SOURCE_UNAVAILABLE', messages.failed);

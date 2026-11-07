@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { convexFetch, networkTimeout } from './networkFetch';
 import { makeFunctionReference } from 'convex/server';
 import type { ActionCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
@@ -158,9 +159,9 @@ export function convexSourceTransport(
         // shared bound retries it, then the exact SOURCE_UNAVAILABLE stands.
         response = await retryR2Lag(
           () =>
-            fetch(url, {
+            convexFetch(url, {
               headers: { 'accept-encoding': 'identity', ...packHeaders(row.range, pin.size) },
-              signal: AbortSignal.timeout(15000),
+              signal: networkTimeout(15000),
             }),
           lagged => lagged.status === 404,
           lagged => lagged.body?.cancel().catch(() => {}),

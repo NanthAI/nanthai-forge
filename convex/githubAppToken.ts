@@ -2,6 +2,7 @@
 // One GitHub App access module for the hosted mirror and Actions checks. It
 // runs in the default Convex runtime (WebCrypto, no Node), so mutation-bearing
 // modules may import it. Tokens are never persisted or logged.
+import { convexFetch, networkTimeout } from './networkFetch';
 import { makeFunctionReference } from 'convex/server';
 import type { Id } from './_generated/dataModel';
 import { operatorBinding } from './githubBindingAccess';
@@ -103,7 +104,7 @@ async function mintInstallationToken(
  * metadata read on exactly one repository, by the numeric ID an authorized
  * lookup returned. Null when the App is not configured or not installed there,
  * in which case the caller keeps its already authorized credential. */
-export async function importReadToken(repo: string, repoId: unknown, request: typeof fetch = fetch) {
+export async function importReadToken(repo: string, repoId: unknown, request: typeof fetch = convexFetch) {
   if (!process.env.GITHUB_APP_ID || !process.env.GITHUB_APP_PRIVATE_KEY) return null;
   if (typeof repoId !== 'number' || !Number.isSafeInteger(repoId) || repoId <= 0) return null;
   try {
@@ -125,7 +126,7 @@ export async function importReadToken(repo: string, repoId: unknown, request: ty
 export async function requireInstallationPermissions(
   repo: string,
   required: GithubAppPermissions,
-  request: typeof fetch = fetch,
+  request: typeof fetch = convexFetch,
   now = Date.now(),
 ) {
   const { installation } = await appInstallation(repo, request, now);
@@ -185,7 +186,7 @@ async function repositoryScope(
       );
       const response = await request(`https://api.github.com/repos/${repo}`, {
         redirect: 'error',
-        signal: AbortSignal.timeout(30000),
+        signal: networkTimeout(30000),
         headers: {
           Authorization: `Bearer ${probe}`,
           Accept: 'application/vnd.github+json',
@@ -220,8 +221,8 @@ async function repositoryScope(
 }
 /** Configure preflight proves identity before allowing the runner setting. */
 export async function requireRepositoryBinding(ctx: ActionCtx, projectId: string, repo: string) {
-  const { api, installation } = await appInstallation(repo, fetch, Date.now());
-  await repositoryScope(ctx, projectId, repo, api, installation.id, fetch);
+  const { api, installation } = await appInstallation(repo, convexFetch, Date.now());
+  await repositoryScope(ctx, projectId, repo, api, installation.id, convexFetch);
 }
 /** Stable shared API for mirror, Actions dispatch and cancellation. */
 export async function installationToken(
@@ -229,7 +230,7 @@ export async function installationToken(
   projectId: string,
   repo: string,
   permissions: GithubAppPermissions,
-  request: typeof fetch = fetch,
+  request: typeof fetch = convexFetch,
   now = Date.now(),
 ): Promise<string> {
   const { api, installation } = await appInstallation(repo, request, now);
@@ -245,11 +246,16 @@ export async function installationToken(
 }
 /** Raw App-authenticated request for endpoints whose status matters (dispatch
  * returns 200 with run details or 204). Bodies are never echoed in errors. */
-export async function githubAppRequest(path: string, token: string, request = fetch, body?: unknown) {
+export async function githubAppRequest(
+  path: string,
+  token: string,
+  request: typeof fetch = convexFetch,
+  body?: unknown,
+) {
   const response = await request(`https://api.github.com/${path}`, {
     method: body === undefined ? 'GET' : 'POST',
     redirect: 'error',
-    signal: AbortSignal.timeout(20_000),
+    signal: networkTimeout(20_000),
     headers: {
       authorization: `Bearer ${token}`,
       accept: 'application/vnd.github+json',

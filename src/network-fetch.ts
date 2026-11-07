@@ -129,7 +129,8 @@ export async function networkFetch(
           // Both caller cancellation and the header deadline stop this socket.
           const abort = () => controller.abort(deadlineSignal.reason);
           deadlineSignal.addEventListener('abort', abort, { once: true });
-          return request(input, { ...init, signal: controller.signal }).finally(() =>
+          // Injected transports may answer synchronously; normalize before chaining.
+          return Promise.resolve(request(input, { ...init, signal: controller.signal })).finally(() =>
             deadlineSignal.removeEventListener('abort', abort),
           );
         },

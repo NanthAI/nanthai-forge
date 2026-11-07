@@ -7,6 +7,7 @@ import { authorizeGithub } from '../../src/github-access.js';
 import { captureGithub, githubAnalysisVersion } from '../../src/github.js';
 import { encodeHostedArtifact } from '../../src/hosted-artifact.js';
 import { ForgeError, invariant } from '../../src/errors.js';
+import { networkFetch, networkTimeout } from '../../src/network-fetch.js';
 
 export default async (request: Request): Promise<Response> => {
   const key = process.env.FORGE_WORKER_KEY;
@@ -31,10 +32,10 @@ export default async (request: Request): Promise<Response> => {
     return new Response('Invalid worker job.', { status: 400 });
   }
   const post = async <T,>(operation: string, data: object): Promise<T> => {
-    const response = await fetch(`${process.env.FORGE_CONVEX_SITE_URL}/worker/${operation}`, {
+    const response = await networkFetch(`${process.env.FORGE_CONVEX_SITE_URL}/worker/${operation}`, {
       method: 'POST',
       redirect: 'error',
-      signal: AbortSignal.timeout(30_000),
+      signal: networkTimeout(30_000),
       headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
     });
@@ -82,10 +83,10 @@ export default async (request: Request): Promise<Response> => {
       await putR2(upload.target, bytes);
       artifactKey = upload.ref;
     } else {
-      const response = await fetch(input.uploadUrl!, {
+      const response = await networkFetch(input.uploadUrl!, {
         method: 'POST',
         redirect: 'error',
-        signal: AbortSignal.timeout(120_000),
+        signal: networkTimeout(120_000),
         headers: { 'Content-Type': 'application/gzip' },
         body,
       });

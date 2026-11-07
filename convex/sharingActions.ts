@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 'use node';
+import { convexFetch, networkTimeout } from './networkFetch';
 import { v } from 'convex/values';
 import { paginationOptsValidator } from 'convex/server';
 import { action } from './cliServer';
@@ -13,10 +14,10 @@ export async function checkForgeUser(value: string) {
   const reader = value.trim();
   invariant(reader, 'BAD_ARGUMENT', 'Enter an existing Forge user ID.');
   invariant(process.env.CLERK_SECRET_KEY, 'GITHUB_SETUP_REQUIRED', 'Forge identity is not configured.');
-  const response = await fetch(`https://api.clerk.com/v1/users/${encodeURIComponent(reader)}`, {
+  const response = await convexFetch(`https://api.clerk.com/v1/users/${encodeURIComponent(reader)}`, {
     headers: { Authorization: `Bearer ${process.env.CLERK_SECRET_KEY}` },
     redirect: 'error',
-    signal: AbortSignal.timeout(30_000),
+    signal: networkTimeout(30_000),
   });
   invariant(response.status !== 404, 'BAD_ARGUMENT', 'This Forge user ID does not exist.');
   invariant(response.ok, 'GITHUB_UNAVAILABLE', 'Forge could not check this user. Try again.');

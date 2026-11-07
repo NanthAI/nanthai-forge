@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { convexFetch, networkTimeout } from './networkFetch';
 import { noteTrustCulprit } from './projectHostedTrust';
 import { v } from 'convex/values';
 import { makeFunctionReference } from 'convex/server';
@@ -1111,11 +1112,11 @@ export const drive = internalAction({
     for (const { value, pin } of uploads) {
       const key = r2Key(input.projectId, pin.sha256);
       const target = await presignPut(r2Config(), key, { digest: pin.sha256, size: pin.size });
-      const response = await fetch(target.url, {
+      const response = await convexFetch(target.url, {
         method: 'PUT',
         headers: target.headers,
         body: value,
-        signal: AbortSignal.timeout(10000),
+        signal: networkTimeout(10000),
       });
       invariant(
         response.ok || response.status === 412,

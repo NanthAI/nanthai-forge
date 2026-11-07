@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { convexFetch } from './networkFetch';
 import { z } from 'zod';
 import { v } from 'convex/values';
 import { internalMutation, internalAction } from './server';
@@ -127,7 +128,7 @@ export const cancel = internalAction({
       token,
       // A completed workflow is already stopped. Keep all other failures explicit.
       async (url, init) => {
-        const response = await fetch(url, init);
+        const response = await convexFetch(url, init);
         return response.status === 409 ? new Response(null, { status: 204 }) : response;
       },
       {},

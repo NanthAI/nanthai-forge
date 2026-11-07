@@ -502,7 +502,8 @@ test('wake action sends only fixed-run metadata, and terminal no-op never contac
     };
     await assert.rejects(
       wake.observe._handler({ runMutation: async () => selected }, { ...selected, generation: 1 }),
-      /disconnected worker/,
+      // convexFetch types the lost connection without echoing transport details (aabe52a7).
+      { name: 'NetworkTransportError', code: 'EXCHANGE_REQUEST_FAILED' },
     );
   } finally {
     globalThis.fetch = originalFetch;

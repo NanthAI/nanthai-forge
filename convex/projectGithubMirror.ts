@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 'use node';
+import { convexFetch, networkTimeout } from './networkFetch';
 import { v } from 'convex/values';
 import { makeFunctionReference } from 'convex/server';
 import { internalAction, type ActionCtx } from './_generated/server';
@@ -59,10 +60,10 @@ export function mirrorSource(ctx: ActionCtx, input: { jobId: Id<'projectGithubMi
       const blob = !row.url && row.storageId ? await ctx.storage.get(row.storageId) : null;
       if (blob) return blob.stream() as unknown as AsyncIterable<Uint8Array>;
       invariant(row.url, 'SOURCE_UNAVAILABLE', 'Mirror source bytes are unavailable.');
-      const response = await fetch(row.url, {
+      const response = await convexFetch(row.url, {
         headers: packHeaders(row.range, pin.size),
         redirect: 'error',
-        signal: AbortSignal.timeout(30000),
+        signal: networkTimeout(30000),
       });
       invariant(response.ok && response.body, 'SOURCE_UNAVAILABLE', 'Mirror source download failed.');
       verifyPackRange(response, row.range, pin.size);

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { convexFetch } from './networkFetch';
 import { v } from 'convex/values';
 import { makeFunctionReference } from 'convex/server';
 import { internalMutation, internalAction, type MutationCtx } from './server';
@@ -20,6 +21,11 @@ const rateLimitMs = { min: 60_000, max: 15 * 60_000 };
 const repositoryOf = (run: HostedCheckRun) =>
   run.configuration.provider === 'github-actions' ? run.configuration.repository : 'the repository';
 const identity = { projectId: v.id('hostedProjects'), runId: v.string() };
+/** Shared-transport deadlines (convexFetch) and native aborts both count as timeouts. */
+const timedOut = (error: unknown) => {
+  const { name, code } = (error ?? {}) as { name?: unknown; code?: unknown };
+  return name === 'TimeoutError' || name === 'AbortError' || code === 'EXCHANGE_REQUEST_TIMEOUT';
+};
 type DispatchFailure = { outcome: 'unknown' | 'rejected'; failure: string; retryAfterMs?: number };
 /** A 4xx reply proves GitHub created no run; 5xx, timeout and network loss do not.
  * Records only the status or error class. Rate limits keep Retry-After. */
@@ -31,11 +37,7 @@ export function classifyDispatchFailure(
 ): DispatchFailure {
   if (stage === 'setup') return { outcome: 'rejected', failure: 'setup' };
   if (!response) {
-    const name = (error as { name?: unknown })?.name;
-    return {
-      outcome: 'unknown',
-      failure: name === 'TimeoutError' || name === 'AbortError' ? 'timeout' : 'network',
-    };
+    return { outcome: 'unknown', failure: timedOut(error) ? 'timeout' : 'network' };
   }
   const status = response.status;
   if (status >= 500) return { outcome: 'unknown', failure: `http ${status}` };
@@ -274,7 +276,7 @@ export const dispatch = internalAction({
       const response = await githubAppRequest(
         `repos/${run.configuration.repository}/actions/workflows/forge-check.yml/dispatches`,
         token,
-        async (url, init) => (seen = await fetch(url, init)),
+        async (url, init) => (seen = await convexFetch(url, init)),
         {
           ref: 'main',
           return_run_details: true,
@@ -408,7 +410,7 @@ export const reconcile = internalAction({
         lookup = found ? 'found' : 'absent';
         if (found && Number.isSafeInteger(found.id) && found.id! > 0) executionId = String(found.id);
       } catch (error) {
-        lookup = `failed ${(error as { name?: unknown })?.name === 'TimeoutError' ? 'timeout' : 'error'}`;
+        lookup = `failed ${timedOut(error) ? 'timeout' : 'error'}`;
       }
     await ctx.runMutation(makeFunctionReference<'mutation'>('projectHostedActionsDirect:reconciled'), {
       ...input,

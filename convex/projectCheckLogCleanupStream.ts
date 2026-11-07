@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 'use node';
+import { convexFetch } from './networkFetch';
 import type { ActionCtx } from './_generated/server';
 import { internal } from './_generated/api';
 import { lookupRef, type Identity, type PlanState, type PlanWrite } from './projectCheckLogCleanupTypes';
@@ -94,7 +95,7 @@ export async function cleanupStreamStep(ctx: ActionCtx, input: Identity, state: 
       if (p.sequence !== chunk.sequence) carry.push(Buffer.from('\n'));
       p.sequence = chunk.sequence + 1;
       const config = r2Config(),
-        response = await fetch(
+        response = await convexFetch(
           await presignGet(config, outputKey(input.projectId, stream.runId, chunk.object)),
         );
       invariant(

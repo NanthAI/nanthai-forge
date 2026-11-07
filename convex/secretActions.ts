@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 'use node';
+import { convexFetch } from './networkFetch';
 import { v } from 'convex/values';
 import { parseEnv } from 'node:util';
 import { action, type ActionCtx } from './cliServer';
@@ -292,7 +293,7 @@ export const use = action({
       const commit = await githubJson<{ sha: string }>(
         `/repos/${snapshot.object.repository}/commits/${encodeURIComponent(snapshot.object.ref)}`,
         value,
-        (url, init) => fetch(url, { ...init, redirect: 'error' }),
+        (url, init) => convexFetch(url, { ...init, redirect: 'error' }),
       );
       invariant(
         typeof commit?.sha === 'string' && /^[a-f0-9]{40,64}$/.test(commit.sha),

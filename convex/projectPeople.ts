@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Clerk stays behind owner-authorized actions; no public directory endpoint.
+import { convexFetch, networkTimeout } from './networkFetch';
 import { invariant } from '../src/errors';
 type Person = {
   id: string;
@@ -17,10 +18,10 @@ function handleSeed(person: Person | null) {
 }
 async function clerk(path: string): Promise<unknown> {
   invariant(process.env.CLERK_SECRET_KEY, 'GITHUB_SETUP_REQUIRED', 'Forge identity is not configured.');
-  const response = await fetch(`https://api.clerk.com/v1/users${path}`, {
+  const response = await convexFetch(`https://api.clerk.com/v1/users${path}`, {
     headers: { Authorization: `Bearer ${process.env.CLERK_SECRET_KEY}` },
     redirect: 'error',
-    signal: AbortSignal.timeout(30_000),
+    signal: networkTimeout(30_000),
   });
   if (response.status === 404) return null;
   invariant(response.ok, 'GITHUB_UNAVAILABLE', 'Forge could not check this account. Try again.');

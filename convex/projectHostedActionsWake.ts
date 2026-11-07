@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { convexFetch, networkTimeout } from './networkFetch';
 import { v } from 'convex/values';
 import { makeFunctionReference } from 'convex/server';
 import { internalMutation, internalAction, type MutationCtx } from './server';
@@ -136,10 +137,10 @@ export const observe = internalAction({
       'Configure the fixed Actions controller ingress.',
     );
     // Bounded request only; next durable wake already exists if HTTP fails.
-    const response = await fetch(endpoint, {
+    const response = await convexFetch(endpoint, {
       method: 'POST',
       redirect: 'error',
-      signal: AbortSignal.timeout(20_000),
+      signal: networkTimeout(20_000),
       headers: { authorization: `Bearer ${key}`, 'content-type': 'application/json' },
       body: canonicalPayload(selected),
     });

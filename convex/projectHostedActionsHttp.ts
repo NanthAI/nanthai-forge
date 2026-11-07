@@ -31,7 +31,14 @@ import {
 import { deleteR2Object, listR2Prefix } from './r2Operations';
 /** Refused writes that resolve on their own: the runner keeps its result and
  * retries the same request (Issue 72d50375). */
-const transientCodes = ['RUNNER_UNAVAILABLE', 'LEGACY_STORAGE_WRITES_PAUSED', 'HOSTED_CONFLICT'];
+// EXCHANGE_REQUEST_*: convexFetch transport faults (deadline or lost connection).
+const transientCodes = [
+  'RUNNER_UNAVAILABLE',
+  'LEGACY_STORAGE_WRITES_PAUSED',
+  'HOSTED_CONFLICT',
+  'EXCHANGE_REQUEST_TIMEOUT',
+  'EXCHANGE_REQUEST_FAILED',
+];
 async function poolClaims(projectId: string, run: HostedCheckRun, recipe: HostedActionsRecipe) {
   invariant(run.executionId, 'EVIDENCE_CHANGED', 'Prepare this exact Actions execution.');
   const config = r2Config(),

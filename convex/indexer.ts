@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 'use node';
+import { convexFetch, networkTimeout } from './networkFetch';
 import { v } from 'convex/values';
 import { blobStore } from './blobStore';
 import { artifactBlobId } from './artifactBlobFields';
@@ -37,10 +38,10 @@ export const run = internalAction({
         if (!process.env.FORGE_WORKER_KEY)
           throw new ForgeError('WORKER_SETUP_REQUIRED', 'Forge’s analysis worker is not configured yet.');
         if (!(await ctx.runMutation(internal.imports.handoff, { id, generation }))) return null;
-        const response = await fetch(remote, {
+        const response = await convexFetch(remote, {
           method: 'POST',
           redirect: 'error',
-          signal: AbortSignal.timeout(30_000),
+          signal: networkTimeout(30_000),
           headers: {
             Authorization: `Bearer ${process.env.FORGE_WORKER_KEY}`,
             'Content-Type': 'application/json',

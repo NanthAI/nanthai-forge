@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { convexFetch, networkTimeout } from './networkFetch';
 import type { ActionCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import { r2Config, r2Key, presignPut, headObject, checksumOf } from './r2';
@@ -31,12 +32,12 @@ export async function storeSourceBytes(
   const target = await presignPut(config, key, { digest: pin.sha256, size: pin.size });
   let response: Response;
   try {
-    response = await fetch(target.url, {
+    response = await convexFetch(target.url, {
       method: 'PUT',
       headers: target.headers,
       body: new Uint8Array(bytes),
       redirect: 'error',
-      signal: AbortSignal.timeout(20_000),
+      signal: networkTimeout(20_000),
     });
   } catch (error) {
     throw new SourceIoError(error, 'source-put', pin.sha256);

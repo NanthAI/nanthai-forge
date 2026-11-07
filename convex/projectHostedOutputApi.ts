@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { convexFetch, networkTimeout } from './networkFetch';
 import { v } from 'convex/values';
 import { makeFunctionReference } from 'convex/server';
 import { internalMutation, internalAction } from './server';
@@ -110,7 +111,7 @@ const pause = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, m
 export async function storeOutputObject(
   target: { url: string; headers: Record<string, string> },
   body: BodyInit,
-  send: typeof fetch = fetch,
+  send: typeof fetch = convexFetch,
   wait = pause,
 ) {
   const put = () =>
@@ -119,7 +120,7 @@ export async function storeOutputObject(
       headers: target.headers,
       body,
       redirect: 'error',
-      signal: AbortSignal.timeout(20_000),
+      signal: networkTimeout(20_000),
     });
   let stored = await put();
   if (stored.status === 403) {

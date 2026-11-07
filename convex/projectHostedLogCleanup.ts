@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 'use node';
+import { convexFetch } from './networkFetch';
 import type { ActionCtx } from './_generated/server';
 import { outputChunkSchema, outputKey } from '../src/hosted-check-output';
 import { compactProviderOutput, compactCheckText } from '../src/check-compact-output';
@@ -38,7 +39,7 @@ export async function purgeHostedLogStream(
         // Gaps cannot be joined into a complete machine report.
         if (chunk.sequence !== next) yield Buffer.from('\n');
         next = chunk.sequence + 1;
-        const response = await fetch(
+        const response = await convexFetch(
           await presignGet(config, outputKey(input.projectId, input.runId, chunk.object)),
         );
         invariant(

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { convexFetch } from './networkFetch';
 import { presign } from './presign';
 import { r2Endpoint, type R2Config } from './r2';
 import { invariant } from '../src/errors';
@@ -15,7 +16,7 @@ const endpoint = (config: R2Config, key = '') => ({
 export async function deleteR2Object(config: R2Config, key: string) {
   let ok = false;
   try {
-    const response = await fetch(await presign({ method: 'DELETE', ...endpoint(config, key) }), {
+    const response = await convexFetch(await presign({ method: 'DELETE', ...endpoint(config, key) }), {
       method: 'DELETE',
     });
     ok = response.ok || response.status === 404;
@@ -53,7 +54,7 @@ export async function listR2Prefix(
         ...(startAfter ? { 'start-after': startAfter } : {}),
       },
     });
-    const response = await fetch(url);
+    const response = await convexFetch(url);
     if (response.ok) body = await response.text();
     else await response.body?.cancel();
   } catch {

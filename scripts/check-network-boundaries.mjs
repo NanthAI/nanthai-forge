@@ -14,12 +14,20 @@ const exempt = new Map([
   ['scripts/bench-t3code/relay-client.mjs', 'primitive'],
 ]);
 
+/** Server-side code that must reach the network through the shared helper.
+ * convex/ actions use convex/networkFetch.ts (convexFetch, no default retries)
+ * and netlify/ functions import src/network-fetch.js; both share its deadlines
+ * (Issue aabe52a7). web/ stays out: browser requests run on the viewer's device
+ * and connection, are cancelled by navigation, strand no worker or Convex call,
+ * and its archive/backup transfers are sized by the user's file, so a fixed
+ * server-side total deadline would only break large legitimate uploads. */
+export const networkBoundaryScopes = /^(?:src|scripts|convex|netlify)\//;
 /** Inspect executable syntax, so comments and type-only `typeof fetch` cannot
  * bless a bare request. One HTTP primitive and one complete-RPC constructor.
  * Scripts reach the same helper through dist/ (`npm run build:core`). */
 export function networkBoundaryFindings(path, text) {
-  if (!/^(?:src|scripts)\//.test(path) || !/\.(?:[cm]?[jt]s|[jt]sx)$/.test(path)) return [];
-  if (path === 'scripts/check-network-boundaries.mjs') return [];
+  if (!networkBoundaryScopes.test(path) || !/\.(?:[cm]?[jt]s|[jt]sx)$/.test(path)) return [];
+  if (path === 'scripts/check-network-boundaries.mjs' || path.startsWith('convex/_generated/')) return [];
   const source = ts.createSourceFile(path, text, ts.ScriptTarget.Latest, true);
   const findings = [];
   const fail = (node, message) => {

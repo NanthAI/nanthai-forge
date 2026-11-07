@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 'use node';
+import { convexFetch } from './networkFetch';
 import { v } from 'convex/values';
 import { action, type ActionCtx } from './cliServer';
 import { makeFunctionReference } from 'convex/server';
@@ -114,7 +115,7 @@ export async function executeIntentTests(
             query,
             mutation,
             download: async url => {
-              const response = await fetch(url);
+              const response = await convexFetch(url);
               invariant(response.ok, 'SOURCE_UNAVAILABLE', 'Timing output download failed.');
               return new Uint8Array(await response.arrayBuffer());
             },
