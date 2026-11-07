@@ -12,7 +12,9 @@ export type CliReleaseKey = { id: string; publicKey: string };
 
 /** Public keys that may sign Forge CLI releases. Rotation: add the new key in a release signed
  * with an old one, sign with both until every machine runs it, then drop the old key. */
-export const CLI_RELEASE_KEYS: readonly CliReleaseKey[] = [];
+export const CLI_RELEASE_KEYS: readonly CliReleaseKey[] = [
+  { id: 'f3b8ac47a969d73d', publicKey: 'CB7z5KMg+wi0RPxtygIY7ubTfLEjieO5Lu8xk4pIjg4=' },
+];
 
 /** The transition switch. While false, a release without a signature from a listed key installs as
  * before (one log line). Set it to true only after the first signed release is on every machine. */

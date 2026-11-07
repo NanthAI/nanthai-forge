@@ -165,6 +165,9 @@ moved, and idle costs nothing. The verdict is written to `DIR/release-signature.
 - An explicit `nforge update --state STATE` selection skips the check; it is the owner's own
   recovery path.
 
+The first release key is listed (key id `f3b8ac47a969d73d`). Signing is still optional:
+`CLI_RELEASE_SIGNATURES_REQUIRED` stays `false` until the first signed release is installed.
+
 Turning the switch on: after the first signed release, confirm `release-signature.json` says
 `verified` on every machine, then land `CLI_RELEASE_SIGNATURES_REQUIRED = true` and sign that
 landing too. A test refuses `true` with an empty key list.
