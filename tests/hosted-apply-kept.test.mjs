@@ -52,6 +52,30 @@ async function blocked(t, edit) {
   await assert.rejects(applyHostedSync(s.root, request, s.transport), { code: 'WORK_CONFLICT' });
   return { s, request };
 }
+const incoming = path => `incoming ${path}`;
+/** The incoming change also touches `paths` (a new file where none was). */
+const changeAlso = (s, paths) => {
+  const touched = new Set(paths);
+  s.setFiles([
+    { ...s.files[0], blob: s.put('after\n') },
+    ...s.files
+      .slice(1)
+      .map(file => (touched.has(file.path) ? { ...file, blob: s.put(incoming(file.path)) } : file)),
+    ...paths
+      .filter(path => !s.files.some(file => file.path === path))
+      .map(path => ({ path, blob: s.put(incoming(path)), mode: 'file' })),
+  ]);
+};
+const clashing = [
+  'src/dir1/file1.txt',
+  'src/dir2/file2.txt',
+  'src/dir3/file3.txt',
+  'notes.txt',
+  'src/dir4/file4.txt.link',
+  'src/dir5/file5.txt',
+];
+// Every local change meets the incoming change, so recovery keeps every one (e0ae9db0 F1 keeps
+// only those; tests/hosted-userbytes-followups.test.mjs covers edits that stay in place).
 const localEdits = s => {
   writeFileSync(join(s.root, 'a'), 'local draft of a');
   writeFileSync(join(s.root, 'src/dir1/file1.txt'), 'local draft one');
@@ -60,6 +84,7 @@ const localEdits = s => {
   writeFileSync(join(s.root, 'notes.txt'), 'a brand new local file');
   symlinkSync('local-target', join(s.root, 'src/dir4/file4.txt.link'));
   chmodSync(join(s.root, 'src/dir5/file5.txt'), 0o755);
+  changeAlso(s, clashing);
 };
 
 test('a kept apply holds only the changed files, in the client cache, never beside the root', async t => {
@@ -95,9 +120,10 @@ test('a kept apply holds only the changed files, in the client cache, never besi
   assert.equal(recovered.kept.deleted, 1);
   // The live tree is the applied target; everything not changed, including ignored output, was left alone.
   assert.equal(readFileSync(join(s.root, 'a'), 'utf8'), 'after\n');
-  assert.equal(readFileSync(join(s.root, 'src/dir1/file1.txt'), 'utf8'), 'baseline 1 '.repeat(40));
-  assert.equal(readFileSync(join(s.root, 'src/dir3/file3.txt'), 'utf8'), 'baseline 3 '.repeat(40));
-  assert(!existsSync(join(s.root, 'notes.txt')));
+  assert.equal(readFileSync(join(s.root, 'src/dir1/file1.txt'), 'utf8'), incoming('src/dir1/file1.txt'));
+  assert.equal(readFileSync(join(s.root, 'src/dir3/file3.txt'), 'utf8'), incoming('src/dir3/file3.txt'));
+  assert.equal(readFileSync(join(s.root, 'notes.txt'), 'utf8'), incoming('notes.txt'));
+  assert.equal(readFileSync(join(s.root, 'src/dir7/file7.txt'), 'utf8'), 'baseline 7 '.repeat(40));
   assert.equal(readFileSync(join(s.root, 'build/output.js'), 'utf8'), 'ignored build output');
 });
 
@@ -135,13 +161,14 @@ test('a directory standing where a saved file belongs is kept file by file and t
     rmSync(join(s.root, 'src/dir6/file6.txt'));
     mkdirSync(join(s.root, 'src/dir6/file6.txt'));
     writeFileSync(join(s.root, 'src/dir6/file6.txt/inner.txt'), 'inside a directory');
+    changeAlso(s, ['src/dir6/file6.txt']); // The directory stands where the incoming file goes.
   });
   const recovered = await recoverLocalApply(s.root, request.operationId, s.transport);
   assert.equal(
     readFileSync(join(recovered.preservedAt, 'src/dir6/file6.txt/inner.txt'), 'utf8'),
     'inside a directory',
   );
-  assert.equal(readFileSync(join(s.root, 'src/dir6/file6.txt'), 'utf8'), 'baseline 6 '.repeat(40));
+  assert.equal(readFileSync(join(s.root, 'src/dir6/file6.txt'), 'utf8'), incoming('src/dir6/file6.txt'));
 });
 
 test('a removed checkout comes back from the baseline with nothing else kept', async t => {

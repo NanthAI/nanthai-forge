@@ -131,10 +131,26 @@ test('B2 Lane moved before the first apply receipt: recovery ends with an explic
     assert.deepEqual(result.from, request.from);
     assert.deepEqual(result.to, request.lane);
     assert.deepEqual(result.next, { action: 'open', laneId: request.lane.laneId });
-    assert.equal(fs.readFileSync(join(s.root, 'a'), 'utf8'), 'before\n', 'no silent pin switch');
-    assert.equal(fs.readFileSync(join(result.preservedAt, 'a'), 'utf8'), 'original local draft');
+    assert.equal(
+      readHostedLaneCheckout(s.root).selection.version,
+      request.from.version,
+      'no silent pin switch',
+    );
+    // Nothing was going to be installed, so nothing moved (e0ae9db0 F2): the draft stays in place.
+    assert.equal(fs.readFileSync(join(s.root, 'a'), 'utf8'), 'original local draft');
+    assert.equal(result.preservedAt, null);
   }
-  // The explicit next step installs the current head.
+  // The explicit next step installs the current head; it refuses to overwrite the draft.
+  const open = () =>
+    checkoutHostedLane(
+      s.root,
+      { operationId: randomUUID(), url: request.url, projectId: current.projectId, laneId: current.laneId },
+      s.transport,
+    );
+  await assert.rejects(open(), { code: 'WORK_CONFLICT' });
+  assert.equal(fs.readFileSync(join(s.root, 'a'), 'utf8'), 'original local draft');
+  fs.renameSync(join(s.root, 'a'), join(s.root, '..', 'draft-moved-by-user'));
+  fs.writeFileSync(join(s.root, 'a'), 'before\n');
   await checkoutHostedLane(
     s.root,
     { operationId: randomUUID(), url: request.url, projectId: current.projectId, laneId: current.laneId },

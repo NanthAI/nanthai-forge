@@ -75,7 +75,10 @@ test('older interrupted apply cannot overwrite a newer checkout or newer server 
     s.transport,
   );
   const marker = readHostedLaneCheckout(s.root);
-  await assert.rejects(applyHostedSync(s.root, old, s.transport), { code: 'WORK_STALE' });
+  // The checkout already holds a newer version of the Lane: nothing is installed or rolled back
+  // (e0ae9db0 F3), where this used to refuse WORK_STALE.
+  const older = await applyHostedSync(s.root, old, s.transport);
+  assert.equal(older.alreadyApplied, 'newer');
   assert.deepEqual(readHostedLaneCheckout(s.root), marker);
   const fresh = {
     ...s.command(),
@@ -86,7 +89,10 @@ test('older interrupted apply cannot overwrite a newer checkout or newer server 
       sourceVersion: old.lane.sourceVersion,
     },
   };
-  await assert.rejects(applyHostedSync(s.root, fresh, s.transport), { code: 'WORK_STALE' });
+  // The newer selection was installed by `open`: it is reported as already applied, untouched.
+  const already = await applyHostedSync(s.root, fresh, s.transport);
+  assert.equal(already.alreadyApplied, 'target');
+  assert.deepEqual(readHostedLaneCheckout(s.root), marker);
 });
 for (const kind of ['deletion', 'mode', 'symlink', 'untracked'])
   test(`sync apply preserves a local ${kind}`, async t => {

@@ -1759,9 +1759,12 @@ content when possible, or retains it with an obstruction; even verified quaranti
 stay outside GC because open handles can still write to moved directories.
 Tracked source paths retain ordinary obstruction handling. Blocked sync/resolve applies
 retain typed recovery through CLI/MCP; explicit `recover-apply` keeps only the
-changed files, restores just those paths to the baseline in place and resumes the
-same pinned installation. The changed set is found with one stat-indexed pass over the
-materialized files, so the kept copy and its receipt grow with the changed paths, not the
+unsaved changes that meet the incoming change (computed from the baseline and target State
+exactly as the in-place apply does), restores just those paths to the baseline in place and
+resumes the same pinned installation, which carries every other edit and new file. When the
+apply will replace the whole checkout, or something the clean check ignores blocks the
+incoming change, every change is kept instead. The changed set is found with one
+stat-indexed pass over the materialized files, so the kept copy and its receipt grow with the changed paths, not the
 tree; ignored output (dependency links, build output) is never touched. Kept bytes live in
 the outermost client cache at `ROOT.forge-client/kept-apply/APPLY_ID/` (never beside the
 root): `files/` mirrors the changed paths (a later round adds `files-UUID/`), and
@@ -1783,15 +1786,24 @@ or removed path (or a parent or child of one), or any Forge metadata change, ref
 anything is installed, and the refusal removes its pending receipt so a retry re-checks its
 pins. The judgement reuses the publication's one stat-indexed clean pass. A whole-checkout
 publication never removes the prior root wholesale: an editor can recreate paths in it until
-the rename lands, so `hosted-checkout-dispose.ts` walks it once (the walk `rm -r` did), unlinks
-only exact baseline bytes and Forge metadata, and moves anything else whole into a held
-kept-apply folder that never expires; results report it in `displacedRecovery`. Hosted main
+the rename lands, so `hosted-checkout-dispose.ts` walks it once (the walk `rm -r` did). Each
+baseline path is first renamed into a private folder inside the old root and only then
+compared, so a write through the old path after that lands in a new file that stays; exact
+baseline bytes are unlinked, others go back to their path without replacing anything. Forge
+metadata is removed and anything else moves whole into a held kept-apply folder that never
+expires; results report it in `displacedRecovery`. A walk that stops on a filesystem error (a
+read-only folder) holds the remainder the same way, so the publication finishes and later
+checkouts are not refused; if even that rename fails, a typed `WORK_CONFLICT` names the
+folder and the retry. Hosted main
 pulls do the same. Recovery wrappers keep typed recovery for filesystem errors
 (`local-filesystem`), an unreadable quarantined cache (left quarantined), a lost marker (a
 private baseline copy taken with the handoff), and a checkout root replaced by a link (a
 `root-link` blocker; nothing is written through the link). When the Lane moved before the
 first apply receipt, `recover-apply` returns `status:"superseded"` with both pin sets and
-`next: open`; it never switches pins silently. Recovery removes its exact journaled baseline
+`next: open` before moving anything; it never switches pins silently. A checkout that already
+holds the apply's target pins or a newer version of its Lane (an `open` while the sync waited)
+is reported as `alreadyApplied` and left untouched; the handoff's baseline copy stands in only
+for a marker that is missing or unreadable, never for a newer one. Recovery removes its exact journaled baseline
 stage even after an interrupted earlier run.
 
 

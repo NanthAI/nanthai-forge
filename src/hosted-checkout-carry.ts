@@ -74,11 +74,13 @@ function changeObstruction(
         : 'other',
   };
 }
-/** The first local change that an in-place apply would move, replace or build on. */
-function deltaConflict(changes: readonly CheckoutChange[], delta: CheckoutDelta) {
+/** Every local change that an in-place apply would move, replace or build on. */
+export function deltaConflicts(changes: readonly CheckoutChange[], delta: CheckoutDelta) {
   const paths = [...delta.install, ...delta.remove].map(file => file.path);
   const meets = (path: string) =>
     metadata(path) ||
     paths.some(other => other === path || other.startsWith(`${path}/`) || path.startsWith(`${other}/`));
-  return changes.find(change => meets(change.path));
+  return changes.filter(change => meets(change.path));
 }
+const deltaConflict = (changes: readonly CheckoutChange[], delta: CheckoutDelta) =>
+  deltaConflicts(changes, delta)[0];

@@ -17,7 +17,12 @@ import { hostedLaneMarkerName } from './hosted-lane-checkout-marker.js';
 import { HostedCheckoutCache } from './hosted-checkout-cache.js';
 import { type LaneTransport } from './hosted-lane-checkout.js';
 import { hostedRecoveryCommand } from './hosted-agent-resolution.js';
-import { parseNativeStateValue } from './native-state-format.js';
+import { parseNativeState, parseNativeStateValue, type NativeFile } from './native-state-format.js';
+import { readFileSync } from 'node:fs';
+import { digest } from './hash.js';
+import { checkoutDelta, deltaObstructed, type CheckoutDelta } from './hosted-checkout-delta.js';
+import { deltaConflicts } from './hosted-checkout-carry.js';
+import type { HostedLaneCheckoutMarker } from './hosted-lane-checkout-marker.js';
 import { applyHostedSync } from './hosted-sync-client.js';
 import { applySchema } from './hosted-sync-contract.js';
 import { withCheckoutWritePass } from './checkout-materialization.js';
@@ -45,6 +50,7 @@ import {
   savedSchema,
   markerAt,
   localApplyBlocked,
+  checkoutAhead,
 } from './hosted-apply-recovery-records.js';
 export { localApplyBlocked } from './hosted-apply-recovery-records.js';
 
@@ -71,6 +77,42 @@ function rootLinkBlocked(root: string, target: string, saved: z.infer<typeof sav
       command: hostedRecoveryCommand(root, next.action, { applyOperationId: request.operationId }),
     },
   );
+}
+/** The incoming change the retained apply will make in place, computed exactly as the apply
+ * does (same baseline, same sparse scope). Null when it will replace the whole checkout. */
+async function incomingDelta(
+  cache: HostedCheckoutCache,
+  marker: HostedLaneCheckoutMarker,
+  files: readonly NativeFile[],
+  head: string,
+): Promise<CheckoutDelta | null> {
+  await cache.ensure([head]);
+  const bytes = readFileSync(join(cache.objects, head));
+  invariant(digest(bytes) === head, 'INVALID_NATIVE_SOURCE', 'Selected State bytes changed.');
+  const retained = new Set(marker.materialized),
+    scope = marker.scope === null ? null : [...new Set(marker.scope)];
+  const target = parseNativeState(bytes).files.filter(
+    file =>
+      scope === null ||
+      retained.has(file.path) ||
+      scope.some(path => file.path === path || file.path.startsWith(`${path}/`)),
+  );
+  return checkoutDelta(files, target);
+}
+/** The local changes recovery must move out of the way: only those the in-place apply would
+ * replace or build on. Every other edit and new file stays and is carried. All of them when the
+ * apply will replace the whole checkout, or when something the clean check ignores stands in the
+ * incoming change's way (then the apply cannot run in place). */
+function clashing(root: string, changes: CheckoutChange[], delta: CheckoutDelta | null) {
+  if (!delta) return changes;
+  const meeting = deltaConflicts(changes, delta);
+  const obstruction = deltaObstructed(root, delta);
+  if (
+    obstruction !== null &&
+    !meeting.some(change => change.path === obstruction || change.path.startsWith(`${obstruction}/`))
+  )
+    return changes;
+  return meeting;
 }
 /** Explicit recovery keeps only the changed files of the obstructed tree (plus a receipt listing
  * deletions) in the client cache, then restores those paths to the exact baseline in place. Every
@@ -106,63 +148,92 @@ export async function recoverLocalApply(root: string, id: string, transport: Lan
     }
     const directory = recoveryDirectory(root, id),
       backup = join(directory, 'files');
-    mkdirSync(directory, { recursive: true, mode: 0o700 });
-    for (const path of [cacheRoot, directory])
-      invariant(
-        lstatSync(path).isDirectory() && !lstatSync(path).isSymbolicLink(),
-        'UNSAFE_PATH',
-        'Recovery directories must be real.',
-      );
     const receiptPath = join(directory, 'receipt.json');
-    const receipt = workLocked(join(cacheRoot, 'lock'), () => {
-      if (checkoutPathExists(receiptPath)) return receiptSchema.parse(read(receiptPath));
-      const observedMarker = markerAt(root),
-        marker = saved.baseline ?? observedMarker;
-      invariant(
-        marker && validBaseline(marker, request),
-        'WORK_STALE',
-        'The local baseline changed; preserve it before recovering the retained apply.',
-      );
-      const value = {
-        marker,
-        restored: false,
-        preservedAt: backup,
-        baselineStage: join(directory, `baseline-${randomUUID()}`),
-        undo: `Only the files your checkout changed are kept at ${backup}, with the same relative paths; files that were deleted are listed in the receipt next to it. Copy what you need back after the apply. Further rounds stay in the same folder. It is removed seven days after the apply is confirmed.`,
-      };
-      durableReplace(receiptPath, JSON.stringify(value));
-      return receiptSchema.parse(value);
-    });
-    invariant(
-      validBaseline(receipt.marker, request),
-      'WORK_OPERATION_CHANGED',
-      'Recover the original checkout baseline.',
-    );
-    invariant(
-      receipt.preservedAt === backup,
-      'WORK_OPERATION_CHANGED',
-      'Retain the original recovery backup.',
-    );
     const checkoutReceipt = join(cacheRoot, `${id}.json`);
+    // Nothing has left the tree yet (no round recorded), or the baseline is already back. Then a
+    // checkout that already holds the result (F3), or a Lane that moved on before this apply's
+    // first receipt (F2), means nothing will be installed, so nothing moves: the apply is
+    // replayed directly and reports already-applied or superseded.
+    const untouched = (() => {
+      if (!checkoutPathExists(receiptPath)) return true;
+      const current = receiptSchema.parse(read(receiptPath));
+      return current.restored || !Object.keys(current.rounds ?? {}).length;
+    })();
+    const pins = ({ head, version, sourceVersion }: typeof observed) => ({ head, version, sourceVersion });
+    const moved =
+      !checkoutPathExists(checkoutReceipt) &&
+      JSON.stringify(pins(observed)) !== JSON.stringify(pins(request.lane));
+    const skip = untouched && (checkoutAhead(root, request) !== null || moved);
+    if (!skip) mkdirSync(directory, { recursive: true, mode: 0o700 });
+    if (!skip)
+      for (const path of [cacheRoot, directory])
+        invariant(
+          lstatSync(path).isDirectory() && !lstatSync(path).isSymbolicLink(),
+          'UNSAFE_PATH',
+          'Recovery directories must be real.',
+        );
+    // A skipped recovery creates nothing; an earlier one keeps reporting what it kept.
+    const receipt = skip
+      ? checkoutPathExists(receiptPath)
+        ? receiptSchema.parse(read(receiptPath))
+        : null
+      : workLocked(join(cacheRoot, 'lock'), () => {
+          if (checkoutPathExists(receiptPath)) return receiptSchema.parse(read(receiptPath));
+          const observedMarker = markerAt(root),
+            marker = saved.baseline ?? observedMarker;
+          invariant(
+            marker && validBaseline(marker, request),
+            'WORK_STALE',
+            'The local baseline changed; preserve it before recovering the retained apply.',
+          );
+          const value = {
+            marker,
+            restored: false,
+            preservedAt: backup,
+            baselineStage: join(directory, `baseline-${randomUUID()}`),
+            undo: `Only your unsaved changes that clash with the incoming change are kept at ${backup}, with the same relative paths; other edits and new files stay in place. Files that were deleted are listed in the receipt next to it. Copy what you need back after the apply. Further rounds stay in the same folder. It is removed seven days after the apply is confirmed.`,
+          };
+          durableReplace(receiptPath, JSON.stringify(value));
+          return receiptSchema.parse(value);
+        });
+    if (receipt) {
+      invariant(
+        validBaseline(receipt.marker, request),
+        'WORK_OPERATION_CHANGED',
+        'Recover the original checkout baseline.',
+      );
+      invariant(
+        receipt.preservedAt === backup,
+        'WORK_OPERATION_CHANGED',
+        'Retain the original recovery backup.',
+      );
+    }
     const alreadyApplied =
       checkoutPathExists(checkoutReceipt) &&
       z.object({ complete: z.boolean() }).parse(read(checkoutReceipt)).complete;
-    if (!receipt.restored && !alreadyApplied) {
+    if (receipt && !skip && !receipt.restored && !alreadyApplied) {
       const paths = new Set<string>(receipt.marker.materialized);
       const state = parseNativeStateValue(receipt.marker.state);
       const files = state.files.filter(file => paths.has(file.path));
       const byPath = new Map(files.map(file => [file.path, file]));
       const cache = new HostedCheckoutCache(cacheRoot, transport);
       const lock = join(cacheRoot, 'lock');
+      // A baseline this apply installed itself is finished by a strict replay, not in place.
+      const incoming =
+        receipt.marker.operationId === request.operationId
+          ? null
+          : await incomingDelta(cache, receipt.marker, files, request.lane.head);
+      // The baseline is back once no remaining local change clashes with the incoming change.
       const publishedBaseline = (marker: unknown) => {
         if (JSON.stringify(markerAt(root)) !== JSON.stringify(marker)) return false;
+        const changes: CheckoutChange[] = [];
         try {
-          cleanHostedCheckout(root, files, hostedLaneMarkerName, true);
-          return true;
+          cleanHostedCheckout(root, files, hostedLaneMarkerName, true, { collect: changes });
         } catch (error) {
           if (error instanceof ForgeError && error.code === 'WORK_CONFLICT') return false;
           throw error;
         }
+        return clashing(root, changes, incoming).length === 0;
       };
       /** One preservation round: copy only the changed paths, set them back to the baseline in
        * place, and leave every other file (including ignored artifacts) where it is. A path edited
@@ -193,6 +264,7 @@ export async function recoverLocalApply(root: string, id: string, transport: Lan
                 collect: changes,
                 index: readCheckoutStatIndex(root),
               });
+            if (!missingRoot) changes.splice(0, changes.length, ...clashing(root, changes, incoming));
             if (!missingRoot) changes.push(...misplacedCacheContent(root, files));
             current.rounds = { ...current.rounds, [name]: preserveChanges(root, round, changes) };
             durableReplace(receiptPath, JSON.stringify(current));
@@ -321,6 +393,7 @@ export async function recoverLocalApply(root: string, id: string, transport: Lan
     // journaled stage is removed, under the same write serialization; kept user files never are.
     await withCheckoutWritePass(cacheRoot, async () =>
       workLocked(join(cacheRoot, 'lock'), () => {
+        if (!checkoutPathExists(receiptPath)) return;
         const current = receiptSchema.parse(read(receiptPath)),
           stage = current.baselineStage;
         const done =
@@ -343,9 +416,10 @@ export async function recoverLocalApply(root: string, id: string, transport: Lan
     } catch (error) {
       const superseded = error instanceof ForgeError ? error.recovery?.superseded : undefined;
       if (!superseded) throw error;
-      // The Lane moved on before this apply's first receipt. The checkout is back at its exact
-      // baseline with every local change kept; installing the newer head is a separate, explicit
-      // step, so this retained apply ends here instead of repeating WORK_STALE.
+      // The Lane moved on before this apply's first receipt. Nothing moved for it (or, after an
+      // earlier round, the checkout is back at its exact baseline with those changes kept);
+      // installing the newer head is a separate, explicit step, so this retained apply ends here
+      // instead of repeating WORK_STALE.
       workLocked(join(cacheRoot, 'lock'), () => {
         const handoff = join(cacheRoot, 'sync-handoff.json');
         try {
@@ -367,22 +441,24 @@ export async function recoverLocalApply(root: string, id: string, transport: Lan
         from: request.from,
         to: request.lane,
         superseded,
-        note: 'The Lane changed after this sync completed, so its pinned result was not installed. Your checkout is at its previous baseline and local changes are kept; open the Lane to install its current head.',
-        preservedAt: backup,
-        undo: receipt.undo,
+        note: receipt
+          ? 'The Lane changed after this sync completed, so its pinned result was not installed. Your checkout is at its previous baseline and local changes are kept; open the Lane to install its current head.'
+          : 'The Lane changed after this sync completed, so its pinned result was not installed. Nothing in your checkout was moved or changed; open the Lane to install its current head.',
+        ...(receipt ? { preservedAt: backup, undo: receipt.undo } : { preservedAt: null }),
         kept: listKeptApply(root).entries.find(entry => entry.id === id),
         next,
         command: hostedRecoveryCommand(root, action, command),
       };
     }
     // The apply is confirmed: the retention clock for the kept files starts now.
-    workLocked(join(cacheRoot, 'lock'), () => {
-      const current = receiptSchema.parse(read(receiptPath));
-      if (current.confirmedAt) return;
-      current.confirmedAt = Date.now();
-      durableReplace(receiptPath, JSON.stringify(current));
-      receipt.confirmedAt = current.confirmedAt;
-    });
+    if (receipt)
+      workLocked(join(cacheRoot, 'lock'), () => {
+        const current = receiptSchema.parse(read(receiptPath));
+        if (current.confirmedAt) return;
+        current.confirmedAt = Date.now();
+        durableReplace(receiptPath, JSON.stringify(current));
+        receipt.confirmedAt = current.confirmedAt;
+      });
     const next = saved.handoff
       ? { action: saved.handoff.action, ...saved.handoff.command }
       : { action: 'open', laneId: request.lane.laneId };
@@ -394,10 +470,11 @@ export async function recoverLocalApply(root: string, id: string, transport: Lan
       sourceCompleted: true,
       operationId: saved.handoff?.operationId ?? id,
       applyOperationId: id,
-      preservedAt: backup,
-      undo: receipt.undo,
+      ...(receipt
+        ? { preservedAt: backup, undo: receipt.undo }
+        : { preservedAt: null, note: 'Nothing in your checkout was moved or changed.' }),
       kept: listKeptApply(root).entries.find(entry => entry.id === id),
-      ...(receipt.additionalPreservedAt?.length
+      ...(receipt?.additionalPreservedAt?.length
         ? { additionalPreservedAt: receipt.additionalPreservedAt }
         : {}),
       ...(checkoutPathExists(join(directory, 'prior-checkout'))

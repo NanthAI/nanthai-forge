@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { localApplyBlocked } from './hosted-apply-recovery-records.js';
+import { checkoutAhead, localApplyBlocked } from './hosted-apply-recovery-records.js';
 import { checkoutHostedLane, type LaneTransport } from './hosted-lane-checkout.js';
 import { ForgeError, invariant } from './errors.js';
 import { applySchema } from './hosted-sync-contract.js';
@@ -30,6 +30,17 @@ export async function applyHostedSync(root: string, input: unknown, transport: L
       transport,
     );
   } catch (error) {
+    // The checkout moved past `from` on its own (an `open` while the sync waited) and already holds
+    // this result or a newer Lane version. Nothing is installed, moved or rolled back.
+    const kind = (error as ForgeError | undefined)?.recovery?.obstruction as { kind?: string } | undefined;
+    if (
+      error instanceof ForgeError &&
+      error.code === 'WORK_STALE' &&
+      (kind?.kind === 'baseline-mismatch' || kind?.kind === 'superseded')
+    ) {
+      const ahead = checkoutAhead(root, request);
+      if (ahead) return alreadyApplied(root, request, ahead);
+    }
     if (
       error instanceof ForgeError &&
       (error.code === 'WORK_CONFLICT' || (error.code === 'WORK_STALE' && error.recovery?.obstruction))
@@ -51,6 +62,18 @@ export async function applyHostedSync(root: string, input: unknown, transport: L
       );
     throw error;
   }
+}
+function alreadyApplied(root: string, request: { lane: { laneId: string } }, ahead: 'target' | 'newer') {
+  return {
+    ...request.lane,
+    root,
+    replayed: true,
+    alreadyApplied: ahead,
+    note:
+      ahead === 'target'
+        ? 'The checkout already holds this result; nothing was installed or moved.'
+        : 'The checkout already holds a newer version of this Lane; nothing was installed or moved.',
+  };
 }
 const localFilesystemCodes = new Set([
   'EACCES',

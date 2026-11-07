@@ -60,6 +60,8 @@ for (const boundary of boundaries)
         assert.equal(first.signal, 'SIGKILL', first.stdout + first.stderr);
         fs.mkdirSync(s.root, { recursive: true });
         fs.writeFileSync(join(s.root, 'between-crashes.txt'), 'draft between two interruptions');
+        // Only an edit that meets the incoming change starts another round (e0ae9db0 F1).
+        fs.writeFileSync(join(s.root, 'a'), 'second draft between two interruptions');
       }
       const child = crash(boundary, timing);
       assert.equal(child.signal, 'SIGKILL', child.stdout + child.stderr);

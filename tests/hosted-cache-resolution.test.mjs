@@ -239,16 +239,14 @@ for (const wrapper of ['cli', 'mcp'])
           readFileSync(join(retained.preservedAt, '.forge', 'private-note.json'), 'utf8'),
           'keep all of these local bytes',
         );
-        assert.equal(readFileSync(join(retained.preservedAt, 'extra-local.txt'), 'utf8'), 'also preserve me');
+        // An untracked file the incoming change does not touch stays in place (e0ae9db0 F1).
+        assert.equal(readFileSync(join(conflict.root, 'extra-local.txt'), 'utf8'), 'also preserve me');
+        assert(!existsSync(join(retained.preservedAt, 'extra-local.txt')));
         assert(retained.undo.includes(retained.preservedAt));
         if (interruption) {
-          // A draft created mid-recovery is either moved aside with the preserved round it joined
-          // or, when recovery resumes from a restored baseline, carried in place: an untracked
-          // path the apply does not touch. Its bytes are never lost either way.
-          const path =
-            interruption === 'after-preserve'
-              ? retained.additionalPreservedAt?.find(path => existsSync(join(path, 'new-note.txt')))
-              : conflict.root;
+          // A draft created mid-recovery is an untracked path the apply does not touch, so it is
+          // carried in place (e0ae9db0 F1: recovery moves only what meets the incoming change).
+          const path = conflict.root;
           assert(path, 'the late draft is kept');
           assert.equal(readFileSync(join(path, 'new-note.txt'), 'utf8'), 'draft created after interruption');
         }

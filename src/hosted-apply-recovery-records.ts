@@ -99,6 +99,24 @@ function retainedApplyBaseline(root: string, request: z.infer<typeof applySchema
     return undefined;
   }
 }
+/** The live checkout already holds this apply's target pins (another command, such as `open`,
+ * installed them) or a newer version of the same Lane: nothing is left to install or move. */
+export function checkoutAhead(root: string, input: z.infer<typeof applySchema>): 'target' | 'newer' | null {
+  const marker = markerAt(root),
+    lane = input.lane;
+  if (
+    !marker ||
+    // This apply's own install is finished by replaying it, never reported as already there.
+    marker.operationId === input.operationId ||
+    marker.url !== input.url ||
+    marker.selection.projectId !== lane.projectId ||
+    marker.selection.laneId !== lane.laneId
+  )
+    return null;
+  const { head, version, sourceVersion } = marker.selection;
+  if (head === lane.head && version === lane.version && sourceVersion === lane.sourceVersion) return 'target';
+  return version > lane.version && sourceVersion >= lane.sourceVersion ? 'newer' : null;
+}
 export function markerAt(root: string) {
   try {
     return readHostedLaneCheckout(root);
@@ -154,18 +172,25 @@ export function localApplyBlocked(root: string, input: unknown, error: ForgeErro
     command: hostedRecoveryCommand(root, next.action, { applyOperationId: request.operationId }),
   };
   workLocked(join(cache, 'lock'), () => {
+    // The copy taken at handoff stands in only for a marker that is gone or unreadable. A live
+    // marker that is newer (an `open` while the sync waited) is never rolled back to it.
     const marker = markerAt(root),
       baseline =
         prior?.baseline ??
-        (marker && validBaseline(marker, request) ? marker : retainedApplyBaseline(root, request));
+        (marker
+          ? validBaseline(marker, request)
+            ? marker
+            : undefined
+          : retainedApplyBaseline(root, request));
     durableReplace(path, JSON.stringify({ request, handoff: handoff ?? prior?.handoff ?? null, baseline }));
     const directory = recoveryDirectory(root, request.operationId),
       receiptPath = join(directory, 'receipt.json');
     if (checkoutPathExists(receiptPath)) {
       const receipt = receiptSchema.parse(read(receiptPath));
       // A new local edit during a previous recovery is another preservation round,
-      // not an unchanged retry against the same persistent obstruction.
-      if (receipt.restored) {
+      // not an unchanged retry against the same persistent obstruction. A Lane that moved on is
+      // not a local edit: nothing will be installed, so nothing more needs to move.
+      if (receipt.restored && !error.recovery?.superseded) {
         receipt.roundBackup = join(directory, `files-${randomUUID()}`);
         receipt.additionalPreservedAt = [...(receipt.additionalPreservedAt ?? []), receipt.roundBackup];
         receipt.restored = false;
