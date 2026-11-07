@@ -1939,3 +1939,81 @@ test('shard pool: a forged claim cannot pass a check with fewer tests', async t 
   assert.deepEqual(failed.map(([file]) => file).sort(), forged.slice().sort());
   assert(failed.every(([, report]) => report.firstError.startsWith('POOL_UNIT_UNREPORTED')));
 });
+
+// Landing secret scan (src/secret-scan.ts). The fake token is assembled at run time.
+const fakeGithubToken = ['gh', 'p_', 'FORGEfake0TEST1never2REAL3token4XYZ5ab'].join('');
+test('secret scan: a Candidate adding a known token fails as a red check naming file and line, never the value', async t => {
+  const s = fixture(t);
+  s.run.request.expectedHead = s.state([
+    ...s.files,
+    s.entry('config/app.env', `NAME=forge\nGITHUB_TOKEN=${fakeGithubToken}\n`),
+  ]).sha256;
+  s.run.check = { executable: 'true', args: [], definition: 'c'.repeat(64) };
+  const prepared = await prepareActionsJob(
+    s.client,
+    join(s.directory, 'candidate'),
+    join(s.directory, 'cache'),
+  );
+  assert.deepEqual(
+    prepared.recipe.selection.secretScan.findings.map(item => [item.path, item.line, item.kind]),
+    [['config/app.env', 2, 'github-token']],
+  );
+  const planPath = join(s.directory, 'plan.json');
+  writeFileSync(planPath, JSON.stringify(prepared.recipe));
+  assert.equal(
+    await executeActionsJob(s.client, join(s.directory, 'candidate'), planPath, prepared.singleShard),
+    1,
+  );
+  const { result } = s.calls.find(call => call.kind === 'result');
+  assert.match(result.log.failureSummary, /SecretScanError: .*config\/app\.env:2 github-token/);
+  assert(!JSON.stringify(s.calls).includes(fakeGithubToken), 'no call carries the value');
+  assert(!JSON.stringify(prepared.recipe).includes(fakeGithubToken), 'the plan carries no value');
+  // The landing notice: a red check (not a platform retry) whose detail names file and line.
+  const { checkFailureKind } = await import('../dist/hosted-landing-admission.js');
+  assert.equal(checkFailureKind({ status: 'failed', exitCode: 1 }, { conflicts: [] }), 'tests');
+  const { failingStep } = await import('../dist/hosted-landing-suspect.js');
+  const { checkFailureDetail } = await import('../dist/check-failure-detail.js');
+  const detail = checkFailureDetail(
+    {},
+    failingStep(
+      [
+        {
+          descriptor: JSON.stringify({ shard: 0 }),
+          seal: JSON.stringify({ failureSummary: result.log.failureSummary }),
+        },
+      ],
+      1,
+    ),
+  );
+  assert.match(
+    detail,
+    /SecretScanError: committed credential found in config\/app\.env:2 github-token \(fingerprint [0-9a-f]{16}\)/,
+  );
+  assert(!detail.includes(fakeGithubToken));
+});
+
+test('secret scan: a token already on the composition base is not rescanned and the check runs', async t => {
+  const s = fixture(t);
+  // No lockfile: the synthetic command needs no install.
+  const withToken = [
+    s.entry('README.md', 'synthetic before'),
+    s.entry('config/app.env', `GITHUB_TOKEN=${fakeGithubToken}\n`),
+  ];
+  s.run.candidate.base.head = s.state(withToken).sha256;
+  s.run.request.expectedHead = s.state(
+    withToken.map(file => (file.path === 'README.md' ? s.entry(file.path, 'synthetic after') : file)),
+  ).sha256;
+  s.run.check = { executable: 'true', args: [], definition: 'c'.repeat(64) };
+  const prepared = await prepareActionsJob(
+    s.client,
+    join(s.directory, 'candidate'),
+    join(s.directory, 'cache'),
+  );
+  assert.equal(prepared.recipe.selection.secretScan, undefined);
+  const planPath = join(s.directory, 'plan.json');
+  writeFileSync(planPath, JSON.stringify(prepared.recipe));
+  assert.equal(
+    await executeActionsJob(s.client, join(s.directory, 'candidate'), planPath, prepared.singleShard),
+    0,
+  );
+});

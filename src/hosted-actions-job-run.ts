@@ -16,6 +16,7 @@ import { setupActionsJob } from './hosted-actions-job-setup.js';
 import { actionsInlineLogCapability } from './hosted-actions-capabilities.js';
 import { poolUnits } from '../scripts/shard-pool.mjs';
 import { describePoolOutcome, poolClaimsSchema, runShardPool } from './hosted-actions-pool.js';
+import { secretScanFailureCommand, type SecretScanResult } from './secret-scan.js';
 /** Below the server's 512 KiB request window, leaving room for identity fields. */
 const inlineRequestBytes = 448 * 1024;
 /** Credentials remain in the fixed supervisor; the project receives a clean env.
@@ -71,6 +72,10 @@ async function executeActiveActionsJob(
       "console.error('SOURCE_HASH_MISMATCH: Actions setup verification failed.'); process.exitCode = 1;",
     ];
   }
+  // A secret the plan step found fails the static job before project code runs.
+  const secretScan = recipe.selection?.secretScan as Pick<SecretScanResult, 'findings' | 'more'> | undefined;
+  if (shard === 'static' && secretScan?.findings?.length)
+    command = secretScanFailureCommand(process.execPath, secretScan);
   let tail = Buffer.alloc(0);
   const reports = new ContractTimingReader({ secrets: [], paths: [directory, process.env.HOME ?? ''] });
   const redactor = new HostedOutputRedactor({ secrets: [], paths: [directory, process.env.HOME ?? ''] });

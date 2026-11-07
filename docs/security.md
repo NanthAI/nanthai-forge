@@ -36,6 +36,18 @@ Clean environment isolation prevents ambient discovery through inherited setting
 
 Handing a secret to arbitrary code lets that code leak it.
 
+## Secret scan at landing
+
+Every hosted landing check scans the paths its composed Candidate changes from the composition base, before project code runs. Forge's own executors do it (the GitHub Actions planning job and self-hosted machine runners), so it works with any configured check command. Paths already on main are not rescanned.
+
+It looks for known credential shapes (private key blocks with a key body, AWS access key ids, GitHub, GitLab, Slack, npm, Google, Anthropic and OpenAI tokens, live `sk_`/`rk_` keys) and for a random-looking value assigned to a secret-named key (`token`, `secret`, `password`, `api_key`, …; at least 24 characters, mixed case and digits, entropy of at least 4.3 bits per character, so hex hashes and ids pass). Repeated-character placeholders and documented `…EXAMPLE` values are not findings. Binary files, files over 1 MiB and links are skipped.
+
+A finding fails the check like a failing test: the landing stops with `CHECK_FAILED`, and the notice names the file, line, kind and a 16-character fingerprint, never the value. The fingerprint is a salted SHA-256 of path, kind and value. At most 20 findings are listed, with a count of the rest.
+
+If a finding is not a secret, the Lane owner overrides it in that Lane by adding an entry to `.forge-secret-allow.json` at the repository root: `{"allow":[{"fingerprint":"…","path":"…","reason":"…"}]}`. An entry needs a non-empty reason and covers only that value in that path. The entry lands as an ordinary reviewed change, so accepted history records who allowed what, when and why, and the Actions planning log shows how many findings each check allowed. This file is a root file, so changing it always rechecks in full. Remove a real credential instead, and rotate it at its provider: once it reached a Lane save it may be retained.
+
+The scan is a guard, not a guarantee: it does not see encoded or split values, text in skipped files, history that landed before it, or local (not hosted) checks. A future private-file audience (Issue 6bd7ddb1) will be skipped by one flag (`isPrivate` in `src/secret-scan.ts`); until then every changed file is public to the scan. Cost: no Convex calls, no vendor and nothing when idle; it reads only bytes the check already downloaded (the machine runner reads one extra State manifest for the base). Measured on this repository (200 random sets of 1 to 40 real files, read from disk): 4 ms median, 10 ms p95; all 3,639 files scan in about 1 s.
+
 ## Access is checked before retrieval
 
 Durable source-worker and mirror continuation reads bind legacy Convex file IDs
@@ -100,7 +112,7 @@ Dotenv import creates a Secret Object and a value-free example file. It does not
 
 ## What archives contain
 
-Full source and Work archives hold complete retained history, run logs and selected build outputs. They are not filtered by Zones and are not scanned for committed credentials. Treat them as private. Git bundles and accepted-source clones carry full tracked history, including any committed secret.
+Full source and Work archives hold complete retained history, run logs and selected build outputs. They are not filtered by Zones and are not scanned for committed credentials (the landing scan sees only each landing's changed paths). Treat them as private. Git bundles and accepted-source clones carry full tracked history, including any committed secret.
 
 Restoring an archive writes only named regular files into a fresh directory. It runs no hooks and does not start recorded checks. Interrupted runs stay interrupted. Ignored credential files and local configuration are not part of recovery. Hashes show the bytes are intact. They do not show who wrote them or confine execution.
 

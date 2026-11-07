@@ -6,7 +6,7 @@ import { semanticTests } from './intent-semantic-conflict.js';
 import { localMacLogFiles } from './check-local-log-files.js';
 import { compactProviderOutput } from './check-compact-output.js';
 import { deliverMacCallback } from './hosted-mac-delivery.js';
-import { createReadStream } from 'node:fs';
+import { createReadStream, readFileSync } from 'node:fs';
 import { captureArtifacts } from './work-artifacts.js';
 import { randomUUID } from 'node:crypto';
 import { mkdtemp, mkdir, readFile, writeFile, rm } from 'node:fs/promises';
@@ -25,6 +25,7 @@ import { canonicalPayload } from './hosted-source-operation.js';
 import { digest } from './hash.js';
 import { HostedMacProvider } from './hosted-mac-worker.js';
 import { invariant } from './errors.js';
+import { changedStatePaths, scanSecretPaths, secretScanFailureCommand } from './secret-scan.js';
 import type { OutputRoot } from './hosted-check-output.js';
 
 export type MacExecutionTransport = CheckoutObjectTransport & {
@@ -114,6 +115,26 @@ export async function executeHostedMacCheck(
       signal.throwIfAborted();
       installHostedFile(checkout, cache.objects, file);
     }
+    // Landing secret scan (src/secret-scan.ts) on the paths changed from the composition
+    // base: one extra State read. An unreadable base scans every file instead.
+    let before: ReturnType<typeof parseNativeState>['files'] | null = null;
+    try {
+      await cache.ensure([run.candidate.base.head]);
+      before = parseNativeState(await readFile(join(cache.objects, run.candidate.base.head))).files;
+    } catch {
+      /* Unreadable base: scan every file. */
+    }
+    signal.throwIfAborted();
+    const changed = changedStatePaths(before, state.files);
+    const inventory = new Map(state.files.map(file => [file.path, file]));
+    const secretScan = scanSecretPaths(changed, path => {
+      const file = inventory.get(path);
+      return file && file.mode !== 'symlink' ? readFileSync(join(cache.objects, file.blob)) : undefined;
+    });
+    // A finding fails the run before project code runs, through the ordinary result path.
+    const execute = secretScan.findings.length
+      ? secretScanFailureCommand(process.execPath, secretScan)
+      : command;
     await save({ kind: 'reserve' });
     const executionId = `${run.configuration.provider}:${run.id}:${run.fence}:${owner}`;
     await save({ kind: 'observe', result: { status: 'accepted', executionId } });
@@ -181,7 +202,7 @@ export async function executeHostedMacCheck(
           },
         };
         const reports: ContractTimingReader['reports'] = {};
-        const child = spawn(command[0]!, command.slice(1), {
+        const child = spawn(execute[0]!, execute.slice(1), {
           cwd: checkout,
           env: runtime.env,
           detached: process.platform !== 'win32',

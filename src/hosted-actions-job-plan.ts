@@ -22,6 +22,7 @@ import type { NativeState } from './native-state-format.js';
 import { refreshSourcePack } from './source-pack.js';
 import { refreshActionsSourcePack } from './hosted-actions-job-pack.js';
 import { testedDocs } from './tested-docs.js';
+import { scanSecretPaths } from './secret-scan.js';
 /** Keep only paths/hashes in memory. Import analysis reads one source file at a time. */
 class SourceFiles extends Map<string, string> {
   constructor(
@@ -73,11 +74,24 @@ export async function prepareActionsJob(
   // Markdown that tests or scripts read: a clean merge of any other Markdown can
   // land on its first check (Issue 7fe54c7c). Absent means every Markdown is tested.
   const docs = standard ? testedDocs(files.keys(), path => files.get(path)) : undefined;
+  // Landing secret scan (src/secret-scan.ts): changed paths only, from bytes already cached.
+  const scanStarted = performance.now();
+  const secrets = scanSecretPaths(paths, path => {
+    const file = inventory.get(path);
+    return file && file.mode !== 'symlink' ? readFileSync(join(cache, file.blob)) : undefined;
+  });
+  console.log(
+    `secret scan: ${secrets.scannedFiles} changed files in ${Math.round(performance.now() - scanStarted)} ms; ${secrets.findings.length + secrets.more} found, ${secrets.allowed} allowed`,
+  );
   const selection = {
     scope: selected.scope,
     reason: selected.reason,
     tests: selected.tests,
     ...(docs ? { testedDocs: docs } : {}),
+    // Pinned in the plan so the static job fails on it. Value-free: path, line, kind, fingerprint.
+    ...(secrets.findings.length || secrets.allowed
+      ? { secretScan: { findings: secrets.findings, more: secrets.more, allowed: secrets.allowed } }
+      : {}),
     ...(run.gate
       ? {
           gate: {
