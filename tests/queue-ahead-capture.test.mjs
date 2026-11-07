@@ -133,7 +133,10 @@ test('hosted finish observation then save captures zero paths at dogfood size', 
   );
   assert.equal(request.changeCount, 0);
   const visited = [];
-  assert.deepEqual(scanSourcePaths(f.root, { visitDirectory: path => visited.push(path) }), []);
+  // The fixture Lane's one saved file is the only source; no cache or metadata path appears.
+  assert.deepEqual(scanSourcePaths(f.root, { visitDirectory: path => visited.push(path) }), [
+    'lane-edit.txt',
+  ]);
   assert.deepEqual(visited, [''], 'capture never traverses old caches or Forge metadata');
   assert(objectCalls <= 10, `bounded selected object reads: ${objectCalls}`);
   assert(process.resourceUsage().maxRSS < 512 * 1024);
@@ -176,7 +179,7 @@ test('legacy saved cache entries ignore edits and removal without source deletio
     const capture = await captureHostedSave(f.root, join(`${f.root}.forge-client`, `migration-${removed}`));
     assert.deepEqual(
       capture.changes.map(change => change.path),
-      ['.forgeignore'],
+      ['.forgeignore', 'lane-edit.txt'],
     );
     assert.deepEqual(
       source.capture(f.root, false, head).filter(file => paths.includes(file.path)),
@@ -185,7 +188,7 @@ test('legacy saved cache entries ignore edits and removal without source deletio
   }
   assert.deepEqual(
     source.capture(f.root).map(file => file.path),
-    ['.forgeignore'],
+    ['.forgeignore', 'lane-edit.txt'],
   );
 });
 

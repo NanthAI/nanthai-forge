@@ -198,6 +198,8 @@ export const hostedAgentCommandSchemas = {
       closes: z.boolean().optional(),
       priority: z.enum(['urgent', 'normal']).optional(),
       overlapAnswer: z.literal('accept-order').optional(),
+      /** Land a Lane whose saved head changes nothing against its base (otherwise refused). */
+      allowEmpty: z.boolean().optional(),
       retry: z.boolean().optional(),
       reason: finishRetryReasonSchema.optional(),
     })

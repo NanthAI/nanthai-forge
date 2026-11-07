@@ -19,6 +19,13 @@ import { hostedAgentDirectory, readAgentJson } from './hosted-agent-journal.js';
 import { finishRetryHint, type FinishContext } from './hosted-agent-finish-identity.js';
 import { landWaitCommand } from './hosted-land-wait.js';
 import { markLandStep } from './land-timing.js';
+import {
+  changedPathsAgainstBase,
+  finishChangedPathsKey,
+  inspectLaneCheckout,
+  nothingToLandError,
+  unsavedEditsError,
+} from './hosted-finish-guard.js';
 import type { WouldConflict } from './hosted-would-conflict.js';
 import type { HostedAgentResponse, HostedAgentSession } from './hosted-agent-transport.js';
 
@@ -141,9 +148,12 @@ export async function executeHostedFinish(session: HostedAgentSession, input: un
   const result = await executeFinishWork(session, input);
   const context = session.journal.get<FinishContext>('finish-context');
   const defaults = session.journal.get<Record<string, unknown>>('finish-defaults');
+  const changedPaths = session.journal.get<number | null>(finishChangedPathsKey);
   const receipt = {
     ...(result as Record<string, unknown>),
     ...(defaults ? { defaults } : {}),
+    // Changed paths this landing carries against the Lane's base; null when the base manifest is not cached.
+    ...(changedPaths === undefined ? {} : { changedPaths }),
   };
   // One wake-driven command that resumes a long queue; absent once the outcome is final.
   const waitCommand = landWaitCommand(session.root, {
@@ -216,6 +226,29 @@ async function executeFinishWork(session: HostedAgentSession, input: unknown) {
       },
     ];
   }
+  // Landing a Lane by id from a folder that is not its checkout lands only its server-recorded head.
+  // Refuse when that checkout holds unsaved edits or the head changes nothing (incident a930de4c).
+  if (
+    !command.candidateId &&
+    !command.inputs &&
+    command.laneId &&
+    !resolvedHere &&
+    marker?.selection.laneId !== command.laneId
+  ) {
+    const local = inspectLaneCheckout(command.laneId);
+    if (local?.unsaved) throw unsavedEditsError(command.laneId, { root: local.root, count: local.unsaved });
+    const recorded = await selectAgentLane(session, command.laneId);
+    const changed =
+      local && local.marker.selection.head === recorded.head
+        ? changedPathsAgainstBase(local.root, local.marker)
+        : null;
+    if (
+      !command.allowEmpty &&
+      (changed === 0 || (changed === null && recorded.head === recorded.base.head && !recorded.stack))
+    )
+      throw nothingToLandError(command.laneId);
+    await session.journal.retain(finishChangedPathsKey, () => changed);
+  }
   if (
     !command.candidateId &&
     !command.inputs &&
@@ -249,6 +282,14 @@ async function executeFinishWork(session: HostedAgentSession, input: unknown) {
     }
     const savedMarker = clean ? marker : session.marker();
     const selection = clean ?? savedMarker!.selection;
+    // A saved head that changes nothing against its base lands nothing: refuse it, state the count otherwise.
+    const changed = savedMarker ? changedPathsAgainstBase(session.root, savedMarker) : null;
+    if (
+      !command.allowEmpty &&
+      (changed === 0 || (changed === null && selection.head === selection.base.head && !selection.stack))
+    )
+      throw nothingToLandError(selection.laneId);
+    await session.journal.retain(finishChangedPathsKey, () => changed);
     // Agent defaults (overlap gate, preflight) judge the saved head this finish will land.
     if (session.finishGates) {
       const advice = await session.finishGates(

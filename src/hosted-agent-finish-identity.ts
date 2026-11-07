@@ -17,7 +17,7 @@ import { SourceFileReader } from './source-file-reader.js';
 import { digest } from './hash.js';
 import { canonicalPayload } from './hosted-source-operation.js';
 import { checkoutPathExists } from './hosted-checkout-files.js';
-import { readHostedLaneCheckout } from './hosted-lane-checkout-marker.js';
+import { readHostedLaneCheckout, type HostedLaneCheckoutMarker } from './hosted-lane-checkout-marker.js';
 import { hostedAgentDirectory, readAgentJson, HostedAgentJournal } from './hosted-agent-journal.js';
 import { durableReplace } from './native-durability.js';
 import { workLocked } from './work-lock.js';
@@ -53,10 +53,36 @@ export function finishSourceFingerprint(root: string, command: Command, operatio
       candidateId: command.candidateId ?? null,
       laneId: command.laneId ?? null,
     });
-  const files = new Map(marker.state.files.map(file => [file.path, file]));
+  const { files, marked } = scanCheckout(root, marker);
+  assertNoConflictMarkers(
+    root,
+    marker.selection.laneId,
+    marked,
+    pendingConflictPaths(root, marker.selection.laneId).length > 0,
+    { action: 'finish', parameters: { ...command, ...(operationId ? { operationId } : {}) } },
+  );
+  return digest(
+    canonicalPayload({
+      laneId: marker.selection.laneId,
+      files: [...files.values()].sort((a, b) => a.path.localeCompare(b.path)),
+    }),
+  );
+}
+
+/** The checkout's current files by path, and the paths whose bytes or mode differ from the saved
+ * baseline (edited, added or deleted): the unsaved edits. One local scan; unchanged baseline files
+ * are vouched for by the stat index and never reread. */
+export function scanCheckout(root: string, marker: HostedLaneCheckoutMarker) {
+  const baselineFiles = new Map(marker.state.files.map(file => [file.path, file]));
+  const files = new Map(baselineFiles);
   const local = nativePaths(root, [...files.keys()]);
   const present = new Set(local);
-  for (const path of marker.materialized) if (!forgeCachePath(path) && !present.has(path)) files.delete(path);
+  const changed: string[] = [];
+  for (const path of marker.materialized)
+    if (!forgeCachePath(path) && !present.has(path)) {
+      files.delete(path);
+      if (baselineFiles.has(path)) changed.push(path);
+    }
   const scratch = Buffer.allocUnsafe(1024 * 1024),
     index = readCheckoutStatIndex(root);
   const marked: string[] = [];
@@ -79,21 +105,11 @@ export function finishSourceFingerprint(root: string, command: Command, operatio
         reader.close();
       }
     }
+    const before = baselineFiles.get(path);
+    if (!before || before.blob !== blob || before.mode !== mode) changed.push(path);
     files.set(path, { path, blob, mode });
   }
-  assertNoConflictMarkers(
-    root,
-    marker.selection.laneId,
-    marked,
-    pendingConflictPaths(root, marker.selection.laneId).length > 0,
-    { action: 'finish', parameters: { ...command, ...(operationId ? { operationId } : {}) } },
-  );
-  return digest(
-    canonicalPayload({
-      laneId: marker.selection.laneId,
-      files: [...files.values()].sort((a, b) => a.path.localeCompare(b.path)),
-    }),
-  );
+  return { files, marked, changed };
 }
 
 /** One durable index per normalized finish selection, independent of history size.

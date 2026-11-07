@@ -21,6 +21,8 @@ type Result = {
   };
   run?: { id?: string; status?: string };
   command?: string;
+  /** Paths the landing changes against the Lane's base (null: base manifest not cached). */
+  changedPaths?: number | null;
   retryCommand?: string;
   status?: string;
   terminal?: boolean;
@@ -42,7 +44,13 @@ export function landSummary(response: HostedAgentResponse): string[] {
     submission = result.submission;
   const phase = landPhase(response);
   if (phase === 'landed')
-    return [`LANDED${submission?.acceptance ? ` receipt ${submission.acceptance.receiptId}` : ''}`];
+    return [
+      `LANDED${submission?.acceptance ? ` receipt ${submission.acceptance.receiptId}` : ''}${
+        typeof result.changedPaths === 'number'
+          ? `, ${result.changedPaths} changed path${result.changedPaths === 1 ? '' : 's'}`
+          : ''
+      }`,
+    ];
   if (submission?.observation?.state === 'superseded' || phase === 'superseded')
     return [
       'SUPERSEDED; this operation does not land the newer saved head. Use its current Lane status before continuing.',

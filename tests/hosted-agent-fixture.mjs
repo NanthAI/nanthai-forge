@@ -19,7 +19,21 @@ export function agentFixture(t) {
   const state = { schema: 1, kind: 'forge-source-state', parents: [], files: [], message: 'Synthetic', at };
   const bytes = Buffer.from(JSON.stringify(state)),
     head = digest(bytes),
-    objects = new Map([[head, bytes]]);
+    // The Lane's saved head changes one file against its base (an edited Lane), so landing it is not empty.
+    laneFile = Buffer.from('Synthetic Lane edit\n'),
+    laneBytes = Buffer.from(
+      JSON.stringify({
+        ...state,
+        files: [{ path: 'lane-edit.txt', blob: digest(laneFile), mode: 'file' }],
+        message: 'Synthetic Lane edit',
+      }),
+    ),
+    laneHead = digest(laneBytes),
+    objects = new Map([
+      [head, bytes],
+      [laneHead, laneBytes],
+      [digest(laneFile), laneFile],
+    ]);
   const main = {
     schema: 2,
     projectId: 'project',
@@ -35,7 +49,7 @@ export function agentFixture(t) {
     projectId: 'project',
     laneId: randomUUID(),
     intentId: randomUUID(),
-    head,
+    head: laneHead,
     version: 0,
     sourceVersion: 0,
     lifecycleVersion: 0,
@@ -112,7 +126,7 @@ export function agentFixture(t) {
               version: lane.version,
               sourceVersion: lane.sourceVersion,
               lifecycleVersion: lane.lifecycleVersion,
-              state: { object: { sha256: head, size: bytes.length }, recipe: null },
+              state: { object: { sha256: laneHead, size: laneBytes.length }, recipe: null },
             },
           };
         }),
@@ -150,7 +164,7 @@ export function agentFixture(t) {
           operationId: id,
           laneId: lane.laneId,
           saveId: randomUUID(),
-          head,
+          head: laneHead,
           version: 0,
           sourceVersion: 0,
           unchanged: true,
@@ -301,7 +315,7 @@ export function agentFixture(t) {
         lane:
           request.target.kind === 'lane'
             ? {
-                head,
+                head: laneHead,
                 version: 1,
                 sourceVersion: 0,
                 lifecycleVersion: 1,
@@ -391,6 +405,7 @@ export function agentFixture(t) {
     requests,
     exchange,
     objects,
+    laneFiles: [{ path: 'lane-edit.txt', blob: digest(laneFile), mode: 'file' }],
     transport,
     queueView,
     lose(name) {

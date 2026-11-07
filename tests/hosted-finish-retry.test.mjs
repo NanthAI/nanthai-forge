@@ -223,7 +223,7 @@ test('finish reconciles a completed async checkpoint before capturing and never 
     schema: 1,
     kind: 'forge-source-state',
     parents: [oldHead],
-    files: [{ path: 'saved.txt', blob, mode: 'file' }],
+    files: [...s.laneFiles, { path: 'saved.txt', blob, mode: 'file' }],
     message: 'Async checkpoint',
     at,
   };
@@ -301,7 +301,7 @@ async function pendingCheckpoint(t) {
     schema: 1,
     kind: 'forge-source-state',
     parents: [oldHead],
-    files: [{ path: 'saved.txt', blob, mode: 'file' }],
+    files: [...s.laneFiles, { path: 'saved.txt', blob, mode: 'file' }],
     message: 'Async checkpoint',
     at,
   };

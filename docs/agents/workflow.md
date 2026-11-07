@@ -56,6 +56,8 @@ Hosted `land --save` uses `--no-wait` to return after submission. Replay every o
 
 Include `overlapAnswer:"accept-order"` in `land --save` to answer the pending notices seen by that landing without a separate `ack`. The answers are recorded exactly as `ack` records them, so peers and the inbox see them, and the defaults receipt lists them. The answer does not resolve source conflicts or change project policy.
 
+Run `land --save` from the Lane's own folder: it saves the folder, then lands. `land --save` with a `laneId` from another folder lands only the last saved head, so it refuses (`UNSAVED_LANE_EDITS`, with the count and the exact `cd FOLDER && nforge agent . land --save`) when that Lane's registered checkout holds unsaved edits. It also refuses a Lane that changes nothing against its base (`NOTHING_TO_LAND`) unless `allowEmpty:true`. The land reply and the LANDED line state `changedPaths`, the number of changed paths accepted (also printed by `wait`); `null` when the base manifest is not cached. All local, no added call.
+
 `save --overlap-answers` takes `answers:[{operationId,laneId,noticeId,choice,text?}]`: every answer needs its own UUID `operationId` (a replay reuses it), beside the optional top-level one.
 
 When you change a hosted reply in Forge itself: add fields freely, but never remove, retype, make optional or add enum values to one without a contract feature, because released CLIs lag the server. The CLI parses replies with `parseHostedResponse` (unknown keys dropped, all else checked), and `tests/hosted-response-contract.test.mjs` fails the landing on a breaking reply change. Rule: [server replies](../operations/cli-update.md#server-replies-cli-behind-the-deploy).
@@ -81,7 +83,7 @@ When you change a hosted reply in Forge itself: add fields freely, but never rem
 | `recover-apply` | `applyOperationId, operationId?` |
 | `resolve` | `laneId?, message?, operationId?` |
 | `save --check` | `checkId, expectedDefinition?, expectedConfiguration?, expectedEnvironment?, candidateId, expectedHead?, operationId?` |
-| `land --save` | `laneId?, message?, intentId?, inputs?, dependencies?, check?, candidateId?, composeOperationId?, after?, accept?, keepOpen?, closes?, priority?, overlapAnswer?, retry?, reason?, operationId?` |
+| `land --save` | `laneId?, message?, intentId?, inputs?, dependencies?, check?, candidateId?, composeOperationId?, after?, accept?, keepOpen?, closes?, priority?, overlapAnswer?, allowEmpty?, retry?, reason?, operationId?` |
 | `x prioritize` | `submissionId, priority, asOwner?, operationId?` |
 | `ack` | `laneId?, choice?, text?, operationId?` |
 | `preflight` | `laneId?, run?, budgetSeconds?, trim?, operationId?` |

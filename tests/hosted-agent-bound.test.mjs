@@ -30,6 +30,7 @@ function fixture(t, mode = 'server') {
   initNative(f.root);
   const store = new WorkStore(f.root),
     source = new NativeSource(f.root);
+  for (const file of f.laneFiles) source.put(f.objects.get(file.blob));
   source.put(f.objects.get(f.lane.head));
   source.materialize(f.lane.head, store.path(f.lane.laneId));
   store.locked(() => {

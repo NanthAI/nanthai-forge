@@ -324,7 +324,7 @@ test('bound CLI and native MCP workflow start and save aliases use the cache rou
     message: 'clean hosted checkpoint',
   });
   assert.equal(saved.result.transport, 'hosted');
-  assert.equal(saved.result.head, f.main.head);
+  assert.equal(saved.result.head, f.lane.head, 'a clean save returns the Lane head');
   assert(!f.calls.some(c => /Exchange|SourceReturn/.test(c.name)));
 });
 

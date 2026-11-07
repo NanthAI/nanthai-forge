@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { retainedChangedPaths } from './hosted-finish-guard.js';
 import { readSource } from './files.js';
 import { waitFailure } from './wait-failure.js';
 import { clientCacheRoot } from './root-paths.js';
@@ -288,8 +289,12 @@ export async function hostedAgentCli(
       const selected = submissions?.length === 1 ? submissions[0] : undefined;
       if (!selectedWait.runId && status === 'terminal')
         for (const entry of submissions ?? []) {
+          const changedPaths =
+            selectedWait.operationIds?.length === 1
+              ? retainedChangedPaths(root, selectedWait.operationIds[0]!)
+              : undefined;
           for (const line of landSummary({
-            result: { phase: 'finish', ...entry },
+            result: { phase: 'finish', ...entry, ...(changedPaths === undefined ? {} : { changedPaths }) },
           } as never))
             process.stderr.write(`${line}\n`);
           // A failed check of this checkout's landing teaches the next preflight its failing tests.
