@@ -5,13 +5,18 @@
 //   scripts/bench-t3code/teardown --live [--keep deps,meta]
 // Standing rule: the temporary public fork is deleted after the bench. --keep leaves whole
 // steps (ids as printed by setup --dry) in place and in the manifest, e.g. the multi-GB deps.
-import { homedir } from 'node:os';
-import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { benchRoot } from './bench-root.mjs';
 import { realContext, runTeardown } from './env.mjs';
 
 export async function main(argv = process.argv.slice(2), ctxFactory = realContext) {
-  const B = process.env.BENCH_ROOT || join(homedir(), 'NanthAI/forge-bench/b15d');
+  let B;
+  try {
+    B = benchRoot();
+  } catch (error) {
+    console.error(error.message);
+    return 2;
+  }
   let dry = false,
     live = false,
     keep = [];

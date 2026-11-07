@@ -8,7 +8,7 @@
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
-import { homedir } from 'node:os';
+import { benchRootOrExit } from './bench-root.mjs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 export const DESIGN = Object.freeze({
@@ -254,7 +254,7 @@ export function checkPlan(benchRoot) {
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
-  const benchRoot = process.env.BENCH_ROOT || join(homedir(), 'NanthAI/forge-bench/b15d');
+  const benchRoot = benchRootOrExit();
   if (process.argv[2] === 'json') console.log(JSON.stringify(plan(benchRoot), null, 1));
   else if (process.argv[2] === 'check') {
     const problems = checkPlan(benchRoot);

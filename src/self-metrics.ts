@@ -3,6 +3,7 @@ import { firstAttemptLandRate } from './first-attempt-land-rate.js';
 import { calculateOverlapMetrics, calculateAuthorityMetrics } from './self-metrics-joins.js';
 import { calculateBillingMetrics } from './self-metrics-billing.js';
 import { calculateRedMainMetrics } from './self-metrics-red-main.js';
+import { calculateBackstopMetrics } from './self-metrics-backstop.js';
 import { calculateStorageMetrics } from './self-metrics-storage.js';
 import { calculatePlacementMetrics } from './self-metrics-placement.js';
 import type { MetricInput, MetricPeriod, MetricRecords, SelfMetricsReader } from './self-metrics-types.js';
@@ -364,6 +365,7 @@ export function calculateSelfMetrics(
     ),
     metric8: joined(calculateBillingMetrics(records, { ...period, asOf })),
     redMain: joined(calculateRedMainMetrics(records, { ...period, asOf })),
+    backstop: joined(calculateBackstopMetrics(records, { ...period, asOf })),
     disk: joined(calculateStorageMetrics(records, { ...period, asOf })),
     placement: joined(calculatePlacementMetrics(records)),
     metric5: {

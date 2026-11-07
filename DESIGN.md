@@ -218,7 +218,7 @@ Each has a `-bg` tint for pills. Status is always colour + glyph + word. Syntax 
 
 ### Named Rules
 - **The One Orange Rule.** One orange (`--brand`) button per area. Recommended answers use `.btn.rec` (1px `--text-2` border, 600), never orange. Orange never signals status.
-- **The Teal Quarantine.** `#23cbff` and `#ffb347` exist only inside the F mark.
+- **The Teal Quarantine.** `#23cbff` and `#ffb347` exist only inside the F mark. Status colours may flow through the F under the tide rule (see Brand mark states); the mark's own two colours never leave it.
 - **No glow, no gradient in the app.** `--glow` only on the accepted toast and the newest Accepted-today row for 1.2 s. `--hero-a/b` gradient only on the landing hero.
 
 ## Typography
@@ -255,6 +255,94 @@ Flat. Depth comes from surface steps (`--bg` → `--surface` → `--surface-2`) 
 ## Shapes
 
 Radii: 2px rail segments · 3px `auto` tags · 4px status pills, focus ring · 6px buttons, inputs · 8px panels, sheets, popovers · 9px count pills · 12px landing paste box only. Avatars: humans round; agents rounded-square (6px at 24px, 8px at 32px) with an `agent` tag. Left status rails on rows are 3px and carry status colour; they are a Forge signature, not decoration.
+
+## Brand mark states
+
+The F mark is alive. It is the only animated brand element, it is built from the letter's own pieces, and it never carries a message on its own: every state is also shown by a status pill, glyph and word beside it. Source of truth: `web/src/shell/mark.css` and `web/src/shell/brand.tsx` (64 geometry) plus the 16 px cut.
+
+### The pieces
+- **Stem** is main (ink, `currentColor`), split below the lower arm.
+- **Arms** are landed Lanes (`--brand`), each an inner part and an outer chamfered tip.
+- **Crossings** (warm `#ffb347` above, teal `#23cbff` below) are where Lanes joined main. Colour enters the F here.
+- **Sparks** are the only extra element: at idle, and one thrown by every landing.
+- Nothing else, ever: no bars, dots, gauges, faces, rings or seams. When a state needs a signal, a piece of the F becomes it.
+
+### The tide rule
+1. Rest colours are fixed: ink stem, orange arms, warm and teal crossings. Every state begins and ends there.
+2. A status colour enters the F at a crossing and flows outward piece by piece, 80 to 120 ms per piece. It never appears on a piece it did not flow to.
+3. While in motion, a status colour may take any piece, including the stem, up to the whole F (landing, the streak, the re-forge).
+4. A still (reduced motion, or the end pose of a one-shot) holds status colour on at most the crossing plus the one arm that changed. The stem is never a solid status colour in a still. Failed holds red on the lower crossing only; the arm stays orange because the work is intact. Landed's still is the whole approved F with the crossing and lower arm green, so the only state whose shape equals idle is the one that means "back to normal".
+5. Orange never means a status, and no status colour is decoration: a colour change always comes with a shape change on the same piece, so a colour-blind user reads every state from the shape and the glyph beside it.
+6. Status colours keep their meaning: blue working or checking, amber overlap or waiting, green landed, red failed, grey rolled back.
+
+### The strike (house motion)
+Every one-shot has three beats; every loop is the first beat stretched. **Anticipation** (120 ms): the piece pulls away from where it is going. **Impact** (100 ms): it slams home, the crossing flashes, the stem rings (scaleX 1.14, 500 ms), status colour enters at the crossing. **Settle** (400 to 600 ms): strong ease-out `cubic-bezier(.23,1,.32,1)`, no bounce; colour floods outward, holds, later drains. When a landing does not take, impact is replaced by contact: the join goes red, no flash, no ring.
+
+### States: pose and meaning
+| State | Pose | Means |
+|---|---|---|
+| idle | the approved F; one spark runs along the top arm into the stem every 8 s | nothing is moving; main is steady |
+| working | the lower tip reaches (scaleX 1 → 1.25); a blue tide runs tip → inner → crossing → back, 2.4 s | one agent is editing in a Lane |
+| working, many | both arms reach out of phase (2.4 s and 3.1 s); the stem takes a faint blue where the tides meet | several agents are editing |
+| checks | the lower tip detaches and goes round the inner arm, blue, 2.4 s | checks are running |
+| overlap | the arms close until they touch and become one flag; amber breathes through it | two Lanes touch the same files |
+| waiting | the top tip lifts off (−6 px, −8°) and hovers, amber tip and crossing | a Lane is waiting for you |
+| queued | the lower arm waits short (scaleX .55) and inches forward every 2.4 s; its tip a step apart | a Lane is waiting for its turn to land |
+| landing | the strike: pull back 6 px, slam into the stem, flash, ring; green floods inner, tip, stem, top crossing, top arm (400 → 900 ms) | a Lane is landing on main |
+| landed | the whole F holds green 600 ms, drains to rest leaving the crossing and lower arm green; at 1.3 s one spark leaves the crossing and runs down main | it landed; main moved |
+| failed | "didn't take": pull back, contact (the lower crossing goes red in 80 ms, no flash, no ring), the arm and its crossing are pushed back out 16 px and rest in line, whole and orange | the landing did not take; the work is whole |
+| rolled back | "set aside": the arm and its crossing leave main as one piece (16 px), then are lowered 18 px to the foot; the crossing grey | a landing was taken out of main on purpose; the work is kept |
+| paused | the whole F lies on its side (−90°); crossings at 60 %; nothing moves | the project is paused |
+
+Loops: idle, working, checks, overlap, waiting, queued (slowest 8 s, fastest 2.4 s). One-shots that hold: landing, landed, failed, rolled back. No motion: paused. Transitions between poses: 320 ms on transform, 240 ms on colour, from wherever each piece is; a one-shot may be interrupted at any time.
+
+### Motion rules
+- Tilt is allowed only for paused (the lie-down) and the raised waiting tip (−8°). No other state rotates the letter; nothing ever forms a cross, an X or a circle-with-cross.
+- No bounce, no overshoot, no shake, no pop, no glow. Settles are strong ease-outs to 100 %.
+- Calming down: after 60 s in a looping state every period doubles (the `--calm` multiplier); after 5 min the still pose holds and the glyph beside the mark carries the state alone. A state change resets the clock.
+- Paused when the tab is hidden and when the mark is off screen. No JavaScript per frame; the state is a `data-state` attribute.
+- Reduced motion: every state is its end pose, still, and every change is instant. The base rule of each state is its still; animation only adds movement. Every still differs from idle in shape, not only colour (landed excepted, by rule 4). A user may opt in to full motion over the OS setting (`.mk-motion-full` on the root); the product never opts in for them.
+
+### Delight (plays once per event, never loops, never always-on)
+| Moment | Threshold | What happens |
+|---|---|---|
+| first landing | once per project | the F assembles: arms fly in 180 ms apart, crossings colour on contact, the stem flashes once |
+| every landing | each | the strike throws one spark down main |
+| second idle spark | 10 landings | idle shows two sparks, never in step |
+| third idle spark | 100 landings | three sparks |
+| streak | 5 clean landings in a row | one green wave runs through all six pieces and leaves (1.3 s) |
+| many | 3 or more Lanes land in one batch | both arms strike 90 ms apart; one swell; green floods the whole F |
+| the re-forge | the 1,000th landing | every piece flies apart, turns, comes home; stem flash; one green wave (2.9 s) |
+
+Counters are per project and local to the browser. No server call, nothing stored about people.
+
+### Favicon and app icon
+The favicon is the still 16 px cut and never follows state (a state-driven favicon is a notification by another name). The 16 px cut is a separate pixel-aligned drawing: stem 3 px, arms 3 px, crossings 3 × 3, the spark 1 px; in the app (top bar, loaders) every 16 px move is a whole-pixel step with stepped timing. The 32 px cut is the 64 geometry scaled. App and touch icons use the 64 geometry at rest.
+
+### Terminal (nforge)
+On a TTY, nforge shows one frame per Lane row, cycled at 550 ms while the state is live; one-shots run their frames once and hold the still. Frames are plain Unicode box drawing and block elements; the glyph and word always follow the frame; colour is ANSI where supported. Logs, JSON and piped output get the ASCII still form.
+
+| State | Frames | Still | Log |
+|---|---|---|---|
+| idle | ┣━━ · ┣━━ · ┣━· · ┣·━ · ┣━━ | ┣━━ | `\|--` |
+| working | ┣━━ · ┣━━━ · ┣━━━━ · ┣━━━ | ┣━━━ | `\|-->` |
+| working, many | ┣━━ ┣━━━ · ┣━━━ ┣━━ · ┣━━━━ ┣━ | ┣━━ +2 | `\|--> x3` |
+| checks | ┣━╸ · ┣━╹ · ┣╹━ · ┣╻━ · ┣━╻ | ┣━╹ | `\|..` |
+| overlap | ┣━━ · ┣═━ · ┣══ · ┣▀▀ | ┣══ | `\|==` |
+| waiting | ┣━▀ · ┣━▔ · ┣━▀ · ┣━━ | ┣━▀ | `\| --` |
+| queued | ┣━ ╸ · ┣━╸ · ┣━ ╸ | ┣━ ╸ | `\|-- ..` |
+| landing | ┣━━ · ┣ ━━ · ┣ · ┃ · ┣━━ ✓ | ┣━▸ | `\|>` |
+| landed | ┣━━ ✓ · ┢━━ ✓ · ┣━━ ✓ | ┣━━ ✓ | `\|-- ok` |
+| failed | ┣━━ · ┣ ━━ · ┣━━ · ┣  ━━ · ┣  ━━ ✕ | ┣  ━━ ✕ | `\|-x` |
+| rolled back | ┣━━ ✓ · ┣ ━━ · ┣  ━━ · ┃  ▁▁ ↺ | ┃  ▁▁ ↺ | `\|<-` |
+| paused | ┣━━ · ━┻━ | ━┻━ | `:--` |
+
+Delight prints once, never on a loop (first landing, streak, many, 1,000th).
+
+### Cost budget
+Client-side only: one inline SVG and one CSS file, no per-frame script, no timers while idle, 0 extra requests, 0 server calls at idle and at every state change (state comes from counts the top bar already has). Shipped CSS ≤ 24 KB uncompressed (≤ 6 KB gzipped), each SVG ≤ 1 KB. The CLI ticker runs only on a TTY and only while a state is live.
+
+Reference page (every state at 512, 64, 32 and 16 px, the stills, CLI frames and motion spec): `design/hearth/index.html`, with `mark.svg` and `mark-16.svg` beside it.
 
 ## Components
 

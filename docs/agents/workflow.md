@@ -1832,6 +1832,12 @@ are `null`; available timing sums remain partial subtotals. Friction prose and
 automation definitions never substitute for execution or caller-delivery facts.
 Manual service restarts outside Forge have no requester record and remain a
 coverage gap. The metrics command and full metrics surface are separate from these readers.
+Metric B (proved-reuse back-stop) counts hosted acceptances that landed on a
+cross-head reuse proof, failed full main audits (red episodes), those whose audited
+range holds a reuse acceptance, flake clears, proven culprits and culprits that were
+reuse acceptances. A non-zero reuse-culprit count means a proof let a breaking change
+through. It is derived from receipts and audit events on the first acceptances page:
+no write and no extra call.
 Readers ignore an unterminated final journal line without changing its bytes.
 The output counts it in `incompleteReceiptRecords` and marks receipt-dependent
 metrics partial; complete earlier receipts remain available. Malformed complete

@@ -1,0 +1,702 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Hearth, final</title>
+<meta name="description" content="The locked Forge brand mark, 2026-11-07: every state at 512, 64, 32 and 16 px, reduced-motion stills, CLI frames, story players, the motion spec, the tide rule, delight moments and cost. Reference for builders.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@600;700;800&display=swap">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect x='2' y='1' width='3' height='14' fill='%23e8ecf2'/%3E%3Crect x='2' y='1' width='12' height='3' fill='%23ff6b3d'/%3E%3Crect x='2' y='1' width='3' height='3' fill='%23ffb347'/%3E%3Crect x='2' y='7' width='9' height='3' fill='%23ff6b3d'/%3E%3Crect x='2' y='7' width='3' height='3' fill='%2323cbff'/%3E%3C/svg%3E">
+<style>
+/* Hallmark v2.0.0 · theme: Forge DESIGN.md (locked system, dark-first) · deal: none · genre: modern-minimal · shape: Long Document (reference) · hero: Stage, head only · nav: jump links · footer: one line · posture: restrained · signature: the locked F at 16 to 512 px · copy: brief vocabulary · critique: P4 H4 E4 S5 R4 V4 */
+/* Waiver: marks, state cards, CLI frames, spec tables and the cost line are built by inline script from <template> and data blocks; the prose and rules render with scripting off. Reason: 150+ SVG instances built from one template. The mark CSS and SVG templates below are byte-identical to mark.css, mark.svg and mark-16.svg beside this file. */
+:root{
+  --bg:#0b0e13;--surface:#11151c;--surface-2:#161b24;--surface-3:#1c2230;--hover:#1a202b;
+  --line:#222a36;--line-strong:#2e3746;
+  --text:#e8ecf2;--text-2:#a3adbb;--text-3:#6f7a8a;
+  --brand:#ff6b3d;--brand-hover:#ff865f;--on-brand:#17100b;--accent:#ff936e;--accent-bg:#2b1d17;--focus:#ff936e;
+  --active:#6aaeff;--active-bg:#14233a;--waiting:#f2b84b;--waiting-bg:#2c2312;--stale:#7d8796;--stale-bg:#1a1f28;
+  --conflict:#c79bff;--conflict-bg:#251a37;--passed:#5fd39a;--passed-bg:#12281e;--failed:#ff6f7a;--failed-bg:#311519;
+  --rail-off:#2a3240;--mark-warm:#ffb347;--mark-teal:#23cbff;--flash:#ffffff;
+  --term-bg:#070a0f;--term-fg:#d6dce6;--term-dim:#8a94a4;--term-faint:#6f7a8a;--term-ok:#5fd39a;--term-no:#ff6f7a;--term-wa:#f2b84b;--term-ac:#6aaeff;--shadow:0 12px 40px #0008;
+  --ease:cubic-bezier(.2,.7,.2,1);--ease-out:cubic-bezier(.23,1,.32,1);
+  --t-display:"Manrope",-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
+  --t-body:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",Inter,system-ui,sans-serif;
+  --t-mono:"SF Mono",SFMono-Regular,ui-monospace,Menlo,Consolas,monospace;
+  color-scheme:dark;
+}
+@media (prefers-color-scheme:light){
+  :root:not([data-theme=dark]){
+    --bg:#f4f6f9;--surface:#ffffff;--surface-2:#f8f9fb;--surface-3:#eef1f5;--hover:#f1f4f8;--line:#e3e7ed;--line-strong:#cfd6df;
+    --text:#141a24;--text-2:#4f5b6b;--text-3:#606c7c;--accent:#b43a11;--accent-bg:#fff0e9;--focus:#b43a11;
+    --active:#1f6fd1;--active-bg:#e8f1fd;--waiting:#9a6200;--waiting-bg:#fff4dc;--stale:#6c7686;--stale-bg:#eef1f5;
+    --conflict:#7a3fc4;--conflict-bg:#f3ecfd;--passed:#1e7a4c;--passed-bg:#e6f5ec;--failed:#c42b37;--failed-bg:#fdecee;
+    --rail-off:#dde3ea;--flash:#141a24;--term-bg:#141a24;--shadow:0 12px 40px #1a22302a;color-scheme:light;
+  }
+}
+:root[data-theme=light]{
+  --bg:#f4f6f9;--surface:#ffffff;--surface-2:#f8f9fb;--surface-3:#eef1f5;--hover:#f1f4f8;--line:#e3e7ed;--line-strong:#cfd6df;
+  --text:#141a24;--text-2:#4f5b6b;--text-3:#606c7c;--accent:#b43a11;--accent-bg:#fff0e9;--focus:#b43a11;
+  --active:#1f6fd1;--active-bg:#e8f1fd;--waiting:#9a6200;--waiting-bg:#fff4dc;--stale:#6c7686;--stale-bg:#eef1f5;
+  --conflict:#7a3fc4;--conflict-bg:#f3ecfd;--passed:#1e7a4c;--passed-bg:#e6f5ec;--failed:#c42b37;--failed-bg:#fdecee;
+  --rail-off:#dde3ea;--flash:#141a24;--term-bg:#141a24;--shadow:0 12px 40px #1a22302a;color-scheme:light;
+}
+*{box-sizing:border-box}
+html,body{overflow-x:clip}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.5 var(--t-body)}
+.wrap{max-width:920px;margin:0 auto;padding:0 16px 64px}
+h1,h2,h3,h4{font-family:var(--t-display);margin:0;overflow-wrap:break-word;min-width:0}
+h1{font-size:30px;font-weight:800;letter-spacing:-.03em;line-height:1.1}
+h2{font-size:22px;font-weight:700;letter-spacing:-.02em;line-height:1.2}
+h3{font-size:15px;font-weight:700;letter-spacing:-.01em}
+p{margin:0}
+a{color:var(--accent);text-decoration-thickness:1px;text-underline-offset:3px}
+a:focus-visible,button:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+code,kbd,pre{font-family:var(--t-mono);font-size:12.5px}
+.faint{color:var(--text-3);font-size:13px}
+.top{position:sticky;top:0;z-index:5;background:var(--bg);border-bottom:1px solid var(--line);margin:0 -16px;padding:10px 16px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.top .nav{display:flex;gap:4px;flex-wrap:wrap;flex:1 1 auto;min-width:0}
+.top a.jump{color:var(--text-2);text-decoration:none;font-size:13px;padding:5px 8px;border-radius:6px;border:1px solid transparent}
+.top a.jump:hover{background:var(--hover);color:var(--text)}
+.ctl{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.btn,.chip{font:600 12.5px/1 var(--t-body);color:var(--text);background:var(--surface-2);border:1px solid var(--line-strong);border-radius:6px;height:30px;padding:0 10px;cursor:pointer;transition:background .15s var(--ease),border-color .15s var(--ease),transform .16s var(--ease-out)}
+.btn:hover,.chip:hover{background:var(--hover)}
+.btn:active,.chip:active{transform:scale(.97)}
+.btn[aria-pressed=true]{border-color:var(--text-2)}
+.chip{color:var(--text-2)}
+.chip:hover{color:var(--text)}
+.chip[aria-pressed=true]{color:var(--text);border-color:var(--text-2);background:var(--surface-3)}
+.chip.once{border-style:dashed}
+.chip.story{border-color:var(--brand);color:var(--text)}
+.chips .lab{font-size:12px;color:var(--text-3);align-self:center;margin-right:2px;font-weight:600}
+.head{padding:28px 0 16px}
+.head p.lede{font-size:17px;color:var(--text-2);max-width:62ch;margin-top:10px}
+.head .meta{margin-top:10px;font-size:13px;color:var(--text-3)}
+.locked{margin-top:14px;padding:10px 14px;border-left:3px solid var(--brand);background:var(--surface);border-radius:0 8px 8px 0;font-size:13.5px;color:var(--text-2)}
+.locked b{color:var(--text);font-weight:600}
+section.plain{border-top:1px solid var(--line);padding:32px 0 12px;scroll-margin-top:60px}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:8px}
+.anat{display:flex;gap:16px;align-items:center;flex-wrap:wrap;padding:14px;margin-top:12px}
+.anat ul{margin:0;padding:0;list-style:none;font-size:13px;color:var(--text-2);display:grid;gap:4px;min-width:0;flex:1 1 240px}
+.anat li b{color:var(--text);font-weight:600}
+.sw{display:inline-block;width:10px;height:10px;border-radius:2px;vertical-align:-1px;margin-right:6px}
+.stage{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:10px;margin-top:14px}
+.stage .view{display:grid;place-items:center;background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:24px;min-height:min(70vw,420px);position:relative}
+.stage .view svg{width:min(360px,80vw);max-width:100%;height:auto;cursor:pointer}
+.stage.story .view{min-height:min(60vw,300px)}
+.stage.story .view svg{width:min(220px,60vw)}
+.stage .view .now{position:absolute;left:10px;top:8px;font-size:11px;color:var(--text-3);letter-spacing:.04em;text-transform:uppercase;font-weight:600;max-width:calc(100% - 20px)}
+.stage .chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+.stage .hint{margin-top:10px;font-size:13px;color:var(--text-3)}
+.cards{display:grid;grid-template-columns:1fr;gap:12px;margin-top:14px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:14px;min-width:0}
+.card h3{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap}
+.card h3 .n{color:var(--text-3);font-weight:600}
+.card h3 .once{font-size:11px;color:var(--text-3);font-weight:600;text-transform:uppercase;letter-spacing:.04em}
+.card .cap{margin-top:4px;color:var(--text-2);font-size:13.5px}
+.card .row{display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap;margin-top:12px;padding:12px 10px;background:var(--bg);border:1px solid var(--line);border-radius:6px;cursor:pointer}
+.card .row .sz{display:flex;flex-direction:column;align-items:center;gap:6px;font-size:11px;color:var(--text-3)}
+.card .row .sz.gap{margin-left:6px;padding-left:12px;border-left:1px solid var(--line)}
+.card .row .sz.big svg{width:128px;height:128px}
+html.big512 .card .row .sz.big{flex:1 1 100%;align-items:center}
+html.big512 .card .row .sz.big svg{width:min(512px,100%);height:auto}
+.card .f{margin-top:8px;font-family:var(--t-mono);font-size:12px;color:var(--text-3)}
+.card .f b{font-weight:400;color:var(--brand)}
+@media (min-width:720px){.cards{grid-template-columns:1fr 1fr}html.big512 .cards{grid-template-columns:1fr}}
+.states{display:grid;grid-template-columns:repeat(auto-fill,minmax(104px,1fr));gap:8px;margin-top:12px}
+.states.tiny{grid-template-columns:repeat(auto-fill,minmax(82px,1fr))}
+.cell{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:10px 6px 8px;display:flex;flex-direction:column;align-items:center;gap:8px;cursor:pointer;transition:background .15s var(--ease)}
+.cell:hover{background:var(--hover)}
+.cell .mkbox{width:72px;height:72px;display:grid;place-items:center}
+.cell .pair{display:flex;gap:10px;align-items:center;height:48px}
+.cell .st{font-size:12px;line-height:1.25;text-align:center;color:var(--text-2)}
+.cell .st b{font-weight:600;color:var(--text)}
+pre.cli{margin:0;background:var(--term-bg);color:var(--term-fg);border-radius:8px;padding:12px 14px;overflow-x:auto;font-size:12.5px;line-height:1.6;border:1px solid var(--line)}
+pre.cli .p{color:var(--term-dim)}
+pre.cli .b{color:var(--brand)}
+pre.cli .ok{color:var(--term-ok)}.cli .no{color:var(--term-no)}.cli .wa{color:var(--term-wa)}.cli .ac{color:var(--term-ac)}.cli .dim{color:var(--term-faint)}
+.fr{display:inline-block;min-width:4ch}
+table{border-collapse:collapse;width:100%;font-size:12.5px}
+.tbl{overflow-x:auto;border:1px solid var(--line);border-radius:8px;background:var(--surface);margin-top:12px}
+th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-weight:600;color:var(--text-2);white-space:nowrap}
+tr:last-child td{border-bottom:0}
+td.k{font-weight:600;white-space:nowrap}
+td.f{font-family:var(--t-mono);white-space:nowrap}
+td.f .fr{color:var(--brand)}
+td.f .seq{color:var(--text-3)}
+td.f .seq i{font-style:normal;color:var(--text-2)}
+.tbl table{min-width:640px}
+.cost{padding:12px 14px;font-size:13px;color:var(--text-2);line-height:1.5;margin-top:12px}
+.cost b{color:var(--text);font-weight:600}
+.cost .live{display:block;margin-top:4px;color:var(--text-3);font-size:12.5px}
+.prose{color:var(--text-2);max-width:70ch;margin-top:10px}
+.prose p + p{margin-top:8px}
+.prose ol,.prose ul{margin:8px 0 0;padding-left:20px}
+.prose li{margin:4px 0}
+.prose b{color:var(--text);font-weight:600}
+.sigrow{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:10px}
+.sigrow .s{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:10px;font-size:12.5px;color:var(--text-2)}
+.sigrow .s b{display:block;color:var(--text);font-weight:700;margin-bottom:2px}
+footer{margin-top:40px;padding-top:16px;border-top:1px solid var(--line);font-size:13px;color:var(--text-3)}
+@media (max-width:719px){
+  .top{position:static}
+  h1{font-size:26px}
+  .cell .mkbox{width:64px;height:64px}
+  .sigrow{grid-template-columns:1fr}
+}
+/* page-only: bind the mark's host tokens to this page's theme (the product binds them to --fx-*) */
+.mk{--mk-active:var(--active);--mk-waiting:var(--waiting);--mk-passed:var(--passed);--mk-failed:var(--failed);--mk-stale:var(--stale);--mk-flash:var(--flash);color:var(--text)}
+</style>
+
+<!-- ============ mark.css, verbatim ============ -->
+<style data-css="mark">
+/* Forge brand mark states · locked 2026-11-07 (Take A "Reach unleashed"; failed "Didn't take"; rolled back "Set aside"; landed throws a spark).
+   Inline mark.svg (64 geometry; use at 32 px and up) or mark-16.svg (the 16 px cut) and set data-state on the <svg>.
+   States: idle w1 wN checks overlap waiting queued landing landed failed rolledback paused · one-shots: first streak many thousand.
+   Classes on the <svg>: .u2/.u3 (2 or 3 idle sparks), .calm (periods ×2), .still (end pose, no motion), .off (paused off screen).
+   Classes on <html>: .mk-hidden (tab hidden: all paused), .mk-reduced (app-level reduced motion), .mk-motion-full (a user's explicit opt-in over the OS reduced-motion setting).
+   Host tokens: the --fx-* custom properties of web/src/style.css; every one has a hex fallback. 0 JavaScript per frame, 0 requests, 0 server calls. */
+
+/* ---- tokens and plumbing ---- */
+.mk{--mk-brand:var(--fx-brand,#ff6b3d);--mk-warm:#ffb347;--mk-teal:#23cbff;--mk-active:var(--fx-active,#6aaeff);--mk-waiting:var(--fx-waiting,#f2b84b);--mk-passed:var(--fx-passed,#5fd39a);--mk-failed:var(--fx-failed,#ff6f7a);--mk-stale:var(--fx-stale,#7d8796);--mk-flash:var(--fx-mark-flash,#fff);
+  --mk-ease:cubic-bezier(.2,.7,.2,1);--mk-out:cubic-bezier(.23,1,.32,1);--mk-inout:cubic-bezier(.77,0,.175,1);
+  display:block;overflow:visible;color:var(--fx-text,currentColor)}
+.mk .stem,.mk .stemB{fill:currentColor}
+.mk .arm{fill:var(--mk-brand)}
+.mk .xT{fill:var(--mk-warm)}
+.mk .xL{fill:var(--mk-teal)}
+.mk .sp{fill:var(--mk-warm);opacity:0}
+.mk .whole{transform-origin:32px 32px}
+.mk .stem,.mk .stemB{transform-origin:14px 40px}
+.mk .armT{transform-origin:8px 12px}.mk .aTo{transform-origin:34px 12px}.mk .aTi{transform-origin:20px 12px}
+.mk .armL{transform-origin:8px 34px}.mk .aLo{transform-origin:30px 34px}.mk .aLi{transform-origin:20px 34px}
+.mk .xT{transform-origin:14px 12px}.mk .xL{transform-origin:14px 34px}
+.mk [class]{transition:transform .32s var(--mk-ease),opacity .24s var(--mk-ease),fill .24s var(--mk-ease)}
+.mk.off *,.mk-hidden .mk *{animation-play-state:paused!important}
+.mk.still *,.mk-reduced .mk *{animation:none!important;transition:none!important}
+.mk.calm{--calm:2}
+@media (prefers-reduced-motion:reduce){:root:not(.mk-motion-full) .mk *{animation:none!important;transition:none!important}}
+
+/* ---- idle: the approved F; a spark travels the top arm into the stem every 8 s; 2 sparks after 10 landings (.u2), 3 after 100 (.u3) ---- */
+.mk[data-state=idle] .xT{animation:mk-breathe calc(8s*var(--calm,1)) ease-in-out infinite}
+@keyframes mk-breathe{0%,86%,100%{opacity:1}93%{opacity:.62}}
+.mk[data-state=idle] .sp1{animation:mk-sparkT calc(8s*var(--calm,1)) linear infinite}
+.mk.u2[data-state=idle] .sp2,.mk.u3[data-state=idle] .sp2{animation:mk-sparkL calc(8s*var(--calm,1)) linear -3.1s infinite}
+.mk.u3[data-state=idle] .sp3{animation:mk-sparkT calc(8s*var(--calm,1)) linear -5.6s infinite}
+@keyframes mk-sparkT{0%{transform:translateX(0);opacity:0}3%{opacity:1}22%{opacity:1}26%{transform:translateX(-36px);opacity:0}100%{transform:translateX(-36px);opacity:0}}
+@keyframes mk-sparkL{0%{transform:translateX(0);opacity:0}3%{opacity:1}22%{opacity:1}26%{transform:translateX(-26px);opacity:0}100%{transform:translateX(-26px);opacity:0}}
+
+/* ---- shared colour beats: flash, ring, flood, drain, tides ---- */
+@keyframes mk-flashX{0%{fill:var(--mk-teal)}8%,18%{fill:var(--mk-flash)}30%,100%{fill:var(--mk-passed)}}
+@keyframes mk-flashXT{0%{fill:var(--mk-warm)}8%,18%{fill:var(--mk-flash)}30%,100%{fill:var(--mk-passed)}}
+@keyframes mk-ring{0%,100%{transform:scaleX(1)}40%{transform:scaleX(1.14)}}
+@keyframes mk-floodArm{0%{fill:var(--mk-brand)}100%{fill:var(--mk-passed)}}
+@keyframes mk-floodInk{0%{fill:currentColor}100%{fill:var(--mk-passed)}}
+@keyframes mk-floodXT{0%{fill:var(--mk-warm)}100%{fill:var(--mk-passed)}}
+@keyframes mk-drainArm{0%{fill:var(--mk-passed)}100%{fill:var(--mk-brand)}}
+@keyframes mk-drainInk{0%{fill:var(--mk-passed)}100%{fill:currentColor}}
+@keyframes mk-drainXT{0%{fill:var(--mk-passed)}100%{fill:var(--mk-warm)}}
+@keyframes mk-tideB{0%,100%{fill:var(--mk-brand)}45%{fill:var(--mk-active)}}
+@keyframes mk-tideBT{0%,100%{fill:var(--mk-warm)}45%{fill:var(--mk-active)}}
+@keyframes mk-tideBL{0%,100%{fill:var(--mk-teal)}45%{fill:var(--mk-active)}}
+@keyframes mk-tideI{0%,100%{fill:currentColor}45%{fill:var(--mk-active)}}
+@keyframes mk-tideA{0%,100%{fill:var(--mk-brand)}50%{fill:var(--mk-waiting)}}
+@keyframes mk-tideAT{0%,100%{fill:var(--mk-warm)}50%{fill:var(--mk-waiting)}}
+@keyframes mk-tideAL{0%,100%{fill:var(--mk-teal)}50%{fill:var(--mk-waiting)}}
+@keyframes mk-red{0%{fill:var(--mk-teal)}100%{fill:var(--mk-failed)}}
+@keyframes mk-grey{0%{fill:var(--mk-passed)}100%{fill:var(--mk-stale)}}
+
+/* ---- working, 1 agent: the lower arm reaches; a blue tide runs tip → inner → crossing → back ---- */
+.c64[data-state=w1] .aLo,.c64[data-state=wN] .aLo{transform:scaleX(1.18);fill:var(--mk-active);animation:mk-reach calc(2.4s*var(--calm,1)) ease-in-out infinite,mk-tideB calc(2.4s*var(--calm,1)) ease-in-out infinite}
+.c64[data-state=w1] .aLi,.c64[data-state=wN] .aLi{animation:mk-tideB calc(2.4s*var(--calm,1)) ease-in-out .3s infinite}
+.c64[data-state=w1] .xL,.c64[data-state=wN] .xL{animation:mk-tideBL calc(2.4s*var(--calm,1)) ease-in-out .6s infinite}
+@keyframes mk-reach{0%,100%{transform:scaleX(1)}50%{transform:scaleX(1.25)}}
+/* ---- working, many: both arms reach out of phase; the tides meet in the stem ---- */
+.c64[data-state=wN] .aTo{transform:scaleX(1.18);fill:var(--mk-active);animation:mk-reach calc(3.1s*var(--calm,1)) ease-in-out -1.2s infinite,mk-tideB calc(3.1s*var(--calm,1)) ease-in-out -1.2s infinite}
+.c64[data-state=wN] .aTi{animation:mk-tideB calc(3.1s*var(--calm,1)) ease-in-out -.9s infinite}
+.c64[data-state=wN] .xT{animation:mk-tideBT calc(3.1s*var(--calm,1)) ease-in-out -.6s infinite}
+.c64[data-state=wN] .stem{animation:mk-tideI calc(2.4s*var(--calm,1)) ease-in-out .9s infinite}
+/* ---- checks: the lower tip detaches and goes round the arm, blue ---- */
+.c64[data-state=checks] .aLo{fill:var(--mk-active);transform:translate(0,-13px);animation:mk-orbit calc(2.4s*var(--calm,1)) var(--mk-inout) infinite}
+@keyframes mk-orbit{0%{transform:translate(0,0)}25%{transform:translate(0,-13px)}50%{transform:translate(-10px,-13px)}75%{transform:translate(-10px,13px)}100%{transform:translate(0,0)}}
+.c64[data-state=checks] .xL{fill:var(--mk-active)}
+/* ---- overlap: the arms close on each other into one flag; amber breathes through it ---- */
+.c64[data-state=overlap] .armT,.c64[data-state=overlap] .xT{transform:translateY(5px)}
+.c64[data-state=overlap] .armL,.c64[data-state=overlap] .xL{transform:translateY(-5px)}
+.c64[data-state=overlap] .arm{animation:mk-tideA calc(2.4s*var(--calm,1)) ease-in-out infinite}
+.c64[data-state=overlap] .xT{animation:mk-tideAT calc(2.4s*var(--calm,1)) ease-in-out infinite}
+.c64[data-state=overlap] .xL{animation:mk-tideAL calc(2.4s*var(--calm,1)) ease-in-out infinite}
+/* ---- waiting on you: the top tip lifts off and hangs raised, amber, hovering ---- */
+.c64[data-state=waiting] .aTo{fill:var(--mk-waiting);transform:translateY(-6px) rotate(-8deg);animation:mk-raise calc(2.4s*var(--calm,1)) ease-in-out infinite}
+@keyframes mk-raise{0%,100%{transform:translateY(-6px) rotate(-8deg)}50%{transform:translateY(-8px) rotate(-8deg)}}
+.c64[data-state=waiting] .xT{fill:var(--mk-waiting)}
+/* ---- queued: the lower arm waits short and inches forward; its tip a step apart ---- */
+.c64[data-state=queued] .armL{transform-origin:20px 34px;transform:scaleX(.55);animation:mk-inch calc(2.4s*var(--calm,1)) var(--mk-ease) infinite}
+@keyframes mk-inch{0%,70%,100%{transform:scaleX(.55)}80%{transform:scaleX(.62)}}
+.c64[data-state=queued] .aLo{transform:translateX(4px)}
+/* ---- landing: the strike. pull back 6 px → slam into the stem, the crossing flashes, the stem rings → the arm grows back as green floods out from the crossing through the whole F ---- */
+.c64[data-state=landing] .armL{transform-origin:20px 34px;transform:scaleX(.5);animation:mk-strike .72s var(--mk-out) both}
+@keyframes mk-strike{0%{transform:none}16%{transform:translateX(6px)}30%{transform:scaleX(0)}100%{transform:none}}
+.c64[data-state=landing] .xL,.c64[data-state=landing] .aLi,.c64[data-state=landing] .aLo{fill:var(--mk-passed)}
+.c64[data-state=landing] .xL{animation:mk-flashX .9s .2s both}
+.c64[data-state=landing] .stem,.c64[data-state=landing] .stemB{animation:mk-ring .5s var(--mk-ease) .22s both,mk-floodInk .5s var(--mk-ease) .5s both}
+.c64[data-state=landing] .aLi{animation:mk-floodArm .3s var(--mk-ease) .4s both}
+.c64[data-state=landing] .aLo{animation:mk-floodArm .3s var(--mk-ease) .52s both}
+.c64[data-state=landing] .xT{animation:mk-floodXT .3s var(--mk-ease) .7s both}
+.c64[data-state=landing] .aTi{animation:mk-floodArm .3s var(--mk-ease) .8s both}
+.c64[data-state=landing] .aTo{animation:mk-floodArm .3s var(--mk-ease) .9s both}
+/* ---- landed: the whole F holds green 600 ms, drains to rest leaving the crossing and the lower arm green; then the strike throws a spark down main ---- */
+.mk[data-state=landed] .xL,.mk[data-state=landed] .aLi,.mk[data-state=landed] .aLo,.c16[data-state=landed] .armLi,.c16[data-state=landed] .armLo{fill:var(--mk-passed)}
+.c64[data-state=landed] .stem,.c64[data-state=landed] .stemB{animation:mk-drainInk .9s var(--mk-ease) .6s both}
+.c64[data-state=landed] .aTi,.c64[data-state=landed] .aTo{animation:mk-drainArm .9s var(--mk-ease) .5s both}
+.c64[data-state=landed] .xT{animation:mk-drainXT .9s var(--mk-ease) .4s both}
+.c64[data-state=landed] .sp2{animation:mk-spLand 1.1s linear 1.3s both}
+@keyframes mk-spLand{0%{transform:translate(-30px,0);opacity:0}10%{opacity:1}88%{transform:translate(-30px,22px);opacity:1}100%{transform:translate(-30px,22px);opacity:0}}
+/* ---- failed, "Didn't take": the strike makes contact but does not go in; the join goes red (no flash, no ring); the arm is pushed back out and rests 16 px off main, whole and orange ---- */
+.c64[data-state=failed] .armL,.c64[data-state=failed] .xL{transform:translateX(16px);animation:mk-take .7s var(--mk-out) both}
+@keyframes mk-take{0%{transform:none}18%{transform:translateX(6px)}30%{transform:none}100%{transform:translateX(16px)}}
+.c64[data-state=failed] .xL{fill:var(--mk-failed);animation:mk-take .7s var(--mk-out) both,mk-red .08s .2s both}
+/* ---- rolled back, "Set aside": the arm leaves main as one piece, then is lowered to the foot; grey root; the work kept, out of main ---- */
+.c64[data-state=rolledback] .armL,.c64[data-state=rolledback] .xL{transform:translate(16px,18px);animation:mk-aside .8s var(--mk-inout) both}
+@keyframes mk-aside{0%{transform:none}45%{transform:translateX(16px)}100%{transform:translate(16px,18px)}}
+.c64[data-state=rolledback] .xL{fill:var(--mk-stale);animation:mk-aside .8s var(--mk-inout) both,mk-grey .3s both}
+/* ---- paused: the F lies down on its side; crossings dim; nothing moves ---- */
+.mk[data-state=paused] .whole{transform:rotate(-90deg)}
+.mk[data-state=paused] .xT,.mk[data-state=paused] .xL{opacity:.6}
+
+/* ---- delight, each plays once per event, never loops ---- */
+/* first landing ever (and the 1,000th): the F assembles; arms fly in, crossings colour on contact, the stem flashes once */
+.c64[data-state=first] .armT,.c64[data-state=thousand] .armT{transform-origin:58px 6px;animation:mk-dArmT .24s var(--mk-out) both}
+.c64[data-state=first] .armL,.c64[data-state=thousand] .armL{transform-origin:48px 28px;animation:mk-dArmL .24s .18s var(--mk-out) both}
+@keyframes mk-dArmT{0%{transform:translate(70px,-14px) rotate(-11deg)}100%{transform:none}}
+@keyframes mk-dArmL{0%{transform:translate(70px,-17px) rotate(-14deg)}100%{transform:none}}
+.c64[data-state=first] .xT{animation:mk-dWarm .12s .12s both}
+.c64[data-state=first] .xL{animation:mk-dTeal .12s .3s both}
+@keyframes mk-dWarm{from{fill:var(--mk-brand)}to{fill:var(--mk-warm)}}
+@keyframes mk-dTeal{from{fill:var(--mk-brand)}to{fill:var(--mk-teal)}}
+.c64[data-state=first] .stem{animation:mk-stemFlash .62s both}
+@keyframes mk-stemFlash{0%,67%,71%,100%{fill:currentColor}68%,70%{fill:var(--mk-flash)}}
+/* streak, 5 clean landings in a row: one green wave runs through every piece in turn and leaves */
+.mk[data-state=streak] .xL{animation:mk-wave 1.3s both}
+.mk[data-state=streak] .aLi,.mk[data-state=streak] .armLi{animation:mk-waveA 1.3s .08s both}
+.mk[data-state=streak] .aLo,.mk[data-state=streak] .armLo{animation:mk-waveA 1.3s .16s both}
+.mk[data-state=streak] .stem,.mk[data-state=streak] .stemB{animation:mk-waveI 1.3s .2s both}
+.mk[data-state=streak] .xT{animation:mk-waveT 1.3s .3s both}
+.mk[data-state=streak] .aTi,.mk[data-state=streak] .armTi{animation:mk-waveA 1.3s .38s both}
+.mk[data-state=streak] .aTo,.mk[data-state=streak] .armTo{animation:mk-waveA 1.3s .46s both}
+@keyframes mk-wave{0%{fill:var(--mk-teal)}12%,50%{fill:var(--mk-passed)}100%{fill:var(--mk-teal)}}
+@keyframes mk-waveT{0%{fill:var(--mk-warm)}12%,50%{fill:var(--mk-passed)}100%{fill:var(--mk-warm)}}
+@keyframes mk-waveA{0%{fill:var(--mk-brand)}12%,50%{fill:var(--mk-passed)}100%{fill:var(--mk-brand)}}
+@keyframes mk-waveI{0%{fill:currentColor}12%,50%{fill:var(--mk-passed)}100%{fill:currentColor}}
+/* many, 3 or more Lanes land together: both arms strike 90 ms apart; one swell; green floods the whole F */
+.c64[data-state=many] .armL{animation:mk-strike .72s var(--mk-out) both}
+.c64[data-state=many] .armT{transform-origin:20px 12px;animation:mk-strike .72s .09s var(--mk-out) both}
+.c64[data-state=many] .xL{animation:mk-flashX .9s .14s both}
+.c64[data-state=many] .xT{animation:mk-flashXT .9s .23s both}
+.c64[data-state=many] .stem,.c64[data-state=many] .stemB{animation:mk-ring .5s var(--mk-ease) .2s both,mk-floodInk .5s var(--mk-ease) .4s both}
+.c64[data-state=many] .arm{animation:mk-floodArm .5s var(--mk-ease) .45s both}
+/* the 1,000th landing, the re-forge: every piece flies apart, turns, comes home; stem flash; one green wave */
+.c64[data-state=thousand] .aTo{animation:mk-fly1 1.4s var(--mk-inout) both}
+.c64[data-state=thousand] .aLo{animation:mk-fly2 1.4s var(--mk-inout) both}
+.c64[data-state=thousand] .aTi{animation:mk-fly3 1.4s var(--mk-inout) both}
+.c64[data-state=thousand] .aLi{animation:mk-fly4 1.4s var(--mk-inout) both}
+.c64[data-state=thousand] .stemB{animation:mk-fly5 1.4s var(--mk-inout) both}
+.c64[data-state=thousand] .xT{animation:mk-fly6 1.4s var(--mk-inout) both,mk-waveT 1.3s 1.5s both}
+.c64[data-state=thousand] .xL{animation:mk-fly7 1.4s var(--mk-inout) both,mk-wave 1.3s 1.4s both}
+.c64[data-state=thousand] .stem{animation:mk-stemFlash .62s 1.3s both,mk-waveI 1.3s 1.6s both}
+.c64[data-state=thousand] .armT,.c64[data-state=thousand] .armL{animation:none}
+@keyframes mk-fly1{0%{transform:none}35%,55%{transform:translate(8px,10px) rotate(90deg)}100%{transform:none}}
+@keyframes mk-fly2{0%{transform:none}35%,55%{transform:translate(14px,-6px) rotate(-90deg)}100%{transform:none}}
+@keyframes mk-fly3{0%{transform:none}35%,55%{transform:translate(12px,20px) rotate(180deg)}100%{transform:none}}
+@keyframes mk-fly4{0%{transform:none}35%,55%{transform:translate(-4px,-14px) rotate(-180deg)}100%{transform:none}}
+@keyframes mk-fly5{0%{transform:none}35%,55%{transform:translate(22px,-2px) rotate(90deg)}100%{transform:none}}
+@keyframes mk-fly6{0%{transform:none}35%,55%{transform:translate(34px,18px) rotate(45deg)}100%{transform:none}}
+@keyframes mk-fly7{0%{transform:none}35%,55%{transform:translate(34px,-10px) rotate(-45deg)}100%{transform:none}}
+
+/* ==== 16 px cut (mark-16.svg): whole-pixel steps, stepped timing. Rules below this line are the 16 px set. ==== */
+.c16 .whole{transform-origin:8px 8px}.c16 .stem,.c16 .stemB{transform-origin:3px 11px}.c16 .armT{transform-origin:2px 2px}.c16 .armL{transform-origin:2px 8px}.c16 .armLo{transform-origin:7px 8px}.c16 .armTo{transform-origin:10px 2px}.c16 .armLi{transform-origin:5px 8px}.c16 .armTi{transform-origin:5px 2px}
+.c16[data-state=idle] .sp1{animation:mk-spark16 calc(8s*var(--calm,1)) steps(1,end) infinite}
+.c16.u2[data-state=idle] .sp2,.c16.u3[data-state=idle] .sp2{animation:mk-spark16L calc(8s*var(--calm,1)) steps(1,end) -3.1s infinite}
+@keyframes mk-spark16{0%{transform:none;opacity:1}8%{transform:translateX(-3px)}16%{transform:translateX(-6px)}24%,100%{opacity:0}}
+@keyframes mk-spark16L{0%{transform:none;opacity:1}8%{transform:translateX(-2px)}16%{transform:translateX(-4px)}24%,100%{opacity:0}}
+.c16[data-state=w1] .armLo,.c16[data-state=wN] .armLo,.c16[data-state=wN] .armTo{fill:var(--mk-active)}
+.c16[data-state=w1] .armL,.c16[data-state=wN] .armL{transform-origin:2px 8px;transform:scaleX(1.22);animation:mk-r16 calc(2.4s*var(--calm,1)) steps(1,end) infinite}
+@keyframes mk-r16{0%{transform:scaleX(1)}33%{transform:scaleX(1.22)}66%{transform:scaleX(1.33)}100%{transform:scaleX(1)}}
+.c16[data-state=w1] .armLo,.c16[data-state=wN] .armLo{animation:mk-tideB calc(2.4s*var(--calm,1)) steps(2,end) infinite}
+.c16[data-state=w1] .xL,.c16[data-state=wN] .xL{animation:mk-tideBL calc(2.4s*var(--calm,1)) steps(2,end) .6s infinite}
+.c16[data-state=wN] .armT{transform-origin:2px 2px;transform:scaleX(1.22);animation:mk-r16 calc(3.1s*var(--calm,1)) steps(1,end) -1.2s infinite}
+.c16[data-state=wN] .armTo{animation:mk-tideB calc(3.1s*var(--calm,1)) steps(2,end) -1.2s infinite}
+.c16[data-state=checks] .armLo{fill:var(--mk-active);transform:translateY(-3px);animation:mk-orbit16 calc(2.4s*var(--calm,1)) steps(1,end) infinite}
+@keyframes mk-orbit16{0%{transform:none}25%{transform:translateY(-3px)}50%{transform:translate(-2px,-3px)}75%{transform:translate(-2px,3px)}100%{transform:none}}
+.c16[data-state=checks] .xL{fill:var(--mk-active)}
+.c16[data-state=overlap] .armT,.c16[data-state=overlap] .xT{transform:translateY(2px)}
+.c16[data-state=overlap] .armL,.c16[data-state=overlap] .xL{transform:translateY(-1px)}
+.c16[data-state=overlap] .arm{animation:mk-tideA calc(2.4s*var(--calm,1)) steps(2,end) infinite}
+.c16[data-state=waiting] .armLo{fill:var(--mk-waiting);transform:translateY(-3px)}
+.c16[data-state=waiting] .xL{fill:var(--mk-waiting)}
+.c16[data-state=queued] .armL{transform-origin:5px 8px;transform:scaleX(.6);animation:mk-inch16 calc(2.4s*var(--calm,1)) steps(1,end) infinite}
+@keyframes mk-inch16{0%,70%,100%{transform:scaleX(.6)}80%{transform:scaleX(.8)}}
+.c16[data-state=landing] .xL,.c16[data-state=landing] .armLi,.c16[data-state=landing] .armLo{fill:var(--mk-passed)}
+.c16[data-state=landing] .armL{transform-origin:5px 8px;transform:scaleX(.5);animation:mk-strike16 .72s steps(4,end) both}
+@keyframes mk-strike16{0%{transform:none}16%{transform:translateX(1px)}30%,45%{transform:scaleX(0)}70%{transform:scaleX(.5)}100%{transform:none}}
+.c16[data-state=landing] .xL{animation:mk-flashX .9s steps(1,end) .2s both}
+.c16[data-state=landing] .armLi,.c16[data-state=landing] .armLo{animation:mk-floodArm .3s steps(1,end) .5s both}
+.c16[data-state=landing] .stem,.c16[data-state=landing] .stemB{animation:mk-floodInk .3s steps(1,end) .6s both}
+.c16[data-state=landing] .armTi,.c16[data-state=landing] .armTo{animation:mk-floodArm .3s steps(1,end) .8s both}
+.c16[data-state=landing] .xT{animation:mk-floodXT .3s steps(1,end) .7s both}
+.c16[data-state=landed] .stem,.c16[data-state=landed] .stemB{animation:mk-drainInk .9s steps(2,end) .6s both}
+.c16[data-state=landed] .armTi,.c16[data-state=landed] .armTo{animation:mk-drainArm .9s steps(2,end) .5s both}
+.c16[data-state=landed] .xT{animation:mk-drainXT .9s steps(2,end) .4s both}
+.c16[data-state=landed] .sp2{animation:mk-sp16Land 1.1s steps(1,end) 1.3s both}
+@keyframes mk-sp16Land{0%{transform:translate(-7px,0);opacity:1}30%{transform:translate(-7px,2px)}60%{transform:translate(-7px,4px)}85%,100%{transform:translate(-7px,5px);opacity:0}}
+.c16[data-state=failed] .armL,.c16[data-state=failed] .xL{transform:translateX(5px);animation:mk-take16 .7s steps(1,end) both}
+@keyframes mk-take16{0%{transform:none}18%{transform:translateX(1px)}30%{transform:none}60%{transform:translateX(3px)}100%{transform:translateX(5px)}}
+.c16[data-state=failed] .xL{fill:var(--mk-failed);animation:mk-take16 .7s steps(1,end) both,mk-red .08s .2s both}
+.c16[data-state=rolledback] .armL,.c16[data-state=rolledback] .xL{transform:translate(5px,4px);animation:mk-aside16 .8s steps(1,end) both}
+@keyframes mk-aside16{0%{transform:none}30%{transform:translateX(3px)}45%{transform:translateX(5px)}72%{transform:translate(5px,2px)}100%{transform:translate(5px,4px)}}
+.c16[data-state=rolledback] .xL{fill:var(--mk-stale);animation:mk-aside16 .8s steps(1,end) both,mk-grey .3s steps(1,end) both}
+.c16[data-state=first] .armT,.c16[data-state=thousand] .armT{animation:mk-d16in .24s steps(3,end) both}
+.c16[data-state=first] .armL,.c16[data-state=thousand] .armL{animation:mk-d16in .24s .18s steps(3,end) both}
+@keyframes mk-d16in{from{transform:translateX(6px)}to{transform:none}}
+.c16[data-state=first] .stem,.c16[data-state=thousand] .stem{animation:mk-stemFlash .62s steps(1,end) both}
+.c16[data-state=thousand] .xL{animation:mk-wave 1.3s steps(2,end) .5s both}
+.c16[data-state=thousand] .xT{animation:mk-waveT 1.3s steps(2,end) .62s both}
+.c16[data-state=many] .armL{animation:mk-strike16 .72s steps(4,end) both}
+.c16[data-state=many] .armT{transform-origin:5px 2px;animation:mk-strike16 .72s .09s steps(4,end) both}
+.c16[data-state=many] .xL{animation:mk-flashX .9s steps(1,end) .14s both}
+.c16[data-state=many] .xT{animation:mk-flashXT .9s steps(1,end) .23s both}
+.c16[data-state=many] .arm{animation:mk-floodArm .5s steps(2,end) .45s both}
+.c16[data-state=many] .stem,.c16[data-state=many] .stemB{animation:mk-floodInk .5s steps(2,end) .4s both}
+</style>
+
+<template id="tpl-64">
+<svg class="mk c64" viewBox="0 0 64 64" width="64" height="64" aria-hidden="true" data-state="idle" xmlns="http://www.w3.org/2000/svg">
+  <g class="whole">
+    <path class="stem" d="M8 6H20V40.5H8Z"/>
+    <path class="stemB" d="M8 40H20V58H14L8 52Z"/>
+    <g class="armT"><rect class="arm aTi" x="8" y="6" width="26.6" height="12"/><path class="arm aTo" d="M34 6H58L52 18H34Z"/></g>
+    <rect class="xT" x="8" y="6" width="12" height="12"/>
+    <g class="armL"><rect class="arm aLi" x="8" y="28" width="22.6" height="12"/><path class="arm aLo" d="M30 28H48L42 40H30Z"/></g>
+    <rect class="xL" x="8" y="28" width="12" height="12"/>
+    <circle class="sp sp1" cx="54" cy="12" r="2.4"/>
+    <circle class="sp sp2" cx="44" cy="34" r="2.6"/>
+    <circle class="sp sp3" cx="50" cy="12" r="1.8"/>
+  </g>
+</svg>
+</template>
+<template id="tpl-16">
+<svg class="mk c16" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" data-state="idle" shape-rendering="crispEdges" xmlns="http://www.w3.org/2000/svg">
+  <g class="whole">
+    <rect class="stem" x="2" y="1" width="3" height="10"/>
+    <rect class="stemB" x="2" y="11" width="3" height="4"/>
+    <g class="armT"><rect class="arm armTi" x="2" y="1" width="8" height="3"/><rect class="arm armTo" x="10" y="1" width="4" height="3"/></g>
+    <rect class="xT" x="2" y="1" width="3" height="3"/>
+    <g class="armL"><rect class="arm armLi" x="2" y="7" width="5" height="3"/><rect class="arm armLo" x="7" y="7" width="4" height="3"/></g>
+    <rect class="xL" x="2" y="7" width="3" height="3"/>
+    <rect class="sp sp1" x="12" y="2" width="1" height="1"/>
+    <rect class="sp sp2" x="10" y="8" width="1" height="1"/>
+  </g>
+</svg>
+</template>
+</head>
+<body>
+<div class="wrap">
+<div class="top">
+  <div class="nav">
+    <a class="jump" href="#stage">Stage</a>
+    <a class="jump" href="#rule">Pieces and rule</a>
+    <a class="jump" href="#sizes">Sizes</a>
+    <a class="jump" href="#stills">Stills</a>
+    <a class="jump" href="#cli">CLI</a>
+    <a class="jump" href="#story">Stories</a>
+    <a class="jump" href="#spec">Motion</a>
+    <a class="jump" href="#delight">Delight</a>
+    <a class="jump" href="#cost">Cost</a>
+  </div>
+  <div class="ctl">
+    <button class="btn" id="theme" type="button" aria-pressed="false">Theme: system</button>
+    <button class="btn" id="motion" type="button" aria-pressed="false">Motion: system</button>
+  </div>
+</div>
+
+<header class="head">
+  <h1>Hearth: the locked mark</h1>
+  <p class="lede">The Forge F, alive. Six pieces, twelve states, four delight moments, one colour rule. Nothing is added to the letter: its own pieces reach, detach, meet, lie down and come home, and status colour runs through them like a tide. This page is the reference for builders; the shipped set (mark.svg, mark-16.svg, mark.css) sits beside it.</p>
+  <p class="locked"><b>Locked 2026-11-07.</b> Take A "Reach unleashed" for every state. Failed is "Didn't take": the strike makes contact, the join goes red, the arm is pushed back out and rests in line, whole and orange. Rolled back is "Set aside". Every landing throws a spark. Favicon stays the still 16 px cut. No candidates or alternatives remain on this page.</p>
+  <p class="meta" id="live">Every animation is CSS, client-side only, and pauses when its mark is off screen or the tab is hidden.</p>
+</header>
+
+<section class="plain" id="stage" style="border-top:0;padding-top:4px">
+  <div class="stage">
+    <div class="view"><span class="now" id="now">idle</span><span id="heroSlot"></span></div>
+    <div class="chips" id="stateChips" role="group" aria-label="State"></div>
+    <div class="chips" id="moreChips" role="group" aria-label="Delight and controls"></div>
+    <p class="hint">Tap a state to switch; tap it again to replay. Dashed chips play once and hold. "Calm" doubles every looping period, as the product does after 60 s. "Uses" shows how idle grows: one spark on day one, two after 10 landings, three after 100.</p>
+  </div>
+</section>
+
+<section class="plain" id="rule">
+  <h2>The pieces, and the tide rule</h2>
+  <div class="panel anat">
+    <span data-mk="idle" data-size="128"></span>
+    <ul>
+      <li><b>Stem</b> is main (ink), split below the lower arm.</li>
+      <li><b>Arms</b> are landed Lanes (brand orange), each an inner part and an outer tip.</li>
+      <li><b>Crossings</b> <span class="sw" style="background:#ffb347"></span>warm and <span class="sw" style="background:#23cbff"></span>teal are where Lanes joined main. Colour enters the F here.</li>
+      <li><b>Sparks</b> are the only extra thing: at idle, and one thrown by every landing.</li>
+      <li><b>Nothing else.</b> No bars, dots, gauges, faces or seams. When a state needs a signal, a piece of the F becomes it.</li>
+    </ul>
+  </div>
+  <div class="prose">
+    <p><b>The tide rule.</b></p>
+    <ol>
+      <li>Rest colours are fixed: ink stem, brand-orange arms, warm and teal crossings. Every state begins and ends there.</li>
+      <li>A status colour enters the F at a crossing (where a Lane meets main) and flows outward piece by piece, 80 to 120 ms per piece. It never appears on a piece it did not flow to.</li>
+      <li>While in motion, a status colour may take any piece, including the stem, up to the whole F (landing, the streak, the re-forge).</li>
+      <li>A still (reduced motion, or the end pose of a one-shot) holds status colour on at most the crossing plus the one arm that changed. The stem is never a solid status colour in a still. Failed holds red on the lower crossing only: the arm stays orange because the work is intact. Landed's still is the whole approved F with the crossing and the lower arm green, so the only state whose shape equals idle is the one that means "back to normal".</li>
+      <li>Orange never means a status, and no status colour is decoration: a colour change always comes with a shape change on the same piece (reach, orbit, lift, flag, push-out, set-aside, lie-down), so a colour-blind user reads every state from the shape and the glyph beside it.</li>
+      <li>Status colours keep their meaning: blue working or checking, amber overlap or waiting, green landed, red failed, grey rolled back.</li>
+    </ol>
+    <p><b>The strike is the house style.</b> Every one-shot is built from three beats, and every looping state is the first beat stretched out.</p>
+  </div>
+  <div class="sigrow">
+    <div class="s"><b>1 Anticipation, 120 ms</b>The piece pulls away from where it is going: the arm backs 6 px out of the stem.</div>
+    <div class="s"><b>2 Impact, 100 ms</b>The piece slams home. The crossing flashes for 100 ms, the stem rings (scaleX 1.14 for 500 ms), and the status colour enters at the crossing. When the landing does not take, this beat is replaced by contact: the join goes red, no flash, no ring.</div>
+    <div class="s"><b>3 Settle, 400 to 600 ms</b>The piece comes to rest with a strong ease-out, no bounce. Colour floods outward piece by piece, holds, and later drains back to rest colours.</div>
+  </div>
+</section>
+
+<section class="plain" id="sizes">
+  <h2>Every state at 512, 64, 32 and 16 px</h2>
+  <p class="prose">The 512 geometry is shown at 128 px here so the page fits a phone; <button class="chip" id="big" type="button" aria-pressed="false">Show at 512</button> opens every card to full size. The 32 px cut is the 64 geometry scaled. The 16 px cut is a separate pixel-aligned drawing (stem 3 px, arms 3 px, crossings 3 × 3, the spark 1 px); every move is a whole-pixel step with stepped timing. Tap a row to replay it.</p>
+  <div class="cards" id="cards"></div>
+</section>
+
+<section class="plain" id="stills">
+  <h2>Reduced-motion stills</h2>
+  <p class="prose">The base rule of each state is its end pose; animation only adds movement. With motion reduced every state is still and every change is instant. Every still differs from idle in shape, not only in colour, except landed, by design (tide rule 4). The glyph and word beside the mark always carry the state too: the product never relies on the mark alone.</p>
+  <div class="states tiny" id="stillGrid"></div>
+</section>
+
+<section class="plain" id="cli">
+  <h2>Terminal: nforge frames per state</h2>
+  <pre class="cli" id="cliSample" aria-label="nforge status output"></pre>
+  <div class="tbl" id="cliTable"></div>
+  <pre class="cli" id="cliDelight" style="margin-top:8px" aria-label="delight moments in the terminal"></pre>
+  <p class="faint" style="margin-top:8px">Frames are plain Unicode (box drawing and block elements), cycled by nforge at 550 ms only on a TTY; one-shots run their frames once and hold the still. The idle spark is a middle dot walking along the bar once per cycle. Waiting lifts the tip (▀ ↔ ▔); checks walks it round (╹ ╻). Colour is ANSI where supported; the glyph and word always follow the frame. Logs, JSON and piped output get the ASCII still form.</p>
+</section>
+
+<section class="plain" id="story">
+  <h2>Story players</h2>
+  <div class="stage story">
+    <div class="view"><span class="now" id="storyNow">idle</span><span id="storySlot"></span></div>
+    <div class="chips" id="storyChips" role="group" aria-label="Stories"></div>
+    <p class="hint">"A Lane's life" runs idle → working → many → checks → overlap → waiting → queued → landing → landed → idle with real transitions. "Then it fails" cuts the landing with a failure, then rolls back and sets the work aside. "A busy day" lands three Lanes together, then a streak of five.</p>
+  </div>
+  <div class="prose">
+    <p><b>States are poses.</b> Every persistent state is a set of transforms and fills on the same six pieces, with a 320 ms transition on transform and 240 ms on colour. Switching state tweens from wherever each piece is.</p>
+    <p><b>One-shots can be interrupted.</b> Landing, landed, failed and rolled back have a start and an end. A state change removes the animation and the pieces tween to the new pose; the largest visible jump is the lower arm's 6 px pull-back if landing is cut in its first 120 ms.</p>
+    <p><b>What loops and what never loops.</b> Idle, working, checks, overlap, waiting and queued loop (slowest 8 s, fastest 2.4 s). Landing, landed, failed and rolled back play once and hold. Paused has no motion. Delight moments play once per event and are never queued or repeated.</p>
+    <p><b>Calming down.</b> After 60 s in a looping state every period doubles (one multiplier). After 5 min the still pose holds and the glyph beside the mark carries the state alone. A state change resets the clock.</p>
+  </div>
+</section>
+
+<section class="plain" id="spec">
+  <h2>Motion spec</h2>
+  <div class="tbl" id="specTable"></div>
+</section>
+
+<section class="plain" id="delight">
+  <h2>Delight that grows with use</h2>
+  <div class="states" id="delightGrid"></div>
+  <div class="prose">
+    <p><b>Thresholds.</b> Idle shows a second spark after 10 landings and a third after 100. The streak plays at 5 clean landings in a row. "Many" plays when 3 or more Lanes land in one batch. The re-forge plays once, at the 1,000th landing. The first-landing assembly plays once per project.</p>
+    <p><b>Counters are per project and local</b> (browser storage; no server call). Each moment plays once per event; a user who lands 50 times a day sees the strike 50 times and the re-forge once in their life. Nothing on this list loops, and nothing is always on.</p>
+  </div>
+</section>
+
+<section class="plain" id="cost">
+  <h2>Cost</h2>
+  <div class="panel cost"><b>Client-side only.</b> One inline SVG and one CSS file; no JavaScript per frame; no requests; 0 server calls at idle and at every state change (state comes from counts the top bar already has; delight counters are local). Paused when the tab is hidden or the mark is off screen. Favicon is the still 16 px cut and never follows state.<span class="live" id="costLive"></span></div>
+  <div class="prose">
+    <p><b>Budget for builders.</b> Shipped CSS ≤ 24 KB uncompressed (≤ 6 KB gzipped), SVG ≤ 1 KB each, 0 extra requests, 0 Convex calls, no per-frame script, no timers while idle (the CLI ticker runs only on a TTY and only while a state is live).</p>
+  </div>
+</section>
+
+<footer>Fable, 2026-11-07 · Issue 036b573c · the locked mark; see notes in design-md-section.md and build-slices.md beside this file.</footer>
+</div>
+<script>
+(function(){
+var html=document.documentElement;html.classList.add('js');
+var STATES=[
+ ['idle','idle'],['w1','working, 1 agent'],['wN','working, many'],['checks','checks running'],['overlap','overlap noticed'],['waiting','waiting on you'],['queued','queued'],
+ ['landing','landing',1],['landed','landed',1],['failed','failed',1],['rolledback','rolled back',1],['paused','paused']
+];
+var CAP={idle:'the approved F; a spark travels the top arm into the stem every 8 s',w1:'the lower arm reaches; blue runs tip → crossing → back',wN:'both arms reach out of phase; the tides meet in the stem',checks:'the lower tip detaches and goes round the arm, blue',overlap:'the arms close into one flag; amber breathes through it',waiting:'the top tip lifts off and hangs, amber, hovering',queued:'the lower arm waits short and inches; its tip a step apart',landing:'the strike: pull back, slam, flash, the stem rings; green floods out',landed:'the F holds green 600 ms, drains to crossing and arm; one spark runs down main',failed:'didn’t take: contact, the join goes red, the arm is pushed back out and rests in line, whole and orange',rolledback:'set aside: the arm leaves main as one piece and is lowered to the foot; grey root',paused:'the F lies down on its side; crossings dim; nothing moves'};
+var MEAN={idle:'nothing is moving; main is steady',w1:'one agent is editing in a Lane',wN:'several agents are editing',checks:'checks are running on a Lane',overlap:'two Lanes touch the same files',waiting:'a Lane is waiting for you',queued:'a Lane is waiting for its turn to land',landing:'a Lane is landing on main',landed:'it landed; main moved',failed:'the landing did not take; the work is whole',rolledback:'a landing was taken out of main on purpose; the work is kept',paused:'the project is paused'};
+var DELIGHT=[['first','first landing ever','the F assembles: arms fly in, crossings colour on contact, the stem flashes once'],['streak','5 clean in a row','one green wave runs through all six pieces and leaves'],['many','3 Lanes land together','both arms strike 90 ms apart; one swell; green floods the whole F'],['thousand','1,000th landing','the re-forge: every piece flies apart, turns, comes home; stem flash; green wave']];
+var CLI={idle:['┣━━','┣━━','┣━·','┣·━','┣━━'],w1:['┣━━','┣━━━','┣━━━━','┣━━━'],wN:['┣━━ ┣━━━','┣━━━ ┣━━','┣━━━━ ┣━'],checks:['┣━╸','┣━╹','┣╹━','┣╻━','┣━╻'],overlap:['┣━━','┣═━','┣══','┣▀▀'],waiting:['┣━▀','┣━▔','┣━▀','┣━━'],queued:['┣━ ╸','┣━╸','┣━ ╸'],landing:['┣━━','┣ ━━','┣','┃','┣━━ ✓'],landed:['┣━━ ✓','┢━━ ✓','┣━━ ✓'],failed:['┣━━','┣ ━━','┣━━','┣  ━━','┣  ━━ ✕'],rolledback:['┣━━ ✓','┣ ━━','┣  ━━','┃  ▁▁ ↺'],paused:['┣━━','━┻━']};
+var STILL={idle:'┣━━',w1:'┣━━━',wN:'┣━━ +2',checks:'┣━╹',overlap:'┣══',waiting:'┣━▀',queued:'┣━ ╸',landing:'┣━▸',landed:'┣━━ ✓',failed:'┣  ━━ ✕',rolledback:'┃  ▁▁ ↺',paused:'━┻━'};
+var LOG={idle:'|--',w1:'|-->',wN:'|--> x3',checks:'|..',overlap:'|==',waiting:'| --',queued:'|-- ..',landing:'|>',landed:'|-- ok',failed:'|-x',rolledback:'|<-',paused:':--'};
+var DCLI={first:'┏━━━━━━\n┣━━━━\n┃   first landing on main\n┗',streak:'┣━━ ✓ ✓ ✓ ✓ ✓   5 clean in a row',many:'┣━━\n┣━━     3 Lanes landed together\n┣━━   →  ┣━━ ✓ 3',thousand:'┏━━━━━━\n┣━━━━   1,000 landed\n┃\n┗'};
+var SPEC=[
+ ['idle','warm crossing opacity 1 → .62 → 1; one spark runs 36 px along the top arm into the stem and fades (2 or 3 sparks with use)','1.1 s + 2 s inside an 8 s cycle','ease-in-out; linear','yes, slow'],
+ ['working, 1','lower tip scaleX 1 → 1.25 → 1; blue tide tip (0 ms) → inner (300) → crossing (600)','2.4 s','ease-in-out','yes'],
+ ['working, many','working plus the top tip on a 3.1 s period, offset; the stem takes a faint blue at the meeting beat','2.4 / 3.1 s','ease-in-out','yes'],
+ ['checks','lower tip translates round the inner arm: up 13, left 10, down 26, back; blue tip and crossing','2.4 s','in-out (.77,0,.175,1)','yes'],
+ ['overlap','top arm +5 px, lower arm −5 px (they touch); amber tide on all arm pieces and both crossings','320 ms in; 2.4 s','ease (.2,.7,.2,1); ease-in-out','tide only'],
+ ['waiting','top tip −6 px, rotate −8° about its base; hovers 2 px; amber tip and crossing','320 ms in; 2.4 s','ease; ease-in-out','hover only'],
+ ['queued','lower arm scaleX .55, origin at the stem; inches to .62 at 80 %; tip +4 px','320 ms in; 2.4 s','ease','inch only'],
+ ['landing','arm +6 px (16 %) → scaleX 0 (30 %) → 1; crossing flash 100 ms then green; stem scaleX 1.14; green floods inner, tip, stem, top crossing, top arm at 400 → 900 ms','720 ms + flood to 1.2 s','ease-out (.23,1,.32,1); flood ease','never'],
+ ['landed','whole F green → drains from 400 ms; crossing and lower arm stay green; at 1.3 s one warm spark leaves the lower crossing and runs 22 px down main','900 ms drain + 1.1 s spark','ease; linear','never, holds'],
+ ['failed','arm +6 px (18 %) → contact at 0 (30 %): the lower crossing goes red in 80 ms, no flash, the stem does not ring → the arm and its crossing are pushed out to +16 px; the arm stays orange','700 ms','ease-out (.23,1,.32,1)','never, holds'],
+ ['rolled back','the arm and its crossing leave main as one piece to +16 px (45 %), then are lowered 18 px to the foot; the crossing turns grey in 300 ms','800 ms','in-out (.77,0,.175,1)','never, holds'],
+ ['paused','whole rotate −90° about the centre; crossings 60 %','320 ms','ease','no motion'],
+ ['first / 1,000th','arms fly in from (70, −14) and (70, −17) px with a small turn, 180 ms apart; crossings colour on contact; the stem flashes once (first); the re-forge adds every piece flying apart and back over 1.4 s, then a green wave','620 ms; 2.9 s','ease-out; in-out','never'],
+ ['streak','one green wave through crossing, inner, tip, stem, top crossing, top arm, 80 ms apart, then leaves','1.3 s','ease','never'],
+ ['many','both arms strike 90 ms apart; one swell; green floods the whole F','720 ms + flood','ease-out','never'],
+ ['16 px cut','the same poses in whole pixels with stepped timing: reach 1 → 2 px, orbit 2 and 3 px, flag 1 and 2 px, lift 3 px, short arm, push-out 5 px, set-aside (5, 4) px, lie-down 90°','same durations','steps(1..4)','as above'],
+ ['reduced motion','every state is its end pose, still; state changes are instant','0','none','no'],
+ ['after 60 s','every looping period doubles (one multiplier); after 5 min the still pose holds','×2','same','slower, then no']
+];
+
+var tpl64=document.getElementById('tpl-64').content.querySelector('svg'), tpl16=document.getElementById('tpl-16').content.querySelector('svg');
+var all=[];
+function mark(state,size,cut,still,extra){
+  var svg=(cut==='16'?tpl16:tpl64).cloneNode(true);
+  if(still)svg.classList.add('still');if(extra)extra.split(' ').forEach(function(c){if(c)svg.classList.add(c);});
+  svg.setAttribute('width',size);svg.setAttribute('height',size);
+  svg.dataset.state=state||'idle';
+  all.push(svg);return svg;
+}
+function replay(svg){if(!svg.getAnimations)return;svg.getAnimations({subtree:true}).forEach(function(a){try{a.cancel();a.play();}catch(e){}});}
+function replayAll(root){root.querySelectorAll('svg').forEach(replay);}
+function el(tag,cls,html){var e=document.createElement(tag);if(cls)e.className=cls;if(html!=null)e.innerHTML=html;return e;}
+function esc(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;');}
+function sz(label,svg,cls){var d=el('div','sz'+(cls?' '+cls:''));d.appendChild(svg);d.appendChild(el('span',null,label));return d;}
+function clickable(node,label){node.setAttribute('tabindex','0');node.setAttribute('role','button');node.setAttribute('aria-label','Replay '+(label||''));node.addEventListener('click',function(){replayAll(node);});node.addEventListener('keydown',function(e){if(e.key==='Enter'||e.key===' '){e.preventDefault();replayAll(node);}});}
+function frames(fr){return '<span class="fr" data-frames=\''+esc(JSON.stringify(fr))+'\'></span>';}
+function labelOf(k){var s=STATES.filter(function(x){return x[0]===k;})[0];if(s)return s[1];var d=DELIGHT.filter(function(x){return x[0]===k;})[0];return d?d[1]:k;}
+function cellFor(st,label,cap,once,sizes,still,uses){
+  var c=el('div','cell');
+  if(sizes.length===1){var b=el('div','mkbox');b.appendChild(mark(st,sizes[0],sizes[0]==='16'?'16':null,still,uses));c.appendChild(b);}
+  else{var pr=el('div','pair');sizes.forEach(function(s){pr.appendChild(mark(st,s,s==='16'?'16':null,still,uses));});c.appendChild(pr);}
+  c.appendChild(el('p','st','<b>'+label+'</b>'+(cap?'<br>'+cap:'')));
+  clickable(c,label);return c;
+}
+
+/* ===== stage ===== */
+(function hero(){
+  var big=mark('idle',512),slot=document.getElementById('heroSlot'),now=document.getElementById('now');
+  slot.replaceWith(big);
+  var stateChips=document.getElementById('stateChips'),more=document.getElementById('moreChips');
+  function press(group,key){group.querySelectorAll('.chip[data-set]').forEach(function(c){c.setAttribute('aria-pressed',c.dataset.set===key?'true':'false');});}
+  function setState(st,lab){press(stateChips,st);press(more,st);now.textContent=lab;if(big.dataset.state===st)replay(big);else big.dataset.state=st;}
+  STATES.forEach(function(s){var c=el('button','chip'+(s[2]?' once':''),s[1]);c.type='button';c.dataset.set=s[0];c.setAttribute('aria-pressed',s[0]==='idle');c.addEventListener('click',function(){setState(s[0],s[1]);});stateChips.appendChild(c);});
+  DELIGHT.forEach(function(d){var c=el('button','chip once',d[1]);c.type='button';c.dataset.set=d[0];c.addEventListener('click',function(){setState(d[0],d[1]);});more.appendChild(c);});
+  var calmB=el('button','chip','Calm');calmB.type='button';calmB.setAttribute('aria-pressed','false');calmB.addEventListener('click',function(){var on=big.classList.toggle('calm');calmB.setAttribute('aria-pressed',on?'true':'false');});
+  more.appendChild(calmB);
+  more.appendChild(el('span','lab','Uses:'));
+  [['','1'],['u2','10+'],['u3','100+']].forEach(function(u){var c=el('button','chip',u[1]);c.type='button';c.dataset.uses=u[0];c.setAttribute('aria-pressed',u[0]==='');c.addEventListener('click',function(){big.classList.remove('u2','u3');if(u[0])big.classList.add(u[0]);more.querySelectorAll('.chip[data-uses]').forEach(function(x){x.setAttribute('aria-pressed',x===c?'true':'false');});if(big.dataset.state==='idle')replay(big);});more.appendChild(c);});
+  big.addEventListener('click',function(){replay(big);});
+})();
+
+/* ===== every state at four sizes ===== */
+(function(){
+  var root=document.getElementById('cards');
+  STATES.forEach(function(s,i){
+    var k=s[0],card=el('div','card');
+    card.appendChild(el('h3',null,'<span class="n">'+(i+1)+'</span>'+esc(s[1])+(s[2]?'<span class="once">plays once</span>':'')));
+    card.appendChild(el('p','cap',esc(MEAN[k])+'. '+esc(CAP[k].charAt(0).toUpperCase()+CAP[k].slice(1))+'.'));
+    var row=el('div','row');
+    row.appendChild(sz('512 geometry',mark(k,512),'big'));
+    row.appendChild(sz('64',mark(k,64)));
+    row.appendChild(sz('32',mark(k,32)));
+    row.appendChild(sz('16',mark(k,16,'16')));
+    var st=sz('still',mark(k,48,null,true));st.classList.add('gap');row.appendChild(st);
+    row.appendChild(sz('still 16',mark(k,16,'16',true)));
+    clickable(row,s[1]);card.appendChild(row);
+    card.appendChild(el('p','f','<b>'+frames(CLI[k])+'</b> <span>· still '+esc(STILL[k])+' · log '+esc(LOG[k])+'</span>'));
+    root.appendChild(card);
+  });
+  var bigB=document.getElementById('big');
+  bigB.addEventListener('click',function(){var on=html.classList.toggle('big512');bigB.setAttribute('aria-pressed',on?'true':'false');bigB.textContent=on?'Show at 128':'Show at 512';});
+})();
+
+/* ===== stills ===== */
+(function(){var g=document.getElementById('stillGrid');STATES.forEach(function(s){g.appendChild(cellFor(s[0],s[1],null,0,['48','16'],true));});})();
+
+/* ===== CLI ===== */
+(function(){
+  document.getElementById('cliSample').innerHTML='<span class="p">$</span> nforge agent . status\n<span class="b">┃</span>   <span class="dim">main</span>      accepted 12 min ago · passing\n'+
+   '<span class="b">'+frames(CLI.landed)+'</span> 7f3a      <span class="ok">landed</span>    12 files                   <span class="ok">✓</span>\n'+
+   '<span class="b">'+frames(CLI.w1)+'</span> 9c12      <span class="ac">working</span>   agent-3 · seen 40 s        <span class="ac">●</span>\n'+
+   '<span class="b">'+frames(CLI.checks)+'</span> 51e0      <span class="ac">checking</span>  4 shards · 1 min 10 s      <span class="ac">●</span>\n'+
+   '<span class="b">'+frames(CLI.waiting)+'</span> 3b7e      <span class="wa">waiting</span>   overlap on web/src/app.tsx <span class="wa">◷</span>\n'+
+   '<span class="b">'+frames(CLI.failed)+'</span> a8d1      <span class="no">failed</span>    tests/api.test.ts          <span class="no">✕</span>\n'+
+   '<span class="b">'+frames(CLI.rolledback)+'</span> c05d      <span class="dim">rolled back</span> by you · 3 min ago      <span class="dim">↺</span>';
+  var t='<table><thead><tr><th>State</th><th>Live (TTY)</th><th>Frames, 550 ms each</th><th>Still (TTY)</th><th>Logs, non-TTY</th></tr></thead><tbody>';
+  STATES.forEach(function(s){var fr=CLI[s[0]];t+='<tr><td class="k">'+s[1]+'</td><td class="f">'+frames(fr)+'</td><td class="f"><span class="seq">'+fr.map(function(f){return '<i>'+esc(f)+'</i>';}).join(' · ')+'</span></td><td class="f">'+esc(STILL[s[0]])+'</td><td class="f">'+esc(LOG[s[0]])+'</td></tr>';});
+  document.getElementById('cliTable').innerHTML=t+'</tbody></table>';
+  document.getElementById('cliDelight').innerHTML='<span class="p">#</span> delight, printed once, never on a loop\n'+Object.keys(DCLI).map(function(k){return '<span class="dim">'+k+'</span>\n<span class="b">'+esc(DCLI[k])+'</span>';}).join('\n');
+})();
+
+/* ===== story players ===== */
+(function(){
+  var m=mark('idle',256),slot=document.getElementById('storySlot'),now=document.getElementById('storyNow'),chips=document.getElementById('storyChips');
+  slot.replaceWith(m);
+  var timer=null;
+  var STORIES=[
+   ['A Lane’s life',[['idle',1600],['w1',2600],['wN',3200],['checks',2600],['overlap',2600],['waiting',2600],['queued',2200],['landing',1500],['landed',3000],['idle',0]]],
+   ['Then it fails',[['idle',1200],['w1',2600],['checks',2600],['landing',260],['failed',2400],['rolledback',2200],['idle',0]]],
+   ['A busy day',[['idle',1200],['wN',2800],['checks',2200],['many',2600],['idle',1400],['w1',1800],['landing',1500],['landed',2600],['streak',2200],['idle',0]]]
+  ];
+  function run(name,seq){if(timer)clearTimeout(timer);var i=0;function step(){var s=seq[i];var last=i===seq.length-1;now.textContent=(last?'':name+' · ')+labelOf(s[0]);if(m.dataset.state===s[0])replay(m);else m.dataset.state=s[0];i++;if(i<seq.length)timer=setTimeout(step,s[1]);else timer=null;}step();}
+  STORIES.forEach(function(st){var b=el('button','chip story',st[0]);b.type='button';b.addEventListener('click',function(){run(st[0],st[1]);});chips.appendChild(b);});
+  var stop=el('button','chip','Stop');stop.type='button';stop.addEventListener('click',function(){if(timer)clearTimeout(timer);timer=null;m.dataset.state='idle';now.textContent='idle';});chips.appendChild(stop);
+  m.addEventListener('click',function(){replay(m);});
+})();
+
+/* ===== motion spec ===== */
+(function(){var t='<table><thead><tr><th>State</th><th>What moves</th><th>Duration</th><th>Easing</th><th>Loops</th></tr></thead><tbody>';SPEC.forEach(function(r){t+='<tr><td class="k">'+r[0]+'</td><td>'+r[1]+'</td><td>'+r[2]+'</td><td>'+r[3]+'</td><td>'+r[4]+'</td></tr>';});document.getElementById('specTable').innerHTML=t+'</tbody></table>';})();
+
+/* ===== delight ===== */
+(function(){
+  var g=document.getElementById('delightGrid');
+  g.appendChild(cellFor('idle','idle, day one','one spark',0,['64']));
+  g.appendChild(cellFor('idle','idle after 10 landings','a second spark on the lower arm',0,['64'],false,'u2'));
+  g.appendChild(cellFor('idle','idle after 100 landings','three sparks, never in step',0,['64'],false,'u3'));
+  g.appendChild(cellFor('landed','every landing','throws one spark down main',1,['64']));
+  DELIGHT.forEach(function(d){g.appendChild(cellFor(d[0],d[1],d[2],1,['64']));});
+})();
+
+document.querySelectorAll('[data-mk]').forEach(function(slot){slot.replaceWith(mark(slot.dataset.mk,slot.dataset.size,slot.dataset.cut));});
+
+/* CLI frame ticker: one interval for the whole page, paused when hidden; reduced motion shows the still (last frame) */
+var frs=[].slice.call(document.querySelectorAll('.fr')),tick=0;
+frs.forEach(function(f){f._f=JSON.parse(f.dataset.frames);f.textContent=f._f[f._f.length-1];});
+setInterval(function(){if(document.hidden||html.classList.contains('mk-reduced'))return;tick++;frs.forEach(function(f){var n=f._f.length,i=tick%(n+3);f.textContent=f._f[Math.min(i,n-1)];});},550);
+/* pause when hidden or off screen */
+document.addEventListener('visibilitychange',function(){html.classList.toggle('mk-hidden',document.hidden);count();});
+if('IntersectionObserver' in window){var io=new IntersectionObserver(function(entries){entries.forEach(function(en){en.target.classList.toggle('off',!en.isIntersecting);});count();},{rootMargin:'80px'});all.forEach(function(s){io.observe(s);});}
+var live=document.getElementById('live');
+function count(){var n=document.querySelectorAll('.mk:not(.off)').length;live.textContent=(document.hidden?'Tab hidden: all paused. ':'')+'Every animation is CSS, client-side only, and pauses when its mark is off screen or the tab is hidden. On screen now: '+n+' of '+all.length+' marks.';}
+count();
+/* measured sizes, from the verbatim copies on this page */
+var cssText=document.querySelector('style[data-css="mark"]').textContent,cut=cssText.indexOf('/* ==== 16 px cut');
+var css=new Blob([cssText]).size,css16=new Blob([cssText.slice(cut)]).size,svg64=new Blob([tpl64.outerHTML]).size,svg16=new Blob([tpl16.outerHTML]).size;
+document.getElementById('costLive').textContent='Measured on this page, uncompressed: mark.svg '+svg64+' B; mark-16.svg '+svg16+' B; mark.css '+css+' B ('+(css/1024).toFixed(1)+' KB, of which the 16 px section is '+css16+' B). Shipped set: '+((svg64+svg16+css)/1024).toFixed(1)+' KB. Requests made by the mark: 0. Convex calls: 0.';
+/* theme and motion toggles */
+var themes=['system','dark','light'],ti=0,tb=document.getElementById('theme');
+tb.addEventListener('click',function(){ti=(ti+1)%3;var t=themes[ti];if(t==='system')html.removeAttribute('data-theme');else html.dataset.theme=t;tb.textContent='Theme: '+t;tb.setAttribute('aria-pressed',t!=='system');});
+var mq=matchMedia('(prefers-reduced-motion: reduce)'),motions=['system','full','reduced'],mi=0,mb=document.getElementById('motion');
+function applyMotion(){var m=motions[mi];var reduced=m==='reduced'||(m==='system'&&mq.matches);html.classList.toggle('mk-reduced',reduced);html.classList.toggle('mk-motion-full',m==='full');mb.textContent='Motion: '+m+(m==='system'?(mq.matches?' (reduced)':' (full)'):'');mb.setAttribute('aria-pressed',m!=='system');if(reduced)frs.forEach(function(f){f.textContent=f._f[f._f.length-1];});}
+mb.addEventListener('click',function(){mi=(mi+1)%3;applyMotion();});mq.addEventListener('change',applyMotion);applyMotion();
+})();
+</script>
+</body>
+</html>

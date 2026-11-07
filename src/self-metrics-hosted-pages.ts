@@ -41,6 +41,8 @@ const rowSchemas = {
     path: z.literal('after-retry').optional(),
     attemptId: z.string().optional(),
     inputPin: pin,
+    reused: z.boolean().optional(),
+    revision: z.number().int().nonnegative().nullable().optional(),
   }),
   requests: z.object({
     id: z.string(),
@@ -111,6 +113,19 @@ const rowSchemas = {
   operations: z.object({ id: z.string(), mutation: mutation.optional() }),
   receipts: metricReceiptRowSchema,
 };
+const audits = z.object({
+  events: z
+    .array(
+      z.object({
+        kind: z.enum(['red', 'green', 'flake', 'stalled', 'culprit']),
+        at: stamp,
+        sequence: z.number().int().nonnegative(),
+        culprit: z.string().optional(),
+      }),
+    )
+    .max(100),
+  complete: z.boolean(),
+});
 const gaps = ['Hosted overlap acknowledgements and authority observations need durable coverage.'];
 /** `runsOnly` reads the runs stream alone (about one call per 100 check runs), with one day of
  * context and no bills, placement or input hydration: enough for the flake list (Issue d710663d). */
@@ -179,6 +194,7 @@ export async function readHostedMetricPages(
             cutover: nullableStamp,
             authority: sourceAuthoritySchema,
             coverage: z.record(z.string(), nullableStamp).optional(),
+            audits: audits.optional(),
           })
           .parse(typeof raw === 'string' ? JSON.parse(raw) : raw);
         invariant(
@@ -207,8 +223,11 @@ export async function readHostedMetricPages(
               kind: row.kind,
               path: row.path,
               ...(row.attemptId ? { attemptId: row.attemptId } : {}),
+              ...(row.reused ? { reused: true } : {}),
+              ...(row.revision != null ? { revision: row.revision } : {}),
               inputs: [],
             });
+            if (row.reused === undefined) records.reuseUnprojected = true;
             records.finishTimings!.push({
               id: row.id,
               at: row.at,
@@ -283,6 +302,7 @@ export async function readHostedMetricPages(
           }
         }
         if (page.coverage) receiptCoverage = page.coverage;
+        if (page.audits) records.mainAudits = page.audits;
         if (summary && !page.isDone) {
           records.surfaceGaps!.push(
             `Status read one hosted ${stream} page; use metrics for the remaining records.`,

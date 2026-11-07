@@ -23,6 +23,7 @@ export function metricValues(t: MetricTotals): Record<keyof typeof metricNames, 
         ),
       ].join('; ') || 'unknown',
     R: t.R.sources.map(s => `${s.source}: ${number(s.minutes)}`).join('; '),
+    B: `${number(t.B.reuseAcceptances)} reuse acceptances; ${number(t.B.mainCheckFailures)} main-check failures (${number(t.B.failuresAfterReuse)} after reuse, ${number(t.B.flakeCleared)} flake, ${number(t.B.culprits)} culprits, ${number(t.B.reuseCulprits)} on reuse)`,
   };
 }
 const cell = (value: string) => value.replace(/\|/g, '\\|').replace(/[\r\n]/g, ' ');

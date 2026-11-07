@@ -6,6 +6,7 @@ import { installRoutes } from './shell/location';
 import { AppLoader } from './ui/AppLoader';
 import { NavigationGuard } from './ui/NavigationGuard';
 import './ui/loader.css';
+import './shell/mark.css';
 import { createRoot } from 'react-dom/client';
 
 import './legacy.css';

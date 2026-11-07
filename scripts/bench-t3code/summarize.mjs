@@ -7,10 +7,10 @@
 //   node scripts/bench-t3code/summarize.mjs [--dry] > summary.json
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { homedir } from 'node:os';
+import { benchRootOrExit } from './bench-root.mjs';
 import { summarizeRunners, runnerFairness } from './runners.mjs';
 
-const B = process.env.BENCH_ROOT || join(homedir(), 'NanthAI/forge-bench/b15d');
+const B = benchRootOrExit();
 const dry = process.argv.includes('--dry');
 const median = xs => {
   const v = xs.filter(x => x != null).sort((a, b) => a - b);

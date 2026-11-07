@@ -7,15 +7,17 @@ import { promisify } from 'node:util';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { homedir, tmpdir } from 'node:os';
+import { tmpdir } from 'node:os';
 import { agentOf, CLAUDE, CODEX } from './agent.mjs';
 import { parseMirror } from './pin.mjs';
+import { freezePath, productCli } from './cli-install.mjs';
 
 const run = promisify(execFile);
 const FORGE = 'NanthAI/nanthai-forge';
 export const HARNESS_DIR = import.meta.dirname;
-// The lead's CLI updater skips swapping forge-cli/current while this file exists.
-export const FREEZE = join(homedir(), 'NanthAI/forge-cli/.freeze');
+/** The measurement hold of the CLI installation config.forge.cli belongs to (cli-install.mjs):
+ * while it exists the product CLI holds land/finish and does not update itself. */
+export const benchFreeze = config => freezePath(productCli({ config }));
 const out = async (cmd, args, opts = {}) =>
   (await run(cmd, args, { maxBuffer: 64 << 20, ...opts })).stdout.trim();
 const safe = async (fn, fallback = null) => {
@@ -171,7 +173,7 @@ export async function snapshot(config) {
       });
       return version ? `${a.provider} ${a.model} ${a.effort} ${version}` : null;
     }),
-    freeze: existsSync(FREEZE),
+    freeze: await safe(() => existsSync(benchFreeze(config)), false),
   };
 }
 
@@ -213,7 +215,7 @@ export function snapshotProblems(s, { requireFreeze, liveMain = false }) {
     p.push(`deployed convex/ (${s.deploy?.headSha?.slice(0, 12)}) differs from the CLI commit's convex/`);
   if (!s.checkWorkflow.forge || !s.checkWorkflow.github) p.push('check workflow version unreadable');
   if (!s.agent) p.push('agent CLI --version unreadable');
-  if (requireFreeze && !s.freeze) p.push(`freeze file ${FREEZE} missing`);
+  if (requireFreeze && !s.freeze) p.push(`freeze file (.freeze of the CLI installation) missing`);
   return p;
 }
 

@@ -1,0 +1,13 @@
+<svg class="mk c64" viewBox="0 0 64 64" width="64" height="64" aria-hidden="true" data-state="idle" xmlns="http://www.w3.org/2000/svg">
+  <g class="whole">
+    <path class="stem" d="M8 6H20V40.5H8Z"/>
+    <path class="stemB" d="M8 40H20V58H14L8 52Z"/>
+    <g class="armT"><rect class="arm aTi" x="8" y="6" width="26.6" height="12"/><path class="arm aTo" d="M34 6H58L52 18H34Z"/></g>
+    <rect class="xT" x="8" y="6" width="12" height="12"/>
+    <g class="armL"><rect class="arm aLi" x="8" y="28" width="22.6" height="12"/><path class="arm aLo" d="M30 28H48L42 40H30Z"/></g>
+    <rect class="xL" x="8" y="28" width="12" height="12"/>
+    <circle class="sp sp1" cx="54" cy="12" r="2.4"/>
+    <circle class="sp sp2" cx="44" cy="34" r="2.6"/>
+    <circle class="sp sp3" cx="50" cy="12" r="1.8"/>
+  </g>
+</svg>

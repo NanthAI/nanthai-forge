@@ -7,9 +7,11 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { homedir, loadavg } from 'node:os';
+import { loadavg } from 'node:os';
+import { benchRoot as requiredBenchRoot } from './bench-root.mjs';
+import { productCli } from './cli-install.mjs';
 import { checkPlan, DESIGN, batches, loadTasks, schedule, repNs } from './plan.mjs';
-import { snapshot, snapshotProblems, pinProblems, forgeInFlight, FREEZE } from './versions.mjs';
+import { snapshot, snapshotProblems, pinProblems, forgeInFlight, benchFreeze } from './versions.mjs';
 import { hostedQueueEntries } from './drain.mjs';
 import { usageGate, diskFreeGb, diskNeed, filesystemEventGate } from './gates.mjs';
 import { probeFilesystemEvents } from '../filesystem-event-health.mjs';
@@ -26,12 +28,15 @@ import { SETUP_COMMAND } from './env.mjs';
 /** What to tell the operator when a piece of the bench environment is missing. */
 export const setupHint = step => ` (missing? ${SETUP_COMMAND} --dry names step "${step}" and what it costs)`;
 
-export async function main({
-  benchRoot = process.env.BENCH_ROOT || join(homedir(), 'NanthAI/forge-bench/b15d'),
-  filesystemProbe = probeFilesystemEvents,
-  log = console.log,
-} = {}) {
-  const B = benchRoot;
+export async function main({ benchRoot, filesystemProbe = probeFilesystemEvents, log = console.log } = {}) {
+  let B;
+  try {
+    B = benchRoot ?? requiredBenchRoot();
+  } catch (error) {
+    log(`NO-GO bench root: ${error.message}`);
+    log('NO-GO (1): bench root');
+    return 1;
+  }
   // Fail before network probes or any benchmark work when local event delivery is unhealthy.
   const workspaceVolume = join(B, 'ws');
   mkdirSync(workspaceVolume, { recursive: true });
@@ -108,32 +113,36 @@ export async function main({
       : `CLI ${s.cli.commit?.slice(0, 12)} = GitHub main; deploy ${s.deploy?.headSha?.slice(0, 12)} convex/ = CLI convex/; agent ${s.agent}`,
     dry && !snapshotProblems(s, { requireFreeze: false, liveMain: true }).length,
   );
-  const freezeText = existsSync(FREEZE) ? readFileSync(FREEZE, 'utf8').trim() : null;
-  check(
-    'freeze',
-    !freezeText || !staleBenchFreeze(freezeText),
-    !freezeText
-      ? `${FREEZE} absent; the driver holds it for each batch (first cell start to last grade) and releases it between batches`
-      : staleBenchFreeze(freezeText)
-        ? `stale bench freeze (${freezeText}): its process is gone; the driver removes it at start`
-        : `held: ${freezeText}`,
-    Boolean(freezeText && staleBenchFreeze(freezeText)),
-  );
+  let FREEZE = null;
+  await tryRun('cli install', () => {
+    const cli = productCli({ config });
+    FREEZE = benchFreeze(config);
+    check('cli install', true, `${cli.build} (${cli.via}); measurement hold ${FREEZE}`);
+  });
+  const freezeText = FREEZE && existsSync(FREEZE) ? readFileSync(FREEZE, 'utf8').trim() : null;
+  if (FREEZE)
+    check(
+      'freeze',
+      !freezeText || !staleBenchFreeze(freezeText),
+      !freezeText
+        ? `${FREEZE} absent; the driver holds it for each batch (first cell start to last grade) and releases it between batches`
+        : staleBenchFreeze(freezeText)
+          ? `stale bench freeze (${freezeText}): its process is gone; the driver removes it at start`
+          : `held: ${freezeText}`,
+      Boolean(freezeText && staleBenchFreeze(freezeText)),
+    );
   await tryRun('landing hold', () => {
-    const wrapper = join(homedir(), '.npm-global/bin/nforge');
-    const laneSh = join(homedir(), 'NanthAI/forge-phase5/agents/tools/lane.sh');
-    const holds = [wrapper, laneSh].map(f => [
-      f,
-      existsSync(f) && readFileSync(f, 'utf8').includes('forge-cli/.freeze'),
-    ]);
+    // The product CLI holds land/finish and its own updates while the installation's .freeze
+    // exists (src/cli-measurement-hold.ts, docs/operations/cli-update.md).
+    const cli = productCli({ config });
+    const held = Boolean(cli.installation) && existsSync(join(cli.build, 'dist', 'cli-measurement-hold.js'));
     check(
       'landing hold',
-      holds.every(([, ok]) => ok),
-      holds
-        .map(
-          ([f, ok]) => `${f.split('/').slice(-1)[0]} ${ok ? 'waits on .freeze' : 'does NOT wait on .freeze'}`,
-        )
-        .join('; ') + ' (bench agents call the CLI by path and are not held)',
+      held,
+      (held
+        ? `the installed CLI holds land/finish and updates while ${join(cli.installation, '.freeze')} exists`
+        : `${cli.build} is ${cli.installation ? 'a build without the measurement hold' : 'not part of a product installation'}: landings would not wait`) +
+        ' (bench agents call the CLI by path and are not held)',
     );
   });
   const pp = await pinProblems(s.harness);

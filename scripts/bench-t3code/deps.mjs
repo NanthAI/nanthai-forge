@@ -16,7 +16,7 @@ import { execFileSync, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, readFileSync, symlinkSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { benchRootOrExit } from './bench-root.mjs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
@@ -157,7 +157,7 @@ export function buildSharedDeps(benchRoot, checkout, installer) {
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href && process.argv[2] === 'build') {
-  const benchRoot = process.env.BENCH_ROOT || join(homedir(), 'NanthAI/forge-bench/b15d');
+  const benchRoot = benchRootOrExit();
   const config = JSON.parse(readFileSync(join(benchRoot, 'config.json'), 'utf8'));
   console.log(buildSharedDeps(benchRoot, config.baseCheckout, process.argv[3]));
 }

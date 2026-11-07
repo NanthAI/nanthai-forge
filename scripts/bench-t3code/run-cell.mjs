@@ -14,7 +14,8 @@
 // recorded on that task; the cell continues. Results are write-once.
 import { mkdirSync, writeFileSync, readFileSync, existsSync, rmSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
-import { homedir, loadavg } from 'node:os';
+import { loadavg } from 'node:os';
+import { benchRootOrExit } from './bench-root.mjs';
 import { launchAgent, agentOf, killAgents } from './agent.mjs';
 import { prompt } from './prompt.mjs';
 import * as github from './github-arm.mjs';
@@ -26,7 +27,14 @@ import { cellFinished } from './oracle-branches.mjs';
 import { attribute, gitShow } from './attribution.mjs';
 import { sharedDeps, linkDepsAsync } from './deps.mjs';
 import { loadTasks, schedule, cellKey } from './plan.mjs';
-import { snapshot, differences, snapshotProblems, pinProblems, forgeInFlight, FREEZE } from './versions.mjs';
+import {
+  snapshot,
+  differences,
+  snapshotProblems,
+  pinProblems,
+  forgeInFlight,
+  benchFreeze,
+} from './versions.mjs';
 import { startSampler, rateLimit, clockOffsets } from './samplers.mjs';
 import { keepTranscript, readSession } from './transcripts.mjs';
 import { scanTask } from './contamination.mjs';
@@ -41,7 +49,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { rm } from 'node:fs/promises';
 
-const B = process.env.BENCH_ROOT || join(homedir(), 'NanthAI/forge-bench/b15d');
+const B = benchRootOrExit();
 const config = JSON.parse(readFileSync(join(B, 'config.json'), 'utf8'));
 const [arm, nText, repText, ...flags] = process.argv.slice(2);
 const flag = name => (flags.includes(name) ? flags[flags.indexOf(name) + 1] : null);
@@ -147,8 +155,9 @@ process.on('unhandledRejection', e => crash(String(e?.stack ?? e).slice(0, 800))
 for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP'])
   process.on(signal, () => crash(`interrupted by ${signal}`));
 
-// The cell holds the CLI freeze for its whole run (the updater would swap forge-cli/current and
-// delete the old build mid-cell); the driver may already hold it. Released on every exit.
+// The cell holds the CLI installation's measurement hold for its whole run (the product updater
+// would switch `current` mid-cell); the driver may already hold it. Released on every exit.
+const FREEZE = benchFreeze(config);
 const ownsFreeze = !existsSync(FREEZE);
 if (ownsFreeze) writeFileSync(FREEZE, `bench cell ${cellId} pid ${process.pid}\n`);
 process.on('exit', () => {

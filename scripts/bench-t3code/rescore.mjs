@@ -5,13 +5,13 @@
 // Keeps the original as result.before-rescore.json.
 import { readFileSync, writeFileSync, existsSync, copyFileSync, mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { homedir } from 'node:os';
+import { benchRootOrExit } from './bench-root.mjs';
 import { forgeArm } from './forge-arm.mjs';
 import { landingFields, cellSummary } from './score.mjs';
 
 const [cellId, reason] = process.argv.slice(2);
 if (!cellId || !reason) throw Error('usage: rescore.mjs CELL_ID "why"');
-const B = process.env.BENCH_ROOT || join(homedir(), 'NanthAI/forge-bench/b15d');
+const B = benchRootOrExit();
 const config = JSON.parse(readFileSync(join(B, 'config.json'), 'utf8'));
 const dir = join(B, 'runs', cellId);
 const result = JSON.parse(readFileSync(join(dir, 'result.json'), 'utf8'));

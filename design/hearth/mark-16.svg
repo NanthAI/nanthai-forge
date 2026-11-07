@@ -1,0 +1,12 @@
+<svg class="mk c16" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" data-state="idle" shape-rendering="crispEdges" xmlns="http://www.w3.org/2000/svg">
+  <g class="whole">
+    <rect class="stem" x="2" y="1" width="3" height="10"/>
+    <rect class="stemB" x="2" y="11" width="3" height="4"/>
+    <g class="armT"><rect class="arm armTi" x="2" y="1" width="8" height="3"/><rect class="arm armTo" x="10" y="1" width="4" height="3"/></g>
+    <rect class="xT" x="2" y="1" width="3" height="3"/>
+    <g class="armL"><rect class="arm armLi" x="2" y="7" width="5" height="3"/><rect class="arm armLo" x="7" y="7" width="4" height="3"/></g>
+    <rect class="xL" x="2" y="7" width="3" height="3"/>
+    <rect class="sp sp1" x="12" y="2" width="1" height="1"/>
+    <rect class="sp sp2" x="10" y="8" width="1" height="1"/>
+  </g>
+</svg>

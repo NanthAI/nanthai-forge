@@ -16,6 +16,8 @@ import {
   sumCosts,
   versionAtLeast,
   SETUP_COMMAND,
+  benchCheckDigest,
+  FORGE_RUNNER,
 } from '../scripts/bench-t3code/env.mjs';
 import { parseArgs } from '../scripts/bench-t3code/setup.mjs';
 import { repository, rulesetName } from '../scripts/bench-t3code/github-arm.mjs';
@@ -117,7 +119,8 @@ function fakeContext(B, flags = {}, world = {}) {
   };
   return { ctx, calls, lines, world: w };
 }
-const MUTATING = /^(gh (repo|api -X)|git .*(push|clone|fetch|remote add)|\S*node .* host )/;
+const MUTATING =
+  /^(gh (repo|api -X)|git .*(push|clone|fetch|remote add)|\S*node .* host |\S*node .* x .* (configure-check|configure-runner|set-policy) )/;
 
 test('versionAtLeast compares left to right', () => {
   assert.ok(versionAtLeast('v24.22.1', [24, 22, 1]));
@@ -178,6 +181,7 @@ test('dry run: prints every step with its cost, creates nothing, makes no mutati
     'deps',
     'fork',
     'forge-project',
+    'forge-check',
     'dogfood',
   ])
     assert.match(text, new RegExp(`\\] ${id}:`), id);
@@ -487,7 +491,7 @@ test('every step has an id, a title, commands and a complete cost (no hidden spe
   }
   assert.deepEqual(
     steps.filter(s => s.outward).map(s => s.id),
-    ['fork', 'forge-project'],
+    ['fork', 'forge-project', 'forge-check'],
   );
 });
 
@@ -514,4 +518,76 @@ test('base step: a bundle that does not advertise the bare commit id is fetched 
   const f = fakeContext(B, { baseSource: '/src/base.bundle' }, { refusesBareSha: true });
   assert.equal((await runSetup(f.ctx, { only: ['base'] })).ok, true, f.lines.join('\n'));
   assert.ok(f.calls.some(c => c.includes('fetch -q -- /src/base.bundle +refs/*:refs/bench/source/*')));
+});
+
+/** A bench whose config names a hosted project, with a fake check-settings reply. */
+function hostedBench({ own, settings }) {
+  const B = bench();
+  const cfg = JSON.parse(readFileSync(join(B, 'config.json'), 'utf8'));
+  cfg.forge.projectId = 'p'.repeat(32);
+  writeFileSync(join(B, 'config.json'), JSON.stringify(cfg));
+  mkdirSync(join(B, 'work/forge-owner/.forge'), { recursive: true });
+  if (own)
+    record(B, {
+      step: 'forge-project',
+      kind: 'forge-project',
+      ref: 'p',
+      state: 'created',
+      projectId: cfg.forge.projectId,
+    });
+  const f = fakeContext(B);
+  let current = settings;
+  const writes = [];
+  const base = f.ctx.sh;
+  f.ctx.sh = (c, a, o) => {
+    if (a[1] === 'x') {
+      writes.push(a[3]);
+      if (a[3] === 'configure-check')
+        current = { ...current, definitions: [{ name: 'verify', definition: benchCheckDigest() }] };
+      if (a[3] === 'configure-runner')
+        current = {
+          ...current,
+          runner: {},
+          actions: { repository: FORGE_RUNNER.repository, runsOn: 'ubuntu-latest' },
+        };
+      if (a[3] === 'set-policy') current = { ...current, agentLandsOnPass: true };
+      return '{}';
+    }
+    return base(c, a, o);
+  };
+  f.ctx.tryRun = (c, a) => {
+    f.calls.push(`${c} ${a.join(' ')}`);
+    return a[3] === 'check-settings' ? JSON.stringify({ result: current }) : null;
+  };
+  return { B, f, writes };
+}
+const fresh = {
+  definitions: [],
+  runner: null,
+  actions: null,
+  checkCallbackConfigured: true,
+  agentLandsOnPass: false,
+};
+
+test('forge-check: dry reads check-settings only; live configures check, runner and acceptance once', async () => {
+  const dry = hostedBench({ own: true, settings: fresh });
+  await runSetup(dry.f.ctx, { dry: true, only: ['forge-check'] });
+  assert.deepEqual(dry.writes, []);
+  assert.match(dry.f.lines.join('\n'), /to configure: check, runner, acceptance/);
+  assert.match(dry.f.lines.join('\n'), /bash \.bench\/ci\.sh/);
+  const live = hostedBench({ own: true, settings: fresh });
+  const r = await runSetup(live.f.ctx, { only: ['forge-check'] });
+  assert.equal(r.ok, true, live.f.lines.join('\n'));
+  assert.deepEqual(live.writes, ['configure-check', 'configure-runner', 'set-policy']);
+  const again = await runSetup(live.f.ctx, { only: ['forge-check'] });
+  assert.equal(again.results[0].status, 'done');
+  assert.equal(live.writes.length, 3, 'a rerun changes nothing');
+});
+
+test('forge-check never changes a project setup did not host', async () => {
+  const { f, writes } = hostedBench({ own: false, settings: fresh });
+  const r = await runSetup(f.ctx, { only: ['forge-check'] });
+  assert.equal(r.ok, false);
+  assert.match(r.error, /BENCH_SETUP_CHECK_NOT_OURS/);
+  assert.deepEqual(writes, []);
 });

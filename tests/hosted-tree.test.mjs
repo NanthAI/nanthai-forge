@@ -123,8 +123,8 @@ test('hosted Intents use one primary navigation and a compact page selector', as
   for (const label of ['Intents', 'Lanes', 'Planning', 'Decisions'])
     assert.match(workNav, new RegExp(`<span>${label}</span>`));
   assert.doesNotMatch(workNav, /<span>Views<\/span>/);
-  assert.match(html, /class="fx-mark"/);
-  assert.match(html, /fill="#23cbff"/);
+  assert.match(html, /<svg class="fx-mark mk c64"[^>]*width="22"[^>]*data-state="idle"/);
+  assert.match(html, /<rect class="xL"/);
   assert.doesNotMatch(html, /nanthai-monogram/);
 });
 

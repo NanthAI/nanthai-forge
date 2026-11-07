@@ -16,6 +16,7 @@ export const metricNames = {
   '5.7': 'Authority lag and contradictions',
   '5.8': 'Dollars per landing',
   R: 'Red-main minutes',
+  B: 'Proved-reuse back-stop',
 };
 export function metricPeriod(from?: string, to?: string, now = new Date().toISOString()): MetricPeriod {
   const parse = (value: string) => {
@@ -147,6 +148,11 @@ export function metricTotals(
           e =>
             (e.type === 'full-result' || e.type === 'culprit') && Date.parse(e.at) <= Date.parse(period.to),
         ).length,
+    ),
+    B: wrap(
+      result.backstop,
+      records.moves.filter(m => m.reused && during(m.at, period)).length +
+        (records.mainAudits?.events.filter(e => during(e.at, period)).length ?? 0),
     ),
     // G4: files that recovered on retry. Counted in the same run rows as 5.6; never a clean pass.
     flakes: wrap(

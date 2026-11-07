@@ -10,8 +10,8 @@
 //   (plan.mjs rep3Decision, written once to rep3-n<N>.json) and the selected rep-3 batches,
 //   descending (plan.mjs repNs). A void batch is re-run once before the next batch starts, and
 //   a resume continues at the same place (plan.mjs nextBatch). Every attempt is published.
-// - Freeze: the batch holds forge-cli/.freeze from before its first cell starts until its last
-//   cell is graded (lane.sh finish and nforge land wait meanwhile), and is released between
+// - Freeze: the batch holds the CLI installation's .freeze from before its first cell starts until its last
+//   cell is graded (nforge land/finish wait meanwhile), and is released between
 //   batches. Versions (CLI, GitHub main, deployed Convex, check workflows, harness, agent) are
 //   recorded at batch start and end; any change voids the batch.
 // - Resumable: a batch without batch.json whose driver is gone is closed as `interrupted`
@@ -22,7 +22,6 @@ import { spawn, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { existsSync, readdirSync, readFileSync, writeFileSync, mkdirSync, rmSync, renameSync } from 'node:fs';
 import { join } from 'node:path';
-import { homedir } from 'node:os';
 import { pathToFileURL } from 'node:url';
 import { setTimeout as wait } from 'node:timers/promises';
 import {
@@ -37,14 +36,16 @@ import {
   rep3Decision,
   loadTasks,
 } from './plan.mjs';
-import { snapshot, snapshotProblems, differences, forgeInFlight, FREEZE } from './versions.mjs';
+import { snapshot, snapshotProblems, differences, forgeInFlight, benchFreeze } from './versions.mjs';
+import { benchRootOrExit } from './bench-root.mjs';
+import { productCli } from './cli-install.mjs';
 import { drainBatch, hostedQueueEntries } from './drain.mjs';
 import { usageGate, usageProblems, diskFreeGb, diskNeed } from './gates.mjs';
 import { agentOf } from './agent.mjs';
 import { runnerFairness } from './runners.mjs';
 import { oracleBranchRecord } from './oracle-branches.mjs';
 
-const B = process.env.BENCH_ROOT || join(homedir(), 'NanthAI/forge-bench/b15d');
+let B, FREEZE;
 const flags = process.argv.slice(2);
 const flag = name => (flags.includes(name) ? flags[flags.indexOf(name) + 1] : null);
 const dry = flags.includes('--dry');
@@ -53,7 +54,6 @@ const only = flag('--only');
 const fakeChange = dry && flags.includes('--fake-version-change');
 // Convex list-price stop for the whole run (lead: report before going past $5).
 export const BUDGET_USD = 5;
-const CLI_UPDATE = join(homedir(), 'NanthAI/forge-phase5/agents/tools/cli-update.sh');
 const RETRY_MS = Number(process.env.BENCH_DRIVE_RETRY_MS ?? 300_000);
 const DRAIN_MS = 45 * 60_000;
 let lastWait = '';
@@ -90,7 +90,10 @@ export function staleBenchFreeze(text) {
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) await main();
 
 async function main() {
+  B = benchRootOrExit();
   const config = readJson(join(B, 'config.json'));
+  const cli = productCli({ config });
+  FREEZE = benchFreeze(config);
   const problems = checkPlan(B);
   if (problems.length) {
     say(`STOP plan check: ${problems.join('; ')}`);
@@ -294,12 +297,17 @@ async function main() {
         await wait(RETRY_MS);
         continue;
       }
-      // Bring the one CLI to main under the hold: the updater skips while .freeze exists, so
-      // it is moved aside for the update only (a finish that slips in is caught below).
+      // Bring the installed CLI to main under the hold: `nforge update` refuses while .freeze
+      // exists, so it is moved aside for the update only (a finish that slips in is caught below).
       let start = await snapshot(config);
       if (start.cli.commit !== start.githubMain) {
         renameSync(FREEZE, `${FREEZE}.batch`);
-        await promisify(execFile)('bash', [CLI_UPDATE]).catch(() => {});
+        await promisify(execFile)(process.execPath, [
+          join(cli.installation, 'launcher.mjs'),
+          'update',
+          '--directory',
+          cli.installation,
+        ]).catch(() => {});
         renameSync(`${FREEZE}.batch`, FREEZE);
         if (!(await drain(b.key))) {
           release();

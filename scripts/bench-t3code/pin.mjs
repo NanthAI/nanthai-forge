@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // B1.5d pinned harness (B3): a clean checkout of one landed commit of nanthai-forge, outside
 // every Lane root, that the driver and cells run from. The Convex meter needs the convex
-// package, so node_modules links to the one CLI build's dependencies (read-only).
+// package, so node_modules links to the installed CLI build's dependencies (read-only), found
+// through the product installation (cli-install.mjs), never a machine path.
 //   node scripts/bench-t3code/pin.mjs [STATE_HEAD | GIT_SHA]   -> prints the checkout path
 // Forge main is the authority (its State heads are 64 hex; the CLI's `.commit` is one). The
 // checkout itself is a Git commit of the GitHub mirror, so the pin maps the State head to
@@ -13,8 +14,9 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, realpathSync, symlinkSync } from 'node:fs';
 import { join, dirname } from 'node:path';
-import { homedir } from 'node:os';
 import { pathToFileURL } from 'node:url';
+import { benchRootOrExit } from './bench-root.mjs';
+import { productCli } from './cli-install.mjs';
 
 const MIRROR_REMOTE = 'https://github.com/NanthAI/nanthai-forge';
 const STATE_HEAD = /^[0-9a-f]{64}$/;
@@ -89,11 +91,9 @@ export function resolvePin({ wanted, mirror }) {
   };
 }
 
-/** Where the dependency donor lives: explicit, else the CLI build next to config.forge.cli. */
-export function cliDonor({ explicit, config, home = homedir() } = {}) {
-  if (explicit) return explicit;
-  if (config?.forge?.cli) return dirname(dirname(config.forge.cli));
-  return join(home, 'NanthAI/forge-cli/current');
+/** The dependency donor: the selected build of the product CLI installation (cli-install.mjs). */
+export function cliDonor({ explicit, config, pathEnv, home } = {}) {
+  return productCli({ explicit, config, pathEnv, home }).build;
 }
 
 /** The CLI build's own commit (a State head), or null. */
@@ -168,7 +168,7 @@ export function existingPin({ benchRoot, wanted, donor, mirror }) {
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
-  const B = process.env.BENCH_ROOT || join(homedir(), 'NanthAI/forge-bench/b15d');
+  const B = benchRootOrExit();
   let config = null;
   try {
     config = JSON.parse(readFileSync(join(B, 'config.json'), 'utf8'));

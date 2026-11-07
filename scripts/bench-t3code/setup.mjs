@@ -9,11 +9,10 @@
 //        --replace-forge-project  host a NEW Forge project though config names one that does not answer
 //        --dogfood-project ID  the project whose landing queue the benchmark hold waits for
 //        --only a,b            run only these steps (ids as printed by --dry)
-// BENCH_ROOT selects the bench folder (default ~/NanthAI/forge-bench/b15d). --live needs it to hold
+// BENCH_ROOT (required, absolute; bench-root.mjs) is the bench folder. --live needs it to hold
 // the owner's config.json and tasks.json. Creates only what the manifest records: see teardown.
-import { homedir } from 'node:os';
-import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { benchRoot } from './bench-root.mjs';
 import { realContext, runSetup } from './env.mjs';
 
 export function parseArgs(argv) {
@@ -40,7 +39,13 @@ export function parseArgs(argv) {
 }
 
 export async function main(argv = process.argv.slice(2), ctxFactory = realContext) {
-  const B = process.env.BENCH_ROOT || join(homedir(), 'NanthAI/forge-bench/b15d');
+  let B;
+  try {
+    B = benchRoot();
+  } catch (error) {
+    console.error(error.message);
+    return 2;
+  }
   let parsed;
   try {
     parsed = parseArgs(argv);

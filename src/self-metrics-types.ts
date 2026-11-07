@@ -18,6 +18,17 @@ export type MetricMove = {
   ancestorHeads?: string[];
   path?: 'after-retry' | undefined;
   attemptId?: string | undefined;
+  /** Accepted on a proved cross-head reuse rather than an exact check (hosted). */
+  reused?: boolean | undefined;
+  /** Main source revision of the receipt (hosted). */
+  revision?: number | undefined;
+};
+/** A hosted main-audit event, as projected for the back-stop metric. */
+export type MetricMainAuditEvent = {
+  kind: 'red' | 'green' | 'flake' | 'stalled' | 'culprit';
+  at: string;
+  sequence: number;
+  culprit?: string | undefined;
 };
 export type MetricSubmission = {
   id: string;
@@ -99,6 +110,10 @@ export type MetricRecords = {
   };
   /** A hosted runs page predates the flaky projection: the flaky list may be incomplete. */
   flakesUnprojected?: boolean;
+  /** Hosted main-audit events; `complete` once the page reached a green before the window. */
+  mainAudits?: { events: MetricMainAuditEvent[]; complete: boolean };
+  /** A hosted acceptances page predates the reuse projection. */
+  reuseUnprojected?: boolean;
   gaps: string[];
   landingKindsComplete?: boolean;
   lifecycleCoverageGaps?: string[];

@@ -43,6 +43,34 @@ export async function metricsReader(ctx: QueryCtx, projectId: Id<'hostedProjects
   }
   return project;
 }
+/** Main-audit events for the proved-reuse back-stop metric (Issue 71767c9b). One
+ * bounded page rides on the first acceptances page, so it adds no call. Newest
+ * first, down to the first green or flake before the window: that event bounds
+ * the range the earliest in-window failure audited. */
+async function mainAuditEvents(ctx: QueryCtx, projectId: Id<'hostedProjects'>, from: number, to: number) {
+  const rows = await ctx.db
+    .query('projectHostedMainAuditEvents')
+    .withIndex('by_project_and_sequence', q => q.eq('projectId', projectId))
+    .order('desc')
+    .paginate({ cursor: null, numItems: 100, maximumRowsRead: 100, maximumBytesRead: 64 * 1024 });
+  const events = [];
+  let complete = rows.isDone;
+  for (const row of rows.page) {
+    const at = Date.parse(row.at);
+    if (at >= to) continue;
+    events.push({
+      kind: row.kind,
+      at: row.at,
+      sequence: row.sequence,
+      ...(row.culprit ? { culprit: row.culprit } : {}),
+    });
+    if (at < from && (row.kind === 'green' || row.kind === 'flake')) {
+      complete = true;
+      break;
+    }
+  }
+  return { events, complete };
+}
 /** Compact, demand-driven pages. A finite context horizon is explicit in coverage.
  * Nothing in this query wakes execution or materializes metric records. */
 export const page = query({
@@ -197,6 +225,9 @@ export const page = query({
               kind: request?.revertOf ? 'compensating' : 'landing',
               attemptId: move.attemptId,
               inputPin: move.candidate.inputs ?? null,
+              // Back-stop metric (Issue 71767c9b): derived from the receipt, no write.
+              reused: Boolean(move.crossHeadProof),
+              revision: move.snapshot?.revision ?? null,
             };
           }
           if (input.stream === 'runs') {
@@ -278,6 +309,9 @@ export const page = query({
       );
       return canonicalPayload({
         page: values,
+        ...(input.stream === 'acceptances' && input.cursor === null
+          ? { audits: await mainAuditEvents(ctx, input.projectId, from, to) }
+          : {}),
         contextFrom: new Date(context).toISOString(),
         isDone: rows.isDone,
         continueCursor: rows.continueCursor,

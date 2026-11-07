@@ -66,6 +66,58 @@ export const rulesetBody = () => ({
   ],
 });
 
+/** The Forge bench project's check (plan "Same check": `bash .bench/ci.sh`, as the GitHub arm's
+ * required `bench-check`) and the runner it runs on (Forge's GitHub Actions runner, forge-check.yml,
+ * whose runs the Forge arm reads from this repository). */
+export const BENCH_CHECK = Object.freeze({
+  name: 'verify',
+  executable: 'bash',
+  args: ['.bench/ci.sh'],
+  environmentLabel: 'B1.5d bench check',
+});
+/** The definition digest Forge records for BENCH_CHECK (src/hosted-check.ts hostedCheckDefinition). */
+export const benchCheckDigest = () =>
+  createHash('sha256')
+    .update(
+      JSON.stringify({
+        name: BENCH_CHECK.name,
+        executable: BENCH_CHECK.executable,
+        args: BENCH_CHECK.args,
+        environmentLabel: BENCH_CHECK.environmentLabel,
+      }),
+    )
+    .digest('hex');
+export const FORGE_RUNNER = Object.freeze({ repository: 'NanthAI/nanthai-forge', runsOn: 'ubuntu-latest' });
+
+/** What check-settings still lacks for the bench: { done, missing[], problems[] }. Pure. */
+export function checkSettingsState(s) {
+  const missing = [];
+  const problems = [];
+  const verify = (s.definitions ?? []).find(d => d.name === BENCH_CHECK.name);
+  if (!verify) missing.push('check');
+  else if (verify.definition !== benchCheckDigest())
+    problems.push(
+      `check ${BENCH_CHECK.name} has definition ${String(verify.definition).slice(0, 12)}, not the bench check ${benchCheckDigest().slice(0, 12)}; setup does not overwrite a check it did not define`,
+    );
+  if (!s.runner) missing.push('runner');
+  else if (s.actions?.repository !== FORGE_RUNNER.repository || s.actions?.runsOn !== FORGE_RUNNER.runsOn)
+    problems.push(
+      `runner is ${s.actions ? `${s.actions.repository} (${s.actions.runsOn})` : 'not GitHub Actions'}, the bench needs ${FORGE_RUNNER.repository} (${FORGE_RUNNER.runsOn})`,
+    );
+  if (s.agentLandsOnPass === false) missing.push('acceptance');
+  if (s.checkCallbackConfigured === false)
+    problems.push(
+      'the deployment has no hosted check key (FORGE_HOSTED_CHECK_KEY_ID): the lead sets it, setup cannot',
+    );
+  const done = !missing.length && !problems.length;
+  return {
+    done,
+    missing,
+    ...(problems.length ? { problems } : {}),
+    ...(done ? {} : missing.length ? { detail: `to configure: ${missing.join(', ')}` } : {}),
+  };
+}
+
 /* ------------------------------------------------------------------ manifest */
 
 export const manifestPath = B => join(B, MANIFEST);
@@ -799,6 +851,77 @@ export function buildSteps(ctx) {
         ]);
       }
       patchConfig(ctx, 'forge-project', { 'forge.projectId': projectId, 'forge.mainBase': L().baseSha });
+    },
+  });
+
+  // The bench project's check: what both arms run (plan "Same check"), on the Forge runner the
+  // Forge arm reads its CI evidence from (run-cell.mjs forgeCi), with agent landings accepted
+  // on a pass (the prompt says `land --save` lands when the check passes).
+  const checkSettings = () => {
+    const out = (ctx.tryOut ?? ctx.tryRun)('/usr/local/bin/node', [
+      cfgSafe().forge?.cli,
+      'agent',
+      L().forgeOwner,
+      'check-settings',
+      '{}',
+    ]);
+    const line = out
+      ?.split('\n')
+      .filter(l => l.startsWith('{'))
+      .at(-1);
+    try {
+      return line ? JSON.parse(line) : null;
+    } catch {
+      return null;
+    }
+  };
+  step({
+    id: 'forge-check',
+    title: `Forge bench project check: ${BENCH_CHECK.name} = ${BENCH_CHECK.executable} ${BENCH_CHECK.args.join(' ')}, runner ${FORGE_RUNNER.repository} (${FORGE_RUNNER.runsOn})`,
+    outward: true,
+    cost: {
+      ...COST0,
+      convexCalls: 8,
+      note: 'check-settings is 3 reads (definitions page, current runner, policy); configure-check, configure-runner (one read-only GitHub App permission read) and set-policy are one write each, on the project setup hosted only. No CI runs here: the base-green qualification belongs to the exit bench dry run.',
+    },
+    commands: () => [
+      `nforge agent ${L().forgeOwner} check-settings '{}'   # read-only`,
+      `nforge x ${L().forgeOwner} configure-check '${JSON.stringify({ operationId: '<uuid>', command: BENCH_CHECK })}'`,
+      `nforge x ${L().forgeOwner} configure-runner '${JSON.stringify({ operationId: '<uuid>', provider: 'github-actions', ...FORGE_RUNNER })}'`,
+      `nforge x ${L().forgeOwner} set-policy '{"operationId":"<uuid>","preset":"trusted"}'   # only if agent landings wait for review`,
+    ],
+    isDone: async () => {
+      if (!cfgSafe().forge?.projectId || !existsSync(join(L().forgeOwner, '.forge')))
+        return { done: false, detail: 'no bench project yet: configured right after forge-project hosts it' };
+      const s = checkSettings()?.result;
+      if (!s)
+        return { done: false, problems: ['check-settings gave no result (is the bench project reachable?)'] };
+      return checkSettingsState(s);
+    },
+    run: async () => {
+      const c = cfg();
+      const own = readManifest(B).entries.find(
+        e => e.kind === 'forge-project' && e.state === 'created' && e.projectId === c.forge?.projectId,
+      );
+      if (!own)
+        throw Error(
+          `BENCH_SETUP_CHECK_NOT_OURS: config.forge.projectId ${String(c.forge?.projectId).slice(0, 8)}… was not hosted by setup (no ${MANIFEST} entry), so setup will not change its check, runner or policy. Configure it by hand with the commands above, or host a new project with --replace-forge-project.`,
+        );
+      const node = '/usr/local/bin/node';
+      const x = (action, request) =>
+        ctx.sh(node, [
+          c.forge.cli,
+          'x',
+          L().forgeOwner,
+          action,
+          JSON.stringify({ operationId: randomUUID(), ...request }),
+        ]);
+      const s = checkSettings()?.result ?? {};
+      const state = checkSettingsState(s);
+      if (state.missing.includes('check')) x('configure-check', { command: BENCH_CHECK });
+      if (state.missing.includes('runner'))
+        x('configure-runner', { provider: 'github-actions', ...FORGE_RUNNER });
+      if (state.missing.includes('acceptance')) x('set-policy', { preset: 'trusted' });
     },
   });
 
