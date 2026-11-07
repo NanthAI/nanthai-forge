@@ -123,11 +123,13 @@ process.exitCode = 7;
           done();
         }
       };
-      child.stdout.on('data', d => {
+      // A pipe read may end inside a multi-byte character ("café 🚀"); concatenating raw Buffers would turn
+      // the halves into U+FFFD, so out never equals stdout and the handshake waits for the timeout.
+      child.stdout.setEncoding('utf8').on('data', d => {
         out += d;
         progress();
       });
-      child.stderr.on('data', d => {
+      child.stderr.setEncoding('utf8').on('data', d => {
         err += d;
         progress();
       });
@@ -250,8 +252,8 @@ test('relay client: fragmented UTF-8 frames, refusal and truncated/error respons
       });
       let stdout = '',
         stderr = '';
-      child.stdout.on('data', d => (stdout += d));
-      child.stderr.on('data', d => (stderr += d));
+      child.stdout.setEncoding('utf8').on('data', d => (stdout += d));
+      child.stderr.setEncoding('utf8').on('data', d => (stderr += d));
       const [code] = await once(child, 'close');
       assert.equal(code, scenario === 'utf8' ? 0 : scenario === 'refusal' ? 2 : 1, scenario);
       if (scenario === 'utf8') assert.equal(stdout, 'café 🚀\npartial');

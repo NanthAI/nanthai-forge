@@ -164,9 +164,13 @@ test('CLI exits after durable admission and owner work survives the client proce
   assert.equal(code, 0, errors);
   const result = JSON.parse(output).result;
   assert.equal(result.durable, true);
-  assert.equal(runs(f).length, 0);
+  assert.equal(result.terminal, false, 'the client process only admitted the request');
+  assert.equal(result.complete, false);
+  // No run-count assertion here: the CLI starts a detached owner worker (startPresenceWorker, only for
+  // a process whose script is cli.js) that begins the check about a second after the client exits, so
+  // a count read after a scheduling stall legitimately sees it (a93bec50: 1 !== 0).
   await drive(f, () => f.store.load().channelMoves.find(move => move.channel === 'main'));
-  assert.equal(runs(f).length, 1);
+  assert.equal(runs(f).length, 1, 'the detached worker and this test drive one submission');
 });
 
 test('MCP existing task registration admits finish and land without running checks', async t => {

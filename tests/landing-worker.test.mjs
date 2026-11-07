@@ -23,6 +23,30 @@ import { WorkStore } from '../dist/work-store.js';
 import { ForgeError } from '../dist/errors.js';
 import { notifyWorker } from '../dist/local-worker-notifications.js';
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+/** The worker's directory watcher arms handshake deadline timers (open, probe-ready, probe-written,
+ * probe-event) for as long as its watch process takes to start: about 200 ms idle, longer under load, so
+ * any fixed delay after 'idle' can end inside it (09feeecb: 2 !== 0). Wait for a quiet window instead; a
+ * timer created more often than the window never goes quiet and fails here with the count. */
+async function untilTimersQuiet(quietMs = 400, limitMs = 30_000) {
+  let created = 0;
+  for (const end = Date.now() + limitMs; Date.now() < end;) {
+    created = 0;
+    const hook = createHook({
+      init(_id, type) {
+        if (type === 'Timeout') created++;
+      },
+    }).enable();
+    try {
+      await delay(quietMs); // Its own Timeout is the one counted below.
+    } finally {
+      hook.disable();
+    }
+    if (created <= 1) return;
+  }
+  assert.fail(
+    `Timeouts still created in every ${quietMs} ms window for ${limitMs} ms (last window: ${created - 1})`,
+  );
+}
 function worker(f) {
   const controller = new AbortController();
   const pending = watchLandingWorker(f.store, controller.signal);
@@ -220,7 +244,7 @@ test('idle service has no timer resources, Work writes, or hosted writes; status
   const stop = worker(f);
   try {
     await until(f, () => readLandingWorkerStatus(f.store).status === 'idle', 'idle');
-    await delay(300); // Drain notifications from fixture setup before measuring idle.
+    await untilTimersQuiet(); // Drain the watch handshake and fixture notifications before measuring idle.
     const pointer = readFileSync(join(f.store.directory, 'work.json'));
     const fetch = t.mock.method(globalThis, 'fetch', () => {
       throw new Error('Idle worker must not use hosted APIs');
