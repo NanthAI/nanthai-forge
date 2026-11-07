@@ -12,6 +12,7 @@ import { mutation, query, type MutationCtx, type QueryCtx } from './cliServer';
 import type { Id } from './_generated/dataModel';
 import { activeProject } from './projectAuthority';
 import { candidateOwnerInputs } from './projectHostedProvenance';
+import { requireMemberAuthority } from './projectLaneAuthority';
 import { readHostedRecord } from './projectHostedRecords';
 import { beginHostedOperation } from './projectHostedOperations';
 import { hostedStartMain } from './projectHostedChannels';
@@ -181,6 +182,8 @@ export const stage = mutation({
         invariant(!duplicate || input.kind === 'dependencies', 'BAD_ARGUMENT', 'Select each Lane once.');
         if ('laneId' in entry) {
           const { lane, ownerOnly } = await saveLaneRecord(ctx, { ...auth, laneId: entry.laneId });
+          // Landing a Lane's work is its author's (or the project owner's) choice.
+          requireMemberAuthority(project, lane.actor, auth.actor, 'Lane');
           state.ownerInputs = state.ownerInputs === true && lane.actor === project.owner && ownerOnly;
           invariant(
             lane.intentId === state.request.intentId && sameSaveLane(lane, entry),

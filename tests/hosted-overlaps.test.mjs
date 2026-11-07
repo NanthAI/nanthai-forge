@@ -275,6 +275,27 @@ test('two separate checkout roots save the same file; second response reports pe
   assert.equal(response.presence.notices.length, 1);
   assert.match(response.presence.notices[0], new RegExp(`Lane ${lane.id.slice(0, 8)}`));
   assert(response.presence.notices[0].length <= 240);
+  // Only the Lane's author (or the project owner) answers its notices (8809fba5).
+  s.insert('projectContributors', { projectId: s.projectId, contributor: 'writer' });
+  await s.transaction(
+    'foreign-ack',
+    acks.append,
+    {
+      projectId: s.projectId,
+      request: JSON.stringify({
+        operationId: randomUUID(),
+        answers: [
+          { operationId: randomUUID(), laneId: peer.id, noticeId: notice.noticeId, choice: 'accept-order' },
+        ],
+      }),
+    },
+    'writer',
+  );
+  assert.equal(
+    (await second.dispatch('status', { laneId: peer.id })).unacknowledgedOverlaps.count,
+    1,
+    "another member's answer leaves the notice unanswered",
+  );
   await s.transaction('ack', acks.append, {
     projectId: s.projectId,
     request: JSON.stringify({

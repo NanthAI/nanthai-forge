@@ -23,6 +23,7 @@ import {
 import { hostedAcceptanceSchema } from '../src/hosted-acceptance';
 import { hostedPayloadHash } from '../src/hosted-source-operation';
 import { invariant } from '../src/errors';
+import { requireMemberAuthorityById } from './projectLaneAuthority';
 
 /** One metadata transaction races the same request/lease/receipt as final
  * acceptance. OCC retries resolve the winner; cancellation never rewinds main. */
@@ -86,6 +87,10 @@ export async function cancelHostedLanding(
   }
   const identity = { projectId, submissionId: request.submissionId };
   const { row, state } = await loadLanding(ctx, identity);
+  // An operator cancel needs the submitter or the project owner. Forge's own stall/exhaust drops and
+  // the children of an already authorized Lane abandon carry that authority with them.
+  if (!input.drop && !input.abandonOperationId)
+    await requireMemberAuthorityById(ctx, projectId, state.actor, actor, 'landing');
   const attempt = await loadLandingAttempt(ctx, { projectId, attemptId: state.attemptId });
   const accepted = await acceptanceRow(ctx, { projectId, receiptId: attempt.operations.accept });
   let result = state;

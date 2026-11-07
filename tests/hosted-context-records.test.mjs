@@ -47,7 +47,8 @@ test('friction and decisions replay exactly; changed requests fail without appen
     assert.ok(first.request.match(/^[a-f0-9]{64}$/));
     if (first.kind === 'decision') {
       assert.equal(first.requester.name, 'owner');
-      assert.equal(first.actor.name, 'Builder');
+      // A free-text actor is not an identity: the record names the caller (8809fba5).
+      assert.equal(first.actor.name, 'owner');
       assert.equal(first.decidedAt, '2026-10-24');
     }
   }

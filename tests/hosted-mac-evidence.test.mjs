@@ -207,9 +207,10 @@ test('outside Candidate provenance cannot be laundered through an owner-requeste
 });
 
 test('an outside accepting actor still needs hosted-runner evidence', async () => {
-  const f = await fixture(),
-    item = await f.makeCandidate();
+  const f = await fixture();
   f.insert('projectContributors', { projectId: f.projectId, contributor: 'outside' });
+  // The outside contributor submits its own Candidate (only its author or the owner may).
+  const item = await f.makeCandidate([], [], {}, 'outside');
   const state = await f.submit(item, await f.passMac(item), 'outside', false);
   assert.equal(state.error.code, 'HOSTED_RUNNER_REQUIRED');
 });

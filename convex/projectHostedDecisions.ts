@@ -10,6 +10,7 @@ import { decideInputSchema, decisionRecordSchema, decisionsInputSchema } from '.
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { recordHead } from './projectHostedRecords';
 import { invariant } from '../src/errors';
+import { agentActor } from '../src/agent-slug';
 import { report } from './errors';
 export const decide = mutation({
   args: { projectId: v.id('hostedProjects'), request: v.string() },
@@ -53,9 +54,11 @@ export const decide = mutation({
         request,
         at,
         decidedAt: command.decidedAt ?? at,
+        // The server identity names the actor: the caller's account, or `account/slug` for the
+        // caller's own agent session. Any other client-sent name is not recorded (Issue 8809fba5).
         actor: {
           kind: 'agent',
-          name: command.actor ?? actor,
+          name: agentActor(actor, command.actor),
           ...(command.tool ? { tool: command.tool } : {}),
         },
         requester: { kind: 'agent', name: actor },

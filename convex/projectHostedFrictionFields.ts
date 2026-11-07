@@ -26,7 +26,8 @@ export const hostedFrictionTables = {
     noticeId: v.string(),
   })
     .index('by_project_and_id', ['projectId', 'id'])
-    .index('by_project_and_lane_and_notice', ['projectId', 'laneId', 'noticeId'])
+    // `actor` last: an answer counts only from the Lane's author or the project owner (8809fba5).
+    .index('by_project_and_lane_and_notice', ['projectId', 'laneId', 'noticeId', 'actor'])
     // Creation-time order serves the answer window read and the 90-day cleanup (Issue b78ca196).
     .index('by_project', ['projectId'])
     .index('by_project_and_lane', ['projectId', 'laneId']),

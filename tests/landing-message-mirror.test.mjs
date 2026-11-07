@@ -5,11 +5,15 @@ import { moduleUrl } from './convex-module.mjs';
 import { batchesFixture, synthetic } from './hosted-landing-batches-fixture.mjs';
 import { acceptanceFixture } from './hosted-acceptance-fixture.mjs';
 import { mirrorFixture } from './hosted-github-mirror-fixture.mjs';
-import { landingMessage, LANDING_MESSAGE_BYTES, mirrorMessage } from '../dist/landing-message.js';
+import {
+  landingMessage,
+  LANDING_MESSAGE_BYTES,
+  lostTrailers,
+  mirrorMessage,
+} from '../dist/landing-message.js';
 import { prepareMirror, stepMirror } from '../dist/hosted-github-mirror.js';
 import { hostedAgentCommandSchemas } from '../dist/hosted-agent-contract.js';
 import { hostedLandingStateSchema, hostedLandingRequestSchema } from '../dist/hosted-landing.js';
-const queue = await import(moduleUrl('../convex/projectGithubMirrorQueue.ts'));
 const store = await import(moduleUrl('../convex/projectGithubMirrorStore.ts'));
 const landingApi = await import(moduleUrl('../convex/projectHostedLanding.ts'));
 const observe = await import(moduleUrl('../convex/projectHostedFinishObserve.ts'));
@@ -66,9 +70,11 @@ test('released strict wait and stack readers keep working while canonical messag
   assert.equal((await f.accept(state)).receipt.message, supplied(0));
 });
 
-// Issue b30284de / class guard 8b7b97ce: run real finish, acceptance, seed and
-// Git publication. A fixture using only an already-built mirror message misses
-// exactly the repeated defect: the message never reaching that boundary.
+// Issue b30284de / class guard 8b7b97ce / eacfdb6e: run real finish, acceptance,
+// the publication's own mirror enqueue, seed and Git publication. Fixtures that
+// enqueue every receipt by hand, or use only an already-built mirror message,
+// miss the repeated defect: the message never reaching that boundary. Batch
+// 9f919ded (2026-11-05) lost a member's message and Co-Authored-By footer that way.
 for (const [batching, legacy] of [
   [false, false],
   [true, false],
@@ -85,6 +91,14 @@ for (const [batching, legacy] of [
         delete value.request.message;
         f.patch('projectHostedLandingRequests', row._id, { value: JSON.stringify(value) });
       }
+    // Mirror on before acceptance: publication enqueues exactly the jobs production does.
+    const project = f.tables.hostedProjects.get(f.projectId);
+    f.patch('hostedProjects', f.projectId, {
+      autonomyPolicy: {
+        ...project.autonomyPolicy,
+        githubMirror: { repo: 'synthetic/mirror', autoPush: true, laneRefs: false },
+      },
+    });
     for (
       let tick = 0;
       [...f.tables.projectHostedLandingRequests.values()].some(r => JSON.parse(r.value).phase !== 'landed');
@@ -92,7 +106,11 @@ for (const [batching, legacy] of [
     ) {
       assert(tick < 300, 'every finish reaches acceptance');
       if (f.runs().some(r => r.status === 'queued')) await f.passChecks();
-      await f.execute(f.pending()[0]);
+      const task = f.pending()[0];
+      // GitHub IO runs below against the Git API fixture.
+      if (task.name === 'projectGithubMirror:step')
+        f.patch('_scheduled_functions', task._id, { state: { kind: 'canceled' } });
+      else await f.execute(task);
     }
     const receipts = [...f.tables.projectHostedAcceptances.values()].map(r => JSON.parse(r.value));
     assert.equal(receipts.length, 3);
@@ -101,7 +119,9 @@ for (const [batching, legacy] of [
       assert.equal(r.message, messages[i], 'acceptance freezes each original finish message');
       assert.equal((await f.enqueue(entry.request)).phase, 'landed', 'unknown finish outcome reconciles');
     }
-    const first = receipts[0];
+    const jobs = [...f.tables.projectGithubMirrorJobs.values()].sort((a, b) => a.sequence - b.sequence);
+    assert.equal(jobs.length, batching ? 1 : 3, 'one mirror job per published main move');
+    const first = receipts.find(r => r.id === jobs[0].receiptId);
     if (batching) assert.deepEqual(first.cohortMessages, messages);
     // Materialize an ordinary Git API fixture with the exact accepted bytes.
     const state = id => JSON.parse(f.c.objects.get(id));
@@ -116,18 +136,7 @@ for (const [batching, legacy] of [
         ]),
       );
     const github = mirrorFixture({ before: files(first.previous.head), after: files(first.candidate.head) });
-    const project = f.tables.hostedProjects.get(f.projectId);
-    f.patch('hostedProjects', f.projectId, {
-      autonomyPolicy: {
-        ...project.autonomyPolicy,
-        githubMirror: { repo: 'synthetic/mirror', autoPush: true, laneRefs: false },
-      },
-    });
     const run = (name, fn, input) => f.transaction(name, { _handler: fn }, input);
-    await run('enqueueMirror', async ctx => {
-      for (const receipt of receipts)
-        await queue.enqueueGithubMirror(ctx, await ctx.db.get(f.projectId), receipt);
-    });
     // Accepted supplied prose must not depend on later mutable Intent records.
     for (const table of ['projectHostedRecords', 'projectHostedRecordHeads'])
       for (const [id, row] of f.tables[table]) if (row.kind === 'intent') f.tables[table].delete(id);
@@ -135,8 +144,7 @@ for (const [batching, legacy] of [
     f.patch('projectGithubMirrors', mapping._id, {
       mapping: JSON.stringify({ ...github.root, state: first.previous.head }),
     });
-    const job = [...f.tables.projectGithubMirrorJobs.values()].find(j => j.receiptId === first.id);
-    const identity = { jobId: job._id, step: job.step };
+    const identity = { jobId: jobs[0]._id, step: jobs[0].step };
     const seeds = await Promise.all([0, 1, 2].map(() => run('mirrorBegin', store.begin._handler, identity)));
     assert(
       seeds.every(s => s === seeds[0]),
@@ -145,16 +153,6 @@ for (const [batching, legacy] of [
     const { seed } = JSON.parse(seeds[0]);
     const expected = (batching ? messages : [first.message]).join('\n\n') + '\n\n' + trailers(first);
     assert.equal(seed.message, expected);
-    assert.notEqual(
-      seed.message,
-      mirrorMessage({
-        fallback: 'Outcome only: failing incident fixture',
-        state: seed.state,
-        acceptanceId: first.id,
-        viewId: seed.viewId,
-      }),
-      'guard rejects the original lossy construction',
-    );
     const io = {
       ...github.io,
       states: async ids => ids.map(state),
@@ -169,7 +167,11 @@ for (const [batching, legacy] of [
     await assert.rejects(stepMirror(structuredClone(initial), io), /lost reply/);
     let plan = structuredClone(initial);
     while (plan.phase !== 'done') plan = await stepMirror(plan, io);
-    assert.equal(github.commits.get(github.remote()).message, expected);
+    const published = github.commits.get(github.remote()).message;
+    assert.equal(published, expected);
+    // The guard: no finish message this commit lands loses a trailer.
+    for (const message of batching ? messages : [first.message])
+      assert.deepEqual(lostTrailers(message, published), [], 'mirror commit keeps every finish trailer');
     assert.equal(github.commits.size, 2, 'one commit despite unknown ref outcome');
     assert.equal(plan.entry.author.email, github.root.committer.email, 'noreply sync identity stays');
     await run('mirrorCommit', store.commit._handler, {
@@ -177,9 +179,9 @@ for (const [batching, legacy] of [
       cursor: null,
       mapping: JSON.stringify(plan.entry),
     });
-    for (const receipt of receipts.slice(1)) {
-      const nextJob = [...f.tables.projectGithubMirrorJobs.values()].find(j => j.receiptId === receipt.id);
-      const nextIdentity = { jobId: nextJob._id, step: nextJob.step };
+    for (const job of jobs.slice(1)) {
+      const receipt = receipts.find(r => r.id === job.receiptId);
+      const nextIdentity = { jobId: job._id, step: job.step };
       const next = JSON.parse(await run('mirrorBegin', store.begin._handler, nextIdentity)).seed;
       assert.equal(
         next.message,
@@ -188,13 +190,8 @@ for (const [batching, legacy] of [
       );
       let continuation = await prepareMirror(next, io);
       while (continuation.phase !== 'done') continuation = await stepMirror(continuation, io);
-      if (!batching) assert.equal(github.commits.get(github.remote()).message, next.message);
-      else
-        assert.equal(
-          github.commits.get(github.remote()).message,
-          expected,
-          'cohort no-op jobs retain the combined commit',
-        );
+      assert.equal(github.commits.get(github.remote()).message, next.message);
+      assert.deepEqual(lostTrailers(receipt.message, next.message), []);
       await run('mirrorCommit', store.commit._handler, {
         ...nextIdentity,
         cursor: null,
@@ -210,6 +207,7 @@ for (const [batching, legacy] of [
     t.diagnostic(
       JSON.stringify({
         members: 3,
+        mirrorJobs: jobs.length,
         acceptanceMessageBytes: messages.map(m => Buffer.byteLength(m)),
         sharedMessageBytes: Buffer.byteLength(seed.message),
         mirrorBeginCalls: 3,
@@ -217,6 +215,40 @@ for (const [batching, legacy] of [
       }),
     );
   });
+
+// Replays of the dropped-footer incidents: the check names the lost trailer.
+const footer = 'Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>';
+const forge = (state, acceptance, view) =>
+  `Forge-State: ${state}\nForge-Acceptance: ${acceptance}\nForge-View: ${view}`;
+test('incident 5fdd87f9: an Issue-title mirror commit loses the finish footer', () => {
+  const finish = `Preserve finish messages in GitHub mirror commits\n\nBody.\n\n${footer}`;
+  const commit = `Preserve finish messages and requested authorship footers in GitHub mirror commits\n\n${forge('a'.repeat(64), '0e022bc8-bb0b-4c1d-9119-70103f6e46c2', 'view')}`;
+  assert.deepEqual(lostTrailers(finish, commit), [footer]);
+  // The old outcome-only construction is exactly that commit shape.
+  assert.deepEqual(
+    lostTrailers(
+      finish,
+      mirrorMessage({ fallback: 'Issue title', state: 'a'.repeat(64), acceptanceId: 'r', viewId: 'v' }),
+    ),
+    [footer],
+  );
+  assert.deepEqual(
+    lostTrailers(
+      finish,
+      mirrorMessage({ message: finish, fallback: '', state: 's', acceptanceId: 'r', viewId: 'v' }),
+    ),
+    [],
+  );
+});
+test('incident 9f919ded: a cohort mirror commit with one peer message loses the other footer', () => {
+  const lost = `Lane open: hash direct machine-store hits once, at install (a245bcf0)\n\nWarm Lane opens no longer hash every object.\n\nCo-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>`;
+  const peer = 'Neutral device, runner and machine names; remove stored display names';
+  const commit = `${peer}\n\n${forge('80027c85bd83824189212354301ac668ed369a63cb95f41b947e5b29774f0395', '9cb824ad-bf28-4f34-abba-49cde5a86959', 'd2d4709f-97ae-44b1-9eef-c8dc0b1ac159')}`;
+  assert.deepEqual(lostTrailers(lost, commit), ['Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>']);
+  assert.deepEqual(lostTrailers(peer, commit), [], 'a subject-only message has no trailers');
+  // Forge escapes a supplied Forge identity line; the escaped line is what must survive.
+  assert.deepEqual(lostTrailers('S\n\nForge-State: forged', '> Forge-State: forged'), []);
+});
 
 test('no supplied message keeps the outcome fallback and exact Forge identity trailers', async () => {
   const input = {

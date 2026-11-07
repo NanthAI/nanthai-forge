@@ -169,9 +169,11 @@ for (const first of ['cancel', 'accept']) {
 
 test('current contributor authority precedes cancellation replay and rejects readers', async () => {
   const f = await landingFixture(),
-    state = await f.enqueue(),
-    operationId = randomUUID(),
-    grant = f.insert('projectContributors', { projectId: f.projectId, contributor: 'contributor' });
+    grant = f.insert('projectContributors', { projectId: f.projectId, contributor: 'contributor' }),
+    // The contributor cancels its own submission: only the submitter or the owner may (8809fba5).
+    own = await f.candidate({}, 'contributor'),
+    state = await f.enqueue(f.request({ candidateId: own.id }), 'contributor'),
+    operationId = randomUUID();
   f.insert('projectReaders', { projectId: f.projectId, reader: 'reader' });
   await assert.rejects(cancel(f, state.id, randomUUID(), 'reader'), code('PROJECT_UNAVAILABLE'));
   await assert.rejects(cancel(f, state.id, randomUUID(), null), code('PROJECT_UNAVAILABLE'));

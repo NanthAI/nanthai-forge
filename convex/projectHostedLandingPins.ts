@@ -6,6 +6,7 @@ import type { SemanticPlan } from '../src/intent-semantic-conflict';
 // SPDX-License-Identifier: Apache-2.0
 import type { MutationCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
+import { requireMemberAuthority } from './projectLaneAuthority';
 import { readHostedRecord, hostedWriteProject } from './projectHostedRecords';
 import { hostedStartMain } from './projectHostedChannels';
 import { enqueueHostedCheck } from './projectHostedChecks';
@@ -71,6 +72,9 @@ export async function pinLandingAttempt(
     key: r.candidateId,
   });
   invariant(row, 'NOT_FOUND', 'Select a canonical hosted Candidate.');
+  // Submitting another member's Candidate is the owner's call only (Issue 8809fba5).
+  if (row.creatorAccountId !== undefined)
+    requireMemberAuthority(project, row.creatorAccountId, input.actor.id, 'Candidate');
   const candidate = hostedRecordSchema.parse(JSON.parse(row.value));
   invariant(
     candidate.kind === 'candidate' &&

@@ -11,6 +11,7 @@ import { hostedLifecycleRequestSchema } from '../src/hosted-lifecycle';
 import { canonicalPayload, hostedPayloadHash, hostedOperationSchema } from '../src/hosted-source-operation';
 import { invariant } from '../src/errors';
 import { accessibleProject } from './projectAuthority';
+import { requireMemberAuthorityById } from './projectLaneAuthority';
 import { report } from './errors';
 import {
   lifecycleCaller,
@@ -86,6 +87,9 @@ export const transition = mutation({
         target.kind === 'lane' ? target.laneId : target.intentId,
       );
       if (target.kind === 'lane') {
+        // Only the Lane author or the project owner abandons, completes or reopens a Lane.
+        if (record.kind === 'lane')
+          await requireMemberAuthorityById(ctx, input.projectId, record.actor, actor, 'Lane');
         invariant(
           record.kind === 'lane' &&
             (target.saveOperationId !== null || sameSaveLane(record, target.expected)),

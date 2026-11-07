@@ -445,7 +445,12 @@ test('private contributors cannot use person authority to bypass full checks or 
       const f = await acceptanceFixture();
       f.patch('hostedProjects', f.projectId, { autonomyPolicy: policyPreset('trusted') });
       f.insert('projectContributors', { projectId: f.projectId, contributor: 'contributor' });
-      const item = await f.makeCandidate([], [], { governance: { version: 1, paths, ownerInputs: false } });
+      const item = await f.makeCandidate(
+        [],
+        [],
+        { governance: { version: 1, paths, ownerInputs: false } },
+        'contributor',
+      );
       let run;
       if (checked) {
         run = await f.rawChecks.enqueue(

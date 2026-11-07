@@ -91,9 +91,12 @@ test('600 Intents and 575 retained receipts do not change bounded eight-member l
   const receipts = [...f.tables.projectHostedAcceptances.values()]
     .filter(r => r.value !== '{"synthetic":"unrelated history must not be read"}')
     .map(r => JSON.parse(r.value));
-  assert.deepEqual(receipts[0].cohortMessages, memberMessages);
+  // The last receipt is main's and the mirrored one; it carries the cohort's messages.
+  const published = receipts.reduce((a, b) => (b.snapshot.revision > a.snapshot.revision ? b : a));
+  assert.deepEqual(published.cohortMessages, memberMessages);
+  assert.equal(receipts.filter(r => r.cohortMessages).length, 1);
   assert(receipts.every(r => Buffer.byteLength(r.message) === LANDING_MESSAGE_BYTES));
-  assert(Buffer.byteLength(JSON.stringify(receipts[0])) < 300 * 1024);
+  assert(Buffer.byteLength(JSON.stringify(published)) < 300 * 1024);
   assert(costs.transactions <= 100, 'Message retention must not add Convex calls: ' + JSON.stringify(costs));
   assert(costs.documentsRead < 4000, JSON.stringify(costs));
   assert(costs.documentsWritten < 1300, JSON.stringify(costs));

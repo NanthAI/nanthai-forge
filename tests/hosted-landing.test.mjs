@@ -281,7 +281,7 @@ test('current project access precedes replay and reads; device requests retain a
   assert.equal((await f.status(s.id, 'reader')).request.id, s.id);
   await assert.rejects(f.enqueue(f.request(), 'reader'), code('PROJECT_UNAVAILABLE'));
   const contributor = f.insert('projectContributors', { projectId: f.projectId, contributor: 'contributor' });
-  const cr = f.request(),
+  const cr = f.request({ candidateId: (await f.candidate({}, 'contributor')).id }),
     cs = await f.enqueue(cr, 'contributor');
   f.tables.projectContributors.delete(contributor);
   await assert.rejects(f.enqueue(cr, 'contributor'), code('PROJECT_UNAVAILABLE'));

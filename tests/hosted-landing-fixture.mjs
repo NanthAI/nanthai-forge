@@ -268,10 +268,12 @@ export async function landingFixture(source = null) {
     }
     return ticks;
   };
-  const candidate = async (overrides = {}) => {
+  // `actor` authors the Candidate; only its author or the owner may submit it (8809fba5).
+  const candidate = async (overrides = {}, actor = 'owner') => {
     const c = { ...f.candidate, id: randomUUID(), ...overrides };
     await run('landingSeed', records.writeHostedRecord, {
       ...f.auth,
+      actor,
       expectedVersion: null,
       record: c,
     });

@@ -63,6 +63,8 @@ async function prepared(f, paths, actor = 'contributor', agent = true, ownerInpu
       : {
           governance: { version: 1, paths, ownerInputs },
         },
+    // The submitter authors its Candidate: only the author or the owner may submit it (8809fba5).
+    actor,
   );
   let run;
   if (checked) {

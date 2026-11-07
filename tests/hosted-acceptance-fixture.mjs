@@ -99,15 +99,18 @@ export async function acceptanceFixture(source = null) {
       state: { object: { sha256: record.head, size: f.state.size }, recipe: null },
     };
   };
-  const makeCandidate = async (lanes = [], dependencies = [], overrides = {}) => {
+  const makeCandidate = async (lanes = [], dependencies = [], overrides = {}, actor = 'owner') => {
     const inputs = buildComposePages(lanes),
       deps = buildComposePages(dependencies);
     for (const page of [...inputs.pages, ...deps.pages]) f.put(canonicalPayload(page.value));
-    const candidate = await f.candidate({
-      inputs: inputs.manifest.root,
-      dependencies: deps.manifest.root,
-      ...overrides,
-    });
+    const candidate = await f.candidate(
+      {
+        inputs: inputs.manifest.root,
+        dependencies: deps.manifest.root,
+        ...overrides,
+      },
+      actor,
+    );
     return { candidate, pages: { inputs: inputs.pages, dependencies: deps.pages } };
   };
   const select = s => ({ projectId: f.projectId, submissionId: s.id, attemptId: s.attemptId });

@@ -14,6 +14,7 @@ import { invariant } from '../src/errors';
 import { report } from './errors';
 import { safeRelative } from '../src/safe-relative';
 import { boardDelivery } from './projectBoardDelivery';
+import { mayActFor } from './projectLaneAuthority';
 
 const savedPaths = (changes: string) => {
   try {
@@ -237,7 +238,10 @@ export const read = query({
         // A slim row whose overlap row is gone cannot be classified: coverage says so.
         else if (sharing.includes(peer)) complete = false;
       }
-      const answered = new Set(acks.map(ack => ack.noticeId));
+      // Only the Lane's author (or the project owner) answers its notices; anyone else's answer is ignored.
+      const answered = new Set(
+        acks.filter(ack => mayActFor(ack.actor, lane.actor, project.owner)).map(ack => ack.noticeId),
+      );
       const compute = () =>
         hostedOverlapAdvice(
           focus,
@@ -340,13 +344,21 @@ export const read = query({
           let removed = false;
           for (const item of selected) {
             if (++checked > 20) break;
-            const ack = await ctx.db
-              .query('projectHostedOverlapAcks')
-              .withIndex('by_project_and_lane_and_notice', q =>
-                q.eq('projectId', projectId).eq('laneId', laneId).eq('noticeId', item.noticeId),
-              )
-              .take(1);
-            if (ack.length) {
+            const answeredBy = (actor: string) =>
+              ctx.db
+                .query('projectHostedOverlapAcks')
+                .withIndex('by_project_and_lane_and_notice', q =>
+                  q
+                    .eq('projectId', projectId)
+                    .eq('laneId', laneId)
+                    .eq('noticeId', item.noticeId)
+                    .eq('actor', actor),
+                )
+                .first();
+            const ack =
+              (await answeredBy(lane.actor)) ??
+              (project.owner !== lane.actor ? await answeredBy(project.owner) : null);
+            if (ack) {
               answered.add(item.noticeId);
               removed = true;
             }

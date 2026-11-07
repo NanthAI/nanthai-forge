@@ -92,7 +92,11 @@ test('hosted ordering uses native priority and same-class fairness including leg
 test('contributors requesting urgent stay normal with an explicit governance reason; cannot reprioritise', async () => {
   const f = await landingFixture();
   f.insert('projectContributors', { projectId: f.projectId, contributor: 'contributor' });
-  const state = await f.enqueue(f.request({ priority: 'urgent', agent: false }), 'contributor');
+  const own = await f.candidate({}, 'contributor');
+  const state = await f.enqueue(
+    f.request({ candidateId: own.id, priority: 'urgent', agent: false }),
+    'contributor',
+  );
   assert.equal(state.priority, 'normal');
   assert.match(state.priorityReason, /only the project owner/);
   await assert.rejects(prioritize(f, command(f, state.id), 'contributor'), code('PROJECT_UNAVAILABLE'));

@@ -18,6 +18,7 @@ import {
   type SaveIdentity,
 } from './projectHostedSaveStore';
 import { refuseLiveLaneFinish } from './projectHostedLaneFinish';
+import { requireMemberAuthorityById } from './projectLaneAuthority';
 import { invariant } from '../src/errors';
 import { report } from './errors';
 import type { MutationCtx, QueryCtx } from './_generated/server';
@@ -51,6 +52,7 @@ export const prepare = mutation({
       // An empty delta never moves the head, so it keeps the live finish's proof.
       if (request.pages && !request.supersedeFinish) {
         const current = await saveLane(ctx, { ...auth, laneId: request.laneId });
+        await requireMemberAuthorityById(ctx, input.projectId, current.actor, auth.actor, 'Lane');
         if (current.state === 'active' && sameSaveLane(current, request.expected))
           await refuseLiveLaneFinish(ctx, {
             projectId: input.projectId,
@@ -83,6 +85,8 @@ export const prepare = mutation({
         });
       }
       const lane = await saveLane(ctx, { ...auth, laneId: request.laneId });
+      // Only the Lane author or the project owner saves over a Lane (Issue 8809fba5).
+      await requireMemberAuthorityById(ctx, input.projectId, lane.actor, auth.actor, 'Lane');
       invariant(
         sameSaveLane(lane, request.expected),
         'WORK_STALE',

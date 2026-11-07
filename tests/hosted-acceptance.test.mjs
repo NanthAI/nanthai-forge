@@ -640,9 +640,9 @@ test('expired publication lease is fenced and a recovered original attempt can l
 });
 
 test('revoked contributor authority is checked again at final publication and completed replay', async () => {
-  const f = await acceptanceFixture(),
-    item = await f.makeCandidate();
+  const f = await acceptanceFixture();
   const contributor = f.insert('projectContributors', { projectId: f.projectId, contributor: 'contributor' });
+  const item = await f.makeCandidate([], [], {}, 'contributor');
   const request = f.request({
     agent: false,
     candidateId: item.candidate.id,

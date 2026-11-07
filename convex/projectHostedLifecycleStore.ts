@@ -81,7 +81,7 @@ export async function lifecycleTarget(
   };
 }
 export async function lifecycleCurrent(ctx: MutationCtx, plan: LifecyclePlan) {
-  await hostedWriteProject(ctx, plan.projectId, plan.actor, plan.authorityEpoch);
+  const project = await hostedWriteProject(ctx, plan.projectId, plan.actor, plan.authorityEpoch);
   const guard = await lifecycleGuard(ctx, plan.projectId, plan.intentId);
   const request = hostedLifecycleRequestSchema.parse(JSON.parse(plan.request));
   const current = await lifecycleTarget(
@@ -97,7 +97,7 @@ export async function lifecycleCurrent(ctx: MutationCtx, plan: LifecyclePlan) {
     request.target.version === current.record.version &&
     guard?.planId === plan._id &&
     guard.revision === plan.revision;
-  return { guard, current, valid };
+  return { guard, current, valid, project };
 }
 export async function settleLifecycle(
   ctx: MutationCtx,

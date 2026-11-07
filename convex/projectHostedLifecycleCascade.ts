@@ -10,6 +10,7 @@ import { hostedLaneSchema } from '../src/hosted-lane';
 import { hostedRecordIndex, hostedRecordRef } from '../src/hosted-records';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { invariant } from '../src/errors';
+import { mayActFor } from './projectLaneAuthority';
 import { loadSave, sameSaveLane } from './projectHostedSaveStore';
 import { saveResultSchema } from '../src/hosted-save';
 import { hostedLifecycleRequestSchema } from '../src/hosted-lifecycle';
@@ -30,7 +31,7 @@ export const scheduleLifecycle = (ctx: MutationCtx, planId: Id<'projectHostedLif
 export async function advanceLifecycle(ctx: MutationCtx, plan: LifecyclePlan) {
   if (plan.status !== 'pending') return lifecycleResult(plan);
   if (plan.saveOperationId) return advanceSavedLifecycle(ctx, plan);
-  const { guard, current, valid } = await lifecycleCurrent(ctx, plan);
+  const { guard, current, valid, project } = await lifecycleCurrent(ctx, plan);
   if (!valid) return settleLifecycle(ctx, plan, 'stale');
   if (plan.ready) {
     await applyLifecycleRecord(ctx, plan, current.record);
@@ -59,6 +60,8 @@ export async function advanceLifecycle(ctx: MutationCtx, plan: LifecyclePlan) {
     const lane = hostedLaneSchema.parse(JSON.parse(row.value));
     // A pinned Lane is the owner's to close; an Intent cascade never abandons it.
     if (lane.state !== 'active' || lane.pinned) continue;
+    // Another member's Lane is theirs (or the owner's) to close; a contributor's cascade leaves it open.
+    if (!mayActFor(plan.actor, lane.actor, project.owner)) continue;
     const record = {
       ...lane,
       version: lane.version + 1,

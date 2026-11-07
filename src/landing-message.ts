@@ -48,3 +48,14 @@ export function mirrorMessage(input: {
     `Forge-View: ${input.viewId}`,
   ].join('\n');
 }
+
+const trailerLine = /^[A-Za-z][A-Za-z0-9-]*: \S/;
+/** Trailers (last paragraph of `Key: value` lines) of a finish message that a mirror commit message lacks. */
+export function lostTrailers(finishMessage: string, commitMessage: string) {
+  const paragraphs = cleanMessage(finishMessage)
+    .trim()
+    .split(/\n{2,}/);
+  const last = paragraphs.length > 1 ? paragraphs.at(-1)!.split('\n') : [];
+  const kept = new Set(commitMessage.split('\n'));
+  return last.every(line => trailerLine.test(line)) ? last.filter(line => !kept.has(line)) : [];
+}

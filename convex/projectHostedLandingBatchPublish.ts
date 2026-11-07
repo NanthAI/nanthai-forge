@@ -247,7 +247,10 @@ export async function publishLandingBatch(ctx: MutationCtx, claim: LandingClaim,
       candidate: member.attempt.candidate,
       memberCandidate: member.original.candidate,
       ...(message === undefined ? {} : { message }),
-      ...(index === 0
+      // The last receipt is main's receipt and the one the GitHub mirror commits
+      // (enqueueGithubMirror below): it carries every member's message, or the
+      // commit loses peers' prose and trailers (batch 9f919ded, Issue eacfdb6e).
+      ...(index === members.length - 1
         ? {
             cohortMessages: messages.filter((m): m is string => m !== undefined),
           }

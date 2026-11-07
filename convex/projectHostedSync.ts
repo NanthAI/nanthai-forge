@@ -7,6 +7,7 @@ import type { Id } from './_generated/dataModel';
 import { activeProject } from './projectAuthority';
 import { beginHostedOperation } from './projectHostedOperations';
 import { candidateOwnerInputs } from './projectHostedProvenance';
+import { requireMemberAuthority } from './projectLaneAuthority';
 import { readHostedRecord } from './projectHostedRecords';
 import { hostedStartMain } from './projectHostedChannels';
 import { saveLaneRecord, sameSaveLane, saveObject } from './projectHostedSaveStore';
@@ -125,6 +126,8 @@ export const prepare = receiptMutation({
       } else {
         const original = await saveLaneRecord(ctx, { ...auth, laneId: request.laneId });
         lane = original.lane;
+        // A clean sync or resolve rewrites this Lane: only its author or the project owner.
+        requireMemberAuthority(project, lane.actor, auth.actor, 'Lane');
         ownerInputs = original.ownerOnly && lane.actor === project.owner;
         invariant(sameSaveLane(lane, request.expected), 'WORK_STALE', 'Select the exact saved Lane pins.');
         intentId = lane.intentId;
