@@ -13,6 +13,7 @@ import { loadCompose } from './projectHostedComposeStore';
 import { enqueueHostedLanding } from './projectHostedLanding';
 import { landingAlias } from './projectHostedLandingIdentity';
 import { landingRow } from './projectHostedLandingStore';
+import { notifyStackedLandingEnded } from './projectHostedStackNotice';
 import { hostedLandingDesiredSchema } from '../src/hosted-landing-desired';
 import { hostedLandingStateSchema, landingObservation } from '../src/hosted-landing';
 import { hostedRecordSchema } from '../src/hosted-records';
@@ -275,6 +276,15 @@ export const fail = internalMutation({
     await ctx.scheduler.cancel(row.wake.taskId);
     await scheduleLandingAlarm(ctx, failed);
     await ctx.db.patch(row._id, { value: canonicalPayload(failed), wake: null });
+    // This failure never reaches writeLanding: Lanes stacked on the Lanes it carried are told here (dc62b120).
+    await notifyStackedLandingEnded(ctx, {
+      projectId: row.projectId,
+      actor: state.actor,
+      composeOperationId:
+        state.request.finish?.composeOperationId ?? state.request.finish?.reviewedSource?.operationId,
+      operationId: state.operationId,
+      code: input.code,
+    });
     return canonicalPayload(failed);
   },
 });

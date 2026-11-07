@@ -37,10 +37,33 @@ export const hostedOverlapTables = {
      * rows written before the field existed; reads cover them through presenceRow.at until the Lane's
      * next write sets it. */
     lastActivityAt: v.optional(v.number()),
+    /** Set once another Lane was stacked on this one (Issue dc62b120): the Lane's own save, abandon and
+     * landing events then look up its dependents in projectHostedStackDependents. Absent for every Lane
+     * nobody stacked on, which therefore pay no extra read. */
+    stacked: v.optional(v.literal(true)),
   })
     .index('by_project_and_lane', ['projectId', 'laneId'])
     .index('by_project_and_open', ['projectId', 'open'])
     .index('by_project_and_open_and_activity', ['projectId', 'open', 'lastActivityAt']),
+  /** Stacked Lanes (Issue dc62b120): one row per open Lane stacked on a parent Lane, written only by
+   * stacked Lane records. It holds the parent head the child is pinned to and one mark per parent
+   * event already announced, so each event reaches each dependent once. Deleted when the child
+   * closes or unstacks. */
+  projectHostedStackDependents: defineTable({
+    projectId: v.id('hostedProjects'),
+    parentLaneId: v.string(),
+    laneId: v.string(),
+    /** The parent head this child was last restacked onto (the Lane record's stack.head). */
+    parentHead: v.string(),
+    /** A "parent saved" notice is out and the child has not restacked since. */
+    savedNoticed: v.optional(v.literal(true)),
+    /** The parent was abandoned and the child was told; cleared when the parent is saved again. */
+    ended: v.optional(v.literal('abandoned')),
+    /** The parent's failed/cancelled landing was announced; cleared by a parent save or a restack. */
+    landingNoticed: v.optional(v.literal(true)),
+  })
+    .index('by_project_and_parent', ['projectId', 'parentLaneId'])
+    .index('by_project_and_lane', ['projectId', 'laneId']),
   // One row per Lane head whose agent response carried at least one overlap notice (metric 5.4 delivered).
   projectHostedOverlapDeliveries: defineTable({
     projectId: v.id('hostedProjects'),

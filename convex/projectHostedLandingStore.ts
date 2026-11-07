@@ -27,6 +27,7 @@ import {
 } from '../src/hosted-landing';
 import { hostedOperationRow } from './projectHostedOperations';
 import { notifyFinish, wakeLandingOrderWaiters } from './projectHostedFinishWake';
+import { notifyStackedLandingEnded } from './projectHostedStackNotice';
 import { invariant } from '../src/errors';
 export type { LandingChannel } from './projectHostedLandingEvents';
 export { landingQueue, ensureLandingQueue, recordLandingObservation } from './projectHostedLandingEvents';
@@ -273,6 +274,16 @@ export async function writeLanding(
       });
   }
   await notifyFinish(ctx, state);
+  // Lanes stacked on a Lane this landing carried are told once (Issue dc62b120): failed and cancelled alike.
+  if (state.phase === 'terminal-failed' && previous.phase !== 'terminal-failed')
+    await notifyStackedLandingEnded(ctx, {
+      projectId: row.projectId,
+      actor: state.actor,
+      composeOperationId:
+        state.request.finish?.composeOperationId ?? state.request.finish?.reviewedSource?.operationId,
+      operationId: state.operationId,
+      ...(state.error?.code ? { code: state.error.code } : {}),
+    });
   return state;
 }
 /** Internal queue bookkeeping can retain a rejected outcome after actor revocation.

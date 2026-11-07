@@ -1506,6 +1506,22 @@ Detached stacks stop at main. Child briefs include the parent's latest
 handoff; child handoffs retain its pinned fields and `handoff-read` also returns
 the latest parent handoff. Missing handoffs are reported as absent.
 
+Hosted parent notices (Issue dc62b120). A Lane stacked on another is told when its parent changes,
+so it never lands on or waits for a parent that moved. Each direct dependent gets one board note from
+the parent (`board.notices` on its next Lane action, and a blocked `wait` returns early with
+`reason:"message"`), naming the event and the exact command: the parent **saved** a new head (`Restack
+onto it: nforge agent . sync '{"laneId":"CHILD"}'`), was **abandoned** (`Unstack onto main: ... sync
+'{"laneId":"CHILD","ontoMain":true}'`), or its **landing failed or was cancelled** (unstack, or restack
+after the fix). One note per event per dependent: further parent saves stay quiet until the child
+restacks, an abandonment is announced once (the landing it cancels adds nothing), and a landing failure
+is announced once until the parent is saved again. A two-deep chain is told level by level: the middle
+Lane's restack is a save, which tells the newest. There is no auto-restack, polling or timer; a stopped
+board (operator switch) sends none. Cost: a Lane nobody stacked on pays nothing new on save or abandon.
+A stacked start adds one dependents row and a flag on the parent's overlap row; a parent event reads
+that parent's dependents (at most 20) and writes about 5 rows per dependent. A failed or cancelled
+landing reads one empty dependents range in a project without stacks; only a project that has stacks
+resolves the landing's Lanes.
+
 Stacked owners use Work format 21 (legacy Intents) or 22 (unified Intents).
 Readers capped at 20 reject these owners before writing, preserving stack pins.
 Ordinary owners keep their existing format. These formats and commands concern

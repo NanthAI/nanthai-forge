@@ -122,6 +122,7 @@ export const projectPurgeTables = {
   projectHostedOverlapLanes: 'by_project_and_lane',
   projectHostedPresence: 'by_project_and_lane',
   projectHostedOverlapPeers: 'by_project_and_lane',
+  projectHostedStackDependents: 'by_project_and_lane',
   projectHostedOverlapDeliveries: 'by_project_and_id',
   projectHostedOverlapMain: 'by_project',
   projectBoardMessages: 'by_project_and_id',

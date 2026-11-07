@@ -6,6 +6,7 @@ import type { hostedLaneSchema } from '../src/hosted-lane';
 import { mergeOverlapChanges, advanceOverlapMain, type OverlapChange } from '../src/hosted-overlap';
 import { trackHostedPresence } from './projectHostedPresence';
 import { patchOverlapRow, syncOverlapPeer } from './projectHostedOverlapPeers';
+import { notifyStackDependents, trackStackDependent } from './projectHostedStackNotice';
 
 export async function trackHostedOverlapLane(
   ctx: MutationCtx,
@@ -61,6 +62,8 @@ export async function trackHostedOverlapLane(
     lastActivityAt: Number.isFinite(Date.parse(lane.at)) ? Date.parse(lane.at) : Date.now(),
     // Landing evidence belongs to the head that landed and survives later records of the Lane.
     ...(old?.landed ? { landed: old.landed } : {}),
+    // Another Lane is stacked on this one (Issue dc62b120); only a stacked start sets it.
+    ...(old?.stacked ? { stacked: true as const } : {}),
     ...projection,
   };
   const at = Date.parse(lane.at);
@@ -84,6 +87,17 @@ export async function trackHostedOverlapLane(
   if (old) await ctx.db.replace(old._id, stored);
   else await ctx.db.insert('projectHostedOverlapLanes', stored);
   await syncOverlapPeer(ctx, stored);
+  // Stacked Lanes (Issue dc62b120). A Lane nobody stacked on has no flag and a Lane without `stack`
+  // returns at once, so neither adds a read. This Lane as a child: keep its dependents row. As a parent:
+  // one notice per dependent when its saved head moved or it was abandoned.
+  await trackStackDependent(ctx, projectId, lane, open);
+  if (old?.stacked) {
+    const parent = { projectId, laneId: lane.id, actor: lane.actor, ...(agent ? { agent } : {}) };
+    if (open && lane.head !== old.head)
+      await notifyStackDependents(ctx, parent, { kind: 'saved', head: lane.head });
+    else if (old.open && !open && lane.state === 'abandoned')
+      await notifyStackDependents(ctx, parent, { kind: 'abandoned', key: String(lane.version) });
+  }
 }
 
 export async function trackHostedOverlapMain(
@@ -115,6 +129,13 @@ export async function markHostedOverlapLifecycle(
   // A staged close hides the Lane from presence now; a later record write of a still-open Lane restores it.
   if (row?.presenceRow) await ctx.db.delete(row.presenceRow.id);
   if (row) await patchOverlapRow(ctx, row, { lifecyclePlanId, presenceRow: undefined });
+  // The only staged close is an abandonment by an Intent cascade: Lanes stacked on this one are told.
+  if (row?.stacked && row.open)
+    await notifyStackDependents(
+      ctx,
+      { projectId, laneId, actor: row.actor, ...(row.agent ? { agent: row.agent } : {}) },
+      { kind: 'abandoned', key: String(lifecyclePlanId) },
+    );
 }
 
 /** Retire the advisory open entry when its existing lifecycle overlay is promoted. */

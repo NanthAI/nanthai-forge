@@ -154,9 +154,12 @@ for (const history of [0, 575, 1150])
     // to add the landing (receipt, Lane, public actor) to its 50-entry log for the drift nudge; the
     // row is patched in the same tick (one write per landing in production, where that row exists).
     // Calls are unchanged.
+    // Reads 4215 -> 4216 (dc62b120): a landing that ends failed or cancelled reads one dependents range to
+    // learn whether any Lane is stacked in the project; it is empty here, so the Lane lookup never runs.
+    // Writes and calls are unchanged. Only the failure transition pays it, once per failed landing.
     assert(
       budget.calls <= 199 &&
-        source.reduce((n, c) => n + c.documents, 0) <= 4215 &&
+        source.reduce((n, c) => n + c.documents, 0) <= 4216 &&
         source.reduce((n, c) => n + c.writes, 0) <= 1245,
       JSON.stringify({
         ...budget,
