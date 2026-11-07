@@ -4,6 +4,9 @@ import { retainLogExpiry } from './projectCheckLogRetention';
 import type { QueryCtx, MutationCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
 import { writableHostedCheck, type LoadedHostedCheck } from './projectHostedCheckStore';
+import { activeProject } from './projectAuthority';
+import { requireMacMachine } from './projectHostedCheckMachines';
+import { runSigningSecret } from '../src/hosted-collector-key';
 import {
   outputMessageSchema,
   outputStreamId,
@@ -68,7 +71,7 @@ async function validateOutput(
     );
   }
   invariant(message.projectId === input.projectId, 'EVIDENCE_CHANGED', 'Output project differs.');
-  verifyOutput(message, input.signature, key(run.keyId));
+  verifyOutput(message, input.signature, runSigningSecret(key(run.keyId), run));
   if (message.body.kind !== 'final') {
     const stream = message.body.kind === 'chunk' ? message.body.chunk.stream : message.body.seal.stream;
     if (stream.stream !== 'artifact')
@@ -132,8 +135,38 @@ type SignedInput = {
   message: unknown;
   signature: string;
 };
-export async function authorizeOutput(ctx: MutationCtx, input: SignedInput, key: (id: string) => string) {
-  return (await authorizeOutputWindow(ctx, [input], key))[0]!;
+/** Public collector endpoints name the signed-in caller; internal backend paths
+ * pass no caller. A missing identity is refused before any record is read. */
+export async function collectorCaller(ctx: {
+  auth: { getUserIdentity(): Promise<{ subject: string } | null> };
+}) {
+  const user = await ctx.auth.getUserIdentity();
+  invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in as the project owner to send runner output.');
+  return user.subject;
+}
+/** Collector output is accepted only from the project owner whose registered,
+ * unrevoked machine this run is pinned to, under the run's exact key id. */
+export async function bindCollectorCaller(ctx: MutationCtx, run: HostedCheckRun, caller: string) {
+  invariant(
+    isMachineRunner(run.configuration),
+    'PROJECT_UNAVAILABLE',
+    'Only a registered runner machine sends collector output for this check.',
+  );
+  const project = await activeProject(ctx, run.projectId as Id<'hostedProjects'>, caller);
+  const machine = await requireMacMachine(ctx, project._id, run.configuration.machineId);
+  invariant(
+    caller === project.owner && machine.actor === caller && machine.keyId === run.keyId,
+    'PROJECT_UNAVAILABLE',
+    'Use the project owner’s registered runner machine for this check.',
+  );
+}
+export async function authorizeOutput(
+  ctx: MutationCtx,
+  input: SignedInput,
+  key: (id: string) => string,
+  caller?: string,
+) {
+  return (await authorizeOutputWindow(ctx, [input], key, undefined, caller))[0]!;
 }
 /** Authority is fresh within this transaction only; each signature and all
  * original message pins remain independently validated. No cross-call cache. */
@@ -143,6 +176,8 @@ export async function authorizeOutputWindow(
   key: (id: string) => string,
   /** The caller's run row from this same transaction; skips a second read of it. */
   loaded?: LoadedHostedCheck,
+  /** Signed-in collector account (public endpoints); absent for backend paths. */
+  caller?: string,
 ) {
   invariant(inputs.length > 0 && inputs.length <= 100, 'BAD_ARGUMENT', 'Select a bounded output window.');
   const first = inputs[0]!,
@@ -158,6 +193,7 @@ export async function authorizeOutputWindow(
     'EVIDENCE_CHANGED',
     'An output window belongs to one exact project and run.',
   );
+  if (caller !== undefined) await bindCollectorCaller(ctx, run, caller);
   const messages = [];
   for (const input of inputs) {
     invariant(
@@ -169,16 +205,22 @@ export async function authorizeOutputWindow(
   }
   return messages;
 }
-export async function commitHostedOutput(ctx: MutationCtx, input: SignedInput, key: (id: string) => string) {
-  return commitOutputMessage(ctx, input.projectId, await authorizeOutput(ctx, input, key));
+export async function commitHostedOutput(
+  ctx: MutationCtx,
+  input: SignedInput,
+  key: (id: string) => string,
+  caller?: string,
+) {
+  return commitOutputMessage(ctx, input.projectId, await authorizeOutput(ctx, input, key, caller));
 }
 export async function commitHostedOutputWindow(
   ctx: MutationCtx,
   inputs: SignedInput[],
   key: (id: string) => string,
   loaded?: LoadedHostedCheck,
+  caller?: string,
 ) {
-  const messages = await authorizeOutputWindow(ctx, inputs, key, loaded),
+  const messages = await authorizeOutputWindow(ctx, inputs, key, loaded, caller),
     receipts = [];
   for (const message of messages)
     receipts.push(await commitOutputMessage(ctx, inputs[0]!.projectId, message, true));

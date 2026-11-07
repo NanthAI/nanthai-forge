@@ -13,6 +13,7 @@ import { nativeOwner } from '../dist/native-source.js';
 import { WorkStore } from '../dist/work-store.js';
 import { WorkService } from '../dist/work.js';
 import { outputRootObject } from '../dist/hosted-check-output.js';
+import { machineCollectorKey } from '../dist/hosted-collector-key.js';
 
 const worker = await import(moduleUrl('../convex/projectHostedCheckWorker.ts'));
 const records = await import(moduleUrl('../convex/projectHostedRecords.ts'));
@@ -161,6 +162,12 @@ export async function recoveryRunnerDrill(t) {
       );
     const claim = (await control({ kind: 'claim', owner: address.sessionId, leaseMs: 60000 })).run;
     const output = new Map();
+    // The recovered machine signs with the key its registration issues, never the deployment key.
+    const machineKey = machineCollectorKey(secret, {
+      keyId: 'SYNTHETIC',
+      projectId,
+      machineId: configuration.machineId,
+    });
     await measure('check', () =>
       executeHostedMacCheck(
         claim,
@@ -201,7 +208,7 @@ export async function recoveryRunnerDrill(t) {
               ),
           },
         },
-        secret,
+        machineKey,
       ),
     );
     assert.equal((await f.status(queued.id)).status, 'passed');

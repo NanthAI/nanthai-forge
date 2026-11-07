@@ -20,7 +20,7 @@ import { runHostedMacWorker, HostedMacProvider } from '../dist/hosted-mac-worker
 import { signMacHeartbeat, hostedMacRuntime } from '../dist/hosted-mac-lease.js';
 const worker = await import(moduleUrl('../convex/projectHostedCheckWorker.ts'));
 const lease = await import(moduleUrl('../convex/projectHostedCheckLease.ts'));
-const outputStore = await import(moduleUrl('../convex/projectHostedOutputStore.ts'));
+const outputApi = await import(moduleUrl('../convex/projectHostedOutputApi.ts'));
 const secret = 'synthetic-mac-fixed-collector';
 
 async function fixture(t, actualEnvironment = false, provider = 'mac') {
@@ -79,7 +79,11 @@ async function fixture(t, actualEnvironment = false, provider = 'mac') {
         actor,
       )
       .then(JSON.parse);
-  await register();
+  // The owner's collector signs with the machine key issued at registration;
+  // the deployment key (secret) stays on the backend.
+  const { collectorKey: key } = await register();
+  assert.match(key, /^[0-9a-f]{64}$/);
+  assert.notEqual(key, secret);
   const enqueue = overrides =>
     f.enqueue(
       f.selection({
@@ -106,7 +110,7 @@ async function fixture(t, actualEnvironment = false, provider = 'mac') {
       .call('macHeartbeat', worker.heartbeat, {
         projectId: f.projectId,
         callback: JSON.stringify(value),
-        signature: signature ?? signMacHeartbeat(value, secret),
+        signature: signature ?? signMacHeartbeat(value, key),
       })
       .then(JSON.parse);
   };
@@ -119,6 +123,7 @@ async function fixture(t, actualEnvironment = false, provider = 'mac') {
     });
   return {
     ...f,
+    key,
     localLogs,
     configuration,
     scheduled,
@@ -437,14 +442,15 @@ for (const provider of ['mac', 'self-hosted'])
             return { status: 200 };
           },
           commit: async (message, signature) => {
-            const result = await f.run(
-              'macOutput',
-              (ctx, input) => outputStore.commitHostedOutput(ctx, input, () => secret),
-              {
+            // The owner's signed-in collector path: caller-bound, verified with the
+            // machine key derived on the backend.
+            const result = JSON.parse(
+              await f.call('macOutput', outputApi.apply, {
                 projectId: f.projectId,
-                message,
+                message: JSON.stringify(message),
                 signature,
-              },
+                caller: 'owner',
+              }),
             );
             if (message.body.kind === 'chunk' && !lostChunkReply) {
               lostChunkReply = true;
@@ -460,7 +466,7 @@ for (const provider of ['mac', 'self-hosted'])
         await runHostedMacWorker(
           {
             sessionId: f.address.sessionId,
-            key: secret,
+            key: f.key,
             work: update => {
               update([run.id]);
               return () => {};
@@ -476,7 +482,7 @@ for (const provider of ['mac', 'self-hosted'])
                 }),
               ),
             execute: async (owned, signal, control) => {
-              await executeHostedMacCheck(owned, signal, control, transport, secret);
+              await executeHostedMacCheck(owned, signal, control, transport, f.key);
               stop.abort();
             },
             close: async () => {},
@@ -489,7 +495,7 @@ for (const provider of ['mac', 'self-hosted'])
           new AbortController().signal,
           async command => (await f.control(run.id, command)).run,
           transport,
-          secret,
+          f.key,
         );
       const completed = await f.status(run.id);
       assert.equal(completed.status, 'passed');
@@ -539,7 +545,7 @@ test('active renewal is signed, cancel stops the live process through its subscr
   const running = runHostedMacWorker(
     {
       sessionId: f.address.sessionId,
-      key: secret,
+      key: f.key,
       work: update => {
         update([queued.id]);
         return () => {};
@@ -551,7 +557,7 @@ test('active renewal is signed, cancel stops the live process through its subscr
       control: f.control,
       heartbeat: async (callback, signature) => {
         heartbeats++;
-        assert.equal(signature, signMacHeartbeat(callback, secret));
+        assert.equal(signature, signMacHeartbeat(callback, f.key));
         return JSON.parse(
           await f.call('macHeartbeat', worker.heartbeat, {
             projectId: f.projectId,
@@ -594,7 +600,7 @@ test('a hung heartbeat cannot keep execution alive beyond its last acknowledged 
   const running = runHostedMacWorker(
     {
       sessionId: f.address.sessionId,
-      key: secret,
+      key: f.key,
       work: update => {
         update([queued.id]);
         return () => {};
@@ -808,7 +814,7 @@ test('dogfood-sized idle queue is bounded and a settled empty subscription makes
   const running = runHostedMacWorker(
     {
       sessionId: f.address.sessionId,
-      key: secret,
+      key: f.key,
       work: update => {
         update(queue);
         return () => {};
@@ -858,7 +864,7 @@ for (const provider of ['mac', 'self-hosted'])
     const running = runHostedMacWorker(
       {
         sessionId: f.address.sessionId,
-        key: secret,
+        key: f.key,
         work: update => {
           update([queued.id]);
           return () => {};

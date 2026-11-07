@@ -22,6 +22,7 @@ import { hostedCheckTerminal, checkPin, type HostedCheckRun } from '../src/hoste
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { invariant } from '../src/errors';
 import { recordHostedTestTimings } from './projectHostedTestTimings';
+import { runSigningSecret } from '../src/hosted-collector-key';
 
 /** Only fixed trusted collection code holds the signing key. Project-code
  * stdout, display records and source-job callbacks cannot supply this evidence.
@@ -49,7 +50,7 @@ export async function receiveHostedCheckCallback(
       runId: callback.runId,
     }));
   invariant(run.id === callback.runId, 'EVIDENCE_CHANGED', 'Callback run differs.');
-  verifyHostedCheckCallback(callback, input.signature, key(run.keyId));
+  verifyHostedCheckCallback(callback, input.signature, runSigningSecret(key(run.keyId), run));
   assertHostedCheckActive(run);
   const plan = run.plan,
     r = run.request;

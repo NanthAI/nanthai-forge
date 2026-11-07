@@ -6,6 +6,7 @@ import { moduleUrl } from './convex-module.mjs';
 import { digest } from '../dist/hash.js';
 import { checkPin } from '../dist/hosted-check.js';
 import { signHostedCheckCallback } from '../dist/hosted-check-evidence.js';
+import { runSigningSecret } from '../dist/hosted-collector-key.js';
 export const definitions = await import(moduleUrl('../convex/projectHostedCheckDefinitions.ts'));
 export const checks = await import(moduleUrl('../convex/projectHostedChecks.ts'));
 export const read = await import(moduleUrl('../convex/projectHostedCheckRead.ts'));
@@ -221,11 +222,20 @@ export async function checksFixture(source = null) {
       })
     ).run;
   };
+  // Machine-run evidence is signed with that machine's derived key, as a real
+  // collector receives it at registration.
+  const signed = new Map();
+  const sign = body =>
+    signHostedCheckCallback(
+      body,
+      signed.has(body.runId) ? runSigningSecret(callbackKey, signed.get(body.runId)) : callbackKey,
+    );
+  const remember = r => (signed.set(r.id, r), r);
   const body = (r, result, overrides = {}) => ({
     schema: 1,
     eventId: randomUUID(),
     projectId,
-    runId: r.id,
+    runId: remember(r).id,
     operationId: r.request.operationId,
     authorityEpoch: 1,
     fence: r.fence,
@@ -242,7 +252,7 @@ export async function checksFixture(source = null) {
     result,
     ...overrides,
   });
-  const callback = (body, signature = signHostedCheckCallback(body, callbackKey)) =>
+  const callback = (body, signature = sign(body)) =>
     run(
       body.result.kind === 'complete' ? 'checkComplete' : 'checkShard',
       (ctx, input) => callbacks.receiveHostedCheckCallback(ctx, input, () => callbackKey),
@@ -325,7 +335,7 @@ export async function checksFixture(source = null) {
     },
     body,
     callback,
-    sign: body => signHostedCheckCallback(body, callbackKey),
+    sign,
     shard,
     complete,
     pass,

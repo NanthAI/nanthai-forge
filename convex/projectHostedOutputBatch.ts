@@ -4,7 +4,7 @@ import { makeFunctionReference } from 'convex/server';
 import { internalMutation, internalAction, type MutationCtx, type ActionCtx } from './server';
 import { mutation, action } from './cliServer';
 import type { Id } from './_generated/dataModel';
-import { authorizeOutputWindow, commitHostedOutputWindow } from './projectHostedOutputStore';
+import { authorizeOutputWindow, collectorCaller, commitHostedOutputWindow } from './projectHostedOutputStore';
 import { outputSigningKey, verifyOutputObject } from './projectHostedOutputApi';
 import { outputMessageObject, outputKey, type OutputMessage } from '../src/hosted-check-output';
 import { canonicalPayload } from '../src/hosted-source-operation';
@@ -16,7 +16,11 @@ const args = {
   projectId: v.id('hostedProjects'),
   entries: v.array(v.object({ message: v.string(), signature: v.string() })),
 };
+/** Internal steps of the verified transfer: a public collector call names its
+ * signed-in account, a backend call names none. */
+const internalArgs = { ...args, caller: v.optional(v.string()) };
 type Input = { projectId: Id<'hostedProjects'>; entries: { message: string; signature: string }[] };
+type InternalInput = Input & { caller?: string };
 function window(input: Input) {
   invariant(
     input.entries.length > 0 && input.entries.length <= 100,
@@ -25,16 +29,19 @@ function window(input: Input) {
   );
   return input.entries.map(entry => ({ ...entry, message: JSON.parse(entry.message) }));
 }
-async function authorized(ctx: MutationCtx, input: Input) {
+async function authorized(ctx: MutationCtx, input: Input, caller: string | undefined) {
   return authorizeOutputWindow(
     ctx,
     window(input).map(entry => ({ projectId: input.projectId, ...entry })),
     outputSigningKey,
+    undefined,
+    caller,
   );
 }
-const prepareHandler = async (ctx: MutationCtx, input: Input) => {
+const prepareHandler = async (ctx: MutationCtx, input: Input, collector: boolean) => {
   try {
-    const messages = await authorized(ctx, input);
+    const caller = collector ? await collectorCaller(ctx) : undefined;
+    const messages = await authorized(ctx, input, caller);
     const targets = [];
     for (const message of messages) {
       const object = outputMessageObject(message);
@@ -53,22 +60,26 @@ const prepareHandler = async (ctx: MutationCtx, input: Input) => {
     return report(error);
   }
 };
-export const prepare = internalMutation({ args, returns: v.string(), handler: prepareHandler });
-export const authorize = internalMutation({
+export const prepare = internalMutation({
   args,
   returns: v.string(),
-  handler: async (ctx, input) => {
+  handler: (ctx, input) => prepareHandler(ctx, input, false),
+});
+export const authorize = internalMutation({
+  args: internalArgs,
+  returns: v.string(),
+  handler: async (ctx, { caller, ...input }) => {
     try {
-      return canonicalPayload(await authorized(ctx, input));
+      return canonicalPayload(await authorized(ctx, input, caller));
     } catch (error) {
       return report(error);
     }
   },
 });
 export const apply = internalMutation({
-  args,
+  args: internalArgs,
   returns: v.string(),
-  handler: async (ctx, input) => {
+  handler: async (ctx, { caller, ...input }) => {
     try {
       // One atomic ordered window. Every original signature, epoch, execution,
       // offset, sequence and duplicate receipt is revalidated after storage IO.
@@ -77,6 +88,8 @@ export const apply = internalMutation({
           ctx,
           window(input).map(entry => ({ projectId: input.projectId, ...entry })),
           outputSigningKey,
+          undefined,
+          caller,
         ),
       );
     } catch (error) {
@@ -84,24 +97,42 @@ export const apply = internalMutation({
     }
   },
 });
-const commitHandler = async (ctx: ActionCtx, input: Input): Promise<string> => {
+const commitHandler = async (ctx: ActionCtx, input: Input, collector: boolean): Promise<string> => {
   try {
+    const selected: InternalInput = {
+      projectId: input.projectId,
+      entries: input.entries,
+      ...(collector ? { caller: await collectorCaller(ctx) } : {}),
+    };
     const messages: OutputMessage[] = JSON.parse(
       await ctx.runMutation(
-        makeFunctionReference<'mutation', Input, string>('projectHostedOutputBatch:authorize'),
-        input,
+        makeFunctionReference<'mutation', InternalInput, string>('projectHostedOutputBatch:authorize'),
+        selected,
       ),
     );
     // Storage HEADs are external IO, not nested Convex calls; keep memory bounded.
     for (const message of messages) await verifyOutputObject(input.projectId, message);
     return await ctx.runMutation(
-      makeFunctionReference<'mutation', Input, string>('projectHostedOutputBatch:apply'),
-      input,
+      makeFunctionReference<'mutation', InternalInput, string>('projectHostedOutputBatch:apply'),
+      selected,
     );
   } catch (error) {
     return report(error);
   }
 };
-export const commit = internalAction({ args, returns: v.string(), handler: commitHandler });
-export const workerPrepare = mutation({ args, returns: v.string(), handler: prepareHandler });
-export const workerCommit = action({ args, returns: v.string(), handler: commitHandler });
+export const commit = internalAction({
+  args,
+  returns: v.string(),
+  handler: (ctx, input) => commitHandler(ctx, input, false),
+});
+// Public collector entrypoints bind the signed-in caller to the run's machine owner.
+export const workerPrepare = mutation({
+  args,
+  returns: v.string(),
+  handler: (ctx, input) => prepareHandler(ctx, input, true),
+});
+export const workerCommit = action({
+  args,
+  returns: v.string(),
+  handler: (ctx, input) => commitHandler(ctx, input, true),
+});

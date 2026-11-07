@@ -18,6 +18,7 @@ import {
 import { controlHostedCheck, hostedCheckControlSchema } from './projectHostedCheckDispatch';
 import { receiveHostedCheckCallback } from './projectHostedCheckCallbacks';
 import { outputSigningKey } from './projectHostedOutputApi';
+import { machineCollectorKey, runSigningSecret } from '../src/hosted-collector-key';
 import { hostedMachineRunnerSchema, checkPin, hostedCheckTerminal } from '../src/hosted-check';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { invariant } from '../src/errors';
@@ -37,8 +38,10 @@ async function owner(ctx: QueryCtx | MutationCtx, projectId: Id<'hostedProjects'
 async function worker(
   ctx: QueryCtx | MutationCtx,
   input: { projectId: Id<'hostedProjects'>; machineId: string; sessionId: string },
+  /** The owner already resolved in this transaction. */
+  resolved?: { actor: string },
 ) {
-  const { actor } = await owner(ctx, input.projectId);
+  const { actor } = resolved ?? (await owner(ctx, input.projectId));
   const row = await requireMacMachine(ctx, input.projectId, input.machineId);
   invariant(
     row && row.actor === actor && row.sessionId === input.sessionId,
@@ -61,6 +64,14 @@ export const register = mutation({
         .strict()
         .parse(JSON.parse(input.request));
       const { actor } = await owner(ctx, input.projectId);
+      // The machine's key is derived on demand for this project and machine only;
+      // it is never stored and never part of the operation receipt.
+      const issue = (keyId: string) =>
+        machineCollectorKey(outputSigningKey(keyId), {
+          keyId,
+          projectId: input.projectId,
+          machineId: request.configuration.machineId,
+        });
       const operation = await beginCheckOperation(ctx, {
         projectId: input.projectId,
         actor,
@@ -68,7 +79,19 @@ export const register = mutation({
         expected: { authorityEpoch: request.authorityEpoch },
         payload: request,
       });
-      if (operation.replayed) return canonicalPayload(operation.operation.terminal?.outcome);
+      if (operation.replayed) {
+        const outcome = operation.operation.terminal?.outcome as
+          | { status?: string; result?: { keyId?: string; machineId?: string } }
+          | undefined;
+        const keyId = outcome?.result?.keyId;
+        return canonicalPayload(
+          outcome?.status === 'completed' &&
+            keyId &&
+            outcome.result?.machineId === request.configuration.machineId
+            ? { ...outcome, collectorKey: issue(keyId) }
+            : outcome,
+        );
+      }
       const configuration = await checkSetting(ctx, input.projectId, 'runner', 'runner');
       invariant(
         configuration?.digest === checkPin(request.configuration),
@@ -81,7 +104,7 @@ export const register = mutation({
         'RUNNER_UNAVAILABLE',
         'Trusted check callback configuration is unavailable.',
       );
-      outputSigningKey(keyId);
+      const collectorKey = issue(keyId);
       const row = {
         projectId: input.projectId,
         machineId: request.configuration.machineId,
@@ -99,7 +122,7 @@ export const register = mutation({
       if (old) await ctx.db.replace(old._id, row);
       else await ctx.db.insert('projectHostedCheckWorkers', row);
       await completeCheckOperation(ctx, operation.operation, row);
-      return canonicalPayload({ status: 'completed', result: row });
+      return canonicalPayload({ status: 'completed', result: row, collectorKey });
     } catch (error) {
       return report(error);
     }
@@ -174,17 +197,22 @@ export const heartbeat = mutation({
   returns: v.string(),
   handler: async (ctx, input) => {
     try {
+      const selected = await owner(ctx, input.projectId);
       const value = macHeartbeatSchema.parse(JSON.parse(input.callback));
       invariant(value.projectId === input.projectId, 'EVIDENCE_CHANGED', 'Heartbeat project differs.');
       const { row, run } = await writableHostedCheck(ctx, { projectId: input.projectId, runId: value.runId });
       assertHostedCheckActive(run);
-      verifyMacHeartbeat(value, input.signature, outputSigningKey(run.keyId));
       invariant(isMachineRunner(run.configuration), 'EVIDENCE_CHANGED', 'Select a machine execution.');
-      await worker(ctx, {
-        projectId: input.projectId,
-        machineId: run.configuration.machineId,
-        sessionId: value.owner,
-      });
+      verifyMacHeartbeat(value, input.signature, runSigningSecret(outputSigningKey(run.keyId), run));
+      await worker(
+        ctx,
+        {
+          projectId: input.projectId,
+          machineId: run.configuration.machineId,
+          sessionId: value.owner,
+        },
+        selected,
+      );
       const prior = await ctx.db
         .query('projectHostedCheckCallbacks')
         .withIndex('by_project_and_run_and_event', q =>

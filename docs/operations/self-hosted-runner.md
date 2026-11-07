@@ -17,15 +17,17 @@ GitHub account, launchd, systemd, Keychain, Xcode or macOS sandbox is needed.
 The check's declared command and tools must be available on the runner's PATH.
 
 Use the existing owner sign-in (`nforge login "$DEPLOYMENT_URL"`) or inject
-`FORGE_AUTH_TOKEN` through your service's secret facility. Provision the existing
-collector signing credential: the deployment has `FORGE_HOSTED_CHECK_KEY_ID` and
-`FORGE_HOSTED_CHECK_KEY_<ID>`, and the worker receives the same key in an owner-only
-mode-600 file named by `FORGE_HOSTED_CHECK_KEY_FILE`. The environment alternative
-`FORGE_HOSTED_CHECK_KEY_<ID>` remains supported. Never put key contents in arguments,
-source, an image or service definition. Registration authenticates the project
-owner and verifies the exact configured machine/runtime/environment; it does not
-mint or display a credential. Project children receive neither collector key nor
-account token.
+`FORGE_AUTH_TOKEN` through your service's secret facility. No collector key file
+is needed: registration authenticates the project owner, verifies the exact
+configured machine/runtime/environment and returns this machine's own signing key,
+derived on the backend from the deployment key (`FORGE_HOSTED_CHECK_KEY_<ID>`) for
+this one project and machine. Nothing new is stored; the worker keeps the derived
+key in memory only, and it is refused for any other project or machine. Output,
+heartbeat and result calls must also come from the signed-in project owner who
+registered the machine. The deployment key itself never leaves the backend. An
+older deployment that does not issue machine keys still reads the legacy
+`FORGE_HOSTED_CHECK_KEY_FILE` (owner-only mode 600) or `FORGE_HOSTED_CHECK_KEY_<ID>`.
+Project children receive neither collector key nor account token.
 
 Choose a stable machine UUID (for example `node -p 'crypto.randomUUID()'`) and
 supply it on restarts. From the built package, this single command configures the
@@ -61,14 +63,12 @@ source/build inputs, uses a non-root `node` user and contains no credentials:
 ```sh
 docker build -f scripts/self-hosted-runner/Dockerfile -t forge-runner .
 docker run --rm --init --name forge-runner \
-  --env FORGE_AUTH_TOKEN --env FORGE_HOSTED_CHECK_KEY_FILE=/run/secrets/collector \
-  --mount type=bind,src="$COLLECTOR_KEY_FILE",dst=/run/secrets/collector,readonly \
+  --env FORGE_AUTH_TOKEN \
   --mount type=volume,src=forge-runner-state,dst=/var/lib/forge-runner \
   forge-runner "$DEPLOYMENT_URL" "$PROJECT_ID" "$MACHINE_ID" '["linux","build"]'
 ```
 
-The mounted key must be readable by container UID 1000 and retain mode 600;
-provision that file without embedding its bytes in the image. The base image
+The base image
 contains Node/npm and core utilities. Add the tools your check requires in a
 child image, then configure from that same image. The image runs Linux on Docker
 Desktop for macOS too. Writable private temp/cache storage is required. Full

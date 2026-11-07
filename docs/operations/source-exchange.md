@@ -611,7 +611,9 @@ controller does not choose a replacement provider or start an idle polling loop.
 Trusted collection ingress calls only the internal
 `projectHostedCheckApi:callback` with exact callback JSON and its signature. The
 backend pins `FORGE_HOSTED_CHECK_KEY_ID` at enqueue and resolves
-`FORGE_HOSTED_CHECK_KEY_<keyId>` itself. Signing uses the
+`FORGE_HOSTED_CHECK_KEY_<keyId>` itself. Runner-machine runs verify with that
+machine's key, derived per project and machine from the deployment key and issued
+at registration; the deployment key stays server-side. Signing uses the
 `forge-hosted-check-provider-v1` domain. Keep this signing authority in fixed
 collector/control code, isolated from project commands, source workers and account
 credentials; never pass a signing key in a dispatch payload or project environment.

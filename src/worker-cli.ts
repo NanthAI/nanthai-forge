@@ -17,9 +17,10 @@ import { invariant } from './errors.js';
 import { canonicalPayload } from './hosted-source-operation.js';
 import type { OutputTransport } from './hosted-output-transfer.js';
 
-/** The collector key comes from FORGE_HOSTED_CHECK_KEY_<id>, or from an owner-only
- * file named by FORGE_HOSTED_CHECK_KEY_FILE so it never sits in a service definition or
- * shell history. The child check environment drops both names. */
+/** Legacy fallback for a deployment that does not yet issue machine keys at
+ * registration: FORGE_HOSTED_CHECK_KEY_<id>, or an owner-only file named by
+ * FORGE_HOSTED_CHECK_KEY_FILE so it never sits in a service definition or shell
+ * history. The child check environment drops both names. */
 export function hostedCheckKey(keyId: string, env: NodeJS.ProcessEnv = process.env) {
   const direct = env[`FORGE_HOSTED_CHECK_KEY_${keyId}`];
   if (direct) return direct;
@@ -45,6 +46,22 @@ export function hostedCheckKey(keyId: string, env: NodeJS.ProcessEnv = process.e
   const key = readFileSync(path, 'utf8').trim();
   invariant(key, 'RUNNER_UNAVAILABLE', 'The collector key file is empty.');
   return key;
+}
+/** The registration issues this machine's own signing key, derived for this
+ * project and machine only; it is held in memory and never written to disk. */
+export function collectorKey(
+  registered: { result: { keyId: string }; collectorKey?: unknown },
+  env: NodeJS.ProcessEnv = process.env,
+) {
+  if (registered.collectorKey !== undefined) {
+    invariant(
+      typeof registered.collectorKey === 'string' && /^[0-9a-f]{64}$/.test(registered.collectorKey),
+      'RUNNER_UNAVAILABLE',
+      'The runner registration returned an unusable signing key.',
+    );
+    return registered.collectorKey;
+  }
+  return hostedCheckKey(registered.result.keyId, env);
 }
 /** Preserve the selected wire format (including legacy Mac), labels and digest.
  * Never guess a different environment or downgrade a self-hosted registration. */
@@ -107,8 +124,7 @@ export async function workerCli(args: string[]) {
       configuration,
     }),
   });
-  const keyId: string = registered.result.keyId,
-    key = hostedCheckKey(keyId);
+  const key = collectorKey(registered);
   const subscriptions = hostedRunSubscription({ url, projectId });
   const stop = new AbortController();
   const abort = () => stop.abort();

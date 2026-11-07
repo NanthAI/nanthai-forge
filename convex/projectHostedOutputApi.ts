@@ -4,7 +4,7 @@ import { makeFunctionReference } from 'convex/server';
 import { internalMutation, internalAction } from './server';
 import { mutation, action } from './cliServer';
 import type { Id } from './_generated/dataModel';
-import { authorizeOutput, commitHostedOutput } from './projectHostedOutputStore';
+import { authorizeOutput, collectorCaller, commitHostedOutput } from './projectHostedOutputStore';
 import { outputMessageObject, outputKey, type OutputMessage } from '../src/hosted-check-output';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { r2Config, presignPut, headObject, checksumOf } from './r2';
@@ -12,6 +12,13 @@ import { invariant } from '../src/errors';
 import { report } from './errors';
 
 const args = { projectId: v.id('hostedProjects'), message: v.string(), signature: v.string() };
+/** Internal steps of the verified transfer: a public collector call names its
+ * signed-in account, a backend call names none. */
+const internalArgs = { ...args, caller: v.optional(v.string()) };
+type Input = { projectId: Id<'hostedProjects'>; message: string; signature: string };
+type InternalInput = Input & { caller?: string };
+/** The deployment key. Server-only: runner machines receive a derived key at
+ * registration (see machineCollectorKey) and never this value. */
 export const outputSigningKey = (id: string) => {
   const value = process.env[`FORGE_HOSTED_CHECK_KEY_${id}`];
   invariant(value, 'RUNNER_UNAVAILABLE', 'Trusted output key is unavailable.');
@@ -21,13 +28,16 @@ export const outputSigningKey = (id: string) => {
  * authority. Targets bind one exact immutable key, length and checksum. */
 const prepareHandler = async (
   ctx: import('./_generated/server').MutationCtx,
-  input: { projectId: Id<'hostedProjects'>; message: string; signature: string },
+  input: Input,
+  collector: boolean,
 ) => {
   try {
+    const caller = collector ? await collectorCaller(ctx) : undefined;
     const message = await authorizeOutput(
       ctx,
-      { ...input, message: JSON.parse(input.message) },
+      { projectId: input.projectId, signature: input.signature, message: JSON.parse(input.message) },
       outputSigningKey,
+      caller,
     );
     const object = outputMessageObject(message);
     return canonicalPayload({
@@ -46,17 +56,22 @@ const prepareHandler = async (
 export const prepare = internalMutation({
   args,
   returns: v.string(),
-  handler: prepareHandler,
+  handler: (ctx, input) => prepareHandler(ctx, input, false),
 });
 /** The apply entrypoint is internal to the verified transfer action. No output
  * byte body is accepted by either API. Rechecks authority after external I/O. */
 export const apply = internalMutation({
-  args,
+  args: internalArgs,
   returns: v.string(),
-  handler: async (ctx, input) => {
+  handler: async (ctx, { caller, ...input }) => {
     try {
       return canonicalPayload(
-        await commitHostedOutput(ctx, { ...input, message: JSON.parse(input.message) }, outputSigningKey),
+        await commitHostedOutput(
+          ctx,
+          { ...input, message: JSON.parse(input.message) },
+          outputSigningKey,
+          caller,
+        ),
       );
     } catch (error) {
       return report(error);
@@ -64,23 +79,22 @@ export const apply = internalMutation({
   },
 });
 // Type-independent references keep additions to the generated API unnecessary.
-const authorizedRef = makeFunctionReference<
-  'mutation',
-  { projectId: Id<'hostedProjects'>; message: string; signature: string },
-  string
->('projectHostedOutputApi:authorize');
-const applyRef = makeFunctionReference<
-  'mutation',
-  { projectId: Id<'hostedProjects'>; message: string; signature: string },
-  string
->('projectHostedOutputApi:apply');
+const authorizedRef = makeFunctionReference<'mutation', InternalInput, string>(
+  'projectHostedOutputApi:authorize',
+);
+const applyRef = makeFunctionReference<'mutation', InternalInput, string>('projectHostedOutputApi:apply');
 export const authorize = internalMutation({
-  args,
+  args: internalArgs,
   returns: v.string(),
-  handler: async (ctx, input) => {
+  handler: async (ctx, { caller, ...input }) => {
     try {
       return canonicalPayload(
-        await authorizeOutput(ctx, { ...input, message: JSON.parse(input.message) }, outputSigningKey),
+        await authorizeOutput(
+          ctx,
+          { ...input, message: JSON.parse(input.message) },
+          outputSigningKey,
+          caller,
+        ),
       );
     } catch (error) {
       return report(error);
@@ -147,19 +161,39 @@ export async function verifyOutputObject(
 }
 const commitHandler = async (
   ctx: import('./_generated/server').ActionCtx,
-  input: { projectId: Id<'hostedProjects'>; message: string; signature: string },
+  input: Input,
+  collector: boolean,
 ): Promise<string> => {
   try {
-    const message: OutputMessage = JSON.parse(await ctx.runMutation(authorizedRef, input));
+    const selected: InternalInput = {
+      projectId: input.projectId,
+      message: input.message,
+      signature: input.signature,
+      ...(collector ? { caller: await collectorCaller(ctx) } : {}),
+    };
+    const message: OutputMessage = JSON.parse(await ctx.runMutation(authorizedRef, selected));
     if (outputMessageObject(message)) await verifyOutputObject(input.projectId, message);
-    return await ctx.runMutation(applyRef, input);
+    return await ctx.runMutation(applyRef, selected);
   } catch (error) {
     return report(error);
   }
 };
-export const commit = internalAction({ args, returns: v.string(), handler: commitHandler });
+export const commit = internalAction({
+  args,
+  returns: v.string(),
+  handler: (ctx, input) => commitHandler(ctx, input, false),
+});
 
 // Signed fixed collectors may pull output targets directly. apply stays internal;
 // the public commit action performs the same authoritative R2 HEAD verification.
-export const workerPrepare = mutation({ args, returns: v.string(), handler: prepareHandler });
-export const workerCommit = action({ args, returns: v.string(), handler: commitHandler });
+// Both bind the signed-in caller to the run's registered machine owner.
+export const workerPrepare = mutation({
+  args,
+  returns: v.string(),
+  handler: (ctx, input) => prepareHandler(ctx, input, true),
+});
+export const workerCommit = action({
+  args,
+  returns: v.string(),
+  handler: (ctx, input) => commitHandler(ctx, input, true),
+});

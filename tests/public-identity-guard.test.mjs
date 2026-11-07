@@ -257,3 +257,52 @@ test('system actors are never looked up', async () => {
   assert.deepEqual(await people.publicPeople(view.ctx, { projectId: 'project-1' }, value), value);
   assert.equal(view.reads(), 0);
 });
+
+// Collector-signed input is never authority on its own: every public function that
+// accepts a signature must resolve the signed-in caller before it reads any record.
+test('every public function taking a collector signature refuses an anonymous caller first', async () => {
+  const touched = name => () => {
+    throw new Error(`${name} used before the caller check`);
+  };
+  const ctx = {
+    auth: { getUserIdentity: async () => null },
+    db: new Proxy({}, { get: (_, key) => touched(`db.${String(key)}`) }),
+    runQuery: touched('runQuery'),
+    runMutation: touched('runMutation'),
+    runAction: touched('runAction'),
+    scheduler: new Proxy({}, { get: (_, key) => touched(`scheduler.${String(key)}`) }),
+    storage: new Proxy({}, { get: (_, key) => touched(`storage.${String(key)}`) }),
+  };
+  const checked = [],
+    open = [];
+  for (const file of files) {
+    const module = await import(moduleUrl(`../convex/${file}`));
+    for (const [name, fn] of Object.entries(module)) {
+      if (!fn?.isPublic || !(fn.isMutation || fn.isAction)) continue;
+      const args = JSON.parse(fn.exportArgs());
+      if (!/"signature":/.test(JSON.stringify(args))) continue;
+      const input = { projectId: 'hostedProjects-1', signature: '0'.repeat(64) };
+      for (const key of Object.keys(args.value)) input[key] ??= key === 'entries' ? [] : '{}';
+      try {
+        await fn._handler(ctx, input);
+        open.push(`${file}:${name} accepted an anonymous caller`);
+      } catch (error) {
+        const data = error?.data ?? {};
+        if (data.code !== 'PROJECT_UNAVAILABLE')
+          open.push(`${file}:${name} ${data.code ?? error?.message ?? 'failed'} before the caller check`);
+      }
+      checked.push(`${file}:${name}`);
+    }
+  }
+  // The known collector endpoints are covered; a new one is covered automatically.
+  for (const name of [
+    'projectHostedOutputApi.ts:workerPrepare',
+    'projectHostedOutputApi.ts:workerCommit',
+    'projectHostedOutputBatch.ts:workerPrepare',
+    'projectHostedOutputBatch.ts:workerCommit',
+    'projectHostedCheckWorker.ts:callback',
+    'projectHostedCheckWorker.ts:heartbeat',
+  ])
+    assert(checked.includes(name), `${name} is guarded`);
+  assert.deepEqual(open, []);
+});
