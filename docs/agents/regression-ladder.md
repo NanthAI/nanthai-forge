@@ -71,6 +71,7 @@ removed, skipped or moved out of `tests/*.test.mjs`, or when this page stops nam
 | `t27456` | B1.5d conflict recovery: re-land with markers, resolve from a subdirectory, overtaken during its check |
 | `a930de4c` | Core claim: an empty Lane reported LANDED |
 | `c329d191` | Core claim: a lost finish wake stalled the queue about 30 min |
+| `a7de3a93` | Core claim: a lost check dispatch left the queue head checking for up to 12 h (2026-11-05) |
 
 A new core-claim incident adds its replay to the registry and a row here in the Lane that fixes
 it.

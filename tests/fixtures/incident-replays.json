@@ -43,6 +43,24 @@
       "what": "Core claim: every running-check progress event woke the queue (OCC contention behind the stall)",
       "file": "tests/hosted-landing-progress-wake.test.mjs",
       "test": "incident c329d191: running-check progress writes the queue row at most once a minute"
+    },
+    {
+      "incident": "a7de3a93",
+      "what": "Core claim: a check dispatch threw, the run stayed unknown with no executionId and the queue head sat checking for up to 12 h",
+      "file": "tests/hosted-lost-dispatch.test.mjs",
+      "test": "incident a7de3a93 replay: an unacknowledged dispatch is re-checked by the stall alarm, then the head lands"
+    },
+    {
+      "incident": "a7de3a93",
+      "what": "Core claim: the lost runs were an admission run (77d20db5) and a train recheck (9e7e9db0); every shape recovers",
+      "file": "tests/hosted-lost-dispatch.test.mjs",
+      "test": "incident a7de3a93 shape: a lost dispatch on ${name} is re-checked and every entry lands"
+    },
+    {
+      "incident": "a7de3a93",
+      "what": "Core claim: the workflow_dispatch call threw after outcome=unknown; only the 12 h watchdog would have ended the run",
+      "file": "tests/hosted-actions-direct.test.mjs",
+      "test": "incident a7de3a93 replay: a dispatch that throws is reconciled by run-name at 5 min instead of waiting 12 h"
     }
   ]
 }
