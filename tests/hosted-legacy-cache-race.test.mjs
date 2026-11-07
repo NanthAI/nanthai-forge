@@ -96,5 +96,12 @@ for (const phase of ['after-receipt', 'after-move', 'interrupted-after-move', 'a
     });
     assert.equal(gc.evicted.length, 1, 'actual clean nested checkout and adjacent cache are evicted');
     assert.equal(fs.readFileSync(preservedNote, 'utf8'), 'IRREPLACEABLE USER DRAFT');
-    assert(!preservedNote.startsWith(parentCache + '/'), 'user bytes never live in disposable caches');
+    // Kept local changes sit in the cache's own kept-apply folder, which no eviction touches;
+    // a note a clean apply quarantined stays beside the root, as before.
+    if (blocked)
+      assert(
+        preservedNote.startsWith(join(parentCache, 'kept-apply') + '/'),
+        'kept in the kept-apply folder',
+      );
+    else assert(!preservedNote.startsWith(parentCache + '/'), 'user bytes never live in disposable caches');
   });

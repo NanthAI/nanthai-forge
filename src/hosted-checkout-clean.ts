@@ -9,6 +9,8 @@ import { preserveLegacyCacheUse } from './client-cache-use.js';
 import { ignoredBy, ignoreLayer } from './source-ignore.js';
 import { indexedBlob, statIndexRefresh, type CheckoutStatIndex } from './checkout-stat-index.js';
 
+export type CheckoutChange = { path: string; kind: 'edited' | 'extra' | 'deleted' };
+
 /** Validate saved source even when ignored. Return only disjoint local artifacts
  * to carry across publication; never follow links or read ignored output bytes.
  * The early guard defers extras until the target manifest is available. */
@@ -17,7 +19,13 @@ export function cleanHostedCheckout(
   files: NativeFile[],
   markerName: string,
   marked: boolean,
-  options: { target?: NativeFile[]; deferExtras?: boolean; index?: CheckoutStatIndex } = {},
+  options: {
+    target?: NativeFile[];
+    deferExtras?: boolean;
+    index?: CheckoutStatIndex;
+    /** List every difference from the saved files instead of refusing at the first one. */
+    collect?: CheckoutChange[];
+  } = {},
 ): string[] {
   let rootStat;
   try {
@@ -53,21 +61,31 @@ export function cleanHostedCheckout(
       const path = directory ? `${directory}/${entry}` : entry;
       const stat = lstatSync(join(root, path));
       if (path === '.forge') {
-        if (!(marked && stat.isDirectory() && !stat.isSymbolicLink()))
+        if (!(marked && stat.isDirectory() && !stat.isSymbolicLink())) {
+          if (options.collect) {
+            options.collect.push({ path, kind: 'extra' });
+            continue;
+          }
           throw new ForgeError(
             'WORK_CONFLICT',
             'Existing Forge metadata at ".forge" is preserved.',
             undefined,
             { obstruction: { kind: 'unknown-metadata', path: '.forge' } },
           );
+        }
         for (const name of readdirSync(join(root, path)))
-          if (!(name === markerName || (name === 'cache-use.json' && preserveLegacyCacheUse(root))))
+          if (!(name === markerName || (name === 'cache-use.json' && preserveLegacyCacheUse(root)))) {
+            if (options.collect) {
+              options.collect.push({ path: `${path}/${name}`, kind: 'extra' });
+              continue;
+            }
             throw new ForgeError(
               'WORK_CONFLICT',
               `Existing Forge metadata at ${JSON.stringify(`${path}/${name}`)} is preserved.`,
               undefined,
               { obstruction: { kind: 'unknown-metadata', path: `${path}/${name}` } },
             );
+          }
         continue;
       }
       const saved = allowed.get(path),
@@ -110,16 +128,20 @@ export function cleanHostedCheckout(
           ? readFileSync(join(root, path))
           : null;
       const observedDigest = bytes ? digest(bytes) : null;
-      if (
-        !(
-          file &&
-          bytes &&
-          observedDigest === file.blob &&
-          (stat.isSymbolicLink()
-            ? file.mode === 'symlink'
-            : file.mode !== 'symlink' && Boolean(stat.mode & 0o111) === (file.mode === 'executable'))
-        )
-      )
+      const matches = Boolean(
+        file &&
+        bytes &&
+        observedDigest === file.blob &&
+        (stat.isSymbolicLink()
+          ? file.mode === 'symlink'
+          : file.mode !== 'symlink' && Boolean(stat.mode & 0o111) === (file.mode === 'executable')),
+      );
+      if (!matches && options.collect) {
+        options.collect.push({ path, kind: saved ? 'edited' : 'extra' });
+        allowed.delete(path);
+        continue;
+      }
+      if (!matches)
         throw new ForgeError(
           'WORK_CONFLICT',
           `Local checkout changes at ${JSON.stringify(path)} are preserved.`,
@@ -146,7 +168,8 @@ export function cleanHostedCheckout(
     }
   }
   visit('', []);
-  if (allowed.size)
+  if (options.collect) for (const path of allowed.keys()) options.collect.push({ path, kind: 'deleted' });
+  else if (allowed.size)
     throw new ForgeError(
       'WORK_CONFLICT',
       `Local checkout deletion at ${JSON.stringify(allowed.keys().next().value)} is preserved.`,

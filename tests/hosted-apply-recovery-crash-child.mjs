@@ -17,27 +17,25 @@ fs.renameSync = (from, to) => {
   const receipt = String(to).endsWith('/receipt.json');
   const data =
     receipt || String(to).endsWith(`/${request.operationId}.json`) ? JSON.parse(fs.readFileSync(from)) : null;
-  const match =
-    boundary === 'receipt'
-      ? receipt && !data.restored && !data.priorPreservedAt
-      : boundary === 'stage-marker'
-        ? /\/baseline-[^/]+\/\.forge\//.test(String(to))
-        : boundary === 'preserve'
-          ? from === root && String(to).endsWith('/checkout')
-          : boundary === 'baseline'
-            ? String(from).includes('/baseline-') && to === root
-            : boundary === 'prior-backup'
-              ? from === join(clientCacheRoot(root), 'previous') && String(to).endsWith('/prior-checkout')
-              : boundary === 'restored-receipt'
-                ? receipt && data.restored
-                : boundary === 'apply-publication'
-                  ? (String(from).includes('/checkout-') && to === root) ||
-                    (String(from).includes('/delta-') && String(to).startsWith(`${root}/`))
-                  : boundary === 'additional-receipt'
-                    ? receipt && !data.restored && data.additionalPreservedAt?.length
-                    : boundary === 'additional-preserve'
-                      ? from === root && /\/checkout-[a-f0-9-]{36}$/.test(String(to))
-                      : data?.complete === true;
+  const rounds = Object.keys(data?.rounds ?? {}).length;
+  const kills = {
+    receipt: () => receipt && !data.restored && !data.priorPreservedAt,
+    // The first round's changed files are copied and its receipt names them.
+    'round-recorded': () => receipt && !data.restored && rounds === 1,
+    // A baseline file moves from the private stage into the live tree.
+    install: () => String(from).includes('/baseline-') && String(to).startsWith(`${root}/`),
+    'prior-backup': () =>
+      from === join(clientCacheRoot(root), 'previous') && String(to).endsWith('/prior-checkout'),
+    'restored-receipt': () => receipt && data.restored,
+    'apply-publication': () =>
+      (String(from).includes('/checkout-') && to === root) ||
+      (String(from).includes('/delta-') && String(to).startsWith(`${root}/`)),
+    'additional-receipt': () => receipt && !data.restored && data.additionalPreservedAt?.length,
+    // The second round's changed files are copied and its receipt names them.
+    'additional-preserve': () => receipt && !data.restored && rounds === 2,
+  };
+  if (boundary !== 'apply-receipt' && !kills[boundary]) throw Error(`Unknown crash boundary ${boundary}`);
+  const match = boundary === 'apply-receipt' ? data?.complete === true : Boolean(kills[boundary]());
   if (match && timing === 'before') process.kill(process.pid, 'SIGKILL');
   const result = rename(from, to);
   if (match && timing === 'after') process.kill(process.pid, 'SIGKILL');

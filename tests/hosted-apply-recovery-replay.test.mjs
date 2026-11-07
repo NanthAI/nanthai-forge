@@ -14,9 +14,8 @@ import { assertAgentResponseShape } from './agent-response-shape.mjs';
 
 const boundaries = [
   'receipt',
-  'stage-marker',
-  'preserve',
-  'baseline',
+  'round-recorded',
+  'install',
   'prior-backup',
   'restored-receipt',
   'apply-publication',
@@ -57,7 +56,7 @@ for (const boundary of boundaries)
           },
         );
       if (boundary.startsWith('additional-')) {
-        const first = crash('preserve', 'after');
+        const first = crash('round-recorded', 'after');
         assert.equal(first.signal, 'SIGKILL', first.stdout + first.stderr);
         fs.mkdirSync(s.root, { recursive: true });
         fs.writeFileSync(join(s.root, 'between-crashes.txt'), 'draft between two interruptions');
@@ -162,7 +161,8 @@ test('interrupted recovery keeps executable identities without exposing unstruct
   await assert.rejects(applyHostedSync(s.root, request, s.transport), { code: 'WORK_CONFLICT' });
   const rename = fs.renameSync;
   t.mock.method(fs, 'renameSync', (from, to) => {
-    if (from === s.root) throw Error('PRIVATE_UNSTRUCTURED_FAILURE_TEXT');
+    if (String(from).includes('/baseline-') && String(to).startsWith(s.root + '/'))
+      throw Error('PRIVATE_UNSTRUCTURED_FAILURE_TEXT');
     return rename(from, to);
   });
   syncBuiltinESMExports();

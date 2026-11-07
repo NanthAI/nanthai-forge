@@ -205,9 +205,10 @@ for (const phase of ['after-preserve', 'after-baseline', 'after-receipt'])
       const result = rename(from, to);
       const match =
         phase === 'after-preserve'
-          ? from === s.root && String(to).endsWith('/checkout')
+          ? String(to).endsWith('/receipt.json') &&
+            Object.keys(JSON.parse(readFileSync(to)).rounds ?? {}).length > 0
           : phase === 'after-baseline'
-            ? String(from).includes('/baseline-') && to === s.root
+            ? String(from).includes('/baseline-') && String(to).startsWith(s.root + '/')
             : String(to).endsWith('/receipt.json') && JSON.parse(readFileSync(to)).restored;
       if (match && !interrupted) {
         interrupted = true;

@@ -227,6 +227,6 @@ export function readDeltaJournal(path: string): DeltaJournal {
   throw deltaPendingError(
     'its journal is unreadable.',
     deltaJournalName,
-    'Keep the checkout as it is and report this; recover-apply from a retained sync preserves the whole checkout.',
+    'Keep the checkout as it is and report this; recover-apply from a retained sync keeps your changed files and restores the baseline.',
   );
 }

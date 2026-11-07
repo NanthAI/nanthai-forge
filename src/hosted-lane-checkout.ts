@@ -26,6 +26,7 @@ import {
 } from './hosted-checkout-delta.js';
 import { retainedDeltaBackups, settleCheckoutDelta } from './hosted-checkout-delta-settle.js';
 import { sweepCheckoutStages } from './hosted-checkout-delta-pending.js';
+import { sweepKeptApply } from './hosted-apply-kept.js';
 import { withCheckoutOpenMetrics, type CheckoutOpenMetrics } from './checkout-open-metrics.js';
 import { checkoutIo } from './checkout-io.js';
 import { smallCheckout } from './checkout-workload.js';
@@ -401,6 +402,11 @@ async function checkout(
                       // Ignored artifacts stay where they are; only changed paths move.
                       const pin = ({ path, blob, mode }: NativeFile) => ({ path, blob, mode });
                       sweepCheckoutStages(cache.root);
+                      try {
+                        sweepKeptApply(root);
+                      } catch {
+                        /* Expiry bookkeeping never fails an apply. */
+                      }
                       journalCheckoutDelta(cache.root, {
                         operationId: request.operationId,
                         stage: basename(stage),

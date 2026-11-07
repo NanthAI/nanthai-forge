@@ -156,8 +156,8 @@ test('a marker rewritten after the crash is never replaced; recover-apply preser
   assert(existsSync(journal(s.root)), 'the journal is kept for an explicit recovery');
   const recovered = await recoverLocalApply(s.root, request.operationId, s.transport);
   assert.equal(recovered.status, 'applied');
-  // Recovery restores a verified baseline; ignored output stays in the preserved checkout.
-  assertTarget(s, request, target, recovered.preservedAt);
+  // Recovery restores the verified baseline in place; ignored output was never touched.
+  assertTarget(s, request, target);
   assert.equal(readFileSync(join(recovered.preservedAt, 'a'), 'utf8'), 'after\n');
   assert(
     (recovered.additionalPreservedAt ?? []).some(path => existsSync(join(path, 'gone/x.txt'))),

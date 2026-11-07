@@ -1247,8 +1247,8 @@ and moved-aside bytes return. A local edit found before anything was installed
 also rolls back and refuses, from any command; a recorded rollback resumes as one.
 A marker changed by anything else, a parent replaced by a link or a file, or a
 filesystem error refuses with a `delta-apply-pending` obstruction naming the path
-and keeps the journal; explicit `recover-apply` moves its moved-aside bytes beside
-the preserved checkout. A journal from a newer client asks for an upgrade. Bytes
+and keeps the journal; explicit `recover-apply` moves its moved-aside bytes into the
+kept-apply folder with the changed files. A journal from a newer client asks for an upgrade. Bytes
 moved aside after installing began (an edit or a recreated incoming path) are kept,
 listed in `displacedRecovery` with a `warning`, and refuse a save once. Every
 parent directory the journal touched is flushed before the marker is published,
@@ -1758,12 +1758,23 @@ containing disposable cache. Re-verification after the move restores unexpected
 content when possible, or retains it with an obstruction; even verified quarantines
 stay outside GC because open handles can still write to moved directories.
 Tracked source paths retain ordinary obstruction handling. Blocked sync/resolve applies
-retain typed recovery through CLI/MCP; explicit `recover-apply` preserves the full
-checkout before restoring its baseline and resuming the same pinned installation.
-Restoration requires the exact journaled marker and clean materialized baseline;
-a recreated checkout is preserved in another durable round. Recovery uses one
-serialized private baseline stage, cleans it on exit, and never restores a baseline
-over a completed apply. Interrupted local failures retain executable recovery.
+retain typed recovery through CLI/MCP; explicit `recover-apply` keeps only the
+changed files, restores just those paths to the baseline in place and resumes the
+same pinned installation. The changed set is found with one stat-indexed pass over the
+materialized files, so the kept copy and its receipt grow with the changed paths, not the
+tree; ignored output (dependency links, build output) is never touched. Kept bytes live in
+the outermost client cache at `ROOT.forge-client/kept-apply/APPLY_ID/` (never beside the
+root): `files/` mirrors the changed paths (a later round adds `files-UUID/`), and
+`receipt.json` lists every path as edited, extra or deleted, with digests. A path edited
+again after it was kept starts another round instead of being overwritten, and a legacy
+read-cache folder holding local files is kept the same way. Status lists kept entries
+(`keptApply`, paths and counts only, at most 20) with their expiry. The retention clock starts when
+the pinned apply is confirmed and lasts seven days; an unconfirmed entry never expires.
+Expired entries are swept by later recoveries, applies and Lane housekeeping scans, and
+Lane pruning keeps the folder until then. Restoration requires the exact journaled marker and clean materialized baseline;
+a recreated or re-edited checkout is preserved in another durable round. Recovery uses one
+serialized private baseline stage of the restored files only, cleans it on exit, and never
+restores a baseline over a completed apply. Interrupted local failures retain executable recovery.
 The recovery journal and preserved bytes stay local and add no idle server calls.
 
 

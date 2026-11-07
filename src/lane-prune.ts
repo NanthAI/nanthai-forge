@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { removeCachePreservingKept, sweepKeptApplyCache } from './hosted-apply-kept.js';
 import { canonicalRoot, clientCacheRoot, rootSibling } from './root-paths.js';
 import { lstatSync, readFileSync, readdirSync, readlinkSync, rmSync } from 'node:fs';
 import { join, resolve, sep } from 'node:path';
@@ -111,6 +112,13 @@ export function adoptLaneCheckouts(directory: string, now = Date.now(), write = 
       const target = canonicalRoot(resolve(directory, readlinkSync(path)));
       links.set(target, [...(links.get(target) ?? []), path]);
     } else if (stat?.isDirectory() && name.endsWith('.forge-client')) {
+      if (write) {
+        try {
+          sweepKeptApplyCache(path);
+        } catch {
+          /* Expiry bookkeeping never fails a scan. */
+        }
+      }
       let lanes: string[] = [];
       try {
         lanes = readdirSync(join(path, 'lanes'));
@@ -266,7 +274,9 @@ export async function laneHousekeeping(input: {
         },
         now,
       );
-      for (const path of siblings(root)) rmSync(path, { recursive: true, force: true });
+      for (const path of siblings(root))
+        if (path === clientCacheRoot(root)) removeCachePreservingKept(path);
+        else rmSync(path, { recursive: true, force: true });
       for (const link of links.get(root) ?? []) rmSync(link, { force: true });
       forgetLane(entry.laneId);
     }

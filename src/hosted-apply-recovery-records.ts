@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import { canonicalRoot, clientCacheRoot, retainedRootSibling } from './root-paths.js';
+import { canonicalRoot, clientCacheRoot } from './root-paths.js';
+import { keptApplyRoot, keptEntrySchema } from './hosted-apply-kept.js';
 import { lstatSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -30,6 +31,10 @@ export const receiptSchema = z
     roundBackup: z.string().optional(),
     additionalPreservedAt: z.array(z.string()).optional(),
     baselineStage: z.string().optional(),
+    /** Changed paths kept per round folder (keyed by its name), never a copy of the checkout. */
+    rounds: z.record(z.string(), z.array(keptEntrySchema)).optional(),
+    /** Epoch ms when the apply this recovery belongs to was confirmed; starts the retention clock. */
+    confirmedAt: z.number().optional(),
   })
   .strict();
 export function validBaseline(
@@ -46,9 +51,10 @@ export function validBaseline(
     marker.selection.sourceVersion === pins.sourceVersion
   );
 }
-/** Preserved user bytes must outlive GC of even the outermost nested Lane cache. */
+/** Changed files only, in the outermost client cache: it outlives nested Lane eviction and sits
+ * nowhere near the project root. Listed by status, removed a TTL after the apply is confirmed. */
 export function recoveryDirectory(root: string, id: string) {
-  return retainedRootSibling(root, `.kept-apply-${z.uuid().parse(id)}`);
+  return join(keptApplyRoot(root), z.uuid().parse(id));
 }
 export const pathFor = (root: string, id: string) =>
   join(clientCacheRoot(root), `apply-blocked-${z.uuid().parse(id)}.json`);
@@ -128,7 +134,7 @@ export function localApplyBlocked(root: string, input: unknown, error: ForgeErro
       // A new local edit during a previous recovery is another preservation round,
       // not an unchanged retry against the same persistent obstruction.
       if (receipt.restored) {
-        receipt.roundBackup = join(directory, `checkout-${randomUUID()}`);
+        receipt.roundBackup = join(directory, `files-${randomUUID()}`);
         receipt.additionalPreservedAt = [...(receipt.additionalPreservedAt ?? []), receipt.roundBackup];
         receipt.restored = false;
         durableReplace(receiptPath, JSON.stringify(receipt));

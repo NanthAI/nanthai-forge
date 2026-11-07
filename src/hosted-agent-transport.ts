@@ -1,3 +1,4 @@
+import { keptApplyEnvelope } from './hosted-apply-kept.js';
 import { cliBuildCommit } from './cli-installation.js';
 import { describeIssues } from './argument-errors.js';
 import { liveLanes } from './hosted-live-lanes.js';
@@ -1225,6 +1226,7 @@ export class HostedAgentTransport {
         ? { board: boardEnvelope(this.root, overlapLaneId, advice.board) }
         : {}),
       ...this.nudge(action, result),
+      ...(action === 'status' ? keptApplyEnvelope(this.root) : {}),
       ...this.identity(action),
       ...(missing.length ? { serverContract: { missing } } : {}),
     };

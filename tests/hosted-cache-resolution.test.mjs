@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { getFunctionName } from 'convex/server';
-import { existsSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { resolutionFixture } from './hosted-agent-resolution-fixture.mjs';
 import { canonicalRoot } from '../dist/root-paths.js';
@@ -186,9 +186,10 @@ for (const wrapper of ['cli', 'mcp'])
             const value = rename(from, to);
             const match =
               interruption === 'after-preserve'
-                ? from === conflict.root && String(to).endsWith('/checkout')
+                ? String(to).endsWith('/receipt.json') &&
+                  Object.keys(JSON.parse(readFileSync(to)).rounds ?? {}).length > 0
                 : interruption === 'after-baseline'
-                  ? String(from).includes('/baseline-') && to === conflict.root
+                  ? String(to) === join(conflict.root, '.forge', 'hosted-lane.json')
                   : String(to).endsWith('/receipt.json') && JSON.parse(readFileSync(to)).restored;
             if (!interrupted && match) {
               interrupted = true;
@@ -327,8 +328,11 @@ test('preserved resolution checkout survives removal of all disposable client ca
     recovery.applyOperationId,
     new ConvexLaneTransport(s.exchange),
   );
-  assert(!result.preservedAt.startsWith(s.root + '.forge-client/'));
-  rmSync(s.root + '.forge-client', { recursive: true, force: true });
+  const cache = realpathSync(s.root) + '.forge-client';
+  assert(result.preservedAt.startsWith(cache + '/kept-apply/'));
+  // Everything disposable in the client cache goes; the kept local changes are not disposable.
+  for (const name of readdirSync(cache))
+    if (name !== 'kept-apply') rmSync(join(cache, name), { recursive: true, force: true });
   assert.equal(
     readFileSync(join(result.preservedAt, '.forge', 'private-note.json'), 'utf8'),
     'keep beyond cache cleanup',
