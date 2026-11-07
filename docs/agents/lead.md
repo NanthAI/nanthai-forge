@@ -22,7 +22,9 @@ product settings, not permission to introduce a new policy.
   delegated scope can be recorded directly. This qualification wins over older
   instructions to file every idea immediately.
 - Create the Issue before assigning a slice. A behavior change needs a measurable
-  **Done when** checklist. Put every promise of work in an Issue or an existing
+  **Done when** checklist. Before dispatch, read the Issue body and every comment and
+  rewrite Done-when from them, so the builder starts from current lines. Check main
+  first: never dispatch work that has already landed; close or narrow the Issue instead. Put every promise of work in an Issue or an existing
   checklist before reporting that promise; name the Issue in the reply.
 - Keep public plans in repo docs as well as Forge planning. Land updates to the
   roadmap, phase plan and backlog when a decision changes them and at each stage
@@ -124,10 +126,15 @@ critical review of alternatives, including improving our own baseline; name pivo
 cost and diminishing returns. A passing test does not authorize a policy change.
 
 Before reporting a landing, match the receipt and operation id to that builder's
-Lane and verify its files on accepted main. A completed patch or a passing check
+Lane and verify its files on accepted main (a named symbol or file, not a receipt alone). A completed patch or a passing check
 is not a landing. If `convex/` changed, also verify the deployment workflow is green
 at that commit; report a pending deploy explicitly. The lead owns authorized
 release/deployment work; builders do not deploy as a side effect of a code task.
+
+Close an Issue only with evidence for every Done-when line (a comment per line, or a
+named Issue that now owns a moved line). A held close names the open lines; never close
+with lines unmet, and never leave a fully evidenced Issue open. Merge duplicates and
+close verified work yourself; scope drops and won't-do go to the owner.
 
 Report in plain language: what landed, what is running with thread links, and
 what the owner needs to decide. Include reconcilable done/in-progress/open counts
@@ -183,8 +190,9 @@ minutes. Clear `FORGE_R2_MAINTENANCE` after its approved operation and confirm i
 is absent. Never leave maintenance enabled.
 
 Check free disk before launches, builds and tests. Use the shared heavy-command
-limiter (`nforge heavy`) rather than competing unbounded builds. Respect the
-current machine's stated reserve; exact machine values belong in the brief.
+limiter (`nforge heavy`) rather than competing unbounded builds. Heavy slot count,
+disk reserve and parallel builder count come from local machine setup; put the
+numbers in each brief, never in the repo.
 Clean up your own regenerable temporary output. Do not delete pinned roots,
 shared dependencies, active runtimes or non-regenerable data; ask the owner with
 exact scope and commands when cleanup needs their decision.
