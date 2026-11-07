@@ -214,6 +214,7 @@
     "scripts/agent-default-lines.d.mts",
     "scripts/test-import-graph.mjs",
     "scripts/test-name-watchers.mjs",
+    "scripts/test-closeness.mjs",
     "scripts/convex-function-names.mjs",
     "scripts/test-directory-path.mjs",
     "scripts/test-coverage.mjs",

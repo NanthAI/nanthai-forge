@@ -219,12 +219,12 @@ test('a real run records the rule, deferral target and measured wall time; peak 
   const plan = f.plan();
   assert.match(
     plan.local.summary,
-    /Local rule: changed tests, explicit coverage and smoke; then tests that failed for these paths before; then tests that import or are named for a changed module \(never trimmed\)/,
+    /Local rule: changed tests, explicit coverage and smoke; then tests that failed for these paths before; then tests that run a changed module directly, through a test fixture or through one module that imports it, or are named for it \(never trimmed, most specific first\)/,
   );
   assert.equal(plan.local.budgetSeconds, 180);
   const receipt = f.run(plan);
   assert.equal(receipt.passed, true);
-  assert.match(receipt.rule, /import or are named for a changed module/);
+  assert.match(receipt.rule, /run a changed module directly, through a test fixture/);
   assert.equal(receipt.budgetSeconds, 180);
   assert.equal(typeof receipt.testMs, 'number');
   assert.ok(receipt.peakRssMb === undefined || receipt.peakRssMb > 0);
@@ -233,12 +233,13 @@ test('a real run records the rule, deferral target and measured wall time; peak 
   assert.equal(parsePeakRssMb('nothing'), null);
 });
 
-/** tests/b.test.mjs reaches the changed src/b.ts through another module: a distance-2 (`near`) test
- * the budget may trim, unlike the direct tests/a.test.mjs. */
+/** tests/far.test.mjs reaches the changed src/b.ts through two modules: a `near` test the budget may
+ * trim, unlike the direct tests/a.test.mjs. */
 function distant(f) {
   rmSync(join(f.root, 'tests/b.test.mjs'));
   f.bytes.delete('tests/b.test.mjs');
-  f.put('src/c.ts', "export { n } from './b.ts';");
+  f.put('src/d.ts', "export { n } from './b.ts';");
+  f.put('src/c.ts', "export { n } from './d.ts';");
   f.put(
     'tests/far.test.mjs',
     "import test from 'node:test'; import {n} from '../src/c.ts'; test('far', () => n);",
@@ -276,21 +277,32 @@ test('a tiny budget trims by time, names the trimmed files and the one command t
   assert.equal(second.skipped, undefined);
 });
 
-test('direct tests of a changed module are never trimmed or stopped for time (8288e7f5)', t => {
+test('direct tests are never trimmed by an estimate; the wall-time cap names the ones it did not start (8288e7f5)', t => {
   const f = fixture(t);
-  // Both tests import a changed module directly: protected, whatever the budget.
+  // Both tests import a changed module directly: protected from the plan's trim, whatever the budget.
   const plan = f.plan([], { budgetSeconds: 1 });
   assert.deepEqual(plan.tests, ['tests/a.test.mjs', 'tests/b.test.mjs']);
   assert.equal(plan.local.protected, 2);
   assert.equal(plan.local.protectedOverBudget, true);
   assert.equal(plan.local.trimmedTests, undefined);
-  // Even if the budget is gone before they start, protected tests still run.
+  // The budget is a wall-time cap: with none left, the first (most relevant) file still runs and no
+  // other starts; the receipt names the stopped file with a rerun of just those.
   plan.local.budgetSeconds = 0;
   const receipt = f.run(plan);
   assert.equal(receipt.passed, true);
-  assert.equal(receipt.tests, 2);
-  assert.equal(receipt.stoppedForTime, undefined);
-  assert.equal(receipt.skipped, undefined);
+  assert.equal(receipt.tests, 1);
+  assert.equal(receipt.stoppedForTime, 1);
+  assert.deepEqual(receipt.stopped, ['tests/b.test.mjs']);
+  assert.match(receipt.stoppedRerun, /preflight '\{"laneId":"[0-9a-f-]+","retry":true\}'/);
+  // That rerun plans exactly the stopped files; the passed one is reused, nothing else is added.
+  const rerun = f.plan([], { budgetSeconds: 180, trim: true, only: receipt.stopped });
+  assert.deepEqual(rerun.tests, ['tests/b.test.mjs']);
+  assert.deepEqual(rerun.reusedTests, ['tests/a.test.mjs']);
+  assert.ok(!rerun.local.filler, 'a rerun of stopped files adds no filler');
+  const second = f.run(rerun);
+  assert.equal(second.passed, true);
+  assert.equal(second.tests, 1);
+  assert.equal(second.stopped, undefined);
 });
 
 test('the run stops between groups when the local budget is spent and reports what it did not start', t => {
@@ -306,6 +318,7 @@ test('the run stops between groups when the local budget is spent and reports wh
   assert.equal(receipt.tests, 1);
   assert.equal(receipt.stoppedForTime, 1);
   assert.deepEqual(receipt.skipped, ['tests/far.test.mjs']);
+  assert.deepEqual(receipt.stopped, ['tests/far.test.mjs']);
   assert.match(receipt.rerun, /"trim":false/);
   assert.equal(receipt.deferredTests, 1);
   assert.equal(receipt.deferredTo, 'pre-queue');

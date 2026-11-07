@@ -63,7 +63,7 @@ import {
 import { enrichHostedQueueAhead } from './queue-ahead-hosted.js';
 import { ackAnswers, checkpointNudge, finishGates, unsavedMinutes } from './agent-default-gates.js';
 import { liveLanding, ownsLiveLanding } from './landing-freeze.js';
-import { preflightPlan, runPreflight } from './agent-preflight.js';
+import { preflightPlan, readPreflightReceipt, runPreflight } from './agent-preflight.js';
 import { rememberLandingPaths } from './preflight-learned.js';
 import { hostedLaneDirty } from './hosted-lane-dirty.js';
 import { deltaApplyPending, finishPendingCheckoutDelta } from './hosted-checkout-delta-pending.js';
@@ -1386,6 +1386,12 @@ export class HostedAgentTransport {
       'HOSTED_CHECKOUT_REQUIRED',
       'Run preflight in the Lane checkout; it tests the saved files here.',
     );
+    const stopped = command.retry ? readPreflightReceipt(root, laneId)?.stopped : undefined;
+    invariant(
+      !command.retry || stopped?.length,
+      'BAD_ARGUMENT',
+      'The last preflight of this Lane stopped no file for time; run preflight without "retry".',
+    );
     const advice = await readHostedOverlapAdvice(this, laneId, true);
     const plan = preflightPlan(
       root,
@@ -1394,8 +1400,8 @@ export class HostedAgentTransport {
         { base: marker.selection.base.head, head: marker.selection.head },
         advice.changedPaths,
       ),
-      { laneId, files: marker.state.files },
-      { budgetSeconds: command.budgetSeconds, trim: command.trim },
+      { laneId, files: marker.state.files, base: marker.selection.base.head },
+      { budgetSeconds: command.budgetSeconds, trim: command.trim, only: stopped },
     );
     const head = marker.selection.head;
     if (plan.status === 'unavailable' || !command.run)

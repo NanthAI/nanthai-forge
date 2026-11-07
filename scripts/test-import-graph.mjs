@@ -27,7 +27,9 @@ import {
 export function testImportGraph(files, scriptsChanged = []) {
   const reverse = new Map(),
     evidence = new Map();
-  const edge = (dependency, importer, kind = 'package-command', detail) => {
+  // `byName`: a by-name loader's closure edge (every module named anywhere the test's code can reach).
+  // It keeps landing coverage but is weak closeness evidence: preflight never ranks it as direct.
+  const edge = (dependency, importer, kind = 'package-command', detail, byName = false) => {
     // A runner naming behavior tests describes coverage, not its implementation.
     // Keep test-to-test imports, but never cycle coverage back into the pipeline.
     if (/^tests\/[^/]+\.test\.mjs$/.test(dependency) && !importer.startsWith('tests/')) return;
@@ -40,7 +42,9 @@ export function testImportGraph(files, scriptsChanged = []) {
       previous.kind === 'workspace-path' ||
       (previous.kind === 'dynamic' && kind !== 'workspace-path')
     )
-      evidence.get(dependency).set(importer, { kind, ...(detail ? { detail } : {}) });
+      evidence
+        .get(dependency)
+        .set(importer, { kind, ...(detail ? { detail } : {}), ...(byName ? { byName: true } : {}) });
     reverse.get(dependency).add(importer);
   };
   const packageGraph = packageScriptGraph(files, edge);

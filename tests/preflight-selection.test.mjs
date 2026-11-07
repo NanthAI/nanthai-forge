@@ -28,19 +28,29 @@ test('local selection follows import distance; every distant and uncertain consu
       'src/shared.ts': 'export const n = 1;',
       'src/near.ts': "import './shared.js';",
       'src/far.ts': "import './near.js';",
+      'src/farther.ts': "import './far.js';",
       'tests/direct.test.mjs': "import '../dist/shared.js';",
       'tests/near.test.mjs': "import '../dist/near.js';",
       'tests/far.test.mjs': "import '../dist/far.js';",
+      'tests/farther.test.mjs': "import '../dist/farther.js';",
       'tests/dynamic.test.mjs': 'await import(process.argv[2]);',
       'tests/changed.test.mjs': '',
       'tests/unrelated.test.mjs': '',
     }),
   );
   const plan = partition(files, ['src/shared.ts', 'tests/changed.test.mjs']);
-  assert.deepEqual(plan.tests, ['tests/changed.test.mjs', 'tests/direct.test.mjs', 'tests/near.test.mjs']);
-  assert.deepEqual(plan.deferredTests, ['tests/dynamic.test.mjs', 'tests/far.test.mjs']);
+  // One module between (near.ts) is still direct; two (far.ts) is the trimmable near tier; three
+  // and a computed path stay in landing coverage only.
+  assert.deepEqual(plan.tests, [
+    'tests/changed.test.mjs',
+    'tests/direct.test.mjs',
+    'tests/near.test.mjs',
+    'tests/far.test.mjs',
+  ]);
+  assert.deepEqual(plan.tiers.find(item => item.tier === 'near').tests, ['tests/far.test.mjs']);
+  assert.deepEqual(plan.deferredTests, ['tests/dynamic.test.mjs', 'tests/farther.test.mjs']);
   // Adding distant consumers does not increase local work. All remain in landing coverage.
-  for (let i = 0; i < 10000; i++) files.set(`tests/far-${i}.test.mjs`, "import '../dist/far.js';");
+  for (let i = 0; i < 10000; i++) files.set(`tests/far-${i}.test.mjs`, "import '../dist/farther.js';");
   const started = performance.now(),
     heap = process.memoryUsage().heapUsed;
   const grown = partition(files, ['src/shared.ts', 'tests/changed.test.mjs']);
@@ -156,10 +166,11 @@ test('behaviour tests that reach a changed module through a test fixture, or are
       'package.json': '{"scripts":{}}',
       'src/delta.ts': 'export const n = 1;',
       'src/sync.ts': "import './delta.js';",
+      'src/store.ts': "import './sync.js';",
       'tests/delta-fixture.mjs': "import '../dist/delta.js';",
       'tests/through-fixture.test.mjs': "import './delta-fixture.mjs';",
       'tests/delta.test.mjs': "import '../dist/sync.js';",
-      'tests/near.test.mjs': "import '../dist/sync.js';",
+      'tests/near.test.mjs': "import '../dist/store.js';",
       'tests/unrelated.test.mjs': '',
     }),
   );
@@ -240,31 +251,39 @@ test('learned tests run locally and protected, even where the import graph does 
   const fit = fitPreflightBudget({ tiers: plan.tiers, budgetSeconds: 1, secondsPerFile: 4 });
   assert.ok(fit.tests.includes('tests/watches-paths.test.mjs'));
 });
-test('a hub consumer that failed a landing check lately under other paths runs before the rest of wide (0d403d25)', () => {
+test('a recent landing failure runs first among equally close tests and never ahead of closer ones (0d403d25)', () => {
   const files = new Map([
     ['package.json', '{"scripts":{}}'],
     ['src/hub.ts', 'export {};'],
+    ['src/mid.ts', "import './hub.js';"],
+    ['src/top.ts', "import './mid.js';"],
     ['tests/shared.test.mjs', "import '../dist/hub.js';"],
+    ['tests/top.test.mjs', "import '../dist/top.js';"],
   ]);
   for (let i = 0; i < 30; i++)
     files.set(`tests/t-${String(i).padStart(2, '0')}.test.mjs`, "import '../dist/hub.js';");
   const hubBudget = { seconds: 40, secondsFor: () => 4 };
   const input = { files, paths: ['src/hub.ts'], hubBudget };
   const plain = partition(files, ['src/hub.ts'], hubBudget);
+  const tier = (plan, name) => plan.tiers.find(item => item.tier === name).tests;
   const last = 'tests/t-29.test.mjs';
-  assert.equal(plain.tiers.find(item => item.tier === 'wide').tests.at(-1), last);
+  assert.equal(tier(plain, 'wide').at(-1), last);
+  assert.deepEqual(tier(plain, 'near'), ['tests/top.test.mjs']);
   const plan = selectPreflightTests({
     ...input,
-    // Unreached by this change (not a consumer) and missing files never join; the consumer does.
-    recent: [last, 'tests/unrelated.test.mjs', 'tests/gone.test.mjs'],
+    // Unreached by this change (not a consumer) and missing files never join.
+    recent: [last, 'tests/top.test.mjs', 'tests/unrelated.test.mjs', 'tests/gone.test.mjs'],
   });
-  assert.deepEqual(plan.tiers.find(item => item.tier === 'recent').tests, [last]);
-  assert.ok(!plan.tiers.find(item => item.tier === 'wide').tests.includes(last));
   assert.deepEqual(
     plan.tiers.map(item => item.tier),
-    ['mandatory', 'learned', 'direct', 'recent', 'wide', 'watch', 'near'],
+    ['mandatory', 'learned', 'direct', 'wide', 'recent', 'watch', 'near'],
   );
-  // Unprotected: a budget trims it, but only after the protected tiers and before wide.
+  // A wide consumer that failed lately stays wide, first among its equally close peers.
+  assert.equal(tier(plan, 'wide')[0], last);
+  assert.deepEqual(plan.recentFailed, [last, 'tests/top.test.mjs']);
+  // A failure two modules away moves up from near to recent: after wide, never before it.
+  assert.deepEqual(tier(plan, 'recent'), ['tests/top.test.mjs']);
+  assert.deepEqual(tier(plan, 'near'), []);
   assert.ok(!protectedTiers.has('recent'));
   const fit = fitPreflightBudget({
     tiers: plan.tiers,
@@ -272,16 +291,12 @@ test('a hub consumer that failed a landing check lately under other paths runs b
     secondsPerFile: 4,
     secondsFor: () => 4,
   });
-  assert.equal(
-    fit.tests.indexOf(last) < fit.tests.indexOf('tests/t-00.test.mjs') ||
-      !fit.tests.includes('tests/t-00.test.mjs'),
-    true,
-  );
   assert.ok(fit.tests.includes(last));
+  assert.ok(!fit.tests.includes('tests/top.test.mjs'));
   // A test learned for this very path stays learned, not recent.
   const both = selectPreflightTests({ ...input, learned: [last], recent: [last] });
-  assert.deepEqual(both.tiers.find(item => item.tier === 'learned').tests, [last]);
-  assert.deepEqual(both.tiers.find(item => item.tier === 'recent').tests, []);
+  assert.deepEqual(tier(both, 'learned'), [last]);
+  assert.deepEqual(tier(both, 'recent'), []);
 });
 test('no hardcoded local file count remains in the selector or the preflight planner', () => {
   for (const file of ['../scripts/test-impact.mjs', '../src/agent-preflight.ts'])
@@ -425,4 +440,33 @@ test('real bench, incident and pull slices cannot regress into near-full local r
       `${name}: ${plan.tests.length + plan.deferredTests.length} complete -> ${fit.tests.length} local + ${cut.length + plan.deferredTests.length} pre-queue (${direct.length} direct; trimmed: ${fit.trimmed.map(item => `${item.tier} ${item.kept}/${item.total}`).join(', ') || 'none'})`,
     );
   }
+});
+test('a manifest that makes coverage full still leaves the other paths ranked; recent needs a short chain', () => {
+  const files = new Map(
+    Object.entries({
+      'package.json': '{"scripts":{}}',
+      'src/a.ts': 'export const n = 1;',
+      'src/wrapper.ts': "import './a.js';",
+      'src/server.ts': "import './wrapper.js';",
+      'src/far.ts': "import './server.js';",
+      'tests/a.test.mjs': "import '../dist/a.js';",
+      'tests/far.test.mjs': "import '../dist/far.js';",
+      'tests/unrelated.test.mjs': '',
+    }),
+  );
+  const paths = ['package.json', 'src/a.ts'];
+  const graphCache = {};
+  const complete = selectTests({ files, paths }, graphCache);
+  assert.equal(complete.scope, 'full');
+  const plan = selectPreflightTests(
+    { files, paths, hubBudget: budget, recent: ['tests/far.test.mjs', 'tests/unrelated.test.mjs'] },
+    graphCache,
+  );
+  const tier = name => plan.tiers.find(item => item.tier === name).tests;
+  assert.deepEqual(tier('direct'), ['tests/a.test.mjs']);
+  // Three modules between and no edge at all: coverage only, never a recent local file.
+  assert.deepEqual(tier('recent'), []);
+  assert.deepEqual(plan.recentFailed, []);
+  assert.ok(plan.deferredTests.includes('tests/far.test.mjs'));
+  assert.ok(plan.deferredTests.includes('tests/unrelated.test.mjs'));
 });

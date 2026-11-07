@@ -282,13 +282,19 @@ test('observed per-file time and the slowest files are recorded for the next pla
   assert.ok(receipt.slowest.length >= 1 && receipt.slowest.length <= 3);
 });
 
-test('budget the ranked tiers leave over runs the cheapest timed deferred tests, last; untimed ones stay deferred', t => {
-  const dynamic =
-    "import test from 'node:test'; test('d', async () => { await import(process.argv[2] ?? 'node:fs'); });";
+test('budget the ranked tiers leave over runs the cheapest timed tests the budget cut, last; unranked coverage never fills it', t => {
+  const near = "import test from 'node:test'; import './near-fixture.mjs'; test('d', () => {});";
   const f = fixture(t, [], {
-    'tests/d1.test.mjs': dynamic,
-    'tests/d2.test.mjs': dynamic,
-    'tests/d3.test.mjs': dynamic,
+    // Two modules between src/a.ts and these tests: the trimmable near tier.
+    'src/m1.ts': "import './a.ts';",
+    'src/m2.ts': "import './m1.ts';",
+    'tests/near-fixture.mjs': "import '../src/m2.ts';",
+    'tests/d3.test.mjs': "import test from 'node:test'; import '../src/m2.ts'; test('d', () => {});",
+    'tests/d1.test.mjs': near,
+    'tests/d2.test.mjs': near,
+    // Reaches src/a.ts only through a computed path: landing coverage, not evidence about this change.
+    'tests/dynamic.test.mjs':
+      "import test from 'node:test'; test('d', async () => { await import(process.argv[2] ?? 'node:fs'); });",
   });
   const agent = join(f.root + '.forge-client', 'agent');
   mkdirSync(agent, { recursive: true });
@@ -298,16 +304,21 @@ test('budget the ranked tiers leave over runs the cheapest timed deferred tests,
       'tests/d1.test.mjs': { ms: 50, failed: false },
       'tests/d2.test.mjs': { ms: 10, failed: false },
       'tests/d3.test.mjs': { ms: 600000, failed: false },
+      'tests/dynamic.test.mjs': { ms: 5, failed: false },
     }),
   );
   const plan = f.plan(['src/a.ts']);
   assert.deepEqual(plan.tests.slice(0, 1), ['tests/a.test.mjs']);
-  // d2 (10 ms) before d1 (50 ms); d3 takes ten minutes and does not fit the leftover budget.
+  // d3 is closest (no shared fixture) but takes ten minutes, so the budget cuts the near tier there;
+  // the cut d2 (10 ms) and d1 (50 ms) fill the leftover, cheapest first.
   assert.deepEqual(plan.tests.slice(-2), ['tests/d2.test.mjs', 'tests/d1.test.mjs']);
   assert.ok(plan.deferredTests.includes('tests/d3.test.mjs'));
-  assert.ok(!plan.deferredTests.includes('tests/d1.test.mjs'));
+  assert.ok(plan.deferredTests.includes('tests/dynamic.test.mjs'), 'unranked coverage never fills');
   assert.equal(plan.local.filler, 2);
   assert.match(plan.local.summary, /2 cheap test file\(s\) timed in earlier runs use the leftover budget/);
+  // The estimate is what the wall-time cap allows: at most the budget plus the longest planned file.
+  assert.ok(plan.estimateMinutes >= 1);
+  assert.ok(plan.estimateMinutes <= Math.ceil((plan.local.budgetSeconds + 4) / 60));
 });
 
 const guardManifest = guards =>

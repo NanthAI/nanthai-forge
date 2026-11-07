@@ -3,6 +3,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { posix, join } from 'node:path';
 import { testImportGraph } from './test-import-graph.mjs';
 import { watchRanking } from './test-name-watchers.mjs';
+import { closenessIndex, compareRank } from './test-closeness.mjs';
 import { coverageShadow } from './test-coverage.mjs';
 import { classifyCheckPath, webTest } from './check-path-scopes.mjs';
 import { guardSelection } from './selection-guard.mjs';
@@ -67,49 +68,70 @@ export function selectImpactPair(files, comparisons) {
   );
 }
 /** Local execution is a partition of complete landing coverage, never an independence proof.
- * Tiers, most relevant first: mandatory (changed tests, explicit coverage, smoke, declared guards); learned (tests
- * that failed in a landing check or preflight for a changed path); direct (tests that import a
- * changed module, through test-only helpers too, or are named for it); recent (consumers of this
- * change that failed in a landing check under other paths lately, trimmed by time but before wide);
- * wide (direct consumers of a hub module most tests import); name watchers (tests that match a distinctive name in a changed
- * source, at any import distance: an import graph cannot see a test that hooks the paths a module
- * creates); then distance-2 consumers. Mandatory, learned and direct are protected: the time budget
- * never trims them. Nothing here counts files: the whole neighbourhood is returned, and
- * `fitPreflightBudget` trims the unprotected tiers by time, least relevant last. Other uncertain
- * and distant consumers (dynamic, domain, three or more edges) stay explicit pre-queue/landing work. */
+ * Tiers, most relevant first (also the run order under the wall-time budget): mandatory (changed
+ * tests, explicit coverage, smoke, declared guards); learned (tests that failed in a landing check or
+ * preflight for a changed path); direct (tests that run a changed module: they load it, directly or
+ * through test fixtures, or load a module that imports it, directly or through fixtures, the
+ * "fixture-reached" consumers; or are named for it); wide (the same consumers of a hub module most
+ * tests load, recent failures first among equals); recent (tests that run a changed module within two
+ * product modules and failed in a landing check under other paths lately); name watchers (tests that match a distinctive
+ * name in a changed source, at any import distance: an import graph cannot see a test that hooks the
+ * paths a module creates); then tests two product modules away (`near`). Within each, the most specific
+ * consumers come first (fewest product modules between, then a fixture few tests use before a shared
+ * harness). Mandatory, learned and direct are protected: the plan never trims them. Nothing here
+ * counts files: the whole neighbourhood is returned, and `fitPreflightBudget` trims the unprotected
+ * tiers by time, least relevant last. Other uncertain and distant consumers (dynamic, domain, a
+ * by-name loader's closure, three or more edges) stay explicit pre-queue/landing work. A
+ * comment-only path (`commentOnly`, bytes equal to its base outside comments) runs nothing new: it
+ * adds only the tests that read its text. */
 export const preflightTierRule =
-  'changed tests, explicit coverage and smoke; then tests that failed for these paths before; then tests that import or are named for a changed module (never trimmed); then consumers of this change that failed in a landing check lately; then direct consumers of hub modules (their direct tests would push protected tests past the budget, broadest first); then tests that watch a distinctive name in a changed source; then distance-2 consumers, nearest first';
-/** Tiers the time budget never trims (plan) or stops (run). */
+  'changed tests, explicit coverage and smoke; then tests that failed for these paths before; then tests that run a changed module directly, through a test fixture or through one module that imports it, or are named for it (never trimmed, most specific first); then the same consumers of hub modules (their direct tests would push protected tests past the budget; closest first); then tests that run a changed module within two modules and failed in a landing check lately; then tests that watch a distinctive name in a changed source; then tests that run a changed module through two modules, most specific first; comment-only edits add only tests that read the file';
+/** Tiers the time budget never trims from the plan; the run starts them first. */
 export const protectedTiers = new Set(['mandatory', 'learned', 'direct']);
 const testFile = path => /^tests\/[^/]+\.test\.mjs$/.test(path);
-const testHelper = path => path.startsWith('tests/') && !testFile(path);
 const moduleName = path => posix.basename(path).replace(/(?:\.test)?\.[cm]?[jt]sx?$/, '');
-/** Tests that statically import `path`, directly or through test-only helpers (a fixture that wraps
- * the module is how its behaviour tests reach it, so the hop adds no distance). */
-function directTests(path, graph) {
-  const found = new Set();
-  const seen = new Set([path]);
-  const queue = [path];
-  while (queue.length) {
-    const current = queue.shift();
-    for (const importer of graph.reverse.get(current) ?? []) {
-      if (seen.has(importer) || graph.evidence.get(current)?.get(importer)?.kind === 'dynamic') continue;
-      seen.add(importer);
-      if (testFile(importer)) found.add(importer);
-      else if (testHelper(importer)) queue.push(importer);
-    }
+const wordCache = new Map();
+const words = name => {
+  if (!wordCache.has(name)) wordCache.set(name, splitWords(name));
+  return wordCache.get(name);
+};
+const splitWords = name =>
+  name
+    .replace(/([a-z0-9])([A-Z])/g, '$1-$2')
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
+/** A test is named for a module when its name is the module's name, or the module's trailing words
+ * (at least two): `hosted-landing-cancel.test.mjs` for `convex/projectHostedLandingCancel.ts`. */
+const namedFor = (test, modules) => {
+  const name = moduleName(test);
+  if (modules.has(name)) return true;
+  const own = words(name);
+  if (own.length < 2) return false;
+  for (const module of modules) {
+    const theirs = words(module);
+    if (theirs.length > own.length && own.every((word, i) => theirs[theirs.length - own.length + i] === word))
+      return true;
   }
-  return found;
-}
+  return false;
+};
 export function selectPreflightTests(input, graphCache = {}) {
   // The consumers-only pass reads the same inventory, so it reuses the graph the first pass built.
   const selection = selectTests(input, graphCache);
   if (selection.scope === 'docs') return { ...selection, deferredTests: [], tiers: [] };
-  const consumers =
-    selection.scope === 'full'
-      ? selectWithGraph({ ...input, consumersOnly: true }, undefined, graphCache)
+  const commentOnly = new Set((input.commentOnly ?? []).filter(path => input.paths.includes(path)));
+  const behavioural = input.paths.filter(path => !commentOnly.has(path));
+  // Ranking reads only the paths whose behaviour can change and that the graph can place; coverage
+  // (`selection`) keeps them all. A path that makes coverage full (a manifest, an unclassified file)
+  // must not cost the rest of the change its ranking: the graph still ranks the other paths' consumers.
+  const rankable = behavioural.filter(path => documentation(path) || classifyCheckPath(path, input.files));
+  const consumers = !rankable.length
+    ? { tests: [], reasons: {} }
+    : selection.scope === 'full' || commentOnly.size || rankable.length < behavioural.length
+      ? selectWithGraph({ ...input, paths: rankable, consumersOnly: true }, undefined, graphCache)
       : selection;
-  const changed = new Set(input.paths);
+  const changed = new Set(behavioural);
+  const rankedPaths = rankable.filter(path => !testFile(path) && !documentation(path));
   const allTests = [...input.files.keys()].filter(testFile).sort();
   const kind = test => consumers.reasons?.[test]?.kind;
   const distance = test => consumers.reasons?.[test]?.edges?.length ?? Infinity;
@@ -118,38 +140,54 @@ export function selectPreflightTests(input, graphCache = {}) {
     changed.has(test) || smokeTests.includes(test) || guards.has(test) || kind(test) === 'explicit';
   const learned = new Set((input.learned ?? []).filter(test => input.files.has(test) && !mandatory(test)));
   const covered = new Set(selection.tests);
-  // Tests that failed in a landing check under other paths, not these: the failure proves the test
-  // guards its region, not that this change reaches it. Only consumers of this change qualify.
-  const recent = new Set(
-    (input.recent ?? []).filter(test => covered.has(test) && !mandatory(test) && !learned.has(test)),
-  );
   const named = new Set(
-    input.paths
+    behavioural
       .filter(path => !testFile(path) && !documentation(path))
       .map(moduleName)
       .filter(Boolean),
   );
   const direct = new Set(),
     wide = new Set();
-  // Direct tests are protected module by module, most specific module (fewest direct tests) first,
-  // while their combined cost fits `hubBudget.seconds`. A module whose tests would push past it is
-  // broad (a hub or a shared harness every test uses): its consumers are ranked (`wide`), not
-  // protected, so one shared-helper change does not turn preflight into the full suite. Named tests
-  // stay protected. Without a budget (preflight trim:false) every module's tests are protected.
+  const rank = new Map();
+  const offer = (test, value) => {
+    if (!rank.has(test) || compareRank(value, rank.get(test)) < 0) rank.set(test, value);
+  };
+  // Direct tests are protected module by module, most specific module (fewest tests that load it)
+  // first, while the cost of those loaders fits `hubBudget.seconds`. A module whose loaders would
+  // push past it is broad (a hub or a shared harness every test uses): its consumers are ranked
+  // (`wide`), not protected, so one shared-helper change does not turn preflight into the full
+  // suite. Fixture-reached consumers (one module between) follow their module and never make it
+  // broad. Named tests stay protected. Without a budget (preflight trim:false) every module's
+  // consumers are protected.
   const graph = graphCache.graph;
-  const modules = graph?.reverse
-    ? input.paths
-        .filter(path => !testFile(path) && !documentation(path))
-        .map(path => ({ path, tests: [...directTests(path, graph)].filter(test => covered.has(test)) }))
+  const index = graph?.reverse ? closenessIndex(graph) : null;
+  const eligible = test => covered.has(test) && !mandatory(test) && !learned.has(test);
+  const far = new Map();
+  const modules = index
+    ? [
+        ...rankedPaths.map(path => {
+          const all = [...index.consumers(path, { maxHops: 2 })];
+          // Two modules between: ranked last (`near`), and close enough for a recent failure.
+          for (const [test, value] of all) if (value[0] === 2) far.set(test, value);
+          return { path, tests: all.filter(([, value]) => value[0] < 2) };
+        }),
+        // A comment-only edit runs the same tokens: only tests that read the file's text reach it.
+        ...[...commentOnly].map(path => ({ path, tests: [...index.consumers(path, { readers: true })] })),
+      ]
+        .map(item => ({ ...item, tests: item.tests.filter(([test]) => eligible(test)) }))
         .filter(item => item.tests.length)
-        .sort((a, b) => a.tests.length - b.tests.length || (a.path < b.path ? -1 : 1))
+        .map(item => ({ ...item, loaders: item.tests.filter(([, value]) => value[0] === 0).length }))
+        .sort((a, b) => a.loaders - b.loaders || (a.path < b.path ? -1 : 1))
     : [];
   const cost = test => input.hubBudget?.secondsFor(test) ?? 0;
   let spent = 0;
   const broad = [];
   for (const { path, tests } of modules) {
-    const added = tests.filter(test => !direct.has(test) && !mandatory(test) && !learned.has(test));
-    const extra = added.reduce((sum, test) => sum + cost(test), 0);
+    for (const [test, value] of tests) offer(test, value);
+    const added = tests.map(([test]) => test).filter(test => !direct.has(test));
+    const extra = tests
+      .filter(([test, value]) => value[0] === 0 && !direct.has(test))
+      .reduce((sum, [test]) => sum + cost(test), 0);
     if (input.hubBudget && spent + extra > input.hubBudget.seconds) {
       broad.push(path);
       for (const test of added) wide.add(test);
@@ -161,20 +199,44 @@ export function selectPreflightTests(input, graphCache = {}) {
       wide.delete(test);
     }
   }
-  for (const test of selection.tests) {
-    if (named.has(moduleName(test))) direct.add(test);
-    // Without a graph (or for a fenced chain) the selector's own one-edge reason still counts.
-    else if (kind(test) === 'dependency' && distance(test) === 1 && !wide.has(test)) direct.add(test);
+  for (const test of consumers.tests ?? []) {
+    if (!covered.has(test)) continue;
+    if (namedFor(test, named)) {
+      direct.add(test);
+      wide.delete(test);
+      offer(test, [0, 1, 0]);
+    }
+    // Without a graph the selector's own one-edge reason still counts.
+    else if (!index && kind(test) === 'dependency' && distance(test) === 1) direct.add(test);
   }
+  // Tests that failed in a landing check under other paths, not these: the failure proves the test
+  // guards its region, not that this change reaches it. Only tests that run a changed module within
+  // two product modules qualify (a computed path, a by-name closure or a chain through the backend's
+  // shared wrapper is coverage, not evidence that the test runs this code).
+  // Without a graph, only the selector's own dependency chain of at most two edges is evidence.
+  const reaches = index
+    ? test => direct.has(test) || wide.has(test) || far.has(test)
+    : test => kind(test) === 'dependency' && distance(test) <= 2;
+  const recentFailed = new Set(
+    (input.recent ?? []).filter(
+      test => covered.has(test) && !mandatory(test) && !learned.has(test) && reaches(test),
+    ),
+  );
+  const recent = new Set([...recentFailed].filter(test => !direct.has(test) && !wide.has(test)));
   // Rarity is measured over every test in the inventory; only landing-covered tests are promoted.
   const watchers = watchRanking({
     files: input.files,
     tests: allTests,
-    candidates: selection.tests.filter(
+    candidates: (consumers.tests ?? []).filter(
       test =>
-        !mandatory(test) && !learned.has(test) && !direct.has(test) && !recent.has(test) && !wide.has(test),
+        covered.has(test) &&
+        !mandatory(test) &&
+        !learned.has(test) &&
+        !direct.has(test) &&
+        !recent.has(test) &&
+        !wide.has(test),
     ),
-    changed: input.paths,
+    changed: behavioural,
   });
   const tierOf = test =>
     mandatory(test)
@@ -183,30 +245,48 @@ export function selectPreflightTests(input, graphCache = {}) {
         ? 'learned'
         : direct.has(test)
           ? 'direct'
-          : recent.has(test)
-            ? 'recent'
-            : wide.has(test)
-              ? 'wide'
+          : wide.has(test)
+            ? 'wide'
+            : recent.has(test)
+              ? 'recent'
               : watchers.has(test)
                 ? 'watch'
-                : kind(test) === 'dependency' && distance(test) === 2
+                : (index ? far.has(test) : kind(test) === 'dependency' && distance(test) === 2) &&
+                    covered.has(test)
                   ? 'near'
                   : null;
+  // A named test, or one ranked without a graph, counts as a specific loader.
+  const rankOf = test => rank.get(test) ?? [0, 1, 0];
+  const byRank = (a, b) => compareRank(rankOf(a), rankOf(b)) || (a < b ? -1 : 1);
   const ranked = tier => {
     // A learned test may sit outside this path's graph selection: that miss is why it was learned.
-    // A project-declared guard runs even where the import graph does not reach it: that is why it is declared.
+    // A project-declared guard runs even where the import graph does not reach them: that is why it is declared.
     const pool =
       tier === 'learned'
         ? [...learned].sort()
         : tier === 'mandatory'
           ? [...new Set([...selection.tests, ...guards])]
-          : selection.tests;
+          : tier === 'direct' || tier === 'wide'
+            ? [...(tier === 'direct' ? direct : wide)]
+            : tier === 'near' && index
+              ? [...far.keys()]
+              : selection.tests;
     const tests = pool.filter(test => tierOf(test) === tier);
-    return tier === 'watch'
-      ? tests.sort((a, b) => watchers.get(b).score - watchers.get(a).score || (a < b ? -1 : 1))
-      : tests;
+    if (tier === 'watch')
+      return tests.sort((a, b) => watchers.get(b).score - watchers.get(a).score || (a < b ? -1 : 1));
+    if (tier === 'direct' || tier === 'near') return tests.sort(byRank);
+    // Closest first; among equally close hub consumers, one that failed a landing check lately first.
+    if (tier === 'wide')
+      return tests.sort(
+        (a, b) =>
+          compareRank(rankOf(a), rankOf(b)) ||
+          Number(recentFailed.has(b)) - Number(recentFailed.has(a)) ||
+          (a < b ? -1 : 1),
+      );
+    return tests.sort();
   };
-  const tiers = ['mandatory', 'learned', 'direct', 'recent', 'wide', 'watch', 'near'].map(tier => ({
+  for (const [test, value] of far) if (!rank.has(test)) rank.set(test, value);
+  const tiers = ['mandatory', 'learned', 'direct', 'wide', 'recent', 'watch', 'near'].map(tier => ({
     tier,
     tests: ranked(tier),
   }));
@@ -216,6 +296,10 @@ export function selectPreflightTests(input, graphCache = {}) {
     tests: tiers.flatMap(item => item.tests),
     tiers,
     broadModules: broad,
+    ...(commentOnly.size ? { commentOnly: [...commentOnly].sort() } : {}),
+    /** Rank of each direct and wide test ([product hops, carrier fan-in, helper hops]). */
+    ranks: Object.fromEntries([...local].filter(test => rank.has(test)).map(test => [test, rank.get(test)])),
+    recentFailed: [...recentFailed].sort(),
     watchedNames: Object.fromEntries([...watchers].map(([test, item]) => [test, item.names])),
     deferredTests: selection.tests.filter(test => !local.has(test)),
     reason: `${selection.reason}; local: ${preflightTierRule}; the rest runs in the pre-queue check`,

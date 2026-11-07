@@ -14,6 +14,7 @@ import {
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, posix } from 'node:path';
+import { safeRelative } from './files.js';
 import { z } from 'zod';
 import {
   fitPreflightBudget,
@@ -24,6 +25,7 @@ import {
   selectionSourcePath,
 } from '../scripts/test-impact.mjs';
 import { learnFailures, learnedTests, recentFailedTests } from './preflight-learned.js';
+import { commentOnlyPaths } from './preflight-comment-only.js';
 import { spawnMeasured } from './agent-preflight-measure.js';
 import {
   runStaticChecks,
@@ -54,12 +56,13 @@ export const preflightRuntime = { filesystemEventHealth };
 
 /** Default local cost per selected test file at concurrency 1, used for the time estimate. */
 export const PREFLIGHT_SECONDS_PER_FILE = 4;
-/** Local time budget (seconds) for tests beyond the mandatory set. It trims by estimated time, never
- * by file count; whatever it cuts is named in the plan and runs in the pre-queue Lane check. */
+/** Local time budget (seconds). The plan trims unprotected tiers by estimated time, never by file
+ * count; the run is a wall-time cap on the test phase: it starts no file once the budget is spent and
+ * names every file it did not start. Whatever either cuts runs in the pre-queue Lane check. */
 export const PREFLIGHT_LOCAL_BUDGET_SECONDS = 180;
-/** Longest a later group is planned to run (seconds). The run re-checks the budget between groups and
- * sizes the next one from the speed it observed, so this is only how finely it can stop, never how
- * many tests may run. */
+/** Longest a group is planned to run (seconds). The run re-checks the budget between groups and sizes
+ * the next one from the speed it observed and the time left, so this is only how finely it can stop,
+ * never how many tests may run. */
 const PREFLIGHT_GROUP_SECONDS = 30;
 const SOURCE_DIRS = ['src', 'web', 'convex', 'netlify', 'tests', 'scripts'];
 
@@ -117,6 +120,10 @@ export const preflightReceiptSchema = z
     peakRssMb: z.number().nonnegative().optional(),
     /** Tests that were planned to run here but not started because the time budget was spent. */
     stoppedForTime: z.number().int().nonnegative().optional(),
+    /** Those files by name, in plan order (most relevant first). */
+    stopped: z.array(z.string()).optional(),
+    /** The one command that runs exactly the `stopped` files on the saved head. */
+    stoppedRerun: z.string().optional(),
     /** Every local-tier file this run skipped for time (trimmed by the plan or not started). */
     skipped: z.array(z.string()).optional(),
     /** The one command that runs exactly the skipped files (passed ones are reused). */
@@ -149,6 +156,10 @@ export type LocalSelection = {
   rerun?: string;
   /** false: run every ranked local tier, no time budget (the rerun command). */
   trim?: false;
+  /** Changed paths whose edit is comment-only: they add only tests that read their text. */
+  commentOnly?: string[];
+  /** Set when the plan runs only the files a previous run stopped for time. */
+  only?: 'stopped';
   deferred: number;
   /** Declared guards this change triggered: always run first, never trimmed; `seconds` is the cost
    * (measured on this machine where known, else the per-file estimate). */
@@ -290,21 +301,32 @@ function recordFileStats(
   }
 }
 /** Within a tier, the tests that failed last time run first (likely to fail again, and a failure
- * ends the run), then the cheapest known first so more of the neighbourhood fits the budget. The
- * `watch` tier keeps its evidence order. Tier membership never changes. */
+ * ends the run); then, in direct, wide and near, the closest consumers (`ranks`: product hops, carrier
+ * fan-in, helper hops); then the cheapest known first so more of the neighbourhood fits the budget.
+ * The `watch` tier keeps its evidence order. Tier membership never changes. */
 export function orderByHistory<T extends { tier: string; tests: string[] }>(
   tiers: T[],
   stats: PreflightFileStats,
   fallbackMs: number,
+  ranks: Record<string, readonly number[]> = {},
 ): T[] {
   const cost = (test: string) => stats[test]?.ms ?? fallbackMs;
+  const closer = (a: string, b: string) => {
+    const left = ranks[a];
+    const right = ranks[b];
+    if (!left || !right) return 0;
+    for (let i = 0; i < left.length; i++) if (left[i] !== right[i]) return left[i]! - right[i]!;
+    return 0;
+  };
   return tiers.map(item => {
     const index = new Map(item.tests.map((test, i) => [test, i]));
     const order = (test: string) => index.get(test) ?? 0;
+    const ranked = item.tier === 'direct' || item.tier === 'wide' || item.tier === 'near';
     const tests = [...item.tests].sort((a, b) => {
       const failed = Number(stats[b]?.failed ?? false) - Number(stats[a]?.failed ?? false);
       if (failed) return failed;
-      return item.tier === 'watch' ? order(a) - order(b) : cost(a) - cost(b) || order(a) - order(b);
+      if (item.tier === 'watch') return order(a) - order(b);
+      return (ranked ? closer(a, b) : 0) || cost(a) - cost(b) || order(a) - order(b);
     });
     return { ...item, tests };
   });
@@ -331,6 +353,16 @@ function laneFiles(root: string) {
   return files;
 }
 
+/** One saved text file outside the selector inventory (a shell script, a workflow), for comparison. */
+function laneText(root: string, path: string) {
+  if (!safeRelative(path)) return undefined;
+  try {
+    return readFileSync(join(root, path), 'utf8');
+  } catch {
+    return undefined;
+  }
+}
+
 const testArgs = (root: string, tests: string[]) => {
   // An empty list would make `node --test` discover and run the whole suite (friction e4ce373a).
   if (!tests.length) throw new Error('No test files selected; refusing to run the default suite.');
@@ -347,8 +379,13 @@ const testArgs = (root: string, tests: string[]) => {
 export function preflightPlan(
   root: string,
   changed: { paths: string[]; complete: boolean; source?: 'projection' | 'manifests' } | undefined,
-  context?: { laneId: string; files: NativeFile[] },
-  options?: { budgetSeconds?: number | undefined; trim?: boolean | undefined },
+  context?: { laneId: string; files: NativeFile[]; base?: string },
+  options?: {
+    budgetSeconds?: number | undefined;
+    trim?: boolean | undefined;
+    /** Run exactly these test files (the files a previous run stopped for time). */
+    only?: string[] | undefined;
+  },
 ): PreflightPlan {
   if (!changed?.complete)
     return {
@@ -373,16 +410,28 @@ export function preflightPlan(
     const secondsFor = (test: string) => (stats[test] ? stats[test].ms / 1000 : timing.secondsPerFile);
     const declaredGuards = preflightGuards(files.get('package.json'), path => files.has(path));
     const guards = selectGuards(declaredGuards, changed.paths);
+    // Comment-only edits (an SPDX header, a reworded comment) run the same program: they rank only the
+    // tests that read the file. Needs the base bytes on this machine; otherwise nothing is skipped.
+    const commentOnly = context?.base
+      ? commentOnlyPaths(
+          root,
+          context.base,
+          context.files,
+          changed.paths,
+          path => files.get(path) ?? laneText(root, path),
+        )
+      : [];
     const selection = selectPreflightTests({
       files,
       paths: changed.paths,
       guards: guards.selected.flatMap(guard => guard.tests),
       learned: learnedTests(root, changed.paths),
       recent: recentFailedTests(root),
+      ...(commentOnly.length ? { commentOnly } : {}),
       // Direct tests of the most specific changed modules are protected while they fit the budget.
       ...(trim ? { hubBudget: { seconds: budgetSeconds, secondsFor } } : {}),
     });
-    selection.tiers = orderByHistory(selection.tiers, stats, timing.secondsPerFile * 1000);
+    selection.tiers = orderByHistory(selection.tiers, stats, timing.secondsPerFile * 1000, selection.ranks);
     selection.tests = selection.tiers.flatMap(item => item.tests);
     let tests = [...new Set(selection.tests)];
     let reusedTests: string[] = [];
@@ -438,9 +487,10 @@ export function preflightPlan(
       }
     }
     // Tiers still hold reused passes: those cost nothing here, so they never consume the budget.
+    const only = options?.only ? new Set(options.only) : null;
     const fit = fitPreflightBudget({
       tiers: selection.tiers,
-      budgetSeconds: trim ? budgetSeconds : Infinity,
+      budgetSeconds: trim && !only ? budgetSeconds : Infinity,
       secondsPerFile: timing.secondsPerFile,
       secondsFor,
       free: new Set(reusedTests),
@@ -448,12 +498,22 @@ export function preflightPlan(
     const kept = new Set(fit.tests);
     const cut = fit.trimmed.flatMap(item => item.deferred);
     tests = tests.filter(test => kept.has(test));
-    // Budget the tiers did not use goes to the cheapest landing-covered tests an earlier run timed
-    // (a computed-path guard that takes milliseconds should not wait for the pre-queue check). Tests
-    // never timed here are not guessed at, and these run last, after every ranked test.
-    const pool = (trim ? [...selection.deferredTests, ...cut] : []).filter(
-      test => stats[test] && !reusedTests.includes(test),
-    );
+    // A rerun of stopped files runs exactly those (that still exist and have no reusable pass), in
+    // plan order; everything else this plan would run stays as it is in coverage.
+    if (only) {
+      const order = new Map(selection.tests.map((test, i) => [test, i]));
+      const named = [...only].filter(test => files.has(test) && !reusedTests.includes(test));
+      named.sort((a, b) => (order.get(a) ?? Infinity) - (order.get(b) ?? Infinity) || (a < b ? -1 : 1));
+      selection.deferredTests = [...new Set([...selection.deferredTests, ...tests])].filter(
+        test => !only.has(test),
+      );
+      tests = named;
+    }
+    // Budget the ranked tiers did not use goes to the cheapest ranked consumers the budget cut that an
+    // earlier run timed. Unranked coverage (computed paths, by-name closures, far chains) never fills
+    // it: those tests are not evidence about this change (friction 425ecd74). Tests never timed here are
+    // not guessed at, and these run last, after every ranked test.
+    const pool = (trim && !only ? cut : []).filter(test => stats[test] && !reusedTests.includes(test));
     pool.sort((a, b) => stats[a]!.ms - stats[b]!.ms || (a < b ? -1 : 1));
     let leftover = budgetSeconds - fit.estimateSeconds;
     const filler: string[] = [];
@@ -485,9 +545,11 @@ export function preflightPlan(
         seconds: Math.round(guard.tests.reduce((sum, test) => sum + secondsFor(test), 0) * 10) / 10,
       })),
       filler: filler.length,
-      trimmedTests: cut.filter(test => !filled.has(test)).sort(),
+      trimmedTests: only ? [] : cut.filter(test => !filled.has(test)).sort(),
       rerun: context ? rerunCommand(root, context.laneId) : undefined,
       trim,
+      commentOnly,
+      only: !!only,
     });
     const checks = planStatic(files.get('package.json'), changed.paths);
     if ('reason' in checks) return { status: 'unavailable', reason: checks.reason };
@@ -510,7 +572,13 @@ export function preflightPlan(
       ...(reusedFrom ? { reusedFrom } : {}),
       ...(delta ? { deltaPaths: delta } : {}),
       ...(changed.source === 'manifests' ? { changedPathsFrom: 'manifests' as const } : {}),
-      estimateMinutes: estimatePreflightMinutes(root, tests.length),
+      // The run's wall-time cap bounds what this plan can cost here: the budget plus one file.
+      estimateMinutes: Math.ceil(
+        Math.min(
+          tests.reduce((sum, test) => sum + secondsFor(test), 0),
+          trim ? budgetSeconds + tests.reduce((most, test) => Math.max(most, secondsFor(test)), 0) : Infinity,
+        ) / 60,
+      ),
       totalEstimateMinutes: estimatePreflightMinutes(root, complete),
       command: tests.length
         ? ['node', ...testArgs(root, tests)]
@@ -538,6 +606,9 @@ export function preflightPlan(
 /** Runs every ranked local tier with no time budget; reused passes make it run only what was skipped. */
 const rerunCommand = (root: string, laneId: string) =>
   `nforge agent ${shellQuote(root)} preflight ${shellQuote(JSON.stringify({ laneId, trim: false }))}`;
+/** Runs exactly the files the last run stopped for time (under the same wall-time budget). */
+const stoppedCommand = (root: string, laneId: string) =>
+  `nforge agent ${shellQuote(root)} preflight ${shellQuote(JSON.stringify({ laneId, retry: true }))}`;
 
 function planStatic(packageJson: string | undefined, paths: string[]) {
   try {
@@ -564,6 +635,8 @@ function localSelection(input: {
   trimmedTests: string[];
   rerun: string | undefined;
   trim: boolean;
+  commentOnly: string[];
+  only: boolean;
 }): LocalSelection {
   const { fit, timing, budgetSeconds } = input;
   const tiers = input.selection.tiers.map(item => ({
@@ -589,7 +662,7 @@ function localSelection(input: {
   const over = !input.trim
     ? ' trim:false: every ranked local tier runs, no time budget.'
     : fit.protectedOverBudget
-      ? ` Protected tests (changed, learned, direct) alone exceed the ${budgetSeconds} s budget; they still all run.`
+      ? ` Protected tests (changed, learned, direct) alone exceed the ${budgetSeconds} s budget: they run first, closest first, and the wall clock stops the rest by name.`
       : '';
   const skippedNote = input.trimmedTests.length
     ? ` ${input.trimmedTests.length} trimmed file(s) are named in trimmedTests${input.rerun ? `; run them: ${input.rerun}` : ''}.`
@@ -613,6 +686,8 @@ function localSelection(input: {
     ...(input.trimmedTests.length ? { trimmedTests: input.trimmedTests } : {}),
     ...(input.trimmedTests.length && input.rerun ? { rerun: input.rerun } : {}),
     ...(input.trim ? {} : { trim: false as const }),
+    ...(input.commentOnly.length ? { commentOnly: input.commentOnly } : {}),
+    ...(input.only ? { only: 'stopped' as const } : {}),
     deferredTo: 'pre-queue',
     summary:
       `Local rule: ${preflightTierRule}.` +
@@ -620,6 +695,10 @@ function localSelection(input: {
         ? ` Guards always run first, never trimmed: ${input.guards.map(guard => `${guard.name} ~${guard.seconds} s`).join(', ')}.`
         : '') +
       `${cutNote}${over}${skippedNote}` +
+      (input.commentOnly.length
+        ? ` ${input.commentOnly.length} comment-only path(s) add only the tests that read them.`
+        : '') +
+      (input.only ? ' Runs only the files the last run stopped for time.' : '') +
       (input.filler
         ? ` ${input.filler} cheap test file(s) timed in earlier runs use the leftover budget, last.`
         : '') +
@@ -716,14 +795,13 @@ export function runPreflight(
       const budgetMs = plan.local && plan.local.trim !== false ? plan.local.budgetSeconds * 1000 : Infinity;
       const stats = preflightFileStats(root);
       const fallbackSeconds = plan.local?.secondsPerFile ?? PREFLIGHT_SECONDS_PER_FILE;
-      // Mandatory tests always run, in one process. Later tests run in proximity order in groups of
-      // about PREFLIGHT_GROUP_SECONDS, each sized from this run's observed speed (so a machine
-      // slower than the estimate gets small groups), and the budget is re-checked between groups: a
-      // slow machine stops early and says so, it never overruns silently on a wrong estimate.
-      const mandatory = plan.local?.mandatory ?? plan.tests.length;
-      // Protected tests after the mandatory group (learned, direct) are never stopped for time.
-      let guarded = Math.max(0, (plan.local?.protected ?? mandatory) - mandatory);
-      const queue = plan.tests.slice(mandatory);
+      // The budget is a wall-time cap on this test phase. Tests run in plan order (mandatory, then
+      // learned, direct, then the ranked tiers) in groups of about PREFLIGHT_GROUP_SECONDS, each sized
+      // from known per-file times or this run's observed speed and never past the time left, so a slow
+      // machine gets small groups. No file starts once the budget is spent; near the end groups shrink
+      // to one file, so the run ends within the budget plus about one file. Every file it did not
+      // start is named in the receipt with a one-command rerun of exactly those.
+      const queue = [...plan.tests];
       let ran = 0;
       let index = 0;
       const runGroup = (group: string[]) => {
@@ -760,34 +838,29 @@ export function runPreflight(
         return Date.now() - groupStarted;
       };
       try {
-        const first = plan.tests.slice(0, mandatory);
-        let spent = first.length ? runGroup(first) : 0;
+        let spent = 0;
         // Seconds per file seen in this run; the estimate stands in until a group has run.
-        let observed = first.length ? spent / 1000 / first.length : fallbackSeconds;
+        let observed = fallbackSeconds;
         while (queue.length) {
           if (exitCode !== 0) {
             stopped.push(...queue.splice(0));
             break;
           }
-          const protectedGroup = guarded > 0;
-          const remaining = protectedGroup
-            ? PREFLIGHT_GROUP_SECONDS
-            : (budgetMs - (Date.now() - started)) / 1000;
-          if (remaining <= 0) {
+          const remaining = (budgetMs - (Date.now() - testStarted)) / 1000;
+          // The first group always runs (a budget of 0 still runs one file, the most relevant).
+          if (remaining <= 0 && ran) {
             notRun.push(...queue.splice(0));
             break;
           }
-          const window = Math.min(remaining, PREFLIGHT_GROUP_SECONDS);
+          const window = Math.max(0, Math.min(remaining, PREFLIGHT_GROUP_SECONDS));
           const group: string[] = [];
           let planned = 0;
-          // A group never mixes protected and budgeted tests, so the budget check stays exact.
-          while (queue.length && guarded > 0 === protectedGroup) {
+          while (queue.length) {
             const next = queue[0]!;
             const seconds = stats[next] ? stats[next].ms / 1000 : observed;
             if (group.length && planned + seconds > window) break;
             group.push(queue.shift()!);
             planned += seconds;
-            if (guarded > 0) guarded--;
           }
           spent += runGroup(group);
           observed = spent / 1000 / ran;
@@ -815,6 +888,7 @@ export function runPreflight(
   const skipped = notRun.length + stopped.length;
   const skippedFiles = [...(plan.local?.trimmedTests ?? []), ...notRun].sort();
   const rerun = skippedFiles.length ? (plan.local?.rerun ?? rerunCommand(root, laneId)) : undefined;
+  const stoppedRerun = notRun.length ? stoppedCommand(root, laneId) : undefined;
   const receipt: PreflightReceipt = {
     schema: 1,
     laneId,
@@ -835,7 +909,7 @@ export function runPreflight(
     ...(plan.deferredTests?.length || skipped
       ? { deferredTests: (plan.deferredTests?.length ?? 0) + skipped }
       : {}),
-    ...(notRun.length ? { stoppedForTime: notRun.length } : {}),
+    ...(notRun.length ? { stoppedForTime: notRun.length, stopped: notRun, stoppedRerun } : {}),
     ...(skippedFiles.length ? { skipped: skippedFiles } : {}),
     ...(rerun ? { rerun } : {}),
     ...(stopped.length ? { stoppedForFailure: stopped.length } : {}),
@@ -886,7 +960,10 @@ function runSummary(receipt: PreflightReceipt, plan: PreflightPlan & { status: '
   ].filter(Boolean);
   const deferred = receipt.deferredTests ?? 0;
   const stopped = receipt.stoppedForTime
-    ? ` The ${receipt.budgetSeconds} s local budget ran out, so ${receipt.stoppedForTime} planned test file(s) were not started.`
+    ? ` The ${receipt.budgetSeconds} s local budget ran out, so ${receipt.stoppedForTime} planned test file(s) were not started` +
+      ` (receipt.stopped names them${
+        receipt.stopped && receipt.stopped.length <= SKIPPED_NAMED ? `: ${receipt.stopped.join(' ')}` : ''
+      }); run just those: ${receipt.stoppedRerun}.`
     : '';
   const failedFirst = receipt.stoppedForFailure
     ? ` ${receipt.stoppedForFailure} planned test file(s) were not started because an earlier group failed; fix it and run preflight again (passed files are reused).`

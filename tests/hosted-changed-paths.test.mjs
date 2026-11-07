@@ -6,6 +6,9 @@ import { digest } from '../dist/hash.js';
 import { savedChangedPaths } from '../dist/hosted-changed-paths.js';
 import { preflightPlan, readPreflightReceipt } from '../dist/agent-preflight.js';
 import { effectiveAgentDefaults } from '../dist/agent-parallel-defaults.js';
+import { clientCacheRoot } from '../dist/root-paths.js';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 function fixture(t) {
   const f = agentFixture(t);
@@ -129,4 +132,61 @@ test('plan-only preflight on a sync head derives paths, starts no build or test 
     f.calls.every(call => !/Landing|Finish|Check/.test(call.name)),
     'plan-only starts no landing or check',
   );
+});
+
+test('preflight "retry":true plans exactly the files the last run stopped for time', async t => {
+  const f = agentFixture(t);
+  const put = bytes => {
+    const id = digest(bytes);
+    f.objects.set(id, bytes);
+    return id;
+  };
+  const state = files =>
+    put(
+      Buffer.from(
+        JSON.stringify({
+          schema: 1,
+          kind: 'forge-source-state',
+          parents: [],
+          files: files.map(([path, text]) => ({ path, blob: put(Buffer.from(text)), mode: 'file' })),
+          at: '2026-01-01T00:00:00.000Z',
+          message: 'Synthetic',
+        }),
+      ),
+    );
+  const tests = [
+    ['tests/a.test.mjs', "import '../src/a.ts';"],
+    ['tests/b.test.mjs', "import '../src/a.ts';"],
+  ];
+  const base = state([['src/a.ts', 'export const n = 1;'], ...tests]);
+  f.main.head = base;
+  f.lane.base.head = base;
+  f.lane.head = state([['src/a.ts', 'export const n = 2;'], ...tests]);
+  f.caps.agentDefaults = effectiveAgentDefaults();
+  const transport = f.transport();
+  await transport.dispatch('open', { laneId: f.lane.laneId });
+  const laneId = f.lane.laneId;
+  await assert.rejects(
+    transport.dispatch('preflight', { laneId, retry: true, run: false }),
+    error => error.code === 'BAD_ARGUMENT' && /stopped no file for time/.test(error.message),
+  );
+  const receipt = {
+    schema: 1,
+    laneId,
+    head: f.lane.head,
+    tests: 1,
+    selection: 'local',
+    exitCode: 0,
+    passed: true,
+    durationMs: 1,
+    at: '2026-01-01T00:00:00.000Z',
+    stoppedForTime: 1,
+    stopped: ['tests/b.test.mjs'],
+  };
+  const path = join(clientCacheRoot(f.root), 'agent', 'preflight', `${laneId}.json`);
+  mkdirSync(join(path, '..'), { recursive: true });
+  writeFileSync(path, JSON.stringify(receipt));
+  const response = await transport.dispatch('preflight', { laneId, retry: true, run: false });
+  assert.deepEqual(response.result.plan.tests, ['tests/b.test.mjs']);
+  assert.ok(response.result.plan.deferredTests.includes('tests/a.test.mjs'));
 });

@@ -169,41 +169,60 @@ frozen set on 2026-11-06 broke capabilities across CLI/server versions with `HOS
 - `nforge agent ROOT preflight '{"laneId":"…"}'` always runs changed tests, explicit coverage,
   smoke and the project's declared *guards* (`forge.preflight.guards` in `package.json`, filtered by
   path rules, protected like mandatory tests, cost in `local.guards`; see
-  [workflows](workflows.md#local-preflight-guards)); then *learned* tests; then *direct* tests; then *recent* failers; then direct consumers
-  of hub modules (`wide`); then tests that watch a distinctive name in a changed source (any import distance);
-  then distance-2 consumers, nearest first. There is no file count. Mandatory, learned and direct
-  tests are protected: the time budget never trims them and the run never stops them for time
-  (`local.protected`; `protectedOverBudget` says when they alone exceed it).
-  A *direct* test imports a changed module, also through test-only helpers (a fixture under
-  `tests/` that wraps the module adds no distance), or is named for it (`tests/NAME.test.mjs` for
-  a changed `NAME.ts`). A changed module whose direct tests alone would overrun the budget on this
-  machine (more files than the budget over the per-file estimate) is a *hub*: its consumers are
-  ranked as `wide` instead, and its own named test stays protected. A *learned* test failed in a
+  [workflows](workflows.md#local-preflight-guards)); then *learned* tests; then *direct* tests; then direct consumers
+  of hub modules (`wide`); then *recent* failers; then tests that watch a distinctive name in a changed source (any import distance);
+  then `near` consumers (two modules between). There is no file count. Mandatory, learned and direct
+  tests are protected: the time budget never trims them (`local.protected`; `protectedOverBudget`
+  says when they alone exceed it), and only the run's wall-time cap stops one.
+  A *direct* test runs a changed module: it loads it itself or through test fixtures (a helper
+  under `tests/` adds no distance), or loads a module that imports it or dispatches it in process
+  (*fixture-reached*: a fixture that loads `convex/a.ts` runs what `a.ts` imports for every test
+  using it; 2026-11-07, seven landing failures of `projectHostedLandingCancel.ts` sat behind
+  `tests/hosted-landing-fixture.mjs`), or is named for it (`tests/NAME.test.mjs` for a changed
+  `NAME.ts`, or the module's trailing words: `hosted-landing-cancel` for `projectHostedLandingCancel`).
+  A computed path, a path string in product code and a by-name loader's closure (every Convex
+  module named anywhere the test's code reaches) keep landing coverage but never make a test close.
+  Within direct and wide, tests rank by product modules between, then the fan-in of the fixture
+  that carries them (a test's own import before a shared harness), then fixture depth.
+  A changed module whose own loaders (tests at zero modules between) would overrun the budget on
+  this machine is a *hub*: its consumers are ranked as `wide` instead, and its own named test stays
+  protected. Tests one module away never make a module a hub. A *learned* test failed in a
   landing check or a preflight while one of the changed paths was changed (2026-11-06: the
   disk-hygiene prune test and the delta behaviour tests were trimmed and the regression surfaced
   only by hand). The record is `preflight-learned.json` beside the timings: changed path to failing
   test file, from the `CHECK_FAILED` response `land --save` or `wait` already holds (the finish gate
   remembers the landing's changed paths) and from failed preflight files. Learned tests run even
   where the import graph does not reach them; entries expire after 30 days, the record is bounded
-  and never uploaded, and no server call is added. A *recent* failer is a consumer of this change
-  that failed in a landing check within 14 days under other paths (2026-11-06: two read-budget tests
-  failed for the completion-tick change, and a sibling file of the same modules would have missed the
-  learned record). It is ranked before `wide` and trimmed by time like it, never protected, so a
-  flaky failer cannot grow the protected set. `local.tierTests` names the local tests of each tier. A *name watcher* shares a rare path-like name with the change, such as a mkdtemp
+  and never uploaded, and no server call is added. A *recent* failer runs a changed module within two
+  modules and failed in a landing check within 14 days under other paths (2026-11-06: two read-budget
+  tests failed for the completion-tick change, and a sibling file of the same modules would have
+  missed the learned record). A recent failer that is already direct or wide stays there and runs
+  first among equally close tests; the rest rank after `wide` and are trimmed by time, never
+  protected, so a flaky failer cannot grow the protected set or displace a direct importer
+  (2026-11-07: 13 recent files reached through the backend's shared wrapper took the budget from the
+  importers of four job modules). `local.tierTests` names the local tests of each tier. A *name watcher* shares a rare path-like name with the change, such as a mkdtemp
   prefix the module creates and a test that hooks `fs.open` on paths matching it; an import graph
   cannot see that link (2026-11-05: `hosted-checkout-barriers` was four edges away). A name counts
   only when at most 1% of the project's tests match it, and watchers rank by how rare their names
   are. Within a tier, tests that failed last time run first, then the cheapest by what earlier
   runs on this machine timed (`preflight-files.json` beside the timings: smoothed milliseconds and a
   failed flag, bounded, never uploaded). Budget the ranked tiers leave over runs the cheapest timed
-  deferred tests, last (`local.filler`).
+  tests the budget cut from them, last (`local.filler`); coverage the ranking does not reach
+  (computed paths, by-name closures, three or more modules away) never fills it.
+  A *comment-only* edit (the parser sees the same program for JS and TS; for `#`-comment languages
+  only the leading header changed) adds only the tests that read the file's text, never its
+  importers (`local.commentOnly`). The base bytes come from this machine's object stores; without
+  them a path counts as changed.
   A time budget (180 s by default; `"budgetSeconds":N` overrides) is filled in that
   order using each file's own measured time where known and the mean seconds per file otherwise
-  (the last 8 completed runs on this machine; 4 s until one is measured). A wrong estimate cannot
-  overrun by more than one group: after the mandatory group the run goes on in groups of about
-  30 estimated seconds, each sized from the speed this run has observed (a slow machine gets groups
-  of one file), checks the budget between groups, and stops with `stoppedForTime` tests unstarted,
-  which join the deferred set. A failure ends the run the same way (`stoppedForFailure`): the rest
+  (the last 8 completed runs on this machine; 4 s until one is measured). `estimateMinutes` is never
+  more than the budget plus the longest planned file. The budget is also a wall-time cap on the test
+  phase, protected tiers included: the run goes in groups of about 30 estimated seconds, each sized
+  from known file times or the speed this run has observed and never past the time left, starts no
+  file once the budget is spent (the first file always runs), and so ends within the budget plus
+  about one file. Files it did not start are `stopped` in the receipt (`stoppedForTime` counts them)
+  and join the deferred set; `stoppedRerun` is `preflight '{"laneId":"…","retry":true}'`, which
+  plans exactly those files (passes are reused, no filler). A failure ends the run the same way (`stoppedForFailure`): the rest
   is not started, passes are kept, fix and run again. A cut trims the farthest
   tier first, never leaves a nearer consumer out while a farther one runs, and never touches
   protected tests. The plan's `local.summary` and the receipt

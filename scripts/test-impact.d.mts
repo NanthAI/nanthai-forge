@@ -43,11 +43,11 @@ export function selectTests(
   graphCache?: object,
 ): TestSelection;
 export type PreflightTier = {
-  tier: 'mandatory' | 'learned' | 'direct' | 'recent' | 'wide' | 'watch' | 'near';
+  tier: 'mandatory' | 'learned' | 'direct' | 'wide' | 'recent' | 'watch' | 'near';
   tests: string[];
 };
 export const preflightTierRule: string;
-/** Tiers the time budget never trims or stops. */
+/** Tiers the time budget never trims from the plan; the run starts them first. */
 export const protectedTiers: Set<string>;
 export function selectPreflightTests(
   input: {
@@ -55,9 +55,13 @@ export function selectPreflightTests(
     paths: string[];
     /** Tests that failed for one of these paths in an earlier landing check or preflight. */
     learned?: string[];
-    /** Tests that failed in a landing check lately under other paths; consumers of this change
-     * among them are ranked before `wide` and trimmed by time like it (`recent`). */
+    /** Tests that failed in a landing check lately under other paths. Those that run a changed
+     * module within two product modules are ranked after `wide` (`recent`); among equally close
+     * direct and wide tests they go first. */
     recent?: string[];
+    /** Changed paths whose bytes equal their base outside comments: they add only the tests that
+     * read their text, never their importers. */
+    commentOnly?: string[];
     /** Project-declared guard tests this change triggers; mandatory, so never trimmed. */
     guards?: string[];
     /** Protect direct tests module by module, most specific first, while their cost fits; the
@@ -72,6 +76,11 @@ export function selectPreflightTests(
   broadModules: string[];
   /** Distinctive names each promoted `watch` test shares with a changed source. */
   watchedNames: Record<string, string[]>;
+  /** [product hops, carrier fan-in, helper hops] of each direct, wide and near test; lower is closer. */
+  ranks: Record<string, [number, number, number]>;
+  /** The `recent` input tests that qualified (consumers within two product modules). */
+  recentFailed: string[];
+  commentOnly?: string[];
 };
 export function fitPreflightBudget(input: {
   tiers: PreflightTier[];
@@ -90,7 +99,7 @@ export function fitPreflightBudget(input: {
   }[];
   estimateSeconds: number;
   mandatoryOverBudget: boolean;
-  /** Protected tiers alone exceed the budget; they still all run. */
+  /** Protected tiers alone exceed the budget; the plan keeps them all, the run's wall clock stops them. */
   protectedOverBudget: boolean;
 };
 export function selectImpactPair(files: Map<string, string>, comparisons: string[][]): TestSelection[];

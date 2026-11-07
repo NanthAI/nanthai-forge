@@ -113,9 +113,13 @@ Each tier answers a different question. None depends on a particular CI provider
    transitive consumers), with a measured time estimate instead of a fixed cut.
    Issue c14f4065 replaced the former fixed 25-file cap for nearby consumers with
    this: tiers in order (changed tests, explicit coverage and smoke; tests that
-   failed for these paths before; direct tests of a changed module; hub, name-watch
-   and distance-2 consumers), with only the last three trimmed by a local time
-   budget (180 s by default, `budgetSeconds` overrides). The plan, the receipt and
+   failed for these paths before; direct tests, which run a changed module
+   themselves, through a test fixture or through one module that imports it;
+   hub consumers, recent landing failures within two modules, name-watch and
+   two-module consumers), with only the last four trimmed by a local time budget
+   (180 s by default, `budgetSeconds` overrides). The budget is also a wall-time
+   cap: the run starts no file once it is spent and names those files in
+   `stopped`, with `stoppedRerun` to run just them. The plan, the receipt and
    the builder output name the rule, the trimmed tier and files, the one command
    that runs them (`trim:false`), the estimate and the number of tests left for this
    pre-queue tier. The local tier **may leave out** any hub, name-watch or farther

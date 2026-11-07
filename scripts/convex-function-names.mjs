@@ -99,7 +99,7 @@ export function byNameDispatch(files, reverse, evidence, edge, named, nameLoader
         if (!seen.has(dependency)) seen.add(dependency) && visit.push(dependency);
     }
     for (const [module, item] of names)
-      if (module !== test && files.has(module)) edge(module, test, item.kind, detail(item.current));
+      if (module !== test && files.has(module)) edge(module, test, item.kind, detail(item.current), true);
   }
 }
 // `../convex/${module}.ts` where module is the first part of name.split(':'): the

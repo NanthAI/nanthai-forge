@@ -111,7 +111,9 @@ test('a failure under one path is recent for every other path, for 14 days; the 
   const { root, files } = lane(t, {
     'src/b.ts': 'export const m = 1;',
     'tests/b.test.mjs': "import '../src/b.ts';",
-    'src/a.ts': "import './b.ts'; export const n = 1;",
+    // Two modules between: not a direct consumer of b.ts, but near enough for a recent failure.
+    'src/mid.ts': "import './b.ts'; export const k = 1;",
+    'src/a.ts': "import './mid.ts'; export const n = 1;",
     'tests/barriers.test.mjs': "import '../src/a.ts';",
   });
   const day = 24 * 60 * 60 * 1000,

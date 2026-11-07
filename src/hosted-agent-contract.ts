@@ -234,6 +234,9 @@ export const hostedAgentCommandSchemas = {
       budgetSeconds: z.number().int().min(1).max(3600).optional(),
       /** false: run every ranked local tier without the time budget (the receipt's rerun command). */
       trim: z.boolean().optional(),
+      /** true: run exactly the files the last run stopped for time (receipt `stopped`, its
+       * stoppedRerun). Named like finish's retry so the compact tool list stays in budget. */
+      retry: z.literal(true).optional(),
     })
     .strict(),
   /** Client-composed operator repair: pack the current hosted main and publish it to R2. */

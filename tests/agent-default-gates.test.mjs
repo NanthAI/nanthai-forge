@@ -380,7 +380,7 @@ test('slow learned timings trim by time, and the advisory names the rule, the cu
   assert.equal(result.preflight.deferredTests, 62);
   assert.equal(result.preflight.estimateMinutes, 3);
   assert.equal(result.preflight.totalEstimateMinutes, 14);
-  assert.match(result.preflight.local, /direct consumers/);
+  assert.match(result.preflight.local, /consumers of hub modules/);
   assert.match(result.preflight.local, /Trimmed wide 18 of 80/);
   assert.match(
     result.preflight.local,
