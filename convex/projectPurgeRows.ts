@@ -35,6 +35,7 @@ type Indexed = {
     }) => unknown,
   ) => { take: (n: number) => Promise<Row[]> };
 };
+// oxlint-disable-next-line forge/convex-bounded-query -- the Indexed type exposes only withIndex(...).take(n)
 const indexed = (ctx: MutationCtx, table: string) => ctx.db.query(table as never) as unknown as Indexed;
 /** Up to `n` rows a project owns in one covered table, through its project index. */
 export const projectRows = (

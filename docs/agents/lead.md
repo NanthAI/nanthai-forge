@@ -78,7 +78,8 @@ design judgment for the designated reviewer. Exact providers and machine budgets
 Write briefs in neutral, concrete language. Each brief uses the [standard block](briefings.md#standard-builder-block) and adds:
 
 - the Issue, outcome, owned files and concepts, dependencies and non-goals;
-- the invariant being fixed, not just one named instance;
+- the invariant being fixed, not just one named instance, and the build-failing
+  guard when the class repeats ([lint rules and guards](lint-rules.md));
 - current data size and growth, calls per record and operation, total Convex calls
   and documents read/written, peak memory and wall-time budget;
 - a time box and written acceptance bar: required cases, measurement repeats,

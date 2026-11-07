@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { mkdir } from 'node:fs/promises';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { HostedCheckRun } from './hosted-check.js';
 import { contractTestPath } from './intent-test-contract.js';
@@ -22,7 +22,26 @@ import type { NativeState } from './native-state-format.js';
 import { refreshSourcePack } from './source-pack.js';
 import { refreshActionsSourcePack } from './hosted-actions-job-pack.js';
 import { testedDocs } from './tested-docs.js';
-import { scanSecretPaths } from './secret-scan.js';
+import { scanSecretPaths, SECRET_SCAN_ALLOW_FILE } from './secret-scan.js';
+/** The base (main) allow file's bytes. Usually cached already (unchanged, or from the base
+ * pack); otherwise one small object read, only when the base has the file. Unreadable
+ * means no allow entries: findings then fail, never pass. */
+async function baseAllowBytes(source: Awaited<ReturnType<typeof materializeActionsSource>>, cache: string) {
+  const file = source.base.files.find(item => item.path === SECRET_SCAN_ALLOW_FILE);
+  if (!file || file.mode === 'symlink') return undefined;
+  const path = join(cache, file.blob);
+  try {
+    if (!existsSync(path)) {
+      await source.connection.resolve([file.blob]);
+      await source.connection.prepareRecipes([file.blob]);
+      await source.reader.resolveMany([file.blob]);
+    }
+    return readFileSync(path);
+  } catch {
+    console.log('secret scan: the base allow file is unreadable; no allow entries apply');
+    return undefined;
+  }
+}
 /** Keep only paths/hashes in memory. Import analysis reads one source file at a time. */
 class SourceFiles extends Map<string, string> {
   constructor(
@@ -75,13 +94,22 @@ export async function prepareActionsJob(
   // land on its first check (Issue 7fe54c7c). Absent means every Markdown is tested.
   const docs = standard ? testedDocs(files.keys(), path => files.get(path)) : undefined;
   // Landing secret scan (src/secret-scan.ts): changed paths only, from bytes already cached.
+  // Allow entries come from the composition base (main), never from the Candidate (R-01).
   const scanStarted = performance.now();
-  const secrets = scanSecretPaths(paths, path => {
-    const file = inventory.get(path);
-    return file && file.mode !== 'symlink' ? readFileSync(join(cache, file.blob)) : undefined;
-  });
+  const baseAllow = await baseAllowBytes(source, cache);
+  const secrets = scanSecretPaths(
+    paths,
+    path => {
+      const file = inventory.get(path);
+      return file && file.mode !== 'symlink' ? readFileSync(join(cache, file.blob)) : undefined;
+    },
+    { baseAllow },
+  );
   console.log(
-    `secret scan: ${secrets.scannedFiles} changed files in ${Math.round(performance.now() - scanStarted)} ms; ${secrets.findings.length + secrets.more} found, ${secrets.allowed} allowed`,
+    `secret scan: ${secrets.scannedFiles} changed files in ${Math.round(performance.now() - scanStarted)} ms; ${secrets.findings.length + secrets.more} found, ${secrets.allowed} allowed from main` +
+      (secrets.allowChanges
+        ? `; ${secrets.allowChanges.entries.length + secrets.allowChanges.more} allow entries added or edited`
+        : ''),
   );
   const selection = {
     scope: selected.scope,
@@ -89,8 +117,16 @@ export async function prepareActionsJob(
     tests: selected.tests,
     ...(docs ? { testedDocs: docs } : {}),
     // Pinned in the plan so the static job fails on it. Value-free: path, line, kind, fingerprint.
-    ...(secrets.findings.length || secrets.allowed
-      ? { secretScan: { findings: secrets.findings, more: secrets.more, allowed: secrets.allowed } }
+    ...(secrets.findings.length || secrets.allowed || secrets.allowChanges
+      ? {
+          secretScan: {
+            findings: secrets.findings,
+            more: secrets.more,
+            allowed: secrets.allowed,
+            ...(secrets.selfAllowed ? { selfAllowed: secrets.selfAllowed } : {}),
+            ...(secrets.allowChanges ? { allowChanges: secrets.allowChanges } : {}),
+          },
+        }
       : {}),
     ...(run.gate
       ? {

@@ -5,6 +5,7 @@ code at the same time. Start with the guide that matches your task.
 
 - [Principles](principles.md): our north star and how everyday friction guides improvement.
 - [Improvement loop](agents/improvement-loop.md): capture, rank and resolve workflow friction.
+- [Lint rules and guards](agents/lint-rules.md): build-failing guards for repeat bug classes and how to add one.
 - [Why Forge](why-forge.md): differences from GitHub, measured landing throughput and what remains unmeasured.
 - [Quickstart](quickstart.md): import GitHub source into a writable hosted project, then save and land a Lane.
 - [Concepts](concepts.md): Intents, Lanes, Candidates, checks and Channels.

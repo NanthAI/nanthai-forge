@@ -73,7 +73,9 @@ async function executeActiveActionsJob(
     ];
   }
   // A secret the plan step found fails the static job before project code runs.
-  const secretScan = recipe.selection?.secretScan as Pick<SecretScanResult, 'findings' | 'more'> | undefined;
+  const secretScan = recipe.selection?.secretScan as
+    | Pick<SecretScanResult, 'findings' | 'more' | 'selfAllowed'>
+    | undefined;
   if (shard === 'static' && secretScan?.findings?.length)
     command = secretScanFailureCommand(process.execPath, secretScan);
   let tail = Buffer.alloc(0);

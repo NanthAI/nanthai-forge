@@ -10,6 +10,7 @@ import { digest } from './portable-hash.js';
 import { canonicalPayload } from './hosted-source-operation.js';
 import { invariant } from './errors.js';
 import { contractTestPath } from './intent-test-contract.js';
+import { secretAllowEvidenceSchema } from './secret-allow.js';
 
 export const checkHash = z.string().regex(/^[0-9a-f]{64}$/);
 export const checkNumber = z.number().safe().nonnegative();
@@ -137,6 +138,9 @@ export const hostedCheckPlanSchema = z
     manifest: checkObject,
     shardCount: checkNumber.refine(n => n > 0),
     skipped: checkSkippedSchema.optional(),
+    /** Allow entries the change adds or edits against main (Issue 93e14bb0); only when the
+     * allow file changed. Value-free; the receipt copies it as `secretAllowAdded`. */
+    secretAllow: secretAllowEvidenceSchema.optional(),
   })
   .strict()
   .refine(plan => !plan.skipped || plan.shardCount === 1, {

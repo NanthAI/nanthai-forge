@@ -11,6 +11,7 @@ import { semanticTests } from '../src/intent-semantic-conflict';
 import { checkGateSchema } from '../src/bet2-gate';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { invariant } from '../src/errors';
+import { secretAllowEvidenceSchema } from '../src/secret-allow';
 export const prepare = internalMutation({
   args: {
     ...sessionArgs,
@@ -103,6 +104,11 @@ export const prepare = internalMutation({
       manifest = savePin(recipe);
     // Tests the change's paths do not reach are skipped, not pending (Issue 9e71abcc).
     const skipped = recipe.groups.length === 0 ? testsNotAffected(recipe.selection, standard) : undefined;
+    // Allow entries the change adds against main (Issue 93e14bb0), for the receipt mark. A malformed
+    // value is dropped: the landing then marks the allow-file change as unscanned and still alerts.
+    const allowChanges = secretAllowEvidenceSchema.safeParse(
+      (recipe.selection.secretScan as { allowChanges?: unknown } | undefined)?.allowChanges,
+    );
     const plan = hostedCheckPlanSchema.parse({
       head: recipe.head,
       definition: recipe.definition,
@@ -113,6 +119,7 @@ export const prepare = internalMutation({
       manifest,
       shardCount: recipe.groups.length + 1,
       ...(skipped ? { skipped } : {}),
+      ...(allowChanges.success ? { secretAllow: allowChanges.data } : {}),
     });
     invariant(
       run.configuration.runtime === hostedActionsRuntime,

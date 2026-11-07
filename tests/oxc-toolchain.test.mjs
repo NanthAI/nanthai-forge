@@ -40,7 +40,8 @@ function fixture(t) {
   writeFileSync(join(owner, '.gitignore'), '.forge/\n');
   const root = join(owner, '.forge/work/lane');
   mkdirSync(root, { recursive: true });
-  for (const path of ['.gitignore', '.oxlintrc.json', '.oxfmtrc.json'])
+  mkdirSync(join(root, 'scripts/lint'), { recursive: true });
+  for (const path of ['.gitignore', '.oxlintrc.json', '.oxfmtrc.json', 'scripts/lint/forge-plugin.mjs'])
     writeFileSync(join(root, path), readFileSync(path));
   const write = (path, text) => {
     mkdirSync(dirname(join(root, path)), { recursive: true });
@@ -76,7 +77,10 @@ test('Oxc selects source explicitly inside ignored native Lanes and preserves ex
     write(path, 'preserve exact bytes');
   const sources = ['convex/value.ts', 'netlify/functions/value.mts', 'src/value.ts', 'web/src/value.tsx'];
   assert.deepEqual(oxcFiles(root, true), sources);
-  assert.deepEqual(oxcFiles(root, false), [...sources, 'scripts/value.mjs', 'tests/value.test.mjs'].sort());
+  assert.deepEqual(
+    oxcFiles(root, false),
+    [...sources, 'scripts/lint/forge-plugin.mjs', 'scripts/value.mjs', 'tests/value.test.mjs'].sort(),
+  );
   const result = run(root, 'oxlint', ['--threads', '2', '--debug', 'files', ...oxcFiles(root, true)]);
   assert.equal(result.status, 0, result.stdout + result.stderr);
   assert.deepEqual(result.stdout.trim().split('\n').sort(), sources);

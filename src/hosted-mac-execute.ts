@@ -13,7 +13,11 @@ import { mkdtemp, mkdir, readFile, writeFile, rm } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
-import { HostedCheckoutCache, type CheckoutObjectTransport } from './hosted-checkout-cache.js';
+import {
+  HostedCheckoutCache,
+  checkoutPackMinimum,
+  type CheckoutObjectTransport,
+} from './hosted-checkout-cache.js';
 import { parseNativeState } from './native-state-format.js';
 import { installHostedFile } from './hosted-checkout-files.js';
 import { checkEnvironment, checkProcessEnvironment, checkPassthrough } from './check-environment.js';
@@ -25,7 +29,12 @@ import { canonicalPayload } from './hosted-source-operation.js';
 import { digest } from './hash.js';
 import { HostedMacProvider } from './hosted-mac-worker.js';
 import { invariant } from './errors.js';
-import { changedStatePaths, scanSecretPaths, secretScanFailureCommand } from './secret-scan.js';
+import {
+  changedStatePaths,
+  scanSecretPaths,
+  secretScanFailureCommand,
+  SECRET_SCAN_ALLOW_FILE,
+} from './secret-scan.js';
 import type { OutputRoot } from './hosted-check-output.js';
 
 export type MacExecutionTransport = CheckoutObjectTransport & {
@@ -33,6 +42,47 @@ export type MacExecutionTransport = CheckoutObjectTransport & {
   callback(value: HostedCheckCallback, signature: string): Promise<HostedCheckRun>;
   output: OutputTransport;
 };
+/** Landing secret scan (src/secret-scan.ts) on the paths changed from the composition
+ * base (main): one extra State read. An unreadable base scans every file instead and
+ * applies no allow entry. Allow entries come from the base only (R-01). It runs before
+ * the plan is saved so the plan can carry the allow entries this change adds. */
+export async function machineSecretScan(
+  cache: HostedCheckoutCache,
+  baseHead: string,
+  files: ReturnType<typeof parseNativeState>['files'],
+  signal: AbortSignal,
+) {
+  let before: ReturnType<typeof parseNativeState>['files'] | null = null;
+  try {
+    await cache.ensure([baseHead]);
+    before = parseNativeState(await readFile(join(cache.objects, baseHead))).files;
+  } catch {
+    /* Unreadable base: scan every file. */
+  }
+  signal.throwIfAborted();
+  const changed = changedStatePaths(before, files);
+  const inventory = new Map(files.map(file => [file.path, file]));
+  const baseAllowFile = before?.find(file => file.path === SECRET_SCAN_ALLOW_FILE && file.mode !== 'symlink');
+  // Only the changed blobs and the base allow file now; the full checkout later reuses them.
+  // A set large enough for the one-shot source pack fetches the whole checkout here instead.
+  const scanned = changed.flatMap(path => {
+    const file = inventory.get(path);
+    return file && file.mode !== 'symlink' ? [file.blob] : [];
+  });
+  await cache.ensure([
+    ...(scanned.length < checkoutPackMinimum ? scanned : files.map(file => file.blob)),
+    ...(baseAllowFile ? [baseAllowFile.blob] : []),
+  ]);
+  signal.throwIfAborted();
+  return scanSecretPaths(
+    changed,
+    path => {
+      const file = inventory.get(path);
+      return file && file.mode !== 'symlink' ? readFileSync(join(cache.objects, file.blob)) : undefined;
+    },
+    { baseAllow: baseAllowFile ? readFileSync(join(cache.objects, baseAllowFile.blob)) : undefined },
+  );
+}
 /** Check commands receive a private HOME/temp and only declared inputs. Source
  * bytes go from hosted/R2 to a hash-verified checkout, without any Git export. */
 export async function executeHostedMacCheck(
@@ -77,6 +127,7 @@ export async function executeHostedMacCheck(
       signal.throwIfAborted();
       return pin;
     };
+    const secretScan = await machineSecretScan(cache, run.candidate.base.head, state.files, signal);
     const command = semanticCheckCommand(
       [run.check.executable, ...run.check.args],
       run.semanticPlan,
@@ -105,6 +156,7 @@ export async function executeHostedMacCheck(
         selection,
         manifest,
         shardCount: 1,
+        ...(secretScan.allowChanges ? { secretAllow: secretScan.allowChanges } : {}),
       },
     });
     await cache.ensure(state.files.map(file => file.blob));
@@ -115,22 +167,6 @@ export async function executeHostedMacCheck(
       signal.throwIfAborted();
       installHostedFile(checkout, cache.objects, file);
     }
-    // Landing secret scan (src/secret-scan.ts) on the paths changed from the composition
-    // base: one extra State read. An unreadable base scans every file instead.
-    let before: ReturnType<typeof parseNativeState>['files'] | null = null;
-    try {
-      await cache.ensure([run.candidate.base.head]);
-      before = parseNativeState(await readFile(join(cache.objects, run.candidate.base.head))).files;
-    } catch {
-      /* Unreadable base: scan every file. */
-    }
-    signal.throwIfAborted();
-    const changed = changedStatePaths(before, state.files);
-    const inventory = new Map(state.files.map(file => [file.path, file]));
-    const secretScan = scanSecretPaths(changed, path => {
-      const file = inventory.get(path);
-      return file && file.mode !== 'symlink' ? readFileSync(join(cache.objects, file.blob)) : undefined;
-    });
     // A finding fails the run before project code runs, through the ordinary result path.
     const execute = secretScan.findings.length
       ? secretScanFailureCommand(process.execPath, secretScan)

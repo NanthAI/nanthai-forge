@@ -11,6 +11,7 @@ import {
   changedStatePaths,
   secretScanFailureCommand,
 } from '../dist/secret-scan.js';
+import { secretAllowAlert, secretAllowMark } from '../dist/secret-allow.js';
 import { spawnSync } from 'node:child_process';
 
 // Obviously fake tokens with real shapes, assembled at run time so this file's own
@@ -83,27 +84,28 @@ test('only changed paths are read; binary, large, deleted and link paths are ski
       'c.txt': Buffer.from(`${'x'.repeat(1024 * 1024)}${fake.github}`),
     }[path];
   };
-  const result = scanSecretPaths(['a.txt', 'b.bin', 'c.txt', 'gone.txt'], read);
+  const result = scanSecretPaths(['a.txt', 'b.bin', 'c.txt', 'gone.txt'], read, { baseAllow: undefined });
   assert.deepEqual(
     result.findings.map(item => item.path),
     ['a.txt'],
   );
   assert.equal(result.scannedFiles, 1);
   assert.equal(result.skippedFiles, 2);
-  assert.deepEqual(reads.sort(), [SECRET_SCAN_ALLOW_FILE, 'a.txt', 'b.bin', 'c.txt', 'gone.txt'].sort());
+  // The change's own allow file is not read unless it changed: entries count from main only (R-01).
+  assert.deepEqual(reads.sort(), ['a.txt', 'b.bin', 'c.txt', 'gone.txt'].sort());
 });
 
 test('a private-audience file holding the same token has no finding; a public one does', () => {
   const read = files({ '.env': `TOKEN=${fake.github}\n`, 'config/.env': `TOKEN=${fake.github}\n` });
   const isPrivate = path => path === '.env';
-  const result = scanSecretPaths(['.env', 'config/.env'], read, { isPrivate });
+  const result = scanSecretPaths(['.env', 'config/.env'], read, { isPrivate, baseAllow: undefined });
   assert.deepEqual(
     result.findings.map(item => [item.path, item.line, item.kind]),
     [['config/.env', 1, 'github-token']],
   );
   assert.equal(result.skippedFiles, 1);
   // Without the audience flag both are public, and both are found.
-  assert.equal(scanSecretPaths(['.env', 'config/.env'], read).findings.length, 2);
+  assert.equal(scanSecretPaths(['.env', 'config/.env'], read, { baseAllow: undefined }).findings.length, 2);
 });
 
 test('an allow entry with a reason overrides one finding by fingerprint, scoped to its path', () => {
@@ -112,11 +114,11 @@ test('an allow entry with a reason overrides one finding by fingerprint, scoped 
   assert.equal(first.fingerprint, secretFingerprint('src/fixture.ts', 'github-token', fake.github));
   const allow = reason =>
     JSON.stringify({ allow: [{ fingerprint: first.fingerprint, path: 'src/fixture.ts', reason }] });
+  // The entry is on the base (main); the change under check only touches the fixture.
   const scan = (allowText, paths = ['src/fixture.ts']) =>
-    scanSecretPaths(
-      paths,
-      files({ 'src/fixture.ts': text, 'src/copy.ts': text, [SECRET_SCAN_ALLOW_FILE]: allowText }),
-    );
+    scanSecretPaths(paths, files({ 'src/fixture.ts': text, 'src/copy.ts': text }), {
+      baseAllow: Buffer.from(allowText),
+    });
   const allowed = scan(allow('Synthetic fixture for a redaction test.'));
   assert.deepEqual(
     allowed.findings.map(item => item.kind),
@@ -133,7 +135,7 @@ test('findings are capped and counted', () => {
   const text = Array.from({ length: SECRET_SCAN_MAX_FINDINGS + 5 }, (_, i) =>
     join('gh', 'p_', `FORGEfake${String(i).padStart(2, '0')}TEST1never2REAL3token4XYZ`),
   ).join('\n');
-  const result = scanSecretPaths(['many.txt'], files({ 'many.txt': text }));
+  const result = scanSecretPaths(['many.txt'], files({ 'many.txt': text }), { baseAllow: undefined });
   assert.equal(result.findings.length, SECRET_SCAN_MAX_FINDINGS);
   assert.equal(result.more, 5);
   assert.match(secretScanNotice(result).at(-1), /; \+5 more\. /);
@@ -147,7 +149,7 @@ test('scan time of a typical changed-path set stays well under the landing budge
   const times = [];
   for (let i = 0; i < 20; i++) {
     const started = performance.now();
-    scanSecretPaths(Object.keys(entries), read);
+    scanSecretPaths(Object.keys(entries), read, { baseAllow: undefined });
     times.push(performance.now() - started);
   }
   times.sort((a, b) => a - b);
@@ -173,4 +175,184 @@ test('the failure command exits non-zero and prints the notice without the value
   assert.equal(child.status, 1);
   assert.match(child.stderr, /SecretScanError: .*config\/app\.env:1 github-token/);
   assert(!child.stderr.includes(fake.github) && !child.stdout.includes(fake.github));
+});
+
+// Issue 93e14bb0, R-01: allow entries take effect only from the base (main) State.
+const allowFile = entries => JSON.stringify({ allow: entries });
+const selfAllowCase = () => {
+  const text = `TOKEN=${fake.github}\n`;
+  const [finding] = scanSecretText('src/fixture.ts', text);
+  const entry = { fingerprint: finding.fingerprint, path: 'src/fixture.ts', reason: 'Synthetic fixture.' };
+  return { text, finding, entry };
+};
+
+test('R-01: a change that adds a finding and its own allow entry still fails, labelled as self-allow', () => {
+  const { text, entry } = selfAllowCase();
+  const change = files({ 'src/fixture.ts': text, [SECRET_SCAN_ALLOW_FILE]: allowFile([entry]) });
+  const result = scanSecretPaths(['src/fixture.ts', SECRET_SCAN_ALLOW_FILE], change, {
+    baseAllow: undefined,
+  });
+  assert.deepEqual(
+    result.findings.map(item => [item.path, item.kind, item.fingerprint]),
+    [['src/fixture.ts', 'github-token', entry.fingerprint]],
+  );
+  assert.equal(result.allowed, 0);
+  assert.equal(result.selfAllowed, 1);
+  assert.deepEqual(result.allowChanges, {
+    entries: [{ ...entry, change: 'added', sameLanding: true }],
+    more: 0,
+  });
+  const notice = secretScanNotice(result).join('\n');
+  assert.match(notice, /1 finding\(s\) match an allow entry added in this same change/);
+  assert(!notice.includes(fake.github) && !JSON.stringify(result).includes(fake.github));
+});
+
+test('R-01: the same entry already on main passes, and an allow-only change reports what it adds', () => {
+  const { text, entry } = selfAllowCase();
+  const onMain = scanSecretPaths(['src/fixture.ts'], files({ 'src/fixture.ts': text }), {
+    baseAllow: Buffer.from(allowFile([entry])),
+  });
+  assert.deepEqual(onMain.findings, []);
+  assert.equal(onMain.allowed, 1);
+  assert.equal(onMain.allowChanges, undefined, 'no allow-file change, no allow evidence');
+  // The entry lands on its own first: no finding in that change, one added entry, not a self-allow.
+  const allowOnly = scanSecretPaths(
+    [SECRET_SCAN_ALLOW_FILE],
+    files({ [SECRET_SCAN_ALLOW_FILE]: allowFile([entry]) }),
+    { baseAllow: undefined },
+  );
+  assert.deepEqual(allowOnly.findings, []);
+  assert.deepEqual(allowOnly.allowChanges.entries, [{ ...entry, change: 'added', sameLanding: false }]);
+});
+
+test('allow changes: edited reasons, unchanged entries, bounds and a credential-looking reason', () => {
+  const { entry } = selfAllowCase();
+  const base = Buffer.from(allowFile([entry]));
+  const diff = entries =>
+    scanSecretPaths([SECRET_SCAN_ALLOW_FILE], files({ [SECRET_SCAN_ALLOW_FILE]: allowFile(entries) }), {
+      baseAllow: base,
+    }).allowChanges;
+  assert.deepEqual(diff([entry]), { entries: [], more: 0 }, 'an unchanged entry is not a change');
+  assert.deepEqual(diff([]), { entries: [], more: 0 }, 'a removal is not an addition');
+  assert.deepEqual(diff([{ ...entry, reason: 'Wider reason.' }]).entries, [
+    { ...entry, reason: 'Wider reason.', change: 'edited', sameLanding: false },
+  ]);
+  const leaky = diff([{ ...entry, path: 'src/other.ts', reason: `it is ${fake.github}` }]);
+  assert.equal(leaky.entries[0].reason, '[withheld: looks like a credential]');
+  assert(!JSON.stringify(leaky).includes(fake.github));
+  const many = Array.from({ length: 25 }, (_, i) => ({
+    ...entry,
+    fingerprint: i.toString(16).padStart(16, '0'),
+    reason: `r${i}`,
+  }));
+  const bounded = diff(many);
+  assert.equal(bounded.entries.length, 20);
+  assert.equal(bounded.more, 5);
+});
+
+test('the failure notice puts remove and rotate first and says an allow entry needs its own landing', () => {
+  const findings = scanSecretText('config/app.env', `TOKEN=${fake.github}\n`);
+  const lines = secretScanNotice({ findings, more: 0 });
+  const advice = lines.filter(line => !/^secret-scan: config\//.test(line));
+  assert.match(advice[0], /^secret-scan: remove the credential .* rotate it/);
+  assert.match(
+    advice[1],
+    /only if it is not a secret.* in its own landing first.* only once they are on main/,
+  );
+  assert.match(
+    lines.at(-1),
+    /^SecretScanError: .*Remove and rotate it first; an allow entry .* needs its own landing\.$/,
+  );
+  assert(lines.findIndex(line => /rotate/.test(line)) < lines.findIndex(line => /allow/.test(line)));
+});
+
+test('receipt mark and owner alert: one per allow change, none without; self-allow labelled; never a value', () => {
+  const { entry } = selfAllowCase();
+  const input = {
+    project: 'demo',
+    receiptId: 'r-1',
+    submissionId: 's-1',
+    operationId: 'o-1',
+    actor: 'an agent',
+    agentRun: 'cheery-thrush',
+  };
+  const evidence = { entries: [{ ...entry, change: 'added', sameLanding: true }], more: 0 };
+  const mark = secretAllowMark(evidence, [SECRET_SCAN_ALLOW_FILE]);
+  assert.deepEqual(mark, { ...evidence, scanned: true });
+  const alert = secretAllowAlert(mark, input);
+  assert.match(alert.subject, /self-allow entry landed: demo/);
+  assert.match(
+    alert.text,
+    new RegExp(`added src/fixture\\.ts fingerprint ${entry.fingerprint}: Synthetic fixture\\.`),
+  );
+  assert.match(alert.text, /\[SELF-ALLOW: this same landing also adds the finding it allows/);
+  for (const text of [alert.subject, alert.text, JSON.stringify(mark)]) assert(!text.includes(fake.github));
+  // No allow-file change: no mark, so no alert. Only removals: no mark either.
+  assert.equal(secretAllowMark(undefined, ['src/a.ts']), undefined);
+  assert.equal(secretAllowMark(undefined, null), undefined);
+  assert.equal(secretAllowMark({ entries: [], more: 0 }, [SECRET_SCAN_ALLOW_FILE]), undefined);
+  // Changed but not diffed by a Forge executor (bring-your-own check, older runner): still marked.
+  const unscanned = secretAllowMark(undefined, [SECRET_SCAN_ALLOW_FILE]);
+  assert.deepEqual(unscanned, { entries: [], more: 0, scanned: false });
+  assert.match(secretAllowAlert(unscanned, input).text, /changed, but no Forge check diffed it/);
+  // A malformed plan value is treated as unscanned, never as no change.
+  assert.equal(secretAllowMark({ entries: 'x' }, [SECRET_SCAN_ALLOW_FILE]).scanned, false);
+});
+
+test('machine runner R-01: allow entries come from the base State; the self-allow fails, main passes', async t => {
+  const { mkdtempSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join: joinPath } = await import('node:path');
+  const { createHash } = await import('node:crypto');
+  const { HostedCheckoutCache } = await import('../dist/hosted-checkout-cache.js');
+  const { machineSecretScan } = await import('../dist/hosted-mac-execute.js');
+  const objects = new Map();
+  const put = text => {
+    const bytes = Buffer.from(text),
+      sha256 = createHash('sha256').update(bytes).digest('hex');
+    objects.set(sha256, bytes);
+    return sha256;
+  };
+  const file = (path, text) => ({ path, blob: put(text), mode: 'file' });
+  const state = files =>
+    put(
+      JSON.stringify({
+        schema: 1,
+        kind: 'forge-source-state',
+        parents: [],
+        files,
+        at: '2026-01-01T00:00:00.000Z',
+        message: 'synthetic',
+      }),
+    );
+  const requested = [];
+  const transport = {
+    objects: async ids =>
+      ids.map(sha256 => (requested.push(sha256), { sha256, size: objects.get(sha256).length })),
+    downloadToFile: async (pin, path) =>
+      (await import('node:fs/promises')).writeFile(path, objects.get(pin.sha256)),
+  };
+  const scan = async (baseFiles, files) => {
+    const root = mkdtempSync(joinPath(tmpdir(), 'forge-secret-scan-'));
+    t.after(() => rmSync(root, { recursive: true, force: true }));
+    const cache = new HostedCheckoutCache(root, transport, joinPath(root, 'objects'), null);
+    return machineSecretScan(cache, state(baseFiles), files, new AbortController().signal);
+  };
+  const { text, entry } = selfAllowCase();
+  const readme = file('README.md', 'synthetic');
+  const token = file('src/fixture.ts', text);
+  const allow = file(SECRET_SCAN_ALLOW_FILE, allowFile([entry]));
+  // The change adds the token and its own entry: the entry does not count.
+  const self = await scan([readme], [readme, token, allow]);
+  assert.equal(self.findings.length, 1);
+  assert.equal(self.selfAllowed, 1);
+  assert.equal(self.allowChanges.entries[0].sameLanding, true);
+  // The same entry already on main: the token passes; only changed blobs and the base allow file are read.
+  requested.length = 0;
+  const onMain = await scan([readme, allow], [readme, token, allow]);
+  assert.deepEqual(onMain.findings, []);
+  assert.equal(onMain.allowed, 1);
+  assert.equal(onMain.allowChanges, undefined);
+  assert(!requested.includes(readme.blob), 'unchanged files are not fetched before the plan');
+  assert(!JSON.stringify([self, onMain]).includes(fake.github));
 });

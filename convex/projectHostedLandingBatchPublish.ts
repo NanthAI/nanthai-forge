@@ -41,6 +41,8 @@ import { policyDigestCurrent } from '../src/policy-digest';
 import { landingObservation } from '../src/hosted-landing';
 import { invariant } from '../src/errors';
 import { acceptedLandingMessage } from './projectHostedLandingMessage';
+import { alertSecretAllowAdded } from './projectHostedSecretAllow';
+import { secretAllowMark } from '../src/secret-allow';
 
 /** At most eight independently authorized members, one checked head, one main
  * CAS. All receipts, request settlements and completion activations commit with
@@ -227,6 +229,8 @@ export async function publishLandingBatch(ctx: MutationCtx, claim: LandingClaim,
     ...(run.macEvidence ? { macEvidence: run.macEvidence } : {}),
     ...(run.plan?.skipped ? { skipped: run.plan.skipped } : {}),
   };
+  // Issue 93e14bb0: the shared run diffed the whole stacked change; main's (last) receipt carries it.
+  const secretAllowAdded = secretAllowMark(run.plan?.secretAllow, candidate.governance?.paths ?? null);
   let previousSnapshot = main.snapshotId;
   const receipts = [];
   const completions: { identity: ReceiptIdentity; planId: Id<'projectHostedAcceptancePlans'> }[] = [];
@@ -276,6 +280,7 @@ export async function publishLandingBatch(ctx: MutationCtx, claim: LandingClaim,
         ...landingCompletion(policy.lifecycle, member.state.request),
       },
       automatic: true,
+      ...(secretAllowAdded && index === members.length - 1 ? { secretAllowAdded } : {}),
       undo: { kind: 'revert', receiptId: member.attempt.operations.accept },
     });
     const identity = { projectId: claim.projectId, receiptId: receipt.id },
@@ -347,5 +352,6 @@ export async function publishLandingBatch(ctx: MutationCtx, claim: LandingClaim,
   await releaseLandingQueue(ctx, queue, now);
   await noteMainLanding(ctx, { project, receipt: last, run });
   await enqueueGithubMirror(ctx, project, last);
+  await alertSecretAllowAdded(ctx, project, last);
   return { status: 'landed' as const, receipt: receipts.find(r => r.submissionId === state.id)! };
 }

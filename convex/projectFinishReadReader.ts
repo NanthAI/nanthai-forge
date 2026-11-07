@@ -31,6 +31,7 @@ export function finishReadReader(ctx: QueryCtx, mode: 'pending' | 'owner' = 'pen
                 table,
               )
             )
+              // oxlint-disable-next-line forge/convex-bounded-query -- pass-through: callers chain on ctx.db, linted at their own call sites
               return db.query(table as never);
             const original = db.query(table as FinishReadKind);
             const kind =

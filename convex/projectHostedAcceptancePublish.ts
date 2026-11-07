@@ -36,6 +36,8 @@ import { invariant } from '../src/errors';
 import { validCrossHeadProof } from '../src/hosted-cross-head-proof';
 import { requireReuseAudit } from './projectHostedReuseAudit';
 import { acceptedLandingMessage } from './projectHostedLandingMessage';
+import { alertSecretAllowAdded } from './projectHostedSecretAllow';
+import { secretAllowMark, secretAllowReview } from '../src/secret-allow';
 /** One constant-size publication transaction. A completed replay authorizes the
  * reader first, then returns the original receipt without rechecking old policy,
  * acquiring another lease or rewinding any later main/saved Lane. */
@@ -247,6 +249,8 @@ export async function publishAcceptance(
     !(actor.id === project.owner && candidate.governance?.ownerInputs)
       ? 'needs owner approval: protected or unknown paths'
       : null;
+  // Issue 93e14bb0: from the run plan and changed paths already loaded; no extra read.
+  const secretAllowAdded = secretAllowMark(run?.plan?.secretAllow, candidate.governance?.paths ?? null);
   const reason =
     governanceReason(
       project,
@@ -254,7 +258,9 @@ export async function publishAcceptance(
       actor,
       candidate.governance?.paths ?? null,
       candidate.governance?.ownerInputs,
-    ) ?? protectedReason;
+    ) ??
+    protectedReason ??
+    secretAllowReview(policy, actor, secretAllowAdded);
   if (reason) {
     const next = {
       ...state,
@@ -301,6 +307,7 @@ export async function publishAcceptance(
       ...landingCompletion(policy.lifecycle, state.request),
     },
     automatic: requiresGovernedCheck(project, actor),
+    ...(secretAllowAdded ? { secretAllowAdded } : {}),
     undo: { kind: 'revert', receiptId: identity.receiptId },
   });
   const value = canonicalPayload(receipt);
@@ -373,6 +380,7 @@ export async function publishAcceptance(
     run,
   });
   await enqueueGithubMirror(ctx, project, receipt);
+  await alertSecretAllowAdded(ctx, project, receipt);
   // The completion tick also retires landed work from overlap, so it runs even when keepOpen or policy skips completion.
   const precompose = { receiptIds: [receipt.id] };
   if (plan.inputPages) await scheduleAcceptanceCompletion(ctx, plan._id, { ...identity, precompose });

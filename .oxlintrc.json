@@ -3,6 +3,9 @@
   "plugins": [
     "typescript"
   ],
+  "jsPlugins": [
+    "./scripts/lint/forge-plugin.mjs"
+  ],
   "categories": {
     "correctness": "off"
   },
@@ -67,6 +70,15 @@
             "reportVarsOnlyUsedAsTypes": true
           }
         ]
+      }
+    },
+    {
+      "files": [
+        "convex/**/*.ts"
+      ],
+      "rules": {
+        "forge/no-convex-collect": "error",
+        "forge/convex-bounded-query": "error"
       }
     }
   ]

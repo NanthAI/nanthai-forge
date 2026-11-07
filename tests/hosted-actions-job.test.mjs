@@ -2017,3 +2017,78 @@ test('secret scan: a token already on the composition base is not rescanned and 
     0,
   );
 });
+
+// Issue 93e14bb0, R-01: allow entries come from the composition base (main), never the Candidate.
+const { secretFingerprint } = await import('../dist/secret-scan.js');
+const allowFor = (path, reason = 'Synthetic fixture.') =>
+  JSON.stringify({
+    allow: [{ fingerprint: secretFingerprint(path, 'github-token', fakeGithubToken), path, reason }],
+  });
+async function preparedExit(s) {
+  s.run.check = { executable: 'true', args: [], definition: 'c'.repeat(64) };
+  const prepared = await prepareActionsJob(
+    s.client,
+    join(s.directory, 'candidate'),
+    join(s.directory, 'cache'),
+  );
+  const planPath = join(s.directory, 'plan.json');
+  writeFileSync(planPath, JSON.stringify(prepared.recipe));
+  const exit = await executeActionsJob(
+    s.client,
+    join(s.directory, 'candidate'),
+    planPath,
+    prepared.singleShard,
+  );
+  return { prepared, exit };
+}
+test('secret scan R-01: a Candidate adding a token and its own allow entry still fails, flagged as self-allow', async t => {
+  const s = fixture(t);
+  s.run.request.expectedHead = s.state([
+    ...s.files,
+    s.entry('config/app.env', `GITHUB_TOKEN=${fakeGithubToken}\n`),
+    s.entry('.forge-secret-allow.json', allowFor('config/app.env')),
+  ]).sha256;
+  const { prepared, exit } = await preparedExit(s);
+  assert.equal(exit, 1);
+  const scan = prepared.recipe.selection.secretScan;
+  assert.equal(scan.findings.length, 1);
+  assert.equal(scan.selfAllowed, 1);
+  assert.deepEqual(
+    scan.allowChanges.entries.map(entry => [entry.path, entry.change, entry.sameLanding]),
+    [['config/app.env', 'added', true]],
+  );
+  const { result } = s.calls.find(call => call.kind === 'result');
+  assert.match(result.log.failureSummary, /SecretScanError: .*Remove and rotate it first; an allow entry/);
+  assert(
+    !JSON.stringify(s.calls).includes(fakeGithubToken) &&
+      !JSON.stringify(prepared.recipe).includes(fakeGithubToken),
+  );
+});
+test('secret scan R-01: the same entry already on main allows the token; a new entry beside it is reported', async t => {
+  const s = fixture(t);
+  // No lockfile: the synthetic command needs no install.
+  const readme = s.entry('README.md', 'synthetic before');
+  const baseFiles = [readme, s.entry('.forge-secret-allow.json', allowFor('config/app.env'))];
+  s.run.candidate.base.head = s.state(baseFiles).sha256;
+  // The Candidate also edits the allow file, so main's allow bytes are not in its own checkout.
+  const both = JSON.stringify({
+    allow: [
+      ...JSON.parse(allowFor('config/app.env')).allow,
+      ...JSON.parse(allowFor('config/other.env', 'Second fixture.')).allow,
+    ],
+  });
+  s.run.request.expectedHead = s.state([
+    readme,
+    s.entry('config/app.env', `GITHUB_TOKEN=${fakeGithubToken}\n`),
+    s.entry('.forge-secret-allow.json', both),
+  ]).sha256;
+  const { prepared, exit } = await preparedExit(s);
+  assert.equal(exit, 0);
+  const scan = prepared.recipe.selection.secretScan;
+  assert.deepEqual(scan.findings, []);
+  assert.equal(scan.allowed, 1);
+  assert.deepEqual(
+    scan.allowChanges.entries.map(entry => [entry.path, entry.change, entry.sameLanding, entry.reason]),
+    [['config/other.env', 'added', false, 'Second fixture.']],
+  );
+});

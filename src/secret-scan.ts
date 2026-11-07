@@ -1,10 +1,19 @@
 // SPDX-License-Identifier: Apache-2.0
 import { createHash } from 'node:crypto';
+import {
+  SECRET_SCAN_ALLOW_FILE,
+  SECRET_ALLOW_MAX_CHANGES,
+  SECRET_ALLOW_PATH_MAX,
+  SECRET_ALLOW_REASON_MAX,
+  type SecretAllowChange,
+  type SecretAllowEvidence,
+} from './secret-allow.js';
 
 /** Landing secret scan (Issue 31f8b580). Runs inside Forge's own check executors on
  * the changed paths of the composed Candidate only. A finding names its path, line,
- * kind and a short fingerprint; the matched value never leaves this module. */
-export const SECRET_SCAN_ALLOW_FILE = '.forge-secret-allow.json';
+ * kind and a short fingerprint; the matched value never leaves this module.
+ * Allow entries count only from the base (main) State (Issue 93e14bb0, R-01). */
+export { SECRET_SCAN_ALLOW_FILE };
 /** Files above this size are skipped; credentials live in small text files. */
 export const SECRET_SCAN_MAX_FILE_BYTES = 1024 * 1024;
 /** At most this many findings are reported; the count says how many more exist. */
@@ -15,12 +24,20 @@ export type SecretScanResult = {
   findings: SecretFinding[];
   /** Findings beyond SECRET_SCAN_MAX_FINDINGS. */
   more: number;
-  /** Findings matched by an allow entry, by fingerprint (never the value). */
+  /** Findings matched by an allow entry on the base (main), by fingerprint (never the value). */
   allowed: number;
+  /** Findings an allow entry added in this same change would match; they still fail. */
+  selfAllowed: number;
+  /** Present only when the change edits the allow file: entries added or edited against the base. */
+  allowChanges?: SecretAllowEvidence;
   scannedFiles: number;
   skippedFiles: number;
 };
 export type SecretScanOptions = {
+  /** The allow file bytes of the base (main) State, or undefined when it has none or the
+   * base is unreadable. Entries in the change under check never take effect here, so a
+   * change cannot allow its own finding (R-01). */
+  baseAllow: Buffer | undefined;
   /** Future private-file audience (Issue 6bd7ddb1): a private path is never scanned. */
   isPrivate?: (path: string) => boolean;
 };
@@ -79,9 +96,9 @@ export function secretFingerprint(path: string, kind: string, value: string) {
 
 /** Allow entries: `{"allow":[{"fingerprint":"…","path":"…","reason":"…"}]}`. An entry
  * without a reason is ignored, so every override says why. */
-export function parseSecretAllow(bytes: Buffer | undefined) {
-  const allowed = new Set<string>();
-  if (!bytes) return allowed;
+export function parseSecretAllowEntries(bytes: Buffer | undefined) {
+  const entries: { fingerprint: string; path: string; reason: string }[] = [];
+  if (!bytes) return entries;
   try {
     const value = JSON.parse(bytes.toString('utf8')) as { allow?: unknown };
     for (const entry of Array.isArray(value.allow) ? value.allow : []) {
@@ -93,12 +110,22 @@ export function parseSecretAllow(bytes: Buffer | undefined) {
         typeof item.reason === 'string' &&
         item.reason.trim()
       )
-        allowed.add(`${item.path}\0${item.fingerprint}`);
+        entries.push({ fingerprint: item.fingerprint, path: item.path, reason: item.reason });
     }
   } catch {
     /* An unreadable allow file allows nothing. */
   }
-  return allowed;
+  return entries;
+}
+export function parseSecretAllow(bytes: Buffer | undefined) {
+  return new Set(parseSecretAllowEntries(bytes).map(entry => `${entry.path}\0${entry.fingerprint}`));
+}
+/** Author text bound for a receipt and an alert: one line, bounded, and withheld when it
+ * holds something the scan would call a credential. */
+function safeText(text: string, max: number) {
+  const line = text.replace(/[\u0000-\u001f\u007f]+/g, ' ').trim();
+  if (scanSecretText('allow-entry', line).length) return '[withheld: looks like a credential]';
+  return line.length > max ? `${line.slice(0, max - 1)}…` : line;
 }
 
 function lineAt(starts: number[], index: number) {
@@ -149,19 +176,28 @@ export function scanSecretText(path: string, text: string) {
 }
 
 /** Scan the changed paths of a composed result. `read` returns a path's bytes in the
- * result, or undefined for a deleted path or a link. */
+ * result, or undefined for a deleted path or a link. Allow entries come from
+ * `options.baseAllow` only; the result's own allow file is read only to report what
+ * the change adds (`allowChanges`, for the receipt mark and the owner alert). */
 export function scanSecretPaths(
   paths: readonly string[],
   read: (path: string) => Buffer | undefined,
-  options: SecretScanOptions = {},
+  options: SecretScanOptions,
 ): SecretScanResult {
-  const allow = parseSecretAllow(read(SECRET_SCAN_ALLOW_FILE));
+  const baseEntries = parseSecretAllowEntries(options.baseAllow);
+  const allow = new Set(baseEntries.map(entry => `${entry.path}\0${entry.fingerprint}`));
+  const unique = [...new Set(paths)].sort();
+  const allowFileChanged = unique.includes(SECRET_SCAN_ALLOW_FILE);
+  const changeEntries = allowFileChanged ? parseSecretAllowEntries(read(SECRET_SCAN_ALLOW_FILE)) : [];
+  const proposed = new Set(changeEntries.map(entry => `${entry.path}\0${entry.fingerprint}`));
   const findings: SecretFinding[] = [];
+  const found = new Set<string>();
   let allowed = 0,
+    selfAllowed = 0,
     scannedFiles = 0,
     skippedFiles = 0,
     total = 0;
-  for (const path of [...new Set(paths)].sort()) {
+  for (const path of unique) {
     if (path === SECRET_SCAN_ALLOW_FILE || options.isPrivate?.(path)) {
       skippedFiles++;
       continue;
@@ -175,15 +211,61 @@ export function scanSecretPaths(
     }
     scannedFiles++;
     for (const finding of scanSecretText(path, bytes.toString('utf8'))) {
-      if (allow.has(`${path}\0${finding.fingerprint}`)) {
+      const key = `${path}\0${finding.fingerprint}`;
+      if (allow.has(key)) {
         allowed++;
         continue;
       }
+      found.add(key);
+      if (proposed.has(key)) selfAllowed++;
       total++;
       if (findings.length < SECRET_SCAN_MAX_FINDINGS) findings.push(finding);
     }
   }
-  return { findings, more: total - findings.length, allowed, scannedFiles, skippedFiles };
+  const result: SecretScanResult = {
+    findings,
+    more: total - findings.length,
+    allowed,
+    selfAllowed,
+    scannedFiles,
+    skippedFiles,
+  };
+  if (allowFileChanged) result.allowChanges = allowChanges(baseEntries, changeEntries, found);
+  return result;
+}
+
+/** Entries of the change's allow file that the base lacks, or holds with another reason. */
+function allowChanges(
+  base: readonly { fingerprint: string; path: string; reason: string }[],
+  change: readonly { fingerprint: string; path: string; reason: string }[],
+  found: ReadonlySet<string>,
+): SecretAllowEvidence {
+  const reasons = new Map<string, Set<string>>();
+  for (const entry of base) {
+    const key = `${entry.path}\0${entry.fingerprint}`;
+    reasons.set(key, (reasons.get(key) ?? new Set()).add(entry.reason));
+  }
+  const entries: SecretAllowChange[] = [];
+  const seen = new Set<string>();
+  let more = 0;
+  for (const entry of change) {
+    const key = `${entry.path}\0${entry.fingerprint}`;
+    const identity = `${key}\0${entry.reason}`;
+    if (reasons.get(key)?.has(entry.reason) || seen.has(identity)) continue;
+    seen.add(identity);
+    if (entries.length >= SECRET_ALLOW_MAX_CHANGES) {
+      more++;
+      continue;
+    }
+    entries.push({
+      path: safeText(entry.path, SECRET_ALLOW_PATH_MAX) || '[empty path]',
+      fingerprint: entry.fingerprint,
+      reason: safeText(entry.reason, SECRET_ALLOW_REASON_MAX) || '[empty reason]',
+      change: reasons.has(key) ? 'edited' : 'added',
+      sameLanding: found.has(key),
+    });
+  }
+  return { entries, more };
 }
 
 type StateFile = { path: string; blob: string; mode: string };
@@ -198,8 +280,11 @@ export function changedStatePaths(before: readonly StateFile[] | null, after: re
 
 /** Value-free notice lines. The last, an `Error:` line, is the one a landing failure
  * shows (src/hosted-landing-suspect.ts picks it); it avoids `key: value` shapes that
- * the failure text scrubber would redact. */
-export function secretScanNotice(result: Pick<SecretScanResult, 'findings' | 'more'>) {
+ * the failure text scrubber would redact. Remove-and-rotate comes first: an allow entry
+ * is for a false positive and counts only once it is on main, so it needs its own landing. */
+export function secretScanNotice(
+  result: Pick<SecretScanResult, 'findings' | 'more'> & { selfAllowed?: number | undefined },
+) {
   const listed = result.findings
     .map(item => `${item.path}:${item.line} ${item.kind} (fingerprint ${item.fingerprint})`)
     .join('; ');
@@ -208,15 +293,21 @@ export function secretScanNotice(result: Pick<SecretScanResult, 'findings' | 'mo
     ...result.findings.map(
       item => `secret-scan: ${item.path}:${item.line} ${item.kind} (fingerprint ${item.fingerprint})`,
     ),
-    `secret-scan: remove the credential and rotate it, or, if it is not a secret, add {"fingerprint","path","reason"} to ${SECRET_SCAN_ALLOW_FILE}.`,
-    `SecretScanError: committed credential found in ${listed}${more}. Remove and rotate it, or allow a false positive in ${SECRET_SCAN_ALLOW_FILE} with a reason.`,
+    'secret-scan: remove the credential from this change and rotate it at its provider; once it reached a Lane save it may be retained.',
+    `secret-scan: only if it is not a secret, add {"fingerprint","path","reason"} to ${SECRET_SCAN_ALLOW_FILE} in its own landing first. Allow entries count only once they are on main, and project owners are alerted.`,
+    ...(result.selfAllowed
+      ? [
+          `secret-scan: ${result.selfAllowed} finding(s) match an allow entry added in this same change; that entry does not count until it lands on its own.`,
+        ]
+      : []),
+    `SecretScanError: committed credential found in ${listed}${more}. Remove and rotate it first; an allow entry for a false positive needs its own landing.`,
   ];
 }
 
 /** A Node command that prints the notice and fails, so the run fails like any check. */
 export function secretScanFailureCommand(
   executable: string,
-  result: Pick<SecretScanResult, 'findings' | 'more'>,
+  result: Pick<SecretScanResult, 'findings' | 'more'> & { selfAllowed?: number | undefined },
 ) {
   return [
     executable,

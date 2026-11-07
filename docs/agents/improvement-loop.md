@@ -66,7 +66,8 @@ Search the whole repo for other instances and fix them or list them explicitly.
 When a defect class appears twice, or a fix is reverted and retried, include a
 lint rule, check script or behavioral budget test that fails the build on the
 class. Also add a guard whenever the invariant must never be broken again.
-A reminder in a brief is not a guard. Review remaining paths and real usage before
+A reminder in a brief is not a guard. [Product lint rules](lint-rules.md) lists the
+current guards and how to add the next one. Review remaining paths and real usage before
 calling the class done; tests on one named path do not establish the invariant.
 
 The [lead playbook](lead.md) covers triage, owner discussions and completion

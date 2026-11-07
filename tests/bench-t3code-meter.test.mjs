@@ -8,7 +8,7 @@ import { mkdtempSync, readFileSync, mkdirSync, writeFileSync, rmSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { ImportBenchmarkMonitor } from '../scripts/benchmark-import-monitor.mjs';
+import { ImportBenchmarkMonitor, failureCode } from '../scripts/benchmark-import-monitor.mjs';
 import { convexMeter, costUsd } from '../scripts/bench-t3code/meter.mjs';
 
 // Synthetic values; field names/types match a bounded provider Completion capture.
@@ -149,6 +149,34 @@ test('meter flags missing usage instead of silently pricing zero; null costs can
     else assert.equal(r.usage[field], null);
   }
   assert.equal(costUsd({ executions: 1, ioBytes: 0, egressBytes: 0, actionGbHours: null }), null);
+});
+
+test('failed executions are tallied by error code per function, never by error text', () => {
+  assert.equal(
+    failureCode('Uncaught ConvexError: {"code":"WORK_STALE","message":"Hosted Work changed."}'),
+    'WORK_STALE',
+  );
+  assert.equal(failureCode("{ code: 'CHANNEL_CHANGED', message: 'x' }"), 'CHANNEL_CHANGED');
+  assert.equal(failureCode('Uncaught Error: secret-ish free text'), 'UNCODED');
+  assert.equal(failureCode('{"code":"lowercase"}'), 'UNCODED');
+  const failing = (executionId, error, extra = {}) => ({
+    ...action(),
+    identifier: 'synthetic:command',
+    executionId,
+    error,
+    logLines: [],
+    ...extra,
+  });
+  const r = metered([
+    { ...action(), identifier: 'synthetic:command' },
+    failing('a', '{"code":"WORK_STALE"}'),
+    failing('b', '{"code":"WORK_STALE"}'),
+    failing('c', 'boom'),
+  ]);
+  const fn = r.perFunction.find(item => item.identifier === 'synthetic:command');
+  assert.equal(fn.failures, 3);
+  assert.deepEqual(fn.failureCodes, { WORK_STALE: 2, UNCODED: 1 });
+  assert.ok(!JSON.stringify(r).includes('boom'), 'error text is not retained');
 });
 
 test('per-function costs reconcile to the project total through delayed attribution and retries', () => {

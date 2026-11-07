@@ -6,6 +6,12 @@ export const benchmarkLimits = Object.freeze({
   total: 5000,
   quietMs: 300_000,
 });
+// A failed execution is classified by its ForgeError code only (an uppercase token such as WORK_STALE),
+// so a capture can say why executions failed. The error text itself is never retained.
+export function failureCode(error) {
+  const code = /["']?code["']?\s*[:=]\s*["']([A-Z][A-Z0-9_]{2,47})["']/.exec(String(error ?? ''))?.[1];
+  return code ?? 'UNCODED';
+}
 // Only numeric provider metadata enters the meter. An absent/invalid value is
 // unknown, not a free execution. Field names are fixed; no raw log data is retained.
 export function completionUsage(log, keys) {
@@ -94,6 +100,7 @@ export class ImportBenchmarkMonitor {
         executions: 0,
         cachedExecutions: 0,
         failures: 0,
+        failureCodes: {},
         usage: Object.fromEntries(Object.keys(this.usage).map(key => [key, 0])),
         actionGbHours: 0,
         missingUsageFields: {},
@@ -103,6 +110,7 @@ export class ImportBenchmarkMonitor {
     fn.executions++;
     fn.cachedExecutions += event.cached ? 1 : 0;
     fn.failures += event.failed ? 1 : 0;
+    if (event.failed) fn.failureCodes[event.failureCode] = (fn.failureCodes[event.failureCode] ?? 0) + 1;
     for (const field of [...event.missingFields, ...(event.identifier ? [] : ['identifier'])])
       fn.missingUsageFields[field] = (fn.missingUsageFields[field] ?? 0) + 1;
     for (const field of Object.keys(this.usage))
@@ -186,6 +194,7 @@ export class ImportBenchmarkMonitor {
       counted: true,
       at: log.timestamp * 1000,
       failed: Boolean(log.error),
+      failureCode: log.error ? failureCode(log.error) : null,
       identifier: typeof log.identifier === 'string' && log.identifier.length ? log.identifier : null,
       udfType: typeof log.udfType === 'string' ? log.udfType : null,
       cached: log.cachedResult === true,
@@ -226,6 +235,7 @@ export class ImportBenchmarkMonitor {
       missingUsageFields: { ...this.missingUsageFields },
       perFunction: [...this.functions.values()].map(fn => ({
         ...fn,
+        failureCodes: { ...fn.failureCodes },
         usage: { ...fn.usage },
         missingUsageFields: { ...fn.missingUsageFields },
       })),
