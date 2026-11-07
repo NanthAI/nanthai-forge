@@ -442,11 +442,9 @@ test('budget: the calls one parent event costs, per table', async () => {
   assert.deepEqual(plain, {
     'read:projectHostedOverlapLanes': 1,
     'write:projectHostedOverlapLanes': 1,
-    'read:projectHostedOverlapPeers': 1,
-    'write:projectHostedOverlapPeers': 1,
   });
   // Stacking a child: its own dependents row (1 read, 1 write) and the parent's flag (1 overlap read and
-  // patch, which re-derives the unchanged slim peer row: 1 read, no write).
+  // patch).
   assert.equal(stacking['read:projectHostedStackDependents'], 1);
   assert.equal(stacking['write:projectHostedStackDependents'], 1);
   // A parent save with one dependent: 1 dependents range, 1 child overlap read, then the note
@@ -454,8 +452,6 @@ test('budget: the calls one parent event costs, per table', async () => {
   assert.deepEqual(withDependent, {
     'read:projectHostedOverlapLanes': 2,
     'write:projectHostedOverlapLanes': 1,
-    'read:projectHostedOverlapPeers': 1,
-    'write:projectHostedOverlapPeers': 1,
     'read:projectHostedStackDependents': 1,
     'write:projectHostedStackDependents': 1,
     'read:projectBoardMessages': 1,

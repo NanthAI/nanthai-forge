@@ -5,7 +5,6 @@ import type { z } from 'zod';
 import type { hostedLaneSchema } from '../src/hosted-lane';
 import { mergeOverlapChanges, advanceOverlapMain, type OverlapChange } from '../src/hosted-overlap';
 import { trackHostedPresence } from './projectHostedPresence';
-import { patchOverlapRow, syncOverlapPeer } from './projectHostedOverlapPeers';
 import { notifyStackDependents, trackStackDependent } from './projectHostedStackNotice';
 
 export async function trackHostedOverlapLane(
@@ -97,7 +96,6 @@ export async function trackHostedOverlapLane(
   const stored = { ...value, ...(presenceRow ? { presenceRow } : {}) };
   if (old) await ctx.db.replace(old._id, stored);
   else await ctx.db.insert('projectHostedOverlapLanes', stored);
-  await syncOverlapPeer(ctx, stored);
   // Stacked Lanes (Issue dc62b120). A Lane nobody stacked on has no flag and a Lane without `stack`
   // returns at once, so neither adds a read. This Lane as a child: keep its dependents row. As a parent:
   // one notice per dependent when its saved head moved or it was abandoned.
@@ -139,7 +137,7 @@ export async function markHostedOverlapLifecycle(
     .unique();
   // A staged close hides the Lane from presence now; a later record write of a still-open Lane restores it.
   if (row?.presenceRow) await ctx.db.delete(row.presenceRow.id);
-  if (row) await patchOverlapRow(ctx, row, { lifecyclePlanId, presenceRow: undefined });
+  if (row) await ctx.db.patch(row._id, { lifecyclePlanId, presenceRow: undefined });
   // The only staged close is an abandonment by an Intent cascade: Lanes stacked on this one are told.
   if (row?.stacked && row.open)
     await notifyStackDependents(
@@ -162,7 +160,7 @@ export async function materializeHostedOverlapLifecycle(
     .unique();
   if (row?.presenceRow) await ctx.db.delete(row.presenceRow.id);
   if (row)
-    await patchOverlapRow(ctx, row, {
+    await ctx.db.patch(row._id, {
       open: false,
       recordVersion,
       lifecyclePlanId: undefined,

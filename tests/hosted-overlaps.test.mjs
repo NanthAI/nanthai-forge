@@ -623,9 +623,7 @@ test('20 open Lanes x 200 paths use one indexed peer read; history does not ente
     2,
     'one focus lookup and one peer range',
   );
-  // Every open peer shares a path here, so each is read in full and also as its slim peer row (one extra
-  // ~0.6 KB document each); the byte budget is unchanged.
-  assert(meter.documents <= 90, JSON.stringify(meter));
+  assert(meter.documents <= 60, JSON.stringify(meter));
   assert(meter.readBytes < 2 * 1024 * 1024);
   assert.equal(meter.writes, 0);
   assert(
@@ -736,9 +734,6 @@ test('unprojected active peers report incomplete coverage', async t => {
   await trackChange(s, lane);
   const projection = [...s.tables.projectHostedOverlapLanes.values()].find(row => row.laneId === peer.id);
   s.tables.projectHostedOverlapLanes.delete(projection._id);
-  // The slim peer row is written and purged with its overlap row, so a Lane with none has neither.
-  for (const [id, row] of s.tables.projectHostedOverlapPeers)
-    if (row.laneId === peer.id) s.tables.projectHostedOverlapPeers.delete(id);
   const observed = JSON.parse(
     await s.transaction('legacy', overlaps.read, { projectId: s.projectId, laneId: lane.id }),
   );
@@ -1202,8 +1197,7 @@ for (const [files, laneCount] of [
     assert.equal(result.peerEvidence.items.length, Math.min(laneCount - 1, 50));
     assert.equal(result.peerEvidence.coverage, 'hosted-incomplete');
     const meter = s.counts.at(-1);
-    // Every Lane shares the path, so each is read in full and as its slim peer row (one extra document).
-    assert(meter.documents <= (laneCount > 50 ? 180 : 120), JSON.stringify(meter));
+    assert(meter.documents <= (laneCount > 50 ? 180 : 80), JSON.stringify(meter));
     assert(meter.ranges <= 15, JSON.stringify(meter));
     // Thirty Lanes fit below 4.5 MiB; the new 560-Lane case saturates the
     // existing 51-row projection window (each row is at most 128 KiB).
@@ -1226,7 +1220,7 @@ for (const [files, laneCount] of [
     assert.equal(hook.overlaps.length, 5);
     assert.equal(hook.coverage, 'hosted-incomplete');
     assert.equal(s.counts.at(-1).writes, 0);
-    assert(s.counts.at(-1).documents <= (laneCount > 50 ? 180 : 120));
+    assert(s.counts.at(-1).documents <= (laneCount > 50 ? 180 : 80));
     t.diagnostic(
       `${files} files/${laneCount} Lanes: 1 query, exactly 5 hook notices, ${meter.documents} documents, ${meter.ranges} ranges, ${meter.readBytes} DB bytes`,
     );
@@ -1298,15 +1292,9 @@ test('board notes arrive on a Lane action once per machine; old clients and read
 
 /** A busy project at dogfood scale: 8 open Lanes of 25 saved paths each, a long main history. Returns
  * the Lane under test, which has saved changes and sits behind or level with main. */
-async function busyProject(t, { behind, sharing = 7, links = false, fresh = false }) {
+async function busyProject(t, { behind }) {
   const { s, lane, main, channel } = await setup(t);
   const paths = Array.from({ length: 25 }, (_, i) => delta(`src/area-${i}/file.ts`));
-  // A cross-file symbol link to a Lane that shares no path with this one: the note needs its facts only.
-  if (links)
-    paths[5].evidence = {
-      ...paths[5].evidence,
-      symbolLinks: { exports: [], refs: ['src/peer-6/file-9.ts#helper'] },
-    };
   await trackChange(s, lane, paths);
   const rows = [...s.tables.projectHostedOverlapLanes.values()];
   const mineRow = rows.find(row => row.laneId === lane.id);
@@ -1323,13 +1311,9 @@ async function busyProject(t, { behind, sharing = 7, links = false, fresh = fals
     });
     const own = paths.map((change, n) => ({
       ...change,
-      // Two shared paths for the first `sharing` peers, every other path private to that peer.
-      path: n < 2 && i < sharing ? change.path : `src/peer-${i}/file-${n}.ts`,
+      // Two shared paths per peer, the rest private to that peer.
+      path: n < 2 ? change.path : `src/peer-${i}/file-${n}.ts`,
       after: { ...change.after, blob: digest(peerId + n) },
-      evidence:
-        links && i === 6 && n === 9
-          ? { ...delta('x').evidence, symbolLinks: { exports: ['helper'], refs: [] } }
-          : delta('x').evidence,
     }));
     const { _id, _creationTime, presenceRow, ...template } = mineRow;
     s.insert('projectHostedOverlapLanes', {
@@ -1339,8 +1323,6 @@ async function busyProject(t, { behind, sharing = 7, links = false, fresh = fals
       actor: 'owner',
       recordVersion: 0,
       intent: 'Synthetic peer',
-      // Fresh peers are not idle, so their advisory notes are listed, not collapsed into one line.
-      ...(fresh ? { lastActivityAt: Date.now() } : {}),
       head: 'b'.repeat(64),
       ...mergeOverlapChanges([], own),
     });
@@ -1417,116 +1399,6 @@ test('overlap read: a Lane level with main never reads the main path history; a 
   });
   const { response } = await metered(behind.s, behind.lane, 'behind-conflict');
   assert.deepEqual(response.behindMain.conflictingPaths, ['src/area-3/file.ts']);
-});
-
-/** What the read must answer: the notices and behind-main facts computed over every peer's full row. */
-function fullAdvice(s, lane) {
-  const rows = [...s.tables.projectHostedOverlapLanes.values()];
-  const mine = rows.find(row => row.laneId === lane.id);
-  // The open-Lane index order: newest activity first, then newest row.
-  const peers = rows
-    .filter(row => row.open && row.laneId !== lane.id)
-    .sort((a, b) => (b.lastActivityAt ?? 0) - (a.lastActivityAt ?? 0) || b._creationTime - a._creationTime);
-  const channel = JSON.parse([...s.tables.projectHostedChannels.values()][0].selection);
-  const history = [...s.tables.projectHostedOverlapMain.values()][0] ?? null;
-  const advice = hostedOverlapAdvice(
-    mine,
-    peers,
-    history,
-    { head: channel.head, sourceRevision: channel.sourceRevision },
-    new Set(),
-    true,
-    5,
-    undefined,
-    Date.now() - 6 * 3_600_000,
-  );
-  return { unacknowledgedOverlaps: advice.unacknowledgedOverlaps, behindMain: advice.behindMain };
-}
-
-test('slim peer read: same notices as reading every peer in full, bytes follow the peers that share a path', async t => {
-  const report = {};
-  let previous = 0;
-  for (const sharing of [0, 1, 3, 7]) {
-    const { s, lane } = await busyProject(t, { behind: false, sharing, links: sharing === 0, fresh: true });
-    const { response, meter } = await metered(s, lane, `sharing-${sharing}`);
-    assert.deepEqual(
-      { unacknowledgedOverlaps: response.unacknowledgedOverlaps, behindMain: response.behindMain },
-      fullAdvice(s, lane),
-      `${sharing} sharing peers: identical notices`,
-    );
-    report[sharing] = {
-      documents: meter.documents,
-      readBytes: meter.readBytes,
-      byTable: meter.readBytesByTable,
-    };
-    assert(meter.readBytes > previous, 'bytes grow only with the peers that share a path');
-    previous = meter.readBytes;
-    assert.equal(
-      response.unacknowledgedOverlaps.items.some(item => item.reason === 'cross-file-symbol'),
-      sharing === 0,
-      'a cross-file note needs no shared path, only the peer facts',
-    );
-  }
-  t.diagnostic(JSON.stringify(report));
-  // 8 Lanes x 25 paths, nobody shares: the peers cost their slim rows, not their evidence.
-  assert(report[0].byTable.projectHostedOverlapLanes < 20 * 1024, 'only the focus row in full');
-  assert(report[0].readBytes < 40 * 1024, JSON.stringify(report[0]));
-  // One sharing peer reads one more full row, not seven.
-  assert(
-    report[1].byTable.projectHostedOverlapLanes < report[0].byTable.projectHostedOverlapLanes + 15 * 1024,
-  );
-});
-
-test('slim peer read: many sharing peers read one open-Lane window; behind main keeps its conflicts', async t => {
-  for (const behind of [false, true]) {
-    const { s, lane } = await busyProject(t, { behind, sharing: 7 });
-    // Nine more peers share the path: past the point-read limit the read takes the one window.
-    const mine = [...s.tables.projectHostedOverlapLanes.values()].find(row => row.laneId === lane.id);
-    for (let i = 0; i < 4; i++) {
-      const peerId = randomUUID();
-      s.insert('projectHostedRecordHeads', {
-        projectId: s.projectId,
-        kind: 'lane',
-        key: peerId,
-        parent: randomUUID(),
-        status: 'active',
-        version: 0,
-        recordId: 'synthetic',
-      });
-      const { _id, _creationTime, presenceRow, ...template } = mine;
-      s.insert('projectHostedOverlapLanes', {
-        ...template,
-        laneId: peerId,
-        intentId: randomUUID(),
-        recordVersion: 0,
-        intent: 'More sharing',
-        head: 'd'.repeat(64),
-        ...mergeOverlapChanges([], [delta('src/area-0/file.ts'), delta('src/area-1/file.ts')]),
-      });
-    }
-    const { response, meter } = await metered(s, lane, behind ? 'window-behind' : 'window-level');
-    assert.deepEqual(
-      { unacknowledgedOverlaps: response.unacknowledgedOverlaps, behindMain: response.behindMain },
-      fullAdvice(s, lane),
-    );
-    assert(meter.ranges <= 15, JSON.stringify(meter.readRangesByTable));
-  }
-});
-
-test('slim peer read: an overlap row without a slim peer row (written before the table) is still read, once per head', async t => {
-  const { s, lane } = await busyProject(t, { behind: false, sharing: 3 });
-  const before = fullAdvice(s, lane);
-  const rows = [...s.tables.projectHostedOverlapLanes.values()].filter(row => row.laneId !== lane.id);
-  // The three sharing peers and two others predate the slim table.
-  for (const row of rows.slice(0, 5))
-    for (const [id, peer] of s.tables.projectHostedOverlapPeers)
-      if (peer.laneId === row.laneId) s.tables.projectHostedOverlapPeers.delete(id);
-  const { response } = await metered(s, lane, 'legacy-peers');
-  assert.deepEqual(
-    { unacknowledgedOverlaps: response.unacknowledgedOverlaps, behindMain: response.behindMain },
-    before,
-  );
-  assert.equal(response.unacknowledgedOverlaps.coverage, 'hosted');
 });
 
 // Drift nudge (Issue 8dfede85): a Lane behind main by >= N landings on its own saved paths.

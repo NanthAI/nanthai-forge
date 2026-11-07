@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
-import { patchOverlapRow } from './projectHostedOverlapPeers';
 import { postSystemLaneNote } from './projectBoardSystem';
 import {
   STACK_NOTICE_FANOUT,
@@ -47,7 +46,7 @@ export async function trackStackDependent(
   if (row) await ctx.db.replace(row._id, value);
   else await ctx.db.insert('projectHostedStackDependents', value);
   const parent = await overlapRow(ctx, projectId, stack.laneId);
-  if (parent && !parent.stacked) await patchOverlapRow(ctx, parent, { stacked: true });
+  if (parent && !parent.stacked) await ctx.db.patch(parent._id, { stacked: true });
 }
 
 type Reader = Pick<MutationCtx, 'db'> | Pick<QueryCtx, 'db'>;

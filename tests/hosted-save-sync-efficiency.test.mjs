@@ -253,11 +253,9 @@ test('ten changed files in a 3,000-file tree fit the complete save budget at dog
     assert.equal(run.stats.overlapWrites, 1, 'one atomic path projection update per changed save');
     // Writes 98 -> 99 (9c8490a4 presence): the Lane's slim presence row is rewritten with the save's
     // new paths in the same mutation. Calls and reads are unchanged.
-    // Writes 99 -> 100 (5471e31c slim peer): the Lane's slim peer row (scalars, path fingerprints, symbol
-    // facts) is rewritten with the same save; it is what lets every overlap read skip peers' evidence.
-    // Writes 100 -> 102 (a91b9b69 storage quota): each of the two upload batches that reserves new
+    // Writes 99 -> 101 (a91b9b69 storage quota): each of the two upload batches that reserves new
     // objects updates one project usage counter row. Calls and reads per object are unchanged.
-    assert(run.stats.writes - run.stats.overlapWrites <= 102, JSON.stringify(run.stats));
+    assert(run.stats.writes - run.stats.overlapWrites <= 101, JSON.stringify(run.stats));
     const prior = run.c.calls.length;
     await saveHostedLane(run.root, run.command, run.transport);
     assert.equal(run.c.calls.length - prior, 1, 'same-op terminal retry only prepares/returns the receipt');
@@ -471,9 +469,8 @@ test('Convex source provider: complete 10-file save including new object uploads
   assert(run.stats.totalCalls <= 30, JSON.stringify({ stats: run.stats, functions: run.calls }));
   assert.equal(run.stats.overlapWrites, 1, 'one atomic path projection update per changed save');
   // Writes 97 -> 98 (9c8490a4 presence): the slim presence row follows the save's new paths.
-  // Writes 98 -> 99 (5471e31c slim peer): the slim peer row follows them too, in the same mutation.
-  // Writes 99 -> 101 (a91b9b69 storage quota): one usage counter write per reserving upload batch.
-  assert(run.stats.writes - run.stats.overlapWrites <= 101, JSON.stringify(run.stats));
+  // Writes 98 -> 100 (a91b9b69 storage quota): one usage counter write per reserving upload batch.
+  assert(run.stats.writes - run.stats.overlapWrites <= 100, JSON.stringify(run.stats));
   t.diagnostic(
     JSON.stringify({
       convex: run.stats,

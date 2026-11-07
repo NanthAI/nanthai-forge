@@ -4,7 +4,6 @@ import type { MutationCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import { readHostedRecord, writeHostedRecord } from './projectHostedRecords';
 import { hostedLaneSchema } from '../src/hosted-lane';
-import { patchOverlapRow } from './projectHostedOverlapPeers';
 import { supersedeLane } from './projectHostedSuperseded';
 
 /** A conflict inside a resolution makes a short chain; the walk stays bounded. */
@@ -72,7 +71,7 @@ export async function completeResolutionOrigins(
       .withIndex('by_project_and_lane', q => q.eq('projectId', input.projectId).eq('laneId', current.id))
       .unique();
     if (overlap && overlap.head === current.head && overlap.landed?.receiptId !== input.receiptId)
-      await patchOverlapRow(ctx, overlap, {
+      await ctx.db.patch(overlap._id, {
         open: false,
         ...(input.commit
           ? {

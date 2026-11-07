@@ -101,20 +101,18 @@ for (const history of [575, 1150])
     // Reads 1336 -> 1341 (55024d40): a landed Lane's Intent with other open unpinned Lanes costs the
     // completion tick one overlap-row read for the landed Lane and one per candidate, to supersede the
     // quiet ones. Calls and writes are unchanged.
-    // Reads 1341 -> 1345, writes 412 -> 416 (5471e31c): each overlap-row write also reads and rewrites the
-    // Lane's ~1 KB slim peer row. Calls are unchanged.
-    // Reads 1345 -> 1347 (0b12fcfe): one overlap-row read per open sibling at the landing, to see whether
+    // Reads 1341 -> 1343 (0b12fcfe): one overlap-row read per open sibling at the landing, to see whether
     // it already landed at its head (landed siblings no longer hold the Intent open). Calls and writes unchanged.
-    // Reads 1347 -> 1349 (8dfede85): one main path-history row read per landed receipt, to add the landing
+    // Reads 1343 -> 1345 (8dfede85): one main path-history row read per landed receipt, to add the landing
     // to its 50-entry log for the drift nudge. Calls are unchanged.
-    // Reads 1349 -> 1351, writes 416 -> 418 (45f49fb7): each of the 2 landings reads and rewrites the
+    // Reads 1345 -> 1347, writes 412 -> 414 (45f49fb7): each of the 2 landings reads and rewrites the
     // project's landing-speed row (regression ladder rung 1) in its own accept mutation. Calls are unchanged.
-    // Reads 1351 -> 1353 (ee9d5738): each of the 2 landing completion ticks reads one (empty) indexed range of
+    // Reads 1347 -> 1349 (ee9d5738): each of the 2 landing completion ticks reads one (empty) indexed range of
     // open overlap rows that predate lastActivityAt, to stamp them from their Lane record. Calls and writes unchanged.
     assert(
       budget.calls <= 71 &&
-        source.reduce((n, c) => n + c.documents, 0) <= 1353 &&
-        source.reduce((n, c) => n + c.writes, 0) <= 418,
+        source.reduce((n, c) => n + c.documents, 0) <= 1349 &&
+        source.reduce((n, c) => n + c.writes, 0) <= 414,
       JSON.stringify({
         ...budget,
         sourceReads: source.reduce((n, c) => n + c.documents, 0),

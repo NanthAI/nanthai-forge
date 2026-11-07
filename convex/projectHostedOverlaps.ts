@@ -3,13 +3,11 @@ import { v } from 'convex/values';
 import { query } from './cliServer';
 import { accessibleProject, activeProject } from './projectAuthority';
 import { readHostedPresence, dormantHostedPresence } from './projectHostedPresence';
-import { dormantCutoff, liveOpenOverlapLanes, rowActivity } from './projectHostedDormancy';
-import { liveOpenOverlapPeers } from './projectHostedOverlapPeers';
+import { dormantCutoff, liveOpenOverlapLanes } from './projectHostedDormancy';
 import { hostedStartMain } from './projectHostedChannels';
 import { readHostedRecord } from './projectHostedRecords';
 import { hostedLaneSchema } from '../src/hosted-lane';
 import { hostedOverlapAdvice, IDLE_NOTICE_MS } from '../src/hosted-overlap';
-import { mayShareOverlapPath, overlapPeerLane, overlapPeerOf, pathHash } from '../src/hosted-overlap-peer';
 import { invariant } from '../src/errors';
 import { report } from './errors';
 import { safeRelative } from '../src/safe-relative';
@@ -26,12 +24,6 @@ const savedPaths = (changes: string) => {
     return [];
   }
 };
-
-/** Active heads without a slim peer row (an overlap row written before the slim table existed) are
- * looked up one by one, at most this many per read; the rest read as incomplete, as an unread peer did. */
-const LEGACY_PEER_LOOKUPS = 10;
-/** Peers sharing a path read by point up to this many; more read as the one open-Lane window. */
-const SHARED_POINT_READS = 8;
 
 /** One finite agent read. No source objects, Work hydration, scheduler or subscription. */
 export const read = query({
@@ -121,7 +113,7 @@ export const read = query({
       const idle = !path && focus.complete && focus.changes === '[]';
       const readPeers = () =>
         Promise.all([
-          liveOpenOverlapPeers(ctx, projectId, cutoff),
+          liveOpenOverlapLanes(ctx, projectId, cutoff),
           ctx.db
             .query('projectHostedOverlapAcks')
             .withIndex('by_project_and_lane_and_notice', q =>
@@ -136,14 +128,14 @@ export const read = query({
             .order('desc')
             .take(51),
         ]);
-      const [slimPeers, acks, headers] = idle
+      const [peers, acks, headers] = idle
         ? ([[], [], []] as Awaited<ReturnType<typeof readPeers>>)
         : await readPeers();
       const versions = new Map(headers.map(header => [header.key, header.version]));
       // Newest-first windows hold current work, but retained stale active Lanes can still push
       // a live peer out of the 51-row window (2026-10-30: 125 active heads hid every peer).
       // An exact indexed head read keeps such a peer's currency check correct.
-      for (const peer of slimPeers.slice(0, 50))
+      for (const peer of peers.slice(0, 50))
         if (!versions.has(peer.laneId)) {
           const head = await ctx.db
             .query('projectHostedRecordHeads')
@@ -153,38 +145,6 @@ export const read = query({
             .unique();
           if (head?.status === 'active') versions.set(peer.laneId, head.version);
         }
-      // Dormant Lanes stay active heads but are left out of the peers on purpose: their slim presence
-      // rows excuse them. Read only when an active head has no peer row.
-      const dormantLanes =
-        cutoff !== null &&
-        headers.some(
-          header =>
-            !slimPeers.some(peer => peer.laneId === header.key && peer.recordVersion === header.version),
-        )
-          ? await dormantHostedPresence(ctx, projectId, cutoff)
-          : null;
-      // An overlap row written before the slim table existed has no peer row: its active head shows it.
-      // It is read in full (bounded), until the Lane's next record write creates the slim row.
-      const fullChanges = new Map<string, string>();
-      const legacy: typeof slimPeers = [];
-      let lookups = 0;
-      for (const header of headers) {
-        if (slimPeers.some(peer => peer.laneId === header.key) || dormantLanes?.has(header.key)) continue;
-        if (++lookups > LEGACY_PEER_LOOKUPS) break;
-        const known = await ctx.db
-          .query('projectHostedOverlapPeers')
-          .withIndex('by_project_and_lane', q => q.eq('projectId', projectId).eq('laneId', header.key))
-          .unique();
-        if (known) continue;
-        const row = await ctx.db
-          .query('projectHostedOverlapLanes')
-          .withIndex('by_project_and_lane', q => q.eq('projectId', projectId).eq('laneId', header.key))
-          .unique();
-        if (!row?.open || (cutoff !== null && rowActivity(row) <= cutoff)) continue;
-        fullChanges.set(row.laneId, row.changes);
-        legacy.push({ ...overlapPeerOf(row), _id: row._id as never, _creationTime: row._creationTime });
-      }
-      const peers = legacy.length ? [...slimPeers, ...legacy] : slimPeers;
       const plans = new Map();
       for (const peer of peers)
         if (peer.lifecyclePlanId && !plans.has(peer.lifecyclePlanId)) {
@@ -204,41 +164,14 @@ export const read = query({
       const unmatched = headers.filter(
         header => !peers.some(peer => peer.laneId === header.key && peer.recordVersion === header.version),
       );
-      let complete =
+      // Dormant Lanes stay active heads but are left out of the peers on purpose: their slim presence
+      // rows excuse them. Read only when an active head has no peer row.
+      const dormantLanes =
+        cutoff !== null && unmatched.length ? await dormantHostedPresence(ctx, projectId, cutoff) : null;
+      const complete =
         peers.length <= 50 &&
         headers.length <= 50 &&
         unmatched.every(header => dormantLanes?.has(header.key));
-      // The per-path evidence is read in full only for peers that share a saved path with the caller (or
-      // the requested path): classification and the notices need it, nothing else does. Few such peers
-      // read by point; many read as the one open-Lane window, which then costs what it always did.
-      const advisedPeers = currentPeers.slice(0, 50).map(peer => overlapPeerLane(peer));
-      const wanted = new Set((path ? [path] : savedPaths(focus.changes)).map(pathHash));
-      const sharing = advisedPeers.filter(
-        peer =>
-          peer.open &&
-          peer.laneId !== laneId &&
-          !fullChanges.has(peer.laneId) &&
-          mayShareOverlapPath(peer.pathHashes, wanted),
-      );
-      if (sharing.length > SHARED_POINT_READS) {
-        for (const row of await liveOpenOverlapLanes(ctx, projectId, cutoff))
-          fullChanges.set(row.laneId, row.changes);
-      } else
-        await Promise.all(
-          sharing.map(async peer => {
-            const row = await ctx.db
-              .query('projectHostedOverlapLanes')
-              .withIndex('by_project_and_lane', q => q.eq('projectId', projectId).eq('laneId', peer.laneId))
-              .unique();
-            if (row) fullChanges.set(row.laneId, row.changes);
-          }),
-        );
-      for (const peer of advisedPeers) {
-        const full = fullChanges.get(peer.laneId);
-        if (full !== undefined) peer.changes = full;
-        // A slim row whose overlap row is gone cannot be classified: coverage says so.
-        else if (sharing.includes(peer)) complete = false;
-      }
       // Only the Lane's author (or the project owner) answers its notices; anyone else's answer is ignored.
       const answered = new Set(
         acks.filter(ack => mayActFor(ack.actor, lane.actor, project.owner)).map(ack => ack.noticeId),
@@ -246,7 +179,7 @@ export const read = query({
       const compute = () =>
         hostedOverlapAdvice(
           focus,
-          advisedPeers,
+          currentPeers.slice(0, 50),
           latest,
           main,
           answered,
@@ -292,7 +225,7 @@ export const read = query({
               peerEvidence: {
                 ...hostedOverlapAdvice(
                   focus,
-                  advisedPeers,
+                  currentPeers.slice(0, 50),
                   latest,
                   main,
                   new Set(),
@@ -330,8 +263,7 @@ export const read = query({
                     saved: new Set(savedPaths(focus.changes)),
                     // Peers already in memory: their open state and saved paths cost no read.
                     peers: (peerLane: string) => {
-                      const peer = advisedPeers.find(row => row.laneId === peerLane);
-                      // Only the hook's own path matters: a peer that may hold it was read in full above.
+                      const peer = currentPeers.find(row => row.laneId === peerLane);
                       return peer ? { open: peer.open, saved: new Set(savedPaths(peer.changes)) } : undefined;
                     },
                   },

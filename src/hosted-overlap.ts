@@ -51,8 +51,6 @@ export type OverlapLane = {
   /** Set when a Lane of the same Intent landed after this Lane went quiet: no presence, no advisory
    * notices, blocking ones stay. Counts only while it names the Lane's current head. */
   superseded?: { laneHead: string };
-  /** Cross-file symbol facts of `changes`, when the caller holds them without the full evidence. */
-  symbolFacts?: ReturnType<typeof symbolFacts>;
 };
 export type OverlapMain = {
   sequence: number;
@@ -345,9 +343,7 @@ export function hostedOverlapAdvice(
     }
     // One advisory cross-file note per Lane pair, only when no same-file notice already names the pair.
     const note =
-      requestedPath || visible || quiet
-        ? null
-        : crossFileSymbolNote(mineFacts, peer.symbolFacts ?? symbolFacts(peerChanges));
+      requestedPath || visible || quiet ? null : crossFileSymbolNote(mineFacts, symbolFacts(peerChanges));
     const noteId = note && digest(JSON.stringify(['cross-file-symbol', lanes]));
     if (note && idle) {
       idleLanes.add(peer.laneId);

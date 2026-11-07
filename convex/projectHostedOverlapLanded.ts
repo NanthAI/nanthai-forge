@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { MutationCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
-import { patchOverlapRow } from './projectHostedOverlapPeers';
 import { acceptancePage, type ReceiptIdentity } from './projectHostedAcceptanceStore';
 import { composeLaneSchema, validateComposePage } from '../src/hosted-compose';
 import { recordOverlapLanding } from '../src/hosted-overlap';
@@ -61,7 +60,7 @@ export async function retireLandedOverlapLanes(
       : undefined;
     const stamped = !stamp || row.landed?.receiptId === stamp.receiptId;
     if (!row.open && stamped) continue;
-    await patchOverlapRow(ctx, row, { open: false, ...(stamped ? {} : { landed: stamp }) });
+    await ctx.db.patch(row._id, { open: false, ...(stamped ? {} : { landed: stamp }) });
     retired++;
   }
   return retired;
@@ -101,7 +100,7 @@ export async function stampLegacyOverlapActivity(ctx: MutationCtx, projectId: Id
       // An unreadable body still has its version's own write time below.
     }
     if (record && !Number.isFinite(at)) at = record._creationTime;
-    await patchOverlapRow(ctx, row, record ? { lastActivityAt: at } : { open: false });
+    await ctx.db.patch(row._id, record ? { lastActivityAt: at } : { open: false });
   }
   return rows.length;
 }

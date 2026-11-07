@@ -13,7 +13,6 @@ const {
   finishAheadQueueProjection,
 } = await import(moduleUrl('../convex/projectFinishReadProjection.ts'));
 const schema = (await import(moduleUrl('../convex/schema.ts'))).default;
-const { overlapPeerOf } = await import(moduleUrl('../src/hosted-overlap-peer.ts'));
 const githubBindings = await import(moduleUrl('../convex/githubBindingStore.ts'));
 const bytes = value => Buffer.byteLength(JSON.stringify(value));
 const encoded = rows => JSON.stringify(rows);
@@ -27,26 +26,9 @@ export function lanesFixture() {
   let serial = 0,
     decorate,
     lastReadSet;
-  /** Direct edits of an overlap row (seeding, aging) keep its slim peer row equal, as every production
-   * writer does in its own transaction (convex/projectHostedOverlapPeers.ts). */
-  const syncPeer = row => {
-    const value = overlapPeerOf(row);
-    const old = [...tables.projectHostedOverlapPeers.values()].find(
-      peer => peer.projectId === value.projectId && peer.laneId === value.laneId,
-    );
-    if (old) tables.projectHostedOverlapPeers.set(old._id, updatedDocument(old, value, true));
-    else {
-      const _id = `projectHostedOverlapPeers-${++serial}`;
-      tables.projectHostedOverlapPeers.set(
-        _id,
-        insertedDocument(schema, 'projectHostedOverlapPeers', value, _id, serial),
-      );
-    }
-  };
   const insert = (table, value) => {
     const _id = `${table}-${++serial}`;
     tables[table].set(_id, insertedDocument(schema, table, value, _id, serial));
-    if (table === 'projectHostedOverlapLanes') syncPeer(tables[table].get(_id));
     return _id;
   };
   async function call(name, fn, input, actor = 'owner') {
@@ -294,24 +276,6 @@ export function lanesFixture() {
             if (row === null) tables[table].delete(id);
             else tables[table].set(id, row);
           }
-          // Build-failing guard: no production write of an overlap row may leave its slim peer row
-          // behind (convex/projectHostedOverlapPeers.ts); every test through this fixture checks it.
-          for (const id of new Set(
-            writes.filter(([table]) => table === 'projectHostedOverlapLanes').map(w => w[1]),
-          )) {
-            const row = tables.projectHostedOverlapLanes.get(id);
-            if (!row) continue;
-            const peer = [...tables.projectHostedOverlapPeers.values()].find(
-              r => r.projectId === row.projectId && r.laneId === row.laneId,
-            );
-            assert(peer, `${name}: overlap row ${row.laneId} written without its slim peer row`);
-            const { _id, _creationTime, ...stored } = peer;
-            assert.deepEqual(
-              stored,
-              overlapPeerOf(row),
-              `${name}: slim peer row differs from its overlap row`,
-            );
-          }
           if (name === 'observerBudgetPage') lastReadSet = () => reads.every(unchanged => unchanged());
           counts.push(meter);
           return result;
@@ -359,7 +323,6 @@ export function lanesFixture() {
     patch(table, id, value) {
       const row = checkDocument(schema, table, updatedDocument(tables[table].get(id), value));
       tables[table].set(id, row);
-      if (table === 'projectHostedOverlapLanes') syncPeer(row);
       if (table in finishReadFields) {
         const projection = finishReadProjection(table, row);
         const old = [...tables.projectFinishReadRows.values()].find(

@@ -144,29 +144,26 @@ for (const history of [0, 575, 1150])
     // Reads 4116 -> 4179 (55024d40): for an Intent with other open unpinned Lanes the completion tick
     // reads the landed Lane's overlap row and each candidate's, to supersede the quiet ones. An Intent
     // with no other open Lane reads nothing more. Calls and writes are unchanged.
-    // Reads 4179 -> 4197, writes 1227 -> 1245 (5471e31c): each overlap-row write (landing retirement,
-    // superseding, lifecycle marks) also reads and rewrites the Lane's ~1 KB slim peer row that every
-    // overlap read loads instead of peers' evidence. Calls are unchanged.
-    // Reads 4197 -> 4206 (0b12fcfe): an Intent whose other Lane is still open at the landing costs the
+    // Reads 4179 -> 4188 (0b12fcfe): an Intent whose other Lane is still open at the landing costs the
     // completion tick one overlap-row read for that sibling, to see whether it already landed at its head
     // (landed siblings no longer hold the Intent open). Calls and writes are unchanged.
-    // Reads 4206 -> 4215 (8dfede85): per landed receipt the completion tick reads the main path-history row
+    // Reads 4188 -> 4197 (8dfede85): per landed receipt the completion tick reads the main path-history row
     // to add the landing (receipt, Lane, public actor) to its 50-entry log for the drift nudge; the
     // row is patched in the same tick (one write per landing in production, where that row exists).
     // Calls are unchanged.
-    // Reads 4215 -> 4216 (dc62b120): a landing that ends failed or cancelled reads one dependents range to
+    // Reads 4197 -> 4198 (dc62b120): a landing that ends failed or cancelled reads one dependents range to
     // learn whether any Lane is stacked in the project; it is empty here, so the Lane lookup never runs.
     // Writes and calls are unchanged. Only the failure transition pays it, once per failed landing.
-    // Reads 4216 -> 4225, writes 1245 -> 1254 (45f49fb7): each of the 9 landings reads and rewrites the
+    // Reads 4198 -> 4207, writes 1227 -> 1236 (45f49fb7): each of the 9 landings reads and rewrites the
     // project's landing-speed row (regression ladder rung 1) inside its own accept mutation. Calls
     // are unchanged.
-    // Reads 4225 -> 4234 (ee9d5738): each of the 9 landing completion ticks reads one indexed range of open
+    // Reads 4207 -> 4216 (ee9d5738): each of the 9 landing completion ticks reads one indexed range of open
     // overlap rows that predate lastActivityAt, to stamp them from their Lane record; empty here, so nothing
     // else is read or written. Calls and writes are unchanged.
     assert(
       budget.calls <= 199 &&
-        source.reduce((n, c) => n + c.documents, 0) <= 4234 &&
-        source.reduce((n, c) => n + c.writes, 0) <= 1254,
+        source.reduce((n, c) => n + c.documents, 0) <= 4216 &&
+        source.reduce((n, c) => n + c.writes, 0) <= 1236,
       JSON.stringify({
         ...budget,
         sourceReads: source.reduce((n, c) => n + c.documents, 0),

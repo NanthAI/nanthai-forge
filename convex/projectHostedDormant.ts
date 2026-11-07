@@ -3,7 +3,6 @@ import { v } from 'convex/values';
 import { mutation } from './cliServer';
 import { activeOwnedProject } from './projectAuthority';
 import { abandonClass, dormantCutoff, landedByReceipt } from './projectHostedDormancy';
-import { patchOverlapRow } from './projectHostedOverlapPeers';
 import { hostedWriteProject, readHostedRecord, writeHostedRecord } from './projectHostedRecords';
 import { hostedLaneSchema } from '../src/hosted-lane';
 import { canonicalPayload } from '../src/hosted-source-operation';
@@ -77,7 +76,7 @@ export const abandon = mutation({
             .unique();
           if (intent === 'stamp') {
             if (row && row.lastActivityAt === undefined)
-              await patchOverlapRow(ctx, row, { lastActivityAt: Date.parse(lane.at) });
+              await ctx.db.patch(row._id, { lastActivityAt: Date.parse(lane.at) });
             skip(row ? 'stamped' : 'no-overlap-row');
           } else if (
             intent === 'on-main'
