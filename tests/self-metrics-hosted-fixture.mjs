@@ -21,6 +21,14 @@ export const empty = () => ({ moves: [], submissions: [], runs: [], receipts: []
 export function fixture() {
   const tables = Object.fromEntries(Object.keys(schema.tables).map(table => [table, []]));
   const meter = { calls: 0, documents: 0, writes: 0, maxPage: 0 };
+  // Convex rejects a second paginate() in one query function (dev failure 2026-11-07, metrics
+  // HOSTED_REQUEST_FAILED); the fake does too, counting system and table pages per call.
+  let paginations = 0;
+  const onePagination = () =>
+    assert(
+      ++paginations === 1,
+      'This query function ran multiple paginated queries. Convex only supports a single paginated query in each query function.',
+    );
   const project = {
     _id: 'project',
     _creationTime: 0,
@@ -58,6 +66,7 @@ export function fixture() {
           return {
             order: () => ({
               paginate: async () => {
+                onePagination();
                 meter.documents++;
                 return { page: [], isDone: true, continueCursor: '' };
               },
@@ -123,7 +132,14 @@ export function fixture() {
             assert(selected.length <= 1);
             return read(selected)[0] ?? null;
           },
+          async take(count) {
+            assert(selected);
+            assert(count <= 100);
+            const rows = descending ? selected.toReversed() : selected;
+            return read(rows.slice(0, count));
+          },
           async paginate(options) {
+            onePagination();
             assert(selected);
             assert(options.numItems <= 100);
             assert(options.maximumRowsRead <= 100);
@@ -154,6 +170,7 @@ export function fixture() {
     const handler = handlers[name];
     assert(handler, name);
     meter.calls++;
+    paginations = 0;
     const input = { ...args, projectId: project._id };
     checkArgs(handler, input, name);
     return handler._handler(ctx, input);
@@ -162,6 +179,7 @@ export function fixture() {
   const recordBill = async bill => {
     const input = { projectId: project._id, bill: JSON.stringify(bill) };
     checkArgs(bills.record, input, 'projectSelfMetricBills:record');
+    paginations = 0;
     return JSON.parse(await bills.record._handler(ctx, input));
   };
   const landing = (id, submitted, accepted, trusted = true) => {

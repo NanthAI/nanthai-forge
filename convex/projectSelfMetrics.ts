@@ -43,8 +43,11 @@ export async function metricsReader(ctx: QueryCtx, projectId: Id<'hostedProjects
   }
   return project;
 }
+/** Main-audit events read per acceptances page. A bounded take, not a second paginate():
+ * Convex allows one paginated query per query function, and the page already runs one. */
+const mainAuditEventLimit = 100;
 /** Main-audit events for the proved-reuse back-stop metric (Issue 71767c9b). One
- * bounded page rides on the first acceptances page, so it adds no call. Newest
+ * bounded read rides on the first acceptances page, so it adds no call. Newest
  * first, down to the first green or flake before the window: that event bounds
  * the range the earliest in-window failure audited. */
 async function mainAuditEvents(ctx: QueryCtx, projectId: Id<'hostedProjects'>, from: number, to: number) {
@@ -52,10 +55,10 @@ async function mainAuditEvents(ctx: QueryCtx, projectId: Id<'hostedProjects'>, f
     .query('projectHostedMainAuditEvents')
     .withIndex('by_project_and_sequence', q => q.eq('projectId', projectId))
     .order('desc')
-    .paginate({ cursor: null, numItems: 100, maximumRowsRead: 100, maximumBytesRead: 64 * 1024 });
+    .take(mainAuditEventLimit);
   const events = [];
-  let complete = rows.isDone;
-  for (const row of rows.page) {
+  let complete = rows.length < mainAuditEventLimit;
+  for (const row of rows) {
     const at = Date.parse(row.at);
     if (at >= to) continue;
     events.push({
