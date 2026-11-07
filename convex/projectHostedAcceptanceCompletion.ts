@@ -123,7 +123,7 @@ export async function completeAcceptedHeads(ctx: MutationCtx, input: CompletionI
     });
   // Landed work leaves the open-overlap index on the first tick, even when completion is off (keepOpen)
   // or skips a Lane whose pins moved after finish. Idempotent and bounded to one input page.
-  const landed = { commit: receipt.candidate.head, at: receipt.at };
+  const landed = { commit: receipt.candidate.head, at: receipt.at, sequence: row.sequence };
   if (!receipt.completion.enabled && plan.inputPages) await retireLandedOverlapLanes(ctx, input, landed);
   // Landing declares the Intents of its Lanes even when the Lanes themselves stay open (completeOnAccept off or
   // keepOpen): `closeIntents` completes them in this same tick, and the planning read closes the Issue if its

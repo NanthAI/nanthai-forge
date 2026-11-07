@@ -104,5 +104,7 @@ export const hostedOverlapTables = {
     sequence: v.number(),
     coverageAfter: v.number(),
     changes: v.string(),
+    /** Recent landings for the drift nudge (see OverlapMain.landings); absent on rows written before it. */
+    landings: v.optional(v.string()),
   }).index('by_project', ['projectId']),
 };

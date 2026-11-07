@@ -18,6 +18,10 @@ import {
   mergeOverlapChanges,
   advanceOverlapMain,
   boundOverlapChanges,
+  recordOverlapLanding,
+  driftNudge,
+  DRIFT_NUDGE_MIN_LANDINGS,
+  DRIFT_LANDING_LOG,
 } from '../dist/hosted-overlap.js';
 import { hostedOverlapNotifications } from '../dist/mcp-hosted-overlaps.js';
 import { rememberOverlapText } from '../dist/hosted-overlap-text.js';
@@ -1414,4 +1418,177 @@ test('slim peer read: an overlap row without a slim peer row (written before the
     before,
   );
   assert.equal(response.unacknowledgedOverlaps.coverage, 'hosted');
+});
+
+// Drift nudge (Issue 8dfede85): a Lane behind main by >= N landings on its own saved paths.
+async function driftRead(t, landingsOnMain) {
+  const { s, lane } = await busyProject(t, { behind: true });
+  const row = [...s.tables.projectHostedOverlapMain.values()][0];
+  let history = row,
+    landings;
+  let sequence = 5;
+  for (const { paths, who } of landingsOnMain) {
+    sequence++;
+    history = { ...history, ...advanceOverlapMain({ ...history, landings }, sequence, paths) };
+    if (who) {
+      landings = recordOverlapLanding(landings, {
+        sequence,
+        receiptId: randomUUID(),
+        laneId: randomUUID(),
+        actor: who,
+      });
+      history = { ...history, landings };
+    }
+  }
+  const { _id, _creationTime, projectId, ...fields } = history;
+  s.patch('projectHostedOverlapMain', row._id, fields);
+  const channelId = [...s.tables.projectHostedChannels.keys()][0];
+  s.patch('projectHostedChannels', channelId, {
+    selection: JSON.stringify({
+      ...JSON.parse([...s.tables.projectHostedChannels.values()][0].selection),
+      sourceRevision: sequence,
+    }),
+  });
+  return { ...(await metered(s, lane, 'drift')), lane, landings };
+}
+
+test('drift nudge: behind only on unrelated paths adds nothing and the answer stays byte-identical', async t => {
+  const none = await driftRead(t, []);
+  const unrelated = await driftRead(t, [
+    { paths: ['elsewhere/a.ts'], who: 'owner/calm-fox' },
+    { paths: ['elsewhere/b.ts'], who: 'owner/calm-fox' },
+    { paths: ['elsewhere/c.ts'], who: 'owner/calm-fox' },
+  ]);
+  assert(!('nudge' in unrelated.response.behindMain));
+  assert.deepEqual(Object.keys(unrelated.response.behindMain), Object.keys(none.response.behindMain));
+  assert.deepEqual(unrelated.response.behindMain.conflictingPaths, []);
+});
+
+test('drift nudge: none below N own-path landings, named once N is reached, up to 3 plus the sync command', async t => {
+  assert.equal(DRIFT_NUDGE_MIN_LANDINGS, 2);
+  const one = await driftRead(t, [{ paths: ['src/area-3/file.ts'], who: 'owner/calm-fox' }]);
+  assert(!('nudge' in one.response.behindMain), 'one own-path landing is below N');
+  assert.deepEqual(one.response.behindMain.conflictingPaths, ['src/area-3/file.ts']);
+  // Two landings on one path count once (a later touch hides the earlier one), so the count is a floor.
+  const same = await driftRead(t, [
+    { paths: ['src/area-3/file.ts'], who: 'owner/calm-fox' },
+    { paths: ['src/area-3/file.ts'], who: 'owner/calm-fox' },
+  ]);
+  assert(!('nudge' in same.response.behindMain));
+  const two = await driftRead(t, [
+    { paths: ['src/area-3/file.ts'], who: 'owner/calm-fox' },
+    { paths: ['elsewhere/a.ts'], who: 'someone' },
+    { paths: ['src/area-4/file.ts'], who: 'owner' },
+  ]);
+  const { nudge } = two.response.behindMain;
+  assert.match(nudge, /^Behind main on your own paths: 2 landings changed them since your base: /);
+  const entries = JSON.parse(two.landings);
+  assert(
+    nudge.includes(`${entries[2][1]} (Lane ${entries[2][2]}, owner)`),
+    'newest landing named with handle',
+  );
+  assert(nudge.includes(`${entries[0][1]} (Lane ${entries[0][2]}, owner/calm-fox)`));
+  assert(!nudge.includes(entries[1][1]), 'the unrelated landing is not named');
+  assert(nudge.includes(`nforge agent . sync '{"laneId":"${two.lane.id}"}'`));
+  assert(!nudge.includes('@') && !nudge.includes('.com'), 'public identities only');
+  const five = await driftRead(
+    t,
+    [3, 4, 5, 6, 7].map(n => ({ paths: [`src/area-${n}/file.ts`], who: 'owner/calm-fox' })),
+  );
+  assert.match(five.response.behindMain.nudge, /5 landings.*; and 2 more\. Sync now:/);
+  assert.equal(five.response.behindMain.nudge.split('(Lane ').length - 1, 3, 'at most 3 named');
+  // A landing from before the log existed is named by its sequence.
+  const unlogged = await driftRead(t, [
+    { paths: ['src/area-3/file.ts'] },
+    { paths: ['src/area-4/file.ts'], who: 'owner' },
+  ]);
+  assert.match(unlogged.response.behindMain.nudge, /landing #6/);
+});
+
+test('drift nudge: same calls and documents with or without it; bytes grow only by the landing log', async t => {
+  const plain = await driftRead(t, [{ paths: ['src/area-3/file.ts'] }, { paths: ['src/area-4/file.ts'] }]);
+  const named = await driftRead(t, [
+    { paths: ['src/area-3/file.ts'], who: 'owner/calm-fox' },
+    { paths: ['src/area-4/file.ts'], who: 'owner/calm-fox' },
+  ]);
+  assert.equal(named.meter.documents, plain.meter.documents);
+  assert.equal(named.meter.ranges, plain.meter.ranges);
+  assert(named.meter.readBytes - plain.meter.readBytes < 1024, 'two log entries are a few hundred bytes');
+  t.diagnostic(
+    JSON.stringify({
+      documents: named.meter.documents,
+      ranges: named.meter.ranges,
+      readBytesWithLog: named.meter.readBytes,
+      readBytesWithoutLog: plain.meter.readBytes,
+      nudgeBytes: Buffer.byteLength(named.response.behindMain.nudge),
+    }),
+  );
+});
+
+test('drift nudge: landing log is idempotent, bounded, and survives a main path advance', () => {
+  let log;
+  for (let n = 1; n <= DRIFT_LANDING_LOG + 5; n++)
+    log = recordOverlapLanding(log, {
+      sequence: n,
+      receiptId: randomUUID(),
+      laneId: randomUUID(),
+      actor: 'a/b-c',
+    });
+  const entries = JSON.parse(log);
+  assert.equal(entries.length, DRIFT_LANDING_LOG);
+  assert.equal(entries[0][0], 6);
+  assert.equal(
+    recordOverlapLanding(log, { sequence: 20, receiptId: randomUUID(), laneId: randomUUID(), actor: 'x' }),
+    log,
+  );
+  const advanced = advanceOverlapMain({ sequence: 1, coverageAfter: 0, changes: '[]', landings: log }, 2, [
+    'p',
+  ]);
+  assert.equal(advanced.landings, log);
+  assert(!('landings' in advanceOverlapMain(null, 1, ['p'])));
+  assert.equal(driftNudge('lane', new Set([1]), log), null);
+  assert.equal(driftNudge('lane', new Set([1, 2]), 'not json').includes('landing #2'), true);
+});
+
+test('drift nudge: a landing completion logs receipt, Lane and public actor on the main row once', async t => {
+  const { s, lane, transport } = await setup(t);
+  await transport(lane).dispatch('save', { operationId: randomUUID(), message: 'work' });
+  const row = [...s.tables.projectHostedOverlapLanes.values()].find(item => item.laneId === lane.id);
+  s.insert('projectHostedOverlapMain', { projectId: s.projectId, ...advanceOverlapMain(null, 6, ['a']) });
+  const receiptId = randomUUID();
+  const object = { object: { sha256: 'a'.repeat(64), size: 1 }, recipe: null };
+  s.insert('projectHostedAcceptancePages', {
+    projectId: s.projectId,
+    receiptId,
+    kind: 'inputs',
+    index: 0,
+    digest: 'd'.repeat(64),
+    root: 'r'.repeat(64),
+    value: JSON.stringify({
+      schema: 1,
+      kind: 'forge-hosted-compose-page',
+      entries: [
+        { laneId: lane.id, head: row.head, version: 0, sourceVersion: 0, lifecycleVersion: 0, state: object },
+      ],
+      next: null,
+    }),
+  });
+  const retire = () =>
+    s.transaction(
+      'retire',
+      {
+        _handler: ctx =>
+          landed.retireLandedOverlapLanes(
+            ctx,
+            { projectId: s.projectId, receiptId },
+            { commit: 'c'.repeat(64), at: new Date().toISOString(), sequence: 6 },
+          ),
+      },
+      {},
+    );
+  await retire();
+  await retire();
+  const main = [...s.tables.projectHostedOverlapMain.values()][0];
+  assert.deepEqual(JSON.parse(main.landings), [[6, receiptId.slice(0, 8), lane.id.slice(0, 8), row.actor]]);
+  assert.equal(main.changes, advanceOverlapMain(null, 6, ['a']).changes, 'path history untouched');
 });

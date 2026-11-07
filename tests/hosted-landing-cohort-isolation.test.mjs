@@ -150,9 +150,13 @@ for (const history of [0, 575, 1150])
     // Reads 4197 -> 4206 (0b12fcfe): an Intent whose other Lane is still open at the landing costs the
     // completion tick one overlap-row read for that sibling, to see whether it already landed at its head
     // (landed siblings no longer hold the Intent open). Calls and writes are unchanged.
+    // Reads 4206 -> 4215 (8dfede85): per landed receipt the completion tick reads the main path-history row
+    // to add the landing (receipt, Lane, public actor) to its 50-entry log for the drift nudge; the
+    // row is patched in the same tick (one write per landing in production, where that row exists).
+    // Calls are unchanged.
     assert(
       budget.calls <= 199 &&
-        source.reduce((n, c) => n + c.documents, 0) <= 4206 &&
+        source.reduce((n, c) => n + c.documents, 0) <= 4215 &&
         source.reduce((n, c) => n + c.writes, 0) <= 1245,
       JSON.stringify({
         ...budget,

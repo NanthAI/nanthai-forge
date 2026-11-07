@@ -58,7 +58,19 @@ export type OverlapMain = {
   sequence: number;
   coverageAfter: number;
   changes: string;
+  /** Recent landings, newest last: JSON `[sequence, receiptId8, laneId8, publicActor][]`, up to
+   * DRIFT_LANDING_LOG entries. Written when a landing completes; read only to name landings in the drift nudge. */
+  landings?: string;
 };
+/** Landings (distinct, each touching a path the Lane saved) after the Lane's base before behindMain adds a
+ * nudge. N=2 (Issue 8dfede85, 2026-11-07): dogfood data 2026-11-04..07 was too thin to measure how many
+ * own-path landings precede a conflict (20-landing pages showed 7-15 recomposes, none with recorded
+ * conflict paths), and one own-path landing is common and usually composes cleanly. */
+export const DRIFT_NUDGE_MIN_LANDINGS = 2;
+/** Landings named in the nudge line. */
+export const DRIFT_NUDGE_NAMES = 3;
+/** Recent landings the main row remembers (bytes: ~70 each, so ~3.5 KB). */
+export const DRIFT_LANDING_LOG = 50;
 const same = (a: OverlapFile, b: OverlapFile) =>
   a === null || b === null ? a === b : a.blob === b.blob && a.mode === b.mode;
 
@@ -166,7 +178,60 @@ export function advanceOverlapMain(
     selected.push(entry);
     bytes += size;
   }
-  return { sequence, coverageAfter, changes: JSON.stringify(selected) };
+  return {
+    sequence,
+    coverageAfter,
+    changes: JSON.stringify(selected),
+    ...(previous?.landings ? { landings: previous.landings } : {}),
+  };
+}
+
+type LandingEntry = [number, string, string, string];
+const landingEntries = (landings: string | undefined): LandingEntry[] => {
+  try {
+    return landings ? (JSON.parse(landings) as LandingEntry[]) : [];
+  } catch {
+    return [];
+  }
+};
+
+/** Add one landing to the main row's log (idempotent per sequence); keeps the newest DRIFT_LANDING_LOG. */
+export function recordOverlapLanding(
+  landings: string | undefined,
+  landing: { sequence: number; receiptId: string; laneId: string; actor: string },
+) {
+  const entries = landingEntries(landings);
+  if (entries.some(entry => entry[0] === landing.sequence)) return landings!;
+  entries.push([
+    landing.sequence,
+    landing.receiptId.slice(0, 8),
+    landing.laneId.slice(0, 8),
+    landing.actor.slice(0, 80),
+  ]);
+  entries.sort((a, b) => a[0] - b[0]);
+  return JSON.stringify(entries.slice(-DRIFT_LANDING_LOG));
+}
+
+/** The drift nudge: a Lane behind main by at least N distinct landings whose latest touch of a path the Lane
+ * saved came after its base. Pure set lookup over the main path history behindMain already loads; the
+ * count is a floor (a later landing on the same path hides an earlier one). Null when it does not apply. */
+export function driftNudge(
+  laneId: string,
+  conflictSequences: Set<number>,
+  landings: string | undefined,
+  min = DRIFT_NUDGE_MIN_LANDINGS,
+) {
+  if (conflictSequences.size < min) return null;
+  const known = new Map(landingEntries(landings).map(entry => [entry[0], entry]));
+  const named = [...conflictSequences]
+    .sort((a, b) => b - a)
+    .slice(0, DRIFT_NUDGE_NAMES)
+    .map(sequence => {
+      const entry = known.get(sequence);
+      return entry ? `${entry[1]} (Lane ${entry[2]}, ${entry[3]})` : `landing #${sequence}`;
+    });
+  const rest = conflictSequences.size - named.length;
+  return `Behind main on your own paths: ${conflictSequences.size} landings changed them since your base: ${named.join('; ')}${rest > 0 ? `; and ${rest} more` : ''}. Sync now: nforge agent . sync '{"laneId":"${laneId}"}'`;
 }
 
 /** Saved range/path advice. Actual text conflicts are still decided by composition. */
@@ -335,13 +400,17 @@ export function hostedOverlapAdvice(
       main !== null &&
       main.sequence === current.sourceRevision &&
       mine.baseSequence! >= main.coverageAfter);
-  const conflicts =
-    main && knownBase && current.head !== mine.baseHead
-      ? (JSON.parse(main.changes) as [string, number][])
-          .filter(([path, sequence]) => sequence > mine.baseSequence! && paths.has(path))
-          .map(([path]) => path)
-          .sort()
-      : [];
+  // One pass over the path history: conflicting paths, and the distinct landings behind them.
+  const conflictPaths: string[] = [],
+    conflictSequences = new Set<number>();
+  if (main && knownBase && current.head !== mine.baseHead)
+    for (const [path, sequence] of JSON.parse(main.changes) as [string, number][])
+      if (sequence > mine.baseSequence! && paths.has(path)) {
+        conflictPaths.push(path);
+        conflictSequences.add(sequence);
+      }
+  const conflicts = conflictPaths.sort();
+  const nudge = driftNudge(mine.laneId, conflictSequences, main?.landings);
   return {
     unacknowledgedOverlaps: {
       laneId: mine.laneId,
@@ -360,6 +429,7 @@ export function hostedOverlapAdvice(
       conflictingPaths: conflicts.slice(0, 10),
       more: Math.max(0, conflicts.length - 10),
       coverage: mainComplete && mine.complete ? 'hosted' : 'hosted-incomplete',
+      ...(nudge ? { nudge } : {}),
     },
   };
 }

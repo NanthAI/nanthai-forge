@@ -33,6 +33,8 @@ const advice = z.object({
     conflictingPaths: z.array(z.string()),
     more: z.number(),
     coverage: z.string(),
+    /** One line, only when >= N landings touched the Lane's saved paths since its base (Issue 8dfede85). */
+    nudge: z.string().optional(),
   }),
   /** The Lane's saved base-to-head paths, when asked (paths:true) and current. */
   changedPaths: z.object({ paths: z.array(z.string()), complete: z.boolean() }).optional(),

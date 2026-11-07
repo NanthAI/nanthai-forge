@@ -1927,7 +1927,7 @@ calculation is read-time work over landing records, with no new background job.
 Hosted agent start, save and Lane status responses include
 `unacknowledgedOverlaps:{count,items,coverage}` and
 `behindMain:{commits,conflictingPaths,more,coverage}` when the server advertises
-`overlapVersion:1`. Notice identities bind the Lane pair and path, with a separate advisory identity for explicit path reads. Existing blocking answers remain valid across evidence updates. Notices name the peer
+`overlapVersion:1`. `behindMain.nudge` (one line) appears only when at least 2 distinct landings touched your saved paths since your base: it names up to 3 (receipt, Lane, public actor) and the exact `sync` command; absent otherwise, so the answer is unchanged. It reads the path history `behindMain` already loads plus a 50-entry landing log on the same row, with no extra call (a count of distinct landings by latest touch per path, so a floor). Notice identities bind the Lane pair and path, with a separate advisory identity for explicit path reads. Existing blocking answers remain valid across evidence updates. Notices name the peer
 Lane, actor, Intent and shared saved path. `peer-ack` and `overlap-acks` suppress
 that notice for the answering Lane across machines. Every notice carries `class:"blocking"|"advisory"` and a `reason`. Saving and checking remain available; with `overlapGate:block`, only unanswered blocking notices stop landing. MCP emits `forge-overlap` notices from these same responses;
 no polling, subscriptions or idle work are added.

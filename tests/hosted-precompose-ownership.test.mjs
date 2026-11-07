@@ -105,9 +105,11 @@ for (const history of [575, 1150])
     // Lane's ~1 KB slim peer row. Calls are unchanged.
     // Reads 1345 -> 1347 (0b12fcfe): one overlap-row read per open sibling at the landing, to see whether
     // it already landed at its head (landed siblings no longer hold the Intent open). Calls and writes unchanged.
+    // Reads 1347 -> 1349 (8dfede85): one main path-history row read per landed receipt, to add the landing
+    // to its 50-entry log for the drift nudge. Calls are unchanged.
     assert(
       budget.calls <= 71 &&
-        source.reduce((n, c) => n + c.documents, 0) <= 1347 &&
+        source.reduce((n, c) => n + c.documents, 0) <= 1349 &&
         source.reduce((n, c) => n + c.writes, 0) <= 416,
       JSON.stringify({
         ...budget,
