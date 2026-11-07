@@ -13,6 +13,7 @@ import { hostedQueueEntries } from './drain.mjs';
 import { usageGate, diskFreeGb, diskNeed, filesystemEventGate } from './gates.mjs';
 import { probeFilesystemEvents } from '../filesystem-event-health.mjs';
 import { pathToFileURL } from 'node:url';
+import { networkFetch } from '../../dist/network-fetch.js';
 import { agentOf } from './agent.mjs';
 import { sharedDeps } from './deps.mjs';
 import { branches, foreignBranches, repository, rulesetName, measureSkew } from './github-arm.mjs';
@@ -255,7 +256,7 @@ export async function main({
     );
   });
   await tryRun('runners', async () => {
-    const res = await fetch('https://www.githubstatus.com/api/v2/components.json');
+    const res = await networkFetch('https://www.githubstatus.com/api/v2/components.json');
     const actions = (await res.json()).components.find(c => c.name === 'Actions');
     check('GitHub Actions status', actions?.status === 'operational', actions?.status ?? 'unknown');
   });

@@ -2,7 +2,9 @@
 import test from 'node:test';
 import { assertAgentResponseShape } from './agent-response-shape.mjs';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { landTerminal, landSummary } from '../dist/hosted-land-summary.js';
 import { landWaitCommand } from '../dist/hosted-land-wait.js';
@@ -21,7 +23,8 @@ async function fixture(t, checkOnly = false) {
     conflictRecovery,
     terminalFailure,
     stalePending,
-    sourceStatus;
+    sourceStatus,
+    pendingPhase = 'ready';
   const gate = new Promise(resolve => {
     release = resolve;
   });
@@ -47,7 +50,7 @@ async function fixture(t, checkOnly = false) {
                     ? 'composing'
                     : accepted
                       ? 'landed'
-                      : 'ready',
+                      : pendingPhase,
               observation: {
                 state:
                   conflictRecovery || terminalFailure
@@ -147,9 +150,9 @@ async function fixture(t, checkOnly = false) {
     process.exitCode = oldExit;
     delete globalThis[key];
   });
-  const run = () =>
+  const run = (root = '/synthetic') =>
     cli.hostedLandCli(
-      '/synthetic',
+      root,
       { message: 'Land' },
       { url: 'https://fixture.invalid', projectId: 'synthetic' },
       { detach: false, wait: true },
@@ -188,6 +191,9 @@ async function fixture(t, checkOnly = false) {
     },
     timeout: () => {
       timeout = true;
+    },
+    pendingPhase: phase => {
+      pendingPhase = phase;
     },
     pendingSource: () => {
       sourcePending = true;
@@ -323,6 +329,57 @@ test('land observation deadline returns IN PROGRESS with the exact wait command 
   // so a foreground land returns before a 600 s agent shell backgrounds it.
   assert.equal(s.budgets.length, 1);
   assert(s.budgets[0] > 530 && s.budgets[0] <= 540, `budget ${s.budgets[0]}`);
+});
+
+// Issue 4f60d57a replay: three land --save clients waited 16-21 min at 0% CPU on one socket after their
+// admission committed, because the landing never left pending. Their retained metrics showed the
+// submitter finished but nothing about the parent's wait. The wait now leaves a local start receipt
+// before it begins (so a killed client still names its phase) and an end receipt with the last state.
+test('a landing that never leaves pending leaves wait receipts naming the phase and last state', async t => {
+  const s = await fixture(t);
+  const parent = mkdtempSync(join(tmpdir(), 'forge-land-wait-')),
+    root = join(parent, 'lane');
+  t.after(() => rmSync(parent, { recursive: true, force: true }));
+  const journal = () => {
+    try {
+      return readFileSync(`${root}.forge-metrics.jsonl`, 'utf8')
+        .split('\n')
+        .filter(Boolean)
+        .map(line => JSON.parse(line))
+        .filter(row => row.kind === 'wait');
+    } catch {
+      return [];
+    }
+  };
+  s.pendingPhase('composing');
+  s.timeout();
+  const pending = s.run(root);
+  await turn();
+  // Still waiting: the start receipt is already on disk, as it would be for a killed client.
+  const during = journal();
+  assert.equal(during.length, 1);
+  assert.equal(during[0].action, 'land');
+  assert.equal(during[0].operationId, s.operationId);
+  assert.equal(during[0].wait.phase, 'start');
+  assert.equal(during[0].wait.waitingFor, 'acceptance');
+  assert(during[0].wait.budgetMs > 530_000 && during[0].wait.budgetMs <= 540_000);
+  s.release();
+  const result = await pending;
+  assert.equal(result.result.waitStatus, 'timeout');
+  assert.equal(process.exitCode, 3);
+  const [start, end] = journal();
+  assert.equal(start.wait.phase, 'start');
+  assert.equal(end.wait.phase, 'end');
+  assert.equal(end.operationId, s.operationId);
+  assert.equal(end.wait.status, 'timeout');
+  assert.equal(end.wait.events, 1);
+  assert.equal(end.wait.retries, 0);
+  assert.equal(end.wait.last.phase, 'composing');
+  assert.equal(end.wait.last.state, 'pending');
+  assert(end.wait.sinceChangeMs >= 0 && end.wait.sinceChangeMs <= end.wait.durationMs);
+  // Local appends only: still one submission call and one observer, no extra read.
+  assert.equal(s.calls.length, 1);
+  assert.deepEqual(s.events, ['subscription']);
 });
 
 test('land returns observed composition conflict details and sync instead of a finish replay', async t => {

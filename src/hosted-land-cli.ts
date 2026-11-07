@@ -32,6 +32,7 @@ import { markOverlapShown, overlapBannerOnce, type HostedOverlapNotice } from '.
 import { LAND_INVOKED_ENV, landTiming, landTimingLine, startLandTiming } from './land-timing.js';
 import { AGENT_WAIT_SECONDS } from './agent-operation-wait.js';
 import { waitFailure } from './wait-failure.js';
+import { withLandWaitMetrics } from './land-wait-metrics.js';
 
 export { landPhase, landSummary };
 
@@ -212,17 +213,24 @@ async function waitLanding(
           'land: observation unavailable; landing still in progress. Continuing to wait.\n',
         );
     };
-    if (result.phase === 'check' && result.run?.id)
-      return await observeHostedRun(
-        transport,
-        { runId: result.run.id, timeoutSeconds },
-        controller.signal,
+    // A local start/end receipt for this wait: a killed client still names the phase it was in.
+    if (result.phase === 'check' && result.run?.id) {
+      const runId = result.run.id;
+      return await withLandWaitMetrics(
+        root,
+        { operationId: runId, waitingFor: 'run', budgetSeconds: timeoutSeconds },
         emit,
+        observed => observeHostedRun(transport, { runId, timeoutSeconds }, controller.signal, observed),
       );
-    else if (response.operationId) {
+    } else if (response.operationId) {
       const selection = { operationIds: [response.operationId], timeoutSeconds, until: 'acceptance' };
       try {
-        return await observeHostedSubmissions(transport, selection, controller.signal, emit);
+        return await withLandWaitMetrics(
+          root,
+          { operationId: response.operationId, waitingFor: 'acceptance', budgetSeconds: timeoutSeconds },
+          emit,
+          observed => observeHostedSubmissions(transport, selection, controller.signal, observed),
+        );
       } catch (error) {
         // A check-only or save operation id is not a landing: follow what this client recorded for it.
         const followed = await followLocalOperation(

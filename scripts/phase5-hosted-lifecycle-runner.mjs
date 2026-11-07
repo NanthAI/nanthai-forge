@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { makeFunctionReference } from 'convex/server';
 import { executeHostedMacCheck } from '../dist/hosted-mac-execute.js';
 import { hostedCheckKey } from '../dist/worker-cli.js';
+import { networkFetch, networkTimeout } from '../dist/network-fetch.js';
 const parse = value => (typeof value === 'string' ? JSON.parse(value) : value);
 
 /** One finite, harmless check on the scratch project. It uses the existing
@@ -50,19 +51,19 @@ export async function runDrillCheck(client, exchange, address, machineId, until)
       action('projectHostedOutputApi:workerCommit', entry({ message, signature })),
     put: async (url, headers, bytes) => ({
       status: (
-        await fetch(url, {
+        await networkFetch(url, {
           method: 'PUT',
           headers,
           body: bytes,
           redirect: 'error',
-          signal: AbortSignal.timeout(30_000),
+          signal: networkTimeout(30_000),
         })
       ).status,
     }),
   };
   await executeHostedMacCheck(
     claimed.run,
-    AbortSignal.timeout(60_000),
+    networkTimeout(60_000),
     async command => (await control(command)).run,
     {
       objects: ids => exchange.objects(ids),

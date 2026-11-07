@@ -20,7 +20,7 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { setTimeout as wait } from 'node:timers/promises';
 import { createInterface } from 'node:readline';
-import { ConvexHttpClient } from 'convex/browser';
+import { deadlineConvexClient } from '../dist/network-convex-client.js';
 import { makeFunctionReference as ref, getFunctionName } from 'convex/server';
 import { importBenchmarkGuard } from './benchmark-import-guard.mjs';
 
@@ -63,7 +63,7 @@ const auth = JSON.parse(
 const credential = auth.deployments[URL];
 if (!credential || credential.expiresAt < Date.now())
   throw Error('Forge CLI credential missing or expired for ' + URL);
-const owner = new ConvexHttpClient(URL);
+const owner = deadlineConvexClient(URL, {});
 owner.setAuth(credential.token);
 
 const convexRun = (name, args) =>

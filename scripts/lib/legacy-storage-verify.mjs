@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { createHash } from 'node:crypto';
 import { presign } from '../../dist/r2-presign.js';
+import { networkFetch, networkTimeout } from '../../dist/network-fetch.js';
 
 /** The cleanup's own page receipts list refused storage ids. That records a
  * decision, not a dependency: counting it would make every refused file
@@ -93,13 +94,13 @@ function safeErrorCode(error) {
   if (typeof code === 'string' && /^[A-Z][A-Z0-9_]{1,63}$/.test(code)) return code;
   return typeof error?.name === 'string' && /^[A-Za-z]{1,40}$/.test(error.name) ? error.name : 'unknown';
 }
-export function verificationIo(config, metrics, fetcher = fetch) {
+export function verificationIo(config, metrics, fetcher = networkFetch) {
   async function hash(url, size, provider) {
     metrics[provider + 'Gets']++;
     const response = await fetcher(url, {
       headers: { 'accept-encoding': 'identity' },
       redirect: 'error',
-      signal: AbortSignal.timeout(120_000),
+      signal: networkTimeout(120_000),
     });
     return hashResponse(response, size, bytes => {
       metrics[provider + 'Bytes'] += bytes;
@@ -121,7 +122,7 @@ export function verificationIo(config, metrics, fetcher = fetch) {
           method: 'HEAD',
           headers: { 'accept-encoding': 'identity' },
           redirect: 'error',
-          signal: AbortSignal.timeout(20_000),
+          signal: networkTimeout(20_000),
         });
       } catch (error) {
         throw headError('VERIFY_HEAD_UNAVAILABLE', {

@@ -5,7 +5,8 @@ import { mkdir, readFile, writeFile, chmod, lstat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
-import { ConvexHttpClient } from 'convex/browser';
+import { deadlineConvexClient } from '../dist/network-convex-client.js';
+import { networkFetch, networkTimeout } from '../dist/network-fetch.js';
 import { makeFunctionReference } from 'convex/server';
 import { ShotError } from './ui-shots/options.mjs';
 import { readerGrantOperationId } from './ui-bot-grant.mjs';
@@ -57,12 +58,12 @@ try {
     }).trim();
     if (!key.startsWith('sk_test_')) throw new ShotError('A Clerk DEV secret key is required.');
     async function clerk(path, method = 'GET', body) {
-      const response = await fetch(`https://api.clerk.com/v1${path}`, {
+      const response = await networkFetch(`https://api.clerk.com/v1${path}`, {
         method,
         headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
         ...(body ? { body: JSON.stringify(body) } : {}),
         redirect: 'error',
-        signal: AbortSignal.timeout(30_000),
+        signal: networkTimeout(30_000),
       });
       if (!response.ok)
         throw new ShotError(`Clerk provisioning returned HTTP ${response.status}; response redacted.`);
@@ -109,7 +110,7 @@ try {
       const auth = JSON.parse(await readFile(authPath, 'utf8')).deployments?.[deployment];
       if (!auth || auth.scope !== 'cli' || auth.expiresAt <= Date.now())
         throw new ShotError('A current owner nforge login with CLI scope is required.');
-      const client = new ConvexHttpClient(deployment, { logger: false });
+      const client = deadlineConvexClient(deployment, { logger: false });
       client.setAuth(auth.token);
       stage = 'verify owner project access';
       const project = await client.query(makeFunctionReference('projectWork:state'), { projectId });

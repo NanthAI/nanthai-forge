@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { ConvexHttpClient } from 'convex/browser';
+import { deadlineConvexClient } from '../dist/network-convex-client.js';
+import { networkFetch, networkTimeout } from '../dist/network-fetch.js';
 import { api, internal } from '../convex/_generated/api.js';
 
 export const githubOidcIssuer = 'https://token.actions.githubusercontent.com';
@@ -18,10 +19,10 @@ async function token(audience) {
     'Use GitHub’s native job token endpoint.',
   );
   url.searchParams.set('audience', audience);
-  const response = await fetch(url, {
+  const response = await networkFetch(url, {
     headers: { Authorization: `Bearer ${request}` },
     redirect: 'error',
-    signal: AbortSignal.timeout(30_000),
+    signal: networkTimeout(30_000),
   });
   assert(response.ok, 'GitHub did not issue the ephemeral OIDC token.');
   const result = await response.json();
@@ -41,7 +42,7 @@ async function token(audience) {
 // This exercises real signed bearer verification, not setAdminAuth. Native admin is used only to inspect persisted ownership.
 export async function verifyGithubOidc(clients, repository, ref, original) {
   const current = await token('convex'),
-    client = new ConvexHttpClient(clients.anon.url, { logger: false });
+    client = deadlineConvexClient(clients.anon.url, { logger: false });
   client.setAuth(current.jwt);
   const retained = original ?? {
     operationId: randomUUID(),
@@ -77,7 +78,7 @@ export async function verifyGithubOidc(clients, repository, ref, original) {
   );
   for (const caller of [clients.anon, clients.outsider, clients.admin])
     await assert.rejects(caller.query(api.secrets.details, { id: retained.id }));
-  const invalid = new ConvexHttpClient(clients.anon.url, { logger: false });
+  const invalid = deadlineConvexClient(clients.anon.url, { logger: false });
   invalid.setAuth((await token('forge-negative-audience')).jwt);
   await assert.rejects(
     invalid.mutation(api.teams.create, {

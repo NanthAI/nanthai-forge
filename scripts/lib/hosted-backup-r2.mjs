@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { createHash } from 'node:crypto';
 import { presign } from '../../dist/r2-presign.js';
+import { networkFetch, networkTimeout } from '../../dist/network-fetch.js';
 import { failure } from './hosted-durability-compare.mjs';
 
 const escape = value => value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('"', '&quot;');
@@ -12,7 +13,7 @@ const tag = (xml, name) => tags(xml, name)[0];
 
 // The existing path-style S3 signer and R2 environment names are shared with blob storage.
 // Raw provider errors, response bodies and signed URLs must never reach CLI output.
-export function r2Client(env = process.env, fetcher = fetch) {
+export function r2Client(env = process.env, fetcher = networkFetch) {
   const {
     R2_ACCOUNT_ID: accountId,
     R2_BUCKET: bucket,
@@ -38,7 +39,7 @@ export function r2Client(env = process.env, fetcher = fetch) {
           ...(method === 'GET' || method === 'HEAD' ? { 'accept-encoding': 'identity' } : {}),
         },
         ...(body === undefined ? {} : { body }),
-        signal: AbortSignal.timeout(120_000),
+        signal: networkTimeout(120_000),
       });
       if (method === 'HEAD' && response.status === 404) return null;
       if (!response.ok) throw failure('BACKUP_R2_FAILED');

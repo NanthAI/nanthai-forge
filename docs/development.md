@@ -14,7 +14,7 @@ npm run format               # oxfmt --write; run before committing
 
 | Command | What it does |
 | --- | --- |
-| `npm run check` | Validates JSON, Markdown links, license inventory freshness and required root files; rejects machine-specific home paths and live-query arguments or `refreshKey` values driven by the clock (idle tabs must cost nothing) |
+| `npm run check` | Validates JSON, Markdown links, license inventory freshness and required root files; rejects machine-specific home paths and live-query arguments or `refreshKey` values driven by the clock (idle tabs must cost nothing); rejects network calls in `src/` and `scripts/` that bypass `networkFetch`, `networkTimeout` or `deadlineConvexClient` (scripts import them from `dist/`) |
 | `npm run typecheck` | Native TypeScript for all four scopes, including web JSX |
 | `npm run typecheck:tsc` | Explicit tsc 5.9.3 fallback for all four projects |
 | `npm run build:core` | Native TypeScript JavaScript and published declarations |

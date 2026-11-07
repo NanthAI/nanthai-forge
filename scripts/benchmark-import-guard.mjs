@@ -2,6 +2,7 @@
 import { randomUUID } from 'node:crypto';
 import { setTimeout as wait } from 'node:timers/promises';
 import { makeFunctionReference } from 'convex/server';
+import { networkFetch, networkTimeout } from '../dist/network-fetch.js';
 import { ImportBenchmarkMonitor } from './benchmark-import-monitor.mjs';
 
 /** Live adapter: admin is deployment-admin authenticated; owner is the ordinary
@@ -157,14 +158,14 @@ export async function benchmarkLogStream({
   adminKey,
   signal,
   onEvent,
-  fetchImpl = fetch,
+  fetchImpl = networkFetch,
   now = Date.now,
 }) {
   const read = async cursor => {
     const response = await fetchImpl(`${url}/api/stream_function_logs?cursor=${cursor}`, {
       headers: { Authorization: `Convex ${adminKey}` },
       redirect: 'error',
-      signal: AbortSignal.any([signal, AbortSignal.timeout(30_000)]),
+      signal: AbortSignal.any([signal, networkTimeout(30_000)]),
     });
     if (!response.ok) throw Error('BENCHMARK_LOG_UNAVAILABLE');
     const page = await response.json();

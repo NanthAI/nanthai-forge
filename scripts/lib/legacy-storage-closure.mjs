@@ -5,6 +5,7 @@ import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { readFile } from 'node:fs/promises';
 import { presign } from '../../dist/r2-presign.js';
+import { networkFetch, networkTimeout } from '../../dist/network-fetch.js';
 import { metadataSource, digestHex } from './legacy-storage-verify.mjs';
 import { privateJson } from './legacy-storage-journal.mjs';
 export const closureHash = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -128,7 +129,7 @@ export async function closeBodies(audit, scan, reader, config, out, options = {}
     references = [],
     failures = [];
   let frontier = roots;
-  const fetcher = options.fetcher ?? fetch;
+  const fetcher = options.fetcher ?? networkFetch;
   while (frontier.length) {
     const nodes = [];
     for (const n of frontier) {
@@ -184,7 +185,7 @@ export async function closeBodies(audit, scan, reader, config, out, options = {}
               const response = await fetcher(url, {
                 headers: { 'accept-encoding': 'identity' },
                 redirect: 'error',
-                signal: AbortSignal.timeout(120000),
+                signal: networkTimeout(120000),
               });
               body = await inspectBody(response, pin, ids, cache.metrics, n.kind);
               cache.nodes[n.key] = body;

@@ -46,7 +46,7 @@ import {
 import { executeHostedPolicy } from './hosted-agent-policy.js';
 import { executeHostedPlanning, markPlanningStarted } from './hosted-agent-planning.js';
 import { isPlanningPrefix } from './planning-id.js';
-import { executeHostedMetrics } from './hosted-agent-metrics.js';
+import { executeHostedMetrics, METRICS_DEADLINE_MS, metricsDeadline } from './hosted-agent-metrics.js';
 import { laneLiveness, readLaneEntry, recordLane, withLaneCommand } from './lane-registry.js';
 import { convexLaneStates, laneHousekeeping, markerIdentity } from './lane-prune.js';
 import { shareDependencies } from './shared-dependencies.js';
@@ -482,6 +482,13 @@ export class HostedAgentTransport {
     input: Record<string, unknown>,
     signal?: AbortSignal,
   ): Promise<HostedAgentResponse> {
+    // Issue e32cb0e7: capability discovery shares the metrics budget.
+    if (requestedAction === 'metrics')
+      return metricsDeadline(
+        input,
+        () => this.dispatchRequest(requestedAction, input, signal),
+        this.metricsDeadlineMs,
+      );
     if (
       [
         'capabilities',
@@ -489,7 +496,6 @@ export class HostedAgentTransport {
         'observe',
         'landing',
         'check-settings',
-        'metrics',
         'policy',
         ...hostedAgentPlanningActions,
       ].includes(requestedAction)
@@ -695,6 +701,7 @@ export class HostedAgentTransport {
               }),
             },
             command.data,
+            this.metricsDeadlineMs,
           ),
         );
       if (action === 'capabilities') {
@@ -1081,6 +1088,8 @@ export class HostedAgentTransport {
   }
   /** Seconds-bound for checkout and dependency sharing after the durable start. */
   startBoundMs = START_COMPLETION_SECONDS * 1000;
+  /** Whole metrics action, capability discovery included (e32cb0e7). */
+  metricsDeadlineMs = METRICS_DEADLINE_MS;
   /** Set when a bounded step was abandoned: the CLI must not wait for it to exit. */
   abandonedStart = false;
   /** Checkout and dependency sharing after the durable start, within the bound. A stall or failure

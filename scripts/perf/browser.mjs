@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { readFile, lstat } from 'node:fs/promises';
 import { chromium } from 'playwright';
-import { ConvexHttpClient } from 'convex/browser';
+import { deadlineConvexClient } from '../../dist/network-convex-client.js';
 import { makeFunctionReference } from 'convex/server';
 import { signIn, convexToken } from '../ui-shots/browser.mjs';
 import { destination } from '../ui-shots/options.mjs';
@@ -54,7 +54,7 @@ export async function browserSamples(config) {
     await signInPage.waitForFunction(() => Boolean(window.Clerk?.session));
     const token = await convexToken(signInPage);
     if (!token || !deployment) throw new Error('PERF_PROJECT_CONNECTION');
-    const client = new ConvexHttpClient(deployment, { logger: false });
+    const client = deadlineConvexClient(deployment, { logger: false });
     client.setAuth(token);
     try {
       await client.query(makeFunctionReference('projectWork:state'), { projectId: project });

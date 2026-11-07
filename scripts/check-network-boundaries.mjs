@@ -1,10 +1,25 @@
 // SPDX-License-Identifier: Apache-2.0
 import ts from 'typescript';
 
+/** Files that may touch the global fetch or a primitive without the shared
+ * helper, each with its reason. Keep this short; a new entry needs review. */
+const exempt = new Map([
+  // Measurement harnesses replace the global under networkFetch to count requests;
+  // the shared helper still owns every deadline and retry above them.
+  ['scripts/measure-host.mjs', 'intercept'],
+  ['scripts/measure-exchange-latency.mjs', 'intercept'],
+  ['scripts/benchmark-import-projection.mjs', 'intercept'],
+  // Copied alone beside a benchmark agent's nforge shim (no repo imports). It
+  // streams one local loopback command whose own wait is bounded (540 s).
+  ['scripts/bench-t3code/relay-client.mjs', 'primitive'],
+]);
+
 /** Inspect executable syntax, so comments and type-only `typeof fetch` cannot
- * bless a bare request. One HTTP primitive and one complete-RPC constructor. */
+ * bless a bare request. One HTTP primitive and one complete-RPC constructor.
+ * Scripts reach the same helper through dist/ (`npm run build:core`). */
 export function networkBoundaryFindings(path, text) {
-  if (!path.startsWith('src/') || !/\.(?:[cm]?[jt]s|[jt]sx)$/.test(path)) return [];
+  if (!/^(?:src|scripts)\//.test(path) || !/\.(?:[cm]?[jt]s|[jt]sx)$/.test(path)) return [];
+  if (path === 'scripts/check-network-boundaries.mjs') return [];
   const source = ts.createSourceFile(path, text, ts.ScriptTarget.Latest, true);
   const findings = [];
   const fail = (node, message) => {
@@ -33,7 +48,8 @@ export function networkBoundaryFindings(path, text) {
       const accessor =
         ts.isPropertyAccessExpression(parent) &&
         parent.name === node &&
-        !['globalThis', 'window', 'self'].includes(parent.expression.getText(source));
+        (exempt.get(path) === 'intercept' ||
+          !['globalThis', 'window', 'self'].includes(parent.expression.getText(source)));
       if (!property && !type && !accessor)
         fail(node, 'Use networkFetch; bare or aliased fetch bypasses shared deadlines.');
     }
@@ -58,6 +74,7 @@ export function networkBoundaryFindings(path, text) {
         node.moduleSpecifier.text,
       ) &&
       path !== 'src/exchange-convex-fetch.ts' &&
+      exempt.get(path) !== 'primitive' &&
       !node.importClause?.isTypeOnly &&
       (node.importClause?.name ||
         ts.isNamespaceImport(node.importClause?.namedBindings ?? {}) ||

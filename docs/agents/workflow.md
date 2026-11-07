@@ -1776,7 +1776,7 @@ cancellations; nested phases retain the original requester. Automatic writes nam
 the Forge owner as their system requester. These append-only records live in
 `self-metrics.jsonl` beside Work metadata. Hosted clients append to
 `<checkout>.forge-metrics.jsonl` beside the checkout, so a failed capability lookup
-creates neither an owner nor a recovery cache. Recording adds no hosted mutation or polling. A receipt-write failure
+creates neither an owner nor a recovery cache. `land` also appends a `wait` receipt before and after its outcome wait (last observed phase, status, time since a change), so a killed client still names its phase. Recording adds no hosted mutation or polling. A receipt-write failure
 reports `METRIC_RECEIPT_UNAVAILABLE` without changing the action's outcome.
 Mutation receipts are emitted only after the Work commit pointer is published,
 with its committed revision; no-op, refused and aborted writes emit none.

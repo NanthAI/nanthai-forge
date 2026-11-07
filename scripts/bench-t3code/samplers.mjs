@@ -4,6 +4,7 @@ import { appendFileSync } from 'node:fs';
 import { loadavg, freemem, totalmem } from 'node:os';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { networkFetch } from '../../dist/network-fetch.js';
 
 const run = promisify(execFile);
 
@@ -43,7 +44,8 @@ export async function clockOffsets(convexUrl) {
   const one = async url => {
     try {
       const before = Date.now();
-      const res = await fetch(url, { method: 'HEAD' });
+      // One attempt: a retry would skew the measured round trip.
+      const res = await networkFetch(url, { method: 'HEAD' }, { retries: 0 });
       const local = (before + Date.now()) / 2;
       return Math.round((Date.parse(res.headers.get('date')) - local) / 100) / 10;
     } catch {

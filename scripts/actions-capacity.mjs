@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { retryActionsInfrastructure, actionsInfrastructureResponse } from '../dist/hosted-actions-retry.js';
+import { networkFetch } from '../dist/network-fetch.js';
 const pageSize = 20;
 const maxBytes = 1024 * 1024;
 const freeJobCap = 20;
@@ -20,7 +21,7 @@ export async function readActionsCapacity({
   workflow = 'forge-check.yml',
   runId,
   token,
-  request = fetch,
+  request = networkFetch,
   jobCap = actionsJobCap(),
 }) {
   if (

@@ -2,7 +2,7 @@
 import { routeUrlState, projectIdentity } from '../src/project-routes.ts';
 import { readFile, lstat, mkdir, writeFile } from 'node:fs/promises';
 import { chromium } from 'playwright';
-import { ConvexHttpClient } from 'convex/browser';
+import { deadlineConvexClient } from '../dist/network-convex-client.js';
 import { makeFunctionReference } from 'convex/server';
 import { captureLanding } from './ui-shots/landing.mjs';
 import { options, usage, destination, selectedReviewRoute, ShotError } from './ui-shots/options.mjs';
@@ -65,7 +65,7 @@ try {
     async function query(name, args) {
       const token = await convexToken(page);
       if (!token || !deployment) throw new ShotError('Could not identify the signed-in Convex connection.');
-      const client = new ConvexHttpClient(deployment, { logger: false });
+      const client = deadlineConvexClient(deployment, { logger: false });
       client.setAuth(token);
       return client.query(makeFunctionReference(name), args);
     }

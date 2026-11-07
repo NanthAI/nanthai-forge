@@ -7,7 +7,8 @@ import { join, resolve } from 'node:path';
 import { parseEnv } from 'node:util';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { ConvexHttpClient } from 'convex/browser';
+import { deadlineConvexClient } from '../dist/network-convex-client.js';
+import { networkFetch, networkTimeout } from '../dist/network-fetch.js';
 import { api, internal } from '../convex/_generated/api.js';
 import { decodeHostedArtifact } from '../dist/hosted-artifact.js';
 import { releases, release, digest, main, portNumber } from './selfhost.mjs';
@@ -82,16 +83,18 @@ async function start(directory, s3Env) {
         throw error;
       }
       try {
-        if ((await fetch(url + '/version', { signal: AbortSignal.timeout(1000) })).ok) break;
+        // The loop owns readiness retries: one attempt per probe.
+        if ((await networkFetch(url + '/version', { signal: networkTimeout(1000) }, { retries: 0 })).ok)
+          break;
       } catch {
         /* Wait only for this new owned listener. */
       }
       assert(attempt < 100, 'Owned native backend did not become ready.');
       await new Promise(done => setTimeout(done, 100));
     }
-    const anon = new ConvexHttpClient(url, { logger: false }),
-      admin = new ConvexHttpClient(url, { logger: false }),
-      outsider = new ConvexHttpClient(url, { logger: false });
+    const anon = deadlineConvexClient(url, { logger: false }),
+      admin = deadlineConvexClient(url, { logger: false }),
+      outsider = deadlineConvexClient(url, { logger: false });
     const identity = subject => ({ subject, issuer, tokenIdentifier: issuer + '|' + subject });
     admin.setAdminAuth(env.CONVEX_SELF_HOSTED_ADMIN_KEY, identity(owner));
     outsider.setAdminAuth(env.CONVEX_SELF_HOSTED_ADMIN_KEY, identity('forge_native_outsider'));
@@ -157,7 +160,7 @@ async function snapshot(client, id) {
     });
     sha ??= part.digest;
     assert.equal(part.digest, sha);
-    parts.push(Buffer.from(part.direct ? await (await fetch(part.url)).arrayBuffer() : part.data));
+    parts.push(Buffer.from(part.direct ? await (await networkFetch(part.url)).arrayBuffer() : part.data));
     offset += parts.at(-1).length;
     assert(offset <= part.size);
     if (offset === part.size) break;

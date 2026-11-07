@@ -4,6 +4,7 @@
 // goes through broker.mjs in its own process, so no harness work can delay an agent.
 import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
+import { networkFetch } from '../../dist/network-fetch.js';
 import {
   existsSync,
   readFileSync,
@@ -298,7 +299,7 @@ export function forgeArm(config, { callLog, ws, ledger = null, cellDir = dirname
     async agentEnv(root, task, env) {
       const token = randomUUID();
       const base = `http://127.0.0.1:${broker.port}`;
-      const res = await fetch(`${base}/register`, {
+      const res = await networkFetch(`${base}/register`, {
         method: 'POST',
         body: JSON.stringify({ admin: broker.admin, token, root: realpathSync(root), task, env }),
       });

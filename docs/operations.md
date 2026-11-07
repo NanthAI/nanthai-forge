@@ -194,6 +194,9 @@ lag) by one shared offset, and `page.nextCursor` continues the same `from`/`to`.
 Counts and totals are whole on every page; the per-day sections keep their counts and
 report `rowsOmitted` instead of rows (a one-day window returns them). Paging bounds the
 reply, not the read: each page recomputes the report from the same hosted pages.
+The whole `metrics` action, capability discovery included, ends within 100 s (under an
+agent shell's two-minute limit); a larger window ends with `METRICS_TIMEOUT`, changes
+nothing and names the one-day command to run next.
 
 `landings {from,to,limit?,cursor?}` (`nforge agent ROOT landings`) is the cheap read for
 replays and cost capture: accepted landings in the UTC window [from,to) by commit time,

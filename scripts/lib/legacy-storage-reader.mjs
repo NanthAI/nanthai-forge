@@ -3,6 +3,7 @@ import { spawn } from 'node:child_process';
 import { resolve } from 'node:path';
 import { deploymentOptions } from '../hosted-durability.mjs';
 import { presign } from '../../dist/r2-presign.js';
+import { networkFetch, networkTimeout } from '../../dist/network-fetch.js';
 
 /** Only the pinned CLI's readonly inline query, table list and individual config
  * reads are reachable. Provider output is captured and never included in errors. */
@@ -72,7 +73,7 @@ const unescape = s =>
     .replaceAll('&quot;', '"')
     .replaceAll('&apos;', "'");
 /** One LIST (1000 object metadata entries) per page. Never HEAD per object. */
-export async function listR2(config, accept, fetcher = fetch, remainingDollars = 1) {
+export async function listR2(config, accept, fetcher = networkFetch, remainingDollars = 1) {
   let cursor,
     pages = 0,
     objects = 0,
@@ -94,7 +95,7 @@ export async function listR2(config, accept, fetcher = fetch, remainingDollars =
         ...(cursor ? { 'continuation-token': cursor } : {}),
       },
     });
-    const response = await fetcher(url, { signal: AbortSignal.timeout(120_000) });
+    const response = await fetcher(url, { signal: networkTimeout(120_000) });
     if (!response.ok) throw new Error('AUDIT_R2_LIST_FAILED');
     const xml = await response.text();
     responseBytes += Buffer.byteLength(xml);

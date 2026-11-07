@@ -18,6 +18,7 @@ import {
   copyFileSync,
 } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
+import { networkFetch } from '../../dist/network-fetch.js';
 import { dirname, join, relative, isAbsolute, resolve } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
 import { checkPlan, planPath } from './plan.mjs';
@@ -139,7 +140,7 @@ export function realContext(B, flags = {}) {
       return Number(line[3]) / 1024 / 1024;
     },
     nodeVersion: () => process.version,
-    fetchText: async url => (await fetch(url)).text(),
+    fetchText: async url => (await networkFetch(url)).text(),
     log: console.log,
   };
 }

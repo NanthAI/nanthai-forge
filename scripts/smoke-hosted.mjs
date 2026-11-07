@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 import assert from 'node:assert/strict';
-import { ConvexHttpClient } from 'convex/browser';
+import { deadlineConvexClient } from '../dist/network-convex-client.js';
 import { api } from '../convex/_generated/api.js';
 import { ConvexError } from 'convex/values';
 
 assert.ok(process.env.VITE_CONVEX_URL, 'Load the separate Forge .env.local.');
 assert.ok(process.argv[2], 'Pass a licensed public GitHub repository URL.');
-const client = new ConvexHttpClient(process.env.VITE_CONVEX_URL);
+const client = deadlineConvexClient(process.env.VITE_CONVEX_URL, {});
 if (process.argv[2] === '--failed-job') {
   assert.ok(process.argv[3], 'Pass an import whose scheduled worker failed or was canceled.');
   const job = JSON.parse(await client.action(api.hosted.status, { id: process.argv[3] }));

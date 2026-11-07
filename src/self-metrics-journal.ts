@@ -21,8 +21,9 @@ export type Requester = {
 };
 export type SelfMetricReceipt = Requester & {
   schema: 1;
-  kind: 'lifecycle' | 'mutation' | 'observation' | 'checkout';
+  kind: 'lifecycle' | 'mutation' | 'observation' | 'checkout' | 'wait';
   checkout?: import('./checkout-open-metrics.js').CheckoutOpenMeasurement;
+  wait?: import('./land-wait-metrics.js').LandWaitMeasurement;
   observation?: MetricObservation;
   disk?: DiskSample;
   at: string;
