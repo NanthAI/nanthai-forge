@@ -206,7 +206,8 @@ ends at 800 KB read) with no writes and no idle work. Each row carries `receiptI
 `submissionId`, `laneId`, `intentId`, `kind`, `submittedAt`, `admittedAt` (the end of the
 pre-queue Lane check, null when the change queued unadmitted), `committedAt`,
 `admissionBase` (the first landing attempt's main) and `landedBase` (main the receipt
-moved), `mainMoved` (they differ), the receipt's `firstCheck`, `landedHead`,
+moved), `mainMoved` (they differ), the receipt's `firstCheck` and `check.skipped` (as
+`checkSkipped`, null when every selected part ran), `landedHead`,
 `checkRunIds` (the admission Lane run, each attempt's run, the accepting run; at most 8),
 `followingAudit` (`{runId,verdict,sequence}` of the first stored main-audit event at or after
 the landing: `passed`, `failed` or `stalled`; null when none is stored yet), `recomposeCount` and `conflictPaths`. Text-conflict paths of an earlier generation live only

@@ -102,6 +102,27 @@ export const hostedCheckRequestSchema = z
     expectedEnvironment: checkHash,
   })
   .strict();
+/** The configured check's test shards were not affected by the change's paths, so
+ * none ran and the landing never waited on them (Issue 9e71abcc). Only a plan with
+ * the static job alone (shardCount 1) can carry it; the receipt copies it. */
+export const checkSkippedSchema = z
+  .object({ part: z.literal('tests'), status: z.literal('not-affected'), reason: z.string().min(1).max(300) })
+  .strict();
+export type CheckSkipped = z.infer<typeof checkSkippedSchema>;
+/** Decided from the selection the planner already made from the changed paths:
+ * the standard check selects no test for a docs-only change. Opaque (bring-your-own)
+ * commands have no Forge-known scope, so they always run in full and never skip. */
+export function testsNotAffected(
+  selection: { scope: string; reason?: string; tests: readonly string[] },
+  standard: boolean,
+): CheckSkipped | undefined {
+  if (!standard || selection.scope !== 'docs' || selection.tests.length) return undefined;
+  return {
+    part: 'tests',
+    status: 'not-affected',
+    reason: (selection.reason || 'No changed path reaches a test').slice(0, 300),
+  };
+}
 /** Prepared by fixed provider code after reading exact source/lockfile/selection.
  * Shard membership and command bytes live in the immutable plan object. Indexes
  * cover [0, shardCount), including the static job where applicable. */
@@ -115,8 +136,12 @@ export const hostedCheckPlanSchema = z
     selection: checkObject,
     manifest: checkObject,
     shardCount: checkNumber.refine(n => n > 0),
+    skipped: checkSkippedSchema.optional(),
   })
-  .strict();
+  .strict()
+  .refine(plan => !plan.skipped || plan.shardCount === 1, {
+    message: 'Only a plan without test shards can record skipped tests.',
+  });
 export const hostedCheckStatusSchema = z.enum([
   'queued',
   'preparing',

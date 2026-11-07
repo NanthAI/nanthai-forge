@@ -179,6 +179,7 @@ test('old runner/new server: real plan validator accepts full echo omission and 
   const f = await fixture(t, contract);
   const run = await f.prepare({ scope: 'full', reason: 'Old runner', tests: [leaf] });
   assert.equal(run.gate.effective, 'full');
+  assert.equal(run.plan.skipped, undefined, 'a plan with test shards skips nothing');
   assert.equal([...f.tables.projectHostedCheckRuns.values()][0].gate.effective, 'full');
 });
 test('new runner/old server: legacy plan contains no gate fields and remains valid', async t => {
@@ -288,6 +289,12 @@ test('checked docs satisfy full and contract gates and persist their effective s
       });
       assert.equal(run.gate.effective, 'docs');
       assert.equal(run.plan.shardCount, 1);
+      // No test applies: skipped as not affected, never pending (Issue 9e71abcc).
+      assert.deepEqual(run.plan.skipped, {
+        part: 'tests',
+        status: 'not-affected',
+        reason: 'Only Markdown documentation changed',
+      });
       assert.equal([...f.tables.projectHostedCheckRuns.values()][0].gate.effective, 'docs');
     });
 });

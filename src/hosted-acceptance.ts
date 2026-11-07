@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
 import { landingMessageSchema, cohortMessagesSchema } from './landing-message.js';
-import { hostedMacEvidenceSchema } from './hosted-check.js';
+import { checkSkippedSchema, hostedMacEvidenceSchema } from './hosted-check.js';
 import { hostedLandingAttemptSchema } from './hosted-landing.js';
 import { canonicalPayload } from './hosted-source-operation.js';
 import { digest } from './portable-hash.js';
@@ -56,6 +56,8 @@ export const hostedAcceptanceSchema = z
         planDigest: hash,
         executionId: z.string().min(1),
         macEvidence: hostedMacEvidenceSchema.optional(),
+        /** Test shards the change's paths did not reach: skipped, never pending (Issue 9e71abcc). */
+        skipped: checkSkippedSchema.optional(),
       })
       .strict()
       .nullable(),

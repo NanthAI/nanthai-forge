@@ -205,6 +205,7 @@ export async function publishAcceptance(
       planDigest: run.planDigest!,
       executionId: run.executionId!,
       ...(run.macEvidence ? { macEvidence: run.macEvidence } : {}),
+      ...(run.plan?.skipped ? { skipped: run.plan.skipped } : {}),
     };
   }
   invariant(

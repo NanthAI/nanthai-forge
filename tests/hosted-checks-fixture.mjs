@@ -193,7 +193,9 @@ export async function checksFixture(source = null) {
   let machineOwner;
   // Runner-reported test selection bytes; real runners write JSON with a scope.
   let planSelection = 'synthetic-test-selection';
-  const prepare = async (id, shardCount = 2, overrides = {}) => {
+  // Runner-planned extras for every later prepare, e.g. `{ shardCount: 1, skipped }` for a docs-only plan.
+  let planOverrides = {};
+  const prepare = async (id, shardCount = 2, overrides = planOverrides) => {
     const owner = machineOwner ?? randomUUID(),
       claim = await control(id, { kind: 'claim', owner, leaseMs: 60000 });
     const plan = {
@@ -320,6 +322,9 @@ export async function checksFixture(source = null) {
     objectBytes,
     setPlanSelection: value => {
       planSelection = value;
+    },
+    setPlanOverrides: value => {
+      planOverrides = value;
     },
     selection,
     enqueue,

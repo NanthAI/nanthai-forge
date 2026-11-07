@@ -104,6 +104,8 @@ async function evidence(
       landedBase,
       mainMoved: admissionBase ? admissionBase.receiptId !== landedBase.receiptId : null,
       firstCheck: receipt.firstCheck ?? null,
+      // Test shards the change did not reach: skipped, never pending (Issue 9e71abcc).
+      checkSkipped: receipt.check?.skipped ?? null,
       landedHead: receipt.candidate.head,
       checkRunIds: runIds.slice(0, LANDINGS_RUN_IDS),
       ...(runIds.length > LANDINGS_RUN_IDS ? { moreCheckRunIds: runIds.length - LANDINGS_RUN_IDS } : {}),

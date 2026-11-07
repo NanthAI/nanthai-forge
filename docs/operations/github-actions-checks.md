@@ -33,6 +33,18 @@ an unstarted old-runtime plan needs a new check on the fixed runtime.
 Arbitrary commands run once in the static job. Candidate sources must include the
 Actions-aware standard check script to use standard sharding.
 
+**Checks that do not apply skip, never wait.** A project has one configured landing
+check and no per-check path filters, so no required check can sit pending because a
+change is outside its paths. The planner decides what applies from the changed-path
+list it already holds: test shards a change does not reach are not dispatched, and the
+landing waits only for the jobs that apply. When no test applies (a docs-only change
+under the standard check) the plan has the static job alone, and the run, its acceptance
+receipt (`check.skipped`) and the `landings` row (`checkSkipped`) record
+`{"part":"tests","status":"not-affected","reason":…}` with the planner's reason. A change
+that reaches tests selects them and waits for every shard; its receipt has no `skipped`.
+Opaque bring-your-own commands, and machine runners, which plan the whole configured
+check, have no scope Forge can read: they run in full on every change and never skip.
+
 A standard check never passes without running a test for a change that touches code. Every
 planner (local, owner, hosted gate planning) applies `scripts/selection-guard.mjs`: a non-docs selection
 with zero tests runs the fixed smoke set instead (every test file when the source has no smoke file),

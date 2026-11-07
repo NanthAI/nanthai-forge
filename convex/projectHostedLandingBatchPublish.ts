@@ -225,6 +225,7 @@ export async function publishLandingBatch(ctx: MutationCtx, claim: LandingClaim,
     planDigest: run.planDigest!,
     executionId: run.executionId!,
     ...(run.macEvidence ? { macEvidence: run.macEvidence } : {}),
+    ...(run.plan?.skipped ? { skipped: run.plan.skipped } : {}),
   };
   let previousSnapshot = main.snapshotId;
   const receipts = [];

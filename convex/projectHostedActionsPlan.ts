@@ -4,7 +4,7 @@ import { internalMutation } from './server';
 import { actionsSession, sessionArgs } from './projectHostedActionsSession';
 import { storeSourceOutputs } from './projectConvexSourceOutput';
 import { writeHostedCheck } from './projectHostedCheckStore';
-import { hostedCheckPlanSchema, checkPin, hostedCheckTerminal } from '../src/hosted-check';
+import { hostedCheckPlanSchema, checkPin, hostedCheckTerminal, testsNotAffected } from '../src/hosted-check';
 import { hostedActionsRecipeSchema, hostedActionsRuntime } from '../src/hosted-actions';
 import { savePin } from '../src/hosted-save';
 import { semanticTests } from '../src/intent-semantic-conflict';
@@ -101,6 +101,8 @@ export const prepare = internalMutation({
       );
     const selection = savePin(recipe.selection),
       manifest = savePin(recipe);
+    // Tests the change's paths do not reach are skipped, not pending (Issue 9e71abcc).
+    const skipped = recipe.groups.length === 0 ? testsNotAffected(recipe.selection, standard) : undefined;
     const plan = hostedCheckPlanSchema.parse({
       head: recipe.head,
       definition: recipe.definition,
@@ -110,6 +112,7 @@ export const prepare = internalMutation({
       selection,
       manifest,
       shardCount: recipe.groups.length + 1,
+      ...(skipped ? { skipped } : {}),
     });
     invariant(
       run.configuration.runtime === hostedActionsRuntime,
