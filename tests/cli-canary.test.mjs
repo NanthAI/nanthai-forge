@@ -290,8 +290,12 @@ test('a server that lacks a feature the build needs holds the switch with the ba
   f.build(b, 'behind:planning');
   const alerts = [],
     lines = [];
+  // A fixed clock: the refusal record stamps `at` and `nextRetryAt` with separate clock reads, so a
+  // real clock that ticks a millisecond between them made the back-off equality flake under CPU load.
+  const clockMs = Date.parse('2026-11-06T02:10:00Z');
   const canary = cliCanaryPreSwitch(f.installation, {
     home: f.home,
+    now: () => clockMs,
     alert: async record => alerts.push(record),
     log: line => lines.push(line),
   });
@@ -307,7 +311,7 @@ test('a server that lacks a feature the build needs holds the switch with the ba
     lines.join('\n'),
     /Forge CLI canary held bbbbbbbb: the server does not yet advertise future-feature .*previous build stays selected, next retry after \d\d:\d\d UTC \(attempt 1\)\./,
   );
-  assert.equal(activeCliCanaryRefusal(f.installation, b)?.step, 'server-capabilities');
+  assert.equal(activeCliCanaryRefusal(f.installation, b, clockMs)?.step, 'server-capabilities');
   const { cliCanaryNotice } = await import('../dist/cli-canary.js');
   assert.match(cliCanaryNotice(f.installation, record, a), /was held by its pre-switch canary/);
   // Still behind after the back-off: held again, the back-off doubles (bounded by its maximum).

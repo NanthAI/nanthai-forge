@@ -113,3 +113,32 @@ test('durable state waits observe changes and retain their failure deadline', as
   controller.abort(new Error('observation cancelled'));
   await assert.rejects(aborted, /observation cancelled/);
 });
+
+test('idle state waits re-arm on store activity and still fail when the state stalls', async t => {
+  const { mkdtempSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { waitForState } = await import('./wait-for-state.mjs');
+  const root = mkdtempSync(join(tmpdir(), 'forge-state-idle-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const file = join(root, 'work.json');
+  writeFileSync(file, '0');
+  // Four writes 400 ms apart outlast the 1000 ms idle window as a whole, never inside any gap.
+  const pending = waitForState(
+    { directory: root },
+    () => readFileSync(file, 'utf8') === '4',
+    1000,
+    undefined,
+    {
+      idle: true,
+    },
+  );
+  for (let n = 1; n <= 4; n++) {
+    await new Promise(resolve => setTimeout(resolve, 400));
+    writeFileSync(file, String(n));
+  }
+  assert.equal(await pending, true);
+  await assert.rejects(
+    waitForState({ directory: root }, () => false, 20, undefined, { idle: true }),
+    { code: 'TEST_STATE_TIMEOUT' },
+  );
+});

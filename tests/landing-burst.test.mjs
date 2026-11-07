@@ -217,13 +217,15 @@ async function burst(f, arrivals, { admitBeforeDrain = false, green = false } = 
     if (hasLate) f.holdFirst();
     const firstQueued = hasLate
       ? initialReady.then(() =>
-          waitForState(f.store, () => checkRuns(f).length > 0, 20000, controller.signal),
+          waitForState(f.store, () => checkRuns(f).length > 0, 20000, controller.signal, { idle: true }),
         )
       : Promise.resolve();
     const secondQueued =
       hasLate && f.concurrency !== 1
         ? firstQueued
-            .then(() => waitForState(f.store, () => checkRuns(f).length > 1, 20000, controller.signal))
+            .then(() =>
+              waitForState(f.store, () => checkRuns(f).length > 1, 20000, controller.signal, { idle: true }),
+            )
             .then(f.releaseFirst)
         : Promise.resolve();
     try {

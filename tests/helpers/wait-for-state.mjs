@@ -1,11 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 import { watchLocal } from '../../dist/local-watcher.js';
 
-/** Observe durable fixture state; a watcher hint never drives the worker. */
-export function waitForState(store, read, timeoutMs, signal) {
+/**
+ * Observe durable fixture state; a watcher hint never drives the worker.
+ * `timeoutMs` is a wall deadline. With `{ idle: true }` it is instead a stall deadline: every
+ * store change re-arms it, so CPU contention that slows real work cannot expire it, while a
+ * wait on state that no longer advances still fails fast.
+ */
+export function waitForState(store, read, timeoutMs, signal, { idle = false } = {}) {
   return new Promise((resolve, reject) => {
     let watcher,
       deadline,
+      expire,
       fallback,
       scheduled,
       settled = false;
@@ -33,6 +39,10 @@ export function waitForState(store, read, timeoutMs, signal) {
       if (signal?.aborted) return aborted();
       signal?.addEventListener('abort', aborted, { once: true });
       watcher = watchLocal(store.directory, {}, () => {
+        if (idle && !settled) {
+          clearTimeout(deadline);
+          deadline = setTimeout(expire, timeoutMs);
+        }
         if (settled || scheduled) return;
         scheduled = setImmediate(() => {
           scheduled = undefined;
@@ -42,11 +52,12 @@ export function waitForState(store, read, timeoutMs, signal) {
       // Native hints can miss initial attachment. Preserve a bounded fallback,
       // without decoding complete Work twenty to fifty times per second.
       fallback = setInterval(check, 250);
-      deadline = setTimeout(() => {
+      expire = () => {
         check();
         if (!settled)
           close(Object.assign(new Error('Fixture state deadline expired'), { code: 'TEST_STATE_TIMEOUT' }));
-      }, timeoutMs);
+      };
+      deadline = setTimeout(expire, timeoutMs);
       check();
     } catch (error) {
       close(error);
