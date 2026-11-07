@@ -15,10 +15,11 @@ import { savePin } from '../src/hosted-save';
 import { blobStore } from './blobStore';
 import { presignGet, r2Config } from './r2';
 import { invariant } from '../src/errors';
+import { readExactObject } from './projectR2ExactRead';
 import { report } from './errors';
 import { finishHostedOperation } from './projectHostedOperations';
 import { findObject } from './projectObjectFind';
-import { packHeaders, packRange, verifyPackRange, type PackRange } from '../src/object-pack-range';
+import { packHeaders, packRange, type PackRange } from '../src/object-pack-range';
 
 const identity = { projectId: v.id('hostedProjects'), operationId: v.string() },
   jobIdentity = { projectId: v.id('hostedProjects'), jobId: v.string() };
@@ -175,36 +176,10 @@ export const complete = internalAction({
       input,
     );
     if (!grant) return null;
-    const response = await fetch(grant.url, {
-      headers: { 'accept-encoding': 'identity', ...packHeaders(grant.range, grant.size) },
-      signal: AbortSignal.timeout(10000),
+    const bytes = await readExactObject(grant, {
+      failed: 'Worker result download failed; retry the original save.',
+      exceeds: 'Worker result exceeds its exact size.',
     });
-    invariant(
-      response.ok && response.body,
-      'SOURCE_UNAVAILABLE',
-      'Worker result download failed; retry the original save.',
-    );
-    verifyPackRange(response, grant.range, grant.size);
-    const reader = response.body.getReader(),
-      parts: Uint8Array[] = [];
-    let size = 0;
-    try {
-      for (;;) {
-        const chunk = await reader.read();
-        if (chunk.done) break;
-        size += chunk.value.length;
-        invariant(size <= grant.size, 'SOURCE_HASH_MISMATCH', 'Worker result exceeds its exact size.');
-        parts.push(chunk.value);
-      }
-    } finally {
-      await reader.cancel();
-    }
-    const bytes = new Uint8Array(size);
-    let offset = 0;
-    for (const part of parts) {
-      bytes.set(part, offset);
-      offset += part.length;
-    }
     return await ctx.runMutation(makeFunctionReference<'mutation'>('projectHostedSaveJobs:publish'), {
       ...input,
       result: new TextDecoder().decode(bytes),

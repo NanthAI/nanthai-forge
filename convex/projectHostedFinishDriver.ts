@@ -12,7 +12,7 @@ import { r2Config, r2Key, presignPut } from './r2';
 import { verifyArchiveUpload } from './archiveUpload';
 import { exchangeFetch } from '../src/exchange-request';
 import { invariant } from '../src/errors';
-import { packHeaders, verifyPackRange } from '../src/object-pack-range';
+import { readExactObject } from './projectR2ExactRead';
 const identity = { projectId: v.id('hostedProjects'), submissionId: v.string() };
 const stepIdentity = { ...identity, wakeId: v.string() };
 export const step = internalMutation({
@@ -124,42 +124,15 @@ export const drive = internalAction({
       'SOURCE_HASH_MISMATCH',
       'Selection metadata exceeds its transport window.',
     );
-    const response = await fetch(command.url, {
-      headers: { 'accept-encoding': 'identity', ...packHeaders(command.range, command.pin.size) },
-      signal: AbortSignal.timeout(10_000),
-    });
-    invariant(
-      response.ok && response.body,
-      'SOURCE_UNAVAILABLE',
-      'Exact selection metadata download failed.',
+    const bytes = await readExactObject(
+      { url: command.url, size: command.pin.size, ...(command.range ? { range: command.range } : {}) },
+      {
+        failed: 'Exact selection metadata download failed.',
+        exceeds: 'Selection metadata exceeds its exact size.',
+      },
     );
-    verifyPackRange(response, command.range, command.pin.size);
-    const reader = response.body.getReader(),
-      parts: Uint8Array[] = [];
-    let size = 0;
-    try {
-      for (;;) {
-        const chunk = await reader.read();
-        if (chunk.done) break;
-        size += chunk.value.length;
-        invariant(
-          size <= command.pin.size,
-          'SOURCE_HASH_MISMATCH',
-          'Selection metadata exceeds its exact size.',
-        );
-        parts.push(chunk.value);
-      }
-    } finally {
-      await reader.cancel();
-    }
-    const bytes = new Uint8Array(size);
-    let offset = 0;
-    for (const part of parts) {
-      bytes.set(part, offset);
-      offset += part.length;
-    }
     invariant(
-      size === command.pin.size && digest(bytes) === command.pin.sha256,
+      bytes.length === command.pin.size && digest(bytes) === command.pin.sha256,
       'SOURCE_HASH_MISMATCH',
       'Selection metadata differs from its exact bytes.',
     );

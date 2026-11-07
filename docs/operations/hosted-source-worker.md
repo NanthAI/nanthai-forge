@@ -145,6 +145,12 @@ is tried at most twice more (400 ms, then 1.6 s) before the exact
 repair above. Hash or size mismatch, 403 and malformed data fail at once. The
 healthy path makes no extra call.
 
+Actions with no scheduled repair of their own (the save, compose and sync result
+download, and the finish selection-page download) read through
+`convex/projectR2ExactRead.ts`. With the same budget, it also retries a network
+failure or 408/425/429/5xx. Before this, one transient answer left the operation
+`submitted` until the finish watchdog or a client replay ran it again.
+
 Failed actions emit bounded structured context to retained Convex logs: job,
 step, task/generation, stage, exception class/code, available object digest,
 elapsed time and HTTP status. Failure receipts also retain the source step,
