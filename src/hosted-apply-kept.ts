@@ -267,6 +267,8 @@ const receiptShape = z
     preservedAt: z.string().optional(),
     additionalPreservedAt: z.array(z.string()).optional(),
     rounds: z.record(z.string(), z.array(keptEntrySchema)).optional(),
+    /** Found in a prior checkout after publication; kept until deleted, never swept by expiry. */
+    held: z.boolean().optional(),
   })
   .passthrough();
 export type KeptApplySummary = {
@@ -314,9 +316,11 @@ function summarize(cache: string, id: string): KeptApplySummary | null {
       : {}),
     ...counts,
     paths,
-    note: receipt.confirmedAt
-      ? 'Your local changes are kept here until the expiry time. Copy back what you need.'
-      : 'Your local changes are kept here until the apply is confirmed, then for seven days. Copy back what you need.',
+    note: receipt.held
+      ? 'Local bytes found in the previous checkout after an apply are kept here until you delete this folder. Copy back what you need.'
+      : receipt.confirmedAt
+        ? 'Your local changes are kept here until the expiry time. Copy back what you need.'
+        : 'Your local changes are kept here until the apply is confirmed, then for seven days. Copy back what you need.',
   };
 }
 

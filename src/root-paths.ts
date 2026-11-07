@@ -25,6 +25,14 @@ export function canonicalRoot(root: string): string {
 }
 export const rootSibling = (root: string, suffix: string) => canonicalRoot(root) + suffix;
 export const clientCacheRoot = (root: string) => rootSibling(root, '.forge-client');
+/** The checkout path itself with its parent canonicalized, never following a link at the last
+ * component, and its client cache beside it. Recovery uses these to find a journal even after the
+ * root was replaced by a link. */
+export const unfollowedRoot = (root: string) => {
+  const absolute = resolve(root);
+  return join(canonicalRoot(dirname(absolute)), basename(absolute));
+};
+export const unfollowedClientCacheRoot = (root: string) => unfollowedRoot(root) + '.forge-client';
 
 /** Preservation must outlive eviction of every containing nested checkout cache. */
 export function retainedRootSibling(root: string, suffix: string) {

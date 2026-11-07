@@ -32,6 +32,8 @@ import {
 import { retainedDeltaBackups, settleCheckoutDelta } from './hosted-checkout-delta-settle.js';
 import { sweepCheckoutStages } from './hosted-checkout-delta-pending.js';
 import { readSource } from './files.js';
+import { disposePriorCheckout } from './hosted-checkout-dispose.js';
+import type { CheckoutStatIndex } from './checkout-stat-index.js';
 import { HostedCheckoutCache, type CheckoutObjectTransport } from './hosted-checkout-cache.js';
 import { parseHostedResponse } from './hosted-response.js';
 export interface MainTransport extends CheckoutObjectTransport {
@@ -101,6 +103,22 @@ export async function checkoutHostedMain(root: string, input: unknown, transport
     const settled = settleCheckoutDelta(root, cache);
     if (settled?.conflict) throw settled.conflict;
   };
+  /** Retire the old clone once publication is durable: only exact baseline bytes are removed, and
+   * anything recreated in the old root before the rename landed is held and reported. */
+  const disposePrevious = (previousMarker: string | null, index?: CheckoutStatIndex) => {
+    if (!existsSync(previous)) return;
+    const bytes = readSource(previous, '.forge/hosted-main.json', Number.MAX_SAFE_INTEGER);
+    const old =
+      bytes && digest(bytes) === previousMarker ? markerSchema.parse(JSON.parse(bytes.toString())) : null;
+    disposePriorCheckout({
+      root,
+      cacheRoot: cache,
+      previous,
+      files: old ? parseNativeStateValue(old.state).files : [],
+      markerName: 'hosted-main.json',
+      index: index ?? readCheckoutStatIndex(root),
+    });
+  };
   const displaced = () => {
     const kept = retainedDeltaBackups(cache);
     return kept.length
@@ -122,6 +140,8 @@ export async function checkoutHostedMain(root: string, input: unknown, transport
         'WORK_OPERATION_CHANGED',
         'Retry the original client checkout request.',
       );
+      // A crash after the completion receipt can leave the old clone behind.
+      if (original.complete) disposePrevious(original.previousMarker);
       return original as {
         request: typeof request;
         selection: HostedMain;
@@ -254,9 +274,10 @@ export async function checkoutHostedMain(root: string, input: unknown, transport
       const installed = marker && JSON.stringify(marker.selection) === JSON.stringify(selection);
       if (installed) preserveArtifacts();
       preserveCaches([...beforeFiles, ...state.files]);
+      const index = readCheckoutStatIndex(root);
       const artifacts = cleanHostedCheckout(root, beforeFiles, 'hosted-main.json', Boolean(marker), {
         target: state.files,
-        index: readCheckoutStatIndex(root),
+        index,
       });
       if (!installed && delta) {
         invariant(
@@ -317,9 +338,9 @@ export async function checkoutHostedMain(root: string, input: unknown, transport
       }
       syncDirectory(dirname(root));
       syncDirectory(cache);
-      if (existsSync(previous)) rmSync(previous, { recursive: true });
       operation.complete = true;
       save(receiptPath, operation);
+      disposePrevious(operation.previousMarker, index);
       recordMetricCache(cache, selection, 'replica', request.operationId);
     });
   } finally {

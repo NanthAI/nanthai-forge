@@ -28,21 +28,22 @@ test('hosted sync after a build preserves output; remote advance/local conflict 
   const check = build(s.root),
     before = readHostedLaneCheckout(s.root);
   f.moveMain({ overlap: false });
-  writeFileSync(join(s.root, 'draft.ts'), 'unsaved local draft');
+  // main brings accepted.txt; an unsaved local file of that name is what the sync would replace.
+  writeFileSync(join(s.root, 'accepted.txt'), 'unsaved local draft');
   const command = { laneId: f.lane.laneId, operationId: randomUUID(), apply: true };
   await assert.rejects(s.transport().dispatch('sync', command), error => {
     assert.equal(error.code, 'WORK_CONFLICT');
     assert.equal(error.recovery.sourceCompleted, true);
-    assert.equal(error.recovery.blockers[0].path, 'draft.ts');
+    assert.equal(error.recovery.blockers[0].path, 'accepted.txt');
     assert.equal(error.recovery.next.action, 'recover-apply');
     return true;
   });
   const remote = await f.readLane(f.lane.laneId);
   assert.notEqual(remote.head, before.selection.head);
   assert.equal(readHostedLaneCheckout(s.root).selection.head, before.selection.head);
-  assert.equal(readFileSync(join(s.root, 'draft.ts'), 'utf8'), 'unsaved local draft');
+  assert.equal(readFileSync(join(s.root, 'accepted.txt'), 'utf8'), 'unsaved local draft');
   // Remove only this synthetic obstruction, then replay the original operation.
-  rmSync(join(s.root, 'draft.ts'));
+  rmSync(join(s.root, 'accepted.txt'));
   const jobs = [...f.tables.projectHostedRecordHeads.values()].filter(row => row.kind === 'job').length;
   const result = await s.transport().dispatch('sync', command);
   assert.equal(result.operationId, command.operationId);

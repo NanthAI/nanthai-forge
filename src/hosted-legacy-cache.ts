@@ -41,7 +41,9 @@ function verifiedObject(path: string, id: string) {
   }
 }
 
-function verifiedLayout(path: string) {
+/** true: a verified disposable cache. false: not one. 'unreadable': permissions hide its
+ * contents, so nothing about it can be proven and it is never treated as disposable. */
+function verifiedLayout(path: string): boolean | 'unreadable' {
   try {
     const directory = lstatSync(path);
     if (!directory.isDirectory() || directory.isSymbolicLink()) return false;
@@ -70,7 +72,9 @@ function verifiedLayout(path: string) {
       stat.mtimeMs === afterObjects.mtimeMs
     );
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT') return false;
+    if (code === 'EACCES' || code === 'EPERM') return 'unreadable';
     throw error;
   }
 }
@@ -93,10 +97,11 @@ export function preserveMisplacedReadCaches(
   const reconcile = (receipt: LegacyCacheRecovery, identity?: { dev: number; ino: number }) => {
     const destination = receipt.preservedAt;
     const moved = lstatSync(destination);
-    if (
-      (!identity || (identity.dev === moved.dev && identity.ino === moved.ino)) &&
-      verifiedLayout(destination)
-    ) {
+    const layout =
+      !identity || (identity.dev === moved.dev && identity.ino === moved.ino)
+        ? verifiedLayout(destination)
+        : false;
+    if (layout === true) {
       receipt.status = 'verified';
     } else {
       // The source can have been recreated by an editor. Never replace it.
@@ -108,7 +113,9 @@ export function preserveMisplacedReadCaches(
         if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
       }
       receipt.status = 'unexpected';
-      if (!occupied) {
+      // An unreadable candidate stays in quarantine, outside the checkout: put back, every later
+      // check of the tree would fail on it again. Its bytes are retained either way.
+      if (!occupied && layout !== 'unreadable') {
         renameSync(destination, receipt.from);
         syncDirectory(root);
         receipt.status = 'restored';
@@ -117,7 +124,9 @@ export function preserveMisplacedReadCaches(
       retain(receipt);
       throw new ForgeError(
         'WORK_CONFLICT',
-        'Changed legacy-cache candidate contains local content; its bytes are preserved.',
+        layout === 'unreadable'
+          ? 'A legacy-cache candidate became unreadable after it was set aside; it is kept outside the checkout at its preservedAt path.'
+          : 'Changed legacy-cache candidate contains local content; its bytes are preserved.',
         undefined,
         {
           obstruction: {
@@ -149,7 +158,7 @@ export function preserveMisplacedReadCaches(
       const directory = lstatSync(from);
       if (!directory.isDirectory() || directory.isSymbolicLink()) continue;
       if (sourceFiles.some(file => file.path === name || file.path.startsWith(name + '/'))) continue;
-      if (!verifiedLayout(from)) continue;
+      if (verifiedLayout(from) !== true) continue;
       const parent = retainedRootSibling(root, '.kept-read-caches');
       mkdirSync(parent, { recursive: true, mode: 0o700 });
       invariant(

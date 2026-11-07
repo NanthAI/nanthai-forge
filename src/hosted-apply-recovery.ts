@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { canonicalRoot, clientCacheRoot } from './root-paths.js';
+import { canonicalRoot, clientCacheRoot, unfollowedClientCacheRoot, unfollowedRoot } from './root-paths.js';
 import { lstatSync, mkdirSync, renameSync, rmSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -40,6 +40,7 @@ import {
   validBaseline,
   recoveryDirectory,
   pathFor,
+  blockedName,
   read,
   savedSchema,
   markerAt,
@@ -47,11 +48,46 @@ import {
 } from './hosted-apply-recovery-records.js';
 export { localApplyBlocked } from './hosted-apply-recovery-records.js';
 
+function rootLinkBlocked(root: string, target: string, saved: z.infer<typeof savedSchema>) {
+  const request = applySchema.parse(saved.request),
+    next = { action: 'recover-apply', applyOperationId: request.operationId };
+  return new ForgeError(
+    'WORK_CONFLICT',
+    `The checkout root was replaced by a link to ${target} after this apply was retained. Nothing was written there. Move the link aside, then run recover-apply again.`,
+    undefined,
+    {
+      phase: 'local-apply',
+      status: 'blocked',
+      sourceCompleted: true,
+      operationId: saved.handoff?.operationId ?? request.operationId,
+      applyOperationId: request.operationId,
+      root,
+      laneId: request.lane.laneId,
+      from: request.from,
+      to: request.lane,
+      blockers: [{ kind: 'root-link', path: root }],
+      more: false,
+      next,
+      command: hostedRecoveryCommand(root, next.action, { applyOperationId: request.operationId }),
+    },
+  );
+}
 /** Explicit recovery keeps only the changed files of the obstructed tree (plus a receipt listing
  * deletions) in the client cache, then restores those paths to the exact baseline in place. Every
  * step is journaled and retryable; no submitted source work is replaced or cancelled. */
 export async function recoverLocalApply(root: string, id: string, transport: LaneTransport) {
+  const lexical = unfollowedRoot(root),
+    retained = join(unfollowedClientCacheRoot(root), blockedName(id));
   root = canonicalRoot(root);
+  // The journal is found where the apply was retained. A root recreated as a link afterwards is
+  // never followed: recovery refuses with the same executable action instead of writing elsewhere.
+  if (root !== lexical && !checkoutPathExists(pathFor(root, id)) && checkoutPathExists(retained))
+    throw rootLinkBlocked(lexical, root, savedSchema.parse(read(retained)));
+  invariant(
+    checkoutPathExists(pathFor(root, id)),
+    'NOT_FOUND',
+    'No retained local apply with this applyOperationId exists for this checkout.',
+  );
   const cacheRoot = clientCacheRoot(root),
     saved = savedSchema.parse(read(pathFor(root, id)));
   const request = applySchema.parse(saved.request);
@@ -280,7 +316,65 @@ export async function recoverLocalApply(root: string, id: string, transport: Lan
         need = 'need' in step ? step.need : [];
       }
     }
-    const applied = await applyHostedSync(root, request, transport);
+    // A crash after the baseline was published (or the apply finished) can leave the journaled,
+    // never-consumed stage behind; a replay that finds the work done retires it. Only the exact
+    // journaled stage is removed, under the same write serialization; kept user files never are.
+    await withCheckoutWritePass(cacheRoot, async () =>
+      workLocked(join(cacheRoot, 'lock'), () => {
+        const current = receiptSchema.parse(read(receiptPath)),
+          stage = current.baselineStage;
+        const done =
+          current.restored ||
+          (checkoutPathExists(checkoutReceipt) &&
+            z.object({ complete: z.boolean() }).parse(read(checkoutReceipt)).complete);
+        if (!stage || !done || !checkoutPathExists(stage)) return;
+        invariant(
+          dirname(stage) === directory && /^baseline-[a-f0-9-]{36}$/.test(basename(stage)),
+          'UNSAFE_PATH',
+          'The private baseline stage must stay in its recovery directory.',
+        );
+        rmSync(stage, { recursive: true, force: true });
+        syncDirectory(directory);
+      }),
+    );
+    let applied;
+    try {
+      applied = await applyHostedSync(root, request, transport);
+    } catch (error) {
+      const superseded = error instanceof ForgeError ? error.recovery?.superseded : undefined;
+      if (!superseded) throw error;
+      // The Lane moved on before this apply's first receipt. The checkout is back at its exact
+      // baseline with every local change kept; installing the newer head is a separate, explicit
+      // step, so this retained apply ends here instead of repeating WORK_STALE.
+      workLocked(join(cacheRoot, 'lock'), () => {
+        const handoff = join(cacheRoot, 'sync-handoff.json');
+        try {
+          if (z.object({ applyOperationId: z.string() }).parse(read(handoff)).applyOperationId === id)
+            rmSync(handoff);
+        } catch {
+          /* No retained handoff for this apply. */
+        }
+      });
+      const next = { action: 'open', laneId: request.lane.laneId };
+      const { action, ...command } = next;
+      return {
+        phase: 'local-apply',
+        status: 'superseded',
+        applied: null,
+        sourceCompleted: true,
+        operationId: saved.handoff?.operationId ?? id,
+        applyOperationId: id,
+        from: request.from,
+        to: request.lane,
+        superseded,
+        note: 'The Lane changed after this sync completed, so its pinned result was not installed. Your checkout is at its previous baseline and local changes are kept; open the Lane to install its current head.',
+        preservedAt: backup,
+        undo: receipt.undo,
+        kept: listKeptApply(root).entries.find(entry => entry.id === id),
+        next,
+        command: hostedRecoveryCommand(root, action, command),
+      };
+    }
     // The apply is confirmed: the retention clock for the kept files starts now.
     workLocked(join(cacheRoot, 'lock'), () => {
       const current = receiptSchema.parse(read(receiptPath));

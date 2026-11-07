@@ -522,7 +522,9 @@ export async function executeHostedAgent(
     timing.mark('hostedWait');
     if (completed?.status === 'completed') {
       const source = parseHostedResponse(syncResultSchema, completed.result);
-      if (command.apply && session.marker() && source.status !== 'conflict' && source.from) {
+      // A retained handoff owns this install even if the marker vanished during the source wait:
+      // the apply then refuses with typed recovery instead of the result silently skipping it.
+      if (command.apply && (handoff || session.marker()) && source.status !== 'conflict' && source.from) {
         const applied = await applyHostedSync(
           session.root,
           {

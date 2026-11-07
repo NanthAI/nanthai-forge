@@ -96,6 +96,18 @@ for (const obstruction of ['unknown metadata', 'unsaved edit'])
       }
       return result;
     };
+    if (obstruction === 'unsaved edit') {
+      // The resolution saved a.txt as submitted; an edit after submission is a path the local
+      // apply does not move, so it is carried in place (as Git carries it), never overwritten.
+      const done = await s.transport(conflict.root).dispatch('resolve', command);
+      const resolved = await s.f.readLane(conflict.laneId);
+      assert.equal(done.result.applied.head, resolved.head);
+      assert.equal(readFileSync(path, 'utf8'), 'preserve these local bytes');
+      const replay = await s.transport(conflict.root).dispatch('resolve', command);
+      assert.equal(replay.result.applied.replayed, true);
+      assert.equal(readFileSync(path, 'utf8'), 'preserve these local bytes');
+      return;
+    }
     await assert.rejects(s.transport(conflict.root).dispatch('resolve', command), error => {
       assert.equal(error.code, 'WORK_CONFLICT');
       assert(error.message.includes(relative), error.message);
@@ -230,8 +242,14 @@ for (const wrapper of ['cli', 'mcp'])
         assert.equal(readFileSync(join(retained.preservedAt, 'extra-local.txt'), 'utf8'), 'also preserve me');
         assert(retained.undo.includes(retained.preservedAt));
         if (interruption) {
-          assert(retained.additionalPreservedAt?.some(path => existsSync(join(path, 'new-note.txt'))));
-          const path = retained.additionalPreservedAt.find(path => existsSync(join(path, 'new-note.txt')));
+          // A draft created mid-recovery is either moved aside with the preserved round it joined
+          // or, when recovery resumes from a restored baseline, carried in place: an untracked
+          // path the apply does not touch. Its bytes are never lost either way.
+          const path =
+            interruption === 'after-preserve'
+              ? retained.additionalPreservedAt?.find(path => existsSync(join(path, 'new-note.txt')))
+              : conflict.root;
+          assert(path, 'the late draft is kept');
           assert.equal(readFileSync(join(path, 'new-note.txt'), 'utf8'), 'draft created after interruption');
         }
         assert(!readdirSync(dirname(retained.preservedAt)).some(name => name.startsWith('baseline-')));

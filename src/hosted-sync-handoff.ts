@@ -10,7 +10,12 @@ import { checkoutPathExists } from './hosted-checkout-files.js';
 import { durableReplace } from './native-durability.js';
 import { workLocked } from './work-lock.js';
 import { applyHostedSync } from './hosted-sync-client.js';
-import { markerAt, retainedLocalApplyBlocked } from './hosted-apply-recovery-records.js';
+import {
+  clearApplyBaseline,
+  markerAt,
+  retainApplyBaseline,
+  retainedLocalApplyBlocked,
+} from './hosted-apply-recovery-records.js';
 import { ConvexLaneTransport } from './hosted-lane-transport.js';
 import { hostedRecoveryCommand } from './hosted-agent-resolution.js';
 import { invariant } from './errors.js';
@@ -42,6 +47,7 @@ export async function retainSyncHandoff(
   };
   workLocked(lockFor(session.root), () => {
     const path = pathFor(session.root);
+    retainApplyBaseline(session.root, handoff.applyOperationId);
     durableReplace(path, JSON.stringify(handoff));
   });
   return handoff;
@@ -49,8 +55,11 @@ export async function retainSyncHandoff(
 export function clearSyncHandoff(root: string, operationId: string) {
   workLocked(lockFor(root), () => {
     const path = pathFor(root);
-    if (checkoutPathExists(path) && JSON.parse(readFileSync(path, 'utf8')).operationId === operationId)
-      rmSync(path);
+    if (!checkoutPathExists(path)) return;
+    const handoff = JSON.parse(readFileSync(path, 'utf8'));
+    if (handoff.operationId !== operationId) return;
+    if (typeof handoff.applyOperationId === 'string') clearApplyBaseline(root, handoff.applyOperationId);
+    rmSync(path);
   });
 }
 /** One exact progress read before a fresh land, only while an installation is

@@ -131,6 +131,7 @@ test('a replay of a finished recovery keeps the same entry and adds no copies', 
 
 test('a directory standing where a saved file belongs is kept file by file and the baseline returns', async t => {
   const { s, request } = await blocked(t, s => {
+    writeFileSync(join(s.root, 'a'), 'local draft of a'); // Meets the sync, so the apply refuses.
     rmSync(join(s.root, 'src/dir6/file6.txt'));
     mkdirSync(join(s.root, 'src/dir6/file6.txt'));
     writeFileSync(join(s.root, 'src/dir6/file6.txt/inner.txt'), 'inside a directory');
@@ -199,13 +200,14 @@ test('removing a root cache leaves kept local changes in place', async t => {
 
 test('an edit made after the copy starts another round instead of overwriting the first', async t => {
   const { s, request } = await blocked(t, localEdits);
-  let changed = false;
-  s.onDownload(() => {
-    if (!changed) {
-      changed = true;
-      writeFileSync(join(s.root, 'src/dir1/file1.txt'), 'second local draft');
-    }
-  });
+  // Recovery reads authority once, then its apply twice; the second is the last read before
+  // publication. The editor writes again right then, to a path the sync replaces.
+  const select = s.transport.select;
+  let reads = 0;
+  s.transport.select = async laneId => {
+    if (++reads === 3) writeFileSync(join(s.root, 'a'), 'second local draft');
+    return select(laneId);
+  };
   // The first call hits the second edit while the apply downloads and reports it as a new obstruction.
   await assert.rejects(recoverLocalApply(s.root, request.operationId, s.transport), {
     code: 'WORK_CONFLICT',
@@ -213,6 +215,7 @@ test('an edit made after the copy starts another round instead of overwriting th
   const recovered = await recoverLocalApply(s.root, request.operationId, s.transport);
   assert.equal(readFileSync(join(recovered.preservedAt, 'src/dir1/file1.txt'), 'utf8'), 'local draft one');
   const [later] = recovered.additionalPreservedAt;
-  assert.equal(readFileSync(join(later, 'src/dir1/file1.txt'), 'utf8'), 'second local draft');
+  assert.equal(readFileSync(join(recovered.preservedAt, 'a'), 'utf8'), 'local draft of a');
+  assert.equal(readFileSync(join(later, 'a'), 'utf8'), 'second local draft');
   assert(later.startsWith(`${dirname(recovered.preservedAt)}/files-`));
 });

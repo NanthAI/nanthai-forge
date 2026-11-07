@@ -8,11 +8,21 @@ import { join } from 'node:path';
 function rawSuffixes(text) {
   const file = ts.createSourceFile('source.ts', text, ts.ScriptTarget.Latest, true);
   const found = [];
-  const unwrap = node => (ts.isParenthesizedExpression(node) ? unwrap(node.expression) : node);
+  // Parentheses, casts and non-null assertions never change the string a path is built from.
+  const unwrap = node =>
+    ts.isParenthesizedExpression(node) ||
+    ts.isAsExpression(node) ||
+    ts.isTypeAssertionExpression(node) ||
+    ts.isNonNullExpression(node) ||
+    (ts.isSatisfiesExpression && ts.isSatisfiesExpression(node))
+      ? unwrap(node.expression)
+      : node;
   const root = node => {
     node = unwrap(node);
     if (ts.isIdentifier(node)) return /(?:root|copy)$/i.test(node.text);
     if (ts.isPropertyAccessExpression(node)) return /(?:root|copy)$/i.test(node.name.text);
+    if (ts.isElementAccessExpression(node))
+      return /(?:root|copy)$/i.test(constant(node.argumentExpression) ?? '');
     if (
       ts.isCallExpression(node) &&
       /^(resolve|realpathSync|canonicalRoot|hostedAgentRoot|basename)$/.test(node.expression.getText(file))
@@ -20,17 +30,49 @@ function rawSuffixes(text) {
       return node.arguments.some(root);
     return false;
   };
-  const literal = node => {
+  /** The whole value of a constant string expression (literals joined by +), else null. */
+  function constant(node) {
     node = unwrap(node);
-    return ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)
-      ? node.text
-      : ts.isTemplateExpression(node)
-        ? node.head.text
-        : null;
+    if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) return node.text;
+    if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.PlusToken) {
+      const left = constant(node.left),
+        right = left === null ? null : constant(node.right);
+      return right === null ? null : left + right;
+    }
+    return null;
+  }
+  /** The constant start of a string expression: what any suffix would begin with. */
+  function literal(node) {
+    node = unwrap(node);
+    const whole = constant(node);
+    if (whole !== null) return whole;
+    if (ts.isTemplateExpression(node)) return node.head.text;
+    if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.PlusToken) {
+      const left = constant(node.left);
+      return left === null ? literal(node.left) : left + (literal(node.right) ?? '');
+    }
+    return null;
+  }
+  /** Concatenated arguments read as one suffix: concat(".forge", "-client"). */
+  const joined = args => {
+    let text = '';
+    for (const arg of args) {
+      const whole = constant(arg);
+      if (whole === null) return text + (literal(arg) ?? '');
+      text += whole;
+    }
+    return text;
   };
-  const suffix = (left, right) =>
-    /^\.forge-(?:client|metrics)/.test(literal(right) ?? '') ||
-    (root(left) && (literal(right)?.startsWith('.') || /suffix/i.test(right.getText(file))));
+  const suffix = (left, text, right) =>
+    /^\.forge-(?:client|metrics)/.test(text ?? '') ||
+    (root(left) && (text?.startsWith('.') || /suffix/i.test(right)));
+  const method = node => {
+    const callee = unwrap(node.expression);
+    if (ts.isPropertyAccessExpression(callee)) return { name: callee.name.text, target: callee.expression };
+    if (ts.isElementAccessExpression(callee))
+      return { name: constant(callee.argumentExpression), target: callee.expression };
+    return null;
+  };
   function visit(node) {
     if (ts.isTemplateExpression(node))
       for (const span of node.templateSpans)
@@ -42,12 +84,16 @@ function rawSuffixes(text) {
     if (
       ts.isBinaryExpression(node) &&
       node.operatorToken.kind === ts.SyntaxKind.PlusToken &&
-      suffix(node.left, node.right)
+      suffix(node.left, literal(node.right), node.right.getText(file))
     )
       found.push(node.getText(file));
-    if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(unwrap(node.expression))) {
-      const method = unwrap(node.expression);
-      if (method.name.text === 'concat' && node.arguments.some(arg => suffix(method.expression, arg)))
+    if (ts.isCallExpression(node)) {
+      const call = method(node);
+      if (
+        call?.name === 'concat' &&
+        (suffix(call.target, joined(node.arguments), node.arguments.map(arg => arg.getText(file)).join()) ||
+          node.arguments.some(arg => suffix(call.target, literal(arg), arg.getText(file))))
+      )
         found.push(node.getText(file));
     }
     ts.forEachChild(node, visit);
@@ -84,9 +130,24 @@ test('root suffix guard rejects raw templates and additions, including member ro
     'directory.concat(`.forge-metrics.jsonl`)',
     'root.concat(".preparing")',
     'directory + `.forge-client`',
+    // Round-2 review repros (118a5539 S1) and straightforward equivalents.
+    'root["concat"](".forge-client")',
+    'directory["concat"](".forge-client")',
+    'directory + (".forge-" + "client")',
+    'directory.concat(".forge", "-client")',
+    "root['concat']('.forge' + '-client')",
+    '(root as string).concat(".forge-client")',
+    'root!.concat(".forge-client")',
+    'root?.concat(".forge-", "client")',
+    'directory + (".forge" + `-client`)',
+    'session["root"] + ".preparing"',
+    '(directory satisfies string) + ".forge-metrics.jsonl"',
+    'directory.concat(".forge-" + "client", suffix)',
   ])
     assert(rawSuffixes(text).length, text);
   assert.deepEqual(rawSuffixes('join(clientCacheRoot(root), "objects")'), []);
+  assert.deepEqual(rawSuffixes('"prefix" + ("-" + "name")'), []);
+  assert.deepEqual(rawSuffixes('directory.concat("/objects")'), []);
 });
 
 test('canonical root resolves missing prefixes and dangling checkout aliases without creating paths', async t => {

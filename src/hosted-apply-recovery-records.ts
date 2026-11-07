@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { canonicalRoot, clientCacheRoot } from './root-paths.js';
 import { keptApplyRoot, keptEntrySchema } from './hosted-apply-kept.js';
-import { lstatSync, readFileSync } from 'node:fs';
+import { constants, copyFileSync, lstatSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
@@ -9,7 +9,11 @@ import { ForgeError, invariant } from './errors.js';
 import { durableReplace } from './native-durability.js';
 import { workLocked } from './work-lock.js';
 import { checkoutPathExists } from './hosted-checkout-files.js';
-import { readHostedLaneCheckout, hostedLaneCheckoutMarkerSchema } from './hosted-lane-checkout-marker.js';
+import {
+  readHostedLaneCheckout,
+  hostedLaneCheckoutMarkerSchema,
+  hostedLaneMarkerName,
+} from './hosted-lane-checkout-marker.js';
 import { hostedRecoveryCommand } from './hosted-agent-resolution.js';
 import { applySchema } from './hosted-sync-contract.js';
 const handoffSchema = z
@@ -56,8 +60,8 @@ export function validBaseline(
 export function recoveryDirectory(root: string, id: string) {
   return join(keptApplyRoot(root), z.uuid().parse(id));
 }
-export const pathFor = (root: string, id: string) =>
-  join(clientCacheRoot(root), `apply-blocked-${z.uuid().parse(id)}.json`);
+export const blockedName = (id: string) => `apply-blocked-${z.uuid().parse(id)}.json`;
+export const pathFor = (root: string, id: string) => join(clientCacheRoot(root), blockedName(id));
 export const read = (path: string): unknown => {
   const stat = lstatSync(path);
   invariant(stat.isFile() && stat.nlink === 1, 'UNSAFE_PATH', 'Recovery receipt must be a private file.');
@@ -70,6 +74,31 @@ export const savedSchema = z
     baseline: hostedLaneCheckoutMarkerSchema.optional(),
   })
   .strict();
+/** The checkout marker as it was when a sync or resolve retained its handoff, before any source IO.
+ * If the live marker is lost before the local apply, recovery still has its exact baseline. */
+const baselinePathFor = (root: string, id: string) =>
+  join(clientCacheRoot(root), `apply-baseline-${z.uuid().parse(id)}.json`);
+/** Under the caller's work lock. A clone where the filesystem has one (APFS, Btrfs), else one
+ * copy of the marker the apply rewrites anyway. Replays keep the first copy. */
+export function retainApplyBaseline(root: string, id: string) {
+  const path = baselinePathFor(root, id),
+    marker = join(canonicalRoot(root), '.forge', hostedLaneMarkerName);
+  if (checkoutPathExists(path) || !checkoutPathExists(marker) || !markerAt(root)) return;
+  copyFileSync(marker, path, constants.COPYFILE_FICLONE);
+}
+export function clearApplyBaseline(root: string, id: string) {
+  rmSync(baselinePathFor(root, id), { force: true });
+}
+function retainedApplyBaseline(root: string, request: z.infer<typeof applySchema>) {
+  try {
+    const marker = hostedLaneCheckoutMarkerSchema.parse(
+      JSON.parse(readFileSync(baselinePathFor(root, request.operationId), 'utf8')),
+    );
+    return validBaseline(marker, request) ? marker : undefined;
+  } catch {
+    return undefined;
+  }
+}
 export function markerAt(root: string) {
   try {
     return readHostedLaneCheckout(root);
@@ -119,13 +148,16 @@ export function localApplyBlocked(root: string, input: unknown, error: ForgeErro
     from: request.from,
     to: request.lane,
     blockers: [error.recovery?.obstruction ?? { kind: 'local-obstruction', path: null }],
+    ...(error.recovery?.superseded ? { superseded: error.recovery.superseded } : {}),
     more: false,
     next,
     command: hostedRecoveryCommand(root, next.action, { applyOperationId: request.operationId }),
   };
   workLocked(join(cache, 'lock'), () => {
     const marker = markerAt(root),
-      baseline = prior?.baseline ?? (marker && validBaseline(marker, request) ? marker : undefined);
+      baseline =
+        prior?.baseline ??
+        (marker && validBaseline(marker, request) ? marker : retainedApplyBaseline(root, request));
     durableReplace(path, JSON.stringify({ request, handoff: handoff ?? prior?.handoff ?? null, baseline }));
     const directory = recoveryDirectory(root, request.operationId),
       receiptPath = join(directory, 'receipt.json');

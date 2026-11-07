@@ -17,6 +17,7 @@ import { ForgeError, invariant } from './errors.js';
 import { readSource } from './files.js';
 import { workLocked } from './work-lock.js';
 import { indexInstalledFiles, readCheckoutStatIndex, writeCheckoutStatIndex } from './checkout-stat-index.js';
+import type { CheckoutChange } from './hosted-checkout-clean.js';
 import {
   checkoutDelta,
   deltaDisplacement,
@@ -27,6 +28,8 @@ import {
 import { retainedDeltaBackups, settleCheckoutDelta } from './hosted-checkout-delta-settle.js';
 import { sweepCheckoutStages } from './hosted-checkout-delta-pending.js';
 import { sweepKeptApply } from './hosted-apply-kept.js';
+import { disposePriorCheckout } from './hosted-checkout-dispose.js';
+import { refuseDeltaConflict, refuseMetadataChange } from './hosted-checkout-carry.js';
 import { withCheckoutOpenMetrics, type CheckoutOpenMetrics } from './checkout-open-metrics.js';
 import { checkoutIo } from './checkout-io.js';
 import { smallCheckout } from './checkout-workload.js';
@@ -136,6 +139,22 @@ async function checkout(
         target,
       });
     });
+  /** Retire the old checkout once publication is durable. Only exact baseline bytes are removed;
+   * anything recreated in the old root before the rename lands is held and reported (B1). */
+  const disposePrevious = (previousMarker: string | null, index = readCheckoutStatIndex(root)) => {
+    if (!checkoutPathExists(previous)) return;
+    const bytes = readSource(previous, `.forge/${hostedLaneMarkerName}`, Number.MAX_SAFE_INTEGER);
+    // A prior marker that is not the one this operation observed vouches for nothing.
+    const old = bytes && digest(bytes) === previousMarker ? readHostedLaneCheckout(previous) : null;
+    disposePriorCheckout({
+      root,
+      cacheRoot: cache.root,
+      previous,
+      files: materializedFiles(old),
+      markerName: hostedLaneMarkerName,
+      index,
+    });
+  };
   const baseline = () => {
     let marker;
     try {
@@ -177,19 +196,27 @@ async function checkout(
                 'WORK_OPERATION_CHANGED',
                 'Retry the original Lane checkout request.',
               );
+              // A crash after the completion receipt can leave the old checkout behind.
+              if (original.complete) disposePrevious(original.previousMarker);
               return original;
             }
-            invariant(
-              !request.expected ||
-                canonicalPayload(request.expected) ===
-                  canonicalPayload({
-                    head: observed.head,
-                    sourceVersion: observed.sourceVersion,
-                    version: observed.version,
-                  }),
-              'WORK_STALE',
-              'The Lane changed from its expected source pins.',
-            );
+            const current = {
+              head: observed.head,
+              version: observed.version,
+              sourceVersion: observed.sourceVersion,
+            };
+            if (request.expected && canonicalPayload(request.expected) !== canonicalPayload(current))
+              // Nothing was applied yet. The exact pins are named so a caller can say what superseded
+              // them; the checkout never switches to the newer head on its own.
+              throw new ForgeError(
+                'WORK_STALE',
+                'The Lane changed from its expected source pins.',
+                undefined,
+                {
+                  obstruction: { kind: 'superseded', path: null },
+                  superseded: { expected: request.expected, current },
+                },
+              );
             const marker = baseline();
             if (
               !(
@@ -209,10 +236,16 @@ async function checkout(
                 undefined,
                 { obstruction: { kind: 'baseline-mismatch', path: `.forge/${hostedLaneMarkerName}` } },
               );
+            // A sync apply onto a trusted baseline judges unsaved changes against the incoming
+            // delta at publication (in place it carries edits to paths it does not touch, as Git
+            // does); only Forge metadata refuses here. Otherwise any local change refuses now.
+            const early: CheckoutChange[] = [];
             cleanHostedCheckout(root, materializedFiles(marker), hostedLaneMarkerName, Boolean(marker), {
               deferExtras: true,
               index: readCheckoutStatIndex(root),
+              ...(marker && request.previous ? { collect: early } : {}),
             });
+            refuseMetadataChange(early);
             const next = { request, selection: observed, complete: false, previousMarker: markerDigest() };
             durableReplace(receiptPath, JSON.stringify(next));
             return next;
@@ -370,13 +403,30 @@ async function checkout(
                       );
                     if (current?.operationId === request.operationId) preserveArtifacts(files);
                     preserveCaches([...(current?.state.files ?? []), ...state.files]);
+                    const index = readCheckoutStatIndex(root);
+                    const inPlace =
+                      Boolean(delta && request.previous) && current?.operationId !== request.operationId;
+                    const changes: CheckoutChange[] = [];
                     const artifacts = cleanHostedCheckout(
                       root,
                       materializedFiles(current),
                       hostedLaneMarkerName,
                       Boolean(current),
-                      { target: files, index: readCheckoutStatIndex(root) },
+                      { target: files, index, ...(inPlace ? { collect: changes } : {}) },
                     );
+                    // In place, only paths the delta touches move; unsaved changes elsewhere stay
+                    // exactly where they are under the new baseline. One that meets the delta (or
+                    // any Forge metadata change) refuses before anything is installed.
+                    // Nothing is installed yet, so the pending receipt goes too: a retry starts
+                    // fresh and re-checks its expected pins, exactly as an early refusal does.
+                    if (inPlace)
+                      try {
+                        refuseDeltaConflict(root, changes, delta!, materializedFiles(current), files);
+                      } catch (error) {
+                        rmSync(receiptPath, { force: true });
+                        syncDirectory(cache.root);
+                        throw error;
+                      }
                     // An interrupted post-rename install already has the original marker. Reconcile it.
                     if (current?.operationId !== request.operationId) {
                       invariant(
@@ -439,7 +489,7 @@ async function checkout(
                     durableReplace(join(cache.root, 'overlap-objects.json'), JSON.stringify(cache.objects));
                     operation.complete = true;
                     durableReplace(receiptPath, JSON.stringify(operation));
-                    if (checkoutPathExists(previous)) rmSync(previous, { recursive: true });
+                    disposePrevious(operation.previousMarker, index);
                   }),
                 'durability',
               ),

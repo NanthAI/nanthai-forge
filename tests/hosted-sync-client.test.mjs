@@ -12,6 +12,8 @@ import {
   mkdirSync,
   readdirSync,
   linkSync,
+  lstatSync,
+  readlinkSync,
 } from 'node:fs';
 import { join } from 'node:path';
 import { checkoutHostedLane } from '../dist/hosted-lane-checkout.js';
@@ -88,8 +90,15 @@ test('older interrupted apply cannot overwrite a newer checkout or newer server 
 });
 for (const kind of ['deletion', 'mode', 'symlink', 'untracked'])
   test(`sync apply preserves a local ${kind}`, async t => {
-    const s = await fixture(t),
-      command = s.command();
+    const s = await fixture(t);
+    // An untracked file only meets the sync where the sync brings a file of that name.
+    if (kind === 'untracked')
+      s.setFiles([
+        { ...s.files[0], blob: s.put('after\n') },
+        ...s.files.slice(1),
+        { path: 'untracked', blob: s.put('incoming'), mode: 'file' },
+      ]);
+    const command = s.command();
     if (kind === 'deletion') rmSync(join(s.root, 'a'));
     if (kind === 'mode') chmodSync(join(s.root, 'a'), 0o755);
     if (kind === 'symlink') {
@@ -99,6 +108,24 @@ for (const kind of ['deletion', 'mode', 'symlink', 'untracked'])
     if (kind === 'untracked') writeFileSync(join(s.root, 'untracked'), 'retained');
     await assert.rejects(applyHostedSync(s.root, command, s.transport), { code: 'WORK_CONFLICT' });
     assert.equal(readHostedLaneCheckout(s.root).selection.head, s.from.head);
+    if (kind === 'untracked') assert.equal(readFileSync(join(s.root, 'untracked'), 'utf8'), 'retained');
+  });
+for (const kind of ['edit', 'deletion', 'mode', 'untracked'])
+  test(`sync apply carries an unsaved ${kind} in a path it does not touch`, async t => {
+    const s = await fixture(t),
+      command = s.command();
+    if (kind === 'edit') writeFileSync(join(s.root, 'unaffected'), 'unsaved local edit');
+    if (kind === 'deletion') rmSync(join(s.root, 'unaffected'));
+    if (kind === 'mode') chmodSync(join(s.root, 'unaffected'), 0o755);
+    if (kind === 'untracked') writeFileSync(join(s.root, 'untracked'), 'retained');
+    const applied = await applyHostedSync(s.root, command, s.transport);
+    assert.equal(applied.head, command.lane.head);
+    assert.equal(readFileSync(join(s.root, 'a'), 'utf8'), 'after\n');
+    if (kind === 'edit') assert.equal(readFileSync(join(s.root, 'unaffected'), 'utf8'), 'unsaved local edit');
+    if (kind === 'deletion') assert(!existsSync(join(s.root, 'unaffected')));
+    if (kind === 'mode') assert(lstatSync(join(s.root, 'unaffected')).mode & 0o111);
+    if (kind === 'untracked') assert.equal(readFileSync(join(s.root, 'untracked'), 'utf8'), 'retained');
+    assert.equal(applied.displacedRecovery, undefined, 'nothing moved out of the working tree');
   });
 test('fresh apply rejects a newer remote head and changed original command explicitly', async t => {
   const s = await fixture(t),
@@ -150,8 +177,13 @@ for (const unknown of ['unknown file', 'wrong hash', 'symlink', 'hardlink'])
       writeFileSync(join(s.root, 'outside'), bytes);
       linkSync(join(s.root, 'outside'), path);
     }
-    await assert.rejects(applyHostedSync(s.root, s.command(), s.transport), { code: 'WORK_CONFLICT' });
+    // Not a verified cache, so it is local content: the sync touches no path in it and carries it.
+    await applyHostedSync(s.root, s.command(), s.transport);
     assert(readdirSync(directory).length);
+    if (unknown === 'unknown file') assert.deepEqual(readFileSync(join(directory, 'notes.txt')), bytes);
+    if (unknown === 'wrong hash') assert.equal(readFileSync(path, 'utf8'), 'not the named hash');
+    if (unknown === 'symlink') assert.equal(readlinkSync(path), '../elsewhere');
+    if (unknown === 'hardlink') assert.deepEqual(readFileSync(path), bytes);
   });
 
 for (const obstruction of ['edit', 'deletion', 'mode', 'symlink', 'extra', 'sparse mismatch'])
@@ -159,7 +191,14 @@ for (const obstruction of ['edit', 'deletion', 'mode', 'symlink', 'extra', 'spar
     const { recoverLocalApply } = await import('../dist/hosted-apply-recovery.js');
     const { assertAgentResponseShape } = await import('./agent-response-shape.mjs');
     const { describeFailure } = await import('../dist/system-errors.js');
-    const s = await fixture(t, obstruction === 'sparse mismatch' ? ['a'] : undefined);
+    const s = await fixture(t, obstruction === 'sparse mismatch' ? ['a', 'extra.txt'] : undefined);
+    // An untracked file meets the sync where the sync brings a file of that name.
+    if (obstruction === 'extra' || obstruction === 'sparse mismatch')
+      s.setFiles([
+        { ...s.files[0], blob: s.put('after\n') },
+        ...s.files.slice(1),
+        { path: 'extra.txt', blob: s.put('incoming extra'), mode: 'file' },
+      ]);
     if (obstruction === 'edit') writeFileSync(join(s.root, 'a'), 'local draft');
     if (obstruction === 'deletion') rmSync(join(s.root, 'a'));
     if (obstruction === 'mode') chmodSync(join(s.root, 'a'), 0o755);
@@ -295,13 +334,14 @@ test('an edit during recovery gets another preservation round instead of a new r
     request = s.command();
   writeFileSync(join(s.root, 'a'), 'first local draft');
   await assert.rejects(applyHostedSync(s.root, request, s.transport), { code: 'WORK_CONFLICT' });
-  let changed = false;
-  s.onDownload(() => {
-    if (!changed) {
-      changed = true;
-      writeFileSync(join(s.root, 'a'), 'second local draft');
-    }
-  });
+  // Recovery reads authority once, then its apply twice; the second is the last read before
+  // publication. The editor writes again right then.
+  const select = s.transport.select;
+  let reads = 0;
+  s.transport.select = async laneId => {
+    if (++reads === 3) writeFileSync(join(s.root, 'a'), 'second local draft');
+    return select(laneId);
+  };
   await assert.rejects(recoverLocalApply(s.root, request.operationId, s.transport), {
     code: 'WORK_CONFLICT',
   });

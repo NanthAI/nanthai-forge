@@ -1777,6 +1777,23 @@ serialized private baseline stage of the restored files only, cleans it on exit,
 restores a baseline over a completed apply. Interrupted local failures retain executable recovery.
 The recovery journal and preserved bytes stay local and add no idle server calls.
 
+A sync apply onto a trusted baseline carries unsaved changes in paths its delta does not
+touch, as Git carries them through a pull: in place, only a change that meets an installed
+or removed path (or a parent or child of one), or any Forge metadata change, refuses before
+anything is installed, and the refusal removes its pending receipt so a retry re-checks its
+pins. The judgement reuses the publication's one stat-indexed clean pass. A whole-checkout
+publication never removes the prior root wholesale: an editor can recreate paths in it until
+the rename lands, so `hosted-checkout-dispose.ts` walks it once (the walk `rm -r` did), unlinks
+only exact baseline bytes and Forge metadata, and moves anything else whole into a held
+kept-apply folder that never expires; results report it in `displacedRecovery`. Hosted main
+pulls do the same. Recovery wrappers keep typed recovery for filesystem errors
+(`local-filesystem`), an unreadable quarantined cache (left quarantined), a lost marker (a
+private baseline copy taken with the handoff), and a checkout root replaced by a link (a
+`root-link` blocker; nothing is written through the link). When the Lane moved before the
+first apply receipt, `recover-apply` returns `status:"superseded"` with both pin sets and
+`next: open`; it never switches pins silently. Recovery removes its exact journaled baseline
+stage even after an interrupted earlier run.
+
 
 `HostedAgentTransport` is the shared hosted CLI/agent boundary. `agent-cli` selects
 an explicit deployment/project, a verified Lane marker or a retained client

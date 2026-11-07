@@ -169,6 +169,12 @@ test('target source with identical untracked bytes is installed while disjoint i
 
 test('nested ignore rules and negations preserve only ignored output, never a re-included local draft', async t => {
   const s = await fixture(t, undefined, [{ path: 'pkg/.gitignore', content: '*.cache\n!draft.cache\n' }]);
+  // The sync brings its own pkg/draft.cache, so a local draft there is source it would replace.
+  s.setFiles([
+    { ...s.files[0], blob: s.put('after\n') },
+    ...s.files.slice(1),
+    { path: 'pkg/draft.cache', blob: s.put('incoming draft'), mode: 'file' },
+  ]);
   writeFileSync(join(s.root, 'pkg/data.cache'), 'output');
   writeFileSync(join(s.root, 'pkg/draft.cache'), 'draft');
   await assert.rejects(applyHostedSync(s.root, s.command(), s.transport), error => {
@@ -178,6 +184,7 @@ test('nested ignore rules and negations preserve only ignored output, never a re
   rmSync(join(s.root, 'pkg/draft.cache'));
   await applyHostedSync(s.root, s.command(), s.transport);
   assert.equal(readFileSync(join(s.root, 'pkg/data.cache'), 'utf8'), 'output');
+  assert.equal(readFileSync(join(s.root, 'pkg/draft.cache'), 'utf8'), 'incoming draft');
 });
 
 test('relative ROOT shares the absolute sibling cache boundary and creates no in-checkout cache', async t => {
@@ -242,6 +249,12 @@ test('incoming file replacing an ignored directory cannot discard its untracked 
 
 test('tracked source within an ignored directory is always checked and ignored siblings survive', async t => {
   const s = await fixture(t, undefined, [...rules, { path: 'out/tracked.ts', content: 'saved source' }]);
+  // The sync changes the tracked file, so an unsaved edit there must be found, ignored or not.
+  s.setFiles([
+    { ...s.files[0], blob: s.put('after\n') },
+    ...s.files.slice(1).filter(file => file.path !== 'out/tracked.ts'),
+    { path: 'out/tracked.ts', blob: s.put('incoming source'), mode: 'file' },
+  ]);
   const check = outputs(s),
     command = s.command();
   writeFileSync(join(s.root, 'out/tracked.ts'), 'unsaved source');
@@ -251,7 +264,7 @@ test('tracked source within an ignored directory is always checked and ignored s
   });
   writeFileSync(join(s.root, 'out/tracked.ts'), 'saved source');
   await applyHostedSync(s.root, command, s.transport);
-  assert.equal(readFileSync(join(s.root, 'out/tracked.ts'), 'utf8'), 'saved source');
+  assert.equal(readFileSync(join(s.root, 'out/tracked.ts'), 'utf8'), 'incoming source');
   check();
 });
 
