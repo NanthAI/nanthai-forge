@@ -7,6 +7,7 @@ import { basename, join } from 'node:path';
 import { heavySlots, readClientSettings } from './client-settings.js';
 import { watchLocal, type LocalWatcher } from './local-watcher.js';
 import { invariant } from './errors.js';
+import { ensureCoreBuild } from './heavy-build.js';
 import { processAlive } from './local-process.js';
 import {
   estimateWaitMs,
@@ -254,8 +255,13 @@ const NODE_VALUE_OPTIONS = new Set([
  * here instead of silently falling through to that default glob (friction e4ce373a).
  */
 export function nodeTestWithoutPaths(args: string[]) {
+  const paths = nodeTestPathCount(args);
+  return paths === 0;
+}
+/** Number of test paths of a `node ... --test` command, or null when the command is not one. */
+export function nodeTestPathCount(args: string[]): number | null {
   const name = basename(args[0] ?? '').replace(/\.exe$/i, '');
-  if (name !== 'node' && args[0] !== process.execPath) return false;
+  if (name !== 'node' && args[0] !== process.execPath) return null;
   let testing = false;
   let paths = 0;
   for (let index = 1; index < args.length; index++) {
@@ -269,7 +275,7 @@ export function nodeTestWithoutPaths(args: string[]) {
       else if (NODE_VALUE_OPTIONS.has(arg)) index++;
     } else if (arg.trim()) paths++;
   }
-  return testing && paths === 0;
+  return testing ? paths : null;
 }
 
 /** nforge heavy CMD [ARGS...]: run one heavy local command under the machine-wide slot limit. */
@@ -325,6 +331,11 @@ export async function heavyCli(
         join(slot, 'holder.json'),
         JSON.stringify({ cwd: process.cwd(), startedAt: Date.now(), command: basename(args[0]!) }),
       );
+    // Inside the slot, so builds stay bounded; a fresh dist/ costs one stat pass (friction 6288d0c2).
+    if (nodeTestPathCount(args)) {
+      const built = await ensureCoreBuild(process.cwd());
+      if (built !== 0) return built;
+    }
     return await new Promise<number>((resolve, reject) => {
       const child = spawn(args[0]!, args.slice(1), { stdio: 'inherit' });
       const forward = (signal: NodeJS.Signals) => () => child.kill(signal);
