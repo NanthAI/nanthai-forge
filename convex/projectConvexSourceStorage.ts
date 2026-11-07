@@ -35,7 +35,12 @@ export function sourceStorage(ctx: ActionCtx, projectId: Id<'hostedProjects'>) {
           makeFunctionReference<'query'>('projectConvexSourceOwnership:owns'),
           { projectId, ref },
         );
-        invariant(owned, 'SOURCE_REF_UNOWNED', 'Durable source reference has no owner in this project.');
+        invariant(
+          owned,
+          'SOURCE_REF_UNOWNED',
+          'Durable source reference has no owner in this project, so this saved continuation cannot resume. ' +
+            'Start the operation again from its input; Forge never reads an unowned legacy reference.',
+        );
         const blob = await ctx.storage.get(ref as Id<'_storage'>);
         invariant(blob, 'SOURCE_UNAVAILABLE', 'Durable source data is absent.');
         return new Uint8Array(await blob.arrayBuffer());

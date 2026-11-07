@@ -4,32 +4,30 @@ This is a disposition and precondition guide, not permission to delete. New byte
 
 ## Current dev disposition
 
-Dev retains **49,266 files / 1,009,639,246 bytes**. The approved deleted bench
+Dev retains **2,270 files / 44,025,423 bytes**. The approved deleted bench
 project's 155,012 rows are removed, all 58 per-table after counts are zero, and
-six cursor references are migrated to R2 and verified. Complete frozen table
-and recursive body coverage passed. Committed cleanup pages removed 43,400
-Convex files / 1,676,836,100 bytes: class 1 accounts for 42,342 files /
-1,654,634,977 bytes and class 3 for 1,058 files / 22,201,123 bytes. No class 2 or
-class 4 file was deleted. R2 objects are retained.
+six cursor references are migrated to R2 and verified. Two dev pause windows
+removed 90,396 Convex files / 2,642,449,923 bytes in committed cleanup pages:
+43,400 files in the first and 46,996 in the remaining-only run, including class
+4 files from an owner-approved manifest. R2 objects are retained.
 
-The remaining approved target is **31,108 files / 364,102,209 bytes**: class 1
-has 4,793 files / 272,520,960 bytes, the six migrated class 2 files total 20,486
-bytes, and class 3 has 26,309 files / 91,560,763 bytes. Five additional class 3
-files / 410,230 bytes remain referenced; all 18,153 class 4 files / 645,126,807
-bytes remain retained. Class 4 attribution is incomplete and grants no deletion
-permission. The older-backend `uploadUrl` / `putConvexUpload` paths and legacy
-read/record-field allowlists remain needed or await their separate disposition.
+Of the remainder, 16 files / 1,352,278 bytes are still referenced and stay: five
+class 3 files and eleven cursor sections reached from source-step cursor bodies.
+The other 2,254 files / 42,673,145 bytes are the approved remainder (classes 1, 3
+and 4) that the remaining-only run did not reach, or whose owner row lacked
+`r2BackfilledAt` (since repaired). The older-backend `uploadUrl` /
+`putConvexUpload` paths and legacy read/record-field allowlists remain needed or
+await their separate disposition.
 
-The single dev pause ended with both maintenance flags proven absent. A HEAD
-fetch failure stopped the file stage, and the first resume proof also failed;
-same-session outer recovery closed the fence and proved absence. Page receipts,
-physical files and owner flags reconcile without a half-applied batch. Issue
-1323a44c added bounded page-scoped HEAD retry with page skipping, sequential
-verified flag removal with a proof loop, and preservation of the original
-failure (see [Remaining-only run](#remaining-only-run)). The old driver's closed
-window cannot reopen, and its original catalog and completed bench/cursor stages
-are never reused. A remaining-only run needs fresh inputs, verification and
-dry-run evidence, a new operation and a new lead go.
+Each pause ended with both maintenance flags proven absent by name. The first
+stopped on a HEAD fetch failure; the remaining-only run stopped when the delete
+guard refused four files the dry run had not evaluated. Issue 1323a44c added
+bounded page-scoped HEAD retry with page skipping, sequential verified flag
+removal with a proof loop, preservation of the original failure, dry-run parity
+with the delete guard and skip-and-report for refused files (see
+[Remaining-only run](#remaining-only-run)). A closed window never reopens. Every
+further run needs fresh inputs, verification and dry-run evidence, a new
+operation and a new lead go.
 
 ## Read-only inventory first
 

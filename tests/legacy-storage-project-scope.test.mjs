@@ -96,6 +96,14 @@ for (const ref of ['foreign', 'unknown', 'removed', 'invalid-id']) {
   });
 }
 
+test('SOURCE_REF_UNOWNED tells the caller to start the operation again', async () => {
+  const f = fixture();
+  await assert.rejects(f.storage.read('foreign'), {
+    code: 'SOURCE_REF_UNOWNED',
+    message: /cannot resume\. Start the operation again from its input/,
+  });
+});
+
 test('an owned ref whose bytes are absent retains SOURCE_UNAVAILABLE', async () => {
   const f = fixture();
   await assert.rejects(f.storage.read('missing'), { code: 'SOURCE_UNAVAILABLE' });
