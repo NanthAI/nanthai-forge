@@ -8,6 +8,7 @@ import type { MoveRecord } from './cockpit/now-model';
 import { latestAcceptedMain, selectedMain } from './shell/main-model';
 import { age } from './ui/status';
 import { useNow } from './shell/StatusBar';
+import { useExpiringCounts } from './countsExpiry';
 export function HomeProjectRow({
   project,
   summary,
@@ -22,7 +23,7 @@ export function HomeProjectRow({
   choose: () => void;
 }) {
   const now = useNow();
-  const counts = useQuery(api.projectCoordination.counts, { projectId: project.id });
+  const counts = useExpiringCounts(useQuery(api.projectCoordination.counts, { projectId: project.id }));
   const raw = useQuery(workIndex.workspace, { projectId: project.id });
   const workspace = useMemo(() => (raw ? (JSON.parse(raw) as WorkIndexWorkspace) : null), [raw]);
   const local = useWorkRecords<MoveRecord & { head: string }>(project.id, workspace, 'channelMoves');

@@ -290,6 +290,8 @@ export type ActivityCounts = {
   activePeople: number;
   activeLanes: number;
   unannouncedActiveLanes: number;
+  /** Soonest window end; a client timer drops the counts then. */
+  nextExpiryAt?: number;
 };
 
 /** Who is listed in the people panel, from the same loaded sessions and folding rules. */

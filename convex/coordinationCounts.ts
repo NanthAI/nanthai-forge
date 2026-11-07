@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import { collapseSessions } from '../src/presence';
-import { v } from 'convex/values';
+import { activityAt, collapseSessions } from '../src/presence';
+import { v, type Infer } from 'convex/values';
 import type { QueryCtx } from './_generated/server';
 import { coordinationQuery } from './cliServer';
 import type { Doc } from './_generated/dataModel';
@@ -18,9 +18,14 @@ const countFields = v.object({
   activePeople: v.number(),
   activeLanes: v.number(),
   unannouncedActiveLanes: v.number(),
+  /** Soonest time (ms since epoch) a counted window ends; absent when nothing is counted. */
+  nextExpiryAt: v.optional(v.number()),
 });
 /** Never return rows from this helper: its public caller must expose counts only. */
-async function activityCounts(ctx: QueryCtx, project: Doc<'hostedProjects'>) {
+async function activityCounts(
+  ctx: QueryCtx,
+  project: Doc<'hostedProjects'>,
+): Promise<Infer<typeof countFields>> {
   const now = Date.now(),
     since = now - COORDINATION_LANE_ACTIVE_MS;
   const result = {
@@ -29,6 +34,11 @@ async function activityCounts(ctx: QueryCtx, project: Doc<'hostedProjects'>) {
     activePeople: 0,
     activeLanes: 0,
     unannouncedActiveLanes: 0,
+  };
+  // One number for the whole result: the client drops the counts locally at this time, with no re-query.
+  let nextExpiryAt = Infinity;
+  const expiresAt = (end: number) => {
+    if (end < nextExpiryAt) nextExpiryAt = end;
   };
   const attributed = new Set<string>(),
     lanes = new Set<string>();
@@ -44,6 +54,7 @@ async function activityCounts(ctx: QueryCtx, project: Doc<'hostedProjects'>) {
   for (const row of collapseSessions(sessions)) {
     if (!liveSession(row, now)) continue;
     live.add(row.sessionId);
+    expiresAt(activityAt(row) + COORDINATION_STALE_MS);
     if (row.context.laneId) attributed.add(row.context.laneId);
     const kind = row.kind ?? 'agent';
     if (kind === 'person') result.activePeople++;
@@ -60,14 +71,18 @@ async function activityCounts(ctx: QueryCtx, project: Doc<'hostedProjects'>) {
       command.kind === 'claim' ||
       (command.kind === 'change' &&
         (command.source === 'return' || ['checkpoint', 'run-check', 'run'].includes(command.action ?? '')))
-    )
+    ) {
       lanes.add(laneId);
+      expiresAt(row.at + COORDINATION_LANE_ACTIVE_MS);
+    }
   }
   for await (const claim of ctx.db
     .query('projectCoordinationClaims')
     .withIndex('by_project_and_expiresAt', q => q.eq('projectId', project._id).gt('expiresAt', now))) {
-    if (!claim.releasedAt && claim.laneId && claim.sessionId && live.has(claim.sessionId))
+    if (!claim.releasedAt && claim.laneId && claim.sessionId && live.has(claim.sessionId)) {
       attributed.add(claim.laneId);
+      expiresAt(claim.expiresAt);
+    }
   }
   // Imported saves/checks also count: agents without an announcement do not disappear.
   // Read summaries only, never hydrate source, prompts, logs or full Work payloads.
@@ -82,11 +97,16 @@ async function activityCounts(ctx: QueryCtx, project: Doc<'hostedProjects'>) {
         );
     for await (const row of rows('lanes')) {
       const lane = JSON.parse(row.value) as HostedLaneSummary;
-      if (lane.lastCheckpointAt && Date.parse(lane.lastCheckpointAt) >= since) lanes.add(lane.id);
+      if (lane.lastCheckpointAt && Date.parse(lane.lastCheckpointAt) >= since) {
+        lanes.add(lane.id);
+        expiresAt(Date.parse(lane.lastCheckpointAt) + COORDINATION_LANE_ACTIVE_MS);
+      }
     }
     for await (const row of rows('runs')) {
       const run = JSON.parse(row.value) as HostedRunSummary;
-      if (!(Math.max(Date.parse(run.startedAt), Date.parse(run.endedAt ?? run.startedAt)) >= since)) continue;
+      const ranAt = Math.max(Date.parse(run.startedAt), Date.parse(run.endedAt ?? run.startedAt));
+      if (!(ranAt >= since)) continue;
+      expiresAt(ranAt + COORDINATION_LANE_ACTIVE_MS);
       const viewRow = await record(ctx, partition, 'views', run.viewId);
       const view = viewRow ? (JSON.parse(viewRow.value) as HostedViewSummary) : null;
       for (const input of view?.inputs ?? []) lanes.add(input.laneId);
@@ -95,6 +115,7 @@ async function activityCounts(ctx: QueryCtx, project: Doc<'hostedProjects'>) {
       .query('projectCheckRequests')
       .withIndex('by_project_and_updatedAt', q => q.eq('projectId', project._id).gte('updatedAt', since))) {
       if (!request.report?.startedAt) continue;
+      expiresAt(request.updatedAt + COORDINATION_LANE_ACTIVE_MS);
       const viewRow = await record(ctx, partition, 'views', request.viewId);
       const view = viewRow ? (JSON.parse(viewRow.value) as HostedViewSummary) : null;
       for (const input of view?.inputs ?? []) lanes.add(input.laneId);
@@ -102,10 +123,10 @@ async function activityCounts(ctx: QueryCtx, project: Doc<'hostedProjects'>) {
   }
   result.activeLanes = lanes.size;
   result.unannouncedActiveLanes = [...lanes].filter(id => !attributed.has(id)).length;
-  return result;
+  return nextExpiryAt === Infinity ? result : { ...result, nextExpiryAt };
 }
 // Reactive on server writes only: a client-supplied time argument would re-run this per project per minute
-// for every idle tab. Counts stay as of the last write until the next one.
+// for every idle tab. The result carries `nextExpiryAt`, so the client drops stale counts with a local timer.
 const args = { projectId: v.id('hostedProjects') };
 export const counts = coordinationQuery({
   args,

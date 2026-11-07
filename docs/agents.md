@@ -112,7 +112,9 @@ only five numbers, never names, actors, credentials, paths, Lane or session ids:
 | `unannouncedActiveLanes` | Such Lanes without a live session naming them or an active claim by that session's actor; observed activity, not a hidden-agent estimate. |
 
 CLI/MCP uses `{action:"counts"}`. Counts use server time at read; subscriptions
-change on writes, never a clock refresh or poll. `sessions` pages roots, immediate
+change on writes, never a clock refresh or poll. `nextExpiryAt` (one number,
+absent when nothing is counted) is the soonest window end: Home sets one local
+timer and shows the count as unknown after it, with no Convex call. `sessions` pages roots, immediate
 children with `parentSessionId`, or all sessions with `all:true`. Continue each
 scope's cursor independently. Rows carry kind, harness, stale, parent and empty
 `subagents`; credentials are server-only. Order stays stable across heartbeats.

@@ -181,6 +181,29 @@ test('Home lists reader-only projects with a role tag', async () => {
   assert.doesNotMatch(html, /portal-footer/);
 });
 
+test('Home shows the working count while its window is open and unknown after nextExpiryAt, with no extra query', async () => {
+  const row = nextExpiryAt => async () => {
+    const html = await render('?surface=projects', tree => {
+      tree.pages['projectBackups:list'] = () => [];
+      tree.pages['projectContributors:shared'] = () => [];
+      tree.pages['projectReaders:shared'] = () => [{ id: PROJECT, name: 'Expiry project' }];
+      tree.queries['projectCoordination:counts'] = () => ({
+        activeAgents: 2,
+        activeSubagents: 0,
+        activePeople: 0,
+        activeLanes: 1,
+        unannouncedActiveLanes: 0,
+        nextExpiryAt,
+      });
+    });
+    return html;
+  };
+  assert.match(await row(Date.now() + 600_000)(), /2 working/);
+  const expired = await row(Date.now() - 1)();
+  assert.doesNotMatch(expired, /2 working|No one now/);
+  assert.match(expired, /fx-muted">—</);
+});
+
 test('reader General presents facts once in its table without the owner summary', async () => {
   const html = await render(
     `?surface=projects&project=${PROJECT}&projectTab=settings&settingsSection=general`,

@@ -48,6 +48,8 @@ function fixture(t) {
   };
   return { ...f, now, publish, query, row, identity };
 }
+// The tallies without the expiry field, which has its own test below.
+const tally = ({ nextExpiryAt: _expiry, ...rest }) => rest;
 const empty = {
   activeAgents: 0,
   activeSubagents: 0,
@@ -76,7 +78,7 @@ test('counts distinguish legacy agents, subagents and people; completed and stal
   await f.publish(legacy);
   delete f.row(legacy).kind;
   delete f.row(legacy).harness;
-  assert.deepEqual(await f.query('counts'), {
+  assert.deepEqual(tally(await f.query('counts')), {
     ...empty,
     activeAgents: 2,
     activeSubagents: 2,
@@ -111,7 +113,7 @@ test('counts distinguish legacy agents, subagents and people; completed and stal
   assert.equal(roots.find(row => row.sessionId === stale).stale, true);
   f.row(parent).lastSeen = f.now - 900_001;
   f.row(parent).lastActivity = f.row(parent).lastSeen;
-  assert.deepEqual(await f.query('counts'), {
+  assert.deepEqual(tally(await f.query('counts')), {
     ...empty,
     activeAgents: 1,
     activeSubagents: 2,
@@ -249,13 +251,15 @@ test('active Lanes include saves, imported checks and claims without announcemen
     command: { kind: 'change', source: 'work', action: 'note', laneId: 'only-a-note' },
   });
   const expected = { ...empty, activeAgents: 1, activeLanes: 6, unannouncedActiveLanes: 4 };
-  assert.deepEqual(await f.query('counts'), expected);
+  assert.deepEqual(tally(await f.query('counts')), expected);
   // CLI/MCP dispatch exposes the same counts action.
   assert.deepEqual(
-    await dispatchCoordination(
-      { query: (_ref, args) => coordination.counts._handler(f.ctx, args) },
-      'project',
-      { action: 'counts' },
+    tally(
+      await dispatchCoordination(
+        { query: (_ref, args) => coordination.counts._handler(f.ctx, args) },
+        'project',
+        { action: 'counts' },
+      ),
     ),
     expected,
   );
@@ -263,8 +267,8 @@ test('active Lanes include saves, imported checks and claims without announcemen
   f.tables.hostedProjects.get('project').visibility = 'public';
   f.identity(null);
   const aggregate = await f.query('publicCounts');
-  assert.deepEqual(aggregate, expected);
-  assert.deepEqual(Object.keys(aggregate).sort(), Object.keys(empty).sort());
+  assert.deepEqual(tally(aggregate), expected);
+  assert.deepEqual(Object.keys(aggregate).sort(), [...Object.keys(empty), 'nextExpiryAt'].sort());
   assert.ok(Object.values(aggregate).every(value => typeof value === 'number'));
   await assert.rejects(f.query('sessions', { paginationOpts: { cursor: null, numItems: 50 } }), /Sign in/);
   await assert.rejects(f.query('counts'), /Sign in/);
@@ -282,18 +286,48 @@ test('stale attributed sessions leave active Lanes unannounced; no announcement 
   const f = fixture(t),
     sessionId = randomUUID();
   await f.publish(sessionId, { context: { laneId: 'merely-announced' } });
-  assert.deepEqual(await f.query('counts'), { ...empty, activeAgents: 1 });
+  assert.deepEqual(tally(await f.query('counts')), { ...empty, activeAgents: 1 });
   await coordination.publish._handler(f.ctx, {
     projectId: 'project',
     operationId: randomUUID(),
     command: { kind: 'claim', sessionId, paths: ['file.ts'], laneId: 'claimed', ttlSeconds: 60 },
   });
-  assert.deepEqual(await f.query('counts'), { ...empty, activeAgents: 1, activeLanes: 1 });
+  assert.deepEqual(tally(await f.query('counts')), { ...empty, activeAgents: 1, activeLanes: 1 });
   f.row(sessionId).lastSeen = f.now - 900_001;
   f.row(sessionId).lastActivity = f.row(sessionId).lastSeen;
-  assert.deepEqual(await f.query('counts'), { ...empty, activeLanes: 1, unannouncedActiveLanes: 1 });
+  assert.deepEqual(tally(await f.query('counts')), { ...empty, activeLanes: 1, unannouncedActiveLanes: 1 });
   for (const event of f.tables.projectCoordinationEvents.values()) event.at -= 900_001;
-  assert.deepEqual(await f.query('counts'), empty);
+  assert.deepEqual(tally(await f.query('counts')), empty);
+});
+
+test('counts carry one nextExpiryAt: the soonest window end, absent when nothing is counted', async t => {
+  const f = fixture(t),
+    older = randomUUID(),
+    newer = randomUUID();
+  assert.equal((await f.query('counts')).nextExpiryAt, undefined);
+  await f.publish(older);
+  await f.publish(newer);
+  f.row(older).lastSeen = f.now - 300_000;
+  f.row(older).lastActivity = f.row(older).lastSeen;
+  const first = await f.query('counts');
+  assert.equal(first.activeAgents, 2);
+  assert.equal(first.nextExpiryAt, f.now - 300_000 + 900_000, 'the older session ends first');
+  assert.equal(Object.keys(first).length, Object.keys(empty).length + 1, 'one number field added');
+  assert.equal(typeof first.nextExpiryAt, 'number');
+  // A lane event that ends sooner than any session wins.
+  f.tables.projectCoordinationEvents.set('save', {
+    projectId: 'project',
+    at: f.now - 800_000,
+    command: { kind: 'change', source: 'return', laneId: 'saved' },
+  });
+  assert.equal((await f.query('counts')).nextExpiryAt, f.now - 800_000 + 900_000);
+  // A short claim by a live session ends sooner still.
+  await coordination.publish._handler(f.ctx, {
+    projectId: 'project',
+    operationId: randomUUID(),
+    command: { kind: 'claim', sessionId: newer, paths: ['a.ts'], laneId: 'claimed', ttlSeconds: 60 },
+  });
+  assert.equal((await f.query('counts')).nextExpiryAt, f.now + 60_000);
 });
 
 test('MCP detects initialize metadata/environment and inherits parent without merging child session identity', () => {
