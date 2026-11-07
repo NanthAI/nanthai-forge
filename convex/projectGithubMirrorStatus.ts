@@ -6,6 +6,7 @@ import { mirrorRow } from './projectGithubMirrorQueue';
 import { effectivePolicy } from '../src/autonomy-policy';
 import { githubSyncCommitSchema } from '../src/github-sync-types';
 import type { HostedMirrorStatus } from '../src/hosted-github-mirror-status';
+import { missingObjectDelays } from '../src/hosted-github-retry';
 
 /** Called only after project authorization. Three selected rows, no history scan,
  * timer or additional client request; retry/job writes invalidate existing reads. */
@@ -44,6 +45,9 @@ export async function githubMirrorStatus(
     pendingSince: job?._creationTime ?? null,
     mirroredAt: queue?.mirroredAt ?? null,
     failures: job?.failures ?? 0,
+    // Only lag 422s retry (others are terminal at once); 429/5xx get 5 tries (projectGithubMirrorStore:failed).
+    attemptLimit:
+      job?.status !== 'retrying' ? null : job.httpStatus === 422 ? missingObjectDelays.length + 1 : 5,
     nextAttemptAt: job?.nextAttemptAt ?? null,
     error: job?.error ?? null,
     // targetHead is current main; name the State this failing job publishes.

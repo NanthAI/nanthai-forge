@@ -352,7 +352,7 @@ test('Now exposes hosted mirror lag, scheduled retries and terminal failures fro
   const terminal = renderNow(f, {
     githubMirror: { ...githubMirror, status: 'failed', failures: 5, nextAttemptAt: null },
   });
-  assert.match(terminal, /GitHub mirror synthetic\/mirror: failed.*5\/5 failed attempts.*HTTP 500/);
+  assert.match(terminal, /GitHub mirror synthetic\/mirror: failed.* 5 failed attempts.*HTTP 500/);
   const healthy = renderNow(f, { githubMirror: { ...githubMirror, status: 'synced', lagging: false } });
   assert.doesNotMatch(healthy, /GitHub mirror synthetic\/mirror/);
 });

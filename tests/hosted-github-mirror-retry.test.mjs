@@ -190,6 +190,7 @@ test('real action: HTTP 500 retains the cursor, schedules one backoff, then succ
   assert.equal(f.job().httpStatus, 500);
   assert.equal(f.job().apiOperation, 'POST git/blobs');
   assert(f.job().requestBytes > 0);
+  assert.match(hostedMirrorStatusText(await f.status(), Date.now()), /retrying .* 1\/5 failed attempts/);
   await f.step();
   assert.equal(f.job().status, 'done');
   assert.equal(f.job().failures, 0);
@@ -258,6 +259,9 @@ test('real action: 422 "Tree SHA does not exist" on commits retries after 2 s, t
   assert.equal(f.job().failures, 1);
   assert.equal(f.scheduled.at(-1).delay, 2_000);
   assert(f.job().nextAttemptAt > Date.now());
+  const lagging = await f.status();
+  assert.equal(lagging.attemptLimit, 3, 'lag budget: first try + 2 scheduled retries');
+  assert.match(hostedMirrorStatusText(lagging, Date.now()), /retrying .* 1\/3 failed attempts .* retry at/);
   await f.step();
   assert.equal(f.job().status, 'done');
   assert.equal(f.job().failures, 0);
@@ -310,6 +314,10 @@ test('real action: a persistent missing-object 422 gets exactly two scheduled re
   const status = await f.status();
   assert.equal(status.status, 'failed');
   assert.match(status.detail, /Tree SHA does not exist/);
+  assert.match(
+    hostedMirrorStatusText(status, Date.now()),
+    /failed .* 3 failed attempts .*Tree SHA does not exist/,
+  );
 });
 
 test('real action: a persistent tree 422 for a SHA outside this job, or any other 422, stays terminal at once', async t => {
@@ -427,10 +435,13 @@ test('real action: five persistent 500s end terminal, visible in CLI and Now, wi
   const status = await f.status();
   assert.equal(status.status, 'failed');
   assert.equal(status.lagging, true);
-  assert.match(hostedMirrorStatusText(status, Date.now()), /failed.*behind.*5\/5.*HTTP 500.*request bytes/);
+  assert.match(
+    hostedMirrorStatusText(status, Date.now()),
+    /failed.*behind.* 5 failed attempts.*HTTP 500.*request bytes/,
+  );
   const html = renderToStaticMarkup(createElement(HostedMirrorStatus, { status, now: Date.now() }));
   assert.match(html, /role="status"/);
-  assert.match(html, /failed.*5\/5.*HTTP 500/);
+  assert.match(html, /failed.* 5 failed attempts.*HTTP 500/);
   const capabilities = JSON.parse(
     await f.run(agent.capabilities, { projectId: f.projectId, mirrorVersion: 1 }),
   );
@@ -441,7 +452,7 @@ test('real action: five persistent 500s end terminal, visible in CLI and Now, wi
   client.caps.githubMirror = capabilities.githubMirror;
   const cli = await readHostedCliStatus(client.root, client.transport());
   assert.equal(cli.value.githubMirror.status, 'failed');
-  assert.match(cli.text, /failed.*5\/5.*HTTP 500/);
+  assert.match(cli.text, /failed.* 5 failed attempts.*HTTP 500/);
   assert.equal(
     client.calls.filter(c => c.name === 'projectHostedAgent:capabilities').length,
     1,
