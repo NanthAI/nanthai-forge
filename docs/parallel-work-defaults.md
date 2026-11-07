@@ -246,7 +246,8 @@ frozen set on 2026-11-06 broke capabilities across CLI/server versions with `HOS
   the Lanes listed at `start`. Their saved work is kept and any save or start revives them.
 - No scan runs. Overlap reads use an index on the Lane's last activity, so dormant Lanes' rows are never
   read. Open Lanes saved before this field existed are judged by their presence time (a row with no time
-  at all counts as live) until they next write or `abandon-dormant` indexes them.
+  at all counts as live) until they next write, a landing completion stamps them from their Lane record
+  (up to five per landing, one indexed range read, empty once healed) or `abandon-dormant` indexes them.
 - `nforge agent ROOT lanes '{"view":"dormant"}'` lists dormant Lanes with `abandonable` (`landed`: an
   accepted receipt landed the saved head, stamped on the Lane or named in a landed receipt's inputs; `empty`:
   nothing was ever saved; `null`: other saved work). The dry run also compares the paths a `null` Lane

@@ -748,3 +748,18 @@ test('a landing supersedes the quiet open siblings of its Intent on their overla
   );
   assert.equal(read(rows.pinned).superseded, undefined, 'a pinned Lane is never touched');
 });
+
+test('a landing stamps an unrelated open legacy overlap row from its Lane record (ee9d5738)', async () => {
+  const f = await acceptanceFixture();
+  const landed = await f.lane(),
+    idle = await f.lane();
+  const [id] = [...f.tables.projectHostedOverlapLanes].find(([, r]) => r.laneId === idle.laneId);
+  // A row written before lastActivityAt existed, with no presence time: its activity reads as unknown.
+  f.patch('projectHostedOverlapLanes', id, { lastActivityAt: undefined, presenceRow: undefined });
+  const { state } = await f.ready(await f.makeCandidate([landed]), {});
+  const { receipt } = await f.accept(state);
+  await f.materialize(receipt.id);
+  const row = f.tables.projectHostedOverlapLanes.get(id);
+  assert.equal(row.lastActivityAt, Date.parse((await f.readLane(idle.laneId)).at));
+  assert.equal(row.open, true, 'the idle Lane stays open; only its activity is now known');
+});

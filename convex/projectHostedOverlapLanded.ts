@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { MutationCtx } from './_generated/server';
+import type { Id } from './_generated/dataModel';
 import { patchOverlapRow } from './projectHostedOverlapPeers';
 import { acceptancePage, type ReceiptIdentity } from './projectHostedAcceptanceStore';
 import { composeLaneSchema, validateComposePage } from '../src/hosted-compose';
 import { recordOverlapLanding } from '../src/hosted-overlap';
 import { agentActor } from '../src/agent-slug';
+import { readHostedRecord } from './projectHostedRecords';
 
 /** One immutable input page is at most 100 entries; later pages are reached through the completion ledger. */
 const RETIRE_LIMIT = 100;
@@ -17,6 +19,7 @@ export async function retireLandedOverlapLanes(
   identity: ReceiptIdentity,
   landed?: { commit: string; at: string; sequence?: number },
 ) {
+  await stampLegacyOverlapActivity(ctx, identity.projectId);
   const page = await acceptancePage(ctx, { ...identity, kind: 'inputs', index: 0 });
   if (!page) return 0;
   let retired = 0,
@@ -61,4 +64,43 @@ export async function retireLandedOverlapLanes(
     retired++;
   }
   return retired;
+}
+
+/** Legacy open overlap rows stamped per landing completion. */
+export const LEGACY_STAMP_LIMIT = 5;
+/** An overlap row written before `lastActivityAt` existed sits in the legacy activity range, and a row there
+ * with no presence time has unknown activity, which counts as live. A dormant Lane never writes again, so
+ * such a row kept notifying every peer forever (wave 5, 2026-11-07: one Lane idle 64 h sent 41 of 47 live
+ * notices, all 5 blocking; Issue ee9d5738). Each landing completion stamps a few of these rows from their
+ * Lane record's `at`, the value `abandon-dormant` stamps, so every deployment heals at its next landings
+ * with no backfill, manual run, per-save or per-read cost. One indexed range read per landing, empty once
+ * healed; up to LEGACY_STAMP_LIMIT Lane record reads and row patches while rows remain. A row whose Lane
+ * record is gone holds no open Lane and is closed. Idempotent: a stamped row leaves the range. */
+export async function stampLegacyOverlapActivity(ctx: MutationCtx, projectId: Id<'hostedProjects'>) {
+  const rows = await ctx.db
+    .query('projectHostedOverlapLanes')
+    .withIndex('by_project_and_open_and_activity', q =>
+      q.eq('projectId', projectId).eq('open', true).eq('lastActivityAt', undefined),
+    )
+    .take(LEGACY_STAMP_LIMIT);
+  if (!rows.length) return 0;
+  const project = await ctx.db.get(projectId);
+  if (!project) return 0;
+  for (const row of rows) {
+    const record = await readHostedRecord(ctx, {
+      projectId,
+      actor: project.owner,
+      kind: 'lane',
+      key: row.laneId,
+    });
+    let at = NaN;
+    try {
+      at = record ? Date.parse((JSON.parse(record.value) as { at?: string }).at ?? '') : NaN;
+    } catch {
+      // An unreadable body still has its version's own write time below.
+    }
+    if (record && !Number.isFinite(at)) at = record._creationTime;
+    await patchOverlapRow(ctx, row, record ? { lastActivityAt: at } : { open: false });
+  }
+  return rows.length;
 }

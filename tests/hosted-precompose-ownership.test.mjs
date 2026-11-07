@@ -109,9 +109,11 @@ for (const history of [575, 1150])
     // to its 50-entry log for the drift nudge. Calls are unchanged.
     // Reads 1349 -> 1351, writes 416 -> 418 (45f49fb7): each of the 2 landings reads and rewrites the
     // project's landing-speed row (regression ladder rung 1) in its own accept mutation. Calls are unchanged.
+    // Reads 1351 -> 1353 (ee9d5738): each of the 2 landing completion ticks reads one (empty) indexed range of
+    // open overlap rows that predate lastActivityAt, to stamp them from their Lane record. Calls and writes unchanged.
     assert(
       budget.calls <= 71 &&
-        source.reduce((n, c) => n + c.documents, 0) <= 1351 &&
+        source.reduce((n, c) => n + c.documents, 0) <= 1353 &&
         source.reduce((n, c) => n + c.writes, 0) <= 418,
       JSON.stringify({
         ...budget,

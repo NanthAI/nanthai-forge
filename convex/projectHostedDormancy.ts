@@ -24,14 +24,15 @@ export function dormantCutoff(project: Project, now = Date.now()): number | null
 
 /** Last time a Lane's record was written: the overlap row's own field, else the presence time it
  * carried before the field existed. A row with neither is unknown, and unknown counts as live: missing
- * evidence never hides a Lane. `abandon-dormant` stamps such rows from the Lane record. */
+ * evidence never hides a Lane. Landing completions and `abandon-dormant` stamp such rows from the Lane record. */
 export const rowActivity = (row: Pick<Doc<'projectHostedOverlapLanes'>, 'lastActivityAt' | 'presenceRow'>) =>
   row.lastActivityAt ?? row.presenceRow?.at ?? Infinity;
 
 /** Newest live open Lanes, at most `PEER_WINDOW`, from one indexed range on last activity. Dormant Lanes
  * are never read. Rows written before `lastActivityAt` existed sit in their own small range and are
  * filtered by the presence time they already hold, so a deployment needs no backfill; each leaves that
- * range at its Lane's next record write. With dormancy off this is the plain open-Lane read. */
+ * range at its Lane's next record write or, for a Lane that never writes again, when a landing completion
+ * stamps it (`stampLegacyOverlapActivity`). With dormancy off this is the plain open-Lane read. */
 export async function liveOpenOverlapLanes(
   ctx: QueryCtx,
   projectId: Id<'hostedProjects'>,

@@ -160,9 +160,12 @@ for (const history of [0, 575, 1150])
     // Reads 4216 -> 4225, writes 1245 -> 1254 (45f49fb7): each of the 9 landings reads and rewrites the
     // project's landing-speed row (regression ladder rung 1) inside its own accept mutation. Calls
     // are unchanged.
+    // Reads 4225 -> 4234 (ee9d5738): each of the 9 landing completion ticks reads one indexed range of open
+    // overlap rows that predate lastActivityAt, to stamp them from their Lane record; empty here, so nothing
+    // else is read or written. Calls and writes are unchanged.
     assert(
       budget.calls <= 199 &&
-        source.reduce((n, c) => n + c.documents, 0) <= 4225 &&
+        source.reduce((n, c) => n + c.documents, 0) <= 4234 &&
         source.reduce((n, c) => n + c.writes, 0) <= 1254,
       JSON.stringify({
         ...budget,
