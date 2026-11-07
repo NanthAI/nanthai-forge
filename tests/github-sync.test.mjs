@@ -150,9 +150,18 @@ function fixture(t, flags = {}) {
     root: temporary,
     value: { first },
   } = privateFixture();
+  // Accepts and pushes wake detached audit and auto-push workers that take the Work lock in short
+  // bursts. check-runtime.mjs gives every process zero lock patience, so a call that met such a
+  // burst failed at once ('Timed out after 0ms ... queue position=2', 3fc9facf) and the auto-push
+  // worker backed off past the test's wait (8e867966). Like the product (ten minutes), this
+  // fixture and the children it wakes wait a bounded 10 s for the lock instead.
+  const lockWait = process.env.FORGE_WORK_LOCK_WAIT_MS;
+  process.env.FORGE_WORK_LOCK_WAIT_MS = '10000';
   t.after(async () => {
     await cleanupOwner(owner, undefined, { stopChecks: true });
     rmSync(temporary, { recursive: true, force: true });
+    if (lockWait === undefined) delete process.env.FORGE_WORK_LOCK_WAIT_MS;
+    else process.env.FORGE_WORK_LOCK_WAIT_MS = lockWait;
   });
   const remote = join(temporary, 'remote.git'),
     owner = join(temporary, 'forge-native');
@@ -1387,11 +1396,11 @@ async function heldAudit(f) {
   };
 }
 
-function syncChild(f, flags, onProgress = () => {}) {
+function syncChild(f, flags, onProgress = () => {}, env = process.env) {
   const child = spawn(
     process.execPath,
     [resolve('dist/cli.js'), 'github-sync', f.owner, '--repo', 'tests/sync', ...flags],
-    { stdio: ['ignore', 'pipe', 'pipe'] },
+    { stdio: ['ignore', 'pipe', 'pipe'], env },
   );
   let stdout = '',
     stderr = '';
@@ -1414,7 +1423,11 @@ test('busy audit and expired --wait-audit always print a JSON no-push reason and
     release = await heldAudit(f);
   try {
     for (const flags of [[], ['--wait-audit', '--audit-timeout-ms', '100']]) {
-      const child = await syncChild(f, ['--push', ...flags]);
+      // This case asserts the immediate busy answer, so it opts out of the fixture's lock wait.
+      const child = await syncChild(f, ['--push', ...flags], undefined, {
+        ...process.env,
+        FORGE_WORK_LOCK_WAIT_MS: '0',
+      });
       assert.equal(child.status, 1, child.stderr);
       const result = JSON.parse(child.stdout);
       assert.equal(result.pushed, false);

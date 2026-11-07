@@ -634,11 +634,17 @@ test('20 open Lanes x 200 paths use one indexed peer read; history does not ente
   assert.equal(response.unacknowledgedOverlaps.items.length, 5);
   const peers = [...s.tables.projectHostedOverlapLanes.values()].filter(row => row.open);
   const focus = peers.find(row => row.laneId === lane.id);
-  const started = performance.now();
+  // The 50 ms claim is checked on main-thread CPU time. Wall time also counts the time a loaded runner
+  // deschedules this process: hosted Linux takes about 5.6 ms per comparison, yet one run read 52 ms
+  // (2026-11-07). Wall time stays a diagnostic.
+  const started = performance.now(),
+    cpu = process.threadCpuUsage();
   for (let i = 0; i < 20; i++)
     hostedOverlapAdvice(focus, peers, null, { head: focus.baseHead, sourceRevision: 0 }, new Set());
-  const wallMs = (performance.now() - started) / 20;
-  assert(wallMs < 50, 'pure overlap comparison under 50 ms: ' + wallMs);
+  const used = process.threadCpuUsage(cpu),
+    cpuMs = (used.user + used.system) / 1000 / 20,
+    wallMs = (performance.now() - started) / 20;
+  assert(cpuMs < 50, 'pure overlap comparison under 50 ms of CPU: ' + cpuMs);
   t.diagnostic(
     JSON.stringify({
       calls: 1,
@@ -648,6 +654,7 @@ test('20 open Lanes x 200 paths use one indexed peer read; history does not ente
       readBytes: meter.readBytes,
       writes: meter.writes,
       calculationMs: wallMs,
+      calculationCpuMs: cpuMs,
       rssBytes: process.memoryUsage().rss,
       peakRssBytes: process.resourceUsage().maxRSS * 1024,
     }),

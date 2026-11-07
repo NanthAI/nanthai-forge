@@ -13,15 +13,85 @@ import { ConvexExchange } from '../dist/exchange-client.js';
 import { digest } from '../dist/hash.js';
 import { buildExchangeRoot } from '../dist/native-exchange-tree.js';
 
+// Short deadlines are only used by tests that make them fire, and those tests run on fakeClock.
+// Tests that need an answer keep the production deadlines, so a loaded runner cannot fire a
+// deadline the test does not exercise (a0fd0893: 150 ms header/idle timers raced the fixture).
 const deadlines = { headerTimeoutMs: 150, idleTimeoutMs: 150, totalTimeoutMs: 2000, retries: 1, delayMs: 5 };
+const answered = { retries: 1, delayMs: 5 };
+
+/** Resolves waiters each time a test-visible event happens; waits are events, never sleeps. */
+function events() {
+  let waiters = [];
+  return {
+    notify: () => waiters.splice(0).forEach(wake => wake()),
+    async until(ready) {
+      while (!ready()) await new Promise(wake => waiters.push(wake));
+    },
+  };
+}
+
+// Node's fetch (undici) creates one module-level tick timer for its own socket timeouts and only
+// refreshes it afterwards. Create it on the real clock before any fakeClock test: a tick timer
+// created on mocked timers dies with that test and stops undici's own timers for later tests.
+{
+  const server = createServer((_req, res) => res.end());
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  await (await fetch(`http://127.0.0.1:${server.address().port}`)).text();
+  server.closeAllConnections();
+  await new Promise(resolve => server.close(resolve));
+}
+
+/** Deadlines under test fire only when the test advances virtual time, after waiting for the
+ * fixture event that must precede them. The fixture server shares this event loop, so with the
+ * real clock any stall longer than a deadline reordered "server answered" and "deadline fired".
+ * Load can still delay events here, but can no longer reorder them. */
+function fakeClock(t) {
+  const real = { clearTimeout, clearInterval };
+  t.mock.timers.enable({ apis: ['setTimeout', 'setInterval', 'Date'], now: 0 });
+  // Timeout classification (total vs idle vs headers) reads performance.now().
+  t.mock.method(performance, 'now', () => Date.now());
+  const mocked = { setTimeout, setInterval, clearTimeout, clearInterval },
+    own = new WeakSet(),
+    armed = new Map(),
+    changes = events();
+  // Count armed delays so a back-off is advanced only once the code under test has armed it.
+  globalThis.setTimeout = (fn, ms, ...args) => {
+    const handle = mocked.setTimeout(fn, ms, ...args);
+    own.add(handle);
+    armed.set(ms, (armed.get(ms) ?? 0) + 1);
+    changes.notify();
+    return handle;
+  };
+  globalThis.setInterval = (fn, ms, ...args) => {
+    const handle = mocked.setInterval(fn, ms, ...args);
+    own.add(handle);
+    return handle;
+  };
+  // Mocked timers clear by queue position, so a handle from a real timer or an earlier test's clock
+  // (a late socket 'close' handler) would remove an unrelated pending timer here.
+  globalThis.clearTimeout = handle => (own.has(handle) ? mocked.clearTimeout : real.clearTimeout)(handle);
+  globalThis.clearInterval = handle => (own.has(handle) ? mocked.clearInterval : real.clearInterval)(handle);
+  // Resetting the mock timers after the test restores all four real functions over these wrappers.
+  return {
+    tick: ms => t.mock.timers.tick(ms),
+    async backoff(ms) {
+      await changes.until(() => armed.get(ms) > 0);
+      armed.set(ms, armed.get(ms) - 1);
+      t.mock.timers.tick(ms);
+    },
+  };
+}
+
 async function fixture(t, handler) {
   const requests = [],
-    sockets = new Set();
+    sockets = new Set(),
+    received = events();
   const server = createServer(async (req, res) => {
     const chunks = [];
     for await (const chunk of req) chunks.push(chunk);
     requests.push({ path: req.url, body: Buffer.concat(chunks).toString() });
     handler(req, res, requests.length);
+    received.notify();
   });
   server.on('connection', socket => {
     sockets.add(socket);
@@ -32,7 +102,11 @@ async function fixture(t, handler) {
     for (const socket of sockets) socket.destroy();
     await new Promise(resolve => server.close(resolve));
   });
-  return { url: `http://127.0.0.1:${server.address().port}`, requests };
+  return {
+    url: `http://127.0.0.1:${server.address().port}`,
+    requests,
+    seen: n => received.until(() => requests.length >= n),
+  };
 }
 const timedOut = (call, reason) => error => {
   assert(error instanceof ForgeError);
@@ -46,10 +120,14 @@ const timedOut = (call, reason) => error => {
 
 test('accepted HTTP connections that never return headers time out, abort and retry finitely', async t => {
   const f = await fixture(t, () => {});
-  await assert.rejects(
-    exchangeFetch('manifest', `${f.url}/?token=secret`, {}, deadlines),
-    timedOut('manifest', 'response headers'),
-  );
+  const clock = fakeClock(t);
+  const pending = exchangeFetch('manifest', `${f.url}/?token=secret`, {}, deadlines);
+  await f.seen(1);
+  clock.tick(150);
+  await clock.backoff(5);
+  await f.seen(2);
+  clock.tick(150);
+  await assert.rejects(pending, timedOut('manifest', 'response headers'));
   assert.equal(f.requests.length, 2);
 });
 
@@ -58,16 +136,27 @@ test('half a body then no progress times out and retries the complete read', asy
     res.writeHead(200, { 'Content-Length': 8 });
     res.write('half');
   });
-  const progress = [];
-  await assert.rejects(
-    exchangeFetch(
-      'work.json download',
-      f.url,
-      {},
-      { ...deadlines, onBytes: (done, total) => progress.push([done, total]) },
-    ),
-    timedOut('work.json', 'body idle'),
+  const clock = fakeClock(t),
+    progress = [],
+    bytes = events();
+  const pending = exchangeFetch(
+    'work.json download',
+    f.url,
+    {},
+    {
+      ...deadlines,
+      onBytes: (done, total) => {
+        progress.push([done, total]);
+        bytes.notify();
+      },
+    },
   );
+  for (const attempt of [1, 2]) {
+    await bytes.until(() => progress.length === 2 * attempt);
+    clock.tick(150);
+    if (attempt === 1) await clock.backoff(5);
+  }
+  await assert.rejects(pending, timedOut('work.json', 'body idle'));
   assert.equal(f.requests.length, 2);
   assert.deepEqual(progress, [
     [0, 8],
@@ -78,24 +167,48 @@ test('half a body then no progress times out and retries the complete read', asy
 });
 
 test('continuous body progress resets idle time but cannot evade the total cap', async t => {
-  const timers = [];
-  t.after(() => timers.forEach(clearInterval));
-  const f = await fixture(t, (_req, res) => {
+  const written = [];
+  const f = await fixture(t, (_req, res, n) => {
+    written[n] = 1;
     res.writeHead(200);
     res.write('x');
-    const timer = setInterval(() => res.write('x'), 20);
-    timers.push(timer);
+    const timer = setInterval(() => {
+      written[n]++;
+      res.write('x');
+    }, 100);
     res.on('close', () => clearInterval(timer));
   });
-  // The server shares this event loop, so a loaded runner can stall the 20 ms
-  // writer. Idle must tolerate that stall (30x the write interval) while still
-  // being shorter than the total cap, or the idle timer wins the race instead
-  // of the total cap this test asserts.
-  await assert.rejects(
-    exchangeFetch('stream', f.url, {}, { ...deadlines, idleTimeoutMs: 600, totalTimeoutMs: 900 }),
-    timedOut('stream', 'total request'),
+  // A byte every 100 ms against a 150 ms idle deadline and a 900 ms total cap. Virtual time moves
+  // 100 ms only after every written byte reached the client, so idle never expires and the
+  // total cap is the deadline that ends each attempt, however long the runner stalls.
+  const clock = fakeClock(t),
+    bytes = events();
+  let received = 0;
+  const pending = exchangeFetch(
+    'stream',
+    f.url,
+    {},
+    {
+      ...deadlines,
+      totalTimeoutMs: 900,
+      onBytes: done => {
+        received = done;
+        bytes.notify();
+      },
+    },
   );
+  for (const attempt of [1, 2]) {
+    await f.seen(attempt);
+    received = 0;
+    for (let elapsed = 0; elapsed < 900; elapsed += 100) {
+      await bytes.until(() => received === written[attempt]);
+      clock.tick(100);
+    }
+    if (attempt === 1) await clock.backoff(5);
+  }
+  await assert.rejects(pending, timedOut('stream', 'total request'));
   assert.equal(f.requests.length, 2);
+  assert(written[2] > 900 / 150, 'body progress outlived the idle deadline several times');
 });
 
 test('stalled response retry discards partial bytes and returns only a complete successful body', async t => {
@@ -104,7 +217,25 @@ test('stalled response retry discards partial bytes and returns only a complete 
     if (n === 1) res.write('bad!');
     else res.end('complete');
   });
-  const response = await exchangeFetch('download', f.url, {}, deadlines);
+  const clock = fakeClock(t),
+    bytes = events();
+  let received = 0;
+  const pending = exchangeFetch(
+    'download',
+    f.url,
+    {},
+    {
+      ...deadlines,
+      onBytes: done => {
+        received = done;
+        bytes.notify();
+      },
+    },
+  );
+  await bytes.until(() => received === 4);
+  clock.tick(150);
+  await clock.backoff(5);
+  const response = await pending;
   assert.equal(await response.text(), 'complete');
   assert.equal(f.requests.length, 2);
 });
@@ -115,7 +246,7 @@ test('HTTP retries back off; permission failures and Convex structured errors re
       res.writeHead(status);
       res.end('failure');
     });
-    assert.equal((await exchangeFetch('read', f.url, {}, deadlines)).status, status);
+    assert.equal((await exchangeFetch('read', f.url, {}, answered)).status, status);
     assert.equal(f.requests.length, status === 429 || status === 503 ? 2 : 1);
   }
 });
@@ -127,10 +258,16 @@ test('Convex journal action uses the same deadline and names its endpoint', asyn
     logger: false,
     fetch: exchangeConvexFetch(deadlines),
   });
-  await assert.rejects(
-    client.action(makeFunctionReference('projectWorkActions:exportJournal'), { projectId: 'synthetic' }),
-    timedOut('projectWorkActions:exportJournal', 'response headers'),
-  );
+  const clock = fakeClock(t);
+  const pending = client.action(makeFunctionReference('projectWorkActions:exportJournal'), {
+    projectId: 'synthetic',
+  });
+  await f.seen(1);
+  clock.tick(150);
+  await clock.backoff(5);
+  await f.seen(2);
+  clock.tick(150);
+  await assert.rejects(pending, timedOut('projectWorkActions:exportJournal', 'response headers'));
   assert.equal(f.requests.length, 2);
   assert.equal(f.requests[0].body, f.requests[1].body);
 });
@@ -155,7 +292,7 @@ test('hosted overlap reads retry a lost connection but current authority errors 
     const client = new ConvexHttpClient(f.url, {
       skipConvexDeploymentUrlCheck: true,
       logger: false,
-      fetch: exchangeConvexFetch(deadlines),
+      fetch: exchangeConvexFetch(answered),
     });
     const read = () =>
       client.query(makeFunctionReference('projectHostedOverlaps:read'), {
@@ -177,7 +314,7 @@ test('receipt-reconciled Convex actions retry identical operation IDs; unknown a
   const client = new ConvexHttpClient(f.url, {
     skipConvexDeploymentUrlCheck: true,
     logger: false,
-    fetch: exchangeConvexFetch(deadlines),
+    fetch: exchangeConvexFetch(answered),
   });
   assert.equal(
     await client.action(makeFunctionReference('projectExchangeMigration:migrate'), {
@@ -188,11 +325,15 @@ test('receipt-reconciled Convex actions retry identical operation IDs; unknown a
   );
   assert.equal(f.requests[0].body, f.requests[1].body);
   const g = await fixture(t, () => {});
+  const clock = fakeClock(t);
+  const unknown = exchangeConvexFetch(deadlines)(`${g.url}/api/action`, {
+    method: 'POST',
+    body: JSON.stringify({ path: 'unknown:write', args: [{}] }),
+  });
+  await g.seen(1);
+  clock.tick(150);
   await assert.rejects(
-    exchangeConvexFetch(deadlines)(`${g.url}/api/action`, {
-      method: 'POST',
-      body: JSON.stringify({ path: 'unknown:write', args: [{}] }),
-    }),
+    unknown,
     error => error.code === 'EXCHANGE_REQUEST_TIMEOUT' && /attempt 1\/1/.test(error.message),
   );
   assert.equal(g.requests.length, 1);
@@ -212,7 +353,7 @@ test('Convex typed action errors preserve authorization/CAS codes rather than tr
   const client = new ConvexHttpClient(f.url, {
     skipConvexDeploymentUrlCheck: true,
     logger: false,
-    fetch: exchangeConvexFetch(deadlines),
+    fetch: exchangeConvexFetch(answered),
   });
   await assert.rejects(
     client.action(makeFunctionReference('projectExchangeMigration:migrate'), { operationId: 'original' }),
@@ -241,7 +382,7 @@ test('range consumers can cancel a range-less response without buffering its suf
         reader.releaseLock();
       }
     },
-    deadlines,
+    answered,
   );
   assert.equal(bytes.toString(), 'range');
   assert.equal(f.requests.length, 1);
@@ -299,13 +440,22 @@ test('active call tracking clears completed and timed-out Convex calls', async t
     const f = await fixture(t, (_req, res) => {
       if (!stall) res.end('{}');
     });
-    const progress = [];
-    const response = exchangeConvexFetch(deadlines, (name, pending) => progress.push([name, pending]))(
-      `${f.url}/api/action`,
-      { method: 'POST', body: JSON.stringify({ path: 'projectWorkActions:exportJournal', args: [{}] }) },
-    );
-    if (stall) await assert.rejects(response, error => error.code === 'EXCHANGE_REQUEST_TIMEOUT');
-    else await response;
+    const progress = [],
+      clock = stall ? fakeClock(t) : undefined;
+    const response = exchangeConvexFetch(stall ? deadlines : answered, (name, pending) =>
+      progress.push([name, pending]),
+    )(`${f.url}/api/action`, {
+      method: 'POST',
+      body: JSON.stringify({ path: 'projectWorkActions:exportJournal', args: [{}] }),
+    });
+    if (clock) {
+      await f.seen(1);
+      clock.tick(150);
+      await clock.backoff(5);
+      await f.seen(2);
+      clock.tick(150);
+      await assert.rejects(response, error => error.code === 'EXCHANGE_REQUEST_TIMEOUT');
+    } else await response;
     assert.deepEqual(progress, [
       ['projectWorkActions:exportJournal', true],
       ['projectWorkActions:exportJournal', false],
@@ -407,7 +557,7 @@ test('a completed request never aborts its closed response stream', async t => {
   t.after(() => {
     AbortController.prototype.abort = abort;
   });
-  const response = await exchangeFetch('R2 object HEAD verification', url, { method: 'HEAD' }, deadlines);
+  const response = await exchangeFetch('R2 object HEAD verification', url, { method: 'HEAD' }, answered);
   assert.equal(response.status, 200);
   assert.equal(response.headers.get('content-length'), '5');
   assert.equal(aborts, 0);
@@ -422,7 +572,7 @@ test('a completed request never aborts its closed response stream', async t => {
         reads++;
         throw new Error('synthetic reader failure');
       },
-      { ...deadlines, retries: 1, delayMs: 1 },
+      { ...answered, delayMs: 1 },
     ),
     error => error.code === 'EXCHANGE_REQUEST_FAILED',
   );
@@ -446,7 +596,7 @@ test('pending long actions continue the exact payload immediately and expose sav
   });
   const client = new ConvexHttpClient(f.url, {
     skipConvexDeploymentUrlCheck: true,
-    fetch: exchangeConvexFetch(deadlines, (name, pending) => events.push({ name, pending })),
+    fetch: exchangeConvexFetch(answered, (name, pending) => events.push({ name, pending })),
   });
   assert.equal(
     await client.action(makeFunctionReference('projectWorkIndexActions:ensure'), {
@@ -476,7 +626,7 @@ test('HTTP pending with changing elapsed time but no saved position stops finite
   });
   const client = new ConvexHttpClient(f.url, {
     skipConvexDeploymentUrlCheck: true,
-    fetch: exchangeConvexFetch(deadlines),
+    fetch: exchangeConvexFetch(answered),
   });
   await assert.rejects(
     client.action(makeFunctionReference('projectWorkIndexActions:ensure'), { projectId: 'project' }),
@@ -487,10 +637,8 @@ test('HTTP pending with changing elapsed time but no saved position stops finite
 
 test('redirected Convex storage/recipe reads bound headers and the complete body', async t => {
   const { ConvexExchangeBlobs } = await import('../dist/exchange-blobs.js');
-  const realTimeout = globalThis.setTimeout;
-  t.mock.method(globalThis, 'setTimeout', (fn, ms, ...args) =>
-    realTimeout(fn, ms === 30_000 ? 150 : ms === 120_000 ? 2000 : ms, ...args),
-  );
+  // The production 30 s header/idle deadlines and 100 ms doubling back-off, in virtual time.
+  const clock = fakeClock(t);
   const bytes = Buffer.from('complete'),
     pin = { sha256: digest(bytes), size: bytes.length };
   for (const halfBody of [false, true]) {
@@ -508,10 +656,13 @@ test('redirected Convex storage/recipe reads bound headers and the complete body
       action: async () => ({ direct: true, digest: pin.sha256, size: pin.size }),
       mutation: async () => [{ digest: pin.sha256, size: pin.size, location: 'convex', url: f.url }],
     });
-    await assert.rejects(
-      blobs.getPart('synthetic', pin, 0),
-      error => error.code === 'EXCHANGE_REQUEST_TIMEOUT',
-    );
+    const pending = blobs.getPart('synthetic', pin, 0);
+    for (const attempt of [1, 2, 3, 4]) {
+      await f.seen(attempt);
+      clock.tick(30_000);
+      if (attempt < 4) await clock.backoff(100 * 2 ** (attempt - 1));
+    }
+    await assert.rejects(pending, error => error.code === 'EXCHANGE_REQUEST_TIMEOUT');
     assert.equal(f.requests.length, 4);
     assert.deepEqual(Buffer.from((await blobs.getPart('synthetic', pin, 0)).data), bytes);
   }
@@ -531,6 +682,8 @@ test('cooperative cancellation stops retries and aborts a header/body stall befo
       }
       accepted();
     });
+    // Virtual time never advances here: only the cancellation can end the stalled read.
+    if (!halfBody) fakeClock(t);
     const controller = new AbortController();
     const pending = withExchangeProgress({ signal: controller.signal }, () =>
       exchangeFetch('synthetic read', f.url, {}, deadlines),
