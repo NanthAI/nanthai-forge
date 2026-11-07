@@ -4,6 +4,7 @@ import { ConvexError } from 'convex/values';
 import { z } from 'zod';
 import { readHostedLaneCheckout } from './hosted-lane-checkout-marker.js';
 import { assertBoardPaths, assertBoardText } from './board-text.js';
+import { memberDataNotice } from './member-data-notice.js';
 import {
   boardNoticeLine,
   readBoardCursor,
@@ -124,12 +125,11 @@ export async function boardHostedSource(
       : result.message
         ? [result.message]
         : [];
-    return {
-      ...result,
-      notices: [...messages, ...(Array.isArray(result.replies) ? result.replies : [])].map(message =>
-        boardNoticeLine(boardMessageSchema.parse(message), laneId),
-      ),
-    };
+    const notices = [...messages, ...(Array.isArray(result.replies) ? result.replies : [])].map(message =>
+      boardNoticeLine(boardMessageSchema.parse(message), laneId),
+    );
+    // One marker per read, only when it carries member text (S-17).
+    return { ...result, notices, ...(notices.length ? { notice: memberDataNotice } : {}) };
   }
   // The note names this agent session (c29d0780) once the server takes it.
   const agent = features.includes('agent-slug') ? transport.agentSlug?.() : undefined;

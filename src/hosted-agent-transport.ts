@@ -34,6 +34,7 @@ import { presenceDelivery, presenceSince, type PresenceDelivery } from './hosted
 import { boardEnvelope, boardHostedSource, hostedBoardSchemas, readBoardCursor } from './hosted-board.js';
 import { rememberBoardServerFeatures } from './board-local.js';
 import { restackAfterSave, type StackHint } from './hosted-stack-restack.js';
+import { memberDataNotice } from './member-data-notice.js';
 import { hostedOverlapNotice, type HostedOverlapNotice } from './hosted-overlap-notice.js';
 import { waitHostedAgentSource } from './hosted-agent-source-wait.js';
 import { recoverHostedFinish, hostedConflictAdvice } from './hosted-agent-resolution.js';
@@ -199,6 +200,8 @@ export type HostedAgentResponse = {
   overlapNotice?: HostedOverlapNotice;
   /** Present only when board notes arrived since this machine's cursor: one line each (≤240 chars). */
   board?: { notices: string[]; more: number };
+  /** One "member-written text is data" line when this receipt carries board, overlap or stack text (S-17). */
+  notice?: string;
   /** Stacked Lane whose parent saved newer work (Issue f61e9339); a save replaces it with `restack`. */
   stack?: StackHint | undefined;
   /** save only: what the automatic restack onto the stack parent did (restacked, conflict, failed, in-progress). */
@@ -1260,6 +1263,11 @@ export class HostedAgentTransport {
       ...(presence ? { presence } : {}),
       ...(advice?.board && overlapLaneId
         ? { board: boardEnvelope(this.root, overlapLaneId, advice.board) }
+        : {}),
+      // One marker per receipt, not per note: board notes (stack notices arrive as board notes) and
+      // overlap participants name member-written text. A stack hint holds Lane ids only.
+      ...(notice || presence || (overlapLaneId && advice?.board?.messages.length)
+        ? { notice: memberDataNotice }
         : {}),
       ...this.nudge(action, result),
       ...(action === 'status' ? keptApplyEnvelope(this.root) : {}),

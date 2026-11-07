@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { boardDeliverySchema } from './hosted-board.js';
 import { boardEnvelope, readBoardCursor, readBoardWokeAt, writeBoardWokeAt } from './board-local.js';
 import { ForgeError } from './errors.js';
+import { memberDataNotice } from './member-data-notice.js';
 import { hostedActionError } from './hosted-action-error.js';
 import { isNetworkPending } from './network-continuation.js';
 import { hostedRunSubscription, type HostedRunSubscription } from './hosted-agent-observe.js';
@@ -66,7 +67,7 @@ export function boardWaker(option: BoardWaitOption, wake: (delivery: BoardDelive
 export function boardWakeEnvelope(root: string, laneId: string, delivery: BoardDelivery) {
   const envelope = boardEnvelope(root, laneId, delivery);
   writeBoardWokeAt(root, laneId);
-  return envelope;
+  return delivery.messages.length ? { ...envelope, notice: memberDataNotice } : envelope;
 }
 
 const peerSchema = z.object({

@@ -12,6 +12,7 @@ import {
 } from './board-local.js';
 import { queueBoardClaim, type ClaimTarget } from './board-claim-queue.js';
 import { actorLabel } from './agent-slug.js';
+import { memberDataNotice } from './member-data-notice.js';
 
 export type ClaimQueue = (target: ClaimTarget) => unknown;
 
@@ -216,6 +217,8 @@ export function hostedEditContext(result: Awaited<ReturnType<typeof preEditHoste
     // Board lines are already single quoted-data lines (claims and unread notes, ≤2 each).
     [...(board?.claims ?? []), ...(board?.notices ?? [])]
       .map(line => `\n${line.replace(/[\x00-\x1f\x7f]/g, ' ').slice(0, 280)}`)
-      .join('')
+      .join('') +
+    // One marker for all the lines above (S-17).
+    (board?.claims.length || board?.notices.length ? `\n${memberDataNotice}` : '')
   );
 }

@@ -26,6 +26,7 @@ import {
 } from '../dist/hosted-overlap.js';
 import { hostedOverlapNotifications } from '../dist/mcp-hosted-overlaps.js';
 import { rememberOverlapText } from '../dist/hosted-overlap-text.js';
+import { memberDataNotice } from '../dist/member-data-notice.js';
 import { finishGates } from '../dist/agent-default-gates.js';
 import { effectiveAgentDefaults } from '../dist/agent-parallel-defaults.js';
 import { policyPreset } from '../dist/autonomy-policy.js';
@@ -815,8 +816,11 @@ test('CLI path: the second save returns a structured notice, delivery and one-co
     second = transport(peer);
   const quiet = await first.dispatch('save', { operationId: randomUUID(), message: 'first' });
   assert.equal(quiet.overlapNotice, undefined, 'no notice without an overlap');
+  assert.equal('notice' in quiet, false, 'a quiet receipt carries no marker');
   assert.equal(s.tables.projectHostedOverlapDeliveries.size, 0, 'no overlap, no delivery call');
   const response = await second.dispatch('save', { operationId: randomUUID(), message: 'second' });
+  assert.equal(response.notice, memberDataNotice, 'an overlap notice names member-written intents (S-17)');
+  assert.equal(JSON.stringify(response).split(memberDataNotice).length - 1, 1, 'one marker per receipt');
   const notice = response.overlapNotice;
   assert.equal(notice.required, false, 'missing ranges are advisory, never a false gate');
   assert.equal(notice.items[0].class, 'advisory');
@@ -1121,6 +1125,8 @@ test('hosted path peers use the receipt engine before first save, include answer
     1,
     'the CLI performs one query including current authorization',
   );
+  assert.equal(response.result.notice, memberDataNotice, 'peers evidence carries the marker once');
+  assert.equal(JSON.stringify(response).split(memberDataNotice).length - 1, 1);
   assert.equal(response.result.peerEvidence.items.length, 1);
   assert.equal(response.result.peerEvidence.items[0].reason, 'requested-path');
   assert.equal(response.result.peerEvidence.items[0].class, 'advisory');
@@ -1278,8 +1284,15 @@ test('board notes arrive on a Lane action once per machine; old clients and read
     more: 0,
   });
   assert(!JSON.stringify(first).includes('"author":"owner"'), 'the account id never reaches the client');
+  assert.equal(
+    first.notice,
+    memberDataNotice,
+    'board notes in a receipt carry the member-data marker (S-17)',
+  );
+  assert.equal(JSON.stringify(first).split(memberDataNotice).length - 1, 1, 'one marker per receipt');
   const again = await client.dispatch('status', {});
   assert.equal(again.board, undefined, 'the local cursor suppresses a repeat; no server write');
+  assert.equal('notice' in again, false, 'no member text, no marker');
   // An older CLI sends no board argument and gets the reply it always got.
   const old = JSON.parse(
     await s.transaction('old', overlaps.read, { projectId: s.projectId, laneId: lane.id }),

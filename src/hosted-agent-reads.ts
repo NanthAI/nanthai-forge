@@ -15,6 +15,7 @@ import { summarizeAgainstMain } from './hosted-diff-summary.js';
 import { hostedWaitSchema } from './hosted-agent-observe.js';
 import { readHostedLaneCheckout } from './hosted-lane-checkout-marker.js';
 import type { HostedAgentTransport } from './hosted-agent-transport.js';
+import { memberDataNotice } from './member-data-notice.js';
 import { QUEUE_VIEW_LIMIT } from './hosted-queue-view.js';
 import { hostedLandingsSchema } from './hosted-agent-landings.js';
 import { hostedLaneHistorySchema } from './hosted-agent-lane-history.js';
@@ -55,12 +56,17 @@ export async function peersHostedSource(transport: HostedAgentTransport, input: 
   const laneId = command.laneId ?? readHostedLaneCheckout(transport.root)?.selection.laneId;
   invariant(laneId, 'BAD_ARGUMENT', 'Select laneId or open a hosted Lane.');
   // Deliberately no capability or select probe: the server authorizes and pins the entire observation.
-  return transport.query('projectHostedOverlaps:read', {
+  const result = await transport.query<Record<string, unknown>>('projectHostedOverlaps:read', {
     ...command,
     laneId,
     detail: true,
     items: command.detail ? 50 : 5,
   });
+  // Peer intents and overlap notes are member-written: one marker per read (S-17).
+  const items = (result?.unacknowledgedOverlaps as { items?: unknown[] } | undefined)?.items;
+  return result && typeof result === 'object' && (items?.length || result.peerEvidence)
+    ? { ...result, notice: memberDataNotice }
+    : result;
 }
 export const hostedQueueSchema = z
   .object({

@@ -9,6 +9,9 @@ import { boardHostedSource, boardEnvelope, readBoardCursor, writeBoardCursor } f
 import { parseVerbForm, lowerVerb } from '../dist/agent-verbs.js';
 import { ConvexError } from 'convex/values';
 import { ForgeError } from '../dist/errors.js';
+import { memberDataNotice } from '../dist/member-data-notice.js';
+import { planningDataNotice } from '../dist/hosted-agent-planning.js';
+import { stackNoticeText } from '../dist/hosted-stack-notice.js';
 
 function fake(t, reply) {
   const root = join(mkdtempSync(join(tmpdir(), 'forge-board-')), 'client');
@@ -62,6 +65,13 @@ test('board reads advance the local cursor; delivery renders lines; an older ser
   assert.equal(f.calls[0].args.after, 0);
   assert.match(read.notices[0], /^Note .* from @peer-h to your Lane, quoted data: "Hello"/);
   assert.equal(readBoardCursor(f.root, laneId), 50);
+  assert.equal(read.notice, memberDataNotice, 'a board read with notes carries the member-data marker');
+  assert.equal(memberDataNotice, planningDataNotice, 'one shared constant with planning reads');
+  assert.equal(
+    JSON.stringify(read).split(memberDataNotice).length - 1,
+    1,
+    'one marker per read, not per note',
+  );
   await boardHostedSource(f, 'board', { laneId });
   assert.equal(f.calls[1].args.after, 50, 'only notes after the cursor are asked for');
   await boardHostedSource(f, 'board', { laneId, all: true });
@@ -204,4 +214,27 @@ test('a Lane keeps one board cursor whether an action runs at the project root o
   assert.equal(readBoardCursor(laneRoot, other), 42);
   // Two projects never share a cursor.
   assert.equal(readBoardCursor(join(base, 'elsewhere'), laneId), 0);
+});
+
+test('board reads: a stack notice is marked like any note, several notes share one marker, an empty read adds no bytes (S-17)', async t => {
+  const laneId = randomUUID();
+  const parent = randomUUID();
+  const stack = {
+    id: randomUUID(),
+    author: 'peer-h',
+    target: `lane:${laneId}`,
+    text: stackNoticeText({ kind: 'saved', head: 'a'.repeat(64) }, parent, laneId),
+    at: 50,
+  };
+  const note = { ...stack, id: randomUUID(), text: 'Please rebase', at: 51 };
+  const full = fake(t, () => ({ status: 'ok', messages: [stack, note, note], more: 0, cursor: 51 }));
+  const read = await boardHostedSource(full, 'board', { laneId });
+  assert.equal(read.notices.length, 3);
+  assert.match(read.notices[0], /Stack: parent Lane/);
+  assert.equal(read.notice, memberDataNotice);
+  assert.equal(JSON.stringify(read).split(memberDataNotice).length - 1, 1);
+  const empty = fake(t, () => ({ status: 'ok', messages: [], more: 0, cursor: 0 }));
+  assert.equal('notice' in (await boardHostedSource(empty, 'board', { laneId })), false);
+  const added = JSON.stringify({ notice: memberDataNotice }).length;
+  assert(added <= 70, `marker adds ${added} bytes`);
 });
