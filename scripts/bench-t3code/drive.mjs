@@ -41,6 +41,7 @@ import { drainBatch, hostedQueueEntries } from './drain.mjs';
 import { usageGate, usageProblems, diskFreeGb, diskNeed } from './gates.mjs';
 import { agentOf } from './agent.mjs';
 import { runnerFairness } from './runners.mjs';
+import { oracleBranchRecord } from './oracle-branches.mjs';
 
 const B = process.env.BENCH_ROOT || join(homedir(), 'NanthAI/forge-bench/b15d');
 const flags = process.argv.slice(2);
@@ -350,6 +351,8 @@ async function main() {
           // Crashed in setup: the cell wrote agentsStarted:false (run-cell.mjs).
           setupCrash: Boolean(r?.crashed && r.agentsStarted === false),
           voided: r?.voided ?? ['no result'],
+          // A grading branch that could not be deleted is recorded here (02ee5788).
+          oracleBranch: oracleBranchRecord(r),
         };
       });
       const changes = batchGuard(start, end, { unpinned: dry && flags.includes('--unpinned') });

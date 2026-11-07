@@ -15,8 +15,10 @@ export const oracleBranchCell = name => {
   return m && CELL_ID.test(m[1]) ? m[1] : null;
 };
 
-/** Delays between delete attempts (about two minutes in all); grading is outside timing. */
-export const DELETE_BACKOFF_MS = [2000, 4000, 8000, 16_000, 32_000, 64_000];
+/** Delays between delete attempts: at most 5 tries per branch (4 pauses, about 3 minutes in
+ * all, long enough to ride out a short outage); grading is outside timing. */
+export const DELETE_BACKOFF_MS = [5000, 15_000, 45_000, 120_000];
+export const MAX_DELETE_TRIES = DELETE_BACKOFF_MS.length + 1;
 
 /** Delete a ref, retrying every failure with backoff (a network blip is the usual cause).
  * A ref that is already gone counts as deleted. Never throws: the outcome is recorded so the
@@ -36,6 +38,10 @@ export async function deleteRefWithBackoff(request, path, { pause = wait, delays
   }
   return { deleted: false, attempts: delays.length + 1, error: lastError };
 }
+
+/** The batch-ledger entry for a cell's grading branch: the delete outcome from the cell
+ * result, or null when grading never created one. A failed delete stays visible there. */
+export const oracleBranchRecord = result => result?.oracle?.branchCleanup ?? null;
 
 /** Is this cell finished (its process wrote a result, or died without one)? Only then may a
  * later reset remove its grading branch. `runs` is the harness runs directory. */

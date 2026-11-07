@@ -3,15 +3,18 @@
 // diagnostics from the CLI's stderr (108a4883). No network, no bench data.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { reset, rulesetName } from '../scripts/bench-t3code/github-arm.mjs';
 import { runOracle } from '../scripts/bench-t3code/oracle.mjs';
 import {
   cellFinished,
+  DELETE_BACKOFF_MS,
+  MAX_DELETE_TRIES,
   deleteRefWithBackoff,
   oracleBranchCell,
+  oracleBranchRecord,
 } from '../scripts/bench-t3code/oracle-branches.mjs';
 import { nextBatch, SETUP_ONLY } from '../scripts/bench-t3code/plan.mjs';
 import { forgeArm } from '../scripts/bench-t3code/forge-arm.mjs';
@@ -43,6 +46,24 @@ test('oracle branch names map to cell ids only for the harness’s exact pattern
     assert.equal(oracleBranchCell(other), null, other);
 });
 
+test('branch delete never exceeds 5 tries with the default backoff', async () => {
+  assert.equal(MAX_DELETE_TRIES, 5);
+  let calls = 0;
+  const slept = [];
+  const r = await deleteRefWithBackoff(
+    async () => {
+      calls++;
+      throw blip;
+    },
+    'p',
+    { pause: async ms => slept.push(ms) },
+  );
+  assert.equal(calls, 5);
+  assert.equal(r.attempts, 5);
+  assert.equal(r.deleted, false);
+  assert.deepEqual(slept, DELETE_BACKOFF_MS);
+});
+
 test('branch delete retries every failure with backoff and records a final failure', async () => {
   let calls = 0;
   const delays = [];
@@ -54,7 +75,7 @@ test('branch delete retries every failure with backoff and records a final failu
     { pause: async ms => delays.push(ms) },
   );
   assert.deepEqual(ok, { deleted: true, attempts: 4 });
-  assert.deepEqual(delays, [2000, 4000, 8000]);
+  assert.deepEqual(delays, [5000, 15_000, 45_000]);
   calls = 0;
   const failed = await deleteRefWithBackoff(
     async () => {
@@ -199,4 +220,59 @@ process.exit(1);`,
   const plain = await arm.abandonById('11111111-1111-4111-8111-111111111111', 'bench cleanup', dir);
   assert.match(plain.error, /^ERROR: /);
   assert.ok(plain.message.length > 0);
+});
+
+test('batch ledger keeps a failed oracle branch delete', () => {
+  const branchCleanup = { name: `oracle/${GITHUB_CELL}`, deleted: false, attempts: 5, error: 'blip' };
+  assert.deepEqual(oracleBranchRecord({ oracle: { error: 'x', branchCleanup } }), branchCleanup);
+  assert.equal(oracleBranchRecord({ oracle: { error: 'x' } }), null);
+  assert.equal(oracleBranchRecord(null), null);
+});
+
+test('replay of 2026-11-04: grading drops, deletes fail, the next cell still resets', async t => {
+  const runs = temp(t);
+  const calls = [];
+  const state = { branches: ['main'] };
+  // Cell a1: push fails like a dropped connection; every delete fails; the cell ends void.
+  const report = {};
+  await assert.rejects(
+    runOracle(
+      { meta: '/nonexistent/bench-meta', branch: `oracle/${GITHUB_CELL}`, commit: 'abc' },
+      '/dev/null',
+      report,
+      {
+        request: async args => {
+          calls.push(args);
+          throw blip;
+        },
+        deleteBackoff: { pause: async () => {} },
+      },
+    ),
+  );
+  assert.equal(report.branch.deleted, false);
+  assert.equal(report.branch.attempts, 5);
+  assert.equal(calls.length, 5, 'bounded by the retry cap');
+  // The branch is still on the fork; the void cell wrote its result with the cleanup record.
+  state.branches.push(`oracle/${GITHUB_CELL}`);
+  mkdirSync(join(runs, GITHUB_CELL));
+  writeFileSync(
+    join(runs, GITHUB_CELL, 'result.json'),
+    JSON.stringify({
+      voided: ['oracle: error connecting to api.github.com'],
+      oracle: { branchCleanup: report.branch },
+    }),
+  );
+  assert.equal(
+    oracleBranchRecord(JSON.parse(readFileSync(join(runs, GITHUB_CELL, 'result.json'), 'utf8'))).deleted,
+    false,
+  );
+  // Cell a2 resets: the finished cell's branch is removed (real cellFinished over the ledger).
+  const resetCalls = [];
+  const receipt = await reset('synthetic-base', {
+    request: resetRequest(state, resetCalls),
+    pause: async () => {},
+    finishedCell: id => cellFinished(runs, id),
+  });
+  assert.deepEqual(receipt.removedOracleBranches, [`oracle/${GITHUB_CELL}`]);
+  assert.deepEqual(state.branches, ['main']);
 });
