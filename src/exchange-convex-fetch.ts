@@ -30,8 +30,6 @@ const replaySafe = new Set([
   'projectObjectDownloads:describe',
   'projectObjectDownloads:lanePage',
   'projectObjects:prepareBatch',
-  'projectObjects:completeBatch',
-  'projectObjects:reconcile',
   'projectObjectDownloads:signDownloads',
   'projectObjectCommit:commitBatch',
   'projectObjectRecipes:complete',

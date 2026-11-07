@@ -37,8 +37,11 @@ Actions-aware standard check script to use standard sharding.
 check and no per-check path filters, so no required check can sit pending because a
 change is outside its paths. The planner decides what applies from the changed-path
 list it already holds: test shards a change does not reach are not dispatched, and the
-landing waits only for the jobs that apply. When no test applies (a docs-only change
-under the standard check) the plan has the static job alone, and the run, its acceptance
+landing waits only for the jobs that apply. A docs-only change under the standard check
+runs the test files that read a changed document (`scripts/docs-readers.mjs`, the selector local
+preflight uses) in ordinary test shards, still under the docs scope: the documents checks run, no
+full re-check, and the main-audit skip holds. When no test applies (a docs-only change that no
+test reads) the plan has the static job alone, and the run, its acceptance
 receipt (`check.skipped`) and the `landings` row (`checkSkipped`) record
 `{"part":"tests","status":"not-affected","reason":…}` with the planner's reason. A change
 that reaches tests selects them and waits for every shard; its receipt has no `skipped`.
@@ -52,7 +55,7 @@ and a docs scope that covers a non-Markdown path becomes a full selection. Both 
 `Zero-selection guard:` in the selection reason. A source with no test file at all fails with
 `ZERO_SELECTION`. The runners refuse the same state at execution: an Actions plan with no test shard for
 code, an empty shard, or a pinned selection that names no test file fails with `ZERO_SELECTION`.
-Only docs scope and explicit partial evidence (which never lands) run without test files; arbitrary
+Only docs scope (when no test reads the changed documents) and explicit partial evidence (which never lands) run without test files; arbitrary
 commands have no selection.
 
 ### Check contract

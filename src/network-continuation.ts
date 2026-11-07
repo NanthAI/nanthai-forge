@@ -12,7 +12,7 @@ export function networkContinuation(
   action: HostedAgentAction,
   input: Record<string, unknown>,
   operationId: string | null,
-  error: Pick<ForgeError, 'code' | 'message'>,
+  error: Pick<ForgeError, 'code' | 'message'> & { recovery?: Record<string, unknown> | undefined },
 ): HostedAgentResponse {
   const parameters = { ...input, ...(operationId ? { operationId } : {}) };
   const next = { ...parameters, action };
@@ -27,7 +27,12 @@ export function networkContinuation(
       phase: 'transport',
       inProgress: true,
       successful: false,
-      error: { code: error.code, message: error.message },
+      // A 429/503 refusal keeps retryable and retryAt (72d50375).
+      error: {
+        code: error.code,
+        message: error.message,
+        ...(error.recovery ? { recovery: error.recovery } : {}),
+      },
       replayParameters: parameters,
       next,
       command: `nforge agent ${shellQuote(root)} ${action} ${shellQuote(JSON.stringify({ ...address, ...parameters }))}`,

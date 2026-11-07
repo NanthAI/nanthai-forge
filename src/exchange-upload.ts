@@ -14,8 +14,7 @@ type Prepared = {
   id: string;
   stored: boolean;
   created: boolean;
-  uploadUrl?: string;
-  target?: Extract<PutTarget, { kind: 'r2' }>;
+  target?: PutTarget;
   contentType: string;
 };
 const query = (name: string) => makeFunctionReference<'query'>(name);
@@ -89,19 +88,9 @@ export function uploadPhysicalObjects(
             status: 'fulfilled' as const,
             value: await (async () => {
               if (row.stored) return null;
-              let cursor: string | null = null;
-              // R2 PUTs are create-only and idempotent, so a retried row needs no storage scan.
-              while (!row.created && !row.target) {
-                const observed: { stored: boolean; isDone: boolean; cursor: string } = await client.mutation(
-                  mutation('projectObjects:reconcile'),
-                  { id: row.id, cursor },
-                );
-                if (observed.stored) return null;
-                if (observed.isDone) break;
-                cursor = observed.cursor;
-              }
+              // Every unstored row has a create-only R2 PUT target, so a retry needs no reconcile.
               invariant(
-                row.target || row.uploadUrl,
+                row.target,
                 'EXCHANGE_UPLOAD_UNKNOWN',
                 'Original upload destination is unavailable; reconcile the same request.',
               );
@@ -114,13 +103,8 @@ export function uploadPhysicalObjects(
               );
               uploadedObjects++;
               uploadedBytes += bytes.length;
-              const stored = await (options.blobs?.put ?? putTarget)(
-                row.target ?? { uploadUrl: row.uploadUrl!, contentType: row.contentType },
-                bytes,
-              );
-              return row.target
-                ? { id: row.id, r2: true as const }
-                : { id: row.id, storageId: stored.storageId! };
+              await (options.blobs?.put ?? putTarget)(row.target, bytes);
+              return { id: row.id };
             })(),
           };
         } catch (reason) {
@@ -136,17 +120,14 @@ export function uploadPhysicalObjects(
       const completed = attempts.flatMap(result =>
         result.status === 'fulfilled' && result.value ? [result.value] : [],
       );
-      const convex = completed.flatMap(c => ('storageId' in c ? [c] : [])),
-        r2 = completed.flatMap(c => ('r2' in c ? [{ id: c.id }] : []));
-      if (convex.length) await client.mutation(mutation('projectObjects:completeBatch'), { objects: convex });
-      if (r2.length) {
+      if (completed.length) {
         invariant(
           client.action,
           'EXCHANGE_UPLOAD_UNKNOWN',
           'This client cannot verify object storage uploads.',
         );
         await client.action(makeFunctionReference<'action'>('projectObjectCommit:commitBatch'), {
-          objects: r2,
+          objects: completed,
         });
       }
       for (const object of completed) {
@@ -167,9 +148,9 @@ export function uploadPhysicalObjects(
               error.code,
               `${error.message} Upload failed after ${attempt} attempts; original objects: ${window.map(o => o.pin.sha256).join(', ')}. Retry the same operation to reconcile.`,
             );
-          // Re-prepare the exact window: stored rows are skipped, Convex pending
-          // rows reconcile before another POST, and R2's create-only PUT replays
-          // the same key before commit verification. Successful peers stay saved.
+          // Re-prepare the exact window: stored rows are skipped and R2's
+          // create-only PUT replays the same key before commit verification.
+          // Successful peers stay saved.
           await (options.wait ?? sleep)(250 * 2 ** (attempt - 1));
         }
       }

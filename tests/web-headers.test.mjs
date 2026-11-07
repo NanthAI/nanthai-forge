@@ -3,6 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
 /** The hosted web app's response headers live in netlify.toml (review S-13). */
 const toml = readFileSync(new URL('../netlify.toml', import.meta.url), 'utf8');
@@ -18,15 +19,48 @@ test('every page is sent with frame protection, nosniff, no referrer and HSTS', 
   assert.match(header('Permissions-Policy') ?? '', /camera=\(\)/);
 });
 
-test('the enforced CSP forbids framing; the full policy is report-only and names what the app loads', () => {
+test('the full CSP is enforced, forbids framing and names what the app loads', () => {
   const enforced = header('Content-Security-Policy') ?? '';
-  assert.match(enforced, /frame-ancestors 'none'/);
-  assert.match(enforced, /object-src 'none'/);
-  const draft = header('Content-Security-Policy-Report-Only') ?? '';
-  for (const part of ["default-src 'self'", 'connect-src', 'worker-src', 'frame-src', 'img-src'])
-    assert.ok(draft.includes(part), `report-only policy has ${part}`);
-  assert.doesNotMatch(draft, /script-src[^;]*'unsafe-inline'/, 'no blanket inline scripts');
-  assert.doesNotMatch(draft, /script-src[^;]*'unsafe-eval'/);
+  assert.equal(header('Content-Security-Policy-Report-Only'), undefined, 'no report-only draft is left');
+  for (const part of [
+    "frame-ancestors 'none'",
+    "object-src 'none'",
+    "base-uri 'self'",
+    "default-src 'self'",
+    'connect-src',
+    'worker-src',
+    'frame-src',
+    'img-src',
+  ])
+    assert.ok(enforced.includes(part), `enforced policy has ${part}`);
+  assert.doesNotMatch(enforced, /script-src[^;]*'unsafe-inline'/, 'no blanket inline scripts');
+  assert.doesNotMatch(enforced, /script-src[^;]*'unsafe-eval'/);
+});
+
+test('the web entry turns off Zod string evaluation before anything else runs', async () => {
+  const main = readFileSync(new URL('../web/src/main.tsx', import.meta.url), 'utf8');
+  const firstImport = /^import [^\n]*$/m.exec(main)?.[0];
+  assert.equal(firstImport, "import './zod-jitless';", 'main.tsx imports ./zod-jitless first');
+  const jitless = readFileSync(new URL('../web/src/zod-jitless.ts', import.meta.url), 'utf8');
+  assert.match(jitless, /__zod_globalConfig = \{ \.\.\.scope\.__zod_globalConfig, jitless: true \}/);
+  // The pinned Zod must pick up a config object set before it loads (else it probes Function('')).
+  const probe = [
+    'globalThis.__zod_globalConfig = { jitless: true };',
+    "const { z } = await import('zod');",
+    'let evaluated = 0;',
+    'const real = globalThis.Function;',
+    'globalThis.Function = new Proxy(real, { apply: (t, s, a) => (evaluated++, Reflect.apply(t, s, a)), construct: (t, a) => (evaluated++, Reflect.construct(t, a)) });',
+    'const schema = z.object({ a: z.string(), b: z.number() });',
+    "for (let i = 0; i < 3; i++) schema.parse({ a: 'x', b: i });",
+    'globalThis.Function = real;',
+    'console.log(JSON.stringify({ jitless: z.config().jitless, evaluated }));',
+  ].join('\n');
+  const { execFileSync } = await import('node:child_process');
+  const out = execFileSync(process.execPath, ['--input-type=module', '-e', probe], {
+    cwd: fileURLToPath(new URL('..', import.meta.url)),
+    encoding: 'utf8',
+  });
+  assert.deepEqual(JSON.parse(out), { jitless: true, evaluated: 0 });
 });
 
 test('the inline theme script in index.html is allowed by its hash in the policy', () => {
@@ -35,7 +69,7 @@ test('the inline theme script in index.html is allowed by its hash in the policy
   assert.equal(scripts.length, 1, 'index.html has exactly one inline script');
   const hash = createHash('sha256').update(scripts[0]).digest('base64');
   assert.ok(
-    (header('Content-Security-Policy-Report-Only') ?? '').includes(`'sha256-${hash}'`),
+    (header('Content-Security-Policy') ?? '').includes(`'sha256-${hash}'`),
     'update the sha256 in netlify.toml after editing the inline script',
   );
 });

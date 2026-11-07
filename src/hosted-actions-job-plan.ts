@@ -137,8 +137,9 @@ export async function prepareActionsJob(
         }
       : {}),
   };
+  // A docs scope shards only the tests that read a changed document (none for a document no test reads).
   const groups =
-    standard && selection.scope !== 'docs'
+    standard && (selection.scope !== 'docs' || selection.tests.length)
       ? timedShards(selection.tests, client.timings, {
           concurrencyBudget: run.configuration.concurrencyBudget ?? 12,
           callsPerJob: actionsJobCalls(client.capabilities),

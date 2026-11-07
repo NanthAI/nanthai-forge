@@ -98,6 +98,12 @@ if (selection.scope === 'docs') {
     node: script => execFileSync(process.execPath, [script], { env, stdio: 'inherit' }),
     interaction: comparison?.interaction !== undefined,
   });
+  // The tests that read a changed document (scripts/docs-readers.mjs), the same files the hosted shards run.
+  if (selection.tests.length) {
+    npm('run', 'build:core');
+    npm('run', 'build:web');
+    execFileSync(process.execPath, ['scripts/test-files.mjs', ...selection.tests], { env, stdio: 'inherit' });
+  }
 } else {
   // verify reads only scope and tests; reasons can exceed Linux's per-variable limit.
   const { scope, domain, reason, tests } = selection;

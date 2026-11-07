@@ -27,6 +27,8 @@ export const sourceJobControlSchema = z
     providerReservation: z.object({ input: jobHash, token: z.uuid() }).strict().optional(),
     failureCode: z.string().nullable(),
     failureCause: sourceFailureSchema.optional(),
+    /** Operator-written reason for a reviewed terminal failure (SOURCE_JOB_STALE); shown to the caller. */
+    failureReason: z.string().min(1).max(240).optional(),
     retryUntil: jobNumber.optional(),
   })
   .strict();

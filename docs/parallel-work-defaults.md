@@ -218,7 +218,8 @@ frozen set on 2026-11-06 broke capabilities across CLI/server versions with `HOS
   document when it names its path (`docs/a.md`, `../docs/a.md`; a root document needs a `./` or
   `../` prefix, or its quoted name in a file that resolves names against the root), or loads a test
   helper or script that does. Product code naming a document links to it; it is no read. Those
-  readers run locally although the landing's docs scope runs only the documents checks. Beside code,
+  readers are also what the landing's docs scope runs beside the documents checks (the same selector,
+  `scripts/docs-readers.mjs`); a document no test reads runs no test file. Beside code,
   the readers of a changed document are mandatory. The selector reads only saved paths, so a file
   the save ignores (a typecheck's generated declarations) never makes the inventory look incomplete
   and widen the plan to the whole suite; a saved file that really differs here still does, and the

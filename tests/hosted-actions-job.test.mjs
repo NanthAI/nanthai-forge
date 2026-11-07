@@ -40,6 +40,7 @@ function fixture(
     downloadDelay = 0,
     timingHistory = { version: 1, files: {}, runs: [] },
     capabilities = hostedActionsCapabilities,
+    reader = false,
   } = {},
 ) {
   const directory = mkdtempSync(join(tmpdir(), 'forge-direct-job-'));
@@ -58,6 +59,10 @@ function fixture(
     entry('scripts/example.sh', '#!/bin/sh\nexit 0\n', 'executable'),
     entry('test-link', 'package-lock.json', 'symlink'),
     entry('README.md', 'synthetic before'),
+    // A test that reads the changed document (docs-only change: its readers run, nothing else).
+    ...(reader
+      ? [entry('tests/reads-readme.test.mjs', "readFileSync(new URL('../README.md', import.meta.url));")]
+      : []),
   ];
   const state = entries =>
     put(
@@ -568,6 +573,22 @@ test('fixed planner materializes verified pinned bytes, modes and links; docs sc
   assert(lstatSync(join(candidate, 'scripts/example.sh')).mode & 0o111);
   assert.equal(s.calls.filter(call => call.kind === 'source').length, 2);
   assert.equal(s.run.plan.manifest.sha256, savePin(prepared.recipe).sha256);
+});
+test('a docs-only change shards the tests that read the changed document and keeps the docs scope', async t => {
+  const s = fixture(t, { reader: true }),
+    prepared = await prepareActionsJob(
+      s.client,
+      join(s.directory, 'candidate'),
+      join(s.directory, 'objects'),
+    );
+  const readers = ['tests/reads-readme.test.mjs'];
+  assert.equal(prepared.recipe.selection.scope, 'docs');
+  assert.deepEqual(prepared.recipe.selection.tests, readers);
+  assert.deepEqual(prepared.recipe.groups, [readers]);
+  assert.deepEqual(prepared.matrix, ['0', 'static']);
+  assert.equal(prepared.singleShard, '');
+  // The plan carries a test shard, so the landing waits for it.
+  assert.equal(s.run.plan.shardCount, 2);
 });
 test('untrusted traversal manifests and altered downloads fail before materialization', async t => {
   const s = fixture(t);

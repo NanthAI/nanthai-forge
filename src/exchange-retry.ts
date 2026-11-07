@@ -35,7 +35,8 @@ export function retryableExchangeError(error: ForgeError, operationId?: string |
     error.code,
     `${reason}. Retry the same command ${when}${operationId ? ` (operation ${operationId})` : ''}. ${error.message}`,
     retryAt,
-    { retryable: true, ...(retryAt ? { retryAt: new Date(retryAt).toISOString() } : {}) },
+    // Keep the original refusal evidence (httpStatus, outcome) beside the retry fields.
+    { ...error.recovery, retryable: true, ...(retryAt ? { retryAt: new Date(retryAt).toISOString() } : {}) },
   );
 }
 /** Delay before resending a 429/503 refusal, or null when it is not one or its

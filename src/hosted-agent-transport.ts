@@ -1103,6 +1103,14 @@ export class HostedAgentTransport {
       if (error instanceof z.ZodError)
         throw isHostedReplyError(error) ? protocolMismatchError() : localShapeError(action, error.issues);
       const safe = hostedActionError(error, `agent ${action}`);
+      // A write pause, OCC conflict or 429/503 refusal ran nothing: keep its structured
+      // retryable flag and retryAt instead of rebuilding it from code and message (72d50375).
+      const refused =
+        safe.code === 'LEGACY_STORAGE_WRITES_PAUSED' ||
+        safe.code === 'HOSTED_CONFLICT' ||
+        safe.recovery?.outcome === 'refused';
+      if (refused && safe.recovery?.retryable !== true)
+        throw retryableExchangeError(safe, this.callerOperationId) ?? safe;
       if (safe instanceof SourceAuthorityStaleError || safe.recovery) throw safe;
       // Version skew needs an upgrade, not a replay.
       if (safe.code === 'HOSTED_ACTION_UNSUPPORTED' || safe.code === 'CLI_UPGRADE_REQUIRED') throw safe;

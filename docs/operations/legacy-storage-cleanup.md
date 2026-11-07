@@ -4,20 +4,22 @@ This is a disposition and precondition guide, not permission to delete. New byte
 
 ## Current dev disposition
 
-Dev retains **2,270 files / 44,025,423 bytes**. The approved deleted bench
+Dev retains **16 files / 1,352,278 bytes**. The approved deleted bench
 project's 155,012 rows are removed, all 58 per-table after counts are zero, and
-six cursor references are migrated to R2 and verified. Two dev pause windows
-removed 90,396 Convex files / 2,642,449,923 bytes in committed cleanup pages:
-43,400 files in the first and 46,996 in the remaining-only run, including class
-4 files from an owner-approved manifest. R2 objects are retained.
+six cursor references are migrated to R2 and verified. Three dev pause windows
+removed 92,650 Convex files / 2,685,123,068 bytes in committed cleanup pages:
+43,400 files in the first, 46,996 in the first remaining-only run and 2,254 in
+the second, including class 4 files from owner-approved manifests. R2 objects
+are retained.
 
-Of the remainder, 16 files / 1,352,278 bytes are still referenced and stay: five
-class 3 files and eleven cursor sections reached from source-step cursor bodies.
-The other 2,254 files / 42,673,145 bytes are the approved remainder (classes 1, 3
-and 4) that the remaining-only run did not reach, or whose owner row lacked
-`r2BackfilledAt` (since repaired). The older-backend `uploadUrl` /
-`putConvexUpload` paths and legacy read/record-field allowlists remain needed or
-await their separate disposition.
+The 16 remaining files (five class 3, eleven Forge sections) are reached only
+from the cursors of eight source steps whose jobs stopped at the cutover. The
+[stale source job](#stale-source-jobs) tool settles those jobs and drops their
+dead cursors; a later remaining-only run, which needs its own pause and lead go,
+then deletes the files. The CLI no longer has a Convex upload path (`uploadUrl` /
+`putConvexUpload`): every upload is a presigned R2 PUT. The guard's legacy
+read and record-field allowlist entries remain while those files and the legacy
+`storageId` columns exist.
 
 Each pause ended with both maintenance flags proven absent by name. The first
 stopped on a HEAD fetch failure; the remaining-only run stopped when the delete
@@ -143,8 +145,7 @@ still lack complete source/task/Work reference protection and joint handling of
 the shared object/backup file. The approved pause driver below provides complete frozen coverage and joint
 handling; missing recursive cursor-body coverage blocks it before any pause. Its accepted backend must be deployed and qualified before use. Never
 substitute an unpaused read-only report for transactional reference protection. Retain compatibility read/field allowlist entries while
-legacy files and their readers remain. The older-backend CLI `uploadUrl` /
-`putConvexUpload` path remains tracked on Issue 8678148e.
+legacy files and their readers remain.
 
 ## Approved dev write-pause preparation
 
@@ -375,3 +376,31 @@ The raw receipts and exact operational counts stay private and on the Issue,
 not in this public runbook. File-inclusive backup 41887010710 remains the
 rollback; restore is a separate approved operation. The lead owns deployment
 qualification of the accepted backend before the quiet-window go.
+
+## Stale source jobs
+
+A source job whose worker died (for example at the cutover) can stay `running`
+with nothing left to resume it, and its step cursor keeps legacy files
+referenced. `projectSourceJobOperator` settles NAMED jobs of one project, owner
+scoped, at most 10 per call, with a reason of at most 240 characters. `plan` is
+the read-only dry run; `apply` makes the same checks and takes an operation ID.
+
+A job qualifies only when its worker lease expired more than 24 hours ago, its
+step has no pending or running scheduled function and no queued or waiting
+fan-out batch, and the source authority is unchanged. `apply` then marks it
+`failed` with code `SOURCE_JOB_STALE` and the reason (kept as `failureReason`),
+drops the dead step cursor and schedules the existing save, sync or compose
+settle action, which fails the parent operation with that reason. A job that is
+already failed or cancelled only has its cursor dropped. Anything else is
+refused with a code (`SOURCE_JOB_NOT_STALE`, `SOURCE_JOB_ACTIVE`,
+`SOURCE_JOB_COMPLETED`, `SOURCE_JOB_UNAVAILABLE`, `SOURCE_AUTHORITY_CHANGED`,
+`SOURCE_PROVIDER_CHANGED`) and left unchanged. A replay finds the work done
+(`done`) and schedules nothing. The job's inputs and identity stay; the caller
+starts the operation again from its input. It is an ordinary write, so a cleanup
+pause refuses it. Cost: one call, a few indexed reads per job and one settle
+action per failed job.
+
+```sh
+npx convex run projectSourceJobOperator:plan '{"projectId":"…","actor":"OWNER_SUBJECT","jobIds":["…"],"reason":"…"}'
+npx convex run projectSourceJobOperator:apply '{"projectId":"…","actor":"OWNER_SUBJECT","jobIds":["…"],"reason":"…","operationId":"UUID"}'
+```

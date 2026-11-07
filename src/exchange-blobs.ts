@@ -3,23 +3,20 @@ import type { ConvexHttpClient } from 'convex/browser';
 import { makeFunctionReference } from 'convex/server';
 import type { ContentPin } from './native-exchange.js';
 import { exchangeFetch } from './exchange-request.js';
-import { ForgeError, invariant } from './errors.js';
+import { ForgeError } from './errors.js';
 import { ObjectDownloadReader } from './blob-download.js';
 import type { DownloadRow } from './blob-download-format.js';
 import { readSigned, SignedDownloadCache, type SignedObject } from './exchange-r2-read.js';
 
 /** The one place the CLI moves exchange object bytes. Callers verify sizes and
- * digests; this seam only transports. Today the only implementation is Convex
- * file storage (upload URLs, download actions); a direct object-store
- * transport can replace it without touching exchange logic. */
+ * digests; this seam only transports. Uploads are presigned create-only R2 PUTs;
+ * reads use signed R2 GETs or the bounded Convex download actions. */
 export type BlobRow = { digest: string; size: number; data: ArrayBuffer };
-/** The destination `projectObjects:prepareBatch` returned: a Convex upload URL, or a presigned R2 PUT. */
-export type PutTarget =
-  | { uploadUrl: string; contentType: string }
-  | { kind: 'r2'; url: string; headers: Record<string, string> };
+/** The destination `projectObjects:prepareBatch` returned: a presigned R2 PUT. */
+export type PutTarget = { kind: 'r2'; url: string; headers: Record<string, string> };
 export interface ExchangeBlobs {
-  /** Send one object to its prepared destination. Convex uploads return the storage id; R2 uploads return `{}`. */
-  put(target: PutTarget, bytes: Buffer): Promise<{ storageId?: string }>;
+  /** Send one object to its prepared R2 destination. */
+  put(target: PutTarget, bytes: Buffer): Promise<Record<string, never>>;
   /** Read several small objects (callers keep groups within the 2 MiB / 8 object limits). */
   getGroup(projectId: string, pins: ContentPin[]): Promise<BlobRow[]>;
   /** Read the 2 MiB range of one object at `offset`. */
@@ -30,26 +27,6 @@ export interface ExchangeBlobs {
 }
 
 const action = (name: string) => makeFunctionReference<'action'>(name);
-
-/** Convex file storage upload: POST the bytes to the one-time upload URL. */
-export async function putConvexUpload(target: { uploadUrl: string; contentType: string }, bytes: Buffer) {
-  const response = await exchangeFetch(
-    'Convex object upload',
-    target.uploadUrl,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': target.contentType },
-      body: new Uint8Array(bytes),
-    },
-    { retries: 0 },
-  );
-  invariant(
-    response.ok,
-    'EXCHANGE_UPLOAD_UNKNOWN',
-    'Upload did not return success. Retry this same exchange to reconcile its original objects.',
-  );
-  return (await response.json()) as { storageId: string };
-}
 
 /** Create-only R2 PUTs can safely replay their exact signed destination and bytes. */
 export async function putR2(
@@ -72,8 +49,8 @@ export async function putR2(
     `R2 object upload returned HTTP ${response.status}. Retry this same exchange to reconcile its original objects.`,
   );
 }
-export function putTarget(target: PutTarget, bytes: Buffer): Promise<{ storageId?: string }> {
-  return 'kind' in target ? putR2(target, bytes) : putConvexUpload(target, bytes);
+export function putTarget(target: PutTarget, bytes: Buffer): Promise<Record<string, never>> {
+  return putR2(target, bytes);
 }
 
 export class ConvexExchangeBlobs implements ExchangeBlobs {

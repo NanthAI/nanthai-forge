@@ -140,7 +140,8 @@ export const resultDownload = internalMutation({
               message:
                 job.control.failureCode === 'SOURCE_RETRY_EXHAUSTED'
                   ? sourceRetryFailureMessage(job.control.failureCause)
-                  : 'The original source job did not complete; its save delta is retained.',
+                  : (job.control.failureReason ??
+                    'The original source job did not complete; its save delta is retained.'),
             },
           },
         },

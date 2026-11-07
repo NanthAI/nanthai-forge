@@ -85,8 +85,8 @@ export function selectImpactPair(files, comparisons) {
  * by-name loader's closure, three or more edges) stay explicit pre-queue/landing work. A
  * comment-only path (`commentOnly`, bytes equal to its base outside comments) runs nothing new: it
  * adds only the tests that read its text. A docs-only change parses no graph: it runs only the tests
- * that read a changed document (`docsReaders`), beside the static checks. Those run here although the
- * landing's docs scope runs only the documents checks: more local coverage, never less. */
+ * that read a changed document (`docsReaders`), beside the static checks. The landing check selects the
+ * same readers (`withDocsReaders`, one shared selector). */
 export const preflightTierRule =
   'changed tests, explicit coverage and smoke; then tests that failed for these paths before; then tests that run a changed module directly, through a test fixture or through one module that imports it, or are named for it (never trimmed, most specific first); then the same consumers of hub modules (their direct tests would push protected tests past the budget; closest first); then tests that run a changed module within two modules and failed in a landing check lately; then tests that watch a distinctive name in a changed source; then tests that run a changed module through two modules, most specific first; comment-only edits add only tests that read the file; a docs-only change runs only the tests that read the changed documents';
 /** Tiers the time budget never trims from the plan; the run starts them first. */
@@ -134,7 +134,7 @@ export function selectPreflightTests(input, graphCache = {}) {
         tests.length
           ? `the ${tests.length} test file(s) that read a changed document`
           : 'no test reads a changed document'
-      }, beside the static checks; the landing check runs the documents checks`,
+      }, beside the static checks; the landing check runs the same readers and the documents checks`,
     };
   }
   const commentOnly = new Set((input.commentOnly ?? []).filter(path => input.paths.includes(path)));
@@ -612,6 +612,33 @@ export function guardedSelection(selection, { files, paths, interaction }) {
   return guardSelection(selection, { files, paths, interaction, documentation, smoke: smokeTests });
 }
 
+/** The hosted and machine checks run the same readers as local preflight (`docsReaders`, one shared
+ * selector): a docs scope keeps its scope, so the documents checks and every rule that keys on `docs`
+ * (main-audit skip, gate, clean-disjoint admission) hold, and its tests are the test files that read a
+ * changed document, none when no test reads one. Never a full re-check for docs. Mutates and returns
+ * `selection`; any other scope is returned untouched. */
+function withDocsReaders(selection, files, paths) {
+  if (selection.scope !== 'docs' || !Array.isArray(paths) || !paths.every(documentation)) return selection;
+  const readers = docsReaders(files, paths);
+  if (!readers.size) return selection;
+  selection.tests = [...readers.keys()].sort();
+  selection.reasons = Object.fromEntries(
+    selection.tests.map(test => {
+      const { doc, via } = readers.get(test);
+      return [
+        test,
+        {
+          kind: 'explicit',
+          changedPath: doc,
+          detail: `Reads changed document ${doc}${via === test ? '' : ` through ${via}`}`,
+        },
+      ];
+    }),
+  );
+  selection.reason = `${selection.reason}; plus the ${selection.tests.length} test file(s) that read a changed document`;
+  return selection;
+}
+
 export function standardSelection(input) {
   return guardedSelection(composedSelection(input), input);
 }
@@ -672,6 +699,7 @@ function baseStandardSelection({
           paths.every(path => safePath(path) && documentation(path))
         )),
   });
+  withDocsReaders(selection, files, paths);
   if (mainCheck) selection.reason = `Pinned main audit View for ${mainCheck.channel}`;
   else if (env.FORGE_CHECK_FULL !== '1' && env.FORGE_CHECK_SCOPED !== '1' && selection.scope !== 'docs')
     selection.reason =

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import './zod-jitless';
 import { ErrorToast, ToastProvider } from './ui/Toast';
 import { Component, type ErrorInfo, type ReactNode } from 'react';
 import { errorReporter, installErrorCapture } from './error-capture';

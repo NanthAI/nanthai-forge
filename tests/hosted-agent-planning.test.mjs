@@ -19,6 +19,7 @@ import { HostedAgentTransport } from '../dist/hosted-agent-transport.js';
 import { hostedContractFeatures } from '../dist/hosted-contract-features.js';
 import { z } from 'zod';
 import { ConvexError } from 'convex/values';
+import { ForgeError } from '../dist/errors.js';
 
 const index = await import(moduleUrl('../convex/projectWorkIndex.ts'));
 const actions = await import(moduleUrl('../convex/projectWorkActions.ts'));
@@ -884,6 +885,69 @@ test('the transport serves planning actions from the advertised capability and t
   });
   // The released server's argument error removed only the new field, and nothing was written.
   assert(old.seen.length === 1 || !old.seen.at(-1).includes('planningVersion'));
+});
+
+test('a paused or refused agent write keeps structured retryable and retryAt in the CLI error (72d50375)', async t => {
+  const s = await setup(t);
+  const { p, transport: agent } = transport(s, { planning: true });
+  const at = Date.now() + 10 * 60_000;
+  const invoke = p.exchange.client.action;
+  p.exchange.client.action = async (ref, args) => {
+    if (getFunctionName(ref).endsWith(':command'))
+      throw new ConvexError({
+        code: 'LEGACY_STORAGE_WRITES_PAUSED',
+        message: 'Dev writes are temporarily paused for approved storage maintenance.',
+        retryAt: at,
+      });
+    return invoke(ref, args);
+  };
+  const operationId = randomUUID();
+  await assert.rejects(
+    agent.dispatch('put-planning-item', { kind: 'issue', title: 'During a pause', operationId }),
+    error => {
+      assert.equal(error.code, 'LEGACY_STORAGE_WRITES_PAUSED');
+      assert.equal(error.retryAt, at);
+      assert.deepEqual(error.recovery, { retryable: true, retryAt: new Date(at).toISOString() });
+      assert.match(error.message, /nothing was changed/);
+      assert.match(
+        error.message,
+        new RegExp(`after ${new Date(at).toISOString()} \\(operation ${operationId}\\)`),
+      );
+      return true;
+    },
+  );
+  // A platform 503 refusal (Retry-After past the in-process wait) is reported, not slept
+  // through: its continuation keeps the retry fields and the refusal evidence.
+  p.exchange.client.action = async (ref, args) => {
+    if (getFunctionName(ref).endsWith(':command'))
+      throw new ForgeError('EXCHANGE_REQUEST_FAILED', 'Command returned HTTP 503.', at, {
+        httpStatus: 503,
+        outcome: 'refused',
+      });
+    return invoke(ref, args);
+  };
+  const pending = await agent.dispatch('put-planning-item', {
+    kind: 'issue',
+    title: 'During an outage',
+    operationId: randomUUID(),
+  });
+  assert.equal(pending.result.phase, 'transport');
+  assert.deepEqual(pending.result.error.recovery, {
+    httpStatus: 503,
+    outcome: 'refused',
+    retryable: true,
+    retryAt: new Date(at).toISOString(),
+  });
+  // An unknown outcome is not called refused and gains no retry claim here.
+  p.exchange.client.action = async (ref, args) => {
+    if (getFunctionName(ref).endsWith(':command'))
+      throw new ConvexError({ code: 'WORK_STALE', message: 'Hosted Work changed.' });
+    return invoke(ref, args);
+  };
+  await assert.rejects(
+    agent.dispatch('put-planning-item', { kind: 'issue', title: 'Stale', operationId: randomUUID() }),
+    error => error.code === 'WORK_STALE' && error.recovery === undefined,
+  );
 });
 
 test('new CLI vs previous server through the transport: the capability read drops only `features`, and a status-only put keeps the body (a83b6fd5)', async t => {

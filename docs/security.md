@@ -90,7 +90,7 @@ The `/device` approval page shows only facts the server knows (access, lifetime,
 
 ## Web response headers
 
-The hosted web app is sent with `X-Frame-Options: DENY`, an enforced `Content-Security-Policy: frame-ancestors 'none'; base-uri 'self'; object-src 'none'`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, HSTS and a restrictive `Permissions-Policy`, set in `netlify.toml`. The full resource policy ships as `Content-Security-Policy-Report-Only` so a missing host shows in the browser console instead of breaking sign-in; make it enforcing once a release shows no violations. `tests/web-headers.test.mjs` checks the block and that the inline theme script's hash matches `web/index.html`.
+The hosted web app is sent with `X-Frame-Options: DENY`, an enforced `Content-Security-Policy`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, HSTS and a restrictive `Permissions-Policy`, set in `netlify.toml`. The policy allows scripts only from the site, the inline theme script's hash, WebAssembly, Clerk and Cloudflare Turnstile (no `'unsafe-inline'` or `'unsafe-eval'` scripts), and forbids framing (`frame-ancestors 'none'`), plugins and a changed base URL. Zod runs jitless in the browser (`web/src/zod-jitless.ts`) so it never evaluates strings. `tests/web-headers.test.mjs` checks the block, that the inline theme script's hash matches `web/index.html`, and that the web entry loads the jitless setting first.
 
 ## Autonomy authority
 
