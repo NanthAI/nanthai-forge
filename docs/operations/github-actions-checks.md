@@ -675,6 +675,11 @@ scripts logs it). The planning job logs one `Shard plan:` line with the planned 
 Use these lines, not estimates, before changing the worker count (`FORGE_TEST_WORKERS` in
 `scripts/github-actions-check.mjs`) or the shard count.
 
+Reading a run's log later: `gh run view RUN_ID --log` returns empty output (exit 0) for runs older than about an
+hour, because GitHub expires that view. The job log is still readable through the jobs API:
+`gh api repos/OWNER/REPO/actions/jobs/JOB_ID/logs` (get `JOB_ID` from `gh run view RUN_ID --json jobs`). Do not
+print the redirect URL it follows. A job still in progress returns 404; that is not a lost log.
+
 ### Where a check's wall time goes (measured 2026-11-06)
 
 `node scripts/actions-cache-report.mjs NanthAI/nanthai-forge 40` also prints a `breakdown` of the successful
