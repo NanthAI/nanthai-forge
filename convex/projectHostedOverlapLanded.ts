@@ -5,7 +5,7 @@ import { patchOverlapRow } from './projectHostedOverlapPeers';
 import { acceptancePage, type ReceiptIdentity } from './projectHostedAcceptanceStore';
 import { composeLaneSchema, validateComposePage } from '../src/hosted-compose';
 import { recordOverlapLanding } from '../src/hosted-overlap';
-import { agentActor } from '../src/agent-slug';
+import { publicActorLabel } from './publicPeople';
 import { readHostedRecord } from './projectHostedRecords';
 
 /** One immutable input page is at most 100 entries; later pages are reached through the completion ledger. */
@@ -37,7 +37,8 @@ export async function retireLandedOverlapLanes(
       .unique();
     if (!row || row.head !== lane.data.head) continue;
     // The drift nudge names landings: the first landed Lane's public identity goes on the main row's
-    // landing log (one indexed read and replace per landing completion, idempotent per sequence).
+    // landing log (one indexed read, one account read for the handle and one replace per landing completion, idempotent
+    // per sequence; never the account id, which the nudge would print to every agent behind main).
     if (!logged && landed?.sequence !== undefined) {
       logged = true;
       const main = await ctx.db
@@ -49,7 +50,7 @@ export async function retireLandedOverlapLanes(
           sequence: landed.sequence,
           receiptId: identity.receiptId,
           laneId: row.laneId,
-          actor: agentActor(row.actor, row.agent),
+          actor: await publicActorLabel(ctx, row.actor, row.agent),
         });
         if (next !== main.landings) await ctx.db.patch(main._id, { landings: next });
       }

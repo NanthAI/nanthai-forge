@@ -52,7 +52,7 @@ export function stallAlert(
     ...(state.supersedes ? [`resubmission of ${state.supersedes} (${state.retryReason ?? 'retry'})`] : []),
   ];
   const lines = [
-    `${tier === 1 ? 'Landing stalled' : 'Still stalled'}: ${input.project}, submission ${state.id} by ${state.actor}, ${minutes(since, now)} min without progress at ${step}.`,
+    `${tier === 1 ? 'Landing stalled' : 'Still stalled'}: ${input.project}, submission ${state.id}, ${minutes(since, now)} min without progress at ${step}.`,
     `Why: ${stall?.message ?? 'no landing progress'}`,
     `Already tried: ${retried.join('; ')}.`,
     `Repair: ${repair}`,
@@ -64,7 +64,7 @@ export function stallAlert(
       `Diagnosis: dead step ${step}` +
         (runnerDone ? ` (runner finished at ${timing.ciEndedAt} but no result was recorded)` : '') +
         `; last progress ${since}; error ${state.error ? `${state.error.code}: ${state.error.message.slice(0, 200)}` : 'none recorded'}` +
-        `; waiting: ${state.actor}${input.queuedBehind ? ` and ${input.queuedBehind} queued behind` : ''}.`,
+        `; waiting: this submission${input.queuedBehind ? ` and ${input.queuedBehind} queued behind` : ''}.`,
     );
   }
   return {
@@ -97,7 +97,7 @@ export function exhaustedStallAlert(
     operationId: state.operationId,
     subject: `[Forge] Landing ended: ${input.project} ${step}`,
     text: [
-      `Landing ended: ${input.project}, submission ${state.id} by ${state.actor}, ${minutes(since, now)} min without progress at ${step}.`,
+      `Landing ended: ${input.project}, submission ${state.id}, ${minutes(since, now)} min without progress at ${step}.`,
       `Why: ${reason}`,
       `Repair: ${repair}`,
     ].join('\n'),

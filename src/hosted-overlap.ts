@@ -212,6 +212,9 @@ export function recordOverlapLanding(
   return JSON.stringify(entries.slice(-DRIFT_LANDING_LOG));
 }
 
+/** Landing-log entries written before the handle fix stored the account id; the nudge leaves those out. */
+const legacyAccountId = /user_[A-Za-z0-9]{8,}/;
+
 /** The drift nudge: a Lane behind main by at least N distinct landings whose latest touch of a path the Lane
  * saved came after its base. Pure set lookup over the main path history behindMain already loads; the
  * count is a floor (a later landing on the same path hides an earlier one). Null when it does not apply. */
@@ -228,7 +231,9 @@ export function driftNudge(
     .slice(0, DRIFT_NUDGE_NAMES)
     .map(sequence => {
       const entry = known.get(sequence);
-      return entry ? `${entry[1]} (Lane ${entry[2]}, ${entry[3]})` : `landing #${sequence}`;
+      return entry
+        ? `${entry[1]} (Lane ${entry[2]}${entry[3] && !legacyAccountId.test(entry[3]) ? `, ${entry[3]}` : ''})`
+        : `landing #${sequence}`;
     });
   const rest = conflictSequences.size - named.length;
   return `Behind main on your own paths: ${conflictSequences.size} landings changed them since your base: ${named.join('; ')}${rest > 0 ? `; and ${rest} more` : ''}. Sync now: nforge agent . sync '{"laneId":"${laneId}"}'`;

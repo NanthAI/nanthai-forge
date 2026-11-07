@@ -296,7 +296,7 @@ export function reviewReason(
   if (policy.acceptance.mode === 'review') return 'Waiting for review by a person; not in main yet';
   const allowed = policy.acceptance.autoActors ?? [];
   if (allowed.length && !allowed.includes(actor.id))
-    return `Waiting for review by a person; actor ${actor.id} is not allowed to auto-accept`;
+    return 'Waiting for review by a person; this actor is not on the project auto-accept list';
   if (paths === null && policy.acceptance.protectedPaths.length)
     return 'Waiting for review by a person; protected-path coverage is unavailable';
   const matched = protectedMatches(policy, paths ?? []);

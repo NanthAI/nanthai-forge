@@ -5,7 +5,8 @@ import { randomUUID } from 'node:crypto';
 import { finishFixture, desired, landingApi } from './hosted-finish-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { effectiveAgentDefaults } from '../dist/agent-parallel-defaults.js';
-import { policyPreset } from '../dist/autonomy-policy.js';
+import { policyPreset, reviewReason } from '../dist/autonomy-policy.js';
+import { accountIdLeaks } from './account-id-scan.mjs';
 import { deliverStallAlert, stallAlert, stallAlertRequests } from '../dist/stall-alerts.js';
 import { LANDING_STALL_MS } from '../dist/landing-stall.js';
 
@@ -210,7 +211,9 @@ const state = (overrides = {}) => ({
 test('alert text: what, why, tried, repair; tier 2 diagnoses a finished runner with no result', () => {
   const now = Date.parse('2026-10-30T19:10:00.000Z');
   const one = stallAlert(state(), 1, { project: 'forge', now });
-  assert.match(one.text, /forge, submission submission-1 by agent-a, 30 min without progress at checking/);
+  assert.match(one.text, /forge, submission submission-1, 30 min without progress at checking/);
+  // The actor is a stored account id: alert text goes to agents and the owner's phone, so it never names it.
+  assert.doesNotMatch(one.text, /agent-a/);
   assert.match(one.text, /If check runner is down, fix that first/);
   const two = stallAlert(state({ supersedes: 'submission-0', retryReason: 'failed' }), 2, {
     project: 'forge',
@@ -220,7 +223,8 @@ test('alert text: what, why, tried, repair; tier 2 diagnoses a finished runner w
   assert.match(two.text, /resubmission of submission-0 \(failed\)/);
   assert.match(two.text, /runner finished at 2026-10-30T18:40:00.000Z but no result was recorded/);
   assert.match(two.text, /error CHECK_RESULT_REFUSED: result upload refused: HTTP 403/);
-  assert.match(two.text, /waiting: agent-a and 3 queued behind/);
+  assert.match(two.text, /waiting: this submission and 3 queued behind/);
+  assert.doesNotMatch(two.text, /agent-a/);
 });
 
 test('providers: email per recipient and each webhook preset; secrets stay in URL and headers, out of bodies and logs', async () => {
@@ -283,4 +287,21 @@ test('stall alerts ride the 15-minute alarm: thresholds stay at or after it', ()
   const defaults = effectiveAgentDefaults(undefined).stallAlerts;
   assert(defaults.notifyAfterMinutes * 60_000 >= LANDING_STALL_MS);
   assert(defaults.repeatAfterMinutes > defaults.notifyAfterMinutes);
+});
+
+test('alert and review texts never carry an account id (Issue 9a19b304)', () => {
+  const subject = 'user_2abcDEFghiJKLmnoPQRstUVwxYZ';
+  const now = Date.parse('2026-10-30T19:10:00.000Z');
+  for (const tier of [1, 2])
+    assert.deepEqual(
+      accountIdLeaks(
+        stallAlert(state({ actor: subject }), tier, { project: 'forge', queuedBehind: 2, now }).text,
+      ),
+      [],
+    );
+  const policy = { ...policyPreset('trusted') };
+  policy.acceptance = { ...policy.acceptance, mode: 'auto', autoActors: ['someone-else'] };
+  const reason = reviewReason(policy, { kind: 'agent', id: subject }, []);
+  assert.match(reason, /not on the project auto-accept list/);
+  assert.deepEqual(accountIdLeaks(reason), []);
 });

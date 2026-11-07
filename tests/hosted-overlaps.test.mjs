@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import { digest } from '../dist/hash.js';
+import { assertNoAccountIds } from './account-id-scan.mjs';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
@@ -209,7 +210,17 @@ async function setup(t, options = {}) {
     main,
     exchange,
     discovery,
-    transport: entry => new HostedAgentTransport(root(entry), address, exchange),
+    transport: entry => {
+      const transport = new HostedAgentTransport(root(entry), address, exchange);
+      const dispatch = transport.dispatch.bind(transport);
+      // Guard (9a19b304): every agent action's output in these fixtures is scanned for raw account ids.
+      transport.dispatch = async (action, ...rest) => {
+        const reply = await dispatch(action, ...rest);
+        assertNoAccountIds(assert, reply, `dispatch ${action}`);
+        return reply;
+      };
+      return transport;
+    },
   };
 }
 
@@ -1689,4 +1700,58 @@ test('drift nudge: a landing completion logs receipt, Lane and public actor on t
   const main = [...s.tables.projectHostedOverlapMain.values()][0];
   assert.deepEqual(JSON.parse(main.landings), [[6, receiptId.slice(0, 8), lane.id.slice(0, 8), row.actor]]);
   assert.equal(main.changes, advanceOverlapMain(null, 6, ['a']).changes, 'path history untouched');
+});
+
+// Issue 9a19b304 (friction 2904bf4f): the behind-main nudge printed the landing actor's account id.
+test('drift nudge: a landing by an account logs its Forge handle, never the account id', async t => {
+  const { s, lane, transport } = await setup(t);
+  await transport(lane).dispatch('save', { operationId: randomUUID(), message: 'work' });
+  const subject = 'user_2abcDEFghiJKLmnoPQRstUVwxYZ';
+  const row = [...s.tables.projectHostedOverlapLanes.values()].find(item => item.laneId === lane.id);
+  s.patch('projectHostedOverlapLanes', row._id, { actor: subject, agent: 'calm-fox' });
+  s.insert('forgeAccounts', { owner: subject, handle: 'builder' });
+  s.insert('projectHostedOverlapMain', { projectId: s.projectId, ...advanceOverlapMain(null, 6, ['a']) });
+  const receiptId = randomUUID();
+  const object = { object: { sha256: 'a'.repeat(64), size: 1 }, recipe: null };
+  s.insert('projectHostedAcceptancePages', {
+    projectId: s.projectId,
+    receiptId,
+    kind: 'inputs',
+    index: 0,
+    digest: 'd'.repeat(64),
+    root: 'r'.repeat(64),
+    value: JSON.stringify({
+      schema: 1,
+      kind: 'forge-hosted-compose-page',
+      entries: [
+        { laneId: lane.id, head: row.head, version: 0, sourceVersion: 0, lifecycleVersion: 0, state: object },
+      ],
+      next: null,
+    }),
+  });
+  await s.transaction(
+    'retire',
+    {
+      _handler: ctx =>
+        landed.retireLandedOverlapLanes(
+          ctx,
+          { projectId: s.projectId, receiptId },
+          { commit: 'c'.repeat(64), at: new Date().toISOString(), sequence: 6 },
+        ),
+    },
+    {},
+  );
+  const main = [...s.tables.projectHostedOverlapMain.values()][0];
+  assert.equal(JSON.parse(main.landings)[0][3], 'builder/calm-fox');
+  assertNoAccountIds(assert, main.landings, 'landing log');
+  const nudge = driftNudge('lane', new Set([6, 7]), main.landings);
+  assert(nudge.includes(`(Lane ${lane.id.slice(0, 8)}, builder/calm-fox)`), nudge);
+  assertNoAccountIds(assert, nudge, 'nudge');
+});
+
+test('drift nudge: log entries written before the fix, with an account id, are named without it', () => {
+  const old = JSON.stringify([[6, 'aaaaaaaa', 'bbbbbbbb', 'user_2abcDEFghiJKLmnoPQRstUVwxYZ/calm-fox']]);
+  const nudge = driftNudge('lane', new Set([6, 7]), old);
+  assert(nudge.includes('aaaaaaaa (Lane bbbbbbbb)'), nudge);
+  assertNoAccountIds(assert, nudge, 'legacy nudge');
 });

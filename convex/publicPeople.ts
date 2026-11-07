@@ -3,7 +3,7 @@ import { v } from 'convex/values';
 import { internalQuery, type ActionCtx, type MutationCtx, type QueryCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import { makeFunctionReference } from 'convex/server';
-import { splitAgentActor } from '../src/agent-slug';
+import { agentActor, splitAgentActor } from '../src/agent-slug';
 
 /** Public identity rule: a person is shown as a Forge handle, never as an auth
  * subject (account id), provider display name or email. Every public function
@@ -217,6 +217,19 @@ function databaseLookup(ctx: QueryCtx | MutationCtx, viewer: string | null): Loo
     }
     return pending;
   };
+}
+
+/** The public label of a stored actor (`ACCOUNT` or `ACCOUNT/slug`) for text a mutation stores or
+ * builds: the Forge handle, '' when the account has none. System actors keep their text. One indexed
+ * account read; the same lookup `publicPeople` makes for a person-keyed field. */
+export async function publicActorLabel(
+  ctx: QueryCtx | MutationCtx,
+  actor: string,
+  agent?: string | null,
+): Promise<string> {
+  const found = await databaseLookup(ctx, null)(actor);
+  const label = found.person ? (found.handle ?? '') : actor;
+  return label ? agentActor(label, agent) : '';
 }
 
 /** Map a query or mutation result to the public identity rule. */
