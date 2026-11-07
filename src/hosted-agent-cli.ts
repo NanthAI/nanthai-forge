@@ -69,6 +69,8 @@ export function hostedAgentAddress(
     );
   return address;
 }
+/** The CLI sends a hosted save under its wire name `checkpoint`; both mean save. */
+const hostedSaveAction = (action: string) => action === 'save' || action === 'checkpoint';
 const sourcePending = (response: { result?: unknown } | undefined) => {
   const result = response?.result as { status?: string; jobId?: string } | undefined;
   return result?.status === 'submitted' && typeof result.jobId === 'string';
@@ -326,7 +328,7 @@ export async function hostedAgentCli(
       const pending = result.result as { command: string };
       process.stderr.write(`IN PROGRESS; network response unavailable. Continue: ${pending.command}\n`);
       process.exitCode = 3;
-    } else if (action === 'save' && result.operationId && sourcePending(result)) {
+    } else if (hostedSaveAction(action) && result.operationId && sourcePending(result)) {
       // The save waited its whole budget for its own outcome: one resume, never a new save.
       const resume = operationWait(root, {
         operationIds: [result.operationId],

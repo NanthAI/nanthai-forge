@@ -6,6 +6,8 @@ import assert from 'node:assert/strict';
 import { moduleUrl } from './convex-module.mjs';
 import { syncFixture } from './hosted-sync-fixture.mjs';
 import { restackAfterSave, restackOperationId } from '../dist/hosted-stack-restack.js';
+import { HostedAgentTransport } from '../dist/hosted-agent-transport.js';
+import { AsyncLocalStorage } from 'node:async_hooks';
 
 const overlaps = await import(moduleUrl('../convex/projectHostedOverlaps.ts'));
 const stackNotice = await import(moduleUrl('../convex/projectHostedStackNotice.ts'));
@@ -193,6 +195,24 @@ test('save runs one cleanOnly sync with a stable operation id and reports what i
   await restackAfterSave(savedResponse(), LANE, dispatch);
   assert.equal(calls[1].input.operationId, calls[0].input.operationId);
 });
+
+// Live replay (sweep B, 2026-11-07): `nforge agent . save` dispatches the wire name `checkpoint`, and a
+// gate on the raw action name never restacked. The transport keys on the normalized response action.
+for (const wire of ['save', 'checkpoint'])
+  test(`the transport restacks after a save sent as ${wire}`, async () => {
+    const transport = Object.create(HostedAgentTransport.prototype);
+    transport.operationContext = new AsyncLocalStorage();
+    transport.checkoutLaneId = () => LANE;
+    const calls = [];
+    transport.dispatchScoped = async action => {
+      calls.push(action);
+      return action === 'sync' ? { action: 'sync', result: syncResult('merged') } : savedResponse();
+    };
+    const response = await transport.dispatch(wire, { message: 'm' });
+    assert.deepEqual(calls, [wire, 'sync']);
+    assert.equal(response.restack.status, 'restacked');
+    assert.equal(response.stack, undefined);
+  });
 
 test('save does nothing extra unless the hint is ready, the save completed and this checkout is the Lane', async () => {
   let called = 0;

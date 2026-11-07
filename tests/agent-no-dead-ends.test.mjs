@@ -309,3 +309,27 @@ test('save prints its operation id and resume command first, before waiting', as
   await hostedAgentCli(root, 'finish', {}, address, finishTransport);
   assert.equal(finishTransport.onOperation, undefined);
 });
+
+// f61e9339 live replay: the CLI sends a hosted save as `checkpoint`, so save-only branches must accept both.
+for (const wire of ['save', 'checkpoint'])
+  test(`a save still running after its budget exits IN PROGRESS with its wait (wire name ${wire})`, async t => {
+    const root = checkout(t);
+    const operationId = randomUUID();
+    const written = [];
+    t.mock.method(process.stderr, 'write', chunk => {
+      written.push(String(chunk));
+      return true;
+    });
+    const transport = {
+      dispatch: async action => ({ action, operationId, result: { status: 'submitted', jobId: 'j' } }),
+    };
+    await hostedAgentCli(root, wire, { message: 'm' }, address, transport);
+    t.mock.restoreAll();
+    const exitCode = process.exitCode;
+    process.exitCode = 0;
+    assert.equal(exitCode, 3);
+    assert.match(
+      written.join(''),
+      new RegExp(`save: IN PROGRESS; keep waiting with: .*wait .*${operationId}`),
+    );
+  });

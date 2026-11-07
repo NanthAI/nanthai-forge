@@ -371,11 +371,16 @@ export class HostedAgentTransport {
       () => this.dispatchScoped(requestedAction, input, signal),
     );
     // A stacked Lane's save restacks onto its parent's newer saved work when that applies cleanly.
-    return requestedAction === 'save'
-      ? restackAfterSave(response, readHostedLaneCheckout(this.root)?.selection.laneId, (action, data) =>
+    // Keyed on the normalized response action: the CLI sends a save under its wire name `checkpoint`.
+    return response.action === 'save'
+      ? restackAfterSave(response, this.checkoutLaneId(), (action, data) =>
           this.dispatch(action, data, signal),
         )
       : response;
+  }
+  /** The Lane this checkout holds, if any. */
+  checkoutLaneId() {
+    return readHostedLaneCheckout(this.root)?.selection.laneId;
   }
   private async dispatchScoped(
     requestedAction: string,
