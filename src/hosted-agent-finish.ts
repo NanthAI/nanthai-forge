@@ -16,7 +16,12 @@ import { canonicalPayload } from './hosted-source-operation.js';
 import { invariant } from './errors.js';
 import { shellQuote } from './agent-brief-render.js';
 import { hostedAgentDirectory, readAgentJson } from './hosted-agent-journal.js';
-import { finishRetryHint, type FinishContext } from './hosted-agent-finish-identity.js';
+import {
+  FINISH_REFUSALS,
+  finishRefusedKey,
+  finishRetryHint,
+  type FinishContext,
+} from './hosted-agent-finish-identity.js';
 import { landWaitCommand } from './hosted-land-wait.js';
 import { markLandStep } from './land-timing.js';
 import {
@@ -145,7 +150,16 @@ async function reuseCheckedFinish(session: HostedAgentSession, command: FinishCo
 }
 
 export async function executeHostedFinish(session: HostedAgentSession, input: unknown) {
-  const result = await executeFinishWork(session, input);
+  let result: unknown;
+  try {
+    result = await executeFinishWork(session, input);
+  } catch (error) {
+    // Ended before anything was submitted: a re-run on new source is new work, not a replay (ac13de6b).
+    const code = (error as { code?: unknown }).code;
+    if (typeof code === 'string' && FINISH_REFUSALS.has(code))
+      await session.journal.retain(finishRefusedKey, () => code);
+    throw error;
+  }
   const context = session.journal.get<FinishContext>('finish-context');
   const defaults = session.journal.get<Record<string, unknown>>('finish-defaults');
   const changedPaths = session.journal.get<number | null>(finishChangedPathsKey);

@@ -35,6 +35,7 @@ function fixture(t) {
     GITHUB_APP_CLIENT_ID: 'synthetic-client',
     GITHUB_APP_CLIENT_SECRET: 'synthetic-secret',
     CONVEX_SITE_URL: 'https://forge.example',
+    CLERK_SECRET_KEY: 'synthetic-identity-secret',
   });
   const s = lanesFixture();
   const projectId = s.insert('hostedProjects', {
@@ -63,13 +64,13 @@ function fixture(t) {
     operationId = randomUUID(),
     state = randomUUID(),
     repository = 'synthetic/repo',
-    installationId = 9,
+    githubAccounts = [linkedAccount],
   } = {}) {
     await call('start', {
       operationId,
       state,
       repository,
-      installationId,
+      githubAccounts,
       verifier: 'synthetic-verifier',
       authorizeUrl: `https://github.com/login/oauth/authorize?state=${state}`,
     });
@@ -77,7 +78,7 @@ function fixture(t) {
   }
   async function bind(repoId = 42, options = {}) {
     const op = await start(options);
-    await s.call('consume', store.consume, { state: op.state });
+    await proving(op.state, options.installationId);
     await s.call('complete', store.complete, {
       state: op.state,
       repoId,
@@ -85,14 +86,30 @@ function fixture(t) {
     });
     return op;
   }
-  return { s, ctx, projectId, call, start, bind };
+  /** Callback order: consume the state, then pin the installation after access proof. */
+  async function proving(state, installationId = 9) {
+    await s.call('consume', store.consume, { state });
+    await s.call('pin', store.pin, { state, installationId });
+  }
+  return { s, ctx, projectId, call, start, bind, proving };
 }
+const linkedAccount = '1001';
+const identity = (id = 'owner', accounts = [linkedAccount]) =>
+  Response.json({
+    id,
+    external_accounts: accounts.map(provider_user_id => ({
+      provider: 'oauth_github',
+      provider_user_id,
+      verification: { status: 'verified' },
+    })),
+  });
 function github(t, { repoId = 42, name = 'synthetic/repo' } = {}) {
   const calls = [],
     scopes = new Map();
   let serial = 0;
   const request = async (url, init) => {
     calls.push({ url, method: init.method ?? 'GET', body: init.body ? JSON.parse(init.body) : null });
+    if (url.startsWith('https://api.clerk.com/v1/users/')) return identity();
     if (url.endsWith('/installation'))
       return Response.json({ id: 9, permissions: { actions: 'write', contents: 'write' } });
     if (url.endsWith('/access_tokens')) {
@@ -122,7 +139,7 @@ test('only the Forge owner starts a connection; original operation replays exact
   const args = {
     operationId: previous.operationId,
     repository: previous.repository,
-    installationId: previous.installationId,
+    githubAccounts: previous.githubAccounts,
     state: previous.state,
     verifier: previous.verifier,
     authorizeUrl: previous.authorizeUrl,
@@ -147,40 +164,86 @@ test('only the Forge owner starts a connection; original operation replays exact
   assert(op.operationId);
 });
 test('admin or maintain and user installation membership are both required', async () => {
+  const user = { id: Number(linkedAccount) };
+  const pinned = () => async () => 9;
   for (const permissions of [{}, { push: true }, { admin: false, maintain: false }]) {
     let calls = 0;
     await assert.rejects(
-      oauth.proveRepository('synthetic-user-token', 9, 'synthetic/repo', async () => {
-        calls++;
-        return Response.json({ id: 42, full_name: 'synthetic/repo', permissions });
-      }),
+      oauth.proveRepository(
+        'synthetic-user-token',
+        'synthetic/repo',
+        [linkedAccount],
+        pinned(),
+        async url => {
+          calls++;
+          return Response.json(
+            url.endsWith('/user') ? user : { id: 42, full_name: 'synthetic/repo', permissions },
+          );
+        },
+      ),
       code('GITHUB_REPOSITORY_PERMISSION'),
     );
-    assert.equal(calls, 1);
+    assert.equal(calls, 2);
   }
   for (const permissions of [{ admin: true }, { maintain: true }]) {
     let calls = 0;
-    const result = await oauth.proveRepository('synthetic-user-token', 9, 'synthetic/repo', async url => {
-      calls++;
-      return Response.json(
-        url.includes('/user/installations/')
-          ? { repositories: [{ id: 42 }] }
-          : { id: 42, full_name: 'synthetic/repo', permissions },
-      );
-    });
+    const result = await oauth.proveRepository(
+      'synthetic-user-token',
+      'synthetic/repo',
+      [linkedAccount],
+      pinned(),
+      async url => {
+        calls++;
+        return Response.json(
+          url.endsWith('/user')
+            ? user
+            : url.includes('/user/installations/')
+              ? { repositories: [{ id: 42 }] }
+              : { id: 42, full_name: 'synthetic/repo', permissions },
+        );
+      },
+    );
     assert.equal(result.repoId, 42);
-    assert.equal(calls, 2);
+    assert.equal(calls, 3);
   }
   await assert.rejects(
-    oauth.proveRepository('synthetic-user-token', 9, 'synthetic/repo', async url =>
+    oauth.proveRepository('synthetic-user-token', 'synthetic/repo', [linkedAccount], pinned(), async url =>
       Response.json(
-        url.includes('/user/installations/')
-          ? { repositories: [] }
-          : { id: 42, full_name: 'synthetic/repo', permissions: { admin: true } },
+        url.endsWith('/user')
+          ? user
+          : url.includes('/user/installations/')
+            ? { repositories: [] }
+            : { id: 42, full_name: 'synthetic/repo', permissions: { admin: true } },
       ),
     ),
     code('GITHUB_REPOSITORY_PERMISSION'),
   );
+});
+test('proof refuses a GitHub account not linked to the starting Forge account before any repository read', async () => {
+  const calls = [];
+  let pinned = false;
+  await assert.rejects(
+    oauth.proveRepository(
+      'synthetic-user-token',
+      'synthetic/repo',
+      [linkedAccount],
+      async () => {
+        pinned = true;
+        return 9;
+      },
+      async url => {
+        calls.push(url);
+        return Response.json(
+          url.endsWith('/user')
+            ? { id: 2002 }
+            : { id: 42, full_name: 'synthetic/repo', permissions: { admin: true } },
+        );
+      },
+    ),
+    code('GITHUB_ACCOUNT_MISMATCH'),
+  );
+  assert.deepEqual(calls, ['https://api.github.com/user']);
+  assert.equal(pinned, false);
 });
 test('forged and replayed state cannot create bindings', async t => {
   const f = fixture(t),
@@ -188,6 +251,16 @@ test('forged and replayed state cannot create bindings', async t => {
   await assert.rejects(f.s.call('consume', store.consume, { state: 'forged' }), code('GITHUB_OAUTH_STATE'));
   await f.s.call('consume', store.consume, { state: op.state });
   await assert.rejects(f.s.call('consume', store.consume, { state: op.state }), code('GITHUB_OAUTH_STATE'));
+  await assert.rejects(
+    f.s.call('complete', store.complete, { state: op.state, repoId: 42, fullName: 'synthetic/repo' }),
+    code('GITHUB_OAUTH_STATE'),
+    'An unpinned operation cannot complete.',
+  );
+  await f.s.call('pin', store.pin, { state: op.state, installationId: 9 });
+  await assert.rejects(
+    f.s.call('pin', store.pin, { state: op.state, installationId: 10 }),
+    code('GITHUB_OAUTH_STATE'),
+  );
   await f.s.call('complete', store.complete, { state: op.state, repoId: 42, fullName: 'synthetic/repo' });
   await assert.rejects(
     f.s.call('complete', store.complete, { state: op.state, repoId: 42, fullName: 'synthetic/repo' }),
@@ -206,11 +279,18 @@ test('callback verifies PKCE and proof, persists no user token, rejects replay a
       assert.equal(body.redirect_uri, 'https://forge.example/github/oauth/callback');
       return Response.json({ access_token: 'synthetic-user-token-never-store', token_type: 'bearer' });
     }
+    // The App lookup runs only after the user's repository access is proven.
+    if (url.endsWith('/repos/synthetic/repo/installation')) {
+      assert.equal(calls.at(-2), 'https://api.github.com/repos/synthetic/repo');
+      return Response.json({ id: 9 });
+    }
     assert.equal(init.headers.Authorization, 'Bearer synthetic-user-token-never-store');
     return Response.json(
-      url.includes('/user/installations/')
-        ? { repositories: [{ id: 42 }] }
-        : { id: 42, full_name: 'synthetic/repo', permissions: { admin: true } },
+      url.endsWith('/user')
+        ? { id: Number(linkedAccount) }
+        : url.includes('/user/installations/')
+          ? { repositories: [{ id: 42 }] }
+          : { id: 42, full_name: 'synthetic/repo', permissions: { admin: true } },
     );
   });
   const request = new Request(
@@ -218,7 +298,8 @@ test('callback verifies PKCE and proof, persists no user token, rejects replay a
   );
   const result = await oauth.callback._handler(f.ctx, request);
   assert.equal(result.status, 200);
-  assert.equal(calls.length, 3);
+  assert.equal(calls.length, 5);
+  assert.equal([...f.s.tables.projectGithubBindings.values()][0].installationId, 9);
   assert(
     !JSON.stringify([...Object.values(f.s.tables).flatMap(table => [...table.values()])]).includes(
       'synthetic-user-token-never-store',
@@ -226,7 +307,7 @@ test('callback verifies PKCE and proof, persists no user token, rejects replay a
   );
   assert.equal(result.headers.get('referrer-policy'), 'no-referrer');
   assert.equal((await oauth.callback._handler(f.ctx, request)).status, 400);
-  assert.equal(calls.length, 3);
+  assert.equal(calls.length, 5);
   const failed = await f.start();
   t.mock.method(
     globalThis,
@@ -243,9 +324,14 @@ test('callback verifies PKCE and proof, persists no user token, rejects replay a
 });
 test('authorize URL uses server callback, random state and SHA256 PKCE', async t => {
   const f = fixture(t);
-  github(t);
+  const provider = github(t);
   const input = { projectId: f.projectId, operationId: randomUUID(), repository: 'synthetic/repo' };
   const started = JSON.parse(await oauth.connect._handler(f.ctx, input));
+  assert.deepEqual(
+    provider.calls.map(call => call.url),
+    ['https://api.clerk.com/v1/users/owner'],
+    'Connect reads only the caller identity; no repository or App lookup.',
+  );
   const url = new URL(started.authorizeUrl),
     op = [...f.s.tables.githubBindingOperations.values()][0];
   assert.equal(url.origin, 'https://github.com');
@@ -258,6 +344,100 @@ test('authorize URL uses server callback, random state and SHA256 PKCE', async t
   );
   assert(!started.authorizeUrl.includes('synthetic-secret'));
   assert.deepEqual(JSON.parse(await oauth.connect._handler(f.ctx, input)), started);
+  assert.equal(provider.calls.length, 1, 'A replayed connect makes no external call.');
+});
+test('binding by a different GitHub account than the starter is refused and writes no binding', async t => {
+  const f = fixture(t);
+  const op = await f.start();
+  const calls = [];
+  t.mock.method(globalThis, 'fetch', async url => {
+    calls.push(url);
+    if (url === 'https://github.com/login/oauth/access_token')
+      return Response.json({ access_token: 'synthetic-other-user-token', token_type: 'bearer' });
+    if (url.endsWith('/user')) return Response.json({ id: 2002 });
+    return Response.json({ id: 42, full_name: 'synthetic/repo', permissions: { admin: true } });
+  });
+  const response = await oauth.callback._handler(
+    f.ctx,
+    new Request(`https://forge.example/github/oauth/callback?state=${op.state}&code=synthetic-code`),
+  );
+  assert.equal(response.status, 400);
+  assert.match(await response.text(), /GITHUB_ACCOUNT_MISMATCH/);
+  assert.deepEqual(calls, ['https://github.com/login/oauth/access_token', 'https://api.github.com/user']);
+  assert.equal(f.s.tables.projectGithubBindings.size, 0);
+  const status = JSON.parse(await f.call('status', { operationId: op.operationId }));
+  assert.deepEqual([status.status, status.code], ['failed', 'GITHUB_ACCOUNT_MISMATCH']);
+  assert.equal([...f.s.tables.githubBindingOperations.values()][0].installationId, undefined);
+});
+test('connect gives the same answer for unknown, uninstalled and installed repositories', async t => {
+  const f = fixture(t);
+  const calls = [];
+  t.mock.method(globalThis, 'fetch', async url => {
+    calls.push(url);
+    if (url.startsWith('https://api.clerk.com/v1/users/')) return identity();
+    return new Response('not found', { status: 404 });
+  });
+  const shapes = [];
+  for (const repository of ['synthetic/repo', 'synthetic/unknown', 'other-owner/private-repo']) {
+    const started = JSON.parse(
+      await oauth.connect._handler(f.ctx, { projectId: f.projectId, operationId: randomUUID(), repository }),
+    );
+    shapes.push([
+      Object.keys(started).sort().join(','),
+      started.status,
+      new URL(started.authorizeUrl).origin,
+    ]);
+  }
+  assert.equal(new Set(shapes.map(shape => JSON.stringify(shape))).size, 1);
+  assert(
+    calls.every(url => url.startsWith('https://api.clerk.com/')),
+    'No GitHub call before user proof.',
+  );
+  assert(
+    [...f.s.tables.githubBindingOperations.values()].every(op => op.installationId === undefined),
+    'No installation state is stored before the callback proof.',
+  );
+});
+test('connect requires a verified GitHub account linked to the Forge account', async t => {
+  const f = fixture(t);
+  for (const person of [
+    { id: 'owner', external_accounts: [] },
+    {
+      id: 'owner',
+      external_accounts: [
+        { provider: 'oauth_github', provider_user_id: '1001', verification: { status: 'unverified' } },
+      ],
+    },
+    { id: 'someone-else', external_accounts: [] },
+  ]) {
+    t.mock.method(globalThis, 'fetch', async () => Response.json(person));
+    await assert.rejects(
+      oauth.connect._handler(f.ctx, {
+        projectId: f.projectId,
+        operationId: randomUUID(),
+        repository: 'synthetic/repo',
+      }),
+      error => code('GITHUB_ACCOUNT_REQUIRED')(error) || code('GITHUB_RESPONSE')(error),
+    );
+  }
+  assert.equal(f.s.tables.githubBindingOperations?.size ?? 0, 0);
+});
+test('a connection operation started before account binding fails closed at the callback', async t => {
+  const f = fixture(t);
+  const state = randomUUID();
+  f.s.insert('githubBindingOperations', {
+    projectId: f.projectId,
+    operationId: randomUUID(),
+    actor: 'owner',
+    repository: 'synthetic/repo',
+    installationId: 9,
+    state,
+    verifier: 'synthetic-verifier',
+    authorizeUrl: 'https://github.com/login/oauth/authorize',
+    status: 'waiting',
+  });
+  await assert.rejects(f.s.call('consume', store.consume, { state }), code('GITHUB_OAUTH_STATE'));
+  assert.equal(f.s.tables.projectGithubBindings.size, 0);
 });
 test('binding survives rename by id; recreated/public repository and other projects are refused', async t => {
   const f = fixture(t);
@@ -302,12 +482,12 @@ test('one repo id has one project even with concurrent claims', async t => {
     projectId: other,
     operationId: randomUUID(),
     repository: 'synthetic/repo',
-    installationId: 9,
+    githubAccounts: [linkedAccount],
     state,
     verifier: 'v',
     authorizeUrl: 'https://github.com',
   });
-  for (const value of [a.state, state]) await f.s.call('consume', store.consume, { state: value });
+  for (const value of [a.state, state]) await f.proving(value);
   const results = await Promise.allSettled(
     [a.state, state].map(value =>
       f.s.call('complete', store.complete, { state: value, repoId: 42, fullName: 'synthetic/repo' }),
@@ -320,7 +500,7 @@ test('removal and uninstall invalidate bindings and in-flight proof; duplicate w
   const f = fixture(t);
   await f.bind();
   const op = await f.start();
-  await f.s.call('consume', store.consume, { state: op.state });
+  await f.proving(op.state);
   const input = { delivery: 'synthetic-delivery:0', installationId: 9, removed: false, repoIds: [42] };
   await f.s.call('invalidate', webhook.invalidate, input);
   assert.equal(f.s.tables.projectGithubBindings.size, 0);
@@ -565,7 +745,7 @@ test('revocation while minting prevents token return; owner change also fences O
   const f = fixture(t);
   await f.bind();
   const op = await f.start();
-  await f.s.call('consume', store.consume, { state: op.state });
+  await f.proving(op.state);
   await f.call('remove', { repoId: 42, operationId: randomUUID() });
   await assert.rejects(
     f.s.call('complete', store.complete, { state: op.state, repoId: 42, fullName: 'synthetic/repo' }),
@@ -584,7 +764,7 @@ test('revocation while minting prevents token return; owner change also fences O
     code('GITHUB_REPOSITORY_UNBOUND'),
   );
   const changed = await f.start();
-  await f.s.call('consume', store.consume, { state: changed.state });
+  await f.proving(changed.state);
   f.s.patch('hostedProjects', f.projectId, { owner: 'other' });
   await assert.rejects(
     f.s.call('complete', store.complete, { state: changed.state, repoId: 42, fullName: 'synthetic/repo' }),

@@ -87,11 +87,21 @@ export async function cliRollback(
   }
 }
 export async function cliManageCli(args: string[]) {
-  if (!args.length || args.includes('--help') || args[0] !== 'rollback')
+  if (
+    !args.length ||
+    args.includes('--help') ||
+    !['rollback', 'release-key', 'release-sign'].includes(args[0]!)
+  )
     return {
       usage:
-        'nforge cli rollback [--directory DIR]\nSwitches atomically to the one retained previous CLI build; run it again to switch back.',
+        'nforge cli rollback [--directory DIR]\nSwitches atomically to the one retained previous CLI build; run it again to switch back.\n' +
+        'nforge cli release-key --out FILE\nOwner: creates an Ed25519 release key (mode 0600) and prints its public key.\n' +
+        'nforge cli release-sign --key FILE [--state STATE] [--directory DIR]\nOwner: signs released main (or STATE) and stores the signature.',
     };
+  if (args[0] !== 'rollback') {
+    const { cliReleaseCommand } = await import('./cli-release-sign.js');
+    return cliReleaseCommand(args[0] as 'release-key' | 'release-sign', args.slice(1));
+  }
   const flags = args.slice(1);
   let installation = cliInstallation() ?? defaultCliInstallation();
   while (flags.length) {

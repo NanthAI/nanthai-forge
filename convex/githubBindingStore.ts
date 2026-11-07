@@ -19,7 +19,7 @@ export const start = internalMutation({
     projectId,
     operationId: v.string(),
     repository: v.string(),
-    installationId: v.number(),
+    githubAccounts: v.array(v.string()),
     state: v.string(),
     verifier: v.string(),
     authorizeUrl: v.string(),
@@ -28,6 +28,11 @@ export const start = internalMutation({
   handler: async (ctx, input) => {
     const actor = await owner(ctx, input.projectId);
     invariant(z.uuid().safeParse(input.operationId).success, 'BAD_ARGUMENT', 'Use an operation UUID.');
+    invariant(
+      input.githubAccounts.length > 0 && input.githubAccounts.length <= 10,
+      'GITHUB_ACCOUNT_REQUIRED',
+      'Link a GitHub account to this Forge account, then connect again.',
+    );
     const prior = await ctx.db
       .query('githubBindingOperations')
       .withIndex('by_project_and_operation', q =>
@@ -68,10 +73,45 @@ export const consume = internalMutation({
       'Invalid or already used GitHub authorization state.',
     );
     await activeOwnedProject(ctx, op.projectId, op.actor);
-    const install = await bindingInstallation(ctx, op.installationId);
+    // Operations started before account binding carry no linked accounts; they fail closed.
+    invariant(
+      op.githubAccounts?.length,
+      'GITHUB_OAUTH_STATE',
+      'This connection operation has expired. Start a new connection operation.',
+    );
+    await ctx.db.patch(op._id, { status: 'processing' });
+    return JSON.stringify({
+      repository: op.repository,
+      verifier: op.verifier,
+      githubAccounts: op.githubAccounts,
+    });
+  },
+});
+/** Pins the installation found after the user proved repository access; the
+ * revision fences removal or uninstall until `complete`. */
+export const pin = internalMutation({
+  args: { state: v.string(), installationId: v.number() },
+  returns: v.null(),
+  handler: async (ctx, input) => {
+    const op = await ctx.db
+      .query('githubBindingOperations')
+      .withIndex('by_state', q => q.eq('state', input.state))
+      .unique();
+    invariant(
+      op?.status === 'processing' && op.installationId === undefined,
+      'GITHUB_OAUTH_STATE',
+      'Invalid or already used GitHub authorization state.',
+    );
+    invariant(
+      Number.isSafeInteger(input.installationId) && input.installationId > 0,
+      'GITHUB_APP_CONFIG',
+      'GitHub App installation is unavailable.',
+    );
+    await activeOwnedProject(ctx, op.projectId, op.actor);
+    const install = await bindingInstallation(ctx, input.installationId);
     invariant(!install?.removed, 'GITHUB_REPOSITORY_UNBOUND', 'GitHub installation was removed.');
-    await ctx.db.patch(op._id, { status: 'processing', revision: install?.revision ?? 0 });
-    return JSON.stringify({ ...op, revision: install?.revision ?? 0 });
+    await ctx.db.patch(op._id, { installationId: input.installationId, revision: install?.revision ?? 0 });
+    return null;
   },
 });
 export const complete = internalMutation({
@@ -83,12 +123,13 @@ export const complete = internalMutation({
       .withIndex('by_state', q => q.eq('state', input.state))
       .unique();
     invariant(
-      op?.status === 'processing',
+      op?.status === 'processing' && op.installationId !== undefined,
       'GITHUB_OAUTH_STATE',
       'Invalid or already used GitHub authorization state.',
     );
+    const installationId = op.installationId;
     await activeOwnedProject(ctx, op.projectId, op.actor);
-    const install = await bindingInstallation(ctx, op.installationId);
+    const install = await bindingInstallation(ctx, installationId);
     invariant(
       !install?.removed && (install?.revision ?? 0) === op.revision,
       'GITHUB_REPOSITORY_UNBOUND',
@@ -116,7 +157,7 @@ export const complete = internalMutation({
       projectId: op.projectId,
       repoId: input.repoId,
       fullName: input.fullName.toLowerCase(),
-      installationId: op.installationId,
+      installationId,
       boundBy: op.actor,
       boundAt: Date.now(),
     };

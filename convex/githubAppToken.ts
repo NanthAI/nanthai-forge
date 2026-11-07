@@ -46,12 +46,15 @@ export async function githubAppJwt(id: string, pem: string, now = Date.now()) {
   return `${payload}.${base64url(new Uint8Array(signature))}`;
 }
 type Installation = { id: number; permissions?: Record<string, string> };
-export async function appInstallation(repo: string, request: typeof fetch, now: number) {
+export function assertRepositoryName(repo: string) {
   invariant(
     /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo) && repo.split('/').every(p => p !== '.' && p !== '..'),
     'BAD_REPOSITORY',
     'Select OWNER/NAME.',
   );
+}
+export async function appInstallation(repo: string, request: typeof fetch, now: number) {
+  assertRepositoryName(repo);
   const id = process.env.GITHUB_APP_ID,
     key = process.env.GITHUB_APP_PRIVATE_KEY;
   invariant(

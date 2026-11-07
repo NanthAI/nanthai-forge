@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { printedReceipt } from './receipt-slim.js';
 import { callerOverlaps, withCallerOverlaps } from './agent-caller-overlaps.js';
-import { overlapBannerOnce } from './hosted-overlap-notice.js';
+import { overlapBannerOnce, refusalOverlapBanner } from './hosted-overlap-notice.js';
 import { metricsCli } from './metrics-cli.js';
 import { supportedNode, nodeRequirement } from '../scripts/node-runtime.mjs';
 import { improveCli } from './improve-cli.js';
@@ -55,6 +55,7 @@ Usage:
   nforge pull [ROOT]           # refresh a clean clone to accepted main (ROOT: cwd clone)
   nforge update [FORGE_CHECKOUT] [--directory DIR] [--state STATE]
   nforge cli rollback [--directory DIR]   # switch to the one retained previous CLI build
+  nforge cli release-sign --key FILE [--state STATE]   # owner: sign released main for the CLI updater
   nforge worker DEPLOYMENT_URL PROJECT_ID MACHINE_UUID
   nforge metrics ROOT [--from DATE] [--to DATE] [--json] [--report FILE.md] [--compare FROM..TO]
   nforge metrics record-bill ROOT --provider P --from DATE --to DATE --billed-usd N [--list-usd N] [--usage unit=qty,...] [--rate unit=usd,...] [--basis TEXT]
@@ -534,9 +535,13 @@ try {
   if (process.argv[2] === 'github-sync') {
     syncPending = false;
     process.stdout.write(`${JSON.stringify({ pushed: false, reason: failure.code, error: failure })}\n`);
-  } else
+  } else {
     process.stderr.write(
       `${JSON.stringify(withCallerOverlaps(process.argv[3] ?? process.cwd(), { error: failure }))}\n`,
     );
+    // A gate refusal names the blocking notices it judged and their exact answer (c8b842a9).
+    if (process.argv[2] === 'agent' || process.argv[2] === 'x')
+      process.stderr.write(refusalOverlapBanner(failure.recovery));
+  }
   process.exitCode = 1;
 }

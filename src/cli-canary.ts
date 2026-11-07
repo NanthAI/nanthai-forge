@@ -53,12 +53,16 @@ export type CanaryRefusal = {
   deployPendingSince?: number;
   /** This record is such a deploy-window hold, not a refusal. */
   deployPending?: boolean;
+  /** A release-signature hold: signatures are required and this State has none yet. */
+  signaturePending?: boolean;
   alerted?: boolean;
   noticed?: boolean;
 };
 type CloneRecord = { root: string; operationId?: string; operationKind?: 'landing' };
 /** The canary step name of a hold for a server that is behind the build (not a broken build). */
 export const SERVER_BEHIND_STEP = 'server-capabilities';
+/** The step name of a release that failed its signature check (src/cli-release-check.ts). */
+export const RELEASE_SIGNATURE_STEP = 'release-signature';
 
 function readJson<T>(path: string): T | null {
   try {
@@ -436,7 +440,16 @@ export function cliCanaryNotice(installation: string, record: CanaryRefusal, run
   const retry = record.hold
     ? 'held until main moves (explicit rollback)'
     : `next retry after ${clock(record.nextRetryAt)}`;
-  const head = `Forge CLI main ${record.head.slice(0, 8)} was ${record.hold ? 'rolled back' : record.step === SERVER_BEHIND_STEP || record.deployPending ? 'held by its pre-switch canary' : 'refused by its pre-switch canary'}`;
+  const verdict = record.hold
+    ? 'rolled back'
+    : record.step === RELEASE_SIGNATURE_STEP
+      ? record.signaturePending
+        ? 'held until its release signature is published'
+        : 'refused by its release signature check'
+      : record.step === SERVER_BEHIND_STEP || record.deployPending
+        ? 'held by its pre-switch canary'
+        : 'refused by its pre-switch canary';
+  const head = `Forge CLI main ${record.head.slice(0, 8)} was ${verdict}`;
   return (
     `${head} (${record.reason}); running on ${runningOn.slice(0, 8)}, ${retry}.` +
     (first

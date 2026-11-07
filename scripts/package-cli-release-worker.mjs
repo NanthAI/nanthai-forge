@@ -10,6 +10,15 @@ const server = createServer((request, response) => {
   });
   request.on('end', () => {
     const input = JSON.parse(bytes);
+    if (input.path === 'projectReleaseSignatures:forState') {
+      // Unsigned release (the transition default); not a release read, so not counted.
+      response.setHeader('content-type', 'application/json');
+      const head = input.args?.[0]?.head ?? input.args?.head;
+      response.end(
+        JSON.stringify({ status: 'success', value: JSON.stringify({ head, signatures: [] }), logLines: [] }),
+      );
+      return;
+    }
     if (input.path !== 'projectHostedChannels:current') {
       response.writeHead(500).end('Unexpected synthetic release query');
       return;

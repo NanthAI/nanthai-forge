@@ -31,7 +31,7 @@ import { policyPreset } from '../dist/autonomy-policy.js';
 import { mergeNativeText } from '../dist/native-text-merge.js';
 import { preEditHosted } from '../dist/agent-edit-hosted.js';
 import { hostedAgentCli } from '../dist/hosted-agent-cli.js';
-import { overlapBanner } from '../dist/hosted-overlap-notice.js';
+import { overlapBanner, overlapBannerOnce, refusalOverlapBanner } from '../dist/hosted-overlap-notice.js';
 const overlaps = await import(moduleUrl('../convex/projectHostedOverlaps.ts'));
 const records = await import(moduleUrl('../convex/projectHostedRecords.ts'));
 const tracking = await import(moduleUrl('../convex/projectHostedOverlapStore.ts'));
@@ -970,6 +970,83 @@ test('intersecting saved hunks block before landing and composition still reject
     code('OVERLAP_UNANSWERED'),
   );
   assert.equal(mergeNativeText(Buffer.from(base), Buffer.from(mine), Buffer.from(peerText)), null);
+});
+
+// Friction c8b842a9 (Lane e88703a8, retry 6a75392f): the land retry printed one advisory notice,
+// then refused OVERLAP_UNANSWERED; ack then answered a blocking notice that no banner had shown. A
+// save had changed the overlap evidence after the receipt that printed the banner.
+test('incident replay: a save turns an advisory overlap blocking; the refusal shows that notice and its exact answer', async t => {
+  const base = Array.from({ length: 40 }, (_, i) => `line ${i}\n`).join('');
+  const mine = base.replace('line 2\n', 'my edit\n');
+  const { s, lane, peer, transport } = await setup(t, {
+    base,
+    mine,
+    peer: base.replace('line 2\n', 'peer edit\n'),
+  });
+  await transport(lane).dispatch('save', { operationId: randomUUID(), message: 'mine' });
+  const second = transport(peer);
+  // The first save carries no range evidence (its base text was not retained): advisory.
+  const sketches = join(`${second.root}.forge-client`, 'overlap-text');
+  rmSync(sketches, { recursive: true, force: true });
+  const first = await second.dispatch('save', { operationId: randomUUID(), message: 'no ranges' });
+  assert.deepEqual(
+    first.overlapNotice.items.map(item => item.class),
+    ['advisory'],
+  );
+  assert.match(
+    overlapBannerOnce(first.overlapNotice),
+    /OVERLAP NOTICE: ADVISORY/,
+    'the banner the agent saw',
+  );
+  // The retry's save brings range evidence that intersects the other hunk: a blocking notice.
+  rememberOverlapText(`${second.root}.forge-client`, s.original.sha256, Buffer.from(base));
+  writeFileSync(join(second.root, 'a.txt'), base.replace('line 2\n', 'peer edit again\n'));
+  const saved = await second.dispatch('save', { operationId: randomUUID(), message: 'intersecting' });
+  const blocking = saved.overlapNotice.items.filter(item => item.class === 'blocking');
+  assert.equal(blocking.length, 1);
+  assert.notEqual(blocking[0].noticeId, first.overlapNotice.items[0].noticeId, 'a new notice id');
+  const reads = s.counts.length;
+  const gate = advice =>
+    finishGates(
+      second.root,
+      effectiveAgentDefaults({ preflight: 'off' }),
+      { laneId: peer.id, head: advice.unacknowledgedOverlaps.head },
+      advice,
+    );
+  let refusal;
+  assert.throws(
+    () => gate(saved),
+    error => ((refusal = error), code('OVERLAP_UNANSWERED')(error)),
+  );
+  assert.equal(s.counts.length, reads, 'the refusal reuses the gate read: no added call');
+  const notice = refusal.recovery.overlapNotice;
+  assert.deepEqual(
+    notice.items.map(item => [item.noticeId, item.class, item.file]),
+    [[blocking[0].noticeId, 'blocking', 'a.txt']],
+    'the refusal carries the blocking notice it judged',
+  );
+  assert.deepEqual(
+    notice.items[0].with.map(p => p.lane),
+    [lane.id],
+  );
+  assert(refusal.message.includes(notice.acknowledge), 'the message names the exact answer command');
+  assert(refusal.message.includes(blocking[0].noticeId), 'and the notice it answers');
+  assert.equal(refusal.recovery.command, notice.acknowledge);
+  // The CLI prints the refusal's banner even after this process showed the earlier advisory one.
+  const banner = refusalOverlapBanner(refusal.recovery);
+  assert.match(banner, /OVERLAP NOTICE: ACTION REQUIRED/);
+  assert(banner.includes('a.txt') && banner.includes(lane.id) && banner.includes(notice.acknowledge));
+  assert.equal(refusalOverlapBanner(undefined), '', 'other refusals print nothing extra');
+  // The printed command answers exactly that notice; the gate then lets the same head through.
+  const body = JSON.parse(/ overlap-acks '(.*)'$/.exec(notice.acknowledge)[1]);
+  assert.deepEqual(
+    body.answers.map(answer => answer.noticeId),
+    [blocking[0].noticeId],
+  );
+  await second.dispatch('overlap-acks', body);
+  const after = await second.dispatch('status', { laneId: peer.id });
+  assert.equal(after.unacknowledgedOverlaps.items.filter(item => item.class === 'blocking').length, 0);
+  assert.doesNotThrow(() => gate(after));
 });
 
 test('range metadata negotiates on existing discovery, and older strict save APIs keep their original pages', async t => {

@@ -21,6 +21,7 @@ import { readHostedLaneCheckout, type HostedLaneCheckoutMarker } from './hosted-
 import { hostedAgentDirectory, readAgentJson, HostedAgentJournal } from './hosted-agent-journal.js';
 import { durableReplace } from './native-durability.js';
 import { workLocked } from './work-lock.js';
+import { hostedActionError } from './hosted-action-error.js';
 import type { HostedLaneSelection } from './hosted-lane.js';
 import type { HostedAgentAddress, hostedAgentCommandSchemas } from './hosted-agent-contract.js';
 
@@ -31,6 +32,15 @@ const selectionSchema = z.object({
   command: z.record(z.string(), z.unknown()),
 });
 export type FinishSelection = z.infer<typeof selectionSchema>;
+/** Journal key: this finish was refused before it submitted anything (a known refusal code). */
+export const finishRefusedKey = 'finish-refused';
+/** Refusals thrown before compose or submission: the operation ended, nothing runs on the server. */
+export const FINISH_REFUSALS = new Set([
+  'NOTHING_TO_LAND',
+  'UNSAVED_LANE_EDITS',
+  'OVERLAP_UNANSWERED',
+  'PREFLIGHT_REQUIRED',
+]);
 export type FinishContext = {
   command: Record<string, unknown>;
   clean: HostedLaneSelection | null;
@@ -160,15 +170,21 @@ export async function selectHostedFinish(
     const saved = readAgentJson(path) as {
       values: Record<string, unknown>;
     };
-    if (saved.values['finish-source-failed']) return true;
+    // A refusal before anything was submitted (nothing to land, an unanswered gate) ended that
+    // operation: new source is new work. No server read (ac13de6b).
+    if (saved.values['finish-source-failed'] || saved.values[finishRefusedKey]) return true;
+    const run = saved.values['finish-check-run'] as { id: string } | undefined;
+    // A check-only finish is never a landing, so the landing page has no row for it: without a run
+    // it is still preparing (or its enqueue reply was lost) and is replayed, at zero reads.
+    if (!run && prior.command.accept === false) return false;
     try {
-      const run = saved.values['finish-check-run'] as { id: string } | undefined;
       const observed = await observe(prior.operationId, run?.id);
       return observed.status
         ? ['passed', 'failed', 'cancelled', 'runner-unavailable', 'interrupted'].includes(observed.status)
         : Boolean(observed.submission && observed.submission.observation?.state !== 'pending');
     } catch (error) {
-      if ((error as { code?: string }).code === 'NOT_FOUND') return false;
+      // A hosted read throws the server's code inside ConvexError data, not on the error itself.
+      if (hostedActionError(error, 'observation').code === 'NOT_FOUND') return false;
       throw error;
     }
   };

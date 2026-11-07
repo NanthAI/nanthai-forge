@@ -3,7 +3,7 @@
 // checkout landed the server-recorded head (== base), reported LANDED and left five edits unsaved.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { agentFixture } from './hosted-agent-fixture.mjs';
@@ -12,6 +12,7 @@ import { recordLane } from '../dist/lane-registry.js';
 import { clientCacheRoot } from '../dist/root-paths.js';
 import { landSummary } from '../dist/hosted-land-summary.js';
 import { synthetic } from './hosted-revert-fixture.mjs';
+import { ConvexError } from 'convex/values';
 
 const priorEnv = Object.fromEntries(
   [...Object.keys(synthetic), 'XDG_STATE_HOME'].map(key => [key, process.env[key]]),
@@ -80,6 +81,60 @@ test('land of an empty Lane is refused as nothing to land, unless allowEmpty ask
   assert.equal(deliberate.result.phase, 'check');
   assert.equal(deliberate.result.changedPaths, 0);
 });
+
+// Issue ac13de6b (report a3d59b6c, 2026-11-05): `land --check-only` on a no-change Lane, then an edit
+// and a re-run, returned NOT_FOUND on every re-run. The re-run probed the landing page for the earlier
+// operation (a check-only id is never a landing) and the real server's NOT_FOUND arrives inside
+// ConvexError data, so the probe's `error.code` test missed it and the read failed the finish.
+for (const accept of [false, undefined])
+  test(`incident replay: ${accept === false ? 'check-only' : 'land'} after a no-change finish, an edit and a re-run is a clear result, never NOT_FOUND`, async t => {
+    const s = agentFixture(t);
+    const state = mkdtempSync(join(tmpdir(), 'forge-empty-rerun-'));
+    t.after(() => rmSync(state, { recursive: true, force: true }));
+    process.env.XDG_STATE_HOME = state;
+    const edited = s.lane.head;
+    s.lane.head = s.lane.base.head;
+    await s.transport().dispatch('open', { laneId: s.lane.laneId });
+    let landingPageReads = 0;
+    const run = () => {
+      const transport = s.transport();
+      const query = transport.query.bind(transport);
+      transport.query = async (name, args) => {
+        if (name === 'projectHostedFinishObserve:page') {
+          landingPageReads++;
+          // The deployed server's shape: the code is in ConvexError data (convex/errors.ts report).
+          throw new ConvexError({ code: 'NOT_FOUND', message: 'Select one hosted landing operation.' });
+        }
+        return query(name, args);
+      };
+      return transport.dispatch('finish', accept === false ? { accept } : {});
+    };
+    const refusals = [];
+    for (let i = 0; i < 2; i++) await assert.rejects(run(), error => refusals.push(error.code) > 0);
+    assert.deepEqual(refusals, ['NOTHING_TO_LAND', 'NOTHING_TO_LAND'], 'no change: the same clear refusal');
+    // The agent edits a file and saves it: the checkout now holds the Lane's new saved head.
+    const changed = edited;
+    s.lane.head = changed;
+    const markerPath = join(s.root, '.forge', 'hosted-lane.json');
+    const marker = JSON.parse(readFileSync(markerPath, 'utf8'));
+    const saved = JSON.parse(s.objects.get(changed).toString());
+    for (const file of saved.files) writeFileSync(join(s.root, file.path), s.objects.get(file.blob));
+    marker.selection.head = changed;
+    marker.state = saved;
+    marker.materialized = [...new Set([...marker.materialized, ...saved.files.map(file => file.path)])];
+    writeFileSync(markerPath, JSON.stringify(marker));
+    const before = s.calls.length;
+    const rerun = await run();
+    assert.equal(rerun.result.phase, accept === false ? 'check' : 'finish', 'new source is new work');
+    assert.equal(landingPageReads, 0, 'a refused earlier finish is ended locally: no landing read');
+    assert.equal(
+      s.calls.slice(before).filter(call => /Observe|CheckRead/.test(call.name)).length,
+      0,
+      'zero added Convex reads',
+    );
+    // Re-running the same source again replays that new operation, still a clear result.
+    assert.equal((await run()).operationId, rerun.operationId);
+  });
 
 test('a Lane with changes lands and the reply states the changed path count at zero added calls', async t => {
   const s = agentFixture(t);

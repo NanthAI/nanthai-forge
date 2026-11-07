@@ -39,6 +39,7 @@ import {
   clearCliCanaryRefusal,
   rememberCanaryClone,
 } from './cli-canary.js';
+import { checkCliRelease, type ReleaseCheckHooks } from './cli-release-check.js';
 
 const sourceSchema = z.object({ url: z.url(), projectId: z.string().min(1) }).strict();
 /** How long a write command waits for a live concurrent updater (a dead one is reclaimed at once).
@@ -133,12 +134,15 @@ export async function updateCli(
     // Every auto-update smoke-tests the new build before the switch (canary, ac9c4ed4).
     preSwitch: cliCanaryPreSwitch(installation),
   } as {
-    source: Pick<ReturnType<typeof cliReleaseSource>, 'current' | 'checkout'>;
+    source: Pick<ReturnType<typeof cliReleaseSource>, 'current' | 'checkout'> &
+      Partial<Pick<ReturnType<typeof cliReleaseSource>, 'signatures'>>;
     run: typeof cliUpdateRun;
     migrate(runner: string): unknown;
     /** Pre-switch check (canary, ac9c4ed4): runs on the installed-but-not-active build; throwing
      * keeps the previous build selected. Explicit rollback (--state) skips it. */
     preSwitch?: (build: string, head: string) => unknown;
+    /** Release keys, transition switch and alert; the compiled ones unless a test supplies its own. */
+    releaseCheck?: ReleaseCheckHooks;
   },
   options: {
     expectedCurrent?: string | null;
@@ -232,6 +236,18 @@ export async function updateCli(
       rmSync(failureMark(installation), { force: true });
       return { status: 'current', cliCommit: release.head, installation, removed: [] };
     }
+    // Signed releases: checked with this (already installed) build's keys before the new State is
+    // downloaded, provisioned or built. Explicit --state selection is the owner's own recovery path.
+    if (!options.rollback)
+      await checkCliRelease(
+        installation,
+        {
+          projectId: address.projectId,
+          head: release.head,
+          ...(dependencies.source.signatures ? { signatures: dependencies.source.signatures } : {}),
+        },
+        dependencies.releaseCheck,
+      );
     const publish = async (prepared?: string) => {
       const input = {
         installation,

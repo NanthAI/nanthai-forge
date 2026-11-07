@@ -58,16 +58,21 @@ function repo(t, files = {}) {
 }
 const code = value => error => error.code === value || error.data?.code === value;
 
-test('overlapGate: block refuses with the ack command, warn advises, off ignores; nothing without notices', t => {
+test('overlapGate: block refuses with the exact answer command, warn advises, off ignores; nothing without notices', t => {
   const root = repo(t);
   const pending = advice({ notices: [notice('src/x.ts')] });
   const off = { preflight: 'off' };
+  // c8b842a9: the refusal answers exactly the notices it judged (overlap-acks by noticeId), not
+  // whatever `ack` would read later, and carries them structured for the banner and MCP.
   assert.throws(
     () => finishGates(root, defaults({ ...off }), lane, pending),
     error =>
       code('OVERLAP_UNANSWERED')(error) &&
       error.message.includes('src/x.ts') &&
-      error.message.includes(`ack '{"laneId":"${lane.laneId}"}'`),
+      error.message.includes(' overlap-acks ') &&
+      error.message.includes('"noticeId":"n-src/x.ts"') &&
+      error.recovery.overlapNotice.items[0].noticeId === 'n-src/x.ts' &&
+      error.recovery.command === error.recovery.overlapNotice.acknowledge,
   );
   const warned = finishGates(root, defaults({ ...off, overlapGate: 'warn' }), lane, pending);
   assert.equal(warned.overlap.status, 'unanswered');

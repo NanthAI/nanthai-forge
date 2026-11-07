@@ -22,6 +22,7 @@ export const projectPurgeTables = {
   projectHostedSeeds: 'by_project',
   projectHostedSeedPages: 'by_project',
   projectHostedChannels: 'by_project_and_name',
+  projectReleaseSignatures: 'by_project_and_head',
   projectReturnSupersessions: 'by_project_and_operation',
   projectSlugs: 'by_project',
   ownerAcceptanceMachines: 'by_project_owner',

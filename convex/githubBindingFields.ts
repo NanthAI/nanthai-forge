@@ -23,7 +23,11 @@ export const githubBindingTables = {
     operationId: v.string(),
     actor: v.string(),
     repository: v.string(),
-    installationId: v.number(),
+    // Pinned by the callback after the user proves repository access.
+    installationId: v.optional(v.number()),
+    // GitHub account ids linked to the starting Forge account; the callback
+    // completes only for one of them.
+    githubAccounts: v.optional(v.array(v.string())),
     state: v.string(),
     verifier: v.string(),
     authorizeUrl: v.string(),

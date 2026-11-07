@@ -9,7 +9,7 @@ import { readHostedLaneCheckout } from './hosted-lane-checkout-marker.js';
 import { ForgeError } from './errors.js';
 import { shellQuote } from './agent-brief-render.js';
 import { preflightPlan, readPreflightReceipt, PREFLIGHT_SECONDS_PER_FILE } from './agent-preflight.js';
-import { answerId } from './hosted-overlap-notice.js';
+import { answerId, hostedOverlapNotice } from './hosted-overlap-notice.js';
 import type { EffectiveAgentDefaults } from './agent-parallel-defaults.js';
 import type { readHostedOverlapAdvice } from './hosted-overlap-client.js';
 
@@ -33,11 +33,29 @@ export function finishGates(
   if (defaults.overlapGate !== 'off' && pending.length) {
     const ack = command(root, 'ack', { laneId: lane.laneId });
     const files = pending.map(item => item.file).join(', ');
-    if (defaults.overlapGate === 'block' && overlapAnswer !== 'accept-order')
+    if (defaults.overlapGate === 'block' && overlapAnswer !== 'accept-order') {
+      // The refusal carries the notices it judged, from this same read: a save can change the
+      // evidence after an earlier receipt printed its banner (c8b842a9). No extra call.
+      const notice = hostedOverlapNotice(root, lane.laneId, {
+        unacknowledgedOverlaps: {
+          count: pending.length,
+          coverage: advice!.unacknowledgedOverlaps.coverage ?? 'complete',
+          items: pending,
+        },
+      })!;
+      const named = notice.items
+        .map(
+          item =>
+            `${item.file} (${item.reason}${item.with.length ? `; with Lane ${item.with.map(p => p.lane).join(', ')}` : ''})`,
+        )
+        .join('; ');
       throw new ForgeError(
         'OVERLAP_UNANSWERED',
-        `Answer the blocking overlap notice(s) on ${files} before landing (project overlapGate: block). Keep your change and land in order: ${ack}. Or route around: add "choice":"split". Or include "overlapAnswer":"accept-order" in land --save.`,
+        `Answer the blocking overlap notice(s) on ${files} before landing (project overlapGate: block). Blocking: ${named}. Keep your change and land in order: ${notice.acknowledge}. Or route around: ${notice.routeAround}. Or include "overlapAnswer":"accept-order" in land --save.`,
+        undefined,
+        { overlapNotice: notice, command: notice.acknowledge },
       );
+    }
     advisories.overlap =
       overlapAnswer === 'accept-order'
         ? {

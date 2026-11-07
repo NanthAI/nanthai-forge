@@ -432,6 +432,12 @@ function syncContext(jobs) {
           unique: async () =>
             [...deliveries.values()].find(row => [...matches].every(([key, value]) => row[key] === value)) ??
             null,
+          first: async () => {
+            assert.equal(table, 'imports');
+            return (
+              [...rows.values()].find(row => [...matches].every(([key, value]) => row[key] === value)) ?? null
+            );
+          },
           paginate: async opts => {
             assert.equal(table, 'imports');
             const all = [...rows.values()].filter(row =>
@@ -518,15 +524,37 @@ test('signed GitHub HTTP delivery authenticates raw bytes and stores only a mini
         ).status,
         204,
       );
-      assert.deepEqual(received.at(-1), { delivery: 'one', event });
+      // Installation-level events that name no repository schedule no reconciliation.
+      assert.equal(received.filter(args => 'event' in args && args.event === event).length, 0);
       if (event === 'installation')
-        assert.deepEqual(received.at(-2), {
+        assert.deepEqual(received.at(-1), {
           delivery: 'one:0',
           installationId: 9,
           removed: true,
           repoIds: [],
         });
     }
+    const named = JSON.stringify({
+      action: 'added',
+      installation: { id: 9 },
+      repositories_added: [
+        ...Array.from({ length: 150 }, (_, i) => ({ full_name: `example/repo-${i}` })),
+        { full_name: 'example/repo-0' },
+        { full_name: '../bad' },
+      ],
+    });
+    const prior = received.length;
+    assert.equal(
+      (await route._handler(ctx, request(named, { 'x-github-event': 'installation_repositories' }))).status,
+      204,
+    );
+    const pages = received.slice(prior);
+    assert.deepEqual(
+      pages.map(page => page.repositories.length),
+      [100, 50],
+      'Installation events refresh only named repositories, deduplicated, in 100-name pages.',
+    );
+    assert(pages.every(page => page.delivery === 'one' && page.event === 'installation_repositories'));
     assert.equal((await route._handler(ctx, request('{}', { 'x-github-event': 'ping' }))).status, 204);
     delete process.env.GITHUB_WEBHOOK_SECRET;
     assert.equal((await route._handler(ctx, request(body))).status, 401);
@@ -599,20 +627,33 @@ test('delivery deduplication, paginated current-ref reconciliation, access revoc
     for (const job of state.rows.values())
       assert.equal(job.sync.head, head, 'Event payload order cannot roll back current GitHub facts.');
     revoked = true;
-    await receive('revoked', 'github_app_authorization');
+    const installationEvent = (delivery, repositories) =>
+      sync.receiveRepositories._handler(state.ctx, {
+        delivery,
+        event: 'installation_repositories',
+        repositories,
+      });
+    await installationEvent('revoked', [repository.full_name]);
     await drain();
     for (const job of state.rows.values()) {
       assert.equal(job.sync.result, 'unavailable');
       assert.equal(job.artifactKey, 'old-object');
     }
     revoked = false;
-    await receive('restored', 'installation');
+    await installationEvent('restored', [repository.full_name]);
     await drain();
     for (const job of state.rows.values()) {
       assert.equal(job.sync.result, 'checked');
       assert.equal(job.sync.head, head);
       assert.equal(job.generation, 2);
     }
+    const before = { deliveries: state.deliveries.size, scheduled: state.scheduled.length };
+    await installationEvent('unknown-installation', ['unrelated/one', 'unrelated/two']);
+    assert.deepEqual(
+      { deliveries: state.deliveries.size, scheduled: state.scheduled.length },
+      before,
+      'Repositories with no imports write nothing and schedule nothing.',
+    );
     await receive('interrupted');
     const interrupted = state.scheduled.at(-1);
     state.tasks.set(interrupted.task, { state: { kind: 'failed' } });

@@ -8,6 +8,7 @@ import { localPathFindings } from './check-local-paths.mjs';
 import { landingModelFindings } from './check-landing-model.mjs';
 import { idleQueryFindings } from './check-idle-queries.mjs';
 import { recoveryAdviceFindings } from './check-recovery-advice.mjs';
+import { actionPinFindings, isWorkflowPath } from './check-action-pins.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const errors = [];
@@ -40,6 +41,8 @@ errors.push(...landingModelFindings(read));
 const files = walk(root);
 for (const file of files) {
   errors.push(...localPathFindings(relative(root, file), readFileSync(file)));
+  if (isWorkflowPath(relative(root, file)))
+    errors.push(...actionPinFindings(relative(root, file), readFileSync(file, 'utf8')));
   if (['.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs'].includes(extname(file))) {
     const path = relative(root, file),
       source = readFileSync(file, 'utf8');

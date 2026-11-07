@@ -509,6 +509,15 @@ export default defineSchema({
     name: v.string(),
     selection: v.string(),
   }).index('by_project_and_name', ['projectId', 'name']),
+  // Owner signatures over released States; the CLI updater verifies them (convex/projectReleaseSignatures.ts).
+  projectReleaseSignatures: defineTable({
+    projectId: v.id('hostedProjects'),
+    head: v.string(),
+    keyId: v.string(),
+    signature: v.string(),
+    actor: v.string(),
+    at: v.number(),
+  }).index('by_project_and_head', ['projectId', 'head']),
   projectReturnSupersessions: defineTable({
     projectId: v.id('hostedProjects'),
     operationId: v.string(),

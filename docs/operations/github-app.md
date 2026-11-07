@@ -29,7 +29,8 @@ These are manual steps for the GitHub App owner and deployment operator:
    `installation_repositories` when qualifying the setup.
 5. Install the App on the selected repositories and approve its permissions:
    Metadata read, Contents write for mirroring, Actions write for check dispatch.
-   The connecting GitHub user must have repository admin or maintain permission.
+   The connecting GitHub user must have repository admin or maintain permission,
+   and must be a GitHub account linked to the Forge account that runs connect.
 
 See GitHub's [user authorization flow](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-a-user-access-token-for-a-github-app)
 and [installation tokens](https://docs.github.com/en/rest/apps/apps#create-an-installation-access-token-for-an-app).
@@ -54,9 +55,18 @@ subscription, with no polling or scheduled work. Ctrl-C closes the subscription;
 it does not cancel a completed binding. Retrying identical parameters reconciles
 the same operation. After an authorization failure, use a fresh
 `--operation-id UUID` to start again. The OAuth state is bound to the initiating
-Forge owner and project, consumed once, and protected with S256 PKCE. The callback
-checks user admin/maintain permission and membership in the selected installation.
-The user token is used in memory once and is never saved or logged.
+Forge owner and project, consumed once, and protected with S256 PKCE. Connect
+records the GitHub accounts linked to the starting Forge account and makes no
+repository or App lookup. The callback completes only when the authorizing GitHub
+account is one of them (`GITHUB_ACCOUNT_MISMATCH` otherwise;
+`GITHUB_ACCOUNT_REQUIRED` at connect when none is linked), then checks user
+admin/maintain permission, finds the App installation, and checks membership in
+it. The user token is used in memory once and is never saved or logged.
+
+Installation webhook events refresh imports only for the repositories they name
+(at most 1000 per delivery, `INSTALLATION_EVENT_REPOSITORY_LIMIT` in
+`convex/sync.ts`), one indexed lookup each; repositories with no imports cause no
+write and no scheduled work.
 
 `check-settings` includes the first page of stored bindings with numeric ID,
 installation, proving Forge owner, time and active status. `github status`

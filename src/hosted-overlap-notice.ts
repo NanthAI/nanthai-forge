@@ -107,13 +107,23 @@ const shown = new Set<string>();
  * parent reads that receipt back from its detached child, so it may hold no items (c29d0780). */
 const itemsOf = (notice: HostedOverlapNotice) => (Array.isArray(notice.items) ? notice.items : []);
 /** The banner for notices this process has not printed yet, so an early print is never repeated at exit. */
+/** A notice that turned blocking after it was printed as advisory is news: key by id and class. */
+const shownKey = (item: HostedOverlapNotice['items'][number]) => `${item.noticeId}\0${item.class}`;
 export function overlapBannerOnce(notice: HostedOverlapNotice) {
   const items = itemsOf(notice);
-  const fresh = items.filter(item => !shown.has(item.noticeId));
-  for (const item of items) shown.add(item.noticeId);
+  const fresh = items.filter(item => !shown.has(shownKey(item)));
+  for (const item of items) shown.add(shownKey(item));
   return fresh.length ? overlapBanner({ ...notice, items: fresh }) : '';
 }
 /** Record notices another path already printed (a relayed child process), without printing. */
 export function markOverlapShown(notice: HostedOverlapNotice) {
-  for (const item of itemsOf(notice)) shown.add(item.noticeId);
+  for (const item of itemsOf(notice)) shown.add(shownKey(item));
+}
+/** The banner for a refusal's own blocking notices (OVERLAP_UNANSWERED recovery), always printed:
+ * an earlier banner in this process may have shown other or older notices (c8b842a9). */
+export function refusalOverlapBanner(recovery: unknown) {
+  const notice = (recovery as { overlapNotice?: HostedOverlapNotice } | undefined)?.overlapNotice;
+  if (!notice || !itemsOf(notice).length) return '';
+  markOverlapShown(notice);
+  return overlapBanner(notice);
 }

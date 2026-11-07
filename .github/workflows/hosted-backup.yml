@@ -23,10 +23,10 @@ jobs:
       HOSTED_DURABILITY_DATABASE_ONLY: '0'
       HOSTED_DURABILITY_R2_PREFIX: ${{ vars.HOSTED_DURABILITY_R2_PREFIX }}
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
         with:
           persist-credentials: false
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '24.22.1'
       - run: npm ci --ignore-scripts
@@ -63,10 +63,10 @@ jobs:
     runs-on: ubuntu-latest
     environment: hosted-backup
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
         with:
           persist-credentials: false
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '24.22.1'
       - run: npm ci --ignore-scripts

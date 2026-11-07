@@ -332,12 +332,13 @@ export function lanesFixture() {
       projectId,
       operationId: randomUUID(),
       repository: repository.toLowerCase(),
-      installationId,
+      githubAccounts: ['1001'],
       state,
       verifier: 'synthetic-owner-proof',
       authorizeUrl: `https://github.com/login/oauth/authorize?state=${state}`,
     });
     await call('githubBindingConsume', githubBindings.consume, { state });
+    await call('githubBindingPin', githubBindings.pin, { state, installationId });
     await call('githubBindingComplete', githubBindings.complete, {
       state,
       repoId,

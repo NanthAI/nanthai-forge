@@ -125,6 +125,49 @@ Synthetic tests assert single-read caching, zero timer work, atomic selection,
 update-then-prune hook validity and protection of live runtimes. Live billed
 usage, platform qualification and installation adoption require release evidence.
 
+## Signed releases
+
+Landing on main decides what main is; a release signature decides what the updater installs.
+The project owner signs released States with an Ed25519 key that is created and kept outside
+Forge (never in Convex, this repository, CI or environment files). The public keys live in
+`src/cli-release-trust.ts` (`CLI_RELEASE_KEYS`). The updater checks a new release with the keys
+of the build that is already installed, never with keys from the build it is about to install.
+
+The owner's steps (only public material is printed):
+
+```sh
+nforge cli release-key --out KEY_FILE                  # once per key; mode 0600, never overwritten
+nforge cli release-sign --key KEY_FILE [--state STATE] # after a release lands; default: current main
+```
+
+`release-sign` signs the statement `forge-cli-release/v1`, project id and State hash, and stores
+the 64-byte signature with the project (`projectReleaseSignatures`, owner-only, insert-only, at
+most 4 per State). The store is untrusted: a row can make a signature present, never valid.
+
+When main moves, the updater makes one small signature read for that State, after the release
+read and before any download, dependency install or build. Nothing is read when main has not
+moved, and idle costs nothing. The verdict is written to `DIR/release-signature.json`.
+
+- A signature from a listed key that verifies: the update continues (canary, two-step switch).
+- A listed key's signature that does not verify: the State is refused like a canary failure. The
+  current build keeps serving every call, one alert goes out, and the canary back-off applies.
+- No signature from a listed key (none yet, unknown keys only, or the read failed): while
+  `CLI_RELEASE_SIGNATURES_REQUIRED` is `false` (the transition) the update continues as before.
+  Once it is `true`, the updater holds on the current build without an alert and looks again
+  after `CLI_RELEASE_SIGNATURE_RETRY_MS` (1 minute) until the signature appears or main moves.
+- An explicit `nforge update --state STATE` selection skips the check; it is the owner's own
+  recovery path.
+
+Turning the switch on: after the first signed release, confirm `release-signature.json` says
+`verified` on every machine, then land `CLI_RELEASE_SIGNATURES_REQUIRED = true` and sign that
+landing too. A test refuses `true` with an empty key list.
+
+Rotation: land the new public key in a release signed with an old key, sign with every listed key
+until each machine runs that build, then remove the old key in a release signed with the new key.
+If a key is lost or exposed, remove it in a release signed with a remaining key; with none left,
+each machine recovers once with `nforge update --directory DIR --state STATE` of a release that
+lists the new key.
+
 ## Canary and rollback
 
 A broken build must never strand every agent at once, so each auto-update
