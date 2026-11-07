@@ -273,29 +273,36 @@ async function settleResult(
   result: z.infer<typeof directResultSchema>,
   phase: (reason: 'authorization' | 'storage') => void,
 ) {
-  const settled: HostedCheckRun = await ctx.runMutation(
+  // The terminal result also returns the final output target (Issue 75cb5074): no prepare call.
+  const { run: settled, final } = (await ctx.runMutation(
     makeFunctionReference<'mutation'>('projectHostedActionsResults:result'),
-    { ...input, result: canonicalPayload(result) },
-  );
+    { ...input, result: canonicalPayload(result), withFinal: true },
+  )) as { run: HostedCheckRun; final: FinalOutput | 'prepare' };
   if (!hostedCheckTerminal(settled)) return settled;
   // Runs beside the output manifest work; it never throws.
   const cleanup = settled.poolClaimed ? cleanPoolClaims(input.projectId, settled.id) : undefined;
   try {
-    return await finalOutput(ctx, input, settled, phase);
+    return await finalOutput(ctx, input, settled, phase, final);
   } finally {
     await cleanup;
   }
 }
+type FinalOutput = { root: OutputRoot; target: { url: string; headers: Record<string, string> } } | null;
 async function finalOutput(
   ctx: ActionCtx,
   input: SessionInput,
   settled: HostedCheckRun,
   phase: (reason: 'authorization' | 'storage') => void,
+  prepared: FinalOutput | 'prepare',
 ) {
-  const final = (await ctx.runMutation(
-    makeFunctionReference<'mutation'>('projectHostedActionsOutput:prepare'),
-    input,
-  )) as { root: OutputRoot; target: { url: string; headers: Record<string, string> } } | null;
+  // Unsealed output: prepare refuses exactly as before, after the result committed.
+  const final =
+    prepared === 'prepare'
+      ? ((await ctx.runMutation(
+          makeFunctionReference<'mutation'>('projectHostedActionsOutput:prepare'),
+          input,
+        )) as FinalOutput)
+      : prepared;
   if (!final) return settled;
   phase('storage');
   await storeOutputObject(final.target, canonicalPayload(final.root));

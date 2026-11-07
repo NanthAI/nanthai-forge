@@ -48,6 +48,30 @@ export function expandReports(state: { notable: Reports; plain: string[] }): Rep
   };
 }
 
+/** Issue 75cb5074: a shard row stores each passing file that has only a duration as
+ * `{file: durationMs}`, so the final replay reads names and numbers instead of one JSON
+ * object per file. Everything else stays verbatim; rows written in the old shape still parse. */
+type SavedShard = { reports: Reports; durations?: Record<string, number>; yielded: string[] };
+export function packShardReports(reports: Reports) {
+  const kept: Reports = {},
+    durations: Record<string, number> = {};
+  for (const [file, report] of Object.entries(reports))
+    if (
+      report.failed === false &&
+      typeof report.durationMs === 'number' &&
+      Object.keys(report).every(key => key === 'failed' || key === 'durationMs')
+    )
+      durations[file] = report.durationMs;
+    else kept[file] = report;
+  return { reports: kept, durations };
+}
+export function unpackShardReports(saved: SavedShard): Reports {
+  const reports: Reports = {};
+  for (const [file, durationMs] of Object.entries(saved.durations ?? {}))
+    reports[file] = { durationMs, failed: false };
+  return Object.assign(reports, saved.reports);
+}
+
 const rows = (ctx: MutationCtx, run: HostedCheckRun) =>
   ctx.db
     .query('projectHostedActionsResults')
@@ -65,8 +89,12 @@ async function replayShardReports(ctx: MutationCtx, run: HostedCheckRun, last?: 
     .sort((a, b) => a.sequence! - b.sequence!);
   let state = { reports: {} as Reports, pending: [] as string[] };
   for (const row of shards) {
-    const saved = JSON.parse(row.reports!) as Omit<ShardStep, 'complete'>;
-    state = foldShardStep(state, { ...saved, complete: row.complete! });
+    const saved = JSON.parse(row.reports!) as SavedShard;
+    state = foldShardStep(state, {
+      reports: unpackShardReports(saved),
+      yielded: saved.yielded,
+      complete: row.complete!,
+    });
   }
   if (last) state = foldShardStep(state, last);
   for (const row of all)
@@ -105,6 +133,16 @@ export async function recordShardReports(
     });
     return settle(run, folded.reports, folded.pending, true);
   }
+  if (step.complete) {
+    // The replay's one range read covers the progress row too (Issue 75cb5074).
+    const replayed = await replayShardReports(ctx, run, step);
+    await ctx.db.insert('projectHostedActionsResults', {
+      ...key,
+      index: result.index,
+      digest: result.digest,
+    });
+    return settle(run, replayed.reports, replayed.pending, true);
+  }
   const progress = await ctx.db
     .query('projectHostedActionsResults')
     .withIndex('by_project_and_run_and_index', q =>
@@ -118,22 +156,13 @@ export async function recordShardReports(
         count: number;
       })
     : { notable: {}, plain: [], count: 0 };
-  if (step.complete) {
-    const replayed = await replayShardReports(ctx, run, step);
-    await ctx.db.insert('projectHostedActionsResults', {
-      ...key,
-      index: result.index,
-      digest: result.digest,
-    });
-    return settle(run, replayed.reports, replayed.pending, true);
-  }
   await ctx.db.insert('projectHostedActionsResults', {
     ...key,
     index: result.index,
     digest: result.digest,
     sequence: saved.count,
     complete: false,
-    reports: canonicalPayload({ reports: step.reports, yielded: step.yielded }),
+    reports: canonicalPayload({ ...packShardReports(step.reports), yielded: step.yielded }),
   });
   const folded = foldShardStep({ reports: expandReports(saved), pending: run.poolPending ?? [] }, step);
   const state = canonicalPayload({

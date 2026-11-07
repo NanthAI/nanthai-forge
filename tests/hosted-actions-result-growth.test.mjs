@@ -180,7 +180,7 @@ async function landing(t, shards) {
   const responses = [],
     sent = new Map(),
     started = new Date(Date.now() - 60_000).toISOString();
-  const send = async index => {
+  const send = async (index, status = 200) => {
     const bytes = Buffer.from(`synthetic shard ${index} log `.repeat(64));
     logs.set(digest(bytes), bytes);
     const per = Math.ceil(files.length / shards);
@@ -214,7 +214,7 @@ async function landing(t, shards) {
         }),
       }),
     );
-    assert.equal(response.status, 200);
+    assert.equal(response.status, status);
     const text = await response.text();
     responses.push(Buffer.byteLength(text));
     return { body: JSON.parse(text), meters: s.counts.slice(before) };
@@ -475,4 +475,98 @@ test('the run row is read once per shard call: output reads 2 documents, an earl
   }
   const first = calls[0].meters.find(m => m.name.endsWith(':result'));
   assert(first.readBytes < 8 * 1024, `early result read ${first.readBytes}`);
+});
+
+test('the last shard reads about one copy of the reports, not every shard record twice; no prepare call', async t => {
+  // Issue 75cb5074: before, the last result read 190 KB at 4 shards and 215 KB at 12 (the run row
+  // read back after its own write, the progress row twice, one JSON object per passing file),
+  // and output prepare read the finished run row again.
+  const rows = [];
+  for (const shards of [4, 12]) {
+    const { calls, runRowBytes } = await measure(t, shards);
+    const last = calls.at(-1).meters,
+      result = last.find(m => m.name.endsWith(':result')),
+      apply = last.find(m => m.name.endsWith(':apply'));
+    rows.push({ shards, resultReadKB: kb(result.readBytes), applyReadKB: kb(apply.readBytes) });
+    // The finished run row holds every file's report, so it is the unit: one copy plus a little.
+    assert(result.readBytes <= 1.2 * runRowBytes, `last result read ${result.readBytes} of ${runRowBytes}`);
+    assert(result.readBytes <= 100 * 1024, `last result read ${result.readBytes}`);
+    assert.equal(result.readDocumentsByTable.projectHostedCheckRuns, 3, 'run rows read once');
+    assert(!last.some(m => m.name.endsWith(':prepare')), 'prepare folded into the final result');
+    assert(apply.readBytes <= runRowBytes + 4096, `apply read ${apply.readBytes}`);
+    assert.equal(
+      calls.flatMap(call => call.meters).filter(m => m.name.endsWith(':apply')).length,
+      1,
+      'one apply',
+    );
+  }
+  t.diagnostic(JSON.stringify(rows));
+});
+
+test("a failing early shard's file and first error reach the landing reply", async t => {
+  const { checkFailureDetail } = await import('../dist/check-failure-detail.js');
+  const l = await landing(t, 4),
+    file = 'tests/hosted-growth-0300.test.mjs',
+    error = 'AssertionError: synthetic shard one failure';
+  const steps = [0, 1, 2, 3].map(index => ({
+    index,
+    exitCode: index === 1 ? 1 : 0,
+    contractReports: Object.fromEntries(
+      files
+        .slice(index * 222, (index + 1) * 222)
+        .map(name => [name, name === file ? failing(name, error) : { durationMs: 10, failed: false }]),
+    ),
+  }));
+  let body;
+  for (const step of steps) body = await l.post(step);
+  assert.equal(body.status, 'failed');
+  assert.equal(body.contractReports[file].firstError, error);
+  assert.equal(body.contractReports['tests/hosted-growth-0001.test.mjs'].durationMs, 10);
+  assert.equal(Object.keys(body.contractReports).length, files.length);
+  const detail = checkFailureDetail(body);
+  assert(detail.includes(file) && detail.includes('synthetic shard one failure'), detail);
+});
+
+test('shard rows written before the compact shape still replay to the same reports', async t => {
+  // A run in flight across the deploy has raw rows {reports, yielded}; the replay reads both shapes.
+  const steps = trickySteps(6),
+    l = await landing(t, 6);
+  for (const step of steps.slice(0, 5)) await l.post(step);
+  for (const row of l.s.tables.projectHostedActionsResults.values())
+    if (row.reports !== undefined) {
+      const saved = JSON.parse(row.reports);
+      row.reports = canonicalPayload({
+        reports: {
+          ...Object.fromEntries(
+            Object.entries(saved.durations).map(([file, durationMs]) => [
+              file,
+              { durationMs, failed: false },
+            ]),
+          ),
+          ...saved.reports,
+        },
+        yielded: saved.yielded,
+      });
+    }
+  const body = await l.post(steps[5]);
+  assert.deepEqual(body.contractReports, referenceFold(steps, 6).at(-1).reports);
+});
+
+test('unsealed output: the committed result stands and prepare refuses exactly as before', async t => {
+  const l = await landing(t, 2);
+  await l.send(0);
+  // An output stream that never sealed: the final manifest must not be published.
+  [...l.s.tables.projectHostedOutputHeads.values()][0].streams++;
+  const { body, meters } = await l.send(1, 403);
+  assert.equal(body.reason, 'authorization');
+  assert.deepEqual(
+    meters.map(m => m.name),
+    [
+      'projectHostedActionsResults:output',
+      'projectHostedActionsResults:result',
+      'projectHostedActionsOutput:prepare',
+    ],
+  );
+  assert.equal(l.stored().status, 'passed');
+  assert(![...l.s.tables.projectHostedOutputHeads.values()][0].final);
 });
