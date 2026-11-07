@@ -213,6 +213,17 @@ frozen set on 2026-11-06 broke capabilities across CLI/server versions with `HOS
   only the leading header changed) adds only the tests that read the file's text, never its
   importers (`local.commentOnly`). The base bytes come from this machine's object stores; without
   them a path counts as changed.
+  A *docs-only* change (Markdown under `docs/` or at the root) parses no import graph: it runs only
+  the tests that read a changed document, beside the static checks it triggers. A test reads a
+  document when it names its path (`docs/a.md`, `../docs/a.md`; a root document needs a `./` or
+  `../` prefix, or its quoted name in a file that resolves names against the root), or loads a test
+  helper or script that does. Product code naming a document links to it; it is no read. Those
+  readers run locally although the landing's docs scope runs only the documents checks. Beside code,
+  the readers of a changed document are mandatory. The selector reads only saved paths, so a file
+  the save ignores (a typecheck's generated declarations) never makes the inventory look incomplete
+  and widen the plan to the whole suite; a saved file that really differs here still does, and the
+  reason says so first. Before anything runs, preflight prints one `preflight plan:` line on stderr:
+  scope, files here, deferred files, budget, estimate, static checks and why.
   A time budget (180 s by default; `"budgetSeconds":N` overrides) is filled in that
   order using each file's own measured time where known and the mean seconds per file otherwise
   (the last 8 completed runs on this machine; 4 s until one is measured). `estimateMinutes` is never

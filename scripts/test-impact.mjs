@@ -8,6 +8,7 @@ import { coverageShadow } from './test-coverage.mjs';
 import { classifyCheckPath, webTest } from './check-path-scopes.mjs';
 import { guardSelection } from './selection-guard.mjs';
 import { docsPackager, docsWrapper, scriptPath, scriptSelectionReason } from './script-impact.mjs';
+import { docsReaders } from './docs-readers.mjs';
 
 export const smokeTests = [
   'tests/files.test.mjs',
@@ -83,9 +84,11 @@ export function selectImpactPair(files, comparisons) {
  * tiers by time, least relevant last. Other uncertain and distant consumers (dynamic, domain, a
  * by-name loader's closure, three or more edges) stay explicit pre-queue/landing work. A
  * comment-only path (`commentOnly`, bytes equal to its base outside comments) runs nothing new: it
- * adds only the tests that read its text. */
+ * adds only the tests that read its text. A docs-only change parses no graph: it runs only the tests
+ * that read a changed document (`docsReaders`), beside the static checks. Those run here although the
+ * landing's docs scope runs only the documents checks: more local coverage, never less. */
 export const preflightTierRule =
-  'changed tests, explicit coverage and smoke; then tests that failed for these paths before; then tests that run a changed module directly, through a test fixture or through one module that imports it, or are named for it (never trimmed, most specific first); then the same consumers of hub modules (their direct tests would push protected tests past the budget; closest first); then tests that run a changed module within two modules and failed in a landing check lately; then tests that watch a distinctive name in a changed source; then tests that run a changed module through two modules, most specific first; comment-only edits add only tests that read the file';
+  'changed tests, explicit coverage and smoke; then tests that failed for these paths before; then tests that run a changed module directly, through a test fixture or through one module that imports it, or are named for it (never trimmed, most specific first); then the same consumers of hub modules (their direct tests would push protected tests past the budget; closest first); then tests that run a changed module within two modules and failed in a landing check lately; then tests that watch a distinctive name in a changed source; then tests that run a changed module through two modules, most specific first; comment-only edits add only tests that read the file; a docs-only change runs only the tests that read the changed documents';
 /** Tiers the time budget never trims from the plan; the run starts them first. */
 export const protectedTiers = new Set(['mandatory', 'learned', 'direct']);
 const testFile = path => /^tests\/[^/]+\.test\.mjs$/.test(path);
@@ -118,7 +121,22 @@ const namedFor = (test, modules) => {
 export function selectPreflightTests(input, graphCache = {}) {
   // The consumers-only pass reads the same inventory, so it reuses the graph the first pass built.
   const selection = selectTests(input, graphCache);
-  if (selection.scope === 'docs') return { ...selection, deferredTests: [], tiers: [] };
+  if (selection.scope === 'docs') {
+    const readers = docsReaders(input.files, input.paths);
+    const tests = [...readers.keys()].sort();
+    return {
+      ...selection,
+      tests,
+      tiers: [{ tier: 'mandatory', tests }],
+      docsReaders: Object.fromEntries(tests.map(test => [test, readers.get(test)])),
+      deferredTests: [],
+      reason: `${selection.reason}; local: ${
+        tests.length
+          ? `the ${tests.length} test file(s) that read a changed document`
+          : 'no test reads a changed document'
+      }, beside the static checks; the landing check runs the documents checks`,
+    };
+  }
   const commentOnly = new Set((input.commentOnly ?? []).filter(path => input.paths.includes(path)));
   const behavioural = input.paths.filter(path => !commentOnly.has(path));
   // Ranking reads only the paths whose behaviour can change and that the graph can place; coverage
@@ -478,6 +496,9 @@ function selectWithGraph(
     item => item.domain === 'web' || item.seeds.some(path => path.startsWith('web/')),
   );
   const explicit = new Set(classifications.flatMap(item => item.tests ?? []));
+  // Changed documents beside code: the tests that read them are their coverage.
+  const readers = docsReaders(files, paths.filter(documentation));
+  for (const test of readers.keys()) explicit.add(test);
   const selected = tests.filter(
     path =>
       affected.has(path) || smokeTests.includes(path) || explicit.has(path) || (webChanged && webTest(path)),
@@ -503,6 +524,17 @@ function selectWithGraph(
       selected.map(test => {
         if (smokeTests.includes(test)) return [test, { kind: 'smoke', detail: 'Fixed scoped smoke test' }];
         const item = classifications.find(item => item.tests?.includes(test));
+        const reader = readers.get(test);
+        // Reading a changed document is direct evidence, stronger than any import chain to code.
+        if (reader && affected.get(test)?.kind !== 'changed')
+          return [
+            test,
+            {
+              kind: 'explicit',
+              changedPath: reader.doc,
+              detail: `Reads changed document ${reader.doc}${reader.via === test ? '' : ` through ${reader.via}`}`,
+            },
+          ];
         return [
           test,
           affected.get(test) ??

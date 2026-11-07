@@ -128,3 +128,43 @@ test('425ecd74: a data fixture, its test and a doc select only that test and man
   );
   t.diagnostic(`local ${plan.tests.length}, deferred to pre-queue ${plan.deferredTests.length}`);
 });
+
+test('0f3d44e1: a docs-only change runs only the tests that read those documents, with no graph', t => {
+  // The lead's change (receipt 0f3d44e1) that ran 315 files locally while its landing check ran none.
+  const docs = [
+    at('docs', 'agents', 'brief-template.md'),
+    at('docs', 'agents', 'briefings.md'),
+    at('docs', 'agents', 'lead.md'),
+  ];
+  const cache = {};
+  const started = performance.now();
+  const plan = selectPreflightTests({ files, paths: docs, hubBudget }, cache);
+  const ms = performance.now() - started;
+  assert.equal(plan.scope, 'docs');
+  assert.equal(cache.graph, undefined, 'a docs-only change parses no import graph');
+  assert.deepEqual(plan.deferredTests, []);
+  assert.deepEqual(
+    selectTests({ files, paths: docs }, cache).tests,
+    [],
+    'the landing docs scope is unchanged',
+  );
+  // The tests that read these documents (directly, or through a script that lists them), and only those.
+  for (const test of [at('tests', 'check-brief.test.mjs'), at('tests', 'planning-search.test.mjs')])
+    assert.ok(plan.tests.includes(test), `${test} reads a changed document`);
+  for (const test of plan.tests) assert.ok(docs.includes(plan.docsReaders[test].doc), test);
+  assert.ok(plan.tests.length <= 6, `${plan.tests.length} readers`);
+  assert.deepEqual(plan.tiers, [{ tier: 'mandatory', tests: plan.tests }]);
+  t.diagnostic(`readers ${plan.tests.join(' ')}; selection ${ms.toFixed(0)} ms`);
+});
+
+test('a code change beside those documents still selects its real tests', () => {
+  const script = at('scripts', 'check-brief.mjs');
+  const doc = at('docs', 'agents', 'briefings.md');
+  const near = select([script]);
+  assert.ok(tier(near, 'direct').includes(at('tests', 'check-brief.test.mjs')));
+  // With the document in the same change, its readers are mandatory beside the script's consumers.
+  const both = select([script, doc]);
+  const mandatory = tier(both, 'mandatory');
+  for (const test of [at('tests', 'check-brief.test.mjs'), at('tests', 'planning-search.test.mjs')])
+    assert.ok(mandatory.includes(test), `${test} must be mandatory`);
+});

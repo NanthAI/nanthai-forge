@@ -215,6 +215,7 @@
     "scripts/test-import-graph.mjs",
     "scripts/test-name-watchers.mjs",
     "scripts/test-closeness.mjs",
+    "scripts/docs-readers.mjs",
     "scripts/convex-function-names.mjs",
     "scripts/test-directory-path.mjs",
     "scripts/test-coverage.mjs",

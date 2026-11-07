@@ -336,14 +336,18 @@ export function estimatePreflightMinutes(root: string, files: number) {
   return Math.ceil((files * preflightSecondsPerFile(root).secondsPerFile) / 60);
 }
 
-/** Selector input from the Lane checkout; absent directories are simply absent. */
-function laneFiles(root: string) {
+/** Selector input from the Lane checkout; absent directories are simply absent. With the saved
+ * manifest (`saved`), only saved paths count: a file the save ignores (a build's generated
+ * declarations, such as convex/_generated/api.d.ts after a typecheck) is not part of the head under
+ * test, and must not make the inventory look incomplete (that widened a docs-only plan to the whole
+ * suite). Unsaved edits are refused before any run. */
+function laneFiles(root: string, saved?: Set<string>) {
   const files = new Map<string, string>();
   const walk = (dir: string) => {
     for (const entry of readdirSync(join(root, dir), { withFileTypes: true })) {
       const path = posix.join(dir, entry.name);
       if (entry.isDirectory()) walk(path);
-      else if (entry.isFile() && selectionSourcePath(path))
+      else if (entry.isFile() && selectionSourcePath(path) && (!saved || saved.has(path)))
         files.set(path, readFileSync(join(root, path), 'utf8'));
     }
   };
@@ -402,7 +406,7 @@ export function preflightPlan(
       command: null,
     };
   try {
-    const files = laneFiles(root);
+    const files = laneFiles(root, context && new Set(context.files.map(file => file.path)));
     const timing = preflightSecondsPerFile(root);
     const stats = preflightFileStats(root);
     const budgetSeconds = options?.budgetSeconds ?? PREFLIGHT_LOCAL_BUDGET_SECONDS;
@@ -448,7 +452,8 @@ export function preflightPlan(
       ]);
       selection.scope = 'full';
       selection.deferredTests = [...all].filter(test => !selection.tests.includes(test)).sort();
-      selection.reason += '; incomplete local source inventory: full landing coverage, no receipt reuse';
+      // First, so the printed plan says why the scope is full before any rule text.
+      selection.reason = `Incomplete local source inventory (a saved source file is missing or differs here): full landing coverage, no receipt reuse; ${selection.reason}`;
     }
     if (context && saved) {
       const receipt = readPreflightReceipt(root, context.laneId);
@@ -603,6 +608,31 @@ export function preflightPlan(
   }
 }
 
+/** One line naming what a run will do: scope, file counts, budget, estimate, static checks and why. */
+export function planLine(plan: PreflightPlan & { status: 'planned' }) {
+  const deferred = plan.deferredTests?.length ?? 0;
+  const reused = plan.reusedTests?.length ?? 0;
+  const budget = plan.local
+    ? plan.local.trim === false
+      ? 'no time budget (trim:false)'
+      : `${plan.local.budgetSeconds} s budget`
+    : 'no time budget';
+  const checks = plan.static?.selected.length
+    ? ` Static first: ${plan.static.selected.map(check => check.name).join(', ')}.`
+    : '';
+  // A caller-built plan may carry no reason; the line still prints.
+  const reason = plan.reason ?? '';
+  const why = reason.length > PLAN_REASON_CHARS ? `${reason.slice(0, PLAN_REASON_CHARS)}…` : reason;
+  return (
+    `preflight plan: scope ${plan.scope}, ${plan.tests.length} test file(s) here` +
+    (reused ? `, ${reused} passed before (reused)` : '') +
+    `, ${deferred} deferred to the pre-queue check; ${budget}, about ${plan.estimateMinutes} min.` +
+    checks +
+    (why ? ` Why: ${why}` : '')
+  );
+}
+const PLAN_REASON_CHARS = 400;
+
 /** Runs every ranked local tier with no time budget; reused passes make it run only what was skipped. */
 const rerunCommand = (root: string, laneId: string) =>
   `nforge agent ${shellQuote(root)} preflight ${shellQuote(JSON.stringify({ laneId, trim: false }))}`;
@@ -737,6 +767,8 @@ export function runPreflight(
   tree?: string,
 ) {
   const started = Date.now();
+  // Before anything runs: a long run must never be silent about what it is doing and why.
+  process.stderr.write(`${planLine(plan)}\n`);
   let exitCode: number | null = 0;
   let environment: PreflightReceipt['environment'];
   const environmentNext = `nforge agent ${shellQuote(root)} land --save ${shellQuote(JSON.stringify({ laneId }))}`;
