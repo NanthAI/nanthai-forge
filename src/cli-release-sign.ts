@@ -16,6 +16,7 @@ import {
   signCliRelease,
   verifyCliRelease,
 } from './cli-release-trust.js';
+import { releaseVerifyOutcome, verifyCliReleases } from './cli-release-verify.js';
 
 /** `nforge cli release-key --out FILE`: a new Ed25519 key, PKCS#8 PEM, mode 0600, never overwritten. */
 export function cliReleaseKey(out: string) {
@@ -64,12 +65,16 @@ export async function cliReleaseSign(
   return { head, release, keyId: signed.keyId, stored, listed: listed.status === 'verified' };
 }
 
-export async function cliReleaseCommand(command: 'release-key' | 'release-sign', flags: string[]) {
+export async function cliReleaseCommand(
+  command: 'release-key' | 'release-sign' | 'release-verify',
+  flags: string[],
+) {
   let installation = cliInstallation() ?? defaultCliInstallation(),
     out: string | undefined,
     key: string | undefined,
     state: string | undefined,
     release: number | undefined;
+  const states: string[] = [];
   while (flags.length) {
     const flag = flags.shift()!,
       value = flags.shift();
@@ -78,10 +83,17 @@ export async function cliReleaseCommand(command: 'release-key' | 'release-sign',
     else if (flag === '--out' && command === 'release-key') out = resolve(value);
     else if (flag === '--key' && command === 'release-sign') key = resolve(value);
     else if (flag === '--state' && command === 'release-sign') state = value;
+    else if (flag === '--state' && command === 'release-verify') states.push(value);
     else if (flag === '--release' && command === 'release-sign') {
       invariant(/^\d{1,15}$/.test(value), 'BAD_ARGUMENT', 'Use a whole release number.');
       release = Number(value);
     } else invariant(false, 'BAD_ARGUMENT', 'Use nforge cli --help.');
+  }
+  if (command === 'release-verify') {
+    const address = readCliSource(installation);
+    return releaseVerifyOutcome(
+      await verifyCliReleases({ projectId: address.projectId, states }, cliReleaseSource(address)),
+    );
   }
   if (command === 'release-key') {
     invariant(out, 'BAD_ARGUMENT', 'Supply --out FILE (outside any checkout).');

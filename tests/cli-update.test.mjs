@@ -24,7 +24,8 @@ import { join } from 'node:path';
 import { withCliRuntimeLock, cliProcessIdentity } from '../dist/cli-launcher.js';
 import { cliUpdateRun } from '../dist/cli-update.js';
 import { cliStartup, cliVersionCheck } from '../dist/cli-version.js';
-import { updateCli } from '../dist/cli-update.js';
+import { updateCli as updateCliChecked } from '../dist/cli-update.js';
+import { testReleaseSigner, trustedDist, withSignedReleases } from './release-trust-fixture.mjs';
 import { publishCliBuild } from '../dist/cli-update-install.js';
 import {
   cliBuildCommit,
@@ -40,6 +41,15 @@ import { migrateEditHookRunner } from '../dist/agent-install-hooks.js';
 const a = 'a'.repeat(64),
   b = 'b'.repeat(64);
 const address = { url: 'https://synthetic.convex.cloud', projectId: 'forge-source' };
+/** Release signatures are required: every update these tests drive is signed with a test key. */
+const updateCli = (installation, source, selected, dependencies, ...rest) =>
+  updateCliChecked(
+    installation,
+    source,
+    selected,
+    withSignedReleases(dependencies, source.projectId),
+    ...rest,
+  );
 function fixture(t) {
   const directory = realpathSync(mkdtempSync(join(tmpdir(), 'forge-test-cli-update-')));
   t.after(() => rmSync(directory, { recursive: true, force: true }));
@@ -333,7 +343,13 @@ test('successful updater builds and smoke-checks before selection, then migrates
 async function releaseFixture(t, f, head, status) {
   const calls = new Int32Array(new SharedArrayBuffer(4));
   const worker = new Worker(new URL('../scripts/package-cli-release-worker.mjs', import.meta.url), {
-    workerData: { head, projectId: address.projectId, calls: calls.buffer, status },
+    workerData: {
+      head,
+      projectId: address.projectId,
+      calls: calls.buffer,
+      status,
+      signer: testReleaseSigner(),
+    },
   });
   t.after(() => worker.terminate());
   const url = await new Promise((done, reject) => {
@@ -464,7 +480,7 @@ writeFileSync(${JSON.stringify(output)}, readFileSync(0));`,
   const payload = JSON.stringify({ title: "Synthetic quote's", detail: 'first\nsecond', area: 'checks' });
   const code = `
     import { readFileSync } from 'node:fs';
-    const { cliStartup } = await import(${JSON.stringify(new URL('../dist/cli-version.js', import.meta.url).href)});
+    const { cliStartup } = await import(${JSON.stringify(trustedDist().url('cli-version.js'))});
     const stdin = readFileSync(0, 'utf8');
     const run = await cliStartup(['agent', ${JSON.stringify(f.directory)}, 'friction', '--command-file', '-'], ${JSON.stringify(f.old)}, undefined, { validated: true, stdin });
     process.stdout.write(JSON.stringify({ run }));
@@ -607,7 +623,7 @@ function launcherEnv(f) {
   });
 }
 function controllerEntry(root, text = 'main-ran') {
-  const startup = pathToFileURL(fileURLToPath(new URL('../dist/cli-version.js', import.meta.url))).href;
+  const startup = trustedDist().url('cli-version.js');
   writeFileSync(
     join(root, 'dist', 'cli-entry.js'),
     `import { cliStartup } from ${JSON.stringify(startup)};
@@ -849,7 +865,7 @@ async function pendingUpdate(t, f) {
   controllerEntry(f.old, 'old-ran');
   installLauncher(f, f.old);
   const main = f.build(b);
-  const startup = pathToFileURL(fileURLToPath(new URL('../dist/cli-version.js', import.meta.url))).href;
+  const startup = trustedDist().url('cli-version.js');
   writeFileSync(
     join(main, 'dist', 'cli-entry.js'),
     `import { cliStartup } from ${JSON.stringify(startup)};
@@ -1038,7 +1054,7 @@ test('a forced update is never queued behind machine-wide heavy slots', async t 
 
 // Concurrency during an update (7af26482): many agents share one installed CLI.
 function gatedEntry(root, name) {
-  const startup = pathToFileURL(fileURLToPath(new URL('../dist/cli-version.js', import.meta.url))).href;
+  const startup = trustedDist().url('cli-version.js');
   writeFileSync(
     join(root, 'dist', 'cli-entry.js'),
     `import { cliStartup } from ${JSON.stringify(startup)};
@@ -1199,11 +1215,12 @@ test('an updater killed mid-install leaves the previous build selected and worki
       '--input-type=module',
       '-e',
       `import { updateCli } from ${JSON.stringify(module)};
+import { withSignedReleases } from ${JSON.stringify(new URL('./release-trust-fixture.mjs', import.meta.url).href)};
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 setInterval(() => {}, 1000);
 const release = { head: ${JSON.stringify(b)}, projectId: ${JSON.stringify(address.projectId)} };
-await updateCli(${JSON.stringify(f.installation)}, ${JSON.stringify(readCliSourceFile(f))}, release, {
+await updateCli(${JSON.stringify(f.installation)}, ${JSON.stringify(readCliSourceFile(f))}, release, withSignedReleases({
   source: {
     current: async () => release,
     checkout: async stage => {
@@ -1219,7 +1236,7 @@ await updateCli(${JSON.stringify(f.installation)}, ${JSON.stringify(readCliSourc
     await new Promise(() => {});
   },
   migrate: () => {},
-}, { expectedCurrent: ${JSON.stringify(a)} });`,
+}, release.projectId), { expectedCurrent: ${JSON.stringify(a)} });`,
     ],
     { env: { ...launcherEnv(f), XDG_CACHE_HOME: cache }, stdio: ['ignore', 'pipe', 'inherit'] },
   );

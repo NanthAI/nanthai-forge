@@ -90,17 +90,18 @@ export async function cliManageCli(args: string[]) {
   if (
     !args.length ||
     args.includes('--help') ||
-    !['rollback', 'release-key', 'release-sign'].includes(args[0]!)
+    !['rollback', 'release-key', 'release-sign', 'release-verify'].includes(args[0]!)
   )
     return {
       usage:
         'nforge cli rollback [--directory DIR]\nSwitches atomically to the one retained previous CLI build; run it again to switch back.\n' +
         'nforge cli release-key --out FILE\nOwner: creates an Ed25519 release key (mode 0600) and prints its public key.\n' +
-        'nforge cli release-sign --key FILE [--state STATE --release N] [--directory DIR]\nOwner: signs released main (or STATE) with its release number and stores the signature.',
+        'nforge cli release-sign --key FILE [--state STATE --release N] [--directory DIR]\nOwner: signs released main (or STATE) with its release number and stores the signature.\n' +
+        "nforge cli release-verify [--state STATE]... [--directory DIR]\nRe-checks stored release signatures of main (or each STATE, oldest first) with this build's keys; exit 1 unless all verify with increasing release numbers.",
     };
   if (args[0] !== 'rollback') {
     const { cliReleaseCommand } = await import('./cli-release-sign.js');
-    return cliReleaseCommand(args[0] as 'release-key' | 'release-sign', args.slice(1));
+    return cliReleaseCommand(args[0] as 'release-key' | 'release-sign' | 'release-verify', args.slice(1));
   }
   const flags = args.slice(1);
   let installation = cliInstallation() ?? defaultCliInstallation();

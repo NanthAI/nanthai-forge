@@ -9,7 +9,8 @@ import { CLI_RELEASE_KEYS, type CliReleaseKey } from './cli-release-keys.js';
 export { CLI_RELEASE_KEYS, type CliReleaseKey };
 
 /** The transition switch. While false, a release without a signature from a listed key installs as
- * before (one log line). Set it to true only after the first signed release is on every machine. */
+ * before (one log line). Turn it on only after `nforge cli release-verify` passes on recent signed
+ * States (docs/operations/cli-update.md, "Automated signer"). */
 export const CLI_RELEASE_SIGNATURES_REQUIRED = false;
 
 /** While signatures are required and one is still missing, the updater keeps the current build

@@ -146,6 +146,19 @@ The owner's manual steps (only public material is printed):
 ```sh
 nforge cli release-key --out KEY_FILE                  # once per key; mode 0600, never overwritten
 nforge cli release-sign --key KEY_FILE [--state STATE --release N] # default: current main
+nforge cli release-verify [--state STATE]...           # anyone with read access; default: main
+```
+
+`release-verify` reads each State's stored signatures (one small read per State, at most 20) and
+checks them with this build's own `CLI_RELEASE_KEYS` and verification code: a v2 statement for
+this project, that State and a release number. It prints each State's key id and release number,
+never a signature, and exits 1 unless every State verifies and the numbers increase in the order
+given (oldest first). Each run of the automated signer (below) logs one line naming the State
+it signed and its release number, or why it skipped:
+
+```sh
+gh run list --repo OWNER/REPO --workflow release-sign.yml --json databaseId --limit 20
+gh run view RUN_ID --repo OWNER/REPO --log | grep -o '{"action":"signed"[^}]*}'
 ```
 
 `release-sign` signs the statement `forge-cli-release/v2`, project id, State hash and release
@@ -172,6 +185,9 @@ moved, and idle costs nothing. The verdict is written to `DIR/release-signature.
   `CLI_RELEASE_SIGNATURES_REQUIRED` is `false` (the transition) the update continues as before.
   Once it is `true`, the updater holds on the current build without an alert and looks again
   after `CLI_RELEASE_SIGNATURE_RETRY_MS` (1 minute) until the signature appears or main moves.
+  Every command keeps running on the current build, and `nforge` prints one line that the new
+  build is held until its release signature is published. If signing stops (signer job off,
+  mirror stuck), the machine stays on its current build.
 - An explicit `nforge update --state STATE` selection skips the check and leaves the recorded
   release number as it is; it is the owner's own rollback and recovery path.
 
@@ -183,7 +199,8 @@ and treat them as unsigned, which installs during the transition. A machine reco
 release number at the first numbered release its own (new) updater installs.
 
 The first release key is listed (key id `f3b8ac47a969d73d`). Signing is still optional:
-`CLI_RELEASE_SIGNATURES_REQUIRED` stays `false` until the first signed release is installed.
+`CLI_RELEASE_SIGNATURES_REQUIRED` stays `false` until `release-verify` passes on recent signed
+States (see "Turning the switch on" below).
 
 ### Automated signer
 
@@ -232,9 +249,18 @@ The URL and project id are the ones the CLI release source uses (`source.json` i
 installation). The job stays off (skipped, no runner) until
 `FORGE_RELEASE_PROJECT` is set. `gh secret set` reads the key from the file without printing it.
 
-Turning the switch on: after the first signed release, confirm `release-signature.json` says
-`verified` with a `release` number on every machine, then land `CLI_RELEASE_SIGNATURES_REQUIRED = true` and sign that
-landing too. A test refuses `true` with an empty key list.
+The signer skips a commit when a newer main commit has already reached GitHub, so in a burst of
+landings only the newest one is signed. Updaters install main's head: one that read a skipped
+State finds the newer head at its next attempt a minute later.
+
+Turning the switch on: confirm the stored signatures of the last five signed States verify with
+`nforge cli release-verify --state ...`, then land `CLI_RELEASE_SIGNATURES_REQUIRED = true`; the
+signer signs that landing too. Do not wait for
+`release-signature.json` to say `verified` first: while signing is optional the updater writes
+that verdict when it installs, which is usually a minute or two before the signer has stored the
+signature, so it says `unsigned` even when signing works. Once signatures are required the
+updater waits for the signature, so the verdict reads `verified` with a `release` number. A test
+refuses `true` with an empty key list.
 
 Rotation: land the new public key in a release signed with an old key, sign with every listed key
 until each machine runs that build, then remove the old key in a release signed with the new key.

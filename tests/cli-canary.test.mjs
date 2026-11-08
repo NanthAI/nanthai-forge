@@ -22,7 +22,8 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { childEnv } from '../scripts/child-env.mjs';
-import { updateCli } from '../dist/cli-update.js';
+import { updateCli as updateCliChecked } from '../dist/cli-update.js';
+import { testReleaseSigner, trustedDist, withSignedReleases } from './release-trust-fixture.mjs';
 import { cliBuildCommit, selectCliBuild } from '../dist/cli-installation.js';
 import { migrateEditHookRunner } from '../dist/agent-install-hooks.js';
 import { cliRollback } from '../dist/cli-rollback.js';
@@ -41,6 +42,15 @@ const a = 'a'.repeat(64),
   b = 'b'.repeat(64),
   c = 'c'.repeat(64);
 const address = { url: 'https://synthetic.convex.cloud', projectId: 'forge-source' };
+/** Release signatures are required: every update these tests drive is signed with a test key. */
+const updateCli = (installation, source, selected, dependencies, ...rest) =>
+  updateCliChecked(
+    installation,
+    source,
+    selected,
+    withSignedReleases(dependencies, source.projectId),
+    ...rest,
+  );
 const OPERATION = '11111111-1111-4111-8111-111111111111';
 const hash = path => createHash('sha256').update(readFileSync(path)).digest('hex');
 
@@ -680,7 +690,7 @@ function launch(f, args) {
 async function releaseFixture(t, f, head) {
   const counter = new Int32Array(new SharedArrayBuffer(4));
   const worker = new Worker(new URL('../scripts/package-cli-release-worker.mjs', import.meta.url), {
-    workerData: { head, projectId: address.projectId, calls: counter.buffer },
+    workerData: { head, projectId: address.projectId, calls: counter.buffer, signer: testReleaseSigner() },
   });
   t.after(() => worker.terminate());
   const url = await new Promise((done, reject) => {
@@ -699,7 +709,7 @@ async function releaseFixture(t, f, head) {
 /** A real controller entry: it runs the product's cliStartup, so it exercises the product's own
  * gate. Under the canary env it behaves like a build under test (`gate` file, then `canary-mode`). */
 function controller(f, root, name) {
-  const startup = pathToFileURL(fileURLToPath(new URL('../dist/cli-version.js', import.meta.url))).href;
+  const startup = trustedDist().url('cli-version.js');
   writeFileSync(
     join(root, 'dist', 'cli-entry.js'),
     `import { existsSync, appendFileSync, readFileSync } from 'node:fs';
@@ -852,7 +862,7 @@ test('the canary child makes no release read and starts no update', async t => {
   const f = fixture(t),
     counter = await releaseFixture(t, f, c),
     build = f.build(b);
-  const startup = pathToFileURL(fileURLToPath(new URL('../dist/cli-version.js', import.meta.url))).href;
+  const startup = trustedDist().url('cli-version.js');
   writeFileSync(
     join(build, 'dist', 'cli-entry.js'),
     `import { cliStartup } from ${JSON.stringify(startup)};

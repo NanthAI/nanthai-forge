@@ -56,6 +56,7 @@ Usage:
   nforge update [FORGE_CHECKOUT] [--directory DIR] [--state STATE]
   nforge cli rollback [--directory DIR]   # switch to the one retained previous CLI build
   nforge cli release-sign --key FILE [--state STATE --release N]   # owner: sign released main for the CLI updater
+  nforge cli release-verify [--state STATE]...   # re-check stored release signatures with this build's keys
   nforge worker DEPLOYMENT_URL PROJECT_ID MACHINE_UUID
   nforge metrics ROOT [--from DATE] [--to DATE] [--json] [--report FILE.md] [--compare FROM..TO]
   nforge metrics record-bill ROOT --provider P --from DATE --to DATE --billed-usd N [--list-usd N] [--usage unit=qty,...] [--rate unit=usd,...] [--basis TEXT]
