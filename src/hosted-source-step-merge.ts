@@ -15,7 +15,7 @@ import { parseNativeState, type NativeFile } from './native-state-format.js';
 import { MemoryMergeSource, MemorySourceReader } from './hosted-source-memory.js';
 import { buildHostedComposeState, changedPaths, type ComposeBases } from './hosted-compose-worker.js';
 import { buildHostedSyncState } from './hosted-sync-worker.js';
-import { readJson, sourceStepBytes, full, type StepMeter } from './hosted-source-step-verify.js';
+import { readJson, sourceStepBytes, full, yieldStep, type StepMeter } from './hosted-source-step-verify.js';
 import type { SourceStepCursor, StepTransport } from './hosted-source-step.js';
 import { sourceWindows, stateSummary } from './hosted-source-fanout.js';
 import { mapSourceOrdered } from './hosted-source-parallel.js';
@@ -108,13 +108,7 @@ export async function prepareMergeStep(
             c.inventory[work.stackBase.object.sha256] = work.stackBase;
             c.states.push(work.stackBase.object.sha256);
           }
-        } else
-          c.states.push(
-            work.resolution.left,
-            work.resolution.right,
-            work.resolution.draftHead,
-            ...(work.resolution.mergeBase ? [work.resolution.mergeBase] : []),
-          );
+        } else c.states.push(work.resolution.draftHead);
       }
     }
     c.phase = 'graph';
@@ -136,7 +130,7 @@ export async function prepareMergeStep(
     // Both tips are read in one action so their manifests also sign changed paths.
     const size = tips.reduce((sum, id) => sum + c.inventory[id]!.object.size, 0);
     if (tips.length && (full(m) || (m.objects && m.bytes + size > sourceStepBytes))) {
-      m.yielded = true;
+      yieldStep(m, 'bytes');
       return;
     }
     await io.prepareRead?.(tips.map(id => c.inventory[id]!.object));
@@ -217,14 +211,15 @@ export async function prepareMergeStep(
           roots,
         );
   };
-  const frontier = selectFrontier().slice(0, 100);
+  const frontier = selectFrontier().slice(0, 100),
+    extra = resolveRight(c, frontier);
   // Descriptors are resolved by page. Deeper derived hints cannot enter a
   // breadth-first byte window or become a dependency before a nearer branch.
   invariant(io.describeBatch, 'SOURCE_WORKER_UNAVAILABLE', 'Resolve ancestry in windows.');
   let refs: WorkerObject[];
   if (io.probeStates) {
     const probes = await io.probeStates(
-      frontier,
+      [...frontier, ...extra],
       // Recorded parents let one bounded descriptor page follow a linear chain
       // instead of one call per level; older rows wait for a 32-State walk.
       Object.keys(c.parents).length >= 32 || Object.keys(c.parents).some(id => io.stateParents?.(id))
@@ -234,16 +229,28 @@ export async function prepareMergeStep(
           }
         : undefined,
     );
-    refs = probes.refs;
-    const ids = [...refs.map(ref => ref.object.sha256), ...probes.unavailable];
+    const ids = [...probes.refs.map(ref => ref.object.sha256), ...probes.unavailable];
     invariant(
-      ids.length > 0 && new Set(ids).size === ids.length && ids.every(id => frontier.includes(id)),
+      ids.length > 0 &&
+        new Set(ids).size === ids.length &&
+        ids.every(id => frontier.includes(id) || extra.includes(id)),
       'SOURCE_HASH_MISMATCH',
       'Ancestry descriptor page changed its frontier.',
     );
-    for (const id of probes.unavailable) (c.ancestryFailures ??= {})[id] = 'SOURCE_UNAVAILABLE';
-    if (walk && probes.unavailable.length) c.generationFallback = true;
-  } else refs = await io.describeBatch(frontier);
+    refs = probes.refs.filter(ref => frontier.includes(ref.object.sha256));
+    const unavailable = probes.unavailable.filter(id => frontier.includes(id));
+    for (const id of unavailable) (c.ancestryFailures ??= {})[id] = 'SOURCE_UNAVAILABLE';
+    if (walk && unavailable.length) c.generationFallback = true;
+  } else
+    refs = (await io.describeBatch([...frontier, ...extra])).filter(ref =>
+      frontier.includes(ref.object.sha256),
+    );
+  for (const id of extra) {
+    const generation = io.stateGeneration?.(id),
+      edges = io.stateParents?.(id);
+    if (generation !== undefined) (c.generations ??= {})[id] = generation;
+    if (edges) c.parents[id] = [...edges];
+  }
   if (walk) {
     for (const ref of refs) {
       const id = ref.object.sha256,
@@ -289,7 +296,7 @@ export async function prepareMergeStep(
       end: 0,
       tasks: windows.map(refs => ({ kind: 'states', refs, files: false })),
     });
-    m.yielded = true;
+    yieldStep(m, 'fanout');
     return;
   }
   let bytes = 0;
@@ -302,7 +309,7 @@ export async function prepareMergeStep(
     bytes += ref.object.size;
   }
   if (!window.length) {
-    if (refs.length) m.yielded = true;
+    if (refs.length) yieldStep(m, 'window');
     return;
   }
   await io.prepareRead?.(window.filter(r => !r.recipe).map(r => r.object));
@@ -484,11 +491,20 @@ async function syncRoots(c: SourceStepCursor, io: StepTransport, m: StepMeter): 
       work.right.object.sha256,
       ...(work.stackBase ? [work.stackBase.object.sha256] : []),
     ];
-  return [
-    work.left.object.sha256,
-    work.resolution.left,
-    work.resolution.right,
-    work.resolution.draftHead,
-    ...(work.resolution.mergeBase ? [work.resolution.mergeBase] : []),
-  ];
+  // A resolve asks one ancestry question: does the saved head descend from its draft? The draft is
+  // an ancestor of the head, so with more roots (the conflict's tips and base) the generation walk
+  // sees a subset-common State and falls back to breadth-first search for a State every root passes
+  // through, which in a busy history is far below the merge (Issue 1eef1b43: 40 manifests, 3 steps).
+  return [work.left.object.sha256, work.resolution.draftHead];
+}
+
+/** A resolve's right tip is no ancestry root, but the resolved State names it as a parent: its
+ * descriptor (described in the same probe call) gives that State its generation, and its recorded
+ * parents spare the compute step a manifest read. Empty once known, and for every other job. */
+function resolveRight(c: SourceStepCursor, frontier: string[]): string[] {
+  if ((c.plan as { kind: string }).kind !== 'forge-hosted-sync-input') return [];
+  const work = sourceValidation('SOURCE_JOB_INVALID', () => syncInputSchema.parse(c.plan)).work;
+  if (work.mode !== 'resolve') return [];
+  const right = work.resolution.right;
+  return c.parents[right] || c.generations?.[right] !== undefined || frontier.includes(right) ? [] : [right];
 }

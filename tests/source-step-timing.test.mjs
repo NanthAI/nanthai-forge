@@ -85,6 +85,35 @@ test('the step row appends each reported step with its scheduling wait and folds
   );
 });
 
+test('the step row keeps each step phase, stop reason and read kinds, and folds them past 16 steps', () => {
+  let t = { queuedAt: 0, scheduledAt: 0, steps: [] };
+  const detail = (phase, stop) => ({ phase, stop, states: 2, pages: 1, blobs: 3 });
+  t = recordSourceStep(t, report(10, detail('input>graph', 'bytes')), 100, false);
+  assert.deepEqual(
+    { phase: t.steps[0].phase, stop: t.steps[0].stop, states: t.steps[0].states, blobs: t.steps[0].blobs },
+    { phase: 'input>graph', stop: 'bytes', states: 2, blobs: 3 },
+  );
+  for (let i = 0; i < 16; i++)
+    t = recordSourceStep(
+      t,
+      report(
+        t.scheduledAt + 1,
+        detail(i < 15 ? 'graph>graph' : 'graph>compute', i < 15 ? 'fanout' : 'window'),
+      ),
+      t.scheduledAt + 10,
+      false,
+    );
+  assert.equal(t.steps.length, 16);
+  const last = t.steps[15];
+  assert.equal(last.phase, 'graph>compute', 'a folded entry spans its first to its last phase');
+  assert.equal(last.stop, 'window', 'and keeps the last stop reason');
+  assert.equal(last.states, 4, 'counts add up');
+  // Older workers report no detail; the entry stays numbers only.
+  t = recordSourceStep({ queuedAt: 0, scheduledAt: 0, steps: [] }, report(5), 9, true);
+  assert.equal(t.steps[0].phase, undefined);
+  assert.equal(t.steps[0].stop, undefined);
+});
+
 test('the receipt splits hostedWait into dispatch, steps, publication and the client watch', () => {
   const progress = {
     state: {

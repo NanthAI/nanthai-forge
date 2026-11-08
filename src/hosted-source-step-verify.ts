@@ -18,7 +18,55 @@ export type StepMeter = {
   outputObjects: number;
   outputBytes: number;
   treeUpdates: number;
+  /** Why the step stopped before its work was done (friction 09c0b7cd); set where it yields. */
+  stop?: SourceStepStop;
+  /** Each object read, by kind from its first bytes (see `readKinds`). */
+  kinds: Map<string, 'state' | 'page' | 'blob'>;
 };
+/** `fanout`: handed bounded tasks to parallel actions; `bytes`/`objects`/`time`: the step's 8 MiB,
+ * 100-object or 20 s budget; `compute-bytes`: whole-State merge starts a fresh heap after 2 MiB of
+ * reads; `created`: the next round reads a blob this action created; `recompute`: an inline round
+ * finished and the merge re-runs in a fresh action; `tree`: one save tree update per step;
+ * `window`: the next bounded read window does not fit or was not prepared. */
+export type SourceStepStop =
+  | 'fanout'
+  | 'bytes'
+  | 'objects'
+  | 'time'
+  | 'compute-bytes'
+  | 'created'
+  | 'recompute'
+  | 'tree'
+  | 'window';
+/** End this step early, recording why. */
+export function yieldStep(m: StepMeter, stop: SourceStepStop) {
+  m.yielded = true;
+  m.stop ??= stop;
+}
+/** Why a step that is not done stopped: its recorded yield, else the budget `full` hit. */
+export function stepStop(m: StepMeter): SourceStepStop {
+  if (m.stop) return m.stop;
+  if (m.objects + m.outputObjects >= sourceStepObjects) return 'objects';
+  if (m.bytes + m.outputBytes >= sourceStepBytes) return 'bytes';
+  return performance.now() - m.started >= 20000 ? 'time' : 'window';
+}
+/** Kind of a read from its first 256 bytes: a State manifest, other Forge JSON (plans, pages,
+ * recipes) or a file blob. Canonical JSON sorts its keys, so a State can hide its kind behind
+ * `files`; `readKinds` also counts every read the step parsed as a State. */
+export function readKind(head: string): 'state' | 'page' | 'blob' {
+  if (head.includes('"kind":"forge-source-state"')) return 'state';
+  return head.startsWith('{') && head.includes('"kind":"forge-') ? 'page' : 'blob';
+}
+/** How many State manifests, other Forge JSON pages and file blobs this step read. */
+export function readKinds(m: StepMeter, parsedState: (id: string) => boolean) {
+  const counts = { states: 0, pages: 0, blobs: 0 };
+  for (const [id, kind] of m.kinds) {
+    if (kind === 'state' || parsedState(id)) counts.states++;
+    else if (kind === 'page') counts.pages++;
+    else counts.blobs++;
+  }
+  return counts;
+}
 export const meter = (): StepMeter => ({
   objects: 0,
   bytes: 0,
@@ -27,6 +75,7 @@ export const meter = (): StepMeter => ({
   outputObjects: 0,
   outputBytes: 0,
   treeUpdates: 0,
+  kinds: new Map(),
 });
 export const full = (m: StepMeter) =>
   m.yielded ||
@@ -110,7 +159,7 @@ export async function verifySourceObject(
       'Recipe physical encoding is oversized.',
     );
     if (m.objects && m.bytes + next.size > sourceStepBytes) {
-      m.yielded = true;
+      yieldStep(m, 'bytes');
       break;
     }
     const window: WorkerPin[] = [];

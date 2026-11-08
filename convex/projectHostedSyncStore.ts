@@ -31,7 +31,7 @@ export const syncStateSchema = z
       .object({
         queuedAt: z.number(),
         scheduledAt: z.number(),
-        steps: z.array(z.record(z.string(), z.number())).max(16),
+        steps: z.array(z.record(z.string(), z.union([z.number(), z.string().max(40)]))).max(16),
         doneAt: z.number().optional(),
         publishedAt: z.number(),
       })

@@ -62,7 +62,7 @@ export const step = internalAction({
             objects: transport.outputs,
             output,
             failure: null,
-            timing: transport.clock.value(),
+            timing: { ...transport.clock.value(), phase: 'input>done', stop: 'done' },
             ...(resultText === null ? {} : { result: resultText }),
           });
           logSourceStep(input, {

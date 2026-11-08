@@ -117,7 +117,7 @@ export const step = internalAction({
               kind: plan.kind,
               end: plan.end,
               tasks: plan.tasks.map(task => JSON.stringify(task)),
-              timing: clock.value(),
+              timing: { ...clock.value(), ...result.metrics.detail },
             });
             logStep();
             return null;
@@ -129,7 +129,7 @@ export const step = internalAction({
             objects: outputs,
             output: result.cursor.output,
             failure: null,
-            timing: clock.value(),
+            timing: { ...clock.value(), ...result.metrics.detail },
             ...(resultText === null ? {} : { result: resultText }),
           });
           logStep();

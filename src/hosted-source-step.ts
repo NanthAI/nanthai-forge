@@ -20,6 +20,10 @@ import {
   verifySourceObject,
   sourceStepBytes,
   sourceStepObjects,
+  yieldStep,
+  stepStop,
+  readKind,
+  readKinds,
   type VerifyCursor,
   type StepMeter,
 } from './hosted-source-step-verify.js';
@@ -119,7 +123,7 @@ async function verifyQueue(c: SourceStepCursor, io: StepTransport, m: StepMeter)
     const plan = verificationFanout(c);
     if (plan) {
       io.fanout(plan);
-      m.yielded = true;
+      yieldStep(m, 'fanout');
       return;
     }
   }
@@ -140,7 +144,7 @@ async function verifyQueue(c: SourceStepCursor, io: StepTransport, m: StepMeter)
       ref = c.inventory[id];
     invariant(ref, 'SOURCE_CLOSURE_INVALID', 'Required source object is absent from inventory.');
     if (m.objects && !ref.recipe && m.bytes + ref.object.size > sourceStepBytes) {
-      m.yielded = true;
+      yieldStep(m, 'bytes');
       break;
     }
     c.verify = await verifySourceObject(io, ref, m, c.verify);
@@ -197,7 +201,7 @@ async function saveStep(c: SourceStepCursor, io: StepTransport, m: StepMeter) {
   }
   if (c.changes.length && !(c.next && c.pages % 8 !== 0)) {
     if (m.treeUpdates) {
-      m.yielded = true;
+      yieldStep(m, 'tree');
       return;
     }
     m.treeUpdates++;
@@ -296,7 +300,7 @@ async function closureStep(c: SourceStepCursor, io: StepTransport, m: StepMeter)
         end: 0,
         tasks: sourceWindows(required).map(refs => ({ kind: 'states', refs, files: true })),
       });
-      m.yielded = true;
+      yieldStep(m, 'fanout');
       return;
     }
   }
@@ -311,12 +315,12 @@ async function closureStep(c: SourceStepCursor, io: StepTransport, m: StepMeter)
     invariant(ref, 'SOURCE_CLOSURE_INVALID', 'Required ancestor is absent.');
     if (prepared && !prepared.has(id)) {
       c.states.push(id);
-      m.yielded = true;
+      yieldStep(m, 'window');
       break;
     }
     if (m.objects && m.bytes + ref.object.size > sourceStepBytes) {
       c.states.push(id);
-      m.yielded = true;
+      yieldStep(m, 'bytes');
       break;
     }
     const source = new MemoryMergeSource({}),
@@ -352,7 +356,8 @@ async function closureStep(c: SourceStepCursor, io: StepTransport, m: StepMeter)
 export async function runSourceStep(cursor: SourceStepCursor, io: StepTransport) {
   const c = structuredClone(cursor),
     m = meter(),
-    original = io;
+    original = io,
+    from = c.phase;
   io.rememberStateGenerations?.(c.generations ?? {});
   let mergeSource = new MemoryMergeSource(c.parents, c.ancestryBoundary, c.ancestryCuts);
   io = {
@@ -375,10 +380,13 @@ export async function runSourceStep(cursor: SourceStepCursor, io: StepTransport)
       const stream = await original.read(pin);
       m.objects++;
       return (async function* () {
+        let head = '';
         for await (const chunk of stream) {
           m.bytes += chunk.length;
+          if (head.length < 256) head += Buffer.from(chunk.subarray(0, 256 - head.length)).toString('latin1');
           yield chunk;
         }
+        m.kinds.set(pin.sha256, readKind(head));
       })();
     },
   };
@@ -434,7 +442,7 @@ export async function runSourceStep(cursor: SourceStepCursor, io: StepTransport)
             if (!prior.generated.has(id)) mergeSource.objects.set(id, bytes);
         }
         if (m.bytes > 2 * 1024 * 1024 && !again) {
-          m.yielded = true;
+          yieldStep(m, 'compute-bytes');
           break;
         }
         if (c.index < c.selections.length) {
@@ -462,7 +470,7 @@ export async function runSourceStep(cursor: SourceStepCursor, io: StepTransport)
         } catch (error) {
           if (!(error instanceof SourceCalculationsPending)) throw error;
         }
-        if (pending.size && needsCreated([...pending.values()], created)) m.yielded = true;
+        if (pending.size && needsCreated([...pending.values()], created)) yieldStep(m, 'created');
         else if (pending.size) {
           const tasks = await calculationWindows([...pending.values()], io);
           // A fan-out round (fork, task actions, join, then a fresh step that re-reads every
@@ -487,7 +495,7 @@ export async function runSourceStep(cursor: SourceStepCursor, io: StepTransport)
           // The same heap re-enters only when this action read at most one step of bytes; bigger
           // trees still skip the fan-out round but recompute in a fresh action.
           if (inline && io.fanout && m.bytes + m.outputBytes <= sourceStepBytes) recompute = true;
-          else m.yielded = true;
+          else yieldStep(m, inline ? 'recompute' : 'fanout');
         }
       }
     }
@@ -497,6 +505,12 @@ export async function runSourceStep(cursor: SourceStepCursor, io: StepTransport)
     metrics: {
       objects: m.objects,
       bytes: m.bytes,
+      /** What this step did and why it stopped, for the receipt's server timing (friction 09c0b7cd). */
+      detail: {
+        phase: `${from}>${c.phase}`,
+        stop: c.phase === 'done' ? ('done' as const) : stepStop(m),
+        ...readKinds(m, id => !!c.parents[id] || mergeSource.states.has(id)),
+      },
       elapsedMs: performance.now() - m.started,
       rssBytes: process.memoryUsage().rss,
       maxRssBytes: process.resourceUsage().maxRSS * 1024,

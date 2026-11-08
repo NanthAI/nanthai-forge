@@ -11,11 +11,13 @@ export type SyncTiming = {
   /** Where `hostedWait` went on the server, when the server reports it (friction 84c1497f). */
   server?: ServerSyncTiming;
 };
-type ServerStep = Record<string, number>;
+/** Numbers, plus `phase` (`from>to`) and `stop` (why the step ended) from current servers. */
+type ServerStep = Record<string, number | string>;
 /** `dispatchMs`: submit until the first step was scheduled. Each step: `waitMs` from its scheduling
  * (or fan-out join) to its handler start, including any runtime start (`bootMs` for the Node hand-off);
  * `runMs` its handler time, of which `readMs`/`writeMs`/`callMs` had R2 reads, R2 writes or Convex
- * calls in flight (the rest is merge work). `publishMs`: last commit until the result was published.
+ * calls in flight (the rest is merge work); `phase`, `stop` and the `states`/`pages`/`blobs` read counts
+ * say what the step ran and why it ended (friction 09c0b7cd). `publishMs`: last commit until the result was published.
  * `watchMs`: the client's remaining hostedWait, from publication until it observed the result
  * (durations from two clocks, so approximate). */
 export type ServerSyncTiming = {

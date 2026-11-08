@@ -1139,9 +1139,12 @@ by static import; `tests/convex-source-worker-graph.test.mjs` enforces this.
 A step's output writes (create-only, checksum-bound PUT and HEAD) run behind the
 merge work after them, at most 8 at a time; digest checks and State generations stay
 in upload order and the step waits for every write before it stages or commits.
-Each step reports its run, R2 read/write and Convex call time with its commit; the
-execution's step row keeps them (at most 16 entries) and a sync's state carries
-them to the receipt's `timing.server` split (dispatch, steps, publish, watch).
+Each step reports its run, R2 read/write and Convex call time with its commit, plus
+the cursor phases it ran (`phase`, `from>to`), why it stopped (`stop`: `done`,
+`fanout`, a `bytes`/`objects`/`time` budget, or another named yield) and how many
+State manifests, other Forge JSON pages and file blobs it read; the execution's step
+row keeps them (at most 16 entries) and a sync's state carries them to the receipt's
+`timing.server` split (dispatch, steps, publish, watch).
 
 A trusted source-job completion schedules the save finalizer independently of the
 editing client. A save, sync or compose step whose result manifest is at most 64 KiB passes
