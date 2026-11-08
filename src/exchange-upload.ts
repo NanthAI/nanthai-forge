@@ -33,6 +33,9 @@ export function uploadPhysicalObjects(
     onRaw?: (sha256: string) => void;
     blobs?: Pick<ExchangeBlobs, 'put'>;
     wait?: (ms: number) => Promise<unknown>;
+    /** Collect PUT rows here instead of committing each window; the caller commits them later
+     * (`projectObjectCommit:commitBatch`) before anything relies on them being stored. */
+    deferCommit?: { id: string }[];
   } = {},
 ): Promise<{ uploadedObjects: number; uploadedBytes: number }> {
   const pending = [...objects];
@@ -120,7 +123,8 @@ export function uploadPhysicalObjects(
       const completed = attempts.flatMap(result =>
         result.status === 'fulfilled' && result.value ? [result.value] : [],
       );
-      if (completed.length) {
+      if (completed.length && options.deferCommit) options.deferCommit.push(...completed);
+      else if (completed.length) {
         invariant(
           client.action,
           'EXCHANGE_UPLOAD_UNKNOWN',

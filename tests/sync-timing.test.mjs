@@ -23,3 +23,22 @@ test('a clock that steps back never reports a negative step', () => {
   timing.mark('hostedWait');
   assert.deepEqual(timing.value(), { totalMs: 0, stepsMs: { hostedWait: 0 } });
 });
+
+test('a save split adds up a step marked twice and resolve nests its save (friction f15db544)', () => {
+  const clock = [0, 10, 30, 60, 100, 150];
+  const save = syncTiming(() => clock.shift());
+  save.mark('capture'); // 10
+  save.mark('prepare'); // 20
+  save.mark('capture'); // 30 more: the save repaired once after WORK_STALE
+  save.mark('submit'); // 40
+  assert.deepEqual(save.value(), { totalMs: 100, stepsMs: { capture: 40, prepare: 20, submit: 40 } });
+  const outer = [0, 150];
+  const resolve = syncTiming(() => outer.shift());
+  resolve.nest(save.value());
+  resolve.mark('save');
+  assert.deepEqual(resolve.value(), {
+    totalMs: 150,
+    stepsMs: { save: 150 },
+    save: { totalMs: 100, stepsMs: { capture: 40, prepare: 20, submit: 40 } },
+  });
+});

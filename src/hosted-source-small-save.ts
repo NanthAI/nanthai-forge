@@ -34,8 +34,20 @@ async function readExact(io: SourceWorkerTransport, pin: WorkerPin) {
 export async function runSmallSourceSave(
   input: WorkerPin,
   io: SourceWorkerTransport,
+  /** Objects the plan is expected to name (the baseline and its delta page, from `begin`): read
+   * beside the input instead of after it. Used only when the plan names exactly these pins. */
+  hints: readonly WorkerPin[] = [],
 ): Promise<WorkerPin | null> {
   if (input.size > 128 * 1024) return null;
+  const early = new Map(
+    hints
+      .filter(pin => pin.size <= smallSaveStateBytes)
+      .map(pin => {
+        const read = readExact(io, pin);
+        read.catch(() => {});
+        return [pin.sha256, { pin, read }] as const;
+      }),
+  );
   const inputBytes = await readExact(io, input);
   const plan = sourceValidation('SOURCE_JOB_INVALID', () =>
     saveInputSchema.parse(JSON.parse(new TextDecoder().decode(inputBytes))),
@@ -47,11 +59,17 @@ export async function runSmallSourceSave(
     plan.baseline.object.size > smallSaveStateBytes
   )
     return null;
-  await io.prepareRead?.([plan.baseline.object, plan.pages]);
-  // Both pins are known and prepared together: one round trip, not two.
-  const [pageBytes, baselineBytes] = await mapSourceOrdered([plan.pages, plan.baseline.object], pin =>
-    readExact(io, pin),
-  );
+  const started = (pin: WorkerPin) => {
+    const hinted = early.get(pin.sha256);
+    return hinted && hinted.pin.size === pin.size ? hinted.read : null;
+  };
+  const pending = [plan.pages, plan.baseline.object].filter(pin => !started(pin));
+  // Both pins are known and prepared together: one round trip, not two (none when hinted).
+  if (pending.length) await io.prepareRead?.(pending);
+  const pageRead = started(plan.pages) ?? readExact(io, plan.pages),
+    baselineRead = started(plan.baseline.object) ?? readExact(io, plan.baseline.object);
+  baselineRead.catch(() => {});
+  const pageBytes = await pageRead;
   const page = sourceValidation(
     'SOURCE_JOB_INVALID',
     () => validateSavePage(JSON.parse(new TextDecoder().decode(pageBytes)), null).page,
@@ -69,6 +87,10 @@ export async function runSmallSourceSave(
   const after = page.changes.flatMap(change => (change.after ? [change.after.content] : []));
   if (after.some(ref => ref.recipe) || after.reduce((n, ref) => n + ref.object.size, 0) > windowBytes)
     return null;
+  // The changed objects' descriptors resolve while the (larger) baseline is still downloading; the
+  // ones the baseline already holds are then not read.
+  const objects = [...new Map(after.map(ref => [ref.object.sha256, ref.object])).values()];
+  const [baselineBytes] = await Promise.all([baselineRead, io.prepareRead?.(objects)]);
   const baseline = parseNativeState(baselineBytes!),
     files = new Map(baseline.files.map(file => [file.path, file])),
     seen = new Set(baseline.files.map(file => file.blob));
@@ -77,8 +99,7 @@ export async function runSmallSourceSave(
       after.filter(ref => !seen.has(ref.object.sha256)).map(ref => [ref.object.sha256, ref.object]),
     ).values(),
   ];
-  await io.prepareRead?.(verify);
-  // Descriptors are prepared in one window; changed bytes are streamed and
+  // Descriptors were prepared in one window above; changed bytes are streamed and
   // discarded, several in flight (each read is a round trip, not CPU).
   await mapSourceOrdered(verify, async pin => {
     const hash = sha256.create();

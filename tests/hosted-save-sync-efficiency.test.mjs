@@ -107,7 +107,7 @@ function dogfood(s) {
       removed: false,
     });
 }
-async function changedSave(t, legacy, scale = false, provider = 'synthetic') {
+async function changedSave(t, legacy, scale = false, provider = 'synthetic', contract = false) {
   environment(t);
   const now = Date.now();
   t.mock.method(Date, 'now', () => now);
@@ -148,13 +148,13 @@ async function changedSave(t, legacy, scale = false, provider = 'synthetic') {
         missing: exchange.missing.bind(exchange),
       }
     : exchange;
-  const pending = await saveHostedLane(root, command, transport);
+  const pending = await saveHostedLane(root, command, transport, contract);
   const args = { projectId: s.projectId, jobId: pending.jobId };
   if (provider === 'convex') {
     await c.call('projectConvexSource:dispatch', args);
     await c.call('projectConvexSource:step', { ...args, step: 0 });
     await c.call('projectHostedSaveJobs:complete', args);
-    const terminal = await saveHostedLane(root, command, exchange);
+    const terminal = await saveHostedLane(root, command, exchange, contract);
     const output = terminal.outcome.result;
     assert.equal(JSON.parse(s.objects.get(output.head)).files.length, 3000);
     assert.equal(readHostedLaneCheckout(root).tree, sourceTree(JSON.parse(s.objects.get(output.head)).files));
@@ -477,6 +477,43 @@ test('Convex source provider: complete 10-file save including new object uploads
       functions: Object.fromEntries(
         [...new Set(run.calls)].map(name => [name, run.calls.filter(v => v === name).length]),
       ),
+    }),
+  );
+});
+
+test('a 10-file save commits its objects once, stages its page in submit and reads its baseline beside its input (friction f15db544)', async t => {
+  const run = await changedSave(t, false, true, 'convex', { overlapEvidence: false, submitPage: true });
+  const count = name => run.calls.filter(value => value === name).length;
+  // Before: 21 calls (2 commitBatch actions with their pendingRows/markCommitted, 1 stage, 2 step resolves).
+  assert.equal(
+    count('projectObjectCommit:commitBatch'),
+    1,
+    'changed files and save metadata share one commit',
+  );
+  assert.equal(count('projectHostedSaves:stage'), 0, 'the only page rides on submit');
+  assert.equal(
+    count('projectConvexSourceObjects:resolve'),
+    1,
+    'begin hands baseline and page; only changed files resolve',
+  );
+  assert(run.stats.totalCalls <= 16, JSON.stringify({ stats: run.stats, functions: run.calls }));
+  assert(run.stats.writes - run.stats.overlapWrites <= 100, JSON.stringify(run.stats));
+  // The receipt's server split, as sync has it: submit time and the execution's step.
+  const progress = JSON.parse(
+    await run.c.call('projectHostedSaves:progress', {
+      projectId: run.s.projectId,
+      operationId: run.command.operationId,
+    }),
+  );
+  assert.equal(typeof progress.state.submittedAt, 'number');
+  assert.equal(progress.state.serverTiming.steps.length, 1);
+  assert.equal(progress.state.serverTiming.steps[0].phase, 'input>done');
+  assert.equal(progress.state.serverTiming.steps[0].stop, 'done');
+  assert.equal(typeof progress.state.serverTiming.publishedAt, 'number');
+  t.diagnostic(
+    JSON.stringify({
+      convex: run.stats,
+      functions: Object.fromEntries([...new Set(run.calls)].map(name => [name, count(name)])),
     }),
   );
 });

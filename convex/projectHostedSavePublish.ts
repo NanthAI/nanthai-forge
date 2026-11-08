@@ -13,6 +13,7 @@ import {
 import { finishHostedOperation } from './projectHostedOperations';
 import { writeHostedRecord } from './projectHostedRecords';
 import { loadSourceJob } from './projectSourceJobs';
+import { sourceServerTiming } from './projectSourceStepTiming';
 import { hostedSaveInput } from './projectHostedSaves';
 import { saveResultSchema, savePin } from '../src/hosted-save';
 import { workerResultSchema } from '../src/hosted-source-worker-format';
@@ -169,7 +170,15 @@ export async function publishHostedSave(ctx: MutationCtx, input: SaveIdentity & 
   });
   const terminal = { attemptId: first.id, at: first.at, outcome: { status: 'completed' as const, result } };
   await finishHostedOperation(ctx, { ...input, receipt: terminal });
-  await writeSaveState(ctx, row._id, { ...state, status: 'completed' });
+  // The receipt's server split, as on sync (friction f15db544); a save without a job has none.
+  const serverTiming = state.request.pages
+    ? await sourceServerTiming(ctx, input.projectId, row.jobId)
+    : undefined;
+  await writeSaveState(ctx, row._id, {
+    ...state,
+    status: 'completed',
+    ...(serverTiming ? { serverTiming } : {}),
+  });
   await wakeLifecycleSave(ctx, input);
   return terminal;
 }

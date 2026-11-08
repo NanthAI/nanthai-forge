@@ -442,7 +442,9 @@ launching a worker.
 baseline, counts and exact linked page root. Preparation also returns the original
 server-timestamped worker input, allowing its upload to share the delta-page
 window before staging. The worker batches changed-blob read grants and State/result
-output commits. `projectHostedSaveJobs:submit` creates
+output commits. `projectHostedSaveJobs:submit` accepts an optional `{index,page}`
+(contract feature `save-submit-page`) and stages that last page in the same
+transaction, so a one-page save makes no `stage` call. It creates
 one child source job pinned to the internal Convex source worker and its fixed runtime. The trusted worker verifies the
 baseline State and each prior delta entry, downloads changed blobs with bounded
 buffers/private disk, preserves other paths and constructs the native State with

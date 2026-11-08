@@ -28,7 +28,7 @@ import { hostedRecordSchema } from './hosted-records.js';
 import { saveExpectedSchema, saveResultSchema } from './hosted-save.js';
 import { syncRequestSchema, syncResultSchema } from './hosted-sync.js';
 import { syncTiming } from './sync-timing.js';
-import { overlapEvidenceLevel, saveHostedLane } from './hosted-save-client.js';
+import { applyObservedSaveOutcome, saveContract, saveHostedLane } from './hosted-save-client.js';
 import { driveAgentSource, syncAgentSource } from './hosted-agent-source.js';
 import { hostedRootLanePath } from './hosted-root-checkout.js';
 import { placeResolution } from './hosted-resolution-placement.js';
@@ -281,24 +281,35 @@ export async function resolveHostedAgent(session: HostedAgentSession, input: unk
       true,
     );
   // Phase split in this process (clock reads only), as on sync receipts.
-  const timing = syncTiming();
+  const timing = syncTiming(),
+    saveTiming = syncTiming();
   const saveOperationId = await session.journal.id('resolution-save');
   const save = () =>
     saveHostedLane(
       session.root,
       { operationId: saveOperationId, message: command.message },
       session.exchange,
-      overlapEvidenceLevel(session.capabilities),
+      saveContract(session.capabilities),
       false,
       { action: 'resolve', parameters: { ...command, operationId: session.journal.operationId } },
+      undefined,
+      saveTiming,
     );
   let saved = await save();
   if (!completed(saved)) {
-    saved = await session.waitSource(saveOperationId, saved, 'Saves');
+    let observed: unknown;
+    saved = await session.waitSource(saveOperationId, saved, 'Saves', undefined, value => {
+      observed = value;
+    });
+    saveTiming.mark('hostedWait');
+    saveTiming.server(observed);
     if (!completed(saved)) return { phase: 'save', saveOperationId, progress: saved, ...continuation };
-    // Reconcile the marker from the original capture before resolving its exact head.
-    saved = await save();
+    // Advance the marker from the original capture and the observed receipt before resolving its
+    // exact head, as a plain save does: no replay of the save's preparation.
+    applyObservedSaveOutcome(session.root, saveOperationId, saved as { outcome: { status: string } });
+    saveTiming.mark('apply');
   }
+  timing.nest(saveTiming.value());
   const request = await session.journal.retain('resolve-request', async () => {
     const lane = saveResultSchema.parse(completed(saved));
     return syncRequestSchema.parse({

@@ -6,6 +6,7 @@ import { writeHostedRecord } from './projectHostedRecords';
 import { markRestackConflict } from './projectHostedStackNotice';
 import { saveObjects, saveLaneRecord, sameSaveLane, type SaveIdentity } from './projectHostedSaveStore';
 import { loadSourceJob } from './projectSourceJobs';
+import { sourceServerTiming } from './projectSourceStepTiming';
 import { syncOutputSchema, syncResultSchema } from '../src/hosted-sync';
 import { hostedLaneSelectionSchema } from '../src/hosted-lane';
 import { savePin } from '../src/hosted-save';
@@ -83,17 +84,8 @@ export async function publishHostedSync(ctx: MutationCtx, input: SaveIdentity & 
     const terminal = { attemptId: first.id, at: first.at, outcome };
     await finishHostedOperation(ctx, { ...input, receipt: terminal });
     // The receipt's server split: one indexed read of the execution's step row (friction 84c1497f).
-    const execution = (
-      await ctx.db
-        .query('projectSourceSteps')
-        .withIndex('by_project_and_job', q => q.eq('projectId', input.projectId).eq('jobId', row.jobId))
-        .unique()
-    )?.timing;
-    await writeSyncState(ctx, row._id, {
-      ...state,
-      status,
-      ...(execution ? { serverTiming: { ...execution, publishedAt: Date.now() } } : {}),
-    });
+    const serverTiming = await sourceServerTiming(ctx, input.projectId, row.jobId);
+    await writeSyncState(ctx, row._id, { ...state, status, ...(serverTiming ? { serverTiming } : {}) });
     return terminal;
   };
   // Old sync state could derive true from its target alone, omitting a mixed left side.

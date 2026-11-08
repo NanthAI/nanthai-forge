@@ -123,76 +123,85 @@ export const stage = mutation({
   returns: v.string(),
   handler: async (ctx, input) => {
     try {
-      const auth = await caller(ctx, input),
-        { row, state, operation } = await loadSave(ctx, auth);
-      const { page, lastPath } = validateSavePage(
-          JSON.parse(input.page),
-          input.index === state.stagedPages ? state.lastPath : null,
-        ),
-        pin = savePin(page);
-      const old = await ctx.db
-        .query('projectHostedSavePages')
-        .withIndex('by_project_and_actor_and_operation_and_index', q =>
-          q
-            .eq('projectId', input.projectId)
-            .eq('actor', auth.actor)
-            .eq('operationId', input.operationId)
-            .eq('index', input.index),
-        )
-        .unique();
-      if (old) {
-        invariant(old.digest === pin.sha256, 'WORK_OPERATION_CHANGED', 'Retry the original save page.');
-        return canonicalPayload(state);
-      }
-      invariant(
-        !operation.terminal &&
-          state.status === 'staging' &&
-          input.index === state.stagedPages &&
-          state.next?.sha256 === pin.sha256 &&
-          state.next.size === pin.size,
-        'WORK_OPERATION_CHANGED',
-        'Stage the next exact original delta page.',
-      );
-      const contents = page.changes.flatMap(change => (change.after ? [change.after.content] : []));
-      const stored = await saveObjects(ctx, input.projectId, [pin, ...contents.map(value => value.object)]);
-      for (let i = 0; i < contents.length; i++)
-        invariant(
-          canonicalPayload(stored[i + 1]) === canonicalPayload(contents[i]),
-          'WORK_OPERATION_CHANGED',
-          'Delta content differs from its committed project binding.',
-        );
-      const stagedPages = state.stagedPages + 1,
-        stagedChanges = state.stagedChanges + page.changes.length;
-      invariant(
-        stagedPages <= state.request.pageCount &&
-          stagedChanges <= state.request.changeCount &&
-          (page.next === null) === (stagedPages === state.request.pageCount) &&
-          (page.next !== null || stagedChanges === state.request.changeCount),
-        'WORK_OPERATION_CHANGED',
-        'Delta page counts or continuation differ from preparation.',
-      );
-      const overlap = boundOverlapChanges(
-        [...(JSON.parse(state.overlapChanges ?? '[]') as OverlapChange[]), ...page.changes],
-        state.overlapComplete !== false,
-      );
-      const next = {
-        ...state,
-        overlapChanges: overlap.changes,
-        overlapComplete: overlap.complete,
-        stagedPages,
-        stagedChanges,
-        lastPath,
-        next: page.next,
-        status: page.next ? ('staging' as const) : ('ready' as const),
-      };
-      await ctx.db.insert('projectHostedSavePages', { ...auth, index: input.index, digest: pin.sha256 });
-      await writeSaveState(ctx, row._id, next);
-      return canonicalPayload(next);
+      const auth = await caller(ctx, input);
+      return canonicalPayload(await stageSavePage(ctx, auth, input));
     } catch (error) {
       return report(error);
     }
   },
 });
+/** Stage the next exact original delta page (or confirm a staged one); returns the save state.
+ * `projectHostedSaveJobs:submit` runs it for the last page in its own transaction. */
+export async function stageSavePage(
+  ctx: MutationCtx,
+  auth: SaveIdentity,
+  input: { index: number; page: string },
+) {
+  const { row, state, operation } = await loadSave(ctx, auth);
+  const { page, lastPath } = validateSavePage(
+      JSON.parse(input.page),
+      input.index === state.stagedPages ? state.lastPath : null,
+    ),
+    pin = savePin(page);
+  const old = await ctx.db
+    .query('projectHostedSavePages')
+    .withIndex('by_project_and_actor_and_operation_and_index', q =>
+      q
+        .eq('projectId', auth.projectId)
+        .eq('actor', auth.actor)
+        .eq('operationId', auth.operationId)
+        .eq('index', input.index),
+    )
+    .unique();
+  if (old) {
+    invariant(old.digest === pin.sha256, 'WORK_OPERATION_CHANGED', 'Retry the original save page.');
+    return state;
+  }
+  invariant(
+    !operation.terminal &&
+      state.status === 'staging' &&
+      input.index === state.stagedPages &&
+      state.next?.sha256 === pin.sha256 &&
+      state.next.size === pin.size,
+    'WORK_OPERATION_CHANGED',
+    'Stage the next exact original delta page.',
+  );
+  const contents = page.changes.flatMap(change => (change.after ? [change.after.content] : []));
+  const stored = await saveObjects(ctx, auth.projectId, [pin, ...contents.map(value => value.object)]);
+  for (let i = 0; i < contents.length; i++)
+    invariant(
+      canonicalPayload(stored[i + 1]) === canonicalPayload(contents[i]),
+      'WORK_OPERATION_CHANGED',
+      'Delta content differs from its committed project binding.',
+    );
+  const stagedPages = state.stagedPages + 1,
+    stagedChanges = state.stagedChanges + page.changes.length;
+  invariant(
+    stagedPages <= state.request.pageCount &&
+      stagedChanges <= state.request.changeCount &&
+      (page.next === null) === (stagedPages === state.request.pageCount) &&
+      (page.next !== null || stagedChanges === state.request.changeCount),
+    'WORK_OPERATION_CHANGED',
+    'Delta page counts or continuation differ from preparation.',
+  );
+  const overlap = boundOverlapChanges(
+    [...(JSON.parse(state.overlapChanges ?? '[]') as OverlapChange[]), ...page.changes],
+    state.overlapComplete !== false,
+  );
+  const next = {
+    ...state,
+    overlapChanges: overlap.changes,
+    overlapComplete: overlap.complete,
+    stagedPages,
+    stagedChanges,
+    lastPath,
+    next: page.next,
+    status: page.next ? ('staging' as const) : ('ready' as const),
+  };
+  await ctx.db.insert('projectHostedSavePages', { ...auth, index: input.index, digest: pin.sha256 });
+  await writeSaveState(ctx, row._id, next);
+  return next;
+}
 /** Small trusted plan; bytes and full baseline inventories stay outside Convex. */
 export function hostedSaveInput(state: Awaited<ReturnType<typeof loadSave>>['state'], at: string) {
   invariant(state.request.pages, 'BAD_ARGUMENT', 'An unchanged save needs no source worker.');

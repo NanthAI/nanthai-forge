@@ -33,11 +33,17 @@ import type { ConvexExchange } from './exchange-client.js';
 import type { SaveChange, SaveRequest } from './hosted-save.js';
 import type { ContentPin } from './native-exchange.js';
 import { markLandStep } from './land-timing.js';
+import type { StepTimer } from './sync-timing.js';
 import { operationWait } from './agent-operation-wait.js';
 import { parseHostedResponse } from './hosted-response.js';
 
 type SaveExchange = Pick<ConvexExchange, 'client' | 'projectId' | 'uploadFile' | 'upload' | 'missing'> &
-  Partial<Pick<ConvexExchange, 'uploadLazyBatch' | 'downloadToFile' | 'downloadBatch' | 'prepareDownloads'>>;
+  Partial<
+    Pick<
+      ConvexExchange,
+      'uploadLazyBatch' | 'commitObjects' | 'downloadToFile' | 'downloadBatch' | 'prepareDownloads'
+    >
+  >;
 /** What the server's strict save pages accept: nothing, ranges, or ranges plus cross-file facts. */
 type OverlapEvidenceLevel = boolean | 'symbol-links';
 export const overlapEvidenceLevel = (capabilities: {
@@ -49,6 +55,15 @@ export const overlapEvidenceLevel = (capabilities: {
     : capabilities.features?.includes('overlap-symbol-links')
       ? 'symbol-links'
       : true;
+/** What the server's save calls accept, from the capability read the session already made. */
+export type SaveContract = { overlapEvidence: OverlapEvidenceLevel; submitPage: boolean };
+export const saveContract = (capabilities: {
+  overlapEvidenceVersion?: 1 | undefined;
+  features?: readonly string[] | undefined;
+}): SaveContract => ({
+  overlapEvidence: overlapEvidenceLevel(capabilities),
+  submitPage: capabilities.features?.includes('save-submit-page') ?? false,
+});
 const saveCommandSchema = z
   .object({ operationId: z.uuid(), message: z.string(), supersedeFinish: z.boolean().optional() })
   .strict();
@@ -96,24 +111,29 @@ export async function saveHostedLane(
   root: string,
   command: { operationId: string; message: string; supersedeFinish?: boolean },
   exchange: SaveExchange,
-  overlapEvidence: OverlapEvidenceLevel = false,
+  /** Server save features: a SaveContract, or only the overlap evidence level (older callers). */
+  contract: OverlapEvidenceLevel | SaveContract = false,
   preserveConflicts = false,
   continuation: ConflictContinuation = { action: 'save', parameters: command },
   /** Wait on an earlier unfinished save of this checkout instead of refusing SAVE_PENDING. */
   waitPrior?: (operationId: string, pending: unknown) => Promise<unknown>,
+  /** The receipt's phase split (friction f15db544): clock reads only. */
+  timing?: StepTimer,
 ) {
+  const features = typeof contract === 'object' ? contract : { overlapEvidence: contract, submitPage: false };
   const first = await saveOnce(
     root,
     command,
     exchange,
     true,
-    overlapEvidence,
+    features,
     preserveConflicts,
     continuation,
     waitPrior,
+    timing,
   );
   return first === rebased
-    ? saveOnce(root, command, exchange, false, overlapEvidence, preserveConflicts, continuation, waitPrior)
+    ? saveOnce(root, command, exchange, false, features, preserveConflicts, continuation, waitPrior, timing)
     : first;
 }
 const rebased = Symbol('rebased');
@@ -122,10 +142,11 @@ async function saveOnce(
   command: { operationId: string; message: string; supersedeFinish?: boolean },
   exchange: SaveExchange,
   repair: boolean,
-  overlapEvidence: OverlapEvidenceLevel,
+  { overlapEvidence, submitPage }: SaveContract,
   preserveConflicts: boolean,
   continuation: ConflictContinuation,
   waitPrior?: (operationId: string, pending: unknown) => Promise<unknown>,
+  timing?: StepTimer,
 ) {
   saveCommandSchema.parse(command);
   invariant(!lstatSync(root).isSymbolicLink(), 'UNSAFE_PATH', 'Checkout directory must be real.');
@@ -161,49 +182,33 @@ async function saveOnce(
   // or every new save captures against the old head and the server refuses it.
   if (!checkoutPathExists(capturePath))
     await settlePriorHostedSave(root, command.operationId, exchange, waitPrior);
+  timing?.mark('settle');
   const capture: Awaited<ReturnType<typeof captureHostedSave>> = checkoutPathExists(capturePath)
     ? JSON.parse(readFileSync(capturePath, 'utf8'))
     : await captureHostedSave(root, directory, preserveConflicts, continuation);
   markLandStep('captured');
+  timing?.mark('capture');
   invariant(
     capture.marker.selection.projectId === exchange.projectId,
     'WORK_OPERATION_CHANGED',
     'Save project differs from checkout.',
   );
-  const requestPath = join(directory, 'request.json');
+  const requestPath = join(directory, 'request.json'),
+    acknowledged = join(directory, 'acknowledged');
+  // Raw small uploads are PUT now and committed once, with the save's metadata pages below, so a
+  // save makes one verifying commit action instead of two. Nothing reads them before that commit:
+  // preparation names only their pins, and staging checks their committed bindings.
+  const deferred = exchange.uploadLazyBatch && exchange.commitObjects ? ([] as { id: string }[]) : undefined;
   let request: SaveRequest;
-  if (checkoutPathExists(requestPath))
+  if (checkoutPathExists(requestPath)) {
     request = saveRequestSchema.parse(JSON.parse(readFileSync(requestPath, 'utf8')));
-  else {
-    // Raw small files share preparation/commit windows; large files retain the
-    // bounded recipe/chunk path. A lost PUT/commit resumes these
-    // original disk bytes, including after the working files were edited again.
-    const unique = new Map(capture.files.map(file => [file.pin.sha256, file]));
-    const candidates = [...unique.values()],
-      raw = new Set<string>();
-    for (let offset = 0; offset < candidates.length; offset += 100) {
-      const window = candidates.slice(offset, offset + 100);
-      // Lazy authoritative preparation skips stored raw bytes without a separate
-      // missing query. File-backed recipes still need missing-only discovery.
-      const small = exchange.uploadLazyBatch ? window.filter(file => file.pin.size <= 2 * 1024 * 1024) : [];
-      if (small.length) {
-        await exchange.uploadLazyBatch!(
-          small.map(file => ({
-            pin: file.pin,
-            read: () => readFileSync(join(directory, file.path)),
-          })),
-          { batchSize: 100, onRaw: id => raw.add(id) },
-        );
-        // Only exact committed raw members omit descriptor IO. Reused objects
-        // still need current descriptors, including after an unknown reply.
-      }
-      const large = window.filter(file => !exchange.uploadLazyBatch || file.pin.size > 2 * 1024 * 1024);
-      if (large.length) {
-        const missing = new Set(await exchange.missing(large.map(file => file.pin)));
-        for (const file of large)
-          if (missing.has(file.pin.sha256)) await exchange.uploadFile(file.pin, directory, file.path);
-      }
-    }
+    // A retry before the commit below re-sends the staged bytes it still holds: stored members are
+    // skipped, and an uncommitted one is prepared again under its create-only key.
+    if (deferred && !checkoutPathExists(acknowledged))
+      await uploadCapturedFiles(capture, directory, exchange, new Set(), deferred);
+  } else {
+    const raw = new Set<string>();
+    await uploadCapturedFiles(capture, directory, exchange, raw, deferred);
     const changes: SaveChange[] = structuredClone(capture.changes);
     const replacements = changes.filter(change => change.after && !raw.has(change.after.blob));
     for (let offset = 0; offset < replacements.length; offset += 100) {
@@ -301,10 +306,10 @@ async function saveOnce(
     }
     throw error;
   }
-  // The server holds the request and every staged blob it names.
-  writeFileSync(join(directory, 'acknowledged'), '', { mode: 0o600 });
-  dropStagedBlobs(directory);
+  timing?.mark('prepare');
   if (prepared.terminal) {
+    writeFileSync(acknowledged, '', { mode: 0o600 });
+    dropStagedBlobs(directory);
     applyHostedSaveReceipt(root, capture, request, prepared.terminal);
     return prepared.terminal;
   }
@@ -318,11 +323,20 @@ async function saveOnce(
         pin: savePin(value),
         read: () => Buffer.from(saveBytes(value)),
       })),
-      { batchSize: 100 },
+      { batchSize: 100, ...(deferred ? { deferCommit: deferred } : {}) },
     );
   }
+  if (deferred?.length) await exchange.commitObjects!(deferred);
+  // The server holds the request and every staged blob it names.
+  writeFileSync(acknowledged, '', { mode: 0o600 });
+  dropStagedBlobs(directory);
+  timing?.mark('upload');
+  // A server with save-submit-page stages the last page inside submit: one call fewer per save.
+  const lazy = !!exchange.uploadLazyBatch && !!prepared.input,
+    last = lazy && submitPage && pages.length ? pages.length - 1 : null;
   for (const [index, page] of pages.entries()) {
-    if (!exchange.uploadLazyBatch || !prepared.input) await objects.put(Buffer.from(saveBytes(page.value)));
+    if (!lazy) await objects.put(Buffer.from(saveBytes(page.value)));
+    if (index === last) break;
     await exchange.client.mutation(makeFunctionReference<'mutation'>('projectHostedSaves:stage'), {
       ...args,
       index,
@@ -340,13 +354,53 @@ async function saveOnce(
     if (progress.input) await objects.put(Buffer.from(saveBytes(progress.input)));
   }
   const result = JSON.parse(
-    await exchange.client.mutation(makeFunctionReference<'mutation'>('projectHostedSaveJobs:submit'), args),
+    await exchange.client.mutation(
+      makeFunctionReference<'mutation'>('projectHostedSaveJobs:submit'),
+      last === null ? args : { ...args, index: last, page: canonicalPayload(pages[last]!.value) },
+    ),
   );
   markLandStep('saveSubmitted');
+  timing?.mark('submit');
   if (result.outcome) applyHostedSaveReceipt(root, capture, request, result);
   return result;
 }
 
+/** Send the captured changed files. Raw small files share preparation windows (and, with `deferred`,
+ * leave their commit to the caller); large files keep the bounded recipe/chunk path, which commits
+ * itself. A lost PUT/commit resumes these original disk bytes, including after the working files
+ * were edited again. `raw` gains the files this call sent as raw objects. */
+async function uploadCapturedFiles(
+  capture: Awaited<ReturnType<typeof captureHostedSave>>,
+  directory: string,
+  exchange: SaveExchange,
+  raw: Set<string>,
+  deferred: { id: string }[] | undefined,
+) {
+  const unique = new Map(capture.files.map(file => [file.pin.sha256, file]));
+  const candidates = [...unique.values()];
+  for (let offset = 0; offset < candidates.length; offset += 100) {
+    const window = candidates.slice(offset, offset + 100);
+    // Lazy authoritative preparation skips stored raw bytes without a separate
+    // missing query. File-backed recipes still need missing-only discovery.
+    const small = exchange.uploadLazyBatch ? window.filter(file => file.pin.size <= 2 * 1024 * 1024) : [];
+    if (small.length)
+      // Only exact raw members this save sent omit descriptor IO. Reused objects
+      // still need current descriptors, including after an unknown reply.
+      await exchange.uploadLazyBatch!(
+        small.map(file => ({
+          pin: file.pin,
+          read: () => readFileSync(join(directory, file.path)),
+        })),
+        { batchSize: 100, onRaw: id => raw.add(id), ...(deferred ? { deferCommit: deferred } : {}) },
+      );
+    const large = window.filter(file => !exchange.uploadLazyBatch || file.pin.size > 2 * 1024 * 1024);
+    if (large.length) {
+      const missing = new Set(await exchange.missing(large.map(file => file.pin)));
+      for (const file of large)
+        if (missing.has(file.pin.sha256)) await exchange.uploadFile(file.pin, directory, file.path);
+    }
+  }
+}
 /** Advance only the matching baseline marker; working bytes (including newer
  * local edits) are never installed or overwritten by save reconciliation. */
 function applyHostedSaveReceipt(

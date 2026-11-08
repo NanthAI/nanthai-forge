@@ -193,6 +193,20 @@ async function setup(t, options = {}) {
           return s.call('stage', api.stage, args);
         }
         if (name === 'projectHostedSaveJobs:submit') {
+          // save-submit-page: the last page rides on submit and is staged first, as the server does.
+          if (args.page !== undefined) {
+            if (options.legacy)
+              assert(
+                JSON.parse(args.page).changes.every(change => !change.evidence),
+                'strict older save API receives no new metadata',
+              );
+            await s.call('stage', api.stage, {
+              projectId: args.projectId,
+              operationId: args.operationId,
+              index: args.index,
+              page: args.page,
+            });
+          }
           const x = { request: { operationId: args.operationId } };
           const pending = await s.submit(x);
           if (pending.outcome) return JSON.stringify(pending);

@@ -41,7 +41,7 @@ Now and Work collapse large lists into Initiative or decision groups with counts
 
 Verification bounds each test file to ten minutes by default (configurable), reports timed-out file names and terminates their process groups. Local presence contention no longer adds hosted-sync deferrals for unbound or opted-out owners.
 
-Hosted sync and resolve receipts split `hostedWait` into server phases under `timing.server` (`--detail`): dispatch delay, each source step's scheduling wait, run, R2 read/write and Convex call time and counts, the phases it ran, why it stopped and the kinds of objects it read, publication and the client's remaining watch. Small save and sync results publish from the step's own commit without the finalizing action, and the Node source worker no longer loads the CLI's modules at cold start (Issue 1eef1b43).
+Hosted save, sync and resolve receipts split `hostedWait` into server phases under `timing.server` (`--detail`): dispatch delay, each source step's scheduling wait, run, R2 read/write and Convex call time and counts, the phases it ran, why it stopped and the kinds of objects it read, publication and the client's remaining watch. Small save and sync results publish from the step's own commit without the finalizing action, and the Node source worker no longer loads the CLI's modules at cold start. A small save makes one object commit round and no separate `stage` call, and its source step reads baseline, page and input in parallel (Issue 1eef1b43).
 
 Hosted sync/resolve local apply preserves ignored build output and dependency
 links using project ignore rules and Forge source exclusions. Saved source and

@@ -11,6 +11,7 @@ import { hostedOperationRow } from './projectHostedOperations';
 import { isStored } from './projectObjectFields';
 import { invariant } from '../src/errors';
 import { findObject, type ObjectView } from './projectObjectFind';
+import { sourceServerTimingSchema } from './projectSourceStepTiming';
 
 export const saveStateSchema = z
   .object({
@@ -24,6 +25,9 @@ export const saveStateSchema = z
     lastPath: z.string().nullable(),
     jobOperationId: z.uuid(),
     status: z.enum(['staging', 'ready', 'submitted', 'completed', 'stale', 'failed']),
+    /** Server clock at submit and the execution's step split at publication (friction f15db544). */
+    submittedAt: z.number().optional(),
+    serverTiming: sourceServerTimingSchema.optional(),
   })
   .strict();
 export type SaveIdentity = { projectId: Id<'hostedProjects'>; actor: string; operationId: string };

@@ -225,3 +225,27 @@ test('State and manifest uploads overlap, but a failed write prevents a successf
     else assert(await saving);
   }
 });
+
+test('hinted baseline and page are read beside the input, with no descriptor window for them (friction f15db544)', async () => {
+  const plain = fixture(500),
+    expected = await runSmallSourceSave(plain.input, plain.io);
+  const s = fixture(500);
+  const result = await runSmallSourceSave(s.input, s.io, [s.plan.baseline.object, s.plan.pages]);
+  assert.deepEqual(result, expected, 'same exact output as without hints');
+  assert.deepEqual(
+    s.reads.slice(0, 3).map(pin => pin.sha256),
+    [s.plan.baseline.object.sha256, s.plan.pages.sha256, s.input.sha256],
+    'all three reads start before the input is parsed',
+  );
+  assert.equal(s.reads.length, 4, 'nothing is read twice; the changed blob follows');
+  assert.deepEqual(
+    s.windows.map(window => window.map(pin => pin.sha256)),
+    [[s.blob.sha256]],
+    'one descriptor window: the changed file only',
+  );
+  // A hint the plan does not name changes nothing but its own wasted read.
+  const other = fixture(500);
+  const unrelated = other.json({ unrelated: true });
+  assert.deepEqual(await runSmallSourceSave(other.input, other.io, [unrelated]), expected);
+  assert.equal(other.windows.length, 2);
+});

@@ -20,7 +20,6 @@ import { activeStep, sourceStep, rowFor } from './projectConvexSourceActive';
 export { activeStep, sourceStep } from './projectConvexSourceActive';
 import { sourceMutation } from './projectConvexSourceErrors';
 import { hostedWriteProject } from './projectHostedRecords';
-import { saveObject } from './projectHostedSaveStore';
 import { drainSourcePool, requeueSourceBatch } from './projectConvexSourcePool';
 import { ForgeError } from '../src/errors';
 import { sourceOutput, sourceFailure } from './projectSourceStepFields';
@@ -35,10 +34,8 @@ import {
   unknownSourceFailure,
   sourceFailureSchema,
 } from '../src/hosted-source-retry';
-import { presignGet, r2Config } from './r2';
-import { findObject } from './projectObjectFind';
-import { packRange, packHeaders } from '../src/object-pack-range';
 import { recordSourceStep, sourceStepTiming } from './projectSourceStepTiming';
+import { saveStepReads, sourceObjectLocation } from './projectSourceBeginReads';
 import { sourceResultInlineBytes } from './projectConvexSourceTransport';
 import { digest } from '../src/portable-hash';
 const identity = { projectId: v.id('hostedProjects'), jobId: v.string() };
@@ -222,19 +219,11 @@ export const begin = sourceMutation({
     if (batch && batch.status !== 'done') return null;
     const locations = [];
     if (!active.row.cursor) {
-      const descriptor = await saveObject(ctx, args.projectId, active.job.input);
-      const object = await findObject(ctx, args.projectId, active.job.input.sha256);
-      invariant(object, 'SOURCE_UNAVAILABLE', 'Source input is absent.');
-      const url =
-        object.location === 'r2' && object.r2Key
-          ? await presignGet(r2Config(), object.r2Key, packHeaders(packRange(object), object.size))
-          : null;
-      locations.push({
-        descriptor,
-        storageId: url ? null : (object.storageId ?? null),
-        url,
-        ...(object.pack ? { range: packRange(object)! } : {}),
-      });
+      locations.push(await sourceObjectLocation(ctx, args.projectId, active.job.input));
+      // A save's first step also gets its baseline and delta page, so it reads all three at once.
+      if (active.job.jobKind === 'save' && !active.row.batchId)
+        for (const pin of await saveStepReads(ctx, args.projectId, args.jobId))
+          locations.push(await sourceObjectLocation(ctx, args.projectId, pin));
     }
     return canonicalPayload({
       generation: active.row.generation ?? 0,

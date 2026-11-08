@@ -2,7 +2,7 @@
 import { recoverLocalApply } from './hosted-apply-recovery.js';
 import { retainSyncHandoff, clearSyncHandoff } from './hosted-sync-handoff.js';
 import { guideHostedSync, resolveHostedAgent } from './hosted-agent-resolution.js';
-import { syncTiming } from './sync-timing.js';
+import { syncTiming, type StepTimer } from './sync-timing.js';
 import { hostedRecordSchema } from './hosted-records.js';
 import { executeHostedFinish } from './hosted-agent-finish.js';
 import { executeHostedWithdraw } from './hosted-agent-withdraw.js';
@@ -19,7 +19,7 @@ import { checkoutRequired } from './hosted-lane-location.js';
 import { ConvexLaneTransport } from './hosted-lane-transport.js';
 import {
   applyObservedSaveOutcome,
-  overlapEvidenceLevel,
+  saveContract,
   saveHostedLane,
   settlePriorHostedSave,
 } from './hosted-save-client.js';
@@ -460,6 +460,7 @@ export async function executeHostedAgent(
   if (action === 'save') {
     const command = hostedAgentCommandSchemas.save.parse(input);
     checkLocalLane(session, command.laneId);
+    const timing = syncTiming();
     const saved = await saveHostedLane(
       session.root,
       {
@@ -468,12 +469,22 @@ export async function executeHostedAgent(
         ...(command.supersedeFinish ? { supersedeFinish: true } : {}),
       },
       session.exchange,
-      overlapEvidenceLevel(session.capabilities),
+      saveContract(session.capabilities),
       false,
       { action: 'save', parameters: { ...command, operationId: session.journal.operationId } },
       (id, pending) => waitSaveUntil(session, id, pending),
+      timing,
     );
-    return awaitSaveOutcome(session, operationId, saved);
+    const outcome = await awaitSaveOutcome(session, operationId, saved, timing),
+      split = timing.value();
+    if (!outcome || typeof outcome !== 'object') return outcome;
+    // The invocation that saw the outcome keeps its split in the operation journal; a replay answered
+    // from the settled receipt did no save work and returns that original split.
+    const kept =
+      (outcome as { outcome?: unknown }).outcome && Object.keys(split.stepsMs).length
+        ? await session.journal.retain('save-timing', () => split)
+        : session.journal.get<typeof split>('save-timing');
+    return kept ? { ...outcome, timing: kept } : outcome;
   }
   if (action === 'compose')
     return composeAgentSource(session, hostedAgentCommandSchemas.compose.parse(input), operationId);
@@ -703,11 +714,16 @@ const savePending = (value: unknown) => {
 /** One progress subscription for the rest of the caller's budget; no polling or replays. The save
  * is already submitted: an unavailable subscription leaves it pending (its wait resumes it), never
  * turns it into a failure. */
-async function waitSaveUntil(session: HostedAgentSession, operationId: string, pending: unknown) {
+async function waitSaveUntil(
+  session: HostedAgentSession,
+  operationId: string,
+  pending: unknown,
+  observe?: (progress: unknown) => void,
+) {
   const remaining = (session.waitUntil - Date.now()) / 1000;
   if (!savePending(pending) || remaining <= 0) return pending;
   try {
-    return await session.waitSource(operationId, pending, 'Saves', remaining);
+    return await session.waitSource(operationId, pending, 'Saves', remaining, observe);
   } catch {
     return pending;
   }
@@ -715,13 +731,24 @@ async function waitSaveUntil(session: HostedAgentSession, operationId: string, p
 /** A save waits for its own outcome within the agent budget: the job's progress subscription
  * delivers the receipt and the Lane binding advances from it, with no replay or extra call. A save
  * still running at the deadline returns `submitted` (the CLI reports IN_PROGRESS and its wait). */
-async function awaitSaveOutcome(session: HostedAgentSession, operationId: string, saved: unknown) {
+async function awaitSaveOutcome(
+  session: HostedAgentSession,
+  operationId: string,
+  saved: unknown,
+  timing?: StepTimer,
+) {
   if (!savePending(saved)) return saved;
-  const observed = (await waitSaveUntil(session, operationId, saved)) as {
+  let last: unknown;
+  const observed = (await waitSaveUntil(session, operationId, saved, value => {
+    last = value;
+  })) as {
     outcome?: { status: string; result?: unknown };
   } | null;
+  timing?.mark('hostedWait');
+  timing?.server(last);
   if (observed?.outcome) {
     applyObservedSaveOutcome(session.root, operationId, observed as { outcome: { status: string } });
+    timing?.mark('apply');
     return observed;
   }
   return observed ?? saved;

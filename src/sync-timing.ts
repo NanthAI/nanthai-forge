@@ -4,12 +4,19 @@
  * `settle` finishes this client's unfinished save (`save`: resolve's own save and its wait),
  * `submit` pins and sends the request, `hostedWait` covers the server compose and the client's
  * wait for it, `apply` (or `conflict`) writes the result into the checkout or prepares the
- * conflict files, and `select` (resolve) picks the follow-up landing. */
+ * conflict files, and `select` (resolve) picks the follow-up landing. A save (friction f15db544) uses
+ * the same split: `settle` (an earlier unfinished save), `capture` (walk and hash the checkout),
+ * `prepare` (object preparation, the save preparation and the changed-file uploads beside it),
+ * `upload` (the save's metadata pages and the one object commit), `submit` (last page and job
+ * submission), `hostedWait` and `apply` (the checkout marker). A step marked twice (a save repaired
+ * once after WORK_STALE) adds up. */
 export type SyncTiming = {
   totalMs: number;
   stepsMs: Record<string, number>;
   /** Where `hostedWait` went on the server, when the server reports it (friction 84c1497f). */
   server?: ServerSyncTiming;
+  /** Resolve: its save's own split. */
+  save?: SyncTiming;
 };
 /** Numbers, plus `phase` (`from>to`) and `stop` (why the step ended) from current servers. */
 type ServerStep = Record<string, number | string>;
@@ -53,26 +60,44 @@ export function serverSyncTiming(progress: unknown, hostedWaitMs: number): Serve
   };
 }
 
+export type TimingStep =
+  | 'settle'
+  | 'save'
+  | 'capture'
+  | 'prepare'
+  | 'upload'
+  | 'submit'
+  | 'hostedWait'
+  | 'apply'
+  | 'conflict'
+  | 'select';
+export type StepTimer = ReturnType<typeof syncTiming>;
 export function syncTiming(now: () => number = () => performance.now()) {
   const start = now(),
     stepsMs: Record<string, number> = {};
   let previous = start,
-    server: ServerSyncTiming | undefined;
+    server: ServerSyncTiming | undefined,
+    nested: SyncTiming | undefined;
   return {
-    mark(step: 'settle' | 'save' | 'submit' | 'hostedWait' | 'apply' | 'conflict' | 'select') {
+    mark(step: TimingStep) {
       const at = now();
-      stepsMs[step] = Math.max(0, Math.round(at - previous));
+      stepsMs[step] = (stepsMs[step] ?? 0) + Math.max(0, Math.round(at - previous));
       previous = at;
     },
     /** The last hosted wait's server split, from its final progress observation. */
     server(progress: unknown) {
       server = serverSyncTiming(progress, stepsMs.hostedWait ?? 0);
     },
+    /** A nested operation's own split (resolve's save). */
+    nest(value: SyncTiming) {
+      nested = value;
+    },
     value(): SyncTiming {
       return {
         totalMs: Math.max(0, Math.round(previous - start)),
         stepsMs: { ...stepsMs },
         ...(server ? { server } : {}),
+        ...(nested ? { save: nested } : {}),
       };
     },
   };

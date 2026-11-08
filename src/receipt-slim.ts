@@ -178,10 +178,11 @@ function briefStart(result: Json): Json {
   return out;
 }
 
-/** `save`: the saved head and whether anything changed. */
+/** `save`: the saved head, whether anything changed and (as on sync) its total time; the split is --detail. */
 function briefSave(result: Json): Json | undefined {
   const outcome = obj(result.outcome),
-    saved = obj(outcome?.result);
+    saved = obj(outcome?.result),
+    totalMs = obj(result.timing)?.totalMs;
   if (!outcome || outcome.status !== 'completed' || !saved || typeof saved.head !== 'string')
     return undefined;
   return {
@@ -189,6 +190,7 @@ function briefSave(result: Json): Json | undefined {
       status: 'completed',
       result: { head: saved.head, ...(saved.unchanged === true ? { unchanged: true } : {}) },
     },
+    ...(typeof totalMs === 'number' ? { totalMs } : {}),
   };
 }
 

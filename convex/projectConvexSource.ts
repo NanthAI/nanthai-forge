@@ -41,7 +41,16 @@ export const step = internalAction({
         let output;
         try {
           if (state.jobKind === 'save' && !state.cursor && !state.batchId)
-            output = await runSmallSourceSave(state.input, transport.io);
+            output = await runSmallSourceSave(
+              state.input,
+              transport.io,
+              state.locations
+                .slice(1)
+                .map(
+                  (location: { descriptor: { object: { sha256: string; size: number } } }) =>
+                    location.descriptor.object,
+                ),
+            );
           if (!output) {
             // Reuse the already-authorized begin and bounded descriptors on fallback.
             delegated = true;

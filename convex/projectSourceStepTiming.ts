@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import { v, type Infer } from 'convex/values';
+import { z } from 'zod';
+import type { QueryCtx } from './_generated/server';
+import type { Id } from './_generated/dataModel';
 
 /** Which cursor phases a step ran (`from>to`), why it stopped (`done`, or a yield/budget reason from
  * src/hosted-source-step-verify.ts) and how many State manifests, other Forge JSON pages and file
@@ -90,4 +93,28 @@ export function recordSourceStep(
     steps,
     ...(done ? { doneAt: now } : {}),
   };
+}
+/** A sync or save state's copy of its execution split, written once at publication. */
+export const sourceServerTimingSchema = z
+  .object({
+    queuedAt: z.number(),
+    scheduledAt: z.number(),
+    steps: z.array(z.record(z.string(), z.union([z.number(), z.string().max(40)]))).max(16),
+    doneAt: z.number().optional(),
+    publishedAt: z.number(),
+  })
+  .strict();
+/** The execution's split for a publication: one indexed read of its existing step row. */
+export async function sourceServerTiming(
+  ctx: QueryCtx,
+  projectId: Id<'hostedProjects'>,
+  jobId: string,
+): Promise<z.infer<typeof sourceServerTimingSchema> | undefined> {
+  const timing = (
+    await ctx.db
+      .query('projectSourceSteps')
+      .withIndex('by_project_and_job', q => q.eq('projectId', projectId).eq('jobId', jobId))
+      .unique()
+  )?.timing;
+  return timing ? { ...timing, publishedAt: Date.now() } : undefined;
 }

@@ -511,3 +511,17 @@ test('the land submitter prints the full receipt its parent process parses', () 
   assert.equal(overlapBannerOnce(printed.overlapNotice), '');
   markOverlapShown(printed.overlapNotice);
 });
+
+test('a timed save keeps its total and drops the split, as sync does (friction f15db544)', () => {
+  const timing = {
+    totalMs: 2950,
+    stepsMs: { settle: 0, capture: 40, prepare: 700, upload: 900, submit: 300, hostedWait: 1000, apply: 10 },
+  };
+  const full = save();
+  full.result = { ...full.result, timing };
+  const slim = slimReceipt(full);
+  assert.equal(slim.result.totalMs, 2950);
+  assert.equal(slim.result.timing, undefined, 'the split stays in --detail');
+  assert.equal(slim.result.outcome.result.head, sha);
+  assert.equal(slimReceipt(save()).result.totalMs, undefined, 'an untimed save prints no total');
+});

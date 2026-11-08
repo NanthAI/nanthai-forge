@@ -148,17 +148,23 @@ export class ConvexExchange implements ExchangeTransport {
   }
   async uploadLazyBatch(
     objects: { pin: ContentPin; read: () => Buffer | Promise<Buffer> }[],
-    options: { batchSize?: number; onRaw?: (sha256: string) => void } = {},
+    options: {
+      batchSize?: number;
+      onRaw?: (sha256: string) => void;
+      /** Collect the raw objects this call PUT instead of committing them; the caller commits them
+       * with others in one `commitObjects` call. Large (recipe) members still commit themselves. */
+      deferCommit?: { id: string }[];
+    } = {},
   ) {
     if (objects.every(object => !chunked(object.pin)))
-      return this.uploadPhysical(objects, options.batchSize, options.onRaw);
+      return this.uploadPhysical(objects, options.batchSize, options.onRaw, options.deferCommit);
     let uploadedObjects = 0,
       uploadedBytes = 0,
       uploadedLogicalObjects = 0;
     for (const object of objects) {
       const sent = chunked(object.pin)
         ? await this.uploadChunked(object.pin, await object.read())
-        : await this.uploadPhysical([object], options.batchSize, options.onRaw);
+        : await this.uploadPhysical([object], options.batchSize, options.onRaw, options.deferCommit);
       uploadedObjects += sent.uploadedObjects;
       uploadedBytes += sent.uploadedBytes;
       uploadedLogicalObjects += (
@@ -237,15 +243,26 @@ export class ConvexExchange implements ExchangeTransport {
     });
     return { uploadedObjects, uploadedBytes, uploadedLogicalObjects: uploadedObjects ? 1 : 0 };
   }
+  /** Commit raw uploads collected with `deferCommit`: one verifying action per 100 objects. */
+  async commitObjects(objects: { id: string }[]) {
+    const pages: { id: string }[][] = [];
+    for (let offset = 0; offset < objects.length; offset += 100)
+      pages.push(objects.slice(offset, offset + 100));
+    await mapExchange(pages, 4, page =>
+      this.client.action(action('projectObjectCommit:commitBatch'), { objects: page }),
+    );
+  }
   private uploadPhysical(
     objects: { pin: ContentPin; read: () => Buffer | Promise<Buffer> }[],
     batchSize = this.uploadBatchSize,
     onRaw?: (sha256: string) => void,
+    deferCommit?: { id: string }[],
   ) {
     return uploadPhysicalObjects(this.client, this.projectId, objects, {
       blobs: this.blobs,
       ...(batchSize ? { batchSize } : {}),
       ...(onRaw ? { onRaw } : {}),
+      ...(deferCommit ? { deferCommit } : {}),
     });
   }
   private async uploadRawBatch(

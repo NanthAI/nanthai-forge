@@ -7,7 +7,7 @@ import { wakeLifecycleSave } from './projectHostedLifecycleCascade';
 import { makeFunctionReference } from 'convex/server';
 import { mutation, internalMutation, internalAction } from './cliServer';
 import { loadSave, saveObject, writeSaveState } from './projectHostedSaveStore';
-import { hostedSaveInput } from './projectHostedSaves';
+import { hostedSaveInput, stageSavePage } from './projectHostedSaves';
 import { enqueueSourceJob, loadSourceJob } from './projectSourceJobs';
 import { publishHostedSave, saveForJob } from './projectHostedSavePublish';
 import { canonicalPayload, hostedPayloadHash } from '../src/hosted-source-operation';
@@ -24,15 +24,28 @@ import { packHeaders, packRange, type PackRange } from '../src/object-pack-range
 const identity = { projectId: v.id('hostedProjects'), operationId: v.string() },
   jobIdentity = { projectId: v.id('hostedProjects'), jobId: v.string() };
 export const submit = mutation({
-  args: identity,
+  args: {
+    ...identity,
+    /** The last delta page (contract feature save-submit-page), staged here first. */
+    index: v.optional(v.number()),
+    page: v.optional(v.string()),
+  },
   returns: v.string(),
   handler: async (ctx, input) => {
     try {
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to save hosted source.');
-      const auth = { ...input, actor: user.subject },
-        { row, state, operation } = await loadSave(ctx, auth, false);
-      if (operation.terminal) return canonicalPayload(operation.terminal);
+      const { index, page, ...identified } = input,
+        auth = { ...identified, actor: user.subject };
+      const prior = await loadSave(ctx, auth, false);
+      if (prior.operation.terminal) return canonicalPayload(prior.operation.terminal);
+      invariant(
+        (index === undefined) === (page === undefined),
+        'BAD_ARGUMENT',
+        'Submit a delta page with its index.',
+      );
+      if (page !== undefined) await stageSavePage(ctx, auth, { index: index!, page });
+      const { row, state, operation } = page === undefined ? prior : await loadSave(ctx, auth, false);
       await loadSave(ctx, auth);
       if (!state.request.pages)
         return canonicalPayload(await publishHostedSave(ctx, { ...auth, result: null }));
@@ -73,7 +86,7 @@ export const submit = mutation({
             ids: { job: row.jobId },
           },
         });
-        await writeSaveState(ctx, row._id, { ...state, status: 'submitted' });
+        await writeSaveState(ctx, row._id, { ...state, status: 'submitted', submittedAt: Date.now() });
       }
       const job = await loadSourceJob(ctx, input.projectId, row.jobId);
       await ctx.scheduler.runAfter(

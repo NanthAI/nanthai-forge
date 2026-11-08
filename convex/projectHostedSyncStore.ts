@@ -10,6 +10,7 @@ import { syncRequestSchema, syncWorkSchema, syncInputSchema, SYNC_ALGORITHM } fr
 import { hostedLaneSchema } from '../src/hosted-lane';
 import { invariant } from '../src/errors';
 import type { SaveIdentity } from './projectHostedSaveStore';
+import { sourceServerTimingSchema } from './projectSourceStepTiming';
 export const syncStateSchema = z
   .object({
     request: syncRequestSchema,
@@ -27,16 +28,7 @@ export const syncStateSchema = z
     status: z.enum(['ready', 'submitted', 'completed', 'stale', 'failed']),
     /** Server clock at submit and the execution's step split at publication (friction 84c1497f). */
     submittedAt: z.number().optional(),
-    serverTiming: z
-      .object({
-        queuedAt: z.number(),
-        scheduledAt: z.number(),
-        steps: z.array(z.record(z.string(), z.union([z.number(), z.string().max(40)]))).max(16),
-        doneAt: z.number().optional(),
-        publishedAt: z.number(),
-      })
-      .strict()
-      .optional(),
+    serverTiming: sourceServerTimingSchema.optional(),
   })
   .strict();
 export type SyncState = z.infer<typeof syncStateSchema>;

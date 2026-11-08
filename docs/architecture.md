@@ -1143,8 +1143,17 @@ Each step reports its run, R2 read/write and Convex call time with its commit, p
 the cursor phases it ran (`phase`, `from>to`), why it stopped (`stop`: `done`,
 `fanout`, a `bytes`/`objects`/`time` budget, or another named yield) and how many
 State manifests, other Forge JSON pages and file blobs it read; the execution's step
-row keeps them (at most 16 entries) and a sync's state carries them to the receipt's
-`timing.server` split (dispatch, steps, publish, watch).
+row keeps them (at most 16 entries) and a sync's or save's state carries them to the receipt's
+`timing.server` split (dispatch, steps, publish, watch). Save receipts also split the client
+side (`settle`, `capture`, `prepare`, `upload`, `submit`, `hostedWait`, `apply`); resolve nests
+its save's split under `timing.save`.
+
+A save commits the R2 objects of its changed blobs and its metadata pages in one
+`commitBatch` round, after both uploads; the delta is acknowledged only after that commit.
+When the server advertises `save-submit-page`, submit stages the last delta page itself, so a
+one-page save makes no `stage` call. For a one-page raw save, `begin` hands the step the
+locations of its baseline State and its page beside the input, so all three download in
+parallel and the changed blobs' descriptors resolve during the baseline read.
 
 A trusted source-job completion schedules the save finalizer independently of the
 editing client. A save, sync or compose step whose result manifest is at most 64 KiB passes
