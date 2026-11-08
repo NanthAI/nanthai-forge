@@ -381,9 +381,15 @@ export async function runSourceStep(cursor: SourceStepCursor, io: StepTransport)
       })();
     },
   };
-  // Set after this action ran a small calculation set itself: the merge re-enters once on the
-  // same, already parsed States (no new reads) instead of yielding to a fresh action.
+  // Set after this action ran a small calculation set itself: the merge re-enters on the same,
+  // already parsed States (no new reads) instead of yielding to a fresh action. A recursive merge
+  // can re-enter once per round; each round holds at most 100 requests and 1 MiB of input, so this
+  // stays bounded although it bypasses the step's object/time budget.
   let recompute = false;
+  // Blobs this action's inline calculations published. Their object rows exist only once the step
+  // commits, so a later round that reads one (a virtual-base merge result used as the next base)
+  // must run in a fresh action.
+  const created = new Set<string>();
   while (c.phase !== 'done' && (!full(m) || (recompute && !m.yielded))) {
     if (c.phase === 'input') {
       c.plan = parseSourcePlan(await readJson(io, c.input, m));
@@ -452,7 +458,8 @@ export async function runSourceStep(cursor: SourceStepCursor, io: StepTransport)
         } catch (error) {
           if (!(error instanceof SourceCalculationsPending)) throw error;
         }
-        if (pending.size) {
+        if (pending.size && needsCreated([...pending.values()], created)) m.yielded = true;
+        else if (pending.size) {
           const tasks = await calculationWindows([...pending.values()], io);
           // A fan-out round (fork, task actions, join, then a fresh step that re-reads every
           // State) costs seconds; a few small text merges cost milliseconds here.
@@ -466,8 +473,10 @@ export async function runSourceStep(cursor: SourceStepCursor, io: StepTransport)
                 result = await runSourceTask(task, previous, io);
                 previous = result.progress;
               } while (!result.done);
-              for (const value of result.progress.calculations ?? [])
+              for (const value of result.progress.calculations ?? []) {
                 (c.calculations ??= {})[value.key] = value;
+                if (value.blob) created.add(value.blob);
+              }
             }
           // The same heap re-enters only when this action read at most one step of bytes; bigger
           // trees still skip the fan-out round but recompute in a fresh action.
@@ -488,14 +497,25 @@ export async function runSourceStep(cursor: SourceStepCursor, io: StepTransport)
     },
   };
 }
-/** Calculation sets this step runs itself instead of fanning out: at most 16 merge windows,
- * any number of single-blob marker scans, all input blobs totalling at most 1 MiB. Larger
- * sets keep the parallel, separately metered tasks. */
+/** Calculation sets this step runs itself instead of fanning out: all input blobs totalling at
+ * most 1 MiB. A round already holds at most 100 requests (the journal stops there), and one merge
+ * task packs up to 100 of them, so the 16-task cap rarely binds. Marker scans run one after another
+ * here (one read each) instead of in parallel slots. Larger sets keep the parallel, separately
+ * metered tasks. */
 export const inlineCalculationBytes = 1024 * 1024;
 function inlineCalculations(tasks: { kind: string; refs: WorkerObject[] }[]) {
   return (
     tasks.filter(task => task.kind !== 'markers').length <= 16 &&
     tasks.reduce((sum, task) => sum + task.refs.reduce((n, ref) => n + ref.object.size, 0), 0) <=
       inlineCalculationBytes
+  );
+}
+function needsCreated(
+  requests: import('./hosted-source-merge-journal.js').SourceCalculation[],
+  created: Set<string>,
+) {
+  return (
+    created.size > 0 &&
+    requests.some(r => [r.item.base, r.item.left, r.item.right].some(f => f && created.has(f.blob)))
   );
 }

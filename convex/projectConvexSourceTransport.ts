@@ -114,7 +114,8 @@ export function convexSourceTransport(
       invariant(remaining.length < pending.length, 'SOURCE_UNAVAILABLE', 'Object window made no progress.');
       // As with ordinary resolution, complete the byte-bounded descriptor pages
       // before handing the frontier to sourceWindows. Hints warm only this
-      // action's location cache; they never select byte reads or supply edges.
+      // action's location cache and never select byte reads; the only edges they
+      // supply are the stateParents the trusted worker recorded on a hint's row.
       const rest = remaining.length ? await io.probeStates!(remaining) : null;
       const unavailable = [...result.unavailable, ...(rest?.unavailable ?? [])];
       return {

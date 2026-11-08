@@ -213,7 +213,9 @@ never change. Ancestry preparation takes a State's parents from its descriptor w
 recorded and reads the manifest only for older rows, so a sync or resolve far behind
 main reads object rows, not the whole tree of every State in between. Descriptor
 prefetch follows recorded parents to warm a window of up to 100 rows in one call, so
-calls do not grow with distance either.
+calls do not grow with distance either. This holds only for States the hosted worker
+saved: GitHub-imported history and rows saved before parents were recorded carry no
+parents, so a walk into them still reads their manifests.
 
 For verified selected tips with authenticated levels, preparation uses a
 generation-ordered paint walk with one colour per tip, extending Git's two-colour
@@ -1047,10 +1049,12 @@ cursor reference. Compressed immutable metadata sections are reused across steps
 queue advancement writes only the small cursor. A global completion-driven pool
 limits independent child calculations to four computation slots, configurable
 downward. Children persist exact outcomes; the last completion schedules the
-join without polling. A small calculation set (at most 16 merge windows plus any
-single-blob marker scans, with at most 1 MiB of input blobs) runs inside the step that
-found it instead of a fan-out round, which would otherwise cost a fork, a join and a
-fresh step. Native text calculations are journaled per path, while
+join without polling. A small calculation set (at most 1 MiB of input blobs; a
+round holds at most 100 requests) runs inside the step that found it instead of a
+fan-out round, which would otherwise cost a fork, a join and a fresh step. The step
+then re-runs the merge, once per round of a recursive merge. A round that needs a
+blob this step created (a virtual-base merge result used as the next base) yields to
+a fresh step, since that blob's object row exists only after the step commits. Native text calculations are journaled per path, while
 final State assembly and source publication remain serial. Raw/recipe verification proceeds in windows of at most 100
 objects or about 8 MiB. Recipe traversal and SHA-256 progress survive action
 boundaries. Ancestry retains verified parent links; full file trees are read only
