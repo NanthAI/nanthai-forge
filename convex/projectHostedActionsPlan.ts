@@ -14,6 +14,7 @@ import { canonicalPayload } from '../src/hosted-source-operation';
 import { invariant } from '../src/errors';
 import { secretAllowEvidenceSchema } from '../src/secret-allow';
 import { validCommandPlan } from '../src/check-command-scope';
+import { selectionFallbackSchema } from '../src/fallback-reasons';
 export const prepare = internalMutation({
   args: {
     ...sessionArgs,
@@ -157,6 +158,9 @@ export const prepare = internalMutation({
       ]);
       run.plan = plan;
       run.planDigest = checkPin(plan);
+      // A runner's fallback code rides this plan write; unknown values are dropped (7c2e69e1).
+      const fallback = selectionFallbackSchema.safeParse(recipe.selection.fallback);
+      if (fallback.success) run.fallback = fallback.data;
       run.status = 'running';
       if (run.gate) await ctx.db.patch(row._id, { gate: run.gate });
       await writeHostedCheck(ctx, row._id, run);

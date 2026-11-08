@@ -55,6 +55,8 @@ export function formatMetricReport(current: MetricsSurface, before?: MetricsSurf
         `| ${row.cause} | ${row.attempts} | ${number(row.elapsedMinutes)} | ${number(row.runnerMinutes)} | ${number(row.discardedPassedRunnerMinutes)} | ${row.unknownElapsedAttempts} / ${row.unknownRunnerRuns} |`,
     ),
     `Main-race re-checks: ${current.totals.waste.mainRaceRecheckRuns} runs / ${number(current.totals.waste.mainRaceRecheckRunnerMinutes)} runner minutes; ${recheckShare(current)}. ${cell(current.totals.waste.gaps.join(' '))}`,
+    '',
+    ...formatFallbacks(current),
     `Finish-to-main p50 (trusted actors): ${number(current.totals.finishToMain.p50Minutes)} minutes. ${cell(current.totals.finishToMain.gaps.join(' '))}`,
     '',
     ...formatFlakes(current).map(line => (line.startsWith('  ') ? `- ${line.trim()}` : line)),
@@ -66,6 +68,20 @@ function recheckShare(current: MetricsSurface) {
   const waste = current.totals.waste;
   const races = waste.byCause.find(row => row.cause === 'main-race')?.attempts ?? 0;
   return `${waste.mainRaceScopedRecheckRuns} scoped (${number(waste.mainRaceScopedRecheckRunnerMinutes)} runner min); ${races ? number(waste.mainRaceRecheckRunnerMinutes / races) : 'n/a'} recheck runner min per main-race attempt`;
+}
+/** Fast-path fallbacks by stage and reason; each limitation reason is flagged once (7c2e69e1). */
+export function formatFallbacks(current: MetricsSurface) {
+  const value = current.totals.fallbacks;
+  if (!value.byReason.length)
+    return [`Fast-path fallbacks: none in window${value.partial ? ' · partial' : ''}`];
+  return [
+    `Fast-path fallbacks: ${value.total} (${value.limitations} limitation)${value.partial ? ' · partial' : ''}`,
+    ...value.byReason.map(
+      row =>
+        `  ${row.kind === 'limitation' ? '⚑ limitation' : 'genuine'} · ${row.stage} ${row.reason} ×${row.count}`,
+    ),
+    ...value.gaps.map(gap => `  ${gap}`),
+  ];
 }
 const FLAKE_LINES = 10;
 const ms = (value: number) => `${Number((value / 1000).toFixed(1))}s`;
@@ -115,6 +131,7 @@ export function formatMetrics(current: MetricsSurface) {
           `Waste ${row.cause}: ${number(row.elapsedMinutes)} elapsed / ${number(row.runnerMinutes)} runner min; discarded passed ${number(row.discardedPassedRunnerMinutes)} runner min`,
       ),
     `Main-race re-checks: ${current.totals.waste.mainRaceRecheckRuns} runs / ${number(current.totals.waste.mainRaceRecheckRunnerMinutes)} runner min; ${recheckShare(current)}`,
+    ...formatFallbacks(current),
     ...formatFlakes(current),
     'Daily values and named gaps: --json; report: --report FILE.md',
   ].join('\n');
@@ -136,6 +153,8 @@ export function metricsHeadline(t: MetricTotals) {
     gaps: [...new Set(Object.values(t).flatMap(m => m.gaps))],
     diskWarning: t.disk.warning,
     placementWarning: t.placement.warning,
+    /** One line naming each fast-path limitation reason in the window, or null (7c2e69e1). */
+    fallbackWarning: t.fallbacks.warning,
   };
 }
 export type MetricsHeadline = ReturnType<typeof metricsHeadline>;
@@ -149,5 +168,6 @@ export function formatMetricsHeadline(value: MetricsHeadline) {
       .join(', ')}`,
     ...(value.diskWarning ? [value.diskWarning] : []),
     ...(value.placementWarning ? [value.placementWarning] : []),
+    ...(value.fallbackWarning ? [value.fallbackWarning] : []),
   ];
 }

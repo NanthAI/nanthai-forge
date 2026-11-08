@@ -27,6 +27,7 @@ const identity = { projectId: v.id('hostedProjects'), submissionId: v.string() }
 /** Why the first check cannot carry this landing before any analysis (receipt field). */
 export type ReuseIneligible =
   | 'not-eligible'
+  | 'reuse-policy'
   | 'main-red'
   | 'audit-debt'
   | 'text-conflict'
@@ -60,15 +61,15 @@ export async function reuseDecision(ctx: QueryCtx | MutationCtx, input: LandingI
   });
   const project = await hostedWriteProject(ctx, input.projectId, previous.actor.id, previous.authorityEpoch);
   const policy = effectivePolicy(project);
+  // The project's policy keeps the exact recheck (a choice, not a Forge limitation).
   if (
     policy.acceptance.hostedCrossHeadReuse === false ||
     policy.acceptance.mode !== 'auto-on-pass' ||
     // Cheap bound before any other read: false even under the most generous trust.
-    !reducedEvidenceActor(policy, project, previous.actor, policy.trust?.enabled ? bestTrust : null) ||
-    !previous.check ||
-    !previous.candidate.head ||
-    previous.semanticPlan?.members.length
+    !reducedEvidenceActor(policy, project, previous.actor, policy.trust?.enabled ? bestTrust : null)
   )
+    return no('reuse-policy');
+  if (!previous.check || !previous.candidate.head || previous.semanticPlan?.members.length)
     return no('not-eligible');
   const checked = previous.crossHeadProof?.checked ?? {
     id: previous.candidate.id,
@@ -96,7 +97,7 @@ export async function reuseDecision(ctx: QueryCtx | MutationCtx, input: LandingI
   const trust = policy.trust?.enabled
     ? await trustGateReader(ctx, project)(previous.actor.id, candidate.governance?.paths ?? null)
     : null;
-  if (!reducedEvidenceActor(policy, project, previous.actor, trust)) return no('not-eligible');
+  if (!reducedEvidenceActor(policy, project, previous.actor, trust)) return no('reuse-policy');
   let run;
   try {
     run = await requireHostedCheckEvidence(ctx, {
@@ -258,7 +259,9 @@ export const complete = internalMutation({
       row.reuseLease.until <= Date.now()
     )
       return null;
-    const current = await reuseContext(ctx, input);
+    // The same decision reuseContext makes; a refusal keeps its own reason.
+    const decision = await reuseDecision(ctx, input);
+    const current = 'reason' in decision ? null : decision;
     const proof = input.proof && current ? crossHeadProofSchema.parse(JSON.parse(input.proof)) : undefined;
     if (proof && current)
       invariant(
@@ -279,7 +282,7 @@ export const complete = internalMutation({
       value,
       proof || undefined,
       undefined,
-      proof ? undefined : current ? (input.reason ?? 'source-unavailable') : 'not-eligible',
+      proof ? undefined : 'reason' in decision ? decision.reason : (input.reason ?? 'source-unavailable'),
     );
     return null;
   },

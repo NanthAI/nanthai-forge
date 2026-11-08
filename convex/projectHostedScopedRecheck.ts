@@ -45,3 +45,14 @@ export async function scopedRecheckBasis(
   }
   return previous.recheck;
 }
+/** Why a main-race recheck under the contract gate could not be scoped (attempt
+ * `scopedFallback`, src/fallback-reasons.ts): its own full pass is not exact evidence. */
+export const scopedRecheckFallback = (
+  previous: HostedLandingAttempt,
+  basis: ScopedRecheckBasis | undefined,
+) =>
+  !basis &&
+  previous.policy.acceptance.gate === 'contract' &&
+  previous.policy.acceptance.scopedRecheck !== false
+    ? ('scoped-no-evidence' as const)
+    : undefined;

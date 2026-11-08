@@ -40,6 +40,7 @@ import { startSampler, rateLimit, clockOffsets } from './samplers.mjs';
 import { keepTranscript, readSession } from './transcripts.mjs';
 import { scanTask } from './contamination.mjs';
 import { forgeTask, githubTask, cellCoordination } from './coordination.mjs';
+import { cellFallbacks } from './fallbacks.mjs';
 import { captureChanges, realConflicts } from './hunks.mjs';
 import { scriptedForge, dryGroup } from './scripted.mjs';
 import { removeWorkspace } from './evidence.mjs';
@@ -545,21 +546,18 @@ try {
 } catch (error) {
   coordination = { error: String(error.message).slice(0, 300) };
 }
+// Per-reason fast-path fallback counts, from the same metrics reply (7c2e69e1).
+let forgeFallbacks = null;
 if (forge)
   try {
-    writeFileSync(
-      join(dir, 'forge-metrics.json'),
-      JSON.stringify(
-        await forge.nf(join(ws, '.anchor'), 'metrics', {
-          url: config.forge.url,
-          projectId: config.forge.projectId,
-          from: since,
-          to: until,
-        }),
-        null,
-        1,
-      ),
-    );
+    const metrics = await forge.nf(join(ws, '.anchor'), 'metrics', {
+      url: config.forge.url,
+      projectId: config.forge.projectId,
+      from: since,
+      to: until,
+    });
+    writeFileSync(join(dir, 'forge-metrics.json'), JSON.stringify(metrics, null, 1));
+    forgeFallbacks = cellFallbacks(metrics);
   } catch (error) {
     coordination.forgeMetricsError = String(error.stdout ?? error.message).slice(0, 300);
   }
@@ -669,6 +667,7 @@ writeResult({
   agent: dry ? 'scripted-no-model' : agentOf(config),
   contamination,
   coordination,
+  forgeFallbacks,
   tokens,
   // Claude reports model API time; Codex does not (null), wall time per task is elapsedSeconds.
   agentApiSeconds: records.some(r => r.agent?.usage?.durationApiMs != null)

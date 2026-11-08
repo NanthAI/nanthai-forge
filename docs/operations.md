@@ -198,6 +198,38 @@ The whole `metrics` action, capability discovery included, ends within 100 s (un
 agent shell's two-minute limit); a larger window ends with `METRICS_TIMEOUT`, changes
 nothing and names the one-day command to run next.
 
+#### Fallback reasons
+
+Each time Forge takes a slower path than its fast one, the decision records a stable
+reason code on the write it already makes (no extra Convex call), and `metrics` counts
+them per stage and reason in `totals.fallbacks` (`byReason`, `limitations`, `warning`).
+The list of codes and their kind lives in `src/fallback-reasons.ts`:
+
+| Stage | Recorded on | Codes |
+| --- | --- | --- |
+| `first-check` | receipt `firstCheck.reason` (an admitted landing that rechecked) | reuse codes below |
+| `main-race` | landing attempt `recheckReason` (main moved; the attempt rechecked) | reuse codes below |
+| `scoped-recheck` | landing attempt `scopedFallback` | `scoped-no-evidence` |
+| `contract-gate` | the run's server gate (`gate.reason` when the contract gate went full) | `contract-supervised`, `contract-actor`, `contract-protected-paths`, `contract-trust`, `contract-none`, `main-red`, `audit-debt`, `contract-other` |
+| `selection` | check run `fallback`, from the runner's pinned selection | `contract-full`, `docs-paths-undeclared`, `test-runner-unavailable`, `scoped-base-unavailable`, `scoped-root-config`, `scoped-unclassified` |
+
+Reuse codes: `not-eligible`, `not-tried`, `cohort`, `reuse-policy`, `main-red`,
+`audit-debt`, `text-conflict`, `check-evidence`, `audit-baseline`, `path-overlap`,
+`tested-doc`, `global-risk`, `composition-not-exact`, `unsupported-mode`,
+`checked-not-full`, `audit-not-full`, `source-unavailable`, `analysis-expired`.
+
+A **limitation** is a fallback where Forge could not use its fast path for this repository
+or change shape (for example `unsupported-mode`: a changed symlink or submodule;
+`docs-paths-undeclared`: a Markdown-only change ran an opaque command whole because its
+check declares no `docsPaths`). A **genuine** fallback is the right outcome: a real
+conflict or risk (`path-overlap`, `global-risk`, `text-conflict`, red main), or the
+project's own policy (`reuse-policy`, supervised acceptance). An unknown code counts as a
+limitation. Text output flags each limitation reason (`⚑ limitation`); the status metrics
+headline shows one `fallbackWarning` line naming them, computed on that read and never
+polled. Each main-race row in `totals.waste.rows` carries the `recheckReason` of the attempt
+that replaced it. The exit bench copies the counts into each Forge cell's `result.json`
+(`forgeFallbacks`).
+
 `landings {from,to,limit?,cursor?}` (`nforge agent ROOT landings`) is the cheap read for
 replays and cost capture: accepted landings in the UTC window [from,to) by commit time,
 oldest first, at most 30 per page (default 20) and under 64 KB, read in one query per page

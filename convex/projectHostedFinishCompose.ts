@@ -33,7 +33,7 @@ import { hostedLandingStateSchema, landingObservation } from '../src/hosted-land
 import { invariant } from '../src/errors';
 import { validCrossHeadProof, type CrossHeadProof } from '../src/hosted-cross-head-proof';
 import { invalidatePipeline } from './projectHostedLandingPipeline';
-import { scopedRecheckBasis } from './projectHostedScopedRecheck';
+import { scopedRecheckBasis, scopedRecheckFallback } from './projectHostedScopedRecheck';
 import { requireHostedCheckEvidence } from './projectHostedCheckRead';
 async function wakeAfterPrecompose(
   ctx: MutationCtx,
@@ -448,6 +448,10 @@ export async function installFinishCompose(
     !proof && previous && candidate.result.status === 'clean'
       ? await scopedRecheckBasis(ctx, previous)
       : undefined;
+  const scopedFallback =
+    !proof && previous && candidate.result.status === 'clean'
+      ? scopedRecheckFallback(previous, recheck)
+      : undefined;
   const attempt = await pinLandingAttempt(ctx, {
     ...(recheck ? { recheck } : {}),
     ...input,
@@ -470,6 +474,12 @@ export async function installFinishCompose(
   if (proof && previous?.check) {
     attempt.check = previous.check;
     attempt.crossHeadProof = proof;
+  }
+  // The main-race row names why it rechecked, on the attempt this install already writes (7c2e69e1).
+  // A recompose on the same main is not a race and records nothing, so one refusal counts once.
+  if (!proof && previous && previous.main.head !== pending.main.head) {
+    attempt.recheckReason = recheckReason ?? 'not-eligible';
+    if (scopedFallback) attempt.scopedFallback = scopedFallback;
   }
   await insertLandingAttempt(ctx, attempt);
   await writeFinish(ctx, row, { ...value, pending: null });

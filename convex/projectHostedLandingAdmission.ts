@@ -276,9 +276,15 @@ export async function bindAdmissionProof(
   check: NonNullable<HostedLandingAttempt['check']>,
 ) {
   const { row, state, attempt } = selected;
-  const { deferredCheck: _deferred, memberCandidate: _member, ...pins } = original;
+  const {
+    deferredCheck: _deferred,
+    memberCandidate: _member,
+    recheckReason: _reason,
+    scopedFallback: _scoped,
+    ...pins
+  } = original;
   void _deferred;
-  void _member;
+  void [_member, _reason, _scoped];
   const next = {
     ...pins,
     operations: {

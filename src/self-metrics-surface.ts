@@ -3,6 +3,7 @@ import { calculateSelfMetrics } from './self-metrics.js';
 import { calculateWaste } from './self-metrics-waste.js';
 import { observations, during, percentile } from './self-metrics-joins.js';
 import { flakeList } from './self-metrics-flakes.js';
+import { fallbackMetric } from './self-metrics-fallbacks.js';
 import { z } from 'zod';
 import { invariant } from './errors.js';
 import type { MetricPeriod, MetricRecords } from './self-metrics-types.js';
@@ -167,6 +168,11 @@ export function metricTotals(
       },
       records.runs.filter(run => run.flaky && during(run.endedAt ?? run.at, period)).length,
     ),
+    // Fast-path fallbacks by stage and reason; limitations are flagged (7c2e69e1).
+    fallbacks: (() => {
+      const value = fallbackMetric(records, period);
+      return wrap(value, value.total);
+    })(),
     placement: wrap(result.placement, records.placement ? 1 : 0),
     disk: wrap(
       result.disk,

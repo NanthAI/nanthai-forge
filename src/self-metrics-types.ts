@@ -22,6 +22,8 @@ export type MetricMove = {
   reused?: boolean | undefined;
   /** Main source revision of the receipt (hosted). */
   revision?: number | undefined;
+  /** Receipt `firstCheck.reason` when an admitted landing rechecked (hosted, 7c2e69e1). */
+  firstCheckRecheck?: string | undefined;
 };
 /** A hosted main-audit event, as projected for the back-stop metric. */
 export type MetricMainAuditEvent = {
@@ -55,6 +57,12 @@ export type MetricSubmission = {
   operationId?: string | undefined;
   mainRace?: boolean;
   recheck?: boolean;
+  /** Why this attempt rechecked instead of carrying its parent's check (hosted, 7c2e69e1). */
+  recheckReason?: string | undefined;
+  /** Why that recheck ran in full instead of scoped. */
+  scopedFallback?: string | undefined;
+  /** On a raced attempt: the recheck reason of the attempt that replaced it. */
+  raceRecheckReason?: string | undefined;
 };
 export type MetricRun = {
   head?: string;
@@ -73,6 +81,9 @@ export type MetricRun = {
   reusedFrom?: string | undefined;
   reuseKey?: string | undefined;
   started?: boolean | undefined;
+  /** Why the runner could not narrow or skip the command; why the contract gate went full (hosted). */
+  selectionFallback?: string | undefined;
+  gateFallback?: string | undefined;
   /** Files that recovered on the single retry (hosted runs projection only). */
   flaky?: import('./self-metrics-flakes.js').RunFlakes | undefined;
 };
@@ -114,6 +125,8 @@ export type MetricRecords = {
   mainAudits?: { events: MetricMainAuditEvent[]; complete: boolean };
   /** A hosted acceptances page predates the reuse projection. */
   reuseUnprojected?: boolean;
+  /** A hosted page predates the fallback-reason projection (7c2e69e1). */
+  fallbacksUnprojected?: boolean;
   gaps: string[];
   landingKindsComplete?: boolean;
   lifecycleCoverageGaps?: string[];

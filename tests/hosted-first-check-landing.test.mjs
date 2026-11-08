@@ -59,6 +59,17 @@ async function wave(t, options = {}) {
   return f;
 }
 const runCount = f => f.runs().length;
+/** recheckReason of every attempt that replaced a raced attempt (main moved), and of no other. */
+const raceReasons = f => {
+  const attempts = [...f.tables.projectHostedLandingAttempts.values()].map(row => JSON.parse(row.value));
+  const byId = new Map(attempts.map(attempt => [attempt.id, attempt]));
+  return attempts
+    .filter(
+      attempt => attempt.recheckReason || attempt.main.head !== byId.get(attempt.parentAttemptId)?.main.head,
+    )
+    .filter(attempt => attempt.parentAttemptId)
+    .map(attempt => attempt.recheckReason ?? null);
+};
 const recheckReasons = f =>
   [...f.tables.projectHostedLandingRequests.values()].map(r => r.admission?.recheck ?? null);
 const budget = f => ({
@@ -101,7 +112,9 @@ test('first-check landing costs no more Convex calls or DB IO than the recheck i
   const fast = await wave(t, disjoint);
   const slow = await wave(t, { ...disjoint, crossHeadReuse: false });
   assert.deepEqual(slow.reuseDecisions, []);
-  assert.deepEqual(receipts(slow)[1].firstCheck, { landedOn: 'recheck', reason: 'not-eligible' });
+  // The project's own policy keeps the recheck: a genuine fallback, not a Forge limitation (7c2e69e1).
+  assert.deepEqual(receipts(slow)[1].firstCheck, { landedOn: 'recheck', reason: 'reuse-policy' });
+  assert.deepEqual(raceReasons(slow), ['reuse-policy']);
   assert.equal(runCount(slow), 3);
   const [a, b] = [budget(fast), budget(slow)];
   t.diagnostic(`first-check ${JSON.stringify(a)} recheck ${JSON.stringify(b)}`);
@@ -231,6 +244,8 @@ test('own check command: a change that replaces a symlink rechecks (unsupported-
   );
   assert.deepEqual(f.reuseDecisions, ['unsupported-mode']);
   assert.deepEqual(receipts(f)[1].firstCheck, { landedOn: 'recheck', reason: 'unsupported-mode' });
+  // The main-race attempt names the same limitation, on the attempt the install already writes (7c2e69e1).
+  assert.deepEqual(raceReasons(f), ['unsupported-mode']);
   assert.equal(runCount(f), 3);
 });
 

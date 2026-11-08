@@ -43,6 +43,7 @@ const rowSchemas = {
     inputPin: pin,
     reused: z.boolean().optional(),
     revision: z.number().int().nonnegative().nullable().optional(),
+    firstCheckRecheck: z.string().min(1).max(64).nullable().optional(),
   }),
   requests: z.object({
     id: z.string(),
@@ -98,6 +99,8 @@ const rowSchemas = {
       })
       .nullable()
       .optional(),
+    selectionFallback: z.string().min(1).max(64).nullable().optional(),
+    gateFallback: z.string().min(1).max(64).nullable().optional(),
   }),
   attempts: z.object({
     id: z.string(),
@@ -107,6 +110,8 @@ const rowSchemas = {
     mainHead: z.string().nullable(),
     inputPin: pin,
     runId: z.string().nullable(),
+    recheckReason: z.string().min(1).max(64).nullable().optional(),
+    scopedFallback: z.string().min(1).max(64).nullable().optional(),
   }),
   lanes: z.object({ id: z.string(), version: z.number(), intentId: z.string(), revert: z.boolean() }),
   saves: z.object({ id: z.string(), laneId: z.string(), head: z.string(), at: stamp }),
@@ -225,8 +230,10 @@ export async function readHostedMetricPages(
               ...(row.attemptId ? { attemptId: row.attemptId } : {}),
               ...(row.reused ? { reused: true } : {}),
               ...(row.revision != null ? { revision: row.revision } : {}),
+              ...(row.firstCheckRecheck ? { firstCheckRecheck: row.firstCheckRecheck } : {}),
               inputs: [],
             });
+            if (row.firstCheckRecheck === undefined) records.fallbacksUnprojected = true;
             if (row.reused === undefined) records.reuseUnprojected = true;
             records.finishTimings!.push({
               id: row.id,
@@ -237,7 +244,8 @@ export async function readHostedMetricPages(
           } else if (stream === 'runs') {
             const row = rowSchemas.runs.parse(rawRow);
             if (row.inputPin) pins.set(`run:${row.id}`, row.inputPin);
-            const { reuseKey, flaky, ...run } = row;
+            const { reuseKey, flaky, selectionFallback, gateFallback, ...run } = row;
+            if (selectionFallback === undefined) records.fallbacksUnprojected = true;
             if (reuseKey === undefined) reuseKeysProjected = false;
             if (flaky === undefined) flakesProjected = false;
             records.runs.push({
@@ -249,6 +257,8 @@ export async function readHostedMetricPages(
               fullSuite: row.fullSuite ?? false,
               ...(reuseKey ? { reuseKey } : {}),
               ...(flaky ? { flaky } : {}),
+              ...(selectionFallback ? { selectionFallback } : {}),
+              ...(gateFallback ? { gateFallback } : {}),
             });
             // Hosted landing never adopts earlier check evidence: each run row is its own request.
             (records.checkRequests ??= []).push({
@@ -282,7 +292,9 @@ export async function readHostedMetricPages(
               status: row.status === 'terminal-failed' ? 'failed' : row.status,
             });
           } else if (stream === 'attempts') {
-            attempts.push(rowSchemas.attempts.parse(rawRow));
+            const row = rowSchemas.attempts.parse(rawRow);
+            if (row.recheckReason === undefined) records.fallbacksUnprojected = true;
+            attempts.push(row);
           } else if (stream === 'lanes') {
             lanes.push(rowSchemas.lanes.parse(rawRow));
           } else if (stream === 'saves') {

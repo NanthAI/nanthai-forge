@@ -71,7 +71,8 @@ configured check (no `configure-check`) skips it and queues as before.
    The receipt's `firstCheck` says which path it took: `{"landedOn":"admission-run","mainMoved":…}`
    or `{"landedOn":"recheck","reason":…}` with the recheck reason (`path-overlap`,
    `tested-doc`, `global-risk`, `unsupported-mode`, `text-conflict`, `checked-not-full`, `main-red`, `audit-debt`,
-   `cohort`, …).
+   `cohort`, `reuse-policy`, …); `metrics` counts every code and flags the limitations
+   ([fallback reasons](operations.md#fallback-reasons)).
    Cohorts of admitted changes use the admitted failure prior, so they are larger.
    A refused change waits for peers still deciding their own Lane run (bounded by
    the train hold, holding no queue order, with one armed wake), so the refused

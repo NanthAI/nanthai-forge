@@ -73,6 +73,10 @@ export const hostedLandingAttemptSchema = z
     crossHeadProof: crossHeadProofSchema.optional(),
     /** Main-race retry basis: its check may run the scoped recheck selection. */
     recheck: scopedRecheckBasisSchema.optional(),
+    /** Why this main-race attempt rechecked instead of carrying its parent's check across
+     * heads, and why that recheck could not be scoped (src/fallback-reasons.ts, 7c2e69e1). */
+    recheckReason: z.string().min(1).max(64).optional(),
+    scopedFallback: z.string().min(1).max(64).optional(),
     semanticPlan: semanticPlanSchema.optional(),
     deferredCheck: z.literal(true).optional(),
     /** Infrastructure retries retain the exact Candidate and parent run in the attempt chain. */

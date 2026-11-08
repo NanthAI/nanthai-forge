@@ -15,6 +15,7 @@ import { scopedRecheckBase } from '../src/scoped-recheck-policy';
 import { report } from './errors';
 import { metricReceiptCoverage } from '../src/self-metric-receipts';
 import { runFlakes } from '../src/self-metrics-flakes';
+import { contractGateFallback } from '../src/fallback-reasons';
 
 const tables = {
   acceptances: 'projectHostedAcceptances',
@@ -231,6 +232,8 @@ export const page = query({
               // Back-stop metric (Issue 71767c9b): derived from the receipt, no write.
               reused: Boolean(move.crossHeadProof),
               revision: move.snapshot?.revision ?? null,
+              // Why an admitted landing did not land on its first check (7c2e69e1); null: it did or was not admitted.
+              firstCheckRecheck: move.firstCheck?.landedOn === 'recheck' ? move.firstCheck.reason : null,
             };
           }
           if (input.stream === 'runs') {
@@ -257,6 +260,9 @@ export const page = query({
               // Files that failed once and passed on the single retry.
               // Explicit null means projected and none; an older deploy omits the field.
               flaky: runFlakes(run) ?? null,
+              // Fallback codes already on the run (7c2e69e1): the runner's selection and the contract gate.
+              selectionFallback: run.fallback ?? null,
+              gateFallback: contractGateFallback(run.gate) ?? null,
             };
           }
           if (input.stream === 'requests') {
@@ -305,6 +311,8 @@ export const page = query({
               mainHead: attempt.main?.head ?? null,
               inputPin: attempt.candidate?.inputs ?? null,
               runId: attempt.check?.runId ?? null,
+              recheckReason: attempt.recheckReason ?? null,
+              scopedFallback: attempt.scopedFallback ?? null,
             };
           }
           return { id: row._id, ...('metricMutation' in row ? { mutation: row.metricMutation } : {}) };

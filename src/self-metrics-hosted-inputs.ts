@@ -13,6 +13,8 @@ export type MetricAttempt = {
   mainHead: string | null;
   inputPin?: MetricPin | null | undefined;
   runId: string | null;
+  recheckReason?: string | null | undefined;
+  scopedFallback?: string | null | undefined;
 };
 export type MetricLane = { id: string; version: number; intentId: string; revert: boolean };
 export type MetricSave = { id: string; laneId: string; head: string; at: string };
@@ -149,6 +151,10 @@ export function joinMetricAttempts(
         parent.mainHead !== null &&
         attempt.mainHead !== null &&
         parent.mainHead !== attempt.mainHead,
+      // The attempt that rechecked names why; the raced attempt carries its child's reason (7c2e69e1).
+      ...(attempt.recheckReason ? { recheckReason: attempt.recheckReason } : {}),
+      ...(attempt.scopedFallback ? { scopedFallback: attempt.scopedFallback } : {}),
+      ...(child?.recheckReason ? { raceRecheckReason: child.recheckReason } : {}),
       endedAt: child?.at ?? request?.endedAt ?? run?.endedAt,
       progressAt: request?.progressAt ?? [],
       runIds: attempt.runId ? [attempt.runId] : [],

@@ -63,8 +63,8 @@ export async function retainBatchConflict(
     ownerOnly: input.ownerInputs && candidateOwnerInputs(project, row, old, member.authorityEpoch),
     record: candidate,
   });
-  const { deferredCheck, ...pins } = member;
-  void deferredCheck;
+  const { deferredCheck, recheckReason, scopedFallback, ...pins } = member;
+  void [deferredCheck, recheckReason, scopedFallback];
   const attempt = {
     ...pins,
     id: crypto.randomUUID(),

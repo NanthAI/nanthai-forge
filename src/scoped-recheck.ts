@@ -1,7 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 import { documentation, selectImpactPair, smokeTests } from '../scripts/test-impact.mjs';
 
-type Selection = { scope: 'full' | 'scoped'; reason: string; tests: string[] };
+/** `fallback` names why the recheck could not be scoped (src/fallback-reasons.ts). */
+type Selection = {
+  scope: 'full' | 'scoped';
+  reason: string;
+  tests: string[];
+  fallback?: 'scoped-root-config' | 'scoped-unclassified';
+};
 /** Runner-side selection on the exact recomposed Candidate, from one import graph.
  * Tests outside affected(main delta) ∩ affected(this change) passed on either the
  * checked head or main; they become main-audit debt, never a skipped own test. */
@@ -12,18 +18,19 @@ export function scopedRecheckSelection(input: {
   semanticTests?: string[];
 }): Selection {
   const all = [...input.files.keys()].filter(path => /^tests\/[^/]+\.test\.mjs$/.test(path)).sort();
-  const full = (reason: string): Selection => ({
+  const full = (reason: string, fallback: NonNullable<Selection['fallback']>): Selection => ({
     scope: 'full',
     reason: `Scoped recheck needs full: ${reason}`,
     tests: all,
+    fallback,
   });
   const root = [...input.lanePaths, ...input.mainPaths].find(
     path => !path.includes('/') && !documentation(path),
   );
-  if (root) return full(`root configuration ${root}`);
+  if (root) return full(`root configuration ${root}`, 'scoped-root-config');
   const sides = selectImpactPair(input.files, [input.lanePaths, input.mainPaths]);
   const unclassified = sides.find(side => side.scope === 'full');
-  if (unclassified) return full(unclassified.reason);
+  if (unclassified) return full(unclassified.reason, 'scoped-unclassified');
   const [lane, main] = sides.map(side => side.affectedTests ?? []);
   const shared = new Set(main);
   const both = lane!.filter(test => shared.has(test));

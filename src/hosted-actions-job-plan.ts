@@ -23,6 +23,8 @@ import { refreshSourcePack } from './source-pack.js';
 import { refreshActionsSourcePack } from './hosted-actions-job-pack.js';
 import { testedDocs } from './tested-docs.js';
 import { declaredTestedDocs, docsOnlyChange } from './docs-paths.js';
+import { selectionFallback } from './fallback-reasons.js';
+import { resolveTestRunner } from './project-test-runner.js';
 import { scanSecretPaths, SECRET_SCAN_ALLOW_FILE } from './secret-scan.js';
 import { isStandardForgeCheck } from './standard-check.js';
 import { commandSelection, commandShardCount, commandShardGroups } from './check-command-scope.js';
@@ -119,6 +121,7 @@ export async function prepareActionsJob(
     scope: selected.scope,
     reason: selected.reason,
     tests: selected.tests,
+    ...('fallback' in selected && selected.fallback ? { fallback: selected.fallback } : {}),
     ...(docs ? { testedDocs: docs } : {}),
     // Any other command reads this as its changed-paths file (FORGE_CHECK_CHANGES).
     ...('changes' in selected ? { changes: selected.changes } : {}),
@@ -254,9 +257,24 @@ export function actionsGateSelection(
   standard: boolean,
   mainPaths: string[] | null = null,
 ) {
-  const selected = gateSelection(run, paths, files, standard, mainPaths);
+  const raw = gateSelection(run, paths, files, standard, mainPaths);
   // Gate probes, contract unions and rechecks can select nothing; that must never pass.
-  return standard ? guardedSelection(selected, { files, paths }) : selected;
+  const selected = standard ? guardedSelection(raw, { files, paths }) : raw;
+  // Why the command could not be narrowed or skipped, pinned with the selection (7c2e69e1).
+  const fallback = selectionFallback({
+    standard,
+    gate: run.gate,
+    docsPaths: run.check?.docsPaths,
+    paths,
+    mainPaths,
+    selected,
+    // Intent union tests under another command run with the project's own test runner.
+    testRunner: () =>
+      !standard && semanticTests(run.semanticPlan).length
+        ? resolveTestRunner(files.get('package.json'), () => files.keys()).status
+        : undefined,
+  });
+  return fallback ? { ...selected, fallback } : selected;
 }
 function gateSelection(
   run: HostedCheckRun,

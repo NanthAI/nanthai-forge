@@ -200,8 +200,9 @@ export async function installBatchAttempt(
   invariant(row, 'SOURCE_UNAVAILABLE', 'The batch member is unavailable.');
   const state = hostedLandingStateSchema.parse(JSON.parse(row.value));
   const parent = await loadLandingAttempt(ctx, { projectId: input.projectId, attemptId: state.attemptId });
-  const { deferredCheck: _deferred, ...pins } = original;
-  void _deferred;
+  // A retry or cohort pin is a new attempt: it never inherits the original's race reasons (7c2e69e1).
+  const { deferredCheck: _deferred, recheckReason: _reason, scopedFallback: _scoped, ...pins } = original;
+  void [_deferred, _reason, _scoped];
   const attempt = {
     ...pins,
     ...(input.main ? { main: input.main } : {}),

@@ -68,6 +68,8 @@ export function calculateWaste(records: MetricRecords, period: MetricPeriod) {
           id: row.id,
           entryId: row.entryId,
           cause,
+          // A main-race row names why its replacement rechecked (7c2e69e1).
+          ...(cause === 'main-race' && row.raceRecheckReason ? { recheckReason: row.raceRecheckReason } : {}),
           elapsedMinutes:
             minutesBetween(
               Date.parse(row.at) < Date.parse(period.from) ? period.from : row.at,
