@@ -27,12 +27,12 @@ const refsTo = (pack, name, file) =>
       node => node.id === ref.target && node.name === name && (!file || node.locator.file === file),
     ),
   );
-test('five pinned parsers expose source-backed declarations, imports and supported references without execution', t => {
+test('seven analysers expose source-backed declarations, imports and supported references without execution', t => {
   const root = fixture(t, { ...sources, 'never.py': 'open("should-not-exist", "w").write("no")\n' }),
     pack = indexRepository(root).pack;
   assert.deepEqual(
     pack.analysis.languages.map(item => item.language),
-    ['typescript', 'javascript', 'python', 'java', 'rust'],
+    ['typescript', 'javascript', 'python', 'java', 'rust', 'go', 'csharp'],
   );
   assert.equal(pack.analysis.coverage, 'partial');
   assert.equal(existsSync(join(root, 'should-not-exist')), false);

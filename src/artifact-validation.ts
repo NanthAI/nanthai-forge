@@ -78,12 +78,14 @@ export function validateArtifact(input: unknown): GraphPack {
   if (
     multi &&
     (!Array.isArray(a.languages) ||
-      a.languages.length !== 5 ||
-      new Set(a.languages.map(v => (record(v) ? v.language : ''))).size !== 5 ||
+      ![5, 7].includes(a.languages.length) ||
+      new Set(a.languages.map(v => (record(v) ? v.language : ''))).size !== a.languages.length ||
       !a.languages.every(
         v =>
           record(v) &&
-          ['typescript', 'javascript', 'python', 'java', 'rust'].includes(String(v.language)) &&
+          ['typescript', 'javascript', 'python', 'java', 'rust', 'go', 'csharp'].includes(
+            String(v.language),
+          ) &&
           text(v.parser) &&
           text(v.version) &&
           Array.isArray(v.relationships) &&

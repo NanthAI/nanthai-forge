@@ -15,11 +15,17 @@ export function hostedQuery(
 ): unknown {
   const pack = validateArtifact(artifact.pack);
   const content = new Map(Object.entries(artifact.content));
+  // A listed file without stored bytes is a file-level inventory entry (a text file in no
+  // analysed language): it carries a File node and its text is not retained.
+  const entries = new Set(pack.nodes.filter(node => node.kind === 'File').map(node => node.locator.file)),
+    listed = new Set(pack.source.files.map(file => file.path));
   invariant(
-    content.size === pack.source.files.length &&
-      pack.source.files.every(
-        file => typeof content.get(file.path) === 'string' && digest(content.get(file.path)!) === file.digest,
-      ),
+    pack.source.files.every(file => {
+      const text = content.get(file.path);
+      return text === undefined
+        ? entries.has(file.path)
+        : typeof text === 'string' && digest(text) === file.digest;
+    }) && [...content.keys()].every(path => listed.has(path)),
     'ARTIFACT_INTEGRITY',
     'Stored source differs from the graph manifest.',
   );

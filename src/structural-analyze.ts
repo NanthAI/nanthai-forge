@@ -2,9 +2,13 @@
 import { parser as python } from '@lezer/python';
 import { parser as java } from '@lezer/java';
 import { parser as rust } from '@lezer/rust';
+import { parser as go } from '@lezer/go';
 import type { SyntaxNode, Tree } from '@lezer/common';
 import { identity } from './hash.js';
 import { sourceLanguage } from './languages.js';
+import { positionIn } from './structural-positions.js';
+import { goUnmodelledBinding, goVisibleFrom } from './structural-go.js';
+import { csharpAnalysis, CSHARP_PROVIDER } from './structural-csharp.js';
 import {
   children,
   declarationFor,
@@ -33,7 +37,7 @@ export type StructuralFile = {
   rootScope: string;
 };
 const key = (node: SyntaxNode) => `${node.name}:${node.from}:${node.to}`;
-const parsers = { python, java, rust };
+const parsers = { python, java, rust, go };
 export const STRUCTURAL_PROVIDERS = [
   {
     language: 'python',
@@ -53,6 +57,19 @@ export const STRUCTURAL_PROVIDERS = [
     version: '1.0.3',
     relationships: ['declarations', 'lexical-references', 'captured-explicit-file-modules'],
   },
+  {
+    language: 'go',
+    parser: '@lezer/go',
+    version: '1.0.1',
+    relationships: [
+      'declarations',
+      'lexical-references',
+      'same-package-references',
+      'captured-module-package-imports',
+      'qualified-package-references',
+    ],
+  },
+  CSHARP_PROVIDER,
 ];
 export function structuralAnalysis(
   snapshot: Snapshot,
@@ -74,9 +91,13 @@ export function structuralAnalysis(
     session.structuralTrees = new Map();
   }
   const retainedPaths = new Set<string>();
+  const visibleFrom = new Map<string, number>();
+  const csharp: { file: string; text: string }[] = [];
   for (const [file, text] of snapshot.content) {
     const language = sourceLanguage(file);
-    if (!language || language === 'typescript' || language === 'javascript') continue;
+    if (language === 'csharp') csharp.push({ file, text });
+    if (!language || language === 'typescript' || language === 'javascript' || language === 'csharp')
+      continue;
     retainedPaths.add(file);
     const retained = session?.structuralTrees?.get(file);
     const tree = retained?.text === text ? retained.tree : parsers[language].parse(text);
@@ -95,18 +116,7 @@ export function structuralAnalysis(
       },
     });
     if (invalid) continue;
-    const starts = [0];
-    for (let i = 0; i < text.length; i++) if (text[i] === '\n') starts.push(i + 1);
-    const position = (offset: number) => {
-      let low = 0,
-        high = starts.length;
-      while (low + 1 < high) {
-        const mid = (low + high) >> 1;
-        if (starts[mid]! <= offset) low = mid;
-        else high = mid;
-      }
-      return { offset, line: low + 1, column: offset - starts[low]! + 1 };
-    };
+    const position = positionIn(text);
     const locator = (node: SyntaxNode): Locator => ({
       file,
       digest: digests.get(file)!,
@@ -133,7 +143,7 @@ export function structuralAnalysis(
         scope.unknown = true;
         issues.push({ file, code: 'PYTHON_SCOPE_DIRECTIVE_UNRESOLVED', offset: node.from });
       }
-      const definition = declarationFor(node, language);
+      const definition = declarationFor(node, language, text.slice(node.from, node.to));
       // An unmodelled binding must not accidentally resolve to an outer symbol.
       const unsupportedBinding =
         language === 'python'
@@ -145,7 +155,9 @@ export function structuralAnalysis(
             (node.name === 'ImportStatement' && !!node.getChild('*'))
           : language === 'java'
             ? node.name === 'Definition' && !definition
-            : node.name === 'BoundIdentifier' && !definition && !hasImportAncestor(node);
+            : language === 'go'
+              ? goUnmodelledBinding(node, text.slice(node.from, node.to))
+              : node.name === 'BoundIdentifier' && !definition && !hasImportAncestor(node);
       if (
         unsupportedBinding ||
         (language === 'rust' &&
@@ -165,10 +177,12 @@ export function structuralAnalysis(
           id: `symbol:${identity([snapshot.source.id, file, node.from, language, definition.kind])}`,
           name: text.slice(node.from, node.to),
           kind: definition.kind,
-          exported: publicDeclaration(definition.owner, language, text),
+          exported: publicDeclaration(definition.owner, language, text, text.slice(node.from, node.to)),
           locator: locator(node),
         };
         nodes.push(symbol);
+        if (language === 'go' && owner.id !== root.id)
+          visibleFrom.set(symbol.id, goVisibleFrom(definition.owner));
         parsed.definitions.push({ symbol, scope: owner.id, owner: definition.owner });
         if (definition.bind) {
           const prior = owner.bindings.get(symbol.name) ?? [];
@@ -187,6 +201,11 @@ export function structuralAnalysis(
     if (!retainedPaths.has(path)) session!.structuralTrees!.delete(path);
   const resolved = structuralImports(files, snapshot);
   issues.push(...resolved.issues);
+  references.push(...resolved.references);
+  const scanned = csharpAnalysis(csharp, snapshot);
+  nodes.push(...scanned.nodes);
+  resolved.imports.push(...scanned.imports);
+  issues.push(...scanned.issues);
   for (const { file, node, scope, locator } of pending) {
     const name = file.text.slice(node.from, node.to);
     let current: Scope | null = scope,
@@ -216,7 +235,9 @@ export function structuralAnalysis(
             'TypeParameter',
           ].includes(item.kind),
         );
-      if (file.language !== 'python')
+      if (file.language === 'go')
+        candidates = candidates.filter(item => (visibleFrom.get(item.id) ?? 0) <= node.from);
+      else if (file.language !== 'python')
         candidates = candidates.filter(
           item => item.kind !== 'VariableDeclaration' || item.locator.start.offset < node.from,
         );

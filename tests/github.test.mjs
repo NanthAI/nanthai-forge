@@ -372,3 +372,28 @@ test('GitHub analysis shares nested Forge rules and never downloads excluded sou
     assert(!requested.has(blob), path);
   }
 });
+
+test('GitHub analysis reads Go and C# and captures go.mod to resolve package imports', async () => {
+  const f = fixture({
+    'go.mod': 'module example.com/app\n\ngo 1.22\n',
+    'main.go': 'package main\n\nimport "example.com/app/util"\n\nfunc main() { util.Helper() }\n',
+    'util/util.go': 'package util\n\nfunc Helper() {}\n',
+    'App.cs': 'namespace App;\n\npublic class Program { }\n',
+    'README.md': '# Project',
+  });
+  const repo = await githubRepository('example/project', undefined, f.request);
+  const artifact = await captureGithub(repo, undefined, undefined, async () => {}, f.request);
+  validateArtifact(artifact.pack);
+  assert.deepEqual(Object.keys(artifact.content), ['App.cs', 'go.mod', 'main.go', 'util/util.go']);
+  assert(artifact.pack.nodes.some(node => node.name === 'Program' && node.kind === 'ClassDeclaration'));
+  assert(artifact.pack.nodes.some(node => node.kind === 'File' && node.locator.file === 'go.mod'));
+  assert(
+    artifact.pack.imports.some(
+      edge => edge.from === 'main.go' && edge.target === 'util/util.go' && edge.resolution === 'resolved',
+    ),
+  );
+  // go.mod is captured; only README.md (a document, not downloaded as source) is left out.
+  assert.equal(artifact.pack.source.excluded['unsupported-language'], 1);
+  // The stored source still matches the manifest through the hosted integrity check.
+  assert.equal(hostedQuery(artifact, 'status', sha).files, 4);
+});

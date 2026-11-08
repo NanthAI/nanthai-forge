@@ -3,6 +3,7 @@ import { posix } from 'node:path';
 import type { SyntaxNode } from '@lezer/common';
 import type { StructuralFile } from './structural-analyze.js';
 import { ancestor, children } from './structural-language.js';
+import { goImports } from './structural-go-imports.js';
 import type { GraphPack, Snapshot, SymbolNode } from './types.js';
 
 const unique = <T>(values: T[]): T | undefined => (values.length === 1 ? values[0] : undefined);
@@ -189,6 +190,7 @@ export function structuralImports(files: StructuralFile[], snapshot: Snapshot) {
     return current;
   };
   for (const file of files) {
+    if (file.language === 'go') continue;
     const statements = nodesNamed(
       file.tree.topNode,
       file.language === 'python'
@@ -259,5 +261,9 @@ export function structuralImports(files: StructuralFile[], snapshot: Snapshot) {
       }
     }
   }
-  return { imports, bindings, reserved, issues };
+  const go = goImports(files, snapshot);
+  imports.push(...go.imports);
+  issues.push(...go.issues);
+  for (const [file, map] of go.bindings) bindings.set(file, map);
+  return { imports, bindings, reserved, issues, references: go.references };
 }

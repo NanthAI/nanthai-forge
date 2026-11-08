@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { SyntaxNode } from '@lezer/common';
-import type { SourceLanguage } from './languages.js';
+import { goDeclaration, goPublic, goReferenceName, goScopeNames } from './structural-go.js';
 
-export type StructuralLanguage = Exclude<SourceLanguage, 'typescript' | 'javascript'>;
+/** Languages analysed from a Lezer syntax tree (C# has its own declaration scanner). */
+export type StructuralLanguage = 'python' | 'java' | 'rust' | 'go';
 export function children(node: SyntaxNode): SyntaxNode[] {
   const result: SyntaxNode[] = [];
   for (let child = node.firstChild; child; child = child.nextSibling) result.push(child);
@@ -54,6 +55,7 @@ export const scopeNames = {
     'IfExpression',
     'WhileExpression',
   ],
+  go: goScopeNames,
 };
 export type Declaration = { owner: SyntaxNode; kind: string; outside: boolean; bind: boolean };
 const declaration = (owner: SyntaxNode, kind: string, outside = false, bind = true): Declaration => ({
@@ -62,9 +64,14 @@ const declaration = (owner: SyntaxNode, kind: string, outside = false, bind = tr
   outside,
   bind,
 });
-export function declarationFor(node: SyntaxNode, language: StructuralLanguage): Declaration | null {
+export function declarationFor(
+  node: SyntaxNode,
+  language: StructuralLanguage,
+  text = '',
+): Declaration | null {
   const parent = node.parent;
   if (!parent) return null;
+  if (language === 'go') return goDeclaration(node, text);
   if (language === 'python' && node.name === 'VariableName') {
     if (
       ['FunctionDefinition', 'ClassDefinition'].includes(parent.name) &&
@@ -168,13 +175,20 @@ export function ancestorUntil(node: SyntaxNode, boundary: SyntaxNode, names: rea
     if (names.includes(parent.name)) return true;
   return false;
 }
-export function publicDeclaration(owner: SyntaxNode, language: StructuralLanguage, text: string): boolean {
+export function publicDeclaration(
+  owner: SyntaxNode,
+  language: StructuralLanguage,
+  text: string,
+  name = '',
+): boolean {
   if (language === 'python') return false;
+  if (language === 'go') return goPublic(owner, name);
   if (language === 'java') return !!owner.getChild('Modifiers')?.getChild('public');
   const visibility = owner.getChild('Vis');
   return !!visibility && text.slice(visibility.from, visibility.to).trim() === 'pub';
 }
 export function referenceName(node: SyntaxNode, language: StructuralLanguage): boolean {
+  if (language === 'go') return goReferenceName(node);
   if (language === 'python') {
     if (node.name !== 'VariableName' || ancestor(node, ['ImportStatement', 'ScopeStatement', 'ParamList']))
       return false;

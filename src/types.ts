@@ -50,6 +50,8 @@ export interface Snapshot {
   root: string;
   source: SourceIdentity;
   content: Map<string, string>;
+  /** Files with a file-level entry only (no analysed language): the path and where the text ends. */
+  inventory?: { path: string; end: Position }[];
 }
 export interface SymbolNode {
   id: string;

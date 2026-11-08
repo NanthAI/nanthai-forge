@@ -5,12 +5,14 @@ import { identity, graphIdentity } from './hash.js';
 import { makeProgram, local, resolveImport, type CompilerSession } from './compiler.js';
 import { ForgeError, invariant } from './errors.js';
 import type { GraphPack, Locator, Snapshot, SymbolNode } from './types.js';
+import { posix } from 'node:path';
 
 export const LIMITATIONS = [
-  'TypeScript and JavaScript declarations and compiler-resolved identifier references; Python, Java and Rust parser-backed declarations and conservative lexical references.',
-  'Captured relative TypeScript/JavaScript/Python imports, qualified Java types and explicit Rust file modules only; no installed dependencies, tsconfig paths, classpath, Cargo configuration or plugins.',
-  'Python export flags remain unknown (false); Java/Rust public modifiers are syntactic declarations, not effective runtime visibility.',
-  'Python global/nonlocal scopes, defaults, comprehensions and unmodelled bindings, nested import bindings, Java overloads and Rust braced/glob imports remain unresolved; Rust crate roots use captured lib.rs/main.rs module chains.',
+  'TypeScript and JavaScript declarations and compiler-resolved identifier references; Python, Java, Rust and Go parser-backed declarations and conservative lexical references; C# declarations from a header scanner (no references).',
+  'Captured relative TypeScript/JavaScript/Python imports, qualified Java types, explicit Rust file modules, Go packages under a captured go.mod module path and C# namespaces declared in captured files only; no installed dependencies, tsconfig paths, classpath, Cargo configuration, Go workspaces, vendor directories, replace directives, build tags or plugins.',
+  'Python export flags remain unknown (false); Java/Rust public modifiers are syntactic declarations, not effective runtime visibility; Go exports follow the capitalised-name rule and C# exports the public modifier.',
+  'Python global/nonlocal scopes, defaults, comprehensions and unmodelled bindings, nested import bindings, Java overloads and Rust braced/glob imports remain unresolved; Rust crate roots use captured lib.rs/main.rs module chains; Go struct fields, methods and interface methods are declarations but are not resolved through selectors.',
+  'A text file in no analysed language has a file-level entry only (path, size, digest, one File node); files past the file or byte budget are counted in excluded as inventory-limit.',
   'No complete call graph, data flow, runtime dispatch, framework routing or cross-language semantics.',
   'Syntax-error files have no nodes or references; unresolved modules and unsupported behavior remain unknown.',
   'No persistent symbol lineage across states; offsets are UTF-16 code units and lines/columns are 1-based.',
@@ -147,6 +149,21 @@ function analyzeSnapshot(snapshot: Snapshot, session?: CompilerSession): GraphPa
       const target = symbol?.declarations?.map(d => declarationIds.get(d)).find(Boolean);
       if (target) references.push({ target, locator: locator(node, source) });
     });
+  for (const entry of snapshot.inventory ?? []) {
+    const file = files.get(entry.path)!;
+    nodes.push({
+      id: `symbol:${identity([snapshot.source.id, entry.path, 0, 'file', 'File'])}`,
+      name: posix.basename(entry.path),
+      kind: 'File',
+      exported: false,
+      locator: {
+        file: entry.path,
+        digest: file.digest,
+        start: { offset: 0, line: 1, column: 1 },
+        end: entry.end,
+      },
+    });
+  }
   const structural = structuralAnalysis(snapshot, session);
   nodes.push(...structural.nodes);
   imports.push(...structural.imports);

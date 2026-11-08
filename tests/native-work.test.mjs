@@ -81,7 +81,8 @@ test(
     assert.equal(w.store.native, true);
     assert.equal(w.status().capabilities.nativeSource, true);
     assert.equal(capture(path).source.gitHead, null);
-    assert.equal(capture(path).source.files.length, 1);
+    // One analysed source file; other text files only have file-level entries.
+    assert.equal(capture(path).source.files.filter(file => file.path.endsWith('.ts')).length, 1);
     writeFileSync(join(path, 'a.ts'), 'export const a=2;\n');
     mkdirSync(join(path, 'nested'));
     writeFileSync(join(path, 'nested', 'bytes.bin'), Buffer.from([0, 255, 128, 10]));

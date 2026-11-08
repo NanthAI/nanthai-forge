@@ -1,7 +1,7 @@
 NanthAi:Forge third-party npm notices
 
 Exact upstream license/notice files for installed locked production dependencies.
-Lockfile SHA-256: 85dd7dbb44daa23c34d62b8d3665b1985d9677768a3627a922c0a6acbc2aedc9
+Lockfile SHA-256: 442a483e1bed39bfaaaaa28bf7fd8a82965a0d6c3ef03a6d307bb727bcabca4c
 Dependencies retain their own licenses; this document does not relicense them.
 The separately launched native Convex backend is not included in this package.
 NanthAi brand rights are described separately in web/src/assets/NOTICE.md.
@@ -116,6 +116,32 @@ Original bytes: 1113; SHA-256: 568902fb66eaf1f11750e966b33fd7b5d7c618e65af09f35e
 MIT License
 
 Copyright (C) 2018 by Marijn Haverbeke <marijn@haverbeke.berlin> and others
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+
+===== End original file =====
+
+===== @lezer/go@1.0.1: node_modules/@lezer/go/LICENSE =====
+Original bytes: 1113; SHA-256: 54bd812a6d334e0c438b78a43cea74b67e882739fd3450115ddc7c52be5706c1
+MIT License
+
+Copyright (C) 2020 by Marijn Haverbeke <marijn@haverbeke.berlin> and others
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

@@ -41,7 +41,8 @@ test('real stdio MCP discovery, refresh, queries, mutations, validation and shut
     return { result, body: JSON.parse(result.content[0].text) };
   };
   assert.equal((await call('forge_current')).body.error.code, 'INDEX_MISSING');
-  assert.equal((await call('forge_reindex')).body.files, 2);
+  // Two TypeScript files plus the .gitignore text file's file-level entry.
+  assert.equal((await call('forge_reindex')).body.files, 3);
   const original = (await call('forge_current')).body;
   assert.equal(original.freshness, 'current');
   const inspected = (await call('forge_inspect', { symbol: 'value' })).body;

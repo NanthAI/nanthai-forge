@@ -61,7 +61,7 @@ Existing projects, including Forge's dogfooding owner, read as custom with their
 
 ## Context for agents
 
-- **Source context** — a derived graph of files, declarations, imports and references for TypeScript, JavaScript, Python, Java and Rust. Coverage is partial and labelled; a missing edge does not prove two things are independent.
+- **Source context** — a derived graph of files, declarations, imports and references for TypeScript, JavaScript, Python, Java, Rust, Go and C# (C# declarations and `using` edges only). Every other text file has a file-level entry, so a read is never empty. Coverage is partial and labelled; a missing edge does not prove two things are independent.
 - **MCP / agent CLI** — `nforge mcp ROOT --agent` and `nforge agent ROOT …` expose source queries and the Work actions above.
 - **Making-of record** — a derived, read-only account of one Intent: its Lanes, saves, check runs with queued and running time, landings, sessions, wall clock and estimated active time. Agents may self-report harness, model and token totals; absent facts are omitted, never shown as zero.
 - **Coordination** — advisory live activity for a hosted project: sessions (who is working, last seen), path claims and overlaps, messages, handoffs, a per-participant inbox with acknowledgements, server-emitted related-change events and a resumable feed. It never locks files or grants access.

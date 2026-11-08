@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { networkFetch, networkTimeout } from './network-fetch.js';
-import { sourceLanguage } from './languages.js';
+import { analysisManifest, sourceLanguage } from './languages.js';
+import { positionIn } from './structural-positions.js';
 import { ignoreLayer, ignoredBy, ignoreNames } from './source-ignore.js';
 import { posix } from 'node:path';
 import { createHash } from 'node:crypto';
@@ -189,6 +190,7 @@ export async function captureGithub(
   const selected = entries.filter(
     e =>
       !!sourceLanguage(e.path) ||
+      analysisManifest(e.path) ||
       ignoreNames.some(name => posix.basename(e.path) === name) ||
       isRepositoryDocument(e.path),
   );
@@ -295,7 +297,7 @@ export async function captureGithub(
     documents: Record<string, string> = {};
   for (const [path, text] of [...downloaded].sort(([a], [b]) => a.localeCompare(b, 'en'))) {
     if (ignored(path)) continue;
-    if (!!sourceLanguage(path)) content.set(path, text);
+    if (!!sourceLanguage(path) || analysisManifest(path)) content.set(path, text);
     else if (!ignoreNames.some(name => posix.basename(path) === name)) documents[path] = text;
   }
   const excluded: Record<string, number> = {};
@@ -310,7 +312,7 @@ export async function captureGithub(
             ? matches(entry.path)?.source === '.forgeignore'
               ? 'forgeignored'
               : 'gitignored'
-            : !sourceLanguage(entry.path)
+            : !sourceLanguage(entry.path) && !analysisManifest(entry.path)
               ? 'unsupported-language'
               : null));
     if (reason) excluded[reason] = (excluded[reason] ?? 0) + 1;
@@ -327,6 +329,15 @@ export async function captureGithub(
     inventoryDigest: identity([...content.keys()]),
     policy: { version: 2 as const, limits: { ...DEFAULT_LIMITS } },
   };
-  const snapshot: Snapshot = { root: '', source: { id: identity(state), ...state, excluded }, content };
+  // Manifests (go.mod) are captured for import resolution and listed as file-level entries.
+  const inventory = [...content]
+    .filter(([path]) => !sourceLanguage(path))
+    .map(([path, text]) => ({ path, end: positionIn(text)(text.length) }));
+  const snapshot: Snapshot = {
+    root: '',
+    source: { id: identity(state), ...state, excluded },
+    content,
+    inventory,
+  };
   return { pack: analyze(snapshot), content: Object.fromEntries(content), documents, repository };
 }

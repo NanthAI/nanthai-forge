@@ -24,7 +24,8 @@ test('nested ignore rules, tracked ignored files, sensitive names and generated 
   const pack = indexRepository(root).pack;
   assert.deepEqual(
     pack.source.files.map(f => f.path),
-    ['main.ts', 'src/keep.ts'],
+    // Text files in no analysed language (view.swift, the ignore files) have file-level entries.
+    ['main.ts', 'src/keep.ts', '.gitignore', 'src/.gitignore', 'view.swift'],
   );
   const serialized = JSON.stringify(pack);
   assert.equal(serialized.includes('test-value'), false);

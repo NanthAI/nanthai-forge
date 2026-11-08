@@ -239,7 +239,8 @@ test('Git analysis shares Forge rules, re-includes Git-ignored source and preser
   const snapshot = captureAnalysis(root);
   assert.deepEqual(
     snapshot.source.files.map(file => file.path),
-    ['keep.tmp.ts', 'public.ts'],
+    // The ignore files are text with a file-level entry; their text is not retained as content.
+    ['keep.tmp.ts', 'public.ts', '.forgeignore', '.gitignore'],
   );
   assert.deepEqual([...snapshot.content.keys()], ['keep.tmp.ts', 'public.ts']);
 });

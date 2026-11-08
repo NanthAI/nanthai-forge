@@ -143,11 +143,13 @@ Changing one never silently changes another. A Candidate pins its base, ordered 
 
 ## Source analysis
 
-Forge reads TypeScript, JavaScript, Python, Java and Rust. TypeScript and JavaScript use the TypeScript compiler, which resolves identifier references. Python, Java and Rust use pinned Lezer parsers that give declarations and conservative lexical references. Analysis never runs repository code and needs no model.
+Forge reads TypeScript, JavaScript, Python, Java, Rust, Go and C#. TypeScript and JavaScript use the TypeScript compiler, which resolves identifier references. Python, Java, Rust and Go use pinned Lezer parsers that give declarations and conservative lexical references. No Lezer grammar exists for C#, so a small header scanner (comments, strings and `#` lines masked; bodies skipped) gives its declarations and `using` directives. `src/languages.ts` is the one place that names the languages and their extensions.
 
-Coverage is partial and says so. Relative imports resolve for TypeScript, JavaScript and Python, as do qualified Java imports and explicit Rust file modules. Not modelled: tsconfig aliases, installed packages, dynamic dispatch, framework routes, macros, overload resolution and complete call or data-flow graphs. A missing relationship means unknown. It does not mean independent.
+Every other text file (Markdown, YAML, a Makefile, `go.mod`) gets a file-level entry: its path, size and digest in the source files and one `File` node spanning the file, so declaration and file reads are never empty. Binary files, files over the per-file bound and files past the file or byte budget are counted in `excluded` (`unsupported-language`, `inventory-limit`) and never read twice; code is captured first, so an entry never displaces a code file. Entry text is not retained.
 
-`impact` means direct reverse imports. Use ordinary search for configuration, strings and unsupported languages.
+Coverage is partial and says so. Relative imports resolve for TypeScript, JavaScript and Python, as do qualified Java imports and explicit Rust file modules. A Go import resolves through the `module` line of a captured `go.mod` to the package directory and edges every non-test file of that package (at most 64); same-package names resolve across files, and `alias.Name` resolves to an exported package-level declaration. A C# `using` resolves to the captured files that declare that namespace. Go workspaces, `vendor/`, `replace`, build tags, struct fields and methods reached through a selector, and all C# references are not modelled. Not modelled: tsconfig aliases, installed packages, dynamic dispatch, framework routes, macros, overload resolution and complete call or data-flow graphs. A missing relationship means unknown. It does not mean independent.
+
+`impact` means direct reverse imports. Use ordinary search for configuration and strings.
 
 Freshness comes from rereading source, never from timestamps. Re-indexing captures source twice and publishes only if both reads match. An unchanged, valid graph is reused. A worker keeps only its latest compiler program.
 

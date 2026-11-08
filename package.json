@@ -144,6 +144,7 @@
   "dependencies": {
     "@clerk/react": "6.17.3",
     "@lezer/common": "1.5.3",
+    "@lezer/go": "1.0.1",
     "@lezer/highlight": "1.2.5",
     "@lezer/java": "1.1.5",
     "@lezer/javascript": "1.5.6",
