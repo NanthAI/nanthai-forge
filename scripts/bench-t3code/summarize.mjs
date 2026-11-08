@@ -129,6 +129,15 @@ console.log(
           b.mode,
         ),
       })),
+      outliers: Object.fromEntries(
+        [1, 3, 5, 10]
+          .map(N => [N, join(B, `outlier-n${N}${dry ? '-dry' : ''}.json`)])
+          .filter(([, f]) => existsSync(f))
+          .map(([N, f]) => {
+            const d = JSON.parse(readFileSync(f, 'utf8'));
+            return [`N=${N}`, { extraReps: d.extraReps, outliers: d.outliers }];
+          }),
+      ),
       rep3: Object.fromEntries(
         [1, 3, 5, 10]
           .map(N => [N, join(B, `rep3-n${N}${dry ? '-dry' : ''}.json`)])
@@ -156,6 +165,23 @@ console.log(
             }
           : null,
       })),
+      // Headline rule (PLAN.md Outlier rule): byArmN is over all valid reps, extra reps
+      // included; this sensitivity view leaves the outlier rule's extra reps out.
+      withoutExtraReps: Object.fromEntries(
+        [...new Set(usable.map(r => `${r.arm} N=${r.N}`))].map(k => {
+          const list = usable.filter(r => `${r.arm} N=${r.N}` === k && !r.extra);
+          return [
+            k,
+            {
+              cells: list.length,
+              wallSeconds: range(list.map(r => r.wallSecondsToAllLanded)),
+              timeToMainSeconds: range(list.flatMap(r => okTasks(r).map(t => t.timeToMainSeconds ?? null))),
+              landed: range(list.map(r => r.landed)),
+              strict: range(list.map(r => r.oracle?.grade?.strictSuccess ?? null)),
+            },
+          ];
+        }),
+      ),
       byArmN: Object.fromEntries(
         Object.entries(byArmN).map(([k, s]) => [
           k,

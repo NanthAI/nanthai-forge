@@ -243,7 +243,9 @@ export function layout(B, cfg) {
   return {
     meta: cfg.meta ?? join(B, 'work/t3code-meta'),
     baseCheckout: cfg.baseCheckout ?? join(B, 'work/base-F'),
-    forgeOwner: join(B, 'work/forge-owner'),
+    // The bench project's clone (forge-project): check settings and policy run against it.
+    forgeMain: cfg.forgeMain ?? join(B, 'work/forge-main'),
+    importJournal: join(B, 'work/forge-import.json'),
     deps: join(B, 'deps'),
     installer: join(B, 'deps-installer.sh'),
     baseSha: cfg.github?.mainBase ?? null,
@@ -263,6 +265,18 @@ export function versionAtLeast(version, min) {
 }
 
 const sha256 = text => createHash('sha256').update(text).digest('hex');
+/** The last JSON object line a command printed, or null. */
+const jsonLast = out => {
+  const line = String(out ?? '')
+    .split('\n')
+    .filter(l => l.startsWith('{'))
+    .at(-1);
+  try {
+    return line ? JSON.parse(line) : null;
+  } catch {
+    return null;
+  }
+};
 
 export function buildSteps(ctx) {
   const { B, flags } = ctx;
@@ -460,20 +474,24 @@ export function buildSteps(ctx) {
       note: 'estimate: blobless history; blobs arrive on demand. No CI, no Convex.',
     },
     commands: () => [`git clone --filter=blob:none --no-checkout https://github.com/${UPSTREAM} ${L().meta}`],
-    isDone: async () => ({ done: existsSync(join(L().meta, '.git')) }),
+    // config.meta is read directly by the gates, run-cell and preflight: done means it is set.
+    isDone: async () => ({ done: existsSync(join(L().meta, '.git')) && Boolean(cfgSafe().meta) }),
     run: async () => {
       const dir = L().meta;
-      record(B, { step: 'meta', kind: 'path', ref: dir, at: ctx.now(), state: 'creating' });
-      mkdirSync(dirname(dir), { recursive: true });
-      ctx.sh('git', [
-        'clone',
-        '-q',
-        '--filter=blob:none',
-        '--no-checkout',
-        `https://github.com/${UPSTREAM}`,
-        dir,
-      ]);
-      record(B, { step: 'meta', kind: 'path', ref: dir, state: 'created' });
+      if (!existsSync(join(dir, '.git'))) {
+        record(B, { step: 'meta', kind: 'path', ref: dir, at: ctx.now(), state: 'creating' });
+        mkdirSync(dirname(dir), { recursive: true });
+        ctx.sh('git', [
+          'clone',
+          '-q',
+          '--filter=blob:none',
+          '--no-checkout',
+          `https://github.com/${UPSTREAM}`,
+          dir,
+        ]);
+        record(B, { step: 'meta', kind: 'path', ref: dir, state: 'created' });
+      }
+      patchConfig(ctx, 'meta', { meta: dir });
     },
   });
 
@@ -558,15 +576,20 @@ export function buildSteps(ctx) {
         done:
           existsSync(join(dir, '.git')) &&
           gitOk(dir, 'rev-parse', 'HEAD') === L().baseSha &&
-          existsSync(join(dir, 'pnpm-lock.yaml')),
+          existsSync(join(dir, 'pnpm-lock.yaml')) &&
+          Boolean(cfgSafe().baseCheckout),
       };
     },
     run: async () => {
       const dir = L().baseCheckout;
-      record(B, { step: 'base-checkout', kind: 'path', ref: dir, at: ctx.now(), state: 'creating' });
-      ctx.sh('git', ['clone', '-q', '--shared', '--no-checkout', L().meta, dir]);
-      git(dir, 'checkout', '-q', '--detach', L().baseSha);
-      record(B, { step: 'base-checkout', kind: 'path', ref: dir, state: 'created' });
+      if (!existsSync(join(dir, '.git'))) {
+        record(B, { step: 'base-checkout', kind: 'path', ref: dir, at: ctx.now(), state: 'creating' });
+        ctx.sh('git', ['clone', '-q', '--shared', '--no-checkout', L().meta, dir]);
+        record(B, { step: 'base-checkout', kind: 'path', ref: dir, state: 'created' });
+      }
+      if (gitOk(dir, 'rev-parse', 'HEAD') !== L().baseSha)
+        git(dir, 'checkout', '-q', '--detach', L().baseSha);
+      patchConfig(ctx, 'base-checkout', { baseCheckout: dir });
     },
   });
 
@@ -741,116 +764,104 @@ export function buildSteps(ctx) {
 
   step({
     id: 'forge-project',
-    title: 'Forge bench project at the base tree (one-commit snapshot, then server authority)',
+    title: 'Forge bench project at the base commit (GitHub import of the fork, then a clone)',
     outward: true,
     cost: {
       ...COST0,
-      convexCalls: null,
+      convexCalls: 12,
       diskGb: 0.6,
-      minutes: 25,
+      minutes: 5,
       networkGb: 0.35,
-      note: 'Convex calls/$ UNMEASURED: hosting is bounded pages of objects. B1.5d hosted the full t3code history: 29,454 objects / 338 MB in 22 min on the dev deployment. This step hosts ONE commit (the base tree), so expect a fraction of that; the lead should authorise the spend, then record the real figure from `nforge metrics`. Writes to the dev deployment only.',
+      note: 'GitHub import of the public fork at the base commit (born hosted, server authority, agent-writable main): measured 2026-11-07 at 28,881 files / 333 MB in ~2:10 with 8 action calls, then `nforge clone` in ~61 s. A Git-format `nforge host` of a snapshot is NOT used: it leaves no schema-2 main (mainReady false), so agents cannot land. Dev deployment only.',
     },
     commands: () => [
-      `git -C ${L().meta} archive <base> | tar -x -C ${L().forgeOwner}; git init + one commit (Forge Benchmark <benchmark@localhost>)`,
-      `nforge host ${L().forgeOwner} --deployment ${L().forgeUrl ?? '<config.forge.url>'} --name ${L().forgeName} --visibility private --json`,
-      `nforge host ${L().forgeOwner} --source-authority '{"mode":"server",...}'   # only if --status reports native-owner`,
+      `node ${join(import.meta.dirname, 'forge-import.mjs')} ${L().importJournal} '{"url":"https://github.com/${cfgSafe().github?.repository ?? '<config.github.repository>'}","ref":"${L().baseSha ?? '<base>'}","name":"${L().forgeName}","deployment":"${L().forgeUrl ?? '<config.forge.url>'}"}'`,
+      `nforge clone <projectId> ${L().forgeMain} --deployment ${L().forgeUrl ?? '<config.forge.url>'}`,
       'patch config.forge.projectId / mainBase',
     ],
     isDone: async () => {
       const c = cfgSafe();
       if (!c.forge?.projectId)
-        return { done: false, detail: 'config.forge.projectId is unset: a new project would be hosted' };
+        return { done: false, detail: 'config.forge.projectId is unset: a new project would be imported' };
       const caps = forgeCap();
-      if (caps?.result && caps.result.mainReady !== false) return { done: true };
-      return {
-        done: false,
-        detail: `config.forge.projectId ${c.forge.projectId.slice(0, 8)}… does not answer here (${caps?.error?.code ?? 'no reply'}); a live run hosts a NEW project only with --replace-forge-project`,
-      };
+      if (!caps?.result || caps.result.mainReady !== true)
+        return {
+          done: false,
+          detail: `config.forge.projectId ${c.forge.projectId.slice(0, 8)}… does not answer here with a ready main (${caps?.error?.code ?? (caps?.result ? 'mainReady false' : 'no reply')}); a live run imports a NEW project only with --replace-forge-project`,
+        };
+      if (!existsSync(join(L().forgeMain, '.forge')))
+        return { done: false, detail: `no clone at ${L().forgeMain} yet` };
+      return { done: true };
     },
     run: async () => {
       const c = cfg();
-      if (c.forge?.projectId && !flags.replaceForgeProject)
-        throw Error(
-          `BENCH_SETUP_FORGE_PROJECT_EXISTS: config.forge.projectId names a project that does not answer from this account. It may be unreachable rather than gone: check \`nforge auth status\` first, then pass --replace-forge-project to host a new one (the old one is not touched or deleted).`,
-        );
-      const root = L().forgeOwner;
-      const cli = c.forge.cli;
       const node = '/usr/local/bin/node';
-      if (!existsSync(join(root, '.git'))) {
-        record(B, { step: 'forge-project', kind: 'path', ref: root, at: ctx.now(), state: 'creating' });
-        mkdirSync(root, { recursive: true });
-        const tar = join(B, 'work', `.base-${process.pid}.tar`);
-        ctx.sh('git', ['-C', L().meta, 'archive', '-o', tar, L().baseSha]);
-        ctx.sh('tar', ['-x', '-f', tar, '-C', root]);
-        rmSync(tar, { force: true });
-        git(root, 'init', '-q', '-b', 'main');
-        git(root, 'add', '-A');
-        git(
-          root,
-          '-c',
-          'user.name=Forge Benchmark',
-          '-c',
-          'user.email=benchmark@localhost',
-          'commit',
-          '-q',
-          '-m',
-          'Benchmark source snapshot',
+      const answers = c.forge?.projectId ? forgeCap()?.result?.mainReady === true : false;
+      if (c.forge?.projectId && !answers && !flags.replaceForgeProject)
+        throw Error(
+          `BENCH_SETUP_FORGE_PROJECT_EXISTS: config.forge.projectId names a project that does not answer from this account with a ready main. It may be unreachable rather than gone: check \`nforge auth status\` first, then pass --replace-forge-project to import a new one (the old one is not touched or deleted).`,
         );
+      let projectId = answers ? c.forge.projectId : null;
+      if (!projectId) {
+        const journal = L().importJournal;
+        // A finished journal of the project being replaced must not answer for the new one.
+        if (existsSync(journal)) {
+          const j = JSON.parse(readFileSync(journal, 'utf8'));
+          if (j.status?.projectId && j.status.projectId === c.forge?.projectId)
+            renameSync(journal, `${journal}.replaced-${Date.parse(ctx.now())}`);
+        }
+        // Write-ahead: if the import dies halfway, the journal holds its job id and teardown
+        // can look for the project by name.
+        record(B, {
+          step: 'forge-project',
+          kind: 'forge-project',
+          ref: L().forgeName,
+          state: 'creating',
+          via: 'github-import',
+          importJournal: journal,
+          deployment: c.forge.deployment,
+          url: c.forge.url,
+          startedAt: ctx.now(),
+        });
+        const out = (ctx.tryOut ?? ctx.tryRun)(node, [
+          join(import.meta.dirname, 'forge-import.mjs'),
+          journal,
+          JSON.stringify({
+            url: `https://github.com/${c.github.repository}`,
+            ref: L().baseSha,
+            name: L().forgeName,
+            deployment: c.forge.url,
+          }),
+        ]);
+        const done = jsonLast(out);
+        if (done?.phase !== 'ready' || !done.projectId)
+          throw Error(
+            `BENCH_SETUP_IMPORT_FAILED: the GitHub import ended ${done?.phase ?? 'with no result'}${done?.error ? ` (${JSON.stringify(done.error).slice(0, 300)})` : ''}. Re-run setup to resume it from ${journal}.`,
+          );
+        if (done.commit && done.commit !== L().baseSha)
+          throw Error(`BENCH_SETUP_IMPORT_WRONG_BASE: imported ${done.commit}, plan base ${L().baseSha}`);
+        projectId = done.projectId;
+        record(B, {
+          step: 'forge-project',
+          kind: 'forge-project',
+          ref: L().forgeName,
+          state: 'created',
+          via: 'github-import',
+          projectId,
+          root: L().forgeMain,
+          files: done.files,
+          bytes: done.bytes,
+          report: done.report,
+        });
+        patchConfig(ctx, 'forge-project', { 'forge.projectId': projectId, 'forge.mainBase': L().baseSha });
+      }
+      const root = L().forgeMain;
+      if (!existsSync(join(root, '.forge'))) {
+        record(B, { step: 'forge-project', kind: 'path', ref: root, at: ctx.now(), state: 'creating' });
+        mkdirSync(dirname(root), { recursive: true });
+        ctx.sh(node, [c.forge.cli, 'clone', projectId, root, '--deployment', c.forge.url]);
         record(B, { step: 'forge-project', kind: 'path', ref: root, state: 'created' });
       }
-      // Write-ahead: if hosting dies halfway, teardown can look for the project by name.
-      record(B, {
-        step: 'forge-project',
-        kind: 'forge-project',
-        ref: L().forgeName,
-        state: 'creating',
-        deployment: c.forge.deployment,
-        url: c.forge.url,
-        startedAt: ctx.now(),
-      });
-      const out = ctx.sh(node, [
-        cli,
-        'host',
-        root,
-        '--deployment',
-        c.forge.url,
-        '--name',
-        L().forgeName,
-        '--visibility',
-        'private',
-        '--json',
-      ]);
-      const done = out
-        .split('\n')
-        .filter(l => l.startsWith('{'))
-        .map(l => JSON.parse(l))
-        .find(e => e.hosted && e.projectId);
-      const projectId = done?.projectId;
-      if (!projectId)
-        throw Error(
-          'BENCH_SETUP_HOST_NO_PROJECT_ID: nforge host printed no hosted result; run `nforge host ROOT --status` and re-run setup',
-        );
-      record(B, {
-        step: 'forge-project',
-        kind: 'forge-project',
-        ref: L().forgeName,
-        state: 'created',
-        projectId,
-        root,
-      });
-      const status = ctx.tryRun(node, [cli, 'host', root, '--status', '--json']) ?? '';
-      if (/native-owner/.test(status)) {
-        const op = randomUUID();
-        ctx.sh(node, [
-          cli,
-          'host',
-          root,
-          '--source-authority',
-          JSON.stringify({ operationId: op, expected: { mode: 'native-owner', epoch: 0 }, mode: 'server' }),
-        ]);
-      }
-      patchConfig(ctx, 'forge-project', { 'forge.projectId': projectId, 'forge.mainBase': L().baseSha });
     },
   });
 
@@ -861,7 +872,7 @@ export function buildSteps(ctx) {
     const out = (ctx.tryOut ?? ctx.tryRun)('/usr/local/bin/node', [
       cfgSafe().forge?.cli,
       'agent',
-      L().forgeOwner,
+      L().forgeMain,
       'check-settings',
       '{}',
     ]);
@@ -885,14 +896,18 @@ export function buildSteps(ctx) {
       note: 'check-settings is 3 reads (definitions page, current runner, policy); configure-check, configure-runner (one read-only GitHub App permission read) and set-policy are one write each, on the project setup hosted only. No CI runs here: the base-green qualification belongs to the exit bench dry run.',
     },
     commands: () => [
-      `nforge agent ${L().forgeOwner} check-settings '{}'   # read-only`,
-      `nforge x ${L().forgeOwner} configure-check '${JSON.stringify({ operationId: '<uuid>', command: BENCH_CHECK })}'`,
-      `nforge x ${L().forgeOwner} configure-runner '${JSON.stringify({ operationId: '<uuid>', provider: 'github-actions', ...FORGE_RUNNER })}'`,
-      `nforge x ${L().forgeOwner} set-policy '{"operationId":"<uuid>","preset":"trusted"}'   # only if agent landings wait for review`,
+      `nforge agent ${L().forgeMain} check-settings '{}'   # read-only`,
+      `nforge x ${L().forgeMain} configure-check '${JSON.stringify({ operationId: '<uuid>', command: BENCH_CHECK })}'`,
+      `nforge github connect ${cfgSafe().forge?.projectId ?? '<projectId>'} --url ${L().forgeUrl ?? '<config.forge.url>'} --repo ${FORGE_RUNNER.repository}   # OWNER, once: browser authorisation of the runner repository`,
+      `nforge x ${L().forgeMain} configure-runner '${JSON.stringify({ operationId: '<uuid>', provider: 'github-actions', ...FORGE_RUNNER })}'`,
+      `nforge x ${L().forgeMain} set-policy '{"operationId":"<uuid>","preset":"trusted"}'   # only if agent landings wait for review`,
     ],
     isDone: async () => {
-      if (!cfgSafe().forge?.projectId || !existsSync(join(L().forgeOwner, '.forge')))
-        return { done: false, detail: 'no bench project yet: configured right after forge-project hosts it' };
+      if (!cfgSafe().forge?.projectId || !existsSync(join(L().forgeMain, '.forge')))
+        return {
+          done: false,
+          detail: 'no bench project clone yet: configured right after forge-project imports it',
+        };
       const s = checkSettings()?.result;
       if (!s)
         return { done: false, problems: ['check-settings gave no result (is the bench project reachable?)'] };
@@ -912,7 +927,7 @@ export function buildSteps(ctx) {
         ctx.sh(node, [
           c.forge.cli,
           'x',
-          L().forgeOwner,
+          L().forgeMain,
           action,
           JSON.stringify({ operationId: randomUUID(), ...request }),
         ]);
@@ -920,7 +935,19 @@ export function buildSteps(ctx) {
       const state = checkSettingsState(s);
       if (state.missing.includes('check')) x('configure-check', { command: BENCH_CHECK });
       if (state.missing.includes('runner'))
-        x('configure-runner', { provider: 'github-actions', ...FORGE_RUNNER });
+        try {
+          x('configure-runner', { provider: 'github-actions', ...FORGE_RUNNER });
+        } catch (error) {
+          const code = jsonLast(error.stdout)?.error?.code;
+          if (code !== 'GITHUB_REPOSITORY_UNBOUND') throw error;
+          // The runner's repository runs the check through the Forge GitHub App, which the
+          // owner authorises in a browser once per project: setup cannot do it for them.
+          throw Error(
+            `BENCH_SETUP_OWNER_STEP: connect the bench project to the runner repository, then re-run setup:\n` +
+              `  nforge github connect ${c.forge.projectId} --url ${c.forge.url} --repo ${FORGE_RUNNER.repository}\n` +
+              '(opens the GitHub authorisation in a browser; docs/operations/github-app.md)',
+          );
+        }
       if (state.missing.includes('acceptance')) x('set-policy', { preset: 'trusted' });
     },
   });

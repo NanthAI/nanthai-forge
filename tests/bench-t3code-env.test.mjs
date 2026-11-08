@@ -24,6 +24,7 @@ import { repository, rulesetName } from '../scripts/bench-t3code/github-arm.mjs'
 import { parseMirror, pinHarness, resolvePin } from '../scripts/bench-t3code/pin.mjs';
 import { cliGitCommit, snapshotProblems } from '../scripts/bench-t3code/versions.mjs';
 import { setupHint } from '../scripts/bench-t3code/preflight.mjs';
+import { importProject } from '../scripts/bench-t3code/forge-import.mjs';
 
 const BASE = 'a'.repeat(40);
 const STATE = 'b'.repeat(64);
@@ -120,7 +121,7 @@ function fakeContext(B, flags = {}, world = {}) {
   return { ctx, calls, lines, world: w };
 }
 const MUTATING =
-  /^(gh (repo|api -X)|git .*(push|clone|fetch|remote add)|\S*node .* host |\S*node .* x .* (configure-check|configure-runner|set-policy) )/;
+  /^(gh (repo|api -X)|git .*(push|clone|fetch|remote add)|\S*node .* host |\S*node \S*forge-import\.mjs|\S*node \S+ clone |\S*node .* x .* (configure-check|configure-runner|set-policy) )/;
 
 test('versionAtLeast compares left to right', () => {
   assert.ok(versionAtLeast('v24.22.1', [24, 22, 1]));
@@ -186,7 +187,7 @@ test('dry run: prints every step with its cost, creates nothing, makes no mutati
   ])
     assert.match(text, new RegExp(`\\] ${id}:`), id);
   assert.match(text, /cost: repos 1 \| CI min 0 \| Convex calls 0/); // the fork step
-  assert.match(text, /Convex calls unmeasured/); // hosting
+  assert.match(text, /Convex calls 12 \| disk 0.6 GB/); // the GitHub import, measured 2026-11-07
   assert.match(text, /OUTWARD: public\/hosted/);
   assert.match(text, /from scratch: repos 1/);
   assert.match(text, /nothing was created/);
@@ -526,7 +527,7 @@ function hostedBench({ own, settings }) {
   const cfg = JSON.parse(readFileSync(join(B, 'config.json'), 'utf8'));
   cfg.forge.projectId = 'p'.repeat(32);
   writeFileSync(join(B, 'config.json'), JSON.stringify(cfg));
-  mkdirSync(join(B, 'work/forge-owner/.forge'), { recursive: true });
+  mkdirSync(join(B, 'work/forge-main/.forge'), { recursive: true });
   if (own)
     record(B, {
       step: 'forge-project',
@@ -590,4 +591,181 @@ test('forge-check never changes a project setup did not host', async () => {
   assert.equal(r.ok, false);
   assert.match(r.error, /BENCH_SETUP_CHECK_NOT_OURS/);
   assert.deepEqual(writes, []);
+});
+
+/** A bench with no project yet, whose fake import and clone succeed. */
+function importBench({ importResult, answers = false, projectId } = {}) {
+  const B = bench();
+  if (projectId) {
+    const cfg = JSON.parse(readFileSync(join(B, 'config.json'), 'utf8'));
+    cfg.forge.projectId = projectId;
+    writeFileSync(join(B, 'config.json'), JSON.stringify(cfg));
+  }
+  const f = fakeContext(B, { replaceForgeProject: true });
+  const base = f.ctx.sh;
+  let imported = false;
+  const out = (c, a, o) => {
+    if (/forge-import\.mjs$/.test(a[0])) {
+      f.calls.push(`${c} ${a.join(' ')}`);
+      imported = true;
+      return JSON.stringify(
+        importResult ?? { projectId: 'n'.repeat(32), phase: 'ready', commit: BASE, files: 3 },
+      );
+    }
+    if (a[1] === 'clone') {
+      f.calls.push(`${c} ${a.join(' ')}`);
+      mkdirSync(join(a[3], '.forge'), { recursive: true });
+      return '';
+    }
+    if (a[1] === 'agent' && a[3] === 'capabilities') {
+      f.calls.push(`${c} ${a.join(' ')}`);
+      // The imported project answers with a ready main; a replaced one does not.
+      return answers || imported
+        ? JSON.stringify({ result: { mainReady: true } })
+        : JSON.stringify({ error: { code: 'NOT_FOUND' } });
+    }
+    return base(c, a, o);
+  };
+  f.ctx.sh = out;
+  f.ctx.tryOut = out;
+  f.ctx.tryRun = (c, a, o) => {
+    try {
+      return out(c, a, o);
+    } catch {
+      return null;
+    }
+  };
+  return { B, f };
+}
+
+test('forge-project: imports the fork at the base commit, clones it, patches config; a rerun changes nothing', async () => {
+  const { B, f } = importBench();
+  const r = await runSetup(f.ctx, { only: ['forge-project'] });
+  assert.equal(r.ok, true, f.lines.join('\n'));
+  const imp = f.calls.find(c => /forge-import\.mjs/.test(c));
+  assert.ok(imp.includes(`"url":"https://github.com/${repository}"`) && imp.includes(`"ref":"${BASE}"`), imp);
+  assert.ok(
+    f.calls.some(c => c.includes(` clone ${'n'.repeat(32)} ${join(B, 'work/forge-main')} --deployment`)),
+  );
+  assert.equal(f.calls.filter(c => / host /.test(c)).length, 0, 'a Git-format host leaves no ready main');
+  const cfg = JSON.parse(readFileSync(join(B, 'config.json'), 'utf8'));
+  assert.equal(cfg.forge.projectId, 'n'.repeat(32));
+  const created = readManifest(B).entries.find(e => e.kind === 'forge-project' && e.state === 'created');
+  assert.equal(created.via, 'github-import');
+  assert.equal(created.root, join(B, 'work/forge-main'));
+  // The project now answers with a ready main and the clone exists: nothing more to do.
+  const again = importBench({ answers: true });
+  again.f.ctx.B = B;
+  const n = f.calls.length;
+  const steps = buildSteps({ ...again.f.ctx, B });
+  assert.equal((await steps.find(s => s.id === 'forge-project').isDone()).done, true);
+  assert.equal(f.calls.length, n);
+});
+
+test('forge-project: a failed or wrong-base import stops before any clone or config change', async () => {
+  for (const [importResult, code] of [
+    [{ phase: 'failed', error: { code: 'X' } }, /BENCH_SETUP_IMPORT_FAILED/],
+    [{ projectId: 'n'.repeat(32), phase: 'ready', commit: 'e'.repeat(40) }, /BENCH_SETUP_IMPORT_WRONG_BASE/],
+  ]) {
+    const { B, f } = importBench({ importResult });
+    const r = await runSetup(f.ctx, { only: ['forge-project'] });
+    assert.equal(r.ok, false);
+    assert.match(r.error, code);
+    assert.ok(!f.calls.some(c => / clone /.test(c)));
+    assert.equal(JSON.parse(readFileSync(join(B, 'config.json'), 'utf8')).forge.projectId, undefined);
+  }
+});
+
+test('forge-project: replacing a project sets its finished import journal aside, never reuses it', async () => {
+  const old = 'o'.repeat(32);
+  const { B, f } = importBench({ projectId: old });
+  mkdirSync(join(B, 'work'), { recursive: true });
+  writeFileSync(
+    join(B, 'work/forge-import.json'),
+    JSON.stringify({ status: { phase: 'ready', projectId: old } }),
+  );
+  assert.equal((await runSetup(f.ctx, { only: ['forge-project'] })).ok, true, f.lines.join('\n'));
+  assert.equal(existsSync(join(B, 'work/forge-import.json')), false);
+  assert.equal(JSON.parse(readFileSync(join(B, 'config.json'), 'utf8')).forge.projectId, 'n'.repeat(32));
+});
+
+test('forge-check: an unconnected runner repository names the owner step, with the exact command', async () => {
+  const { B, f, writes } = hostedBench({ own: true, settings: {} });
+  const base = f.ctx.sh;
+  f.ctx.sh = (c, a, o) => {
+    if (a[3] === 'configure-runner') {
+      const e = Error('exit 1');
+      e.stdout = JSON.stringify({ error: { code: 'GITHUB_REPOSITORY_UNBOUND' } });
+      throw e;
+    }
+    return base(c, a, o);
+  };
+  const r = await runSetup(f.ctx, { only: ['forge-check'] });
+  assert.equal(r.ok, false);
+  assert.match(r.error, /BENCH_SETUP_OWNER_STEP/);
+  assert.match(
+    r.error,
+    new RegExp(
+      `nforge github connect ${'p'.repeat(32)} --url https://x.convex.cloud --repo ${FORGE_RUNNER.repository}`,
+    ),
+  );
+  assert.ok(writes.includes('configure-check'));
+  rmSync(B, { recursive: true, force: true });
+});
+
+test('meta and base-checkout record their folders in config (the gates read config.meta / baseCheckout)', async () => {
+  const B = bench();
+  mkdirSync(join(B, 'work/t3code-meta/.git'), { recursive: true });
+  const f = fakeContext(B);
+  assert.equal((await runSetup(f.ctx, { only: ['meta'] })).ok, true, f.lines.join('\n'));
+  assert.ok(!f.calls.some(c => / clone /.test(c)), 'an existing meta repo is not cloned again');
+  const cfg = JSON.parse(readFileSync(join(B, 'config.json'), 'utf8'));
+  assert.equal(cfg.meta, join(B, 'work/t3code-meta'));
+  const patch = readManifest(B).entries.find(e => e.kind === 'config-patch' && e.ref === 'meta');
+  assert.deepEqual([patch.hadKey, patch.after], [false, cfg.meta]);
+});
+
+test('forge import: resumes on the journal job id, polls to ready, and a finished journal makes no call', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'bench-import-'));
+  try {
+    const journalPath = join(dir, 'j.json');
+    const seen = [];
+    const phases = ['fetching', 'ready'];
+    const client = {
+      action: async (name, args) => {
+        seen.push([name, args]);
+        if (name === 'start') return 'job1';
+        const phase = phases.shift();
+        return { phase, projectId: phase === 'ready' ? 'P' : null, commit: BASE, total: 3, totalBytes: 9 };
+      },
+    };
+    let t = 0;
+    const spec = { url: 'u', ref: BASE, name: 'n' };
+    const r = await importProject({
+      client,
+      ref: n => n.split(':')[1],
+      journalPath,
+      spec,
+      now: () => t,
+      sleep: async ms => {
+        t += ms;
+      },
+    });
+    assert.deepEqual([r.projectId, r.phase, r.calls, r.files], ['P', 'ready', 3, 3]);
+    assert.equal(seen[0][1].operationId, JSON.parse(readFileSync(journalPath, 'utf8')).operationId);
+    const before = seen.length;
+    const again = await importProject({ client, ref: n => n, journalPath, spec, sleep: async () => {} });
+    assert.deepEqual([again.projectId, again.calls, seen.length], ['P', 0, before]);
+    // A journal with a job id but no end resumes polling without a second start.
+    writeFileSync(journalPath, JSON.stringify({ operationId: 'op', jobId: 'job1' }));
+    phases.push('ready');
+    seen.length = 0;
+    await importProject({ client, ref: n => n.split(':')[1], journalPath, spec, sleep: async () => {} });
+    assert.deepEqual(
+      seen.map(s => s[0]),
+      ['status'],
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

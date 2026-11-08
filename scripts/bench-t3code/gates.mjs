@@ -36,15 +36,17 @@ export function diskNeed(arm, N, dry) {
   return { parts, needGb, floorGb: 15, requiredGb: 15 + needGb };
 }
 
-/** Usage windows of the run's agent provider (`codex-usage` / `claude-usage`). Claude has a 5h
- * and a weekly window; the Codex plan reports a weekly one (and a 5h one if the plan has it). */
+/** Usage windows of the run's agent provider (`codex-usage` / `claude-usage`). A window is gated
+ * only when the provider reports it: the Claude plan reports a 5h window only while one is open
+ * (no window means no 5h use to wait for), the Codex plan a weekly one and a 5h one if it has it.
+ * An unreadable probe refuses (weekly null). */
 export function usageGate(provider = 'codex') {
   try {
     const u = JSON.parse(execFileSync(`${provider}-usage`, ['--json'], { encoding: 'utf8' }));
     return {
       provider,
       session5h: u.session5h?.usedPercent ?? null,
-      has5h: provider === 'claude' || Boolean(u.session5h),
+      has5h: Boolean(u.session5h),
       weekly: u.weekly?.usedPercent ?? null,
       checkedAt: u.checkedAt,
     };

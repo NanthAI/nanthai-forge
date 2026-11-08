@@ -16,7 +16,7 @@ import { mkdirSync, writeFileSync, readFileSync, existsSync, rmSync, realpathSyn
 import { join } from 'node:path';
 import { loadavg } from 'node:os';
 import { benchRootOrExit } from './bench-root.mjs';
-import { launchAgent, agentOf, killAgents } from './agent.mjs';
+import { launchAgent, agentOf, killAgents, claudeTokenFile, claudeTokenProblem } from './agent.mjs';
 import { prompt } from './prompt.mjs';
 import * as github from './github-arm.mjs';
 import { forgeArm, readCalls, openLanes } from './forge-arm.mjs';
@@ -59,15 +59,24 @@ const N = Number(nText),
   modelCheck = !dry && flags.includes('--model-check'),
   trial = dry || modelCheck,
   attempt = Number(flag('--attempt') ?? 1),
+  // The outlier rule's extra rep of (N, rep): same seed and order, key suffix x (plan.mjs extraBatch).
+  extra = flags.includes('--extra'),
   taskLimit = flag('--tasks') ? Number(flag('--tasks')) : null;
 if (!['github', 'forge'].includes(arm) || !(N >= 1) || !(rep >= 1))
-  throw Error('usage: run-cell.mjs github|forge N REP [--dry]');
+  throw Error('usage: run-cell.mjs github|forge N REP [--dry] [--extra]');
 const all = loadTasks(B);
 const byId = new Map(all.map(t => [t.id, t]));
-const planned = schedule(all.map(t => t.id)).find(c => c.key === cellKey(arm, N, rep));
+const planned = schedule(all.map(t => t.id)).find(c => c.key === cellKey(arm, N, rep) + (extra ? 'x' : ''));
 if (!planned) throw Error(`cell ${cellKey(arm, N, rep)} is not in PLAN.md`);
 const tasks = planned.order.map(id => byId.get(id)).slice(0, taskLimit ?? undefined);
 const base = config.github.mainBase;
+// A Claude agent logs in only through the plan's token, handed over a pipe (agent.mjs). Read it
+// once before any folder is made; a dry cell runs the scripted agent and needs none.
+const tokenFile = claudeTokenFile(B, config);
+const tokenProblem = !dry && agentOf(config).provider === 'claude' ? claudeTokenProblem(tokenFile) : null;
+if (tokenProblem) throw Error(tokenProblem);
+const claudeToken =
+  !dry && agentOf(config).provider === 'claude' ? readFileSync(tokenFile, 'utf8').trim() : null;
 const batchDir = flag('--batch');
 const stamp = new Date().toISOString().replace(/[-:]/g, '').slice(0, 15);
 const cellId = `${planned.key}${dry ? '-dry' : modelCheck ? '-modelcheck' : ''}-a${attempt}-${stamp}`;
@@ -84,6 +93,7 @@ writeFileSync(
     attempt,
     dry,
     modelCheck,
+    extra,
     seed: planned.seed,
     order: planned.order,
     startedAt: new Date().toISOString(),
@@ -105,10 +115,11 @@ const result = {
   attempt,
   dry,
   modelCheck,
+  extra,
   seed: planned.seed,
   order: tasks.map(t => t.id),
 };
-const writeResult = extra => writeCellResult(dir, result, extra);
+const writeResult = more => writeCellResult(dir, result, more);
 const callLog = join(dir, 'nforge-calls.jsonl');
 const ledger = join(B, 'forge-lanes.jsonl');
 const forge = arm === 'forge' ? forgeArm(config.forge, { callLog, ws, ledger, cellDir: dir }) : null;
@@ -361,6 +372,7 @@ async function dispatch(task, k) {
       env,
       timeoutMs: config.agentTimeoutMinutes * 60_000,
       agent: agentOf(config),
+      claudeToken,
       extraReads: [
         ...(arm === 'github' ? [hub] : [...forgeCliReads(config.forge.cli), objectCache]),
         ...(shared ? [shared.deps] : []),

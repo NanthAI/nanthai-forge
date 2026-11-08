@@ -8,7 +8,8 @@
 //   Never more than DESIGN.maxAgents agents at once.
 // - Order: rep 1 with N descending (10, 5, 3, 1), rep 2 ascending, then the rep-3 rule per N
 //   (plan.mjs rep3Decision, written once to rep3-n<N>.json) and the selected rep-3 batches,
-//   descending (plan.mjs repNs). A void batch is re-run once before the next batch starts, and
+//   descending (plan.mjs repNs), then the outlier rule per N (plan.mjs outlierDecision, written
+//   once to outlier-n<N>.json) and its extra batches. A void batch is re-run once before the next batch starts, and
 //   a resume continues at the same place (plan.mjs nextBatch). Every attempt is published.
 // - Freeze: the batch holds the CLI installation's .freeze from before its first cell starts until its last
 //   cell is graded (nforge land/finish wait meanwhile), and is released between
@@ -34,6 +35,8 @@ import {
   nextBatch,
   SETUP_ONLY,
   rep3Decision,
+  outlierDecision,
+  extraBatch,
   loadTasks,
 } from './plan.mjs';
 import { snapshot, snapshotProblems, differences, forgeInFlight, benchFreeze } from './versions.mjs';
@@ -244,6 +247,7 @@ async function main() {
       '--batch',
       dir,
       ...(dry ? ['--dry'] : []),
+      ...(cell.extra ? ['--extra'] : []),
       ...(flags.includes('--unpinned') ? ['--unpinned'] : []),
       ...(flag('--tasks') ? ['--tasks', flag('--tasks')] : []),
     ];
@@ -418,9 +422,10 @@ async function main() {
   };
 
   if (only) {
-    const [, N, rep] = only.match(/^n(\d+)-r(\d+)$/) ?? [];
-    if (!N) throw Error('--only n<N>-r<rep>');
-    await runBatch(planBatch(ids, Number(N), Number(rep)), (await attempts(only)).length + 1);
+    const [, N, rep, x] = only.match(/^n(\d+)-r(\d+)(x?)$/) ?? [];
+    if (!N) throw Error('--only n<N>-r<rep>[x]');
+    const b = (x ? extraBatch : planBatch)(ids, Number(N), Number(rep));
+    await runBatch(b, (await attempts(only)).length + 1);
     return;
   }
   const base = planBatches(
@@ -447,7 +452,41 @@ async function main() {
     }
     await runInOrder(third);
   }
-  const all = [...base, ...repNs(3).map(N => planBatch(ids, N, 3))];
+  // Outlier rule (plan.mjs outlierDecision), once all regular reps ran: decided once per N
+  // from the valid reps 1-3, written to outlier-n<N>.json, then the extra batches (same seed
+  // and order) in N-descending order. Extra batches are never judged again: exactly one each.
+  const extras = [];
+  if (reps >= DESIGN.reps)
+    for (const N of repNs(3)) {
+      const file = join(B, `outlier-n${N}${suffix}.json`);
+      if (!existsSync(file)) {
+        const byRep = {};
+        for (let rep = 1; rep <= DESIGN.maxReps; rep++) {
+          const v = await valid(`n${N}-r${rep}`);
+          if (v) byRep[rep] = v;
+        }
+        const d = outlierDecision(byRep);
+        writeFileSync(
+          file,
+          JSON.stringify(
+            { N, decidedAt: new Date().toISOString(), factor: DESIGN.outlierFactor, ...d },
+            null,
+            1,
+          ) + '\n',
+          { flag: 'wx' },
+        );
+        say(
+          `OUTLIER N=${N} ${d.extraReps.length ? `EXTRA rep ${d.extraReps.join(',')}: ${d.outliers.map(o => o.reason).join('; ')}` : 'none'}`,
+        );
+      }
+      for (const rep of readJson(file).extraReps) extras.push(extraBatch(ids, N, rep));
+    }
+  await runInOrder(extras);
+  const all = [
+    ...base,
+    ...repNs(3).map(N => planBatch(ids, N, 3)),
+    ...DESIGN.ns.flatMap(N => [1, 2, 3].map(rep => extraBatch(ids, N, rep))),
+  ];
   const summary = [];
   for (const b of all) {
     const a = await attempts(b.key);

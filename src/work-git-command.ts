@@ -62,6 +62,9 @@ export function gitFailure(error: unknown, args: string[], timedOut = false): Fo
           4000,
         ).trim()
       : '';
+  // A synchronous child killed at its `timeout` reports code ETIMEDOUT (Node): that is this budget
+  // running out, not a Git failure, whichever caller hands the error over.
+  timedOut ||= failure.code === 'ETIMEDOUT';
   return new ForgeError(
     timedOut ? 'WORK_GIT_TIMEOUT' : 'WORK_GIT_FAILED',
     `Git ${gitPhase(args)} ${timedOut ? `exceeded its ${gitTimeout()}ms wait budget (FORGE_GIT_TIMEOUT_MS)` : 'failed'} (status=${failure.status ?? 'unknown'}, code=${failure.code ?? 'none'}, signal=${failure.signal ?? 'none'}).${stderr ? ` stderr: ${stderr}` : ''} Existing branches and workspaces are retained; inspect work status before retrying.`,

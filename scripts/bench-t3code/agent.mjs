@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
-// B1.5d agent runner: one agent CLI, model and flag set for both arms (config.agent), in a
-// macOS sandbox. Codex (GPT) is the run's agent; Claude Code stays selectable. Writes are
-// limited to the workspace (plus the CLI's own caches); bench data (tasks, oracle, results,
-// other workspaces) is unreadable. `scripted` replaces the model for the no-model dry run.
+// Bench agent runner: one agent CLI, model and flag set for both arms (config.agent), in a
+// macOS sandbox. Claude Code (the exit bench's agent) and Codex (B1.5d's) are isolated the same
+// way: a fresh home per task holding no owner config, memory, skills, plugins or sessions, and
+// the owner's own homes unreadable. Writes are limited to the workspace (plus the CLI's own
+// caches); bench data (tasks, oracle, results, other workspaces, sibling bench folders) is
+// unreadable. `scripted` replaces the model for the no-model dry run.
 import { spawn } from 'node:child_process';
 import {
   createWriteStream,
@@ -26,6 +28,11 @@ export const AGENTS = {
   codex: { provider: 'codex', model: 'gpt-6.1-sol', effort: 'high' },
 };
 export const MODEL = AGENTS.claude.model;
+/** Claude Code's built-in tools for both arms, matching Codex's shell, patch and plan: Bash,
+ * Read plus Edit/Write (patch) and TodoWrite (plan). Everything else (sub-agents, workflows,
+ * web, monitors, schedules, worktrees, skills, tool search, MCP) is off: `--tools` is an
+ * allowlist, so a built-in added in a later CLI stays off too. */
+export const CLAUDE_TOOLS = ['Bash', 'Read', 'Edit', 'Write', 'TodoWrite'];
 export const CLAUDE = process.env.BENCH_CLAUDE || join(homedir(), '.npm-global/bin/claude');
 export const CODEX = process.env.BENCH_CODEX || '/opt/homebrew/bin/codex';
 /** The configured agent; Codex when config.agent is absent (the run's recorded choice). */
@@ -49,6 +56,34 @@ export const CODEX_DISABLED = [
   'memories',
 ];
 const CODEX_HOMES = join(homedir(), '.codex-bench');
+export const CLAUDE_HOMES = join(homedir(), '.claude-bench');
+/** Where the bench reads the owner's long-lived Claude Code token (`claude setup-token`):
+ * config.agent.tokenFile, else BENCH_ROOT/secrets/claude-oauth-token (BENCH_ROOT is unreadable
+ * to agents). The token reaches the CLI through an inherited pipe, never the environment. */
+export const claudeTokenFile = (benchRoot, config) =>
+  config?.agent?.tokenFile ?? join(benchRoot, 'secrets', 'claude-oauth-token');
+/** Why a Claude agent cannot start (missing or group/world-readable token file), or null. */
+export function claudeTokenProblem(file) {
+  let st;
+  try {
+    st = lstatSync(file);
+  } catch {
+    return `BENCH_CLAUDE_TOKEN_REQUIRED: ${file} is missing. Each task runs Claude Code in a fresh home (no owner sessions, memory or settings), which has no login: the owner runs \`claude setup-token\` and saves the token there (mode 600).`;
+  }
+  if (!st.isFile()) return `BENCH_CLAUDE_TOKEN_REQUIRED: ${file} is not a regular file`;
+  if (st.mode & 0o077)
+    return `BENCH_CLAUDE_TOKEN_MODE: ${file} must be readable by its owner only (chmod 600)`;
+  if (st.size < 20) return `BENCH_CLAUDE_TOKEN_REQUIRED: ${file} holds no token`;
+  return null;
+}
+
+/** The folder that holds BENCH_ROOT, when it is a bench folder of its own (other bench runs,
+ * their tasks and transcripts live next to this one) rather than a home or system folder. */
+export function benchSiblings(benchRoot, home = homedir()) {
+  const parent = dirname(benchRoot);
+  if (parent === dirname(parent) || parent === home || home.startsWith(parent + '/')) return null;
+  return parent;
+}
 
 /** Deny reads of bench data outside this workspace; allow writes to it and tool caches. */
 export function sandboxProfile({
@@ -57,20 +92,33 @@ export function sandboxProfile({
   extraWrites = [],
   extraReads = [],
   codexHome = null,
+  claudeHome = null,
 }) {
   // extraWrites (e.g. the git hub holding a worktree's objects) are readable too.
   const home = homedir();
-  // A Codex agent reads only its own CODEX_HOME (its auth file links to the owner's): never
-  // the owner's Codex or Claude sessions, nor another task's home.
-  const codex = codexHome
-    ? { denies: [join(home, '.codex'), join(home, '.claude'), CODEX_HOMES], reads: [codexHome] }
+  // An agent reads only its own per-task home (Codex: its auth file links to the owner's;
+  // Claude: its token arrives on a pipe): never the owner's Codex or Claude sessions,
+  // memory or settings, nor another task's home.
+  const agentHome = codexHome ?? claudeHome;
+  const isolated = agentHome
+    ? {
+        denies: [
+          join(home, '.codex'),
+          join(home, '.claude'),
+          join(home, '.claude.json'),
+          CODEX_HOMES,
+          CLAUDE_HOMES,
+        ],
+        reads: [agentHome],
+      }
     : { denies: [], reads: [] };
+  const siblings = benchSiblings(benchRoot, home);
   const writes = [
-    ...(codexHome ? [codexHome] : []),
+    ...(agentHome ? [agentHome] : []),
     workspace,
     workspace + '.forge-client',
-    join(home, '.claude'),
-    join(home, '.claude.json'),
+    // Unisolated (legacy) Claude runs keep their state in the owner's home.
+    ...(agentHome ? [] : [join(home, '.claude'), join(home, '.claude.json')]),
     join(home, '.cache'),
     join(home, '.local/share/vite-plus'),
     join(home, '.config/vite-plus'),
@@ -88,16 +136,19 @@ export function sandboxProfile({
   ];
   const denies = [
     benchRoot,
+    // Earlier bench folders beside this one (their tasks, oracle runs and agent transcripts).
+    ...(siblings ? [siblings] : []),
     // Sibling checkouts and agent workspaces next to the bench data (owner layout).
     ...['forge-bench/results', 'nanthai-forge', 'forge-phase5', 'forge-hosted'].map(name =>
       join(dirname(dirname(benchRoot)), name),
     ),
-    ...codex.denies,
+    ...isolated.denies,
   ];
   // Node resolves a script's realpath by lstat-ing every parent, so readable paths under
-  // a denied root (the CLI in forge-phase5) need metadata on their ancestors (no contents).
+  // a denied root (the CLI in forge-phase5, the workspace under a denied bench folder) need
+  // metadata on their ancestors (no contents).
   const ancestors = new Set();
-  for (const p of [...extraWrites, ...extraReads, ...codex.reads])
+  for (const p of [...extraWrites, ...extraReads, ...isolated.reads, benchRoot])
     for (let d = dirname(p); d !== dirname(d); d = dirname(d)) ancestors.add(d);
   const q = JSON.stringify;
   return `(version 1)
@@ -106,7 +157,7 @@ export function sandboxProfile({
 (allow file-write* ${writes.map(p => `(subpath ${q(p)})`).join(' ')})
 (deny file-read* ${denies.map(p => `(subpath ${q(p)})`).join(' ')})
 (allow file-read-metadata (subpath ${q(benchRoot)})${[...ancestors].map(p => ` (literal ${q(p)})`).join('')})
-(allow file-read* (subpath ${q(workspace)}) (subpath ${q(workspace + '.forge-client')}) (subpath ${q(dirname(workspace) + '/bin')}) ${[...extraWrites, ...extraReads, ...codex.reads].map(p => `(subpath ${q(p)})`).join(' ')})
+(allow file-read* (subpath ${q(workspace)}) (subpath ${q(workspace + '.forge-client')}) (subpath ${q(dirname(workspace) + '/bin')}) ${[...extraWrites, ...extraReads, ...isolated.reads].map(p => `(subpath ${q(p)})`).join(' ')})
 ${codexHome ? `(allow file-read* file-write* (literal ${q(join(home, '.codex/auth.json'))}))\n` : ''}`;
 }
 
@@ -269,6 +320,75 @@ function closeCodexHome(dir, prefix) {
   return { transcript, rollouts: found.length, authRefreshed };
 }
 
+/** A fresh CLAUDE_CONFIG_DIR per task: no owner settings, CLAUDE.md, memory, skills, plugins
+ * or sessions. It holds no credential; the token arrives on a pipe (CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR). */
+export function claudeHomeFor(root = CLAUDE_HOMES) {
+  const dir = join(root, randomUUID());
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  return dir;
+}
+
+/** Keep the session transcript (projects/<cwd>/<session>.jsonl), delete the home. */
+export function closeClaudeHome(dir, prefix, sessionId) {
+  const found = [];
+  const projects = join(dir, 'projects');
+  for (const d of existsSync(projects) ? readdirSync(projects) : [])
+    if (existsSync(join(projects, d, `${sessionId}.jsonl`)))
+      found.push(join(projects, d, `${sessionId}.jsonl`));
+  let transcript = null;
+  if (found.length) {
+    writeFileSync(prefix + '.transcript.jsonl', found.map(f => readFileSync(f, 'utf8')).join(''), {
+      flag: 'wx',
+    });
+    transcript = prefix + '.transcript.jsonl';
+  }
+  rmSync(dir, { recursive: true, force: true });
+  return { transcript, sessions: found.length };
+}
+
+/** `claude -p` with the run's model and effort, the same tools and limits as the Codex flags.
+ * Effort `cli-default` passes no --effort flag (the CLI default). The prompt comes last, after
+ * a single-value option, so a variadic flag (--tools) never swallows it. */
+export function claudeArgs({ model, effort, sessionId, prompt }) {
+  return [
+    '-p',
+    '--output-format',
+    'stream-json',
+    '--verbose',
+    '--model',
+    model,
+    ...(effort && effort !== 'cli-default' ? ['--effort', effort] : []),
+    '--dangerously-skip-permissions',
+    '--setting-sources',
+    '',
+    '--strict-mcp-config',
+    '--mcp-config',
+    '{"mcpServers":{}}',
+    '--disable-slash-commands',
+    '--tools',
+    CLAUDE_TOOLS.join(','),
+    '--session-id',
+    sessionId,
+    prompt,
+  ];
+}
+
+/** The tools, model and CLI version the Claude session reported at start (stream-json init). */
+export function claudeInit(stdout) {
+  const init = jsonLines(stdout).find(e => e.type === 'system' && e.subtype === 'init');
+  return init
+    ? {
+        tools: init.tools ?? null,
+        model: init.model ?? null,
+        version: init.claude_code_version ?? null,
+        mcpServers: init.mcp_servers ?? null,
+        skills: init.skills ?? null,
+        plugins: init.plugins ?? null,
+        apiKeySource: init.apiKeySource ?? null,
+      }
+    : null;
+}
+
 /** `codex exec` with the run's model and effort and the same limits as the Claude flags. */
 export function codexArgs({ model, effort, workspace, prompt }) {
   return [
@@ -323,37 +443,30 @@ export function launchAgent({
   agent = AGENTS.codex,
   extraWrites = [],
   extraReads = [],
+  claudeToken = null,
+  homes = { claude: CLAUDE_HOMES },
 }) {
   mkdirSync(dirname(prefix), { recursive: true });
   writeFileSync(prefix + '.prompt.txt', prompt, { flag: 'wx' });
   const codex = !scripted && agent.provider === 'codex';
+  const claude = !scripted && agent.provider === 'claude';
+  if (claude && !claudeToken)
+    throw Error(
+      'BENCH_CLAUDE_TOKEN_REQUIRED: a Claude agent runs in a fresh home and needs the token (claudeTokenFile)',
+    );
   const codexHome = codex ? codexHomeFor() : null;
+  const claudeHome = claude ? claudeHomeFor(homes.claude) : null;
   const profile = prefix + '.sb';
-  writeFileSync(profile, sandboxProfile({ workspace, benchRoot, extraWrites, extraReads, codexHome }));
+  writeFileSync(
+    profile,
+    sandboxProfile({ workspace, benchRoot, extraWrites, extraReads, codexHome, claudeHome }),
+  );
   const id = randomUUID();
   const args = scripted
     ? scripted.args
     : codex
       ? codexArgs({ model: agent.model, effort: agent.effort, workspace, prompt })
-      : [
-          '-p',
-          '--output-format',
-          'json',
-          '--model',
-          agent.model,
-          '--dangerously-skip-permissions',
-          '--setting-sources',
-          '',
-          '--strict-mcp-config',
-          '--mcp-config',
-          '{"mcpServers":{}}',
-          '--disable-slash-commands',
-          '--disallowedTools',
-          'WebFetch,WebSearch,Agent,Task',
-          '--session-id',
-          id,
-          prompt,
-        ];
+      : claudeArgs({ model: agent.model, effort: agent.effort, sessionId: id, prompt });
   const command = scripted ? scripted.command : codex ? CODEX : CLAUDE;
   const childEnv = {
     ...process.env,
@@ -361,12 +474,22 @@ export function launchAgent({
     CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
     DISABLE_AUTOUPDATER: '1',
     ...(codexHome ? { CODEX_HOME: codexHome } : {}),
+    ...(claudeHome
+      ? {
+          CLAUDE_CONFIG_DIR: claudeHome,
+          CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR: '3',
+          CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1',
+        }
+      : {}),
   };
   for (const key of Object.keys(childEnv))
     if (
       key.startsWith('T3_') ||
       key === 'CLAUDECODE' ||
       key.startsWith('CLAUDE_CODE_ENTRYPOINT') ||
+      // Never another credential route: the plan's login is the token on the pipe.
+      ['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN'].includes(key) ||
+      (key === 'CLAUDE_CONFIG_DIR' && !claudeHome) ||
       (key.startsWith('CODEX_') && key !== 'CODEX_HOME')
     )
       delete childEnv[key];
@@ -376,9 +499,15 @@ export function launchAgent({
   const child = spawn('/usr/bin/sandbox-exec', ['-f', profile, command, ...args], {
     cwd: workspace,
     env: childEnv,
-    stdio: ['ignore', 'pipe', 'pipe'],
+    stdio: ['ignore', 'pipe', 'pipe', ...(claudeHome ? ['pipe'] : [])],
     detached: true,
   });
+  // The token is written once and the pipe closed: the CLI reads it at start; a tool the
+  // agent runs inherits only a drained descriptor and an environment without it.
+  if (claudeHome) {
+    child.stdio[3].on('error', () => {});
+    child.stdio[3].end(claudeToken);
+  }
   live.add(child.pid);
   child.stdout.pipe(stdout);
   child.stderr.pipe(stderr);
@@ -398,21 +527,28 @@ export function launchAgent({
         err = readFileSync(prefix + '.stderr.txt', 'utf8');
       let home = null;
       try {
-        home = codexHome ? closeCodexHome(codexHome, prefix) : null;
+        home = codexHome
+          ? closeCodexHome(codexHome, prefix)
+          : claudeHome
+            ? closeClaudeHome(claudeHome, prefix, id)
+            : null;
       } catch (error) {
         home = { error: String(error.message).slice(0, 300) };
       }
-      const rollout = home?.transcript ? readFileSync(home.transcript, 'utf8') : '';
+      const rollout = codexHome && home?.transcript ? readFileSync(home.transcript, 'utf8') : '';
       const u = scripted ? null : codex ? codexUsage(out, rollout) : usage(out);
       const receipt = {
         provider: scripted ? 'scripted' : agent.provider,
         model: scripted ? 'scripted-no-model' : agent.model,
-        // Claude: no --effort flag and no settings sources, the CLI default effort.
+        // Claude: --effort only when the plan names one; `cli-default` is the CLI default.
         effort: scripted ? null : agent.effort,
         sessionId: scripted ? null : codex ? (u.sessionId ?? null) : id,
         transcript: home?.transcript ?? null,
-        codexHome: home
-          ? { rollouts: home.rollouts, authRefreshed: home.authRefreshed, error: home.error }
+        codexHome: codexHome
+          ? { rollouts: home?.rollouts, authRefreshed: home?.authRefreshed, error: home?.error }
+          : undefined,
+        claudeHome: claudeHome
+          ? { sessions: home?.sessions ?? 0, error: home?.error, init: claudeInit(out) }
           : undefined,
         startedAt: new Date(started).toISOString(),
         elapsedSeconds: (Date.now() - started) / 1000,

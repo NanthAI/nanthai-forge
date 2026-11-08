@@ -17,7 +17,7 @@ import { usageGate, diskFreeGb, diskNeed, filesystemEventGate } from './gates.mj
 import { probeFilesystemEvents } from '../filesystem-event-health.mjs';
 import { pathToFileURL } from 'node:url';
 import { networkFetch } from '../../dist/network-fetch.js';
-import { agentOf } from './agent.mjs';
+import { agentOf, claudeTokenFile, claudeTokenProblem } from './agent.mjs';
 import { sharedDeps } from './deps.mjs';
 import { branches, foreignBranches, repository, rulesetName, measureSkew } from './github-arm.mjs';
 import { convexMeter } from './meter.mjs';
@@ -210,6 +210,14 @@ export async function main({ benchRoot, filesystemProbe = probeFilesystemEvents,
   const agent = agentOf(config);
   const u = usageGate(agent.provider);
   check('agent', true, `${agent.provider} ${agent.model} effort ${agent.effort} (config.agent), both arms`);
+  if (!dry && agent.provider === 'claude') {
+    const problem = claudeTokenProblem(claudeTokenFile(B, config));
+    check(
+      'claude token',
+      !problem,
+      problem ?? 'token file present, owner-only (handed to each agent on a pipe)',
+    );
+  }
   if (!dry) {
     check(
       'usage weekly',

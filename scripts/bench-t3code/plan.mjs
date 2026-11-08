@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // SPDX-License-Identifier: Apache-2.0
-// B1.5d pre-registered design (PLAN.md). Everything a cell's order depends on is derived
+// Phase 6 exit bench pre-registered design (PLAN.md; B1.5d's design plus the outlier rule and
+// the Claude agent, docs/research/p6-exit-bench-plan.md). Everything a cell's order depends on is derived
 // here from fixed inputs, so the schedule is known before the first cell runs:
 //   node scripts/bench-t3code/plan.mjs json   -> the machine-readable plan (batches; rep-3 candidates)
 //   node scripts/bench-t3code/plan.mjs check  -> exits 1 unless BENCH_ROOT/PLAN.md and
@@ -44,6 +45,13 @@ export const DESIGN = Object.freeze({
   // times, and disclosed as setup-only in its batch.json.
   maxSetupRetries: 2,
   tasksSha256: 'dc4346af484794cc181a953b37a42c132b9bf57abcd4b6a0b871e3f84c7b52f1',
+  // Pre-registered outlier rule (8c9b84fc): a valid cell whose wall time is more than this
+  // many times the median wall of the other valid reps at the same N and arm (or that has no
+  // wall, not all landed, while they do) gets exactly one extra batch: same N, rep, seed and
+  // order, both arms (the same machine load as the original).
+  outlierFactor: 2,
+  // The agent of both arms (owner 2026-11-07): config.agent must match it exactly.
+  agent: Object.freeze({ provider: 'claude', model: 'claude-sonnet-5-5', effort: 'cli-default' }),
 });
 
 /** Deterministic 32-bit PRNG seeded from a string (sha256 -> mulberry32). */
@@ -132,12 +140,67 @@ export function nextBatch(history, maxAttempts = DESIGN.maxAttempts, maxSetup = 
   });
 }
 
-/** Every cell any batch may run (reps 1-3), for run-cell's lookup by key. */
+/** The outlier rule's extra batch of (N, rep): the same seed, order, mode and cell order as
+ * the batch itself, keyed `n<N>-r<rep>x` (cells `<arm>-n<N>-r<rep>x`). */
+export function extraBatch(taskIds, N, rep) {
+  const b = batch(taskIds, N, rep);
+  return {
+    ...b,
+    key: `${b.key}x`,
+    extra: true,
+    cells: b.cells.map(c => ({ ...c, key: `${c.key}x`, extra: true })),
+  };
+}
+
+/** Every cell any batch may run (reps 1-3 and their extra batches), for run-cell's lookup by key. */
 export function schedule(taskIds) {
   const reps = Array.from({ length: DESIGN.maxReps }, (_, i) => i + 1);
-  return batches(taskIds, reps)
+  return [...batches(taskIds, reps), ...reps.flatMap(rep => DESIGN.ns.map(N => extraBatch(taskIds, N, rep)))]
     .flatMap(b => b.cells)
     .map((cell, index) => ({ index, ...cell }));
+}
+
+/** Pre-registered outlier rule for one N, once its regular reps are done:
+ * byRep = { [rep]: { forge, github } } (valid cell results of reps 1-3; extra reps never count).
+ * Returns the cells that get an extra batch, each with its wall, the others' median and why.
+ * A cell's wall is `wallSecondsToAllLanded` (null when not all 10 landed: an outlier when the
+ * others have a wall). With no other valid wall there is no reference and no extra rep. */
+export function outlierDecision(byRep, factor = DESIGN.outlierFactor) {
+  const out = [];
+  const reps = Object.keys(byRep)
+    .map(Number)
+    .sort((a, b) => a - b);
+  for (const arm of DESIGN.arms)
+    for (const rep of reps) {
+      const cell = byRep[rep]?.[arm];
+      if (!cell) continue;
+      const others = reps
+        .filter(r => r !== rep)
+        .map(r => byRep[r]?.[arm]?.wallSecondsToAllLanded)
+        .filter(w => w != null);
+      const ref = medianOf(others);
+      if (ref == null) continue;
+      const wall = cell.wallSecondsToAllLanded ?? null;
+      if (wall == null)
+        out.push({
+          arm,
+          rep,
+          wall,
+          othersMedian: ref,
+          reason: `${arm} rep ${rep}: not all landed (no wall)`,
+        });
+      else if (wall > factor * ref)
+        out.push({
+          arm,
+          rep,
+          wall,
+          othersMedian: ref,
+          reason: `${arm} rep ${rep}: wall ${Math.round(wall)} s > ${factor} x ${Math.round(ref)} s`,
+        });
+    }
+  // One extra batch per (N, rep), whichever arm (or both) is the outlier.
+  const extraReps = [...new Set(out.map(o => o.rep))].sort((a, b) => a - b);
+  return { outliers: out, extraReps };
 }
 
 const medianOf = xs => {
@@ -212,9 +275,10 @@ export function loadTasks(benchRoot) {
   return parsed.tasks;
 }
 
-// Committed as docs (no test reads it); BENCH_ROOT/PLAN.md must be a byte-identical copy.
+// Committed as docs; BENCH_ROOT/PLAN.md must be a byte-identical copy. The B1.5d plan
+// (docs/research/b15d-bench-plan.md) stays frozen as run; this plan amends it.
 export const planPath = () =>
-  join(dirname(fileURLToPath(import.meta.url)), '../../docs/research/b15d-bench-plan.md');
+  join(dirname(fileURLToPath(import.meta.url)), '../../docs/research/p6-exit-bench-plan.md');
 export const planSha = text => createHash('sha256').update(text).digest('hex');
 
 /** The plan the driver follows: design, schedule and the PLAN.md text hash. */
@@ -226,6 +290,7 @@ export function plan(benchRoot) {
     planSha256: planSha(text),
     tasks: tasks.map(t => ({ id: t.id, pr: t.pr, overlap: t.overlap })),
     batches: batches(tasks.map(t => t.id)),
+    extraCandidates: 'any (N, rep) the outlier rule selects: extraBatch(N, rep), same order as the batch',
     rep3Candidates: DESIGN.ns.map(N =>
       batch(
         tasks.map(t => t.id),
@@ -245,6 +310,18 @@ export function checkPlan(benchRoot) {
   } catch {}
   const problems = [];
   if (copy !== committed) problems.push('BENCH_ROOT/PLAN.md differs from the committed PLAN.md');
+  let config = null;
+  try {
+    config = JSON.parse(readFileSync(join(benchRoot, 'config.json'), 'utf8'));
+  } catch {}
+  if (config) {
+    const a = config.agent ?? {};
+    const want = DESIGN.agent;
+    if (a.provider !== want.provider || a.model !== want.model || a.effort !== want.effort)
+      problems.push(
+        `config.agent ${a.provider}/${a.model}/${a.effort} differs from the plan's agent ${want.provider}/${want.model}/${want.effort}`,
+      );
+  }
   try {
     loadTasks(benchRoot);
   } catch (error) {

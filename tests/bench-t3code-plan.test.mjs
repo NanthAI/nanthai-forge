@@ -14,6 +14,10 @@ import {
   primaryMetrics,
   repNs,
   nextBatch,
+  extraBatch,
+  outlierDecision,
+  checkPlan,
+  planPath,
 } from '../scripts/bench-t3code/plan.mjs';
 import { batchGuard, staleBenchFreeze } from '../scripts/bench-t3code/drive.mjs';
 import { realConflicts, mergeConflicts } from '../scripts/bench-t3code/hunks.mjs';
@@ -29,10 +33,25 @@ import {
   quotaHit,
   sandboxProfile,
   agentOf,
+  claudeArgs,
+  claudeInit,
+  claudeTokenProblem,
+  closeClaudeHome,
+  benchSiblings,
+  launchAgent,
+  CLAUDE_TOOLS,
 } from '../scripts/bench-t3code/agent.mjs';
 import { readSession } from '../scripts/bench-t3code/transcripts.mjs';
 import { usageProblems } from '../scripts/bench-t3code/gates.mjs';
-import { mkdtempSync, writeFileSync, rmSync, mkdirSync, readFileSync, readdirSync } from 'node:fs';
+import {
+  mkdtempSync,
+  writeFileSync,
+  rmSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  realpathSync,
+} from 'node:fs';
 import { tmpdir, homedir } from 'node:os';
 import { join } from 'node:path';
 import { scanTask } from '../scripts/bench-t3code/contamination.mjs';
@@ -74,7 +93,12 @@ test('batches: concurrent pairs at N 1,3,5, sequential N 10 alternating, never o
   }
   const n10 = rep => batch(ids, 10, rep).cells[0].arm;
   assert.deepEqual([n10(1), n10(2), n10(3)], ['github', 'forge', 'github'], 'first arm alternates by rep');
-  assert.equal(new Set(schedule(ids).map(c => c.key)).size, 24, 'every cell reps 1-3 is addressable');
+  // Reps 1-3 (24 cells) and each (N, rep)'s outlier extra batch (24 more).
+  assert.equal(
+    new Set(schedule(ids).map(c => c.key)).size,
+    48,
+    'every cell reps 1-3 and extras is addressable',
+  );
   assert.deepEqual(batches(ids), all, 'deterministic');
   assert.notDeepEqual(taskOrder(ids, 'a'), taskOrder(ids, 'b'));
 });
@@ -922,6 +946,186 @@ test('codex: usage over every request, quota from CLI errors only, args and sand
   assert.deepEqual(usageProblems({ provider: 'codex', weekly: 10, has5h: false, session5h: null }), []);
   assert.equal(usageProblems({ provider: 'codex', weekly: 90, has5h: false }).length, 1);
   assert.equal(usageProblems({ provider: 'claude', weekly: 10, has5h: true, session5h: null }).length, 1);
+  // No 5h window reported (none open): nothing to wait for; an open one above 40% waits.
+  assert.deepEqual(usageProblems({ provider: 'claude', weekly: 10, has5h: false, session5h: null }), []);
+  assert.equal(usageProblems({ provider: 'claude', weekly: 10, has5h: true, session5h: 41 }).length, 1);
+});
+
+test('claude driver: tool allowlist, prompt last, effort only when set, isolated home in the sandbox', () => {
+  const a = agentOf({ agent: { provider: 'claude' } });
+  assert.deepEqual([a.model, a.effort], ['claude-sonnet-5-5', 'cli-default']);
+  const args = claudeArgs({ ...a, sessionId: 's1', prompt: '--tools looks like a flag' });
+  assert.equal(args.at(-1), '--tools looks like a flag');
+  // --tools is variadic: the option after it is a single-value one, never the prompt.
+  const t = args.indexOf('--tools');
+  assert.equal(args[t + 1], CLAUDE_TOOLS.join(','));
+  assert.ok(args[t + 2].startsWith('--'));
+  assert.deepEqual(CLAUDE_TOOLS, ['Bash', 'Read', 'Edit', 'Write', 'TodoWrite']);
+  for (const want of [
+    'stream-json',
+    '--verbose',
+    '--strict-mcp-config',
+    '--disable-slash-commands',
+    '--setting-sources',
+  ])
+    assert.ok(args.includes(want), want);
+  assert.ok(!args.includes('--effort'));
+  assert.ok(!args.includes('--disallowedTools'));
+  const high = claudeArgs({ ...a, effort: 'high', sessionId: 's1', prompt: 'p' });
+  assert.deepEqual(high.slice(high.indexOf('--effort'), high.indexOf('--effort') + 2), ['--effort', 'high']);
+
+  const home = join(homedir(), '.claude-bench/h');
+  const profile = sandboxProfile({
+    workspace: '/w/ws',
+    benchRoot: '/x/forge-bench/p6exit',
+    claudeHome: home,
+  });
+  const denied = profile.match(/\(deny file-read\* (.*)\)/)[1];
+  for (const p of [
+    join(homedir(), '.claude'),
+    join(homedir(), '.claude.json'),
+    join(homedir(), '.claude-bench'),
+    '/x/forge-bench',
+  ])
+    assert.ok(denied.includes(`"${p}"`), p);
+  assert.match(profile, new RegExp(`allow file-read\\*.*"${home}"`));
+  // The owner's Claude state is not writable once isolated (only the per-task home).
+  const writes = profile.match(/\(allow file-write\* (.*)\)/)[1];
+  assert.ok(!writes.includes(`"${join(homedir(), '.claude')}"`));
+  assert.ok(writes.includes(`"${home}"`));
+  // Metadata on the denied bench parent so Node can resolve paths below it.
+  assert.match(profile, /literal "\/x\/forge-bench"/);
+  assert.equal(benchSiblings('/x/forge-bench/p6exit', '/h/u'), '/x/forge-bench');
+  assert.equal(benchSiblings('/h/u/p6exit', '/h/u'), null);
+  assert.equal(benchSiblings('/p6exit', '/h/u'), null);
+  assert.equal(benchSiblings('/h/forge/p6exit', '/h/forge/home'), null);
+
+  const init = claudeInit(
+    [
+      JSON.stringify({
+        type: 'system',
+        subtype: 'init',
+        tools: CLAUDE_TOOLS,
+        model: 'm',
+        claude_code_version: '9',
+        mcp_servers: [],
+      }),
+      '{"type":"result"}',
+    ].join('\n'),
+  );
+  assert.deepEqual([init.tools, init.model, init.version], [CLAUDE_TOOLS, 'm', '9']);
+  assert.equal(claudeInit('not json'), null);
+});
+
+test('claude token file and home: missing, open or empty tokens refuse; the transcript outlives the home', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'bench-claude-'));
+  try {
+    const file = join(dir, 'token');
+    assert.match(claudeTokenProblem(file), /BENCH_CLAUDE_TOKEN_REQUIRED/);
+    writeFileSync(file, 'x'.repeat(40), { mode: 0o644 });
+    assert.match(claudeTokenProblem(file), /BENCH_CLAUDE_TOKEN_MODE/);
+    rmSync(file);
+    writeFileSync(file, 'short', { mode: 0o600 });
+    assert.match(claudeTokenProblem(file), /holds no token/);
+    rmSync(file);
+    writeFileSync(file, 'x'.repeat(40), { mode: 0o600 });
+    assert.equal(claudeTokenProblem(file), null);
+
+    const home = join(dir, 'home');
+    mkdirSync(join(home, 'projects', '-w-ws'), { recursive: true });
+    writeFileSync(join(home, 'projects', '-w-ws', 'sid.jsonl'), '{"type":"user"}\n');
+    writeFileSync(join(home, 'projects', '-w-ws', 'other.jsonl'), '{"type":"other"}\n');
+    const closed = closeClaudeHome(home, join(dir, 't1'), 'sid');
+    assert.deepEqual(closed, { transcript: join(dir, 't1.transcript.jsonl'), sessions: 1 });
+    assert.equal(readFileSync(closed.transcript, 'utf8'), '{"type":"user"}\n');
+    assert.ok(!readdirSync(dir).includes('home'), 'the home is deleted');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('claude launch: the token arrives on fd 3 only, other credentials are scrubbed, the home is closed', async () => {
+  if (process.platform !== 'darwin') return;
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), 'bench-claude-launch-')));
+  const fake = join(dir, 'fake-claude.mjs');
+  // A stand-in CLI: reports what it was given (never the token itself), writes a session file.
+  writeFileSync(
+    fake,
+    `#!${process.execPath}
+import { readFileSync, mkdirSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+const fd = Number(process.env.CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR);
+const token = readFileSync(fd, 'utf8');
+const sid = process.argv[process.argv.indexOf('--session-id') + 1];
+const home = process.env.CLAUDE_CONFIG_DIR;
+mkdirSync(home + '/projects/p', { recursive: true });
+writeFileSync(home + '/projects/p/' + sid + '.jsonl', '{"type":"assistant"}\\n');
+const leaked = ['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN'].filter(k => k in process.env);
+console.log(JSON.stringify({ type: 'system', subtype: 'init', tools: ['Bash'] }));
+console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, session_id: sid, num_turns: 1,
+  modelUsage: { m: { inputTokens: 1, outputTokens: 2 } },
+  result: JSON.stringify({ tokenSha: createHash('sha256').update(token).digest('hex'), leaked,
+    memoryOff: process.env.CLAUDE_CODE_DISABLE_AUTO_MEMORY, last: process.argv.at(-1) }) }));
+`,
+    { mode: 0o755 },
+  );
+  const ws = join(dir, 'ws');
+  mkdirSync(ws);
+  const token = 'test-token-' + 'y'.repeat(30);
+  const saved = { ...process.env };
+  process.env.ANTHROPIC_API_KEY = 'must-not-pass';
+  process.env.CLAUDE_CODE_OAUTH_TOKEN = 'must-not-pass';
+  try {
+    const { spawnSync } = await import('node:child_process');
+    // CLAUDE is read at import: run the launch in a child with BENCH_CLAUDE set.
+    const run = spawnSync(
+      process.execPath,
+      [
+        '--input-type=module',
+        '-e',
+        `import { launchAgent } from ${JSON.stringify(new URL('../scripts/bench-t3code/agent.mjs', import.meta.url).href)};
+const r = await launchAgent({ workspace: ${JSON.stringify(ws)}, benchRoot: ${JSON.stringify(join(dir, 'bench'))},
+  prefix: ${JSON.stringify(join(dir, 'out', 't1'))}, prompt: 'do it', env: {}, timeoutMs: 60000,
+  agent: { provider: 'claude', model: 'm', effort: 'cli-default' }, claudeToken: ${JSON.stringify(token)},
+  homes: { claude: ${JSON.stringify(join(dir, 'homes'))} }, extraReads: [${JSON.stringify(dir)}] });
+console.log(JSON.stringify(r));`,
+      ],
+      { encoding: 'utf8', env: { ...process.env, BENCH_CLAUDE: fake }, timeout: 90_000 },
+    );
+    assert.equal(run.status, 0, run.stderr);
+    const r = JSON.parse(run.stdout.trim().split('\n').at(-1));
+    assert.equal(r.exitCode, 0);
+    const stdout = readFileSync(join(dir, 'out', 't1.stdout.json'), 'utf8');
+    const seen = JSON.parse(JSON.parse(stdout.trim().split('\n').at(-1)).result);
+    const { createHash } = await import('node:crypto');
+    assert.equal(seen.tokenSha, createHash('sha256').update(token).digest('hex'));
+    assert.deepEqual(seen.leaked, []);
+    assert.equal(seen.memoryOff, '1');
+    assert.equal(seen.last, 'do it');
+    assert.ok(
+      !stdout.includes(token) && !readFileSync(join(dir, 'out', 't1.session.json'), 'utf8').includes(token),
+    );
+    assert.equal(r.claudeHome.sessions, 1);
+    assert.deepEqual(r.claudeHome.init.tools, ['Bash']);
+    assert.equal(r.transcript, join(dir, 'out', 't1.transcript.jsonl'));
+    assert.deepEqual(readdirSync(join(dir, 'homes')), [], 'the per-task home is deleted');
+    await assert.rejects(
+      async () =>
+        launchAgent({
+          workspace: ws,
+          benchRoot: dir,
+          prefix: join(dir, 'out', 't2'),
+          prompt: 'p',
+          env: {},
+          timeoutMs: 1000,
+          agent: { provider: 'claude', model: 'm' },
+        }),
+      /BENCH_CLAUDE_TOKEN_REQUIRED/,
+    );
+  } finally {
+    process.env = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('codex transcripts: the leak scan and coordination counters read rollout actions and outputs', () => {
@@ -1201,5 +1405,80 @@ test('harness scripts: script and main bodies never use const or let above its d
         visit(st);
       });
     }
+  }
+});
+
+test("outlier rule: wall > 2x the others' median (or no wall) gets one extra batch with the same seed and order", () => {
+  const cell = wall => ({ wallSecondsToAllLanded: wall });
+  // Two reps: the other rep's wall is the median.
+  let d = outlierDecision({
+    1: { forge: cell(1000), github: cell(900) },
+    2: { forge: cell(2100), github: cell(1000) },
+  });
+  assert.deepEqual(d.extraReps, [2]);
+  assert.deepEqual(
+    d.outliers.map(o => [o.arm, o.rep, o.othersMedian]),
+    [['forge', 2, 1000]],
+  );
+  // Exactly 2x is not an outlier; 3 reps use the median of the other two.
+  d = outlierDecision({ 1: { forge: cell(1000) }, 2: { forge: cell(2000) } });
+  assert.deepEqual(d.extraReps, []);
+  d = outlierDecision({ 1: { forge: cell(1000) }, 2: { forge: cell(1200) }, 3: { forge: cell(2500) } });
+  assert.deepEqual(d.extraReps, [3]);
+  // Not all landed (no wall) is an outlier when the others have one; no reference, no rule.
+  d = outlierDecision({ 1: { github: cell(null) }, 2: { github: cell(800) } });
+  assert.deepEqual(
+    d.outliers.map(o => [o.arm, o.rep, o.wall]),
+    [['github', 1, null]],
+  );
+  assert.deepEqual(outlierDecision({ 1: { github: cell(null) }, 2: { github: cell(null) } }).extraReps, []);
+  assert.deepEqual(outlierDecision({ 1: { forge: cell(5000) } }).extraReps, []);
+  // Both arms outliers in one rep: still one extra batch for that (N, rep).
+  d = outlierDecision({
+    1: { forge: cell(5000), github: cell(5000) },
+    2: { forge: cell(1000), github: cell(1000) },
+  });
+  assert.deepEqual([d.extraReps, d.outliers.length], [[1], 2]);
+
+  for (const N of DESIGN.ns)
+    for (const rep of [1, 2, 3]) {
+      const b = batch(ids, N, rep),
+        x = extraBatch(ids, N, rep);
+      assert.equal(x.key, `${b.key}x`);
+      assert.deepEqual([x.seed, x.order, x.mode], [b.seed, b.order, b.mode]);
+      assert.deepEqual(
+        x.cells.map(c => [c.arm, c.key]),
+        b.cells.map(c => [c.arm, `${c.key}x`]),
+      );
+      assert.ok(x.extra && x.cells.every(c => c.extra));
+    }
+  assert.equal(DESIGN.outlierFactor, 2);
+});
+
+test('plan check: the committed exit plan, the B1.5d plan frozen as run, and the agent the plan names', () => {
+  assert.match(planPath(), /docs\/research\/p6-exit-bench-plan\.md$/);
+  const text = readFileSync(planPath(), 'utf8');
+  for (const want of [
+    'outlier',
+    'claude-sonnet-5-5',
+    'maxSetupRetries = 2',
+    'd8cf81b4',
+    'Headline rule',
+    'convex.perFunction',
+  ])
+    assert.ok(text.includes(want), want);
+  const B = mkdtempSync(join(tmpdir(), 'bench-plan-check-'));
+  try {
+    writeFileSync(join(B, 'PLAN.md'), text);
+    writeFileSync(join(B, 'config.json'), JSON.stringify({ agent: { ...DESIGN.agent } }));
+    const ok = checkPlan(B);
+    assert.ok(!ok.some(p => /PLAN|agent/.test(p)), ok.join('; '));
+    writeFileSync(
+      join(B, 'config.json'),
+      JSON.stringify({ agent: { provider: 'codex', model: 'gpt-6.1-sol', effort: 'high' } }),
+    );
+    assert.ok(checkPlan(B).some(p => /config.agent codex\/gpt-6.1-sol\/high differs/.test(p)));
+  } finally {
+    rmSync(B, { recursive: true, force: true });
   }
 });
