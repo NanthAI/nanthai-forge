@@ -16,6 +16,12 @@ export function parsePeakRssMb(text: string): number | null {
 }
 const flag = () => (process.platform === 'darwin' ? '-l' : process.platform === 'linux' ? '-v' : null);
 
+/** The spawn error's code (ENOENT: the program is not installed), or null. */
+const errorCode = (error: Error | undefined) =>
+  error && typeof (error as NodeJS.ErrnoException).code === 'string'
+    ? (error as NodeJS.ErrnoException).code!
+    : null;
+
 /** Runs a command and reports its status and peak resident memory when this platform can say.
  * Wrapping never changes the command's exit status; a missing or unusable `time` just runs it. */
 export function spawnMeasured(command: string, args: string[], options: SpawnSyncOptions) {
@@ -35,13 +41,11 @@ export function spawnMeasured(command: string, args: string[], options: SpawnSyn
         } catch {
           /* A killed run leaves no report. */
         }
-        return { status: run.status, peakRssMb };
+        return { status: run.status, peakRssMb, errorCode: errorCode(run.error) };
       }
     }
-    return {
-      status: spawnSync(command, args, options).status,
-      peakRssMb: null as number | null,
-    };
+    const run = spawnSync(command, args, options);
+    return { status: run.status, peakRssMb: null as number | null, errorCode: errorCode(run.error) };
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

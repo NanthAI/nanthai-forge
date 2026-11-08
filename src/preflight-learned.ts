@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { durableReplace } from './native-durability.js';
 import { retainedRootSibling } from './root-paths.js';
 import { readHostedLaneCheckout } from './hosted-lane-checkout-marker.js';
+import { rememberHostedCheck } from './preflight-hosted-timing.js';
 
 /** What preflight learned the hard way: test files that failed in a landing check or a local
  * preflight while a path was changed. The next preflight that changes one of those paths runs them
@@ -101,15 +102,18 @@ export function rememberLandingPaths(root: string, laneId: string, paths: string
 type LandingResult = {
   submission?: {
     error?: { code?: string } | null;
+    timing?: { checkReservedAt?: string; ciObservedAt?: string; ciEndedAt?: string };
     testFiles?: { failed?: { file: string }[] };
   };
 };
 /** A terminal CHECK_FAILED that names failing test files teaches preflight those files for the
- * Lane's changed paths. Reads only the response the client already holds; the Lane is the one the
- * command ran for (its checkout or explicit laneId). */
+ * Lane's changed paths, and any ended check teaches it how long this project's hosted check runs
+ * (src/preflight-hosted-timing.ts). Reads only the response the client already holds; the Lane is
+ * the one the command ran for (its checkout or explicit laneId). */
 export function learnFromLanding(root: string, result: unknown, laneId?: unknown) {
   try {
     const submission = (result as LandingResult | undefined)?.submission;
+    rememberHostedCheck(root, submission?.timing);
     if (submission?.error?.code !== 'CHECK_FAILED') return;
     const failed = (submission.testFiles?.failed ?? []).map(item => item.file);
     if (!failed.length) return;

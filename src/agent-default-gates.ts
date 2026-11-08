@@ -80,6 +80,7 @@ export function finishGates(
         status: 'environment',
         ...receipt.environment,
         tests: receipt.tests,
+        ...(receipt.exitCode ? { exitCode: receipt.exitCode } : {}),
         at: receipt.at,
       };
     else if (sameSource && receipt?.passed)
@@ -111,6 +112,12 @@ export function finishGates(
           run,
         };
         const failed = sameSource ? ' Its last run failed.' : '';
+        // A command Forge inferred (no declared runner) is advice: it can need setup only the
+        // project's CI does, so its result is reported and never required.
+        const lastRun =
+          sameSource && receipt && !receipt.passed
+            ? { lastRun: { passed: false, exitCode: receipt.exitCode, at: receipt.at } }
+            : {};
         // Learned timings may make a run advisory, but must never expand the set
         // that the existing fixed-cost policy made mandatory.
         const gateMinutes = Math.max(
@@ -121,7 +128,7 @@ export function finishGates(
               60,
           ),
         );
-        if (defaults.preflight === 'require' && gateMinutes <= defaults.preflightMaxMinutes)
+        if (defaults.preflight === 'require' && gateMinutes <= defaults.preflightMaxMinutes && !plan.advisory)
           throw new ForgeError(
             'PREFLIGHT_REQUIRED',
             `Run the ${plan.tests.length} affected test file(s) for saved head ${lane.head.slice(0, 12)} first (about ${plan.estimateMinutes} min): ${run}.${failed} Then land again.`,
@@ -129,7 +136,12 @@ export function finishGates(
         advisories.preflight = {
           status: 'advised',
           ...summary,
-          ...(defaults.preflight === 'require' ? { reason: `over ${defaults.preflightMaxMinutes} min` } : {}),
+          ...lastRun,
+          ...(plan.advisory
+            ? { reason: plan.advisory }
+            : defaults.preflight === 'require'
+              ? { reason: `over ${defaults.preflightMaxMinutes} min` }
+              : {}),
         };
       } else if (plan.deferredTests?.length) {
         advisories.preflight = {

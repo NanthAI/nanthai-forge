@@ -833,8 +833,11 @@ retains its exit status. This local
 environment receipt is advisory at landing, bound to the same source tree/head
 as an ordinary preflight receipt. The hosted check still verifies the Candidate;
 no tests, assertions or hosted acceptance checks are disabled. A healthy local
-environment with failing tests still receives `PREFLIGHT_REQUIRED`. No service
-restart happens automatically.
+environment with failing tests still receives `PREFLIGHT_REQUIRED` when the
+project declared its runner; a runner Forge inferred only advises. A program the
+run needs that is not installed here (not on `PATH`, exit 127, `ENOENT`) records
+`ENVIRONMENT / TOOLCHAIN_MISSING` the same advisory way, naming the `missing`
+programs. No service restart happens automatically.
 
 Measurement-hold waits use the isolated helper and a one-second local removal check only while a hold exists. Degraded hints report `ENVIRONMENT` and `nforge doctor .`; an active hold remains in force. No hold means no watcher, timer or server call.
 

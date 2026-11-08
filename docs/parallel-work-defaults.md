@@ -247,6 +247,21 @@ frozen set on 2026-11-06 broke capabilities across CLI/server versions with `HOS
   A scoped configured check command receives the same selection in `FORGE_CHECK_PACKAGES`
   ([check command scope](workflows.md#check-command-scope)). It is a selector, never an
   independence proof.
+- **Inferred commands advise; declared ones can be required.** A runner Forge inferred (these
+  package commands, or `vitest`/`jest` guessed from a dependency with no `test` script) can need
+  setup only the project's CI does: test data it fetches, services, a toolchain. Its plan carries
+  `advisory`, and `land --save` reports it (`status: "advised"`, plus `lastRun` when the last run
+  of this head failed) without `PREFLIGHT_REQUIRED`. A runner the project declared (`preflight.tests`
+  in `forge.json` or `package.json`) or wrote as its `test` script keeps the `require` policy.
+- **A missing toolchain is environment, not failure.** Before a package command runs, preflight
+  looks for its program on `PATH` (and a JVM for the Gradle and Maven wrappers); a missing one, an
+  exit of 127 or a spawn `ENOENT` (any runner) records `ENVIRONMENT / TOOLCHAIN_MISSING` with the
+  `missing` programs and the `units` not run. The receipt never claims a pass, and landing treats
+  it as advice; the hosted check runs those tests with its own setup.
+- **Package-command estimates.** A unit this machine already ran is priced at its smoothed time; the
+  rest at the median of the project's recent hosted check durations (land and wait record them from
+  the landing timing they already hold: no extra call), else 60 s per command. `estimateBasis`
+  says which (`measured`, `hosted`, `default`).
 - `nforge agent ROOT preflight '{"laneId":"…"}'` always runs changed tests, explicit coverage,
   smoke and the project's declared *guards* (`forge.preflight.guards` in `package.json`, filtered by
   path rules, protected like mandatory tests, cost in `local.guards`; see

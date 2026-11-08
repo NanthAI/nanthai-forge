@@ -68,10 +68,24 @@ import {
   filesystemEnvironmentSchema,
 } from './filesystem-event-health.js';
 
+import {
+  missingProgramExit,
+  missingToolchain,
+  toolchainEnvironment,
+  toolchainEnvironmentSchema,
+} from './preflight-toolchain.js';
+import { hostedCheckSeconds } from './preflight-hosted-timing.js';
+
 export const preflightRuntime = { filesystemEventHealth };
 
 /** Default local cost per selected test file at concurrency 1, used for the time estimate. */
 export const PREFLIGHT_SECONDS_PER_FILE = 4;
+/** Default cost of one package command (it builds and tests whole packages) when neither this
+ * machine nor a hosted check has timed one yet. */
+export const PREFLIGHT_SECONDS_PER_PACKAGE_COMMAND = 60;
+/** Why a plan from a runner Forge inferred never blocks landing (src/agent-default-gates.ts). */
+export const INFERRED_RUNNER_ADVISORY =
+  'Forge inferred these commands (no runner declared): their result is reported, never required, because they can need setup only CI does (fixtures, services, a toolchain). Declare preflight.tests in forge.json to require it.';
 /** Local time budget (seconds). The plan trims unprotected tiers by estimated time, never by file
  * count; the run is a wall-time cap on the test phase: it starts no file once the budget is spent and
  * names every file it did not start. Whatever either cuts runs in the pre-queue Lane check. */
@@ -98,7 +112,7 @@ export const preflightReceiptSchema = z
     passed: z.boolean(),
     durationMs: z.number().nonnegative(),
     at: z.string(),
-    environment: filesystemEnvironmentSchema.optional(),
+    environment: z.union([filesystemEnvironmentSchema, toolchainEnvironmentSchema]).optional(),
     evidence: z
       .string()
       .regex(/^[a-f0-9]{64}$/)
@@ -209,7 +223,11 @@ export type PreflightPlan =
       /** No test runner is declared or inferred: only static checks run, and this says why. */
       testsUnavailable?: string;
       /** Package-graph runner: each queued unit's command (cwd relative to the Lane root). */
-      packageCommands?: Record<string, { cwd: string; argv: string[] }>;
+      packageCommands?: Record<string, { cwd: string; argv: string[]; ecosystem?: string }>;
+      /** Set when Forge inferred the runner: why this plan advises and never blocks landing. */
+      advisory?: string;
+      /** What priced the estimate: this machine's timings, the hosted check's, or the default. */
+      estimateBasis?: 'measured' | 'hosted' | 'default';
       /** The packages the change affects (package-graph runner). */
       packages?: SelectedPackage[];
     };
@@ -505,6 +523,7 @@ function runnerPlan(
     ),
     totalEstimateMinutes: estimatePreflightMinutes(root, tests.length),
     runner: { label, command: runner.command },
+    ...(runner.source === 'dependency' ? { advisory: INFERRED_RUNNER_ADVISORY } : {}),
     command: tests.length
       ? runnerCommand(runner, tests)
           .map(arg => (/^[\w./=-]+$/.test(arg) ? arg : shellQuote(arg)))
@@ -529,10 +548,10 @@ function packagePlan(
   const commands = Object.fromEntries(
     selection.commands.map(command => [
       selection.units[selection.commands.indexOf(command)]!,
-      { cwd: command.cwd, argv: command.argv },
+      { cwd: command.cwd, argv: command.argv, ecosystem: command.ecosystem },
     ]),
   );
-  const timing = preflightSecondsPerFile(root);
+  const estimate = packageEstimate(root, units);
   const label = runnerLabel(runner);
   const plan: PreflightPlan = {
     status: 'planned',
@@ -542,14 +561,32 @@ function packagePlan(
     deferredTests: [],
     ...statics,
     reusedTests: [],
-    estimateMinutes: Math.ceil((units.length * timing.secondsPerFile) / 60),
+    estimateMinutes: Math.ceil(estimate.seconds / 60),
+    totalEstimateMinutes: Math.ceil(estimate.seconds / 60),
+    estimateBasis: estimate.basis,
     runner: { label, command: [] },
+    advisory: INFERRED_RUNNER_ADVISORY,
     packageCommands: commands,
     packages: selection.packages,
     command: selection.command,
   };
   plannedPaths.set(plan, paths);
   return plan;
+}
+
+/** Seconds the package units should take: each unit this machine already ran at its smoothed time;
+ * the rest at the hosted check's recent median (the whole CI build bounds any subset of packages),
+ * else the per-command default. Never the per-test-file constant: one unit builds whole packages. */
+function packageEstimate(root: string, units: string[]) {
+  const stats = preflightFileStats(root);
+  const known = units.filter(unit => stats[unit] && stats[unit].ms > 0);
+  const unknown = units.length - known.length;
+  const hosted = unknown ? hostedCheckSeconds(root) : null;
+  const seconds =
+    known.reduce((sum, unit) => sum + stats[unit]!.ms / 1000, 0) +
+    (unknown ? (hosted ?? unknown * PREFLIGHT_SECONDS_PER_PACKAGE_COMMAND) : 0);
+  const basis = !unknown ? 'measured' : hosted !== null ? 'hosted' : 'default';
+  return { seconds, basis } as const;
 }
 
 /** One saved text file outside the selector inventory (a shell script, a workflow), for comparison. */
@@ -1004,6 +1041,9 @@ export function runPreflight(
   const stopped: string[] = [];
   const fileMs: Record<string, number> = {};
   const failedFiles: string[] = [];
+  // Units whose program is not installed here: an environment result, never a failed run.
+  const missingPrograms: string[] = [];
+  const environmentUnits: string[] = [];
   let buildMs: number | undefined;
   let testMs: number | undefined;
   let peakRssMb: number | null = null;
@@ -1070,12 +1110,27 @@ export function runPreflight(
           // Package commands: one process per unit, in its package folder; a pass covers that unit.
           for (const [at, unit] of group.entries()) {
             const command = plan.packageCommands[unit]!;
+            const cwd = join(root, command.cwd);
+            // A toolchain this machine lacks (cargo, go, uv, a JVM…) is not run and not failed.
+            const absent = missingToolchain(command, cwd, env);
+            if (absent) {
+              missingPrograms.push(absent);
+              environmentUnits.push(unit);
+              process.stderr.write(`preflight: ${absent} is not installed here; not run: ${unit}\n`);
+              continue;
+            }
             const started = Date.now();
             const run = spawnMeasured(command.argv[0]!, command.argv.slice(1), {
-              cwd: join(root, command.cwd),
+              cwd,
               env,
               stdio: ['ignore', 2, 2],
             });
+            if (missingProgramExit(run.status, run.errorCode)) {
+              missingPrograms.push(command.argv[0]!);
+              environmentUnits.push(unit);
+              process.stderr.write(`preflight: a program ${unit} needs is not installed here (exit 127)\n`);
+              continue;
+            }
             ran++;
             fileMs[unit] = Date.now() - started;
             if (run.peakRssMb !== null) peakRssMb = Math.max(peakRssMb ?? 0, run.peakRssMb);
@@ -1083,8 +1138,7 @@ export function runPreflight(
             else {
               failedFiles.push(unit);
               if (exitCode === 0) exitCode = run.status ?? 1;
-              // A missing program (go, cargo, dotnet…) exits with no status: say which one.
-              if (run.status === null) process.stderr.write(`preflight: could not run ${command.argv[0]}\n`);
+              if (run.status === null) process.stderr.write(`preflight: ${command.argv[0]} was stopped\n`);
               stopped.push(...group.slice(at + 1));
               break;
             }
@@ -1110,6 +1164,13 @@ export function runPreflight(
           env: { ...env, FORGE_PREFLIGHT_REPORT: report },
           stdio: ['ignore', 2, 2],
         });
+        if (plan.runner && missingProgramExit(run.status, run.errorCode)) {
+          // The runner's program is not installed here: these files are the landing check's.
+          missingPrograms.push(argv[0]!);
+          environmentUnits.push(...group);
+          process.stderr.write(`preflight: ${argv[0]} is not installed here (exit 127); not run\n`);
+          return Date.now() - groupStarted;
+        }
         ran += group.length;
         if (run.status !== 0 && exitCode === 0) exitCode = run.status;
         if (run.peakRssMb !== null) peakRssMb = Math.max(peakRssMb ?? 0, run.peakRssMb);
@@ -1156,7 +1217,7 @@ export function runPreflight(
             planned += seconds;
           }
           spent += runGroup(group);
-          observed = spent / 1000 / ran;
+          if (ran) observed = spent / 1000 / ran;
         }
         testMs = Date.now() - testStarted;
       } finally {
@@ -1168,6 +1229,8 @@ export function runPreflight(
       }
     }
   }
+  if (!environment && missingPrograms.length)
+    environment = toolchainEnvironment(missingPrograms, environmentUnits, environmentNext);
   if (plan.tests.length && (Object.keys(fileMs).length || failedFiles.length))
     recordFileStats(root, { passed: passedTests, failed: failedFiles, ms: fileMs });
   // A failure here is evidence that these tests matter for these paths: the next plan protects them.
@@ -1178,7 +1241,7 @@ export function runPreflight(
     .slice(0, 3)
     .map(([file, ms]) => ({ file, ms: Math.round(ms) }));
   const evidence = preparedEvidence.get(plan);
-  const skipped = notRun.length + stopped.length;
+  const skipped = notRun.length + stopped.length + environmentUnits.length;
   const skippedFiles = [...(plan.local?.trimmedTests ?? []), ...notRun].sort();
   const rerun = skippedFiles.length ? (plan.local?.rerun ?? rerunCommand(root, laneId)) : undefined;
   const stoppedRerun = notRun.length ? stoppedCommand(root, laneId) : undefined;
