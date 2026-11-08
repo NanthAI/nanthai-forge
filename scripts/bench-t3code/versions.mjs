@@ -124,6 +124,7 @@ export async function snapshot(config) {
         root,
         'capabilities',
         JSON.stringify({ url: config.dogfood.url ?? config.forge.url, projectId: config.dogfood.projectId }),
+        '--detail', // the slim receipt drops a synced mirror's mirroredHead/gitHead
       ],
       { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] },
     )

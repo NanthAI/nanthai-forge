@@ -305,6 +305,7 @@ export function buildSteps(ctx) {
       probe,
       'capabilities',
       JSON.stringify({ url: cfgSafe().forge?.url, projectId: cfgSafe().forge?.projectId }),
+      '--detail',
     ]);
     const line = out
       ?.split('\n')
@@ -981,6 +982,7 @@ function readCapsFor(ctx, forgeRoot, donorDir) {
     forgeRoot,
     'capabilities',
     '{}',
+    '--detail', // the slim receipt drops a synced mirror's mirroredHead/gitHead
   ]);
   const line = out
     ?.split('\n')

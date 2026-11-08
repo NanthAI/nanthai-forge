@@ -431,6 +431,7 @@ test('pinHarness: fetches the mapped Git commit into harness/<12>, and refuses a
   const B = bench();
   const donor = join(B, 'cli');
   mkdirSync(join(donor, 'node_modules'), { recursive: true });
+  mkdirSync(join(donor, 'dist'), { recursive: true });
   writeFileSync(join(donor, '.commit'), STATE);
   const gitCalls = [];
   const git = (dir, ...args) => {
@@ -444,6 +445,7 @@ test('pinHarness: fetches the mapped Git commit into harness/<12>, and refuses a
   assert.equal(out.stateHead, STATE);
   assert.ok(gitCalls.some(c => c === `fetch -q --depth 1 origin ${GIT}`));
   assert.ok(existsSync(join(out.dir, 'node_modules')));
+  assert.ok(existsSync(join(out.dir, 'dist')), 'the cells import the built CLI from the checkout');
 
   const B2 = bench();
   assert.throws(

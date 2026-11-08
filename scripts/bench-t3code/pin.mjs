@@ -115,7 +115,8 @@ export function pinHarness({
     JSON.parse(
       execFileSync(
         '/usr/local/bin/node',
-        [join(donor, 'dist/cli-entry.js'), 'agent', root, 'capabilities', '{}'],
+        // --detail: an agent receipt slims a synced mirror to its status (receipt-slim.ts).
+        [join(donor, 'dist/cli-entry.js'), 'agent', root, 'capabilities', '{}', '--detail'],
         {
           encoding: 'utf8',
           stdio: ['ignore', 'pipe', 'pipe'],
@@ -150,6 +151,9 @@ export function pinHarness({
   if (git(dir, 'rev-parse', 'HEAD') !== r.gitSha) throw Error('BENCH_PIN_MISMATCH');
   if (!existsSync(join(dir, 'node_modules')))
     symlinkSync(realpathSync(join(donor, 'node_modules')), join(dir, 'node_modules'));
+  // The cells run the checkout's scripts, which import the built CLI; dist is the donor build of this commit.
+  if (!existsSync(join(dir, 'dist')) && existsSync(join(donor, 'dist')))
+    symlinkSync(realpathSync(join(donor, 'dist')), join(dir, 'dist'));
   return { dir, gitSha: r.gitSha, stateHead: STATE_HEAD.test(want) ? want : null, via: r.via };
 }
 

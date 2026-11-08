@@ -97,7 +97,7 @@ export async function main({ benchRoot, filesystemProbe = probeFilesystemEvents,
     const paired = all.every(b => b.cells.length === 2 && b.cells.every(c => c.order === b.order));
     check(
       'design',
-      !over.length && paired && schedule(ids).length === all.length * 2,
+      !over.length && paired && schedule(ids).length === (all.length + DESIGN.maxReps * DESIGN.ns.length) * 2, // + one possible extra batch per rep and N
       `${all.length / 3} batches per rep (N order rep 1 ${repNs(1).join(',')}, rep 2 ${repNs(2).join(',')}, rep 3 ${repNs(3).join(',')}; concurrent N ${DESIGN.concurrentNs.join(',')}; others sequential, first arm alternating), at most ${Math.max(...all.map(b => b.agentsAtOnce))} agents at once (cap ${DESIGN.maxAgents}); reps 1-2, rep 3 by rule${over.length ? `; over cap: ${over.map(b => b.key).join(',')}` : ''}`,
     );
   });
