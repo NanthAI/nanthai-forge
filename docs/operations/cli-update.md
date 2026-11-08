@@ -111,6 +111,16 @@ with no timers or server polling. Other stale processes
 under that hold refuse with `CLI_UPDATE_FROZEN`, naming the hold and recovery
 command. The updater never removes a measurement hold itself.
 
+A hold can name the projects it measures, one `project PROJECT_ID` line each; other
+lines are free text for the holder. Commands for a named project (read from the
+command's inline `url`/`projectId` or the checkout's binding, locally) run on the
+held build: landings pass instead of waiting, and when main has moved they run on
+the held build with a notice instead of refusing. Landings for every other project,
+or whose project cannot be read locally, still wait. Updates and rollback stay refused
+for everyone. A hold without `project` lines holds every project, as before. Holders
+may rewrite the lines; waiting landings re-read them on each hold change. The bench
+writes its bench project's id, so its own agents land while dogfood landings wait.
+
 To explicitly rebuild a retained accepted State for rollback:
 
 ```sh

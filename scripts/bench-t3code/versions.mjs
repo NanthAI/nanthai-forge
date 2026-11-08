@@ -18,6 +18,15 @@ export const HARNESS_DIR = import.meta.dirname;
 /** The measurement hold of the CLI installation config.forge.cli belongs to (cli-install.mjs):
  * while it exists the product CLI holds land/finish and does not update itself. */
 export const benchFreeze = config => freezePath(productCli({ config }));
+/** Hold text: the owner line (stale detection reads its pid), then the measured bench project, so
+ * the bench's own landings run on the held build while every other project's landings wait
+ * (src/cli-measurement-hold.ts). */
+export function benchHoldText(config, owner) {
+  const projectId = config.forge?.projectId;
+  if (typeof projectId !== 'string' || !/^\S+$/.test(projectId))
+    throw Error('BENCH_HOLD_PROJECT config.forge.projectId is required for the measurement hold');
+  return `${owner}\nproject ${projectId}\n`;
+}
 const out = async (cmd, args, opts = {}) =>
   (await run(cmd, args, { maxBuffer: 64 << 20, ...opts })).stdout.trim();
 const safe = async (fn, fallback = null) => {

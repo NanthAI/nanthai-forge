@@ -34,6 +34,7 @@ import {
   pinProblems,
   forgeInFlight,
   benchFreeze,
+  benchHoldText,
 } from './versions.mjs';
 import { startSampler, rateLimit, clockOffsets } from './samplers.mjs';
 import { keepTranscript, readSession } from './transcripts.mjs';
@@ -167,10 +168,11 @@ for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP'])
   process.on(signal, () => crash(`interrupted by ${signal}`));
 
 // The cell holds the CLI installation's measurement hold for its whole run (the product updater
-// would switch `current` mid-cell); the driver may already hold it. Released on every exit.
+// would switch `current` mid-cell); the driver may already hold it. Released on every exit. The
+// hold names the bench project, so the cell's own agents land while dogfood landings wait.
 const FREEZE = benchFreeze(config);
 const ownsFreeze = !existsSync(FREEZE);
-if (ownsFreeze) writeFileSync(FREEZE, `bench cell ${cellId} pid ${process.pid}\n`);
+if (ownsFreeze) writeFileSync(FREEZE, benchHoldText(config, `bench cell ${cellId} pid ${process.pid}`));
 process.on('exit', () => {
   if (ownsFreeze) rmSync(FREEZE, { force: true });
 });

@@ -12,7 +12,8 @@
 //   once to outlier-n<N>.json) and its extra batches. A void batch is re-run once before the next batch starts, and
 //   a resume continues at the same place (plan.mjs nextBatch). Every attempt is published.
 // - Freeze: the batch holds the CLI installation's .freeze from before its first cell starts until its last
-//   cell is graded (nforge land/finish wait meanwhile), and is released between
+//   cell is graded (dogfood nforge land/finish wait meanwhile; the hold names the bench project, so
+//   the bench's own landings pass), and is released between
 //   batches. Versions (CLI, GitHub main, deployed Convex, check workflows, harness, agent) are
 //   recorded at batch start and end; any change voids the batch.
 // - Resumable: a batch without batch.json whose driver is gone is closed as `interrupted`
@@ -39,7 +40,14 @@ import {
   extraBatch,
   loadTasks,
 } from './plan.mjs';
-import { snapshot, snapshotProblems, differences, forgeInFlight, benchFreeze } from './versions.mjs';
+import {
+  snapshot,
+  snapshotProblems,
+  differences,
+  forgeInFlight,
+  benchFreeze,
+  benchHoldText,
+} from './versions.mjs';
 import { benchRootOrExit } from './bench-root.mjs';
 import { productCli } from './cli-install.mjs';
 import { drainBatch, hostedQueueEntries } from './drain.mjs';
@@ -289,7 +297,7 @@ async function main() {
         await wait(RETRY_MS);
         continue;
       }
-      const hold = `bench driver batch ${b.key} pid ${process.pid}\n`;
+      const hold = benchHoldText(config, `bench driver batch ${b.key} pid ${process.pid}`);
       writeFileSync(FREEZE, hold);
       holding = true;
       const drained = await drain(b.key);

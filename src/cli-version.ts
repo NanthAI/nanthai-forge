@@ -10,7 +10,12 @@ import {
   cliSelectedBuild,
   retainCliRuntime,
 } from './cli-installation.js';
-import { cliLandingCommand, waitForCliMeasurement } from './cli-measurement-hold.js';
+import {
+  cliCommandProject,
+  cliLandingCommand,
+  cliMeasuredCommand,
+  waitForCliMeasurement,
+} from './cli-measurement-hold.js';
 import { CLI_RUNTIME_WAIT_MS, resolveCliPointer } from './cli-launcher.js';
 import { ForgeError } from './errors.js';
 import {
@@ -201,7 +206,10 @@ export async function cliStartup(
       'CLI_UPDATE_SOURCE_REQUIRED',
       'This CLI has no configured Forge release source. Next: nforge update .',
     );
-  if (cliLandingCommand(args)) await waitForCliMeasurement(installation);
+  // Resolved from local files at most once, and only while a measurement hold exists.
+  let project: Promise<string | null> | undefined;
+  const commandProject = () => (project ??= cliCommandProject(args));
+  if (cliLandingCommand(args)) await waitForCliMeasurement(installation, undefined, commandProject);
   const { cliReleaseSource } = await import('./cli-update-source.js');
   const { readCliSource, updateCli, cliUpdateCommand, CLI_UPDATE_WAIT_MS } = await import('./cli-update.js');
   const next = cliUpdateCommand(installation);
@@ -232,8 +240,10 @@ export async function cliStartup(
     // canary, and the next command runs on main. Only a failed background install makes a write
     // install in the foreground, so a broken update never leaves writes silently on old code.
     // An explicit historical rollback (restoreMain) still restores main before any write.
-    const reading = cliReadOnlyCommand(args);
+    // A hold naming this command's project measures it: like a read, it runs on the held build.
     const frozen = existsSync(join(installation, '.freeze'));
+    const measured = frozen && (await cliMeasuredCommand(installation, commandProject));
+    const reading = cliReadOnlyCommand(args) || measured;
     if (expectedCurrent !== null && (reading || (!restoreMain && !frozen))) {
       const state = frozen
         ? 'held by a measurement hold'
@@ -248,7 +258,7 @@ export async function cliStartup(
           );
       if (reading || !state.startsWith('last install failed')) {
         process.stderr.write(
-          `Forge CLI main ${released.slice(0, 8)} ${state}; this ${reading ? 'read' : 'write'} ran on ${installed.slice(0, 8)}.\n`,
+          `Forge CLI main ${released.slice(0, 8)} ${state}; this ${measured ? 'measured write' : reading ? 'read' : 'write'} ran on ${installed.slice(0, 8)}.\n`,
         );
         return true;
       }

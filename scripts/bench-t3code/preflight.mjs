@@ -133,16 +133,20 @@ export async function main({ benchRoot, filesystemProbe = probeFilesystemEvents,
     );
   await tryRun('landing hold', () => {
     // The product CLI holds land/finish and its own updates while the installation's .freeze
-    // exists (src/cli-measurement-hold.ts, docs/operations/cli-update.md).
+    // exists (src/cli-measurement-hold.ts, docs/operations/cli-update.md). The bench agents call
+    // that same build, so it must let the hold's named project (the bench project) through.
     const cli = productCli({ config });
-    const held = Boolean(cli.installation) && existsSync(join(cli.build, 'dist', 'cli-measurement-hold.js'));
+    const module = join(cli.build, 'dist', 'cli-measurement-hold.js');
+    const held = Boolean(cli.installation) && existsSync(module);
+    const scoped = held && readFileSync(module, 'utf8').includes('measurementHoldProjects');
     check(
       'landing hold',
-      held,
-      (held
-        ? `the installed CLI holds land/finish and updates while ${join(cli.installation, '.freeze')} exists`
-        : `${cli.build} is ${cli.installation ? 'a build without the measurement hold' : 'not part of a product installation'}: landings would not wait`) +
-        ' (bench agents call the CLI by path and are not held)',
+      scoped,
+      scoped
+        ? `the installed CLI holds updates and other projects' land/finish while ${join(cli.installation, '.freeze')} exists; bench project ${config.forge?.projectId} lands`
+        : held
+          ? `${cli.build} holds every project's landings, including the bench agents': update the CLI`
+          : `${cli.build} is ${cli.installation ? 'a build without the measurement hold' : 'not part of a product installation'}: landings would not wait`,
     );
   });
   const pp = await pinProblems(s.harness);
