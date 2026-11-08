@@ -6,7 +6,7 @@ import type { SourceWorkerTransport } from './hosted-source-worker-reader.js';
 import { sourcePackDownloadSchema, type SourcePackDownload } from './source-pack.js';
 import { digest } from './hash.js';
 import { objectRecipeSchema, objectChunkPageSchema } from './object-chunks.js';
-import { invariant } from './errors.js';
+import { ForgeError, invariant } from './errors.js';
 import { packHeaders, verifyPackRange, type PackRange } from './object-pack-range.js';
 import type { z } from 'zod';
 import type { directCommandSchema } from './hosted-actions-direct.js';
@@ -72,10 +72,13 @@ export class ActionsJobClient {
           // Only a fixed reason vocabulary may reach logs; never echo a response body.
           const body = (await response.json().catch(() => null)) as { reason?: unknown } | null;
           const reason = actionsRefusalReasons.find(value => value === body?.reason);
-          invariant(
-            false,
-            reason === 'cancelled' ? 'CHECK_CANCELLED' : 'RUNNER_UNAVAILABLE',
-            `Convex Actions request failed (${response.status}${reason ? `; reason: ${reason}` : ''}).`,
+          throw Object.assign(
+            new ForgeError(
+              reason === 'cancelled' ? 'CHECK_CANCELLED' : 'RUNNER_UNAVAILABLE',
+              `Convex Actions request failed (${response.status}${reason ? `; reason: ${reason}` : ''}).`,
+            ),
+            // Callers tell a request Forge refused as invalid (deterministic) from an unavailable runner.
+            { refusal: reason ?? null },
           );
         }
         return { response, value: await response.json() };

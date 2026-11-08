@@ -3,7 +3,7 @@ import { spawn } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { childEnv, toolchainEnvAllow } from '../scripts/child-env.mjs';
-import { ContractTimingReader } from './contract-test-timings.js';
+import { ContractTimingReader, unstoredReportsNote } from './contract-test-timings.js';
 import { HostedOutputRedactor } from './hosted-output-redactor.js';
 import { semanticCheckCommand } from './semantic-check-command.js';
 import { semanticTests } from './intent-semantic-conflict.js';
@@ -197,6 +197,12 @@ async function executeActiveActionsJob(
     for (const line of junitReports.notes) note(line);
     const added = mergeJunitReports(reports, junitReports.reports);
     if (added) note(`JUnit: read ${added} test file report${added === 1 ? '' : 's'}.`);
+    // A failed report under a name Forge cannot store still fails this shard (Issue 7a0ccbef).
+    const unstored = unstoredReportsNote(reports);
+    if (unstored) {
+      note(unstored.line);
+      if (unstored.failed && !exitCode) exitCode = 1;
+    }
   } finally {
     junit.remove();
     packages?.remove();
@@ -252,7 +258,29 @@ async function executeActiveActionsJob(
     });
   }
   result.execution.endedAt = new Date().toISOString();
-  await client.call({ kind: 'result', result, ...(logBytes !== undefined ? { logBytes } : {}) });
+  try {
+    await client.call({ kind: 'result', result, ...(logBytes !== undefined ? { logBytes } : {}) });
+  } catch (error) {
+    if ((error as { refusal?: unknown })?.refusal !== 'validation') throw error;
+    // Forge refused this result as invalid: a deterministic report problem, not a missing runner.
+    // Exiting would settle the check runner-unavailable and re-run the same failure (Issue
+    // 7a0ccbef). Resend once with only the exit status and log; it fails closed and names why.
+    const refused = `Forge refused this shard's test reports as invalid, so the shard fails with its log. Next: read the log; if every test passed, report the refusal.`;
+    console.log(refused);
+    exitCode ||= 1;
+    await client.call({
+      kind: 'result',
+      result: {
+        index,
+        exitCode,
+        ...(log
+          ? { log: { ...log, failureSummary: `${refused}\n${log.failureSummary}`.slice(0, 4096) } }
+          : {}),
+        execution: result.execution,
+      },
+      ...(logBytes !== undefined ? { logBytes } : {}),
+    });
+  }
   lap('reportMs');
   console.log(`run: phases ${JSON.stringify(phases)}`);
   return exitCode;

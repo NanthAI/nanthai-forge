@@ -364,6 +364,15 @@ that file ignored with a one-line log note, so the run keeps its previous eviden
 and log). Reading is a stream with no extra Convex call; a green run's records ride in the
 existing result call. The directory is removed after the job.
 
+A report (JUnit or marker) whose file is not a storable test path — a source file such as
+`lib/widget.py`, a path outside the checkout, or a report with no name at all (`junit`) — is
+not retained, so it can never make the shard's whole result invalid. The log names up to three
+such files; if one of them failed, the shard fails even when the command exited 0. If Forge
+still refuses a shard result as invalid (for example while the runner and server are on
+different versions), the job resends it once with only its exit status and log, failing
+closed with that cause in the failure summary. It is never reported as `runner-unavailable`,
+so the check is not re-run three times on the same failure.
+
 An Intent contract union that rides on the check is covered by the same reports: a union
 test file that a complete JUnit report (or `__FORGE_TESTS__` line) names was run by the
 configured command and is not run again, so a Gradle, Maven or cargo start-up is not paid
@@ -515,7 +524,9 @@ key: a process failure between reservation and the HTTP call can therefore leave
 zero executions, while a lost HTTP reply can leave one. Neither case silently
 creates a second execution. The Workflow run event binds the original execution
 when its dispatch reply was lost. Without complete job evidence, workflows settle
-as `runner-unavailable` unless an authenticated failed shard/report proves failure;
+as `runner-unavailable` unless an authenticated failed shard/report proves failure
+(a shard result Forge refuses as invalid is resent as a failed shard, see
+[JUnit reports](#junit-xml-reports-from-any-check));
 cancellation stays cancelled. Standalone landings share the batch budget: two
 retries, three runs total, with exact Candidate/check pins and parent-linked
 attempts. Exhaustion is infrastructure `CHECK_NOT_PASSED`; genuine failures remain

@@ -36,7 +36,7 @@ function fixture(t, kinds) {
     );
     return path;
   });
-  return { files, counts: () => files.map(file => Number(readFileSync(file + '.count'))) };
+  return { root, files, counts: () => files.map(file => Number(readFileSync(file + '.count'))) };
 }
 async function run(files, maxRetries = 3, timeout = 30000) {
   return new Promise((resolve, reject) => {
@@ -81,7 +81,11 @@ test('fail once passes the check, reports flakiness and both attempt timings, ev
   assert.ok(Buffer.byteLength(report.retry.firstError) <= 2048);
   const retained = summarizeCheckLines(compactCheckText(result.text).split('\n'));
   const reader = new ContractTimingReader();
-  reader.accept(summarizeCheckLines(compactCheckText(retained).split('\n')));
+  // A hosted run reports checkout-relative test paths; the reader keeps only storable test paths
+  // (Issue 7a0ccbef), so the temporary absolute fixture paths read as the tests/ files they stand for.
+  reader.accept(
+    summarizeCheckLines(compactCheckText(retained).split('\n')).replaceAll(`${f.root}/`, 'tests/'),
+  );
   const summary = checkFileSummary(reader.reports);
   assert.equal(summary.counts.flaky, 1);
   assert.equal(summary.counts.failed, 0);

@@ -26,6 +26,7 @@ import {
 } from '../dist/hosted-actions-job-source.js';
 import { prepareActionsJob } from '../dist/hosted-actions-job-plan.js';
 import { executeActionsJob } from '../dist/hosted-actions-job-run.js';
+import { directRequestSchema } from '../dist/hosted-actions-direct.js';
 import { savePin } from '../dist/hosted-save.js';
 import { digest } from '../dist/hash.js';
 import { hostedActionsRuntime } from '../dist/hosted-actions.js';
@@ -816,6 +817,103 @@ test('any check command may write JUnit XML to FORGE_JUNIT_DIR; the result names
   assert.match(log, /JUnit: read 2 test file reports\./);
   const dir = /dir=(\S+)/.exec(log)?.[1];
   assert(dir && !existsSync(dir), 'the private report directory is removed after the job');
+});
+
+/** A job whose Forge endpoint validates output/result requests like the server: invalid is 403 validation. */
+async function validatedJob(t, program, { refuse = () => false } = {}) {
+  const s = fixture(t),
+    candidate = join(s.directory, 'candidate'),
+    prepared = await prepareActionsJob(s.client, candidate, join(s.directory, 'objects'));
+  const path = join(s.directory, 'plan.json');
+  writeFileSync(path, JSON.stringify(prepared.recipe));
+  const posted = [];
+  const realRequest = s.client.request;
+  s.client.request = async (url, init) => {
+    const body = String(url).endsWith('/checks/actions') ? JSON.parse(init.body) : null;
+    if (!body || (body.command.kind !== 'result' && body.command.kind !== 'output'))
+      return realRequest(url, init);
+    posted.push(body.command);
+    const valid = directRequestSchema.safeParse(body).success && !refuse(body.command, posted);
+    return valid ? Response.json({}) : Response.json({ reason: 'validation' }, { status: 403 });
+  };
+  t.mock.method(process.stdout, 'write', () => true);
+  const exit = executeActionsJob(s.client, candidate, path, 'static', [process.execPath, '--eval', program]);
+  return { exit, results: () => posted.filter(command => command.kind === 'result') };
+}
+const writeJunit = xml =>
+  `require('node:fs').writeFileSync(require('node:path').join(process.env.FORGE_JUNIT_DIR,'leak.xml'), ${JSON.stringify(xml)});`;
+
+test('incident 7a0ccbef: a report naming a non-test path never voids the shard result; its failing test arrives at once', async t => {
+  // Replay: a test's child wrote a JUnit report into the job's own folder naming a file the result
+  // schema refuses; the whole result was refused (403 validation), the job exited RUNNER_UNAVAILABLE
+  // and the check re-ran the same failure three times as "runner-unavailable without a failing test".
+  const marker = JSON.stringify({
+    file: 'tests/leaky.test.mjs',
+    complete: false,
+    firstError: 'expected 2 files',
+  });
+  const program =
+    writeJunit('<testsuite><testcase classname="x" name="a" file="lib/widget.py" time="0.1"/></testsuite>') +
+    `console.log('__FORGE_TESTS__'+${JSON.stringify(marker)}); process.exitCode = 1;`;
+  const job = await validatedJob(t, program);
+  assert.equal(await job.exit, 1);
+  const [sent, ...more] = job.results();
+  assert.equal(more.length, 0, 'the first result is valid: no refusal, no resend');
+  assert.equal(sent.result.contractReports['tests/leaky.test.mjs'].failed, true);
+  assert.equal('lib/widget.py' in sent.result.contractReports, false);
+  assert.deepEqual(
+    sent.result.testFiles.failed.map(item => item.file),
+    ['tests/leaky.test.mjs'],
+  );
+  assert.match(
+    Buffer.from(sent.logBytes, 'base64').toString('utf8'),
+    /Forge: 1 test report named a file Forge cannot store as a test path \("lib\/widget\.py"\); they passed/,
+  );
+});
+
+test('a failed report under a name Forge cannot store fails the shard closed and names it', async t => {
+  const program =
+    writeJunit(
+      '<testsuite><testcase classname="x" name="a" file="src/main/java/com/acme/Foo.java"><failure message="boom"/></testcase></testsuite>',
+    ) + 'process.exitCode = 0;';
+  const job = await validatedJob(t, program);
+  assert.equal(await job.exit, 1, 'a hidden failure never passes the shard');
+  const [sent] = job.results();
+  assert.equal(sent.result.exitCode, 1);
+  assert.match(sent.result.log.failureSummary, /1 failed, so this run fails\. Next: fix the failing test/);
+});
+
+test('a result Forge refuses as invalid is resent once with exit status and log, never as runner-unavailable', async t => {
+  // Runner and server schemas can differ (deploy skew): the refusal is deterministic, so the
+  // shard settles failed with a named cause instead of exiting and being re-run.
+  const ok = JSON.stringify({
+    file: 'tests/fine.test.mjs',
+    complete: true,
+    durationMs: 5,
+    results: [{ name: 'n', passed: true }],
+  });
+  const job = await validatedJob(t, `console.log('__FORGE_TESTS__'+${JSON.stringify(ok)});`, {
+    refuse: (command, posted) => command.kind === 'result' && posted.length === 1,
+  });
+  assert.equal(await job.exit, 1);
+  const [refused, resent, ...more] = job.results();
+  assert.equal(more.length, 0);
+  assert.equal(refused.result.exitCode, 0);
+  assert.deepEqual(Object.keys(resent.result).sort(), ['execution', 'exitCode', 'index', 'log']);
+  assert.equal(resent.result.exitCode, 1);
+  assert.equal(resent.logBytes, refused.logBytes);
+  assert.match(
+    resent.result.log.failureSummary,
+    /^Forge refused this shard's test reports as invalid.*Next: read the log/,
+  );
+});
+
+test('a resent result refused again still ends the job: at most one resend', async t => {
+  const again = await validatedJob(t, 'process.exitCode = 0;', {
+    refuse: command => command.kind === 'result',
+  });
+  await assert.rejects(again.exit, { code: 'RUNNER_UNAVAILABLE' });
+  assert.equal(again.results().length, 2, 'at most one resend');
 });
 
 test('a result too large to carry its log falls back to the separate output upload', async t => {

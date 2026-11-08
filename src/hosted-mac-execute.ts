@@ -2,7 +2,7 @@
 import { isMachineRunner } from './hosted-machine-runner.js';
 import { semanticCheckCommand } from './semantic-check-command.js';
 import { resolveTestRunner } from './project-test-runner.js';
-import { ContractTimingReader } from './contract-test-timings.js';
+import { ContractTimingReader, unstoredReportsNote } from './contract-test-timings.js';
 import { semanticTests } from './intent-semantic-conflict.js';
 import { localMacLogFiles } from './check-local-log-files.js';
 import { compactProviderOutput } from './check-compact-output.js';
@@ -288,6 +288,7 @@ export async function executeHostedMacCheck(
           },
         };
         const reports: ContractTimingReader['reports'] = {};
+        const readers: ContractTimingReader[] = [];
         const child = spawn(execute[0]!, execute.slice(1), {
           cwd: checkout,
           env: { ...runtime.env, [junitDirEnv]: junitDir },
@@ -314,6 +315,7 @@ export async function executeHostedMacCheck(
         try {
           const observe = async function* (stream: AsyncIterable<Uint8Array>) {
             const contractReader = new ContractTimingReader({ secrets, paths: [root, homedir()] });
+            readers.push(contractReader);
             const decoder = new TextDecoder();
             for await (const bytes of stream) {
               contractReader.accept(decoder.decode(bytes, { stream: true }));
@@ -348,13 +350,17 @@ export async function executeHostedMacCheck(
               () => summary,
             );
           };
-          const [exitCode] = await Promise.all([exit, stream('stdout'), stream('stderr')]);
+          const [commandExit] = await Promise.all([exit, stream('stdout'), stream('stderr')]);
           signal.throwIfAborted();
           // Forge's own markers win; JUnit fills in the files they did not report.
           const junitReader = new ContractTimingReader({ secrets, paths: [root, homedir()] });
           for (const report of readJunitReports(junitDir, checkout).reports)
             if (!(report.file in reports)) junitReader.report(report);
           Object.assign(reports, junitReader.reports);
+          // A failed report under a name Forge cannot store still fails the run (Issue 7a0ccbef).
+          const unstored = unstoredReportsNote(...readers, junitReader);
+          if (unstored) console.error(unstored.line);
+          const exitCode = unstored?.failed && commandExit === 0 ? 1 : commandExit;
           for (const artifact of await captureArtifacts(checkout, root, run.check.artifactPaths ?? [])) {
             if (artifact.status !== 'retained') continue;
             await collectHostedOutput(
