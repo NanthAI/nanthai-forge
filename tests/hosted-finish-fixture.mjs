@@ -23,6 +23,7 @@ const wouldConflictApi = await import(moduleUrl('../convex/projectHostedLandingW
 const precomposeApi = await import(moduleUrl('../convex/projectHostedLandingPrecompose.ts'));
 const acceptanceApi = await import(moduleUrl('../convex/projectHostedAcceptance.ts'));
 const batchAbandon = await import(moduleUrl('../convex/projectHostedBatchAbandon.ts'));
+const revertNoticeApi = await import(moduleUrl('../convex/projectHostedRevertNotice.ts'));
 const convexSourceModules = Object.fromEntries(
   await Promise.all(
     [
@@ -356,6 +357,8 @@ export async function finishFixture(
       } else if (task.name === 'projectHostedLandingStallAlert:deliver') {
         // Owner channels are faked: record what would be sent, never call a network.
         metrics.stallDeliveries.push(input);
+      } else if (task.name === 'projectHostedRevertNotice:accepted') {
+        await tx('revertNotice', revertNoticeApi.accepted, input);
       } else if (task.name === 'projectHostedBatchAbandon:reselect') {
         await tx('batchAbandon', batchAbandon.reselect, input);
       } else if (task.name === 'projectHostedLandingDesired:drive') {

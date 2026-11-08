@@ -172,6 +172,7 @@ export const submit = receiptMutation({
           ...(command.retryReason ? { retryReason: command.retryReason } : {}),
           ...(command.keepOpen === undefined ? {} : { keepOpen: command.keepOpen }),
           ...(command.closes === undefined ? {} : { closes: command.closes }),
+          ...(command.revertOf ? { revertOf: command.revertOf } : {}),
           finish: { composeOperationId: command.composeOperationId, after: command.after },
         },
       });

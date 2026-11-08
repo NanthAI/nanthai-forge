@@ -101,7 +101,7 @@ export async function initializeFinish(ctx: MutationCtx, state: HostedLandingSta
     invariant(
       state.request.finish.composeOperationId && source.inputs.count === 1 && source.dependencies.count === 0,
       'WORK_OPERATION_CHANGED',
-      'A browser revert selects its one canonical reverse Lane.',
+      'A revert landing selects its one canonical reverse Lane.',
     );
     const [selected] = await ctx.db
       .query('projectHostedComposeSelections')

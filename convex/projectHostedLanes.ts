@@ -51,6 +51,8 @@ export const head = query({
         commit: v.string(),
         at: v.string(),
         current: v.boolean(),
+        /** The accepted compensating landing that took this landing off main (Issue 8dbccdfb). */
+        revertedBy: v.optional(v.object({ receiptId: v.string(), at: v.string() })),
       }),
     ),
   }),
@@ -75,7 +77,8 @@ export const head = query({
                 receiptId: landed.receiptId,
                 commit: landed.commit,
                 at: landed.at,
-                current: landed.laneHead === lane.head,
+                current: landed.laneHead === lane.head && !landed.revertedBy,
+                ...(landed.revertedBy ? { revertedBy: landed.revertedBy } : {}),
               },
             }
           : {}),

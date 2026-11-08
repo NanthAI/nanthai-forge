@@ -66,6 +66,8 @@ export const page = query({
         );
         inputs.push({
           intentId: lane.intentId,
+          // A revert Lane names the receipt it compensates (Issue 8dbccdfb): its landing records it.
+          ...(lane.revert ? { revertOf: lane.revert.receiptId } : {}),
           entry: {
             laneId: lane.id,
             ...expected,

@@ -52,6 +52,10 @@ export const hostedContractFeatures = [
   /** projectHostedLandingWithdraw:withdraw exists (78a97771): `land --withdraw` cancels a Lane's
    * live landing by Lane. Without it the CLI refuses and names `x cancel {submissionId}`. */
   'landing-withdraw',
+  /** Revert provenance on CLI landings (Issue 8dbccdfb): projectHostedComposeSelection:page names a
+   * revert Lane's `revertOf`, and projectHostedLandingDesired:submit takes `revertOf`, so a landed
+   * revert is recorded as compensating and tells the reverted Lane. Without it the CLI sends none. */
+  'landing-revert-of',
 ] as const;
 export type HostedContractFeature = (typeof hostedContractFeatures)[number];
 

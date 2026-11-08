@@ -1266,6 +1266,27 @@ test('recovery decisions map workspace notices without invented ages and keep re
   assert.doesNotMatch(visible, /receipt-one|audit-one|audit-two|undo-one/);
 });
 
+test('a hand-run revert (no main audit) reads as reverted, never as a failed audit (8dbccdfb)', () => {
+  const [item] = attention.needsFixDecisions(
+    [
+      {
+        intentId: 'i',
+        state: 'reverted',
+        receiptId: 'receipt-one',
+        head: 'h',
+        undo: `nforge agent ROOT start --reopen '{"laneId":"lane-one"}'`,
+        summary: 'Reverted receipt receipt-one by receipt receipt-two: the change is off main.',
+      },
+    ],
+    [{ id: 'i', outcome: 'Original work' }],
+  );
+  assert.equal(item.kind, 'revert');
+  assert.equal(item.subtitle, 'reverted on main after it landed; its Lane keeps the change');
+  assert.deepEqual(item.tests, []);
+  assert.equal(item.exact.audit, undefined);
+  assert.match(item.exact.undo, /start --reopen/);
+});
+
 test('recovery tests cap at three, retain the server remainder, and never parse a truncated path', () => {
   const notice = {
     intentId: 'i',

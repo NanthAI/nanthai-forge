@@ -24,9 +24,16 @@ export const hostedOverlapTables = {
     lifecyclePlanId: v.optional(v.id('projectHostedLifecyclePlans')),
     recordVersion: v.number(),
     open: v.boolean(),
-    /** Set when an accepted receipt landed this exact saved head: Lane status reads it (no extra call). */
+    /** Set when an accepted receipt landed this exact saved head: Lane status reads it (no extra call).
+     * `revertedBy` names the accepted compensating landing that took it off main (Issue 8dbccdfb). */
     landed: v.optional(
-      v.object({ receiptId: v.string(), commit: v.string(), laneHead: v.string(), at: v.string() }),
+      v.object({
+        receiptId: v.string(),
+        commit: v.string(),
+        laneHead: v.string(),
+        at: v.string(),
+        revertedBy: v.optional(v.object({ receiptId: v.string(), at: v.string() })),
+      }),
     ),
     /** A Lane of the same Intent landed after this Lane went quiet (Issue 55024d40): the Lane keeps its
      * saved work and stays open, but leaves presence and advisory notices; blocking notices stay. It

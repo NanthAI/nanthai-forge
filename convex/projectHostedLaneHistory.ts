@@ -57,7 +57,9 @@ export const read = query({
               commit: landed.commit,
               head: landed.laneHead,
               at: landed.at,
-              current: landed.laneHead === lane.head,
+              // A reverted landing is off main: not current even while the Lane still holds that head.
+              current: landed.laneHead === lane.head && !landed.revertedBy,
+              ...(landed.revertedBy ? { revertedBy: landed.revertedBy } : {}),
             }
           : null,
       });

@@ -14,7 +14,8 @@ export const culpritProbeBudget = (count: number) => 1 + Math.ceil(Math.log2(cou
 export const needsFixSchema = z
   .object({
     state: z.enum(['reverted', 'needs-fix']),
-    auditRunId: z.uuid(),
+    /** The failed main audit that raised it; absent for a revert someone ran by hand (Issue 8dbccdfb). */
+    auditRunId: z.uuid().optional(),
     receiptId: z.uuid().optional(),
     sequence: z.number().safe().nonnegative().optional(),
     head: z.string().regex(/^[0-9a-f]{64}$/),

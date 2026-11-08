@@ -8,7 +8,7 @@ import { sourceWaitSnapshot } from './hosted-agent-source-wait.js';
 import { hostedCheckRequestSchema } from './hosted-check.js';
 import { hostedRecordSchema } from './hosted-records.js';
 import { overlapEvidenceLevel, saveHostedLane } from './hosted-save-client.js';
-import { composeAgentSource, selectAgentLane } from './hosted-agent-source.js';
+import { composeAgentSource, composedRevertOf, selectAgentLane } from './hosted-agent-source.js';
 import { recoverHostedCandidate } from './hosted-agent-resolution.js';
 import { inPlaceResolution } from './hosted-conflict-precheck.js';
 import { agentSourceOutcome, checkSelection } from './hosted-agent-actions.js';
@@ -364,6 +364,7 @@ async function executeFinishWork(session: HostedAgentSession, input: unknown) {
           ...(command.reason ? { retryReason: command.reason } : {}),
           ...(command.keepOpen === undefined ? {} : { keepOpen: command.keepOpen }),
           ...(command.closes === undefined ? {} : { closes: command.closes }),
+          ...revertField(session, composeOperationId),
         }),
       );
       const submission = await session.mutation('projectHostedLandingDesired:submit', {
@@ -429,6 +430,7 @@ async function executeFinishWork(session: HostedAgentSession, input: unknown) {
       finish: { composeOperationId, after: command.after },
       ...(command.keepOpen === undefined ? {} : { keepOpen: command.keepOpen }),
       ...(command.closes === undefined ? {} : { closes: command.closes }),
+      ...revertField(session, composeOperationId),
     });
   });
   if (command.accept === false) {
@@ -449,4 +451,9 @@ async function executeFinishWork(session: HostedAgentSession, input: unknown) {
     submission: result,
     ...(await queuedConflict(session, result as HostedLandingState)),
   };
+}
+/** A landing of one revert Lane records the receipt it compensates (Issue 8dbccdfb). */
+function revertField(session: HostedAgentSession, composeOperationId: string) {
+  const revertOf = composedRevertOf(session, composeOperationId);
+  return revertOf ? { revertOf } : {};
 }

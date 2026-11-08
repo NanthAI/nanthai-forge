@@ -274,6 +274,19 @@ export async function writeLanding(
         projectId: row.projectId,
         receiptId: state.acceptance.receiptId,
       });
+    // A compensating landing tells the reverted Lanes and Intent (Issue 8dbccdfb); no other landing pays.
+    if (state.request.revertOf)
+      await ctx.scheduler.runAfter(
+        0,
+        makeFunctionReference<'mutation'>('projectHostedRevertNotice:accepted'),
+        {
+          projectId: row.projectId,
+          receiptId: state.acceptance.receiptId,
+          revertOf: state.request.revertOf,
+          actor: state.actor,
+          ...(row.agentRun ? { agent: row.agentRun } : {}),
+        },
+      );
   }
   await notifyFinish(ctx, state);
   // Lanes stacked on a Lane this landing carried are told once (Issue dc62b120): failed and cancelled alike.

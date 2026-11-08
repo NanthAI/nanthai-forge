@@ -148,8 +148,18 @@ MCP `forge_review` exposes hosted `show`, `diff` and `peers`.
 - `lane-history {laneId?}` is one query from stored rows for an open, landed or
   abandoned Lane: `openedAt`, `startBase` (the main it started from),
   `lastSyncedBase` (the main its base is now), `synced`, `state`, `head`,
-  `lastActivityAt` and `landing {receiptId,commit,head,at,current}` (null when
-  nothing landed or the Lane landed before the landing stamp). No writes.
+  `lastActivityAt` and `landing {receiptId,commit,head,at,current,revertedBy?}` (null
+  when nothing landed or the Lane landed before the landing stamp). Once a
+  compensating landing takes that landing off main, `current` is false and
+  `revertedBy {receiptId,at}` names the revert. No writes.
+- `x revert {target}` makes a compensating Lane; landing it (`land --save`, the
+  browser, or main-audit recovery) records `revertOf` on the landing (shown as
+  compensating, with "Reverted by" on the original). When it lands, each Lane of the
+  reverted receipt gets one board note with its reopen command
+  (`start --reopen '{"laneId":"…"}'`; its saved head is kept), and the reverted
+  Intent gets a `reverted` needsFix notice in Now and CLI status (reopened if it
+  had completed; an abandoned Intent stays closed). Re-landing that Intent clears
+  the notice. Only compensating landings pay this, once per revert.
 - `overlap-answers {laneId?,from?,to?,limit?,cursor?}` reads the stored overlap
   answers (`choice`, `text`, `noticeId`, `disposition`, `storedAt`) by Lane or by the
   UTC window [from,to), oldest first, at most 50 a page (default 20), under 64 KB; text

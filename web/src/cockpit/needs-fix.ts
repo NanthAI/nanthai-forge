@@ -6,7 +6,8 @@ export type NeedsFixNotice = {
   intentId: string;
   at?: string;
   state: 'reverted' | 'needs-fix';
-  auditRunId: string;
+  /** Absent when someone reverted the landing by hand (no main audit asked for it). */
+  auditRunId?: string;
   receiptId?: string;
   head: string;
   summary: string;
@@ -35,18 +36,21 @@ export function needsFixDecisions(
     const { tests, more } = failedTests(notice.summary);
     const count = more === undefined ? undefined : tests.length + more;
     const failure = `main audit failed${count === undefined ? '' : ` ${count} ${count === 1 ? 'test' : 'tests'}`}`;
+    const subtitle = !notice.auditRunId
+      ? 'reverted on main after it landed; its Lane keeps the change'
+      : `${failure}${notice.state === 'reverted' ? ' after it landed' : '; no single culprit, main unchanged'}`;
     return {
       id: `needsfix:${notice.intentId}`,
       kind: notice.state === 'reverted' ? 'revert' : 'needs-fix',
       intentId: notice.intentId,
       ...(notice.at ? { at: notice.at } : {}),
       title: titles.get(notice.intentId) ?? 'Intent',
-      subtitle: `${failure}${notice.state === 'reverted' ? ' after it landed' : '; no single culprit, main unchanged'}`,
+      subtitle,
       tests,
       ...(more ? { moreTests: more } : {}),
       exact: {
         ...(notice.receiptId ? { reverted: notice.receiptId } : {}),
-        audit: notice.auditRunId,
+        ...(notice.auditRunId ? { audit: notice.auditRunId } : {}),
         undo: notice.undo,
       },
     };

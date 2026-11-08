@@ -104,7 +104,8 @@ export async function composeAgentSource(
       ...selected.map(item => ({ kind: 'inputs' as const, item })),
       ...command.dependencies.map(item => ({ kind: 'dependencies' as const, item })),
     ];
-    const row = z.object({ intentId: z.string(), entry: z.unknown() });
+    const row = z.object({ intentId: z.string(), entry: z.unknown(), revertOf: z.uuid().optional() });
+    const reverts: (string | undefined)[] = [];
     for (let offset = 0; offset < selection.length; offset += 100) {
       const window = selection.slice(offset, offset + 100);
       const page = z.object({ inputs: z.array(row), dependencies: z.array(row) }).parse(
@@ -125,6 +126,7 @@ export async function composeAgentSource(
       ] as const)
         for (const value of entries) {
           intentId ??= value.intentId;
+          if (kind === 'inputs') reverts.push(value.revertOf);
           (kind === 'inputs' ? inputs : dependencies).push(
             (kind === 'inputs' ? composeLaneSchema : composeDependencySchema).parse(value.entry),
           );
@@ -144,9 +146,19 @@ export async function composeAgentSource(
     const pages = [a, b].flatMap((group, index) =>
       group.pages.map((page, i) => ({ ...page, kind: index ? 'dependencies' : 'inputs', index: i })),
     );
-    return { request, pages };
+    // One revert Lane alone is a compensating landing (Issue 8dbccdfb); the server checks the claim.
+    const revertOf = reverts.length === 1 && !dependencies.length ? reverts[0] : undefined;
+    return { request, pages, ...(revertOf ? { revertOf } : {}) };
   });
   return driveAgentSource(session, 'Compose', operationId, prepared.request, prepared.pages);
+}
+/** The receipt a composed revert Lane compensates, from the retained compose selection (no call). */
+export function composedRevertOf(session: HostedAgentSession, operationId: string) {
+  const prepared = session.journal.get<{ revertOf?: unknown }>(`compose:${operationId}`);
+  return session.capabilities.features?.includes('landing-revert-of') &&
+    typeof prepared?.revertOf === 'string'
+    ? prepared.revertOf
+    : undefined;
 }
 /** The rebuilt sync was refused again: nothing began on the server. */
 export class SyncPinsStale extends ForgeError {
