@@ -10,6 +10,7 @@ import { finishFixture, landingApi } from './hosted-finish-fixture.mjs';
 import { passWithSelection, seedFullMain, useSyntheticHostedEnv } from './hosted-race-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { policyPreset } from '../dist/autonomy-policy.js';
+import { emptyTrust } from '../dist/agent-trust.js';
 const reuse = await import(moduleUrl('../convex/projectHostedReuseStore.ts'));
 const mainAudit = await import(moduleUrl('../convex/projectHostedMainAudit.ts'));
 const reuseAction = await import(moduleUrl('../convex/projectHostedReuse.ts'));
@@ -22,7 +23,10 @@ const baselineFiles = [
   ['tests/convex-source-r2.test.mjs', "import '../convex/projectConvexSourceOutput.ts';"],
   ['tests/native-projection.test.mjs', "import '../dist/native-projection.js';"],
 ];
-async function readyRace(t, { mainFiles, extra = [], disabled = false, admission = false } = {}) {
+async function readyRace(
+  t,
+  { mainFiles, extra = [], disabled = false, admission = false, member = null } = {},
+) {
   const f = await finishFixture(t, {
     admission,
     baselineFiles: [...baselineFiles, ...extra],
@@ -33,6 +37,22 @@ async function readyRace(t, { mainFiles, extra = [], disabled = false, admission
     const policy = policyPreset('trusted');
     policy.acceptance.hostedCrossHeadReuse = false;
     f.patch('hostedProjects', f.projectId, { autonomyPolicy: policy });
+  }
+  if (member) {
+    // The acting agent is a team member (contributor), not the project owner.
+    f.patch('hostedProjects', f.projectId, { owner: 'founder' });
+    f.insert('projectContributors', { projectId: f.projectId, contributor: 'owner' });
+    const policy = policyPreset('trusted');
+    if (member.autoActors) policy.acceptance.autoActors = member.autoActors;
+    if (member.trust) policy.trust = { enabled: true, probationLandings: 0 };
+    f.patch('hostedProjects', f.projectId, { autonomyPolicy: policy });
+    if (member.delegated)
+      f.insert('projectHostedTrust', {
+        projectId: f.projectId,
+        actor: 'owner',
+        ...emptyTrust('2026-10-01T00:00:00.000Z'),
+        delegations: [{ decisionId: randomUUID(), patterns: ['convex/**'], level: 'trusted' }],
+      });
   }
   const state = await f.enqueue(f.request({ agent: true }));
   await f.drain();
@@ -472,3 +492,41 @@ test('explicit hostedCrossHeadReuse:false retains the exact recheck', async t =>
   assert.equal((await f.status(state.id)).attempt.crossHeadProof, undefined);
   assert.deepEqual(f.reuseDecisions, []);
 });
+
+async function landsOnFirstCheck(t, options) {
+  const { f, state, before } = await readyRace(t, options);
+  for (let n = 0; n < 80 && (await f.current(state.id)).submission.phase !== 'landed'; n++) {
+    if (!f.pending().length) break;
+    await f.execute();
+  }
+  return { f, state, before, phase: (await f.current(state.id)).submission.phase };
+}
+for (const [name, member] of [
+  ['listed in autoActors', { autoActors: ['owner'] }],
+  ['trusted on the Candidate paths', { trust: true, delegated: true }],
+]) {
+  test(`a team member ${name} keeps its passed check across a clean overtake`, async t => {
+    const { f, state, before, phase } = await landsOnFirstCheck(t, { member });
+    assert.equal(phase, 'landed');
+    assert.equal(f.tables.projectHostedCheckRuns.size, 2, 'no replacement check');
+    const receipt = JSON.parse(
+      [...f.tables.projectHostedAcceptances.values()].find(row => row.submissionId === state.id).value,
+    );
+    assert.equal(receipt.check.runId, before.check.runId);
+    assert(receipt.crossHeadProof);
+  });
+}
+for (const [name, member] of [
+  ['with no list and no trust policy', {}],
+  ['with trust on but none earned', { trust: true }],
+  ['off a non-empty autoActors list', { autoActors: ['someone-else'], trust: true, delegated: true }],
+]) {
+  test(`an untrusted team member ${name} gets the exact recheck`, async t => {
+    const { f, state } = await readyRace(t, { member });
+    for (let n = 0; n < 80 && (await f.current(state.id)).submission.phase !== 'checking'; n++)
+      await f.execute();
+    assert.equal((await f.current(state.id)).submission.phase, 'checking');
+    assert.equal((await f.status(state.id)).attempt.crossHeadProof, undefined);
+    assert.deepEqual(f.reuseDecisions, []);
+  });
+}

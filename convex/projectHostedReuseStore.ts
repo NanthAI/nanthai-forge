@@ -20,6 +20,8 @@ import { ForgeError, invariant } from '../src/errors';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { fullGate, docsGate } from '../src/main-audit';
 import { checkEntryPaths } from '../src/first-check-risk';
+import { reducedEvidenceActor } from '../src/contract-gate-policy';
+import { trustGateReader } from './projectHostedTrust';
 import { scheduleFinish } from './projectHostedFinishWake';
 const identity = { projectId: v.id('hostedProjects'), submissionId: v.string() };
 /** Why the first check cannot carry this landing before any analysis (receipt field). */
@@ -30,6 +32,7 @@ export type ReuseIneligible =
   | 'text-conflict'
   | 'check-evidence'
   | 'audit-baseline';
+const bestTrust = { level: 'autonomous', reason: 'upper bound' } as const;
 const no = (reason: ReuseIneligible) => ({ reason }) as const;
 /** Constant-size admission; uncertainty keeps the existing exact recheck. */
 export async function reuseContext(ctx: QueryCtx | MutationCtx, input: LandingIdentity) {
@@ -60,8 +63,8 @@ export async function reuseDecision(ctx: QueryCtx | MutationCtx, input: LandingI
   if (
     policy.acceptance.hostedCrossHeadReuse === false ||
     policy.acceptance.mode !== 'auto-on-pass' ||
-    previous.actor.kind !== 'agent' ||
-    previous.actor.id !== project.owner ||
+    // Cheap bound before any other read: false even under the most generous trust.
+    !reducedEvidenceActor(policy, project, previous.actor, policy.trust?.enabled ? bestTrust : null) ||
     !previous.check ||
     !previous.candidate.head ||
     previous.semanticPlan?.members.length
@@ -86,6 +89,14 @@ export async function reuseDecision(ctx: QueryCtx | MutationCtx, input: LandingI
   const candidate = hostedRecordSchema.options[3].parse(result.result);
   if (candidate.result.status !== 'clean' || candidate.semanticPlan?.members.length)
     return no('text-conflict');
+  // Policy decides who may reuse a passed check, like the contract gate: the owner's agent by
+  // default, listed agents, and other agents only once trust (one actor row, read only when
+  // trust is on) raises them above supervised on the Candidate's paths. Untrusted actors
+  // keep the exact recheck.
+  const trust = policy.trust?.enabled
+    ? await trustGateReader(ctx, project)(previous.actor.id, candidate.governance?.paths ?? null)
+    : null;
+  if (!reducedEvidenceActor(policy, project, previous.actor, trust)) return no('not-eligible');
   let run;
   try {
     run = await requireHostedCheckEvidence(ctx, {

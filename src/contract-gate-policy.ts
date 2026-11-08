@@ -10,7 +10,8 @@ export type GateInput = {
   paths: string[] | null;
   contract: { version: number; tests: { path: string }[] } | null;
   main: MainGate;
-  /** B2.6, only when `policy.trust.enabled`: trust can demote a contract-eligible actor to the full gate, never grant more. */
+  /** B2.6, only when `policy.trust.enabled`: trust demotes a supervised actor to the full gate and lets a
+   * trusted non-owner agent qualify; it never overrides an explicit `autoActors` list. */
   trust?: { level: 'supervised' | 'trusted' | 'autonomous'; reason: string } | null;
   /** The project's defined checks (and their setup actions), already loaded by the caller; their entry files are protected like the default paths. */
   checks?: DefinedChecks;
@@ -21,17 +22,30 @@ export function protectedGatePaths(policy: AutonomyPolicy, paths: string[] | nul
   const patterns = policy.acceptance.protectedPaths.map(globPattern);
   return paths.some(path => approval(path) || patterns.some(pattern => pattern.test(path)));
 }
+/** Whether an actor's landings may use reduced evidence (the contract gate, first-check reuse). Decided
+ * by project policy: an agent on a non-empty `autoActors` list qualifies, an agent off that list never
+ * does; with no list the owner's agent qualifies by default, and any other agent only once trust is
+ * enabled and has raised it above `supervised` on these paths. Persons and system actors never qualify. */
+export function reducedEvidenceActor(
+  policy: AutonomyPolicy,
+  project: { owner: string },
+  actor: GateInput['actor'],
+  trust?: GateInput['trust'],
+) {
+  if (actor.kind !== 'agent') return false;
+  const listed = policy.acceptance.autoActors ?? [];
+  if (listed.length && !listed.includes(actor.id)) return false;
+  if (actor.id === project.owner) return true;
+  if (trust) return trust.level !== 'supervised';
+  return listed.length > 0;
+}
 /** Eligibility is recomputed from current server policy, never request gate metadata. */
 export function gateFor(input: GateInput): CheckGate {
   const { policy, project, actor, paths, contract, main, trust, checks } = input;
   let reason = 'Full gate';
   if (policy.acceptance.gate !== 'contract') reason = 'Contract gate is off';
   else if (policy.acceptance.mode !== 'auto-on-pass') reason = 'Supervised acceptance';
-  else if (
-    actor.kind !== 'agent' ||
-    actor.id !== project.owner ||
-    (policy.acceptance.autoActors?.length && !policy.acceptance.autoActors.includes(actor.id))
-  )
+  else if (!reducedEvidenceActor(policy, project, actor, trust))
     reason = 'Owner review, contributor or system acceptance';
   else if (protectedGatePaths(policy, paths, checks)) reason = 'Protected or unknown paths';
   else if (trust?.level === 'supervised') reason = trust.reason;

@@ -358,6 +358,17 @@ frozen set on 2026-11-06 broke capabilities across CLI/server versions with `HOS
   minutes over the project's 7-day median, at most once a metric a day
   ([regression ladder](agents/regression-ladder.md#rung-1-landing-speed-alert)).
 
+### Reduced-evidence actors
+
+Who may use the contract gate and keep a passed first check across a clean overtake is decided by
+project policy, not by who the owner is. Persons and system actors never qualify.
+
+- `acceptance.autoActors` non-empty: exactly the listed agents qualify (the owner's agent too only if listed).
+- Empty, the default: the owner's agent qualifies. Another agent qualifies only when `trust.enabled`
+  and its earned trust on the Candidate's paths is above `supervised`.
+- Anyone else gets the full gate and the exact recheck after an overtake; nothing is reused for them.
+- Trust is read only when it is enabled (one row per actor); no other call is added.
+
 ## Always on
 
 These have no setting: they fix failures and have no sensible alternative.

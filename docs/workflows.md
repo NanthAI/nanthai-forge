@@ -94,7 +94,7 @@ invalidates its dependent stack. See [hosted grouping](operations/landing-batche
 When main moves under a passing full check and the clean recomposition cannot
 reuse it, the retry may run a scoped recheck (`acceptance.scopedRecheck`, absent
 means on; only with `gate: contract`). Eligibility is the contract gate's, apart
-from the Intent contract: owner agent, automatic acceptance, unprotected paths,
+from the Intent contract: an eligible agent (see [actor eligibility](parallel-work-defaults.md#reduced-evidence-actors)), automatic acceptance, unprotected paths,
 green main without audit debt. The planner runs the tests affected by both the main
 delta since the checked base and this change, the change's own test files, the
 composed Intent union and fixed smoke. Unclassified or deleted paths, package or

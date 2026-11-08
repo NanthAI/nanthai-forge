@@ -2,9 +2,9 @@
 import { scheduleLandingPrecompose } from './projectHostedLandingPrecompose';
 import { trackHostedOverlapMain } from './projectHostedOverlapStore';
 import { hostedAcceptGate, holdMainRed } from './projectHostedGate';
-import { protectedGatePaths } from '../src/contract-gate-policy';
+import { protectedGatePaths, reducedEvidenceActor } from '../src/contract-gate-policy';
 import { noteMainLanding, mainGate } from './projectHostedMainAuditState';
-import { noteTrustLanding } from './projectHostedTrust';
+import { noteTrustLanding, trustGateReader } from './projectHostedTrust';
 import type { HostedCheckRun } from '../src/hosted-check';
 import { enqueueGithubMirror } from './projectGithubMirrorQueue';
 import type { MutationCtx } from './_generated/server';
@@ -132,11 +132,15 @@ export async function publishAcceptance(
   const head = candidate.result.head;
   const reuse = attempt.crossHeadProof;
   if (reuse) {
+    // The same policy decision as the reuse proof: owner agent, listed agent, or trusted agent.
+    const trust =
+      policy.trust?.enabled && attempt.actor.id !== project.owner
+        ? await trustGateReader(ctx, project)(attempt.actor.id, candidate.governance?.paths ?? null)
+        : null;
     invariant(
       policy.acceptance.hostedCrossHeadReuse !== false &&
         policy.acceptance.mode === 'auto-on-pass' &&
-        attempt.actor.kind === 'agent' &&
-        attempt.actor.id === project.owner &&
+        reducedEvidenceActor(policy, project, attempt.actor, trust) &&
         validCrossHeadProof(reuse) &&
         reuse.head === head &&
         reuse.main.head === main.head &&

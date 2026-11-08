@@ -169,3 +169,33 @@ test('entry files of every defined check and setup action select the full gate, 
     'Forge default unchanged',
   );
 });
+test('team members: policy decides eligibility, the owner is only the default', () => {
+  const member = { kind: 'agent', id: 'member' };
+  const gate = (change = {}) => gateFor({ ...input(), actor: member, ...change }).mode;
+  const listed = (ids, extra = {}) => {
+    const policy = policyPreset('trusted');
+    policy.acceptance.autoActors = ids;
+    return { policy, ...extra };
+  };
+  const level = value => ({ trust: { level: value, reason: `Trust: ${value}` } });
+  // No list and no trust: only the owner's agent is eligible (unchanged default).
+  assert.equal(gate(), 'full');
+  assert.equal(gateFor(input()).mode, 'contract');
+  // An explicit list makes a member eligible, and still excludes everyone else (owner included).
+  assert.equal(gate(listed(['member'])), 'contract');
+  assert.equal(gate(listed(['other'])), 'full');
+  assert.equal(gateFor({ ...input(), ...listed(['other']) }).mode, 'full');
+  assert.equal(gateFor({ ...input(), ...listed(['owner', 'member']) }).mode, 'contract');
+  // With trust enabled, earned trust qualifies a member; supervised stays on the full gate.
+  assert.equal(gate(level('trusted')), 'contract');
+  assert.equal(gate(level('autonomous')), 'contract');
+  assert.equal(gate(level('supervised')), 'full');
+  assert.equal(gate(listed(['member'], level('supervised'))), 'full');
+  // Trust never admits a person or system actor, nor an actor the list excludes.
+  assert.equal(gate({ actor: { kind: 'person', id: 'member' }, ...level('autonomous') }), 'full');
+  assert.equal(gate({ actor: { kind: 'system', id: 'member' }, ...level('autonomous') }), 'full');
+  assert.equal(gate(listed(['other'], level('autonomous'))), 'full');
+  // The owner keeps today's behaviour at every trust level the gate already handled.
+  assert.equal(gateFor({ ...input(), ...level('trusted') }).mode, 'contract');
+  assert.equal(gateFor({ ...input(), ...level('supervised') }).mode, 'full');
+});
