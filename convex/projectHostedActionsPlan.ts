@@ -5,6 +5,7 @@ import { actionsSession, sessionArgs } from './projectHostedActionsSession';
 import { storeSourceOutputs } from './projectConvexSourceOutput';
 import { writeHostedCheck } from './projectHostedCheckStore';
 import { hostedCheckPlanSchema, checkPin, hostedCheckTerminal, testsNotAffected } from '../src/hosted-check';
+import { isStandardForgeCheck } from '../src/standard-check';
 import { hostedActionsRecipeSchema, hostedActionsRuntime } from '../src/hosted-actions';
 import { savePin } from '../src/hosted-save';
 import { semanticTests } from '../src/intent-semantic-conflict';
@@ -27,9 +28,7 @@ export const prepare = internalMutation({
     const { row, run } = await actionsSession(ctx, input);
     const recipe = hostedActionsRecipeSchema.parse(JSON.parse(input.recipe)),
       { pin, ...pins } = recipe;
-    const standard =
-      /(?:^|\/)node$/.test(run.check.executable) &&
-      JSON.stringify(run.check.args) === '["scripts/forge-check.mjs"]';
+    const standard = isStandardForgeCheck(run.check);
     invariant(
       pin === checkPin(pins) &&
         recipe.head === run.request.expectedHead &&

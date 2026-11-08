@@ -44,6 +44,7 @@ export async function hostedGateInput(
     policy,
     actor,
     paths,
+    ...(project.checkEntries ? { checks: project.checkEntries } : {}),
     ...(enabled && policy.trust?.enabled
       ? { trust: await trustGateReader(ctx, project)(actor.id, paths) }
       : {}),

@@ -87,9 +87,10 @@ multi-input resolution keeps every original suffix and dependency pin.
 
 The owner uses the existing policy command. `acceptance.ownerApprovalPaths` replaces
 the public default list; omit it to retain the defaults, or explicitly set `[]` to
-disable this public path gate. The defaults also cover the files the project's own
-check runs (for example `.bench/ci.sh`), so a contributor cannot change the check
-without owner approval; an explicit list replaces that too, so include them. Existing `acceptance.protectedPaths` remains the
+disable this public path gate. The defaults also cover the files that every check
+definition of the project and its setup action runs (for example `.bench/ci.sh`),
+so a contributor cannot change any of them without owner approval, and the contract
+gate treats them the same way; an explicit list replaces that too, so include them. Existing `acceptance.protectedPaths` remains the
 separate all-agent review list. `acceptance.mode: "review"` stops automatic acceptance,
 including the owner's. Other projects retain their existing policy behavior.
 

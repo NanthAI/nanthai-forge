@@ -13,6 +13,7 @@ import { interactionEvidence } from './work-interaction.js';
 import { runCandidateFamily } from './work-run-cancellation.js';
 import type { WorkStore } from './work-store.js';
 import type { CheckRun, EvidenceCommand } from './work-types.js';
+import { isStandardForgeCheck } from './standard-check.js';
 
 type RunCommand = Extract<EvidenceCommand, { action: 'run-check' }>;
 /** Prepare exact source/input evidence and immutable run pages before the owner
@@ -34,8 +35,7 @@ export function prepareRunRegistration(store: WorkStore, command: RunCommand, se
           : landingRunBatch(store, tx, command.operationId, command.viewId, command.expectedHead);
       if (command.tests !== undefined)
         invariant(
-          JSON.stringify(check.args) === JSON.stringify(['scripts/forge-check.mjs']) &&
-            (check.executable === process.execPath || /(?:^|\/)node$/.test(check.executable)),
+          isStandardForgeCheck(check, process.execPath),
           'BAD_ARGUMENT',
           'Explicit test files require the standard Forge check.',
         );

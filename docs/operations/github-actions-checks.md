@@ -89,8 +89,9 @@ The contract only grows: to remove something, first stop requiring it, then remo
 (2026-11-06) added the [shard pool](#shard-pool) parts: the executor may run a shard as its kept front
 and then single pool units (tests only), each a plain `scripts/test-files.mjs FILES...` call, so check
 scripts need nothing new. Contract 3 (2026-11-08) passes the supervisor's private
-`FORGE_JUNIT_DIR` through to the check ([JUnit reports](#junit-xml-reports-from-any-check)). Plan
-recipe fields written by the planner and read by the executor belong to the same surface. Runtime
+`FORGE_JUNIT_DIR` through to the check ([JUnit reports](#junit-xml-reports-from-any-check)).
+Contract 4 stopped giving configured (non-Forge) commands Forge's suite settings (worker counts,
+Git timeout, Node heap cap); Forge's own check scripts see no change. Planrecipe fields written by the planner and read by the executor belong to the same surface. Runtime
 pins (Node) are provided by the control workflow: raise the pin through the executor Lane first.
 
 For this repository, code verification runs document validation and the installed
@@ -711,7 +712,9 @@ scripts logs it). The planning job logs one `Shard plan:` line with the planned 
 (`describeShardPlan` in `scripts/test-shards.mjs`), to compare with each shard's `tests` phase. Standard GitHub-hosted runners for this public repository are 4 CPUs and 16 GiB. On
 2026-11-05 shards ran two test workers at 58-69% CPU busy, so a third worker would saturate the box.
 Use these lines, not estimates, before changing the worker count (`FORGE_TEST_WORKERS` in
-`scripts/github-actions-check.mjs`) or the shard count.
+`scripts/github-actions-check.mjs`) or the shard count. Those worker settings and the 3 GiB Node heap
+cap (`NODE_OPTIONS`) apply to Forge's own standard check only; any other configured command runs
+with the clean allowlisted environment, as on plain GitHub Actions.
 
 Reading a run's log later: `gh run view RUN_ID --log` returns empty output (exit 0) for runs older than about an
 hour, because GitHub expires that view. The job log is still readable through the jobs API:

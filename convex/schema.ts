@@ -354,6 +354,8 @@ const projectFields = {
   visibility: v.optional(v.union(v.literal('private'), v.literal('public'))),
   hostingRequest: v.optional(v.string()),
   autonomyPolicy: v.optional(autonomyPolicy),
+  /** Entry files of every check definition and setup action (src/public-governance.ts); kept current by the definition save. Absent until the first save after this field existed. */
+  checkEntries: v.optional(v.array(v.string())),
   agentGuidance: v.optional(v.string()),
   exchangeCleanupCursor: v.optional(v.string()),
   exchangeCleanupDone: v.optional(v.boolean()),

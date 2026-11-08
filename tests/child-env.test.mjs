@@ -330,7 +330,8 @@ test('Actions check launcher drops unrelated credentials from its runner environ
     (_executable, _args, { env }) => {
       launches++;
       for (const name of secretNames) assert.equal(env[name], undefined);
-      assert.equal(env.NODE_OPTIONS, '--max-old-space-size=3072');
+      // A configured (non-Forge) command gets no Forge suite settings such as the heap cap.
+      assert.equal(env.NODE_OPTIONS, undefined);
     },
     { install: false },
   );

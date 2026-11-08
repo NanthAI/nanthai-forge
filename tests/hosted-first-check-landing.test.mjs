@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import { batchesFixture, states, synthetic } from './hosted-landing-batches-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { checkEntryPaths, firstCheckRisk } from '../dist/first-check-risk.js';
+import { STANDARD_CHECK_INPUTS } from '../dist/standard-check.js';
 const { revertMessage } = await import(moduleUrl('../convex/projectHostedCulprit.ts'));
 const audit = await import(moduleUrl('../convex/projectHostedMainAudit.ts'));
 const env = {
@@ -235,8 +236,10 @@ test('own check command: first-check landing costs no more Convex calls or DB IO
 });
 
 test('check entries are the repository files a command names, in any form', () => {
+  // Forge's own check also declares its extra inputs (src/standard-check.ts).
   assert.deepEqual(checkEntryPaths({ executable: 'node', args: ['scripts/forge-check.mjs'] }), [
     'scripts/forge-check.mjs',
+    ...STANDARD_CHECK_INPUTS,
   ]);
   assert.deepEqual(checkEntryPaths({ executable: 'bash', args: ['.bench/ci.sh'] }), ['.bench/ci.sh']);
   assert.deepEqual(checkEntryPaths({ executable: './ci/run.sh', args: ['--config=ci/run.json'] }), [
@@ -404,9 +407,7 @@ test('the global-risk list is path-only and any listed file rechecks', () => {
     '.oxlintrc.json',
     '.github/workflows/check.yml',
     '.gitlab-ci.yml',
-    'scripts/forge-check.mjs',
     'scripts/check-contract.mjs',
-    'tests/check-runtime.mjs',
     'convex/schema.ts',
     'prisma/schema.prisma',
     'Makefile',
@@ -419,8 +420,15 @@ test('the global-risk list is path-only and any listed file rechecks', () => {
     'src/a.ts',
     'convex/projectHostedCulprit.ts',
     'tests/x.test.mjs',
+    // Forge's own check scripts are risky only for Forge's check (below).
+    'scripts/forge-check.mjs',
+    'scripts/verify.mjs',
+    'tests/check-runtime.mjs',
   ])
     assert.equal(firstCheckRisk(path), null, path);
+  const forgeEntries = checkEntryPaths({ executable: 'node', args: ['scripts/forge-check.mjs'] });
+  for (const path of ['scripts/forge-check.mjs', 'scripts/verify.mjs', 'tests/check-runtime.mjs'])
+    assert.equal(firstCheckRisk(path, forgeEntries), 'check script or check contract', path);
   // Files the project's check definition runs are global on any runner.
   assert.equal(firstCheckRisk('tools/run.mjs', ['tools/run.mjs']), 'check script or check contract');
 });

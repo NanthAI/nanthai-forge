@@ -18,11 +18,11 @@ import { join } from 'node:path';
 
 export const CHECK_CONTRACT_ENV = 'FORGE_CHECK_CONTRACT';
 /** What this tree's executor (scripts/github-actions-check.mjs) gives the scripts it runs. */
-export const CHECK_CONTRACT_PROVIDED = 3;
+export const CHECK_CONTRACT_PROVIDED = 4;
 /** The lowest executor contract this tree's check scripts (verify.mjs, forge-check.mjs, ...) work with. */
 export const CHECK_CONTRACT_REQUIRED = 0;
 /** Digest of the executor's observable surface at PROVIDED (tests/check-contract.test.mjs recomputes it). */
-export const CHECK_CONTRACT_SURFACE_DIGEST = '439a967a948f0705';
+export const CHECK_CONTRACT_SURFACE_DIGEST = 'ec6b95d20cfe5220';
 
 export class CheckContractError extends Error {
   code = 'CHECK_CONTRACT_MISMATCH';

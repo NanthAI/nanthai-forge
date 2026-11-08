@@ -13,6 +13,7 @@ import type { WorkStore } from './work-store.js';
 import type { CheckRun } from './work-types.js';
 import { partitionTests, timingDurations } from '../scripts/test-shards.mjs';
 import { readTimingHistory } from '../scripts/test-timings-file.mjs';
+import { isStandardForgeCheck } from './standard-check.js';
 
 // Historical modal-* filenames are shared Actions receipt formats; retain them for replay.
 export async function remoteCheckPlan(
@@ -37,9 +38,7 @@ export async function remoteCheckPlan(
     )
   )
     return null;
-  const standard =
-    JSON.stringify(run.check.args) === JSON.stringify(['scripts/forge-check.mjs']) &&
-    (run.check.executable === process.execPath || /(?:^|\/)node$/.test(run.check.executable));
+  const standard = isStandardForgeCheck(run.check, process.execPath);
   const files = new Map(state.files.map(file => [file.path, source.object(file.blob).toString('utf8')]));
   const { standardSelection, guardedSelection, selectTests } = await import('../scripts/test-impact.mjs');
   let comparison: { paths?: string[]; base?: string; semanticTests?: string[] } = {};

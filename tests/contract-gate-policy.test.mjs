@@ -141,3 +141,31 @@ test('history declaration is source-independent while exact measurements remain 
   assert.equal(contract.runId, runId);
   assert.equal(candidateTestContract({ testContracts: [contract] }, crypto.randomUUID(), head), contract);
 });
+
+test('entry files of every defined check and setup action select the full gate, like the default paths', () => {
+  const checks = [
+    {
+      executable: 'bash',
+      args: ['.bench/ci.sh'],
+      actions: { setup: { executable: 'bash', args: ['.bench/setup.sh'] } },
+    },
+    { executable: 'node', args: ['tools/lint-check.mjs'] },
+  ];
+  const gate = paths => gateFor({ ...input(), paths, checks }).mode;
+  assert.equal(gate(['src/leaf.ts']), 'contract');
+  for (const path of ['.bench/ci.sh', '.bench/setup.sh', 'tools/lint-check.mjs'])
+    assert.equal(gate([path, 'src/leaf.ts']), 'full', path);
+  assert.equal(
+    gateFor({ ...input(), paths: ['tools/lint-check.mjs'] }).mode,
+    'contract',
+    'no defined checks: unchanged',
+  );
+  const explicit = input();
+  explicit.policy.acceptance.ownerApprovalPaths = ['deploy/**'];
+  assert.equal(gateFor({ ...explicit, paths: ['.bench/ci.sh'], checks }).mode, 'contract');
+  assert.equal(
+    gateFor({ ...input(), paths: ['scripts/forge-check.mjs'] }).mode,
+    'full',
+    'Forge default unchanged',
+  );
+});

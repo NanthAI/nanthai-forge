@@ -46,12 +46,17 @@ export function runActionsCheck(execute = execFileSync, { install = true, build 
       ],
     }),
     [CHECK_CONTRACT_ENV]: String(CHECK_CONTRACT_PROVIDED),
-    FORGE_TEST_WORKERS: '2',
-    FORGE_MAX_CONCURRENT_CHECKS: '2',
-    FORGE_TEST_EVENTS: '1',
-    FORGE_STATIC_WORKERS: '2',
-    FORGE_GIT_TIMEOUT_MS: '240000',
-    NODE_OPTIONS: '--max-old-space-size=3072',
+    // Forge's own suite settings, for its standard check only (src/standard-check.ts
+    // decides `plan.standard`). Any other command runs with the environment its project
+    // gives it, as on plain GitHub Actions: no heap cap, no Forge worker variables.
+    ...(plan.standard && {
+      FORGE_TEST_WORKERS: '2',
+      FORGE_MAX_CONCURRENT_CHECKS: '2',
+      FORGE_TEST_EVENTS: '1',
+      FORGE_STATIC_WORKERS: '2',
+      FORGE_GIT_TIMEOUT_MS: '240000',
+      NODE_OPTIONS: '--max-old-space-size=3072',
+    }),
   };
   const phases = checkPhases();
   const run = (executable, args) => execute(executable, args, { env, stdio: 'inherit' });

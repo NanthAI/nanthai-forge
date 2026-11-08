@@ -443,6 +443,66 @@ test('check entry protection is a default: unrelated project files, path-free ch
   assert.equal(protectedGatePaths(policy, ['src/a.ts'], check), false);
 });
 
+// Issue 8eccbea9: every defined check and setup action, not only the gating check, is protected.
+test('entry files of every defined check and setup action need owner approval; explicit lists and Forge paths unchanged', async () => {
+  const gating = {
+    executable: 'bash',
+    args: ['.bench/ci.sh'],
+    actions: { setup: { executable: 'bash', args: ['.bench/setup.sh'] } },
+  };
+  const other = { executable: 'node', args: ['tools/lint-check.mjs'] };
+  const project = { owner: 'owner', visibility: 'public' },
+    actor = { id: 'contributor', kind: 'agent' },
+    policy = policyPreset('trusted');
+  const reason = (paths, checks, p = policy) => governanceReason(project, p, actor, paths, false, checks);
+  assert.match(reason(['.bench/setup.sh'], gating), /protected paths \.bench\/setup\.sh/);
+  assert.match(reason(['tools/lint-check.mjs'], [gating, other]), /protected paths tools\/lint-check\.mjs/);
+  assert.equal(reason(['tools/lint-check.mjs'], gating), null, 'a check not passed in is not known');
+  assert.equal(reason(['src/a.ts', 'tools/other.mjs'], [gating, other]), null);
+  const explicit = { ...policy, acceptance: { ...policy.acceptance, ownerApprovalPaths: ['deploy/**'] } };
+  assert.equal(reason(['.bench/setup.sh', 'tools/lint-check.mjs'], [gating, other], explicit), null);
+  assert.equal(protectedGatePaths(policy, ['.bench/setup.sh'], gating), true);
+  assert.equal(protectedGatePaths(policy, ['tools/lint-check.mjs'], [gating, other]), true);
+  assert.equal(protectedGatePaths(policy, ['tools/lint-check.mjs'], [gating]), false);
+});
+
+test('a contributor change to a non-gating check or a setup action needs owner approval at acceptance', async () => {
+  const entry = async (f, args, actions) =>
+    f.rawChecks.configure(
+      {
+        kind: 'definition',
+        checkId: randomUUID(),
+        command: {
+          name: 'lint',
+          environmentLabel: 'clean',
+          executable: 'node',
+          args,
+          ...(actions ? { actions } : {}),
+        },
+      },
+      null,
+    );
+  for (const [path, args, actions] of [
+    ['tools/lint-check.mjs', ['tools/lint-check.mjs']],
+    ['.bench/prepare.sh', ['--version'], { setup: { executable: 'bash', args: ['.bench/prepare.sh'] } }],
+  ]) {
+    const f = await projectCheckFixture(['.bench/ci.sh']);
+    await entry(f, args, actions);
+    assert.deepEqual(
+      f.tables.hostedProjects.get(f.projectId).checkEntries,
+      ['.bench/ci.sh', path].sort(),
+      'derived list on the project row',
+    );
+    const result = await f.accept(await prepared(f, [path, 'src/app.ts']), 'contributor');
+    assert.equal(result.status, 'pending', path);
+    assert.equal(result.reason, `needs owner approval: protected paths ${path}`);
+    // An ordinary path next to the same definitions still auto-lands.
+    const g = await projectCheckFixture(['.bench/ci.sh']);
+    await entry(g, args, actions);
+    assert.equal((await g.accept(await prepared(g, ['src/app.ts']), 'contributor')).status, 'landed', path);
+  }
+});
+
 test('contributor ordinary changes auto-land; owner own protected Lane auto-lands; review policy still applies', async () => {
   for (const agent of [true, false]) {
     const f = await publicFixture();

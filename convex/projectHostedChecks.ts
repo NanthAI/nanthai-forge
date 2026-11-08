@@ -3,6 +3,7 @@ import { fixGate } from '../src/culprit-bisect';
 import { isMachineRunner } from '../src/hosted-machine-runner';
 import { cancelHostedCheck } from './projectHostedCheckCancel';
 import { scheduleDirectActions } from './projectHostedActionsDirect';
+import { refreshCheckEntries } from './projectHostedCheckEntries';
 import { hostedGateForCandidates, hostedGateInput } from './projectHostedGate';
 import {
   scopedRecheckEligible,
@@ -192,7 +193,12 @@ export async function enqueueHostedCheck(
     semantic.batchIntentIds = candidate.semanticPlan.batchIntentIds;
   if (semantic && candidate.semanticPlan?.afterSequence !== undefined)
     semantic.afterSequence = candidate.semanticPlan.afterSequence;
-  const project = (await ctx.db.get(input.projectId))!;
+  const loaded = (await ctx.db.get(input.projectId))!;
+  // A project that predates the derived entry list gets it here once, before the gate reads it.
+  const project =
+    loaded.checkEntries === undefined
+      ? { ...loaded, checkEntries: await refreshCheckEntries(ctx, input.projectId) }
+      : loaded;
   // Older controller/provider clients strictly parse run documents. Only the
   // direct Actions session has the additive gate handshake; all other routes
   // retain their existing full-check wire shape.

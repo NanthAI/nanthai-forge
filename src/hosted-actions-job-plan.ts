@@ -24,6 +24,7 @@ import { refreshActionsSourcePack } from './hosted-actions-job-pack.js';
 import { testedDocs } from './tested-docs.js';
 import { declaredTestedDocs, docsOnlyChange } from './docs-paths.js';
 import { scanSecretPaths, SECRET_SCAN_ALLOW_FILE } from './secret-scan.js';
+import { isStandardForgeCheck } from './standard-check.js';
 /** The base (main) allow file's bytes. Usually cached already (unchanged, or from the base
  * pack); otherwise one small object read, only when the base has the file. Unreadable
  * means no allow entries: findings then fail, never pass. */
@@ -80,9 +81,7 @@ export async function prepareActionsJob(
   const { state, base, checkedBase } = source;
   const inventory = new Map(state.files.map(file => [file.path, file]));
   const paths = changedPaths(base, state);
-  const standard =
-    /(?:^|\/)node$/.test(run.check.executable) &&
-    JSON.stringify(run.check.args) === '["scripts/forge-check.mjs"]';
+  const standard = isStandardForgeCheck(run.check);
   const files = new SourceFiles(new Map(state.files.map(file => [file.path, file.blob])), cache);
   const selected = actionsGateSelection(
     run,

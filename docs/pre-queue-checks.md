@@ -95,11 +95,15 @@ or a main delta touching any of these always rechecks:
   `Dockerfile`);
 - CI configuration on any provider (`.github/`, GitLab, CircleCI, Buildkite,
   Forgejo, Woodpecker, Jenkins, Azure Pipelines, Bitbucket Pipelines);
-- this repository's check scripts, check contract and shared test runtime
-  (`scripts/forge-check`, `verify`, `check-contract`, `check-path-scopes`,
-  `test-*`, `tests/check-runtime.mjs`, …), and every repository file the project's
-  check command names: its executable, its arguments and any path inside a shell
-  string such as `bash -c "./ci/run.sh"` (the check contract's own entry points);
+- every repository file the project's check command names: its executable, its
+  arguments and any path inside a shell string such as `bash -c "./ci/run.sh"`
+  (the check contract's own entry points). Forge's own standard check
+  (`node scripts/forge-check.mjs`, `isStandardForgeCheck` in `src/standard-check.ts`)
+  also declares its extra inputs there: its check scripts, check contract and
+  shared test runtime (`scripts/verify`, `check-contract`, `check-path-scopes`,
+  `test-*`, `tests/check-runtime.mjs`, …). Other repositories' files of the same
+  names are ordinary files, except `scripts/check-contract.mjs`, which the Actions
+  executor reads from every Candidate;
 - database schema (`convex/schema.ts`, `schema.prisma`);
 - any other root-level file that is not `.md` or `.txt`.
 

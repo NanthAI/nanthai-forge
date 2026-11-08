@@ -35,6 +35,11 @@ export async function recoveryRunnerDrill(t) {
   // The check backend is a local indexed fake for this same project and State.
   s.tables.hostedProjects.set(projectId, {
     _id: projectId,
+    _creationTime: 0,
+    key: 'synthetic',
+    name: 'Synthetic',
+    currentBackup: null,
+    revision: 0,
     owner: 'owner',
     visibility: 'private',
     sourceAuthority: { mode: 'server', epoch: 1 },

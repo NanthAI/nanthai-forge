@@ -2,6 +2,7 @@
 import { NativeSource } from './native-source.js';
 import type { WorkStore } from './work-store.js';
 import type { CheckRun } from './work-types.js';
+import { isStandardForgeCheck } from './standard-check.js';
 
 /** Classify immutable bytes with the installed selector, never execute candidate code.
  * Missing selector/inputs conservatively retain ordinary machine admission. */
@@ -12,7 +13,7 @@ export async function lightweightDocsRun(store: WorkStore, run: CheckRun): Promi
     !run.interaction?.eligible ||
     run.interaction.basis !== 'docs-overlap' ||
     run.mainCheck ||
-    JSON.stringify(run.check.args) !== JSON.stringify(['scripts/forge-check.mjs'])
+    !isStandardForgeCheck(run.check, process.execPath)
   )
     return false;
   try {

@@ -15,6 +15,7 @@ import type { HostedCheckDispatch } from './hosted-check-controller.js';
 import { githubActionsWorkflow } from './github-actions-workflow.js';
 import { hostedActionsGit } from './hosted-actions-git.js';
 import { invariant } from './errors.js';
+import { isStandardForgeCheck, STANDARD_CHECK_ENTRY } from './standard-check.js';
 
 /** Fixed source-worker export. Hash-verified R2 bytes go straight to bare Git
  * objects; source is never checked out and no project code runs here. */
@@ -54,9 +55,7 @@ export async function exportHostedActions(
       /(?:^|\/)node$/.test(input.check.executable) ? 'node' : input.check.executable,
       ...input.check.args,
     ];
-    const standard =
-      expectedCommand[0] === 'node' &&
-      JSON.stringify(input.check.args) === JSON.stringify(['scripts/forge-check.mjs']);
+    const standard = isStandardForgeCheck(input.check);
     invariant(
       pin === checkPin(recipePins) &&
         recipe.head === input.request.expectedHead &&
@@ -86,7 +85,7 @@ export async function exportHostedActions(
       ['.github/forge-check-plan.json', JSON.stringify(recipe)],
     ]);
     const semanticCommand = semanticCheckCommand(
-      ['node', 'scripts/forge-check.mjs'],
+      ['node', STANDARD_CHECK_ENTRY],
       input.semanticPlan,
       'node',
       tests,

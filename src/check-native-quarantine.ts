@@ -5,6 +5,7 @@ import { testReports } from './check-test-report.js';
 import { checkQuarantineResult } from './check-quarantine.js';
 import type { WorkStore } from './work-store.js';
 import type { CheckRun } from './work-types.js';
+import { isStandardForgeCheck } from './standard-check.js';
 export function nativeQuarantine(
   store: WorkStore,
   run: CheckRun,
@@ -12,7 +13,7 @@ export function nativeQuarantine(
   exitCode: number | null,
   at: string,
 ) {
-  if (JSON.stringify(run.check.args) !== JSON.stringify(['scripts/forge-check.mjs'])) return;
+  if (!isStandardForgeCheck(run.check, process.execPath)) return;
   const reports = testReports(checkEvidenceLines(path));
   if (!Object.keys(reports).length) return;
   let staticPassed = false;

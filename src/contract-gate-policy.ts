@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { globPattern, type AcceptanceActor, type AutonomyPolicy } from './autonomy-policy.js';
-import { ownerApprovalMatcher } from './public-governance.js';
+import { ownerApprovalMatcher, type DefinedChecks } from './public-governance.js';
 import type { CheckGate, MainGate } from './bet2-gate.js';
 
 export type GateInput = {
@@ -12,20 +12,18 @@ export type GateInput = {
   main: MainGate;
   /** B2.6, only when `policy.trust.enabled`: trust can demote a contract-eligible actor to the full gate, never grant more. */
   trust?: { level: 'supervised' | 'trusted' | 'autonomous'; reason: string } | null;
+  /** The project's defined checks (and their setup actions), already loaded by the caller; their entry files are protected like the default paths. */
+  checks?: DefinedChecks;
 };
-export function protectedGatePaths(
-  policy: AutonomyPolicy,
-  paths: string[] | null,
-  check?: { executable: string; args: readonly string[] } | null,
-) {
+export function protectedGatePaths(policy: AutonomyPolicy, paths: string[] | null, checks?: DefinedChecks) {
   if (paths === null) return true;
-  const approval = ownerApprovalMatcher(policy, check);
+  const approval = ownerApprovalMatcher(policy, checks);
   const patterns = policy.acceptance.protectedPaths.map(globPattern);
   return paths.some(path => approval(path) || patterns.some(pattern => pattern.test(path)));
 }
 /** Eligibility is recomputed from current server policy, never request gate metadata. */
 export function gateFor(input: GateInput): CheckGate {
-  const { policy, project, actor, paths, contract, main, trust } = input;
+  const { policy, project, actor, paths, contract, main, trust, checks } = input;
   let reason = 'Full gate';
   if (policy.acceptance.gate !== 'contract') reason = 'Contract gate is off';
   else if (policy.acceptance.mode !== 'auto-on-pass') reason = 'Supervised acceptance';
@@ -35,7 +33,7 @@ export function gateFor(input: GateInput): CheckGate {
     (policy.acceptance.autoActors?.length && !policy.acceptance.autoActors.includes(actor.id))
   )
     reason = 'Owner review, contributor or system acceptance';
-  else if (protectedGatePaths(policy, paths)) reason = 'Protected or unknown paths';
+  else if (protectedGatePaths(policy, paths, checks)) reason = 'Protected or unknown paths';
   else if (trust?.level === 'supervised') reason = trust.reason;
   else if (!contract) reason = 'Intent has no contract';
   else if (main.status !== 'green' || main.debt)

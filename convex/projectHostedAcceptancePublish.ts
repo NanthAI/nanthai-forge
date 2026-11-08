@@ -218,13 +218,16 @@ export async function publishAcceptance(
     'CHECK_NOT_PASSED',
     'Agent acceptance requires an exact passing check.',
   );
+  // Entry files of every defined check and setup action are protected by default: the project
+  // row's list plus the run's own check (covers a project whose list is not yet filled).
+  const checks = [...(run?.check ? [run.check] : []), ...(project.checkEntries ?? [])];
   const ownerReview =
     actor.kind === 'person' &&
     actor.id === project.owner &&
     attempt.actor.id === project.owner &&
     policy.acceptance.mode === 'auto-on-pass' &&
     policy.acceptance.gate === 'contract' &&
-    !protectedGatePaths(policy, candidate.governance?.paths ?? null, run?.check);
+    !protectedGatePaths(policy, candidate.governance?.paths ?? null, checks);
   const gate =
     run && !ownerReview && !reuse
       ? await hostedAcceptGate(ctx, project, candidate, attempt.actor, run)
@@ -245,7 +248,7 @@ export async function publishAcceptance(
   const protectedReason =
     policy.acceptance.gate === 'contract' &&
     !(actor.kind === 'person' && actor.id === project.owner) &&
-    protectedGatePaths(policy, candidate.governance?.paths ?? null, run?.check) &&
+    protectedGatePaths(policy, candidate.governance?.paths ?? null, checks) &&
     !(actor.id === project.owner && candidate.governance?.ownerInputs)
       ? 'needs owner approval: protected or unknown paths'
       : null;
@@ -258,7 +261,7 @@ export async function publishAcceptance(
       actor,
       candidate.governance?.paths ?? null,
       candidate.governance?.ownerInputs,
-      run?.check,
+      checks,
     ) ??
     protectedReason ??
     secretAllowReview(policy, actor, secretAllowAdded);

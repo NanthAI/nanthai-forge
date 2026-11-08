@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { mainAuditStatus } from './projectHostedMainAuditState';
 import { bindingInstallation, requireStoredRepositoryBinding } from './githubBindingAccess';
+import { refreshCheckEntries } from './projectHostedCheckEntries';
 import { z } from 'zod';
 import { v } from 'convex/values';
 import { mutation, query, type MutationCtx } from './cliServer';
@@ -87,6 +88,7 @@ export async function saveCheckSetting(
   await ctx.db.insert('projectHostedCheckSettingVersions', saved);
   if (old) await ctx.db.replace(old._id, saved);
   else await ctx.db.insert('projectHostedCheckSettings', saved);
+  if (kind === 'definition') await refreshCheckEntries(ctx, projectId);
   const result = { kind, key, version: saved.version, digest, value };
   await completeCheckOperation(ctx, prepared.operation, result);
   return canonicalPayload(result);

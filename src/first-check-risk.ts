@@ -7,6 +7,8 @@
  * names it). It reads paths only, so it works with any CI. A match always
  * keeps today's recheck; so does any doubt.
  */
+import { isStandardForgeCheck, STANDARD_CHECK_INPUTS } from './standard-check.js';
+
 export const FIRST_CHECK_RISK_RULE = 'first-check-risk-v1';
 const patterns: { reason: string; test: RegExp }[] = [
   // Package manifests and lockfiles, for the common ecosystems.
@@ -24,14 +26,28 @@ const patterns: { reason: string; test: RegExp }[] = [
     reason: 'CI configuration',
     test: /^(?:\.github\/|\.gitlab-ci\.yml$|\.gitlab\/|\.circleci\/|\.buildkite\/|\.forgejo\/|\.woodpecker|Jenkinsfile$|azure-pipelines\.yml$|bitbucket-pipelines\.yml$)/,
   },
-  // This repository's check scripts, check contract and shared test runtime.
-  {
-    reason: 'check script or check contract',
-    test: /^(?:scripts\/(?:forge-check|verify|verify-queue|github-actions-check|check-contract|check-path-scopes|check-foundation|test-[^/]+)\.(?:[cm]?[jt]s|d\.m?ts)|tests\/(?:check-runtime|worker-budget)\.mjs)$/,
-  },
+  // The check contract Forge's Actions executor reads from every Candidate, before any check
+  // command (scripts/check-contract.mjs, CHECK_CONTRACT_MISMATCH), whatever the repository.
+  { reason: 'check script or check contract', test: /^scripts\/check-contract\.mjs$/ },
   // Database schema.
   { reason: 'database schema', test: /(?:^|\/)(?:convex\/schema\.ts|schema\.prisma)$/ },
 ];
+
+/** A check entry: an exact path, or a glob where `*` stays inside one path
+ * segment and `{a,b}` is a choice (no nesting). */
+function entryMatcher(entry: string): (path: string) => boolean {
+  if (!/[*{]/.test(entry)) return path => path === entry;
+  let source = '';
+  for (const part of entry.split(/(\{[^{}]*\}|\*)/))
+    if (part === '*') source += '[^/]*';
+    else if (part.startsWith('{') && part.endsWith('}'))
+      source += `(?:${part.slice(1, -1).split(',').map(segmentGlob).join('|')})`;
+    else source += segmentGlob(part);
+  const pattern = new RegExp(`^${source}$`);
+  return path => pattern.test(path);
+}
+const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const segmentGlob = (text: string) => text.split('*').map(escapeRegExp).join('[^/]*');
 
 /** Root files are configuration unless they are plain prose. */
 const rootConfig = (path: string) => !path.includes('/') && !/\.(?:md|txt)$/i.test(path);
@@ -39,7 +55,10 @@ const rootConfig = (path: string) => !path.includes('/') && !/\.(?:md|txt)$/i.te
 /** Reason the path is global-risk, or null. `checkEntries` are the files the
  * project's check definition runs (its own data, any runner). */
 export function firstCheckRisk(path: string, checkEntries: readonly string[] = []): string | null {
-  if (checkEntries.includes(path)) return 'check script or check contract';
+  return riskOf(path, checkEntries.map(entryMatcher));
+}
+function riskOf(path: string, entries: ((path: string) => boolean)[]): string | null {
+  if (entries.some(entry => entry(path))) return 'check script or check contract';
   if (rootConfig(path)) return 'root configuration';
   return patterns.find(pattern => pattern.test.test(path))?.reason ?? null;
 }
@@ -47,7 +66,8 @@ export function firstCheckRisk(path: string, checkEntries: readonly string[] = [
 /** Repository files a check command names: its executable and arguments, and any
  * path inside a shell string (`bash -c "./ci/run.sh && …"`), as manifest paths. A
  * path-free command (`npm test`, `make check`) names none; its manifest or Makefile
- * is already global-risk. Absolute paths and `..` leave the repository. */
+ * is already global-risk. Absolute paths and `..` leave the repository. Forge's
+ * standard check adds the extra inputs it declares (src/standard-check.ts). */
 export function checkEntryPaths(check: { executable: string; args: readonly string[] }) {
   const paths = new Set<string>();
   for (const word of [check.executable, ...check.args].flatMap(text => text.split(/[\s;&|()<>'"`=,]+/))) {
@@ -55,9 +75,11 @@ export function checkEntryPaths(check: { executable: string; args: readonly stri
     if (/^[\w.-]+(?:\/[\w.-]+)+$/.test(path) && !path.split('/').some(part => part === '.' || part === '..'))
       paths.add(path);
   }
+  if (isStandardForgeCheck(check)) for (const input of STANDARD_CHECK_INPUTS) paths.add(input);
   return [...paths];
 }
 
 export function firstCheckRiskPaths(paths: readonly string[], checkEntries: readonly string[] = []) {
-  return paths.filter(path => firstCheckRisk(path, checkEntries) !== null);
+  const entries = checkEntries.map(entryMatcher);
+  return paths.filter(path => riskOf(path, entries) !== null);
 }
