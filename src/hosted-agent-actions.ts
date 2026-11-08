@@ -8,6 +8,7 @@ import { executeHostedFinish } from './hosted-agent-finish.js';
 import { executeHostedWithdraw } from './hosted-agent-withdraw.js';
 import { executeHostedMetrics } from './hosted-agent-metrics.js';
 import { isMachineRunner, machineRunnerDescription } from './hosted-machine-runner.js';
+import { checkLogsField, publicLogsNotice } from './runner-visibility.js';
 import { z } from 'zod';
 import { githubActionsRunsOnSchema, githubActionsRunnerDescription } from './github-actions-runner-label.js';
 import { makeFunctionReference } from 'convex/server';
@@ -68,6 +69,8 @@ export function agentSourceOutcome(value: unknown) {
   const parsed = outcome.safeParse(value);
   return parsed.success ? parsed.data.outcome : null;
 }
+/** The journal key holding the public-logs notice of the runner a check was selected on. */
+export const checkLogsKey = 'check-logs';
 export async function checkSelection(
   session: HostedAgentSession,
   command: z.infer<typeof hostedAgentCommandSchemas.finish>['check'],
@@ -99,7 +102,13 @@ export async function checkSelection(
   const settings = z
     .object({
       check: z.object({ definition: z.string() }).nullable(),
-      configuration: z.object({ environmentFingerprint: z.string() }).nullable(),
+      configuration: z
+        .object({
+          environmentFingerprint: z.string(),
+          repository: z.string().optional(),
+          publicLogs: z.literal(true).optional(),
+        })
+        .nullable(),
       configurationDigest: z.string().nullable(),
       mainAudit: z.unknown().optional(),
     })
@@ -109,6 +118,9 @@ export async function checkSelection(
     'RUNNER_UNAVAILABLE',
     'Configure this hosted check and its runner first.',
   );
+  // From the settings row this selection already read: the receipt names public logs plainly.
+  const { checkLogs } = checkLogsField(settings.configuration);
+  if (checkLogs) await session.journal.retain(checkLogsKey, () => checkLogs);
   return {
     kind: 'request' as const,
     checkId: command.checkId,
@@ -138,6 +150,7 @@ const currentSettings = z.object({
       repository: z.string().optional(),
       runsOn: githubActionsRunsOnSchema.optional(),
       concurrencyBudget: z.number().safe().int().min(2).optional(),
+      publicLogs: z.literal(true).optional(),
       credential: z.unknown().optional(),
     })
     .nullable(),
@@ -169,6 +182,11 @@ function actionsRunnerSettings(configuration: z.infer<typeof currentSettings>['c
     runsOn: configuration.runsOn ?? 'ubuntu-latest',
     concurrencyBudget: configuration.concurrencyBudget ?? 12,
     runner: githubActionsRunnerDescription(configuration.runsOn ?? 'ubuntu-latest'),
+    // Said plainly: the owner accepted that check logs are as visible as the runner repository.
+    logs:
+      configuration.publicLogs === true
+        ? publicLogsNotice(configuration.repository)
+        : `as visible as ${configuration.repository ?? 'the runner repository'} on GitHub`,
     installation: direct ? 'derived per operation via the GitHub App' : 'from the credential reference',
     results: direct ? 'OIDC session plus workflow_run webhook' : 'controller callback',
   };
@@ -270,9 +288,10 @@ async function configureRunnerRequest(
       !(command.labels && !['mac', 'self-hosted'].includes(command.provider ?? '')) &&
       !(command.repository && command.provider !== 'github-actions') &&
       !(command.runsOn !== undefined && command.provider !== 'github-actions') &&
-      !(command.concurrencyBudget !== undefined && command.provider !== 'github-actions'),
+      !(command.concurrencyBudget !== undefined && command.provider !== 'github-actions') &&
+      !(command.publicLogs !== undefined && command.provider !== 'github-actions'),
     'BAD_ARGUMENT',
-    'Choose provider:"self-hosted" (optional machineId and labels; mac is a legacy alias), provider:"github-actions" (repository, optional runsOn), or a full configuration for another provider.',
+    'Choose provider:"self-hosted" (optional machineId and labels; mac is a legacy alias), provider:"github-actions" (repository, optional runsOn, concurrencyBudget and publicLogs), or a full configuration for another provider.',
   );
   const current = parseHostedResponse(
     currentSettings,
@@ -281,14 +300,19 @@ async function configureRunnerRequest(
   if (command.provider === 'github-actions') {
     // Secretless App runner: the server derives runtime/environment and resolves
     // the installation through the App; no installation ID or credential is sent.
-    const repository =
-      command.repository ??
-      (current.configuration?.provider === 'github-actions' ? current.configuration.repository : undefined);
+    const currentActions =
+      current.configuration?.provider === 'github-actions' ? current.configuration : null;
+    const repository = command.repository ?? currentActions?.repository;
     invariant(
       typeof repository === 'string',
       'BAD_ARGUMENT',
       'Pass repository:"OWNER/NAME" for the github-actions runner.',
     );
+    // The owner's public-logs acceptance names one repository: it carries over only
+    // while the repository stays the same, and publicLogs:false withdraws it.
+    const publicLogs =
+      command.publicLogs ??
+      (currentActions?.publicLogs === true && currentActions.repository === repository ? true : undefined);
     return {
       name: 'projectHostedActionsConfigure:configure' as const,
       request: {
@@ -300,6 +324,7 @@ async function configureRunnerRequest(
         ...((command.concurrencyBudget ?? current.configuration?.concurrencyBudget) !== undefined
           ? { concurrencyBudget: command.concurrencyBudget ?? current.configuration?.concurrencyBudget }
           : {}),
+        ...(publicLogs ? { publicLogs: true } : {}),
       },
     };
   }
@@ -676,7 +701,9 @@ export async function executeHostedAgent(
         ...selection,
       });
     });
-    return session.mutation('projectHostedChecks:enqueue', { request: canonicalPayload(request) });
+    const run = await session.mutation('projectHostedChecks:enqueue', { request: canonicalPayload(request) });
+    const checkLogs = session.journal.get<string>(checkLogsKey);
+    return checkLogs && run && typeof run === 'object' ? { ...run, checkLogs } : run;
   }
   if (action === 'prioritize') {
     const command = hostedAgentCommandSchemas.prioritize.parse(input);

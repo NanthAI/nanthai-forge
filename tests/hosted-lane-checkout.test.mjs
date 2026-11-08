@@ -521,3 +521,35 @@ test('checkout tree fields preserve preflight across equivalent States and refus
   );
   assert.deepEqual(s.calls, after);
 });
+
+test('a Lane checkout re-reads access after a transfer, and a full cache hit reads it once', async t => {
+  const s = setup(t);
+  await checkoutHostedLane(s.root, s.request(), s.transport);
+  assert(s.calls.downloads.length > 0);
+  assert.equal(s.calls.select, 2, 'access before and after the transfer');
+  // Every object is now in this machine's verified cache: no server bytes, one access read.
+  const downloads = s.calls.downloads.length;
+  const again = join(s.directory, 'second');
+  const result = await checkoutHostedLane(
+    again,
+    s.request(),
+    s.transport,
+    join(`${s.root}.forge-client`, 'objects'),
+  );
+  assert.equal(result.downloadedObjects, 0);
+  assert.equal(s.calls.downloads.length, downloads);
+  assert.equal(s.calls.select, 3);
+  for (const file of s.files)
+    assert.deepEqual(nativeFile(result.root, file.path).bytes, s.objects.get(file.blob));
+});
+
+test('access revoked during a Lane transfer refuses before any file is written', async t => {
+  const s = setup(t);
+  const download = s.transport.downloadToFile;
+  s.transport.downloadToFile = async (pin, path) => {
+    s.revoke();
+    return download(pin, path);
+  };
+  await assert.rejects(checkoutHostedLane(s.root, s.request(), s.transport), /reader revoked/);
+  assert(!existsSync(join(s.root, 'src/a.txt')));
+});

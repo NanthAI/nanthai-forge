@@ -227,14 +227,25 @@ test('removing a root cache leaves kept local changes in place', async t => {
 
 test('an edit made after the copy starts another round instead of overwriting the first', async t => {
   const { s, request } = await blocked(t, localEdits);
-  // Recovery reads authority once, then its apply twice; the second is the last read before
-  // publication. The editor writes again right then, to a path the sync replaces.
-  const select = s.transport.select;
-  let reads = 0;
-  s.transport.select = async laneId => {
-    if (++reads === 3) writeFileSync(join(s.root, 'a'), 'second local draft');
-    return select(laneId);
-  };
+  // The editor writes again, to a path the sync replaces, once the recovery apply starts staging: after its obstruction check
+  // and before any write, the last moment before publication.
+  const fs = (await import('node:fs')).default;
+  const { syncBuiltinESMExports } = await import('node:module');
+  const mkdtemp = fs.mkdtempSync;
+  let edited = false;
+  t.mock.method(fs, 'mkdtempSync', (prefix, ...rest) => {
+    const dir = mkdtemp(prefix, ...rest);
+    if (!edited && /(?:delta|checkout)-$/.test(prefix)) {
+      edited = true;
+      writeFileSync(join(s.root, 'a'), 'second local draft');
+    }
+    return dir;
+  });
+  syncBuiltinESMExports();
+  t.after(() => {
+    t.mock.restoreAll();
+    syncBuiltinESMExports();
+  });
   // The first call hits the second edit while the apply downloads and reports it as a new obstruction.
   await assert.rejects(recoverLocalApply(s.root, request.operationId, s.transport), {
     code: 'WORK_CONFLICT',

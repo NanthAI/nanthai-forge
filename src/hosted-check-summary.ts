@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Pure: runs in the CLI and in the Convex non-Node runtime.
 import type { HostedCheckRun } from './hosted-check.js';
+import { checkLogsField } from './runner-visibility.js';
 
 /** The whole summary reply stays under this many JSON bytes (Issue 12d2c89f: the full run is about 80 KB). */
 export const CHECK_SUMMARY_BYTES = 8 * 1024;
@@ -78,6 +79,8 @@ export function summarizeCheckRun(run: HostedCheckRun) {
     ...(run.failureReason ? { failureReason: clip(run.failureReason, 200) } : {}),
     cost:
       run.cost.status === 'observed' ? { seconds: run.cost.seconds, usd: run.cost.estimatedCostUsd } : null,
+    // The run's pinned runner configuration: its owner accepted public check logs.
+    ...checkLogsField(run.configuration?.provider === 'github-actions' ? run.configuration : null),
   });
   let names = NAMES;
   let out = build(names);

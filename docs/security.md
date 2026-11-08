@@ -12,6 +12,8 @@ A check or Playbook runs repository code under your OS account. Lanes, Git workt
 
 Queueing a hosted check requires current project owner or contributor access and ownership of the selected runner (`runner.actor` must match the caller). Project ownership alone does not authorize queueing on another person's runner. Contributor proposals run on the owner's computer only when that runner's owner queues them. Runner polling and claiming enforce the same ownership rule, including for retained requests created before it was enforced; those requests are not rewritten.
 
+**Check logs follow the runner repository.** A GitHub Actions run's logs, test names, paths and printed output are as visible as the repository it runs in. A project owner who accepts public check logs on a runner sets `publicLogs:true` on `configure-runner` (owner only; [GitHub Actions checks](operations/github-actions-checks.md)); while it is set, every check receipt and runner view says plainly that check logs are public.
+
 Only the request's creator, the runner's current owner or the project owner may cancel or update a request, and each must still have current project write access. Revoked contributors and read-only viewers cannot queue, cancel or update checks, including retries. Result updates retain the original request, runner and run pins and terminal-result reconciliation. Reports remain observations rather than execution attestations. The canonical owner listener accepts recheck requests only from the current project owner.
 
 ### Clean check environments

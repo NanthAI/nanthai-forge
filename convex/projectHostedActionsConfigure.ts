@@ -21,6 +21,8 @@ const requestSchema = z
     repository: z.string().regex(/^[\w.-]+\/[\w.-]+$/),
     runsOn: githubActionsRunsOnSchema.default('ubuntu-latest'),
     concurrencyBudget: z.number().safe().int().min(2).optional(),
+    /** Owner-only (the configure transaction): accept that check logs are as visible as the repository. */
+    publicLogs: z.boolean().optional(),
   })
   .strict();
 /** Reuses the existing owner-only, idempotent configuration transaction. No
@@ -37,7 +39,7 @@ export const configure = action({
         'BAD_ARGUMENT',
         'Pass a repository and runsOn as a nonblank label (1–256 characters, no control characters) or 1–100 such labels.',
       );
-      const { repository, runsOn, concurrencyBudget, ...request } = parsed.data;
+      const { repository, runsOn, concurrencyBudget, publicLogs, ...request } = parsed.data;
       // Derive the installation via the App now so a missing install or a pending
       // Actions permission approval fails here, not on the first dispatch.
       await requireRepositoryBinding(ctx, input.projectId, repository);
@@ -57,6 +59,7 @@ export const configure = action({
                 repository,
                 runsOn,
                 ...(concurrencyBudget !== undefined ? { concurrencyBudget } : {}),
+                ...(publicLogs ? { publicLogs: true } : {}),
                 runtime: hostedActionsRuntime,
                 environmentFingerprint: checkPin({
                   runtime: hostedActionsRuntime,

@@ -47,16 +47,26 @@ export async function materializeActionsSource(client: ActionsJobClient, directo
     await prepareRecipes(heads);
   }
   const [candidateRef, baseRef, checkedBaseRef] = await transport.describeBatch!(heads);
-  const stateBytes = await reader.bytes(candidateRef!);
+  // The State manifests are independent R2 reads: overlap them (same GETs, one round trip
+  // of wait instead of two or three). One object named twice is read once.
+  const reads = new Map<string, Promise<Buffer>>();
+  const read = (ref: NonNullable<typeof candidateRef>) => {
+    const id = ref.object.sha256;
+    if (!reads.has(id)) reads.set(id, reader.bytes(ref));
+    return reads.get(id)!;
+  };
+  const [stateBytes, baseBytes, checkedBase] = await Promise.all([
+    read(candidateRef!),
+    read(baseRef!),
+    // Unavailable or invalid checked-base bytes select the full suite, never fail the check.
+    checkedBaseRef
+      ? read(checkedBaseRef)
+          .then(bytes => (digest(bytes) === recheckBase ? parseNativeState(bytes) : null))
+          .catch(() => null)
+      : null,
+  ]);
   const state = parseNativeState(stateBytes);
-  const base = parseNativeState(await reader.bytes(baseRef!));
-  // Unavailable or invalid checked-base bytes select the full suite, never fail the check.
-  const checkedBase = checkedBaseRef
-    ? await reader
-        .bytes(checkedBaseRef)
-        .then(bytes => (digest(bytes) === recheckBase ? parseNativeState(bytes) : null))
-        .catch(() => null)
-    : null;
+  const base = parseNativeState(baseBytes);
   phases.stateFetchMs = performance.now() - phaseStarted;
   let selected = state.files,
     reason = 'no pack',

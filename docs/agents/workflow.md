@@ -102,7 +102,7 @@ When you change a hosted reply in Forge itself: add fields freely, but never rem
 | `metrics` | `from?, to?, limit?, cursor?, operationId?` |
 | `capabilities` | `operationId?` |
 | `x configure-check` | `name?, checkId?, command?, expected?, operationId?` |
-| `x configure-runner` | `provider?, runsOn?, concurrencyBudget?, machineId?, labels?, repository?, configuration?, expected?, operationId?` |
+| `x configure-runner` | `provider?, runsOn?, concurrencyBudget?, publicLogs?, machineId?, labels?, repository?, configuration?, expected?, operationId?` |
 | `check-settings` | `operationId?` |
 | `policy` | `operationId?` |
 | `x set-policy` | `governanceVersion?, expectedPolicy?, preset?, acceptance?, checks?, integrationPreview?, ownerRootUpdates?, autoSnapshot?, checkLogs?, laneUpdates?, lifecycle?, notify?, githubMirror?, trust?, agentDefaults?, autoExchange?, operationId?` |
@@ -401,7 +401,7 @@ A hosted finish freezes its source. While a Lane has a live finish (composing, q
 
 **Withdraw a known failing landing.** When you know your live landing's check will fail (a test you broke, a wrong assertion), do not wait for it: from the Lane checkout run `nforge agent LANE_ROOT land --withdraw '{"reason":"…"}'` (`laneId` selects another Lane; only its author or the project owner may withdraw). It is one call: the server finds the Lane's live landing and cancels it with the existing cancellation (`LANDING_CANCELLED`). The Lane, its saves, Candidates and recorded check results stay; its unfinished check stops once no other landing needs it, a late provider reply for it is refused, and peers stacked on its speculative source recompose without it, so a known failure no longer repeats through the queue. The receipt's `confirm.waitCommand` is the original landing's canonical wait: run it and it returns the terminal cancellation at once (this also ends the open landing in your turn). Then fix, save and `land --save` again, a new operation on the same Lane. A replay of the same withdraw `operationId` returns its first receipt and never cancels a later landing; a landing that was already accepted stays on main (`LANDING_NOT_LIVE`). Cost: you lose that submission's queue place and its unfinished check; nothing else. Undo is the re-land. Native projects stop a check with `x cancel {operationId:CHECK_RUN_ID}`.
 
-Hosted landing order: a READY entry accepts before any new check starts, including an urgent one, so a passed proof is never aged by a new main move; urgent still leads every other queued entry.
+Hosted landing order: a READY entry accepts before any new check starts, including an urgent one, so a passed proof is never aged by a new main move; urgent still leads every other queued entry. A passed solo entry takes main ahead of an older unrelated entry (disjoint paths, no global-risk file) once per check generation of that entry; related entries keep submission order ([landing batches](../operations/landing-batches.md#hosted-queue-priority)).
 
 Recommended reviewed flow:
 

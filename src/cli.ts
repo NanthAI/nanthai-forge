@@ -3,47 +3,11 @@
 import { printedReceipt } from './receipt-slim.js';
 import { callerOverlaps, withCallerOverlaps } from './agent-caller-overlaps.js';
 import { overlapBannerOnce, refusalOverlapBanner } from './hosted-overlap-notice.js';
-import { metricsCli } from './metrics-cli.js';
 import { supportedNode, nodeRequirement } from '../scripts/node-runtime.mjs';
-import { improveCli } from './improve-cli.js';
-import { noticeViewAlias } from './candidate-names.js';
-import { refreshOwnerRoot } from './owner-root.js';
-import { recoveryCli } from './recovery-cli.js';
-import { ghCli, forgeVersion } from './gh-cli.js';
-import { queueCli } from './queue-control.js';
-import { githubConnectCli } from './github-connect-cli.js';
-import { githubSyncCli } from './github-sync-cli.js';
-import { WorkStore } from './work-store.js';
-import { workCliSummary } from './work-cli-summary.js';
-import { requireHostedBinding } from './host-binding.js';
-import { hostCli } from './host-cli.js';
-import { localAgent } from './work-autonomy.js';
-import { authCli } from './auth-cli.js';
-import { importNativeGit, exportNativeGit } from './native-git.js';
-import { restoreNativeWork } from './native-backup.js';
-import { initNative } from './native-work.js';
-import { restoreWork } from './work-backup.js';
-import { WorkService } from './work.js';
-import { doctor, mcpConfig } from './setup.js';
-import { pluginConfig } from './plugin-config.js';
-import { localChecksCli } from './local-checks-cli.js';
 import { ForgeError, invariant } from './errors.js';
-import { hostedWorkCli } from './hosted-work-cli.js';
-import { coordinationCli } from './coordination-cli.js';
-import { startCoordinationMcp } from './coordination-mcp.js';
-import { exchangeCli } from './exchange-cli.js';
 import { resolve } from 'node:path';
-import { docsCli } from './docs-cli.js';
 import { describeFailure, recordFailure } from './system-errors.js';
-import { landCli } from './land-cli.js';
-import { agentCli } from './agent-cli.js';
 import { readFileSync } from 'node:fs';
-import { nativeOwner } from './native-source.js';
-import { hostedFixStatus } from './hosted-agent-cache.js';
-import { readHostedCliStatus } from './hosted-cli-status.js';
-import { hostedStatusMetrics } from './self-metrics-source.js';
-import { readPendingStatus } from './pending-status-read.js';
-import { formatPendingStatus } from './pending-status-format.js';
 
 const HELP = `Forge is a source host and workspace for humans and AI agents working on the same code.
 
@@ -145,26 +109,29 @@ async function main(args: string[]): Promise<unknown> {
     return undefined;
   }
   if (args[0] === 'worker') return (await import('./worker-cli.js')).workerCli(args.slice(1));
-  if (args[0] === 'metrics') return metricsCli(args.slice(1));
-  if (args[0] === 'improve') return improveCli(args.slice(1));
-  if (args[0] === 'docs') return docsCli(args.slice(1));
+  if (args[0] === 'metrics') return (await import('./metrics-cli.js')).metricsCli(args.slice(1));
+  if (args[0] === 'improve') return (await import('./improve-cli.js')).improveCli(args.slice(1));
+  if (args[0] === 'docs') return (await import('./docs-cli.js')).docsCli(args.slice(1));
   if (args[0] === '--version') {
-    forgeVersion(args);
+    (await import('./gh-cli.js')).forgeVersion(args);
     return undefined;
   }
-  if (args[0] === 'pr' || args[0] === 'repo') return ghCli(args);
-  if (['login', 'logout', 'auth'].includes(args[0]!)) return authCli(args[0]!, args.slice(1));
-  if (args[0] === 'queue') return queueCli(args.slice(1));
-  if (args[0] === 'github') return githubConnectCli(args.slice(1));
-  if (args[0] === 'github-sync') return githubSyncCli(args.slice(1));
-  if (args[0] === 'recover') return recoveryCli(args.slice(1));
+  if (args[0] === 'pr' || args[0] === 'repo') return (await import('./gh-cli.js')).ghCli(args);
+  if (['login', 'logout', 'auth'].includes(args[0]!))
+    return (await import('./auth-cli.js')).authCli(args[0]!, args.slice(1));
+  if (args[0] === 'queue') return (await import('./queue-control.js')).queueCli(args.slice(1));
+  if (args[0] === 'github') return (await import('./github-connect-cli.js')).githubConnectCli(args.slice(1));
+  if (args[0] === 'github-sync') return (await import('./github-sync-cli.js')).githubSyncCli(args.slice(1));
+  if (args[0] === 'recover') return (await import('./recovery-cli.js')).recoveryCli(args.slice(1));
   if (args[0] === 'owner') {
     invariant(
       args[1] === 'refresh' && args.length === 3 && args[2],
       'BAD_ARGUMENT',
       'Use owner refresh ROOT.',
     );
-    return refreshOwnerRoot(new WorkStore(args[2]));
+    return (await import('./owner-root.js')).refreshOwnerRoot(
+      new (await import('./work-store.js')).WorkStore(args[2]),
+    );
   }
   if (args[0] === 'pull')
     return (await import('./hosted-pull-cli.js')).hostedPullCli(args.slice(1), beforeDispatch, beforeLocal);
@@ -175,7 +142,7 @@ async function main(args: string[]): Promise<unknown> {
       beforeDispatch,
       beforeLocal,
     );
-  if (args[0] === 'host') return hostCli(args.slice(1));
+  if (args[0] === 'host') return (await import('./host-cli.js')).hostCli(args.slice(1));
   if (args[0] === 'policy' || args[0] === 'set-policy') {
     invariant(
       args[1] &&
@@ -183,29 +150,45 @@ async function main(args: string[]): Promise<unknown> {
       'BAD_ARGUMENT',
       'Use policy ROOT or set-policy ROOT JSON.',
     );
-    return agentCli([args[1], args[0], ...(args[2] ? [args[2]] : [])], { notices: false });
+    return (await import('./agent-cli.js')).agentCli([args[1], args[0], ...(args[2] ? [args[2]] : [])], {
+      notices: false,
+    });
   }
   if (args[0] === 'maintenance') return (await import('./maintenance-cli.js')).maintenanceCli(args.slice(1));
-  if (args[0] === 'hosted-work') return hostedWorkCli(args.slice(1));
+  if (args[0] === 'hosted-work') return (await import('./hosted-work-cli.js')).hostedWorkCli(args.slice(1));
   if (args[0] === 'make-editable')
     return (await import('./make-editable-cli.js')).makeEditableCli(args.slice(1));
-  if (args[0] === 'coordination') return coordinationCli(args.slice(1));
+  if (args[0] === 'coordination')
+    return (await import('./coordination-cli.js')).coordinationCli(args.slice(1));
   if (args[0] === 'mcp-coordination') {
     invariant(
       (args.length === 2 || args.length === 3) && args[1],
       'BAD_ARGUMENT',
       'Use mcp-coordination ROOT or DEPLOYMENT PROJECT_ID.',
     );
-    const binding = args.length === 2 ? requireHostedBinding(new WorkStore(args[1])) : null;
-    await startCoordinationMcp(binding?.deployment ?? args[1], binding?.projectId ?? args[2]!);
+    const binding =
+      args.length === 2
+        ? (await import('./host-binding.js')).requireHostedBinding(
+            new (await import('./work-store.js')).WorkStore(args[1]),
+          )
+        : null;
+    await (
+      await import('./coordination-mcp.js')
+    ).startCoordinationMcp(binding?.deployment ?? args[1], binding?.projectId ?? args[2]!);
     return undefined;
   }
-  if (args[0] === 'exchange') return exchangeCli(args.slice(1));
-  if (args[0] === 'land') return landCli(args.slice(1));
+  if (args[0] === 'exchange') return (await import('./exchange-cli.js')).exchangeCli(args.slice(1));
+  if (args[0] === 'land') return (await import('./land-cli.js')).landCli(args.slice(1));
   if (args[0] === 'release')
     return (await import('./maintainer-release-cli.js')).maintainerReleaseCli(args.slice(1));
-  if (args[0] === 'agent') return agentCli(args.slice(1), { process: true, ...runtimeCallbacks });
-  if (args[0] === 'x') return agentCli(args.slice(1), { operator: true, process: true, ...runtimeCallbacks });
+  if (args[0] === 'agent')
+    return (await import('./agent-cli.js')).agentCli(args.slice(1), { process: true, ...runtimeCallbacks });
+  if (args[0] === 'x')
+    return (await import('./agent-cli.js')).agentCli(args.slice(1), {
+      operator: true,
+      process: true,
+      ...runtimeCallbacks,
+    });
   if (args[0] === 'heavy') {
     process.exitCode = await (
       await import('./heavy-slots.js')
@@ -228,18 +211,19 @@ async function main(args: string[]): Promise<unknown> {
       }),
     );
   }
-  if (args[0] === 'local-checks') return localChecksCli(args.slice(1));
+  if (args[0] === 'local-checks')
+    return (await import('./local-checks-cli.js')).localChecksCli(args.slice(1));
   if (args[0] === 'plugin-config') {
     invariant(
       args.length === 3 && args[1] && args[2],
       'BAD_ARGUMENT',
       'Use plugin-config <root> <new-directory>.',
     );
-    return pluginConfig(args[1], args[2]);
+    return (await import('./plugin-config.js')).pluginConfig(args[1], args[2]);
   }
   if (args[0] === 'mcp-config' && args[2] === '--agent') {
     invariant(args.length === 3 && args[1], 'BAD_ARGUMENT', 'Use mcp-config <root> --agent.');
-    return mcpConfig(args[1], { agent: true });
+    return (await import('./setup.js')).mcpConfig(args[1], { agent: true });
   }
   if (args[0] === 'mcp-agent') {
     invariant(args.length === 2 && args[1], 'BAD_ARGUMENT', 'Use mcp-agent <forge-convex-deployment-url>.');
@@ -257,8 +241,8 @@ async function main(args: string[]): Promise<unknown> {
       'Use import-native-git <git-root> <exact-commit> <new-directory> or export-native-git <native-root> <exact-state> <new-directory> [--reuse <previous-export-dir>].',
     );
     return args[0] === 'import-native-git'
-      ? importNativeGit(args[1], args[2], args[3])
-      : exportNativeGit(args[1], args[2], args[3], args[5]);
+      ? (await import('./native-git.js')).importNativeGit(args[1], args[2], args[3])
+      : (await import('./native-git.js')).exportNativeGit(args[1], args[2], args[3], args[5]);
   }
   if (args[0] === 'restore-native') {
     invariant(
@@ -266,11 +250,11 @@ async function main(args: string[]): Promise<unknown> {
       'BAD_ARGUMENT',
       'Use restore-native <backup> <new-directory> [--journal HOSTED_WORK.json].',
     );
-    return restoreNativeWork(args[1], args[2], args[4]);
+    return (await import('./native-backup.js')).restoreNativeWork(args[1], args[2], args[4]);
   }
   if (args[0] === 'init-native') {
     invariant(args.length === 2 && args[1], 'BAD_ARGUMENT', 'Use init-native <directory>.');
-    return initNative(args[1]);
+    return (await import('./native-work.js')).initNative(args[1]);
   }
   if (args[0] === 'restore-work') {
     invariant(
@@ -278,7 +262,7 @@ async function main(args: string[]): Promise<unknown> {
       'BAD_ARGUMENT',
       'Use restore-work <archive> <new-directory> [--journal HOSTED_WORK.json].',
     );
-    return restoreWork(args[1], args[2], args[4]);
+    return (await import('./work-backup.js')).restoreWork(args[1], args[2], args[4]);
   }
   if (args[0] === 'work') {
     if (args[1] === '--help' || args[1] === 'help' || args[2] === '--help') {
@@ -294,8 +278,11 @@ async function main(args: string[]): Promise<unknown> {
       'BAD_ARGUMENT',
       'Use work <root> [--compact | command-json expected-revision] or work <root> --command-file <json-file> <expected-revision>.',
     );
-    if (args.length === 2) return workCliSummary(args[1]);
-    const work = new WorkService(args[1], localAgent());
+    if (args.length === 2) return (await import('./work-cli-summary.js')).workCliSummary(args[1]);
+    const work = new (await import('./work.js')).WorkService(
+      args[1],
+      (await import('./work-autonomy.js')).localAgent(),
+    );
     if (compact) return work.status({ compact });
     let input = args[2]!;
     if (fromFile) {
@@ -312,7 +299,7 @@ async function main(args: string[]): Promise<unknown> {
       throw new ForgeError('BAD_ARGUMENT', 'Work command must be JSON.');
     }
     if (command && typeof command === 'object' && 'action' in command && typeof command.action === 'string')
-      noticeViewAlias(command.action);
+      (await import('./candidate-names.js')).noticeViewAlias(command.action);
     return work.dispatch(command, Number(args.at(-1)));
   }
   if (args[0] === 'mcp') {
@@ -337,15 +324,23 @@ async function main(args: string[]): Promise<unknown> {
     );
     return undefined;
   }
-  if (args[0] === 'status' && args[1] && !nativeOwner(resolve(args[1]))) {
-    const hosted = await readHostedCliStatus(args[1]);
+  if (
+    args[0] === 'status' &&
+    args[1] &&
+    !(await import('./native-source.js')).nativeOwner(resolve(args[1]))
+  ) {
+    const hosted = await (await import('./hosted-cli-status.js')).readHostedCliStatus(args[1]);
     if (hosted) {
       if (args.includes('--json')) return hosted.value;
       process.stdout.write(hosted.text + '\n');
       return undefined;
     }
   }
-  if (args[0] === 'status' && args[1] && (args.includes('--pending') || !!nativeOwner(resolve(args[1])))) {
+  if (
+    args[0] === 'status' &&
+    args[1] &&
+    (args.includes('--pending') || !!(await import('./native-source.js')).nativeOwner(resolve(args[1])))
+  ) {
     const options: { detail?: boolean; ignored?: boolean; offset?: number; limit?: number } = {};
     for (let index = 2; index < args.length; index++) {
       const arg = args[index];
@@ -361,16 +356,16 @@ async function main(args: string[]): Promise<unknown> {
           'Use status ROOT [--pending] [--detail] [--ignored] [--offset N] [--limit N] [--json].',
         );
     }
-    const store = new WorkStore(args[1]);
-    const pendingFixes = await hostedFixStatus(store);
+    const store = new (await import('./work-store.js')).WorkStore(args[1]);
+    const pendingFixes = await (await import('./hosted-agent-cache.js')).hostedFixStatus(store);
     const status = {
-      ...readPendingStatus(store, undefined, undefined, options),
+      ...(await import('./pending-status-read.js')).readPendingStatus(store, undefined, undefined, options),
       ...(pendingFixes ?? {}),
     };
-    const metrics = await hostedStatusMetrics(args[1]);
+    const metrics = await (await import('./self-metrics-source.js')).hostedStatusMetrics(args[1]);
     if (metrics) status.metrics = metrics;
     if (args.includes('--json')) return status;
-    process.stdout.write(formatPendingStatus(status) + '\n');
+    process.stdout.write((await import('./pending-status-format.js')).formatPendingStatus(status) + '\n');
     return undefined;
   }
   const ignored = args[0] === 'status' && args.includes('--ignored');
@@ -416,8 +411,8 @@ async function main(args: string[]): Promise<unknown> {
     'BAD_ARGUMENT',
     '--limit is not supported by this command.',
   );
-  if (command === 'mcp-config') return mcpConfig(root);
-  if (command === 'doctor') return doctor(root);
+  if (command === 'mcp-config') return (await import('./setup.js')).mcpConfig(root);
+  if (command === 'doctor') return (await import('./setup.js')).doctor(root);
   if (command === 'index') {
     const { indexRepository } = await import('./index.js');
     const { pack, elapsedMs, work } = indexRepository(root);

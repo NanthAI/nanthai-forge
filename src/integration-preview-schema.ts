@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
-import ts from 'typescript';
+import type ts from 'typescript';
+import { loadTypescript } from './lazy-typescript.js';
 
 /** Parse source only. Never import/evaluate a project's schema or Convex runtime. */
 export function convexSchemaErrors(text: string): string[] {
+  const ts = loadTypescript();
   const file = ts.createSourceFile('convex/schema.ts', text, ts.ScriptTarget.Latest, true);
   const tables = new Map<ts.CallExpression, Set<string>>(),
     errors: string[] = [];

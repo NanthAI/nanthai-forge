@@ -9,9 +9,8 @@ import { hostedLaneSelectionSchema } from './hosted-lane.js';
 import { hostedLaneExpectationSchema, readHostedLaneCheckout } from './hosted-lane-checkout-marker.js';
 import { hostedMainV2Schema } from './hosted-main.js';
 import { parseNativeState } from './native-state-format.js';
-import { reviewTextPage } from './source-review-format.js';
+import { reviewTextPage, SHOW_MAX_BYTES } from './source-review-format.js';
 import { safeRelative } from './safe-relative.js';
-import { SHOW_MAX_BYTES } from './agent-source-read.js';
 import { ForgeError, invariant } from './errors.js';
 import type { HostedAgentTransport } from './hosted-agent-transport.js';
 

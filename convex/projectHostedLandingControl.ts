@@ -24,6 +24,7 @@ import {
 } from './projectHostedLandingStore';
 import { nextTrainLandingRow, scheduleLandingWake, releaseLandingQueue } from './projectHostedLandingWake';
 import { olderLandingAhead } from './projectHostedLandingOrder';
+import { overtakeMark } from '../src/landing-overtake';
 import { hostedWriteProject, readHostedRecord } from './projectHostedRecords';
 import { retrySoloLandingCheck } from './projectHostedLandingCheckRetry';
 import { loadHostedCheck } from './projectHostedCheckStore';
@@ -355,8 +356,10 @@ export async function claimReadyLanding(
   // Submission order: an older live entry takes main first. The waiter keeps its
   // passed proof and no timer while parked: the older entry owns progress, and
   // its exit from the order wakes this one and arms its stall alarm in the same
-  // transaction (incident c329d191: that single wake drive can be lost).
-  const ahead = await olderLandingAhead(ctx, row, state, now);
+  // transaction (incident c329d191: that single wake drive can be lost). An older
+  // entry that has not given up its place yet is overtaken once (7d98c7da).
+  const spent: LandingRow[] = [];
+  const ahead = await olderLandingAhead(ctx, row, state, now, spent);
   if (ahead) {
     if (row.alarm) await ctx.scheduler.cancel(row.alarm.taskId);
     if (row.orderWait !== ahead.row.submissionId || row.alarm)
@@ -398,6 +401,8 @@ export async function claimReadyLanding(
     attemptId: input.attemptId,
   };
   await ctx.db.patch(queue._id, { fence: lease.token, lease, wake: null });
+  // Taking main stales these entries' current check: their next one holds order.
+  for (const other of spent) await ctx.db.patch(other._id, { overtaken: overtakeMark(other) });
   // Atomic explicit acceptance publishes or rolls back this lease in the same
   // mutation. Its callers need no watchdog for a gap that cannot exist.
   if (watchdog)

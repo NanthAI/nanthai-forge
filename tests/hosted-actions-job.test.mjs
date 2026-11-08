@@ -273,6 +273,28 @@ function fixture(
   };
 }
 
+test('the candidate and base State reads overlap: the same GETs, one round trip of wait', async t => {
+  const s = fixture(t, { downloadDelay: 20 });
+  const states = new Set([s.run.request.expectedHead, s.run.candidate.base.head]),
+    open = new Map(),
+    windows = [];
+  const inner = s.client.request;
+  s.client.request = async (url, init) => {
+    const hash = String(url).startsWith('https://objects.invalid/') ? String(url).split('/').at(-1) : null;
+    if (!hash || !states.has(hash)) return inner(url, init);
+    open.set(hash, performance.now());
+    try {
+      return await inner(url, init);
+    } finally {
+      windows.push({ hash, start: open.get(hash), end: performance.now() });
+    }
+  };
+  await prepareActionsJob(s.client, join(s.directory, 'candidate'), join(s.directory, 'objects'));
+  assert.equal(windows.length, 2, 'each State manifest is read exactly once');
+  const [a, b] = windows;
+  assert.ok(a.start < b.end && b.start < a.end, 'the two State reads are in flight together');
+});
+
 test('6000-file download measurement keeps source calls within the existing page budget', async t => {
   // Warm the planner and filesystem path before measuring; no tight timing assertions.
   const warm = fixture(t);
@@ -1503,7 +1525,7 @@ test('single execution uses the planning runner; distributed jobs and pack artif
   assert(plan.indexOf('uses: actions/cache/save@') < plan.indexOf('outputs.single_shard'));
   assert.match(workflow, /hosted-check:\n\s+if: \$\{\{ needs.hosted-plan.outputs.matrix != '\[\]' \}\}/);
   const script = readFileSync('scripts/hosted-actions-job.mjs', 'utf8');
-  assert.match(script, /single_shard=\$\{result.singleShard\}/);
+  assert.match(script, /single_shard=\$\{fold\.fold \? '' : result\.singleShard\}/);
   assert.match(script, /matrix=\[\]\\nsingle_shard=\\npack_refresh=false/);
 });
 

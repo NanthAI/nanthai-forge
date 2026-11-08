@@ -35,8 +35,17 @@ async function executeActiveActionsJob(
 ) {
   // Runner clock from supervisor process start; earlier workflow steps are not included.
   const startedAt = new Date(Date.now() - process.uptime() * 1000).toISOString();
+  // Fixed-cost phases around the command (Issue ca8a2ca4), printed once at the end: durations only.
+  const phases: Record<string, number> = {};
+  let mark = performance.now();
+  const lap = (phase: string) => {
+    const now = performance.now();
+    phases[phase] = Math.round(now - mark);
+    mark = now;
+  };
   // The plan artifact is a source pin, never a live execution permission.
   const run = await client.preflight();
+  lap('preflightMs');
   const recipe = JSON.parse(readFileSync(planPath, 'utf8'));
   const index = shard === 'static' ? recipe.groups.length : Number(shard);
   invariant(
@@ -156,6 +165,7 @@ async function executeActiveActionsJob(
   };
   let exitCode: number;
   let yielded: string[] | undefined;
+  lap('setupMs');
   try {
     exitCode = await spawnPart(units ? 'kept' : undefined);
     if (units) {
@@ -187,6 +197,7 @@ async function executeActiveActionsJob(
     junit.remove();
     packages?.remove();
   }
+  lap('commandMs');
   tail = Buffer.concat([tail, redactor.write(Buffer.alloc(0), true)]).subarray(-directLogBytes);
   const log = tail.length
     ? {
@@ -238,6 +249,8 @@ async function executeActiveActionsJob(
   }
   result.execution.endedAt = new Date().toISOString();
   await client.call({ kind: 'result', result, ...(logBytes !== undefined ? { logBytes } : {}) });
+  lap('reportMs');
+  console.log(`run: phases ${JSON.stringify(phases)}`);
   return exitCode;
 }
 

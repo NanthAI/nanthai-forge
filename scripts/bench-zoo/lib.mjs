@@ -122,6 +122,17 @@ export function resolveKeepBoth(text) {
 }
 
 /** Every value stored under `key` anywhere in a receipt, depth first. */
+/** The CLI build (State id) that `release-number.json` of the installed CLI names, or null. The
+ * auto-updating CLI keeps this file next to its `current` checkout; no receipt carries a CLI id. */
+export function cliHead(releaseJsonText) {
+  try {
+    const head = JSON.parse(releaseJsonText)?.head;
+    return typeof head === 'string' && /^[0-9a-f]{8,64}$/.test(head) ? head : null;
+  } catch {
+    return null;
+  }
+}
+
 export function findAll(value, key, out = []) {
   if (Array.isArray(value)) for (const v of value) findAll(v, key, out);
   else if (value && typeof value === 'object')

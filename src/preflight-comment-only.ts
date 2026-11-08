@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import ts from 'typescript';
+import type ts from 'typescript';
+import { loadTypescript } from './lazy-typescript.js';
 import { digest } from './portable-hash.js';
 import { machineObjectsDirectory } from './machine-object-store.js';
 import { parseNativeState, type NativeFile } from './native-state-format.js';
@@ -9,26 +10,27 @@ import { clientCacheRoot } from './root-paths.js';
 
 const scriptKind = (path: string) =>
   /\.[cm]?tsx$/.test(path)
-    ? ts.ScriptKind.TSX
+    ? loadTypescript().ScriptKind.TSX
     : /\.[cm]?ts$/.test(path)
-      ? ts.ScriptKind.TS
+      ? loadTypescript().ScriptKind.TS
       : /\.jsx$/.test(path)
-        ? ts.ScriptKind.JSX
+        ? loadTypescript().ScriptKind.JSX
         : /\.[cm]?js$/.test(path)
-          ? ts.ScriptKind.JS
+          ? loadTypescript().ScriptKind.JS
           : null;
 /** Languages whose header lines are `#` comments (a shebang is code, never a header). */
 const hashHeader = (path: string) =>
   /\.(?:sh|bash|py|ya?ml|toml|rb)$/.test(path) || /(?:^|\/)Dockerfile$/.test(path);
-const printer = ts.createPrinter({ removeComments: true });
+let printer: ts.Printer | undefined;
 
 /** The program without its comments and layout, or null when it does not parse cleanly. The
  * parser decides what is a comment (a `//` inside a regex or a string is not one). */
 function program(path: string, text: string, kind: ts.ScriptKind) {
+  const ts = loadTypescript();
   const source = ts.createSourceFile(path, text, ts.ScriptTarget.Latest, false, kind);
   const diagnostics = (source as unknown as { parseDiagnostics?: unknown[] }).parseDiagnostics;
   if (diagnostics?.length) return null;
-  return printer.printFile(source);
+  return (printer ??= ts.createPrinter({ removeComments: true })).printFile(source);
 }
 /** The text without its leading block of `#` comments and blank lines (a first-line shebang is
  * kept: it chooses the interpreter). */

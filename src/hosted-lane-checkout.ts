@@ -335,7 +335,10 @@ async function checkout(
         ),
       );
       cooperative = !(await checkoutIo(async () => smallCheckout(staged, cache.objects)));
-      identity(parseHostedResponse(hostedLaneSelectionSchema, await transport.select(request.laneId)));
+      // Reauthorize after a transfer, before writing. Bytes all from this machine's verified cache
+      // arrived before this operation's access check, so a second read adds only a round trip.
+      if (cache.downloadedObjects > 0)
+        identity(parseHostedResponse(hostedLaneSelectionSchema, await transport.select(request.laneId)));
       await withCheckoutWritePass(
         cache.root,
         async () => {

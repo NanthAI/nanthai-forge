@@ -187,7 +187,8 @@ test('SIGKILL during checkout durability releases its process ticket; the origin
   assert.equal((await retry.done).code, 0);
   assert.equal(completed.result.replayed, false);
   assert.equal(completed.result.downloadedObjects, 0);
-  assert.deepEqual(completed.calls, { select: 2, objects: 0, downloads: 0 });
+  // A full cache hit transfers nothing, so the opening access read is the only one.
+  assert.deepEqual(completed.calls, { select: 1, objects: 0, downloads: 0 });
   const installed = readHostedLaneCheckout(join(root, 'client'));
   assert.equal(installed.operationId, request.operationId);
   for (const file of files) assert.deepEqual(readFileSync(join(root, 'client', file.path)), bytes);

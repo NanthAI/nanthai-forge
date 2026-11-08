@@ -396,6 +396,18 @@ control characters, or an array of 1–100 such labels (all must match one runne
 The setting is stored in the existing runner configuration and included in its
 configuration and environment fingerprints; changing it invalidates old evidence.
 Invalid labels fail configuration before any GitHub request or settings write.
+
+Actions logs, test names, paths and printed output are as visible as the runner
+repository. The project owner records acceptance of that with `"publicLogs":true`
+(owner only: the same owner-only configuration transaction; a member's or a
+coordination-only agent credential is refused). It is stored in the runner
+configuration (so it changes the configuration digest, like any runner change), carries
+over to later `configure-runner` calls while the repository stays the same, and
+`"publicLogs":false` or a different repository withdraws it. While it is set,
+`check-settings.actions.logs`, the `land`/`check` receipt (`checkLogs`, also printed
+as the last land summary line), the run summary and the web landing view say plainly
+that check logs are public. It costs no extra call: the notice comes from the runner
+setting row the check selection already reads.
 `check-settings.actions.runner` displays `runner: LABEL`; custom labels include
 `(not GitHub-hosted: billed by your runner provider)`. This is based on standard
 GitHub label names, not a live billing lookup: custom GitHub larger-runner labels
@@ -759,6 +771,35 @@ Fixed cost is about 12% of the wall time: queue 4 s, plan job 30 s (source fetch
 of `npm ci` and 5-8 s of build. Each is a few seconds and is dominated by GitHub step overhead. Changing
 `forge-check.yml` is risky for what it saves: the workflow comes from GitHub `main`, so a broken workflow
 fails the check of its own fix.
+
+### Fixed cost per check job
+
+Every hosted job also logs where its fixed part goes, as durations only: the planning step prints
+`plan: phases {"sessionMs":…,"sourceMs":…,"selectMs":…,"planCallMs":…}` and the run prints
+`run: phases {"preflightMs":…,"setupMs":…,"commandMs":…,"reportMs":…}`. `setupMs` covers source
+verification and the command's inputs; `reportMs` the log upload and result call. Read them with the
+step durations from the jobs API to split a job into runner setup, control checkout, Node, control
+cache, plan and upload. The planning step reads the candidate, base and checked-base State manifests
+concurrently, and the server stores a plan's selection and recipe objects concurrently: the same
+requests, less waiting.
+
+A workflow can opt in to three more cuts. None changes anything for a workflow that does not use them,
+so installed workflows keep working without a reinstall:
+
+- **Capacity step.** `node control/scripts/hosted-actions-job.mjs capacity` reads the runner queue with
+  the GitHub token and writes `forge-actions-capacity.json` to the runner temp folder. A planning step
+  that finds that file reads it instead of calling GitHub, so it needs no token.
+- **Plan and run in one step.** With `FORGE_ACTIONS_FOLD=1`, the planning step also runs the check when
+  nothing has to happen between them: one static execution, no test shards, no source-pack refresh, no
+  declared toolchain or cache step, and no `GITHUB_TOKEN` in that step. It then sets `single_shard`
+  empty and `folded=true`, so the separate run step is skipped. Otherwise it logs why it did not fold
+  and the run step runs as before. Forge's own suite also needs its npm download cache restored first
+  (`FORGE_ACTIONS_NPM_CACHE=ready`); the plan output `npm_cache` is `true` only for that suite.
+- **Small control runtime.** With a restored control build (`dist/`), the supervisor and executor load
+  only the packages that `node scripts/control-runtime-deps.mjs paths control` lists (about 32 MB
+  unpacked, not the full install of about 150 MiB compressed). Its `key` command gives a cache key
+  from the control lockfile, under the same main-writes, Lanes-read policy as the full install.
+  `tests/control-runtime-deps.test.mjs` fails when the supervisor imports a package that is not listed.
 
 ### Shard pool
 

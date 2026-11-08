@@ -96,21 +96,86 @@ in order with no conflict, where Git conflicts. That flow is replaced by the sam
 above. Its timings matched run 2 (save 5-7.5 s, sync 6-7 s). Every Python landing failed on the
 submodule (below).
 
+## Results (run 3, 18:17Z, after the submodule, package-graph and inferred-preflight fixes)
+
+Same scenario, same five projects, N = 1. The CLI was the build of State e4a6f011 (the one that
+carries the inferred-preflight fix d95d9b41); the install directory shows no newer build until
+after the last Forge operation. The runner recorded no CLI id (`cliCommits` was empty because no
+receipt holds one), so that is inferred from build times; the runner now reads the installed
+CLI's `release-number.json` before and after the run.
+
+**All five repositories complete the whole scenario with no refusal**: import, clone, save,
+sync, forced conflict, resolve and land. Seconds per operation:
+
+| Repo | clone | start | save | sync | land A | land C (overtaken) | conflict | resolve + land |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| go | 2.6 | 3.8 | 4.8 | 8.9 | 205 | 219 | 15 | 222 |
+| python | 2.8 | 4.3 | 4.9 | 7.5 | 60 | 73 | 16 | 78 |
+| rust | 2.7 | 3.5 | 4.8 | 8.2 | 137 | 67 | 16 | 79 |
+| jvm | 2.6 | 3.6 | 4.8 | 7.7 | 588 | 486 | 14 | 516 |
+| mixed | 2.7 | 3.0 | 5.2 | 9.5 | 92 | 216 | 15 | 132 |
+| **git** | 0.8-1.2 | – | 1.7-2.1 | 0.6-1.0 | 1.5-2.2 | 2.1-2.4 | 0.6-1.3 | 1.4-1.8 |
+
+### Run 2 against run 3
+
+| Expectation | Run 2 | Run 3 |
+| --- | --- | --- |
+| Python lands | check failed (submodule pointer) | lands; A, C and the resolution Lane all pass. C reuses its first check (`clean-disjoint-v2`). |
+| JVM and mixed conflict Lane B | refused `PREFLIGHT_REQUIRED` | conflict reported (14-15 s), resolved and landed under the default policy. The land receipts carry `status: advised` (jvm 2, mixed 1). No local toolchain setup. |
+| Hosted gate where the package graph narrows | `full` / "Intent has no contract" on every run | **Not met.** Admission checks are still `full` / "Intent has no contract" on all five. The only scoped gate is a recheck after main moved: rust and mixed record `mode: scoped`, but `effective: full`, because the zoo check command declares no `selection` and so runs everything. Same as run 2. |
+| Overtaken-landing reuse | go and jvm `clean-disjoint-v2`; rust and mixed `global-risk` recheck | the same, and python `clean-disjoint-v2` |
+| `metrics.byReason` | `contract-none` on every run | unchanged: `contract-none` on every run, plus `global-risk` on rust and mixed |
+| Lockfile digest | empty everywhere | empty everywhere (the digest of empty input) |
+| Convex meter | valid, $0.021 | valid, **$0.027** ($0.0051-0.0057 per repository). The rise is the three repositories that now run more steps (python, jvm, mixed). Go and rust are within about 3%. |
+
+Clone and save did not regress (clone 2.6-2.8 s, save 4.8-5.2 s). Sync was 1.2-2.6 s slower on
+all five (7.5-9.5 s against 6.1-7.4 s), and the conflict report on go and rust 2-3 s slower
+(15-16 s against 12-13 s). One run cannot say whether that is the CLI or load on the machine
+(about twelve builders were working in parallel), so it is a watch item, not a finding.
+
+### Check minutes (run 3)
+
+| Repo | Forge runner jobs | Forge job minutes | GitHub full run | GitHub-equivalent (7 runs) |
+| --- | --- | --- | --- | --- |
+| go | 4 | 13.1 | 218 s | 25.4 min |
+| python | 4 | 2.4 | 18 s | 2.1 min |
+| rust | 4 | 3.2 | 22 s | 2.6 min |
+| jvm | 4 | 32.7 | 524 s | 61.1 min |
+| mixed | 4 | 5.8 | 74 s | 8.6 min |
+
+All five now finish the scenario, so these are like for like. Forge used 52% (go), 54% (jvm)
+and 67% (mixed) of the GitHub-equivalent minutes, because each change is checked once and
+reuse saves a run. On the fast checks (python, rust) the fixed cost of about 25 s per job
+dominates and Forge uses 114-123% of the GitHub-equivalent minutes. The mixed total includes
+the scoped recheck, which still ran everything.
+
+### What this run says about scoped checks
+
+Preflight selection works (evidence on 1f2121cb). On hosted checks the package graph reaches
+the check command only on a scoped recheck, as `FORGE_CHECK_PACKAGES`, and only when the check
+declares `selection: changed-paths`. The zoo checks are the repositories' own CI commands and
+declare none, so they run in full. First checks stay full by design (the contract gate scopes
+only with a contract, a probe or a recheck). So on these five repositories hosted check minutes
+are the same as before the package graph.
+
 ## Limitations found (filed under Phase 6)
 
 | Issue | What the zoo hit | State |
 | --- | --- | --- |
-| 32715651 | Imported submodules were pointer files, so the Python C build failed in every check. | Fixed for checks: the re-run built and passed 59 tests. Clone and Lane checkouts still hold pointers (33b1b4f8). |
+| 32715651 | Imported submodules were pointer files, so the Python C build failed in every check. | Fixed for checks: run 3 lands all Python Lanes. Clone and Lane checkouts still hold pointers (33b1b4f8). |
 | 17cce1b3 | A check-only wait during compose reports "produced no check run". The runs are dispatched 10-15 s later (5/5). | Builder assigned. The runner no longer uses check-only. |
 | 77fa4412 | The runner repository must carry Forge's control code, and each project needs its own operator binding. | Open. |
 | 72ac4315 | Deleting a born-hosted project needs a Git worktree root, and a re-import's slug is not shown. | Open. |
 | e89be958 (comment) | Preflight declarations only in package.json. | `forge.json` landed during the run. |
-| d95d9b41 | With the package graph live, the default `preflight: require` makes inferred package commands mandatory. Mixed's `cargo test -p jiter` fails locally without the corpus its CI fetches, and land is refused although the hosted check passes. JVM's 4-module Gradle test is estimated at "about 1 min". | Open. |
+| d95d9b41 | With the package graph live, the default `preflight: require` makes inferred package commands mandatory. Mixed's `cargo test -p jiter` fails locally without the corpus its CI fetches, and land is refused although the hosted check passes. JVM's 4-module Gradle test is estimated at "about 1 min". | Fixed: run 3 lands the jvm and mixed conflict Lanes under the default policy (`advised`). |
 
 Also observed, not filed:
 - Recovering from a conflict takes three Forge steps (sync, resolve, land the resolution
   Lane), against Git's two (pull, push). All three are named by the receipts.
 - The 5.6 reuse metric (`metrics`) reports "reuse rate unknown" on these projects.
+- Run 3: the recorded `cliCommits` list was empty; no receipt names the CLI build. The runner now
+  reads the installed CLI's `release-number.json` before and after (fixed in this change).
+- Run 3: the run plan's lockfile digest is still empty for Go, Rust and Gradle (slice C, 721cd45c).
 - On Rust, an edit to one leaf crate selects the whole workspace, because the root package is a
   dependent (comment on 1f2121cb).
 
@@ -129,4 +194,4 @@ The runner needs:
 
 It writes per-step receipts and a `RESULT.json` per run.
 
-Planned re-run: after the Phase 6 fixes above and hosted scoped checks (1f2121cb) land.
+The second cross-language run (8c867d0d) reuses the same forks and projects.

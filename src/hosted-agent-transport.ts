@@ -1087,6 +1087,18 @@ export class HostedAgentTransport {
             (command.data as { laneId?: string }).laneId ??
             readHostedLaneCheckout(root)?.selection.laneId)
           : undefined;
+      // start's housekeeping (one batched read, advice only) runs beside the overlap read, never after it.
+      const started =
+        action === 'start' ? (result as { lane?: { laneId?: string } | null; path?: string }) : undefined;
+      const housekeeping = started
+        ? boundedStep(
+            this.housekeeping(
+              [root, ...(started.path ? [started.path] : [])],
+              [...(started.lane?.laneId ? [started.lane.laneId] : [])],
+            ),
+            Math.min(15_000, this.startBoundMs),
+          )
+        : undefined;
       const response = await this.response(
         action,
         journal.operationId,
@@ -1100,21 +1112,11 @@ export class HostedAgentTransport {
         ),
         overlapLane,
       );
-      if (action === 'start') {
-        const started = result as {
-          lane?: { laneId?: string } | null;
-          path?: string;
-        };
-        // One batched read for advice only: never let it hold the reply back.
-        const housekeeping = await boundedStep(
-          this.housekeeping(
-            [root, ...(started.path ? [started.path] : [])],
-            [...(started.lane?.laneId ? [started.lane.laneId] : [])],
-          ),
-          Math.min(15_000, this.startBoundMs),
-        );
-        if (housekeeping.status === 'done' && housekeeping.value) response.localLanes = housekeeping.value;
-        else if (housekeeping.status === 'timeout') this.abandonedStart = true;
+      if (housekeeping) {
+        // Never let advice hold the reply back past its bound.
+        const done = await housekeeping;
+        if (done.status === 'done' && done.value) response.localLanes = done.value;
+        else if (done.status === 'timeout') this.abandonedStart = true;
       }
       return response;
     } catch (error) {

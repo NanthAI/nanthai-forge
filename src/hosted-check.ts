@@ -59,6 +59,9 @@ export const hostedActionsRunnerSchema = z
     installationId: text.optional(),
     runsOn: githubActionsRunsOnSchema,
     concurrencyBudget: z.number().safe().int().min(2).optional(),
+    /** The project owner accepted that check logs in this repository are as visible as
+     * the repository (public for a public one). Stored only when true, so older digests hold. */
+    publicLogs: z.literal(true).optional(),
     runtime: checkHash,
     environmentFingerprint: checkHash,
     credential: credential.optional(),

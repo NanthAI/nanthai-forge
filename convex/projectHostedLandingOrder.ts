@@ -9,6 +9,9 @@ import type { Doc } from './_generated/dataModel';
 import { effectivePolicy } from '../src/autonomy-policy';
 import { HOSTED_TRAIN_HOLD_MS } from '../src/hosted-landing-batch';
 import { stackedBehind } from './projectHostedLandingSuffix';
+import { batchRow, batchSchema } from './projectHostedLandingBatchState';
+import { overtakeOlder, unrelatedChanges } from '../src/landing-overtake';
+import { landingChangedPaths, overtakingSide } from './projectHostedLandingOvertake';
 import { landingSuspect } from '../src/hosted-landing-suspect';
 import { effectiveAgentDefaults, urgentAllowed, urgentRefusal } from '../src/agent-parallel-defaults';
 
@@ -79,16 +82,28 @@ export function holdsLandingOrder(row: Pick<LandingRow, 'phase' | 'hold'>, state
 }
 /** The oldest submission that must take main before this one, or null. One
  * indexed window per accept attempt. Urgent entries wait only for older urgent
- * ones; batch members never wait for their own batch. A queued entry no
- * dispatcher owns (its compose or cohort still preparing) holds its place for
- * the train hold only, as the train does: a dead compose never stops the queue.
- * `until` names the one wake the waiter needs when that hold ends. */
+ * ones; batch members never wait for their own batch. A passed solo entry takes
+ * main ahead of an older one it is unrelated to that has not given up its place
+ * yet (`overtakeOlder`, Issue 7d98c7da); entries it overtakes at a cost are pushed
+ * to `spent` for the caller to mark when it takes main. A combined group, or one
+ * checked on a predecessor group's predicted head, overtakes nothing. A queued entry no dispatcher owns (its compose
+ * or cohort still preparing) holds its place for the train hold only, as the
+ * train does: a dead compose never stops the queue. `until` names the one wake
+ * the waiter needs when that hold ends. */
 export async function olderLandingAhead(
   ctx: QueryCtx | MutationCtx,
   row: LandingRow,
   state: HostedLandingState,
   now = Date.now(),
+  spent?: LandingRow[],
 ) {
+  // A solo entry overtakes; a combined group keeps strict order. One batch read for a
+  // pipelined solo group, which must not overtake its own predicted predecessor.
+  const solo = Boolean(spent) && (!state.batchId || Boolean(state.batchSolo));
+  const batch =
+    solo && state.batchId ? await batchRow(ctx, { projectId: row.projectId, batchId: state.batchId }) : null;
+  const canOvertake = solo && !(batch && batchSchema.parse(JSON.parse(batch.value)).predecessor);
+  let mine: Awaited<ReturnType<typeof overtakingSide>> | undefined;
   const older = await ctx.db
     .query('projectHostedLandingRequests')
     .withIndex('by_project_and_channel_and_orderLive_and_sequence', q =>
@@ -108,6 +123,29 @@ export async function olderLandingAhead(
     // Only an entry that entered the queue late (pre-queue Lane check, refused proof)
     // can be stacked behind a younger group; others cost no extra read.
     if (other.admission?.full && (await stackedBehind(ctx, row, state, value))) continue;
+    if (canOvertake) {
+      const overtake = overtakeOlder({
+        phase: other.phase as 'queued' | 'checking' | 'ready',
+        priority: other.priority,
+        attemptId: other.attemptId,
+        runId: other.runId,
+        admitted: Boolean(
+          other.admission?.full && other.admission.status === 'passed' && !other.admission.reuse,
+        ),
+        ...(other.overtaken !== undefined ? { overtaken: other.overtaken } : {}),
+      });
+      // Paths are read only for an entry the rule would skip: one Candidate read each.
+      if (overtake !== 'hold') {
+        if (mine === undefined) mine = await overtakingSide(ctx, row, state);
+        if (
+          mine &&
+          unrelatedChanges(mine.paths, await landingChangedPaths(ctx, other, value), mine.checkEntries)
+        ) {
+          if (overtake === 'spend') spent!.push(other);
+          continue;
+        }
+      }
+    }
     if (other.phase !== 'queued' || other.runnable) return { row: other, state: value, until: null };
     const until =
       Math.max(

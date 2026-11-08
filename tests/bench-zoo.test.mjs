@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import {
   appendLine,
   checkFacts,
+  cliHead,
   githubEquivalent,
   pickProbeFiles,
   probeLine,
@@ -155,4 +156,12 @@ test('summary table lists Forge next to git and the refusal when Forge did not r
   ]);
   assert.match(md, /\| go \| clone \| 10 \| 1\.2 \| ok \|/);
   assert.match(md, /\| go \| land \| – \| – \| skipped: no runner \|/);
+});
+
+test('cliHead reads the installed CLI build id and ignores anything else', () => {
+  const head = 'e4a6f011acf7f97b8f18970d9e03abb0c3b20ea5d70ecb26d776272cff039e49';
+  assert.equal(cliHead(JSON.stringify({ release: 7, head, at: 'x' })), head);
+  assert.equal(cliHead('{"release":7}'), null);
+  assert.equal(cliHead(JSON.stringify({ head: 'not hex!' })), null);
+  assert.equal(cliHead('not json'), null);
 });

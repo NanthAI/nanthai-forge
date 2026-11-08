@@ -89,11 +89,21 @@ export async function prepareActionsJob(
   workflow?: string,
 ) {
   console.log('Actions source: preparing pinned Candidate');
+  // Fixed-cost phases of this step (Issue ca8a2ca4), printed once: durations only, no values.
+  const phases: Record<string, number> = {};
+  let mark = performance.now();
+  const lap = (phase: string) => {
+    const now = performance.now();
+    phases[phase] = Math.round(now - mark);
+    mark = now;
+  };
   const run = await client.session(true);
+  lap('sessionMs');
   invariant(run.configuration.provider === 'github-actions', 'RUNNER_UNAVAILABLE', 'Select Actions.');
   await mkdir(directory, { recursive: true });
   await mkdir(cache, { recursive: true });
   const source = await materializeActionsSource(client, directory, cache);
+  lap('sourceMs');
   const { state, base, checkedBase } = source;
   const inventory = new Map(state.files.map(file => [file.path, file]));
   const paths = changedPaths(base, state);
@@ -224,6 +234,7 @@ export async function prepareActionsJob(
     ACTIONS_WORKFLOW_OUTDATED,
   );
   const lock = inventory.get('package-lock.json');
+  lap('selectMs');
   const planned = (await client.call({
     kind: 'plan',
     plan: { recipe, lockfile: digest(lock ? readFileSync(join(cache, lock.blob)) : Buffer.alloc(0)) },
@@ -238,6 +249,8 @@ export async function prepareActionsJob(
       parsed.success && parsed.data.length === poolUnits(groups, recipe.pool).length ? parsed.data : null;
     if (!claims) console.log('Shard pool: claim targets unavailable; shards run their static groups');
   } else client.run = planned as typeof run;
+  lap('planCallMs');
+  console.log(`plan: phases ${JSON.stringify(phases)}`);
   return {
     packRefresh: {
       refresh:

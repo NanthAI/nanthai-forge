@@ -57,7 +57,8 @@ function readDiff(store: WorkStore, input: z.input<typeof agentDiffSchema>) {
   });
 }
 
-export const SHOW_MAX_BYTES = 1024 * 1024;
+import { SHOW_MAX_BYTES } from './source-review-format.js';
+export { SHOW_MAX_BYTES };
 function checkSize(size: number, force: boolean) {
   invariant(
     force || size <= SHOW_MAX_BYTES,

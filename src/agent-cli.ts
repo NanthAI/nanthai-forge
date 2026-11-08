@@ -7,22 +7,24 @@ import { hostedAgentHelp } from './hosted-agent-help.js';
 import { callerOverlaps } from './agent-caller-overlaps.js';
 import { hostedAgentAddress, hostedAgentCli } from './hosted-agent-cli.js';
 import { canonicalOperationIds } from './operation-id-case.js';
-import { agentWaitCli } from './agent-wait.js';
 import { canonicalCandidateAction, noticeViewAlias } from './candidate-names.js';
 import { aliasNotice, landSaveCommand, lowerVerb, newForm, parseVerbForm } from './agent-verbs.js';
 import { parseWaitBudget } from './agent-operation-wait.js';
 import { recordTurnWait } from './agent-turn-work.js';
 import { readFileSync, realpathSync } from 'node:fs';
 import { sep } from 'node:path';
-import { integrationPreview } from './integration-preview.js';
-import { AgentWorkflow } from './agent-workflow.js';
-import { overlapLines, type PredictiveOverlap } from './agent-predictive-overlap.js';
-import { retainedFinishCommand } from './agent-finish-journal.js';
+import type { AgentWorkflow } from './agent-workflow.js';
+import type { PredictiveOverlap } from './agent-predictive-overlap.js';
 import { invariant } from './errors.js';
 import { hostedLandCli, LAND_CHILD_ENV } from './hosted-land-cli.js';
-import { hostedShowCli } from './hosted-show-cli.js';
 import { HostedAgentTransport } from './hosted-agent-transport.js';
 import { housekeepingLines, type IdleLane, type OtherRunLane } from './lane-prune.js';
+
+/** The native owner workflow (and its local Work store) loads only for a native root: every hosted
+ * command would otherwise pay its import at start. */
+async function nativeWorkflow(root: string): Promise<AgentWorkflow> {
+  return new (await import('./agent-workflow.js')).AgentWorkflow(root);
+}
 
 export const AGENT_HELP = `Forge native owner agent workflow
 Hosted checkout help is generated from its enforced contract: nforge agent HOSTED_ROOT --help.
@@ -333,7 +335,7 @@ function actionHelp(action: string): string {
       'start stackOn:LANE_ID uses the parent’s saved head; sync restacks onto its latest save, or main after its receipt. sync ontoMain:true detaches and reapplies only the child delta. Resolve conflicts then checkpoint. Child finish/land waits for the parent; land-ready resumes waiting finishes.\n';
   if (action === 'configure-check' || action === 'configure-runner' || action === 'check-settings')
     result +=
-      'Hosted project owner only. configure-check imports the named check (default verify) from hosted Work, checkId selects one by id, or command:{name,executable,args,environmentLabel} defines one (optional selection:{scope:"changed-paths",shards:N} lets a custom command scope itself or shard; docs/workflows.md#check-command-scope). configure-runner provider:"self-hosted" (legacy alias "mac") fills machineId (kept from the current machine runner), runtime, platform and environment from this package and process; optional labels:["linux","build"] describe routing to this machine, so run it in the worker\'s exact environment; provider:"github-actions" with repository:"OWNER/NAME" and optional runsOn:"LABEL" or runsOn:["self-hosted","linux","x64"] (default ubuntu-latest) selects the Convex-dispatched GitHub Actions runner (the server derives runtime and environment and checks the App installation and its Actions permission; no installation ID or secret); configuration:{...} sets another provider. expected pins the current digest (default: read now; null for none). Identical parameters replay their first result; pass a new operationId to change again. check-settings is read-only and lists blockers.\n';
+      'Hosted project owner only. configure-check imports the named check (default verify) from hosted Work, checkId selects one by id, or command:{name,executable,args,environmentLabel} defines one (optional selection:{scope:"changed-paths",shards:N} lets a custom command scope itself or shard; docs/workflows.md#check-command-scope). configure-runner provider:"self-hosted" (legacy alias "mac") fills machineId (kept from the current machine runner), runtime, platform and environment from this package and process; optional labels:["linux","build"] describe routing to this machine, so run it in the worker\'s exact environment; provider:"github-actions" with repository:"OWNER/NAME" and optional runsOn:"LABEL" or runsOn:["self-hosted","linux","x64"] (default ubuntu-latest) selects the Convex-dispatched GitHub Actions runner (the server derives runtime and environment and checks the App installation and its Actions permission; no installation ID or secret); publicLogs:true records that the owner accepts check logs as visible as that repository (kept while the repository stays the same; false withdraws it; receipts then say check logs are public); configuration:{...} sets another provider. expected pins the current digest (default: read now; null for none). Identical parameters replay their first result; pass a new operationId to change again. check-settings is read-only and lists blockers.\n';
   if (action === 'integrate')
     result +=
       'Compose main plus latest saved active Lanes and run local static checks. Omit laneIds for all checkpointed active Lanes. No acceptance or remote runner. set-policy integrationPreview:{auto:true} enables debounced previews after saves and before landing; default false. Cached by exact source and check inputs.\n';
@@ -551,7 +553,7 @@ async function runAgentCli(args: string[], options: AgentCliOptions, notices: st
   const textMode = args[1] === 'wait' && args.includes('--text');
   if (textMode) args = args.filter(arg => arg !== '--text');
   if (args[1] === 'peers' && args[2] === '--path' && args[3]) {
-    const workflow = new AgentWorkflow(args[0]!);
+    const workflow = await nativeWorkflow(args[0]!);
     const laneId = laneFromCwd(workflow.work.store.directory) ?? process.env.FORGE_LANE_ID;
     invariant(laneId, 'BAD_ARGUMENT', 'Run peers --path inside a Lane or set FORGE_LANE_ID.');
     return workflow.dispatch({ action: 'peers', laneId, path: args[3] });
@@ -675,7 +677,7 @@ async function runAgentCli(args: string[], options: AgentCliOptions, notices: st
           ...(client.budget !== undefined ? { timeoutSeconds: client.budget } : {}),
         });
       if (action === 'show') {
-        await hostedShowCli(root, command, hosted);
+        await (await import('./hosted-show-cli.js')).hostedShowCli(root, command, hosted);
         return undefined;
       }
       if (action !== 'start' || !options.process) return await hostedAgentCli(root, action, command, hosted);
@@ -722,17 +724,21 @@ async function runAgentCli(args: string[], options: AgentCliOptions, notices: st
   if (options.beforeDispatch && !(await options.beforeDispatch(stdin === undefined ? undefined : { stdin })))
     return;
   if (action === 'wait') {
-    await agentWaitCli(nativeRoot, selected, textMode);
+    await (await import('./agent-wait.js')).agentWaitCli(nativeRoot, selected, textMode);
     return undefined;
   }
-  const agent = new AgentWorkflow(nativeRoot);
+  const agent = await nativeWorkflow(nativeRoot);
   const retained =
     action === 'finish' && typeof selected.operationId === 'string'
-      ? retainedFinishCommand(agent.work.store, selected.operationId)
+      ? (await import('./agent-finish-journal.js')).retainedFinishCommand(
+          agent.work.store,
+          selected.operationId,
+        )
       : undefined;
   notice({ ...retained, ...selected });
   selected = landSaveCommand(form!, false, selected, retained);
-  if (action === 'integrate') return integrationPreview(agent.work.store, selected);
+  if (action === 'integrate')
+    return (await import('./integration-preview.js')).integrationPreview(agent.work.store, selected);
   if (
     ['checkpoint', 'sync', 'finish', 'handoff', 'handoff-read', 'friction'].includes(action) &&
     selected.laneId === undefined &&
@@ -754,6 +760,7 @@ async function runAgentCli(args: string[], options: AgentCliOptions, notices: st
   const predictions = action === 'peers' ? result.predictive : result.peers?.predictive;
   for (const notice of result.peers?.inbox ?? [])
     process.stderr.write(`${notice.text.replace(/[\x00-\x1f\x7f]/g, ' ')}\n`);
+  const { overlapLines } = await import('./agent-predictive-overlap.js');
   for (const line of overlapLines(predictions ?? [])) process.stderr.write(`${line}\n`);
   if (action === 'show') {
     const overlaps = callerOverlaps(root, typeof selected.laneId === 'string' ? selected.laneId : undefined);

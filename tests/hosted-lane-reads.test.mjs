@@ -181,9 +181,10 @@ test('full/sparse checkout uses bounded indexed membership/signing with no Work 
   const warm = await checkoutHostedLane(root, request(), transport);
   assert.equal(warm.downloadedObjects, 0);
   assert.equal(gets, before.gets);
+  // A warm checkout transfers nothing, so its opening access read is the only call.
   assert.deepEqual(
     calls.slice(before.calls).map(call => call.name),
-    ['projectHostedLanes:select', 'projectHostedLanes:select'],
+    ['projectHostedLanes:select'],
   );
   const sparse = join(directory, 'sparse');
   const one = await checkoutHostedLane(sparse, request(['src/7.txt']), transport);

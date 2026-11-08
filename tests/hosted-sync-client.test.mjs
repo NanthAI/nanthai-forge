@@ -340,14 +340,25 @@ test('an edit during recovery gets another preservation round instead of a new r
     request = s.command();
   writeFileSync(join(s.root, 'a'), 'first local draft');
   await assert.rejects(applyHostedSync(s.root, request, s.transport), { code: 'WORK_CONFLICT' });
-  // Recovery reads authority once, then its apply twice; the second is the last read before
-  // publication. The editor writes again right then.
-  const select = s.transport.select;
-  let reads = 0;
-  s.transport.select = async laneId => {
-    if (++reads === 3) writeFileSync(join(s.root, 'a'), 'second local draft');
-    return select(laneId);
-  };
+  // The editor writes again once the recovery apply starts staging: after its obstruction check
+  // and before any write, the last moment before publication.
+  const fs = (await import('node:fs')).default;
+  const { syncBuiltinESMExports } = await import('node:module');
+  const mkdtemp = fs.mkdtempSync;
+  let edited = false;
+  t.mock.method(fs, 'mkdtempSync', (prefix, ...rest) => {
+    const dir = mkdtemp(prefix, ...rest);
+    if (!edited && /(?:delta|checkout)-$/.test(prefix)) {
+      edited = true;
+      writeFileSync(join(s.root, 'a'), 'second local draft');
+    }
+    return dir;
+  });
+  syncBuiltinESMExports();
+  t.after(() => {
+    t.mock.restoreAll();
+    syncBuiltinESMExports();
+  });
   await assert.rejects(recoverLocalApply(s.root, request.operationId, s.transport), {
     code: 'WORK_CONFLICT',
   });

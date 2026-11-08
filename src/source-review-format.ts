@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { NativeFile } from './native-source.js';
 import { invariant } from './errors.js';
+
+/** Largest file a show returns without --force (local and hosted reads share it). */
+export const SHOW_MAX_BYTES = 1024 * 1024;
 export type ReviewPath = {
   path: string;
   status: 'added' | 'deleted' | 'modified' | 'unchanged';

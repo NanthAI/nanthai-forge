@@ -237,9 +237,12 @@ export async function checkoutHostedMain(root: string, input: unknown, transport
     await flushHostedCheckoutFiles(stage, stagedFiles);
     // Stats of the private stage carry over the rename, so later checks read only edited files.
     const installedIndex = delta ? null : indexInstalledFiles(stage, stagedFiles);
-    // Reauthorize after transfer and staging, immediately before publication.
-    const authorized = await transport.current();
-    invariant(authorized.projectId === request.projectId, 'PROJECT_UNAVAILABLE', 'Select this project.');
+    // Reauthorize after a transfer, immediately before publication. When every object came from
+    // this machine's verified cache, no server bytes arrived since this operation's access check.
+    if (objects.downloadedObjects > 0) {
+      const authorized = await transport.current();
+      invariant(authorized.projectId === request.projectId, 'PROJECT_UNAVAILABLE', 'Select this project.');
+    }
     workLocked(lock, () => {
       operation = json(receiptPath);
       if (operation.complete) return;

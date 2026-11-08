@@ -192,6 +192,8 @@ export const hostedLandingTables = {
     orderWait: v.optional(v.string()),
     /** Set on the older submission when a newer one waits for it, so only then its exit wakes waiters. */
     orderWaited: v.optional(v.literal(true)),
+    /** The check generation a newer passed entry overtook (`overtakeMark`); later ones hold order. */
+    overtaken: v.optional(v.string()),
     phase,
     runId: v.union(v.string(), v.null()),
     /** Last delivered event of the current run, independent of queue phase. */

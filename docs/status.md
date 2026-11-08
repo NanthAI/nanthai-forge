@@ -230,6 +230,10 @@ Java, .NET, Rust; a version or a version file) and `actionsCache` (dependency pr
 lockfile hashes, saved only by main) as pinned workflow steps, and configured commands keep the
 runner's toolchain-location variables ([toolchains](operations/github-actions-checks.md#toolchains-and-dependency-cache)).
 App/OIDC runner repositories need the reinstalled `forge-check.yml` before a declared check plans.
+Hosted check jobs log their fixed-cost phases (`plan: phases`, `run: phases`); a workflow may opt in to a
+token-free planning step that also runs a single static check, and to a small control runtime cache
+([fixed cost per check job](operations/github-actions-checks.md#fixed-cost-per-check-job)). Forge's own
+`forge-check.yml` does not use them yet.
 
 Native finish/accept supports an explicit disjoint fast-path autonomy option:
 exact composed-main provenance, current passing evidence, manifest-path

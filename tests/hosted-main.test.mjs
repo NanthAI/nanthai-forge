@@ -384,7 +384,88 @@ test('server main unavailable or revoked never falls back to an uploaded native 
       },
     });
   await assert.rejects(current(), { code: 'SOURCE_UNAVAILABLE' });
-  assert.deepEqual(calls, ['projectHostedAgent:capabilities', 'projectHostedChannels:current']);
+  // The direct read is refused, discovery confirms server authority and its read is refused too.
+  assert.deepEqual(calls, [
+    'projectHostedChannels:current',
+    'projectHostedAgent:capabilities',
+    'projectHostedChannels:current',
+  ]);
+  assert(!calls.includes('projectMain:current'));
+});
+
+function currentWith(answer) {
+  const calls = [];
+  return {
+    calls,
+    async current(expected) {
+      const { ConvexExchange } = await import('../dist/exchange-client.js');
+      const { getFunctionName } = await import('convex/server');
+      return ConvexExchange.prototype.current.call(
+        Object.assign(Object.create(ConvexExchange.prototype), {
+          projectId: 'project',
+          client: {
+            async query(ref, args) {
+              const name = getFunctionName(ref);
+              calls.push(name);
+              return answer(name, args);
+            },
+          },
+        }),
+        expected,
+      );
+    },
+  };
+}
+const serverMain = (mode = 'server') => ({
+  schema: 2,
+  projectId: 'project',
+  snapshotId: 'receipt',
+  sourceRevision: 1,
+  authority: { mode, epoch: 1 },
+  channel: 'main',
+  head: 'a'.repeat(64),
+  receipt: { id: 'receipt', kind: 'server', previousHead: null, previousReceiptId: null },
+});
+
+test('server main is one read: the channel read checks authority in its own transaction', async () => {
+  const f = currentWith(name => {
+    if (name === 'projectHostedChannels:current') return JSON.stringify(serverMain());
+    throw Error(`unexpected ${name}`);
+  });
+  const main = await f.current();
+  assert.equal(main.head, 'a'.repeat(64));
+  assert.deepEqual(f.calls, ['projectHostedChannels:current']);
+  await assert.rejects(f.current({ head: 'a'.repeat(64), receiptId: 'other' }), { code: 'CHANNEL_CHANGED' });
+  assert.deepEqual(f.calls, ['projectHostedChannels:current', 'projectHostedChannels:current']);
+});
+
+test('a refused channel read falls back to authority discovery (native-owner main)', async () => {
+  const { ConvexError } = await import('convex/values');
+  const native = { ...serverMain('native-owner'), schema: 2 };
+  const f = currentWith((name, args) => {
+    if (name === 'projectHostedChannels:current')
+      throw new ConvexError({ code: 'SOURCE_AUTHORITY_CHANGED', message: 'differ' });
+    if (name === 'projectHostedAgent:capabilities')
+      return JSON.stringify({ authority: { mode: 'native-owner', epoch: 1 } });
+    assert.equal(name, 'projectMain:current');
+    assert.equal(args.maxSchema, 2);
+    return JSON.stringify(native);
+  });
+  assert.equal((await f.current()).authority.mode, 'native-owner');
+  assert.deepEqual(f.calls, [
+    'projectHostedChannels:current',
+    'projectHostedAgent:capabilities',
+    'projectMain:current',
+  ]);
+});
+
+test('a transport failure on the channel read surfaces without a second request', async () => {
+  const { NetworkTransportError } = await import('../dist/network-fetch.js');
+  const f = currentWith(() => {
+    throw new NetworkTransportError('EXCHANGE_REQUEST_TIMEOUT', 'deadline');
+  });
+  await assert.rejects(f.current(), { code: 'EXCHANGE_REQUEST_TIMEOUT' });
+  assert.deepEqual(f.calls, ['projectHostedChannels:current']);
 });
 
 test('main checkout uses the shared ignored-output and dependency-link preservation path', async t => {

@@ -33,6 +33,8 @@ type Result = {
   conflict?: { command?: string; instruction?: string; workIn?: string };
   /** A passed entry parked behind an older submission that takes main first. */
   orderWait?: { submissionId?: string };
+  /** The owner accepted public check logs on this runner: said on every outcome. */
+  checkLogs?: string;
 };
 export const resultOf = (response: HostedAgentResponse) => (response.result ?? {}) as Result;
 export function landPhase(response: HostedAgentResponse): string | undefined {
@@ -40,8 +42,14 @@ export function landPhase(response: HostedAgentResponse): string | undefined {
   return result.submission?.phase ?? result.phase;
 }
 
-/** One line per outcome; failures list each failing file with its first error. */
+/** One line per outcome; failures list each failing file with its first error. A runner whose
+ * owner accepted public logs adds that notice as the last line. */
 export function landSummary(response: HostedAgentResponse): string[] {
+  const checkLogs = resultOf(response).checkLogs;
+  const lines = outcomeLines(response);
+  return typeof checkLogs === 'string' && lines.length ? [...lines, checkLogs] : lines;
+}
+function outcomeLines(response: HostedAgentResponse): string[] {
   const result = resultOf(response),
     submission = result.submission;
   const phase = landPhase(response);

@@ -155,6 +155,9 @@ configs.
   exact on unchanged main, carried by `Reuse` only when `Independent`, otherwise
   `LaneRefused` returns it to the batchable pool for a combined check.
 - `Behind(g)`: a group never waits for an older entry stacked behind it.
+- Not modelled: a passed solo entry overtaking an older unrelated entry once per check
+  generation (Issue 7d98c7da). The model keeps strict order, which only removes behaviours;
+  the code bounds the overtaken entry to one extra check (`tests/hosted-landing-overtake.test.mjs`).
 
 Added properties: `KnownRedNeverQueued` (a failed Lane check is terminal, never in
 a group, never accepted), `RedNeverQueued` (no red change is ever in a group or

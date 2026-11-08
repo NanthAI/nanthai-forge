@@ -558,7 +558,23 @@ Checks of independent submissions run in parallel, but submissions take main in
 that order. A passed submission waits while an older one in its priority class is
 still queued, checking or passed; an urgent one waits only for older urgent ones.
 An older entry gives up its place when it fails, stalls, is held for red main, or
-waits for review or a dependency. The waiter keeps its passed check and owns no
+waits for review or a dependency.
+
+A passed solo submission does not wait for an older entry it is unrelated to: when
+neither change's paths equal, contain or sit inside the other's (the Candidates'
+stored changed paths) and together they touch no [global-risk file](../pre-queue-checks.md#global-risk-files),
+it takes main first (core-claim incident `7d98c7da`, 2026-11-08: passed landings
+waited 17-40 min behind unrelated rechecks). The older entry keeps its check: on
+moved main it lands on that pass through the first-check rule when it qualifies,
+otherwise it re-checks. Each entry gives up its place this way for one check
+generation only (`overtaken` on the row); its next check holds strict order, so it
+re-checks at most once because newer entries overtook it. Passed and urgent entries
+are never overtaken; combined groups and groups checked on a predecessor's predicted
+head overtake nothing. The decision reads the claiming entry's project row and
+Candidate once and one Candidate per skipped entry, in the claim transaction; no call
+is added and an idle queue costs nothing. Related entries keep strict order.
+
+The waiter keeps its passed check and owns no
 timer or stall alarm: the older entry keeps its own alarm, and when it gives up its
 place or lands, only the oldest waiter is woken and the rest wait for that one. A
 waiter whose check main has since moved past re-checks after the older entry lands,

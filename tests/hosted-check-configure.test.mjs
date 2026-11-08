@@ -560,6 +560,7 @@ test('CLI configure-runner github-actions routes to the App action, derives the 
     runsOn: 'ubuntu-latest',
     concurrencyBudget: 12,
     runner: 'runner: ubuntu-latest',
+    logs: 'as visible as NanthAI/nanthai-forge on GitHub',
     installation: 'derived per operation via the GitHub App',
     results: 'OIDC session plus workflow_run webhook',
   });
@@ -657,6 +658,94 @@ test('CLI configure-runner github-actions routes to the App action, derives the 
     }),
     code('PROJECT_UNAVAILABLE'),
   );
+});
+
+test('publicLogs: owner-only opt-in, kept with its repository, withdrawn by false or a new repository, shown on settings', async t => {
+  const fixture = project();
+  const { state, run } = cli(t, fixture);
+  bindRepository(t, fixture.projectId, 'NanthAI/nanthai-forge');
+  process.env.FORGE_GITHUB_REPO_BINDINGS += `,${fixture.projectId}=NanthAI/other-runner`;
+  const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
+  const prior = { id: process.env.GITHUB_APP_ID, key: process.env.GITHUB_APP_PRIVATE_KEY };
+  process.env.GITHUB_APP_ID = '12345';
+  process.env.GITHUB_APP_PRIVATE_KEY = privateKey.export({ type: 'pkcs1', format: 'pem' });
+  t.after(() => {
+    for (const [name, value] of [
+      ['GITHUB_APP_ID', prior.id],
+      ['GITHUB_APP_PRIVATE_KEY', prior.key],
+    ])
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+  });
+  const github = [];
+  t.mock.method(globalThis, 'fetch', async url => {
+    github.push(url);
+    assert.match(
+      url,
+      /^https:\/\/api\.github\.com\/repos\/NanthAI\/(nanthai-forge|other-runner)\/installation$/,
+    );
+    return Response.json({ id: 77, permissions: { actions: 'write', contents: 'write', metadata: 'read' } });
+  });
+  const plain = await run('configure-runner', {
+    provider: 'github-actions',
+    repository: 'NanthAI/nanthai-forge',
+    operationId: randomUUID(),
+  });
+  assert.equal(plain.value.publicLogs, undefined); // default: no acceptance recorded
+
+  // A member (contributor) cannot record the owner's acceptance; nothing is written.
+  const versions = settings(fixture.s).length;
+  state.actor = 'peer';
+  await assert.rejects(
+    run('configure-runner', { provider: 'github-actions', publicLogs: true, operationId: randomUUID() }),
+    code('PROJECT_UNAVAILABLE'),
+  );
+  assert.equal(settings(fixture.s).length, versions);
+  state.actor = 'owner';
+  await assert.rejects(
+    run('configure-runner', { provider: 'self-hosted', publicLogs: true, operationId: randomUUID() }),
+    code('BAD_ARGUMENT'),
+  );
+
+  const accepted = await run('configure-runner', {
+    provider: 'github-actions',
+    publicLogs: true,
+    operationId: randomUUID(),
+  });
+  assert.equal(accepted.value.publicLogs, true);
+  assert.equal(accepted.value.repository, 'NanthAI/nanthai-forge');
+  assert.notEqual(accepted.digest, plain.digest);
+  assert.equal(accepted.digest, checkPin(accepted.value));
+  assert.equal(accepted.value.environmentFingerprint, plain.value.environmentFingerprint);
+  const shown = await run('check-settings');
+  assert.match(shown.actions.logs, /^Check logs are public: this runner runs in NanthAI\/nanthai-forge/);
+  assert.equal(shown.runner.configuration.publicLogs, true);
+
+  // Kept while the repository stays the same (another setting changes)...
+  const budgeted = await run('configure-runner', {
+    provider: 'github-actions',
+    concurrencyBudget: 4,
+    operationId: randomUUID(),
+  });
+  assert.equal(budgeted.value.publicLogs, true);
+  // ...withdrawn by publicLogs:false, back to the plain digest's shape.
+  const withdrawn = await run('configure-runner', {
+    provider: 'github-actions',
+    publicLogs: false,
+    operationId: randomUUID(),
+  });
+  assert.equal(withdrawn.value.publicLogs, undefined);
+  assert.match((await run('check-settings')).actions.logs, /^as visible as NanthAI\/nanthai-forge/);
+  // An acceptance names one repository: switching repositories drops it.
+  await run('configure-runner', { provider: 'github-actions', publicLogs: true, operationId: randomUUID() });
+  const moved = await run('configure-runner', {
+    provider: 'github-actions',
+    repository: 'NanthAI/other-runner',
+    operationId: randomUUID(),
+  });
+  assert.equal(moved.value.repository, 'NanthAI/other-runner');
+  assert.equal(moved.value.publicLogs, undefined);
+  assert(!github.some(url => url.includes('access_tokens'))); // no token minted to opt in
 });
 
 test('CLI self-hosted labels remain pinned on replay and explicit empty labels clear the selection metadata', async t => {

@@ -152,21 +152,24 @@ export const handle = httpAction(async (ctx, request) => {
       const plan = command.plan;
       reason = 'storage';
       // Content keys dedupe identical selections across rechecks. A verified
-      // existing HEAD avoids uploading the selection body again.
-      const selection = await storeSourceBytes(
-        ctx,
-        input.projectId,
-        new TextEncoder().encode(canonicalPayload(plan.recipe.selection)),
-        savePin(plan.recipe.selection),
-        true,
-      );
-      const recipe = await storeSourceBytes(
-        ctx,
-        input.projectId,
-        new TextEncoder().encode(canonicalPayload(plan.recipe)),
-        savePin(plan.recipe),
-        true,
-      );
+      // existing HEAD avoids uploading the selection body again. The two objects are
+      // independent, so their R2 round trips overlap (same requests, half the wait).
+      const [selection, recipe] = await Promise.all([
+        storeSourceBytes(
+          ctx,
+          input.projectId,
+          new TextEncoder().encode(canonicalPayload(plan.recipe.selection)),
+          savePin(plan.recipe.selection),
+          true,
+        ),
+        storeSourceBytes(
+          ctx,
+          input.projectId,
+          new TextEncoder().encode(canonicalPayload(plan.recipe)),
+          savePin(plan.recipe),
+          true,
+        ),
+      ]);
       reason = 'authorization';
       value = await ctx.runMutation(makeFunctionReference<'mutation'>('projectHostedActionsPlan:prepare'), {
         ...input,

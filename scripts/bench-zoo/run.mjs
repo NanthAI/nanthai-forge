@@ -20,12 +20,13 @@ import {
   rmSync,
   realpathSync,
 } from 'node:fs';
-import { join, relative, basename } from 'node:path';
+import { join, relative, basename, dirname } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { exec } from './exec.mjs';
 import {
   appendLine,
   checkFacts,
+  cliHead,
   tagLastLine,
   errorCode,
   findAll,
@@ -476,6 +477,15 @@ async function main(argv) {
   const { makeIo } = await import('./io.mjs');
   const io = makeIo({ cfg, root, runDir, state, statePath });
   const repos = cfg.repos.filter(r => !only || only.includes(r.id));
+  const readCli = () => {
+    try {
+      const file = join(dirname(cfg.forgeCheckout), 'release-number.json');
+      return cliHead(readFileSync(file, 'utf8'));
+    } catch {
+      return null;
+    }
+  };
+  const cliBefore = readCli();
   const results = await Promise.all(
     repos.map(repo =>
       io.metered(repo, () =>
@@ -483,22 +493,8 @@ async function main(argv) {
       ),
     ),
   );
-  // The CLI follows main, so a run can straddle a release: list every CLI commit the receipts name.
-  const cliCommits = [
-    ...new Set(
-      readdirSync(runDir)
-        .filter(f => f.endsWith('.receipts.jsonl'))
-        .flatMap(f =>
-          findAll(
-            readFileSync(join(runDir, f), 'utf8')
-              .split('\n')
-              .filter(Boolean)
-              .map(l => JSON.parse(l)),
-            'cliCommit',
-          ),
-        ),
-    ),
-  ];
+  // The CLI follows main, so a run can straddle a release: name the CLI build before and after.
+  const cliCommits = [...new Set([cliBefore, readCli()].filter(Boolean))];
   const out = { stamp, cliCommits, deployment: cfg.deployment, results };
   writeFileSync(join(runDir, 'RESULT.json'), JSON.stringify(out, null, 1) + '\n');
   if (!flag('--keep-checkouts'))

@@ -12,6 +12,8 @@ import { resolveAuthToken } from './auth-store.js';
 import type { ConvexHttpClient } from 'convex/browser';
 
 import { makeFunctionReference } from 'convex/server';
+import { ConvexError } from 'convex/values';
+import { networkFailure } from './network-fetch.js';
 import type { ContentPin, ExchangeTransport } from './native-exchange.js';
 import { mapExchange } from './exchange-parallel.js';
 import { putPreparedObjects, uploadPhysicalObjects } from './exchange-upload.js';
@@ -80,39 +82,26 @@ export class ConvexExchange implements ExchangeTransport {
     this.client.setAuth(token);
   }
   async current(expected?: MainExpectation) {
-    // Authority discovery selects the source API; server main never falls back
-    // to the uploaded owner's historical generation.
-    const value = await this.client.query(query('projectHostedAgent:capabilities'), {
-      projectId: this.projectId,
-      clientVersion: CUTOVER_CLI_VERSION,
-    });
-    const discovery = typeof value === 'string' ? JSON.parse(value) : value;
-    const authority = sourceAuthoritySchema.parse(discovery.authority);
-    const server = authority.mode === 'server';
-    const selected = await this.client.query(
-      query(server ? 'projectHostedChannels:current' : 'projectMain:current'),
-      {
-        projectId: this.projectId,
-        ...(server ? {} : { maxSchema: 2, ...(expected ? { expected } : {}) }),
-      },
-    );
-    const main = parseHostedResponse(
-      hostedMainSchema,
-      typeof selected === 'string' ? JSON.parse(selected) : selected,
-    );
-    invariant(
-      !server ||
-        (main.schema === 2 && main.authority.mode === 'server' && main.authority.epoch === authority.epoch),
-      'SOURCE_AUTHORITY_CHANGED',
-      'Hosted main and discovered authority differ.',
-    );
-    invariant(main.projectId === this.projectId, 'PROJECT_UNAVAILABLE', 'Select this hosted project.');
-    invariant(
-      !expected || (expected.head === main.head && expected.receiptId === main.receipt.id),
-      'CHANNEL_CHANGED',
-      'Hosted main changed from the expected head and receipt.',
-    );
-    return main;
+    // Server authority: one read. `projectHostedChannels:current` checks the project's authority
+    // against main in the same transaction, so discovery first only adds a round trip. Any refusal
+    // (a native-owner project, a missing hosted main) takes the discovery path below, whose own
+    // reads return the canonical error; network failures surface as they are.
+    let direct: unknown;
+    try {
+      direct = await this.client.query(query('projectHostedChannels:current'), { projectId: this.projectId });
+    } catch (error) {
+      // Only a server refusal (a coded reply) falls back; transport failures and cancellation surface.
+      if (!serverRefusal(error)) throw error;
+    }
+    if (direct !== undefined) {
+      const main = parseHostedResponse(
+        hostedMainSchema,
+        typeof direct === 'string' ? JSON.parse(direct) : direct,
+      );
+      if (main.schema === 2 && main.authority.mode === 'server')
+        return checkedMain(main, this.projectId, expected);
+    }
+    return discoveredMain(this.client, this.projectId, expected);
   }
   async objects(digests: string[]): Promise<ContentPin[]> {
     return this.client.query(query('projectMain:objects'), { projectId: this.projectId, digests });
@@ -548,4 +537,60 @@ export class ConvexExchange implements ExchangeTransport {
       this.client.action(action('projectWorkActions:exportJournal'), { projectId: this.projectId }),
     );
   }
+}
+
+/** A coded reply from the server (Convex application error or a mapped Forge refusal), never a
+ * transport failure, timeout or cancellation. */
+function serverRefusal(error: unknown) {
+  if (networkFailure(error)) return false;
+  if (error instanceof ConvexError) return true;
+  const code = (error as { code?: unknown } | null)?.code;
+  return typeof code === 'string' && code !== 'CANCELLED' && !code.startsWith('EXCHANGE_REQUEST_');
+}
+
+/** Authority discovery selects the source API; server main never falls back to the uploaded
+ * owner's historical generation. */
+async function discoveredMain(
+  client: Pick<ConvexHttpClient, 'query'>,
+  projectId: string,
+  expected?: MainExpectation,
+) {
+  const value = await client.query(query('projectHostedAgent:capabilities'), {
+    projectId,
+    clientVersion: CUTOVER_CLI_VERSION,
+  });
+  const discovery = typeof value === 'string' ? JSON.parse(value) : value;
+  const authority = sourceAuthoritySchema.parse(discovery.authority);
+  const server = authority.mode === 'server';
+  const selected = await client.query(
+    query(server ? 'projectHostedChannels:current' : 'projectMain:current'),
+    {
+      projectId,
+      ...(server ? {} : { maxSchema: 2, ...(expected ? { expected } : {}) }),
+    },
+  );
+  const main = parseHostedResponse(
+    hostedMainSchema,
+    typeof selected === 'string' ? JSON.parse(selected) : selected,
+  );
+  invariant(
+    !server ||
+      (main.schema === 2 && main.authority.mode === 'server' && main.authority.epoch === authority.epoch),
+    'SOURCE_AUTHORITY_CHANGED',
+    'Hosted main and discovered authority differ.',
+  );
+  return checkedMain(main, projectId, expected);
+}
+function checkedMain<T extends { projectId: string; head: string; receipt: { id: string } }>(
+  main: T,
+  projectId: string,
+  expected?: MainExpectation,
+): T {
+  invariant(main.projectId === projectId, 'PROJECT_UNAVAILABLE', 'Select this hosted project.');
+  invariant(
+    !expected || (expected.head === main.head && expected.receiptId === main.receipt.id),
+    'CHANNEL_CHANGED',
+    'Hosted main changed from the expected head and receipt.',
+  );
+  return main;
 }

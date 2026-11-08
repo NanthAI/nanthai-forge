@@ -1027,6 +1027,64 @@ test('HTTP plan pairs use verified canonical R2 bytes and reuse both digests on 
   );
 });
 
+test('HTTP plan stores the selection and recipe objects concurrently with the same R2 requests', async t => {
+  const s = await fixture(t);
+  await s.bind();
+  fakeSourceR2(t);
+  const r2Fetch = globalThis.fetch;
+  let inFlight = 0,
+    peak = 0;
+  const requests = [];
+  globalThis.fetch = async (url, init) => {
+    if (new URL(url).hostname === 'token.actions.githubusercontent.com') return jwks();
+    requests.push(init?.method ?? 'GET');
+    inFlight++;
+    peak = Math.max(peak, inFlight);
+    try {
+      // A fixed per-request delay: serial storage would never have two requests open.
+      await new Promise(resolve => setTimeout(resolve, 5));
+      return await r2Fetch(url, init);
+    } finally {
+      inFlight--;
+    }
+  };
+  const pins = {
+    head: s.run.request.expectedHead,
+    definition: s.run.check.definition,
+    selection: { scope: 'full', reason: 'synthetic overlap', tests: ['tests/a.test.mjs'] },
+    standard: true,
+    interaction: false,
+    command: ['node', 'scripts/forge-check.mjs'],
+  };
+  const recipePins = { ...pins, groups: [pins.selection.tests] },
+    recipe = { ...recipePins, pin: checkPin(recipePins) };
+  const ctx = {
+    runMutation: (ref, input) => {
+      const [name, method] = getFunctionName(ref).split(':');
+      return s.call(
+        { projectHostedActionsSession: sessions, projectHostedActionsPlan: plans }[name],
+        method,
+        input,
+      );
+    },
+  };
+  const response = await handle._handler(
+    ctx,
+    new Request(`${audience}/checks/actions`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${oidc()}` },
+      body: JSON.stringify({
+        ...s.id,
+        command: { kind: 'plan', plan: { recipe, lockfile: 'e'.repeat(64) } },
+      }),
+    }),
+  );
+  assert.equal(response.status, 200);
+  assert.equal(peak, 2, 'the two independent objects overlap their R2 round trips');
+  // Request count is unchanged: per object one reuse HEAD, one PUT and one verify HEAD.
+  assert.deepEqual(requests.toSorted(), ['HEAD', 'HEAD', 'HEAD', 'HEAD', 'PUT', 'PUT']);
+});
+
 test('legacy HTTP session shape remains a run with additive capabilities; unknown metadata is stripped', async t => {
   const s = await fixture(t);
   await s.bind();

@@ -105,6 +105,9 @@ export function LandingProgress({
                 ? `${run.check.name} · ${run.counts.completed} of ${run.plan?.shardCount ?? '…'} shards${run.endedAt ? ` · ${elapsed(run.at, run.endedAt)}` : ''}`
                 : 'No check selected'}
             </p>
+            {run?.configuration.provider === 'github-actions' && run.configuration.publicLogs && (
+              <p>Check logs are public in {run.configuration.repository}</p>
+            )}
             {state.tone === 'stale' && (
               <>
                 <p>
