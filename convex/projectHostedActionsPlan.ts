@@ -39,6 +39,12 @@ export const prepare = internalMutation({
       'EVIDENCE_CHANGED',
       'Actions plan differs from its source or configured command.',
     );
+    // An opaque command is never docs-scoped unless its check declared the docs paths.
+    invariant(
+      standard || recipe.selection.scope !== 'docs' || run.check.docsPaths?.length,
+      'EVIDENCE_CHANGED',
+      'Actions plan skipped a command whose check declares no docs paths.',
+    );
     const tests = recipe.groups.flat();
     invariant(
       new Set(tests).size === tests.length &&
@@ -103,7 +109,10 @@ export const prepare = internalMutation({
     const selection = savePin(recipe.selection),
       manifest = savePin(recipe);
     // Tests the change's paths do not reach are skipped, not pending (Issue 9e71abcc).
-    const skipped = recipe.groups.length === 0 ? testsNotAffected(recipe.selection, standard) : undefined;
+    const skipped =
+      recipe.groups.length === 0
+        ? testsNotAffected(recipe.selection, standard, run.check.docsPaths)
+        : undefined;
     // Allow entries the change adds against main (Issue 93e14bb0), for the receipt mark. A malformed
     // value is dropped: the landing then marks the allow-file change as unscanned and still alerts.
     const allowChanges = secretAllowEvidenceSchema.safeParse(

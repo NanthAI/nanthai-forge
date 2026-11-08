@@ -900,6 +900,11 @@ A hosted check definition may declare an optional Actions preparation command:
 {"name":"verify","executable":"node","args":["scripts/forge-check.mjs"],"environmentLabel":"Node 24","actions":{"setup":{"executable":"/opt/forge/warm-cache","args":[]}}}
 ```
 
+A definition may also declare `docsPaths` (globs; see
+[docs-only paths](../pre-queue-checks.md#docs-only-paths)). A change whose every path
+matches them runs no command on the Actions runner, and the server refuses a
+docs-scoped plan for a command whose check declares none.
+
 `actions.setup` belongs to the App/OIDC Actions supervisor, including when that
 workflow uses a self-hosted runner. Other runner providers do not use this
 Actions-specific option. The definition digest includes the command. It runs once

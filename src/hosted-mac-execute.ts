@@ -32,6 +32,7 @@ import { canonicalPayload } from './hosted-source-operation.js';
 import { digest } from './hash.js';
 import { HostedMacProvider } from './hosted-mac-worker.js';
 import { invariant } from './errors.js';
+import { declaredTestedDocs } from './docs-paths.js';
 import {
   changedStatePaths,
   scanSecretPaths,
@@ -151,10 +152,16 @@ export async function executeHostedMacCheck(
           )
         : undefined,
     );
+    const testedDocsList = declaredTestedDocs(
+      run.check.docsPaths,
+      state.files.map(file => file.path),
+    );
     const selection = await publish({
       scope: 'full',
       tests: [],
       semanticTests: semanticTests(run.semanticPlan),
+      // The full command always runs here; declared docs paths only say which Markdown no test reads.
+      ...(testedDocsList ? { testedDocs: testedDocsList } : {}),
     });
     const manifest = await publish({
       head: run.request.expectedHead,

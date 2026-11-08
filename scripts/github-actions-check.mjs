@@ -61,11 +61,15 @@ export function runActionsCheck(execute = execFileSync, { install = true, build 
   const npmLocked = existsSync('package-lock.json') || existsSync('npm-shrinkwrap.json');
   const unitPart = part !== undefined && part !== 'kept';
   try {
-    if (install && !unitPart && (plan.standard || npmLocked))
+    // A docs-only change to an opaque command (its check's docsPaths) runs nothing, so no install either.
+    const skipsCommand = !plan.standard && plan.selection?.scope === 'docs';
+    if (install && !unitPart && !skipsCommand && (plan.standard || npmLocked))
       phases.time('install', () => npm('ci', '--ignore-scripts'));
     if (!plan.standard) {
       if (shard !== 'static') throw new Error('Arbitrary commands have only a static job.');
-      phases.time('command', () => run(plan.command[0], plan.command.slice(1)));
+      if (skipsCommand)
+        console.log(`Command not run: ${plan.selection.reason}. Set the check's docsPaths to change this.`);
+      else phases.time('command', () => run(plan.command[0], plan.command.slice(1)));
     } else if (shard === 'static') {
       // verify reads only scope and tests. Selection reasons can exceed Linux's 128 KiB
       // per-variable limit, which makes the child spawn fail with E2BIG.

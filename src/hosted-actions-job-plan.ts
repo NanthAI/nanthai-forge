@@ -22,6 +22,7 @@ import type { NativeState } from './native-state-format.js';
 import { refreshSourcePack } from './source-pack.js';
 import { refreshActionsSourcePack } from './hosted-actions-job-pack.js';
 import { testedDocs } from './tested-docs.js';
+import { declaredTestedDocs, docsOnlyChange } from './docs-paths.js';
 import { scanSecretPaths, SECRET_SCAN_ALLOW_FILE } from './secret-scan.js';
 /** The base (main) allow file's bytes. Usually cached already (unchanged, or from the base
  * pack); otherwise one small object read, only when the base has the file. Unreadable
@@ -92,7 +93,10 @@ export async function prepareActionsJob(
   );
   // Markdown that tests or scripts read: a clean merge of any other Markdown can
   // land on its first check (Issue 7fe54c7c). Absent means every Markdown is tested.
-  const docs = standard ? testedDocs(files.keys(), path => files.get(path)) : undefined;
+  // An opaque command has no Forge selector: only its declared docs paths say which Markdown is untested.
+  const docs = standard
+    ? testedDocs(files.keys(), path => files.get(path))
+    : declaredTestedDocs(run.check.docsPaths, files.keys());
   // Landing secret scan (src/secret-scan.ts): changed paths only, from bytes already cached.
   // Allow entries come from the composition base (main), never from the Candidate (R-01).
   const scanStarted = performance.now();
@@ -246,9 +250,24 @@ function gateSelection(
   standard: boolean,
   mainPaths: string[] | null,
 ) {
-  if (!standard) return { scope: 'full', reason: 'Exact configured command', tests: [] as string[] };
   const gate = run.gate;
   const union = semanticTests(run.semanticPlan);
+  if (!standard) {
+    // Opt-in `docsPaths` (like paths-ignore): a change that touches only those paths runs no command.
+    // Audit and probe runs and composed Intent contract tests always keep the whole command.
+    if (
+      docsOnlyChange(run.check?.docsPaths, paths) &&
+      gate?.mode !== 'audit' &&
+      gate?.mode !== 'probe' &&
+      !union.length
+    )
+      return {
+        scope: 'docs',
+        reason: 'Every changed path matches the check’s docs paths',
+        tests: [] as string[],
+      };
+    return { scope: 'full', reason: 'Exact configured command', tests: [] as string[] };
+  }
   const forceFull = gate?.mode === 'audit' || (gate?.mode === 'full' && union.length > 0);
   const env = forceFull
     ? { FORGE_CHECK_FULL: '1' }

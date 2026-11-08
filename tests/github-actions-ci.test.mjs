@@ -282,6 +282,44 @@ test('arbitrary Actions commands get npm ci only in npm-locked projects', t => {
   ]);
 });
 
+test('a docs-only plan for an arbitrary command runs no command and no install', t => {
+  const { root, write } = fixture(t);
+  const previous = {
+    cwd: process.cwd(),
+    plan: process.env.FORGE_ACTIONS_PLAN,
+    shard: process.env.FORGE_ACTIONS_SHARD,
+  };
+  t.after(() => {
+    process.chdir(previous.cwd);
+    for (const [key, value] of [
+      ['FORGE_ACTIONS_PLAN', previous.plan],
+      ['FORGE_ACTIONS_SHARD', previous.shard],
+    ])
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+  });
+  write('package-lock.json', '{"lockfileVersion":3}');
+  process.chdir(root);
+  process.env.FORGE_ACTIONS_PLAN = join(root, 'plan.json');
+  process.env.FORGE_ACTIONS_SHARD = 'static';
+  const calls = [],
+    execute = (command, args) => calls.push([command, ...args]);
+  const plan = selection => ({ standard: false, command: ['bash', '.bench/ci.sh'], groups: [], selection });
+  write(
+    'plan.json',
+    JSON.stringify(plan({ scope: 'docs', reason: 'Every changed path matches', tests: [] })),
+  );
+  runActionsCheck(execute);
+  assert.deepEqual(calls, []);
+  // Any other scope, or a plan with no selection, still runs the whole command.
+  write('plan.json', JSON.stringify(plan({ scope: 'full', reason: 'Exact configured command', tests: [] })));
+  runActionsCheck(execute);
+  assert.deepEqual(calls, [
+    ['npm', 'ci', '--ignore-scripts'],
+    ['bash', '.bench/ci.sh'],
+  ]);
+});
+
 test('explicit lists are not silently ignored by arbitrary commands', async t => {
   const { root, write } = fixture(t);
   write('a.txt', 'fixture');

@@ -175,8 +175,9 @@ Each tier answers a different question. None depends on a particular CI provider
 - Proved reuse works with any configured check command on any runner: the rule
   reads paths, manifests and the run's selection, never the command's own test
   selection. It needs owner-agent automatic acceptance. A Markdown overlap lands
-  on its first check only when the runner pinned a tested-docs list, which today
-  only Forge's own selector does; other commands recheck such an overlap.
+  on its first check only when the runner pinned a tested-docs list. Forge's own
+  selector writes one; any other command writes it from its check's opt-in
+  [`docsPaths`](#docs-only-paths) and otherwise rechecks such an overlap.
 - Changes that land on their first check publish one by one, each proved against
   the main it lands on. A wave of k such changes makes up to k(k+1)/2 proof
   analyses (one action each, reading six small objects) and gives up the shared
@@ -184,6 +185,35 @@ Each tier answers a different question. None depends on a particular CI provider
   recheck (5-change fixture wave: 51 to 65) while it saves a full check per change.
 - No polling: a Lane check wakes its submission only when its run reaches a
   terminal state, as admission did before. Idle costs nothing.
+
+## Docs-only paths
+
+A check definition may declare `docsPaths`, repository-relative globs of files that
+no test or build reads (`**/*.md`, `docs/**`, `LICENSE`; same glob syntax as
+`acceptance.protectedPaths`; at most 32). It works like GitHub's `paths-ignore` and
+is **off by default**: a check without it always runs its whole command, and every
+Markdown overlap rechecks. Declare it with `configure-check`:
+
+```sh
+nforge x ROOT configure-check '{"command":{"name":"verify","executable":"bash","args":["ci/check.sh"],"environmentLabel":"","docsPaths":["**/*.md","docs/**"]}}'
+```
+
+- **Docs-only change.** When every path a Candidate changes against its base matches
+  `docsPaths`, the Actions runner runs no command and no install; the plan has the
+  static job alone and the receipt records `skipped: tests not-affected`, as for
+  Forge's own docs-only changes. Any other changed path runs the whole command.
+  Audit runs, failed-file probes and composed Intent contract tests always run it.
+- **Docs-only overlap.** A Markdown file matching `docsPaths` is pinned as untested,
+  so a text-clean overlap of it after an overtake lands on its first check; every
+  Markdown file outside the globs counts as read and rechecks. Overlaps of
+  non-Markdown files always recheck. The Mac and self-hosted runners run the full
+  command either way but pin the same list.
+- **Forge's own check** (`node scripts/forge-check.mjs`) ignores the setting: its
+  selector already knows which tests read which document, which is strictly
+  better than a path list.
+- The globs are part of the definition digest. Declare only paths nothing reads: a
+  glob such as `**` skips every check, and a change to the check's own entry file
+  under a declared path would run nothing.
 
 ## When to turn it off
 

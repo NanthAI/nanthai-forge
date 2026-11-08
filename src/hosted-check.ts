@@ -33,6 +33,7 @@ export function hostedCheckDefinition(command: unknown, id: string, at: string) 
     ...(c.measureResources ? { measureResources: true } : {}),
     ...(c.declaredInputs?.length ? { declaredInputs: c.declaredInputs } : {}),
     ...(c.actions ? { actions: c.actions } : {}),
+    ...(c.docsPaths?.length ? { docsPaths: [...new Set(c.docsPaths)] } : {}),
   };
   return checkSchema.parse({ ...fields, id, at, definition: digest(JSON.stringify(fields)) });
 }
@@ -111,13 +112,16 @@ export const checkSkippedSchema = z
   .strict();
 export type CheckSkipped = z.infer<typeof checkSkippedSchema>;
 /** Decided from the selection the planner already made from the changed paths:
- * the standard check selects no test for a docs-only change. Opaque (bring-your-own)
- * commands have no Forge-known scope, so they always run in full and never skip. */
+ * the standard check selects no test for a docs-only change. An opaque (bring-your-own)
+ * command has no Forge-known scope and always runs in full, unless its check declares
+ * `docsPaths` (opt-in, like `paths-ignore`) and every changed path matches them. */
 export function testsNotAffected(
   selection: { scope: string; reason?: string; tests: readonly string[] },
   standard: boolean,
+  docsPaths?: readonly string[],
 ): CheckSkipped | undefined {
-  if (!standard || selection.scope !== 'docs' || selection.tests.length) return undefined;
+  if (!(standard || docsPaths?.length) || selection.scope !== 'docs' || selection.tests.length)
+    return undefined;
   return {
     part: 'tests',
     status: 'not-affected',

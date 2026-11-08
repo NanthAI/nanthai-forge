@@ -10,6 +10,7 @@ import { landingEntrySchema, landingBatchSchema } from './landing-batch-types.js
 import { checkBackendSchema } from './check-backend.js';
 import { hostedRecoverySchema } from './recovery-hosted-protocol.js';
 import { z } from 'zod';
+import { docsPathsSchema } from './docs-paths.js';
 import { landingMessageSchema, cohortMessagesSchema } from './landing-message.js';
 import { deliveryHandoffSchema } from './agent-handoff-types.js';
 import { githubSyncSchema, githubSyncHistorySchema, githubAutoPushSchema } from './github-sync-types.js';
@@ -366,6 +367,7 @@ export const checkSchema = z.object({
   measureResources: z.boolean().optional(),
   declaredInputs: z.array(declaredInputSchema).optional(),
   actions: checkActions.optional(),
+  docsPaths: docsPathsSchema.optional(),
   definition: oid,
   at: z.string(),
 });
@@ -1206,6 +1208,7 @@ export const defineCheckCommandSchema = z.object({
   measureResources: z.boolean().optional(),
   declaredInputs: z.array(declaredInputSchema).optional(),
   actions: checkActions.optional(),
+  docsPaths: docsPathsSchema.optional(),
 });
 export const commandSchema = z.discriminatedUnion('action', [
   z.object({

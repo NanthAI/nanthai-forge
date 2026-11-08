@@ -82,7 +82,7 @@ const jwks = () =>
       },
     ],
   });
-async function fixture(t, shards = 2, runsOn = 'ubuntu-latest') {
+async function fixture(t, shards = 2, runsOn = 'ubuntu-latest', opaque = null) {
   variables(t, {
     CONVEX_SITE_URL: audience,
     CONVEX_CLOUD_URL: 'https://forge.convex.cloud',
@@ -116,7 +116,16 @@ async function fixture(t, shards = 2, runsOn = 'ubuntu-latest') {
   };
   bindRepository(t, s.projectId, repository);
   const configuration = await s.configure({ kind: 'runner', configuration: runner }, s.configuration.digest);
-  const run = await s.enqueue(s.selection({ expectedConfiguration: configuration.digest }));
+  // An opaque (bring-your-own) command replaces the standard check definition.
+  const definition = opaque
+    ? await s.configure(
+        { kind: 'definition', checkId: s.definition.value.id, command: opaque },
+        s.definition.digest,
+      )
+    : s.definition;
+  const run = await s.enqueue(
+    s.selection({ expectedConfiguration: configuration.digest, expectedDefinition: definition.digest }),
+  );
   const id = { projectId: s.projectId, runId: run.id };
   const call = (module, method, args) => s.transaction(`direct-${method}`, module[method], args);
   const reserve = () => call(direct, 'reserve', id);
@@ -126,17 +135,17 @@ async function fixture(t, shards = 2, runsOn = 'ubuntu-latest') {
     return reserved;
   };
   const input = (overrides = {}) => ({ ...id, claims: JSON.stringify(claims()), ...overrides });
-  const prepare = async () => {
+  const prepare = async (selection = null) => {
     const r = await s.status(run.id),
-      groups = Array.from({ length: shards - 1 }, (_, i) => [`tests/synthetic-${i}.test.mjs`]);
+      groups = opaque ? [] : Array.from({ length: shards - 1 }, (_, i) => [`tests/synthetic-${i}.test.mjs`]);
     const pins = {
       head: r.request.expectedHead,
       definition: r.check.definition,
-      selection: { scope: 'full', reason: 'synthetic', tests: groups.flat() },
+      selection: selection ?? { scope: 'full', reason: 'synthetic', tests: groups.flat() },
       groups,
-      standard: true,
+      standard: !opaque,
       interaction: false,
-      command: ['node', 'scripts/forge-check.mjs'],
+      command: opaque ? [opaque.executable, ...opaque.args] : ['node', 'scripts/forge-check.mjs'],
     };
     const recipe = { ...pins, pin: checkPin(pins) };
     const selectionStorage = 'selection-storage',
@@ -316,6 +325,22 @@ function webhook(s, action = 'completed', conclusion = 'cancelled', overrides = 
     },
   };
 }
+const docsOnly = { scope: 'docs', reason: 'Every changed path matches the check’s docs paths', tests: [] };
+const ciCommand = { name: 'verify', executable: 'bash', args: ['ci/check.sh'], environmentLabel: 'clean' };
+test('a docs-scoped plan for an opaque command needs the check to declare docs paths, then records skipped tests', async t => {
+  const undeclared = await fixture(t, 2, 'ubuntu-latest', ciCommand);
+  await undeclared.bind();
+  await assert.rejects(undeclared.prepare(docsOnly), code('EVIDENCE_CHANGED'));
+  assert.equal((await undeclared.status(undeclared.run.id)).plan, null);
+  // The same command still plans a full run.
+  await undeclared.prepare();
+  const declared = await fixture(t, 2, 'ubuntu-latest', { ...ciCommand, docsPaths: ['**/*.md', 'docs/**'] });
+  await declared.bind();
+  await declared.prepare(docsOnly);
+  const plan = (await declared.status(declared.run.id)).plan;
+  assert.equal(plan.shardCount, 1);
+  assert.deepEqual(plan.skipped, { part: 'tests', status: 'not-affected', reason: docsOnly.reason });
+});
 test('duplicate results are immutable and complete shard evidence is needed to pass', async t => {
   const s = await fixture(t);
   await s.bind();
