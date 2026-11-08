@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { globPattern, type AcceptanceActor, type AutonomyPolicy } from './autonomy-policy.js';
-import { DEFAULT_OWNER_APPROVAL_PATHS } from './public-governance.js';
+import { ownerApprovalMatcher } from './public-governance.js';
 import type { CheckGate, MainGate } from './bet2-gate.js';
 
 export type GateInput = {
@@ -13,13 +13,15 @@ export type GateInput = {
   /** B2.6, only when `policy.trust.enabled`: trust can demote a contract-eligible actor to the full gate, never grant more. */
   trust?: { level: 'supervised' | 'trusted' | 'autonomous'; reason: string } | null;
 };
-export function protectedGatePaths(policy: AutonomyPolicy, paths: string[] | null) {
+export function protectedGatePaths(
+  policy: AutonomyPolicy,
+  paths: string[] | null,
+  check?: { executable: string; args: readonly string[] } | null,
+) {
   if (paths === null) return true;
-  const patterns = [
-    ...(policy.acceptance.ownerApprovalPaths ?? DEFAULT_OWNER_APPROVAL_PATHS),
-    ...policy.acceptance.protectedPaths,
-  ].map(globPattern);
-  return paths.some(path => patterns.some(pattern => pattern.test(path)));
+  const approval = ownerApprovalMatcher(policy, check);
+  const patterns = policy.acceptance.protectedPaths.map(globPattern);
+  return paths.some(path => approval(path) || patterns.some(pattern => pattern.test(path)));
 }
 /** Eligibility is recomputed from current server policy, never request gate metadata. */
 export function gateFor(input: GateInput): CheckGate {

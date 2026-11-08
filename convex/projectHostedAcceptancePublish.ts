@@ -224,7 +224,7 @@ export async function publishAcceptance(
     attempt.actor.id === project.owner &&
     policy.acceptance.mode === 'auto-on-pass' &&
     policy.acceptance.gate === 'contract' &&
-    !protectedGatePaths(policy, candidate.governance?.paths ?? null);
+    !protectedGatePaths(policy, candidate.governance?.paths ?? null, run?.check);
   const gate =
     run && !ownerReview && !reuse
       ? await hostedAcceptGate(ctx, project, candidate, attempt.actor, run)
@@ -245,7 +245,7 @@ export async function publishAcceptance(
   const protectedReason =
     policy.acceptance.gate === 'contract' &&
     !(actor.kind === 'person' && actor.id === project.owner) &&
-    protectedGatePaths(policy, candidate.governance?.paths ?? null) &&
+    protectedGatePaths(policy, candidate.governance?.paths ?? null, run?.check) &&
     !(actor.id === project.owner && candidate.governance?.ownerInputs)
       ? 'needs owner approval: protected or unknown paths'
       : null;
@@ -258,6 +258,7 @@ export async function publishAcceptance(
       actor,
       candidate.governance?.paths ?? null,
       candidate.governance?.ownerInputs,
+      run?.check,
     ) ??
     protectedReason ??
     secretAllowReview(policy, actor, secretAllowAdded);

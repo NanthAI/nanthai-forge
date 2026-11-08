@@ -9,6 +9,7 @@ import { composeFixture } from './hosted-compose-fixture.mjs';
 import { code } from './hosted-landing-fixture.mjs';
 import { policyPreset, policyWriteSchema } from '../dist/autonomy-policy.js';
 import { governanceReason, DEFAULT_OWNER_APPROVAL_PATHS } from '../dist/public-governance.js';
+import { protectedGatePaths } from '../dist/contract-gate-policy.js';
 import { hostedLandingRequestSchema } from '../dist/hosted-landing.js';
 import { hostedLandingDesiredSchema } from '../dist/hosted-landing-desired.js';
 import { z } from 'zod';
@@ -381,6 +382,65 @@ test('contributor person authority cannot bypass passing checks or protected pat
   const g = await publicFixture();
   const unchecked = await prepared(g, ['src/app.ts'], 'contributor', false, false, false);
   await assert.rejects(g.accept(unchecked, 'contributor'), code('CHECK_NOT_PASSED'));
+});
+
+// Issue 56bf031f: every project's own check entry files are owner-approval paths by default.
+async function projectCheckFixture(args) {
+  const f = await publicFixture();
+  f.rawChecks.definition = await f.rawChecks.configure(
+    {
+      kind: 'definition',
+      checkId: f.rawChecks.checkId,
+      command: { name: 'verify', environmentLabel: 'clean', executable: 'bash', args },
+    },
+    f.rawChecks.definition.digest,
+  );
+  // The fixture's selection captured the first definition; select the reconfigured one.
+  const select = f.rawChecks.selection;
+  f.rawChecks.selection = overrides =>
+    select({ expectedDefinition: f.rawChecks.definition.digest, ...overrides });
+  return f;
+}
+test('a contributor change to the project check entry needs owner approval; Forge defaults and ordinary paths are unchanged', async () => {
+  const f = await projectCheckFixture(['.bench/ci.sh']);
+  const state = await prepared(f, ['.bench/ci.sh', 'src/app.ts'], 'contributor', true);
+  const result = await f.accept(state, 'contributor');
+  assert.equal(result.status, 'pending');
+  assert.equal(result.reason, 'needs owner approval: protected paths .bench/ci.sh');
+  assert.equal(f.currentMain().sourceRevision, 0);
+  assert.equal(
+    JSON.parse(await f.transaction('ownerApprove', api.approve, f.select(state))).status,
+    'landed',
+  );
+  // Forge's own protected path still needs approval; an ordinary path still auto-lands.
+  const g = await projectCheckFixture(['.bench/ci.sh']);
+  assert.match(
+    (await g.accept(await prepared(g, ['.github/workflows/deploy.yml']), 'contributor')).reason,
+    /protected paths \.github\/workflows\/deploy\.yml/,
+  );
+  const h = await projectCheckFixture(['.bench/ci.sh']);
+  assert.equal((await h.accept(await prepared(h, ['src/app.ts']), 'contributor')).status, 'landed');
+  // The owner's own agent Lane keeps the owner exemption.
+  const i = await projectCheckFixture(['.bench/ci.sh']);
+  assert.equal((await i.accept(await prepared(i, ['.bench/ci.sh'], 'owner', true, true))).status, 'landed');
+});
+
+test('check entry protection is a default: unrelated project files, path-free checks and explicit lists are unaffected', () => {
+  const project = { owner: 'owner', visibility: 'public' },
+    actor = { id: 'contributor', kind: 'agent' },
+    policy = policyPreset('trusted'),
+    check = { executable: 'bash', args: ['.bench/ci.sh'] };
+  const reason = (paths, run, p = policy) => governanceReason(project, p, actor, paths, false, run);
+  assert.equal(reason(['.bench/ci.sh']), null, 'no check: not protected');
+  assert.match(reason(['.bench/ci.sh'], check), /protected paths \.bench\/ci\.sh/);
+  assert.equal(reason(['.bench/other.sh', 'src/a.ts'], check), null);
+  assert.equal(reason(['package.json'], { executable: 'npm', args: ['test'] }), null);
+  assert.match(reason(['scripts/forge-check.mjs'], check), /protected paths/);
+  const explicit = { ...policy, acceptance: { ...policy.acceptance, ownerApprovalPaths: ['deploy/**'] } };
+  assert.equal(reason(['.bench/ci.sh'], check, explicit), null, 'an explicit list replaces the defaults');
+  assert.equal(protectedGatePaths(policy, ['.bench/ci.sh']), false);
+  assert.equal(protectedGatePaths(policy, ['.bench/ci.sh'], check), true);
+  assert.equal(protectedGatePaths(policy, ['src/a.ts'], check), false);
 });
 
 test('contributor ordinary changes auto-land; owner own protected Lane auto-lands; review policy still applies', async () => {
