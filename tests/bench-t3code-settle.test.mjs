@@ -198,6 +198,10 @@ test('run-cell task-error and abnormal cleanup observe before close and retain i
       ws: '/synthetic',
       dir: '/synthetic/evidence',
       tasks: [],
+      // A ten-task cell: no coordination start signal (cells.mjs).
+      cellKind: null,
+      arrive: () => assert.fail('only coordination cells wait for the start signal'),
+      startSignal: Promise.resolve(),
       config: {},
       bin: '/synthetic/bin',
       shared: null,
@@ -240,6 +244,51 @@ test('run-cell task-error and abnormal cleanup observe before close and retain i
     } else await runInNewContext(`(${fn('crash')})`, context)('synthetic crash');
     assert.deepEqual(calls, ['observe', 'close']);
   }
+});
+
+test('coordination cell: a workspace that fails before the start signal still arrives once', async () => {
+  let arrived = 0;
+  const landing = { landed: false, state: 'abandoned', inFlight: [] };
+  const context = {
+    join,
+    Date,
+    Map,
+    Object,
+    String,
+    Promise,
+    console,
+    arm: 'forge',
+    ws: '/synthetic',
+    dir: '/synthetic/evidence',
+    tasks: [],
+    cellKind: 'convoy',
+    arrive: () => arrived++,
+    startSignal: new Promise(() => {}), // never released: the failed task must not wait for it
+    config: {},
+    bin: '/synthetic/bin',
+    shared: null,
+    depsEnv: {},
+    objectCache: '/synthetic/cache',
+    lanes: new Map(),
+    records: [],
+    crashing: false,
+    forge: {
+      startLane: async () => 'lane',
+      agentEnv: async () => {
+        throw Error('synthetic setup failure');
+      },
+      landing: async () => landing,
+      closeTask: async () => ({}),
+      removeRoot: async () => ({ removed: true }),
+    },
+    event: () => {},
+    process: { env: {} },
+    landingFields: value => ({ landing: value }),
+  };
+  const dispatch = runInNewContext(`(${fn('dispatch')})`, context);
+  const record = await dispatch({ id: 'c01', prompt: 'synthetic' }, 1);
+  assert.equal(arrived, 1);
+  assert.match(record.harnessError, /synthetic setup failure/);
 });
 
 test('call-start journal stays local at dogfood scale and double scale', t => {

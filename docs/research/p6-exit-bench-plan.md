@@ -134,8 +134,85 @@ Against B1.5d ([b15d-report.md](b15d-report.md)), as Forge's % lead over GitHub 
    next to the B1.5d report: time to main, wall, workspace prep (B1.5d: Forge 15.3 s,
    GitHub 4.5 s median), per-step CLI latency, queue wait and notice delivery.
 
+Coordination lines (owner 2026-11-08, binding), from the sections below:
+
+10. **Rework tokens and turns per landing:** Forge lower than GitHub at every N (1, 3, 5, 10),
+    on rework cached input, rework output and rework turns per landing.
+11. **Convoy cell passes at N = 16** in the Forge arm: every landing's time to main is at most
+    1.3 x the cell's median Lane check wall + 2 min.
+12. **Order waits against independent entries = 0** in every Forge convoy cell.
+
+The stacking A/B (offer against auto-stack) is reported, not judged: it chooses the default.
+
 Trade-offs count only for security or another user-facing improvement, each named with its
 cost.
+
+## Rework tokens per landing (new, bf130503)
+
+Every cell, both arms, is classified offline by `phases.mjs` (deterministic; no product calls).
+Each model response (turn) of a task's session (`<task>.transcript.jsonl`, else the
+`stream-json` output) gets one phase from the source commands it runs (`nforge`, `git`, `gh`)
+and the results of the source commands before it:
+
+- `coding`: before the first save, push, pull request or landing request;
+- `landing`: from then to acceptance; the turn that sends a landing attempt is landing;
+- `rework`: after a result that reports a conflict (`COMPOSITION_CONFLICT`, `WORK_CONFLICT`,
+  conflict markers, `CONFLICT (`, `mergeStateStatus DIRTY`), `CHANNEL_CHANGED`,
+  `CHECK_FAILED` or a failed run, a removal from the merge queue, a failed rebase or a
+  rejected push, until the next landing attempt (Forge `land`/`finish`; GitHub `git push`
+  or `gh pr merge`);
+- `waiting`: a landing-phase turn whose only commands are status reads or polls (`status`,
+  `wait`, `observe`, `queue`; `gh pr view|checks|status`, `gh run`, read-only `gh api`;
+  `sleep`);
+- `done`: after acceptance (a `LANDED` receipt, a merged pull request).
+
+Help output and non-source commands (file reads, local tests) never start rework; a timeline
+event or failed-run line shown again on a later read counts once. In the Forge arm the relay's
+call log is joined to the session's `nforge` commands by order and verb, so structured error
+codes count even when the agent printed only part of a receipt; the join coverage is reported
+per task. Per cell (`result.rework`, `rework.mjs`): per landing, the median of rework cached
+input, rework output, rework turns, waiting turns and rework episodes with a 95% bootstrap
+interval (seed 1, 10,000 resamples); sums; and the mean per landing (cell sum / landings, so a
+task that never landed still counts against its arm). Line 10 compares the mean per landing,
+Forge minus GitHub, paired by rep (an extra rep is its own pair), with the
+[perf-claims](../agents/perf-claims.md) interval; with fewer than 11 pairs it is an observation.
+Re-syncs per task are counted from the same sessions; rechecks come from the Forge metrics
+read the cell already makes (`forgeFallbacks`) and GitHub's merge-queue runs (`coordination`).
+
+## Coordination cells (new, bf130503)
+
+Run after the ten-task batches with `drive.mjs --coordination` (or `--only convoy-n16-r1`),
+under the same holds, version guard, void and re-run rules. Tasks are generated from the base
+checkout's workspace manifest (`cells.mjs`, `package.json` workspaces or
+`pnpm-workspace.yaml`): N distinct packages chosen by the seed
+`p6-coordination-2026-11-08/<kind>/n<N>`, the same for every arm and rep of that N, one task
+per agent. Each task adds a new module and its unit test to its package and changes no existing
+file there. All N workspaces are prepared first; the agents then start on one signal
+(`result.startSignal`), so every task's time to main runs from the same moment. The cells
+measure landing, so they are graded by scope (landed, changed paths inside the package plus the
+hot file, the function present), not by hidden tests. Arms run one after the other (never 2N
+agents at once), the first arm rotating with the rep.
+
+- **Convoy:** N = 16, 8 and 4, reps 1 and 2, arms GitHub and Forge. Different packages and new
+  files only, so every pair of entries is independent. Pass (line 11): every task landed and
+  each time to main <= 1.3 x the median Lane check wall + 120 s. The Lane check wall is the
+  landed submission's check (`checkReservedAt` to `ciEndedAt`) in Forge and the pull
+  request's last passing `pull_request` run in GitHub. Line 12: the relay records every order
+  wait an agent was shown (`orderWaits`, from the receipt's `orderWait`) and the submissions a
+  call names as its own; a wait behind another task's submission is a wait against an
+  independent entry, and a wait the cell cannot attribute counts against the pass too.
+  Receipts do not yet record order waits (D1, Issue c6b81429); until they do, a wait the agent
+  never read is not seen, and the post-check hold (`ciEndedAt` to `committedAt`) is reported
+  next to it.
+- **Overlap:** N = 8 and 4, reps 1 and 2, arms GitHub, Forge with the stacking offer and Forge
+  with auto-stack. Each task also adds one line at the end of one shared hot file
+  (`README.md` at the repository root), so every pair edits the same lines. Reported: rework
+  tokens, turns and conflict repairs per landing, each Forge arm against GitHub, and auto
+  against offer (the stacking A/B; it picks the default). The Forge arms set the project's
+  stacking setting before the cell, outside its timing, with the CLI action and body in
+  `config.forge.stacking.offer` / `.auto` (or `{"default": true}` for the mode the project
+  already has); a cell without them stops (`BENCH_STACK_SETTING_MISSING`). The auto-stack
+  setting comes with D2 (Issue 1eb42254); until it lands only the GitHub and offer arms can run.
 
 ## Convex per-function attribution (moved here from the B1.5d plan copy)
 
@@ -170,4 +247,7 @@ minutes billed). The driver stops when the Forge arm's Convex spend reaches its 
 5. `node scripts/bench-t3code/drive.mjs` (resumable: re-run the same command after any stop).
    Its `CELL` lines (START, WAIT, DONE, BATCH, REP3, OUTLIER, ALL DONE) are the lead's
    Monitor feed.
-6. `node scripts/bench-t3code/summarize.mjs`.
+6. `node scripts/bench-t3code/drive.mjs --coordination` (resumable like step 5): the convoy and
+   overlap cells.
+7. `node scripts/bench-t3code/summarize.mjs`: `rework` holds lines 10-12 and the stacking A/B.
+   `node scripts/bench-t3code/rework.mjs RUN_DIR...` re-reads retained cells offline.

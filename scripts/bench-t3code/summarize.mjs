@@ -9,6 +9,7 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { benchRootOrExit } from './bench-root.mjs';
 import { summarizeRunners, runnerFairness } from './runners.mjs';
+import { reworkSummary } from './rework.mjs';
 
 const B = benchRootOrExit();
 const dry = process.argv.includes('--dry');
@@ -38,7 +39,10 @@ const batches = existsSync(batchDir)
 const inValidBatch = new Set(
   batches.filter(b => !b.voided?.length).flatMap(b => (b.cells ?? []).map(c => c.cellId)),
 );
-const usable = cells.filter(r => !r.voided?.length && inValidBatch.has(r.cellId));
+const usableAll = cells.filter(r => !r.voided?.length && inValidBatch.has(r.cellId));
+// Coordination cells (cells.mjs) have their own N and tasks; they never mix into byArmN.
+const usable = usableAll.filter(r => !r.coordinationCell);
+const coordinationCells = usableAll.filter(r => r.coordinationCell);
 const okTasks = r =>
   (r.records ?? []).filter(t => t && !t.harnessError && !(r.taskVoids ?? []).includes(t.task));
 const baseline = {};
@@ -234,6 +238,9 @@ console.log(
             (m.missedRealConflicts ?? 0) + (r.coordination?.metric4?.missed?.length ?? 0);
           return m;
         }, {}),
+      // Rework tokens and turns per landing (phases.mjs), Forge against GitHub with bootstrap
+      // intervals over the reps; coordination cells: convoy verdicts and the stacking A/B.
+      rework: reworkSummary(usable, coordinationCells),
       // Leftover land-gate cost per Forge task (preflight after save, unanswered overlap).
       forgeGateTime: Object.fromEntries(
         Object.entries(

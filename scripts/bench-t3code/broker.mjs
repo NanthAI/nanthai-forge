@@ -112,6 +112,22 @@ export function coordinationOf(args, output) {
   return { notices, answers };
 }
 
+/** Order waits a call reported (a passed entry parked behind an older submission) and the
+ * submissions it names as its own, for the convoy cell's order-wait line (Issue bf130503). */
+export function waitsOf(output) {
+  const orderWaits = new Set(),
+    submissionIds = new Set();
+  const uuid = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
+  const wait = new RegExp(
+    `waiting for older submission (${uuid})|"orderWait"\\s*:\\s*\\{[^}]*?"submissionId"\\s*:\\s*"(${uuid})"`,
+    'g',
+  );
+  for (const m of String(output).matchAll(wait)) orderWaits.add(m[1] ?? m[2]);
+  for (const m of String(output).matchAll(new RegExp(`"submissionId"\\s*:\\s*"(${uuid})"`, 'g')))
+    if (!orderWaits.has(m[1])) submissionIds.add(m[1]);
+  return { orderWaits: [...orderWaits], submissionIds: [...submissionIds] };
+}
+
 export function startBroker(cli, callLog, { now = () => new Date().toISOString() } = {}) {
   const admin = randomUUID();
   const agents = new Map(); // token -> { root, env, task }
@@ -202,6 +218,7 @@ export function startBroker(cli, callLog, { now = () => new Date().toISOString()
               // Both streams: a refused land prints its error JSON (and the gate's notices) on
               // stderr; reading stdout only lost every gate notice (n3-r1-dry-a4).
               ...coordinationOf(args, output),
+              ...waitsOf(output),
             }) + '\n',
           );
           progress({ endedAt });

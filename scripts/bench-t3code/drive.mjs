@@ -2,6 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // B1.5d driver: runs the PLAN.md batches end to end and resumes by itself.
 //   node scripts/bench-t3code/drive.mjs [--dry] [--reps 1|2] [--only n3-r1] [--tasks K] [--unpinned]
+//   node scripts/bench-t3code/drive.mjs --coordination [--dry] [--reps 1|2] [--only convoy-n16-r1]
+//     runs the coordination cells instead (cells.mjs: convoy, overlap with the stacking A/B),
+//     one arm after the other, with the same holds, guards, void and re-run rules.
 //                                       [--fake-version-change]   (dry only: proves the batch guard)
 // - Batch = both arms' cells of one (N, rep). N = 1, 3, 5: the two cells run at the same time
 //   (2N agents); N = 10: one arm, then the other, the first arm alternating between reps.
@@ -55,6 +58,7 @@ import { usageGate, usageProblems, diskFreeGb, diskNeed } from './gates.mjs';
 import { agentOf } from './agent.mjs';
 import { runnerFairness } from './runners.mjs';
 import { oracleBranchRecord } from './oracle-branches.mjs';
+import { coordinationBatch, coordinationBatches, parseCoordinationKey } from './cells.mjs';
 
 let B, FREEZE;
 const flags = process.argv.slice(2);
@@ -62,6 +66,7 @@ const flag = name => (flags.includes(name) ? flags[flags.indexOf(name) + 1] : nu
 const dry = flags.includes('--dry');
 const reps = Number(flag('--reps') ?? DESIGN.reps);
 const only = flag('--only');
+const coordination = flags.includes('--coordination');
 const fakeChange = dry && flags.includes('--fake-version-change');
 // Convex list-price stop for the whole run (lead: report before going past $5).
 export const BUDGET_USD = 5;
@@ -173,7 +178,9 @@ async function main() {
         const info = existsSync(join(dir, 'driver.json')) ? readJson(join(dir, 'driver.json')) : {};
         if (info.pid && alive(info.pid)) throw Error(`batch ${d} is still driven by pid ${info.pid}`);
         // Cells outlive a killed driver: wait for them, then close the batch.
-        for (const arm of DESIGN.arms) {
+        // A coordination batch names its cell slots (arm-stack) in arms.json.
+        const slots = existsSync(join(dir, 'arms.json')) ? readJson(join(dir, 'arms.json')) : DESIGN.arms;
+        for (const arm of slots) {
           const idFile = join(dir, `${arm}.cell`);
           if (!existsSync(idFile)) continue;
           for (let r; (r = cellResult(readFileSync(idFile, 'utf8').trim()))?.running;) {
@@ -256,6 +263,8 @@ async function main() {
       dir,
       ...(dry ? ['--dry'] : []),
       ...(cell.extra ? ['--extra'] : []),
+      ...(cell.kind ? ['--cell', cell.kind] : []),
+      ...(cell.stack ? ['--stack', cell.stack] : []),
       ...(flags.includes('--unpinned') ? ['--unpinned'] : []),
       ...(flag('--tasks') ? ['--tasks', flag('--tasks')] : []),
     ];
@@ -339,7 +348,7 @@ async function main() {
         join(dir, 'driver.json'),
         JSON.stringify({ pid: process.pid, startedAt: start.at }) + '\n',
       );
-      writeFileSync(join(dir, 'arms.json'), JSON.stringify(b.cells.map(c => c.arm)) + '\n');
+      writeFileSync(join(dir, 'arms.json'), JSON.stringify(b.cells.map(c => c.slot ?? c.arm)) + '\n');
       writeFileSync(join(dir, 'mode.json'), JSON.stringify(b.mode) + '\n');
       const pinFile = join(dir, 'pin.json');
       writeFileSync(pinFile, JSON.stringify(start, null, 1) + '\n');
@@ -360,7 +369,7 @@ async function main() {
       }
       release();
       const cells = b.cells.map(c => {
-        const idFile = join(dir, `${c.arm}.cell`);
+        const idFile = join(dir, `${c.slot ?? c.arm}.cell`);
         const cellId = existsSync(idFile) ? readFileSync(idFile, 'utf8').trim() : null;
         const r = cellId ? cellResult(cellId) : null;
         return {
@@ -429,6 +438,17 @@ async function main() {
     return Object.fromEntries(ok.cells.map(c => [c.arm, readJson(join(runs, c.cellId, 'result.json'))]));
   };
 
+  if (coordination) {
+    const c = only && parseCoordinationKey(only);
+    if (only && !c) throw Error('--only convoy|overlap-n<N>-r<rep>');
+    if (c) await runBatch(coordinationBatch(c.kind, c.N, c.rep), (await attempts(only)).length + 1);
+    else
+      await runInOrder(
+        coordinationBatches(Array.from({ length: Math.min(reps, DESIGN.reps) }, (_, i) => i + 1)),
+      );
+    say('ALL DONE coordination');
+    return;
+  }
   if (only) {
     const [, N, rep, x] = only.match(/^n(\d+)-r(\d+)(x?)$/) ?? [];
     if (!N) throw Error('--only n<N>-r<rep>[x]');

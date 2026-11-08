@@ -3,6 +3,10 @@
 // B1.5d cell: N concurrent agents land the 10 frozen tasks on one arm in the PLAN.md order,
 // then the oracle grades the exact final main. Usage:
 //   node scripts/bench-t3code/run-cell.mjs ARM N REP [--dry | --model-check] [--attempt K] [--pin FILE] [--batch DIR] [--unpinned] [--tasks K]
+//                                          [--cell convoy|overlap [--stack offer|auto]]
+// --cell runs a coordination cell (cells.mjs): N generated tasks, one per agent, dispatched
+// together after every workspace is ready (start signal); graded by scope, not hidden tests.
+// --stack (Forge overlap cells) applies the stacking setting named in config.forge.stacking.
 // --batch DIR (the driver): the batch holds the freeze and checked nanthai-forge before it
 // started; this cell writes DIR/<arm>.cell, and before grading waits until every cell of the
 // batch has settled (DIR/<arm>.settled or a result), so no oracle branch is pushed while any
@@ -46,6 +50,9 @@ import { scriptedForge, dryGroup } from './scripted.mjs';
 import { removeWorkspace } from './evidence.mjs';
 import { gates as cellGates, diskFreeGb } from './gates.mjs';
 import { writeCellResult } from './result.mjs';
+import { coordinationTasks, workspacePackages, scopeGrade, COORDINATION } from './cells.mjs';
+import { sessionPhases } from './phases.mjs';
+import { taskLine, cellRework, checkWalls, orderWaits, convoyVerdict } from './rework.mjs';
 import { collectRunners } from './runners.mjs';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -63,14 +70,33 @@ const N = Number(nText),
   attempt = Number(flag('--attempt') ?? 1),
   // The outlier rule's extra rep of (N, rep): same seed and order, key suffix x (plan.mjs extraBatch).
   extra = flags.includes('--extra'),
-  taskLimit = flag('--tasks') ? Number(flag('--tasks')) : null;
+  taskLimit = flag('--tasks') ? Number(flag('--tasks')) : null,
+  cellKind = flag('--cell'),
+  stack = flag('--stack');
 if (!['github', 'forge'].includes(arm) || !(N >= 1) || !(rep >= 1))
-  throw Error('usage: run-cell.mjs github|forge N REP [--dry] [--extra]');
+  throw Error(
+    'usage: run-cell.mjs github|forge N REP [--dry] [--extra] [--cell convoy|overlap [--stack offer|auto]]',
+  );
+if (cellKind && !COORDINATION[cellKind]?.ns.includes(N))
+  throw Error(`coordination cell ${cellKind} at N = ${N} is not in PLAN.md`);
+if (stack && !(cellKind === 'overlap' && arm === 'forge' && ['offer', 'auto'].includes(stack)))
+  throw Error('--stack offer|auto applies to Forge overlap cells only');
+if (cellKind === 'overlap' && arm === 'forge' && !stack)
+  throw Error('a Forge overlap cell runs one arm of the stacking A/B: pass --stack offer|auto');
+// Batch files of this cell: the arm, or arm-stack for the two Forge arms of the stacking A/B.
+const slot = stack ? `${arm}-${stack}` : arm;
 const all = loadTasks(B);
 const byId = new Map(all.map(t => [t.id, t]));
-const planned = schedule(all.map(t => t.id)).find(c => c.key === cellKey(arm, N, rep) + (extra ? 'x' : ''));
+const tasks = cellKind ? coordinationTasks(cellKind, N, workspacePackages(config.baseCheckout)) : [];
+const planned = cellKind
+  ? {
+      key: `${slot}-${cellKind}-n${N}-r${rep}`,
+      seed: `${COORDINATION.seed}/${cellKind}/n${N}`,
+      order: tasks.map(t => t.id),
+    }
+  : schedule(all.map(t => t.id)).find(c => c.key === cellKey(arm, N, rep) + (extra ? 'x' : ''));
 if (!planned) throw Error(`cell ${cellKey(arm, N, rep)} is not in PLAN.md`);
-const tasks = planned.order.map(id => byId.get(id)).slice(0, taskLimit ?? undefined);
+if (!cellKind) tasks.push(...planned.order.map(id => byId.get(id)).slice(0, taskLimit ?? undefined));
 const base = config.github.mainBase;
 // A Claude agent logs in only through the plan's token, handed over a pipe (agent.mjs). Read it
 // once before any folder is made; a dry cell runs the scripted agent and needs none.
@@ -101,7 +127,7 @@ writeFileSync(
     startedAt: new Date().toISOString(),
   }) + '\n',
 );
-if (batchDir) writeFileSync(join(batchDir, `${arm}.cell`), cellId + '\n');
+if (batchDir) writeFileSync(join(batchDir, `${slot}.cell`), cellId + '\n');
 const event = entry =>
   writeFileSync(
     join(dir, 'events.jsonl'),
@@ -120,6 +146,7 @@ const result = {
   extra,
   seed: planned.seed,
   order: tasks.map(t => t.id),
+  ...(cellKind ? { coordinationCell: { kind: cellKind, stack, packages: tasks.map(t => t.package) } } : {}),
 };
 const writeResult = more => writeCellResult(dir, result, more);
 const callLog = join(dir, 'nforge-calls.jsonl');
@@ -263,6 +290,29 @@ try {
   await crash(`reset failed: ${String(error.message).slice(0, 400)}`);
 }
 event({ event: 'reset-done', resetReceipt: result.resetReceipt });
+// Stacking A/B (overlap cell): the project's stacking setting for this arm, applied outside cell
+// timing. config.forge.stacking.<offer|auto> = { action, body } names the CLI action and body
+// that set it (D2, Issue 1eb42254), or { default: true } when the project default already is
+// that mode; without either the arm cannot run and says so.
+if (stack) {
+  const setting = config.forge.stacking?.[stack];
+  if (setting?.default === true) result.stacking = { mode: stack, default: true };
+  else if (!setting?.action)
+    await crash(`BENCH_STACK_SETTING_MISSING: config.forge.stacking.${stack} is not set`);
+  else
+    try {
+      result.stacking = {
+        mode: stack,
+        receipt: await forge.nf(join(ws, '.anchor'), setting.action, {
+          url: config.forge.url,
+          projectId: config.forge.projectId,
+          ...setting.body,
+        }),
+      };
+    } catch (error) {
+      await crash(`stacking setting ${stack} failed: ${String(error.message).slice(0, 300)}`);
+    }
+}
 let meter = null;
 if (forge) {
   meter = convexMeter({
@@ -297,7 +347,7 @@ try {
 // ---- Start barrier: concurrent cells of a batch dispatch together (setup and resets differ
 // in length per arm: GitHub's is a force push, Forge's a landing), so both arms share the load.
 if (batchDir) {
-  writeFileSync(join(batchDir, `${arm}.ready`), new Date().toISOString() + '\n');
+  writeFileSync(join(batchDir, `${slot}.ready`), new Date().toISOString() + '\n');
   result.startBarrier = await waitForArms(batchDir, 'ready', { deadlineMs: 60 * 60_000 });
   if (!result.startBarrier.ok) {
     meter?.stop();
@@ -313,7 +363,20 @@ const queue = [...tasks];
 const settling = [];
 const cellStart = Date.now();
 const prefixOf = taskId => join(dir, 'agents', taskId);
+// Coordination cells: one start signal once every task's workspace is ready (or failed), so
+// the N agents start together and land in the same window (convoy). Other cells start each
+// agent as soon as its own workspace is ready.
+let prepared = 0,
+  startNow;
+const startSignal = new Promise(resolve => (startNow = resolve));
+const arrive = () => {
+  if (++prepared >= tasks.length) {
+    result.startSignal = { at: new Date().toISOString(), afterSeconds: (Date.now() - cellStart) / 1000 };
+    startNow();
+  }
+};
 async function dispatch(task, k) {
+  let arrived = false;
   const root = join(ws, task.id),
     branch = `agent-${k}/${task.id}`;
   const prepStart = Date.now();
@@ -349,6 +412,11 @@ async function dispatch(task, k) {
     const depsAt = Date.now();
     record.deps = shared ? await linkDepsAsync(shared, root) : null;
     record.prep.deps = (Date.now() - depsAt) / 1000;
+    if (cellKind) {
+      arrived = true;
+      arrive();
+      await startSignal;
+    }
     const dispatchedAt = Date.now();
     record.dispatchedAt = new Date(dispatchedAt).toISOString();
     record.prepSeconds = (dispatchedAt - prepStart) / 1000;
@@ -427,6 +495,8 @@ async function dispatch(task, k) {
       })(),
     );
   } catch (error) {
+    // A workspace that failed still counts toward the start signal, so the others start.
+    if (cellKind && !arrived) arrive();
     record.harnessError = String(error.message).slice(0, 400);
     record.landing = { landed: false, state: 'harness-error' };
     event({ event: 'task-error', task: task.id, error: record.harnessError });
@@ -546,6 +616,27 @@ try {
 } catch (error) {
   coordination = { error: String(error.message).slice(0, 300) };
 }
+// Rework tokens per landing (phases.mjs over each session, joined with the relay rows), and
+// for a convoy cell its pass rule: offline over files this cell already holds, no calls.
+let rework;
+try {
+  rework = cellRework(
+    records.map(r =>
+      taskLine(
+        r.task,
+        r.landing?.landed,
+        sessionPhases(prefixOf(r.task), { rows: forge ? calls.filter(c => c.task === r.task) : null }),
+      ),
+    ),
+  );
+  if (cellKind === 'convoy')
+    rework.convoy = convoyVerdict(records, checkWalls(arm, records, ci.runList ?? []), orderWaits(calls), {
+      factor: COORDINATION.passFactor,
+      slackSeconds: COORDINATION.passSlackSeconds,
+    });
+} catch (error) {
+  rework = { error: String(error.message).slice(0, 300) };
+}
 // Per-reason fast-path fallback counts, from the same metrics reply (7c2e69e1).
 let forgeFallbacks = null;
 if (forge)
@@ -564,7 +655,7 @@ if (forge)
 
 // ---- Batch barrier: grade only when no agent of any cell in the batch runs (leak control).
 if (batchDir) {
-  writeFileSync(join(batchDir, `${arm}.settled`), new Date().toISOString() + '\n');
+  writeFileSync(join(batchDir, `${slot}.settled`), new Date().toISOString() + '\n');
   result.batchBarrier = await batchBarrier(batchDir);
 }
 
@@ -574,31 +665,8 @@ const oracleReport = {};
 try {
   if (result.batchBarrier && !result.batchBarrier.ok)
     throw Error(`batch barrier: ${result.batchBarrier.waiting.join(',')} still running`);
-  const meta = config.meta;
-  let c;
-  if (arm === 'github')
-    c = await oracleCommit({
-      meta,
-      tasks,
-      label: cellId,
-      fromCommit: await github.mainHead(),
-      baseCommit: base,
-    });
-  else {
-    const root = join(ws, 'final-main');
-    const laneId = await forge.startLane(root, 'bench oracle export');
-    c = await oracleCommit({ meta, tasks, label: cellId, fromDirectory: root, baseCommit: base });
-    await forge.abandon(root, laneId);
-    await forge.removeRoot(root);
-  }
-  const ran = await runOracle({ meta, ...c }, join(dir, 'oracle-log.txt'), oracleReport);
-  oracle = {
-    commit: c.commit,
-    changedFromBase: c.changedFromBase,
-    runId: ran.runId,
-    conclusion: ran.conclusion ?? ran.status,
-    grade: ran.cases ? grade(tasks, ran, attribute(tasks, gitShow(meta))) : null,
-  };
+  // Coordination cells measure landing, not task correctness: graded by scope (cells.mjs).
+  oracle = cellKind ? { grade: scopeGrade(tasks, records) } : await gradeMain();
 } catch (error) {
   oracle = { error: String(error.message).slice(0, 500) };
 }
@@ -667,6 +735,7 @@ writeResult({
   agent: dry ? 'scripted-no-model' : agentOf(config),
   contamination,
   coordination,
+  rework,
   forgeFallbacks,
   tokens,
   // Claude reports model API time; Codex does not (null), wall time per task is elapsedSeconds.
@@ -699,6 +768,35 @@ console.log(
 );
 process.exit(0);
 
+/** Hidden-test grade of the exact final main (the frozen ten-task cells). */
+async function gradeMain() {
+  const meta = config.meta;
+  let c;
+  if (arm === 'github')
+    c = await oracleCommit({
+      meta,
+      tasks,
+      label: cellId,
+      fromCommit: await github.mainHead(),
+      baseCommit: base,
+    });
+  else {
+    const root = join(ws, 'final-main');
+    const laneId = await forge.startLane(root, 'bench oracle export');
+    c = await oracleCommit({ meta, tasks, label: cellId, fromDirectory: root, baseCommit: base });
+    await forge.abandon(root, laneId);
+    await forge.removeRoot(root);
+  }
+  const ran = await runOracle({ meta, ...c }, join(dir, 'oracle-log.txt'), oracleReport);
+  return {
+    commit: c.commit,
+    changedFromBase: c.changedFromBase,
+    runId: ran.runId,
+    conclusion: ran.conclusion ?? ran.status,
+    grade: ran.cases ? grade(tasks, ran, attribute(tasks, gitShow(meta))) : null,
+  };
+}
+
 /** Keep active CLI working directories through the final sweep, too. */
 async function cleanupWorkspace(reason, retained = records.some(r => r.evidence?.retainedWorkspace)) {
   if (forge && retained) event({ event: 'cleanup-deferred', retainedWorkspace: ws });
@@ -716,7 +814,7 @@ function batchBarrier(dirPath) {
  * batches share a barrier; sequential cells (N = 10) run alone and pass straight through. */
 async function waitForArms(dirPath, mark, { deadlineMs, pollMs = mark === 'ready' ? 2_000 : 15_000 }) {
   const mode = JSON.parse(readFileSync(join(dirPath, 'mode.json'), 'utf8'));
-  const arms = mode === 'concurrent' ? JSON.parse(readFileSync(join(dirPath, 'arms.json'), 'utf8')) : [arm];
+  const arms = mode === 'concurrent' ? JSON.parse(readFileSync(join(dirPath, 'arms.json'), 'utf8')) : [slot];
   const startedAt = Date.now();
   for (;;) {
     const ended = [];
