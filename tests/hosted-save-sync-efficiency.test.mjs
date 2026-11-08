@@ -107,7 +107,14 @@ function dogfood(s) {
       removed: false,
     });
 }
-async function changedSave(t, legacy, scale = false, provider = 'synthetic', contract = false) {
+async function changedSave(
+  t,
+  legacy,
+  scale = false,
+  provider = 'synthetic',
+  contract = false,
+  { baselineGeneration } = {},
+) {
   environment(t);
   const now = Date.now();
   t.mock.method(Date, 'now', () => now);
@@ -119,6 +126,10 @@ async function changedSave(t, legacy, scale = false, provider = 'synthetic', con
   const baseline = s.state(files),
     entry = await s.lane(baseline),
     state = JSON.parse(s.objects.get(baseline.sha256));
+  if (baselineGeneration !== undefined)
+    for (const row of s.tables.projectObjects.values())
+      if (row.digest === baseline.sha256)
+        s.patch('projectObjects', row._id, { stateGeneration: baselineGeneration });
   const root = checkout(t, s, entry, state);
   if (scale) dogfood(s);
   const c = controls(t, s);
@@ -516,4 +527,24 @@ test('a 10-file save commits its objects once, stages its page in submit and rea
       functions: Object.fromEntries([...new Set(run.calls)].map(name => [name, count(name)])),
     }),
   );
+});
+
+test('a hinted small save gives its State the baseline generation plus one (review 3aa618e2 F1)', async t => {
+  const run = await changedSave(
+    t,
+    false,
+    true,
+    'convex',
+    { overlapEvidence: false, submitPage: true },
+    { baselineGeneration: 7 },
+  );
+  assert.equal(
+    run.calls.filter(value => value === 'projectConvexSourceObjects:resolve').length,
+    1,
+    'the baseline came from begin, not from a resolve call',
+  );
+  const head = readHostedLaneCheckout(run.root).selection.head;
+  const row = [...run.s.tables.projectObjects.values()].find(row => row.digest === head);
+  assert.equal(row.stateGeneration, 8);
+  assert.deepEqual(row.stateParents, [JSON.parse(run.s.objects.get(head)).parents[0]]);
 });

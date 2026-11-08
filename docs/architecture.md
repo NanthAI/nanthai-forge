@@ -1151,9 +1151,13 @@ its save's split under `timing.save`.
 A save commits the R2 objects of its changed blobs and its metadata pages in one
 `commitBatch` round, after both uploads; the delta is acknowledged only after that commit.
 When the server advertises `save-submit-page`, submit stages the last delta page itself, so a
-one-page save makes no `stage` call. For a one-page raw save, `begin` hands the step the
-locations of its baseline State and its page beside the input, so all three download in
-parallel and the changed blobs' descriptors resolve during the baseline read.
+one-page save makes no `stage` call. For a one-page raw save whose page is at most 128 KiB and
+whose raw baseline is at most 4 MiB (the shape the V8 step runs), `begin` hands the step the
+locations of its baseline State and its page beside the input, with the baseline's State
+generation and parents as a descriptor resolve returns them, so all three download in
+parallel and the changed blobs' descriptors resolve during the baseline read. A CLI from before
+this one-commit round that retries a save the current CLI left between its PUTs and that commit
+does not re-send the bytes, and its stages fail `SOURCE_UNAVAILABLE` until a current CLI retries.
 
 A trusted source-job completion schedules the save finalizer independently of the
 editing client. A save, sync or compose step whose result manifest is at most 64 KiB passes

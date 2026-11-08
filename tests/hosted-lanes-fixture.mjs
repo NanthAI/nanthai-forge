@@ -166,7 +166,12 @@ export function lanesFixture() {
                   },
                   gt(field, value) {
                     assert.equal(field, keyFields[terms.length], 'index lower-bound order');
-                    lower = [field, value];
+                    lower = [field, value, false];
+                    return bounds;
+                  },
+                  gte(field, value) {
+                    assert.equal(field, keyFields[terms.length], 'index lower-bound order');
+                    lower = [field, value, true];
                     return bounds;
                   },
                   eq(field, value) {
@@ -181,7 +186,7 @@ export function lanesFixture() {
                     .filter(
                       row =>
                         terms.every(([k, v]) => row[k] === v) &&
-                        (!lower || row[lower[0]] > lower[1]) &&
+                        (!lower || row[lower[0]] > lower[1] || (lower[2] && row[lower[0]] === lower[1])) &&
                         (!upper || row[upper[0]] < upper[1] || (upper[2] && row[upper[0]] === upper[1])),
                     )
                     .sort((a, b) => {

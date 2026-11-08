@@ -6,6 +6,7 @@ import { presignGet, r2Config } from './r2';
 import { findObject } from './projectObjectFind';
 import { packRange, packHeaders } from '../src/object-pack-range';
 import { invariant } from '../src/errors';
+import { smallSaveStateBytes } from '../src/hosted-source-small-save';
 
 /** One object's step location, marked for the step exactly as a `resolve` call would mark it. */
 export async function sourceObjectLocation(
@@ -20,8 +21,12 @@ export async function sourceObjectLocation(
     object.location === 'r2' && object.r2Key
       ? await presignGet(r2Config(), object.r2Key, packHeaders(packRange(object), object.size))
       : null;
+  // The State's generation and parents, as resolve returns them: the step derives its output
+  // State's generation from them (review 3aa618e2 F1).
   return {
     descriptor,
+    ...(object.stateGeneration === undefined ? {} : { stateGeneration: object.stateGeneration }),
+    ...(object.stateParents === undefined ? {} : { stateParents: object.stateParents }),
     storageId: url ? null : (object.storageId ?? null),
     url,
     ...(object.pack ? { range: packRange(object)! } : {}),
@@ -39,10 +44,16 @@ export async function saveStepReads(ctx: MutationCtx, projectId: Id<'hostedProje
     .unique();
   if (!row) return [];
   const state = saveStateSchema.parse(JSON.parse(row.value));
-  // Only the single-page shape the small save runs; the resumable worker reads its own.
-  if (state.request.pageCount !== 1) return [];
-  return [
-    ...(state.baseline.recipe ? [] : [state.baseline.object]),
-    ...(state.request.pages ? [state.request.pages] : []),
-  ];
+  // Only the shape the small save runs (one page of at most 128 KiB, a raw baseline of at most
+  // 4 MiB); anything else goes to the resumable worker, which reads its own (review 3aa618e2 F3).
+  const pages = state.request.pages;
+  if (
+    state.request.pageCount !== 1 ||
+    !pages ||
+    pages.size > 128 * 1024 ||
+    state.baseline.recipe ||
+    state.baseline.object.size > smallSaveStateBytes
+  )
+    return [];
+  return [state.baseline.object, pages];
 }
