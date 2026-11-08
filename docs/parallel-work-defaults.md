@@ -321,7 +321,10 @@ frozen set on 2026-11-06 broke capabilities across CLI/server versions with `HOS
   only by hand). The record is `preflight-learned.json` beside the timings: changed path to failing
   test file, from the `CHECK_FAILED` response `land --save` or `wait` already holds (the finish gate
   remembers the landing's changed paths) and from failed preflight files. Learned tests run even
-  where the import graph does not reach them; entries expire after 30 days, the record is bounded
+  where the import graph does not reach them, for every project runner: a failing `x_test.go`,
+  `test_x.py` or `XTest.java` is stored by its test-name shape (preflight: by the runner's globs)
+  and planned again, as its own `learned` tier, on the next change to the same path, when the
+  runner's globs still match it; entries expire after 30 days, the record is bounded
   and never uploaded, and no server call is added. A *recent* failer runs a changed module within two
   modules and failed in a landing check within 14 days under other paths (2026-11-06: two read-budget
   tests failed for the completion-tick change, and a sibling file of the same modules would have

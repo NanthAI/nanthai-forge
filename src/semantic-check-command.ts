@@ -1,14 +1,19 @@
 // SPDX-License-Identifier: Apache-2.0
+import { readFileSync } from 'node:fs';
+import { gzipSync } from 'node:zlib';
 import { semanticTests, type SemanticPlan } from './intent-semantic-conflict.js';
+import { junitLimits } from './junit-report.js';
 import { FILES_PLACEHOLDER, runnerCommand, type TestRunnerResolution } from './project-test-runner.js';
 
 /** Fixed runner code, not a repository hook. Complete reports from the configured
- * check satisfy the union; only uncovered files run afterwards in the same exact
- * workspace/environment. The outer run owns cancellation, evidence and Q3 reuse. */
+ * check satisfy the union: Forge's `__FORGE_TESTS__` lines, and JUnit XML the check wrote to
+ * `FORGE_JUNIT_DIR` (the src/junit-report.ts parser, shipped in the payload so an exported script needs
+ * no Forge install). Only uncovered files run afterwards in the same exact workspace/environment. The
+ * outer run owns cancellation, evidence and Q3 reuse. */
 const program = `
 const { spawn } = await import('node:child_process');
 const { performance } = await import('node:perf_hooks');
-const { command, tests, runner, unavailable } = JSON.parse(process.argv[1]);
+const { command, tests, runner, unavailable, junit } = JSON.parse(process.argv[1]);
 const runnerArgs = file => { const at = runner.indexOf(${JSON.stringify(FILES_PLACEHOLDER)}); return at < 0 ? [...runner, file] : [...runner.slice(0, at), file, ...runner.slice(at + 1)]; };
 const covered = new Set(), failedReports = new Set();
 const execute = (args, observe = false) => new Promise(resolve => {
@@ -35,6 +40,25 @@ const execute = (args, observe = false) => new Promise(resolve => {
   child.on('close', code => resolve(code ?? 128));
 });
 let code = await execute(command, true);
+if (process.env.FORGE_JUNIT_DIR && junit) {
+  try {
+    const fs = await import('node:fs'), path = await import('node:path'), zlib = await import('node:zlib');
+    const { JunitReader } = await import('data:text/javascript;base64,' + zlib.gunzipSync(Buffer.from(junit.module, 'base64')).toString('base64'));
+    const found = new Map();
+    let budget = junit.totalBytes;
+    for (const name of fs.readdirSync(process.env.FORGE_JUNIT_DIR).filter(name => name.endsWith('.xml')).sort().slice(0, junit.files)) {
+      try {
+        const file = path.join(process.env.FORGE_JUNIT_DIR, name), info = fs.lstatSync(file);
+        if (!info.isFile() || info.size > Math.min(junit.fileBytes, budget)) continue;
+        budget -= info.size;
+        const reader = new JunitReader(process.cwd());
+        reader.accept(fs.readFileSync(file, 'utf8'));
+        for (const report of reader.finish() ?? []) found.set(report.file, (found.get(report.file) ?? 0) + report.counts.failed);
+      } catch {}
+    }
+    for (const [file, failed] of found) if (!covered.has(file)) { covered.add(file); if (failed) failedReports.add(file); }
+  } catch {}
+}
 if (tests.some(test => failedReports.has(test))) code = code || 1;
 const missing = tests.filter(test => !covered.has(test));
 let next = 0;
@@ -53,6 +77,24 @@ await Promise.all(Array.from({length: Math.min(2, missing.length)}, async () => 
 }));
 process.exitCode = code;
 `;
+let junitPayload: { module: string } | undefined | null;
+/** The JUnit parser as the check's runner can load it: the compiled module, compressed. Undefined when
+ * it cannot be read (then only Forge's own markers count, as before). */
+function junitParser() {
+  if (junitPayload === undefined) {
+    try {
+      const source = readFileSync(new URL('./junit-report.js', import.meta.url), 'utf8').replace(
+        /^\/\/# sourceMappingURL=.*$/m,
+        '',
+      );
+      junitPayload = { module: gzipSync(source).toString('base64') };
+    } catch {
+      junitPayload = null;
+    }
+  }
+  return junitPayload ?? undefined;
+}
+
 /** `runner`: the project's test runner at the checked source (src/project-test-runner.ts). Forge's
  * Node layout, or none given, runs uncovered union tests with Node's runner as before; any other
  * runner runs them with its own command; without a runner they fail as unavailable, never with a
@@ -78,5 +120,22 @@ export function semanticCheckCommand(
               : runner.runner.command,
           }
         : {};
-  return [node, '--input-type=module', '--eval', program, JSON.stringify({ command, tests, ...project })];
+  const parser = junitParser();
+  const junit = parser
+    ? {
+        junit: {
+          ...parser,
+          files: junitLimits.files,
+          fileBytes: junitLimits.fileBytes,
+          totalBytes: junitLimits.totalBytes,
+        },
+      }
+    : {};
+  return [
+    node,
+    '--input-type=module',
+    '--eval',
+    program,
+    JSON.stringify({ command, tests, ...project, ...junit }),
+  ];
 }

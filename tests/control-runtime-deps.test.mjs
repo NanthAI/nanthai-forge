@@ -26,7 +26,12 @@ function closure(root, entries) {
     const text = readFileSync(file, 'utf8');
     for (const [, specifier] of text.matchAll(specifiers)) {
       if (specifier.startsWith('.')) visit(resolve(dirname(file), specifier));
-      else if (!specifier.startsWith('node:') && !packages.has(packageName(specifier)))
+      // A data: URL carries its own module text; it names no installed package.
+      else if (
+        !specifier.startsWith('node:') &&
+        !specifier.startsWith('data:') &&
+        !packages.has(packageName(specifier))
+      )
         packages.set(packageName(specifier), relative(root, file));
     }
     // A computed specifier would hide a package from this list.

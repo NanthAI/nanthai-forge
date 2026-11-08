@@ -2,11 +2,16 @@
 import { join } from 'node:path';
 import { readSource } from './files.js';
 import type { WorkStore } from './work-store.js';
+import { plausibleTestFile } from './test-file-name.js';
 import type { CheckRun } from './work-types.js';
 
 /** Retained shard pins identify failed files; missing/static/ambiguous evidence
  * keeps ordinary affected-test selection, never invents passing shard results. */
-export function failedAuditTests(store: WorkStore, audit: CheckRun): string[] | undefined {
+export function failedAuditTests(
+  store: WorkStore,
+  audit: CheckRun,
+  isTest: (file: string) => boolean = plausibleTestFile,
+): string[] | undefined {
   try {
     const directory = join(store.directory, `check-${audit.id}`);
     const plan = JSON.parse(readSource(directory, 'modal-plan.json', 4 * 1024 * 1024)!.toString());
@@ -32,12 +37,7 @@ export function failedAuditTests(store: WorkStore, audit: CheckRun): string[] | 
     const tests = plan.groups.flatMap((group: string[], index: number) =>
       latest.get(index)!.exitCode === 0 ? [] : group,
     );
-    if (
-      tests.length &&
-      tests.every(
-        (test: unknown) => typeof test === 'string' && /^tests\/[A-Za-z0-9_.-]+\.test\.mjs$/.test(test),
-      )
-    )
+    if (tests.length && tests.every((test: unknown) => plausibleTestFile(test) && isTest(test)))
       return [...new Set(tests)] as string[];
   } catch {
     /* Older/custom/local runs have no retained shard selection. */

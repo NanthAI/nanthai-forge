@@ -4,7 +4,9 @@ import { join } from 'node:path';
 import { z } from 'zod';
 import { durableReplace } from './native-durability.js';
 import { retainedRootSibling } from './root-paths.js';
+import { safeRelative } from './safe-relative.js';
 import { readHostedLaneCheckout } from './hosted-lane-checkout-marker.js';
+import { plausibleTestFile } from './test-file-name.js';
 import { rememberHostedCheck } from './preflight-hosted-timing.js';
 
 /** What preflight learned the hard way: test files that failed in a landing check or a local
@@ -15,7 +17,12 @@ import { rememberHostedCheck } from './preflight-hosted-timing.js';
 const MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 const MAX_ENTRIES = 5000;
 const MAX_LANES = 200;
-const testFile = /^tests\/[^/]+\.test\.mjs$/;
+/** Decides whether a reported name is a test file of this project. Preflight passes the project
+ * runner's globs; a landing result has no runner at hand, so it falls back to the test-name shape of
+ * any ecosystem (`x.test.mjs`, `x_test.go`, `test_x.py`, `XTest.java`). */
+export type TestFilter = (file: string) => boolean;
+const lockfile =
+  /(?:^|\/)(?:package-lock\.json|npm-shrinkwrap\.json|yarn\.lock|pnpm-lock\.yaml|bun\.lockb?|Cargo\.lock|go\.sum|poetry\.lock|uv\.lock|Pipfile\.lock|Gemfile\.lock|composer\.lock|gradle\.lockfile|packages\.lock\.json)$/;
 const storeSchema = z
   .object({
     /** changed path -> failing test -> last failure time (ms). */
@@ -57,11 +64,17 @@ function write(root: string, store: Store, now: number) {
 }
 /** Only changed source paths carry the association; Markdown and lockfile edits explain nothing. */
 const keyPaths = (paths: string[]) =>
-  paths.filter(path => !/\.md$/.test(path) && path !== 'package-lock.json' && !testFile.test(path));
+  paths.filter(path => !/\.md$/.test(path) && !lockfile.test(path) && !plausibleTestFile(path));
 
 /** Records that these tests failed while these paths were changed. */
-export function learnFailures(root: string, paths: string[], tests: string[], now = Date.now()) {
-  const failing = [...new Set(tests.filter(test => testFile.test(test)))];
+export function learnFailures(
+  root: string,
+  paths: string[],
+  tests: string[],
+  now = Date.now(),
+  isTest: TestFilter = plausibleTestFile,
+) {
+  const failing = [...new Set(tests.filter(test => safeTestName(test) && isTest(test)))];
   const keys = keyPaths(paths);
   if (!failing.length || !keys.length) return;
   const store = read(root);
@@ -69,13 +82,23 @@ export function learnFailures(root: string, paths: string[], tests: string[], no
   write(root, store, now);
 }
 
-/** Tests learned for any of these changed paths, oldest evidence first dropped by age. */
-export function learnedTests(root: string, paths: string[], now = Date.now()): string[] {
+/** Stored names stay plain relative paths whatever the filter says. */
+const safeTestName = (test: unknown): test is string =>
+  typeof test === 'string' && test.length <= 1024 && /^[\w.@+\-/]+$/.test(test) && safeRelative(test);
+
+/** Tests learned for any of these changed paths, oldest evidence first dropped by age. `isTest`
+ * keeps those the project runner still treats as test files. */
+export function learnedTests(
+  root: string,
+  paths: string[],
+  now = Date.now(),
+  isTest: TestFilter = () => true,
+): string[] {
   const store = read(root);
   const tests = new Set<string>();
   for (const path of keyPaths(paths))
     for (const [test, at] of Object.entries(store.learned[path] ?? {}))
-      if (now - at <= MAX_AGE_MS) tests.add(test);
+      if (now - at <= MAX_AGE_MS && isTest(test)) tests.add(test);
   return [...tests].sort();
 }
 

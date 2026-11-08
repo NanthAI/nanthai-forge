@@ -361,6 +361,17 @@ that file ignored with a one-line log note, so the run keeps its previous eviden
 and log). Reading is a stream with no extra Convex call; a green run's records ride in the
 existing result call. The directory is removed after the job.
 
+An Intent contract union that rides on the check is covered by the same reports: a union
+test file that a complete JUnit report (or `__FORGE_TESTS__` line) names was run by the
+configured command and is not run again, so a Gradle, Maven or cargo start-up is not paid
+twice; a failed report fails the union. Only the files no report names run afterwards with
+the project's test runner. The union wrapper carries the report parser itself, so an exported
+Actions script needs no Forge install, and it reads the same bounded `FORGE_JUNIT_DIR`.
+A stack frame in a failure excerpt also names a changed JVM source by its qualified class
+(`at com.acme.billing.Invoice.total(...)` explains a changed
+`src/main/java/com/acme/billing/Invoice.java`; Kotlin, Scala and Groovy likewise), whole
+names only (`Invoice` does not match `InvoiceFormatter`).
+
 Failing files then name likely members of a failed batch by file name in any folder: a test
 `x.test.ts`, `x.spec.js`, `test_x.py`, `x_test.go`, `XTest.java` or `x_spec.rb` (or a dotted
 test class) explains a member that changed a source `x.*` anywhere, and a Go package report

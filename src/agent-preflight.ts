@@ -53,6 +53,7 @@ import {
   runnerCommand,
   runnerLabel,
   runnerSelection,
+  runnerTestPath,
   type RunnerPart,
   type TestRunner,
   type TestRunnerResolution,
@@ -483,6 +484,11 @@ function runnerPlan(
   const keep = (tests: string[]) => (only ? tests.filter(test => only.has(test)) : tests);
   if (runner.layout === 'packages') return packagePlan(root, runner, paths, graph!(), statics, keep);
   const selection = runnerSelection(runner, allPaths, paths);
+  // Tests that failed in a landing check or preflight while these paths changed run again, as for
+  // Forge's own layout: the runner's globs decide which learned names are still test files here.
+  const present = new Set(selection.available);
+  const taken = new Set(selection.tests);
+  const learned = learnedTests(root, paths, undefined, test => present.has(test) && !taken.has(test));
   // Test files inside the packages the change affects, when the manifests place it.
   const inPackages = graph
     ? packageRunnerTests(runner, graph(), allPaths, paths)
@@ -495,9 +501,10 @@ function runnerPlan(
     paths,
   ).selected;
   const mandatory = [...new Set([...guards.flatMap(guard => guard.tests), ...selection.changedTests])];
-  const named = new Set([...mandatory, ...selection.namedTests]);
+  const named = new Set([...mandatory, ...selection.namedTests, ...learned]);
   const tiers = [
     { tier: 'mandatory', tests: keep(mandatory) },
+    { tier: 'learned', tests: keep(learned.filter(test => !mandatory.includes(test))) },
     {
       tier: 'direct',
       tests: keep(
@@ -526,7 +533,10 @@ function runnerPlan(
   const trim = options.trim !== false;
   const seconds = tests.reduce((sum, test) => sum + secondsFor(test), 0);
   const label = runnerLabel(runner);
-  const rule = `${label}: changed test files, then tests named for a changed module (closest folder first), then tests in affected packages`;
+  const rule = `${label}: changed test files, learned failures, then tests named for a changed module (closest folder first), then tests in affected packages`;
+  const reason = learned.length
+    ? `${selection.reason}; ${learned.length} re-run because they failed while these paths changed before`
+    : selection.reason;
   const local: LocalSelection = {
     rule,
     budgetSeconds,
@@ -543,7 +553,7 @@ function runnerPlan(
     ...(trim ? {} : { trim: false as const }),
     ...(only ? { only: 'stopped' as const } : {}),
     deferredTo: 'pre-queue',
-    summary: `Local rule: ${rule}. ${selection.reason}.`,
+    summary: `Local rule: ${rule}. ${reason}.`,
     ...(guards.length
       ? {
           guards: guards.map(guard => ({
@@ -556,8 +566,8 @@ function runnerPlan(
   };
   const plan: PreflightPlan = {
     status: 'planned',
-    scope: selection.scope,
-    reason: selection.reason,
+    scope: selection.scope === 'none' && learned.length ? 'scoped' : selection.scope,
+    reason,
     tests,
     deferredTests: [],
     ...statics,
@@ -743,7 +753,7 @@ export function preflightPlan(
       files,
       paths: changed.paths,
       guards: guards.selected.flatMap(guard => guard.tests),
-      learned: learnedTests(root, changed.paths),
+      learned: learnedTests(root, changed.paths, undefined, test => runnerTestPath(resolved.runner, test)),
       recent: recentFailedTests(root),
       ...(commentOnly.length ? { commentOnly } : {}),
       // Direct tests of the most specific changed modules are protected while they fit the budget.
@@ -1295,7 +1305,10 @@ export function runPreflight(
     recordFileStats(root, { passed: passedTests, failed: failedFiles, ms: fileMs });
   // A failure here is evidence that these tests matter for these paths: the next plan protects them.
   const paths = plannedPaths.get(plan);
-  if (paths && failedFiles.length) learnFailures(root, paths, failedFiles);
+  if (paths && failedFiles.length) {
+    const planned = new Set(plan.tests);
+    learnFailures(root, paths, failedFiles, undefined, file => planned.has(file));
+  }
   const slowest = Object.entries(fileMs)
     .sort((a, b) => b[1] - a[1])
     .slice(0, 3)

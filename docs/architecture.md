@@ -1778,8 +1778,9 @@ and measurements; readers normalize both plain and indexed encodings. This bound
 repeated path overhead without reading each Intent again or changing source bytes.
 
 The existing exact check executes the unique test union, retaining complete
-per-file durations and outcomes. Missing files are executed in the same owned
-check rather than reserving another run. Q3 reuse observes the original complete
+per-file durations and outcomes. A file that a complete `__FORGE_TESTS__`
+line or JUnit report from the configured command names counts as run; only missing files are
+executed in the same owned check rather than reserving another run. Q3 reuse observes the original complete
 reports and never dispatches another semantic check. Hosted collectors sign the
 compact reports with the existing exact source/plan callback. Landing settlement
 records a covered failing union as a named Intent semantic conflict in its existing

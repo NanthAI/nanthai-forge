@@ -48,11 +48,31 @@ export function sourceStem(path: string) {
 /** Generic module names say nothing about which change a test exercises. */
 const genericStems = new Set(['index', 'main', 'types', 'schema', 'server', 'utils', 'errors', 'fields']);
 
-/** How tests and stack traces name one changed path: the path itself and its
- * built `dist/` module (tests import the build). */
+/** The fully qualified class a JVM source file declares, as stack traces print it:
+ * `src/main/java/com/acme/Foo.java` is `com.acme.Foo` (also Kotlin, Scala and Groovy, under
+ * `src/<set>/<language>/`, `src/` or the language folder). Only a deep enough dotted name counts. */
+export function jvmClassName(path: string) {
+  const match =
+    /(?:^|\/)src\/[^/]+\/(?:java|kotlin|scala|groovy)\/(.+)\.(?:java|kt|scala|groovy)$/.exec(path) ??
+    /(?:^|\/)(?:src|java|kotlin|scala|groovy)\/(.+)\.(?:java|kt|scala|groovy)$/.exec(path);
+  const name = match?.[1]?.replace(/\//g, '.');
+  return name && /^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)+$/.test(name) ? name : undefined;
+}
+
+/** How tests and stack traces name one changed path: the path itself, its built `dist/` module
+ * (tests import the build) and, for a JVM source, its qualified class name (`com.acme.Foo`). */
 export function pathAliases(path: string) {
   const built = /^src\/(.+)\.ts$/.exec(path);
-  return built ? [path, `dist/${built[1]}.js`] : [path];
+  const jvm = jvmClassName(path);
+  return [path, ...(built ? [`dist/${built[1]}.js`] : []), ...(jvm ? [jvm] : [])];
+}
+
+/** Whether a failure excerpt names this alias. A class name must stand alone (`com.acme.Foo.run(`,
+ * `com.acme.Foo$Inner`, not `com.acme.FooBar`); paths keep a plain substring match. */
+function mentions(text: string, alias: string, path: string) {
+  if (alias !== jvmClassName(path)) return text.includes(alias);
+  const escaped = alias.replace(/[$.]/g, '\\$&');
+  return new RegExp(`(?<![\\w$.])${escaped}(?![\\w])`).test(text);
 }
 
 /** Changed-file and one-hop import attribution of one failing test file:
@@ -66,7 +86,10 @@ export function memberExplainsFailure(
   firstError?: string,
 ) {
   if (member.tests.includes(file) || member.paths.includes(file)) return true;
-  if (firstError && member.paths.some(path => pathAliases(path).some(alias => firstError.includes(alias))))
+  if (
+    firstError &&
+    member.paths.some(path => pathAliases(path).some(alias => mentions(firstError, alias, path)))
+  )
     return true;
   const stem = testStem(file);
   if (stem && !genericStems.has(stem) && stem.length >= 5)
