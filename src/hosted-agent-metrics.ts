@@ -29,6 +29,7 @@ export async function executeHostedMetrics(
           await readMetricRecords(session.root, period, {
             address: session.address,
             query: session.query,
+            contextDays: command.contextDays,
           }),
           period,
         ),
@@ -77,9 +78,12 @@ function metricsTimeout(input: unknown, deadlineMs: number) {
     // An invalid window fails inside the action with its own BAD_ARGUMENT.
   }
   const to = period?.to ?? new Date().toISOString();
-  const day = new Date(Date.parse(to) - 86_400_000).toISOString();
+  // Never suggest a window larger than the one that failed: the later half, at least an hour.
+  const span = period ? Date.parse(period.to) - Date.parse(period.from) : 86_400_000;
+  const half = new Date(Date.parse(to) - Math.max(3_600_000, Math.floor(span / 2))).toISOString();
+  const from = period && half < period.from ? period.from : half;
   return new ForgeError(
     'METRICS_TIMEOUT',
-    `metrics did not finish within ${Math.round(deadlineMs / 1000)} s${period ? ` for [${period.from}, ${period.to})` : ''}; it reads every landing record in the window page by page. Nothing changed. Next: nforge agent ROOT metrics '${JSON.stringify({ from: day, to })}' for a one-day window.`,
+    `metrics did not finish within ${Math.round(deadlineMs / 1000)} s${period ? ` for [${period.from}, ${period.to})` : ''}; it reads the window plus a context horizon (contextDays, default 2) page by page. Nothing changed. Next: nforge agent ROOT metrics '${JSON.stringify({ from, to, contextDays: 1 })}' for the later part of the window with a one-day horizon.`,
   );
 }

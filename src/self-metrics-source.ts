@@ -79,6 +79,8 @@ export async function readMetricRecords(
     summary?: boolean;
     /** Read only the check runs stream (the flake list needs nothing else). */
     runsOnly?: boolean;
+    /** Days of pre-window history the hosted read adds as context (default 2, at most 30). */
+    contextDays?: number | undefined;
     address?: HostedAgentAddress;
   } = {},
 ) {
@@ -96,6 +98,7 @@ export async function readMetricRecords(
     period,
     options.summary,
     options.runsOnly,
+    options.contextDays,
   );
   if (cutover && Date.parse(period.from) < Date.parse(cutover)) {
     // Hosted-only checkouts have no owner history. Do not manufacture native evidence.

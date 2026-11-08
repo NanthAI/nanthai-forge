@@ -130,7 +130,7 @@ test('2x dogfood budget: 60 landings/day, 3000 weekly runs, 1200 Intents plus a 
   const pages = [];
   const { records } = await readHostedMetricPages(async (name, args) => {
     const page = await f.query(name, args);
-    pages.push(page);
+    pages.push({ name, args, value: page });
     return page;
   }, period);
   const result = metricsSurface(records, period);
@@ -177,7 +177,7 @@ test('old server returns METRICS_UNAVAILABLE plus coverage and never silently fa
   };
   const { records } = await readHostedMetricPages(old, period);
   const result = metricsSurface(records, period);
-  assert.equal(calls, 1);
+  assert.equal(calls, 1, 'one probe call; the other streams are not started');
   assert.equal(result.error.code, 'METRICS_UNAVAILABLE');
   assert(result.totals['5.1'].gaps.some(gap => gap.includes('METRICS_UNAVAILABLE')));
   const f = fixture();

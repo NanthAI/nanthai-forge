@@ -17,6 +17,7 @@ import { readHostedBills } from './self-metrics-bills.js';
 import { metricReceiptRowSchema } from './self-metric-receipts.js';
 import { hostedCallerReceipts } from './self-metrics-hosted-receipts.js';
 import { readPlacement } from './self-metrics-placement.js';
+import { METRICS_CONTEXT_DAYS_DEFAULT, METRICS_CONTEXT_DAYS_MAX } from './self-metrics-page.js';
 export type MetricQuery = ((name: string, args: Record<string, unknown>) => Promise<unknown>) & {
   objects?: MetricObjects;
 };
@@ -132,14 +133,78 @@ const audits = z.object({
   complete: z.boolean(),
 });
 const gaps = ['Hosted overlap acknowledgements and authority observations need durable coverage.'];
+const pageSchema = (stream: keyof typeof rowSchemas) =>
+  z.object({
+    page: z.array(rowSchemas[stream]).max(100),
+    isDone: z.boolean(),
+    continueCursor: z.string(),
+    cutover: nullableStamp,
+    authority: sourceAuthoritySchema,
+    coverage: z.record(z.string(), nullableStamp).optional(),
+    audits: audits.optional(),
+    contextFrom: stamp.optional(),
+  });
+type StreamPage = z.infer<ReturnType<typeof pageSchema>>;
+const metricPage = async (
+  query: MetricQuery,
+  stream: keyof typeof rowSchemas,
+  period: MetricPeriod,
+  contextDays: number,
+  cursor: string | null,
+) => {
+  const raw: unknown = await query('projectSelfMetrics:page', {
+    stream,
+    from: period.from,
+    to: period.to,
+    cursor,
+    contextDays,
+  });
+  return pageSchema(stream).parse(typeof raw === 'string' ? JSON.parse(raw) : raw);
+};
+/** One stream's pages in order, continuing from an already read first page. A stream is
+ * sequential (each page needs the last cursor); the streams are independent, so the caller
+ * reads them side by side. */
+async function readStream(
+  query: MetricQuery,
+  stream: keyof typeof rowSchemas,
+  period: MetricPeriod,
+  contextDays: number,
+  firstPageOnly: boolean,
+  first?: StreamPage,
+) {
+  const pages: StreamPage[] = [];
+  const seen = new Set<string>();
+  let page = first ?? (await metricPage(query, stream, period, contextDays, null));
+  for (;;) {
+    pages.push(page);
+    if (page.isDone || firstPageOnly) return pages;
+    invariant(
+      page.continueCursor && !seen.has(page.continueCursor),
+      'EVIDENCE_CHANGED',
+      'Hosted metric cursor did not advance.',
+    );
+    seen.add(page.continueCursor);
+    page = await metricPage(query, stream, period, contextDays, page.continueCursor);
+  }
+}
 /** `runsOnly` reads the runs stream alone (about one call per 100 check runs), with one day of
- * context and no bills, placement or input hydration: enough for the flake list (Issue d710663d). */
+ * context and no bills, placement or input hydration: enough for the flake list (Issue d710663d).
+ * `contextDays` bounds the pre-window history every stream also reads (default 2 days; status
+ * summaries and `runsOnly` read 1): the window bounds the read, not a fixed 30-day horizon
+ * (Issue e32cb0e7: 366 page calls and a 100 s timeout for a 2 h window). */
 export async function readHostedMetricPages(
   query: MetricQuery,
   period: MetricPeriod,
   summary = false,
   runsOnly = false,
+  requestedContextDays?: number,
 ) {
+  const contextDays = Math.min(
+    METRICS_CONTEXT_DAYS_MAX,
+    Math.max(1, Math.floor(requestedContextDays ?? (summary || runsOnly ? 1 : METRICS_CONTEXT_DAYS_DEFAULT))),
+  );
+  // The horizon the server reports; an older deploy that ignores the argument reads 30 days.
+  let contextFrom = new Date(Date.parse(period.from) - contextDays * 86400000).toISOString();
   const records: MetricRecords = {
     moves: [],
     submissions: [],
@@ -148,9 +213,7 @@ export async function readHostedMetricPages(
     finishTimings: [],
     gaps: [...gaps],
     surfaceGaps: [],
-    landingCoverageGaps: [
-      'Hosted classification reads 30 days of pre-window context; older submission/save history and changes during live pagination can leave ordering incomplete.',
-    ],
+    landingCoverageGaps: [],
     source: { kind: 'hosted' },
     fullResultsUnavailable:
       'Hosted results without explicit full-suite selection and pre-context boundary results remain unknown.',
@@ -167,7 +230,7 @@ export async function readHostedMetricPages(
   const receiptRows: z.infer<typeof rowSchemas.receipts>[] = [];
   let receiptCoverage: Record<string, string | null> | undefined;
   try {
-    for (const stream of runsOnly
+    const streams = runsOnly
       ? (['runs'] as const)
       : summary
         ? (['acceptances', 'requests', 'runs', 'operations'] as const)
@@ -180,28 +243,19 @@ export async function readHostedMetricPages(
             'lanes',
             'saves',
             'receipts',
-          ] as const)) {
-      let cursor: string | null = null;
-      const seen = new Set<string>();
-      do {
-        const raw = await query('projectSelfMetrics:page', {
-          stream,
-          from: period.from,
-          to: period.to,
-          cursor,
-          contextDays: summary || runsOnly ? 1 : 30,
-        });
-        const page = z
-          .object({
-            page: z.array(rowSchemas[stream]).max(100),
-            isDone: z.boolean(),
-            continueCursor: z.string(),
-            cutover: nullableStamp,
-            authority: sourceAuthoritySchema,
-            coverage: z.record(z.string(), nullableStamp).optional(),
-            audits: audits.optional(),
-          })
-          .parse(typeof raw === 'string' ? JSON.parse(raw) : raw);
+          ] as const);
+    // One probe page first: a missing module, a refused caller or a bad window ends the read
+    // after one call, not eight. The streams then run side by side (same calls, wall time of the
+    // slowest stream) and are folded in the fixed order above, whatever order they arrive in.
+    const probe = await metricPage(query, streams[0], period, contextDays, null);
+    const fetched = await Promise.all(
+      streams.map((stream, index) =>
+        readStream(query, stream, period, contextDays, summary, index === 0 ? probe : undefined),
+      ),
+    );
+    for (const [index, stream] of streams.entries()) {
+      for (const page of fetched[index]!) {
+        if (page.contextFrom && page.contextFrom < contextFrom) contextFrom = page.contextFrom;
         invariant(
           page.authority.mode === 'server',
           'SOURCE_AUTHORITY_CHANGED',
@@ -319,17 +373,8 @@ export async function readHostedMetricPages(
           records.surfaceGaps!.push(
             `Status read one hosted ${stream} page; use metrics for the remaining records.`,
           );
-          break;
         }
-        if (page.isDone) break;
-        invariant(
-          page.continueCursor && !seen.has(page.continueCursor),
-          'EVIDENCE_CHANGED',
-          'Hosted metric cursor did not advance.',
-        );
-        seen.add(page.continueCursor);
-        cursor = page.continueCursor;
-      } while (cursor !== null);
+      }
     }
   } catch (error) {
     const missing =
@@ -346,11 +391,15 @@ export async function readHostedMetricPages(
       'METRICS_UNAVAILABLE: the hosted self-metrics module is unavailable; no native fallback was used.',
     );
   }
+  const contextHours = Math.round((Date.parse(period.from) - Date.parse(contextFrom)) / 3600000);
+  records.landingCoverageGaps!.push(
+    `Hosted classification reads ${contextHours % 24 === 0 ? `${contextHours / 24} day${contextHours === 24 ? '' : 's'}` : `${contextHours} hours`} of pre-window context (from ${contextFrom}); older submission/save history and changes during live pagination can leave ordering incomplete. Widen it with contextDays (at most ${METRICS_CONTEXT_DAYS_MAX}).`,
+  );
   if (!flakesProjected) records.flakesUnprojected = true;
   if (reuseKeysProjected && cutover) records.coverage = { ...records.coverage, checkRequests: cutover };
   else records.gaps.push('Hosted reuse keys need the deployed projectSelfMetrics runs projection.');
   if (!records.error && !summary && !runsOnly) {
-    records.billHistoryFrom = new Date(Date.parse(period.from) - 30 * 86400000).toISOString();
+    records.billHistoryFrom = contextFrom;
     await readHostedBills(query, period, records).catch(error => {
       throw hostedActionError(error, 'metrics');
     });

@@ -99,7 +99,7 @@ When you change a hosted reply in Forge itself: add fields freely, but never rem
 | `start --reopen` | `laneId?, target?, operationId?` |
 | `status` | `laneId?, kind?, operationId?, submissionId?, runId?, version?, summary?` |
 | `observe` | `kind?, operationId?, submissionId?, runId?, version?` |
-| `metrics` | `from?, to?, limit?, cursor?, operationId?` |
+| `metrics` | `from?, to?, limit?, cursor?, contextDays?, operationId?` |
 | `capabilities` | `operationId?` |
 | `x configure-check` | `name?, checkId?, command?, expected?, operationId?` |
 | `x configure-runner` | `provider?, runsOn?, concurrencyBudget?, publicLogs?, machineId?, labels?, repository?, configuration?, expected?, operationId?` |

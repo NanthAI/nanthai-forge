@@ -9,7 +9,7 @@ import { agentFixture } from './hosted-agent-fixture.mjs';
 
 // Issue 47558a99: the advertised tool list is per-session context. Budgets are in characters of the
 // tools/list JSON; tokens are about chars / 4. Raise one only with before/after numbers on the Issue.
-const LIST_CHARS = 6_050; // 1.5k tokens, the Issue target. 2026-11-06: ~5,950 (was 11,725, before that 54,565). 2026-11-07: land --save gained allowEmpty (a930de4c): list 5,882 -> 5,895, Codex form ~5,998 -> 6,011
+const LIST_CHARS = 6_075; // 1.5k tokens, the Issue target. 2026-11-06: ~5,950 (was 11,725, before that 54,565). 2026-11-07: land --save gained allowEmpty (a930de4c): list 5,882 -> 5,895, Codex form ~5,998 -> 6,011. 2026-11-08: metrics gained contextDays (e32cb0e7, bounds the pre-window read): list +14 chars, Codex form 6,060
 const DESCRIPTION_CHARS = 1_400; // 2026-11-06: ~1,150 of the 6,000 (was 2,259, then 3,955)
 const body = response => JSON.parse(response.content[0].text);
 // The listing names fields in a description ("Fields: a b:n c=x|y ...") and required fields per action.

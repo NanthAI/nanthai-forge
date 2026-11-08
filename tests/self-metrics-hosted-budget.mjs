@@ -8,7 +8,18 @@ import { metricsSurface } from '../dist/self-metrics-surface.js';
 const { pages, period } = JSON.parse(readFileSync(0, 'utf8'));
 let calls = 0;
 const start = performance.now();
-const { records } = await readHostedMetricPages(async () => pages[calls++], period);
+// The reader runs its streams side by side, so replay by call, not by position.
+const replay = new Map();
+for (const next of pages) {
+  const key = JSON.stringify([next.name, next.args]);
+  replay.set(key, [...(replay.get(key) ?? []), next.value]);
+}
+const { records } = await readHostedMetricPages(async (name, args) => {
+  calls++;
+  const queued = replay.get(JSON.stringify([name, args]));
+  if (!queued?.length) throw new Error(`unrecorded call ${name}`);
+  return queued.shift();
+}, period);
 const result = metricsSurface(records, period);
 process.stdout.write(
   JSON.stringify({

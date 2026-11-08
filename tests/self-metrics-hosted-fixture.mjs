@@ -23,10 +23,10 @@ export function fixture() {
   const meter = { calls: 0, documents: 0, writes: 0, maxPage: 0 };
   // Convex rejects a second paginate() in one query function (dev failure 2026-11-07, metrics
   // HOSTED_REQUEST_FAILED); the fake does too, counting system and table pages per call.
-  let paginations = 0;
-  const onePagination = () =>
+  // Each call has its own counter: callers may read several streams at once.
+  const onePagination = state =>
     assert(
-      ++paginations === 1,
+      ++state.paginations === 1,
       'This query function ran multiple paginated queries. Convex only supports a single paginated query in each query function.',
     );
   const project = {
@@ -56,7 +56,7 @@ export function fixture() {
     meter.documents += Math.max(1, rows.length);
     return structuredClone(rows);
   };
-  const ctx = {
+  const makeCtx = state => ({
     auth: { getUserIdentity: async () => (actor ? { subject: actor } : null) },
     db: {
       // Convex file storage, newest first; nothing writes it, so it is empty.
@@ -66,7 +66,7 @@ export function fixture() {
           return {
             order: () => ({
               paginate: async () => {
-                onePagination();
+                onePagination(state);
                 meter.documents++;
                 return { page: [], isDone: true, continueCursor: '' };
               },
@@ -139,7 +139,7 @@ export function fixture() {
             return read(rows.slice(0, count));
           },
           async paginate(options) {
-            onePagination();
+            onePagination(state);
             assert(selected);
             assert(options.numItems <= 100);
             assert(options.maximumRowsRead <= 100);
@@ -165,22 +165,20 @@ export function fixture() {
         return q;
       },
     },
-  };
+  });
   const query = async (name, args) => {
     const handler = handlers[name];
     assert(handler, name);
     meter.calls++;
-    paginations = 0;
     const input = { ...args, projectId: project._id };
     checkArgs(handler, input, name);
-    return handler._handler(ctx, input);
+    return handler._handler(makeCtx({ paginations: 0 }), input);
   };
   // Owner bill writes use the registered mutation and validators.
   const recordBill = async bill => {
     const input = { projectId: project._id, bill: JSON.stringify(bill) };
     checkArgs(bills.record, input, 'projectSelfMetricBills:record');
-    paginations = 0;
-    return JSON.parse(await bills.record._handler(ctx, input));
+    return JSON.parse(await bills.record._handler(makeCtx({ paginations: 0 }), input));
   };
   const landing = (id, submitted, accepted, trusted = true) => {
     const request = { id, at: submitted, phase: 'landed', timing: { submittedAt: submitted }, error: null };

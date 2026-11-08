@@ -106,7 +106,12 @@ export const page = query({
         'BAD_ARGUMENT',
         'Use a finite metrics window [from,to).',
       );
-      const context = from - (input.contextDays === 1 ? 1 : 30) * 86400000;
+      // Whole days from 1 to 30; absent keeps the original 30-day horizon for older clients.
+      const contextDays = Math.min(
+        30,
+        Math.max(1, Math.floor(Number.isFinite(input.contextDays) ? input.contextDays! : 30)),
+      );
+      const context = from - contextDays * 86400000;
       if (input.stream === 'receipts') {
         const rows = await ctx.db
           .query('projectSelfMetricReceipts')

@@ -14,11 +14,18 @@ export default async function measure({ pages, objects, report, plant = null }) 
   const read = async () => {
     let page = 0,
       object = 0;
+    // The reader runs its streams side by side, so replay by call, not by position.
+    const replay = new Map();
+    for (const next of pages) {
+      const key = JSON.stringify([next.name, next.args]);
+      replay.set(key, [...(replay.get(key) ?? []), next.value]);
+    }
     const query = async (name, args) => {
       calls++;
-      const next = pages[page++];
-      assert.deepEqual({ name, args }, { name: next.name, args: next.args });
-      return next.value;
+      const queued = replay.get(JSON.stringify([name, args]));
+      assert(queued?.length, `unrecorded call ${name} ${JSON.stringify(args)}`);
+      page++;
+      return queued.shift();
     };
     query.objects = async pins => {
       objectCalls++;

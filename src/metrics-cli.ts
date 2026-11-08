@@ -7,7 +7,7 @@ import { formatMetrics, formatMetricReport } from './self-metrics-format.js';
 import { recordBillCli } from './metrics-bill-cli.js';
 import { metricAddress, metricQuery } from './self-metrics-source.js';
 import { nameFlakeIssues } from './self-metrics-flake-issues.js';
-import { pageMetrics, METRICS_PAGE_MAX } from './self-metrics-page.js';
+import { pageMetrics, METRICS_PAGE_MAX, METRICS_CONTEXT_DAYS_MAX } from './self-metrics-page.js';
 export async function readMetrics(
   owner: string,
   options: {
@@ -15,12 +15,16 @@ export async function readMetrics(
     to?: string | undefined;
     limit?: number | undefined;
     cursor?: string | undefined;
+    contextDays?: number | undefined;
   } = {},
   pointer?: Buffer | null,
 ) {
   const period = metricPeriod(options.from, options.to);
   return pageMetrics(
-    metricsSurface(await readMetricRecords(owner, period, { pointer }), period),
+    metricsSurface(
+      await readMetricRecords(owner, period, { pointer, contextDays: options.contextDays }),
+      period,
+    ),
     period,
     options,
   );
@@ -29,7 +33,7 @@ export async function metricsCli(args: string[]) {
   if (args[0] === 'record-bill') return recordBillCli(args.slice(1));
   if (!args.length || args[0] === '--help') {
     process.stdout.write(
-      'nforge metrics ROOT [--from DATE] [--to DATE] [--json | --text] [--report FILE.md] [--compare FROM..TO] [--limit N] [--cursor C] [--flake-issues]\nnforge metrics record-bill ROOT --provider P --from DATE --to DATE --billed-usd N [...]\nUTC windows are [from,to). JSON is the default for agents/non-TTY output.\n--limit N pages the report row lists (N entries per list; follow page.nextCursor with --cursor C, same window); per-day rows are omitted when paging.\n--flake-issues prints only the flaky-file list, each with its Issue.\n',
+      'nforge metrics ROOT [--from DATE] [--to DATE] [--json | --text] [--report FILE.md] [--compare FROM..TO] [--limit N] [--cursor C] [--context-days N] [--flake-issues]\nnforge metrics record-bill ROOT --provider P --from DATE --to DATE --billed-usd N [...]\nUTC windows are [from,to). JSON is the default for agents/non-TTY output.\n--limit N pages the report row lists (N entries per list; follow page.nextCursor with --cursor C, same window); per-day rows are omitted when paging.\n--context-days N (1 to 30, default 2) sets the days of pre-window history read to classify landings; the window and this horizon bound the read.\n--flake-issues prints only the flaky-file list, each with its Issue.\n',
     );
     return;
   }
@@ -49,6 +53,7 @@ export async function metricsCli(args: string[]) {
         '--flake-issues',
         '--limit',
         '--cursor',
+        '--context-days',
       ].includes(flag) && !(flag in options),
       'BAD_ARGUMENT',
       'Unknown or repeated metrics option.',
@@ -75,6 +80,13 @@ export async function metricsCli(args: string[]) {
     'BAD_ARGUMENT',
     `--limit must be a whole number from 1 to ${METRICS_PAGE_MAX}.`,
   );
+  const contextDays = options['--context-days'] === undefined ? undefined : Number(options['--context-days']);
+  invariant(
+    contextDays === undefined ||
+      (Number.isInteger(contextDays) && contextDays >= 1 && contextDays <= METRICS_CONTEXT_DAYS_MAX),
+    'BAD_ARGUMENT',
+    `--context-days must be a whole number from 1 to ${METRICS_CONTEXT_DAYS_MAX}.`,
+  );
   invariant(
     !options['--cursor'] || limit !== undefined,
     'BAD_ARGUMENT',
@@ -83,10 +95,14 @@ export async function metricsCli(args: string[]) {
   invariant(
     !(options['--flake-issues'] && (limit !== undefined || options['--compare'])),
     'BAD_ARGUMENT',
-    '--flake-issues prints only the flake list; do not combine it with --limit or --compare.',
+    '--context-days N (1 to 30, default 2) sets the days of pre-window history read to classify landings; the window and this horizon bound the read.\n--flake-issues prints only the flake list; do not combine it with --limit or --compare.',
   );
   const result = metricsSurface(
-    await readMetricRecords(owner, period, options['--flake-issues'] ? { runsOnly: true } : {}),
+    await readMetricRecords(
+      owner,
+      period,
+      options['--flake-issues'] ? { runsOnly: true, contextDays } : { contextDays },
+    ),
     period,
   );
   // Opt-in: one planning search per listed flaky file (at most 10). Reads add no calls by default.
@@ -95,7 +111,7 @@ export async function metricsCli(args: string[]) {
     if (address) await nameFlakeIssues(metricQuery(address), result.totals.flakes.files);
   }
   const before = beforePeriod
-    ? metricsSurface(await readMetricRecords(owner, beforePeriod), beforePeriod)
+    ? metricsSurface(await readMetricRecords(owner, beforePeriod, { contextDays }), beforePeriod)
     : undefined;
   if (options['--report'])
     writeFileSync(options['--report'], formatMetricReport(result, before), { mode: 0o600 });

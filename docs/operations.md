@@ -219,8 +219,19 @@ Counts and totals are whole on every page; the per-day sections keep their count
 report `rowsOmitted` instead of rows (a one-day window returns them). Paging bounds the
 reply, not the read: each page recomputes the report from the same hosted pages.
 The whole `metrics` action, capability discovery included, ends within 100 s (under an
-agent shell's two-minute limit); a larger window ends with `METRICS_TIMEOUT`, changes
-nothing and names the one-day command to run next.
+agent shell's two-minute limit). The window bounds the read, and so does the context horizon:
+besides the window, each of the eight streams reads `contextDays` of earlier history (default 2,
+`--context-days N` or `contextDays` up to 30) to classify landings by retries, fixers and Lane
+inputs. The streams are read side by side, so the wall time is that of the slowest stream (check
+runs, whose pages are byte-limited). Measured on the dogfood project (35 landings in the 5 h window):
+the page reads for a 5 h window with a one-day horizon were 78 calls and 24 s one after another;
+the whole action with `contextDays: 1` (streams side by side, bills, placement and input
+hydration included) took 24 s and returned exit 0, where the fixed 30-day horizon read about
+366 pages and timed out for a 2 h window. Landings whose Lane history is older than the horizon
+show path `unknown` rather than a wrong class, and the coverage
+gap names the horizon actually read. A deploy older than this change reads 30 days unless `contextDays` is 1;
+the coverage gap then says so. A window that still does not fit ends with `METRICS_TIMEOUT`, changes
+nothing and names a command for the later half of the window with a one-day horizon.
 
 #### Fallback reasons
 

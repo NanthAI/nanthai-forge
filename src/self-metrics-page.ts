@@ -5,12 +5,21 @@ import type { MetricPeriod } from './self-metrics-types.js';
 import type { MetricsSurface } from './self-metrics-surface.js';
 
 export const METRICS_PAGE_MAX = 200;
+/** Pre-window history the hosted read adds to classify landings (retries, fixers, Lane inputs).
+ * The window bounds the read; this horizon bounds the rest. Wider is explicit and costs more pages. */
+export const METRICS_CONTEXT_DAYS_DEFAULT = 2;
+export const METRICS_CONTEXT_DAYS_MAX = 30;
 /** Optional on every metrics surface. Without them the report is returned whole, as before. */
 export const metricPagingFields = {
   /** Row-list entries per page (waste, landings by path, authority-lag rows). */
   limit: z.number().int().min(1).max(METRICS_PAGE_MAX).optional(),
   /** `page.nextCursor` of the previous page of the same window. */
   cursor: z.string().min(1).max(200).optional(),
+};
+/** Hosted `metrics` only: days of history before `from` read as context (default 2, at most 30).
+ * Kept apart from the paging fields so the MCP tool list stays inside its context budget. */
+export const metricContextField = {
+  contextDays: z.number().int().min(1).max(METRICS_CONTEXT_DAYS_MAX).optional(),
 };
 const encode = (offset: number, period: MetricPeriod) =>
   btoa(JSON.stringify({ o: offset, f: period.from, t: period.to }));
