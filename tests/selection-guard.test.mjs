@@ -103,8 +103,15 @@ test('hosted gate planning: a probe or contract gate with no tests runs smoke in
     assert.ok(selected.tests.length > 0, gate.mode);
     assert.equal(selected.guard, 'zero-selection', gate.mode);
   }
-  // An exact configured command has no test selection by design.
-  assert.deepEqual(actionsGateSelection({}, ['src/leaf.ts'], files, false).tests, []);
+  // An exact configured command has no test selection by design; it gets the changed paths instead.
+  const command = {
+    check: { executable: 'bash', args: ['ci.sh'] },
+    candidate: { base: { head: 'a'.repeat(64) } },
+    request: { expectedHead: 'b'.repeat(64) },
+  };
+  const opaque = actionsGateSelection(command, ['src/leaf.ts'], files, false);
+  assert.deepEqual(opaque.tests, []);
+  assert.deepEqual(opaque.changes.paths, ['src/leaf.ts']);
 });
 
 test('the runner refuses a pinned selection with no test file unless it is the static job, docs or partial', () => {

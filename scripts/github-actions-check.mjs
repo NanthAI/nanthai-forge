@@ -6,6 +6,7 @@ import { execFileSync } from 'node:child_process';
 import { runDocumentationChecks } from './check-documentation.mjs';
 import { checkPhases } from './check-phases.mjs';
 import { keptFiles, poolUnits, validPool } from './shard-pool.mjs';
+import { commandCheckInputs } from './check-command-env.mjs';
 import {
   assertCheckContract,
   declaredRequirement,
@@ -71,10 +72,20 @@ export function runActionsCheck(execute = execFileSync, { install = true, build 
     if (install && !unitPart && !skipsCommand && (plan.standard || npmLocked))
       phases.time('install', () => npm('ci', '--ignore-scripts'));
     if (!plan.standard) {
-      if (shard !== 'static') throw new Error('Arbitrary commands have only a static job.');
+      // The changed-paths file and, when the check declares them, its shard part.
+      const inputs = commandCheckInputs(plan, shard);
       if (skipsCommand)
         console.log(`Command not run: ${plan.selection.reason}. Set the check's docsPaths to change this.`);
-      else phases.time('command', () => run(plan.command[0], plan.command.slice(1)));
+      else {
+        Object.assign(env, inputs.env);
+        let passed = false;
+        try {
+          phases.time('command', () => run(plan.command[0], plan.command.slice(1)));
+          passed = true;
+        } finally {
+          inputs.finish(passed);
+        }
+      }
     } else if (shard === 'static') {
       // verify reads only scope and tests. Selection reasons can exceed Linux's 128 KiB
       // per-variable limit, which makes the child spawn fail with E2BIG.

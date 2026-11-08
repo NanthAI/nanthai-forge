@@ -590,6 +590,39 @@ test('a docs-only change shards the tests that read the changed document and kee
   // The plan carries a test shard, so the landing waits for it.
   assert.equal(s.run.plan.shardCount, 2);
 });
+test('any configured command gets the pinned changed paths; declared scope and shards plan scoped jobs', async t => {
+  const s = fixture(t),
+    candidate = join(s.directory, 'candidate');
+  const changes = mode => ({
+    version: 1,
+    comparison: 'main',
+    base: s.run.candidate.base.head,
+    head: s.run.request.expectedHead,
+    paths: ['README.md'],
+    mode,
+  });
+  // Undeclared (today's default): one full job, now with the changed-paths file in its plan.
+  s.run.check = { executable: 'pnpm', args: ['run', 'ci'], definition: 'c'.repeat(64) };
+  let prepared = await prepareActionsJob(s.client, candidate, join(s.directory, 'objects'));
+  assert.equal(prepared.recipe.selection.scope, 'full');
+  assert.deepEqual(prepared.recipe.selection.changes, changes('full'));
+  assert.deepEqual(prepared.matrix, []);
+  assert.equal(prepared.singleShard, 'static');
+  // Declared scope and shards under a contract gate: scoped evidence, one job per declared shard.
+  s.run.check = { ...s.run.check, selection: { scope: 'changed-paths', shards: 3 } };
+  s.run.gate = { mode: 'contract', tests: [], contractVersion: 1, reason: 'Synthetic contract' };
+  delete s.run.plan;
+  prepared = await prepareActionsJob(s.client, candidate, join(s.directory, 'objects'));
+  assert.equal(prepared.recipe.selection.scope, 'scoped');
+  assert.deepEqual(prepared.recipe.selection.changes, changes('scoped'));
+  assert.equal(prepared.recipe.selection.gate.effective, 'contract');
+  assert.equal(prepared.recipe.pool, undefined);
+  assert.deepEqual(
+    prepared.recipe.groups,
+    [1, 2, 3].map(i => [`forge-command-shard:${i}/3`]),
+  );
+  assert.deepEqual(prepared.matrix, ['0', '1', '2', 'static']);
+});
 test('untrusted traversal manifests and altered downloads fail before materialization', async t => {
   const s = fixture(t);
   const malicious = s.state([{ path: '../escape', blob: s.put('bad').sha256, mode: 'file' }]);

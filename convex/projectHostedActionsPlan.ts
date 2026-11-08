@@ -13,6 +13,7 @@ import { checkGateSchema } from '../src/bet2-gate';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { invariant } from '../src/errors';
 import { secretAllowEvidenceSchema } from '../src/secret-allow';
+import { validCommandPlan } from '../src/check-command-scope';
 export const prepare = internalMutation({
   args: {
     ...sessionArgs,
@@ -51,10 +52,12 @@ export const prepare = internalMutation({
           ? checkPin([...tests].sort()) === checkPin([...new Set(recipe.selection.tests)].sort()) &&
             (run.gate?.mode === 'probe' ||
               semanticTests(run.semanticPlan).every(test => tests.includes(test)))
-          : recipe.groups.length === 0),
+          : validCommandPlan(run, recipe)),
       'EVIDENCE_CHANGED',
       'Actions shard membership differs from the complete selection.',
     );
+    // Gate tests a configured command must run are handed to it in the plan, not as shard files.
+    const required = standard ? tests : recipe.selection.tests;
     if (run.gate) {
       const echo = recipe.selection.gate === undefined ? null : checkGateSchema.parse(recipe.selection.gate);
       if (echo) {
@@ -70,13 +73,13 @@ export const prepare = internalMutation({
                   ? 'docs'
                   : 'contract') &&
             (effective !== 'contract' || !['full', 'audit'].includes(run.gate.mode)) &&
-            (effective !== 'contract' || (run.gate.tests ?? []).every(test => tests.includes(test))),
+            (effective !== 'contract' || (run.gate.tests ?? []).every(test => required.includes(test))),
           'EVIDENCE_CHANGED',
           'Actions selection differs from its server gate.',
         );
         run.gate = echo;
       } else {
-        const covered = (run.gate.tests ?? []).every(test => tests.includes(test));
+        const covered = (run.gate.tests ?? []).every(test => required.includes(test));
         const union = semanticTests(run.semanticPlan);
         // Pre-gate planners can report scoped for a docs-only B3.2 union.
         // Recognize that exact legacy selection, not an arbitrary scoped pass.

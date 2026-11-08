@@ -354,6 +354,17 @@ const checkActions = z
     setup: z.object({ executable: z.string().trim().min(1), args: z.array(z.string()).default([]) }).strict(),
   })
   .strict();
+/** A configured command's selection contract (docs/workflows.md#check-command-scope).
+ * `scope`: the command reads the changed-paths file and may run less than everything; Forge
+ * counts its reduced run as scoped evidence, never as full. `shards`: the command runs one
+ * `FORGE_CHECK_SHARD` part per job. Absent: the command runs in full in one job. */
+export const checkSelectionDeclaration = z
+  .object({
+    scope: z.literal('changed-paths').optional(),
+    shards: z.number().int().min(2).max(20).optional(),
+  })
+  .strict()
+  .refine(value => value.scope !== undefined || value.shards !== undefined, 'Declare scope or shards.');
 export const checkSchema = z.object({
   id,
   name: z.string().trim().min(1),
@@ -367,6 +378,7 @@ export const checkSchema = z.object({
   measureResources: z.boolean().optional(),
   declaredInputs: z.array(declaredInputSchema).optional(),
   actions: checkActions.optional(),
+  selection: checkSelectionDeclaration.optional(),
   docsPaths: docsPathsSchema.optional(),
   definition: oid,
   at: z.string(),
@@ -1208,6 +1220,7 @@ export const defineCheckCommandSchema = z.object({
   measureResources: z.boolean().optional(),
   declaredInputs: z.array(declaredInputSchema).optional(),
   actions: checkActions.optional(),
+  selection: checkSelectionDeclaration.optional(),
   docsPaths: docsPathsSchema.optional(),
 });
 export const commandSchema = z.discriminatedUnion('action', [

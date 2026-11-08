@@ -30,8 +30,10 @@ worker environment. Node is 24.22.1. Each job installs with `npm ci --ignore-scr
 Retained pre-upgrade Node 24.19.0 executions remain observable and cancellable,
 with their original runtime identity. They cannot dispatch new work or retry shards;
 an unstarted old-runtime plan needs a new check on the fixed runtime.
-Arbitrary commands run once in the static job. Candidate sources must include the
-Actions-aware standard check script to use standard sharding.
+Other configured commands run once in the static job and receive the changed-paths file; a
+check that declares `selection.shards` also runs its own test shards, and `selection.scope` lets
+it scope ([check command scope](../workflows.md#check-command-scope)). Candidate sources must
+include the Actions-aware standard check script to use Forge's test selection.
 
 **Checks that do not apply skip, never wait.** A project has one configured landing
 check and no per-check path filters, so no required check can sit pending because a
@@ -45,8 +47,9 @@ test reads) the plan has the static job alone, and the run, its acceptance
 receipt (`check.skipped`) and the `landings` row (`checkSkipped`) record
 `{"part":"tests","status":"not-affected","reason":…}` with the planner's reason. A change
 that reaches tests selects them and waits for every shard; its receipt has no `skipped`.
-Opaque bring-your-own commands, and machine runners, which plan the whole configured
-check, have no scope Forge can read: they run in full on every change and never skip.
+Bring-your-own commands, and machine runners, which plan the whole configured check, never
+skip: Forge runs the command on every change. A command whose check declares
+`selection.scope` reads the changed paths and may scope itself under a reduced-evidence gate.
 
 A standard check never passes without running a test for a change that touches code. Every
 planner (local, owner, hosted gate planning) applies `scripts/selection-guard.mjs`: a non-docs selection
@@ -432,7 +435,8 @@ go directly from object storage to the runner. The Candidate is transferred once
 symlinks. The plan and run pins remain outside the Candidate directory. Planning
 reads source as data with the installed selector and shared eight-way partitioner;
 existing default full selection remains full. Docs scope uses only the static job.
-Arbitrary commands run once, including the existing composed Intent contract union.
+Other commands run once (or once per declared shard), and the composed Intent contract union
+runs in their static job.
 
 The runner first sends the oldest session shape. The reply adds `capabilities`
 alongside the existing run fields, so old runners retain their response shape.

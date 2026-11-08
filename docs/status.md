@@ -217,6 +217,13 @@ standalone scripts add exact basename tests. Check-pipeline, packaging, build an
 product-runtime script dependencies retain full coverage, as do uncertain scripts
 or package commands. Selection evidence records the reason.
 
+Any other configured check command receives the same runner-pinned changed-paths file
+(`FORGE_CHECK_CHANGES`, also on hosted Actions). A check that declares `selection.scope`
+may scope itself under a reduced-evidence gate and counts as scoped evidence, never full;
+one that declares `selection.shards` runs as that many hosted Actions test jobs plus a
+static job ([check command scope](workflows.md#check-command-scope)). Undeclared commands
+run in full in one job.
+
 Native finish/accept supports an explicit disjoint fast-path autonomy option:
 exact composed-main provenance, current passing evidence, manifest-path
 disjointness and clean composition precede a CAS acceptance. Pending post-accept

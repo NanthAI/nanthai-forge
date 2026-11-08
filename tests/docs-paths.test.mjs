@@ -14,8 +14,11 @@ import { hostedCheckCommandSchema, hostedCheckDefinition, testsNotAffected } fro
 import { pinnedTestedDocs } from '../dist/tested-docs.js';
 
 const command = { name: 'verify', executable: 'bash', args: ['ci/check.sh'], environmentLabel: '' };
+// A hosted run always names its Candidate and the main it composed on (the changed-paths file pins both).
 const opaque = (docsPaths, extra = {}) => ({
   check: { executable: 'bash', args: ['ci/check.sh'], definition: 'd'.repeat(64), docsPaths },
+  candidate: { base: { head: 'a'.repeat(64) } },
+  request: { expectedHead: 'b'.repeat(64) },
   ...extra,
 });
 const select = (run, paths) => actionsGateSelection(run, paths, new Map(), false);

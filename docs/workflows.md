@@ -299,6 +299,44 @@ nforge x ROOT define-check '{"name":"integration","executable":"node","args":["t
 
 `env` and `credentials` contain environment variable names, never values. Both are explicit passthrough; the latter identifies credentials separately. They change the definition digest and appear in check definitions and receipts. They do not inject Secret Objects. Omitted variables are absent; failed runs suggest omitted names that may need passthrough. Values are not retained by the runner, but commands can print them into logs. See [security](security.md#clean-check-environments) for the complete allowlist and filesystem limitations. A clean environment is not an OS sandbox.
 
+### Check command scope
+
+Forge's own recipe (`node scripts/forge-check.mjs`) selects and shards test files itself. Any other
+configured command (`define-check` locally, `configure-check` hosted) runs in full, in one job, unless
+its check declares more. Either way it receives the changed paths:
+
+- `FORGE_CHECK_CHANGES`: path of a JSON file outside the checkout, removed after the command:
+  `{"version":1,"comparison":"main","base":STATE,"head":STATE,"paths":[…],"mode":"full"|"scoped"}`.
+  `base` is the main the Candidate composed on and `head` the exact Candidate (`FORGE_CHECK_BASE`,
+  `FORGE_CHECK_HEAD`); `paths` lists every added, modified, deleted or mode-changed path, sorted. A scoped
+  run may add `tests` (Intent contract or probe test files the command must run) and, for a scoped
+  recheck after main moved, `mainPaths` (what main gained since the checked base). `paths` is absent when
+  the list is over 128 KiB; `mode` is then `full`.
+- `mode: "full"` (also `FORGE_CHECK_FULL=1`) means run everything. `mode: "scoped"`
+  (`FORGE_CHECK_SCOPED=1`) means the command may run only what the change affects.
+
+Declare the contract with `selection` in the check definition; it changes the definition digest:
+
+```sh
+nforge x ROOT define-check '{"name":"ci","executable":"bash","args":["ci/check.sh"],"selection":{"scope":"changed-paths","shards":4}}'
+```
+
+- `"scope":"changed-paths"`: the command reads the file and may scope. Forge sets `mode: "scoped"` only
+  where its own check may scope (a contract, probe or scoped-recheck gate); no gate, a full gate and the
+  post-accept main audit always get `mode: "full"`. A scoped run is **scoped evidence**: it lands on the
+  contract gate's terms and leaves main-audit debt, never full evidence, whatever the command then does.
+  A command may write `{"scope":"full"|"scoped",…}` to `FORGE_CHECK_SELECTION`; on hosted Actions a
+  passing command that reports a reduced scope when asked for `full` fails with `SCOPE_MISMATCH`.
+- `"shards":N` (2 to 20): hosted Actions runs N test jobs plus one static job, capped by the runner's
+  concurrency budget, the per-check Convex call budget and free job slots. Test jobs get
+  `FORGE_CHECK_PART=tests` and `FORGE_CHECK_SHARD=i/N` (1-based, also `FORGE_CHECK_SHARD_INDEX` and
+  `FORGE_CHECK_SHARD_TOTAL`), the form `vitest --shard` and `jest --shard` take; the static job gets
+  `FORGE_CHECK_PART=static` for lint, types or build. The job passes only when every part passes, so
+  the command must cover everything across its parts.
+
+A check without `selection` keeps today's behaviour: one full job. Local and self-hosted machine runners
+already supply the same file to every command and run it as one job.
+
 Choose the native project's runner once through the existing owner-only
 `set-policy` command: `checks.runner` is `local` (default), `github-actions`
 (`repo`, `runsOn`, optional `shards`). Use `policy` or `status` to show the

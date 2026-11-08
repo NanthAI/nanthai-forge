@@ -25,6 +25,7 @@ import { testedDocs } from './tested-docs.js';
 import { declaredTestedDocs, docsOnlyChange } from './docs-paths.js';
 import { scanSecretPaths, SECRET_SCAN_ALLOW_FILE } from './secret-scan.js';
 import { isStandardForgeCheck } from './standard-check.js';
+import { commandSelection, commandShardCount, commandShardGroups } from './check-command-scope.js';
 /** The base (main) allow file's bytes. Usually cached already (unchanged, or from the base
  * pack); otherwise one small object read, only when the base has the file. Unreadable
  * means no allow entries: findings then fail, never pass. */
@@ -119,6 +120,8 @@ export async function prepareActionsJob(
     reason: selected.reason,
     tests: selected.tests,
     ...(docs ? { testedDocs: docs } : {}),
+    // Any other command reads this as its changed-paths file (FORGE_CHECK_CHANGES).
+    ...('changes' in selected ? { changes: selected.changes } : {}),
     // Pinned in the plan so the static job fails on it. Value-free: path, line, kind, fingerprint.
     ...(secrets.findings.length || secrets.allowed || secrets.allowChanges
       ? {
@@ -141,26 +144,39 @@ export async function prepareActionsJob(
       : {}),
   };
   // A docs scope shards only the tests that read a changed document (none for a document no test reads).
-  const groups =
-    standard && (selection.scope !== 'docs' || selection.tests.length)
-      ? timedShards(selection.tests, client.timings, {
-          concurrencyBudget: run.configuration.concurrencyBudget ?? 12,
-          callsPerJob: actionsJobCalls(client.capabilities),
-          ...capacity,
-        })
+  const budget = {
+    concurrencyBudget: run.configuration.concurrencyBudget ?? 12,
+    callsPerJob: actionsJobCalls(client.capabilities),
+  };
+  // Another command shards only through its declared shard interface (FORGE_CHECK_SHARD);
+  // a docs-scoped run of it runs no command, so it has no shards.
+  const groups = !standard
+    ? selection.scope === 'docs'
+      ? []
+      : commandShardGroups(commandShardCount(run.check, { ...budget, jobCap: capacity?.jobCap }))
+    : selection.scope !== 'docs' || selection.tests.length
+      ? timedShards(selection.tests, client.timings, { ...budget, ...capacity })
       : [];
   if (capacity)
     console.log(
       `Actions capacity: ${capacity.activeChecks} active checks, ${capacity.jobCap} slots; ${groups.length} test shards`,
     );
-  if (groups.length) console.log(describeShardPlan(groups, client.timings));
+  if (groups.length)
+    console.log(
+      standard
+        ? describeShardPlan(groups, client.timings)
+        : `Command shards: ${groups.length} (declared ${run.check.selection?.shards})`,
+    );
   // Shard pool (scripts/shard-pool.mjs): only servers that sign claims receive one.
   const poolMode = process.env.FORGE_ACTIONS_POOL_MODE;
   const pool =
-    groups.length >= 2 && client.capabilities.includes(actionsPoolCapability) && poolArm(poolMode, run.id)
+    standard &&
+    groups.length >= 2 &&
+    client.capabilities.includes(actionsPoolCapability) &&
+    poolArm(poolMode, run.id)
       ? planPool(groups, client.timings)
       : undefined;
-  if (groups.length >= 2)
+  if (standard && groups.length >= 2)
     console.log(
       pool
         ? `Shard pool: on${poolMode === 'ab' ? ' (ab arm B)' : ''}; ${poolUnits(groups, pool).length} units`
@@ -265,7 +281,8 @@ function gateSelection(
         reason: 'Every changed path matches the check’s docs paths',
         tests: [] as string[],
       };
-    return { scope: 'full', reason: 'Exact configured command', tests: [] as string[] };
+    // Any other command gets the changed paths; it scopes only when its check declares so.
+    return commandSelection(run, paths, files, scopedRecheckBase(gate) ? mainPaths : null);
   }
   const forceFull = gate?.mode === 'audit' || (gate?.mode === 'full' && union.length > 0);
   const env = forceFull

@@ -149,8 +149,9 @@ Each tier answers a different question. None depends on a particular CI provider
    - the Lane check ended without a verdict after two restarts (unknown): the left-out
      tests then run first in the change's queue check;
    - the project configured a check whose selection is narrower than the consumer
-     set (a custom command, or a contract gate that declares fewer tests): the
-     pre-queue tier then covers only what that check selects;
+     set (a custom command that declares `selection.scope` and scopes itself, or a
+     contract gate that declares fewer tests): the pre-queue tier then covers only
+     what that check selects. A custom command without that declaration runs in full;
    - the project opted out (`admissionCheck: false` or `true`): there is no
      pre-queue tier, and left-out tests run first in the queue check.
 3. **Landing (queue check of the combination): the authority.** It checks the
@@ -178,7 +179,10 @@ Each tier answers a different question. None depends on a particular CI provider
   what landed meanwhile, or for unadmitted changes.
 - Proved reuse works with any configured check command on any runner: the rule
   reads paths, manifests and the run's selection, never the command's own test
-  selection. It needs owner-agent automatic acceptance. A Markdown overlap lands
+  selection. Every command receives the same changed-paths file
+  ([check command scope](workflows.md#check-command-scope)); a scoped run of a command
+  that declares `selection.scope` is scoped evidence, so it rechecks (`checked-not-full`)
+  instead of landing on its first check, exactly like Forge's own scoped runs. It needs owner-agent automatic acceptance. A Markdown overlap lands
   on its first check only when the runner pinned a tested-docs list. Forge's own
   selector writes one; any other command writes it from its check's opt-in
   [`docsPaths`](#docs-only-paths) and otherwise rechecks such an overlap.
