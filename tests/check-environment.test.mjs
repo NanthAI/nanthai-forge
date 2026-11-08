@@ -506,13 +506,17 @@ test('every ecosystem gets a dedicated content cache outside the private HOME; n
   const clean = checkProcessEnvironment({ env: [], credentials: [] }, recorded, run);
   const root = dirname(recorded.env.npm_config_cache);
   assert.equal(clean.env.npm_config_cache, join(home, '.cache', 'nanthai-forge', 'check-npm-cache'));
+  // Tool homes that read executable configuration live in the run; every other cache is shared
+  // below the check cache root, one directory per project.
+  const toolHomes = ['CARGO_HOME', 'GRADLE_USER_HOME'];
   for (const name of cacheNames) {
     assert.ok(clean.env[name], `${name} is set`);
-    assert.ok(clean.env[name].startsWith(root + '/'), `${name} is under the shared check cache root`);
-    assert.ok(!clean.env[name].startsWith(clean.env.HOME), `${name} is outside the private HOME`);
+    assert.ok(!clean.env[name].startsWith(clean.env.HOME + '/'), `${name} is outside the private HOME`);
+    if (toolHomes.includes(name)) assert.ok(clean.env[name].startsWith(run + '/'), `${name} is in the run`);
+    else assert.ok(clean.env[name].startsWith(root + '/'), `${name} is under the shared check cache root`);
   }
   assert.notEqual(clean.env.GOMODCACHE, '/ambient/go');
-  assert.match(clean.env.MAVEN_ARGS, /^-Dmaven\.repo\.local=.+check-maven-repository$/);
+  assert.match(clean.env.MAVEN_ARGS, /^-Dmaven\.repo\.local=.+check-maven-repository\/[0-9a-f]{16}$/);
   assert.ok(!clean.env.MAVEN_ARGS.includes(clean.env.HOME));
   clean.prepare();
   for (const name of cacheNames) assert.equal(existsSync(clean.env[name]), true);

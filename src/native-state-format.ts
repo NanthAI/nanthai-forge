@@ -34,7 +34,7 @@ export type NativeFile = z.infer<typeof entry>;
 export type NativeState = z.infer<typeof stateSchema>;
 // A '.forge' or '.git' segment in any case (the names contain only ASCII letters).
 const reservedSegment = /(?:^|\/)\.(?:forge|git)(?:\/|$)/i;
-export function overlappingPaths(files: NativeFile[]): string[] {
+export function overlappingPaths(files: readonly { path: string }[]): string[] {
   const paths = new Set(files.map(file => file.path)),
     seen = new Set<string>(),
     conflicts = new Set<string>();
@@ -47,6 +47,29 @@ export function overlappingPaths(files: NativeFile[]): string[] {
       seen.add(parent);
       if (paths.has(parent)) conflicts.add(parent);
     }
+  return [...conflicts].sort();
+}
+/** What a volume treats as the same name. Case-sensitive Linux volumes keep both. */
+export type NameFolding = { caseInsensitive: boolean; unicodeInsensitive: boolean };
+/** Paths that would land on one name (or a file under a file's name) on a volume with this folding:
+ * valid States may hold `A` and `a/x`, which only a case-insensitive volume turns into a write
+ * through the link `A`. Empty when the volume keeps every path distinct. */
+export function foldedCollisions(files: readonly { path: string }[], folding: NameFolding): string[] {
+  if (!folding.caseInsensitive && !folding.unicodeInsensitive) return [];
+  const fold = (path: string) => {
+    if (folding.unicodeInsensitive) path = path.normalize('NFD');
+    return folding.caseInsensitive ? path.toLowerCase() : path;
+  };
+  const byName = new Map<string, string>(),
+    conflicts = new Set<string>();
+  for (const { path } of files) {
+    const name = fold(path),
+      prior = byName.get(name);
+    if (prior === undefined) byName.set(name, path);
+    else if (prior !== path) conflicts.add(prior).add(path);
+  }
+  for (const name of overlappingPaths([...byName.keys()].map(path => ({ path }))))
+    conflicts.add(byName.get(name)!);
   return [...conflicts].sort();
 }
 export function parseNativeState(bytes: Uint8Array): NativeState {

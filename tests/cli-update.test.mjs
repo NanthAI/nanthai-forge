@@ -21,6 +21,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { removeInstall } from '../dist/dependency-seal.js';
 import { withCliRuntimeLock, cliProcessIdentity } from '../dist/cli-launcher.js';
 import { cliUpdateRun } from '../dist/cli-update.js';
 import { cliStartup, cliVersionCheck } from '../dist/cli-version.js';
@@ -52,7 +53,7 @@ const updateCli = (installation, source, selected, dependencies, ...rest) =>
   );
 function fixture(t) {
   const directory = realpathSync(mkdtempSync(join(tmpdir(), 'forge-test-cli-update-')));
-  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  t.after(() => removeInstall(directory));
   const settings = join(directory, 'client.json');
   writeFileSync(settings, JSON.stringify({ localHeavySlots: 0 }));
   const previousSettings = process.env.FORGE_CLIENT_SETTINGS;

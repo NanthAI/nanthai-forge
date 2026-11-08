@@ -58,7 +58,7 @@ export class PreviewChecks {
       if (errors.length) return { status: 'failed', errors };
       if (this.checks.length) this.prepareDependencies(workspace);
       for (const check of this.checks) {
-        const environment = checkProcessEnvironment(check as Check, this.environment, run);
+        const environment = checkProcessEnvironment(check as Check, this.environment, run, this.store.root);
         environment.prepare();
         const result = spawnSync(check.executable, check.args, {
           cwd: workspace,

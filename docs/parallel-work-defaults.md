@@ -156,7 +156,11 @@ Read: `nforge settings`; set: `nforge settings KEY VALUE`; reset:
   fails the previous link is put back. If the directory holds packages Forge did not link, it is kept
   and reported (`dependencies.status` `stale`, or a stderr line); delete it to relink. A Lane with no
   `node_modules` is not given one by these commands.
-- The cache is `$XDG_CACHE_HOME/forge/deps` (default `~/.cache/forge/deps`) and is safe to delete.
+- The cache is `$XDG_CACHE_HOME/forge/deps` (default `~/.cache/forge/deps`) and is safe to delete. A finished
+  install is read-only (the folder, each `node_modules` root and its tool-cache folders such as `.cache` and
+  `.vite` stay writable), so a tool in one Lane cannot change the packages other Lanes run; `rm -rf` needs
+  `chmod -R u+w` first. A hosted Lane's install is keyed by its project as well as its lockfile, so a fork
+  never shares one. To change packages, replace the link first (next item).
 - If your Lane changes the lockfile, replace the link before installing:
   `rm -r node_modules && npm ci` (or the same with your manager's frozen install). Removing the links does not
   touch the shared install; for a workspace repository remove each workspace `node_modules` the same way.

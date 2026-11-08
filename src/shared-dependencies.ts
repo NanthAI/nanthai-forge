@@ -16,6 +16,7 @@ import { homedir } from 'node:os';
 import { dirname, isAbsolute, join } from 'node:path';
 import { readInstallScriptAllowlist } from './install-script-allowlist.js';
 import { linkInstall } from './dependency-link.js';
+import { removeInstall, sealInstall } from './dependency-seal.js';
 import { recordLink, relinkIfStale, type Relinked } from './dependency-relink.js';
 import { allowedRebuilds, npmInstaller, scriptedPackages } from './npm-install.js';
 import {
@@ -84,6 +85,21 @@ export function workspaceDirectories(lock: Buffer): string[] | null {
     ? folders.sort()
     : null;
 }
+/** The hosted project a Lane checkout belongs to (deployment and project id), or null for any other folder. */
+function hostedProject(root: string): string | null {
+  try {
+    const marker = JSON.parse(readFileSync(join(root, '.forge', 'hosted-lane.json'), 'utf8')) as {
+      url?: unknown;
+      selection?: { projectId?: unknown };
+    };
+    const project = marker.selection?.projectId;
+    return typeof project === 'string' && project && typeof marker.url === 'string'
+      ? `${marker.url}/${project}`
+      : null;
+  } catch {
+    return null;
+  }
+}
 /** npm installs are keyed by the exact lockfile, package.json (and every workspace package.json),
  * platform and Node major version, so a Lane with a different lockfile never shares another Lane's install. */
 export function dependencyKey(root: string, managerVersion?: string): string | null {
@@ -120,6 +136,9 @@ export function dependencyKey(root: string, managerVersion?: string): string | n
   }
   const allow = readInstallScriptAllowlist(root);
   if (allow) hash.update(`\0allow:${JSON.stringify(allow)}`);
+  // A hosted Lane's install is its project's own: a fork with identical manifests never shares it.
+  const project = hostedProject(root);
+  if (project) hash.update(`\0project:${project}`);
   return hash
     .update(`\0${process.platform}-${process.arch}-node${process.versions.node.split('.')[0]}`)
     .digest('hex')
@@ -252,9 +271,8 @@ export async function shareDependencies(
     try {
       if (!complete(entry, key)) {
         for (const name of readdirSync(cache))
-          if (name.startsWith(`${prefix}-${key}.tmp-`))
-            rmSync(join(cache, name), { recursive: true, force: true });
-        rmSync(entry, { recursive: true, force: true });
+          if (name.startsWith(`${prefix}-${key}.tmp-`)) removeInstall(join(cache, name));
+        removeInstall(entry);
         // npm installs in a temporary stage renamed into place; other managers install in place
         // (their shims and links record absolute paths) and the completion marker makes it atomic.
         const stage = other ? entry : mkdtempSync(join(cache, `${prefix}-${key}.tmp-`));
@@ -284,6 +302,11 @@ export async function shareDependencies(
         } finally {
           if (slot) rmSync(slot, { recursive: true, force: true });
         }
+        // Read-only before the marker: an entry that carries the marker is always sealed.
+        sealInstall(
+          stage,
+          ['', ...(stageFolders ?? [])].map(folder => join(stage, folder, 'node_modules')),
+        );
         writeFileSync(join(stage, '.forge-complete'), key);
         if (!other) renameSync(stage, entry);
         installed = true;

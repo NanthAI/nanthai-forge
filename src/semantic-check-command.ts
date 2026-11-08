@@ -69,7 +69,9 @@ await Promise.all(Array.from({length: Math.min(2, missing.length)}, async () => 
       ? await execute([process.execPath, '--test', '--test-concurrency=2', '--test-timeout=90000', file])
       : runner === null
         ? (process.stderr.write('SEMANTIC_TESTS_UNAVAILABLE: ' + file + ': ' + unavailable + '\\n'), 2)
-        : await execute(Array.isArray(runner) ? runnerArgs(file) : runner[file]);
+        : !Array.isArray(runner) && !Array.isArray(runner[file])
+          ? (process.stderr.write('SEMANTIC_TESTS_UNAVAILABLE: ' + file + ': no runner command for this test\\n'), 2)
+          : await execute(Array.isArray(runner) ? runnerArgs(file) : runner[file]);
     const durationMs = performance.now() - start;
     process.stdout.write('__FORGE_TESTS__' + JSON.stringify({file, complete:status === 0 || status === 1, durationMs, results:[{name:file, passed:status === 0}]}) + '\\n');
     if (status !== 0) code = code || status;

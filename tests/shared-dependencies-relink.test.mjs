@@ -14,6 +14,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { removeInstall } from '../dist/dependency-seal.js';
 import { dependencyKey, shareDependencies } from '../dist/shared-dependencies.js';
 
 // Replay of friction abf02795 (issue 5b104d9a): a sync brought a package, the Lane kept the old
@@ -27,7 +28,7 @@ function scratch(t) {
     for (const [key, value] of Object.entries(saved))
       if (value === undefined) delete process.env[key];
       else process.env[key] = value;
-    rmSync(directory, { recursive: true, force: true });
+    removeInstall(directory);
   });
   return directory;
 }

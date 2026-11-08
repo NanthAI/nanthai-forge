@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
-import { existsSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync, symlinkSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { invariant } from './errors.js';
+import { digest } from './hash.js';
 
 /**
  * Transient, per-run settings that keep non-npm ecosystems working and warm inside the
@@ -9,18 +11,23 @@ import { dirname, join } from 'node:path';
  * the environment fingerprint is unchanged. Everything here is a path, never a credential.
  */
 
-/** Dedicated content caches: shared across checks, credential-free, outside the private HOME. */
+/** Pure content caches: every tool re-verifies or only reads packages from them, and none reads
+ * executable configuration from the directory. Segmented per project below the shared root. */
 const contentCaches: Array<[name: string, leaf: string]> = [
   ['GOMODCACHE', 'check-go-mod-cache'],
   ['GOCACHE', 'check-go-build-cache'],
-  // Registry and crate cache only. Toolchains stay in RUSTUP_HOME; no ~/.cargo credentials.
-  ['CARGO_HOME', 'check-cargo-home'],
-  ['GRADLE_USER_HOME', 'check-gradle-home'],
   ['PIP_CACHE_DIR', 'check-pip-cache'],
   ['UV_CACHE_DIR', 'check-uv-cache'],
   ['NUGET_PACKAGES', 'check-nuget-packages'],
 ];
 const mavenRepository = 'check-maven-repository';
+/** Tool homes also read executable configuration (Gradle `init.d` and `gradle.properties`, Cargo
+ * `config.toml`). The variable points at a fresh directory inside the run, so nothing a check writes
+ * there outlives it; only the named content subdirectories are linked in from a per-project store. */
+const toolHomes: Array<{ name: string; leaf: string; run: string; content: string[] }> = [
+  { name: 'CARGO_HOME', leaf: 'check-cargo-home', run: 'cargo-home', content: ['registry', 'git'] },
+  { name: 'GRADLE_USER_HOME', leaf: 'check-gradle-home', run: 'gradle-home', content: ['caches', 'wrapper'] },
+];
 
 /** Toolchain homes hold installed compilers and interpreters, never credentials. */
 const toolchainHomes: Array<[name: string, relative: string[]]> = [
@@ -35,15 +42,36 @@ export function checkCacheRoot(npmCache: string | undefined) {
   return npmCache ? dirname(npmCache) : join(homedir(), '.cache', 'nanthai-forge');
 }
 
-export function ecosystemCheckEnvironment(npmCache: string | undefined, home = homedir()) {
+/** One directory name per project, so no check ever sees another project's caches. */
+export const checkCacheScope = (scope: string) => digest(scope).slice(0, 16);
+
+export function ecosystemCheckEnvironment(
+  npmCache: string | undefined,
+  home = homedir(),
+  scope = 'local',
+  runtime = '',
+) {
   const root = checkCacheRoot(npmCache);
+  const project = checkCacheScope(scope);
   const env: Record<string, string> = {};
   const directories: string[] = [];
+  const links: Array<{ target: string; link: string }> = [];
   for (const [name, leaf] of contentCaches) {
-    env[name] = join(root, leaf);
+    env[name] = join(root, leaf, project);
     directories.push(env[name]);
   }
-  const repository = join(root, mavenRepository);
+  for (const tool of toolHomes) {
+    // Without a run directory (no caller does this) the home would be the shared store itself.
+    invariant(runtime, 'UNSAFE_PATH', 'A tool home needs a run directory.');
+    env[tool.name] = join(runtime, tool.run);
+    directories.push(env[tool.name]!);
+    for (const name of tool.content) {
+      const target = join(root, tool.leaf, project, name);
+      directories.push(target);
+      links.push({ target, link: join(env[tool.name]!, name) });
+    }
+  }
+  const repository = join(root, mavenRepository, project);
   // MAVEN_ARGS is split on whitespace, so a root containing a space cannot carry the path.
   if (!/\s/.test(repository)) {
     env.MAVEN_ARGS = `-Dmaven.repo.local=${repository}`;
@@ -55,5 +83,14 @@ export function ecosystemCheckEnvironment(npmCache: string | undefined, home = h
     const location = join(home, ...relative);
     if (existsSync(location)) env[name] = location;
   }
-  return { env, directories };
+  return { env, directories, links };
+}
+
+/** Make the run's tool homes: empty, with the project's content directories linked in. */
+export function prepareEcosystemHomes(ecosystem: ReturnType<typeof ecosystemCheckEnvironment>) {
+  for (const directory of ecosystem.directories) mkdirSync(directory, { recursive: true, mode: 0o700 });
+  for (const { target, link } of ecosystem.links) {
+    rmSync(link, { recursive: true, force: true });
+    symlinkSync(target, link, 'dir');
+  }
 }

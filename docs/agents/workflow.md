@@ -186,7 +186,9 @@ MCP `forge_review` exposes hosted `show`, `diff` and `peers`.
   commit when the mirror publishes to the imported repository, else the import
   commit (`headState` names its State when known). Each read is one server action
   that rechecks access; when main's mirror moved past stored history it first adds
-  one catch-up pack (coalesced: any number of landings cost one pack). Packs
+  one catch-up pack (coalesced: any number of landings cost one pack). One read per project
+  holds a two-minute lease on that fetch; a concurrent or later read inside the lease serves the
+  stored packs and reports `HISTORY_CATCH_UP_RUNNING`, so readers never multiply GitHub fetches. Packs
   download once per machine into `~/.cache/forge/history` (`FORGE_HISTORY_CACHE`)
   and the local `git` reads them (`GIT_REQUIRED` without Git). Forge landings that
   were not mirrored to GitHub are not in this history yet. Owners set the

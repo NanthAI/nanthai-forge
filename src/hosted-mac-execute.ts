@@ -22,7 +22,7 @@ import {
   type CheckoutObjectTransport,
 } from './hosted-checkout-cache.js';
 import { parseNativeState } from './native-state-format.js';
-import { installHostedFile } from './hosted-checkout-files.js';
+import { installHostedCheckout } from './hosted-checkout-files.js';
 import { checkSubmodules, submoduleFailureCommand } from './submodule-materialize.js';
 import { checkEnvironment, checkProcessEnvironment, checkPassthrough } from './check-environment.js';
 import { checkPin, type HostedCheckRun } from './hosted-check.js';
@@ -199,10 +199,7 @@ export async function executeHostedMacCheck(
     signal.throwIfAborted();
     const checkout = join(root, 'source');
     await mkdir(checkout, { mode: 0o700 });
-    for (const file of state.files) {
-      signal.throwIfAborted();
-      installHostedFile(checkout, cache.objects, file);
-    }
+    installHostedCheckout(checkout, cache.objects, state.files, () => signal.throwIfAborted());
     // Fetched once per run into this run's private root; removed with it. A refusal
     // fails the run through the ordinary result path, naming path, commit and URL.
     const submodules =
@@ -231,7 +228,7 @@ export async function executeHostedMacCheck(
           'EVIDENCE_CHANGED',
           'Collector credentials cannot be project command inputs.',
         );
-        const runtime = checkProcessEnvironment(run.check, environment, root);
+        const runtime = checkProcessEnvironment(run.check, environment, root, run.projectId);
         runtime.prepare();
         // Any check may write JUnit XML here (docs/operations/github-actions-checks.md).
         const junitDir = join(root, 'junit');

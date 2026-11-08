@@ -18,6 +18,7 @@ import {
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { removeInstall } from '../dist/dependency-seal.js';
 import { readInstallScriptAllowlist } from '../dist/install-script-allowlist.js';
 import {
   dependencyKey,
@@ -35,7 +36,7 @@ function scratch(t) {
     for (const [key, value] of Object.entries(saved))
       if (value === undefined) delete process.env[key];
       else process.env[key] = value;
-    rmSync(directory, { recursive: true, force: true });
+    removeInstall(directory);
   });
   return directory;
 }

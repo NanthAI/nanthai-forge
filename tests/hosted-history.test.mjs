@@ -536,3 +536,49 @@ test('chunks of a fetch that stops over the limit are deleted; a failed delete i
   assert.equal(result.deleted, 0);
   assert.equal(projectKeys().length, pinned);
 });
+
+test('concurrent reads after a mirror move fetch the catch-up pack once and later reads reuse it', async t => {
+  const source = sourceRepository(t),
+    f = fixture(t, source),
+    { s } = f;
+  const projectId = await importedProject(f, source.head);
+  await modules.projectHistoryImport.run._handler(s.ctx, { projectId, attempt: 1 });
+  const tip = commit(source.repo, { 'src/two.go': 'package main\n' }, 'Forge landing');
+  await s.ctx.db.insert('projectGithubMirrors', {
+    projectId,
+    repository: 'example/repo',
+    activeId: null,
+    mapping: JSON.stringify({
+      operationId: crypto.randomUUID(),
+      state: 'd'.repeat(64),
+      acceptanceId: crypto.randomUUID(),
+      viewId: crypto.randomUUID(),
+      commit: tip,
+      parent: '',
+      tree: 'e'.repeat(40),
+      message: 'Forge landing',
+      author: { name: 'Forge', email: 'forge@example.invalid' },
+      committer: { name: 'Forge', email: 'forge@example.invalid' },
+      seconds: clock,
+    }),
+  });
+  // Convex runs mutations one at a time; the in-memory fixture does not, so serialize them here.
+  const direct = s.ctx.runMutation;
+  let queue = Promise.resolve();
+  s.ctx.runMutation = (ref, args) => {
+    const run = queue.then(() => direct(ref, args));
+    queue = run.catch(() => {});
+    return run;
+  };
+  s.caller('owner');
+  const open = () => modules.projectHistoryRead.open._handler(s.ctx, { projectId });
+  const replies = (await Promise.all([open(), open(), open()])).map(reply => JSON.parse(reply));
+  assert.equal(f.fetches.length, 2, 'one import fetch and one catch-up fetch for three concurrent reads');
+  assert.equal(s.tables.projectHistoryPacks.size, 2);
+  const waiting = replies.filter(reply => reply.catchUp?.code === 'HISTORY_CATCH_UP_RUNNING');
+  assert.equal(waiting.length, 2, 'the other two reads were told a fetch is already running');
+  assert.equal(historyRow(s, projectId).catchUp, undefined, 'the lease ends with the recorded pack');
+  const later = JSON.parse(await open());
+  assert.equal(later.catchUp, undefined);
+  assert.equal(f.fetches.length, 2, 'a later read reuses the stored pack');
+});

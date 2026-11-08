@@ -98,6 +98,24 @@ export const load = internalQuery({
   },
 });
 
+/** How long one read owns the catch-up fetch. A failed fetch is not released: the lease end is also
+ * the pause before GitHub is asked again, so a broken mirror cannot be hammered by readers. */
+export const catchUpLeaseMs = 2 * 60 * 1000;
+/** One reader per project fetches the catch-up pack for a moved mirror. The claim is one mutation
+ * on the path that needs a fetch (once per mirror move); reads with nothing to fetch never call it. */
+export const claimCatchUp = internalMutation({
+  args: { projectId: v.id('hostedProjects'), tip: v.string() },
+  returns: v.boolean(),
+  handler: async (ctx, { projectId, tip }) => {
+    const row = await historyRow(ctx, projectId);
+    if (!row || row.status !== 'ready') return false;
+    const now = Date.now();
+    if (row.catchUp && row.catchUp.until > now) return false;
+    await ctx.db.patch(row._id, { catchUp: { tip, until: now + catchUpLeaseMs } });
+    return true;
+  },
+});
+
 /** One pack row per fetched pack; a replay or a concurrent catch-up for the same
  * tip keeps the first row. The limit is enforced here as well as on the stream. */
 export const record = internalMutation({
@@ -126,7 +144,8 @@ export const record = internalMutation({
       .take(1)
       .then(rows => rows[0] ?? null);
     if (existing) {
-      if (row.status === 'pending') await ctx.db.patch(row._id, { status: 'ready', updatedAt: Date.now() });
+      if (row.status === 'pending' || row.catchUp)
+        await ctx.db.patch(row._id, { status: 'ready', catchUp: undefined, updatedAt: Date.now() });
       return 'duplicate';
     }
     invariant(
@@ -140,6 +159,7 @@ export const record = internalMutation({
       bytes: row.bytes + pack.bytes,
       packs: row.packs + 1,
       error: undefined,
+      catchUp: undefined,
       updatedAt: Date.now(),
     });
     return 'recorded';

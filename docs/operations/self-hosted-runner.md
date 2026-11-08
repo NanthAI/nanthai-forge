@@ -83,12 +83,17 @@ Checks run with a private HOME, so tools that keep state under HOME would start
 cold or fail. The runner sets these per run, for every repository:
 
 - Dedicated, credential-free content caches next to the npm cache
-  (`~/.cache/nanthai-forge/check-*`, shared by all checks on the machine, created on
-  demand, outside the private HOME): `GOMODCACHE`, `GOCACHE`, `CARGO_HOME` (registry
-  and crates only), `GRADLE_USER_HOME`, `PIP_CACHE_DIR`, `UV_CACHE_DIR`,
-  `NUGET_PACKAGES`, and `MAVEN_ARGS=-Dmaven.repo.local=…` (omitted if that path has
-  whitespace). They are separate from your own caches, so your Cargo, Gradle or pip
-  credentials and settings are not read.
+  (`~/.cache/nanthai-forge/check-*/<project>`, created on demand, outside the private
+  HOME): `GOMODCACHE`, `GOCACHE`, `PIP_CACHE_DIR`, `UV_CACHE_DIR`, `NUGET_PACKAGES`, and
+  `MAVEN_ARGS=-Dmaven.repo.local=…` (omitted if that path has whitespace). Each project
+  has its own directory, so no check sees another project's cached content. They are
+  separate from your own caches, so your Cargo, Gradle or pip credentials and settings
+  are not read.
+- `CARGO_HOME` and `GRADLE_USER_HOME` also read executable configuration (Cargo's
+  `config.toml`, Gradle's `init.d` and `gradle.properties`), so they point at a fresh
+  directory inside the run. Only the downloaded content (`registry` and `git` for Cargo,
+  `caches` and `wrapper` for Gradle) is linked in from the project's directory under
+  `check-cargo-home` / `check-gradle-home`; configuration a check writes dies with the run.
 - Installed toolchain homes, passed only when they exist at the default location:
   `RUSTUP_HOME` (`~/.rustup`), `PYENV_ROOT` (`~/.pyenv`), `MISE_DATA_DIR`
   (`~/.local/share/mise`), `ASDF_DATA_DIR` (`~/.asdf`). Nothing is created for a
@@ -97,7 +102,11 @@ cold or fail. The runner sets these per run, for every repository:
 
 These are transient run settings, so the recorded environment and its fingerprint are
 unchanged. To reclaim disk, delete `~/.cache/nanthai-forge/check-*-*`; the next check
-repopulates them.
+repopulates them. The first check of a project after this layout starts with empty caches.
+
+The runner places a Candidate's files directories first, then files, then links, and
+refuses a State whose paths would share one name on its volume (names that differ only
+by case or Unicode form on APFS), so nothing is written through a link.
 
 ## Health, idle and stop
 

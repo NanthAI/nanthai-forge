@@ -68,6 +68,15 @@ export const open = action({
               'HISTORY_PACKS_FULL',
               'This project has too many history packs to add one.',
             );
+            // One reader fetches; the others read what is stored and are told to retry.
+            invariant(
+              await ctx.runMutation(internal.projectHistoryStore.claimCatchUp, {
+                projectId: input.projectId,
+                tip: mapping.commit,
+              }),
+              'HISTORY_CATCH_UP_RUNNING',
+              'Newer history is being fetched by another read; retry in a minute.',
+            );
             const haves = [...new Set(packs.map(pack => pack.tip))];
             const stored = await storeHistoryPack(ctx, input.projectId, {
               repository: row.repository,

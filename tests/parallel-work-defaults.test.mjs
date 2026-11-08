@@ -18,6 +18,7 @@ import {
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawn, spawnSync } from 'node:child_process';
+import { removeInstall } from '../dist/dependency-seal.js';
 import { clientSettingsCli, heavySlots, readClientSettings } from '../dist/client-settings.js';
 import { listLanes, readLaneEntry, recordLane } from '../dist/lane-registry.js';
 import { housekeepingLines, laneHousekeeping } from '../dist/lane-prune.js';
@@ -41,7 +42,7 @@ function isolated(t) {
     for (const [key, value] of Object.entries(saved))
       if (value === undefined) delete process.env[key];
       else process.env[key] = value;
-    rmSync(directory, { recursive: true, force: true });
+    removeInstall(directory);
   });
   return directory;
 }

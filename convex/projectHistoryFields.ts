@@ -37,6 +37,8 @@ export const historyTables = {
     /** Owner setting; absent means defaultHistoryLimitBytes. */
     limitBytes: v.optional(v.number()),
     error: v.optional(v.object({ code: v.string(), message: v.string() })),
+    /** A read is fetching the catch-up pack for `tip`; other reads wait for it or the lease end. */
+    catchUp: v.optional(v.object({ tip: v.string(), until: v.number() })),
     /** Increments on every requested (re)import, so a stale run cannot record. */
     attempt: v.number(),
     updatedAt: v.number(),

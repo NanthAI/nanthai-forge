@@ -17,6 +17,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { removeInstall } from '../dist/dependency-seal.js';
 import { detectPackageManager, managerWorkspaceFolders } from '../dist/package-manager.js';
 import { dependencyKey, shareDependencies, skippedScriptsNotice } from '../dist/shared-dependencies.js';
 
@@ -30,7 +31,7 @@ function scratch(t) {
     for (const [key, value] of Object.entries(saved))
       if (value === undefined) delete process.env[key];
       else process.env[key] = value;
-    rmSync(directory, { recursive: true, force: true });
+    removeInstall(directory);
   });
   return directory;
 }

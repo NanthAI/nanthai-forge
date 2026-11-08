@@ -319,7 +319,7 @@ async function launchLocal(
   const lightweight = await lightweightDocsRun(store, run);
   const path = directory(store, run.id),
     workspace = join(path, 'workspace');
-  const processEnvironment = checkProcessEnvironment(run.check, run.environment, path);
+  const processEnvironment = checkProcessEnvironment(run.check, run.environment, path, store.root);
   let child: ReturnType<typeof spawn> | undefined;
   let queue: CheckQueue | undefined;
   let queuedPoll: ReturnType<typeof setTimeout> | undefined;

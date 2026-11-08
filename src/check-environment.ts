@@ -3,7 +3,7 @@ import { localeEnvNames } from '../scripts/child-env.mjs';
 import { mkdirSync } from 'node:fs';
 import { homedir, release } from 'node:os';
 import { join } from 'node:path';
-import { ecosystemCheckEnvironment } from './check-ecosystem-env.js';
+import { ecosystemCheckEnvironment, prepareEcosystemHomes } from './check-ecosystem-env.js';
 import { digest } from './hash.js';
 import type { Check, CheckEnvironment } from './work-types.js';
 
@@ -52,7 +52,13 @@ export function checkEnvironment(): CheckEnvironment {
 }
 
 /** Transient values only: never persist arbitrary passthrough values in Work/receipts. */
-export function checkProcessEnvironment(check: Check, environment: CheckEnvironment, runDirectory: string) {
+/** `scope` names the project whose caches the run may use (default: the one local project). */
+export function checkProcessEnvironment(
+  check: Check,
+  environment: CheckEnvironment,
+  runDirectory: string,
+  scope?: string,
+) {
   const runtime = join(runDirectory, 'runtime');
   const env = { ...environment.env };
   const dirs = {
@@ -73,7 +79,7 @@ export function checkProcessEnvironment(check: Check, environment: CheckEnvironm
   // Other ecosystems: dedicated content caches and installed toolchain homes. Transient,
   // so they are not part of the recorded environment or its fingerprint. Declared
   // passthrough below still wins.
-  const ecosystem = ecosystemCheckEnvironment(environment.env.npm_config_cache);
+  const ecosystem = ecosystemCheckEnvironment(environment.env.npm_config_cache, undefined, scope, runtime);
   Object.assign(env, ecosystem.env);
   for (const name of checkPassthrough(check)) {
     // Runtime settings already belong to the recorded run, including when an
@@ -90,7 +96,7 @@ export function checkProcessEnvironment(check: Check, environment: CheckEnvironm
       for (const leaf of new Set(Object.values(dirs)))
         mkdirSync(join(runtime, leaf), { recursive: true, mode: 0o700 });
       mkdirSync(environment.env.npm_config_cache!, { recursive: true, mode: 0o700 });
-      for (const directory of ecosystem.directories) mkdirSync(directory, { recursive: true, mode: 0o700 });
+      prepareEcosystemHomes(ecosystem);
     },
   };
 }
