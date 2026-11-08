@@ -16,6 +16,8 @@ import { partitionTests, timingDurations } from '../scripts/test-shards.mjs';
 import { readTimingHistory } from '../scripts/test-timings-file.mjs';
 import { isStandardForgeCheck } from './standard-check.js';
 import { projectLockfile } from './project-lockfile.js';
+import { scanSecretPaths } from './secret-scan.js';
+import { LazySourceFiles } from './lazy-source-files.js';
 
 // Historical modal-* filenames are shared Actions receipt formats; retain them for replay.
 export async function remoteCheckPlan(
@@ -27,21 +29,25 @@ export async function remoteCheckPlan(
 ) {
   const source = new NativeSource(store.root),
     state = source.state(run.head);
-  // Snapshots with local credential/config files remain entirely on the owner.
+  // Structural exclusions only: VCS/Forge metadata and dependency installs never leave the owner.
   if (
     state.files.some(file =>
-      file.path
-        .split('/')
-        .some(
-          part =>
-            ['.git', '.forge', 'node_modules', '.npmrc', '.modal.toml', '.netrc'].includes(part) ||
-            (part.startsWith('.env') && part !== '.env.example'),
-        ),
+      file.path.split('/').some(part => ['.git', '.forge', 'node_modules'].includes(part)),
     )
   )
     return null;
+  // Credentials are judged by content (the landing secret scan), never by file name: a committed
+  // `.npmrc` or `.env.test` without a secret exports. One blob is in memory at a time; the
+  // base allow file is not trusted here, so a finding keeps the snapshot with the owner.
+  const blobs = new Map(state.files.map(file => [file.path, file.blob]));
+  const scan = scanSecretPaths(
+    state.files.filter(file => file.mode !== 'symlink').map(file => file.path),
+    path => source.object(blobs.get(path)!),
+    { baseAllow: undefined },
+  );
+  if (scan.findings.length || scan.more) return null;
   const standard = isStandardForgeCheck(run.check, process.execPath);
-  const files = new Map(state.files.map(file => [file.path, source.object(file.blob).toString('utf8')]));
+  const files = new LazySourceFiles(blobs, blob => source.object(blob).toString('utf8'));
   const { standardSelection, guardedSelection, selectTests } = await import('../scripts/test-impact.mjs');
   let comparison: { paths?: string[]; base?: string; semanticTests?: string[] } = {};
   try {

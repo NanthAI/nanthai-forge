@@ -14,7 +14,7 @@ import {
 } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, isAbsolute, join } from 'node:path';
-import { readInstallScriptAllowlist } from './install-script-allowlist.js';
+import { readInstallScriptAllowlist, type InstallScriptAllowlist } from './install-script-allowlist.js';
 import { linkInstall } from './dependency-link.js';
 import { removeInstall, sealInstall } from './dependency-seal.js';
 import { recordLink, relinkIfStale, type Relinked } from './dependency-relink.js';
@@ -51,6 +51,27 @@ export type DependencyInstaller = (
 ) => Promise<void>;
 /** Install scripts a default (script-less) install skipped, and the command that runs them. */
 export type SkippedScripts = SkippedScriptsHint;
+/** Which dependency install scripts ran for this install, and who decided: `start` (installScripts:true)
+ * or `machine` (the installScripts client setting accepted the repository's request). */
+export type RanScripts = { ran: 'all' | string[]; because: 'start' | 'machine'; source?: string };
+/** Whose decision runs install scripts. A repository's declaration (forge.json install.scripts,
+ * .yarnrc.yml enableScripts, a package allowlist) is only a request: it runs when start passes
+ * installScripts:true (everything) or this machine's installScripts setting accepts it. */
+export type InstallScriptsPolicy = {
+  mode: 'none' | 'allowlist' | 'all';
+  because?: RanScripts['because'];
+  requested: InstallScriptAllowlist | null;
+};
+export function installScriptsPolicy(
+  root: string,
+  startFlag: boolean | undefined,
+  machine: boolean = readClientSettings().installScripts,
+): InstallScriptsPolicy {
+  const requested = readInstallScriptAllowlist(root);
+  if (startFlag === true) return { mode: 'all', because: 'start', requested };
+  if (startFlag === false || !machine || !requested) return { mode: 'none', requested };
+  return { mode: requested.all ? 'all' : 'allowlist', because: 'machine', requested };
+}
 export type SharedDependencies =
   | { status: 'off' | 'present' }
   | { status: 'none'; reason?: string }
@@ -61,6 +82,10 @@ export type SharedDependencies =
       key: string;
       path: string;
       skippedScripts?: SkippedScripts;
+      /** The repository asked for install scripts and nobody accepted: shown, never run. */
+      requestedScripts?: { source: string; packages: 'all' | string[] };
+      /** Install scripts this install ran (in the clean environment) and why. */
+      scripts?: RanScripts;
       /** The Lane's links followed a changed lockfile; `from` is the key it pointed at before. */
       relinked?: Relinked;
     }
@@ -162,15 +187,15 @@ const complete = (entry: string, key: string) => {
 const ROOT_INSTALL_SCRIPTS = ['preinstall', 'install', 'postinstall', 'prepare'];
 /** What an install without scripts skipped: lockfile packages that declare an install script
  * (`hasInstallScript`) plus the root package's own install lifecycle. */
-export function skippedInstallScripts(root: string): SkippedScripts | undefined {
+export function skippedInstallScripts(root: string, rebuilt: string[] = []): SkippedScripts | undefined {
   const detected = detectPackageManager(root);
   if (detected && 'manager' in detected && detected.manager.name !== 'npm') {
-    const hint = managerSkippedScripts(root, detected.manager);
+    const hint = managerSkippedScripts(root, detected.manager, rebuilt);
     return hint.packages === 0 ? undefined : hint;
   }
   let packages = 0;
   try {
-    const allowed = new Set(allowedRebuilds(root));
+    const allowed = new Set(rebuilt);
     for (const name of scriptedPackages(readFileSync(join(root, 'package-lock.json'))))
       if (!allowed.has(name)) packages++;
     const scripts = (JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as { scripts?: object })
@@ -181,12 +206,42 @@ export function skippedInstallScripts(root: string): SkippedScripts | undefined 
   }
   return packages ? { packages, command: 'npm rebuild' } : undefined;
 }
-/** The one line printed when a script-less install skipped declared scripts; null otherwise. */
-export function skippedScriptsNotice(result: object): string | null {
-  const skipped = (result as { skippedScripts?: SkippedScripts }).skippedScripts;
-  return skipped
-    ? `Skipped install scripts of ${skipped.packages === null ? 'dependencies' : `${skipped.packages} package${skipped.packages === 1 ? '' : 's'}`}. Run them with: ${skipped.command} (in the Lane), or start with {"installScripts":true} or set {"install":{"scripts":true}} in forge.json.`
-    : null;
+const ACCEPT =
+  'start with {"installScripts":true}, or accept repository requests on this machine with nforge settings installScripts true';
+/** The one stderr line about install scripts: which ran and why, or which were skipped (naming the
+ * repository's request when it made one) and how to run them; null when nothing declared a script. */
+export function installScriptsNotice(result: object): string | null {
+  const {
+    skippedScripts: skipped,
+    requestedScripts: requested,
+    scripts,
+    status,
+  } = result as {
+    skippedScripts?: SkippedScripts;
+    requestedScripts?: { source: string; packages: 'all' | string[] };
+    scripts?: RanScripts;
+    status?: string;
+  };
+  if (scripts) {
+    const what =
+      scripts.ran === 'all'
+        ? 'all dependency install scripts'
+        : `install scripts of ${scripts.ran.join(', ')}`;
+    const why =
+      scripts.because === 'start'
+        ? 'start passed installScripts:true'
+        : `this machine's installScripts setting accepts the request in ${scripts.source ?? 'the repository'}`;
+    return `${status === 'installed' ? 'Ran' : 'node_modules links an install that ran'} ${what} in the clean install environment: ${why}.`;
+  }
+  if (!skipped) return null;
+  const count =
+    skipped.packages === null
+      ? 'dependencies'
+      : `${skipped.packages} package${skipped.packages === 1 ? '' : 's'}`;
+  const asked = requested
+    ? ` ${requested.source} asks to run ${requested.packages === 'all' ? 'them' : requested.packages.join(', ')}; that is a request, not a permission.`
+    : '';
+  return `Skipped install scripts of ${count}.${asked} Run them with: ${skipped.command} (in the Lane), or ${ACCEPT}.`;
 }
 /** Build the install stage: root manifest and lockfile plus every workspace package.json (and, for
  * pnpm, yarn and bun, the manager settings and patches the install reads).
@@ -220,8 +275,9 @@ export async function shareDependencies(
     enabled?: boolean;
     cache?: string;
     heavy?: boolean;
-    /** Opt in to (true) or out of (false) all dependency install scripts; it wins over the repository.
-     * Unset: skipped, unless the repository allows them (forge.json `install.scripts`, an allowlist). */
+    /** Opt in to (true) or out of (false) all dependency install scripts (start installScripts).
+     * Unset: skipped; a repository's request (forge.json `install.scripts`, an allowlist) runs only
+     * when this machine's installScripts setting accepts it (installScriptsPolicy). */
     runScripts?: boolean | undefined;
     /** Only follow a lockfile change of an existing Forge link; a Lane with no node_modules stays without. */
     refresh?: boolean;
@@ -258,9 +314,15 @@ export async function shareDependencies(
   }
   const key = dependencyKey(root, runner?.version);
   if (!key) return { status: 'none' };
+  const policy = installScriptsPolicy(root, options.runScripts),
+    runScripts = policy.mode === 'all',
+    rebuild = policy.mode !== 'allowlist' ? [] : other ? managerRebuilds(root, pm) : allowedRebuilds(root);
+  // Each script mode has its own entry: a Lane that did not accept scripts never links one that ran
+  // them. `-skipped` holds a requesting repository's script-less install: its plain entry from before
+  // requests needed acceptance may have run the allowlisted scripts, so it is never linked again.
   const cache = options.cache ?? dependencyCacheDirectory(),
-    runScripts = options.runScripts ?? readInstallScriptAllowlist(root)?.all === true,
-    prefix = `${pm.name}${runScripts ? '-scripts' : ''}`,
+    mode = runScripts ? '-scripts' : rebuild.length ? '-rebuild' : policy.requested ? '-skipped' : '',
+    prefix = `${pm.name}${mode}`,
     entry = join(cache, `${prefix}-${key}`);
   let installed = false;
   if (!complete(entry, key)) {
@@ -289,7 +351,6 @@ export async function shareDependencies(
           slots = options.heavy === false ? 0 : heavySlots(settings.localHeavySlots);
         const slot = slots ? await acquireHeavySlot(heavySlotDirectory(), slots) : null;
         try {
-          const rebuild = other ? managerRebuilds(root, pm) : allowedRebuilds(root);
           await (
             options.install ??
             (other
@@ -326,11 +387,28 @@ export async function shareDependencies(
   else symlinkSync(path, join(root, 'node_modules'), 'dir');
   const fingerprint = dependencyKey(root);
   if (fingerprint) recordLink(root, { fingerprint, entry, folders: other ? folders : npmFolders });
-  const skippedScripts = runScripts ? undefined : skippedInstallScripts(root);
+  const skippedScripts = runScripts ? undefined : skippedInstallScripts(root, rebuild);
+  const ran: RanScripts | undefined =
+    policy.because && (runScripts || rebuild.length)
+      ? {
+          ran: runScripts ? 'all' : rebuild,
+          because: policy.because,
+          ...(policy.because === 'machine' && policy.requested ? { source: policy.requested.source } : {}),
+        }
+      : undefined;
+  const requested =
+    policy.requested && skippedScripts
+      ? {
+          source: policy.requested.source,
+          packages: policy.requested.all ? ('all' as const) : policy.requested.packages,
+        }
+      : undefined;
   return {
     status: installed ? 'installed' : 'linked',
     key,
     path,
     ...(skippedScripts ? { skippedScripts } : {}),
+    ...(requested ? { requestedScripts: requested } : {}),
+    ...(ran ? { scripts: ran } : {}),
   };
 }

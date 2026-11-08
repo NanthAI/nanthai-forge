@@ -126,17 +126,19 @@ export function selectStaticChecks(checks: StaticCheck[], changedPaths: string[]
 }
 
 /** Runs each check in the Lane root, output to stderr, all of them even after a failure (they are
- * short and one report names every static problem). A check that exceeds its timeout is reported,
+ * short and one report names every static problem), in ENV: the run's clean environment
+ * (cleanCommandEnvironment), never the agent's. A check that exceeds its timeout is reported,
  * not counted as a pass or a failure: the landing check still runs it. */
 export function runStaticChecks(
   root: string,
   checks: StaticCheck[],
+  env: NodeJS.ProcessEnv,
   timeoutMs = STATIC_CHECK_TIMEOUT_MS,
 ): StaticCheckResult[] {
   return checks.map(check => {
     const started = Date.now();
     const [command, ...args] = check.command as [string, ...string[]];
-    const run = spawnSync(command, args, { cwd: root, stdio: ['ignore', 2, 2], timeout: timeoutMs });
+    const run = spawnSync(command, args, { cwd: root, env, stdio: ['ignore', 2, 2], timeout: timeoutMs });
     const timedOut = (run.error as NodeJS.ErrnoException | undefined)?.code === 'ETIMEDOUT';
     return {
       name: check.name,

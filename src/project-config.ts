@@ -5,7 +5,7 @@
  * from one file: declaring it in both is an error, never a silent pick. Unknown keys are ignored, so
  * later settings can join the file. Reading never runs repository code. */
 export const FORGE_CONFIG_FILE = 'forge.json';
-export type PreflightKey = 'tests' | 'static' | 'guards';
+export type PreflightKey = 'tests' | 'static' | 'guards' | 'wrappers';
 export type DeclaredPreflight = {
   value: unknown;
   /** The file that declares it. */
@@ -33,9 +33,10 @@ export function parseForgeJson(text: string | undefined): Record<string, unknown
   return parsed;
 }
 
-/** `install.scripts` in forge.json: `true` runs dependency install scripts when a Lane opens, as
- * if every start passed `installScripts:true` (an explicit start flag still wins). Any other value,
- * or a malformed file, declares nothing, so scripts stay skipped. */
+/** `install.scripts` in forge.json: `true` asks for dependency install scripts when a Lane opens.
+ * It is a request the start receipt shows; scripts run only when start passes `installScripts:true`
+ * or this machine's installScripts setting accepts it. Any other value, or a malformed file,
+ * declares nothing. */
 export function declaredInstallScripts(forgeJson: string | undefined): boolean {
   try {
     const install = parseForgeJson(forgeJson)?.install;

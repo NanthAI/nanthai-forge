@@ -2,16 +2,23 @@
 import { lstatSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { exclusion } from './files.js';
+import { ignoredBy, readIgnoreLayer } from './source-ignore.js';
+import { canonicalRoot } from './path-ignore.js';
 
 /** Advisory metadata only: never follows symlinks or reads source bytes. Directory
- * timestamps are omitted so excluded build output cannot look like a source edit. */
-export function observePresenceFiles(root: string) {
+ * timestamps are omitted, and ignored paths are skipped as capture skips them, so build output
+ * cannot look like a source edit while a tracked or unignored `build/` still does. */
+export function observePresenceFiles(rootPath: string) {
+  const root = canonicalRoot(rootPath);
   let previous: string | undefined;
   const observe = () => {
     try {
       const files: string[][] = [];
-      const walk = (directory: string) => {
-        for (const name of readdirSync(join(root, directory)).sort()) {
+      const walk = (directory: string, patterns: ReturnType<typeof readIgnoreLayer>) => {
+        const names = readdirSync(join(root, directory)).sort();
+        const layer = readIgnoreLayer(root, directory, names);
+        const next = layer.length ? [...patterns, ...layer] : patterns;
+        for (const name of names) {
           const path = directory ? `${directory}/${name}` : name;
           if (exclusion(path)) continue;
           let stat;
@@ -21,7 +28,8 @@ export function observePresenceFiles(root: string) {
             if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue;
             throw error;
           }
-          if (stat.isDirectory()) walk(path);
+          if (ignoredBy(next, path, stat.isDirectory())) continue;
+          if (stat.isDirectory()) walk(path, next);
           else
             files.push([
               path,
@@ -29,7 +37,7 @@ export function observePresenceFiles(root: string) {
             ]);
         }
       };
-      walk('');
+      walk('', []);
       const current = JSON.stringify(files);
       const edited = previous !== undefined && current !== previous;
       previous = current;

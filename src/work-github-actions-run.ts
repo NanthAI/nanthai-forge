@@ -92,7 +92,7 @@ export async function launchGithubActionsRun(
               exitCode: null,
               signal: null,
               details:
-                'GitHub Actions cannot export local credential configuration; select the local runner explicitly.',
+                'GitHub Actions cannot export this snapshot: a file looks like a credential, or it holds VCS or dependency folders. Select the local runner explicitly.',
             }),
           ),
         );

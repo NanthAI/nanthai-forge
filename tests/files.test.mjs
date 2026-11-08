@@ -95,7 +95,10 @@ test('capture and publication never drop source by folder or language name', () 
     assert.equal(sourceExclusion(path), null, path);
     assert.equal(captureExclusion(path, false), null, path);
   }
-  for (const path of ['cmd/build/main.go', 'pkg/coverage/c.go', 'build/x.sh'])
+  // Build-output names are not special for analysis either: ignore rules decide (M2-14).
+  for (const path of ['cmd/build/main.go', 'internal/coverage/c.go', 'build/x.sh', 'dist/index.js'])
+    assert.equal(exclusion(path), null, `analysis follows ignore rules for: ${path}`);
+  for (const path of ['node_modules/x/index.js', '.next/server.js', '.netlify/state.json', '.git/config'])
     assert.equal(exclusion(path), 'protected-directory', `analysis keeps its list: ${path}`);
   for (const path of ['cmd/build', 'pkg/coverage', 'dist', 'internal/secrets', 'credentials'])
     assert.equal(captureExclusion(path, true), null, path);

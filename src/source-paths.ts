@@ -7,6 +7,7 @@ import { forgeIncludes, ignoredBy, readIgnoreLayer, type IgnoreMatch } from './s
 import { credentialNameHold } from './capture-credential-check.js';
 import { forgeCachePath } from './forge-cache-paths.js';
 import { gitlinkDirectory } from './gitlink-workspace.js';
+import { inDependencyDirectory } from './dependency-dirs.js';
 
 export type NativeExcludedPath = {
   path: string;
@@ -108,6 +109,15 @@ export function scanSourcePaths(root: string, options: SourcePathOptions = {}): 
         };
         excluded?.push(item);
         onExcluded?.({ ...item, ignore: match });
+        continue;
+      }
+      // Package managers hard-link installed files from a shared store. Below a dependency folder
+      // that no ignore rule names, an untracked hard-linked file is an install: leave it out and
+      // say so, instead of refusing the whole save. Tracked paths and other folders still fail.
+      if (stat.isFile() && stat.nlink > 1 && !selected && inDependencyDirectory(path)) {
+        const item = { path, reason: 'dependency-install' };
+        excluded?.push(item);
+        onExcluded?.(item);
         continue;
       }
       if (validate)

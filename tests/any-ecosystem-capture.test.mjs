@@ -2,11 +2,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { generateKeyPairSync, randomUUID } from 'node:crypto';
-import { mkdtempSync, mkdirSync, realpathSync, writeFileSync, rmSync, symlinkSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, realpathSync, writeFileSync, rmSync, symlinkSync, linkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { captureHostedSave } from '../dist/hosted-save-capture.js';
-import { capturedNotSaved, notSavedInclude, notSavedLimit } from '../dist/save-not-saved.js';
+import {
+  capturedNotSaved,
+  notSavedDependencyFix,
+  notSavedInclude,
+  notSavedLimit,
+} from '../dist/save-not-saved.js';
 import { prepareMirror } from '../dist/hosted-github-mirror.js';
 import { saveFixture } from './hosted-saves-fixture.mjs';
 import { mirrorFixture } from './hosted-github-mirror-fixture.mjs';
@@ -134,4 +139,39 @@ test('the mirror plan publishes tracked build files and tracked credential-looki
     'internal/auth/credentials.go',
     'tls/k.pem',
   ]);
+});
+
+test('hard-linked files of an unignored virtualenv or tool cache are not saved, and the save succeeds', async t => {
+  const s = await saveFixture(),
+    { base, root, put } = checkout(t, s);
+  put('src/app.py', 'print("synthetic")\n');
+  // An installer links site-packages from a shared store outside the checkout.
+  mkdirSync(join(base, 'store'));
+  for (const path of ['.venv/lib/python3/site-packages/dep/__init__.py', 'tools/.pnpm-store/v3/files/ab']) {
+    writeFileSync(join(base, 'store', 'object'), `synthetic ${path}\n`);
+    mkdirSync(join(root, path, '..'), { recursive: true });
+    linkSync(join(base, 'store', 'object'), join(root, path));
+  }
+  const capture = await captureHostedSave(root, join(base, 'capture'));
+  assert.deepEqual(saved(capture), ['src/app.py']);
+  assert.deepEqual(capture.notSaved, {
+    count: 2,
+    paths: [
+      { path: '.venv/lib/python3/site-packages/dep/__init__.py', reason: 'dependency-install' },
+      { path: 'tools/.pnpm-store/v3/files/ab', reason: 'dependency-install' },
+    ],
+    include: notSavedDependencyFix,
+  });
+  assert.match(capture.notSaved.include, /\.gitignore or \.forgeignore/);
+});
+
+test('a hard-linked file outside a dependency folder still stops the save and names the path', async t => {
+  const s = await saveFixture(),
+    { base, root, put } = checkout(t, s);
+  put('src/original.py', 'print("synthetic")\n');
+  linkSync(join(root, 'src/original.py'), join(root, 'src/alias.py'));
+  await assert.rejects(
+    captureHostedSave(root, join(base, 'capture')),
+    /UNSUPPORTED_NATIVE_FILE|linked path: src\//,
+  );
 });

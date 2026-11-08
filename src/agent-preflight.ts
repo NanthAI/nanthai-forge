@@ -59,8 +59,11 @@ import {
   type TestRunnerResolution,
 } from './project-test-runner.js';
 import { CODE_FILE, importGraphTests, jsImportGraph } from './js-import-graph.js';
-import { FORGE_CONFIG_FILE } from './project-config.js';
+import { declaredPreflight, FORGE_CONFIG_FILE } from './project-config.js';
+import { cleanCommandEnvironment } from './clean-command-env.js';
 import {
+  packageCommandLine,
+  packageCommandUnit,
   packageGraphFor,
   packageGraphKey,
   type PackageGraph,
@@ -485,7 +488,18 @@ function runnerPlan(
   const runner: TestRunner = resolved.runner;
   const only = options.only ? new Set(options.only) : null;
   const keep = (tests: string[]) => (only ? tests.filter(test => only.has(test)) : tests);
-  if (runner.layout === 'packages') return packagePlan(root, runner, paths, graph!(), statics, keep, modules);
+  if (runner.layout === 'packages') {
+    // A wrapper script the tree commits (gradlew, mvnw) runs only when the project declares it.
+    let wrappers: ReturnType<typeof declaredPreflight>;
+    try {
+      wrappers = declaredPreflight('wrappers', packageJson, forgeJson);
+    } catch (error) {
+      return { status: 'unavailable', reason: (error as Error).message.slice(0, 300) };
+    }
+    if (wrappers && typeof wrappers.value !== 'boolean')
+      return { status: 'unavailable', reason: `${wrappers.label} is true or false` };
+    return packagePlan(root, runner, paths, graph!(), statics, keep, modules, wrappers?.value === true);
+  }
   const selection = runnerSelection(runner, allPaths, paths, preflightImports(root, runner, allPaths, paths));
   // Tests that failed in a landing check or preflight while these paths changed run again, as for
   // Forge's own layout: the runner's globs decide which learned names are still test files here.
@@ -595,6 +609,30 @@ function runnerPlan(
   return plan;
 }
 
+const shellWord = (value: string) => (/^[A-Za-z0-9_./=@:,{}-]+$/.test(value) ? value : shellQuote(value));
+/** Build-tool wrapper scripts a repository commits, and the tool on PATH that runs instead. */
+const TREE_WRAPPERS: Record<string, string> = { './gradlew': 'gradle', './mvnw': 'mvn' };
+/** Local preflight runs a wrapper the tree commits (gradlew, mvnw) only when the project declares
+ * `preflight.wrappers: true`; otherwise the build tool on PATH runs, and the plan names the wrapper. */
+function treeWrapperRule(selection: ReturnType<typeof packageTestSelection>, declared: boolean) {
+  const replaced = new Set<string>();
+  if (declared) return { ...selection, replacedWrappers: [] };
+  const commands = selection.commands.map(command => {
+    const tool = TREE_WRAPPERS[command.argv[0] ?? ''];
+    if (!tool) return command;
+    replaced.add(command.argv[0]!);
+    return { ...command, argv: [tool, ...command.argv.slice(1)] };
+  });
+  if (!replaced.size) return { ...selection, replacedWrappers: [] };
+  return {
+    ...selection,
+    commands,
+    units: commands.map(packageCommandUnit),
+    command: commands.map(command => packageCommandLine(command, shellWord)).join(' && '),
+    replacedWrappers: [...replaced].sort(),
+  };
+}
+
 /** A package-graph runner's plan: one queued unit per ecosystem command (src/package-graph.ts). */
 function packagePlan(
   root: string,
@@ -604,8 +642,9 @@ function packagePlan(
   statics: Partial<Pick<PreflightPlan & { status: 'planned' }, 'static'>>,
   keep: (tests: string[]) => string[],
   modules?: () => ModuleGraph,
+  treeWrappers = false,
 ): PreflightPlan {
-  const selection = packageTestSelection(graph, paths, modules);
+  const selection = treeWrapperRule(packageTestSelection(graph, paths, modules), treeWrappers);
   const units = keep(selection.units);
   const commands = Object.fromEntries(
     selection.commands.map(command => [
@@ -627,7 +666,9 @@ function packagePlan(
     totalEstimateMinutes: Math.ceil(estimate.seconds / 60),
     estimateBasis: estimate.basis,
     runner: { label, command: [] },
-    advisory: INFERRED_RUNNER_ADVISORY,
+    advisory: selection.replacedWrappers.length
+      ? `${INFERRED_RUNNER_ADVISORY} ${selection.replacedWrappers.join(' and ')} in the tree ${selection.replacedWrappers.length > 1 ? 'are' : 'is'} not declared, so the build tool on PATH runs instead; declare "preflight": {"wrappers": true} in forge.json to run the wrapper.`
+      : INFERRED_RUNNER_ADVISORY,
     packageCommands: commands,
     packages: selection.packages,
     command: selection.command,
@@ -1142,189 +1183,200 @@ export function runPreflight(
   let testMs: number | undefined;
   let peakRssMb: number | null = null;
   let staticResults: StaticCheckResult[] = [];
-  if (plan.static?.selected.length) {
-    staticResults = runStaticChecks(
-      root,
-      plan.static.selected.map(({ name, command }) => ({
-        name,
-        command,
-        inputs: null,
-        source: 'declared' as const,
-      })),
-    );
-    if (staticResults.some(result => result.outcome === 'failed')) exitCode = 1;
-  }
-  if (plan.tests.length && exitCode === 0) {
-    // Only Forge's own Node layout (no project runner) builds first; another project's script of
-    // that name is not Forge's to run, and its runner builds what it needs.
-    const scripts = (() => {
-      if (plan.runner) return undefined;
-      try {
-        return (
-          JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as {
-            scripts?: Record<string, string>;
-          }
-        ).scripts;
-      } catch {
-        return undefined;
-      }
-    })();
-    if (scripts?.['build:core']) {
-      const buildStarted = Date.now();
-      const build = spawnSync('npm', ['run', '-s', 'build:core'], {
-        cwd: root,
-        stdio: ['ignore', 2, 2],
-      });
-      exitCode = build.status;
-      buildMs = Date.now() - buildStarted;
+  // Every repository-declared command (static checks, the build, package commands, the runner) runs
+  // in one clean environment per run, as checks do: private HOME/XDG/temp and npm config, allowlisted
+  // variables only. Built only when something runs; removed when the run ends.
+  let clean: ReturnType<typeof cleanCommandEnvironment> | undefined;
+  const cleanEnv = () => (clean ??= cleanCommandEnvironment('preflight')).env;
+  try {
+    if (plan.static?.selected.length) {
+      staticResults = runStaticChecks(
+        root,
+        plan.static.selected.map(({ name, command }) => ({
+          name,
+          command,
+          inputs: null,
+          source: 'declared' as const,
+        })),
+        cleanEnv(),
+      );
+      if (staticResults.some(result => result.outcome === 'failed')) exitCode = 1;
     }
-    if (exitCode === 0) {
-      const health = preflightRuntime.filesystemEventHealth(root);
-      if (!health.ok) environment = filesystemEnvironment(health, environmentNext);
-    }
-    if (exitCode === 0 && !environment) {
-      // A surrounding test runner's protocol variable would swallow this run's own exit code.
-      const env = { ...process.env };
-      delete env.NODE_TEST_CONTEXT;
-      const directory = mkdtempSync(join(tmpdir(), 'forge-preflight-'));
-      const testStarted = Date.now();
-      const budgetMs = plan.local && plan.local.trim !== false ? plan.local.budgetSeconds * 1000 : Infinity;
-      const stats = preflightFileStats(root);
-      const fallbackSeconds = plan.local?.secondsPerFile ?? PREFLIGHT_SECONDS_PER_FILE;
-      // The budget is a wall-time cap on this test phase. Tests run in plan order (mandatory, then
-      // learned, direct, then the ranked tiers) in groups of about PREFLIGHT_GROUP_SECONDS, each sized
-      // from known per-file times or this run's observed speed and never past the time left, so a slow
-      // machine gets small groups. No file starts once the budget is spent; near the end groups shrink
-      // to one file, so the run ends within the budget plus about one file. Every file it did not
-      // start is named in the receipt with a one-command rerun of exactly those.
-      const queue = [...plan.tests];
-      let ran = 0;
-      let index = 0;
-      const runGroup = (group: string[]) => {
-        const report = join(directory, `passed-${index++}.json`);
-        const groupStarted = Date.now();
-        if (plan.packageCommands) {
-          // Package commands: one process per unit, in its package folder; a pass covers that unit.
-          for (const [at, unit] of group.entries()) {
-            const command = plan.packageCommands[unit]!;
-            const cwd = join(root, command.cwd);
-            // A toolchain this machine lacks (cargo, go, uv, a JVM…) is not run and not failed.
-            const absent = missingToolchain(command, cwd, env);
-            if (absent) {
-              missingPrograms.push(absent);
-              environmentUnits.push(unit);
-              process.stderr.write(`preflight: ${absent} is not installed here; not run: ${unit}\n`);
-              continue;
+    if (plan.tests.length && exitCode === 0) {
+      // Only Forge's own Node layout (no project runner) builds first; another project's script of
+      // that name is not Forge's to run, and its runner builds what it needs.
+      const scripts = (() => {
+        if (plan.runner) return undefined;
+        try {
+          return (
+            JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as {
+              scripts?: Record<string, string>;
             }
-            const started = Date.now();
-            const run = spawnMeasured(command.argv[0]!, command.argv.slice(1), {
-              cwd,
-              env,
-              stdio: ['ignore', 2, 2],
-            });
-            if (missingProgramExit(run.status, run.errorCode)) {
-              missingPrograms.push(command.argv[0]!);
-              environmentUnits.push(unit);
-              process.stderr.write(`preflight: a program ${unit} needs is not installed here (exit 127)\n`);
-              continue;
-            }
-            ran++;
-            fileMs[unit] = Date.now() - started;
-            if (run.peakRssMb !== null) peakRssMb = Math.max(peakRssMb ?? 0, run.peakRssMb);
-            if (run.status === 0) passedTests.push(unit);
-            else {
-              failedFiles.push(unit);
-              if (exitCode === 0) exitCode = run.status ?? 1;
-              if (run.status === null) process.stderr.write(`preflight: ${command.argv[0]} was stopped\n`);
-              stopped.push(...group.slice(at + 1));
-              break;
-            }
-          }
-          return Date.now() - groupStarted;
+          ).scripts;
+        } catch {
+          return undefined;
         }
-        // A project runner reports one exit status per group: a pass covers every file in it, a
-        // failure is pinned to a file only when the group held one.
-        const argv = plan.runner
-          ? runnerCommand(plan.runner, group)
-          : [
-              process.execPath,
-              // dot: one character per passing test and the full detail of failures only (TAP printed every
-              // subtest, about 150 KB of an agent's context per preflight).
-              '--test-reporter=dot',
-              '--test-reporter-destination=stderr',
-              `--test-reporter=${new URL('./agent-preflight-reporter.js', import.meta.url).href}`,
-              '--test-reporter-destination=stdout',
-              ...testArgs(root, group),
-            ];
-        const run = spawnMeasured(argv[0]!, argv.slice(1), {
+      })();
+      if (scripts?.['build:core']) {
+        const buildStarted = Date.now();
+        const build = spawnSync('npm', ['run', '-s', 'build:core'], {
           cwd: root,
-          env: { ...env, FORGE_PREFLIGHT_REPORT: report },
+          env: cleanEnv(),
           stdio: ['ignore', 2, 2],
         });
-        if (plan.runner && missingProgramExit(run.status, run.errorCode)) {
-          // The runner's program is not installed here: these files are the landing check's.
-          missingPrograms.push(argv[0]!);
-          environmentUnits.push(...group);
-          process.stderr.write(`preflight: ${argv[0]} is not installed here (exit 127); not run\n`);
-          return Date.now() - groupStarted;
-        }
-        ran += group.length;
-        if (run.status !== 0 && exitCode === 0) exitCode = run.status;
-        if (run.peakRssMb !== null) peakRssMb = Math.max(peakRssMb ?? 0, run.peakRssMb);
-        if (plan.runner) {
-          if (run.status === 0) passedTests.push(...group);
-          else if (group.length === 1) failedFiles.push(...group);
-          const each = (Date.now() - groupStarted) / group.length;
-          for (const test of group) fileMs[test] = each;
-          return Date.now() - groupStarted;
-        }
-        try {
-          const observed = observationSchema.parse(JSON.parse(readFileSync(report, 'utf8')));
-          passedTests.push(...group.filter(test => observed.passed.includes(test)));
-          failedFiles.push(...group.filter(test => observed.failed.includes(test)));
-          Object.assign(fileMs, observed.ms);
-        } catch {
-          /* Missing report: no per-file pass is reusable. */
-        }
-        return Date.now() - groupStarted;
-      };
-      try {
-        let spent = 0;
-        // Seconds per file seen in this run; the estimate stands in until a group has run.
-        let observed = fallbackSeconds;
-        while (queue.length) {
-          if (exitCode !== 0) {
-            stopped.push(...queue.splice(0));
-            break;
-          }
-          const remaining = (budgetMs - (Date.now() - testStarted)) / 1000;
-          // The first group always runs (a budget of 0 still runs one file, the most relevant).
-          if (remaining <= 0 && ran) {
-            notRun.push(...queue.splice(0));
-            break;
-          }
-          const window = Math.max(0, Math.min(remaining, PREFLIGHT_GROUP_SECONDS));
-          const group: string[] = [];
-          let planned = 0;
-          while (queue.length) {
-            const next = queue[0]!;
-            const seconds = stats[next] ? stats[next].ms / 1000 : observed;
-            if (group.length && planned + seconds > window) break;
-            group.push(queue.shift()!);
-            planned += seconds;
-          }
-          spent += runGroup(group);
-          if (ran) observed = spent / 1000 / ran;
-        }
-        testMs = Date.now() - testStarted;
-      } finally {
-        rmSync(directory, { recursive: true, force: true });
+        exitCode = build.status;
+        buildMs = Date.now() - buildStarted;
       }
-      if (exitCode !== 0) {
+      if (exitCode === 0) {
         const health = preflightRuntime.filesystemEventHealth(root);
         if (!health.ok) environment = filesystemEnvironment(health, environmentNext);
       }
+      if (exitCode === 0 && !environment) {
+        // The clean environment also drops a surrounding test runner's protocol variable
+        // (NODE_TEST_CONTEXT), which would swallow this run's own exit code.
+        const env = { ...cleanEnv() };
+        const directory = mkdtempSync(join(tmpdir(), 'forge-preflight-'));
+        const testStarted = Date.now();
+        const budgetMs = plan.local && plan.local.trim !== false ? plan.local.budgetSeconds * 1000 : Infinity;
+        const stats = preflightFileStats(root);
+        const fallbackSeconds = plan.local?.secondsPerFile ?? PREFLIGHT_SECONDS_PER_FILE;
+        // The budget is a wall-time cap on this test phase. Tests run in plan order (mandatory, then
+        // learned, direct, then the ranked tiers) in groups of about PREFLIGHT_GROUP_SECONDS, each sized
+        // from known per-file times or this run's observed speed and never past the time left, so a slow
+        // machine gets small groups. No file starts once the budget is spent; near the end groups shrink
+        // to one file, so the run ends within the budget plus about one file. Every file it did not
+        // start is named in the receipt with a one-command rerun of exactly those.
+        const queue = [...plan.tests];
+        let ran = 0;
+        let index = 0;
+        const runGroup = (group: string[]) => {
+          const report = join(directory, `passed-${index++}.json`);
+          const groupStarted = Date.now();
+          if (plan.packageCommands) {
+            // Package commands: one process per unit, in its package folder; a pass covers that unit.
+            for (const [at, unit] of group.entries()) {
+              const command = plan.packageCommands[unit]!;
+              const cwd = join(root, command.cwd);
+              // A toolchain this machine lacks (cargo, go, uv, a JVM…) is not run and not failed.
+              const absent = missingToolchain(command, cwd, env);
+              if (absent) {
+                missingPrograms.push(absent);
+                environmentUnits.push(unit);
+                process.stderr.write(`preflight: ${absent} is not installed here; not run: ${unit}\n`);
+                continue;
+              }
+              const started = Date.now();
+              const run = spawnMeasured(command.argv[0]!, command.argv.slice(1), {
+                cwd,
+                env,
+                stdio: ['ignore', 2, 2],
+              });
+              if (missingProgramExit(run.status, run.errorCode)) {
+                missingPrograms.push(command.argv[0]!);
+                environmentUnits.push(unit);
+                process.stderr.write(`preflight: a program ${unit} needs is not installed here (exit 127)\n`);
+                continue;
+              }
+              ran++;
+              fileMs[unit] = Date.now() - started;
+              if (run.peakRssMb !== null) peakRssMb = Math.max(peakRssMb ?? 0, run.peakRssMb);
+              if (run.status === 0) passedTests.push(unit);
+              else {
+                failedFiles.push(unit);
+                if (exitCode === 0) exitCode = run.status ?? 1;
+                if (run.status === null) process.stderr.write(`preflight: ${command.argv[0]} was stopped\n`);
+                stopped.push(...group.slice(at + 1));
+                break;
+              }
+            }
+            return Date.now() - groupStarted;
+          }
+          // A project runner reports one exit status per group: a pass covers every file in it, a
+          // failure is pinned to a file only when the group held one.
+          const argv = plan.runner
+            ? runnerCommand(plan.runner, group)
+            : [
+                process.execPath,
+                // dot: one character per passing test and the full detail of failures only (TAP printed every
+                // subtest, about 150 KB of an agent's context per preflight).
+                '--test-reporter=dot',
+                '--test-reporter-destination=stderr',
+                `--test-reporter=${new URL('./agent-preflight-reporter.js', import.meta.url).href}`,
+                '--test-reporter-destination=stdout',
+                ...testArgs(root, group),
+              ];
+          const run = spawnMeasured(argv[0]!, argv.slice(1), {
+            cwd: root,
+            env: { ...env, FORGE_PREFLIGHT_REPORT: report },
+            stdio: ['ignore', 2, 2],
+          });
+          if (plan.runner && missingProgramExit(run.status, run.errorCode)) {
+            // The runner's program is not installed here: these files are the landing check's.
+            missingPrograms.push(argv[0]!);
+            environmentUnits.push(...group);
+            process.stderr.write(`preflight: ${argv[0]} is not installed here (exit 127); not run\n`);
+            return Date.now() - groupStarted;
+          }
+          ran += group.length;
+          if (run.status !== 0 && exitCode === 0) exitCode = run.status;
+          if (run.peakRssMb !== null) peakRssMb = Math.max(peakRssMb ?? 0, run.peakRssMb);
+          if (plan.runner) {
+            if (run.status === 0) passedTests.push(...group);
+            else if (group.length === 1) failedFiles.push(...group);
+            const each = (Date.now() - groupStarted) / group.length;
+            for (const test of group) fileMs[test] = each;
+            return Date.now() - groupStarted;
+          }
+          try {
+            const observed = observationSchema.parse(JSON.parse(readFileSync(report, 'utf8')));
+            passedTests.push(...group.filter(test => observed.passed.includes(test)));
+            failedFiles.push(...group.filter(test => observed.failed.includes(test)));
+            Object.assign(fileMs, observed.ms);
+          } catch {
+            /* Missing report: no per-file pass is reusable. */
+          }
+          return Date.now() - groupStarted;
+        };
+        try {
+          let spent = 0;
+          // Seconds per file seen in this run; the estimate stands in until a group has run.
+          let observed = fallbackSeconds;
+          while (queue.length) {
+            if (exitCode !== 0) {
+              stopped.push(...queue.splice(0));
+              break;
+            }
+            const remaining = (budgetMs - (Date.now() - testStarted)) / 1000;
+            // The first group always runs (a budget of 0 still runs one file, the most relevant).
+            if (remaining <= 0 && ran) {
+              notRun.push(...queue.splice(0));
+              break;
+            }
+            const window = Math.max(0, Math.min(remaining, PREFLIGHT_GROUP_SECONDS));
+            const group: string[] = [];
+            let planned = 0;
+            while (queue.length) {
+              const next = queue[0]!;
+              const seconds = stats[next] ? stats[next].ms / 1000 : observed;
+              if (group.length && planned + seconds > window) break;
+              group.push(queue.shift()!);
+              planned += seconds;
+            }
+            spent += runGroup(group);
+            if (ran) observed = spent / 1000 / ran;
+          }
+          testMs = Date.now() - testStarted;
+        } finally {
+          rmSync(directory, { recursive: true, force: true });
+        }
+        if (exitCode !== 0) {
+          const health = preflightRuntime.filesystemEventHealth(root);
+          if (!health.ok) environment = filesystemEnvironment(health, environmentNext);
+        }
+      }
     }
+  } finally {
+    clean?.dispose();
   }
   if (!environment && missingPrograms.length)
     environment = toolchainEnvironment(missingPrograms, environmentUnits, environmentNext);

@@ -169,7 +169,8 @@ test('a Gradle estimate uses the hosted check timing, then this machine, never t
   const advice = changed(['core/src/main/java/Core.java']);
   const fresh = preflightPlan(root, advice.changedPaths);
   // core has no test class, so the module graph runs nothing there; app, which depends on it, runs whole.
-  assert.deepEqual(fresh.tests, ['package:.:./gradlew :app:test']);
+  // The tree's ./gradlew is not declared, so local preflight runs gradle from PATH.
+  assert.deepEqual(fresh.tests, ['package:.:gradle :app:test']);
   assert.equal(fresh.estimateBasis, 'default');
   assert.equal(fresh.estimateMinutes, Math.ceil(PREFLIGHT_SECONDS_PER_PACKAGE_COMMAND / 60));
   // A hosted check of 7.5 min, seen by land or wait in the landing timing it already holds.
@@ -189,4 +190,44 @@ test('a Gradle estimate uses the hosted check timing, then this machine, never t
   assert.equal(hosted.totalEstimateMinutes, 8);
   const gate = finishGates(root, require, lane, advice);
   assert.equal(gate.preflight.estimateMinutes, 8);
+});
+
+const maven = {
+  'pom.xml':
+    '<project><groupId>fx</groupId><artifactId>parent</artifactId><packaging>pom</packaging><modules><module>core</module><module>web</module></modules></project>',
+  mvnw: '',
+  'core/pom.xml':
+    '<project><parent><groupId>fx</groupId><artifactId>parent</artifactId></parent><artifactId>fx-core</artifactId></project>',
+  'core/src/main/java/A.java': '',
+  'web/pom.xml':
+    '<project><parent><groupId>fx</groupId><artifactId>parent</artifactId></parent><artifactId>fx-web</artifactId><dependencies><dependency><groupId>fx</groupId><artifactId>fx-core</artifactId></dependency></dependencies></project>',
+  'web/src/main/java/B.java': '',
+};
+
+test('a wrapper script in the tree (gradlew, mvnw) runs in preflight only when the project declares it', t => {
+  const wrappers = JSON.stringify({ preflight: { wrappers: true } });
+  for (const [files, path, tool, wrapper] of [
+    [gradle, 'core/src/main/java/Core.java', 'gradle', './gradlew'],
+    [maven, 'core/src/main/java/A.java', 'mvn', './mvnw'],
+  ]) {
+    const advice = changed([path]);
+    const undeclared = preflightPlan(repo(t, files).root, advice.changedPaths);
+    assert.equal(undeclared.status, 'planned');
+    assert.ok(undeclared.tests.length, undeclared.reason);
+    assert.ok(
+      undeclared.tests.every(unit => unit.startsWith(`package:.:${tool} `)),
+      JSON.stringify(undeclared.tests),
+    );
+    assert.ok(Object.values(undeclared.packageCommands).every(command => command.argv[0] === tool));
+    assert.ok(!undeclared.command.includes(wrapper));
+    assert.match(undeclared.advisory, new RegExp(`${wrapper.slice(2)} in the tree is not declared`));
+    assert.match(undeclared.advisory, /"preflight": \{"wrappers": true\} in forge\.json/);
+    const declared = preflightPlan(repo(t, { ...files, 'forge.json': wrappers }).root, advice.changedPaths);
+    assert.ok(Object.values(declared.packageCommands).every(command => command.argv[0] === wrapper));
+    assert.doesNotMatch(declared.advisory, /not declared/);
+  }
+  const bad = repo(t, { ...gradle, 'forge.json': JSON.stringify({ preflight: { wrappers: 'yes' } }) });
+  const plan = preflightPlan(bad.root, changed(['core/src/main/java/Core.java']).changedPaths);
+  assert.equal(plan.status, 'unavailable');
+  assert.match(plan.reason, /forge\.json preflight\.wrappers is true or false/);
 });

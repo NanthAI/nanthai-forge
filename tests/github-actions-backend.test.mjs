@@ -601,21 +601,58 @@ test('a git failure keeps its redacted, bounded stderr in the receipt', async t 
   assert.ok(long.length <= 604);
   assert.doesNotMatch(long, /ghs_abcdef|abc /);
 });
-test('credential snapshots are not exported', async t => {
-  const { work, run, path } = fixture(t);
-  const { NativeSource } = await import('../dist/native-source.js');
+// Assembled at run time so this file never holds a token-shaped literal.
+const fakeNpmToken = ['npm', '_', 'FORGEfake0TEST1never2REAL3token4XYZab'].join('');
+async function withExtraFile(t, path, text) {
+  const { work, run, path: directory } = fixture(t);
   const source = new NativeSource(work.store.root);
   run.head = source.writeState(
-    [
-      ...source.state(run.head).files,
-      { path: '.npmrc', mode: 'file', blob: source.put(Buffer.from('# synthetic configuration')) },
-    ],
+    [...source.state(run.head).files, { path, mode: 'file', blob: source.put(Buffer.from(text)) }],
     [run.head],
     'Synthetic imported configuration',
     new Date().toISOString(),
   );
+  return { work, run, directory, source };
+}
+test('snapshots holding credential content are not exported', async t => {
+  const { work, run, directory } = await withExtraFile(
+    t,
+    '.npmrc',
+    `//registry.example.test/:_authToken=${fakeNpmToken}\n`,
+  );
   await launchGithubActionsRun(work.store, run, {}, async () => assert.fail('must not export'));
-  assert.equal(read(join(path, 'result.json')).status, 'runner-unavailable');
+  assert.equal(read(join(directory, 'result.json')).status, 'runner-unavailable');
+});
+test('a committed .npmrc or .env.test without a credential still gets a plan', async t => {
+  const { work, run, directory } = await withExtraFile(
+    t,
+    '.npmrc',
+    'save-exact=true\nregistry=https://registry.example.test/\n',
+  );
+  mkdirSync(directory, { recursive: true });
+  const plan = await remoteCheckPlan(work.store, run, directory, 1);
+  assert.ok(plan, 'a configuration file is not a credential');
+  const second = await withExtraFile(t, 'packages/a/.env.test', 'MODE=test\n');
+  mkdirSync(second.directory, { recursive: true });
+  assert.ok(await remoteCheckPlan(second.work.store, second.run, second.directory, 1));
+});
+test('the lazy source map reads a blob only when asked', async () => {
+  const { LazySourceFiles } = await import('../dist/lazy-source-files.js');
+  const reads = [];
+  const files = new LazySourceFiles(
+    new Map([
+      ['a.txt', 'blob-a'],
+      ['b.bin', 'blob-b'],
+    ]),
+    blob => (reads.push(blob), `text of ${blob}`),
+  );
+  assert.deepEqual([...files.keys()], ['a.txt', 'b.bin']);
+  assert.equal(files.has('a.txt'), true);
+  assert.equal(files.size, 2);
+  assert.deepEqual(reads, []);
+  assert.equal(files.get('b.bin'), 'text of blob-b');
+  assert.deepEqual(reads, ['blob-b']);
+  assert.equal(files.get('missing'), undefined);
 });
 test('dead Actions controller can be claimed for adoption', async t => {
   const { work, run } = fixture(t);

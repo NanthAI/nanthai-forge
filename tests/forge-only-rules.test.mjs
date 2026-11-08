@@ -14,14 +14,17 @@ const listed = String.raw`'(?:src|web|web\/src|convex|netlify|scripts|tests|dist
 const RULES = {
   'check-entry': /scripts\/forge-check\.mjs/,
   'standard-from-args': /\.args\[0\]\s*===|\.args\.length\s*===\s*1\b|executable\s*===\s*['"]node['"]/,
-  'tests-folder': /\/\^tests\\\//,
+  // A regular expression anchored on `^tests/`, a `startsWith('tests/')` prefix test, or a `.test.mjs` string.
+  'tests-folder': /\/\^tests\\\/|startsWith\(['"`]tests\/|\.test\\?\.mjs['"$\/]/,
+  // A `docs/` prefix test: Forge's own documentation folder, not every repository's.
+  'docs-folder': /\/\^docs\\\/|startsWith\(['"`]docs\//,
   'forge-folders': new RegExp(
     String.raw`\((?:\?:)?${folder}(?:\|[^)]*)?\|${folder}\b|\[\s*${listed},\s*${listed}`,
   ),
   'npm-lockfile': /package-lock\.json/,
   'node-test': /['"`]--test['"`]/,
 };
-// JS/npm-only assumptions (audit 875a57cc), scanned in src/ and convex/ only.
+// JS/npm-only assumptions (audit 875a57cc), scanned in src/, convex/ and the shipped scripts.
 const buildFolder = String.raw`['"](?:dist|build|coverage)\/?['"]`;
 const PRODUCT_RULES = {
   // A folder list or alternation with `dist`, `build` or `coverage`, as used to skip or drop paths.
@@ -55,7 +58,7 @@ function scanHits(files, read) {
   const hits = new Map();
   for (const file of files) {
     const lines = read(file).split('\n');
-    const rules = /^(?:src|convex)\//.test(file) ? { ...RULES, ...PRODUCT_RULES } : RULES;
+    const rules = { ...RULES, ...PRODUCT_RULES };
     for (const [rule, pattern] of Object.entries(rules)) {
       const count = lines.filter(line => pattern.test(line)).length;
       if (count) hits.set(`${file} ${rule}`, count);
@@ -85,6 +88,7 @@ test('each rule finds the literal it names and nothing else', () => {
     'check-entry': "const entry = 'scripts/forge-check.mjs';",
     'standard-from-args': "const standard = check.args[0] === 'x';",
     'tests-folder': String.raw`const test = path => /^tests\/[^/]+\.test\.mjs$/.test(path);`,
+    'docs-folder': "const docs = path.startsWith('docs/');",
     'forge-folders': String.raw`const product = /^(?:src|web\/src|convex|netlify)\//;`,
     'npm-lockfile': "readFileSync('package-lock.json');",
     'node-test': "spawn(node, ['--test', file]);",
@@ -100,10 +104,22 @@ test('each rule finds the literal it names and nothing else', () => {
     );
   // The list form and a plain folder name in prose are distinct.
   assert.equal(scanHits(['src/x.ts'], () => "const dirs = ['src', 'web', 'convex'];").size, 1);
-  // Product-only rules do not apply to shipped scripts.
-  assert.equal(scanHits(['scripts/x.mjs'], () => "files.get('package.json');").size, 0);
+  // Shipped scripts are product code: every rule applies to them too.
+  assert.deepEqual(
+    [...scanHits(['scripts/x.mjs'], () => "files.get('package.json');").keys()],
+    ['scripts/x.mjs package-json-config'],
+  );
+  // Other string shapes that name Forge's test layout (M2-08, M2-16).
+  for (const line of [
+    "if (path.startsWith('tests/')) return;",
+    "const spec = 'run.test.mjs';",
+    String.raw`const spec = /\.test\.mjs$/;`,
+  ])
+    assert.deepEqual([...scanHits(['src/x.ts'], () => line).keys()], ['src/x.ts tests-folder'], line);
   for (const line of [
     "if (path.startsWith('src/')) return;",
+    "const glob = 'tests/**/*.test.ts';",
+    "if (name.endsWith('.test.ts')) return;",
     'const glob = `packages/*/src/**/*.test.ts`;',
     '/^(?:packages|apps)\\//.test(path);',
     "const lock = 'pnpm-lock.yaml';",

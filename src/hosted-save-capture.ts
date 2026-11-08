@@ -38,6 +38,7 @@ import {
   rememberOverlapSketch,
   readOverlapText,
   overlapTextSketch,
+  sketchCodePath,
   overlapTextEvidence,
   overlapBaseBlobs,
   rememberOverlapBases,
@@ -166,7 +167,7 @@ function captureFile(
   if (checkoutPathExists(final)) rmSync(temporary);
   else renameSync(temporary, final);
   syncFile(final);
-  const sketch = bytes ? overlapTextSketch(bytes) : null;
+  const sketch = bytes ? overlapTextSketch(bytes, sketchCodePath(path)) : null;
   // Cross-file symbol facts read the changed lines of a parsed regular file; never a link target.
   return { ...observed, changed: true, stat, sketch, text: sketch && mode !== 'symlink' ? bytes : null };
 }
@@ -209,10 +210,11 @@ export async function captureHostedSave(
       if (observed.markers) marked.push(path);
       const baseBlob = bases[path] ?? old?.blob ?? digest('');
       bases[path] = baseBlob;
-      // TS/JS anywhere, docs/ examples included; other languages have no symbol facts here (contract-packages).
-      const code = /\.[cm]?[jt]sx?$/.test(path);
+      const code = sketchCodePath(path);
       let base =
-        baseBlob === digest('') ? overlapTextSketch(Buffer.alloc(0)) : readOverlapText(cache, baseBlob);
+        baseBlob === digest('')
+          ? overlapTextSketch(Buffer.alloc(0), code)
+          : readOverlapText(cache, baseBlob, false, code);
       // A base sketch cached by an older client lacks export facts: derive it again within the budget.
       if (code && observed.text && base && !base.exports)
         base = links.budget.run(() => readOverlapText(cache, baseBlob, true)) ?? base;

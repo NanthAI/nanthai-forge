@@ -133,6 +133,7 @@ test('a static check that fails fails preflight before any build or test and nam
         source: 'declared',
       },
     ],
+    process.env,
     300,
   );
   assert.deepEqual(

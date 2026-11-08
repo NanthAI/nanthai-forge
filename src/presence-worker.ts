@@ -9,6 +9,7 @@ import { recordAgentActivity } from './agent-activity.js';
 import { PRESENCE, collapseSessions } from './presence.js';
 import { exclusion } from './files.js';
 import { observePresenceFiles } from './presence-files.js';
+import { pathIgnoreMatcher } from './path-ignore.js';
 import { PeersSource } from './agent-peers-source.js';
 import { changedPaths } from './agent-sync.js';
 import { readHostState } from './host-binding.js';
@@ -43,6 +44,7 @@ export async function watchLanePresence(
           onEdit?.(laneId);
         };
         const metadata = observePresenceFiles(store.path(laneId));
+        const ignores = pathIgnoreMatcher(store.path(laneId));
         const observeFiles = process.platform === 'darwin' ? metadata : undefined;
         if (observeFiles) {
           // A detached observer can attach after the first edit. Compare the live
@@ -78,7 +80,9 @@ export async function watchLanePresence(
           },
           (_event, filename) => {
             if (!existsSync(store.directory)) return close();
-            if (filename && !exclusion(filename.replaceAll('\\', '/'))) {
+            const path = filename?.replaceAll('\\', '/');
+            if (path) ignores.changed(path);
+            if (path && !exclusion(path) && !ignores.ignored(path)) {
               if (!observeFiles) edited = true;
               edit();
             }

@@ -20,6 +20,9 @@ export const clientSettingsSchema = z
     localHeavySlots: z.union([z.literal('auto'), z.number().int().nonnegative()]).default('auto'),
     /** Lane open links node_modules to one install per lockfile hash. */
     shareDependencies: z.boolean().default(true),
+    /** Run the dependency install scripts a repository asks for (forge.json install.scripts, an
+     * allowlist). Off: the request is shown and nothing runs; start installScripts still decides per Lane. */
+    installScripts: z.boolean().default(false),
     /** Nested Lane copies under ROOT.forge-client/lanes are a cache: size cap in GB per client directory (0 = no size cap). */
     clientCacheMaxGB: z.number().nonnegative().finite().default(2),
     /** Evict nested Lane copies unused for this many hours (0 = no age limit). */
@@ -70,7 +73,12 @@ export function heavySlots(
   return Math.max(1, Math.min(Math.floor(memory / (5 * 2 ** 30)), Math.floor(cores / 2)));
 }
 function parseValue(key: keyof ClientSettings, value: string): unknown {
-  if (key === 'shareDependencies' || key === 'landWait' || key === 'firstWriteHooks') {
+  if (
+    key === 'shareDependencies' ||
+    key === 'installScripts' ||
+    key === 'landWait' ||
+    key === 'firstWriteHooks'
+  ) {
     invariant(value === 'true' || value === 'false', 'BAD_ARGUMENT', `${key} is true or false.`);
     return value === 'true';
   }

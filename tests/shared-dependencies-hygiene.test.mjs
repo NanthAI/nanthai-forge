@@ -24,7 +24,7 @@ import {
   dependencyKey,
   npmInstaller,
   shareDependencies,
-  skippedScriptsNotice,
+  installScriptsNotice,
 } from '../dist/shared-dependencies.js';
 
 function scratch(t) {
@@ -51,6 +51,17 @@ function lane(directory, name, { lock = lockOf(), manifest = { name: 'x' }, work
     writeFileSync(join(root, folder, 'package.json'), content);
   }
   return root;
+}
+/** This machine accepts repositories' install-script requests (the installScripts client setting). */
+function acceptRequests(t, directory) {
+  const file = join(directory, 'client.json'),
+    saved = process.env.FORGE_CLIENT_SETTINGS;
+  writeFileSync(file, JSON.stringify({ installScripts: true }));
+  process.env.FORGE_CLIENT_SETTINGS = file;
+  t.after(() => {
+    if (saved === undefined) delete process.env.FORGE_CLIENT_SETTINGS;
+    else process.env.FORGE_CLIENT_SETTINGS = saved;
+  });
 }
 const fakeInstall = calls => async (stage, options) => {
   calls.push({
@@ -99,7 +110,7 @@ test('skipped install scripts are named once, only when a package declared one',
   const quiet = await shareDependencies(plain, options);
   assert.equal(quiet.status, 'installed');
   assert.equal(quiet.skippedScripts, undefined);
-  assert.equal(skippedScriptsNotice(quiet), null);
+  assert.equal(installScriptsNotice(quiet), null);
 
   const scripted = lane(directory, 'scripted', {
     lock: lockOf({ 'node_modules/native': { version: '1.0.0', hasInstallScript: true } }),
@@ -108,7 +119,7 @@ test('skipped install scripts are named once, only when a package declared one',
   const skipped = await shareDependencies(scripted, options);
   assert.equal(calls.at(-1).runScripts, false, 'default install runs no scripts');
   assert.deepEqual(skipped.skippedScripts, { packages: 2, command: 'npm rebuild' });
-  const notice = skippedScriptsNotice(skipped);
+  const notice = installScriptsNotice(skipped);
   assert(notice.includes('2 packages') && notice.includes('npm rebuild') && !notice.includes('\n'));
 
   // The opt-in installs with scripts, in its own cache entry, and has nothing to report.
@@ -119,7 +130,11 @@ test('skipped install scripts are named once, only when a package declared one',
   const ran = await shareDependencies(opted, { ...options, runScripts: true });
   assert.equal(calls.at(-1).runScripts, true);
   assert.equal(ran.status, 'installed', 'a script-less cached install is not reused for the opt-in');
-  assert.equal(skippedScriptsNotice(ran), null);
+  assert.equal(
+    installScriptsNotice(ran),
+    'Ran all dependency install scripts in the clean install environment: start passed installScripts:true.',
+    'when scripts run, one line says so and why',
+  );
   assert.notEqual(ran.path, skipped.path);
 });
 
@@ -245,7 +260,7 @@ test('a repository build-script allowlist is read from every ecosystem file, not
   );
 });
 
-test('allowlisted packages are rebuilt after a script-less install and no longer reported as skipped', async t => {
+test('allowlisted packages are rebuilt after a script-less install only once this machine accepts the request', async t => {
   const directory = scratch(t),
     cache = join(directory, 'deps'),
     calls = [];
@@ -260,16 +275,35 @@ test('allowlisted packages are rebuilt after a script-less install and no longer
     lock,
     manifest: { name: 'x', trustedDependencies: ['node-pty', '@s/native', 'not-in-lock'] },
   });
-  const result = await shareDependencies(allowed, options);
+  const unasked = await shareDependencies(allowed, options);
+  assert.deepEqual(calls.at(-1).rebuild, [], 'the repository alone runs no script');
+  assert.deepEqual(unasked.skippedScripts, { packages: 4, command: 'npm rebuild' });
+  assert.equal(unasked.scripts, undefined);
+  acceptRequests(t, directory);
+  const accepted = lane(directory, 'accepted', {
+    lock,
+    manifest: { name: 'x', trustedDependencies: ['node-pty', '@s/native', 'not-in-lock'] },
+  });
+  const result = await shareDependencies(accepted, options);
   assert.equal(calls.at(-1).runScripts, false, 'blanket scripts stay off');
   assert.deepEqual(calls.at(-1).rebuild, ['@s/native', 'node-pty']);
   assert.deepEqual(result.skippedScripts, { packages: 2, command: 'npm rebuild' });
+  assert.equal(result.status, 'installed', 'never the entry made without the rebuild');
+  assert.deepEqual(result.scripts, {
+    ran: ['@s/native', 'node-pty'],
+    because: 'machine',
+    source: 'package.json',
+  });
+  assert.match(
+    installScriptsNotice(result),
+    /^Ran install scripts of @s\/native, node-pty in the clean install environment: this machine's installScripts setting accepts the request in package\.json\.$/,
+  );
   const plain = lane(directory, 'plain', { lock, manifest: { name: 'x' } });
   assert.notEqual(dependencyKey(allowed), dependencyKey(plain), 'the allowlist is part of the install key');
   const everything = lane(directory, 'everything', { lock, manifest: { name: 'x' } });
   writeFileSync(join(everything, '.yarnrc.yml'), 'enableScripts: true\n');
   const all = await shareDependencies(everything, options);
-  assert.equal(calls.at(-1).runScripts, true, 'a repository that enables scripts runs them');
+  assert.equal(calls.at(-1).runScripts, true, 'an accepted request to enable scripts runs them all');
   assert.equal(all.skippedScripts, undefined);
 });
 
@@ -416,19 +450,23 @@ test("real npm ci: sibling workspace links reach each Lane's own source", { skip
     );
 });
 
-test('forge.json install.scripts runs install scripts with no start flag; an explicit flag still wins', async t => {
+test('forge.json install.scripts is a request: it runs only with the start flag or this machine accepting it', async t => {
   const directory = scratch(t),
     cache = join(directory, 'deps'),
     calls = [];
   const options = { install: fakeInstall(calls), enabled: true, cache, heavy: false };
   const lock = lockOf({ 'node_modules/native': { version: '1.0.0', hasInstallScript: true } });
-  const opted = lane(directory, 'opted', { lock });
-  writeFileSync(join(opted, 'forge.json'), JSON.stringify({ install: { scripts: true } }));
+  const asks = name => {
+    const root = lane(directory, name, { lock });
+    writeFileSync(join(root, 'forge.json'), JSON.stringify({ install: { scripts: true } }));
+    return root;
+  };
+  const opted = asks('opted');
   assert.deepEqual(readInstallScriptAllowlist(opted), { source: 'forge.json', all: true });
-  const ran = await shareDependencies(opted, options);
-  assert.equal(calls.at(-1).runScripts, true, 'the project setting runs scripts without a flag');
-  assert.equal(ran.skippedScripts, undefined);
-  // Without the setting (absent, false, malformed), scripts stay skipped.
+  const shown = await shareDependencies(opted, options);
+  assert.equal(calls.at(-1).runScripts, false, 'the repository file alone runs nothing');
+  assert.match(installScriptsNotice(shown), /forge\.json asks to run them; that is a request/);
+  // Without the request (absent, false, malformed), scripts stay skipped and nothing is claimed.
   for (const [name, text] of [
     ['absent', undefined],
     ['off', JSON.stringify({ install: { scripts: false } })],
@@ -440,11 +478,15 @@ test('forge.json install.scripts runs install scripts with no start flag; an exp
     const result = await shareDependencies(root, options);
     assert.equal(calls.length, before + 1, name);
     assert.equal(calls.at(-1).runScripts, false, name);
-    assert.match(skippedScriptsNotice(result), /forge\.json/, name);
+    assert.equal(result.requestedScripts, undefined, name);
   }
-  // The start flag wins over the project file, both ways.
-  const flagged = lane(directory, 'flagged', { lock, manifest: { name: 'flagged' } });
-  writeFileSync(join(flagged, 'forge.json'), JSON.stringify({ install: { scripts: true } }));
-  await shareDependencies(flagged, { ...options, runScripts: false });
-  assert.equal(calls.at(-1).runScripts, false, 'installScripts:false wins over forge.json');
+  // The start flag runs them; with this machine accepting requests the file does too; false still wins.
+  await shareDependencies(asks('flagged'), { ...options, runScripts: true });
+  assert.equal(calls.at(-1).runScripts, true, 'installScripts:true runs them');
+  acceptRequests(t, directory);
+  const accepted = await shareDependencies(asks('accepted'), options);
+  assert.equal(accepted.scripts?.because, 'machine');
+  const refused = await shareDependencies(asks('refused'), { ...options, runScripts: false });
+  assert.equal(refused.scripts, undefined, 'installScripts:false wins over the machine setting');
+  assert.equal(refused.path, shown.path);
 });

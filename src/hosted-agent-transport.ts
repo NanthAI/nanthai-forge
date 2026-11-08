@@ -53,7 +53,7 @@ import { isPlanningPrefix } from './planning-id.js';
 import { executeHostedMetrics, METRICS_DEADLINE_MS, metricsDeadline } from './hosted-agent-metrics.js';
 import { laneLiveness, readLaneEntry, recordLane, withLaneCommand } from './lane-registry.js';
 import { convexLaneStates, laneHousekeeping, markerIdentity } from './lane-prune.js';
-import { shareDependencies, skippedScriptsNotice } from './shared-dependencies.js';
+import { shareDependencies, installScriptsNotice } from './shared-dependencies.js';
 import { readClientSettings } from './client-settings.js';
 import {
   knownCapabilities,
@@ -1235,7 +1235,7 @@ export class HostedAgentTransport {
     const shared = await boundedStep(
       this.shareDependencies(
         opened.value.root,
-        // An explicit start flag wins; unset leaves it to the repository (forge.json install.scripts).
+        // An explicit start flag wins; unset, a repository's request runs only if this machine accepts it.
         flag((data as { installScripts?: unknown } | null)?.installScripts),
       ),
       left(),
@@ -1262,7 +1262,7 @@ export class HostedAgentTransport {
         process.stderr.write(
           `The lockfile changed but node_modules was not relinked: ${'reason' in shared ? shared.reason : shared.message}\n`,
         );
-      const notice = skippedScriptsNotice(shared);
+      const notice = installScriptsNotice(shared);
       if (notice && 'relinked' in shared) process.stderr.write(`${notice}\n`);
     } catch {
       /* Dependencies are a convenience the agent can still install itself. */
@@ -1272,7 +1272,7 @@ export class HostedAgentTransport {
   private async shareDependencies(path: string, runScripts?: boolean) {
     try {
       const shared = await shareDependencies(path, { runScripts });
-      const notice = skippedScriptsNotice(shared);
+      const notice = installScriptsNotice(shared);
       if (notice) process.stderr.write(`${notice}\n`);
       return shared;
     } catch (error) {

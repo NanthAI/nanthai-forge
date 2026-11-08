@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { ECOSYSTEM_DIRS } from './dependency-dirs.js';
 import { automaticResult } from './work-detail-store.js';
 import {
   autoSnapshotRetentionPlan,
@@ -74,17 +75,6 @@ const BUILD_DIRS = new Set([
   '.netlify',
   'web-dist',
   'hosted-web-dist',
-]);
-/** Other ecosystems' regenerable folders. Only ever reclaimed when ignored by .gitignore/.forgeignore:
- * a folder that is not ignored is source or tracked and stays. */
-const ECOSYSTEM_DIRS = new Set([
-  'target',
-  '.venv',
-  'venv',
-  '__pycache__',
-  '.gradle',
-  '.pytest_cache',
-  '.mypy_cache',
 ]);
 /** `bin`/`obj` are build output only beside a .NET project file. */
 const DOTNET_OUTPUT_DIRS = new Set(['bin', 'obj']);

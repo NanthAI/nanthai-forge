@@ -19,7 +19,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { removeInstall } from '../dist/dependency-seal.js';
 import { detectPackageManager, managerWorkspaceFolders } from '../dist/package-manager.js';
-import { dependencyKey, shareDependencies, skippedScriptsNotice } from '../dist/shared-dependencies.js';
+import { dependencyKey, shareDependencies, installScriptsNotice } from '../dist/shared-dependencies.js';
 
 const ORIGINAL_PATH = process.env.PATH;
 function scratch(t) {
@@ -102,6 +102,17 @@ const bunFiles = (extra = {}, manifest = {}) => ({
   ...workspaces,
   ...extra,
 });
+/** This machine accepts repositories' install-script requests (the installScripts client setting). */
+function acceptRequests(t, directory) {
+  const file = join(directory, 'client.json'),
+    saved = process.env.FORGE_CLIENT_SETTINGS;
+  writeFileSync(file, JSON.stringify({ installScripts: true }));
+  process.env.FORGE_CLIENT_SETTINGS = file;
+  t.after(() => {
+    if (saved === undefined) delete process.env.FORGE_CLIENT_SETTINGS;
+    else process.env.FORGE_CLIENT_SETTINGS = saved;
+  });
+}
 const share = (root, cache, options = {}) =>
   shareDependencies(root, { enabled: true, cache, heavy: false, ...options });
 
@@ -222,7 +233,7 @@ test('yarn classic and berry use their frozen commands; berry never runs the com
   const line = calls().find(entry => entry.startsWith('yarn install'));
   assert.match(line, /^yarn install --immutable \| scripts=false ignorepath=1 \|/);
   assert.match(
-    skippedScriptsNotice(berry),
+    installScriptsNotice(berry),
     /Skipped install scripts of dependencies\. Run them with: yarn rebuild/,
   );
   // Classic: no packageManager, a v1 lockfile, a v1 yarn on PATH.
@@ -249,10 +260,10 @@ test('bun installs the frozen lockfile without scripts', async t => {
   const result = await share(repo(directory, 'lane', bunFiles()), join(directory, 'cache'));
   assert.equal(result.status, 'installed');
   assert.ok(calls().some(entry => entry.startsWith('bun install --frozen-lockfile --ignore-scripts')));
-  assert.match(skippedScriptsNotice(result), /Run them with: bun pm trust --all/);
+  assert.match(installScriptsNotice(result), /Run them with: bun pm trust --all/);
 });
 
-test('a declared build allowlist is rebuilt; without one scripts are skipped and the hint names the command', async t => {
+test('a declared build allowlist is a request: shown and skipped by default, rebuilt once this machine accepts it', async t => {
   const directory = scratch(t),
     calls = fakeManagers(t, directory, ['pnpm', 'bun', 'yarn'], {
       pnpm: '10.4.1',
@@ -260,6 +271,18 @@ test('a declared build allowlist is rebuilt; without one scripts are skipped and
       yarn: '4.5.0',
     }),
     cache = join(directory, 'cache');
+  const asked = await share(
+    repo(directory, 'pnpm-asked', pnpmFiles({}, { pnpm: { onlyBuiltDependencies: ['esbuild'] } })),
+    cache,
+  );
+  assert.ok(!calls().some(l => l.startsWith('pnpm rebuild')), 'the repository alone runs nothing');
+  assert.deepEqual(asked.skippedScripts, { packages: 2, command: 'pnpm rebuild' });
+  assert.deepEqual(asked.requestedScripts, { source: 'package.json', packages: ['esbuild'] });
+  assert.match(
+    installScriptsNotice(asked),
+    /package\.json asks to run esbuild; that is a request, not a permission\./,
+  );
+  acceptRequests(t, directory);
   const pnpm = await share(
     repo(directory, 'pnpm', pnpmFiles({}, { pnpm: { onlyBuiltDependencies: ['esbuild', 'not-in-lock'] } })),
     cache,
@@ -268,12 +291,14 @@ test('a declared build allowlist is rebuilt; without one scripts are skipped and
   assert.ok(!calls().some(l => l.includes('not-in-lock')), 'only lockfile packages are rebuilt');
   // The allowed package is no longer reported; the other build-script package still is.
   assert.deepEqual(pnpm.skippedScripts, { packages: 1, command: 'pnpm rebuild' });
+  assert.deepEqual(pnpm.scripts, { ran: ['esbuild'], because: 'machine', source: 'package.json' });
+  assert.notEqual(pnpm.path, asked.path, 'the rebuilt install is cached apart from the script-less one');
   const none = await share(repo(directory, 'pnpm-none', pnpmFiles()), cache);
   assert.equal(none.status, 'installed');
   assert.deepEqual(none.skippedScripts, { packages: 2, command: 'pnpm rebuild' });
   assert.match(
-    skippedScriptsNotice(none),
-    /Skipped install scripts of 2 packages\. Run them with: pnpm rebuild \(in the Lane\), or start with \{"installScripts":true\} or set \{"install":\{"scripts":true\}\} in forge\.json\./,
+    installScriptsNotice(none),
+    /^Skipped install scripts of 2 packages\. Run them with: pnpm rebuild \(in the Lane\), or start with \{"installScripts":true\}, or accept repository requests on this machine with nforge settings installScripts true\.$/,
   );
   await share(repo(directory, 'bun', bunFiles({}, { trustedDependencies: ['sharp'] })), cache);
   assert.ok(calls().some(l => l.startsWith('bun pm trust sharp |')));

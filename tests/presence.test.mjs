@@ -25,6 +25,7 @@ import { latestWorkFormat } from '../dist/work-format.js';
 import { startOwnerPresence } from '../dist/presence-worker-start.js';
 import { moduleUrl } from './convex-module.mjs';
 import { observePresenceFiles } from '../dist/presence-files.js';
+import { pathIgnoreMatcher } from '../dist/path-ignore.js';
 const { Sessions } = await import(moduleUrl('../web/src/cockpit/Sessions.tsx'));
 
 const session = (extra = {}) => ({
@@ -100,6 +101,7 @@ test('Lane watcher coalesces real edits, ignores build noise, and stops on expli
   const root = mkdtempSync(join(tmpdir(), 'forge-presence-'));
   t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   writeFileSync(join(root, 'file.txt'), 'one');
+  writeFileSync(join(root, '.gitignore'), 'dist/\n'); // build output is ignored by rule, not by name
   initNative(root);
   const agent = new AgentWorkflow(root);
   const lane = (await agent.dispatch({ action: 'start', outcome: 'Synthetic presence', actor: 'gpt-b6' }))
@@ -147,6 +149,7 @@ test('Lane observation reconciles macOS edits without notifications and retains 
   const root = mkdtempSync(join(tmpdir(), 'forge-presence-dropped-'));
   t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   writeFileSync(join(root, 'file.txt'), 'one');
+  writeFileSync(join(root, '.gitignore'), 'dist/\n'); // build output is ignored by rule, not by name
   initNative(root);
   const agent = new AgentWorkflow(root);
   const lane = (await agent.dispatch({ action: 'start', outcome: 'Dropped notification regression' })).result;
@@ -210,6 +213,7 @@ test('metadata reconciliation detects edits without native events and ignores pr
   });
   mkdirSync(join(root, 'nested'));
   writeFileSync(join(root, 'nested/file.txt'), 'one');
+  writeFileSync(join(root, '.gitignore'), 'dist/\n');
   fs.symlinkSync(external, join(root, 'linked'));
   const observe = observePresenceFiles(root);
   assert.equal(observe(), false);
@@ -364,6 +368,7 @@ test('owner observer reconciles edits made before the helper attaches without a 
   const root = mkdtempSync(join(tmpdir(), 'forge-presence-attach-'));
   t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   writeFileSync(join(root, 'file.txt'), 'one');
+  writeFileSync(join(root, '.gitignore'), 'dist/\n'); // build output is ignored by rule, not by name
   initNative(root);
   const agent = new AgentWorkflow(root);
   const first = (await agent.dispatch({ action: 'start', outcome: 'Unedited Lane' })).result;
@@ -583,4 +588,34 @@ test('degraded presence keeps the minute fallback and stays quiet when idle', as
   assert.equal(calls, 0);
   controller.abort();
   await watching;
+});
+
+test('presence follows ignore rules, not folder names: a tracked coverage package is source, ignored output is not', () => {
+  const root = mkdtempSync(join(tmpdir(), 'forge-presence-ignore-'));
+  try {
+    mkdirSync(join(root, 'internal/coverage'), { recursive: true });
+    mkdirSync(join(root, 'build/out'), { recursive: true });
+    writeFileSync(join(root, '.gitignore'), 'build/out/\n');
+    writeFileSync(join(root, 'internal/coverage/x.go'), 'package coverage\n');
+    const observe = observePresenceFiles(root);
+    assert.equal(observe(), false);
+    writeFileSync(join(root, 'build/out/noise.o'), 'generated');
+    assert.equal(observe(), false, 'ignored output stays quiet');
+    writeFileSync(join(root, 'internal/coverage/x.go'), 'package coverage // edited\n');
+    assert.equal(observe(), true, 'a source package named coverage is observed');
+    writeFileSync(join(root, 'build/script.sh'), 'echo hi\n');
+    assert.equal(observe(), true, 'an unignored build folder is observed');
+    const ignores = pathIgnoreMatcher(root);
+    assert.equal(ignores.ignored('build/out/noise.o'), true);
+    assert.equal(ignores.ignored('internal/coverage/x.go'), false);
+    assert.equal(ignores.ignored('build/script.sh'), false);
+    writeFileSync(join(root, '.gitignore'), 'build/\n');
+    ignores.changed('.gitignore');
+    assert.equal(ignores.ignored('build/script.sh'), true, 'an edited ignore file takes effect');
+    writeFileSync(join(root, 'internal/.gitignore'), '*.go\n');
+    ignores.changed('internal/.gitignore');
+    assert.equal(ignores.ignored('internal/coverage/x.go'), true, 'nested ignore files apply');
+  } finally {
+    rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+  }
 });

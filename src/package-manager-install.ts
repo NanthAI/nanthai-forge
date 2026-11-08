@@ -3,7 +3,9 @@ import { execFile, spawn } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { PackageManager } from './package-manager.js';
+import { cleanCommandEnvironment } from './clean-command-env.js';
 import { readInstallScriptAllowlist } from './install-script-allowlist.js';
+import { CLEAN_INSTALL_HINT } from './npm-install.js';
 
 /** How to invoke the declared manager: through corepack at the declared version where it can,
  * else the manager already on PATH. Forge never installs a manager globally. */
@@ -67,12 +69,12 @@ export function installSteps(pm: PackageManager, runScripts: boolean, rebuild: s
   }
 }
 
-const run = (runner: ManagerRunner, directory: string, step: Step) =>
+const run = (runner: ManagerRunner, directory: string, step: Step, clean: NodeJS.ProcessEnv) =>
   new Promise<void>((resolve, reject) => {
     const child = spawn(runner.command, [...runner.prefix, ...step.args], {
       cwd: directory,
       env: {
-        ...process.env,
+        ...clean,
         COREPACK_ENABLE_DOWNLOAD_PROMPT: '0',
         COREPACK_ENABLE_AUTO_PIN: '0',
         ...step.env,
@@ -84,18 +86,28 @@ const run = (runner: ManagerRunner, directory: string, step: Step) =>
     child.once('exit', code =>
       code === 0
         ? resolve()
-        : reject(new Error(`${runner.prefix[0] ?? runner.command} ${step.args[0]} exited ${code}`)),
+        : reject(
+            new Error(
+              `${runner.prefix[0] ?? runner.command} ${step.args[0]} exited ${code} ${CLEAN_INSTALL_HINT}.`,
+            ),
+          ),
     );
   });
-/** Install a non-npm repository's frozen lockfile in DIRECTORY (scripts skipped unless asked). */
+/** Install a non-npm repository's frozen lockfile in DIRECTORY (scripts skipped unless asked), in the
+ * clean check environment built once for the install. */
 export async function managerInstall(
   directory: string,
   pm: PackageManager,
   runner: ManagerRunner,
   options: { runScripts?: boolean; rebuild?: string[] } = {},
 ) {
-  for (const step of installSteps(pm, options.runScripts === true, options.rebuild ?? []))
-    await run(runner, directory, step);
+  const clean = cleanCommandEnvironment('install');
+  try {
+    for (const step of installSteps(pm, options.runScripts === true, options.rebuild ?? []))
+      await run(runner, directory, step, clean.env);
+  } finally {
+    clean.dispose();
+  }
 }
 
 /** pnpm-lock.yaml packages that need a build (`requiresBuild: true`), by name. */
@@ -137,10 +149,14 @@ const REBUILD: Record<string, string> = {
 };
 /** What a script-less install of a non-npm repository skipped. pnpm's lockfile names the packages
  * that need a build; yarn and bun lockfiles do not, so their count is unknown (null). */
-export function managerSkippedScripts(root: string, pm: PackageManager): SkippedScriptsHint {
+export function managerSkippedScripts(
+  root: string,
+  pm: PackageManager,
+  rebuilt: string[] = [],
+): SkippedScriptsHint {
   let packages: number | null = null;
   if (pm.name === 'pnpm') {
-    const allowed = new Set(managerRebuilds(root, pm));
+    const allowed = new Set(rebuilt);
     packages = pnpmScripted(readLock(root, pm)).filter(name => !allowed.has(name)).length;
   }
   try {

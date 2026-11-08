@@ -29,13 +29,14 @@ recipe, with why and what other repositories get instead.
 | --- | --- |
 | `check-entry` | the literal `scripts/forge-check.mjs` |
 | `standard-from-args` | deciding Forge's check from `check.args[0]`, `args.length === 1` or `executable === 'node'` |
-| `tests-folder` | a regular expression anchored on `^tests/` |
+| `tests-folder` | a regular expression anchored on `^tests/`, a `startsWith('tests/')` prefix test, or a `.test.mjs` string or pattern |
+| `docs-folder` | a regular expression anchored on `^docs/` or a `startsWith('docs/')` prefix test |
 | `forge-folders` | an alternation or list of Forge's top-level folders (`src`, `web`, `convex`, `netlify`, `scripts`, `tests`, `dist`) |
 | `npm-lockfile` | the literal `package-lock.json` |
 | `node-test` | the argument `--test` (Node's test runner) |
-| `build-folders` | `src/`, `convex/`: a folder list or alternation with `dist`, `build` or `coverage`, as used to skip or drop paths |
-| `js-extension` | `src/`, `convex/`: a JavaScript/TypeScript extension pattern such as `/\.[cm]?[jt]sx?$/`, as used to gate a feature |
-| `package-json-config` | `src/`, `convex/`: `package.json` read as a config source |
+| `build-folders` | product code and shipped scripts: a folder list or alternation with `dist`, `build` or `coverage`, as used to skip or drop paths |
+| `js-extension` | product code and shipped scripts: a JavaScript/TypeScript extension pattern such as `/\.[cm]?[jt]sx?$/`, as used to gate a feature |
+| `package-json-config` | product code and shipped scripts: `package.json` read as a config source |
 
 The last three come from the JS/Node/npm audit (875a57cc). A gate on them must hold for every
 ecosystem; rows that name an "any-ecosystem slice" Issue are live cases that slice fixes.
@@ -52,20 +53,36 @@ ecosystem; rows that name an "any-ecosystem slice" Issue are live cases that sli
 | `scripts/script-impact.mjs` | `check-entry` | 1 | Forge's selector treats its check entry as global | their check entries are global-risk (`checkRunEntryPaths`) |
 | `scripts/script-impact.mjs` | `forge-folders` | 1 | Forge's selector maps scripts to its own product folders | the project runner and the generic import graph |
 | `scripts/test-impact.mjs` | `forge-folders` | 4 | Forge's selector inventory and product folders | the project runner and the generic import graph |
-| `scripts/test-impact.mjs` | `tests-folder` | 4 | Forge's selector reads `tests/*.test.mjs` | their runner's test globs |
+| `scripts/test-impact.mjs` | `tests-folder` | 9 | Forge's selector reads `tests/*.test.mjs` | their runner's test globs |
 | `scripts/test-impact.mjs` | `npm-lockfile` | 2 | Forge's selector classifies installed packages from its npm lockfile | declared dependencies of every manifest (`src/js-import-graph.ts`) |
 | `scripts/test-import-graph.mjs` | `forge-folders` | 4 | Forge's import graph: its folders, Convex names and loaders | the generic JS/TS import graph |
-| `scripts/test-import-graph.mjs` | `tests-folder` | 1 | Forge's import graph: test-to-test edges in `tests/` | the generic JS/TS import graph |
+| `scripts/test-import-graph.mjs` | `tests-folder` | 4 | Forge's import graph: test-to-test edges in `tests/` | the generic JS/TS import graph |
 | `scripts/test-import-graph.mjs` | `npm-lockfile` | 4 | Forge's import graph: external packages from its npm lockfile | declared dependencies of every manifest |
 | `scripts/test-directory-path.mjs` | `forge-folders` | 2 | Forge's selector: directory reads in its tests and scripts | the generic JS/TS import graph |
+| `scripts/check-path-scopes.mjs` | `docs-folder` | 1 | Forge's own repository path-scope check treats `docs/` as documentation | not run |
+| `scripts/control-build-key.mjs` | `package-json-config` | 1 | the build key of Forge's own CLI | not used |
+| `scripts/docs-readers.mjs` | `js-extension` | 1 | Forge's tested-docs reader scan matches JS/TS importers | declared `docsPaths` on their check definition |
+| `scripts/script-impact.mjs` | `tests-folder` | 4 | Forge's selector maps scripts to named tests in `tests/` | the project runner and the generic import graph |
+| `scripts/script-impact.mjs` | `build-folders` | 1 | an npm script-name pattern (`build`), not a folder | — |
+| `scripts/script-impact.mjs` | `package-json-config` | 1 | Forge's selector reads its own npm scripts | the project runner and the generic import graph |
+| `scripts/test-directory-path.mjs` | `js-extension` | 1 | Forge's selector: directory reads in its JS tests and scripts | the generic JS/TS import graph |
+| `scripts/test-directory-path.mjs` | `package-json-config` | 1 | Forge's selector reads its own package manifest | the generic JS/TS import graph |
+| `scripts/test-impact.mjs` | `js-extension` | 2 | Forge's selector names modules and test files by JS/TS extension | the project runner and the generic import graph |
+| `scripts/test-impact.mjs` | `package-json-config` | 2 | Forge's selector treats its own manifest as global | the project runner and the generic import graph |
+| `scripts/test-import-graph.mjs` | `build-folders` | 3 | Forge's import graph resolves its built `dist/` to `src/` | the generic JS/TS import graph |
+| `scripts/test-name-watchers.mjs` | `js-extension` | 1 | Forge's selector: JS/TS modules a test names | named tests by module stem (`runnerSelection`) |
+| `scripts/test-tiebreak.mjs` | `js-extension` | 1 | Forge's preflight ranking strips JS/TS extensions from test names | changed, named and imported tests in that order |
+| `src/agent-cli.ts` | `tests-folder` | 2 | help-text examples of an explicit test list, not behavior | — |
+| `src/explicit-test-runner.ts` | `tests-folder` | 1 | an explicit test list for Forge's standard check names `tests/*.test.mjs` files | their runner's test files (`resolveTestRunner`) |
+| `src/project-test-runner.ts` | `tests-folder` | 1 | `FORGE_TEST_GLOB`, the glob of Forge's Node test layout | a declared runner or inferred vitest, jest and pytest globs |
 | `scripts/docs-readers.mjs` | `forge-folders` | 1 | Forge's tested-docs reader scan over its tests and scripts | declared `docsPaths` on their check definition |
 | `scripts/docs-readers.mjs` | `tests-folder` | 1 | Forge's tested-docs reader scan | declared `docsPaths` on their check definition |
 | `scripts/selection-guard.mjs` | `tests-folder` | 1 | Forge's selection guard over its test layout | their command's own selection |
-| `scripts/test-closeness.mjs` | `tests-folder` | 1 | Forge's preflight ranking over its test layout | changed, named and imported tests in that order |
-| `scripts/test-coverage.mjs` | `tests-folder` | 1 | Forge's per-test coverage records | full checks; no per-test coverage |
+| `scripts/test-closeness.mjs` | `tests-folder` | 4 | Forge's preflight ranking over its test layout | changed, named and imported tests in that order |
+| `scripts/test-coverage.mjs` | `tests-folder` | 5 | Forge's per-test coverage records | full checks; no per-test coverage |
 | `scripts/test-shards.mjs` | `tests-folder` | 1 | Forge's standard-check shards | their command in one job |
 | `scripts/test-name-watchers.mjs` | `tests-folder` | 1 | Forge's selector: modules a test names | named tests by module stem (`runnerSelection`) |
-| `scripts/convex-function-names.mjs` | `tests-folder` | 1 | Forge's selector: Convex functions its tests call by name | the generic JS/TS import graph |
+| `scripts/convex-function-names.mjs` | `tests-folder` | 2 | Forge's selector: Convex functions its tests call by name | the generic JS/TS import graph |
 | `scripts/check-path-scopes.mjs` | `forge-folders` | 10 | Forge's own repository path-scope check (`npm run check`) | not run; their checks are their own |
 | `scripts/check-path-scopes.mjs` | `tests-folder` | 5 | Forge's own repository path-scope check | not run |
 | `scripts/control-build-key.mjs` | `npm-lockfile` | 1 | the build key of Forge's own CLI | not used |
@@ -96,7 +113,6 @@ ecosystem; rows that name an "any-ecosystem slice" Issue are live cases that sli
 | `src/project-lockfile.ts` | `npm-lockfile` | 2 | the lockfile list, npm first so Forge pins the same bytes as before | their own lockfile (pnpm, Yarn, Bun, Cargo, Go, Python, Ruby, PHP) |
 | `src/agent-clean.ts` | `build-folders` | 3 | Lane cleanup reclaims JS build folders only (any-ecosystem slice H, 4ce67b9a) | after H: gitignored folders named in an ecosystem list |
 | `src/agent-cli.ts` | `build-folders` | 1 | a runner-label example (`["linux","build"]`) in help text, not a folder | — |
-| `src/files.ts` | `build-folders` | 3 | capture and mirror drop these folders (any-ecosystem slice A, f4b93292) | after A: build folders come only from ignore files |
 | `src/gh-cli-options.ts` | `build-folders` | 1 | a `gh` JSON field named `coverage`, not a folder | — |
 | `src/js-import-graph.ts` | `build-folders` | 1 | reads a JS package's built `exports` target as its `src/` source | the same for every JS/TS repository |
 | `src/maintainer-release-schema.ts` | `build-folders` | 1 | Forge's own release stage names | not used |
@@ -119,7 +135,7 @@ ecosystem; rows that name an "any-ecosystem slice" Issue are live cases that sli
 | `src/contract-exports.ts` | `js-extension` | 1 | contract export facts are JS/TS-only (any-ecosystem slice E, 7e97573d) | after E: contract unknown, never independence |
 | `src/first-check-risk.ts` | `js-extension` | 1 | labels nested JS build configs as global-risk (any-ecosystem slice G, 6af95601 adds the other ecosystems) | root configs; after G nested build inputs too |
 | `src/code-files.ts` | `js-extension` | 1 | one code-file name pattern for every listed language, JS/TS among them | the same |
-| `src/hosted-save-capture.ts` | `js-extension` | 1 | symbol overlap facts are JS/TS-only (any-ecosystem slice E, 7e97573d) | path overlap only |
+| `src/hosted-overlap-text.ts` | `js-extension` | 1 | symbol overlap facts (and the JS parse that reads them) are JS/TS-only (any-ecosystem slice E, 7e97573d) | line-range overlap only; no parse |
 | `src/intent-test-contract.ts` | `js-extension` | 2 | contract test names are JS/TS shapes (any-ecosystem slice F, e89be958) | after F: any test name shape |
 | `src/js-import-graph.ts` | `js-extension` | 1 | the JS/TS import graph parses only JS/TS files | path and package selection |
 | `src/junit-report.ts` | `js-extension` | 1 | labels code files of every listed language, JS/TS among them | the same |

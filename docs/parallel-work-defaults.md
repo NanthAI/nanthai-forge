@@ -16,6 +16,7 @@ Read: `nforge settings`; set: `nforge settings KEY VALUE`; reset:
 | `idleLaneHours` | `1` | Agents forgot open Lanes, which kept counting as active work and kept their disk. `start` lists the open Lanes this agent run started on this machine that have had no Forge action for this long. | `nforge settings idleLaneHours 0` stops the list. |
 | `localHeavySlots` | `auto` | About 20 agents shared a 16 GB laptop. Unlimited parallel builds and test runs swapped the machine; 3 at a time kept it responsive. `auto` allows one heavy command per 5 GB of RAM, capped at half the cores and never below 1 (16 GB with 8 cores gives 3). | A number sets the slots; `0` turns the limit off. |
 | `shareDependencies` | `true` | Each Lane needs `node_modules` (261 MB for Forge itself), and every agent ran the install. When a Lane opens, its `node_modules` becomes a link to one install per exact lockfile and package manager (npm, pnpm, yarn or bun). | `nforge settings shareDependencies false`. |
+| `installScripts` | `false` | A repository's own files could switch on dependency install scripts at `start`, so opening a Lane ran code its authors chose. A repository's declaration is a request: `start` shows it, and only you decide. | `nforge settings installScripts true` accepts repository requests on this machine; `start {"installScripts":true}` runs all scripts for one Lane. |
 | `clientCacheMaxGB` | `2` | `ROOT.forge-client/lanes` collected full ~100 MB copies of other Lanes that nothing removed (262 copies, 5.8 GB in one client directory). They are a cache now: past this size, the least recently used copies are removed. | `nforge settings clientCacheMaxGB 0` removes the size cap. |
 | `clientCacheMaxAgeHours` | `24` | The same cache: a copy nobody used for this long is removed. | `nforge settings clientCacheMaxAgeHours 0` removes the age limit. |
 | `landWait` | `true` | Agents wrapped `land --save` in a polling loop to learn the outcome. `land --save` now waits by default and prints a compact summary. | `--no-wait` on one command, or `nforge settings landWait false`. |
@@ -117,21 +118,30 @@ Read: `nforge settings`; set: `nforge settings KEY VALUE`; reset:
   `yarn install --immutable` (Yarn classic: `--frozen-lockfile`) or `bun install --frozen-lockfile`, with
   install scripts off. Concurrent opens of the same key wait for that one install. A later Lane links
   without running anything.
-- A build-script allowlist the repository declares is followed instead of blocking everything: pnpm
-  `onlyBuiltDependencies` or `allowBuilds` (`pnpm-workspace.yaml`, or `pnpm.*` in `package.json`), bun
-  `trustedDependencies`, and yarn `dependenciesMeta.<name>.built` run only those packages' scripts after
-  the script-less install (`npm rebuild`, `pnpm rebuild`, `bun pm trust` or `yarn rebuild NAME…`). Yarn
-  `enableScripts: true` in `.yarnrc.yml` runs them all. The allowlist is part of the install key.
-  `--ignore-scripts` for everything applies only when nothing is declared.
-- Other dependency install scripts do not run. When a skipped package (or the root `preinstall`, `install`,
-  `postinstall` or `prepare`) declared one, `start` prints one line on stderr naming the command:
-  `npm rebuild`, `pnpm rebuild`, `bun pm trust --all` or `yarn rebuild` in the Lane. The pnpm lockfile
-  records which packages need a build and gives a count; the yarn and bun lockfiles do not, so their line
-  says only that dependency scripts were skipped. To run them at install instead, add `"installScripts":true`
-  to `start` (`nforge agent ROOT start '{"planningItemId":"ID","installScripts":true}'`), or set it once
-  for the repository with `{"install":{"scripts":true}}` in a root `forge.json`; an explicit
-  `installScripts` (`true` or `false`) on `start` wins over the file. That install is cached apart from
-  the script-less one. Nothing is printed when no skipped package declared a script.
+- The install runs in the [clean check environment](security.md#clean-check-environments), built once
+  per install and removed after it: a private HOME, XDG and temp directories, private npm user and
+  global configuration, only the allowlisted environment variables, the shared check caches (npm
+  uses `check-npm-cache`) and corepack's own home when it exists.
+  Your npm, pnpm, Yarn or Bun configuration and credentials are not read, so a project that needs a
+  private registry login fails with a line saying so; run its install in the Lane yourself.
+- Install scripts are your decision, never the repository's. What a repository declares is a request:
+  `{"install":{"scripts":true}}` in a root `forge.json` or Yarn `enableScripts: true` in `.yarnrc.yml`
+  (all scripts), or a build-script allowlist: pnpm `onlyBuiltDependencies` or `allowBuilds`
+  (`pnpm-workspace.yaml`, or `pnpm.*` in `package.json`), bun `trustedDependencies` and yarn
+  `dependenciesMeta.<name>.built` (those packages only). The request is part of the install key.
+- By default no dependency install script runs. When a skipped package (or the root `preinstall`,
+  `install`, `postinstall` or `prepare`) declared one, `start` prints one line on stderr naming the
+  command (`npm rebuild`, `pnpm rebuild`, `bun pm trust --all` or `yarn rebuild` in the Lane), the
+  repository's request if it made one, and how to accept it. The pnpm lockfile records which packages
+  need a build and gives a count; the yarn and bun lockfiles do not, so their line says only that
+  dependency scripts were skipped. Nothing is printed when no skipped package declared a script.
+- To run them at install: `"installScripts":true` on `start`
+  (`nforge agent ROOT start '{"planningItemId":"ID","installScripts":true}'`) runs every script for that
+  Lane; `nforge settings installScripts true` makes this machine accept each repository's request (all
+  scripts, or the allowlisted packages after the script-less install: `npm rebuild`, `pnpm rebuild`,
+  `bun pm trust` or `yarn rebuild NAME…`). An explicit `installScripts:false` on `start` wins over the
+  setting. When scripts run, `start` prints one line saying which and why. Each mode (none, allowlisted,
+  all) is cached apart, so a Lane that did not accept scripts never links an install that ran them.
 - Workspaces: the workspace folders the lockfile records (npm `packages`, pnpm `importers`, Yarn Berry
   `@workspace:` entries, `bun.lock` `workspaces`; Yarn classic and `bun.lockb` use the `workspaces`
   field of `package.json`) are copied to the install stage with their `package.json`, and their manifests
@@ -219,6 +229,11 @@ frozen set on 2026-11-06 broke capabilities across CLI/server versions with `HOS
   `package.json`; a key set in both files is an error, never a silent pick, and a `forge.json` that
   is not a JSON object makes the plan unavailable. Forge reads it as data and never runs it; keys
   it does not know are ignored.
+- **Clean environment.** Every command preflight runs (static checks, the build step, package
+  commands and the test runner) runs in one [clean check environment](security.md#clean-check-environments)
+  built for the run and removed when it ends: a private HOME, XDG and temp directories and npm
+  configuration, only the allowlisted variables and the shared check caches, with no passthrough. A
+  test that needs a credential or setting from your shell fails here as it would in the landing check.
 - **Static checks first.** Cheap repository-wide checks the landing check also runs (formatting,
   the foundation check, document and schema guards) run before any build or test, whenever the
   change touches their inputs, and a failure ends the run with that check's own output and no tests
@@ -283,8 +298,10 @@ frozen set on 2026-11-06 broke capabilities across CLI/server versions with `HOS
   build. With no other
   runner, each ecosystem's own command runs the selection when it is unambiguous: `go test ./...`
   (or `go test ./pkg`) in the module, `cargo test -p NAME`, pytest through the lockfile's tool (uv,
-  Poetry, PDM) or `python -m pytest`, `./gradlew :mod:test` (in the build's folder; `test` for a
-  single-project build), `mvn -pl mods -am test` (in the build's folder), `dotnet test PROJECT` for
+  Poetry, PDM) or `python -m pytest`, `gradle :mod:test` (in the build's folder; `test` for a
+  single-project build), `mvn -pl mods -am test` (in the build's folder; a wrapper the tree commits,
+  `./gradlew` or `./mvnw`, runs instead only when the project declares `"preflight": {"wrappers": true}`
+  in `forge.json`, and the plan's advisory names an undeclared one), `dotnet test PROJECT` for
   test projects, `pnpm --filter ./DIR run test` / `npm run test --workspace=DIR` /
   `yarn workspace NAME run test` for workspace packages and `npm run test` (its own package
   manager) in a standalone package's folder, for packages with a `test` script.
@@ -573,6 +590,23 @@ These have no setting: they fix failures and have no sensible alternative.
   landing also changes, that entry is marked `wouldConflict` with the files. Its next receipt says
   to sync and land the same Lane again; the new land replaces the queued entry. This is path
   advice, not a proven text conflict. Each land reads at most 50 queued entries.
+
+## Size ceilings
+
+These fixed ceilings are not settings. Each one falls back to a wider run or a recheck, never to a
+narrower one or a wrong "unaffected": past it, Forge runs more, not less. Every one is a constant
+in the file named in the table.
+
+| Input | Ceiling | Past it | Where |
+| --- | --- | --- | --- |
+| Changed paths handed to a project command (`FORGE_CHECK_CHANGES`) | 128 KiB of JSON, about 3,000 paths | the list is left out and the command runs in full | `src/check-command-scope.ts` |
+| Package manifests read for one head (package graph) | 2,000 manifests and 16 MiB | the layout is unknown: full selection, with the reason | `src/package-graph.ts` |
+| Paths walked in a checkout for the package graph | 500,000 | the graph is unknown: full selection | `src/package-graph-checkout.ts` |
+| JS/TS import graph | 20,000 files, 1 MiB per file, 128 MiB together | selection stays path-only | `src/js-import-graph.ts` |
+| State manifest in first-check reuse | 8 MiB per manifest (roughly 60,000 to 70,000 files) | no first-check reuse: the check runs as usual | `convex/projectHostedReuse.ts` |
+| Secret scan of a file | 1 MiB; binary files (a NUL in the first 8 KiB) are skipped | the file is counted as skipped, not scanned | `src/secret-scan.ts` |
+| JUnit reports per job | 32 files, 8 MiB each, 16 MiB together, 5,000 test files | the rest is not read (extra report files are noted); the check's own result is unchanged | `src/junit-report.ts`, `src/junit-report-files.ts` |
+| Overlap sketch per file | 1 MiB and 20,000 lines | no line-range evidence for that file: advisory only | `src/hosted-overlap-text.ts` |
 
 ## What agents are told
 

@@ -25,15 +25,20 @@ const sketchSchema = z.object({
   imports: z.record(z.string(), z.tuple([z.string(), z.string()])).optional(),
 });
 type Sketch = z.infer<typeof sketchSchema>;
-/** Small, disposable summaries; no source bytes retained or sent to Convex. */
-export function overlapTextSketch(bytes: Buffer): Sketch | null {
+/** TS/JS anywhere, docs/ examples included; other languages have no symbol facts here (contract-packages). */
+export const sketchCodePath = (path: string) => /\.[cm]?[jt]sx?$/.test(path);
+/** Small, disposable summaries; no source bytes retained or sent to Convex. `code` false skips the
+ * JS parse (lines only, no symbol or cross-file facts): the parser serves TS/JS paths alone. */
+export function overlapTextSketch(bytes: Buffer, code = true): Sketch | null {
   if (bytes.length > limit) return null;
   const lines = attributionLines(bytes);
   if (!lines || lines.length > 20000) return null;
   const text = bytes.toString('utf8'),
     symbols: Record<string, string> = Object.create(null);
-  let facts: ReturnType<typeof topLevelFacts> = { exports: {}, imports: {} };
-  if (/\b(?:function|class|const|let|var|interface|type|enum|import|export)\s/.test(text)) {
+  let facts: ReturnType<typeof topLevelFacts> | Record<string, never> = code
+    ? { exports: {}, imports: {} }
+    : {};
+  if (code && /\b(?:function|class|const|let|var|interface|type|enum|import|export)\s/.test(text)) {
     const tree = parser.configure({ dialect: 'ts jsx' }).parse(text);
     facts = topLevelFacts(tree, text);
     tree.iterate({
@@ -93,7 +98,7 @@ export function rememberOverlapSketch(cache: string, blob: string, sketch: Sketc
   }
 }
 /** `facts`: a cached sketch without cross-file facts (older client) is derived again. */
-export function readOverlapText(cache: string, blob: string, facts = false): Sketch | null {
+export function readOverlapText(cache: string, blob: string, facts = false, code = true): Sketch | null {
   if (!/^[a-f0-9]{64}$/.test(blob)) return null;
   try {
     if (lstatSync(cache).isSymbolicLink()) return null;
@@ -118,7 +123,7 @@ export function readOverlapText(cache: string, blob: string, facts = false): Ske
           bytes = readSource(realpathSync(objects), blob, limit, blob);
       }
       if (!bytes || digest(bytes) !== blob) return null;
-      const sketch = overlapTextSketch(bytes);
+      const sketch = overlapTextSketch(bytes, code);
       if (sketch) rememberOverlapSketch(cache, blob, sketch);
       return sketch;
     } catch {

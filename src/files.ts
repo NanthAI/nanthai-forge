@@ -26,17 +26,16 @@ export function sourceRealpath(path: string) {
 const metadataDirectories = ['.git', '.forge', 'private-artifacts'];
 /** Credential stores that a repository never means to publish. */
 const credentialDirectories = ['.ssh', '.aws', '.azure', '.gnupg'];
-/** Analysis also skips build output and other generated trees by name. Capture and
- * publication never do: they follow `.gitignore`/`.forgeignore`, so a Go `cmd/build`
- * package or a tracked `build/x.sh` is source (see `captureExclusion`). */
+/** Analysis skips Forge/VCS metadata, dependency installs, tool output folders and credential
+ * stores by name. Folders such as `build`, `dist` and `coverage` are not listed: like capture,
+ * analysis follows `.gitignore`/`.forgeignore` for them, so a Go `internal/coverage` package or
+ * a tracked `build/x.sh` is source. Callers that walk a live tree apply the ignore rules
+ * themselves (`pathIgnoreMatcher`, `scanSourcePaths`); tracked inventories need none. */
 const analysisDirectories = [
   ...metadataDirectories,
   '.netlify',
   '.next',
   'node_modules',
-  'dist',
-  'build',
-  'coverage',
   ...credentialDirectories,
 ];
 const sensitiveName = (name: string) =>
@@ -45,7 +44,8 @@ const sensitiveName = (name: string) =>
 /** `credentials*`/`secrets*` names that are code modules or packages, never credential values. */
 const credentialStem = /^(credentials?|secrets?)([.-]|$)/i;
 
-/** Analysis policy (code maps, presence, document reads): skips generated trees too. */
+/** Analysis policy (code maps, presence, document reads): metadata, installs and credentials by
+ * name; build output only through the caller's ignore rules. */
 export function exclusion(path: string): string | null {
   const parts = path.toLowerCase().split('/');
   if (parts.some(p => analysisDirectories.includes(p))) return 'protected-directory';

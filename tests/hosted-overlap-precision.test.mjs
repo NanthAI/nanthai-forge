@@ -16,7 +16,13 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { digest } from '../dist/hash.js';
 import { classifyOverlap } from '../dist/hosted-overlap-evidence.js';
-import { overlapTextSketch, overlapTextEvidence, readOverlapText } from '../dist/hosted-overlap-text.js';
+import {
+  overlapTextSketch,
+  overlapTextEvidence,
+  readOverlapText,
+  sketchCodePath,
+} from '../dist/hosted-overlap-text.js';
+import { parser } from '@lezer/javascript';
 import { captureHostedSave } from '../dist/hosted-save-capture.js';
 import { hostedOverlapAdvice, mergeOverlapChanges } from '../dist/hosted-overlap.js';
 import { resolutionFixture } from './hosted-agent-resolution-fixture.mjs';
@@ -318,4 +324,31 @@ test('separate bindings in one declaration do not turn disjoint edits into a sha
   assert.deepEqual(a.evidence.symbols, ['a']);
   assert.deepEqual(b.evidence.symbols, ['b']);
   assert.equal(classifyOverlap(a, b).class, 'advisory');
+});
+
+test('non-JS files are sketched by lines alone and never reach the JS parser', t => {
+  const parse = t.mock.method(parser, 'configure');
+  const python = Buffer.from('class Synthetic:\n    import os\n    def run(self):\n        return 1\n');
+  assert.equal(sketchCodePath('pkg/mod.py'), false);
+  assert.equal(sketchCodePath('web/app.tsx'), true);
+  const plain = overlapTextSketch(python, sketchCodePath('pkg/mod.py'));
+  assert.equal(parse.mock.callCount(), 0, 'the JS parser is not invoked for .py');
+  assert.equal(plain.lines.length, 4);
+  assert.deepEqual(Object.keys(plain.symbols), []);
+  assert.equal(plain.exports, undefined, 'no cross-file facts for another language');
+  // The evidence a non-code path produces is unchanged: line ranges from the hashes.
+  const edited = overlapTextSketch(Buffer.from(python.toString().replace('return 1', 'return 2')), false);
+  assert.deepEqual(overlapTextEvidence(digest('b'), plain, edited, false).ranges, [{ start: 3, end: 4 }]);
+  assert.equal(parse.mock.callCount(), 0);
+  // TS/JS still parses and keeps its symbols.
+  const ts = overlapTextSketch(Buffer.from('export function run() { return 1; }\n'), true);
+  assert.equal(parse.mock.callCount(), 1);
+  assert.deepEqual(Object.keys(ts.symbols), ['run']);
+  // Lazy derivation of a baseline honours the same gate.
+  const cache = mkdtempSync(join(tmpdir(), 'forge-overlap-plain-'));
+  t.after(() => rmSync(cache, { recursive: true, force: true }));
+  mkdirSync(join(cache, 'objects'));
+  writeFileSync(join(cache, 'objects', digest(python)), python);
+  assert.deepEqual(Object.keys(readOverlapText(cache, digest(python), false, false).symbols), []);
+  assert.equal(parse.mock.callCount(), 1, 'the base of a .py path is not parsed either');
 });
