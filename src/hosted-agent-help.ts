@@ -17,6 +17,7 @@ export const hostedAgentHelpEntries = [
   if (action === 'start') {
     json.properties.path = { type: 'string', minLength: 1 };
     json.properties.open = { type: 'boolean' };
+    json.properties.installScripts = { type: 'boolean' };
   }
   if (!['status', 'observe', 'friction-list', ...Object.keys(hostedClientReadSchemas)].includes(action))
     json.properties.operationId = { type: 'string', format: 'uuid' };

@@ -1,25 +1,42 @@
 // SPDX-License-Identifier: Apache-2.0
 import { globRegExp } from './path-glob.js';
 import { safeRelative } from './safe-relative.js';
+import type { PackageGraph } from './package-graph.js';
 
 /** How a project runs its test files: which paths are tests (`globs`) and the argv that runs some of
  * them (`command`; an element `{files}` expands to the files, else they are appended). Preflight, the
  * `tests` read, Intent contract tests and semantic union tests all use it, for every project.
  *
  * Resolution, first match wins, and never runs repository code:
- * 1. declared: package.json `forge.preflight.tests` `{ glob: string | string[], command: string[] }`;
+ * 1. declared: `preflight.tests` `{ glob: string | string[], command: string[] }` in a root
+ *    `forge.json` (any language) or under `forge` in package.json (declaring it in both is an error);
  * 2. inferred from the package.json `test` script: `node --test [globs]`, `vitest`, `jest`;
  * 3. no `test` script: a `vitest` or `jest` dependency, else files that match Node's own test
- *    file patterns (the only runner that needs no dependency).
+ *    file patterns (the only runner that needs no dependency; with no package.json, only when the
+ *    package graph of rule 4 cannot place the repository);
+ * 4. when the caller supplies the manifest package graph (src/package-graph.ts): each ecosystem's own
+ *    command per affected package (`go test`, `cargo test -p`, pytest, Gradle, Maven, `dotnet test`,
+ *    the workspace package manager), when that command is unambiguous.
  * An unrecognized `test` script (a task runner, make, another language) is not guessed: tests are
  * `unavailable` with a reason, never Forge's layout. `layout: 'forge-node'` (Node's runner over
- * `tests/*.test.mjs`) keeps the import-graph selector; any other runner selects by path. */
+ * `tests/*.test.mjs`) keeps the import-graph selector; `packages` runs package commands; any other
+ * runner selects by path. */
 export type TestRunner = {
-  source: 'declared' | 'test-script' | 'dependency' | 'files';
-  program: 'node' | 'vitest' | 'jest' | 'declared';
+  source: 'declared' | 'test-script' | 'dependency' | 'files' | 'package-graph';
+  program: 'node' | 'vitest' | 'jest' | 'declared' | 'packages';
   globs: string[];
   command: string[];
-  layout: 'forge-node' | 'generic';
+  layout: 'forge-node' | 'generic' | 'packages';
+  /** Where a declared runner was found. */
+  declaredIn?: 'forge.json' | 'package.json';
+  /** Ecosystems whose package commands run (`layout: 'packages'`). */
+  ecosystems?: string[];
+};
+export type RunnerOptions = {
+  /** Text of the root forge.json, when the head has one. */
+  forgeJson?: string | undefined;
+  /** The head's package graph, built only when rules 1-3 find no runner. */
+  packages?: (() => PackageGraph) | undefined;
 };
 export type TestRunnerResolution =
   | { status: 'available'; runner: TestRunner }
@@ -38,7 +55,8 @@ const NODE_GLOBS = [
 ];
 const VITEST_GLOBS = [`**/*.{test,spec}.${CODE}`];
 const JEST_GLOBS = [`**/__tests__/**/*.${CODE}`, `**/*.{test,spec}.${CODE}`];
-const DECLARE = 'declare forge.preflight.tests {"glob":[…],"command":[…,"{files}"]} in package.json';
+const DECLARE =
+  'declare preflight.tests {"glob":[…],"command":[…,"{files}"]} in a root forge.json (any language), or forge.preflight.tests in package.json';
 /** Flags of `node` whose value is the next word. */
 const NODE_VALUE_FLAGS = new Set([
   '--import',
@@ -157,11 +175,36 @@ function scriptRunner(script: string, prefix: () => string[]): Omit<TestRunner, 
   return null;
 }
 
-/** The project's test runner from its package.json text and its file paths (read only for rule 3).
- * A malformed declaration throws: a typo must not silently fall back to a guess. */
+const declaredTests = (forge: unknown) =>
+  record(forge) && record(forge.preflight) ? forge.preflight.tests : undefined;
+
+/** Rule 4: the package graph's per-ecosystem commands, or why there is none. */
+function graphRunner(options: RunnerOptions, reason: string): TestRunnerResolution {
+  const graph = options.packages?.();
+  if (graph?.status === 'available')
+    return {
+      status: 'available',
+      runner: {
+        source: 'package-graph',
+        program: 'packages',
+        globs: [],
+        command: [],
+        layout: 'packages',
+        ecosystems: graph.ecosystems.map(item => item.ecosystem),
+      },
+    };
+  return {
+    status: 'unavailable',
+    reason: graph ? `${reason}; package graph unknown: ${graph.reason}` : reason,
+  };
+}
+
+/** The project's test runner from its package.json and forge.json texts and its file paths (read
+ * only for rule 3). A malformed declaration throws: a typo must not silently fall back to a guess. */
 export function projectTestRunner(
   packageJson: string | undefined,
   paths: () => Iterable<string>,
+  options: RunnerOptions = {},
 ): TestRunnerResolution {
   let manifest: Record<string, unknown> = {};
   try {
@@ -170,20 +213,38 @@ export function projectTestRunner(
   } catch {
     /* No manifest: only the file rule can apply. */
   }
-  const forge = record(manifest.forge) ? manifest.forge : {};
-  const declared = record(forge.preflight) ? forge.preflight.tests : undefined;
+  let neutral: unknown;
+  if (options.forgeJson !== undefined)
+    try {
+      neutral = JSON.parse(options.forgeJson);
+    } catch {
+      throw new Error('forge.json is not JSON');
+    }
+  const fromPackage = declaredTests(manifest.forge);
+  const fromForge = declaredTests(neutral);
+  if (fromPackage !== undefined && fromForge !== undefined)
+    throw new Error('preflight.tests is declared in both forge.json and package.json; keep one');
+  const declared = fromForge ?? fromPackage;
   if (declared !== undefined) {
+    const where = fromForge !== undefined ? ('forge.json' as const) : ('package.json' as const);
     const entry = record(declared) ? declared : {};
     const globs = typeof entry.glob === 'string' && entry.glob ? [entry.glob] : strings(entry.glob);
     const command = strings(entry.command);
     if (!globs?.every(glob => safeRelative(glob)) || !command)
       throw new Error(
-        `forge.preflight.tests needs {"glob": string | string[], "command": string[]}: ${JSON.stringify(declared).slice(0, 120)}`,
+        `${where === 'forge.json' ? 'forge.json preflight.tests' : 'forge.preflight.tests'} needs {"glob": string | string[], "command": string[]}: ${JSON.stringify(declared).slice(0, 120)}`,
       );
     const program = command[0] === 'node' && command.includes('--test') ? 'node' : 'declared';
     return {
       status: 'available',
-      runner: { source: 'declared', program, globs, command, layout: layout(program, globs) },
+      runner: {
+        source: 'declared',
+        program,
+        globs,
+        command,
+        layout: layout(program, globs),
+        declaredIn: where,
+      },
     };
   }
   const scripts = record(manifest.scripts) ? manifest.scripts : {};
@@ -200,10 +261,10 @@ export function projectTestRunner(
           status: 'available',
           runner: { ...found, source: 'test-script', layout: layout(found.program, found.globs) },
         }
-      : {
-          status: 'unavailable',
-          reason: `no test runner declared, and the package.json test script names none Forge can run per file (node --test, vitest, jest); ${DECLARE}`,
-        };
+      : graphRunner(
+          options,
+          `no test runner declared, and the package.json test script names none Forge can run per file (node --test, vitest, jest); ${DECLARE}`,
+        );
   }
   const dependencies = {
     ...(record(manifest.dependencies) ? manifest.dependencies : {}),
@@ -217,6 +278,12 @@ export function projectTestRunner(
     return { status: 'available', runner: { ...found, source: 'dependency', layout: 'generic' } };
   }
   const node = [...files].filter(matcher(NODE_GLOBS));
+  // With no package.json, stray `.js` files under a `test/` folder do not make a Go, Rust or Python
+  // repository a Node project: its manifest package graph runs it when that graph reads.
+  if (node.length && packageJson === undefined && options.packages) {
+    const packages = graphRunner(options, '');
+    if (packages.status === 'available') return packages;
+  }
   if (node.length) {
     // Top-level `tests/*.test.mjs` files keep the import-graph selector that reads that layout.
     const globs = node.some(matcher([FORGE_TEST_GLOB])) ? [FORGE_TEST_GLOB] : NODE_GLOBS;
@@ -231,19 +298,20 @@ export function projectTestRunner(
       },
     };
   }
-  return {
-    status: 'unavailable',
-    reason: `no test runner declared or inferred (no package.json test script, test framework dependency or Node test file); ${DECLARE}`,
-  };
+  return graphRunner(
+    options,
+    `no test runner declared or inferred (no package.json test script, test framework dependency or Node test file); ${DECLARE}`,
+  );
 }
 
 /** `projectTestRunner` that reports a malformed declaration as unavailable instead of throwing. */
 export function resolveTestRunner(
   packageJson: string | undefined,
   paths: () => Iterable<string>,
+  options: RunnerOptions = {},
 ): TestRunnerResolution {
   try {
-    return projectTestRunner(packageJson, paths);
+    return projectTestRunner(packageJson, paths, options);
   } catch (error) {
     return { status: 'unavailable', reason: (error as Error).message.slice(0, 300) };
   }
@@ -293,4 +361,7 @@ export function runnerSelection(runner: TestRunner, allPaths: Iterable<string>, 
 }
 
 /** `vitest (test-script)`: the program and where Forge found it. */
-export const runnerLabel = (runner: TestRunner) => `${runner.program} (${runner.source})`;
+export const runnerLabel = (runner: TestRunner) =>
+  runner.layout === 'packages'
+    ? `package commands (${runner.ecosystems?.join(', ')})`
+    : `${runner.program} (${runner.declaredIn ? `declared in ${runner.declaredIn}` : runner.source})`;

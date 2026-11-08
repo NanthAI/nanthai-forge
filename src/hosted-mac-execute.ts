@@ -137,7 +137,10 @@ export async function executeHostedMacCheck(
     const packageFile = unionTests.length
       ? state.files.find(file => file.path === 'package.json')
       : undefined;
-    if (packageFile) await cache.ensure([packageFile.blob]);
+    // forge.json may declare the runner for any language.
+    const forgeFile = unionTests.length ? state.files.find(file => file.path === 'forge.json') : undefined;
+    const runnerFiles = [packageFile, forgeFile].flatMap(file => (file ? [file.blob] : []));
+    if (runnerFiles.length) await cache.ensure(runnerFiles);
     const command = semanticCheckCommand(
       [run.check.executable, ...run.check.args],
       run.semanticPlan,
@@ -149,6 +152,11 @@ export async function executeHostedMacCheck(
               ? (await readFile(join(cache.objects, packageFile.blob))).toString('utf8')
               : undefined,
             () => state.files.map(file => file.path),
+            {
+              forgeJson: forgeFile
+                ? (await readFile(join(cache.objects, forgeFile.blob))).toString('utf8')
+                : undefined,
+            },
           )
         : undefined,
     );

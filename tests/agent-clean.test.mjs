@@ -11,10 +11,10 @@ import { AgentWorkflow } from '../dist/agent-workflow.js';
 import { initNative } from '../dist/native-work.js';
 import { recordLane } from '../dist/lane-registry.js';
 
-async function setup(script = "console.log('ok')") {
+async function setup(script = "console.log('ok')", ignore = 'node_modules/\n') {
   const root = scratchDir('forge-test-agent-clean-');
   writeFileSync(join(root, 'file.txt'), 'original\n');
-  writeFileSync(join(root, '.gitignore'), 'node_modules/\n');
+  writeFileSync(join(root, '.gitignore'), ignore);
   initNative(root);
   trustAgents(root);
   const agent = new AgentWorkflow(root);
@@ -27,11 +27,14 @@ async function setup(script = "console.log('ok')") {
   return { root, agent };
 }
 const run = (agent, action, body = {}) => agent.dispatch({ action, ...body });
-async function finishedLane(agent, file = 'a.txt') {
+async function finishedLane(agent, file = 'a.txt', output = ['node_modules'], extra = {}) {
   const lane = (await run(agent, 'start', { outcome: `Edit ${file}` })).result;
   writeFileSync(join(lane.path, file), 'a\n');
-  mkdirSync(join(lane.path, 'node_modules'));
-  writeFileSync(join(lane.path, 'node_modules', 'dep.js'), 'x'.repeat(1000));
+  for (const [name, content] of Object.entries(extra)) writeFileSync(join(lane.path, name), content);
+  for (const dir of output) {
+    mkdirSync(join(lane.path, dir), { recursive: true });
+    writeFileSync(join(lane.path, dir, 'dep.js'), 'x'.repeat(1000));
+  }
   const done = (await run(agent, 'finish', { laneId: lane.laneId, message: 'Edit', accept: true })).result;
   assert.equal(done.status, 'accepted');
   return lane;
@@ -176,4 +179,63 @@ test('a pinned Lane is skipped by native clean, never removed, and cleaned once 
   recordLane({ laneId: lane.laneId, pinned: false });
   assert.equal(group(await clean(agent, { apply: true, kinds: ['lanes'] }), 'lanes', 'removed').count, 1);
   assert.ok(!existsSync(lane.path));
+});
+
+const depPaths = (result, lane) =>
+  (group(result, 'lane-deps')?.items ?? [])
+    .filter(item => item.laneId === lane.laneId)
+    .map(item => item.path);
+
+test('gitignored ecosystem build folders are reclaimed; folders that are not ignored are kept', async () => {
+  const ignored =
+    'node_modules/\ntarget/\n.venv/\nvenv/\n__pycache__/\n.gradle/\n.pytest_cache/\n.mypy_cache/\nbin/\nobj/\n';
+  const { agent } = await setup("console.log('ok')", ignored);
+  // Rust target/, Python caches (nested and root), Gradle: all gitignored, none a .NET project.
+  const lane = await finishedLane(agent, 'a.txt', [
+    'target',
+    '.venv',
+    'venv',
+    'pkg/__pycache__',
+    '.gradle',
+    '.pytest_cache',
+    '.mypy_cache',
+    'bin',
+  ]);
+  const found = depPaths(await clean(agent, { kinds: ['lane-deps'] }), lane).map(path =>
+    path.slice(lane.path.length + 1),
+  );
+  assert.deepEqual(found.sort(), [
+    '.gradle',
+    '.mypy_cache',
+    '.pytest_cache',
+    '.venv',
+    'pkg/__pycache__',
+    'target',
+    'venv',
+  ]);
+  assert.ok(!found.includes('bin'), 'bin without a project file beside it is not .NET output');
+  await clean(agent, { apply: true, kinds: ['lane-deps'] });
+  assert.ok(!existsSync(join(lane.path, 'target')));
+  assert.ok(existsSync(join(lane.path, 'bin')), 'an unrecognized ignored folder stays');
+  assert.ok(existsSync(join(lane.path, 'file.txt')));
+});
+
+test('bin and obj are reclaimed only beside a .NET project file and only when ignored', async () => {
+  const { agent } = await setup("console.log('ok')", 'bin/\nobj/\n');
+  const lane = await finishedLane(agent, 'a.txt', ['bin', 'obj', 'Other/bin'], {
+    'App.csproj': '<Project />\n',
+  });
+  const found = depPaths(await clean(agent, { kinds: ['lane-deps'] }), lane).map(path =>
+    path.slice(lane.path.length + 1),
+  );
+  assert.deepEqual(found.sort(), ['bin', 'obj'], 'Other/bin has no project file beside it');
+});
+
+test('a folder named target or bin that is not ignored is never reclaimed', async () => {
+  const { agent } = await setup("console.log('ok')", 'node_modules/\n');
+  const lane = await finishedLane(agent, 'a.txt', ['target', 'bin'], { 'App.csproj': '<Project />\n' });
+  assert.deepEqual(depPaths(await clean(agent, { kinds: ['lane-deps'] }), lane), []);
+  await clean(agent, { apply: true, kinds: ['lane-deps'] });
+  assert.ok(existsSync(join(lane.path, 'target', 'dep.js')));
+  assert.ok(existsSync(join(lane.path, 'bin', 'dep.js')));
 });

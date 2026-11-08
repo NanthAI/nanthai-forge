@@ -56,6 +56,13 @@ import {
   type TestRunnerResolution,
 } from './project-test-runner.js';
 import {
+  packageGraphFor,
+  packageGraphKey,
+  type PackageGraph,
+  type SelectedPackage,
+} from './package-graph.js';
+import { packageRunnerTests, packageTestSelection } from './package-test-selection.js';
+import {
   filesystemEventHealth,
   filesystemEnvironment,
   filesystemEnvironmentSchema,
@@ -201,6 +208,10 @@ export type PreflightPlan =
       runner?: { label: string; command: string[] };
       /** No test runner is declared or inferred: only static checks run, and this says why. */
       testsUnavailable?: string;
+      /** Package-graph runner: each queued unit's command (cwd relative to the Lane root). */
+      packageCommands?: Record<string, { cwd: string; argv: string[] }>;
+      /** The packages the change affects (package-graph runner). */
+      packages?: SelectedPackage[];
     };
 
 const preparedEvidence = new WeakMap<PreflightPlan, PreflightEvidence>();
@@ -401,6 +412,7 @@ function runnerPlan(
     trim?: boolean | undefined;
     only?: string[] | undefined;
   } = {},
+  graph?: () => PackageGraph,
 ): PreflightPlan {
   const checks = planStatic(packageJson, paths);
   if ('reason' in checks) return { status: 'unavailable', reason: checks.reason };
@@ -434,13 +446,21 @@ function runnerPlan(
     return plan;
   }
   const runner: TestRunner = resolved.runner;
-  const selection = runnerSelection(runner, allPaths, paths);
   const only = options.only ? new Set(options.only) : null;
   const keep = (tests: string[]) => (only ? tests.filter(test => only.has(test)) : tests);
+  if (runner.layout === 'packages') return packagePlan(root, runner, paths, graph!(), statics, keep);
+  const selection = runnerSelection(runner, allPaths, paths);
+  // Test files inside the packages the change affects, when the manifests place it.
+  const inPackages = graph
+    ? packageRunnerTests(runner, graph(), allPaths, paths)
+    : { tests: [], reason: null };
+  const named = new Set([...selection.changedTests, ...selection.namedTests]);
   const tiers = [
     { tier: 'mandatory', tests: keep(selection.changedTests) },
     { tier: 'direct', tests: keep(selection.namedTests) },
+    { tier: 'package', tests: keep(inPackages.tests.filter(test => !named.has(test))) },
   ].filter(item => item.tests.length);
+  if (inPackages.reason) selection.reason = `${selection.reason}; ${inPackages.reason}`;
   const tests = tiers.flatMap(item => item.tests);
   const timing = preflightSecondsPerFile(root);
   const stats = preflightFileStats(root);
@@ -449,7 +469,7 @@ function runnerPlan(
   const trim = options.trim !== false;
   const seconds = tests.reduce((sum, test) => sum + secondsFor(test), 0);
   const label = runnerLabel(runner);
-  const rule = `${label}: changed test files, then tests named for a changed module (closest folder first)`;
+  const rule = `${label}: changed test files, then tests named for a changed module (closest folder first), then tests in affected packages`;
   const local: LocalSelection = {
     rule,
     budgetSeconds,
@@ -490,6 +510,43 @@ function runnerPlan(
           .map(arg => (/^[\w./=-]+$/.test(arg) ? arg : shellQuote(arg)))
           .join(' ')
       : null,
+  };
+  plannedPaths.set(plan, paths);
+  return plan;
+}
+
+/** A package-graph runner's plan: one queued unit per ecosystem command (src/package-graph.ts). */
+function packagePlan(
+  root: string,
+  runner: TestRunner,
+  paths: string[],
+  graph: PackageGraph,
+  statics: Partial<Pick<PreflightPlan & { status: 'planned' }, 'static'>>,
+  keep: (tests: string[]) => string[],
+): PreflightPlan {
+  const selection = packageTestSelection(graph, paths);
+  const units = keep(selection.units);
+  const commands = Object.fromEntries(
+    selection.commands.map(command => [
+      selection.units[selection.commands.indexOf(command)]!,
+      { cwd: command.cwd, argv: command.argv },
+    ]),
+  );
+  const timing = preflightSecondsPerFile(root);
+  const label = runnerLabel(runner);
+  const plan: PreflightPlan = {
+    status: 'planned',
+    scope: selection.scope,
+    reason: selection.reason,
+    tests: units,
+    deferredTests: [],
+    ...statics,
+    reusedTests: [],
+    estimateMinutes: Math.ceil((units.length * timing.secondsPerFile) / 60),
+    runner: { label, command: [] },
+    packageCommands: commands,
+    packages: selection.packages,
+    command: selection.command,
   };
   plannedPaths.set(plan, paths);
   return plan;
@@ -548,14 +605,31 @@ export function preflightPlan(
     // Forge's Node layout (tests/*.test.mjs) keeps the import-graph selector below; any other runner
     // selects by path, and a project with no runner gets static checks only, never Forge's layout.
     const allPaths = () => (context ? context.files.map(file => file.path) : lanePaths(root));
+    // The manifest package graph, built at most once per plan and cached per head (src/package-graph.ts).
+    let built: PackageGraph | undefined;
+    const graph = () =>
+      (built ??= packageGraphFor(context && packageGraphKey(context.files), allPaths(), path =>
+        laneText(root, path),
+      ));
     let resolved: TestRunnerResolution;
     try {
-      resolved = projectTestRunner(files.get('package.json'), allPaths);
+      resolved = projectTestRunner(files.get('package.json'), allPaths, {
+        forgeJson: laneText(root, 'forge.json'),
+        packages: graph,
+      });
     } catch (error) {
       return { status: 'unavailable', reason: (error as Error).message.slice(0, 300) };
     }
     if (resolved.status === 'unavailable' || resolved.runner.layout !== 'forge-node') {
-      const plan = runnerPlan(root, resolved, changed.paths, allPaths(), files.get('package.json'), options);
+      const plan = runnerPlan(
+        root,
+        resolved,
+        changed.paths,
+        allPaths(),
+        files.get('package.json'),
+        options,
+        graph,
+      );
       if (plan.status === 'planned' && changed.source === 'manifests') plan.changedPathsFrom = 'manifests';
       return plan;
     }
@@ -992,6 +1066,31 @@ export function runPreflight(
       const runGroup = (group: string[]) => {
         const report = join(directory, `passed-${index++}.json`);
         const groupStarted = Date.now();
+        if (plan.packageCommands) {
+          // Package commands: one process per unit, in its package folder; a pass covers that unit.
+          for (const [at, unit] of group.entries()) {
+            const command = plan.packageCommands[unit]!;
+            const started = Date.now();
+            const run = spawnMeasured(command.argv[0]!, command.argv.slice(1), {
+              cwd: join(root, command.cwd),
+              env,
+              stdio: ['ignore', 2, 2],
+            });
+            ran++;
+            fileMs[unit] = Date.now() - started;
+            if (run.peakRssMb !== null) peakRssMb = Math.max(peakRssMb ?? 0, run.peakRssMb);
+            if (run.status === 0) passedTests.push(unit);
+            else {
+              failedFiles.push(unit);
+              if (exitCode === 0) exitCode = run.status ?? 1;
+              // A missing program (go, cargo, dotnet…) exits with no status: say which one.
+              if (run.status === null) process.stderr.write(`preflight: could not run ${command.argv[0]}\n`);
+              stopped.push(...group.slice(at + 1));
+              break;
+            }
+          }
+          return Date.now() - groupStarted;
+        }
         // A project runner reports one exit status per group: a pass covers every file in it, a
         // failure is pinned to a file only when the group held one.
         const argv = plan.runner

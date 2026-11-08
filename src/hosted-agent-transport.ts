@@ -52,7 +52,7 @@ import { isPlanningPrefix } from './planning-id.js';
 import { executeHostedMetrics, METRICS_DEADLINE_MS, metricsDeadline } from './hosted-agent-metrics.js';
 import { laneLiveness, readLaneEntry, recordLane, withLaneCommand } from './lane-registry.js';
 import { convexLaneStates, laneHousekeeping, markerIdentity } from './lane-prune.js';
-import { shareDependencies } from './shared-dependencies.js';
+import { shareDependencies, skippedScriptsNotice } from './shared-dependencies.js';
 import { readClientSettings } from './client-settings.js';
 import {
   knownCapabilities,
@@ -558,15 +558,20 @@ export class HostedAgentTransport {
       const observation = action === 'status' || action === 'observe';
       const { operationId, ...parameters } = input;
       // Client-only start placement: where to open the Lane, or open:false for pins only.
-      const placement = action === 'start' ? { path: parameters.path, open: parameters.open } : {};
+      const placement =
+        action === 'start'
+          ? { path: parameters.path, open: parameters.open, installScripts: parameters.installScripts }
+          : {};
       if (action === 'start') {
         delete parameters.path;
         delete parameters.open;
+        delete parameters.installScripts;
         invariant(
           (placement.path === undefined || (typeof placement.path === 'string' && placement.path !== '')) &&
-            (placement.open === undefined || typeof placement.open === 'boolean'),
+            (placement.open === undefined || typeof placement.open === 'boolean') &&
+            (placement.installScripts === undefined || typeof placement.installScripts === 'boolean'),
           'BAD_ARGUMENT',
-          'start path is a directory and open is true or false.',
+          'start path is a directory, open is true or false, and installScripts is true or false.',
         );
       }
       const command = hostedAgentCommandSchemas[action].safeParse(observation ? input : parameters);
@@ -979,6 +984,11 @@ export class HostedAgentTransport {
           : undefined;
         if (action === 'finish') result = await recoverHostedFinish(session, result);
         if (action === 'start') {
+          // The replay command keeps the client-only opt-in to run dependency install scripts.
+          const startData =
+            placement.installScripts === true
+              ? { ...(command.data as object), installScripts: true }
+              : command.data;
           const started = parseHostedResponse(hostedStartResultSchema, result);
           const into =
             placement.open === false || !started.lane
@@ -1007,14 +1017,14 @@ export class HostedAgentTransport {
           }
           if (into) {
             invariant(started.lane, 'SOURCE_UNAVAILABLE', 'Hosted start has no Lane source.');
-            result = await this.completeStart(root, started, into, command.data, journal);
+            result = await this.completeStart(root, started, into, startData, journal);
           } else if (started.lane && placement.open !== false)
             // Pins only because ROOT has no default placement: say how to materialize this same Lane.
             result = {
               ...started,
               continuation: startContinuation(
                 this.root,
-                command.data,
+                startData,
                 journal.operationId,
                 laneSiblingPath(root, started.lane.laneId),
                 'no-placement',
@@ -1181,7 +1191,13 @@ export class HostedAgentTransport {
       };
     }
     recordLane({ laneId, root: opened.value.root });
-    const shared = await boundedStep(this.shareDependencies(opened.value.root), left());
+    const shared = await boundedStep(
+      this.shareDependencies(
+        opened.value.root,
+        (data as { installScripts?: boolean } | null)?.installScripts === true,
+      ),
+      left(),
+    );
     return {
       ...started,
       path: opened.value.root,
@@ -1192,9 +1208,12 @@ export class HostedAgentTransport {
     };
   }
   /** Never fails the action: dependencies are a convenience the agent can still install itself. */
-  private async shareDependencies(path: string) {
+  private async shareDependencies(path: string, runScripts = false) {
     try {
-      return await shareDependencies(path);
+      const shared = await shareDependencies(path, { runScripts });
+      const notice = skippedScriptsNotice(shared);
+      if (notice) process.stderr.write(`${notice}\n`);
+      return shared;
     } catch (error) {
       return {
         status: 'failed',

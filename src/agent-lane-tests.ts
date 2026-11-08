@@ -9,7 +9,12 @@ import { checkEnvironment } from './check-environment.js';
 import { invariant } from './errors.js';
 import { digest } from './hash.js';
 import { candidateTimings } from './agent-contract-timings.js';
-import { contractRunner, intentContractSelection } from './intent-contract-selection.js';
+import {
+  contractManifestPaths,
+  contractRunner,
+  intentContractSelection,
+} from './intent-contract-selection.js';
+import { packageGraphKey } from './package-graph.js';
 import {
   contractProposal,
   confirmTestContract,
@@ -129,19 +134,28 @@ async function readLaneTests(store: WorkStore, command: Command) {
   const { advisorySelection, selectionSourcePath } = await import('../scripts/test-impact.mjs');
   const files = new Map<string, string>();
   const allPaths: string[] = [];
+  const blobs = new Map<string, string>();
+  let readText: (blob: string) => string;
   if (store.native) {
     const source = new NativeSource(store.root);
+    readText = blob => source.object(blob).toString('utf8');
     for (const file of source.state(head).files) {
       allPaths.push(file.path);
+      blobs.set(file.path, file.blob);
       if (selectionSourcePath(file.path)) files.set(file.path, source.object(file.blob).toString('utf8'));
     }
   } else {
+    readText = blob =>
+      workGit(store.root, ['cat-file', 'blob', blob], undefined, false, true).toString('utf8');
     const tree = workGit(store.root, ['ls-tree', '-r', '-z', head]);
     for (const row of tree.split('\0').filter(Boolean)) {
       const split = row.indexOf('\t'),
         [, kind, blob] = row.slice(0, split).split(' '),
         path = row.slice(split + 1);
-      if (kind === 'blob') allPaths.push(path);
+      if (kind === 'blob') {
+        allPaths.push(path);
+        blobs.set(path, blob!);
+      }
       if (kind === 'blob' && selectionSourcePath(path))
         files.set(
           path,
@@ -150,15 +164,21 @@ async function readLaneTests(store: WorkStore, command: Command) {
     }
   }
   const paths = checkChangedPaths(store, main, head);
-  // Forge's Node layout keeps the import-graph selector; any other runner selects by path, and a
-  // project with no runner gets `unavailable` and its reason, never Forge's layout.
-  const resolved = contractRunner(files, allPaths);
+  // forge.json may declare the runner; package manifests feed the package graph (none for Forge's
+  // own Node layout, none again once this head's graph is cached).
+  if (blobs.has('forge.json')) files.set('forge.json', readText(blobs.get('forge.json')!));
+  const graphKey = packageGraphKey([...blobs].map(([path, blob]) => ({ path, blob })));
+  for (const path of contractManifestPaths(files, allPaths, graphKey))
+    files.set(path, readText(blobs.get(path)!));
+  // Forge's Node layout keeps the import-graph selector; any other runner selects by path or by
+  // package, and a project with no runner gets `unavailable` and its reason, never Forge's layout.
+  const resolved = contractRunner(files, allPaths, graphKey);
   const generic =
     resolved.status === 'unavailable'
       ? null
       : resolved.runner.layout === 'forge-node'
         ? undefined
-        : intentContractSelection(files, paths, allPaths);
+        : intentContractSelection(files, paths, allPaths, graphKey);
   const forge =
     resolved.status === 'available' && !generic
       ? advisorySelection({
@@ -194,6 +214,7 @@ async function readLaneTests(store: WorkStore, command: Command) {
       tests,
       coverage,
       available,
+      ...(generic && 'packages' in generic ? { packages: generic.packages, commands: generic.commands } : {}),
       command: generic
         ? (generic.command ?? null)
         : forge && tests.length

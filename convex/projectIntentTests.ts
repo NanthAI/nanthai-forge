@@ -13,7 +13,12 @@ import {
   confirmTestContract,
   latestTestContract,
 } from '../src/intent-test-contract';
-import { intentContractSelection, selectionSourcePath } from '../src/intent-contract-selection';
+import {
+  contractManifestPaths,
+  intentContractSelection,
+  selectionSourcePath,
+} from '../src/intent-contract-selection';
+import { packageGraphKey } from '../src/package-graph';
 import { hostedContractTimings } from '../src/hosted-contract-timings';
 import { hostedRecordSchema } from '../src/hosted-records';
 import { canonicalPayload } from '../src/hosted-source-operation';
@@ -89,18 +94,23 @@ export async function executeIntentTests(
   const paths = [...new Set([...old.keys(), ...next.keys()])].filter(
     path => old.get(path)?.blob !== next.get(path)?.blob || old.get(path)?.mode !== next.get(path)?.mode,
   );
-  const selected = after.files.filter(file => selectionSourcePath(file.path)),
+  const selected = after.files.filter(file => selectionSourcePath(file.path) || file.path === 'forge.json'),
     files = new Map<string, string>();
-  for (let at = 0; at < selected.length; at += 100) {
-    const batch = selected.slice(at, at + 100),
-      bytes = await read(batch.map(file => file.blob));
-    batch.forEach((file, index) => files.set(file.path, bytes[index]!.toString('utf8')));
-  }
-  const selection = intentContractSelection(
-    files,
-    paths,
-    after.files.map(file => file.path),
-  );
+  const readFiles = async (list: typeof selected) => {
+    for (let at = 0; at < list.length; at += 100) {
+      const batch = list.slice(at, at + 100),
+        bytes = await read(batch.map(file => file.blob));
+      batch.forEach((file, index) => files.set(file.path, bytes[index]!.toString('utf8')));
+    }
+  };
+  await readFiles(selected);
+  // Package manifests for the package graph: none for Forge's own Node layout or a cached head;
+  // otherwise one batched read per 100 manifests (src/package-graph.ts bounds the count).
+  const allPaths = after.files.map(file => file.path),
+    graphKey = packageGraphKey(after.files),
+    manifests = new Set(contractManifestPaths(files, allPaths, graphKey));
+  if (manifests.size) await readFiles(after.files.filter(file => manifests.has(file.path)));
+  const selection = intentContractSelection(files, paths, allPaths, graphKey);
   const historical =
     command.timingBasis === 'history'
       ? z

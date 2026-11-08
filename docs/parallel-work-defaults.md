@@ -103,8 +103,24 @@ Read: `nforge settings`; set: `nforge settings KEY VALUE`; reset:
 
 - The install key is a hash of `package-lock.json`, `package.json`, the platform and the Node major
   version. A Lane with a different lockfile never shares another Lane's install.
-- The first Lane with a new lockfile runs `npm ci` once, in the shared cache, under a heavy slot.
-  Concurrent opens of the same lockfile wait for that one install.
+- The first Lane with a new lockfile runs `npm ci --ignore-scripts` once, in the shared cache, under a
+  heavy slot (the same as the Actions executor). Concurrent opens of the same lockfile wait for that
+  one install.
+- A build-script allowlist the repository declares is followed instead of blocking everything: pnpm
+  `onlyBuiltDependencies` or `allowBuilds` (`pnpm-workspace.yaml`, or `pnpm.*` in `package.json`), bun
+  `trustedDependencies`, and yarn `dependenciesMeta.<name>.built` run only those packages' scripts
+  (`npm rebuild NAME…` after the script-less install). Yarn `enableScripts: true` in `.yarnrc.yml` runs
+  them all. The allowlist is part of the install key. `--ignore-scripts` for everything applies only
+  when nothing is declared.
+- Other dependency install scripts do not run. When a skipped package (or the root `preinstall`, `install`,
+  `postinstall` or `prepare`) declared one, `start` prints one line on stderr naming the command:
+  `npm rebuild` in the Lane. To run them at install instead, add `"installScripts":true` to `start`
+  (`nforge agent ROOT start '{"planningItemId":"ID","installScripts":true}'`); that install is cached
+  apart from the script-less one. Nothing is printed when no skipped package declared a script.
+- npm workspaces: the lockfile's workspace folders are copied to the install stage with their
+  `package.json`, and their manifests are part of the key. If the lockfile names a workspace that has
+  no `package.json` or lies outside the repository, `dependencies.status` is `none` with a `reason`,
+  and the Lane opens without `node_modules`.
 - A failed install leaves no partial cache, and the Lane opens without `node_modules`.
 - An existing `node_modules` is never replaced.
 - The cache is `$XDG_CACHE_HOME/forge/deps` (default `~/.cache/forge/deps`) and is safe to delete.
@@ -167,20 +183,46 @@ frozen set on 2026-11-06 broke capabilities across CLI/server versions with `HOS
   never guessed, because it may be a full verification. A check over its 120 s timeout is reported
   `timed-out`, not passed: the landing check still runs it.
 - **Test runner, per project.** Preflight, the `tests` read, Intent contract tests and semantic
-  union tests use the project's own runner. Declare it in `package.json` as
-  `forge.preflight.tests`: `{glob: string | [glob, ...], command: [program, ...args]}`, where an
-  argument `{files}` becomes the selected files (otherwise they are appended), for example
-  `{"glob":"**/*.test.ts","command":["pnpm","exec","vitest","run","{files}"]}`. Without a
-  declaration Forge infers it, running no repository code: from the `test` script (`node --test
-  [paths]`, `vitest`, `jest`, launched through the package manager its `packageManager` field or
-  lockfile names), else a `vitest` or `jest` dependency, else files matching Node's own test
-  patterns. Anything else (a task runner, `make`, another language) is not guessed: preflight runs
-  the static checks alone and says `tests unavailable` with the reason (`unavailable` when no
-  static check applies), and the `tests` read returns scope `unavailable`. Node's runner over
-  top-level `tests/*.test.mjs` keeps the import-graph tiers below. Any other runner selects by path:
-  changed test files, then the tests named for a changed module (`sum.test.ts` for `sum.ts`,
-  closest folder first); the landing check runs the rest. Contract tests may live at any test path
-  (`*.test.*`, `*.spec.*`, `__tests__/`).
+  union tests use the project's own runner. Declare it as `preflight.tests`:
+  `{glob: string | [glob, ...], command: [program, ...args]}`, where an argument `{files}` becomes
+  the selected files (otherwise they are appended). Any project can declare it in a root
+  `forge.json`, for example `{"preflight":{"tests":{"glob":"**/test_*.py","command":["python","-m","pytest","{files}"]}}}`;
+  a JS project can instead put the same object under `forge` in `package.json`
+  (`forge.preflight.tests`, for example `{"glob":"**/*.test.ts","command":["pnpm","exec","vitest","run","{files}"]}`).
+  Declaring it in both is an error. Without a declaration Forge infers it, running no repository
+  code: from the `test` script (`node --test [paths]`, `vitest`, `jest`, launched through the
+  package manager its `packageManager` field or lockfile names), else a `vitest` or `jest`
+  dependency, else files matching Node's own test patterns, else the **package graph** below. When
+  nothing applies, preflight runs the static checks alone and says `tests unavailable` with the
+  reason (`unavailable` when no static check applies), and the `tests` read returns scope
+  `unavailable`. Node's runner over top-level `tests/*.test.mjs` keeps the import-graph tiers below.
+  Any other declared or inferred runner selects by path: changed test files, then the tests named
+  for a changed module (`sum.test.ts` for `sum.ts`, closest folder first), then its test files
+  inside the packages the change affects; the landing check runs the rest. Contract tests may live
+  at any test path (`*.test.*`, `*.spec.*`, `__tests__/`).
+- **Package graph, any ecosystem.** From manifests alone (never running repository code) Forge maps
+  each changed path to its owning package and selects it plus every package that depends on it:
+  Go modules (`go.mod`; a module requiring another depends on it; a change to `_test.go` files or
+  `testdata/` only runs that package folder), Rust crates (Cargo workspace `members`/`exclude`, `path`
+  and `[workspace.dependencies]` edges), Python packages (`pyproject.toml` `[project]`/Poetry or
+  `setup.cfg`, src layouts, requirement names and `[tool.uv.sources]` paths; `setup.py` is code and is
+  never read), Gradle projects (`settings.gradle(.kts)` `include`, `project(":x")` and `projects.x`
+  edges), Maven modules (`<modules>`, dependency and parent coordinates), .NET projects
+  (`<ProjectReference>`) and JS/TS workspaces (`workspaces` or `pnpm-workspace.yaml`). With no other
+  runner, each ecosystem's own command runs the selection when it is unambiguous: `go test ./...`
+  (or `go test ./pkg`) in the module, `cargo test -p NAME`, pytest through the lockfile's tool (uv,
+  Poetry, PDM) or `python -m pytest`, `./gradlew :mod:test`, `mvn -pl mods -am test`,
+  `dotnet test PROJECT` for test projects, `pnpm --filter ./DIR run test` /
+  `npm run test --workspace=DIR` / `yarn workspace NAME run test` for packages with a `test` script.
+  The selection is full, with the reason, when a changed path is outside every package (a root
+  file, a lockfile, CI config), the root package is affected, a manifest cannot be read, the layout
+  is computed (Gradle `projectDir`, a `setup.py`-only package), more than 2,000 manifests exist, or
+  no unambiguous command exists (Python without pytest declared, Bun workspaces). Repository docs
+  outside every package change nothing. A package found only by its manifest inside another
+  package's folder also selects the enclosing package. Edges between ecosystems (a JS package that
+  builds a Rust crate by path) are not seen. The graph is cached per head; the `tests` read reads
+  manifests in the same batched source reads (none for Forge's own Node layout or a cached head).
+  It is a selector, never an independence proof.
 - `nforge agent ROOT preflight '{"laneId":"…"}'` always runs changed tests, explicit coverage,
   smoke and the project's declared *guards* (`forge.preflight.guards` in `package.json`, filtered by
   path rules, protected like mandatory tests, cost in `local.guards`; see

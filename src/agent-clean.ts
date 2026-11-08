@@ -75,6 +75,20 @@ const BUILD_DIRS = new Set([
   'web-dist',
   'hosted-web-dist',
 ]);
+/** Other ecosystems' regenerable folders. Only ever reclaimed when ignored by .gitignore/.forgeignore:
+ * a folder that is not ignored is source or tracked and stays. */
+const ECOSYSTEM_DIRS = new Set([
+  'target',
+  '.venv',
+  'venv',
+  '__pycache__',
+  '.gradle',
+  '.pytest_cache',
+  '.mypy_cache',
+]);
+/** `bin`/`obj` are build output only beside a .NET project file. */
+const DOTNET_OUTPUT_DIRS = new Set(['bin', 'obj']);
+const DOTNET_PROJECT = /\.(cs|fs|vb)proj$/i;
 
 function stat(path: string) {
   try {
@@ -101,6 +115,19 @@ function bytesOf(path: string): number {
     else total += stat(child)?.size ?? 0;
   }
   return total;
+}
+/** True when an excluded entry is regenerable build output Lane cleanup may reclaim. */
+function regenerable(root: string, entry: { path: string; reason: string }) {
+  const name = basename(entry.path);
+  if (BUILD_DIRS.has(name)) return true;
+  if (entry.reason !== 'gitignored' && entry.reason !== 'forgeignored') return false;
+  if (ECOSYSTEM_DIRS.has(name)) return true;
+  if (!DOTNET_OUTPUT_DIRS.has(name)) return false;
+  try {
+    return readdirSync(dirname(join(root, entry.path))).some(sibling => DOTNET_PROJECT.test(sibling));
+  } catch {
+    return false;
+  }
 }
 const measured = (path: string) => {
   try {
@@ -241,7 +268,7 @@ function laneDirectories(
           excluded.some(
             entry =>
               entry.path !== '.forge' &&
-              (!BUILD_DIRS.has(basename(entry.path)) || !plainDirectory(join(path, entry.path))),
+              (!regenerable(path, entry) || !plainDirectory(join(path, entry.path))),
           )
         ) {
           skip(
@@ -293,7 +320,7 @@ function laneDirectories(
       );
       for (const entry of excluded) {
         const full = join(path, entry.path);
-        if (!BUILD_DIRS.has(basename(entry.path)) || !plainDirectory(full)) continue;
+        if (!regenerable(path, entry) || !plainDirectory(full)) continue;
         const bytes = measured(full);
         if (bytes === undefined) continue;
         items.push({
@@ -302,7 +329,7 @@ function laneDirectories(
           path: full,
           bytes,
           laneId: lane.id,
-          reason: `${why}; ${entry.path} is ${entry.reason === 'gitignored' ? 'gitignored' : 'excluded'} build output, not in State, and regenerates from the lockfile.`,
+          reason: `${why}; ${entry.path} is ${entry.reason === 'gitignored' ? 'gitignored' : 'excluded'} build output, not in State, and regenerates from the lockfile or a rebuild.`,
         });
       }
     } catch {
@@ -473,7 +500,7 @@ export function agentClean(store: WorkStore, command: CleanCommand, automatic?: 
             action: {
               actor: automatic.actor,
               summary: `Clean regenerable copies: ${chosen.map(i => i.path).join(', ')}`,
-              undo: 'Run reopen with the Lane id to re-materialize its retained head. Checks reconstruct workspaces when run again. Restore Lane dependencies with npm ci --ignore-scripts and rerun the build; retained source, summaries and artifacts remain. Seven-day retention removes older copies and expired log bytes; those bytes cannot be reconstructed. Expired closed-Lane auto-snapshot pointers and caches cannot be restored; object collection can later reclaim their otherwise unreachable unsaved source.',
+              undo: 'Run reopen with the Lane id to re-materialize its retained head. Checks reconstruct workspaces when run again. Restore Lane dependencies with the project install and build (for example npm ci --ignore-scripts, cargo build or pip install); retained source, summaries and artifacts remain. Seven-day retention removes older copies and expired log bytes; those bytes cannot be reconstructed. Expired closed-Lane auto-snapshot pointers and caches cannot be restored; object collection can later reclaim their otherwise unreachable unsaved source.',
             },
           });
           store.commitRecords(tx);

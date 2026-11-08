@@ -106,7 +106,11 @@ export async function remoteCheckPlan(
       standard ? undefined : store.select('views', run.viewId)?.semanticPlan,
       'node',
       [],
-      standard ? undefined : resolveTestRunner(files.get('package.json'), () => files.keys()),
+      standard
+        ? undefined
+        : resolveTestRunner(files.get('package.json'), () => files.keys(), {
+            forgeJson: files.get('forge.json'),
+          }),
     ),
   };
   const plan = {

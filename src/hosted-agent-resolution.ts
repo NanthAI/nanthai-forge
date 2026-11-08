@@ -9,7 +9,7 @@ import {
   rememberResolutionFinish,
   resolvedFinishContinuation,
 } from './hosted-conflict-precheck.js';
-import { shareDependencies } from './shared-dependencies.js';
+import { shareDependencies, skippedScriptsNotice } from './shared-dependencies.js';
 import { hostedLaneSelectionSchema } from './hosted-lane.js';
 import { randomUUID } from 'node:crypto';
 import { conflictFinishOptions } from './hosted-conflict-finish-options.js';
@@ -108,6 +108,8 @@ export async function guideHostedSync(session: HostedAgentSession, value: unknow
     status: 'failed' as const,
     message: error instanceof Error ? error.message : String(error),
   }));
+  const skippedNotice = skippedScriptsNotice(dependencies);
+  if (skippedNotice) process.stderr.write(`${skippedNotice}\n`);
   let remaining = 128 * 1024;
   const files = paths.slice(0, 100).map(path => {
     let bytes: Buffer | null;
