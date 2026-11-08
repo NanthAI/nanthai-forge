@@ -16,6 +16,7 @@ import { homedir } from 'node:os';
 import { dirname, isAbsolute, join } from 'node:path';
 import { readInstallScriptAllowlist } from './install-script-allowlist.js';
 import { linkInstall } from './dependency-link.js';
+import { recordLink, relinkIfStale, type Relinked } from './dependency-relink.js';
 import { allowedRebuilds, npmInstaller, scriptedPackages } from './npm-install.js';
 import {
   detectPackageManager,
@@ -52,7 +53,16 @@ export type SkippedScripts = SkippedScriptsHint;
 export type SharedDependencies =
   | { status: 'off' | 'present' }
   | { status: 'none'; reason?: string }
-  | { status: 'linked' | 'installed'; key: string; path: string; skippedScripts?: SkippedScripts }
+  /** A Forge link to an install of an older lockfile that could not be replaced safely. */
+  | { status: 'stale'; reason: string }
+  | {
+      status: 'linked' | 'installed';
+      key: string;
+      path: string;
+      skippedScripts?: SkippedScripts;
+      /** The Lane's links followed a changed lockfile; `from` is the key it pointed at before. */
+      relinked?: Relinked;
+    }
   | { status: 'failed'; key: string; message: string };
 
 export function dependencyCacheDirectory() {
@@ -180,7 +190,10 @@ function writeStage(root: string, stage: string, pm: PackageManager, folders: st
 
 /** Link ROOT/node_modules to the machine's install for this exact lockfile and manager version,
  * installing it once with the manager the repository declares (npm, pnpm, yarn or bun).
- * Leaves an existing node_modules alone. Concurrent opens of the same lockfile install once. */
+ * An install the agent made is left alone. A link Forge made to an older lockfile's install is
+ * replaced (one key compare; an install only when the new key is not cached yet), so a sync that
+ * brings a package never leaves the Lane on the old one. `refresh` never creates a first link.
+ * Concurrent opens of the same lockfile install once. */
 export async function shareDependencies(
   root: string,
   options: {
@@ -191,6 +204,8 @@ export async function shareDependencies(
     /** Opt in to (true) or out of (false) all dependency install scripts; it wins over the repository.
      * Unset: skipped, unless the repository allows them (forge.json `install.scripts`, an allowlist). */
     runScripts?: boolean | undefined;
+    /** Only follow a lockfile change of an existing Forge link; a Lane with no node_modules stays without. */
+    refresh?: boolean;
     /** How to run a non-npm manager (default: corepack at the declared version, else PATH). */
     resolve?: (pm: PackageManager) => Promise<ManagerRunner | { reason: string }>;
   } = {},
@@ -201,8 +216,15 @@ export async function shareDependencies(
   if ('reason' in detected) return { status: 'none', reason: detected.reason };
   const pm = detected.manager,
     other = pm.name !== 'npm';
-  if (exists(join(root, 'node_modules')))
-    return dependencyKey(root) ? { status: 'present' } : { status: 'none' };
+  if (exists(join(root, 'node_modules'))) {
+    const current = dependencyKey(root);
+    if (!current) return { status: 'none' };
+    const relinked = await relinkIfStale(root, current, () =>
+      shareDependencies(root, { ...options, refresh: false }),
+    );
+    return relinked ?? { status: 'present' };
+  }
+  if (options.refresh) return { status: 'none' };
   let runner: ManagerRunner | undefined,
     folders: string[] = [];
   if (other) {
@@ -279,6 +301,8 @@ export async function shareDependencies(
   const npmFolders = other ? [] : (workspaceDirectories(readFileSync(join(root, pm.lockfile))) ?? []);
   if (other || npmFolders.length) linkInstall(entry, root, other ? folders : npmFolders);
   else symlinkSync(path, join(root, 'node_modules'), 'dir');
+  const fingerprint = dependencyKey(root);
+  if (fingerprint) recordLink(root, { fingerprint, entry, folders: other ? folders : npmFolders });
   const skippedScripts = runScripts ? undefined : skippedInstallScripts(root);
   return {
     status: installed ? 'installed' : 'linked',

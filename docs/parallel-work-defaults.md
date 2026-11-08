@@ -146,7 +146,16 @@ Read: `nforge settings`; set: `nforge settings KEY VALUE`; reset:
   `.pnpmfile.cjs`, Yarn plugins in `.yarnrc.yml`) and Yarn Berry Plug'n'Play, which has no `node_modules`
   (set `nodeLinker: node-modules` to share). Forge never runs the `yarnPath` release a repository commits.
 - A failed install leaves no partial cache, and the Lane opens without `node_modules`.
-- An existing `node_modules` is never replaced.
+- An existing `node_modules` that the agent installed is never replaced.
+- A `node_modules` that Forge linked follows the lockfile. After `start`/`open`, and after `sync`, `resolve`,
+  `revert`, `compose`, `preflight` and `nforge pull`, Forge compares the link's key with the current
+  lockfile key (one hash of files already on disk, no Convex call). On a mismatch (a sync brought a package,
+  or the manager version or install settings changed) it relinks to the install for the new key, installing
+  it once into the shared cache if no Lane has yet, and prints one line on stderr (`start`/`open` also report
+  `dependencies.relinked.from`). Lanes linked by older builds follow the same rule. If the new install
+  fails the previous link is put back. If the directory holds packages Forge did not link, it is kept
+  and reported (`dependencies.status` `stale`, or a stderr line); delete it to relink. A Lane with no
+  `node_modules` is not given one by these commands.
 - The cache is `$XDG_CACHE_HOME/forge/deps` (default `~/.cache/forge/deps`) and is safe to delete.
 - If your Lane changes the lockfile, replace the link before installing:
   `rm -r node_modules && npm ci` (or the same with your manager's frozen install). Removing the links does not

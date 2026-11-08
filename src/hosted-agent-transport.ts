@@ -610,6 +610,7 @@ export class HostedAgentTransport {
           mainCheckoutTransport(this.root, this.address, this.exchange),
           operationId as string | undefined,
         );
+        await this.refreshDependencies(this.root);
         return this.response(action, result.operationId, result);
       }
       if (action === 'status' && Object.keys(input).length === 0 && readHostedMainSelection(this.root))
@@ -962,6 +963,8 @@ export class HostedAgentTransport {
       } else {
         if (action === 'finish') markLandStep('ready');
         result = await executeHostedAgent(session, action, command.data);
+        // A sync, resolution or revert rewrote files: follow a changed lockfile before the next build.
+        if (['sync', 'resolve', 'revert', 'compose'].includes(action)) await this.refreshDependencies(root);
         const askedItemId =
           action === 'start' && (command.data as { planningItemId?: string }).planningItemId;
         // A short id was resolved by the start itself: the journal holds the Issue it started. (The
@@ -1212,6 +1215,25 @@ export class HostedAgentTransport {
       ...(shared.status === 'done' ? {} : { continuation: replay('stalled') }),
     };
   }
+  /** After files changed in a Lane: one key compare; a Forge link to an older lockfile's install is
+   * relinked (or installed once into the shared cache). Silent when nothing changed; never fails the action. */
+  private async refreshDependencies(path: string) {
+    try {
+      const shared = await shareDependencies(path, { refresh: true });
+      if ('relinked' in shared && shared.relinked)
+        process.stderr.write(
+          `The lockfile changed: node_modules now links the install for the current one (was ${shared.relinked.from}).\n`,
+        );
+      else if (shared.status === 'stale' || shared.status === 'failed')
+        process.stderr.write(
+          `The lockfile changed but node_modules was not relinked: ${'reason' in shared ? shared.reason : shared.message}\n`,
+        );
+      const notice = skippedScriptsNotice(shared);
+      if (notice && 'relinked' in shared) process.stderr.write(`${notice}\n`);
+    } catch {
+      /* Dependencies are a convenience the agent can still install itself. */
+    }
+  }
   /** Never fails the action: dependencies are a convenience the agent can still install itself. */
   private async shareDependencies(path: string, runScripts?: boolean) {
     try {
@@ -1402,7 +1424,10 @@ export class HostedAgentTransport {
     // names the earlier head. Settle that original operation (no new save) before anything pins the
     // marker's head/tree. No pending file means no call.
     // An interrupted local apply leaves the marker describing other bytes; finish it first.
-    if (action === 'preflight') finishPendingCheckoutDelta(root);
+    if (action === 'preflight') {
+      finishPendingCheckoutDelta(root);
+      await this.refreshDependencies(root);
+    }
     const pendingSave = action === 'preflight' ? await reconcileHostedSave(root, this.exchange) : null;
     if (pendingSave) return this.response(action, null, pendingSave);
     const marker = readHostedLaneCheckout(root);
