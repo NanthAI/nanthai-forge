@@ -43,6 +43,11 @@ export type OverlapLane = {
   open: boolean;
   /** Exact source being resolved; shared by the origin and its resolution siblings. */
   resolutionLeft?: string;
+  /** The Lane a resolution Lane resolves (Issue ee9d5738): every Lane of that resolution shares it. */
+  resolutionOrigin?: string;
+  /** The root Lane of the stack this Lane is attached to; absent for a Lane outside any stack and for
+   * the root itself (its own id is the stack key). Detached Lanes carry none. */
+  stackRoot?: string;
   changes: string;
   complete: boolean;
   /** Last Lane record write (ms), or the presence time of a row older than that field. */
@@ -237,6 +242,15 @@ export function driftNudge(
   return `Behind main on your own paths: ${conflictSequences.size} landings changed them since your base: ${named.join('; ')}${rest > 0 ? `; and ${rest} more` : ''}. Sync now: nforge agent . sync '{"laneId":"${laneId}"}'`;
 }
 
+/** The Lane a resolution Lane resolves, and every Lane of one resolution: their shared paths are one
+ * piece of work the agent cannot act on. Exact Lane ids, so a moved head cannot break the match. */
+const sameResolution = (a: OverlapLane, b: OverlapLane) =>
+  a.resolutionOrigin === b.laneId ||
+  b.resolutionOrigin === a.laneId ||
+  (a.resolutionOrigin !== undefined && a.resolutionOrigin === b.resolutionOrigin);
+/** Lanes of one stack build on each other, so the paths they share are the stack's own. */
+const sameStack = (a: OverlapLane, b: OverlapLane) => (a.stackRoot ?? a.laneId) === (b.stackRoot ?? b.laneId);
+
 /** Saved range/path advice. Actual text conflicts are still decided by composition. */
 export function hostedOverlapAdvice(
   mine: OverlapLane,
@@ -277,6 +291,7 @@ export function hostedOverlapAdvice(
       idleBefore !== undefined &&
       !requestedPath &&
       (peer.lastActivityAt ?? peer.presenceRow?.at ?? Infinity) < idleBefore;
+    if (sameResolution(mine, peer) || sameStack(mine, peer)) continue;
     if (
       mine.intentId === peer.intentId &&
       ((mine.resolutionLeft &&

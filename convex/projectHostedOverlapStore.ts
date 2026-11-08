@@ -50,6 +50,21 @@ export async function trackHostedOverlapLane(
           )
           .unique()
       : null;
+  // Stack membership (Issue ee9d5738): the root is the parent's own root, read once per (re)stack. A
+  // Lane without an attached stack stores nothing and pays no read.
+  const stack = lane.stack && !lane.stack.detached ? lane.stack : undefined;
+  const parentRow =
+    stack && !(old?.stackRoot && old.stackParent === stack.laneId)
+      ? await ctx.db
+          .query('projectHostedOverlapLanes')
+          .withIndex('by_project_and_lane', q => q.eq('projectId', projectId).eq('laneId', stack.laneId))
+          .unique()
+      : null;
+  const stackRoot = stack
+    ? parentRow
+      ? (parentRow.stackRoot ?? stack.laneId)
+      : (old?.stackRoot ?? stack.laneId)
+    : undefined;
   const agent = metadata?.agent ?? old?.agent ?? (origin?.actor === lane.actor ? origin.agent : undefined);
   const open = ['active', 'paused', 'ready'].includes(lane.state);
   // Superseded lasts while the Lane stays open at the head it was set on; a save or reopen ends it.
@@ -64,6 +79,8 @@ export async function trackHostedOverlapLane(
     head: lane.head,
     baseHead: lane.base.head,
     ...(lane.resolution ? { resolutionLeft: lane.resolution.left } : {}),
+    ...(lane.resolution?.origin ? { resolutionOrigin: lane.resolution.origin.laneId } : {}),
+    ...(stack && stackRoot ? { stackRoot, stackParent: stack.laneId } : {}),
     baseReceiptId: lane.base.receiptId,
     baseSequence: metadata?.baseSequence ?? (sameBase ? (old?.baseSequence ?? null) : null),
     recordVersion: lane.version,

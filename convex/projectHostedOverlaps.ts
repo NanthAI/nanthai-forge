@@ -92,9 +92,23 @@ export const read = query({
           baseSequence = base?.sequence ?? null;
         }
       }
+      // Resolution origin and stack come from the Lane record itself, so a stale or missing row cannot
+      // hide them (Issue ee9d5738); the stored root of a row at the same stack parent is kept.
+      const links = {
+        ...(lane.resolution ? { resolutionLeft: lane.resolution.left } : {}),
+        ...(lane.resolution?.origin ? { resolutionOrigin: lane.resolution.origin.laneId } : {}),
+        ...(lane.stack && !lane.stack.detached
+          ? {
+              stackRoot:
+                mine?.stackParent === lane.stack.laneId && mine.stackRoot
+                  ? mine.stackRoot
+                  : lane.stack.laneId,
+            }
+          : {}),
+      };
       const focus =
         mine && mine.head === lane.head && mine.baseHead === lane.base.head
-          ? { ...mine, baseSequence, ...(lane.resolution ? { resolutionLeft: lane.resolution.left } : {}) }
+          ? { ...mine, baseSequence, ...links }
           : {
               laneId,
               intentId: lane.intentId,
@@ -102,7 +116,7 @@ export const read = query({
               intent: lane.intentId,
               head: lane.head,
               baseHead: lane.base.head,
-              ...(lane.resolution ? { resolutionLeft: lane.resolution.left } : {}),
+              ...links,
               baseSequence,
               open: lane.state === 'active',
               changes: '[]',

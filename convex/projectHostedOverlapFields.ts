@@ -13,6 +13,12 @@ export const hostedOverlapTables = {
     head: v.string(),
     baseHead: v.string(),
     resolutionLeft: v.optional(v.string()),
+    /** The Lane a resolution Lane resolves (Issue ee9d5738); notices skip it and its other resolutions. */
+    resolutionOrigin: v.optional(v.string()),
+    /** Stack membership (Issue ee9d5738): the stack's root Lane and the parent this Lane was stacked on
+     * when the root was read. Lanes of one stack get no overlap notices about each other. */
+    stackRoot: v.optional(v.string()),
+    stackParent: v.optional(v.string()),
     baseReceiptId: v.string(),
     baseSequence: v.union(v.number(), v.null()),
     lifecyclePlanId: v.optional(v.id('projectHostedLifecyclePlans')),
