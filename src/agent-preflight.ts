@@ -48,6 +48,7 @@ import {
 } from './agent-preflight-evidence.js';
 import { shellQuote } from './agent-brief-render.js';
 import {
+  orderRunnerTests,
   projectTestRunner,
   runnerCommand,
   runnerLabel,
@@ -344,13 +345,16 @@ function recordFileStats(
 }
 /** Within a tier, the tests that failed last time run first (likely to fail again, and a failure
  * ends the run); then, in direct, wide and near, the closest consumers (`ranks`: product hops, carrier
- * fan-in, helper hops); then the cheapest known first so more of the neighbourhood fits the budget.
+ * fan-in, helper hops); then, among equally close ones, the more relevant (`relevance`: recent landing
+ * failure, name affinity, mentions of a changed module); then the cheapest known first so more of the
+ * neighbourhood fits the budget; then the selector's stable-hash order, never file names.
  * The `watch` tier keeps its evidence order. Tier membership never changes. */
 export function orderByHistory<T extends { tier: string; tests: string[] }>(
   tiers: T[],
   stats: PreflightFileStats,
   fallbackMs: number,
   ranks: Record<string, readonly number[]> = {},
+  relevance: Record<string, readonly number[]> = {},
 ): T[] {
   const cost = (test: string) => stats[test]?.ms ?? fallbackMs;
   const closer = (a: string, b: string) => {
@@ -360,15 +364,23 @@ export function orderByHistory<T extends { tier: string; tests: string[] }>(
     for (let i = 0; i < left.length; i++) if (left[i] !== right[i]) return left[i]! - right[i]!;
     return 0;
   };
+  const moreRelevant = (a: string, b: string) => {
+    const left = relevance[a];
+    const right = relevance[b];
+    if (!left || !right) return 0;
+    for (let i = 0; i < left.length; i++) if (left[i] !== right[i]) return right[i]! - left[i]!;
+    return 0;
+  };
   return tiers.map(item => {
     const index = new Map(item.tests.map((test, i) => [test, i]));
     const order = (test: string) => index.get(test) ?? 0;
-    const ranked = item.tier === 'direct' || item.tier === 'wide' || item.tier === 'near';
+    const ranked =
+      item.tier === 'direct' || item.tier === 'wide' || item.tier === 'near' || item.tier === 'recent';
     const tests = [...item.tests].sort((a, b) => {
       const failed = Number(stats[b]?.failed ?? false) - Number(stats[a]?.failed ?? false);
       if (failed) return failed;
       if (item.tier === 'watch') return order(a) - order(b);
-      return (ranked ? closer(a, b) : 0) || cost(a) - cost(b) || order(a) - order(b);
+      return (ranked ? closer(a, b) || moreRelevant(a, b) : 0) || cost(a) - cost(b) || order(a) - order(b);
     });
     return { ...item, tests };
   });
@@ -475,8 +487,16 @@ function runnerPlan(
   const named = new Set([...selection.changedTests, ...selection.namedTests]);
   const tiers = [
     { tier: 'mandatory', tests: keep(selection.changedTests) },
-    { tier: 'direct', tests: keep(selection.namedTests) },
-    { tier: 'package', tests: keep(inPackages.tests.filter(test => !named.has(test))) },
+    { tier: 'direct', tests: keep(orderRunnerTests(selection.namedTests, paths)) },
+    {
+      tier: 'package',
+      tests: keep(
+        orderRunnerTests(
+          inPackages.tests.filter(test => !named.has(test)),
+          paths,
+        ),
+      ),
+    },
   ].filter(item => item.tests.length);
   if (inPackages.reason) selection.reason = `${selection.reason}; ${inPackages.reason}`;
   const tests = tiers.flatMap(item => item.tests);
@@ -698,7 +718,13 @@ export function preflightPlan(
       // Direct tests of the most specific changed modules are protected while they fit the budget.
       ...(trim ? { hubBudget: { seconds: budgetSeconds, secondsFor } } : {}),
     });
-    selection.tiers = orderByHistory(selection.tiers, stats, timing.secondsPerFile * 1000, selection.ranks);
+    selection.tiers = orderByHistory(
+      selection.tiers,
+      stats,
+      timing.secondsPerFile * 1000,
+      selection.ranks,
+      selection.relevance,
+    );
     selection.tests = selection.tiers.flatMap(item => item.tests);
     let tests = [...new Set(selection.tests)];
     let reusedTests: string[] = [];

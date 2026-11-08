@@ -65,7 +65,7 @@ function fixture(t, fail = false) {
 test('a small saved delta reruns its consumers and reuses passes for the unchanged tree', t => {
   const f = fixture(t);
   const initial = f.plan();
-  assert.deepEqual(initial.tests, ['tests/a.test.mjs', 'tests/b.test.mjs']);
+  assert.deepEqual([...initial.tests].sort(), ['tests/a.test.mjs', 'tests/b.test.mjs']);
   const firstReceipt = f.run(initial);
   assert.equal(firstReceipt.passed, true);
   f.put('src/a.ts', 'export const n = 1; // small correction');
@@ -188,7 +188,7 @@ test('environment failure before execution cannot create reusable per-file passe
   assert.equal(receipt.environment.code, 'FILESYSTEM_EVENTS_UNHEALTHY');
   const retry = f.plan();
   assert.deepEqual(retry.reusedTests, []);
-  assert.deepEqual(retry.tests, ['tests/a.test.mjs', 'tests/b.test.mjs']);
+  assert.deepEqual([...retry.tests].sort(), ['tests/a.test.mjs', 'tests/b.test.mjs']);
   t.mock.method(preflightRuntime, 'filesystemEventHealth', () => healthy);
   assert.equal(f.run(retry).passed, true);
   assert.deepEqual([...f.plan().reusedTests].sort(), ['tests/a.test.mjs', 'tests/b.test.mjs']);
@@ -281,7 +281,9 @@ test('direct tests are never trimmed by an estimate; the wall-time cap names the
   const f = fixture(t);
   // Both tests import a changed module directly: protected from the plan's trim, whatever the budget.
   const plan = f.plan([], { budgetSeconds: 1 });
-  assert.deepEqual(plan.tests, ['tests/a.test.mjs', 'tests/b.test.mjs']);
+  // Equally close: a stable hash orders them, not their names.
+  assert.deepEqual([...plan.tests].sort(), ['tests/a.test.mjs', 'tests/b.test.mjs']);
+  const [first, last] = plan.tests;
   assert.equal(plan.local.protected, 2);
   assert.equal(plan.local.protectedOverBudget, true);
   assert.equal(plan.local.trimmedTests, undefined);
@@ -292,12 +294,12 @@ test('direct tests are never trimmed by an estimate; the wall-time cap names the
   assert.equal(receipt.passed, true);
   assert.equal(receipt.tests, 1);
   assert.equal(receipt.stoppedForTime, 1);
-  assert.deepEqual(receipt.stopped, ['tests/b.test.mjs']);
+  assert.deepEqual(receipt.stopped, [last]);
   assert.match(receipt.stoppedRerun, /preflight '\{"laneId":"[0-9a-f-]+","retry":true\}'/);
   // That rerun plans exactly the stopped files; the passed one is reused, nothing else is added.
   const rerun = f.plan([], { budgetSeconds: 180, trim: true, only: receipt.stopped });
-  assert.deepEqual(rerun.tests, ['tests/b.test.mjs']);
-  assert.deepEqual(rerun.reusedTests, ['tests/a.test.mjs']);
+  assert.deepEqual(rerun.tests, [last]);
+  assert.deepEqual(rerun.reusedTests, [first]);
   assert.ok(!rerun.local.filler, 'a rerun of stopped files adds no filler');
   const second = f.run(rerun);
   assert.equal(second.passed, true);

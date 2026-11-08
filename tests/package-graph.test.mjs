@@ -376,11 +376,12 @@ test('forge.json declares a runner for any language; package.json keeps working;
   });
   const plan = repo.plan(['packages/core/src/fx_core/__init__.py']);
   assert.equal(plan.runner.label, 'declared (declared in forge.json)');
-  assert.deepEqual(plan.tests, ['packages/api/tests/test_api.py', 'packages/core/tests/test_core.py']);
-  assert.match(
-    plan.command,
-    /^python -m pytest packages\/api\/tests\/test_api\.py packages\/core\/tests\/test_core\.py$/,
-  );
+  // Equally close tests run in a stable hash order, not name order (Issue 964e2d2b).
+  assert.deepEqual([...plan.tests].sort(), [
+    'packages/api/tests/test_api.py',
+    'packages/core/tests/test_core.py',
+  ]);
+  assert.equal(plan.command, `python -m pytest ${plan.tests.join(' ')}`);
 });
 
 test('the tests read selects packages for a Rust repository with no package.json', () => {

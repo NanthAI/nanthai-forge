@@ -4,6 +4,7 @@ import { posix, join } from 'node:path';
 import { testImportGraph } from './test-import-graph.mjs';
 import { watchRanking } from './test-name-watchers.mjs';
 import { closenessIndex, compareRank } from './test-closeness.mjs';
+import { changeSalt, compareRelevance, relevanceFor, stableKey } from './test-tiebreak.mjs';
 import { coverageShadow } from './test-coverage.mjs';
 import { classifyCheckPath, webTest } from './check-path-scopes.mjs';
 import { guardSelection } from './selection-guard.mjs';
@@ -79,7 +80,9 @@ export function selectImpactPair(files, comparisons) {
  * name in a changed source, at any import distance: an import graph cannot see a test that hooks the
  * paths a module creates); then tests two product modules away (`near`). Within each, the most specific
  * consumers come first (fewest product modules between, then a fixture few tests use before a shared
- * harness). Mandatory, learned and direct are protected: the plan never trims them. Nothing here
+ * harness), then, among equally close tests, a recent landing failure, how much the test's name and
+ * text are about the changed modules, and a stable hash (`test-tiebreak.mjs`), never the file name.
+ * Mandatory, learned and direct are protected: the plan never trims them. Nothing here
  * counts files: the whole neighbourhood is returned, and `fitPreflightBudget` trims the unprotected
  * tiers by time, least relevant last. Other uncertain and distant consumers (dynamic, domain, a
  * by-name loader's closure, three or more edges) stay explicit pre-queue/landing work. A
@@ -275,7 +278,15 @@ export function selectPreflightTests(input, graphCache = {}) {
                   : null;
   // A named test, or one ranked without a graph, counts as a specific loader.
   const rankOf = test => rank.get(test) ?? [0, 1, 0];
-  const byRank = (a, b) => compareRank(rankOf(a), rankOf(b)) || (a < b ? -1 : 1);
+  // Equally close tests order by relevance (a recent landing failure, then how much the test is
+  // about the changed modules), then a stable hash: never by file name, so adding a test file can
+  // not move a relevant one out of the time budget (Issue 964e2d2b).
+  const relevance = relevanceFor({ files: input.files, changed: rankedPaths, recent: recentFailed });
+  const salt = changeSalt(input.paths);
+  const keyOf = new Map();
+  const key = test => (keyOf.has(test) ? keyOf.get(test) : keyOf.set(test, stableKey(salt, test)).get(test));
+  const tied = (a, b) => compareRelevance(relevance(a), relevance(b)) || (key(a) < key(b) ? -1 : 1);
+  const byRank = (a, b) => compareRank(rankOf(a), rankOf(b)) || tied(a, b);
   const ranked = tier => {
     // A learned test may sit outside this path's graph selection: that miss is why it was learned.
     // A project-declared guard runs even where the import graph does not reach them: that is why it is declared.
@@ -291,16 +302,10 @@ export function selectPreflightTests(input, graphCache = {}) {
               : selection.tests;
     const tests = pool.filter(test => tierOf(test) === tier);
     if (tier === 'watch')
-      return tests.sort((a, b) => watchers.get(b).score - watchers.get(a).score || (a < b ? -1 : 1));
-    if (tier === 'direct' || tier === 'near') return tests.sort(byRank);
-    // Closest first; among equally close hub consumers, one that failed a landing check lately first.
-    if (tier === 'wide')
-      return tests.sort(
-        (a, b) =>
-          compareRank(rankOf(a), rankOf(b)) ||
-          Number(recentFailed.has(b)) - Number(recentFailed.has(a)) ||
-          (a < b ? -1 : 1),
-      );
+      return tests.sort((a, b) => watchers.get(b).score - watchers.get(a).score || tied(a, b));
+    // Closest first; among equally close tests, a recent landing failure, then relevance, then hash.
+    if (tier === 'direct' || tier === 'near' || tier === 'wide' || tier === 'recent')
+      return tests.sort(byRank);
     return tests.sort();
   };
   for (const [test, value] of far) if (!rank.has(test)) rank.set(test, value);
@@ -317,6 +322,12 @@ export function selectPreflightTests(input, graphCache = {}) {
     ...(commentOnly.size ? { commentOnly: [...commentOnly].sort() } : {}),
     /** Rank of each direct and wide test ([product hops, carrier fan-in, helper hops]). */
     ranks: Object.fromEntries([...local].filter(test => rank.has(test)).map(test => [test, rank.get(test)])),
+    /** Tie-break tuple of each local direct, wide, recent and near test: [recent failure, name affinity, mentions]. */
+    relevance: Object.fromEntries(
+      tiers
+        .filter(item => ['direct', 'wide', 'recent', 'near'].includes(item.tier))
+        .flatMap(item => item.tests.map(test => [test, relevance(test)])),
+    ),
     recentFailed: [...recentFailed].sort(),
     watchedNames: Object.fromEntries([...watchers].map(([test, item]) => [test, item.names])),
     deferredTests: selection.tests.filter(test => !local.has(test)),

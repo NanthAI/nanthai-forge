@@ -101,24 +101,12 @@ test('eb0491bb: direct importers of changed job modules run before any recent fa
   ])
     assert.ok(!recentTier.includes(test), `${test} is not near this change`);
   // Within the default budget no recent file and no farther consumer displaces an importer. These
-  // job modules are hubs (well over a hundred tests load them, all ranked [0, 1, 0]), so which of
-  // the equally close loaders fit is a name order, not this incident: an importer left out may only
-  // be cut behind tests ranked as close as it is (17cce1b3: one new equally close test pushed
-  // the hosted saves test past the 45-file edge).
+  // job modules are hubs (well over a hundred tests load them, all ranked [0, 1, 0]); equally close
+  // tests order by relevance and a stable hash, never by file name, so the four importers fit
+  // (17cce1b3: one new equally close test pushed the hosted saves test past the 45-file edge).
   const fit = fitPreflightBudget({ tiers: plan.tiers, budgetSeconds: 180, secondsPerFile: 4 });
   const local = new Set(fit.tests);
-  const closer = (a, b) => {
-    for (let i = 0; i < Math.max(a.length, b.length); i++)
-      if ((a[i] ?? 0) !== (b[i] ?? 0)) return (a[i] ?? 0) < (b[i] ?? 0);
-    return true;
-  };
-  for (const test of importers)
-    if (!local.has(test))
-      for (const kept of fit.tests.filter(item => plan.ranks[item]))
-        assert.ok(
-          closer(plan.ranks[kept], plan.ranks[test]) && !recentTier.includes(kept),
-          `${kept} displaced ${test}`,
-        );
+  for (const test of importers) assert.ok(local.has(test), `${test} fits the default budget`);
   for (const test of recentTier) assert.ok(!fit.tests.includes(test), `${test} displaced an importer`);
   t.diagnostic(`recent ${recentTier.join(' ') || 'none'}; local ${fit.tests.length}`);
 });

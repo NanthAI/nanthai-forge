@@ -71,7 +71,7 @@ test('a comment-only edit adds only the tests that read the file; coverage keeps
   assert.deepEqual([...plan.tests, ...plan.deferredTests].sort(), complete.tests);
   // Another, behavioural path in the same change still selects its own consumers.
   const both = selectPreflightTests({ files, paths: ['src/a.ts', 'src/b.ts'], commentOnly: paths });
-  assert.deepEqual(both.tests, ['tests/b.test.mjs', 'tests/reads-a.test.mjs']);
+  assert.deepEqual([...both.tests].sort(), ['tests/b.test.mjs', 'tests/reads-a.test.mjs']);
 });
 
 test('preflight finds comment-only paths from the base State in the local object store', t => {

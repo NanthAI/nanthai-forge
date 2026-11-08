@@ -217,6 +217,8 @@
     "scripts/test-import-graph.mjs",
     "scripts/test-name-watchers.mjs",
     "scripts/test-closeness.mjs",
+    "scripts/test-tiebreak.mjs",
+    "scripts/test-tiebreak.d.mts",
     "scripts/docs-readers.mjs",
     "scripts/convex-function-names.mjs",
     "scripts/test-directory-path.mjs",

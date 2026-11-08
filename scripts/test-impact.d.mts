@@ -78,6 +78,8 @@ export function selectPreflightTests(
   watchedNames: Record<string, string[]>;
   /** [product hops, carrier fan-in, helper hops] of each direct, wide and near test; lower is closer. */
   ranks: Record<string, [number, number, number]>;
+  /** [recent failure, name affinity 0-100, mentions of a changed module] of each local direct, wide, recent and near test: the tie-break between equally close tests. */
+  relevance: Record<string, [number, number, number]>;
   /** The `recent` input tests that qualified (consumers within two product modules). */
   recentFailed: string[];
   commentOnly?: string[];

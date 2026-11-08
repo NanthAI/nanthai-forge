@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { changeSalt, stableKey } from '../scripts/test-tiebreak.mjs';
 import { globRegExp } from './path-glob.js';
 import { safeRelative } from './safe-relative.js';
 import type { PackageGraph } from './package-graph.js';
@@ -326,6 +327,16 @@ const commonDirs = (a: string, b: string) => {
   while (n < left.length && n < right.length && left[n] === right[n]) n++;
   return n;
 };
+/** A runner tier's execution order: nearest folder to a changed path first, then a stable hash of
+ * the change and the test, never the file name (Issue 964e2d2b). Membership is unchanged. */
+export function orderRunnerTests(tests: string[], changedPaths: string[]): string[] {
+  const salt = changeSalt(changedPaths);
+  const nearest = (test: string) => Math.max(0, ...changedPaths.map(path => commonDirs(path, test)));
+  return tests
+    .map(test => ({ test, near: nearest(test), key: stableKey(salt, test) }))
+    .sort((a, b) => b.near - a.near || (a.key < b.key ? -1 : 1))
+    .map(item => item.test);
+}
 const documentation = (path: string) => /\.(?:md|mdx|txt)$/i.test(path);
 
 /** Path-only selection for a generic runner: changed test files, then the tests named for a changed
