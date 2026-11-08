@@ -36,7 +36,15 @@ export function convexSourceTransport(
   delegatedAt?: number,
   /** `upload` returns once the bytes are verified and lets the R2 write (PUT and HEAD) run on
    * behind the work after it; callers must `settle()` before they read `outputs`. */
-  { overlapWrites = false }: { overlapWrites?: boolean } = {},
+  {
+    overlapWrites = false,
+    preloaded = [],
+  }: {
+    overlapWrites?: boolean;
+    /** Exact small texts the calling action already holds (an input it wrote, or one its caller
+     * sent). A matching read is served from memory; a text that fails its pin is ignored. */
+    preloaded?: readonly { sha256: string; size: number; text: string }[] | undefined;
+  } = {},
 ) {
   // Fan-out tasks pass their wider identity; the object validator accepts only these fields.
   const input = { projectId, jobId, step };
@@ -64,6 +72,11 @@ export function convexSourceTransport(
     }
   };
   remember(initial);
+  const held = new Map<string, Uint8Array>();
+  for (const value of preloaded) {
+    const bytes = new TextEncoder().encode(value.text);
+    if (bytes.length === value.size && digest(bytes) === value.sha256) held.set(value.sha256, bytes);
+  }
   const resolve = async (
     ids: string[],
     ancestry = false,
@@ -157,12 +170,21 @@ export function convexSourceTransport(
     ancestry: (ids, known, windows = 1) => resolve(ids, true, known, windows),
     prepareRead: async pins => {
       const missing = [
-        ...new Map(pins.filter(pin => !locations.has(pin.sha256)).map(pin => [pin.sha256, pin])).values(),
+        ...new Map(
+          pins
+            .filter(pin => !locations.has(pin.sha256) && held.get(pin.sha256)?.length !== pin.size)
+            .map(pin => [pin.sha256, pin]),
+        ).values(),
       ];
       for (let offset = 0; offset < missing.length; offset += 100)
         await resolve(missing.slice(offset, offset + 100).map(p => p.sha256));
     },
     read: async pin => {
+      const bytes = held.get(pin.sha256);
+      if (bytes && bytes.length === pin.size)
+        return (async function* () {
+          yield bytes;
+        })();
       if (!locations.has(pin.sha256)) await resolve([pin.sha256]);
       return clock.read(() => openRead(pin));
     },

@@ -16,7 +16,13 @@ import { sourceDispatch, driveSourceJob } from '../src/hosted-source-job-control
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { convexSourceWorker, convexSourceRuntime, ConvexSourceProvider } from '../src/convex-source-provider';
 import { invariant } from '../src/errors';
-import { activeStep, sourceStep, rowFor } from './projectConvexSourceActive';
+import {
+  activeStep,
+  sourceStep,
+  rowFor,
+  type LoadedSourceJob,
+  type StepGate,
+} from './projectConvexSourceActive';
 export { activeStep, sourceStep } from './projectConvexSourceActive';
 import { sourceMutation } from './projectConvexSourceErrors';
 import { hostedWriteProject } from './projectHostedRecords';
@@ -38,6 +44,7 @@ import { recordSourceStep, sourceStepTiming } from './projectSourceStepTiming';
 import { saveStepReads, sourceObjectLocation } from './projectSourceBeginReads';
 import { sourceResultInlineBytes } from './projectConvexSourceTransport';
 import { digest } from '../src/portable-hash';
+import { publishSourceResult } from './projectSourcePublishInline';
 const identity = { projectId: v.id('hostedProjects'), jobId: v.string() };
 /** The step's own result text, when publication may take it without the complete action's R2 read. */
 export function inlineSourceResult(
@@ -212,10 +219,21 @@ export const lookup = internalMutation({
     canonicalPayload(await lookupConvexSource(ctx, { ...args, input: JSON.parse(args.input) })),
 });
 export const begin = sourceMutation({
-  args: { ...identity, step: v.number(), generation: v.optional(v.number()) },
+  args: {
+    ...identity,
+    step: v.number(),
+    generation: v.optional(v.number()),
+    /** The submitting action runs this first step itself (its delayed fallback is pending). */
+    inline: v.optional(v.boolean()),
+  },
   returns: v.union(v.string(), v.null()),
   handler: async (ctx, args) => {
-    const active = await activeStep(ctx, { ...args, generation: args.generation ?? 0 });
+    const { inline, ...step } = args;
+    const active = await activeStep(
+      ctx,
+      { ...step, generation: args.generation ?? 0 },
+      inline ? undefined : (job, row) => inlineFallbackGate(ctx, args, job, row),
+    );
     if (!active) return null;
     if (sourceRetryExpired(active)) {
       await exhaustSourceExecution(ctx, args, active.row.lastFailure);
@@ -243,6 +261,34 @@ export const begin = sourceMutation({
     });
   },
 });
+/** The delayed fallback of an inline first step has started (review 0f10873e). The submitting
+ * action began that step right after the submit that created this row (`timing.queuedAt`), so
+ * while it may still be running (inside the worker lease from then) re-arm once to the end of that
+ * lease instead of running the step a second time (R1); no write marks the inline start. When the
+ * fallback does run, it renews the worker lease first: it starts late, and a long step's commit must
+ * not be fenced (R2). Any other begin passes through, with no read beyond the step's own. */
+async function inlineFallbackGate(
+  ctx: MutationCtx,
+  args: { projectId: Id<'hostedProjects'>; jobId: string; step: number; generation?: number },
+  job: LoadedSourceJob,
+  row: Parameters<StepGate>[1],
+): Promise<LoadedSourceJob | null> {
+  if (!row.inlineFallback || (row.generation ?? 0) !== (args.generation ?? 0)) return job;
+  const now = Date.now(),
+    leaseMs = job.control.workerLeaseMs,
+    started = row.timing?.queuedAt;
+  if (started !== undefined && !row.inlineRearmed && started + leaseMs > now) {
+    const scheduledId = await ctx.scheduler.runAfter(
+      started + leaseMs - now,
+      makeFunctionReference<'action'>('projectConvexSource:step'),
+      { projectId: args.projectId, jobId: args.jobId, step: args.step, generation: row.generation ?? 0 },
+    );
+    await ctx.db.patch(row._id, { scheduledId, inlineRearmed: true });
+    return null;
+  }
+  const control = { ...job.control, workerUntil: now + leaseMs };
+  return { ...(await saveSourceJob(ctx, args.projectId, job, { ...job, control }, now)), control };
+}
 export const commit = sourceMutation({
   args: {
     ...identity,
@@ -255,8 +301,11 @@ export const commit = sourceMutation({
     timing: v.optional(sourceStepTiming),
     /** The output manifest's exact text when small: publication then needs no R2 re-read. */
     result: v.optional(v.string()),
+    /** The committing action runs a published save's resolve chain itself (save-then-resolve). */
+    chain: v.optional(v.boolean()),
   },
-  returns: v.null(),
+  /** With a small result, the publication this commit made (`InlinePublication`); otherwise null. */
+  returns: v.union(v.string(), v.null()),
   handler: async (ctx, args) => {
     const active = await activeStep(ctx, { ...args, generation: args.generation ?? 0 });
     if (!active) return null;
@@ -294,6 +343,7 @@ export const commit = sourceMutation({
       step: args.step + 1,
       cursor: args.cursor,
       inlineFallback: undefined,
+      inlineRearmed: undefined,
       batchId: undefined,
       generation: undefined,
       failedAttempts: undefined,
@@ -311,21 +361,27 @@ export const commit = sourceMutation({
           : kind === 'compose'
             ? 'projectHostedComposeJobs'
             : 'projectHostedSyncJobs';
-      // A small save, sync or compose result the step produced itself goes straight to the publish
-      // mutation, which checks it against the job's signed output digest exactly as after an R2 read
-      // (and marks the output object). Anything else (a failure, a larger or missing result, such as
-      // a compose result with wide changed-path coverage) takes the complete action, which reads it back.
-      const inline = inlineSourceResult(kind, args.output, args.result);
+      // A small save, sync or compose result the step produced itself is published in this same
+      // transaction (1eef1b43: no scheduler hop), by the publish function that checks it against the
+      // job's signed output digest exactly as after an R2 read (and marks the output object). A
+      // publication refusal rolls this commit back, and the step settles as failed with that code.
+      // Anything else (a failure, a larger or missing result, such as a compose result with wide
+      // changed-path coverage) takes the complete action, which reads it back.
+      const published = inlineSourceResult(kind, args.output, args.result)
+        ? await publishSourceResult(
+            ctx,
+            kind as 'save' | 'sync' | 'compose',
+            { projectId: args.projectId, jobId: args.jobId, result: args.result! },
+            args.chain === true,
+          )
+        : null;
+      // A job with no operation row to publish (none in production) keeps the complete action.
+      if (published) return published;
       if (kind !== 'register-state')
-        await ctx.scheduler.runAfter(
-          0,
-          makeFunctionReference<'action' | 'mutation'>(`${api}:${inline ? 'publish' : 'complete'}`),
-          {
-            projectId: args.projectId,
-            jobId: args.jobId,
-            ...(inline ? { result: args.result } : {}),
-          },
-        );
+        await ctx.scheduler.runAfter(0, makeFunctionReference<'action'>(`${api}:complete`), {
+          projectId: args.projectId,
+          jobId: args.jobId,
+        });
     } else {
       const scheduledId = await ctx.scheduler.runAfter(
         0,
@@ -448,7 +504,12 @@ export const failed = sourceMutation({
           ),
           { projectId: args.projectId, jobId: args.jobId, step: args.step, generation },
         );
-        await ctx.db.patch(active.row._id, { generation, scheduledId, inlineFallback: undefined });
+        await ctx.db.patch(active.row._id, {
+          generation,
+          scheduledId,
+          inlineFallback: undefined,
+          inlineRearmed: undefined,
+        });
       }
     }
     return null;

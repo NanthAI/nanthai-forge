@@ -6,7 +6,7 @@ import { presignGet, r2Config } from './r2';
 import { findObject } from './projectObjectFind';
 import { packRange, packHeaders } from '../src/object-pack-range';
 import { invariant } from '../src/errors';
-import { smallSaveStateBytes } from '../src/hosted-source-small-save';
+import { smallSavePageBytes, smallSaveStateBytes } from '../src/hosted-source-small-save';
 
 /** One object's step location, marked for the step exactly as a `resolve` call would mark it. */
 export async function sourceObjectLocation(
@@ -50,7 +50,7 @@ export async function saveStepReads(ctx: MutationCtx, projectId: Id<'hostedProje
   if (
     state.request.pageCount !== 1 ||
     !pages ||
-    pages.size > 128 * 1024 ||
+    pages.size > smallSavePageBytes ||
     state.baseline.recipe ||
     state.baseline.object.size > smallSaveStateBytes
   )

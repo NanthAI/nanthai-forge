@@ -10,7 +10,7 @@ import { startSubmittedSource } from './projectSourceSubmitStart';
 import type { MutationCtx } from './server';
 import { loadSync, writeSyncState, hostedSyncInput, syncForJob } from './projectHostedSyncStore';
 import { enqueueSourceJob, loadSourceJob } from './projectSourceJobs';
-import { publishHostedSync } from './projectHostedSyncPublish';
+import { publishSyncJob } from './projectHostedSyncPublish';
 import { canonicalPayload, hostedPayloadHash } from '../src/hosted-source-operation';
 import { savePin } from '../src/hosted-save';
 import { blobStore } from './blobStore';
@@ -102,23 +102,7 @@ export async function submitHostedSync(
 export const publish = internalMutation({
   args: { ...jobIdentity, result: v.string() },
   returns: v.union(v.string(), v.null()),
-  handler: async (ctx, input) => {
-    const row = await syncForJob(ctx, input.projectId, input.jobId);
-    if (!row) return null;
-    if (row.culpritRunId)
-      await ctx.scheduler.runAfter(0, makeFunctionReference<'mutation'>('projectHostedCulprit:advance'), {
-        projectId: row.projectId,
-        runId: row.culpritRunId,
-      });
-    return canonicalPayload(
-      await publishHostedSync(ctx, {
-        projectId: input.projectId,
-        operationId: row.operationId,
-        actor: row.actor,
-        result: input.result,
-      }),
-    );
-  },
+  handler: (ctx, input) => publishSyncJob(ctx, input),
 });
 /** Only the small worker result manifest passes through the action, never source bytes. */
 export const resultDownload = internalMutation({

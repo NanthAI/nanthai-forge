@@ -41,7 +41,12 @@ type SaveExchange = Pick<ConvexExchange, 'client' | 'projectId' | 'uploadFile' |
   Partial<
     Pick<
       ConvexExchange,
-      'uploadLazyBatch' | 'commitObjects' | 'downloadToFile' | 'downloadBatch' | 'prepareDownloads'
+      | 'uploadLazyBatch'
+      | 'commitObjects'
+      | 'uploadPrepared'
+      | 'downloadToFile'
+      | 'downloadBatch'
+      | 'prepareDownloads'
     >
   >;
 /** What the server's strict save pages accept: nothing, ranges, or ranges plus cross-file facts. */
@@ -60,6 +65,10 @@ export type SaveContract = {
   overlapEvidence: OverlapEvidenceLevel;
   submitPage: boolean;
   submitRun?: boolean;
+  /** prepare-upload-targets: prepare takes the save's uploads and returns their targets. */
+  prepareTargets?: boolean;
+  /** source-run-publish: the submit action replies with the published outcome when its step finished. */
+  runPublish?: boolean;
   /** The resolve the server chains after this save (save-then-resolve); only a new request takes it. */
   then?: SaveThen;
 };
@@ -70,6 +79,8 @@ export const saveContract = (capabilities: {
   overlapEvidence: overlapEvidenceLevel(capabilities),
   submitPage: capabilities.features?.includes('save-submit-page') ?? false,
   submitRun: capabilities.features?.includes('source-submit-run') ?? false,
+  prepareTargets: capabilities.features?.includes('prepare-upload-targets') ?? false,
+  runPublish: capabilities.features?.includes('source-run-publish') ?? false,
 });
 const saveCommandSchema = z
   .object({ operationId: z.uuid(), message: z.string(), supersedeFinish: z.boolean().optional() })
@@ -126,35 +137,48 @@ export async function saveHostedLane(
   waitPrior?: (operationId: string, pending: unknown) => Promise<unknown>,
   /** The receipt's phase split (friction f15db544): clock reads only. */
   timing?: StepTimer,
+  /** Sees the submit action's published reply (`{terminal, state, chain?}`, source-run-publish). */
+  observe?: (reply: unknown) => void,
 ) {
   const features = typeof contract === 'object' ? contract : { overlapEvidence: contract, submitPage: false };
-  const first = await saveOnce(
-    root,
-    command,
-    exchange,
-    true,
-    features,
-    preserveConflicts,
-    continuation,
-    waitPrior,
-    timing,
-  );
-  return first === rebased
-    ? saveOnce(root, command, exchange, false, features, preserveConflicts, continuation, waitPrior, timing)
-    : first;
+  const once = (repair: boolean) =>
+    saveOnce(
+      root,
+      command,
+      exchange,
+      repair,
+      features,
+      preserveConflicts,
+      continuation,
+      waitPrior,
+      timing,
+      observe,
+    );
+  // A direct save refused for a recipe-only blob rebuilt its request the described way: once more.
+  let result = await once(true);
+  if (result === described) result = await once(true);
+  if (result === rebased) result = await once(false);
+  if (result === described) result = await once(false);
+  return result;
 }
+/** Direct saves (prepare-upload-targets) send these many uploads to prepare at most; the input is the 100th. */
+const directUploads = 99;
+const rawLimit = 2 * 1024 * 1024;
 const rebased = Symbol('rebased');
+const described = Symbol('described');
 async function saveOnce(
   root: string,
   command: { operationId: string; message: string; supersedeFinish?: boolean },
   exchange: SaveExchange,
   repair: boolean,
-  { overlapEvidence, submitPage, submitRun, then }: SaveContract,
+  contract: SaveContract,
   preserveConflicts: boolean,
   continuation: ConflictContinuation,
   waitPrior?: (operationId: string, pending: unknown) => Promise<unknown>,
   timing?: StepTimer,
+  observe?: (reply: unknown) => void,
 ) {
+  const { overlapEvidence, submitPage, submitRun, then, prepareTargets, runPublish } = contract;
   saveCommandSchema.parse(command);
   invariant(!lstatSync(root).isSymbolicLink(), 'UNSAFE_PATH', 'Checkout directory must be real.');
   root = realpathSync(root);
@@ -206,17 +230,32 @@ async function saveOnce(
   // save makes one verifying commit action instead of two. Nothing reads them before that commit:
   // preparation names only their pins, and staging checks their committed bindings.
   const deferred = exchange.uploadLazyBatch && exchange.commitObjects ? ([] as { id: string }[]) : undefined;
+  // A direct save (prepare-upload-targets) names every captured raw blob as `{object, recipe: null}`
+  // without asking first, and its one prepare returns the targets of those blobs, its pages and its
+  // input, so the uploads go in one PUT wave. The server refuses (before any operation) a blob stored
+  // only as a recipe; the `describe` marker then sends this save the original way.
+  const files = [...new Map(capture.files.map(file => [file.pin.sha256, file])).values()],
+    describeMarker = join(directory, 'describe');
+  let direct =
+    !!prepareTargets &&
+    !!deferred &&
+    !!exchange.uploadPrepared &&
+    !checkoutPathExists(describeMarker) &&
+    files.every(file => file.pin.size <= rawLimit);
   let request: SaveRequest;
   if (checkoutPathExists(requestPath)) {
     request = saveRequestSchema.parse(JSON.parse(readFileSync(requestPath, 'utf8')));
+    direct &&=
+      files.length + JSON.parse(readFileSync(join(directory, 'pages.json'), 'utf8')).length <= directUploads;
     // A retry before the commit below re-sends the staged bytes it still holds: stored members are
     // skipped, and an uncommitted one is prepared again under its create-only key.
-    if (deferred && !checkoutPathExists(acknowledged))
+    if (deferred && !direct && !checkoutPathExists(acknowledged))
       await uploadCapturedFiles(capture, directory, exchange, new Set(), deferred);
   } else {
-    const raw = new Set<string>();
-    await uploadCapturedFiles(capture, directory, exchange, raw, deferred);
     const changes: SaveChange[] = structuredClone(capture.changes);
+    if (direct && files.length + buildSavePages(changes).pages.length > directUploads) direct = false;
+    const raw = new Set<string>(direct ? files.map(file => file.pin.sha256) : []);
+    if (!direct) await uploadCapturedFiles(capture, directory, exchange, raw, deferred);
     const replacements = changes.filter(change => change.after && !raw.has(change.after.blob));
     for (let offset = 0; offset < replacements.length; offset += 100) {
       const window = replacements.slice(offset, offset + 100);
@@ -277,16 +316,34 @@ async function saveOnce(
   });
   const objects = hostedObjectWriter(exchange);
   const args = { projectId: exchange.projectId, operationId: command.operationId };
+  const pages: { pin: ContentPin; value: unknown }[] = JSON.parse(
+    readFileSync(join(directory, 'pages.json'), 'utf8'),
+  );
+  const uploads = direct
+    ? [
+        ...files.map(file => ({ pin: file.pin, read: () => readFileSync(join(directory, file.path)) })),
+        ...pages.map(page => ({ pin: page.pin, read: () => Buffer.from(saveBytes(page.value)) })),
+      ]
+    : null;
   let prepared;
   try {
     prepared = JSON.parse(
       await exchange.client.mutation(makeFunctionReference<'mutation'>('projectHostedSaves:prepare'), {
         projectId: exchange.projectId,
         request: canonicalPayload(request),
+        ...(uploads ? { uploads: uploads.map(({ pin }) => ({ digest: pin.sha256, size: pin.size })) } : {}),
       }),
     );
   } catch (error) {
     const refused = hostedActionError(error, 'save');
+    if (refused.code === 'SAVE_CONTENT_RECIPE' && direct) {
+      // Nothing began on the server: rebuild this request with described blobs, the original way.
+      workLocked(join(clientCacheRoot(root), 'lock'), () => {
+        for (const name of ['request.json', 'pages.json']) rmSync(join(directory, name), { force: true });
+        durableReplace(describeMarker, '');
+      });
+      return described;
+    }
     // A refusal began no server operation. Drop the retained capture so a later
     // save reads the working files again instead of resuming these stale bytes.
     if (refused.code === 'LANE_FINISH_ACTIVE' || refused.code === 'WORK_STALE') {
@@ -321,10 +378,15 @@ async function saveOnce(
     applyHostedSaveReceipt(root, capture, request, prepared.terminal);
     return prepared.terminal;
   }
-  const pages: { pin: ContentPin; value: unknown }[] = JSON.parse(
-    readFileSync(join(directory, 'pages.json'), 'utf8'),
-  );
-  if (exchange.uploadLazyBatch && prepared.input) {
+  if (uploads && prepared.targets && prepared.input) {
+    // One PUT wave: the changed blobs, the delta pages and the input, all prepared by that call.
+    const input = prepared.input;
+    await exchange.uploadPrepared!(
+      [...uploads, { pin: savePin(input), read: () => Buffer.from(saveBytes(input)) }],
+      prepared.targets,
+      deferred!,
+    );
+  } else if (exchange.uploadLazyBatch && prepared.input) {
     const metadata = [...pages.map(page => page.value), prepared.input];
     await exchange.uploadLazyBatch(
       metadata.map(value => ({
@@ -350,18 +412,31 @@ async function saveOnce(
   }
   timing?.mark('upload');
   if (run) {
-    const result = JSON.parse(
+    const inputText = canonicalPayload(prepared.input);
+    const reply = JSON.parse(
       await exchange.client.action(makeFunctionReference<'action'>('projectSourceRun:submit'), {
         ...args,
         kind: 'save',
         ...(committedInRun.length ? { objects: committedInRun } : {}),
         ...(last === null ? {} : { index: last, page: canonicalPayload(pages[last]!.value) }),
+        // source-run-publish: the outcome in the reply when the step finished, and the input inline.
+        ...(runPublish
+          ? {
+              progress: true,
+              ...(Buffer.byteLength(inputText) <= 64 * 1024 ? { input: inputText } : {}),
+            }
+          : {}),
       }),
     );
     writeFileSync(acknowledged, '', { mode: 0o600 });
     dropStagedBlobs(directory);
     markLandStep('saveSubmitted');
     timing?.mark('submit');
+    const result = reply?.terminal?.outcome ? reply.terminal : reply;
+    if (result !== reply) {
+      timing?.server(reply);
+      observe?.(reply);
+    }
     if (result.outcome) applyHostedSaveReceipt(root, capture, request, result);
     return result;
   }

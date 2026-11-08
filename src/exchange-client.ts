@@ -14,7 +14,7 @@ import type { ConvexHttpClient } from 'convex/browser';
 import { makeFunctionReference } from 'convex/server';
 import type { ContentPin, ExchangeTransport } from './native-exchange.js';
 import { mapExchange } from './exchange-parallel.js';
-import { uploadPhysicalObjects } from './exchange-upload.js';
+import { putPreparedObjects, uploadPhysicalObjects } from './exchange-upload.js';
 import { ConvexExchangeBlobs } from './exchange-blobs.js';
 import { invariant } from './errors.js';
 import { digest } from './hash.js';
@@ -242,6 +242,15 @@ export class ConvexExchange implements ExchangeTransport {
       recipeSize: recipePin.size,
     });
     return { uploadedObjects, uploadedBytes, uploadedLogicalObjects: uploadedObjects ? 1 : 0 };
+  }
+  /** PUT objects whose targets a source prepare returned (prepare-upload-targets); the sent rows
+   * join `deferCommit` for the caller's one verifying commit. */
+  uploadPrepared(
+    objects: { pin: ContentPin; read: () => Buffer | Promise<Buffer> }[],
+    rows: Parameters<typeof putPreparedObjects>[1],
+    deferCommit: { id: string }[],
+  ) {
+    return putPreparedObjects(objects, rows, deferCommit, this.blobs);
   }
   /** Commit raw uploads collected with `deferCommit`: one verifying action per 100 objects. */
   async commitObjects(objects: { id: string }[]) {

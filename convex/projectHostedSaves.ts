@@ -24,6 +24,9 @@ import { report } from './errors';
 import { chainProgress } from './projectHostedResolveChainProgress';
 import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
+import { findObject } from './projectObjectFind';
+import { isR2Object, isStored } from './projectObjectFields';
+import { prepareObjectTargets } from './projectObjects';
 
 const identity = { projectId: v.id('hostedProjects'), operationId: v.string() };
 async function caller(
@@ -35,8 +38,45 @@ async function caller(
   await activeProject(ctx, input.projectId, user.subject);
   return { projectId: input.projectId, operationId: input.operationId, actor: user.subject };
 }
+const uploadPin = v.object({ digest: v.string(), size: v.number() });
+/** A captured raw blob a direct save names as `{object: pin, recipe: null}` without first asking
+ * the server (prepare-upload-targets) must not be stored only as a recipe, whose describe would
+ * say otherwise: refused before any operation exists, and the CLI then describes it as before. */
+async function refuseRecipeUploads(
+  ctx: MutationCtx,
+  projectId: Id<'hostedProjects'>,
+  uploads: readonly { digest: string; size: number }[],
+) {
+  for (const pin of uploads) {
+    const row = await findObject(ctx, projectId, pin.digest);
+    invariant(
+      !row || !isStored(row) || row.removed || isR2Object(row) || !!row.storageId,
+      'SAVE_CONTENT_RECIPE',
+      'A changed file is stored as a recipe; describe it before saving.',
+    );
+  }
+}
+/** Each upload's target (`projectObjects:prepareBatch` rows), the save input's last. */
+async function saveTargets(
+  ctx: MutationCtx,
+  auth: SaveIdentity,
+  uploads: readonly { digest: string; size: number }[],
+  input: { sha256: string; size: number } | null,
+) {
+  return prepareObjectTargets(ctx, auth.projectId, auth.actor, [
+    ...uploads,
+    ...(input ? [{ digest: input.sha256, size: input.size }] : []),
+  ]);
+}
 export const prepare = mutation({
-  args: { projectId: v.id('hostedProjects'), request: v.string() },
+  args: {
+    projectId: v.id('hostedProjects'),
+    request: v.string(),
+    /** Feature prepare-upload-targets: the pins this save will upload (its new raw blobs and its
+     * delta pages, at most 99); the reply's `targets` prepares them and the save input, so the CLI
+     * makes no `projectObjects:prepareBatch` call. Its raw blobs must not be recipe-only objects. */
+    uploads: v.optional(v.array(uploadPin)),
+  },
   returns: v.string(),
   handler: async (ctx, input) => {
     try {
@@ -75,16 +115,27 @@ export const prepare = mutation({
           ids: { save: crypto.randomUUID(), job: crypto.randomUUID(), jobOperation: crypto.randomUUID() },
         },
       });
+      invariant(
+        !input.uploads || input.uploads.length <= 99,
+        'BAD_ARGUMENT',
+        'Prepare at most 99 save uploads at once.',
+      );
       if (prepared.replayed) {
         const old = await saveRow(ctx, auth);
         invariant(old, 'SOURCE_UNAVAILABLE', 'The original save preparation is unavailable.');
         const state = JSON.parse(old.value);
+        const replayInput = request.pages ? hostedSaveInput(state, prepared.operation.firstAttempt.at) : null;
         return canonicalPayload({
           state,
           terminal: prepared.operation.terminal,
-          input: request.pages ? hostedSaveInput(state, prepared.operation.firstAttempt.at) : null,
+          input: replayInput,
+          ...(input.uploads && !prepared.operation.terminal
+            ? { targets: await saveTargets(ctx, auth, input.uploads, replayInput && savePin(replayInput)) }
+            : {}),
         });
       }
+      // A refusal throws, and the whole transaction (this operation included) rolls back.
+      if (input.uploads) await refuseRecipeUploads(ctx, input.projectId, input.uploads);
       const lane = await saveLane(ctx, { ...auth, laneId: request.laneId });
       // Only the Lane author or the project owner saves over a Lane (Issue 8809fba5).
       await requireMemberAuthorityById(ctx, input.projectId, lane.actor, auth.actor, 'Lane');
@@ -109,10 +160,14 @@ export const prepare = mutation({
         jobId: prepared.operation.firstAttempt.ids.job!,
         value: canonicalPayload(state),
       });
+      const saveInput = request.pages ? hostedSaveInput(state, prepared.operation.firstAttempt.at) : null;
       return canonicalPayload({
         state,
         terminal: null,
-        input: request.pages ? hostedSaveInput(state, prepared.operation.firstAttempt.at) : null,
+        input: saveInput,
+        ...(input.uploads
+          ? { targets: await saveTargets(ctx, auth, input.uploads, saveInput && savePin(saveInput)) }
+          : {}),
       });
     } catch (error) {
       return report(error);

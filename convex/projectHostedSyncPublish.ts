@@ -1,4 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
+import { makeFunctionReference } from 'convex/server';
+import type { Id } from './_generated/dataModel';
+import { syncForJob } from './projectHostedSyncStore';
 import type { MutationCtx } from './_generated/server';
 import { loadSync, hostedSyncInput, writeSyncState } from './projectHostedSyncStore';
 import { finishHostedOperation } from './projectHostedOperations';
@@ -282,5 +285,26 @@ export async function publishHostedSync(ctx: MutationCtx, input: SaveIdentity & 
       }),
     },
     'completed',
+  );
+}
+/** The publish transaction for this job: the scheduled `publish`, or a step's terminal commit. */
+export async function publishSyncJob(
+  ctx: MutationCtx,
+  input: { projectId: Id<'hostedProjects'>; jobId: string; result: string },
+) {
+  const row = await syncForJob(ctx, input.projectId, input.jobId);
+  if (!row) return null;
+  if (row.culpritRunId)
+    await ctx.scheduler.runAfter(0, makeFunctionReference<'mutation'>('projectHostedCulprit:advance'), {
+      projectId: row.projectId,
+      runId: row.culpritRunId,
+    });
+  return canonicalPayload(
+    await publishHostedSync(ctx, {
+      projectId: input.projectId,
+      operationId: row.operationId,
+      actor: row.actor,
+      result: input.result,
+    }),
   );
 }

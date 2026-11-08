@@ -9,6 +9,7 @@ import { r2Key } from './r2';
 import { resolveSyncRequest } from '../src/hosted-resolve-chain';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { report } from './errors';
+import type { Id } from './_generated/dataModel';
 
 // The save-then-resolve chain's transactions (projectHostedResolveChain:run), all for the save's own
 // actor, each a full transaction: a refused step rolls back alone and is recorded on the save.
@@ -22,6 +23,12 @@ export const prepare = internalMutation({
   handler: async (ctx, args) => {
     try {
       const { state, operation } = await loadSave(ctx, args);
+      // The publication's delayed fallback of this chain is not needed once the chain runs here;
+      // when this IS that fallback, its own run is in progress, not pending, and stays.
+      if (state.chainFallbackId) {
+        const fallback = await ctx.db.system.get(state.chainFallbackId as Id<'_scheduled_functions'>);
+        if (fallback?.state.kind === 'pending') await ctx.scheduler.cancel(fallback._id);
+      }
       const then = state.request.then;
       if (!then || operation.terminal?.outcome.status !== 'completed') return null;
       const request = resolveSyncRequest(then, state.request.laneId, operation.terminal.outcome.result);

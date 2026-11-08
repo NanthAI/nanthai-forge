@@ -145,33 +145,46 @@ export const prepareBatch = mutation({
   returns: v.array(preparedObject),
   handler: async (ctx, { projectId, objects }) => {
     try {
-      invariant(
-        objects.length <= 100 && objects.every(p => valid(p.digest, p.size)),
-        'BAD_ARGUMENT',
-        'Prepare content in pages of at most 100 valid pins.',
-      );
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to exchange project source.');
-      // One atomic mutation has one authority snapshot for this project.
-      const project = await activeProject(ctx, projectId, user.subject);
-      // Every project writes R2, including legacy projects created before R2 was the only path.
-      const r2 = r2Config();
-      if (!project.r2StorageUsed) await ctx.db.patch(projectId, { r2StorageUsed: true });
-      const result = [],
-        reserved: number[] = [];
-      for (const pin of objects) {
-        const prepared = await prepareObject(ctx, { projectId, ...pin }, true, r2);
-        if (prepared.created) reserved.push(pin.size);
-        result.push(prepared);
-      }
-      // A batch over quota throws here, so none of its reservations are kept.
-      await chargeStorage(ctx, project, reserved);
-      return result;
+      return await prepareObjectTargets(ctx, projectId, user.subject, objects);
     } catch (error) {
       return report(error);
     }
   },
 });
+export type PreparedObject = Infer<typeof preparedObject>;
+/** The `prepareBatch` transaction for an authenticated actor, also run inside a save or sync
+ * prepare that hands back its upload targets (feature prepare-upload-targets): one row per pin, in
+ * order, each stored or with its create-only, checksum-bound R2 PUT target. */
+export async function prepareObjectTargets(
+  ctx: MutationCtx,
+  projectId: Id<'hostedProjects'>,
+  actor: string,
+  objects: readonly { digest: string; size: number }[],
+): Promise<PreparedObject[]> {
+  invariant(
+    objects.length <= 100 && objects.every(p => valid(p.digest, p.size)),
+    'BAD_ARGUMENT',
+    'Prepare content in pages of at most 100 valid pins.',
+  );
+  // One atomic mutation has one authority snapshot for this project.
+  const project = await activeProject(ctx, projectId, actor);
+  if (!objects.length) return [];
+  // Every project writes R2, including legacy projects created before R2 was the only path.
+  const r2 = r2Config();
+  if (!project.r2StorageUsed) await ctx.db.patch(projectId, { r2StorageUsed: true });
+  const result = [],
+    reserved: number[] = [];
+  for (const pin of objects) {
+    const prepared = await prepareObject(ctx, { projectId, ...pin }, true, r2);
+    if (prepared.created) reserved.push(pin.size);
+    result.push(prepared);
+  }
+  // A batch over quota throws here, so none of its reservations are kept.
+  await chargeStorage(ctx, project, reserved);
+  return result;
+}
 // Read-only scheduling hints never reserve work. Narrow prepareBatch rechecks
 // authority and original bindings without retaining this broad changing read set.
 // Existing pending rows remain immediately eligible when no fresh rows remain.

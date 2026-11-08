@@ -103,14 +103,16 @@ export const commitBatch = action({
     }
   },
 });
-/** The commit round of `commitBatch`, also run by `projectSourceRun:submit` before its submit. */
+/** The commit round of `commitBatch`, also run by `projectSourceRun:submit` before its submit.
+ * Returns the pins this call committed after its HEAD matched their exact size AND their sha256
+ * checksum (rows already committed, or a HEAD without a checksum, are not listed). */
 export async function commitObjects(
   ctx: ActionCtx,
   actor: string,
   objects: readonly { id: Id<'projectObjects'> }[],
-) {
+): Promise<{ sha256: string; size: number }[]> {
   invariant(objects.length <= 100, 'BAD_ARGUMENT', 'Commit content in pages of at most 100.');
-  if (!objects.length) return;
+  if (!objects.length) return [];
   const rows: { id: Id<'projectObjects'>; digest: string; size: number; key: string }[] = await ctx.runQuery(
     internal.projectObjectCommit.pendingRows,
     {
@@ -118,13 +120,21 @@ export async function commitObjects(
       ids: objects.map(object => object.id),
     },
   );
-  if (!rows.length) return;
+  if (!rows.length) return [];
   const config = r2Config();
   const results = await Promise.all(
-    rows.map(async row => ({ row, failure: mismatch(row, await headObject(config, row.key)) })),
+    rows.map(async row => {
+      const head = await headObject(config, row.key);
+      return { row, head, failure: mismatch(row, head) };
+    }),
   );
   const verified = results.filter(r => !r.failure).map(r => r.row);
   if (verified.length) await ctx.runMutation(internal.projectObjectCommit.markCommitted, { rows: verified });
   const failed = results.find(r => r.failure);
   invariant(!failed, failed?.failure?.[0] ?? '', failed?.failure?.[1] ?? '');
+  return results.flatMap(({ row, head }) =>
+    head.status === 'ok' && head.checksum === checksumOf(row.digest)
+      ? [{ sha256: row.digest, size: row.size }]
+      : [],
+  );
 }

@@ -17,12 +17,21 @@ const nodeWorker = await import(moduleUrl('../convex/projectConvexSourceNode.ts'
 const objects = await import(moduleUrl('../convex/projectConvexSourceObjects.ts'));
 const jobApi = await import(moduleUrl('../convex/projectSourceJobApi.ts'));
 const jobs = await import(moduleUrl('../convex/projectSourceJobs.ts'));
+/** The save's own progress (its terminal receipt once published). */
+async function savedProgress(s) {
+  return JSON.parse(
+    await s.call('savedProgress', saveApi.progress, {
+      projectId: s.projectId,
+      operationId: [...s.tables.projectHostedSaves.values()][0].operationId,
+    }),
+  );
+}
 async function fixture() {
   const s = await saveFixture(),
     blobs = new Map(),
     invocations = [],
     failures = new Set(),
-    hooks = { failInsert: false, failStore: false, scheduled: 'pending' };
+    hooks = { failInsert: false, failStore: false, scheduled: 'pending', dropResult: false };
   const functions = {
     'projectConvexSourceStore:dispatch': store.dispatch,
     'projectConvexSourceStore:start': store.start,
@@ -94,6 +103,11 @@ async function fixture() {
       const spec = JSON.parse(functions[name].exportArgs());
       if (spec.type === 'object')
         for (const key of Object.keys(input ?? {})) assert(key in spec.value, `${name}: extra field ${key}`);
+      // A result the step does not carry inline (as one over 64 KiB): the complete action reads it.
+      if (hooks.dropResult && name === 'projectConvexSourceStore:commit') {
+        const { result: _result, ...rest } = input;
+        input = rest;
+      }
       return call(name, functions[name], input);
     };
   });
@@ -232,9 +246,10 @@ test('ten-file save has one execution, atomic progress, lost-reply recovery and 
     const size = s.scheduled.length;
     await s.execute(step);
     assert.equal(s.scheduled.length, size, 'lost commit replay is a no-op');
-    // The small result manifest rides on the commit: publication needs no complete action.
-    assert.equal(s.scheduled[0].name, 'projectHostedSaveJobs:publish');
-    assert.equal(typeof s.scheduled[0].args.result, 'string');
+    // The small result manifest rides on the commit, which publishes it in the same transaction
+    // (1eef1b43): no publication hop is scheduled, and none can be lost after the commit.
+    assert(!s.scheduled.some(task => /:(publish|complete)$/.test(task.name)), JSON.stringify(s.scheduled));
+    assert.equal((await savedProgress(s)).terminal.outcome.status, 'completed');
     const calls = s.invocations.filter(n => !['retryStart'].includes(n)).length;
     // Include source storage accesses in addition to every explicit function.
     const count = s.countsIO();
@@ -305,18 +320,13 @@ test('normal 10-file save stays within the end-to-end call budget', async t => {
       'small saves never enter Node or the fan-out pool',
     );
     assert.equal(s.tables.projectSourceTasks.size, 0);
-    assert.equal(s.scheduled.length, 1, 'only the existing publication action remains');
-    await s.call('resultDownloadConvex', saveJobs.resultDownload, { projectId: s.projectId, jobId: job.id });
-    const row = [...s.tables.projectObjects.values()].find(r => r.digest === job.output.sha256);
-    const manifest = (await storedBytes(s, row)).toString();
-    await s.call('publishConvex', saveJobs.publish, {
-      projectId: s.projectId,
-      jobId: job.id,
-      result: manifest,
-    });
+    assert.equal(job.status, 'completed');
+    // The step's commit published the save itself: no publication action remains (1eef1b43).
+    assert.equal(s.scheduled.length, 0, 'no publication hop');
+    assert.equal((await savedProgress(s)).terminal.outcome.status, 'completed');
     const io = s.countsIO(),
       setup = s.counts.filter(c => ['prepare', 'stage', 'progress'].includes(c.name)).length;
-    const calls = s.invocations.length + setup + 1; // complete action itself; result body read above.
+    const calls = s.invocations.length + setup;
     assert(
       calls + io.stores + io.gets <= 30,
       JSON.stringify({ calls, io, setup, invocations: s.invocations }),
@@ -420,7 +430,7 @@ test('a step that failed on a platform error is retried after the 60 s lease exp
     assert.equal(done.status, 'completed');
     assert.equal(done.executionId, job.executionId);
     assert.equal(s.tables.projectSourceSteps.size, 1, 'one execution');
-    assert.equal(s.scheduled[0].name, 'projectHostedSaveJobs:publish');
+    assert.equal((await savedProgress(s)).terminal.outcome.status, 'completed', 'published in the commit');
   } finally {
     Date.now = real;
     s.restore();
@@ -494,7 +504,7 @@ test('an expired pending step is renewed in place by explicit replay, without du
   }
 });
 
-test('lost publication delivery becomes retryable instead of staying submitted forever', async () => {
+test('lost publication delivery of a result the step did not inline becomes retryable instead of staying submitted forever', async () => {
   const s = await fixture();
   const real = Date.now;
   let offset = 0;
@@ -502,7 +512,11 @@ test('lost publication delivery becomes retryable instead of staying submitted f
   try {
     await s.submit();
     await s.execute(s.scheduled.shift());
+    s.hooks.dropResult = true;
     await s.execute(s.scheduled.shift());
+    s.hooks.dropResult = false;
+    // Only a result read back by the complete action has a separate delivery to lose.
+    assert.equal(s.scheduled.at(-1).name, 'projectHostedSaveJobs:complete');
     const job = await s.load();
     offset += 61000;
     const args = {

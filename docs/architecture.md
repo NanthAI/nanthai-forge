@@ -1159,6 +1159,15 @@ parallel and the changed blobs' descriptors resolve during the baseline read. A 
 this one-commit round that retries a save the current CLI left between its PUTs and that commit
 does not re-send the bytes, and its stages fail `SOURCE_UNAVAILABLE` until a current CLI retries.
 
+When the server advertises `prepare-upload-targets`, a save whose changed files are each at most
+2 MiB (at most 99 uploads with its pages) names its new blobs raw (`{object, recipe: null}`)
+without a describe call and sends their pins and its pages' pins to `projectHostedSaves:prepare`
+as `uploads`. That one transaction returns every upload target, the input's last, so the blobs,
+pages and input go up in one PUT wave with no `prepareBatch` round. It refuses
+`SAVE_CONTENT_RECIPE`, before any operation begins, when such a blob is stored only as a recipe;
+the CLI then rebuilds that request the described way. A sync prepare called with `targets` returns
+its input's target the same way.
+
 When the server advertises `source-submit-run`, a save with no separate `stage` call, a sync and a
 compose submit through one `projectSourceRun:submit` action. It runs the same HEAD-verifying
 commit round on the caller's deferred uploads (at most 100; a larger save commits the rest first),
@@ -1166,13 +1175,25 @@ then the submit mutation, which also dispatches in the same transaction, then st
 action itself. Neither the dispatch nor the first step waits for the scheduler, and step budgets
 are unchanged: a job that step 0 does not finish continues on scheduled steps. The dispatch
 schedules a fallback step 30 s out, inside the 60 s worker lease. The step's commit cancels it
-when it is still pending. A transient failure of the inline step moves the retry to the normal
+when it is still pending. A fallback that fires while the inline run may still be going (inside
+the lease the submit opened) re-arms once to that lease's end instead of running the step a second
+time; a fallback that does run the step renews the worker lease first, so its commit is not fenced. A transient failure of the inline step moves the retry to the normal
 backoff, and an action that dies before its step leaves the fallback to run it. A save acknowledges
 its delta only after the action returns, so a lost reply re-sends the same request and converges.
+The commit round returns the uploads whose HEAD confirmed their checksum, and the small save step
+does not download those again to hash them: the create-only checksum-bound PUT and that HEAD
+already bind them, and every other read is still hash-verified. The caller may send the job input
+text (at most 64 KiB) with the submit; the step reads it from memory only when its digest and size
+equal the job's input pin. With `source-run-publish`, an action whose step published the job
+replies `{terminal, state}` (the receipt and its server timing), so the CLI opens no progress wait.
 
 When the server advertises `save-then-resolve`, a resolve's save request names the sync that
-follows it (`then`: its operation id, authority epoch, lifecycle version and message). The
-save's publication schedules `projectHostedResolveChain:run`, one hop. That action builds the resolve request
+follows it (`then`: its operation id, authority epoch, lifecycle version and message); the CLI
+retains `then` in its journal before the save and builds its own resolve request from that value.
+When the save's step published inside `projectSourceRun:submit`, that action runs the chain at
+once and adds it to its reply as `chain` (the resolve receipt, or `submitted` while the chained
+step continues); the publication schedules `projectHostedResolveChain:run` only as a fallback 5 s
+out, which the chain's prepare cancels. Any other publication schedules it at once. The chain builds the resolve request
 from the save's own result with the same function the CLI uses, prepares it as the save's actor,
 writes its input to R2 (checksum-bound PUT, then HEAD), submits with the dispatch inline and runs
 the first step. `projectHostedSaves:progress` reports that sync as `chain`, so the CLI's one save
@@ -1181,10 +1202,11 @@ itself, replaying the identical idempotent request, when the chain records a fai
 submit (`chainFailure`), or when 10 s pass after the save completed with no chained receipt.
 
 A trusted source-job completion schedules the save finalizer independently of the
-editing client. A save, sync or compose step whose result manifest is at most 64 KiB passes
-it on its terminal commit straight to the publish mutation, which checks it against
-the job's signed output digest; any other result goes through the finalizing action,
-which reads it back from storage. One publication transaction verifies the original job/input/output and
+editing client. A save, sync or compose step whose result manifest is at most 64 KiB publishes
+it inside its terminal commit, in the same transaction and with the same publish function, which
+checks it against the job's signed output digest; a publication refusal rolls the commit back and
+the step settles as failed. Any other result goes through the finalizing action, which reads it
+back from storage. One publication transaction verifies the original job/input/output and
 committed State, compares Lane source/record/lifecycle versions, appends the save,
 updates that Lane and retains the terminal operation receipt. A stale attempt
 retains its original delta and failure receipt. Registered States are immutable

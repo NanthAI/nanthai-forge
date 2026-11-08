@@ -194,3 +194,41 @@ export function uploadPhysicalObjects(
     schedule();
   });
 }
+/** PUT objects whose targets a source prepare already returned (feature prepare-upload-targets):
+ * one row per object, in order, as `projectObjects:prepareBatch` returns them. Stored rows are
+ * skipped; every other row's create-only, checksum-bound PUT runs at once (16 in flight), and its
+ * row joins `deferCommit` for the caller's one verifying commit. Bytes are checked against their
+ * pin before they are sent. A lost reply retries the same operation, whose prepare replays. */
+export async function putPreparedObjects(
+  objects: readonly Upload[],
+  rows: readonly Omit<Prepared, 'index'>[],
+  deferCommit: { id: string }[],
+  blobs?: Pick<ExchangeBlobs, 'put'>,
+) {
+  invariant(
+    rows.length === objects.length,
+    'EXCHANGE_UPLOAD_UNKNOWN',
+    'Upload preparation did not identify the original content window.',
+  );
+  const sent = await mapExchange([...rows.keys()], 16, async index => {
+    const row = rows[index]!,
+      object = objects[index]!;
+    if (row.stored) return null;
+    invariant(row.target, 'EXCHANGE_UPLOAD_UNKNOWN', 'Original upload destination is unavailable.');
+    const bytes = await object.read();
+    invariant(
+      bytes.length === object.pin.size && digest(bytes) === object.pin.sha256,
+      'EXCHANGE_SOURCE_CHANGED',
+      'Content differs from its original physical pin.',
+    );
+    await (blobs?.put ?? putTarget)(row.target, bytes);
+    return { id: row.id };
+  });
+  // Each id once: a save names a blob that is also a page only by coincidence of content.
+  const seen = new Set(deferCommit.map(row => row.id));
+  for (const row of sent)
+    if (row && !seen.has(row.id)) {
+      seen.add(row.id);
+      deferCommit.push(row);
+    }
+}

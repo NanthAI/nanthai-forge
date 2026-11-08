@@ -18,6 +18,8 @@ import { hostedRecordSchema } from '../src/hosted-records';
 import { canonicalPayload, hostedPayloadHash } from '../src/hosted-source-operation';
 import { invariant } from '../src/errors';
 import { report } from './errors';
+import { savePin } from '../src/hosted-save';
+import { prepareObjectTargets } from './projectObjects';
 const identity = { projectId: v.id('hostedProjects'), operationId: v.string() };
 const laneOrigin = (lane: NonNullable<SyncState['lane']>) => ({
   laneId: lane.id,
@@ -35,13 +37,29 @@ async function caller(
 }
 /** Pin once. No current-source substitution on retry, and no source bytes in this mutation. */
 export const prepare = receiptMutation({
-  args: { projectId: v.id('hostedProjects'), request: v.string() },
+  args: {
+    projectId: v.id('hostedProjects'),
+    request: v.string(),
+    /** Feature prepare-upload-targets: the reply's `targets` prepares the sync input's upload
+     * (a `projectObjects:prepareBatch` row), so the CLI makes no separate prepare call. */
+    targets: v.optional(v.boolean()),
+  },
   returns: v.string(),
   handler: async (ctx, input) => {
     try {
       const request = syncRequestSchema.parse(JSON.parse(input.request)),
         auth = await caller(ctx, { projectId: input.projectId, operationId: request.operationId });
-      return await prepareHostedSync(ctx, auth, request);
+      const prepared = await prepareHostedSync(ctx, auth, request);
+      if (!input.targets) return prepared;
+      const value = JSON.parse(prepared) as { terminal?: unknown; input?: unknown };
+      if (value.terminal || !value.input) return prepared;
+      const pin = savePin(value.input);
+      return canonicalPayload({
+        ...value,
+        targets: await prepareObjectTargets(ctx, auth.projectId, auth.actor, [
+          { digest: pin.sha256, size: pin.size },
+        ]),
+      });
     } catch (error) {
       return report(error);
     }

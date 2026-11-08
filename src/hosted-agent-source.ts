@@ -62,10 +62,23 @@ export async function driveAgentSource(
   /** Report a WORK_STALE prepare refusal as PrepareRefused (the caller rebuilds its pins). */
   refusable = false,
 ) {
-  let prepared: SourceProgress;
+  const features = session.capabilities.features ?? [],
+    // prepare-upload-targets: a sync prepare also returns its input's upload target, asked only
+    // by a client that PUTs to it (no pending row is prepared for nothing).
+    targets =
+      kind === 'Sync' &&
+      !pages.length &&
+      features.includes('prepare-upload-targets') &&
+      features.includes('source-submit-run') &&
+      !!session.exchange.uploadPrepared &&
+      !!session.exchange.uploadLazyBatch;
+  let prepared: SourceProgress & {
+    targets?: Parameters<NonNullable<HostedAgentSession['exchange']['uploadPrepared']>>[1];
+  };
   try {
-    prepared = await session.mutation<SourceProgress>(`projectHosted${kind}:prepare`, {
+    prepared = await session.mutation<typeof prepared>(`projectHosted${kind}:prepare`, {
       request: canonicalPayload(request),
+      ...(targets ? { targets: true } : {}),
     });
   } catch (error) {
     // prepare is one transaction: a refusal began no server operation.
@@ -91,16 +104,22 @@ export async function driveAgentSource(
   if (progress.terminal) return progress.terminal;
   invariant(progress.input, 'SOURCE_UNAVAILABLE', 'The prepared source input is unavailable.');
   const input = Buffer.from(saveBytes(progress.input));
-  if (session.capabilities.features?.includes('source-submit-run') && session.exchange.uploadLazyBatch) {
+  if (features.includes('source-submit-run') && session.exchange.uploadLazyBatch) {
     // One action commits the input, submits and runs the first step (no scheduler hop).
-    const deferred: { id: string }[] = [];
-    await session.exchange.uploadLazyBatch([{ pin: savePin(progress.input), read: () => input }], {
-      deferCommit: deferred,
-    });
+    const deferred: { id: string }[] = [],
+      upload = [{ pin: savePin(progress.input), read: () => input }];
+    if (progress === prepared && prepared.targets && session.exchange.uploadPrepared)
+      await session.exchange.uploadPrepared(upload, prepared.targets, deferred);
+    else await session.exchange.uploadLazyBatch(upload, { deferCommit: deferred });
+    const published = features.includes('source-run-publish');
     return session.action('projectSourceRun:submit', {
       operationId,
       kind: kind === 'Sync' ? 'sync' : 'compose',
       ...(deferred.length ? { objects: deferred } : {}),
+      // source-run-publish: the outcome in the reply, and the small input inline (no download back).
+      ...(published
+        ? { progress: true, ...(input.length <= 64 * 1024 ? { input: input.toString('utf8') } : {}) }
+        : {}),
     });
   }
   await session.exchange.upload(savePin(progress.input), input);

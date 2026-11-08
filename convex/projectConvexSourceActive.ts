@@ -12,11 +12,17 @@ export const rowFor = (ctx: MutationCtx, projectId: Id<'hostedProjects'>, jobId:
     .query('projectSourceSteps')
     .withIndex('by_project_and_job', q => q.eq('projectId', projectId).eq('jobId', jobId))
     .unique();
+type StepRow = NonNullable<Awaited<ReturnType<typeof rowFor>>>;
+export type LoadedSourceJob = Awaited<ReturnType<typeof loadSourceJob>>;
+/** Runs on the loaded job and row before the lease check: `null` skips the step, a job continues
+ * with that (renewed) job. It reads nothing the step does not already read. */
+export type StepGate = (job: LoadedSourceJob, row: StepRow) => Promise<LoadedSourceJob | null>;
 export async function activeStep(
   ctx: MutationCtx,
   args: { projectId: Id<'hostedProjects'>; jobId: string; step: number; generation?: number; index?: number },
+  gate?: StepGate,
 ) {
-  const active = await sourceStep(ctx, args, true);
+  const active = await sourceStep(ctx, args, true, gate);
   if (
     active &&
     args.index === undefined &&
@@ -30,11 +36,14 @@ export async function sourceStep(
   ctx: MutationCtx,
   args: { projectId: Id<'hostedProjects'>; jobId: string; step: number },
   lease: boolean,
+  gate?: StepGate,
 ) {
-  const job = await loadSourceJob(ctx, args.projectId, args.jobId);
-  await hostedWriteProject(ctx, args.projectId, job.control.actor, job.authorityEpoch);
+  const loaded = await loadSourceJob(ctx, args.projectId, args.jobId);
+  await hostedWriteProject(ctx, args.projectId, loaded.control.actor, loaded.authorityEpoch);
   const row = await rowFor(ctx, args.projectId, args.jobId);
-  if (!row || sourceJobTerminal(job) || row.step !== args.step) return null;
+  if (!row || sourceJobTerminal(loaded) || row.step !== args.step) return null;
+  const job = gate ? await gate(loaded, row) : loaded;
+  if (!job) return null;
   invariant(
     row.dispatch === canonicalPayload(sourceDispatch(args.projectId, job)),
     'SOURCE_JOB_FENCED',

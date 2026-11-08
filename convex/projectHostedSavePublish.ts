@@ -25,7 +25,15 @@ import { invariant } from '../src/errors';
 
 /** One small transaction: exact signed worker evidence, committed immutable State,
  * Lane CAS, one save record and original terminal receipt. No page/history walk. */
-export async function publishHostedSave(ctx: MutationCtx, input: SaveIdentity & { result: string | null }) {
+/** How long a chain whose publication ran inside a step's commit waits before its scheduled
+ * fallback runs; the action that made that commit runs the chain at once and cancels it. */
+export const chainFallbackMs = 5_000;
+export async function publishHostedSave(
+  ctx: MutationCtx,
+  input: SaveIdentity & { result: string | null },
+  /** The caller runs the save-then-resolve chain itself (`runResolveChain`); only a fallback is scheduled. */
+  chainInline = false,
+) {
   const loaded = await loadSave(ctx, input, false),
     { row, state, operation } = loaded;
   if (operation.terminal) return operation.terminal;
@@ -175,19 +183,24 @@ export async function publishHostedSave(ctx: MutationCtx, input: SaveIdentity & 
   const serverTiming = state.request.pages
     ? await sourceServerTiming(ctx, input.projectId, row.jobId)
     : undefined;
+  // save-then-resolve: the resolve this save was made for starts from the action that published it
+  // (`chainInline`), behind a delayed fallback in case that action dies; otherwise one scheduled hop.
+  const chainFallbackId = state.request.then
+    ? String(
+        await ctx.scheduler.runAfter(
+          chainInline ? chainFallbackMs : 0,
+          makeFunctionReference<'action'>('projectHostedResolveChain:run'),
+          { projectId: input.projectId, actor: input.actor, operationId: input.operationId },
+        ),
+      )
+    : undefined;
   await writeSaveState(ctx, row._id, {
     ...state,
     status: 'completed',
     ...(serverTiming ? { serverTiming } : {}),
+    ...(chainInline && chainFallbackId ? { chainFallbackId } : {}),
   });
   await wakeLifecycleSave(ctx, input);
-  // save-then-resolve: one scheduled hop starts the resolve this save was made for.
-  if (state.request.then)
-    await ctx.scheduler.runAfter(0, makeFunctionReference<'action'>('projectHostedResolveChain:run'), {
-      projectId: input.projectId,
-      actor: input.actor,
-      operationId: input.operationId,
-    });
   return terminal;
 }
 export async function saveForJob(ctx: MutationCtx, projectId: Id<'hostedProjects'>, jobId: string) {
@@ -195,4 +208,20 @@ export async function saveForJob(ctx: MutationCtx, projectId: Id<'hostedProjects
     .query('projectHostedSaves')
     .withIndex('by_project_and_job', q => q.eq('projectId', projectId).eq('jobId', jobId))
     .unique();
+}
+/** The publish transaction for a job's save: the scheduled `publish`, or a step's terminal commit. */
+export async function publishSaveJob(
+  ctx: MutationCtx,
+  input: { projectId: Id<'hostedProjects'>; jobId: string; result: string | null },
+  chainInline = false,
+) {
+  const row = await saveForJob(ctx, input.projectId, input.jobId);
+  if (!row) return null;
+  return canonicalPayload(
+    await publishHostedSave(
+      ctx,
+      { projectId: input.projectId, operationId: row.operationId, actor: row.actor, result: input.result },
+      chainInline,
+    ),
+  );
 }

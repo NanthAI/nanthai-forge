@@ -31,8 +31,9 @@ export const step = internalAction({
     loaded: v.optional(v.string()),
     delegatedAt: v.optional(v.number()),
   },
-  returns: v.null(),
-  handler: async (ctx, args): Promise<null> => {
+  /** The publication its terminal commit made for a small result (see projectSourcePublishInline). */
+  returns: v.union(v.string(), v.null()),
+  handler: async (ctx, args): Promise<string | null> => {
     let generation = args.generation ?? 0;
     return withSourceFailureLog(
       args,
@@ -51,7 +52,8 @@ export const step = internalAction({
             input,
             state.locations,
             supplied ? delegatedAt : undefined,
-            { overlapWrites: true },
+            // Texts the delegating action holds come only through `loaded` (never from a schedule).
+            { overlapWrites: true, preloaded: supplied ? state.preloaded : undefined },
           ),
           durable = sourceStorage(ctx, input.projectId);
         let cursor: SourceStepCursor = initialSourceStep(state.input),
@@ -123,17 +125,20 @@ export const step = internalAction({
             return null;
           }
           const resultText = smallOutput(result.cursor.output);
-          await ctx.runMutation(reference('projectConvexSourceStore:commit'), {
-            ...input,
-            cursor: saved,
-            objects: outputs,
-            output: result.cursor.output,
-            failure: null,
-            timing: { ...clock.value(), ...result.metrics.detail },
-            ...(resultText === null ? {} : { result: resultText }),
-          });
+          const published: string | null = await ctx.runMutation(
+            reference('projectConvexSourceStore:commit'),
+            {
+              ...input,
+              cursor: saved,
+              objects: outputs,
+              output: result.cursor.output,
+              failure: null,
+              timing: { ...clock.value(), ...result.metrics.detail },
+              ...(resultText === null ? {} : { result: resultText }),
+            },
+          );
           logStep();
-          return null;
+          return published;
         } catch (error) {
           // Platform failures stay retryable; a fenced step has nothing to settle.
           const domain = sourceDomainError(error);

@@ -422,6 +422,10 @@ export async function finishFixture(
           },
         };
         await executeSource(task.name, input);
+        // A small result publishes inside the step's own commit (1eef1b43): the step action dies
+        // right after that commit returned.
+        if (stop === 'after-source-publish' && /^projectConvexSource(Node)?:step$/.test(task.name))
+          throw new Error('synthetic crash after source publication');
         if (stop === 'after-source-callback' && task.name.endsWith(':dispatch')) {
           // Advance the exact source steps before simulating a lost completed reply.
           while (

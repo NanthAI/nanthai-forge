@@ -27,7 +27,7 @@ const row = (s, jobId) => s.run('row', () => active.rowFor(s.ctx, s.projectId, j
 const inlineStep = (s, jobId) => ({
   id: 'inline',
   name: 'projectConvexSource:step',
-  args: { projectId: s.projectId, jobId, step: 0 },
+  args: { projectId: s.projectId, jobId, step: 0, inline: true },
   state: { kind: 'pending' },
 });
 async function scheduledOutput(files = 3) {
@@ -76,7 +76,10 @@ test('a submit-run action that dies before its step is recovered by the delayed 
     const job = await s.job(jobId);
     assert.equal(job.status, 'completed');
     assert.deepEqual(job.output, expected);
-    assert.equal(s.calls.filter(name => name === 'projectConvexSource:step').length, 1);
+    // Inside the submit's lease the fallback cannot tell a dead action from a slow one: it re-arms
+    // once to the lease end (R1), then runs the step. Only this crash path pays that extra hop.
+    assert.equal(s.calls.filter(name => name === 'projectConvexSource:step').length, 2);
+    assert.equal(commits(s), 1);
   } finally {
     s.restore();
   }
@@ -102,6 +105,63 @@ test('a failed inline step retries on the normal schedule, not at the fallback d
     const job = await s.job(jobId);
     assert.equal(job.status, 'completed');
     assert.deepEqual(job.output, expected);
+  } finally {
+    s.restore();
+  }
+});
+
+const pendingSteps = s =>
+  [...s.scheduled.values()].filter(
+    item => item.name === 'projectConvexSource:step' && item.state.kind === 'pending',
+  );
+const commits = s => s.calls.filter(name => name === 'projectConvexSourceStore:commit').length;
+
+test('a fallback that fires while the inline step may still run re-arms once instead of running the step twice (review 0f10873e R1)', async () => {
+  const expected = await scheduledOutput();
+  const s = await scaleFixture();
+  try {
+    const { jobId } = await inlineJob(s);
+    const [fallback] = pendingSteps(s);
+    s.ready.splice(s.ready.indexOf(fallback), 1);
+    // The fallback fires first (the inline step outran its 30 s delay): it must not run the step.
+    await s.execute(fallback);
+    assert.equal(commits(s), 0, 'the fallback ran no step');
+    const [rearmed] = pendingSteps(s);
+    assert(rearmed && rearmed !== fallback, 'one re-armed fallback');
+    const lease = (await s.job(jobId)).control.workerLeaseMs;
+    assert(rearmed.delayMs > 0 && rearmed.delayMs <= lease, String(rearmed.delayMs));
+    assert.equal((await row(s, jobId)).inlineRearmed, true);
+    // The inline step finishes; its commit cancels the re-armed fallback.
+    s.ready.splice(s.ready.indexOf(rearmed), 1);
+    await s.execute(inlineStep(s, jobId));
+    assert.equal(rearmed.state.kind, 'canceled');
+    await s.drain();
+    const job = await s.job(jobId);
+    assert.equal(job.status, 'completed');
+    assert.deepEqual(job.output, expected);
+    assert.equal(commits(s), 1, 'the step ran once');
+  } finally {
+    s.restore();
+  }
+});
+
+test('a fallback that runs the step after the inline lease renews the worker lease first, so its commit lands (review 0f10873e R2)', async t => {
+  const expected = await scheduledOutput();
+  const s = await scaleFixture();
+  try {
+    const { jobId } = await inlineJob(s);
+    const before = await s.job(jobId),
+      lease = before.control.workerLeaseMs,
+      real = Date.now.bind(Date),
+      skew = lease + 1_000;
+    // The submitting action died; the fallback starts after the lease that submit opened.
+    t.mock.method(Date, 'now', () => real() + skew);
+    assert(before.control.workerUntil <= Date.now(), 'the submit lease has passed');
+    await s.drain();
+    const job = await s.job(jobId);
+    assert.equal(job.status, 'completed', 'no stranded job waiting for a CLI replay');
+    assert.deepEqual(job.output, expected);
+    assert.equal(commits(s), 1);
   } finally {
     s.restore();
   }

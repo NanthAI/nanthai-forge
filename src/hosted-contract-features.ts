@@ -68,6 +68,17 @@ export const hostedContractFeatures = [
    * schedules projectHostedResolveChain:run, and projectHostedSaves:progress reports that sync as
    * `chain`. Without it the CLI sends no `then` and prepares the resolve itself. */
   'save-then-resolve',
+  /** Prepare hands back upload targets (1eef1b43): projectHostedSaves:prepare takes `uploads` (a
+   * save's new raw blobs and delta pages; it refuses SAVE_CONTENT_RECIPE before any operation when
+   * one of those blobs is stored only as a recipe) and projectHostedSync:prepare takes `targets`;
+   * both reply with `targets` for those pins and the job input, so the CLI makes no
+   * projectObjects:prepareBatch call. Without it the CLI prepares with prepareBatch as before. */
+  'prepare-upload-targets',
+  /** A step that finishes its job publishes a small result inside its own commit, and
+   * projectSourceRun:submit takes `progress` (reply `{terminal, state, chain?}` when its step
+   * published, with the save's chained resolve run in the same action) and `input` (the job input
+   * text, read from memory). Without it the CLI waits on the progress subscription as before. */
+  'source-run-publish',
 ] as const;
 export type HostedContractFeature = (typeof hostedContractFeatures)[number];
 

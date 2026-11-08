@@ -286,14 +286,18 @@ export async function resolveHostedAgent(session: HostedAgentSession, input: unk
   const saveOperationId = await session.journal.id('resolution-save');
   // The resolve's sync, from the save's result. With save-then-resolve the save carries it and the
   // server starts it when the save completes; the CLI builds the identical request either way.
-  const then = {
+  // Retained before the save (review 0f10873e R3): a retry after an epoch or lifecycle change
+  // still builds both requests from the one `then` the saved request carries.
+  const then = await session.journal.retain('resolve-then', async () => ({
     kind: 'resolve' as const,
     operationId: session.journal.operationId,
     authorityEpoch: session.capabilities.authority.epoch,
     lifecycleVersion: marker.selection.lifecycleVersion,
     message: command.message,
-  };
+  }));
   const chain = session.capabilities.features?.includes('save-then-resolve') ?? false;
+  // source-run-publish: the save's own action replies with its outcome and, run there, the chain.
+  let reply: unknown;
   const save = () =>
     saveHostedLane(
       session.root,
@@ -304,9 +308,29 @@ export async function resolveHostedAgent(session: HostedAgentSession, input: unk
       { action: 'resolve', parameters: { ...command, operationId: session.journal.operationId } },
       undefined,
       saveTiming,
+      value => {
+        reply = value;
+      },
     );
   let saved = await save();
   let chained: { terminal: unknown; state: unknown } | undefined;
+  const direct = chain && completed(saved) && reply ? chainSettle(reply) : undefined;
+  if (direct && 'value' in direct) chained = direct.value.chained;
+  else if (direct) {
+    // The save published in its action but the chained resolve is still running: its receipt
+    // arrives on the save's subscription, bounded by the same stall rule.
+    const waited = await session.waitSource(
+      saveOperationId,
+      { status: 'submitted' },
+      'Saves',
+      undefined,
+      undefined,
+      chainSettle,
+    );
+    if (waited && typeof waited === 'object' && 'chained' in waited)
+      chained = (waited as { chained: typeof chained }).chained;
+    saveTiming.mark('hostedWait');
+  }
   if (!completed(saved)) {
     let observed: unknown;
     saved = await session.waitSource(

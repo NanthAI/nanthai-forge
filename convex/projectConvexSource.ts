@@ -18,16 +18,37 @@ export const step = internalAction({
     jobId: v.string(),
     step: v.number(),
     generation: v.optional(v.number()),
+    /** Run as the submitting action's own first step (its fallback stays pending); the submit-run
+     * action calls `runConvexSourceStep` directly, so only a harness names this. */
+    inline: v.optional(v.boolean()),
   },
   returns: v.null(),
-  handler: (ctx, input) => runConvexSourceStep(ctx, input),
+  handler: async (ctx, { inline, ...input }) => {
+    await runConvexSourceStep(ctx, input, inline ? { inline } : {});
+    return null;
+  },
 });
+/** What an action that submitted the job (and so ran its first step itself) already holds. */
+export type InlineStepOptions = {
+  /** This is the submitting action's own run: `begin` never defers it as a fallback (R1). */
+  inline?: boolean;
+  /** The committing action runs a published save's resolve chain itself. */
+  chain?: boolean;
+  /** Objects this action just committed after a HEAD confirmed their exact size and checksum
+   * (`commitObjects`). A small save does not download them again only to re-hash them. */
+  verified?: readonly { sha256: string; size: number }[];
+  /** Exact small texts this action holds (the job input it just wrote, or the one its caller sent);
+   * the step reads them from memory after the same digest check a download gets. */
+  preloaded?: readonly { sha256: string; size: number; text: string }[];
+};
 /** One step of the execution: the scheduled `step`, or the first step run by the action that submitted
- * the job (no scheduler wait; its delayed fallback covers that action dying). */
+ * the job (no scheduler wait; its delayed fallback covers that action dying). Returns the publication
+ * when the step finished the job and published its small result in its own commit. */
 export async function runConvexSourceStep(
   ctx: ActionCtx,
   input: { projectId: Id<'hostedProjects'>; jobId: string; step: number; generation?: number },
-): Promise<null> {
+  options: InlineStepOptions = {},
+): Promise<string | null> {
   let delegated = false,
     generation = input.generation ?? 0;
   return withSourceFailureLog(
@@ -35,13 +56,17 @@ export async function runConvexSourceStep(
     'small-save',
     async () => {
       const started = performance.now();
-      const loaded: string | null = await ctx.runMutation(reference('projectConvexSourceStore:begin'), input);
+      const loaded: string | null = await ctx.runMutation(reference('projectConvexSourceStore:begin'), {
+        ...input,
+        ...(options.inline ? { inline: true } : {}),
+      });
       if (!loaded) return null;
       const state = JSON.parse(loaded);
       generation = state.generation ?? generation;
       input = { ...input, generation };
       const transport = convexSourceTransport(ctx, input, state.locations, undefined, {
         overlapWrites: true,
+        preloaded: options.preloaded,
       });
       let output;
       try {
@@ -55,22 +80,26 @@ export async function runConvexSourceStep(
                 (location: { descriptor: { object: { sha256: string; size: number } } }) =>
                   location.descriptor.object,
               ),
+            options.verified,
           );
         if (!output) {
           // Reuse the already-authorized begin and bounded descriptors on fallback.
           delegated = true;
           await transport.settle();
-          await ctx.runAction(makeFunctionReference<'action'>('projectConvexSourceNode:step'), {
+          return await ctx.runAction(makeFunctionReference<'action'>('projectConvexSourceNode:step'), {
             ...input,
-            loaded: JSON.stringify({ ...state, locations: [...transport.locations.values()] }),
+            loaded: JSON.stringify({
+              ...state,
+              locations: [...transport.locations.values()],
+              ...(options.preloaded?.length ? { preloaded: options.preloaded } : {}),
+            }),
             delegatedAt: Date.now(),
           });
-          return null;
         }
         await transport.settle();
         const outputCount = transport.outputs.length;
         const resultText = transport.smallOutput(output);
-        await ctx.runMutation(reference('projectConvexSourceStore:commit'), {
+        const published: string | null = await ctx.runMutation(reference('projectConvexSourceStore:commit'), {
           ...input,
           cursor: null,
           objects: transport.outputs,
@@ -78,6 +107,7 @@ export async function runConvexSourceStep(
           failure: null,
           timing: { ...transport.clock.value(), phase: 'input>done', stop: 'done' },
           ...(resultText === null ? {} : { result: resultText }),
+          ...(options.chain ? { chain: true } : {}),
         });
         logSourceStep(input, {
           runtime: 'v8',
@@ -89,7 +119,7 @@ export async function runConvexSourceStep(
           outputs: outputCount,
           started,
         });
-        return null;
+        return published;
       } catch (error) {
         if (delegated) throw error;
         const domain = sourceDomainError(error);

@@ -13,6 +13,9 @@ import { mapSourceOrdered } from './hosted-source-parallel.js';
 
 // Runtime routing bounds, not source limits: larger/recipe saves use the Node worker.
 export const smallSaveStateBytes = 4 * 1024 * 1024;
+/** The one delta page a V8 small save takes; `begin` hints only this shape (review 0f10873e G1). */
+export const smallSavePageBytes = 128 * 1024;
+const smallSaveInputBytes = 128 * 1024;
 const windowBytes = 8 * 1024 * 1024;
 async function readExact(io: SourceWorkerTransport, pin: WorkerPin) {
   const bytes = new Uint8Array(pin.size);
@@ -37,8 +40,13 @@ export async function runSmallSourceSave(
   /** Objects the plan is expected to name (the baseline and its delta page, from `begin`): read
    * beside the input instead of after it. Used only when the plan names exactly these pins. */
   hints: readonly WorkerPin[] = [],
+  /** Changed objects the calling action itself just committed after a HEAD confirmed their exact
+   * size and sha256 checksum (R2 also enforced that checksum on their create-only PUT). Staging
+   * already bound them to this save, and the step does not use their bytes, so it does not
+   * download them again only to re-hash them. Every other changed object is read and checked. */
+  verified: readonly WorkerPin[] = [],
 ): Promise<WorkerPin | null> {
-  if (input.size > 128 * 1024) return null;
+  if (input.size > smallSaveInputBytes) return null;
   const early = new Map(
     hints
       .filter(pin => pin.size <= smallSaveStateBytes)
@@ -53,7 +61,7 @@ export async function runSmallSourceSave(
     saveInputSchema.parse(JSON.parse(new TextDecoder().decode(inputBytes))),
   );
   if (
-    plan.pages.size > 128 * 1024 ||
+    plan.pages.size > smallSavePageBytes ||
     plan.pageCount !== 1 ||
     plan.baseline.recipe ||
     plan.baseline.object.size > smallSaveStateBytes
@@ -89,14 +97,19 @@ export async function runSmallSourceSave(
     return null;
   // The changed objects' descriptors resolve while the (larger) baseline is still downloading; the
   // ones the baseline already holds are then not read.
-  const objects = [...new Map(after.map(ref => [ref.object.sha256, ref.object])).values()];
-  const [baselineBytes] = await Promise.all([baselineRead, io.prepareRead?.(objects)]);
+  const committed = new Set(verified.map(pin => `${pin.sha256}:${pin.size}`)),
+    unverified = after.filter(ref => !committed.has(`${ref.object.sha256}:${ref.object.size}`));
+  const objects = [...new Map(unverified.map(ref => [ref.object.sha256, ref.object])).values()];
+  const [baselineBytes] = await Promise.all([
+    baselineRead,
+    objects.length ? io.prepareRead?.(objects) : undefined,
+  ]);
   const baseline = parseNativeState(baselineBytes!),
     files = new Map(baseline.files.map(file => [file.path, file])),
     seen = new Set(baseline.files.map(file => file.blob));
   const verify = [
     ...new Map(
-      after.filter(ref => !seen.has(ref.object.sha256)).map(ref => [ref.object.sha256, ref.object]),
+      unverified.filter(ref => !seen.has(ref.object.sha256)).map(ref => [ref.object.sha256, ref.object]),
     ).values(),
   ];
   // Descriptors were prepared in one window above; changed bytes are streamed and

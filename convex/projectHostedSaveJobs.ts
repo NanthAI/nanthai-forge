@@ -11,7 +11,7 @@ import { startSubmittedSource } from './projectSourceSubmitStart';
 import type { MutationCtx } from './server';
 import { hostedSaveInput, stageSavePage } from './projectHostedSaves';
 import { enqueueSourceJob, loadSourceJob } from './projectSourceJobs';
-import { publishHostedSave, saveForJob } from './projectHostedSavePublish';
+import { publishHostedSave, publishSaveJob, saveForJob } from './projectHostedSavePublish';
 import { canonicalPayload, hostedPayloadHash } from '../src/hosted-source-operation';
 import { savePin } from '../src/hosted-save';
 import { blobStore } from './blobStore';
@@ -119,18 +119,7 @@ export async function submitHostedSave(
 export const publish = internalMutation({
   args: { ...jobIdentity, result: v.union(v.string(), v.null()) },
   returns: v.union(v.string(), v.null()),
-  handler: async (ctx, input) => {
-    const row = await saveForJob(ctx, input.projectId, input.jobId);
-    if (!row) return null;
-    return canonicalPayload(
-      await publishHostedSave(ctx, {
-        projectId: input.projectId,
-        operationId: row.operationId,
-        actor: row.actor,
-        result: input.result,
-      }),
-    );
-  },
+  handler: (ctx, input) => publishSaveJob(ctx, input),
 });
 /** Only the small worker result manifest passes through the action, never source bytes. */
 export const resultDownload = internalMutation({

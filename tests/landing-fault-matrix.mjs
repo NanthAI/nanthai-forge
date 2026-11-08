@@ -34,7 +34,6 @@ export const PERMANENT = {
   'projectHostedFinishDriver:drive@compose': ['LANDING_DRIVER_EXHAUSTED'],
   'projectConvexSource:dispatch@compose': ['SOURCE_RETRY_EXHAUSTED'],
   'projectConvexSource:step@compose': ['SOURCE_RETRY_EXHAUSTED'],
-  'projectHostedComposeJobs:publish@compose': ['SOURCE_RETRY_EXHAUSTED'],
   'projectHostedLandingDriver:drive@reserve': ['LANDING_DRIVER_EXHAUSTED'],
   'projectHostedLandingDriver:drive@check-callback': ['LANDING_DRIVER_EXHAUSTED'],
   'projectHostedLandingDriver:checkWake@check-callback': ['LANDING_DRIVER_EXHAUSTED'],

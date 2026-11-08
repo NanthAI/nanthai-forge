@@ -30,6 +30,8 @@ export const saveStateSchema = z
     serverTiming: sourceServerTimingSchema.optional(),
     /** The save-then-resolve chain stopped before its submit (its error code). */
     chainFailure: z.string().optional(),
+    /** The delayed scheduled chain kept only for an action that dies before it runs the chain inline. */
+    chainFallbackId: z.string().optional(),
   })
   .strict();
 export type SaveIdentity = { projectId: Id<'hostedProjects'>; actor: string; operationId: string };

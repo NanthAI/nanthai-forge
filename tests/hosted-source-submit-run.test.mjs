@@ -59,6 +59,51 @@ test('a sync with source-submit-run commits its input inside the one submit acti
   });
 });
 
+test('a sync with prepare-upload-targets PUTs its input to the prepared target and sends it inline (1eef1b43)', async () => {
+  const run = session(['source-submit-run', 'prepare-upload-targets', 'source-run-publish']);
+  const targets = [{ id: 'object-2', stored: false, target: { url: 'https://r2.invalid/input' } }];
+  const mutation = run.session.mutation;
+  run.session.mutation = async (name, args) => {
+    const reply = await mutation(name, args);
+    return name.endsWith(':prepare') ? { ...reply, targets } : reply;
+  };
+  run.session.exchange.uploadPrepared = async (objects, rows, deferred) => {
+    assert.equal(rows, targets);
+    assert.equal(objects.length, 1);
+    assert.deepEqual(Buffer.from(await objects[0].read()), Buffer.from(saveBytes(run.input)));
+    run.calls.push(['uploadPrepared', objects[0].pin.sha256]);
+    deferred.push({ id: 'object-2' });
+  };
+  const published = { terminal: { outcome: { status: 'completed' } }, state: { submittedAt: 1 } };
+  run.session.action = async (name, args) => {
+    run.calls.push([name, args]);
+    return published;
+  };
+  const result = await driveAgentSource(run.session, 'Sync', run.operationId, {
+    operationId: run.operationId,
+  });
+  assert.equal(result, published);
+  assert.deepEqual(
+    run.calls.map(call => call[0]),
+    ['projectHostedSync:prepare', 'uploadPrepared', 'projectSourceRun:submit'],
+  );
+  assert.equal(run.calls[0][1].targets, true);
+  assert.deepEqual(run.calls[2][1], {
+    operationId: run.operationId,
+    kind: 'sync',
+    objects: [{ id: 'object-2' }],
+    progress: true,
+    input: Buffer.from(saveBytes(run.input)).toString('utf8'),
+  });
+});
+
+test('a sync whose client cannot PUT to prepared targets does not ask for them', async () => {
+  const run = session(['source-submit-run', 'prepare-upload-targets']);
+  await driveAgentSource(run.session, 'Sync', run.operationId, { operationId: run.operationId });
+  assert.equal(run.calls[0][1].targets, undefined);
+  assert.equal(run.calls[1][0], 'uploadLazyBatch');
+});
+
 test('a compose without the feature keeps the committing upload and the submit mutation', async () => {
   const run = session([]);
   await driveAgentSource(run.session, 'Compose', run.operationId, { operationId: run.operationId });
@@ -105,4 +150,25 @@ test('projectSourceRunStore:submit takes a delta page only for a save', async ()
     ),
     error => error.data?.code === 'BAD_ARGUMENT',
   );
+});
+
+test('a submit reply that already holds the published outcome ends the wait at once and still gives its server timing (source-run-publish)', async () => {
+  const { waitHostedAgentSource } = await import('../dist/hosted-agent-source-wait.js');
+  const reply = {
+    terminal: { outcome: { status: 'completed', result: { status: 'clean' } } },
+    state: { submittedAt: 1, serverTiming: { steps: [] } },
+  };
+  const seen = [];
+  const result = await waitHostedAgentSource(
+    { url: 'https://fixture.invalid', projectId: 'project' },
+    randomUUID(),
+    reply,
+    undefined,
+    () => assert.fail('no subscription for a published reply'),
+    'Sync',
+    60,
+    value => seen.push(value),
+  );
+  assert.deepEqual(result, reply.terminal);
+  assert.deepEqual(seen, [reply]);
 });

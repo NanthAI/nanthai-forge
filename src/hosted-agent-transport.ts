@@ -173,7 +173,8 @@ export type HostedAgentExchange = Pick<
   | 'downloadBatch'
   | 'prepareDownloads'
   | 'uploadLazyBatch'
->;
+> &
+  Partial<Pick<ConvexExchange, 'uploadPrepared'>>;
 export type HostedAgentResponse = {
   cliCommit?: string;
   schema: 1;

@@ -53,7 +53,9 @@ export function environment(t) {
 export function controls(t, s) {
   const calls = [];
   let storageCalls = 0;
-  const blobs = new Map();
+  const blobs = new Map(),
+    // Every R2 object GET by digest: a step that re-downloads what its own call wrote shows here.
+    r2Gets = [];
   const storage = {
     async get(id) {
       storageCalls++;
@@ -141,6 +143,7 @@ export function controls(t, s) {
       return new Response(null);
     }
     const bytes = s.objects.get(id);
+    if (init.method !== 'HEAD') r2Gets.push(id);
     if (!bytes) return new Response(null, { status: 404 });
     if (init.method === 'HEAD')
       return new Response(null, {
@@ -176,6 +179,7 @@ export function controls(t, s) {
     stats,
     context,
     storageCalls: () => storageCalls,
+    r2Gets,
   };
 }
 export const ref = name => makeFunctionReference(name);

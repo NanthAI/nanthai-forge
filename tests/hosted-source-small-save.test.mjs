@@ -249,3 +249,15 @@ test('hinted baseline and page are read beside the input, with no descriptor win
   assert.deepEqual(await runSmallSourceSave(other.input, other.io, [unrelated]), expected);
   assert.equal(other.windows.length, 2);
 });
+
+test('begin hints the small save by the runner own page limit, not a copy of it (review 0f10873e G1)', async () => {
+  const { readFileSync } = await import('node:fs');
+  const { smallSavePageBytes } = await import('../dist/hosted-source-small-save.js');
+  assert.equal(smallSavePageBytes, 128 * 1024);
+  const source = readFileSync(new URL('../convex/projectSourceBeginReads.ts', import.meta.url), 'utf8');
+  assert.match(
+    source,
+    /import \{[^}]*\bsmallSavePageBytes\b[^}]*\} from '\.\.\/src\/hosted-source-small-save'/,
+  );
+  assert.doesNotMatch(source, /128 \* 1024/);
+});

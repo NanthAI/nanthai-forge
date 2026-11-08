@@ -113,7 +113,7 @@ async function changedSave(
   scale = false,
   provider = 'synthetic',
   contract = false,
-  { baselineGeneration } = {},
+  { baselineGeneration, wrap, retryLost = false } = {},
 ) {
   environment(t);
   const now = Date.now();
@@ -141,7 +141,7 @@ async function changedSave(
     randomUUID(),
     null,
   );
-  exchange.client = c.client;
+  exchange.client = wrap ? wrap(c.client, s) : c.client;
   const command = { operationId: randomUUID(), message: 'ten-file save' };
   s.counts.length = 0;
   const overlapWrites = () =>
@@ -159,7 +159,14 @@ async function changedSave(
         missing: exchange.missing.bind(exchange),
       }
     : exchange;
-  const pending = await saveHostedLane(root, command, transport, contract);
+  let pending;
+  try {
+    pending = await saveHostedLane(root, command, transport, contract);
+  } catch (error) {
+    if (!retryLost) throw error;
+    // The CLI retries the same save operation after an unknown reply.
+    pending = await saveHostedLane(root, command, transport, contract);
+  }
   const args = { projectId: s.projectId, jobId: pending.jobId };
   if (provider === 'convex') {
     // With source-submit-run the submitting action already dispatched and ran step 0.
@@ -167,8 +174,12 @@ async function changedSave(
       await c.call('projectConvexSource:dispatch', args);
       await c.call('projectConvexSource:step', { ...args, step: 0 });
     }
-    await c.call('projectHostedSaveJobs:complete', args);
-    const terminal = await saveHostedLane(root, command, exchange, contract);
+    // A step that finished the job published inside its commit: the submit replied with the outcome.
+    let terminal = pending;
+    if (!pending.outcome) {
+      await c.call('projectHostedSaveJobs:complete', args);
+      terminal = await saveHostedLane(root, command, exchange, contract);
+    }
     const output = terminal.outcome.result;
     assert.equal(JSON.parse(s.objects.get(output.head)).files.length, 3000);
     assert.equal(readHostedLaneCheckout(root).tree, sourceTree(JSON.parse(s.objects.get(output.head)).files));
@@ -179,7 +190,7 @@ async function changedSave(
       wallMs: performance.now() - started,
     };
     stats.totalCalls = stats.calls + stats.storageCalls;
-    return { stats, calls: c.calls, s, c, root, command, transport };
+    return { stats, calls: c.calls, s, c, root, command, transport, first: pending, files };
   }
   const owner = randomUUID();
   await c.call('projectSourceJobApi:claim', { ...args, owner, leaseMs: 60000 });
@@ -568,6 +579,154 @@ test('a small save commits, submits and runs its first step in one action (sourc
       functions: Object.fromEntries([...new Set(run.calls)].map(name => [name, count(name)])),
     }),
   );
+});
+
+const directContract = {
+  overlapEvidence: false,
+  submitPage: true,
+  submitRun: true,
+  prepareTargets: true,
+  runPublish: true,
+};
+test('a direct small save: prepare returns every upload target, one PUT wave, and the submit replies with the published outcome (1eef1b43 items 1-4)', async t => {
+  const run = await changedSave(t, false, true, 'convex', directContract);
+  const count = name => run.calls.filter(value => value === name).length;
+  // Item 1: no prepareBatch round (the save's prepare returned the blob, page and input targets).
+  assert.equal(count('projectObjects:prepareBatch'), 0);
+  assert.equal(count('projectHostedSaves:prepare'), 1);
+  assert.equal(count('projectHostedSaves:describe'), 0);
+  assert.equal(count('projectObjectDownloads:describe'), 0);
+  assert.equal(count('projectSourceRun:submit'), 1);
+  // Item 3: published inside the step's commit; the submit's own reply carried the outcome.
+  assert.equal(run.first.outcome.status, 'completed');
+  for (const name of [
+    'projectHostedSaveJobs:publish',
+    'projectHostedSaveJobs:complete',
+    'projectHostedSaves:progress',
+  ])
+    assert.equal(count(name), 0, name);
+  // Item 2: the step re-read none of the changed blobs this call HEAD-verified, nor the input the
+  // CLI sent inline (readers still hash what they read; the commit's HEAD checked the checksum).
+  const changed = new Set(run.files.slice(0, 10).map(file => digest(`first\nchanged-${file.path}\nlast\n`)));
+  const reread = run.c.r2Gets.filter(id => changed.has(id));
+  assert.deepEqual(reread, []);
+  const inputs = [...run.s.objects].flatMap(([id, bytes]) => {
+    try {
+      return JSON.parse(Buffer.from(bytes).toString('utf8')).kind === 'forge-hosted-save-input' ? [id] : [];
+    } catch {
+      return [];
+    }
+  });
+  assert.equal(inputs.length, 1, 'one save input');
+  assert(!run.c.r2Gets.includes(inputs[0]), 'the inline input was not downloaded back');
+  // 14 -> 7 calls: prepare, the submit action, its commit's two rounds, its submit, begin and commit.
+  assert(run.stats.totalCalls <= 7, JSON.stringify({ stats: run.stats, functions: run.calls }));
+  assert(run.stats.writes - run.stats.overlapWrites <= 100, JSON.stringify(run.stats));
+  t.diagnostic(
+    JSON.stringify({
+      convex: run.stats,
+      r2Gets: run.c.r2Gets.length,
+      functions: Object.fromEntries([...new Set(run.calls)].map(name => [name, count(name)])),
+    }),
+  );
+});
+
+test('a direct small save writes the same State bytes as the described save path', async t => {
+  const direct = await changedSave(t, false, true, 'convex', directContract);
+  const described = await changedSave(t, false, true, 'convex', {
+    overlapEvidence: false,
+    submitPage: true,
+    submitRun: true,
+  });
+  const files = run =>
+    JSON.parse(
+      run.s.objects.get(run.first.outcome.result.head ?? readHostedLaneCheckout(run.root).selection.head),
+    ).files;
+  assert.deepEqual(files(direct), files(described));
+  assert.equal(readHostedLaneCheckout(direct.root).tree, readHostedLaneCheckout(described.root).tree);
+});
+
+test('a direct save whose changed blob is stored only as a recipe is refused before any operation and saves the described way', async t => {
+  const refusals = [];
+  const run = await changedSave(t, false, true, 'convex', directContract, {
+    wrap: (client, s) => ({
+      ...client,
+      mutation: async (ref, args) => {
+        if (getFunctionName(ref) !== 'projectHostedSaves:prepare' || !args.uploads || refusals.length)
+          return client.mutation(ref, args);
+        // Another save packed this blob into a recipe between capture and prepare.
+        const id = s.insert('projectObjects', {
+          projectId: s.projectId,
+          digest: args.uploads[0].digest,
+          size: args.uploads[0].size,
+          removed: false,
+          nonce: randomUUID(),
+          recipe: { digest: 'f'.repeat(64), size: 1 },
+        });
+        const operations = s.tables.projectHostedOperations.size;
+        try {
+          return await client.mutation(ref, args);
+        } catch (error) {
+          refusals.push({
+            code: error.data?.code,
+            began: s.tables.projectHostedOperations.size - operations,
+          });
+          throw error;
+        } finally {
+          s.tables.projectObjects.delete(id);
+        }
+      },
+    }),
+  });
+  assert.deepEqual(refusals, [{ code: 'SAVE_CONTENT_RECIPE', began: 0 }]);
+  const count = name => run.calls.filter(value => value === name).length;
+  assert.equal(count('projectHostedSaves:prepare'), 2, 'the refused direct prepare, then the described one');
+  assert(count('projectObjects:prepareBatch') >= 1, 'the described path uploads its blobs first');
+  assert.equal(run.first.outcome.status, 'completed');
+});
+
+test('a direct save whose submit reply was lost replays the same operation to the same State', async t => {
+  let lost = 0;
+  const run = await changedSave(t, false, true, 'convex', directContract, {
+    retryLost: true,
+    wrap: client => ({
+      ...client,
+      action: async (ref, args) => {
+        const reply = await client.action(ref, args);
+        if (getFunctionName(ref) === 'projectSourceRun:submit' && !lost++)
+          throw new Error('Synthetic reply lost after the submit ran');
+        return reply;
+      },
+    }),
+  });
+  assert.equal(lost, 1);
+  const count = name => run.calls.filter(value => value === name).length;
+  // The retry's prepare replays the published receipt: no second upload round, run or step.
+  assert.equal(count('projectSourceRun:submit'), 1);
+  assert.equal(count('projectConvexSourceStore:commit'), 1);
+  assert.equal(count('projectHostedSaves:prepare'), 2);
+  assert.equal(run.first.outcome.status, 'completed');
+});
+
+test('a direct save that crashed before its submit ran resumes from its retained request: prepare replays the targets', async t => {
+  let crashed = 0;
+  const run = await changedSave(t, false, true, 'convex', directContract, {
+    retryLost: true,
+    wrap: client => ({
+      ...client,
+      action: async (ref, args) => {
+        if (getFunctionName(ref) === 'projectSourceRun:submit' && !crashed++)
+          throw new Error('Synthetic crash before the submit ran');
+        return client.action(ref, args);
+      },
+    }),
+  });
+  assert.equal(crashed, 2);
+  const count = name => run.calls.filter(value => value === name).length;
+  assert.equal(count('projectHostedSaves:prepare'), 2, 'the replayed prepare returned the same targets');
+  assert.equal(count('projectObjects:prepareBatch'), 0);
+  assert.equal(count('projectSourceRun:submit'), 1);
+  assert.equal(run.first.outcome.status, 'completed');
 });
 
 test('a hinted small save gives its State the baseline generation plus one (review 3aa618e2 F1)', async t => {

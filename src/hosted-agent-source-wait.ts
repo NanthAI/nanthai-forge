@@ -90,8 +90,14 @@ async function waitHostedAgentSourceOnce(
   observe?: (progress: unknown) => void,
   settle?: SourceWaitSettle,
 ) {
+  const raw = initial;
   initial = sourceWaitSnapshot(initial);
-  if (stopped(initial)) return initial;
+  if (stopped(initial)) {
+    // A submit that published its outcome (source-run-publish) replies `{terminal, state}`: the
+    // receipt still reads its server timing from that one reply.
+    if (raw !== initial && (raw as { terminal?: unknown }).terminal) observe?.(raw);
+    return initial;
+  }
   if (signal?.aborted) return initial;
   let latest = initial;
   const client = subscribe();
