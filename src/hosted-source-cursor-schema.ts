@@ -56,6 +56,7 @@ const cursorSchema = z
       )
       .optional(),
     resolutionRoots: z.tuple([jobHash, jobHash]).optional(),
+    resolveRightProbed: z.boolean().optional(),
     verify: sourceVerifyCursorSchema.nullable(),
     selections: z.array(composeEntrySchema),
     head: jobHash.nullable(),

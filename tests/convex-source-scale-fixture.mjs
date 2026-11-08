@@ -93,7 +93,7 @@ export async function scaleFixture({ parallelism = 4, delay = 0, guardRss = fals
   const invoke = (name, args) => {
     const result = chain.then(() => {
       calls.push(name);
-      events.push({ call: name });
+      events.push({ call: name, args });
       const [n, m] = name.split(':');
       // Real Convex rejects fields the args validator does not name.
       const spec = JSON.parse(modules[n][m].exportArgs());

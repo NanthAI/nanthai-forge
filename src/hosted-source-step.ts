@@ -79,6 +79,8 @@ export type SourceStepCursor = {
   ancestryFailures?: Record<string, string>;
   /** Exact tips from the pinned conflict page, independent of ancestry prefetch. */
   resolutionRoots?: [string, string];
+  /** A resolve's right tip was described once; it is never re-added to later probes. */
+  resolveRightProbed?: boolean;
   verify: VerifyCursor | null;
   selections: unknown[];
   head: string | null;

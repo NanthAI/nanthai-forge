@@ -23,6 +23,7 @@ import { ForgeError, invariant } from './errors.js';
 import { sourceValidation } from './hosted-source-validation.js';
 import { sourceAncestryCut, sourceAncestryFrontier } from './hosted-source-ancestry-cut.js';
 import { sourceGenerationWalk } from './hosted-source-generation-cut.js';
+import { describeStackTips, stackedSync } from './hosted-source-stack-tips.js';
 import type { WorkerObject } from './hosted-source-worker-format.js';
 
 export async function prepareMergeStep(
@@ -112,6 +113,11 @@ export async function prepareMergeStep(
       }
     }
     c.phase = 'graph';
+  }
+  const stack = c.phase === 'graph' ? stackedSync(c) : null;
+  if (stack) {
+    await describeStackTips(c, io, stack);
+    return;
   }
   // The first finish commonly composes one saved direct child of current
   // main. Its two verified tip manifests prove the native fast-forward without
@@ -221,8 +227,11 @@ export async function prepareMergeStep(
     const probes = await io.probeStates(
       [...frontier, ...extra],
       // Recorded parents let one bounded descriptor page follow a linear chain
-      // instead of one call per level; older rows wait for a 32-State walk.
-      Object.keys(c.parents).length >= 32 || Object.keys(c.parents).some(id => io.stateParents?.(id))
+      // instead of one call per level; older rows wait for a 32-State walk. The probe that
+      // carries a resolve's right tip sends no hints: they would follow that tip into main's
+      // history, which the resolve never reads.
+      !extra.length &&
+        (Object.keys(c.parents).length >= 32 || Object.keys(c.parents).some(id => io.stateParents?.(id)))
         ? {
             known: Object.keys(c.parents).filter(id => !frontier.includes(id)),
             windows: io.fanout && frontier.length > 4 ? 4 : 1,
@@ -237,6 +246,10 @@ export async function prepareMergeStep(
       'SOURCE_HASH_MISMATCH',
       'Ancestry descriptor page changed its frontier.',
     );
+    // The right tip is no ancestry root, so its manifest is never read here; it must still exist,
+    // or the resolved State would name a parent that is gone.
+    if (probes.unavailable.some(id => extra.includes(id)))
+      throw new ForgeError('SOURCE_UNAVAILABLE', 'The conflict right tip is absent.');
     refs = probes.refs.filter(ref => frontier.includes(ref.object.sha256));
     const unavailable = probes.unavailable.filter(id => frontier.includes(id));
     for (const id of unavailable) (c.ancestryFailures ??= {})[id] = 'SOURCE_UNAVAILABLE';
@@ -245,6 +258,7 @@ export async function prepareMergeStep(
     refs = (await io.describeBatch([...frontier, ...extra])).filter(ref =>
       frontier.includes(ref.object.sha256),
     );
+  if (extra.length) c.resolveRightProbed = true;
   for (const id of extra) {
     const generation = io.stateGeneration?.(id),
       edges = io.stateParents?.(id);
@@ -485,12 +499,8 @@ async function syncRoots(c: SourceStepCursor, io: StepTransport, m: StepMeter): 
     return [...c.resolutionRoots];
   }
   if (work.mode === 'revert') return [work.previous.object.sha256, work.accepted.object.sha256];
-  if (work.mode === 'sync')
-    return [
-      work.left.object.sha256,
-      work.right.object.sha256,
-      ...(work.stackBase ? [work.stackBase.object.sha256] : []),
-    ];
+  // A stacked sync never reaches here: its explicit stack base replaces the search (see stackedSync).
+  if (work.mode === 'sync') return [work.left.object.sha256, work.right.object.sha256];
   // A resolve asks one ancestry question: does the saved head descend from its draft? The draft is
   // an ancestor of the head, so with more roots (the conflict's tips and base) the generation walk
   // sees a subset-common State and falls back to breadth-first search for a State every root passes
@@ -506,5 +516,12 @@ function resolveRight(c: SourceStepCursor, frontier: string[]): string[] {
   const work = sourceValidation('SOURCE_JOB_INVALID', () => syncInputSchema.parse(c.plan)).work;
   if (work.mode !== 'resolve') return [];
   const right = work.resolution.right;
-  return c.parents[right] || c.generations?.[right] !== undefined || frontier.includes(right) ? [] : [right];
+  // Probed once: a legacy row with neither parents nor a generation stays unknown, and re-adding it
+  // to every probe would pull main's history rows into each descriptor page (Issue 1eef1b43).
+  return c.resolveRightProbed ||
+    c.parents[right] ||
+    c.generations?.[right] !== undefined ||
+    frontier.includes(right)
+    ? []
+    : [right];
 }

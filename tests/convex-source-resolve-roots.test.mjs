@@ -66,7 +66,7 @@ async function history(s) {
   }
   mainFiles = await edit(mainFiles, 'dir3/long.txt', 'long lane 9\n');
   main = await state(mainFiles, [main.sha256, lane.sha256]);
-  return { state, blob, generations, old, probe, main };
+  return { state, blob, edit, generations, old, probe, main };
 }
 async function run(s, input) {
   const start = s.events.length,
@@ -189,6 +189,109 @@ test('a resolve walks only its saved head and draft, so old history costs no man
           calls: resolved.events.filter(e => e.call === 'projectConvexSourceObjects:resolve').length,
         },
       }),
+    );
+  } finally {
+    s.restore();
+  }
+});
+
+// A conflicted two-tip sync, then the resolve input for its saved head (the harness of the first test).
+async function resolveInput(s, h, { saves = 1 } = {}) {
+  const input = await s.json({
+    schema: 1,
+    kind: 'forge-hosted-sync-input',
+    algorithm: 'forge-native-sync-v1',
+    work: { mode: 'sync', left: ref(h.probe), right: ref(h.main) },
+    message: 'sync',
+    at,
+  });
+  const result = JSON.parse(await s.bytes((await run(s, input)).output)).result;
+  const draft = parseNativeState(await s.bytes(result.state));
+  const files = [];
+  for (const file of draft.files)
+    files.push(file.path === 'shared.txt' ? { ...file, blob: await h.blob('BOTH\nb\nc\n') } : file);
+  h.generations.set(result.state.sha256, (await row(s, result.state.sha256)).stateGeneration);
+  // `saves` unrecorded saves on top of the draft make the ancestry question take several probe rounds.
+  let saved = await h.state(files, [result.state.sha256], { recorded: saves <= 1 });
+  for (let i = 1; i < saves; i++) {
+    saved = await h.state(await h.edit(files, `late/f${i}.txt`, `late ${i}\n`), [saved.sha256], {
+      recorded: false,
+    });
+  }
+  return s.json({
+    schema: 1,
+    kind: 'forge-hosted-sync-input',
+    algorithm: 'forge-native-sync-v1',
+    work: {
+      mode: 'resolve',
+      left: ref(saved),
+      resolution: {
+        candidateId: null,
+        conflicts: result.conflicts,
+        left: result.left,
+        right: result.right,
+        draftHead: result.state.sha256,
+        status: 'pending',
+      },
+    },
+    message: 'resolve',
+    at,
+  });
+}
+const probesOf = (events, id) =>
+  events.filter(
+    e => e.call === 'projectConvexSourceObjects:resolve' && e.args.probe && e.args.digests.includes(id),
+  );
+
+// Review F1 (comment 24dd30cd): a right tip saved before parents and generations were recorded stayed
+// unknown, so every probe carried it, and with hints the server followed it into main's history.
+test('a legacy right tip is probed once, without hints', async () => {
+  const s = await scaleFixture();
+  try {
+    const h = await history(s);
+    const legacy = await row(s, h.main.sha256);
+    await s.ctx.db.patch(legacy._id, { stateGeneration: undefined, stateParents: undefined });
+    const before = new Set(h.old);
+    const input = await resolveInput(s, h, { saves: 130 });
+    const resolved = await run(s, input);
+    assert.deepEqual(resolved.output, await reference(s, input), 'byte-exact resolve result');
+    const probes = probesOf(resolved.events, h.main.sha256);
+    const rounds = resolved.events.filter(
+      e => e.call === 'projectConvexSourceObjects:resolve' && e.args.probe,
+    ).length;
+    // A step reads at most 100 objects, so 130 unrecorded saves take more than one step; each step is
+    // a new action that would ask for the unknown right tip again.
+    assert(resolved.steps > 1, `the walk takes several steps (${resolved.steps})`);
+    assert(rounds > 1, `and several probe rounds (${rounds})`);
+    assert.equal(probes.length, 1, 'the right tip is in one probe');
+    assert.equal(probes[0].args.ancestry, false, 'and that probe follows no hints into main history');
+    assert.deepEqual(
+      fetched(resolved.events).filter(id => before.has(id)),
+      [],
+    );
+  } finally {
+    s.restore();
+  }
+});
+
+// Review F2: the right tip is described, not read, so a missing row must still fail the resolve.
+test('a resolve whose right tip is gone fails instead of naming a dangling parent', async () => {
+  const s = await scaleFixture();
+  try {
+    const h = await history(s);
+    const input = await resolveInput(s, h);
+    const gone = await row(s, h.main.sha256);
+    await s.ctx.db.patch(gone._id, { removed: true });
+    const id = await s.enqueue(input);
+    await s.drain();
+    const job = await s.job(id);
+    assert.equal(job.status, 'failed');
+    assert.equal(job.control.failureCode, 'SOURCE_UNAVAILABLE');
+    // It fails at the descriptor probe, not later when the compute step first needs the tip.
+    const resolves = s.events.filter(e => e.call === 'projectConvexSourceObjects:resolve');
+    assert(
+      !resolves.some(e => !e.args.probe && e.args.digests.includes(h.main.sha256)),
+      'no later read of the missing right tip',
     );
   } finally {
     s.restore();
