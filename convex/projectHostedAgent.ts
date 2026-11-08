@@ -14,11 +14,29 @@ import {
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { invariant } from '../src/errors';
 import { report } from './errors';
+import { loadSave } from './projectHostedSaveStore';
+import type { QueryCtx } from './server';
+import type { Id } from './_generated/dataModel';
 import { requireCutoverVersion } from '../src/cutover-version';
 import { effectivePolicy } from '../src/autonomy-policy';
 import { effectiveAgentDefaults, wireAgentDefaults } from '../src/agent-parallel-defaults';
 import { advertisedFeatures, MAX_CONTRACT_FEATURES } from '../src/hosted-contract-features';
 /** Discovery is a current-authority read, never a worker wake or an availability promise. */
+/** The caller's own save outcome by operation id, or null terminal when it is still settling or
+ * cannot be read here (the client then reads its progress as before). */
+async function settledSave(
+  ctx: QueryCtx,
+  projectId: Id<'hostedProjects'>,
+  actor: string,
+  operationId: string,
+) {
+  try {
+    const { operation } = await loadSave(ctx, { projectId, actor, operationId }, false);
+    return { operationId, terminal: operation.terminal ?? null };
+  } catch {
+    return { operationId, terminal: null };
+  }
+}
 export const capabilities = query({
   args: {
     projectId: v.id('hostedProjects'),
@@ -37,6 +55,9 @@ export const capabilities = query({
     /** Contract features the client may rely on; the reply names the ones this code implements. */
     features: v.optional(v.array(v.string())),
     boardVersion: v.optional(v.literal(1)),
+    /** Split save (save-settle-background): the caller's save that returned before its settle; the
+     * reply carries its outcome, so the next command needs no separate progress read. */
+    settling: v.optional(v.string()),
   },
   returns: v.string(),
   handler: async (
@@ -57,6 +78,7 @@ export const capabilities = query({
       presenceVersion,
       features,
       boardVersion,
+      settling,
     },
   ) => {
     try {
@@ -90,6 +112,9 @@ export const capabilities = query({
             : {}),
           ...(noticeVersion === 1 ? { needsFix: needsFix(project) } : {}),
           ...(mirrorVersion === 1 ? { githubMirror: await githubMirrorStatus(ctx, project) } : {}),
+          ...(settling !== undefined
+            ? { settledSave: await settledSave(ctx, projectId, user.subject, settling) }
+            : {}),
           schema: 1,
           projectId,
           actor: user.subject,

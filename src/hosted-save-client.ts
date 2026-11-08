@@ -71,6 +71,10 @@ export type SaveContract = {
   runPublish?: boolean;
   /** The resolve the server chains after this save (save-then-resolve); only a new request takes it. */
   then?: SaveThen;
+  /** Split save (save-settle-background, fea47345 C): return once the upload is in and the save is
+   * submitted; the server settles it and the caller's next command reports the outcome. Only the
+   * plain agent save asks for it: land, finish and lifecycle saves need their settled head. */
+  settleBackground?: boolean;
 };
 export const saveContract = (capabilities: {
   overlapEvidenceVersion?: 1 | undefined;
@@ -402,6 +406,7 @@ async function saveOnce(
     // With source-submit-run one action commits, submits and runs the first step. Staging a page
     // first needs committed objects, so only a save with no separate stage call takes it.
     run = lazy && !!submitRun && submitPage && pages.length <= 1 && !!exchange.client.action,
+    background = run && contract.settleBackground === true,
     // The action commits one page of uploads; a larger save commits the rest first, as before.
     committedInRun = run && deferred && deferred.length <= 100 ? deferred : [];
   if (deferred?.length && committedInRun !== deferred) await exchange.commitObjects!(deferred);
@@ -412,6 +417,8 @@ async function saveOnce(
   }
   timing?.mark('upload');
   if (run) {
+    // Recorded before the call: a save whose reply is lost is still reported by the next command.
+    if (background) durableReplace(join(directory, backgroundSaveName), '');
     const inputText = canonicalPayload(prepared.input);
     const reply = JSON.parse(
       await exchange.client.action(makeFunctionReference<'action'>('projectSourceRun:submit'), {
@@ -419,8 +426,9 @@ async function saveOnce(
         kind: 'save',
         ...(committedInRun.length ? { objects: committedInRun } : {}),
         ...(last === null ? {} : { index: last, page: canonicalPayload(pages[last]!.value) }),
+        ...(background ? { settle: 'background' } : {}),
         // source-run-publish: the outcome in the reply when the step finished, and the input inline.
-        ...(runPublish
+        ...(runPublish && !background
           ? {
               progress: true,
               ...(Buffer.byteLength(inputText) <= 64 * 1024 ? { input: inputText } : {}),
@@ -437,7 +445,11 @@ async function saveOnce(
       timing?.server(reply);
       observe?.(reply);
     }
-    if (result.outcome) applyHostedSaveReceipt(root, capture, request, result);
+    if (result.outcome) {
+      applyHostedSaveReceipt(root, capture, request, result);
+      // Settled already (a retry): this command reports the outcome itself.
+      if (background) rmSync(join(directory, backgroundSaveName), { force: true });
+    }
     return result;
   }
   for (const [index, page] of pages.entries()) {
@@ -700,6 +712,7 @@ export async function settlePriorHostedSave(
   const request = saveRequestSchema.parse(JSON.parse(readFileSync(join(directory, 'request.json'), 'utf8')));
   if (progress.terminal) {
     applyHostedSaveReceipt(root, capture, request, progress.terminal);
+    reportBackgroundSave(root, prior.operationId, progress.terminal);
     return;
   }
   const resumed = await saveHostedLane(
@@ -711,16 +724,96 @@ export async function settlePriorHostedSave(
     },
     exchange,
   );
-  if (resumed.outcome) return;
+  if (resumed.outcome) {
+    reportBackgroundSave(root, prior.operationId, resumed);
+    return;
+  }
   const observed = (wait ? await wait(prior.operationId, resumed) : undefined) as
     | { outcome?: { status: string; result?: unknown } }
     | undefined;
   if (observed?.outcome) {
     applyObservedSaveOutcome(root, prior.operationId, observed as { outcome: { status: string } });
+    reportBackgroundSave(root, prior.operationId, observed as { outcome: { status: string } });
     return;
   }
   throw new ForgeError(
     'SAVE_PENDING',
     `The earlier save ${prior.operationId} is still publishing. Nothing new was captured. Wait for it with ${operationWait(root, { operationIds: [prior.operationId] }).waitCommand}, then retry this same command; it then works on top of it.`,
   );
+}
+
+/** A save returned before its settle (fea47345 C) keeps this marker in its directory until the
+ * outcome is applied here and, when it failed, reported. */
+const backgroundSaveName = 'background';
+/** Apply the outcome of the save that returned before its settle and, when it did not complete,
+ * report that once as SAVE_SETTLE_FAILED: the command that reads it does nothing else, so the agent
+ * sees the failure and runs the command again (its edits are still in the checkout). */
+function reportBackgroundSave(
+  root: string,
+  operationId: string,
+  terminal: { outcome: { status: string; error?: { code?: string; message?: string } } },
+) {
+  const flag = join(clientCacheRoot(root), `saves/${operationId}`, backgroundSaveName);
+  if (!checkoutPathExists(flag)) return;
+  rmSync(flag, { force: true });
+  if (terminal.outcome.status === 'completed') return;
+  const error = terminal.outcome.error;
+  throw new ForgeError(
+    'SAVE_SETTLE_FAILED',
+    `Your earlier save ${operationId} returned before the server finished it, and the server could not finish it (${error?.code ?? terminal.outcome.status}: ${error?.message ?? 'no detail'}). Nothing from that save is on the Lane; your edits are still in this checkout. This command did nothing: run it again (a save captures those edits again).`,
+    undefined,
+    { failedSave: operationId, ...(error?.code ? { cause: error.code } : {}) },
+  );
+}
+/** Before any agent command (fea47345 C): when this checkout's pending save returned before its
+ * settle, read its outcome (one query; none when no such save is pending, so idle costs nothing).
+ * A completed save advances the marker; a failed one is reported (SAVE_SETTLE_FAILED); one still
+ * settling is left to the command (save and sync wait on it, reads go on). */
+export async function settleBackgroundSave(
+  root: string,
+  exchange: Pick<SaveExchange, 'client' | 'projectId'>,
+  /** The outcome capability discovery already read for this save (`settling`): no extra call. */
+  known?: { operationId: string; terminal: unknown },
+) {
+  const prior = backgroundSaveOperation(root);
+  if (!prior) return;
+  const directory = join(clientCacheRoot(root), `saves/${prior}`);
+  type Terminal = { outcome: { status: string; result?: unknown } };
+  let terminal: Terminal | null | undefined;
+  if (known?.operationId === prior) terminal = known.terminal as Terminal | null;
+  else
+    try {
+      terminal = (
+        JSON.parse(
+          await exchange.client.query(makeFunctionReference<'query'>('projectHostedSaves:progress'), {
+            projectId: exchange.projectId,
+            operationId: prior,
+          }),
+        ) as { terminal?: Terminal | null }
+      ).terminal;
+    } catch (error) {
+      // An unknown save is the existing reconciliation's case (it drops it); other errors surface.
+      if (hostedActionError(error, 'save reconciliation').code === 'NOT_FOUND') return;
+      throw error;
+    }
+  if (!terminal) return;
+  applyHostedSaveReceipt(
+    root,
+    JSON.parse(readFileSync(join(directory, 'capture.json'), 'utf8')),
+    saveRequestSchema.parse(JSON.parse(readFileSync(join(directory, 'request.json'), 'utf8'))),
+    terminal,
+  );
+  reportBackgroundSave(root, prior, terminal);
+}
+/** The operation id of this checkout's pending save when it returned before its settle (local
+ * files only, no call). */
+export function backgroundSaveOperation(root: string): string | undefined {
+  const marker = readHostedLaneCheckout(root);
+  if (!marker) return undefined;
+  const pending = pendingSavePath(root, marker);
+  if (!checkoutPathExists(pending)) return undefined;
+  const prior = saveCommandSchema.parse(JSON.parse(readFileSync(pending, 'utf8')));
+  return checkoutPathExists(join(clientCacheRoot(root), `saves/${prior.operationId}`, backgroundSaveName))
+    ? prior.operationId
+    : undefined;
 }

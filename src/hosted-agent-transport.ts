@@ -116,7 +116,7 @@ import { publishClientSourcePack } from './source-pack-client.js';
 import { hostedContractFeatures, missingRequiredFeatures } from './hosted-contract-features.js';
 import { HostedCheckoutDownloads } from './hosted-checkout-downloads.js';
 import { selectHostedFinish } from './hosted-agent-finish-identity.js';
-import { reconcileHostedSave } from './hosted-save-client.js';
+import { backgroundSaveOperation, reconcileHostedSave, settleBackgroundSave } from './hosted-save-client.js';
 import { markLandStep, type LandTiming } from './land-timing.js';
 import {
   callerReceipts,
@@ -154,6 +154,7 @@ const gateCodes = new Set([
   'OVERLAP_UNANSWERED',
   'PREFLIGHT_REQUIRED',
   'SAVE_PENDING',
+  'SAVE_SETTLE_FAILED',
   'SAVE_REBASE_CONFLICT',
   'LANE_NOT_ACTIVE',
   'POLICY_CHANGED',
@@ -645,6 +646,7 @@ export class HostedAgentTransport {
           null,
           await cloneFreshness(this.root, mainCheckoutTransport(this.root, this.address, this.exchange)),
         );
+      const settling = backgroundSaveOperation(this.root);
       let discovery: unknown;
       try {
         let options: Record<string, unknown> = {
@@ -660,6 +662,9 @@ export class HostedAgentTransport {
           defaultsVersion: 1,
           landingMessageVersion: 1,
           openLanesVersion: 1,
+          // Split save (fea47345 C): this checkout's save that returned before its settle; the reply
+          // carries its outcome, so reading it costs no extra call. No such save, no field.
+          ...(settling ? { settling } : {}),
         };
         for (;;) {
           try {
@@ -676,7 +681,7 @@ export class HostedAgentTransport {
             )
               throw error;
             const field =
-              /extra field\s+[`'"]?(features|noticeVersion|resolveVersion|overlapVersion|overlapEvidenceVersion|mirrorVersion|metricReceiptVersion|planningVersion|defaultsVersion|landingMessageVersion|openLanesVersion|presenceVersion|boardVersion)\b/i.exec(
+              /extra field\s+[`'"]?(features|noticeVersion|resolveVersion|overlapVersion|overlapEvidenceVersion|mirrorVersion|metricReceiptVersion|planningVersion|defaultsVersion|landingMessageVersion|openLanesVersion|presenceVersion|boardVersion|settling)\b/i.exec(
                 error.message,
               )?.[1];
             // Preserve independently supported features, and never repeat a
@@ -712,6 +717,9 @@ export class HostedAgentTransport {
       // The first-write hook reads this marker instead of a capability call (written on change only).
       rememberBoardServerFeatures(this.address.projectId, this.serverFeatures);
       this.receiptActor = capabilities.metricReceiptVersion === 1 ? capabilities.actor : undefined;
+      // Split save (fea47345 C): apply the outcome of this checkout's save that returned before its
+      // settle, or report its failure, before the command does anything else.
+      if (settling) await settleBackgroundSave(this.root, this.exchange, capabilities.settledSave);
       metricRequesterActor({ kind: 'agent', name: capabilities.actor });
       invariant(
         capabilities.projectId === this.address.projectId,

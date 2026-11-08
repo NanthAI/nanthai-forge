@@ -502,6 +502,7 @@ export async function executeHostedAgent(
     const command = hostedAgentCommandSchemas.save.parse(input);
     checkLocalLane(session, command.laneId);
     const timing = syncTiming();
+    const settleBackground = session.capabilities.features?.includes('save-settle-background') ?? false;
     const saved = await saveHostedLane(
       session.root,
       {
@@ -510,12 +511,22 @@ export async function executeHostedAgent(
         ...(command.supersedeFinish ? { supersedeFinish: true } : {}),
       },
       session.exchange,
-      saveContract(session.capabilities),
+      { ...saveContract(session.capabilities), settleBackground },
       false,
       { action: 'save', parameters: { ...command, operationId: session.journal.operationId } },
       (id, pending) => waitSaveUntil(session, id, pending),
       timing,
     );
+    // Split save (fea47345 C): the upload is in and the save is submitted; the server settles it
+    // now and this checkout's next command reads the outcome (reporting a failure), so no wait here.
+    if (settleBackground && savePending(saved))
+      return {
+        status: 'settling',
+        operationId,
+        laneId: session.marker()?.selection.laneId,
+        note: 'Saved: the server is finishing this save now. Your next command here reports its outcome, including any failure.',
+        timing: timing.value(),
+      };
     const outcome = await awaitSaveOutcome(session, operationId, saved, timing),
       split = timing.value();
     if (!outcome || typeof outcome !== 'object') return outcome;

@@ -105,6 +105,9 @@ export const hostedAgentCapabilitiesSchema = z
     checkCallbackConfigured: z.boolean(),
     nativeOwnerRequired: z.literal(false),
     observation: z.literal('finite'),
+    /** Split save (save-settle-background, fea47345 C): the outcome of the save the client named in
+     * `settling`, read in this same call (`terminal` null while it is still settling). */
+    settledSave: z.object({ operationId: z.string(), terminal: z.unknown().nullable() }).strict().optional(),
   })
   .strict();
 export type HostedAgentCapabilities = z.infer<typeof hostedAgentCapabilitiesSchema>;

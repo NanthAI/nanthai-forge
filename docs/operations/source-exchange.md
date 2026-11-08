@@ -739,6 +739,19 @@ Fast paths (fea47345 B; each falls back to the full path when it cannot prove it
 - **Server R2 writes.** A 200 create-only PUT whose response echoes the exact signed
   `x-amz-checksum-sha256` is verified by that echo; a 412 or a missing/different echo still
   does the HEAD check. This drops one R2 request per new object a source step writes.
+- **Split save (fea47345 C).** With contract feature `save-settle-background`, the agent
+  `save` calls `projectSourceRun:submit` with `settle:"background"`. One action commits the
+  uploads and submits the save; that same transaction records the save's changed paths on the
+  Lane's overlap row (also for a first save from the base), and the step is scheduled at once
+  instead of running inline. The client keeps a `background` marker in the save's cache folder
+  and returns `settling`. Every later agent command in that checkout names that save in its
+  capability call (`settling`), and the reply carries the outcome (`settledSave`), so no call
+  is added. Other callers read `projectHostedSaves:progress` once, and only while that marker
+  exists, so idle costs nothing. A completed save advances the marker; any other outcome raises
+  `SAVE_SETTLE_FAILED` once (`recovery.failedSave`) and the command does nothing. The same check
+  runs where a later save, sync or preflight settles the earlier save. Saves that need their head
+  (land, finish, lifecycle) keep the inline step. The web UI does not show a failed settle yet;
+  a P7 Issue tracks that.
 
 
 ## Hosted check output API

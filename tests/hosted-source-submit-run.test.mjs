@@ -172,3 +172,33 @@ test('a submit reply that already holds the published outcome ends the wait at o
   assert.deepEqual(result, reply.terminal);
   assert.deepEqual(seen, [reply]);
 });
+
+test('only a save settles in the background (save-settle-background, fea47345 C)', async () => {
+  const run = await import(moduleUrl('../convex/projectSourceRun.ts'));
+  const touched = [];
+  const ctx = {
+    auth: { getUserIdentity: async () => ({ subject: 'owner' }) },
+    runQuery: async () => touched.push('query'),
+    runMutation: async () => touched.push('mutation'),
+    runAction: async () => touched.push('action'),
+  };
+  for (const kind of ['sync', 'compose'])
+    await assert.rejects(
+      run.submit._handler(ctx, {
+        projectId: 'project',
+        operationId: randomUUID(),
+        kind,
+        settle: 'background',
+      }),
+      error => error.data?.code === 'BAD_ARGUMENT',
+    );
+  assert.deepEqual(touched, [], 'refused before any commit or submit');
+  const store = await import(moduleUrl('../convex/projectSourceRunStore.ts'));
+  await assert.rejects(
+    store.submit._handler(
+      {},
+      { projectId: 'project', operationId: randomUUID(), actor: 'owner', kind: 'sync', background: true },
+    ),
+    error => error.data?.code === 'BAD_ARGUMENT',
+  );
+});

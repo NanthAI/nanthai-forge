@@ -79,6 +79,11 @@ export const hostedContractFeatures = [
    * published, with the save's chained resolve run in the same action) and `input` (the job input
    * text, read from memory). Without it the CLI waits on the progress subscription as before. */
   'source-run-publish',
+  /** Split save (fea47345 C): projectSourceRun:submit takes `settle: 'background'` for a save. It
+   * commits the uploads, submits, records the save's changed paths for overlap at once, and returns
+   * `submitted` while the server settles the save on a scheduled step; the client's next command
+   * reads its outcome and reports a failed settle. Without it the CLI waits for the settle. */
+  'save-settle-background',
 ] as const;
 export type HostedContractFeature = (typeof hostedContractFeatures)[number];
 

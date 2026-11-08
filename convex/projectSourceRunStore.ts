@@ -17,18 +17,21 @@ export const submit = internalMutation({
     kind: v.union(v.literal('save'), v.literal('sync'), v.literal('compose')),
     index: v.optional(v.number()),
     page: v.optional(v.string()),
+    /** A save that settles on the scheduler (feature save-settle-background): no inline run. */
+    background: v.optional(v.boolean()),
   },
   returns: v.string(),
-  handler: async (ctx, { kind, index, page, ...auth }) => {
+  handler: async (ctx, { kind, index, page, background, ...auth }) => {
     try {
       invariant(
         kind === 'save' || (index === undefined && page === undefined),
         'BAD_ARGUMENT',
         'Only a save submits a delta page.',
       );
+      invariant(!background || kind === 'save', 'BAD_ARGUMENT', 'Only a save settles in the background.');
       const submitted =
         kind === 'save'
-          ? await submitHostedSave(ctx, { ...auth, index, page }, true)
+          ? await submitHostedSave(ctx, { ...auth, index, page }, !background, background === true)
           : kind === 'sync'
             ? await submitHostedSync(ctx, auth, true)
             : await submitHostedCompose(ctx, auth, true);

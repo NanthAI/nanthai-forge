@@ -6,12 +6,21 @@ import { sourceWorkerPlan } from '../src/convex-source-provider';
 import { wakeLifecycleSave } from './projectHostedLifecycleCascade';
 import { makeFunctionReference } from 'convex/server';
 import { mutation, internalMutation, internalAction } from './cliServer';
-import { loadSave, saveObject, writeSaveState, type SaveIdentity } from './projectHostedSaveStore';
+import {
+  loadSave,
+  saveLane,
+  sameSaveLane,
+  saveObject,
+  writeSaveState,
+  type SaveIdentity,
+} from './projectHostedSaveStore';
 import { startSubmittedSource } from './projectSourceSubmitStart';
 import type { MutationCtx } from './server';
 import { hostedSaveInput, stageSavePage } from './projectHostedSaves';
 import { enqueueSourceJob, loadSourceJob } from './projectSourceJobs';
 import { publishHostedSave, publishSaveJob, saveForJob } from './projectHostedSavePublish';
+import { trackHostedOverlapLane } from './projectHostedOverlapStore';
+import { requireMemberAuthorityById } from './projectLaneAuthority';
 import { canonicalPayload, hostedPayloadHash } from '../src/hosted-source-operation';
 import { savePin } from '../src/hosted-save';
 import { blobStore } from './blobStore';
@@ -48,6 +57,9 @@ export async function submitHostedSave(
   ctx: MutationCtx,
   input: SaveIdentity & { index?: number | undefined; page?: string | undefined },
   inline = false,
+  /** Split save (fea47345 C): the caller returns before the settle, so record its changed paths for
+   * overlap now; peers and the caller's own overlap read see them without waiting for the step. */
+  background = false,
 ): Promise<{ payload: string; run: string | null }> {
   const { index, page, ...auth } = input;
   const prior = await loadSave(ctx, auth, false);
@@ -103,6 +115,18 @@ export async function submitHostedSave(
       },
     });
     await writeSaveState(ctx, row._id, { ...state, status: 'submitted', submittedAt: Date.now() });
+    if (background && state.overlapChanges !== undefined) {
+      const lane = await saveLane(ctx, { ...auth, laneId: state.request.laneId });
+      // Only for the exact Lane this save was prepared on, by its author or the project owner (as
+      // the save's prepare checked); a moved Lane fails at publish anyway.
+      await requireMemberAuthorityById(ctx, input.projectId, lane.actor, auth.actor, 'Lane');
+      if (sameSaveLane(lane, state.request.expected))
+        await trackHostedOverlapLane(ctx, input.projectId, lane, {
+          changes: JSON.parse(state.overlapChanges),
+          complete: state.overlapComplete !== false,
+          pending: true,
+        });
+    }
   }
   const started = await startSubmittedSource(
     ctx,

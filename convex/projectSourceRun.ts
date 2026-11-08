@@ -42,6 +42,10 @@ export const submit = action({
      * (`{terminal, state, chain?}`). Without it the reply is the bare terminal receipt, as an older
      * CLI reads it. */
     progress: v.optional(v.boolean()),
+    /** Feature save-settle-background (fea47345 C): a save returns `submitted` once its uploads are
+     * committed and it is submitted (overlap paths recorded in that transaction); its step runs on
+     * the scheduler, and the caller's next command reads the outcome. */
+    settle: v.optional(v.literal('background')),
   },
   returns: v.string(),
   handler: async (ctx, input): Promise<string> => {
@@ -53,12 +57,18 @@ export const submit = action({
         'BAD_ARGUMENT',
         'Send only a small job input inline.',
       );
-      const { objects, input: text, progress: shaped, ...submit } = input;
+      invariant(
+        input.settle === undefined || input.kind === 'save',
+        'BAD_ARGUMENT',
+        'Only a save settles in the background.',
+      );
+      const { objects, input: text, progress: shaped, settle, ...submit } = input;
       const verified = objects?.length ? await commitObjects(ctx, user.subject, objects) : [];
       const submitted: { payload: string; run: string | null } = JSON.parse(
         await ctx.runMutation(makeFunctionReference<'mutation'>('projectSourceRunStore:submit'), {
           ...submit,
           actor: user.subject,
+          ...(settle ? { background: true } : {}),
         }),
       );
       if (!submitted.run) return submitted.payload;

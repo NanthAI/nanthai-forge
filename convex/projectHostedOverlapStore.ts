@@ -20,6 +20,9 @@ export async function trackHostedOverlapLane(
     agent?: string;
     /** A sync moved the base to a newer main; the Lane's saved paths still describe its own work. */
     rebased?: boolean;
+    /** A save submitted to settle in the background (fea47345 C): its paths count before its head
+     * is published, so a first save from the base still records them. */
+    pending?: boolean;
   },
 ) {
   const old = await ctx.db
@@ -29,7 +32,7 @@ export async function trackHostedOverlapLane(
   const sameBase = old?.baseHead === lane.base.head;
   const keepChanges = sameBase || metadata?.rebased === true;
   const sameHead = old?.head === lane.head;
-  const unchangedBase = lane.head === lane.base.head;
+  const unchangedBase = lane.head === lane.base.head && !metadata?.pending;
   const projection = unchangedBase
     ? { changes: '[]', complete: true }
     : mergeOverlapChanges(
