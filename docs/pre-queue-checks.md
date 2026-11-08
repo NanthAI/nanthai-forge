@@ -54,7 +54,9 @@ configured check (no `configure-check`) skips it and queues as before.
      whole check (or, for a docs-only change, its docs selection) on its base;
      the change recomposes onto current main byte-exactly with no text conflict;
      the paths main gained since that base are disjoint from the change's paths;
-     and no path on either side is a [global-risk file](#global-risk-files). The
+     no path on either side is a [global-risk file](#global-risk-files); and no
+     changed path is a symlink or submodule on any side (links the change and main
+     leave alone, anywhere in the tree, do not count). The
      rule reads only Forge data (manifests, the run's selection, receipts), so it
      works with any CI and any check command. The coalesced [main audit](workflows.md#hosted-acceptance-gate)
      is armed at once and covers the new head with one full run.
@@ -68,7 +70,7 @@ configured check (no `configure-check`) skips it and queues as before.
      combined check.
    The receipt's `firstCheck` says which path it took: `{"landedOn":"admission-run","mainMoved":…}`
    or `{"landedOn":"recheck","reason":…}` with the recheck reason (`path-overlap`,
-   `tested-doc`, `global-risk`, `text-conflict`, `checked-not-full`, `main-red`, `audit-debt`,
+   `tested-doc`, `global-risk`, `unsupported-mode`, `text-conflict`, `checked-not-full`, `main-red`, `audit-debt`,
    `cohort`, …).
    Cohorts of admitted changes use the admitted failure prior, so they are larger.
    A refused change waits for peers still deciding their own Lane run (bounded by

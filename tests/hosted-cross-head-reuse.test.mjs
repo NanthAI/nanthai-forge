@@ -76,6 +76,10 @@ function fixture({
   doc = null,
   testedDocs,
   auditTestedDocs,
+  // Untouched symlink and submodule entries (a linked skills folder, vendored repos), and
+  // the side ('candidate' | 'main') that retargets the symlink.
+  links = false,
+  retarget = null,
 } = {}) {
   const blobs = new Map();
   let calls = 0,
@@ -99,6 +103,14 @@ function fixture({
       : []),
     ...(doc ? [[doc, 'a\nb\nc\n']] : []),
   ].map(file);
+  const link = (path, target, mode) => ({ path, blob: put(target), mode });
+  if (links)
+    original.push(
+      link('.claude/skills', '../.agents/skills', 'symlink'),
+      link('vendor/sub', 'e02e9d405b8848909f4f746b61b12a663f631c7c', 'gitlink'),
+    );
+  const retargeted = link('.claude/skills', '../other/skills', 'symlink');
+  const relink = files => [...files.filter(f => f.path !== retargeted.path), retargeted];
   const state = files =>
     put(
       JSON.stringify({
@@ -112,16 +124,19 @@ function fixture({
     );
   const base = state(original),
     changed = file(['convex/projectConvexSourceOutput.ts', 'export const cost = 2;']);
-  const candidate = [...original.filter(f => f.path !== changed.path), changed];
+  let candidate = [...original.filter(f => f.path !== changed.path), changed];
+  if (retarget === 'candidate') candidate = relink(candidate);
   if (unknown) candidate.push(file(['unknown.config', 'unknown']));
   if (risk) candidate.push(file([risk, 'risk']));
   const edit = (files, text) => (doc ? [...files.filter(f => f.path !== doc), file([doc, text])] : files);
   const mainDelta = overlap
     ? file([changed.path, 'export const cost = 3;'])
     : file(['src/native-projection.ts', 'export const old = 2;']);
-  const main = [...original.filter(f => f.path !== mainDelta.path), mainDelta];
+  let main = [...original.filter(f => f.path !== mainDelta.path), mainDelta];
+  if (retarget === 'main') main = relink(main);
   if (mainRisk) main.push(file([mainRisk, 'risk']));
-  const merged = [...candidate.filter(f => f.path !== mainDelta.path), mainDelta];
+  let merged = [...candidate.filter(f => f.path !== mainDelta.path), mainDelta];
+  if (retarget === 'main') merged = relink(merged);
   if (mainRisk) merged.push(main.at(-1));
   if (corrupt) merged.push(file(['extra.txt', 'unexpected recomposition']));
   const docs = paths => (paths ? { testedDocs: { rule: 'name-mention-v1', paths } } : {});
@@ -174,6 +189,13 @@ test('clean path-disjoint composition lands on its first check from six small re
   // Four manifests, then the two selection pins: no import graph, no blobs.
   assert.deepEqual(f.metrics(), { calls: 2, maxWindow: 4 });
 });
+test('untouched symlinks and submodules anywhere in the tree do not block a first-check landing', async () => {
+  const f = fixture({ links: true }),
+    { proof } = await analyzeCrossHeadReuse(f.basis, f.selection, f.read, ['.bench/ci.sh']);
+  assert(proof, 'a linked skills folder or a vendored submodule is not a reason to recheck');
+  assert(validCrossHeadProof(proof));
+  assert.deepEqual(f.metrics(), { calls: 2, maxWindow: 4 });
+});
 test('shared affected tests no longer block a path-disjoint first-check landing (owner option A)', async () => {
   const f = fixture({ shared: true });
   assert((await analyzeCrossHeadReuse(f.basis, f.selection, f.read)).proof);
@@ -189,6 +211,8 @@ for (const [option, reason] of [
   [{ mainRisk: 'convex/schema.ts' }, 'global-risk'],
   [{ risk: 'tools/run-check.mjs' }, 'global-risk'],
   [{ scope: 'scoped' }, 'checked-not-full'],
+  [{ links: true, retarget: 'candidate' }, 'unsupported-mode'],
+  [{ links: true, retarget: 'main' }, 'unsupported-mode'],
 ])
   test(`${JSON.stringify(option)} rechecks: ${reason}`, async () => {
     const f = fixture(option);

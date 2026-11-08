@@ -132,10 +132,24 @@ for (const [name, memberPaths] of [
 // only, so a project whose check is its own command lands a clean overtake on its
 // admission run too. Before, every non-Forge command was refused as check-evidence
 // and the passed admission run was thrown away on every main move.
+//
+// The live bench repository (Issue 05df5aed, 2026-11-08): a linked skills folder and two
+// vendored submodules that no change touches. Every proof there was refused as
+// unsupported-mode because any link anywhere in the tree refused it, so every own-command
+// case here runs on that tree shape (the earlier fixture passed while live failed).
+const linkedRepo = {
+  baselineFiles: [
+    ['.agents/skills/review.md', 'review'],
+    ['.claude/skills', '../.agents/skills', 'symlink'],
+    ['.repos/vendor/submodules/one', 'e02e9d405b8848909f4f746b61b12a663f631c7c', 'gitlink'],
+    ['.repos/vendor/submodules/two', '493909133db04153348eabc503f4e30cf0033d96', 'gitlink'],
+  ],
+};
 const ownCheck = {
   checkCommand: { executable: 'bash', args: ['ci/check.sh'] },
   // What a runner pins for a configured command: the whole command, no test list.
   selection: JSON.stringify({ scope: 'full', reason: 'Exact configured command', tests: [] }),
+  ...linkedRepo,
 };
 const mainFiles = (f, receipt) => JSON.parse(f.c.objects.get(receipt.candidate.head)).files.map(x => x.path);
 
@@ -166,6 +180,24 @@ test('a project with its own check command lands a clean path-disjoint overtake 
   );
   for (const path of ['src/a.ts', 'src/b.ts']) assert(mainFiles(f, second).includes(path), path);
   assert.equal(second.crossHeadProof.main.head, first.candidate.head, 'proved against the main it lands on');
+  const kept = JSON.parse(f.c.objects.get(second.candidate.head)).files;
+  for (const [path, , mode] of linkedRepo.baselineFiles)
+    assert.equal(kept.find(x => x.path === path)?.mode, mode ?? 'file', path);
+});
+
+test('own check command: a change that replaces a symlink rechecks (unsupported-mode)', async t => {
+  const f = await wave(t, {
+    ...ownCheck,
+    memberPaths: ['src/a.ts', '.claude/skills'],
+    fileCount: 2,
+  });
+  assert.deepEqual(
+    states(f).map(s => s.phase),
+    ['landed', 'landed'],
+  );
+  assert.deepEqual(f.reuseDecisions, ['unsupported-mode']);
+  assert.deepEqual(receipts(f)[1].firstCheck, { landedOn: 'recheck', reason: 'unsupported-mode' });
+  assert.equal(runCount(f), 3);
 });
 
 test('own check command: the file the command names is global-risk and rechecks', async t => {

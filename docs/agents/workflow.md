@@ -972,7 +972,8 @@ pinned inputs cleanly on current main. They land on their first check (rule
 base, checked head, current main, recomposed head) show: the recomposition is
 exactly the union of both deltas (modes and deletions included); the changed
 paths of the two deltas are disjoint, including file/directory prefixes; neither
-side touches a [global-risk file](../pre-queue-checks.md#global-risk-files); the
+side touches a [global-risk file](../pre-queue-checks.md#global-risk-files); no
+changed path is a symlink or submodule on any side (untouched links do not count); the
 first run's own selection was the full check (or docs for a docs-only change);
 and main is green with a full audit baseline and no audit debt. It reads six
 small objects and no source text or import graph, so a path-disjoint semantic

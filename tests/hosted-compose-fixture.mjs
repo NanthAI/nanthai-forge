@@ -121,7 +121,11 @@ export async function composeFixture({ baselineFiles = [] } = {}) {
   const file = (path, bytes, mode = 'file') => ({ path, blob: put(bytes).sha256, mode });
   const baseFile = file('a.txt', 'a\nb\nc\n'),
     hidden = file('hidden.bin', Buffer.alloc(4096, 0));
-  const baseline = state([baseFile, hidden, ...baselineFiles.map(([path, text]) => file(path, text))]);
+  const baseline = state([
+    baseFile,
+    hidden,
+    ...baselineFiles.map(([path, text, mode]) => file(path, text, mode)),
+  ]);
   register(baseline);
   const main = {
     schema: 2,

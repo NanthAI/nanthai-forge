@@ -76,7 +76,8 @@ export async function analyzeCrossHeadReuse(
   // The recomposition must be precisely the union of both deltas, including modes/deletions.
   // An overlapping Markdown file is the server's clean text merge: it exists on all four
   // sides as a plain file (no add, delete or mode change) and takes the composed bytes.
-  const expected = entries(main!),
+  const current = entries(main!),
+    expected = new Map(current),
     source = entries(checked!),
     composed = entries(merged!),
     original = entries(base!);
@@ -97,9 +98,17 @@ export async function analyzeCrossHeadReuse(
     [...expected].some(([path, file]) => !same(file, composed.get(path)))
   )
     return { reason: 'composition-not-exact' };
+  // A symlink or submodule that either delta adds, removes or retargets can redirect what
+  // the other side's paths resolve to, so path-disjointness no longer holds. Untouched
+  // links (any repository with a linked skills folder or a vendored submodule) are the
+  // same bytes on all four sides, so only the changed paths are judged.
+  const sides = [original, source, current, composed];
   if (
-    [base, checked, main, merged].some(state =>
-      state!.files.some(f => !['file', 'executable'].includes(f.mode)),
+    [...candidatePaths, ...mainPaths].some(path =>
+      sides.some(side => {
+        const mode = side.get(path)?.mode;
+        return mode !== undefined && mode !== 'file' && mode !== 'executable';
+      }),
     )
   )
     return { reason: 'unsupported-mode' };
