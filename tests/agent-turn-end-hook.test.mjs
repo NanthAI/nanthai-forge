@@ -33,18 +33,25 @@ import { agentFixture } from './hosted-agent-fixture.mjs';
 const hookRunner = fileURLToPath(new URL('../dist/agent-stop-hook.js', import.meta.url));
 const deadPid = 2 ** 22 + 12345; // beyond the default pid range: never alive
 
-/** Private state directory and agent session for one test; no real user state. */
-function session(t) {
+/** Private state directory and agent session for one test; no real user state.
+ * `codex` (default) is a client without background wakes; `claude` wakes on background
+ * exit; `trusted` adds FORGE_AGENT_WAKE=background-exit (turn end never ends the task). */
+function session(t, client = 'codex') {
   const directory = mkdtempSync(join(tmpdir(), 'forge-turn-end-'));
   const previous = {
     XDG_STATE_HOME: process.env.XDG_STATE_HOME,
     CLAUDE_CODE_SESSION_ID: process.env.CLAUDE_CODE_SESSION_ID,
     CODEX_THREAD_ID: process.env.CODEX_THREAD_ID,
+    FORGE_AGENT_WAKE: process.env.FORGE_AGENT_WAKE,
   };
   const id = `synthetic-session-${randomUUID()}`;
   process.env.XDG_STATE_HOME = join(directory, 'state');
-  process.env.CLAUDE_CODE_SESSION_ID = id;
+  delete process.env.CLAUDE_CODE_SESSION_ID;
   delete process.env.CODEX_THREAD_ID;
+  delete process.env.FORGE_AGENT_WAKE;
+  if (client === 'codex') process.env.CODEX_THREAD_ID = id;
+  else process.env.CLAUDE_CODE_SESSION_ID = id;
+  if (client === 'trusted') process.env.FORGE_AGENT_WAKE = 'background-exit';
   t.after(() => {
     for (const [key, value] of Object.entries(previous))
       if (value === undefined) delete process.env[key];
@@ -396,4 +403,53 @@ test('install adds one Stop guard per client beside first-write hooks; uninstall
   installEditHooks(s.directory, undefined, true, home);
   for (const path of ['.claude/settings.json', '.codex/hooks.json'])
     assert.deepEqual(JSON.parse(readFileSync(join(home, path), 'utf8')), { hooks: { Stop: [other] } });
+});
+
+test('background-wake client: the hook names the one background settle wait, never a foreground poll', async t => {
+  const s = session(t, 'claude');
+  const work = landing(s.root, randomUUID(), null);
+  recordTurnWork(work);
+  assert.equal(readTurnLedger(s.id).work[0].wake, 'background');
+  const { calls, probe } = countingProbe();
+  const first = await turnEndDecision({ session_id: s.id, hook_event_name: 'Stop' }, { probe });
+  assert.equal(first.decision, 'block');
+  assert.equal(
+    first.reason,
+    `Your landing ${work.id.slice(0, 8)} is still running. Run once in the background: nforge wait ${work.id} --budget 7080; its exit wakes you when it settles. If ending your turn ends your task, block on it with your harness wait tool. To stop anyway, stop again.`,
+  );
+  assert(approxTokens(first.reason) < 110, `${approxTokens(first.reason)} tokens`);
+  assert.deepEqual(await turnEndDecision({ session_id: s.id }, { probe }), {});
+  // The settle wait is live in the background: still asked once (a delegated task ends with
+  // its turn), with advice to block on that same command rather than start another.
+  recordTurnWork({ ...work, pid: process.pid });
+  const live = await turnEndDecision({ session_id: s.id }, { probe });
+  assert.equal(live.decision, 'block');
+  assert.match(live.reason, /Its settle wait runs in the background\. If ending your turn ends your task/);
+  assert.deepEqual(await turnEndDecision({ session_id: s.id }, { probe }), {});
+  assert.deepEqual(calls, [], 'no hosted query');
+  // `nforge wait ID --budget 7080` resolves to the canonical wait with the settle budget.
+  const argv = resolveTurnWait([work.id, '--budget', '7080']);
+  assert.deepEqual(argv.slice(0, 3), ['agent', s.root, 'wait']);
+  assert.deepEqual(argv.slice(4), ['--budget', '7080']);
+});
+
+test('trusted wake: a live settle wait covers the stop with zero queries; unwatched work still blocks once', async t => {
+  const s = session(t, 'trusted');
+  const watched = landing(s.root, randomUUID(), process.pid);
+  recordTurnWork(watched);
+  assert.equal(readTurnLedger(s.id).work[0].wake, 'trusted');
+  const { calls, probe } = countingProbe();
+  assert.deepEqual(await turnEndDecision({ session_id: s.id, hook_event_name: 'Stop' }, { probe }), {});
+  assert.equal(readTurnLedger(s.id).blocked ?? null, null, 'an allowed stop leaves no block');
+  // A second landing nobody watches still needs its wake.
+  const unwatched = landing(s.root, randomUUID(), deadPid, Date.now() - 60_000);
+  recordTurnWork(unwatched);
+  const decision = await turnEndDecision({ session_id: s.id }, { probe });
+  assert.equal(decision.decision, 'block');
+  assert(decision.reason.includes(unwatched.id.slice(0, 8)));
+  assert.deepEqual(calls, [unwatched.id], 'one hosted query, only for the unwatched entry');
+  // The watcher exited (dead pid): a trusted entry no longer covers the stop.
+  rmSync(turnLedgerDirectory(), { recursive: true, force: true });
+  recordTurnWork({ ...watched, pid: deadPid });
+  assert.equal((await turnEndDecision({ session_id: s.id }, { probe })).decision, 'block');
 });

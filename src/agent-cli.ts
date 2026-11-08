@@ -523,7 +523,14 @@ export async function agentCli(args: string[], options: AgentCliOptions = {}): P
   for (const notice of notices) process.stderr.write(notice);
   const pending = (
     result as
-      | { result?: { inProgress?: boolean; waitCommand?: string; next?: Record<string, unknown> } }
+      | {
+          result?: {
+            inProgress?: boolean;
+            waitCommand?: string;
+            next?: Record<string, unknown>;
+            wake?: unknown;
+          };
+        }
       | undefined
   )?.result;
   // The land submitter already printed this command in its announcement line; repeating it costs context.
@@ -532,6 +539,7 @@ export async function agentCli(args: string[], options: AgentCliOptions = {}): P
     args[1] !== 'wait' &&
     pending?.inProgress &&
     pending.waitCommand &&
+    !pending.wake &&
     process.env[LAND_CHILD_ENV] !== '1'
   )
     process.stderr.write(`Forge work is unfinished; keep this turn active and run: ${pending.waitCommand}\n`);

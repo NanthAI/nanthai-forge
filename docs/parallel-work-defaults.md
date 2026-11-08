@@ -170,6 +170,10 @@ Read: `nforge settings`; set: `nforge settings KEY VALUE`; reset:
 - Exit codes: 0 landed or passed, 2 failed, 3 still running after 90 minutes. Run the same command
   again to keep waiting.
 - Ctrl-C stops waiting, never the landing.
+- In an agent client that wakes on background exit (Claude Code, or
+  `FORGE_AGENT_WAKE=background-exit`) land returns once submitted and names one background
+  settle wait instead; `--wait` or `FORGE_AGENT_WAKE=off` keeps the foreground wait. See
+  [asynchronous land](agents/workflow.md#asynchronous-land-one-wake-no-waiting-turns).
 
 ## Project settings
 

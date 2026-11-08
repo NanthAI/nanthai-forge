@@ -1023,3 +1023,67 @@ test(
     assert.deepEqual(await s.wait(input), resumed, 'reattachment retains the same terminal receipt');
   },
 );
+
+test('wake wait: one settle wait through queued, checking and ready wakes once per outcome with the receipt', async t => {
+  const { wakeContinuation, WAKE_BUDGET_SECONDS } = await import('../dist/agent-wake.js');
+  const outcomes = {
+    landed: ['landed', {}],
+    failed: [
+      'terminal-failed',
+      { observation: { state: 'terminal-failed', pendingReason: null, cause: 'check-failed' } },
+    ],
+    cancelled: [
+      'terminal-failed',
+      {
+        observation: { state: 'terminal-failed', pendingReason: null, cause: 'rejected' },
+        error: { code: 'LANDING_CANCELLED', message: 'Withdrawn by the Lane author.' },
+      },
+    ],
+  };
+  for (const [name, [status, overrides]] of Object.entries(outcomes)) {
+    const s = await fixture(),
+      a = await s.start();
+    const { action, ...input } = wakeContinuation('/synthetic', {
+      action: 'wait',
+      operationIds: [a.request.operationId],
+      until: 'acceptance',
+    }).next;
+    assert.equal(action, 'wait');
+    assert.equal(input.timeoutSeconds, WAKE_BUDGET_SECONDS, 'one budget covers the whole landing');
+    let returns = 0;
+    // A failed assertion must not leave a two-hour observer holding the test process.
+    const stop = new AbortController();
+    t.after(() => stop.abort());
+    const waiting = s.wait(input, stop.signal).then(value => {
+      returns++;
+      return value;
+    });
+    await turn();
+    const idle = s.counts().reads;
+    for (const step of ['queued', 'checking', 'ready']) {
+      await s.update(
+        a.state.id,
+        step,
+        step === 'ready' ? { observation: { state: 'pending', pendingReason: 'queued', cause: null } } : {},
+      );
+      s.wake();
+      await turn();
+      await turn();
+      assert.equal(returns, 0, `${name}: ${step} is not a wake`);
+    }
+    await turn();
+    const between = s.counts().reads;
+    await turn();
+    assert.equal(s.counts().reads, between, `${name}: no idle reads between changes`);
+    assert(between - idle <= 3, `${name}: one reread per change, ${between - idle}`);
+    await s.update(a.state.id, status, overrides);
+    s.wake();
+    const result = await waiting;
+    assert.equal(returns, 1, `${name}: exactly one wake`);
+    assert.equal(result.result.status, 'terminal', name);
+    const { submission } = result.result.submissions[0];
+    assert.equal(submission.observation.state, status, name);
+    if (name === 'cancelled') assert.equal(submission.error.code, 'LANDING_CANCELLED');
+    assert.equal(s.counts().opens, s.counts().closes, `${name}: the observer closes`);
+  }
+});

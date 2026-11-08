@@ -107,7 +107,9 @@ budget, time box, acceptance bar and metrics that must not regress.
     `nforge agent ROOT wait '{"operationIds":["ORIGINAL_UUID"],"until":"acceptance"}'`
     (native: `until:"terminal"`; check-only: `{"runId":"RUN_ID"}`). It blocks up to
     540 s, under agent shell limits; run it in the foreground, never sleep or end on
-    a background task. If the turn-end hook blocks a stop, run its `nforge wait ID`.
+    a background task. Exception: when land prints `SUBMITTED` with `wake.command`,
+    run that one settle wait in the background and block on it with your harness
+    wait tool ([asynchronous land](workflow.md#asynchronous-land-one-wake-no-waiting-turns)). If the turn-end hook blocks a stop, run its `nforge wait ID`.
     Repeat on IN PROGRESS; follow terminal recovery on failure/conflict. A passed
     check alone is not a landing. Your finish `message` is the GitHub commit message:
     end it with the commit trailers your harness asks for (for example `Co-Authored-By:`). Before admission, replay the full original request. Retryable source work follows its returned recovery.

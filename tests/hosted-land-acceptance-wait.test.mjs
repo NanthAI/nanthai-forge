@@ -150,12 +150,12 @@ async function fixture(t, checkOnly = false) {
     process.exitCode = oldExit;
     delete globalThis[key];
   });
-  const run = (root = '/synthetic') =>
+  const run = (root = '/synthetic', options = { detach: false, wait: true }) =>
     cli.hostedLandCli(
       root,
       { message: 'Land' },
       { url: 'https://fixture.invalid', projectId: 'synthetic' },
-      { detach: false, wait: true },
+      options,
     );
   return {
     calls,
@@ -494,3 +494,75 @@ for (const count of [560, 1120])
       }),
     );
   });
+
+/** Agent client environment for one test: `claude` wakes on background exit, `plain` does not. */
+function client(t, kind) {
+  const keys = ['CLAUDE_CODE_SESSION_ID', 'CODEX_THREAD_ID', 'FORGE_AGENT_WAKE', 'FORGE_CLIENT_SETTINGS'];
+  const previous = Object.fromEntries(keys.map(key => [key, process.env[key]]));
+  for (const key of keys) delete process.env[key];
+  // Default client settings (landWait true), never the developer's own file.
+  process.env.FORGE_CLIENT_SETTINGS = join(tmpdir(), `forge-settings-${randomUUID()}.json`);
+  if (kind === 'claude') process.env.CLAUDE_CODE_SESSION_ID = `synthetic-${randomUUID()}`;
+  if (kind === 'off') {
+    process.env.CLAUDE_CODE_SESSION_ID = `synthetic-${randomUUID()}`;
+    process.env.FORGE_AGENT_WAKE = 'off';
+  }
+  t.after(() => {
+    for (const key of keys)
+      if (previous[key] === undefined) delete process.env[key];
+      else process.env[key] = previous[key];
+  });
+}
+
+test('agent land returns at once after submission with the one background wake command', async t => {
+  client(t, 'claude');
+  const s = await fixture(t);
+  const result = await s.run('/synthetic', { detach: false });
+  assert.deepEqual(s.events, [], 'no observer opens in the land command');
+  assert.equal(s.calls.length, 1, 'one submission, no wait, no replay');
+  assert.notEqual(process.exitCode, 3, 'submitted is not IN PROGRESS');
+  const { wake, command, waitCommand, next, inProgress } = result.result;
+  assert.equal(inProgress, true);
+  assert.equal(wake.delivery, 'background-exit');
+  assert.equal(wake.budgetSeconds, 7080);
+  assert.equal(command, wake.command);
+  assert.equal(waitCommand, wake.command);
+  assert.deepEqual(next, {
+    action: 'wait',
+    operationIds: [s.operationId],
+    until: 'acceptance',
+    timeoutSeconds: 7080,
+  });
+  const err = s.err.join('');
+  assert.match(err, /land: SUBMITTED; it settles without you\. Run once in the background/);
+  assert(err.includes(wake.command));
+  assert(!err.includes('keep this turn active'), 'no foreground-wait advice');
+  assert(!err.includes('Next: wait'), 'one next step, not two');
+  t.diagnostic('agent land: 1 submission call, 0 observer subscriptions, 0 replays in the land command');
+});
+
+test('without background wakes (or FORGE_AGENT_WAKE=off) land still waits in the foreground', async t => {
+  for (const kind of ['plain', 'off']) {
+    await t.test(kind, async t => {
+      client(t, kind);
+      const s = await fixture(t);
+      const pending = s.run('/synthetic', { detach: false });
+      await turn();
+      assert.deepEqual(s.events, ['subscription']);
+      s.release();
+      const result = await pending;
+      assert.equal(result.result.wake, undefined);
+      assert.equal(result.result.submission.acceptance.receiptId, 'accepted');
+    });
+  }
+});
+
+test('an explicit --wait keeps the foreground wait even when the client wakes on background exit', async t => {
+  client(t, 'claude');
+  const s = await fixture(t);
+  const pending = s.run('/synthetic', { detach: false, wait: true });
+  await turn();
+  assert.deepEqual(s.events, ['subscription']);
+  s.release();
+  assert.equal((await pending).result.wake, undefined);
+});

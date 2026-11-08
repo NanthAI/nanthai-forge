@@ -33,11 +33,14 @@ import { LAND_INVOKED_ENV, landTiming, landTimingLine, startLandTiming } from '.
 import { AGENT_WAIT_SECONDS } from './agent-operation-wait.js';
 import { waitFailure } from './wait-failure.js';
 import { withLandWaitMetrics } from './land-wait-metrics.js';
+import { backgroundWake, wakeContinuation } from './agent-wake.js';
 
 export { landPhase, landSummary };
 
 /** Set in the detached submitter; it submits and exits without waiting. */
 export const LAND_CHILD_ENV = 'FORGE_LAND_CHILD';
+/** Set in the detached submitter when its land returns at once with a background wake. */
+const LAND_WAKE_ENV = 'FORGE_LAND_WAKE';
 /** The land command's budget in seconds, passed to its detached submitter. */
 const LAND_BUDGET_ENV = 'FORGE_LAND_BUDGET_SECONDS';
 /** Default: the agent wait budget, so a foreground land returns IN_PROGRESS with its resume
@@ -49,8 +52,13 @@ function landBudgetSeconds() {
 const noticeOf = (response: HostedAgentResponse) =>
   (response as { overlapNotice?: HostedOverlapNotice }).overlapNotice;
 /** Immediate stderr progress for a submitted landing: operation id, replay and wait commands, overlap banner. */
-function announce(root: string, command: Record<string, unknown>, response: HostedAgentResponse) {
-  for (const line of landAnnouncement(root, command, response)) process.stderr.write(`${line}\n`);
+function announce(
+  root: string,
+  command: Record<string, unknown>,
+  response: HostedAgentResponse,
+  wake: boolean,
+) {
+  for (const line of landAnnouncement(root, command, response, wake)) process.stderr.write(`${line}\n`);
   const notice = noticeOf(response);
   if (notice) process.stderr.write(overlapBannerOnce(notice));
 }
@@ -63,6 +71,8 @@ export async function submitHostedLand(
   address: HostedAgentAddress,
   transport = new HostedAgentTransport(root, address),
   rounds = 30,
+  /** The land returns at once with a background wake (the detached submitter reads it from env). */
+  wake = process.env[LAND_WAKE_ENV] === '1',
 ) {
   const invokedAt = Number(process.env[LAND_INVOKED_ENV]);
   startLandTiming(invokedAt);
@@ -72,7 +82,7 @@ export async function submitHostedLand(
   transport.waitUntil ??= deadline;
   let response = (await hostedAgentCli(root, 'finish', command, address, transport)) as HostedAgentResponse;
   // The first receipt already carries the operation id and any overlap notice: show them now, not at exit.
-  announce(transport.root ?? root, command, response);
+  announce(transport.root ?? root, command, response, wake);
   for (let round = 0; round < rounds; round++) {
     const result = resultOf(response);
     if (result.phase !== 'save' || !result.saveOperationId || result.progress?.status === 'failed') break;
@@ -128,6 +138,7 @@ async function detachedSubmit(
   root: string,
   command: Record<string, unknown>,
   budgetSeconds: number,
+  wake: boolean,
 ): Promise<HostedAgentResponse | null> {
   const directory = join(clientCacheRoot(hostedAgentRoot(root)), 'agent', 'land');
   mkdirSync(directory, { recursive: true, mode: 0o700 });
@@ -152,6 +163,7 @@ async function detachedSubmit(
         [LAND_CHILD_ENV]: '1',
         [LAND_INVOKED_ENV]: String(performance.timeOrigin),
         [LAND_BUDGET_ENV]: String(budgetSeconds),
+        [LAND_WAKE_ENV]: wake ? '1' : '0',
       },
     },
   );
@@ -265,13 +277,16 @@ export async function hostedLandCli(
   // One budget for the whole command (submission and wait), from when it started.
   const budgetSeconds = options.timeoutSeconds ?? AGENT_WAIT_SECONDS,
     deadline = Date.now() + budgetSeconds * 1000;
+  // Agents whose client wakes them when a background command exits land asynchronously:
+  // submit, return at once, and one settle wait in the background is the only wake.
+  const wake = options.wait === undefined && backgroundWake() !== undefined;
+  const wait = options.wait ?? (wake ? false : readClientSettings().landWait);
   const submitted =
     options.detach === false
-      ? await submitHostedLand(root, command, address)
-      : await detachedSubmit(root, command, budgetSeconds);
+      ? await submitHostedLand(root, command, address, undefined, undefined, wake)
+      : await detachedSubmit(root, command, budgetSeconds, wake);
   if (!submitted) return undefined;
   if (isNetworkPending(submitted)) return submitted;
-  const wait = options.wait ?? readClientSettings().landWait;
   const sourceNeedsRecovery = retryableFinishSource(resultOf(submitted));
   if (
     !wait ||
@@ -283,13 +298,21 @@ export async function hostedLandCli(
     for (const line of lines) process.stderr.write(`${line}\n`);
     learnFromLanding(hostedAgentRoot(root), resultOf(submitted), command.laneId);
     // Not waiting here: an unfinished landing still names the one command that waits for it.
-    const next = lines[0]?.startsWith('FAILED')
+    const continuation = lines[0]?.startsWith('FAILED')
       ? undefined
-      : landWaitCommand(hostedAgentRoot(root), submitted);
-    if (next) process.stderr.write(`Next: wait for the outcome with ${next}\n`);
+      : landWaitContinuation(hostedAgentRoot(root), submitted);
+    const awake =
+      wake && continuation ? wakeContinuation(hostedAgentRoot(root), continuation.next) : undefined;
+    const next = awake?.command ?? continuation?.waitCommand;
+    if (awake)
+      process.stderr.write(
+        `land: ${resultOf(submitted).phase === 'finish' ? 'SUBMITTED' : 'IN PROGRESS'}; it settles without you. Run once in the background; its exit is your one wake (landed, failed or cancelled, with the receipt): ${awake.command}\n`,
+      );
+    else if (next) process.stderr.write(`Next: wait for the outcome with ${next}\n`);
     if (lines[0]?.startsWith('FAILED')) process.exitCode = 2;
     else if (
-      wait &&
+      (wait || wake) &&
+      !awake &&
       (sourceNeedsRecovery || ['save', 'compose', 'sync'].includes(resultOf(submitted).phase ?? ''))
     ) {
       // Source preparation outlived the budget (or needs its recovery): one exact resume command.
@@ -300,10 +323,20 @@ export async function hostedLandCli(
       process.exitCode = 3;
     }
     // stdout names the same one step as stderr: wait, not a blocking finish replay.
-    const resume =
-      next && !lines[0]?.startsWith('FAILED')
-        ? landWaitContinuation(hostedAgentRoot(root), submitted)
-        : undefined;
+    if (awake)
+      return {
+        ...submitted,
+        result: {
+          ...(submitted.result as object),
+          next: awake.next,
+          command: awake.command,
+          waitCommand: awake.waitCommand,
+          inProgress: true,
+          wake: awake.wake,
+          instruction: awake.instruction,
+        },
+      };
+    const resume = next ? continuation : undefined;
     return resume && resultOf(submitted).phase !== 'finish'
       ? {
           ...submitted,

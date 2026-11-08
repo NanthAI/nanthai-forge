@@ -36,9 +36,13 @@ export function landAnnouncement(
   root: string,
   command: Record<string, unknown>,
   response: HostedAgentResponse,
+  /** The land returns at once and names its background wake when submission ends. */
+  wake = false,
 ) {
   if (!response.operationId) return [];
   const wait = landWaitCommand(root, response);
+  if (wake && wait)
+    return [`land: operationId ${response.operationId}; submitting, then it continues without you`];
   const recoveryCommand = resultOf(response).command;
   // One first line carries the id and its exact resume command: a backgrounded,
   // redirected or killed client never loses either.

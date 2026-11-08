@@ -48,7 +48,7 @@ export function hostedAgentHelp(action?: string) {
     ...entries.map(entry => `  ${entry.command}: ${entry.parameters.join(', ') || '{}'}`),
     ...(canonical ? entries.map(entry => JSON.stringify(entry.schema, null, 2)) : []),
     'First successful CLI command installs advisory Claude Code/Codex first-write hooks for every Lane. nforge x ROOT install-hooks|uninstall-hooks {scope?:"user"|"project"} controls local setup; uninstall defaults to user and persists off. nforge settings firstWriteHooks false disables them. Hooks never deny edits; hosted coverage excludes unsaved edits, uses one query per uncached path/session and fails open within one second.',
-    'land --save waits; --no-wait returns after submission. Use --check-only to check without landing.',
+    'land --save waits; --no-wait returns after submission. In clients that wake on background exit (Claude Code; FORGE_AGENT_WAKE=background-exit|off) it returns at once with result.wake.command: run it once in the background, it exits when the landing settles. --wait keeps the foreground wait. Use --check-only to check without landing.',
     "land --withdraw {laneId?,reason?} ends this Lane's live landing when you know its check will fail (Lane author or owner; one call). The Lane, saves and check results stay; confirm with the receipt's confirm.waitCommand (it returns LANDING_CANCELLED at once), then fix, save and land --save again.",
     'land --save overlapAnswer:"accept-order" answers the pending notices for this landing and records them like ack, so peers see the answer.',
     'pull {} refreshes a clean clone root to main; a repeat resumes interruption. Root status {} reports clone freshness.',

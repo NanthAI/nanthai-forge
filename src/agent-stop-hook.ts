@@ -9,6 +9,7 @@ import {
   settleTurnWork,
   type TurnWork,
 } from './agent-turn-work.js';
+import { WAKE_BUDGET_SECONDS } from './agent-wake.js';
 
 /** A ledger entry observed this recently needs no hosted confirmation. */
 export const TURN_WORK_WARM_MS = 30_000;
@@ -16,8 +17,14 @@ const PROBE_DEADLINE_MS = 2500;
 export type TurnWorkProbe = (work: TurnWork) => Promise<'running' | 'terminal'>;
 type StopInput = { session_id?: unknown; hook_event_name?: unknown };
 
-export function turnEndMessage(work: Pick<TurnWork, 'id' | 'kind'>) {
-  return `Your ${work.kind === 'check' ? 'check run' : 'landing'} ${work.id.slice(0, 8)} is still running. Run: nforge wait ${work.id}. To stop anyway, stop again.`;
+export function turnEndMessage(work: Pick<TurnWork, 'id' | 'kind' | 'wake'>, watched = false) {
+  const what = `Your ${work.kind === 'check' ? 'check run' : 'landing'} ${work.id.slice(0, 8)} is still running.`;
+  if (!work.wake) return `${what} Run: nforge wait ${work.id}. To stop anyway, stop again.`;
+  // A client that wakes on background exit needs one settle wait, never a waiting turn.
+  const block = 'If ending your turn ends your task, block on it with your harness wait tool';
+  return watched
+    ? `${what} Its settle wait runs in the background. ${block}; otherwise stop again: its exit wakes you.`
+    : `${what} Run once in the background: nforge wait ${work.id} --budget ${WAKE_BUDGET_SECONDS}; its exit wakes you when it settles. ${block}. To stop anyway, stop again.`;
 }
 const alive = (pid: number) => {
   try {
@@ -44,14 +51,19 @@ export async function turnEndDecision(
     clearTurnBlocked(session);
     return {};
   }
-  if (!ledger.work.length) return {};
+  // A live observer the owner trusts to wake the agent (turn end never ends its task):
+  // stopping now costs nothing, the observer's exit re-invokes the agent on settle.
+  const unwatched = ledger.work.filter(
+    work => !(work.wake === 'trusted' && work.pid !== null && alive(work.pid)),
+  );
+  if (!unwatched.length) return {};
   const now = options.now ?? Date.now();
   let selected =
-    ledger.work.find(work => work.pid !== null && alive(work.pid)) ??
-    ledger.work.find(work => now - work.observedAt < TURN_WORK_WARM_MS);
+    unwatched.find(work => work.pid !== null && alive(work.pid)) ??
+    unwatched.find(work => now - work.observedAt < TURN_WORK_WARM_MS);
   if (!selected) {
     // Cold cache: confirm only the most recent entry with one hosted query.
-    const candidate = ledger.work[0]!;
+    const candidate = unwatched[0]!;
     const state = await withDeadline((options.probe ?? hostedTurnWorkProbe)(candidate));
     if (state === 'terminal') {
       settleTurnWork([candidate.id], session);
@@ -61,7 +73,10 @@ export async function turnEndDecision(
   }
   // Block only when the second attempt is guaranteed to pass.
   if (!markTurnBlocked(selected.id, session, now)) return {};
-  return { decision: 'block', reason: turnEndMessage(selected) };
+  return {
+    decision: 'block',
+    reason: turnEndMessage(selected, selected.pid !== null && alive(selected.pid)),
+  };
 }
 async function withDeadline(probe: Promise<'running' | 'terminal'>) {
   let timer: NodeJS.Timeout | undefined;

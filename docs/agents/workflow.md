@@ -1335,7 +1335,39 @@ recovery summary; this command does not add a hosted UI.
 
 ## Waiting for outcomes
 
-`land --save` / `finish` blocks by default. Keep the turn active while your work
+### Asynchronous land: one wake, no waiting turns
+
+In an agent client that wakes the agent when a background command exits (Claude
+Code, or any client with `FORGE_AGENT_WAKE=background-exit`), hosted `land --save`
+returns as soon as the landing is submitted. It prints
+`land: SUBMITTED; it settles without you…` and its `result.wake.command`
+(also `command` and `waitCommand`) is one settle wait with a 7,080 s budget:
+
+```sh
+nforge agent ROOT wait '{"operationIds":["ORIGINAL_UUID"],"until":"acceptance","timeoutSeconds":7080}'
+```
+
+Run it once as a background command (Claude Code: Bash `run_in_background` with
+`timeout` 7200000). It holds the landing's live subscription, never polls, and exits
+once, when the landing settles: landed, failed or cancelled, with the receipt and its
+recovery. A note to your Lane also ends it early (`IN_PROGRESS`, reason `message`);
+read the note and run the same command again. Do not run `status` or `wait` in
+between. Then:
+
+- If ending your turn ends your task (a delegated builder or sub-agent run), block on
+  that background command with your harness's wait tool (for example T3 Code's
+  `t3_background_wait`) instead of ending the turn.
+- Otherwise end the turn or keep working; the command's exit wakes you.
+
+The land command opens no observer, and the settle wait costs one subscription for
+the landing's whole life instead of a fresh subscribe and reread every 540 s; Convex
+calls per landing do not rise, and nothing runs while idle. `--wait` keeps the
+foreground wait below; `FORGE_AGENT_WAKE=off` turns the asynchronous default off.
+Codex and other clients without background wakes keep the foreground wait.
+
+### Foreground wait
+
+Elsewhere `land --save` / `finish` blocks by default. Keep the turn active while your work
 is unfinished. A progressing hosted landing's `next`, `command` and `waitCommand`
 name one blocking continuation on the original operation:
 
@@ -1386,7 +1418,12 @@ The first-write hooks also install a turn-end guard: a Claude Code and a Codex
 recorded in a local ledger, keyed by a digest of the client session id
 (`CLAUDE_CODE_SESSION_ID` or `CODEX_THREAD_ID`). While one still runs, the first
 stop attempt is blocked: "Your landing ID is still running. Run: nforge wait ID.
-To stop anyway, stop again." The next attempt is always allowed. After a Forge
+To stop anyway, stop again." The next attempt is always allowed. In a client with
+background wakes the message instead names the one background settle wait
+(`nforge wait ID --budget 7080`) or, when that wait is already running, says to block on it
+with the harness wait tool if ending the turn ends the task, else stop again. With
+`FORGE_AGENT_WAKE=background-exit` (the owner says turn end never ends the task) a live
+settle wait covers the stop and the hook allows it. After a Forge
 wait, the next stop counts as a first attempt again. `nforge wait ID [--budget S]`
 runs the canonical wait for that session's recorded work. Each stop costs one
 local read. A hosted query runs only when no live or recent (30 s) observation
