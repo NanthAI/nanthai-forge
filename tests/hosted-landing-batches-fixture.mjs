@@ -36,6 +36,8 @@ export async function batchesFixture(
     requestCheck = false,
     // Any configured runner (BYOCI). Same runtime and environment pins, other provider.
     runner,
+    // Any configured check command (BYOCI), e.g. `{ executable: 'bash', args: ['ci/check.sh'] }`.
+    checkCommand,
   } = {},
 ) {
   const f = await finishFixture(t, { fileCount, ...(baselineFiles ? { baselineFiles } : {}) });
@@ -57,6 +59,15 @@ export async function batchesFixture(
       },
     });
   }
+  if (checkCommand)
+    f.rawChecks.definition = await f.rawChecks.configure(
+      {
+        kind: 'definition',
+        checkId: f.rawChecks.checkId,
+        command: { name: 'verify', environmentLabel: 'clean', ...checkCommand },
+      },
+      f.rawChecks.definition.digest,
+    );
   if (runner) {
     const configuration = { ...runner, runtime: f.rawChecks.runner.runtime };
     f.rawChecks.configuration = await f.rawChecks.configure(

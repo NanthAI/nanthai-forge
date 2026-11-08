@@ -19,6 +19,7 @@ import { crossHeadProofSchema } from '../src/hosted-cross-head-proof';
 import { ForgeError, invariant } from '../src/errors';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { fullGate, docsGate } from '../src/main-audit';
+import { checkEntryPaths } from '../src/first-check-risk';
 import { scheduleFinish } from './projectHostedFinishWake';
 const identity = { projectId: v.id('hostedProjects'), submissionId: v.string() };
 /** Why the first check cannot carry this landing before any analysis (receipt field). */
@@ -99,14 +100,9 @@ export async function reuseDecision(ctx: QueryCtx | MutationCtx, input: LandingI
     if (error instanceof ForgeError) return no('check-evidence');
     throw error;
   }
-  if (
-    !run.plan ||
-    !run.terminalDigest ||
-    !run.planDigest ||
-    run.check.args.join('\0') !== 'scripts/forge-check.mjs' ||
-    !/(?:^|\/)node$/.test(run.check.executable)
-  )
-    return no('check-evidence');
+  // Any configured check command, on any runner: the proof reads paths, manifests
+  // and the run's selection only, and the files the command names are global-risk.
+  if (!run.plan || !run.terminalDigest || !run.planDigest) return no('check-evidence');
   const savedAudit = await auditRow(ctx, input.projectId);
   const parent = await acceptanceRow(ctx, {
     projectId: input.projectId,
@@ -180,7 +176,7 @@ export async function reuseDecision(ctx: QueryCtx | MutationCtx, input: LandingI
     pendingId: value.pending.id,
     selection: run.plan.selection.sha256,
     // The project's own check entry files are global-risk (any runner).
-    checkEntries: run.check.args.filter(arg => /^[\w.-]+(?:\/[\w.-]+)+$/.test(arg)),
+    checkEntries: checkEntryPaths(run.check),
     basis: {
       checked,
       checkedBase,

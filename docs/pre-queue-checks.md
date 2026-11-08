@@ -56,7 +56,7 @@ configured check (no `configure-check`) skips it and queues as before.
      the paths main gained since that base are disjoint from the change's paths;
      and no path on either side is a [global-risk file](#global-risk-files). The
      rule reads only Forge data (manifests, the run's selection, receipts), so it
-     works with any CI. The coalesced [main audit](workflows.md#hosted-acceptance-gate)
+     works with any CI and any check command. The coalesced [main audit](workflows.md#hosted-acceptance-gate)
      is armed at once and covers the new head with one full run.
      Rule `clean-disjoint-v2` also lands a change whose only overlap with main is a
      clean text merge of Markdown that no test or script reads: the runner pins
@@ -95,8 +95,9 @@ or a main delta touching any of these always rechecks:
   Forgejo, Woodpecker, Jenkins, Azure Pipelines, Bitbucket Pipelines);
 - this repository's check scripts, check contract and shared test runtime
   (`scripts/forge-check`, `verify`, `check-contract`, `check-path-scopes`,
-  `test-*`, `tests/check-runtime.mjs`, …), and every file the project's check
-  definition names in its arguments (the check contract's own entry points);
+  `test-*`, `tests/check-runtime.mjs`, …), and every repository file the project's
+  check command names: its executable, its arguments and any path inside a shell
+  string such as `bash -c "./ci/run.sh"` (the check contract's own entry points);
 - database schema (`convex/schema.ts`, `schema.prisma`);
 - any other root-level file that is not `.md` or `.txt`.
 
@@ -169,10 +170,16 @@ Each tier answers a different question. None depends on a particular CI provider
   before the queue. A single Lane on unchanged main pays nothing extra: its Lane
   run is the landing check (one run, as without the Lane check). Queue checks run only for changes that are not independent of
   what landed meanwhile, or for unadmitted changes.
-- Proved reuse depends on the check's test-impact selector (`scripts/forge-check.mjs`
-  for Forge itself) and on owner-agent automatic acceptance. Other projects' checks
-  get the Lane check and exact adoption on unchanged main, and use the combined
-  check after a main move.
+- Proved reuse works with any configured check command on any runner: the rule
+  reads paths, manifests and the run's selection, never the command's own test
+  selection. It needs owner-agent automatic acceptance. A Markdown overlap lands
+  on its first check only when the runner pinned a tested-docs list, which today
+  only Forge's own selector does; other commands recheck such an overlap.
+- Changes that land on their first check publish one by one, each proved against
+  the main it lands on. A wave of k such changes makes up to k(k+1)/2 proof
+  analyses (one action each, reading six small objects) and gives up the shared
+  cohort publication, so it uses more Convex calls per landing than one cohort
+  recheck (5-change fixture wave: 51 to 65) while it saves a full check per change.
 - No polling: a Lane check wakes its submission only when its run reaches a
   terminal state, as admission did before. Idle costs nothing.
 

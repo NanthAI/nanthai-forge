@@ -44,6 +44,20 @@ export function firstCheckRisk(path: string, checkEntries: readonly string[] = [
   return patterns.find(pattern => pattern.test.test(path))?.reason ?? null;
 }
 
+/** Repository files a check command names: its executable and arguments, and any
+ * path inside a shell string (`bash -c "./ci/run.sh && …"`), as manifest paths. A
+ * path-free command (`npm test`, `make check`) names none; its manifest or Makefile
+ * is already global-risk. Absolute paths and `..` leave the repository. */
+export function checkEntryPaths(check: { executable: string; args: readonly string[] }) {
+  const paths = new Set<string>();
+  for (const word of [check.executable, ...check.args].flatMap(text => text.split(/[\s;&|()<>'"`=,]+/))) {
+    const path = word.replace(/^(?:\.\/)+/, '');
+    if (/^[\w.-]+(?:\/[\w.-]+)+$/.test(path) && !path.split('/').some(part => part === '.' || part === '..'))
+      paths.add(path);
+  }
+  return [...paths];
+}
+
 export function firstCheckRiskPaths(paths: readonly string[], checkEntries: readonly string[] = []) {
   return paths.filter(path => firstCheckRisk(path, checkEntries) !== null);
 }

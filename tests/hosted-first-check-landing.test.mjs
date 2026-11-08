@@ -4,7 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { batchesFixture, states, synthetic } from './hosted-landing-batches-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
-import { firstCheckRisk } from '../dist/first-check-risk.js';
+import { checkEntryPaths, firstCheckRisk } from '../dist/first-check-risk.js';
 const { revertMessage } = await import(moduleUrl('../convex/projectHostedCulprit.ts'));
 const audit = await import(moduleUrl('../convex/projectHostedMainAudit.ts'));
 const env = {
@@ -127,6 +127,101 @@ for (const [name, memberPaths] of [
     assert.deepEqual(receipts(f)[1].firstCheck, { landedOn: 'recheck', reason: 'global-risk' });
     assert.equal(runCount(f), 3);
   });
+
+// Any CI (Issue 05df5aed): the rule reads paths, manifests and the run's selection
+// only, so a project whose check is its own command lands a clean overtake on its
+// admission run too. Before, every non-Forge command was refused as check-evidence
+// and the passed admission run was thrown away on every main move.
+const ownCheck = {
+  checkCommand: { executable: 'bash', args: ['ci/check.sh'] },
+  // What a runner pins for a configured command: the whole command, no test list.
+  selection: JSON.stringify({ scope: 'full', reason: 'Exact configured command', tests: [] }),
+};
+const mainFiles = (f, receipt) => JSON.parse(f.c.objects.get(receipt.candidate.head)).files.map(x => x.path);
+
+test('a project with its own check command lands a clean path-disjoint overtake on its admission run', async t => {
+  const f = await wave(t, { ...disjoint, ...ownCheck });
+  assert(
+    f.runs().every(run => run.check.executable === 'bash'),
+    'the configured command ran',
+  );
+  assert.deepEqual(
+    states(f).map(s => s.phase),
+    ['landed', 'landed'],
+  );
+  assert.deepEqual(f.reuseDecisions, ['proof']);
+  assert.deepEqual(recheckReasons(f), [null, null]);
+  const [first, second] = receipts(f);
+  assert.deepEqual(second.firstCheck, {
+    landedOn: 'admission-run',
+    mainMoved: true,
+    rule: 'clean-disjoint-v2',
+  });
+  assert.deepEqual(second.crossHeadProof.checkEntries, ['ci/check.sh']);
+  assert.equal(runCount(f), 2, 'no second check after the main move');
+  // Order and no code loss: submission order, and main keeps both changes.
+  assert.deepEqual(
+    [first, second].map(r => r.submissionId),
+    f.entries.map(e => e.state.id),
+  );
+  for (const path of ['src/a.ts', 'src/b.ts']) assert(mainFiles(f, second).includes(path), path);
+  assert.equal(second.crossHeadProof.main.head, first.candidate.head, 'proved against the main it lands on');
+});
+
+test('own check command: the file the command names is global-risk and rechecks', async t => {
+  const f = await wave(t, { ...ownCheck, memberPaths: ['ci/check.sh', 'src/b.ts'], fileCount: 2 });
+  assert.deepEqual(
+    states(f).map(s => s.phase),
+    ['landed', 'landed'],
+  );
+  assert.deepEqual(f.reuseDecisions, ['global-risk']);
+  assert.deepEqual(receipts(f)[1].firstCheck, { landedOn: 'recheck', reason: 'global-risk' });
+  assert.equal(runCount(f), 3);
+});
+
+test('own check command: a path both changes touch still rechecks', async t => {
+  const f = await wave(t, { ...ownCheck, memberPaths: ['src/a.ts', 'src/b.ts'], fileCount: 3 });
+  assert.deepEqual(
+    states(f).map(s => s.phase),
+    ['landed', 'landed'],
+  );
+  assert.deepEqual(f.reuseDecisions, ['path-overlap']);
+  assert.deepEqual(receipts(f)[1].firstCheck, { landedOn: 'recheck', reason: 'path-overlap' });
+  assert.equal(receipts(f)[1].crossHeadProof, undefined);
+  assert.equal(runCount(f), 3);
+  for (const path of ['src/a.ts', 'src/b.ts', 'fixture/0'])
+    assert(mainFiles(f, receipts(f)[1]).includes(path), path);
+});
+
+test('own check command: first-check landing costs no more Convex calls or DB IO than the recheck', async t => {
+  const fast = await wave(t, { ...disjoint, ...ownCheck });
+  const slow = await wave(t, { ...disjoint, ...ownCheck, crossHeadReuse: false });
+  assert.equal(runCount(slow), 3);
+  const [a, b] = [budget(fast), budget(slow)];
+  t.diagnostic(`own-command first-check ${JSON.stringify(a)} recheck ${JSON.stringify(b)}`);
+  for (const key of Object.keys(a)) assert(a[key] <= b[key], `${key}: ${a[key]} <= ${b[key]}`);
+});
+
+test('check entries are the repository files a command names, in any form', () => {
+  assert.deepEqual(checkEntryPaths({ executable: 'node', args: ['scripts/forge-check.mjs'] }), [
+    'scripts/forge-check.mjs',
+  ]);
+  assert.deepEqual(checkEntryPaths({ executable: 'bash', args: ['.bench/ci.sh'] }), ['.bench/ci.sh']);
+  assert.deepEqual(checkEntryPaths({ executable: './ci/run.sh', args: ['--config=ci/run.json'] }), [
+    'ci/run.sh',
+    'ci/run.json',
+  ]);
+  assert.deepEqual(
+    checkEntryPaths({ executable: 'bash', args: ['-c', './tools/a.sh && node tools/b.mjs | tee out'] }),
+    ['tools/a.sh', 'tools/b.mjs'],
+  );
+  for (const check of [
+    { executable: '/usr/local/bin/node', args: ['--test'] },
+    { executable: 'npm', args: ['test'] },
+    { executable: 'bash', args: ['../outside/x.sh', 'a/./b.sh'] },
+  ])
+    assert.deepEqual(checkEntryPaths(check), [], JSON.stringify(check));
+});
 
 test('a text conflict with main never lands on the first check', async t => {
   const f = await wave(t, { memberPaths: ['src/a.ts', 'src/a.ts'], fileCount: 2 });

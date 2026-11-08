@@ -209,3 +209,99 @@ test('a single Lane pays no extra runner minutes: its pre-queue run is the landi
   assert.equal(after.runnerMinutes, before.runnerMinutes);
   assert.equal(after.rounds, 1);
 });
+
+// Bench-shaped wave (Issue 05df5aed, exit bench n10-r1): 5 changes arrive together on
+// a project whose check is its own command, not Forge's selector. Four are
+// path-disjoint; the fifth edits the fourth's file (a clean text merge, a real
+// overlap). Before: no proved reuse for a non-Forge command, so every main move
+// discarded each passed Lane run. Event-driven fake time: each run passes 2 minutes
+// (the bench's check) after it starts; timers fire only when due.
+const RUN_MS = 2 * 60_000;
+async function simulate(f) {
+  const started = new Map();
+  for (;;) {
+    const due = f.pending().find(task => task.scheduledTime <= Date.now());
+    if (due) {
+      await f.execute(due);
+      continue;
+    }
+    const queued = f.runs().filter(r => r.status === 'queued');
+    for (const run of queued) if (!started.has(run.id)) started.set(run.id, Date.now());
+    const runAt = Math.min(...queued.map(run => started.get(run.id) + RUN_MS));
+    const timerAt = f.pending()[0]?.scheduledTime ?? Infinity;
+    if (runAt === Infinity && timerAt === Infinity) return;
+    f.advanceClock(Math.max(0, Math.min(runAt, timerAt) - Date.now()));
+    if (runAt <= timerAt)
+      for (const run of queued.filter(r => started.get(r.id) + RUN_MS <= Date.now()))
+        await f.rawChecks.pass(await f.rawChecks.activate(run.id));
+  }
+}
+async function ownCommandWave(t, reuse) {
+  const f = await batchesFixture(t, {
+    ...full,
+    count: 0,
+    checkCommand: { executable: 'bash', args: ['ci/check.sh'] },
+    baselineFiles: [['src/shared.ts', 'a\nb\nc\n']],
+    memberPaths: ['src/a.ts', 'src/b.ts', 'src/c.ts', 'src/shared.ts', 'src/shared.ts'],
+    memberContents: [undefined, undefined, undefined, 'A\nb\nc\n', 'a\nb\nC\n'],
+    fileCount: 2,
+  });
+  f.rawChecks.setPlanSelection(
+    JSON.stringify({ scope: 'full', reason: 'Exact configured command', tests: [] }),
+  );
+  if (!reuse) {
+    const policy = f.tables.hostedProjects.get(f.projectId).autonomyPolicy;
+    f.patch('hostedProjects', f.projectId, {
+      autonomyPolicy: { ...policy, acceptance: { ...policy.acceptance, hostedCrossHeadReuse: false } },
+    });
+  }
+  const calls = f.counts.length;
+  const start = Date.now();
+  for (let i = 0; i < 5; i++) await f.add(i);
+  await simulate(f);
+  const receipts = [...f.tables.projectHostedAcceptances.values()]
+    .map(r => JSON.parse(r.value))
+    .sort((a, b) => a.snapshot.revision - b.snapshot.revision);
+  const runs = f.runs();
+  const used = new Set(receipts.map(r => r.check?.runId));
+  const minutes = receipts
+    .map(r => (Date.parse(r.acceptedAt ?? r.at) - start) / 60_000)
+    .sort((a, b) => a - b);
+  const head = receipts.at(-1).candidate.head;
+  const shared = JSON.parse(f.c.objects.get(head)).files.find(file => file.path === 'src/shared.ts');
+  return {
+    landed: receipts.length,
+    order: receipts.map(r => f.entries.findIndex(e => e.state.id === r.submissionId)),
+    runs: runs.length,
+    discardedPassedRuns: runs.filter(r => r.status === 'passed' && !used.has(r.id)).length,
+    finishToMainMinutes: { p50: minutes[2], max: minutes.at(-1) },
+    convexCallsPerLanding: +((f.counts.length - calls) / receipts.length).toFixed(1),
+    sharedText: f.c.objects.get(shared.blob).toString(),
+    reasons: rows(f).map(r => r.admission?.recheck ?? null),
+    proofs: f.reuseDecisions.length,
+    idle: f.pending().length,
+  };
+}
+test('own-command 5-change wave: clean overtakes keep their passed Lane run; the real overlap rechecks once', async t => {
+  const before = await ownCommandWave(t, false);
+  const after = await ownCommandWave(t, true);
+  t.diagnostic(JSON.stringify({ before, after }));
+  for (const run of [before, after]) {
+    assert.equal(run.landed, 5);
+    assert.equal(run.sharedText, 'A\nb\nC\n', 'both edits of the shared file are on main');
+    assert.equal(run.idle, 0, 'idle after settling: no timers or polling');
+  }
+  assert.equal(after.discardedPassedRuns, 1, 'only the overlapping change re-checks');
+  assert(after.discardedPassedRuns < before.discardedPassedRuns);
+  assert(after.finishToMainMinutes.p50 < before.finishToMainMinutes.p50);
+  assert.equal(after.reasons.filter(r => r === 'path-overlap').length, 1);
+  assert.deepEqual(after.order, [0, 1, 2, 3, 4], 'queue order holds');
+  // Known cost (follow-up Issue): three changes now land one by one instead of in one
+  // cohort publication, and each re-proves after every main move ahead of it
+  // (k(k+1)/2 proofs for k changes). Bounded here so it cannot grow unnoticed.
+  assert(after.proofs <= (3 * 4) / 2 + 1, `proofs ${after.proofs}`);
+  assert(
+    after.convexCallsPerLanding <= before.convexCallsPerLanding * 1.3,
+    `calls per landing ${before.convexCallsPerLanding} -> ${after.convexCallsPerLanding}`,
+  );
+});
