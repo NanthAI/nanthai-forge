@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { UNITTEST_UNIT } from './module-graph-types.js';
 import { globRegExp } from './path-glob.js';
 import { parseToml, tomlGet, tomlStrings, tomlTable, type TomlTable } from './toml-lite.js';
 import {
@@ -71,6 +72,43 @@ function fromPyproject(manifest: string, toml: TomlTable): Found | { name: undef
     requires,
     sources,
     pytest,
+  };
+}
+
+/** `python -m unittest MODULE...` in the package folder for unittest units (`unittest:PATH`), or a
+ * refusal when a test file cannot be named as a module from there: every folder between the package
+ * and the file must be a package (`__init__.py`) with an identifier name, or unittest would import it
+ * as another module than the project's own runner does. */
+function unittestCommand(
+  pkg: GraphPackage,
+  units: string[],
+  present: Set<string>,
+  tool: string[] | null,
+): PackageCommand | { refusal: string } {
+  const modules: string[] = [];
+  for (const unit of units) {
+    const path = unit.slice(UNITTEST_UNIT.length);
+    const inside = pkg.dir ? path.startsWith(`${pkg.dir}/`) : true;
+    const parts = (inside ? (pkg.dir ? path.slice(pkg.dir.length + 1) : path) : '').split('/');
+    const stem = parts.pop()?.replace(/\.py$/, '') ?? '';
+    const folders = parts.map((_, index) =>
+      [pkg.dir, ...parts.slice(0, index + 1)].filter(Boolean).join('/'),
+    );
+    if (
+      !inside ||
+      ![...parts, stem].every(part => /^[A-Za-z_]\w*$/.test(part)) ||
+      !folders.every(folder => present.has(`${folder}/__init__.py`))
+    )
+      return {
+        refusal: `${path} is not importable as a unittest module from ${pkg.dir || 'the repository root'} (every folder needs an __init__.py), so Python packages have no unambiguous per-package test command`,
+      };
+    modules.push([...parts, stem].join('.'));
+  }
+  return {
+    ecosystem: 'python',
+    cwd: pkg.dir,
+    argv: [...(tool ? tool.slice(0, -1) : []), 'python', '-m', 'unittest', ...[...new Set(modules)].sort()],
+    packages: [packageKey(pkg)],
   };
 }
 
@@ -169,19 +207,28 @@ export function pythonGraph(paths: string[], read: ManifestReader): EcosystemRes
     ecosystem: 'python',
     packages: found.map(item => item.pkg),
     commands(selected, _changed, narrowed) {
-      if (!pytest)
-        return {
-          refusal:
-            'no pytest declared (dependency, [tool.pytest], pytest.ini or conftest.py), so Python packages have no unambiguous per-package test command',
-        };
+      if (!pytest) {
+        const refusal =
+          'no pytest declared (dependency, [tool.pytest], pytest.ini or conftest.py), so Python packages have no unambiguous per-package test command';
+        // unittest modules proven by the module graph (src/module-graph-python.ts) are the exception:
+        // every selected package must be narrowed to them.
+        const units = selected.map(pkg => narrowed?.get(packageKey(pkg)));
+        if (!units.every(list => list?.length && list.every(unit => unit.startsWith(UNITTEST_UNIT))))
+          return { refusal };
+        const built = selected.map((pkg, index) =>
+          unittestCommand(pkg, units[index]!, present, tool(pkg.dir)),
+        );
+        return built.find(item => 'refusal' in item) ?? (built as PackageCommand[]);
+      }
       // A package with its own lockfile runs in its own folder; the rest run from the root.
       const own: PackageCommand[] = [];
       const shared: GraphPackage[] = [];
       // A narrowed package (src/module-selection.ts) runs only its test files that reach the change.
       const targets = (pkg: GraphPackage, from: string) =>
-        narrowed?.get(packageKey(pkg))?.map(path => (from ? path.slice(from.length + 1) : path)) ?? [
-          pkg.dir || '.',
-        ];
+        narrowed
+          ?.get(packageKey(pkg))
+          ?.map(unit => unit.replace(UNITTEST_UNIT, ''))
+          .map(path => (from ? path.slice(from.length + 1) : path)) ?? [pkg.dir || '.'];
       for (const pkg of selected) {
         const local = tool(pkg.dir);
         if (pkg.dir && local)

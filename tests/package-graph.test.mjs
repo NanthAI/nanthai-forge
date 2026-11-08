@@ -442,7 +442,13 @@ test('the tests read selects packages for a Rust repository with no package.json
 });
 
 test('a scoped configured command gets FORGE_CHECK_PACKAGES from the checkout manifests; a full run does not', t => {
-  const repo = lane(t, { ...cargo, 'node_modules/x/Cargo.toml': '[package\n', '.git/Cargo.toml': '[' });
+  const repo = lane(t, {
+    ...cargo,
+    // A unit test in the changed library: the module graph narrows fx-api to it (and fx-cli runs whole).
+    'crates/api/src/lib.rs': '#[cfg(test)]\nmod tests {\n    #[test]\n    fn ok() {}\n}\n',
+    'node_modules/x/Cargo.toml': '[package\n',
+    '.git/Cargo.toml': '[',
+  });
   const scoped = writeCheckPackages(repo.root, { mode: 'scoped', paths: ['crates/api/src/lib.rs'] });
   t.after(() => scoped?.remove());
   assert.ok(scoped && !scoped.path.startsWith(repo.root), 'the file lives outside the checkout');
@@ -450,7 +456,8 @@ test('a scoped configured command gets FORGE_CHECK_PACKAGES from the checkout ma
   assert.equal(file.version, 1);
   assert.equal(file.scope, 'scoped');
   assert.deepEqual(file.commands, [
-    { ecosystem: 'cargo', cwd: '', argv: ['cargo', 'test', '-p', 'fx-api', '-p', 'fx-cli'] },
+    { ecosystem: 'cargo', cwd: '', argv: ['cargo', 'test', '-p', 'fx-cli'] },
+    { ecosystem: 'cargo', cwd: '', argv: ['cargo', 'test', '-p', 'fx-api', '--lib'] },
   ]);
   assert.deepEqual(
     file.packages.map(pkg => pkg.name),

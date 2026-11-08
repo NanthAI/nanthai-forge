@@ -164,21 +164,37 @@ export function gradleGraph(paths: string[], read: ManifestReader): EcosystemRes
     commands(selected, _changed, narrowed) {
       const groups = new Map<GradleBuild, GraphPackage[]>();
       const tool = (build: GradleBuild) => (present.has(join(build.dir, 'gradlew')) ? './gradlew' : 'gradle');
-      const task = (build: GradleBuild, pkg: GraphPackage) =>
-        pkg.dir === build.root?.dir ? 'test' : `${pkg.name}:test`;
+      const task = (build: GradleBuild, pkg: GraphPackage, name = 'test') =>
+        pkg.dir === build.root?.dir ? name : `${pkg.name}:${name}`;
       // A narrowed project (src/module-selection.ts) runs only the test classes that reach the change.
       const targeted: PackageCommand[] = [];
       for (const pkg of selected) {
         const build = owner.get(pkg.dir)!;
         const classes = narrowed?.get(packageKey(pkg));
-        if (classes)
+        if (classes) {
+          // `TASK:Class` units belong to a Kotlin Multiplatform target's test task; `--tests` filters
+          // the task it follows.
+          const byTask = new Map<string, string[]>();
+          for (const unit of classes) {
+            const at = unit.indexOf(':');
+            const name = at < 0 ? 'test' : unit.slice(0, at);
+            byTask.set(name, [...(byTask.get(name) ?? []), unit.slice(at + 1)]);
+          }
           targeted.push({
             ecosystem: 'gradle',
             cwd: build.dir,
-            argv: [tool(build), task(build, pkg), ...classes.flatMap(name => ['--tests', name])],
+            argv: [
+              tool(build),
+              ...[...byTask]
+                .sort(([a], [b]) => a.localeCompare(b))
+                .flatMap(([name, list]) => [
+                  task(build, pkg, name),
+                  ...list.flatMap(item => ['--tests', item]),
+                ]),
+            ],
             packages: [packageKey(pkg)],
           });
-        else groups.set(build, [...(groups.get(build) ?? []), pkg]);
+        } else groups.set(build, [...(groups.get(build) ?? []), pkg]);
       }
       return [
         ...[...groups]
@@ -306,7 +322,8 @@ export function mavenGraph(paths: string[], read: ManifestReader): EcosystemResu
         // A narrowed module (src/module-selection.ts) runs only the test classes that reach the change;
         // modules built with it (-am) have none of them, which Surefire must not treat as a failure.
         const classes = narrowed?.get(packageKey(pkg));
-        if (classes)
+        // `TASK:Class` units name a Gradle target task Maven has no equivalent for: the module runs whole.
+        if (classes && !classes.some(unit => unit.includes(':')))
           targeted.push({
             ecosystem: 'maven',
             cwd: build,

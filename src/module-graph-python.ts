@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { blank, identifiers, joinPath, posixBasename, posixDirname } from './module-graph-scan.js';
-import type { ModuleContext } from './module-graph-types.js';
+import { UNITTEST_UNIT, type ModuleContext } from './module-graph-types.js';
 
 /** Python module edges: `import a.b`, `from a.b import c` (c may be a submodule), relative imports,
  * the `__init__.py` chain every import runs, the conftest.py files pytest loads for a test, and
@@ -9,10 +9,21 @@ import type { ModuleContext } from './module-graph-types.js';
  * folder pytest puts on sys.path). Dynamic loading (importlib, `__import__`, runpy, subprocess,
  * sys.path edits, exec) and a local-looking import Forge cannot resolve make the file `wide`, unless
  * no Python file or folder in the repository has the missing module's name (a compiled extension or
- * generated module: its sources are not Python, so changing them keeps the package whole). */
+ * generated module: its sources are not Python, so changing them keeps the package whole).
+ * Without pytest, a project whose test files are unittest modules (a `test*.py` file that imports
+ * unittest and defines a TestCase class) narrows to those files, run as `python -m unittest MODULE`
+ * (unit `unittest:PATH`); any other test-looking file keeps the package whole. */
 
 type PythonImport = { module: string; names: string[] };
-export type PythonFacts = { imports: PythonImport[]; tokens: string[]; wide?: string };
+export type PythonFacts = {
+  imports: PythonImport[];
+  tokens: string[];
+  wide?: string;
+  /** Imports the unittest module. */
+  unittest?: true;
+  /** Defines a class with a `...TestCase` base. */
+  testCase?: true;
+};
 
 const DYNAMIC =
   /\b(?:importlib|__import__|runpy|pkgutil|subprocess|execfile|load_module|spec_from_file_location|pytest_plugins|entry_points)\b|\bsys\s*\.\s*(?:path|meta_path|modules)\b|\bos\s*\.\s*(?:system|popen|exec\w*|spawn\w*)\b|(?<![\w.])exec\s*\(/;
@@ -21,6 +32,8 @@ const PYTEST_LAYOUT = /\b(?:python_files|pythonpath|import-mode|import_mode|root
 const CONFIGS = new Set(['pyproject.toml', 'pytest.ini', 'setup.cfg', 'tox.ini']);
 
 export const pythonTestFile = (path: string) => /^(?:test_.*|.*_test)\.py$/.test(posixBasename(path));
+/** A file name unittest discovery (`test*.py`) or pytest would take for a test. */
+const testLooking = (path: string) => /^(?:test.*|.*_test)\.py$/.test(posixBasename(path));
 
 export function pythonFacts(_path: string, text: string): PythonFacts {
   const code = blank(text, 'python');
@@ -55,9 +68,15 @@ export function pythonFacts(_path: string, text: string): PythonFacts {
       }
   }
   const dynamic = DYNAMIC.exec(code);
+  const unittest = imports.some(item => item.module === 'unittest' || item.module.startsWith('unittest.'));
+  const testCase = [...code.matchAll(/^[ \t]*class\s+\w+\s*\(([^)]*)\)/gm)].some(match =>
+    /\w*TestCase\b/.test(match[1]!),
+  );
   return {
     imports,
     tokens: [...identifiers(code)],
+    ...(unittest ? { unittest } : {}),
+    ...(testCase ? { testCase } : {}),
     ...(dynamic ? { wide: `dynamic loading (${dynamic[0].replace(/\s+/g, '')})` } : {}),
   };
 }
@@ -80,8 +99,13 @@ export function resolvePython(context: ModuleContext) {
       const found = PYTEST_LAYOUT.exec(text);
       if (found) layout ??= `${path} sets ${found[0]}, which changes test discovery or imports`;
     }
+  // Without pytest, unittest modules are the tests when any test file is one; other test-looking files
+  // are then unmapped (whole). Nothing recognisable: another runner may name tests otherwise.
+  const unittestMode =
+    !pytest && files.some(([path, facts]) => testLooking(path) && facts.unittest && facts.testCase);
   const whole =
-    layout ?? (pytest ? undefined : 'no pytest declared, so Forge cannot tell which files are tests');
+    layout ??
+    (pytest || unittestMode ? undefined : 'no pytest declared, so Forge cannot tell which files are tests');
   if (whole) for (const file of python) context.nodes.get(file)!.whole = whole;
   const roots = new Set(['', 'src']);
   for (const path of context.paths)
@@ -120,7 +144,11 @@ export function resolvePython(context: ModuleContext) {
         if (conftest !== path && python.has(conftest)) deps.push(conftest);
         if (!dir) break;
       }
-    if (pythonTestFile(path)) node.units = [path];
+    if (pytest ? pythonTestFile(path) : unittestMode && testLooking(path)) {
+      if (pytest) node.units = [path];
+      else if (facts.unittest && facts.testCase) node.units = [`${UNITTEST_UNIT}${path}`];
+      else node.whole = `${path} looks like a test but is not a unittest.TestCase module Forge can run`;
+    }
     const own = [...new Set([...roots, basedir(path)])];
     const packages: string[] = [];
     /** Walks `segments` from `base`, adding each module it runs; the last module's folder or null. */

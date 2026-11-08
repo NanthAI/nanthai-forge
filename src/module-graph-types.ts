@@ -31,3 +31,9 @@ export type ModuleContext = {
   facts: Map<string, unknown>;
   read: (path: string) => string | undefined;
 };
+
+/** Unit prefixes that tell a package's command builder (src/package-graph-*.ts) how to run a unit:
+ * a Python file as a unittest module, a Rust unit as a library filter or the doctests. */
+export const UNITTEST_UNIT = 'unittest:';
+export const RUST_LIB_UNIT = ':lib:';
+export const RUST_DOC_UNIT = ':doc';

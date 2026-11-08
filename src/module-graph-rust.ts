@@ -1,19 +1,26 @@
 // SPDX-License-Identifier: Apache-2.0
 import { blank, identifiers, joinPath, posixBasename, posixDirname, topLevel } from './module-graph-scan.js';
 import { parseToml, tomlGet, tomlTable, type TomlTable, type TomlValue } from './toml-lite.js';
+import {
+  resolveRustLib,
+  rustLibFacts,
+  type RustLibCrate,
+  type RustLibFacts,
+} from './module-graph-rust-lib.js';
 import type { ModuleContext } from './module-graph-types.js';
 
 /** Rust module edges inside and across in-repository crates: `mod name;` builds the module tree
  * (next to a crate root or mod.rs, else in the parent's own folder), and every `crate::`, `$crate::`,
  * `self::`, `super::`, child-module or in-repository crate path (`use` or inline) is an edge to the
  * deepest module it names; a `{…}` group adds the modules it names below that one. `include!`,
- * `#[path]` and `mod name;` inside an inline module are `wide`. Cargo builds a crate's library and
- * binaries into every test target, so reaching any file outside a test target's module tree makes
- * the crate whole; test-target files belong to their targets (`cargo test --test NAME`). */
+ * `#[path]` and `mod name;` inside an inline module are `wide`. Test-target files belong to their
+ * targets (`cargo test --test NAME`); library files narrow to unit tests and doctests
+ * (src/module-graph-rust-lib.ts); other binary, bench and example code is built into every test
+ * target, so reaching it makes the crate whole. */
 
 /** `inline`: how many inline `mod name { … }` blocks enclose the path (their `super` is this file). */
 type Chain = { segments: string[]; group: string[]; inline?: number };
-export type RustFacts = { mods: string[]; chains: Chain[]; wide?: string };
+export type RustFacts = RustLibFacts & { mods: string[]; chains: Chain[]; wide?: string };
 
 export function rustFacts(_path: string, text: string): RustFacts {
   const code = blank(text, 'rust');
@@ -70,13 +77,13 @@ export function rustFacts(_path: string, text: string): RustFacts {
     const inline = blocks.filter(([from, to]) => match.index > from && match.index < to).length;
     chains.push({ segments, group, ...(inline ? { inline } : {}) });
   }
-  return { mods, chains, ...(wide ? { wide } : {}) };
+  return { mods, chains, ...rustLibFacts(code, text), ...(wide ? { wide } : {}) };
 }
 
 const tables = (value: TomlValue | undefined): TomlTable[] =>
   Array.isArray(value) ? value.map(tomlTable) : value ? [tomlTable(value)] : [];
 
-type Crate = { dir: string; lib: string; libRoot: string; roots: Set<string>; tests: Map<string, string> };
+type Crate = RustLibCrate & { lib: string; roots: Set<string>; tests: Map<string, string> };
 
 function crateOf(manifest: string, toml: TomlTable, paths: Set<string>): Crate | null {
   const name = tomlGet(toml, 'package', 'name');
@@ -95,6 +102,7 @@ function crateOf(manifest: string, toml: TomlTable, paths: Set<string>): Crate |
     ),
   ]);
   const tests = new Map<string, string>();
+  const benches = new Set<string>();
   for (const path of paths) {
     if (!path.startsWith(dir ? `${dir}/` : '')) continue;
     const rest = dir ? path.slice(dir.length + 1) : path;
@@ -102,6 +110,7 @@ function crateOf(manifest: string, toml: TomlTable, paths: Set<string>): Crate |
     if (!target) continue;
     roots.add(path);
     if (target[1] === 'tests' && tomlGet(toml, 'package', 'autotests') !== false) tests.set(target[2]!, path);
+    if (target[1] === 'benches') benches.add(path);
   }
   for (const kind of ['bin', 'test', 'bench', 'example'])
     for (const target of tables(toml[kind])) {
@@ -112,6 +121,8 @@ function crateOf(manifest: string, toml: TomlTable, paths: Set<string>): Crate |
       if (!path) continue;
       roots.add(path);
       if (kind === 'test' && label) tests.set(label, path);
+      // `cargo test` builds a bench only when its target says `test = true`.
+      if (kind === 'bench') benches[target.test === true ? 'delete' : 'add'](path);
     }
   return {
     dir,
@@ -119,6 +130,10 @@ function crateOf(manifest: string, toml: TomlTable, paths: Set<string>): Crate |
     libRoot,
     roots,
     tests,
+    benches,
+    procMacro: lib['proc-macro'] === true,
+    libTest: lib.test !== false,
+    libDoc: lib.doctest !== false,
   };
 }
 
@@ -196,12 +211,9 @@ export function resolveRust(context: ModuleContext) {
           }
       }
     }
+  resolveRustLib(context, files, children, crateFor);
   for (const [path, facts] of files) {
     const node = context.nodes.get(path)!;
-    if (!node.units)
-      node.whole = crateFor(path)
-        ? 'library, binary, bench or example code: Cargo builds it into every test target of the crate'
-        : 'outside every Cargo package Forge read';
     for (const { segments, group, inline = 0 } of facts.chains) {
       const [first, ...rest] = segments;
       let module: string | undefined;

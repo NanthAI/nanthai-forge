@@ -309,7 +309,7 @@ frozen set on 2026-11-06 broke capabilities across CLI/server versions with `HOS
   file, a lockfile, CI config), the root package is affected and the module graph below cannot
   narrow it, a manifest cannot be read, the layout
   is computed (Gradle `projectDir`, a `setup.py`-only package), more than 2,000 manifests exist, or
-  no unambiguous command exists (Python without pytest declared, Bun workspaces). Repository docs
+  no unambiguous command exists (Python without pytest declared and without unittest modules, Bun workspaces). Repository docs
   outside every package change nothing. Docs means prose (`src/prose-paths.ts`, one rule for every
   selector): Markdown, MDX, reStructuredText, AsciiDoc, and `.txt` only with a prose name (`README`,
   `LICENSE`, `NOTICE`, `CHANGELOG`, …) or under `docs/`; `requirements.txt`, `CMakeLists.txt` and
@@ -329,15 +329,26 @@ frozen set on 2026-11-06 broke capabilities across CLI/server versions with `HOS
   blob, so a save re-reads only changed files; at most 5,000 source files, 1 MiB each, 16 MiB in
   all, the code graph's bounds, else package level as above). A changed package, the root package
   included, then runs only the test units whose imports reach the change: pytest files
-  (`python -m pytest tests/test_a.py`, conftest.py and `__init__.py` chains included), Go package
-  folders (`go test ./a ./b`), Cargo test targets (`cargo test -p NAME --test=T`), and JVM test
-  classes under `src/test/` (`./gradlew :p:test --tests C`, `mvn test -Dtest=C`). Packages that
-  depend on it still run whole. It stays at package level when a changed path is not module code
+  (`python -m pytest tests/test_a.py`, conftest.py and `__init__.py` chains included; without
+  pytest, the `test*.py` files that import unittest and define a `TestCase`, as
+  `python -m unittest tests.test_a`, needing `__init__.py` in every folder down to them), Go package
+  folders (`go test ./a ./b`), Cargo test targets (`cargo test -p NAME --test=T`), Rust library unit
+  tests by module path (`cargo test -p NAME --lib -- a::b::`, one invocation apart from the targets;
+  the doctests, if the crate has any, rerun whole as `--doc`, since doc comments are not read), and
+  JVM test classes under `src/test/` (`./gradlew :p:test --tests C`, `mvn test -Dtest=C`) and, in a
+  Kotlin Multiplatform build, under a declared target's test source set (`src/jvmTest` is
+  `./gradlew :p:jvmTest --tests C`). Packages that depend on it still run whole. It stays at package level when a changed path is not module code
   (data, C, a manifest, a deleted file), when the package depends on another changed package,
-  when pytest is not declared or its `python_files`, `pythonpath` or `import-mode` is set, and when a reached file's
-  users are invisible: Rust library, binary, bench and example code (Cargo builds it into every
-  test target), JVM tests in another source set (`src/jvmTest`), Kotlin top-level `operator fun`
-  and `package-info.java`. Dynamic loading (`importlib`, `__import__`, `subprocess`, `sys.path`,
+  when neither pytest is declared nor any test file is a unittest module (a test-looking file that
+  is not one keeps Python whole), when pytest's `python_files`, `pythonpath` or `import-mode` is set,
+  and when a reached file's users are invisible: Rust binary, example and build-script code
+  (Cargo builds it into every test target), Rust library code with `#[no_mangle]`, `extern` blocks or
+  linker-registry attributes and every file of a proc-macro library, JVM tests in a source set
+  without a task Forge can name (`commonTest`, `androidTest`, a set of a target the build file does
+  not declare), Kotlin top-level `operator fun` and `package-info.java`. Rust `impl` blocks and
+  `macro_rules!` macros act without being named, so every file of the crate that names a type,
+  trait or macro they mention depends on them, and a file calling a macro that defines tests has
+  those tests; a library `lib.rs` that holds tests runs the whole library harness. Dynamic loading (`importlib`, `__import__`, `subprocess`, `sys.path`,
   `os/exec`, `plugin`, `Class.forName`, `ServiceLoader`, `include!`, `#[path]`) or a local import
   Forge cannot resolve makes that file depend on its whole package, never on nothing. Java and
   Kotlin edges come from package visibility plus word matches on top-level names, so common names

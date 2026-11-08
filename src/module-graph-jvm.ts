@@ -10,8 +10,11 @@ import type { ModuleContext } from './module-graph-types.js';
  * whole imported package. Reflection by name (Class.forName, ServiceLoader, loadClass) and process
  * spawning are `wide`; package-info.java and top-level Kotlin `operator fun`s act without being named,
  * so reaching one makes its package whole. Test units are test classes under `src/test/` (Gradle
- * `--tests`, Maven `-Dtest`); a test file in another source set (`src/jvmTest`, `src/androidTest`)
- * runs under another task, so reaching one keeps its project whole. */
+ * `--tests`, Maven `-Dtest`) and, in a Kotlin Multiplatform project, under the source set of a
+ * declared target (`src/jvmTest` is Gradle task `jvmTest`; unit `jvmTest:pkg.Class`). A test file in
+ * any other source set (`commonTest` runs under every target, `androidTest` needs a device, a custom
+ * set has no known task) runs under a task Forge cannot name, so reaching one keeps its project
+ * whole. */
 
 export type JvmFacts = {
   pkg: string;
@@ -76,8 +79,30 @@ export function jvmFacts(path: string, text: string, language: 'java' | 'kotlin'
   };
 }
 
+const SOURCE_SET = /(?:^|\/)src\/([^/]+)\//;
 /** The source set of a JVM path: `test` for `src/test/`, another name for other test sets. */
-const sourceSet = (path: string) => /(?:^|\/)src\/([^/]+)\//.exec(path)?.[1];
+const sourceSet = (path: string) => SOURCE_SET.exec(path)?.[1];
+const TARGET =
+  /(?:^|[{;])[ \t]*(jvm|js|wasmJs|wasmWasi|(?:ios|macos|tvos|watchos|linux|mingw|androidNative)\w*)\s*(?:\(([^)\n]*)\))?[ \t]*(?:[{};]|$)/gm;
+
+/** The test source sets a Kotlin Multiplatform project's build file declares as targets, each with its
+ * own Gradle task of the same name (`jvm()` → `jvmTest`, `jvm("desktop")` → `desktopTest`); empty when
+ * the build file is not multiplatform or Forge cannot read it. */
+function multiplatformTests(context: ModuleContext, dir: string): Set<string> {
+  const file = ['build.gradle.kts', 'build.gradle']
+    .map(name => (dir ? `${dir}/${name}` : name))
+    .find(name => context.paths.has(name));
+  const text = file ? context.read(file) : undefined;
+  const found = new Set<string>();
+  if (text === undefined) return found;
+  const code = blank(text, 'kotlin', true);
+  if (!/\bmultiplatform\b/.test(code)) return found;
+  for (const match of code.matchAll(TARGET)) {
+    const named = /^\s*["'](\w+)["']/.exec(match[2] ?? '')?.[1];
+    found.add(`${named && !/^(?:ir|legacy|both)$/i.test(named) ? named : match[1]}Test`);
+  }
+  return found;
+}
 
 export function resolveJvm(context: ModuleContext) {
   const files = [...context.facts].filter(([path]) => /\.(?:java|kt)$/.test(path)) as [string, JvmFacts][];
@@ -99,15 +124,21 @@ export function resolveJvm(context: ModuleContext) {
     }
     return members.has(dotted) ? { pkg: dotted, name: undefined } : undefined;
   };
+  const targets = new Map<string, Set<string>>();
   for (const [path, facts] of files) {
     const node = context.nodes.get(path)!;
     if (facts.wide) node.wide = facts.wide;
     if (facts.hub) node.whole = `${facts.hub} acts without being named`;
     const set = sourceSet(path);
-    if (set && set !== 'main' && /test/i.test(set) && set !== 'test')
-      node.whole = `test source set src/${set} runs under its own task`;
-    else if (set === 'test' && facts.test && facts.classes.length)
-      node.units = facts.classes.map(name => (facts.pkg ? `${facts.pkg}.${name}` : name));
+    const named = (name: string) => (facts.pkg ? `${facts.pkg}.${name}` : name);
+    if (set && set !== 'main' && /test/i.test(set) && set !== 'test') {
+      const project = path.slice(0, SOURCE_SET.exec(path)!.index);
+      if (!targets.has(project)) targets.set(project, multiplatformTests(context, project));
+      if (targets.get(project)!.has(set)) {
+        if (facts.test && facts.classes.length)
+          node.units = facts.classes.map(name => `${set}:${named(name)}`);
+      } else node.whole = `test source set src/${set} runs under a task Forge cannot name`;
+    } else if (set === 'test' && facts.test && facts.classes.length) node.units = facts.classes.map(named);
     const visible = new Set([facts.pkg]);
     for (const item of facts.imports) {
       const found = split(item.path);

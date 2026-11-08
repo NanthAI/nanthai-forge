@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { RUST_DOC_UNIT, RUST_LIB_UNIT } from './module-graph-types.js';
 import { globRegExp } from './path-glob.js';
 import { parseToml, tomlGet, tomlStrings, tomlTable, type TomlTable, type TomlValue } from './toml-lite.js';
 import {
@@ -212,20 +213,32 @@ export function cargoGraph(paths: string[], read: ManifestReader): EcosystemResu
       const targeted: PackageCommand[] = [];
       for (const pkg of selected) {
         const root = rootOf.get(packageKey(pkg));
-        // A narrowed crate (src/module-selection.ts) runs only the test targets that reach the change.
+        // A narrowed crate (src/module-selection.ts) runs only what reaches the change: integration
+        // targets (plain names), library unit tests by module path (`:lib:a::b`) and the doctests
+        // (`:doc`). `--doc` cannot be mixed with other targets, and a test filter would also filter
+        // the integration targets, so each kind is its own invocation of the same build.
         const tests = narrowed?.get(packageKey(pkg));
         if (tests) {
-          targeted.push({
-            ecosystem: 'cargo',
-            cwd: root ?? pkg.dir,
-            argv: [
-              'cargo',
-              'test',
-              ...(root === null || root === undefined ? [] : ['-p', pkg.name]),
-              ...tests.map(name => `--test=${name}`),
-            ],
-            packages: [packageKey(pkg)],
-          });
+          const modules = tests
+            .filter(unit => unit.startsWith(RUST_LIB_UNIT))
+            .map(unit => unit.slice(RUST_LIB_UNIT.length));
+          const run = (args: string[]) =>
+            targeted.push({
+              ecosystem: 'cargo',
+              cwd: root ?? pkg.dir,
+              argv: [
+                'cargo',
+                'test',
+                ...(root === null || root === undefined ? [] : ['-p', pkg.name]),
+                ...args,
+              ],
+              packages: [packageKey(pkg)],
+            });
+          const targets = tests.filter(unit => !unit.startsWith(':'));
+          if (targets.length) run(targets.map(name => `--test=${name}`));
+          if (modules.length)
+            run(['--lib', ...(modules.includes('') ? [] : ['--', ...modules.map(path => `${path}::`)])]);
+          if (tests.includes(RUST_DOC_UNIT)) run(['--doc']);
           continue;
         }
         if (root === null || root === undefined)

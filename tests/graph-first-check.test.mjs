@@ -68,7 +68,7 @@ const repos = {
         `crates/${name}/Cargo.toml`,
         `[package]\nname = "${name}"\n[dependencies]\ncore = { path = "../core" }\n`,
       ],
-      [`crates/${name}/src/lib.rs`, ''],
+      [`crates/${name}/src/lib.rs`, '#[test]\nfn t() {}\n'],
     ]),
   ]),
   python: new Map([
@@ -114,7 +114,7 @@ const repos = {
 };
 const leaf = {
   go: ['a/a.go', ['go', 'test', '.']],
-  cargo: ['crates/a/src/lib.rs', ['cargo', 'test', '-p', 'a']],
+  cargo: ['crates/a/src/lib.rs', ['cargo', 'test', '-p', 'a', '--lib']],
   python: ['packages/a/src/a/__init__.py', null],
   gradle: ['a/src/main/java/A.java', ['./gradlew', ':a:test', '--tests', 'ATest']],
   js: ['packages/a/index.js', ['npm', 'run', 'test', '--workspace=packages/a']],
