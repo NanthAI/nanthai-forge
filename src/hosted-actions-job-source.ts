@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { mkdir, copyFile, chmod, symlink, rm, readlink, lstat, stat } from 'node:fs/promises';
+import { mkdir, copyFile, chmod, symlink, rm, readlink, lstat, stat, readFile } from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { SourceWorkerReader } from './hosted-source-worker-reader.js';
@@ -12,6 +12,7 @@ import { invariant } from './errors.js';
 import { retryActionsInfrastructure, actionsInfrastructureResponse } from './hosted-actions-retry.js';
 import { mapExchange } from './exchange-parallel.js';
 import { scopedRecheckBase } from './scoped-recheck-policy.js';
+import { materializeSubmodules } from './submodule-materialize.js';
 
 /** Parallel R2 GETs per descriptor window when the pack is absent or for the delta. */
 export const actionsReadConcurrency = 16;
@@ -187,6 +188,17 @@ export async function materializeActionsSource(client: ActionsJobClient, directo
     reader = new SourceWorkerReader(cache, transport, undefined, actionsReadConcurrency);
     await materialize();
   }
+  // After verification: the pointer bytes are Forge source, the fetched trees are not.
+  // Shards receive them in the Candidate artifact, so each commit is fetched once per run.
+  const submodules =
+    run.check.submodules === false
+      ? []
+      : await timed('submodulesMs', () =>
+          materializeSubmodules(directory, state.files, blob => readFile(join(cache, blob)), {
+            cache: join(dirname(cache), 'forge-submodules'),
+            log: line => console.log(line),
+          }),
+        );
   const old = new Map(packed?.files.map(file => [file.path, file]) ?? []);
   const inventory = new Map(state.files.map(file => [file.path, file]));
   const changed = [...new Set([...old.keys(), ...inventory.keys()])].filter(path => {
@@ -227,12 +239,15 @@ export async function materializeActionsSource(client: ActionsJobClient, directo
     totalBytes,
     connection,
     reader,
+    submodules,
   };
 }
 export async function verifySourceTree(state: NativeState, directory: string) {
   await mapExchange(state.files, actionsFileConcurrency, async file => {
     const path = join(directory, file.path),
       info = await lstat(path);
+    // A materialized submodule (submodule-materialize.ts) replaces its pointer file.
+    if (file.mode === 'gitlink' && info.isDirectory()) return;
     const hash =
       file.mode === 'symlink'
         ? (invariant(info.isSymbolicLink(), 'SOURCE_HASH_MISMATCH', 'Expected source link.'),

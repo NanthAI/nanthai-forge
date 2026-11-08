@@ -19,10 +19,13 @@ export async function setupActionsJob(run: HostedCheckRun, directory: string, pl
   const state = parseNativeState(bytes);
   const verify = async () => {
     const expected = new Set(state.files.map(file => file.path));
+    const gitlinks = new Set(state.files.filter(file => file.mode === 'gitlink').map(file => file.path));
     const walk = async (prefix: string) => {
       for (const entry of await readdir(join(directory, prefix), { withFileTypes: true })) {
         const path = prefix ? `${prefix}/${entry.name}` : entry.name;
-        if (entry.isDirectory()) await walk(path);
+        // A materialized submodule's tree is fetched content, not Candidate source.
+        if (entry.isDirectory() && gitlinks.has(path)) expected.delete(path);
+        else if (entry.isDirectory()) await walk(path);
         else {
           invariant(expected.delete(path), 'SOURCE_HASH_MISMATCH', 'Setup added source.');
         }

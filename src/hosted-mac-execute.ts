@@ -23,6 +23,7 @@ import {
 } from './hosted-checkout-cache.js';
 import { parseNativeState } from './native-state-format.js';
 import { installHostedFile } from './hosted-checkout-files.js';
+import { checkSubmodules, submoduleFailureCommand } from './submodule-materialize.js';
 import { checkEnvironment, checkProcessEnvironment, checkPassthrough } from './check-environment.js';
 import { checkPin, type HostedCheckRun } from './hosted-check.js';
 import { signHostedCheckCallback, type HostedCheckCallback } from './hosted-check-evidence.js';
@@ -200,10 +201,21 @@ export async function executeHostedMacCheck(
       signal.throwIfAborted();
       installHostedFile(checkout, cache.objects, file);
     }
+    // Fetched once per run into this run's private root; removed with it. A refusal
+    // fails the run through the ordinary result path, naming path, commit and URL.
+    const submodules =
+      run.check.submodules === false
+        ? null
+        : await checkSubmodules(checkout, state.files, blob => readFile(join(cache.objects, blob)), {
+            cache: join(root, 'submodules'),
+          });
+    signal.throwIfAborted();
     // A finding fails the run before project code runs, through the ordinary result path.
     const execute = secretScan.findings.length
       ? secretScanFailureCommand(process.execPath, secretScan)
-      : command;
+      : submodules?.refusal
+        ? submoduleFailureCommand(process.execPath, submodules.refusal)
+        : command;
     await save({ kind: 'reserve' });
     const executionId = `${run.configuration.provider}:${run.id}:${run.fence}:${owner}`;
     await save({ kind: 'observe', result: { status: 'accepted', executionId } });

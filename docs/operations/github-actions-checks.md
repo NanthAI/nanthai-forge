@@ -912,6 +912,28 @@ A definition may also declare `docsPaths` (globs; see
 matches them runs no command on the Actions runner, and the server refuses a
 docs-scoped plan for a command whose check declares none.
 
+### Submodules in checks
+
+The Actions planner and the self-hosted runner replace each submodule pointer in
+the check workspace with its pinned commit's tree, recursively (up to 8 levels and
+256 submodules), like `actions/checkout` with `submodules: recursive`. They fetch
+only credential-free HTTPS URLs from `.gitmodules`; a `git@github.com:` URL is
+fetched as its public HTTPS form, and a relative URL needs a known superproject URL.
+Each commit is fetched once per run (shallow, cached by URL and commit), and shards
+receive the trees in the Candidate artifact. Git runs with no inherited
+configuration, hooks, credential helper, filters, LFS smudge or prompts, and no
+repository code runs. The tree carries no `.git` metadata. Source verification
+checks the pointer bytes; the fetched tree is external content, as on GitHub.
+
+Any other URL (SSH to another host, `http:`, `file:`, credentials, missing), a
+relative URL without a superproject URL, an unreachable commit or a runner without `git` refuses with
+`SUBMODULE_NOT_MATERIALIZED`, naming path, commit, URL and reason. On the
+self-hosted runner the check fails with that line before the command runs; on
+Actions the plan job fails with it. Private submodules through the GitHub App are
+not fetched yet. A check that does not need submodule content sets
+`"submodules": false` in its definition (part of its digest) to keep the pointer
+files.
+
 `actions.setup` belongs to the App/OIDC Actions supervisor, including when that
 workflow uses a self-hosted runner. Other runner providers do not use this
 Actions-specific option. The definition digest includes the command. It runs once

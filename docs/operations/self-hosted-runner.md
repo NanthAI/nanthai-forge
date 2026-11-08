@@ -14,7 +14,7 @@ backend/object-storage usage remain yours.
 Use Node **24.22.1+ (24.x)** and a built Forge source package. Install dependencies
 with `npm ci --ignore-scripts`, then `npm run build:core`. No fixed Node path,
 GitHub account, launchd, systemd, Keychain, Xcode or macOS sandbox is needed.
-The check's declared command and tools must be available on the runner's PATH.
+The check's declared command and tools must be available on the runner's PATH, and `git` too when the project has submodules ([submodules in checks](github-actions-checks.md#submodules-in-checks)); the container image includes it.
 
 Use the existing owner sign-in (`nforge login "$DEPLOYMENT_URL"`) or inject
 `FORGE_AUTH_TOKEN` through your service's secret facility. No collector key file

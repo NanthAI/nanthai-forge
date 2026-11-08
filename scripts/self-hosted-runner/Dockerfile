@@ -7,6 +7,8 @@ COPY scripts ./scripts
 RUN npm ci --ignore-scripts && npm run build:core
 
 FROM node:24.22.1-bookworm-slim
+# Git fetches pinned submodule commits for checks (docs/operations/github-actions-checks.md#submodules-in-checks).
+RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates && rm -rf /var/lib/apt/lists/*
 WORKDIR /opt/forge
 COPY --from=build /opt/forge/package.json /opt/forge/package-lock.json ./
 COPY --from=build /opt/forge/dist ./dist

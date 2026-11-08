@@ -70,6 +70,7 @@ export function recordEvidence(
     ...(command.actions ? { actions: command.actions } : {}),
     ...(command.selection ? { selection: command.selection } : {}),
     ...(command.docsPaths?.length ? { docsPaths: [...new Set(command.docsPaths)] } : {}),
+    ...(command.submodules === false ? { submodules: false } : {}),
   };
   const check = {
     ...definition,

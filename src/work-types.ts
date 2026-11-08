@@ -380,6 +380,8 @@ export const checkSchema = z.object({
   actions: checkActions.optional(),
   selection: checkSelectionDeclaration.optional(),
   docsPaths: docsPathsSchema.optional(),
+  /** false: checks keep submodule pointers instead of fetching their pinned trees. */
+  submodules: z.boolean().optional(),
   definition: oid,
   at: z.string(),
 });
@@ -1222,6 +1224,7 @@ export const defineCheckCommandSchema = z.object({
   actions: checkActions.optional(),
   selection: checkSelectionDeclaration.optional(),
   docsPaths: docsPathsSchema.optional(),
+  submodules: z.boolean().optional(),
 });
 export const commandSchema = z.discriminatedUnion('action', [
   z.object({

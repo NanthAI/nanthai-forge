@@ -7,6 +7,8 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, mkdirSync, writeFileSync, rmSync, lstatSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
+import { execFileSync } from 'node:child_process';
+import { pathToFileURL } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import {
   hostedActionsCapabilities,
@@ -41,6 +43,7 @@ function fixture(
     timingHistory = { version: 1, files: {}, runs: [] },
     capabilities = hostedActionsCapabilities,
     reader = false,
+    submodule = null,
   } = {},
 ) {
   const directory = mkdtempSync(join(tmpdir(), 'forge-direct-job-'));
@@ -62,6 +65,12 @@ function fixture(
     // A test that reads the changed document (docs-only change: its readers run, nothing else).
     ...(reader
       ? [entry('tests/reads-readme.test.mjs', "readFileSync(new URL('../README.md', import.meta.url));")]
+      : []),
+    ...(submodule
+      ? [
+          entry('.gitmodules', `[submodule "lib"]\n\tpath = vendor/lib\n\turl = ${submodule.url}\n`),
+          entry('vendor/lib', submodule.commit, 'gitlink'),
+        ]
       : []),
   ];
   const state = entries =>
@@ -573,6 +582,40 @@ test('fixed planner materializes verified pinned bytes, modes and links; docs sc
   assert(lstatSync(join(candidate, 'scripts/example.sh')).mode & 0o111);
   assert.equal(s.calls.filter(call => call.kind === 'source').length, 2);
   assert.equal(s.run.plan.manifest.sha256, savePin(prepared.recipe).sha256);
+});
+test('the planner materializes a pinned submodule into the Candidate unless the check opts out', async t => {
+  process.env.FORGE_TEST_SUBMODULE_FILE_URLS = '1';
+  t.after(() => delete process.env.FORGE_TEST_SUBMODULE_FILE_URLS);
+  const upstream = mkdtempSync(join(tmpdir(), 'forge-actions-submodule-'));
+  t.after(() => rmSync(upstream, { recursive: true, force: true }));
+  const git = (...args) =>
+    execFileSync('git', args, {
+      cwd: upstream,
+      encoding: 'utf8',
+      env: {
+        PATH: process.env.PATH,
+        HOME: upstream,
+        GIT_CONFIG_NOSYSTEM: '1',
+        GIT_CONFIG_GLOBAL: '/dev/null',
+        GIT_AUTHOR_NAME: 'fixture',
+        GIT_AUTHOR_EMAIL: 'fixture@example.invalid',
+        GIT_COMMITTER_NAME: 'fixture',
+        GIT_COMMITTER_EMAIL: 'fixture@example.invalid',
+      },
+    }).trim();
+  git('init', '-q');
+  writeFileSync(join(upstream, 'lib.c'), 'int lib;\n');
+  git('add', '-A');
+  git('commit', '-q', '-m', 'lib');
+  const submodule = { url: pathToFileURL(upstream).href, commit: git('rev-parse', 'HEAD') };
+  for (const optOut of [false, true]) {
+    const s = fixture(t, { submodule }),
+      candidate = join(s.directory, 'candidate');
+    if (optOut) s.run.check.submodules = false;
+    await prepareActionsJob(s.client, candidate, join(s.directory, 'objects'));
+    if (optOut) assert.equal(readFileSync(join(candidate, 'vendor/lib'), 'utf8'), submodule.commit);
+    else assert.equal(readFileSync(join(candidate, 'vendor/lib/lib.c'), 'utf8'), 'int lib;\n');
+  }
 });
 test('a docs-only change shards the tests that read the changed document and keeps the docs scope', async t => {
   const s = fixture(t, { reader: true }),

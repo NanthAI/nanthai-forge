@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { createReadStream } from 'node:fs';
-import { stat, rm, mkdir, copyFile, writeFile, readlink } from 'node:fs/promises';
+import { stat, lstat, rm, mkdir, copyFile, writeFile, readlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileDigest, createSourcePack } from './source-pack-archive.js';
 import { refreshSourcePack } from './source-pack.js';
@@ -91,6 +91,8 @@ export async function warmPackCache(state: NativeState, directory: string, cache
   for (const file of state.files) {
     const path = join(directory, file.path),
       target = join(cache, file.blob);
+    // A materialized submodule has no pointer file; the refresh reads its tiny blob.
+    if (file.mode === 'gitlink' && (await lstat(path)).isDirectory()) continue;
     if (file.mode === 'symlink') {
       const bytes = await readlink(path);
       invariant(digest(bytes) === file.blob, 'SOURCE_HASH_MISMATCH', 'Artifact link differs.');
