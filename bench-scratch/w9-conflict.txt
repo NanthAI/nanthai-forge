@@ -1,0 +1,5 @@
+w9 throwaway conflict sample
+line1 shared
+line2 from lane A
+line3 from lane A
+line4 shared
