@@ -202,7 +202,8 @@ export async function captureHostedSave(
       if (observed.markers) marked.push(path);
       const baseBlob = bases[path] ?? old?.blob ?? digest('');
       bases[path] = baseBlob;
-      const code = !path.startsWith('docs/') && /\.[cm]?[jt]sx?$/.test(path);
+      // TS/JS anywhere, docs/ examples included; other languages have no symbol facts here (contract-packages).
+      const code = /\.[cm]?[jt]sx?$/.test(path);
       let base =
         baseBlob === digest('') ? overlapTextSketch(Buffer.alloc(0)) : readOverlapText(cache, baseBlob);
       // A base sketch cached by an older client lacks export facts: derive it again within the budget.

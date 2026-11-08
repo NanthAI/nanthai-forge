@@ -123,6 +123,37 @@ const DOCUMENTATION = /\.(?:md|mdx|txt|rst|adoc)$/i;
 const label = (pkg: GraphPackage) => `${pkg.ecosystem}:${pkg.dir || '.'}`;
 const within = (dir: string, path: string) => !dir || path.startsWith(`${dir}/`);
 
+/** The packages that own `path`: its deepest enclosing package(s) and, for a package found only by its
+ * manifest inside another one, the enclosing packages too (they may read it). Empty: outside every package. */
+export function enclosingPackages(graph: Extract<PackageGraph, { status: 'available' }>, path: string) {
+  const enclosing = graph.packages.filter(pkg => within(pkg.dir, path));
+  const deepest = Math.max(-1, ...enclosing.map(pkg => pkg.dir.length));
+  const owning = enclosing.filter(pkg => pkg.dir.length === deepest);
+  return [
+    ...owning,
+    ...(owning.some(pkg => !pkg.declared) ? enclosing.filter(pkg => pkg.dir.length < deepest) : []),
+  ];
+}
+
+/** Reverse-dependent query: `keys` plus every package that depends on one of them, transitively. */
+export function withDependents(
+  graph: Extract<PackageGraph, { status: 'available' }>,
+  keys: Iterable<string>,
+) {
+  const dependents = new Map<string, string[]>();
+  for (const pkg of graph.packages)
+    for (const key of pkg.dependsOn) dependents.set(key, [...(dependents.get(key) ?? []), packageKey(pkg)]);
+  const selected = new Set(keys);
+  const queue = [...selected];
+  while (queue.length)
+    for (const key of dependents.get(queue.shift()!) ?? [])
+      if (!selected.has(key)) {
+        selected.add(key);
+        queue.push(key);
+      }
+  return selected;
+}
+
 /** Changed paths → owning packages → those plus every package that depends on them, and the
  * per-ecosystem commands that test them. Repository docs outside every package change nothing. */
 export function packageSelection(graph: PackageGraph, changed: string[]): PackageSelection {
@@ -136,20 +167,12 @@ export function packageSelection(graph: PackageGraph, changed: string[]): Packag
       owners.set(packageKey(leaf), byKey.get(packageKey(leaf)) ?? leaf);
       continue;
     }
-    const enclosing = graph.packages.filter(pkg => within(pkg.dir, path));
-    const deepest = Math.max(-1, ...enclosing.map(pkg => pkg.dir.length));
-    const owning = enclosing.filter(pkg => pkg.dir.length === deepest);
-    if (!owning.length || (deepest === 0 && DOCUMENTATION.test(path))) {
+    const owning = enclosingPackages(graph, path);
+    if (!owning.length || (owning.every(pkg => !pkg.dir) && DOCUMENTATION.test(path))) {
       if (DOCUMENTATION.test(path)) continue;
       return full(`${path} is outside every package`);
     }
-    for (const pkg of owning) {
-      owners.set(packageKey(pkg), pkg);
-      // Found only by its manifest inside another package: the enclosing packages may read it.
-      if (!pkg.declared)
-        for (const outer of enclosing)
-          if (outer.dir.length < pkg.dir.length) owners.set(packageKey(outer), outer);
-    }
+    for (const pkg of owning) owners.set(packageKey(pkg), pkg);
   }
   if (!owners.size)
     return {
@@ -158,18 +181,9 @@ export function packageSelection(graph: PackageGraph, changed: string[]): Packag
       packages: [],
       commands: [],
     };
-  const dependents = new Map<string, string[]>();
-  for (const pkg of graph.packages)
-    for (const key of pkg.dependsOn) dependents.set(key, [...(dependents.get(key) ?? []), packageKey(pkg)]);
   const selected = new Map(owners);
-  const queue = [...owners.keys()];
-  while (queue.length) {
-    for (const key of dependents.get(queue.shift()!) ?? []) {
-      if (selected.has(key)) continue;
-      selected.set(key, byKey.get(key)!);
-      queue.push(key);
-    }
-  }
+  for (const key of withDependents(graph, owners.keys()))
+    if (!selected.has(key)) selected.set(key, byKey.get(key)!);
   const root = [...selected.values()].find(pkg => !pkg.dir);
   if (root) return full(`root package ${root.name} (${root.ecosystem}) is affected`);
   const commands: PackageCommand[] = [];

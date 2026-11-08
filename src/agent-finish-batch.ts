@@ -21,7 +21,10 @@ export async function finishQueuedBatch(
   const store = work.store;
   const queued = store.select('landingEntries', command.operationId);
   const candidate = store.select('views', attempt.view!.viewId as string)!;
-  if (!queued && prepareOptimistic(work, command, candidate)) return;
+  let held: string | undefined;
+  if (!queued && prepareOptimistic(work, command, candidate, reason => (held = reason))) return;
+  // The receipt names the other Lane whose contract signal kept this landing off the optimistic path.
+  if (held && attempt.view) attempt.view.optimisticHold = held;
   if (!queued && !(command.accept && batchEligible(work, command, candidate))) return;
   // Replays follow the canonical submitted Candidate even after the attempt
   // receipt has advanced to its admission/combined run's Candidate.

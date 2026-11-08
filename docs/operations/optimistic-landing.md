@@ -7,7 +7,10 @@ including custom policies with that authority. Supervised projects retain the
 fix-forward handoff. Protected paths and allowed actors retain their normal review rules.
 
 Manifest-disjoint candidates run the configured scoped check and land with a
-Channel compare-and-swap. Concurrent disjoint main changes use the existing
+Channel compare-and-swap. A candidate whose contract an open Lane may use stays
+on the combined path: TS/JS by import, and every other language by package
+(the [contract rules](../agents/workflow.md#contract-changes)); the finish receipt's
+`view.optimisticHold` says which Lane and files held it. Concurrent disjoint main changes use the existing
 manifest proof. Overlapping open Lane checkpoints or queued candidates retain
 combined landing batches. Dirty, uncheckpointed peer edits are not evidence of
 independence. The standard check still runs static verification; custom checks

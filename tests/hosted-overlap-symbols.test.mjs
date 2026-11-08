@@ -404,13 +404,13 @@ test('save path: facts ride the existing pages with no added calls, and only to 
   ]);
 });
 
-test('a 300-file change reports facts or unavailable for every code file', async t => {
+/** A hosted Lane checkout of `path` (exporting `a`), ready for captureHostedSave. */
+async function hostedCheckout(t, path) {
   const base = mkdtempSync(join(tmpdir(), 'forge-symbol-scale-'));
   t.after(() => rmSync(base, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
-  const root = join(base, 'checkout'),
-    path = 'src/a.ts';
+  const root = join(base, 'checkout');
   mkdirSync(join(root, '.forge'), { recursive: true });
-  mkdirSync(join(root, 'src'));
+  mkdirSync(join(root, path, '..'), { recursive: true });
   const s = await saveFixture('export const a = 1;\n', path);
   writeFileSync(
     join(root, '.forge/hosted-lane.json'),
@@ -438,16 +438,29 @@ test('a 300-file change reports facts or unavailable for every code file', async
     }),
   );
   writeFileSync(join(root, path), 'export const a = 1;\n');
+  return { root, capture: join(base, 'capture') };
+}
+
+test('a 300-file change reports facts or unavailable for every code file', async t => {
+  const { root, capture: into } = await hostedCheckout(t, 'src/a.ts');
   for (let i = 0; i < 300; i++)
     writeFileSync(
       join(root, `src/f${i}.ts`),
       `import { a } from './a.js';\nimport { g${(i + 1) % 300} } from './f${(i + 1) % 300}.js';\nexport function g${i}() {\n  return a + g${(i + 1) % 300}();\n}\n`,
     );
-  const capture = await captureHostedSave(root, join(base, 'capture'));
+  const capture = await captureHostedSave(root, into);
   const facts = capture.changes.filter(c => c.evidence?.symbolLinks);
   assert.equal(facts.length, 300, 'every changed code file reports facts or unavailable');
   const computed = facts.filter(c => 'refs' in c.evidence.symbolLinks);
   t.diagnostic(`${computed.length}/300 files computed within the budget, the rest unavailable`);
   assert(computed.length > 0);
   for (const c of computed.slice(0, 5)) assert(c.evidence.symbolLinks.refs.includes('src/a.ts#a'));
+});
+
+test('TS/JS under docs/ is code too: a changed export there carries symbol facts', async t => {
+  const { root, capture: into } = await hostedCheckout(t, 'docs/example/a.ts');
+  writeFileSync(join(root, 'docs/example/b.ts'), "import { a } from './a.js';\nexport const b = a;\n");
+  const capture = await captureHostedSave(root, into);
+  const change = capture.changes.find(c => c.path === 'docs/example/b.ts');
+  assert.deepEqual(change.evidence.symbolLinks, { exports: ['b'], refs: ['docs/example/a.ts#a'] });
 });

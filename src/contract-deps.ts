@@ -10,6 +10,7 @@ import {
   type ImportRef,
 } from './contract-exports.js';
 import { ForgeError } from './errors.js';
+import { STRUCTURAL_CONTRACT_FILE, structuralExports } from './contract-structural.js';
 
 export type { ContractChange } from './contract-exports.js';
 type FileRef = { path: string; blob: string };
@@ -22,29 +23,44 @@ const text = (source: ContractSource, blob: string) => {
   const bytes = source.object(blob);
   return bytes.length > MAX_BYTES ? undefined : bytes.toString('utf8');
 };
-/** Optional `.forge/contracts.json`: `{"interfaces":["glob"]}` declares extra interface files
- * whose whole content is the contract. `numbers` and `generated` are not interpreted. */
+/** Where the contracts config lives: `contracts` in the root `forge.json` (captured like any source
+ * file), else the older `.forge/contracts.json`, which a save never captures and so is read only from a
+ * State that already holds it. `{"interfaces":["glob"]}` declares extra interface files whose whole
+ * content is the contract. `numbers` and `generated` are not interpreted. */
+export const CONTRACTS_CONFIG = 'forge.json',
+  LEGACY_CONTRACTS_CONFIG = '.forge/contracts.json';
+function contractsConfig(source: ContractSource, files: FileRef[]): { interfaces?: unknown } | undefined {
+  const parse = (path: string) => {
+    const file = files.find(item => item.path === path);
+    if (!file) return undefined;
+    try {
+      const parsed = JSON.parse(text(source, file.blob) ?? '') as unknown;
+      return parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : undefined;
+    } catch {
+      return undefined;
+    }
+  };
+  const neutral = parse(CONTRACTS_CONFIG)?.contracts;
+  return neutral && typeof neutral === 'object'
+    ? (neutral as { interfaces?: unknown })
+    : parse(LEGACY_CONTRACTS_CONFIG);
+}
 export function declaredInterfaces(
   source: ContractSource,
   files: FileRef[],
 ): ((path: string) => boolean) | undefined {
-  const config = files.find(file => file.path === '.forge/contracts.json');
-  if (!config) return undefined;
-  try {
-    const parsed = JSON.parse(text(source, config.blob) ?? '') as { interfaces?: unknown };
-    const patterns = (Array.isArray(parsed.interfaces) ? parsed.interfaces : [])
-      .filter((item): item is string => typeof item === 'string')
-      .flatMap(glob => {
-        try {
-          return [globPattern(glob)];
-        } catch {
-          return [];
-        }
-      });
-    return patterns.length ? path => patterns.some(pattern => pattern.test(path)) : undefined;
-  } catch {
-    return undefined;
-  }
+  const parsed = contractsConfig(source, files);
+  if (!parsed) return undefined;
+  const patterns = (Array.isArray(parsed.interfaces) ? parsed.interfaces : [])
+    .filter((item): item is string => typeof item === 'string')
+    .flatMap(glob => {
+      try {
+        return [globPattern(glob)];
+      } catch {
+        return [];
+      }
+    });
+  return patterns.length ? path => patterns.some(pattern => pattern.test(path)) : undefined;
 }
 /** Added, removed and changed exported declarations between two file lists. Only files
  * whose blob changed are read; unchanged and non-code files cost one map lookup. */
@@ -57,19 +73,21 @@ export function contractDelta(source: ContractSource, before: FileRef[], after: 
     const a = old.get(path),
       b = now.get(path);
     if (a === b) continue;
-    const code = CODE_FILE.test(path);
-    if (!code && !declared?.(path)) continue;
-    if (code) {
+    const code = CODE_FILE.test(path),
+      structural = !code && STRUCTURAL_CONTRACT_FILE.test(path);
+    if (!code && !structural && !declared?.(path)) continue;
+    if (code || structural) {
       const from = a ? text(source, a) : undefined,
         to = b ? text(source, b) : undefined;
       if ((a && from === undefined) || (b && to === undefined)) continue;
-      out.push(
-        ...diffExports(
-          path,
-          from === undefined ? undefined : scanExports(from, a),
-          to === undefined ? undefined : scanExports(to, b),
-        ),
-      );
+      const scan = (body: string | undefined, key: string | undefined) =>
+        body === undefined ? undefined : code ? scanExports(body, key) : structuralExports(path, body, key);
+      const before = scan(from, a),
+        after = scan(to, b);
+      // Python, Java or Rust without facts (a syntax error): the whole file's contract may have changed.
+      if (structural && ((from !== undefined && !before) || (to !== undefined && !after)))
+        out.push({ file: path, export: '*', kind: !a ? 'added' : !b ? 'removed' : 'changed' });
+      else out.push(...diffExports(path, before, after));
     } else out.push({ file: path, export: '*', kind: !a ? 'added' : !b ? 'removed' : 'changed' });
     if (out.length >= MAX_CHANGES) return out.slice(0, MAX_CHANGES);
   }
